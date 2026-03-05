@@ -86,7 +86,7 @@ func (r *Registry) Execute(ctx context.Context, call llm.ToolCallData) llm.ToolR
 	return llm.ToolResultData{
 		ToolCallID: call.ID,
 		Name:       call.Name,
-		Content:    output,
+		Content:    truncateOutput(output, maxToolOutputLen),
 		IsError:    false,
 	}
 }
