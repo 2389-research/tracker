@@ -15,6 +15,9 @@ func EvaluateCondition(expr string, ctx *PipelineContext) (bool, error) {
 	if expr == "" {
 		return true, nil
 	}
+	if ctx == nil {
+		return false, fmt.Errorf("cannot evaluate condition %q: nil context", expr)
+	}
 
 	clauses := strings.Split(expr, "&&")
 	for _, clause := range clauses {

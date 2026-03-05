@@ -146,6 +146,23 @@ func TestConditionTripleAND(t *testing.T) {
 	}
 }
 
+func TestConditionNilContext(t *testing.T) {
+	_, err := EvaluateCondition("outcome=success", nil)
+	if err == nil {
+		t.Fatal("expected error for nil context")
+	}
+}
+
+func TestConditionNilContextEmptyExpr(t *testing.T) {
+	result, err := EvaluateCondition("", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("empty condition with nil context should still be true")
+	}
+}
+
 func TestConditionWithSpaces(t *testing.T) {
 	ctx := NewPipelineContext()
 	ctx.Set("outcome", "success")

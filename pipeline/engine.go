@@ -130,6 +130,14 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			return nil, fmt.Errorf("node %q not found in graph", currentNodeID)
 		}
 
+		// Clear per-node edge selection hints so stale values from a
+		// previous node don't pollute routing for the current one.
+		// This must happen before the IsCompleted skip so that resume
+		// paths through selectEdge also see clean context.
+		pctx.Set(ContextKeyOutcome, "")
+		pctx.Set(ContextKeyPreferredLabel, "")
+		pctx.Set("suggested_next_nodes", "")
+
 		// Skip already-completed nodes on resume.
 		if cp.IsCompleted(currentNodeID) {
 			edges := e.graph.OutgoingEdges(currentNodeID)
@@ -144,12 +152,6 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			currentNodeID = next.To
 			continue
 		}
-
-		// Clear per-node edge selection hints so stale values from a
-		// previous node don't pollute routing for the current one.
-		pctx.Set(ContextKeyOutcome, "")
-		pctx.Set(ContextKeyPreferredLabel, "")
-		pctx.Set("suggested_next_nodes", "")
 
 		// Apply stylesheet to a copy of node attrs so the shared Graph
 		// is not mutated. Handlers see resolved attrs; the original node
@@ -276,6 +278,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 		// Check if this is an exit node — pipeline complete.
 		if currentNodeID == e.graph.ExitNode {
+			if outcome.Status == OutcomeFail {
+				return e.failResult(runID, cp, pctx), nil
+			}
 			break
 		}
 
@@ -354,7 +359,7 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		}
 	}
 	if len(unconditional) == 0 {
-		unconditional = edges
+		return nil, fmt.Errorf("no matching edges: all %d edges have conditions that evaluated to false", len(edges))
 	}
 
 	sort.SliceStable(unconditional, func(i, j int) bool {

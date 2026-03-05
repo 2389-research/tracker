@@ -71,7 +71,7 @@ func (cp *Checkpoint) MarkCompleted(nodeID string) {
 // SaveCheckpoint writes the checkpoint to disk as JSON, creating directories as needed.
 func SaveCheckpoint(cp *Checkpoint, path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create checkpoint directory: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func SaveCheckpoint(cp *Checkpoint, path string) error {
 		return fmt.Errorf("marshal checkpoint: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write checkpoint: %w", err)
 	}
 	return nil

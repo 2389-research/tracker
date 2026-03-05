@@ -53,7 +53,9 @@ var PipelineNoopHandler PipelineEventHandler = pipelineNoopHandler{}
 // PipelineMultiHandler fans out each event to every provided handler.
 // Nil handlers in the list are safely skipped.
 func PipelineMultiHandler(handlers ...PipelineEventHandler) PipelineEventHandler {
-	return pipelineMultiHandler(handlers)
+	cp := make([]PipelineEventHandler, len(handlers))
+	copy(cp, handlers)
+	return pipelineMultiHandler(cp)
 }
 
 type pipelineMultiHandler []PipelineEventHandler

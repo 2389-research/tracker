@@ -27,6 +27,9 @@ func (e *ValidationError) hasErrors() bool {
 // Validate checks a parsed Graph for structural correctness.
 // Returns nil if the graph is valid, or a ValidationError listing all problems.
 func Validate(g *Graph) error {
+	if g == nil {
+		return &ValidationError{Errors: []string{"graph is nil"}}
+	}
 	ve := &ValidationError{}
 
 	if len(g.Nodes) == 0 {
@@ -36,6 +39,7 @@ func Validate(g *Graph) error {
 
 	validateStartExit(g, ve)
 	validateShapes(g, ve)
+	validateEdgeEndpoints(g, ve)
 	validateReachability(g, ve)
 	validateNoCycles(g, ve)
 
@@ -67,6 +71,18 @@ func validateStartExit(g *Graph, ve *ValidationError) {
 		ve.add("graph has no exit node (shape=Msquare)")
 	} else if exitCount > 1 {
 		ve.add(fmt.Sprintf("graph has %d exit nodes (shape=Msquare), expected exactly 1", exitCount))
+	}
+}
+
+// validateEdgeEndpoints checks that every edge references declared nodes.
+func validateEdgeEndpoints(g *Graph, ve *ValidationError) {
+	for _, e := range g.Edges {
+		if _, ok := g.Nodes[e.From]; !ok {
+			ve.add(fmt.Sprintf("edge %s->%s references undeclared source node %q", e.From, e.To, e.From))
+		}
+		if _, ok := g.Nodes[e.To]; !ok {
+			ve.add(fmt.Sprintf("edge %s->%s references undeclared target node %q", e.From, e.To, e.To))
+		}
 	}
 }
 
@@ -108,11 +124,23 @@ func validateReachability(g *Graph, ve *ValidationError) {
 	}
 }
 
-// validateNoCycles uses DFS coloring to detect cycles in the graph.
+// validateNoCycles uses DFS coloring to detect unconditional cycles in the graph.
+// Conditional back-edges (retry loops) are allowed because they are guarded by
+// runtime conditions and bounded by max_retries.
 // White = unvisited, Gray = in current path, Black = fully processed.
 func validateNoCycles(g *Graph, ve *ValidationError) {
 	if g.StartNode == "" {
 		return
+	}
+
+	// Build a set of unconditional edges for cycle detection.
+	// Conditional edges form intentional retry loops and are excluded.
+	type edgeKey struct{ from, to string }
+	unconditional := make(map[edgeKey]bool)
+	for _, e := range g.Edges {
+		if e.Condition == "" {
+			unconditional[edgeKey{e.From, e.To}] = true
+		}
 	}
 
 	const (
@@ -130,6 +158,9 @@ func validateNoCycles(g *Graph, ve *ValidationError) {
 	dfs = func(nodeID string) bool {
 		color[nodeID] = gray
 		for _, e := range g.OutgoingEdges(nodeID) {
+			if !unconditional[edgeKey{e.From, e.To}] {
+				continue
+			}
 			switch color[e.To] {
 			case gray:
 				return true

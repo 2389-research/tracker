@@ -138,6 +138,45 @@ func TestValidateUnreachableNode(t *testing.T) {
 	}
 }
 
+func TestValidateNilGraph(t *testing.T) {
+	err := Validate(nil)
+	if err == nil {
+		t.Fatal("expected error for nil graph")
+	}
+}
+
+func TestValidateEdgeToUndeclaredNode(t *testing.T) {
+	g := NewGraph("bad-edge")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "ghost"})
+	g.AddEdge(&Edge{From: "ghost", To: "e"})
+
+	err := Validate(g)
+	if err == nil {
+		t.Fatal("expected error for edge referencing undeclared node")
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("error should mention 'ghost', got: %v", err)
+	}
+}
+
+func TestValidateConditionalCycleAllowed(t *testing.T) {
+	g := NewGraph("retry-loop")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "work", Shape: "box"})
+	g.AddNode(&Node{ID: "check", Shape: "diamond"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "work"})
+	g.AddEdge(&Edge{From: "work", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "e", Condition: "outcome=success"})
+	g.AddEdge(&Edge{From: "check", To: "work", Condition: "outcome=fail"})
+
+	if err := Validate(g); err != nil {
+		t.Errorf("conditional retry loop should be valid, got: %v", err)
+	}
+}
+
 func TestValidateEmptyGraph(t *testing.T) {
 	g := NewGraph("empty")
 	err := Validate(g)
