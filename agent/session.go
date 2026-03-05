@@ -46,18 +46,26 @@ func WithEnvironment(env exec.ExecutionEnvironment) SessionOption {
 	}
 }
 
+// WithSessionRunner sets the session runner used by the spawn_agent tool to create child sessions.
+func WithSessionRunner(runner tools.SessionRunner) SessionOption {
+	return func(s *Session) {
+		s.sessionRunner = runner
+	}
+}
+
 // Session holds the state for a single agent conversation loop.
 // A Session is single-use: Run must only be called once.
 type Session struct {
-	client   Completer
-	config   SessionConfig
-	handler  EventHandler
-	registry *tools.Registry
-	env      exec.ExecutionEnvironment
-	steering <-chan string
-	messages []llm.Message
-	id       string
-	ran      bool
+	client        Completer
+	config        SessionConfig
+	handler       EventHandler
+	registry      *tools.Registry
+	env           exec.ExecutionEnvironment
+	sessionRunner tools.SessionRunner
+	steering      <-chan string
+	messages      []llm.Message
+	id            string
+	ran           bool
 }
 
 // NewSession creates a new agent session with the given LLM client, config, and options.
@@ -95,6 +103,14 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 			if s.registry.Get(t.Name()) == nil {
 				s.registry.Register(t)
 			}
+		}
+	}
+
+	// Register spawn_agent tool if a session runner is provided.
+	if s.sessionRunner != nil {
+		spawnTool := tools.NewSpawnAgentTool(s.sessionRunner)
+		if s.registry.Get(spawnTool.Name()) == nil {
+			s.registry.Register(spawnTool)
 		}
 	}
 
