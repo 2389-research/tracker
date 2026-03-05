@@ -175,7 +175,7 @@ func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp) ([]string
 	if err != nil {
 		return nil, false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	relPath, err := filepath.Rel(t.env.WorkingDir(), absPath)
 	if err != nil {
