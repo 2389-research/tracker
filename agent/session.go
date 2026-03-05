@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/2389-research/mammoth-lite/agent/exec"
@@ -45,6 +46,7 @@ func WithEnvironment(env exec.ExecutionEnvironment) SessionOption {
 }
 
 // Session holds the state for a single agent conversation loop.
+// A Session is single-use: Run must only be called once.
 type Session struct {
 	client   Completer
 	config   SessionConfig
@@ -53,10 +55,15 @@ type Session struct {
 	env      exec.ExecutionEnvironment
 	messages []llm.Message
 	id       string
+	ran      bool
 }
 
 // NewSession creates a new agent session with the given LLM client, config, and options.
-func NewSession(client Completer, config SessionConfig, opts ...SessionOption) *Session {
+// Returns an error if the config is invalid.
+func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (*Session, error) {
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid session config: %w", err)
+	}
 	s := &Session{
 		client:   client,
 		config:   config,
@@ -78,12 +85,17 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) *
 		s.registry.Register(tools.NewBashTool(s.env, s.config.CommandTimeout, s.config.MaxCommandTimeout))
 	}
 
-	return s
+	return s, nil
 }
 
 // Run executes the agentic loop: send user input to the LLM, execute any tool
 // calls, feed results back, and repeat until the LLM stops or max turns is reached.
 func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, error) {
+	if s.ran {
+		return SessionResult{}, fmt.Errorf("session already used; create a new Session for each Run call")
+	}
+	s.ran = true
+
 	start := time.Now()
 
 	result := SessionResult{

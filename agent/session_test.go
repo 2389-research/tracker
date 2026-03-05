@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the agent Session and agentic loop.
-// ABOUTME: Uses mock LLM client to validate turn execution, tool dispatch, loop detection, and event emission.
+// ABOUTME: Uses mock LLM client to validate turn execution, tool dispatch, and event emission.
 package agent
 
 import (
@@ -28,6 +28,16 @@ func (m *mockCompleter) Complete(ctx context.Context, req *llm.Request) (*llm.Re
 	return resp, nil
 }
 
+// mustNewSession creates a session and fails the test if config is invalid.
+func mustNewSession(t *testing.T, client Completer, cfg SessionConfig, opts ...SessionOption) *Session {
+	t.Helper()
+	sess, err := NewSession(client, cfg, opts...)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	return sess
+}
+
 func TestSessionTextOnlyResponse(t *testing.T) {
 	client := &mockCompleter{
 		responses: []*llm.Response{
@@ -42,7 +52,7 @@ func TestSessionTextOnlyResponse(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.SystemPrompt = "You are a helpful assistant."
 
-	sess := NewSession(client, cfg)
+	sess := mustNewSession(t, client, cfg)
 	result, err := sess.Run(context.Background(), "Say hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -85,7 +95,7 @@ func TestSessionToolCallLoop(t *testing.T) {
 	}
 
 	cfg := DefaultConfig()
-	sess := NewSession(client, cfg)
+	sess := mustNewSession(t, client, cfg)
 
 	result, err := sess.Run(context.Background(), "Read test.txt")
 	if err != nil {
@@ -126,7 +136,7 @@ func TestSessionMaxTurns(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.MaxTurns = 3
-	sess := NewSession(client, cfg)
+	sess := mustNewSession(t, client, cfg)
 
 	result, err := sess.Run(context.Background(), "Loop forever")
 	if err != nil {
@@ -153,7 +163,7 @@ func TestSessionEventEmission(t *testing.T) {
 	})
 
 	cfg := DefaultConfig()
-	sess := NewSession(client, cfg, WithEventHandler(handler))
+	sess := mustNewSession(t, client, cfg, WithEventHandler(handler))
 	_, err := sess.Run(context.Background(), "Hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -181,7 +191,7 @@ func TestSessionContextCancellation(t *testing.T) {
 	}
 
 	cfg := DefaultConfig()
-	sess := NewSession(client, cfg)
+	sess := mustNewSession(t, client, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -189,5 +199,39 @@ func TestSessionContextCancellation(t *testing.T) {
 	_, err := sess.Run(ctx, "Hello")
 	if err == nil {
 		t.Error("expected error from cancelled context")
+	}
+}
+
+func TestSessionDoubleRunErrors(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("Hi"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	sess := mustNewSession(t, client, cfg)
+
+	_, err := sess.Run(context.Background(), "First")
+	if err != nil {
+		t.Fatalf("first Run failed: %v", err)
+	}
+
+	_, err = sess.Run(context.Background(), "Second")
+	if err == nil {
+		t.Error("expected error on second Run call")
+	}
+}
+
+func TestNewSessionInvalidConfig(t *testing.T) {
+	client := &mockCompleter{}
+	cfg := SessionConfig{MaxTurns: 0}
+
+	_, err := NewSession(client, cfg)
+	if err == nil {
+		t.Error("expected error for invalid config")
 	}
 }

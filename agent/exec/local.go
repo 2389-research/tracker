@@ -129,6 +129,10 @@ func (e *LocalEnvironment) Glob(ctx context.Context, pattern string) ([]string, 
 
 	var rel []string
 	for _, m := range matches {
+		// Filter out matches that escape the working directory.
+		if !strings.HasPrefix(m, e.workDir+string(filepath.Separator)) && m != e.workDir {
+			continue
+		}
 		r, err := filepath.Rel(e.workDir, m)
 		if err != nil {
 			continue

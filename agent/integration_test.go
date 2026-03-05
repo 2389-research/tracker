@@ -58,7 +58,7 @@ func TestIntegrationReadWriteFlow(t *testing.T) {
 
 	env := exec.NewLocalEnvironment(dir)
 	cfg := DefaultConfig()
-	sess := NewSession(client, cfg, WithEnvironment(env))
+	sess := mustNewSession(t, client, cfg, WithEnvironment(env))
 
 	result, err := sess.Run(context.Background(), "Read input.txt and copy to output.txt")
 	if err != nil {
@@ -115,7 +115,7 @@ func TestIntegrationEditFlow(t *testing.T) {
 	client := &mockCompleter{responses: []*llm.Response{editCallResp, doneResp}}
 	env := exec.NewLocalEnvironment(dir)
 	cfg := DefaultConfig()
-	sess := NewSession(client, cfg, WithEnvironment(env))
+	sess := mustNewSession(t, client, cfg, WithEnvironment(env))
 
 	result, err := sess.Run(context.Background(), "Update the print statement")
 	if err != nil {
@@ -159,7 +159,7 @@ func TestIntegrationBashFlow(t *testing.T) {
 	client := &mockCompleter{responses: []*llm.Response{bashCallResp, doneResp}}
 	env := exec.NewLocalEnvironment(dir)
 	cfg := DefaultConfig()
-	sess := NewSession(client, cfg, WithEnvironment(env))
+	sess := mustNewSession(t, client, cfg, WithEnvironment(env))
 
 	result, err := sess.Run(context.Background(), "Run echo")
 	if err != nil {
