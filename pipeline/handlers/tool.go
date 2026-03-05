@@ -57,9 +57,6 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		return pipeline.Outcome{}, fmt.Errorf("tool command failed for node %q: %w", node.ID, err)
 	}
 
-	pctx.Set(pipeline.ContextKeyToolStdout, result.Stdout)
-	pctx.Set(pipeline.ContextKeyToolStderr, result.Stderr)
-
 	status := pipeline.OutcomeSuccess
 	if result.ExitCode != 0 {
 		status = pipeline.OutcomeFail

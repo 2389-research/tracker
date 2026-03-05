@@ -5,7 +5,9 @@ package pipeline
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -110,9 +112,6 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		currentNodeID = cp.CurrentNode
 	}
 
-	// Track failed goal gates for final status determination.
-	failedGoalGate := false
-
 	for {
 		// Check context cancellation at the top of each iteration.
 		if err := ctx.Err(); err != nil {
@@ -148,6 +147,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 		// Clear per-node edge selection hints so stale values from a
 		// previous node don't pollute routing for the current one.
+		pctx.Set(ContextKeyOutcome, "")
 		pctx.Set(ContextKeyPreferredLabel, "")
 		pctx.Set("suggested_next_nodes", "")
 
@@ -253,7 +253,6 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			})
 
 			if isGoalGate(execNode) {
-				failedGoalGate = true
 				return e.failResult(runID, cp, pctx), nil
 			}
 
@@ -294,10 +293,6 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		currentNodeID = next.To
 		cp.CurrentNode = currentNodeID
 		e.saveCheckpoint(cp, pctx, runID)
-	}
-
-	if failedGoalGate {
-		return e.failResult(runID, cp, pctx), nil
 	}
 
 	e.emit(PipelineEvent{
@@ -368,7 +363,7 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		if wi != wj {
 			return wi > wj
 		}
-		// Priority 4: Lexical ordering by To field.
+		// Priority 5: Lexical ordering by To field.
 		return unconditional[i].To < unconditional[j].To
 	})
 
@@ -406,13 +401,17 @@ func isGoalGate(node *Node) bool {
 }
 
 // loadOrCreateCheckpoint loads an existing checkpoint or creates a fresh one.
+// Returns an error if the checkpoint file exists but is corrupt.
 func (e *Engine) loadOrCreateCheckpoint(runID string) (*Checkpoint, error) {
 	if e.checkpointPath != "" {
 		cp, err := LoadCheckpoint(e.checkpointPath)
 		if err == nil {
 			return cp, nil
 		}
-		// File doesn't exist yet — that's fine, create new.
+		// Only ignore file-not-found; corrupt checkpoints are real errors.
+		if !os.IsNotExist(unwrapPathError(err)) {
+			return nil, fmt.Errorf("corrupt checkpoint at %s: %w", e.checkpointPath, err)
+		}
 	}
 	return &Checkpoint{
 		RunID:          runID,
@@ -468,6 +467,16 @@ func (e *Engine) failResult(runID string, cp *Checkpoint, pctx *PipelineContext)
 		CompletedNodes: cp.CompletedNodes,
 		Context:        pctx.Snapshot(),
 	}
+}
+
+// unwrapPathError extracts the underlying error from wrapped checkpoint errors
+// so that os.IsNotExist can detect file-not-found through fmt.Errorf wrapping.
+func unwrapPathError(err error) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr
+	}
+	return err
 }
 
 // generateRunID creates a random 6-byte hex run identifier.

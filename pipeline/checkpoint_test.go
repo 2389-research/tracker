@@ -106,6 +106,68 @@ func TestCheckpointRetryCount(t *testing.T) {
 	}
 }
 
+func TestCheckpointMarkCompletedDeduplication(t *testing.T) {
+	cp := &Checkpoint{
+		CompletedNodes: []string{},
+		RetryCounts:    map[string]int{},
+	}
+
+	cp.MarkCompleted("start")
+	cp.MarkCompleted("start") // duplicate — should be ignored
+	cp.MarkCompleted("step1")
+
+	if len(cp.CompletedNodes) != 2 {
+		t.Errorf("expected 2 completed nodes (no dupes), got %d: %v", len(cp.CompletedNodes), cp.CompletedNodes)
+	}
+}
+
+func TestCheckpointNilRetryCounts(t *testing.T) {
+	// Simulates a checkpoint loaded from JSON where retry_counts was absent.
+	cp := &Checkpoint{}
+
+	if cp.RetryCount("anything") != 0 {
+		t.Errorf("expected 0 for nil RetryCounts, got %d", cp.RetryCount("anything"))
+	}
+
+	// Should not panic on nil map.
+	cp.IncrementRetry("node1")
+	if cp.RetryCount("node1") != 1 {
+		t.Errorf("expected 1 after increment on nil map, got %d", cp.RetryCount("node1"))
+	}
+}
+
+func TestCheckpointIsCompletedAfterDeserialization(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cp.json")
+
+	original := &Checkpoint{
+		RunID:          "test",
+		CompletedNodes: []string{"s", "step1"},
+		RetryCounts:    map[string]int{},
+		Context:        map[string]string{},
+	}
+	if err := SaveCheckpoint(original, path); err != nil {
+		t.Fatalf("SaveCheckpoint failed: %v", err)
+	}
+
+	loaded, err := LoadCheckpoint(path)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint failed: %v", err)
+	}
+
+	// completedSet is json:"-" so it's nil after load.
+	// IsCompleted should lazily rebuild it.
+	if !loaded.IsCompleted("s") {
+		t.Error("expected 's' to be completed after deserialization")
+	}
+	if !loaded.IsCompleted("step1") {
+		t.Error("expected 'step1' to be completed after deserialization")
+	}
+	if loaded.IsCompleted("step2") {
+		t.Error("expected 'step2' to NOT be completed")
+	}
+}
+
 func TestCheckpointIncrementRetry(t *testing.T) {
 	cp := &Checkpoint{
 		RetryCounts: map[string]int{},

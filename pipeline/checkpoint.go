@@ -41,13 +41,19 @@ func (cp *Checkpoint) IsCompleted(nodeID string) bool {
 }
 
 // RetryCount returns the number of retries recorded for the given node.
-// Returns 0 if the node has no retry history.
+// Returns 0 if the node has no retry history or if the map is nil.
 func (cp *Checkpoint) RetryCount(nodeID string) int {
+	if cp.RetryCounts == nil {
+		return 0
+	}
 	return cp.RetryCounts[nodeID]
 }
 
 // IncrementRetry increments the retry counter for the given node by one.
 func (cp *Checkpoint) IncrementRetry(nodeID string) {
+	if cp.RetryCounts == nil {
+		cp.RetryCounts = make(map[string]int)
+	}
 	cp.RetryCounts[nodeID]++
 }
 

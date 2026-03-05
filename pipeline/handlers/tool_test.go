@@ -42,12 +42,9 @@ func TestToolHandlerSuccess(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
 	}
-	stdout, _ := pctx.Get(pipeline.ContextKeyToolStdout)
+	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
 	if strings.TrimSpace(stdout) != "hello" {
 		t.Errorf("expected stdout %q, got %q", "hello", stdout)
-	}
-	if outcome.ContextUpdates[pipeline.ContextKeyToolStdout] != stdout {
-		t.Errorf("expected context update for stdout")
 	}
 }
 
@@ -128,7 +125,7 @@ func TestToolHandlerCustomTimeout(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
 	}
-	stdout, _ := pctx.Get(pipeline.ContextKeyToolStdout)
+	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
 	if strings.TrimSpace(stdout) != "fast" {
 		t.Errorf("expected stdout %q, got %q", "fast", stdout)
 	}
