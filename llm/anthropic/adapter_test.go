@@ -5,6 +5,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -576,10 +577,9 @@ func TestAdapterCompleteErrorStatus(t *testing.T) {
 	}
 
 	var authErr *llm.AuthenticationError
-	if !isAuthError(err) {
+	if !errors.As(err, &authErr) {
 		t.Errorf("expected AuthenticationError, got %T: %v", err, err)
 	}
-	_ = authErr
 }
 
 func TestAdapterCompleteBetaHeaders(t *testing.T) {
@@ -1114,12 +1114,6 @@ func TestImageBase64SourceFormat(t *testing.T) {
 	if _, ok := source["url"]; ok {
 		t.Error("url field should not be present for base64 images")
 	}
-}
-
-// isAuthError checks if an error is an AuthenticationError.
-func isAuthError(err error) bool {
-	_, ok := err.(*llm.AuthenticationError)
-	return ok
 }
 
 func intPtr(v int) *int { return &v }

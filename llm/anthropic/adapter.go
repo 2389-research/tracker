@@ -179,6 +179,7 @@ func (a *Adapter) setHeaders(httpReq *http.Request, req *llm.Request) {
 // parseSSE reads SSE events from the response body and emits StreamEvents.
 func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024) // Allow up to 1MB lines for large tool call args/thinking blocks.
 
 	// Track content block types by index for proper event emission.
 	blockTypes := make(map[int]string)
@@ -199,6 +200,10 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 		data := strings.TrimPrefix(line, "data: ")
 		a.handleSSEData(eventType, []byte(data), ch, blockTypes)
 		eventType = ""
+	}
+
+	if err := scanner.Err(); err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: SSE scan error: %w", err)}
 	}
 }
 
@@ -258,16 +263,19 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 	switch eventType {
 	case "message_start":
 		var evt sseMessageStart
-		if json.Unmarshal(data, &evt) == nil {
-			ch <- llm.StreamEvent{
-				Type: llm.EventStreamStart,
-				Raw:  data,
-			}
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: parse message_start: %w", err)}
+			return
+		}
+		ch <- llm.StreamEvent{
+			Type: llm.EventStreamStart,
+			Raw:  data,
 		}
 
 	case "content_block_start":
 		var evt sseContentBlockStart
-		if json.Unmarshal(data, &evt) != nil {
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: parse content_block_start: %w", err)}
 			return
 		}
 
@@ -295,7 +303,8 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 
 	case "content_block_delta":
 		var evt sseContentBlockDelta
-		if json.Unmarshal(data, &evt) != nil {
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: parse content_block_delta: %w", err)}
 			return
 		}
 
@@ -320,7 +329,8 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 
 	case "content_block_stop":
 		var evt sseContentBlockStop
-		if json.Unmarshal(data, &evt) != nil {
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: parse content_block_stop: %w", err)}
 			return
 		}
 
@@ -342,7 +352,8 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 
 	case "message_delta":
 		var evt sseMessageDelta
-		if json.Unmarshal(data, &evt) != nil {
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: parse message_delta: %w", err)}
 			return
 		}
 
