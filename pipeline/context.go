@@ -85,3 +85,14 @@ func (c *PipelineContext) SetInternal(key, value string) {
 	defer c.mu.Unlock()
 	c.internal[key] = value
 }
+
+// NewPipelineContextFrom creates a PipelineContext pre-populated with the
+// given values. Used by the parallel handler to give each branch an isolated
+// snapshot of the shared context.
+func NewPipelineContextFrom(values map[string]string) *PipelineContext {
+	ctx := NewPipelineContext()
+	for k, v := range values {
+		ctx.Set(k, v)
+	}
+	return ctx
+}
