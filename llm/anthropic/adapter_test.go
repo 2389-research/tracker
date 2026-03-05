@@ -1,0 +1,761 @@
+// ABOUTME: Tests for the Anthropic Messages API adapter.
+// ABOUTME: Validates request/response translation, SSE stream parsing, and finish reason mapping.
+package anthropic
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/2389-research/mammoth-lite/llm"
+)
+
+// --- translateRequest tests ---
+
+func TestTranslateRequest(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			llm.SystemMessage("You are helpful."),
+			llm.UserMessage("Hello"),
+		},
+		MaxTokens: intPtr(1000),
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// System should be extracted to top-level "system" field
+	if _, ok := parsed["system"]; !ok {
+		t.Error("expected system field in request body")
+	}
+
+	// Messages should only contain user message (no system)
+	msgs, ok := parsed["messages"].([]any)
+	if !ok {
+		t.Fatal("expected messages array")
+	}
+	if len(msgs) != 1 {
+		t.Errorf("expected 1 message (system extracted), got %d", len(msgs))
+	}
+
+	if parsed["model"] != "claude-opus-4-6" {
+		t.Errorf("expected claude-opus-4-6, got %v", parsed["model"])
+	}
+
+	maxTokens, ok := parsed["max_tokens"].(float64)
+	if !ok {
+		t.Fatal("expected max_tokens field")
+	}
+	if int(maxTokens) != 1000 {
+		t.Errorf("expected 1000, got %v", maxTokens)
+	}
+}
+
+func TestTranslateRequestDefaultMaxTokens(t *testing.T) {
+	req := &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	maxTokens, ok := parsed["max_tokens"].(float64)
+	if !ok {
+		t.Fatal("expected max_tokens")
+	}
+	if int(maxTokens) != 4096 {
+		t.Errorf("expected default 4096, got %v", maxTokens)
+	}
+}
+
+func TestTranslateRequestDeveloperMessageAsSystem(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			{Role: llm.RoleDeveloper, Content: []llm.ContentPart{{Kind: llm.KindText, Text: "Dev instructions"}}},
+			llm.UserMessage("Hello"),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Developer messages should be extracted to "system" like system messages
+	if _, ok := parsed["system"]; !ok {
+		t.Error("expected developer message extracted to system field")
+	}
+}
+
+func TestTranslateRequestMessageAlternation(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			llm.UserMessage("Hello"),
+			llm.UserMessage("How are you?"),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Consecutive user messages should be merged
+	msgs, ok := parsed["messages"].([]any)
+	if !ok {
+		t.Fatal("expected messages array")
+	}
+	if len(msgs) != 1 {
+		t.Errorf("expected 1 merged message, got %d", len(msgs))
+	}
+
+	// Merged message should have both content parts
+	msg := msgs[0].(map[string]any)
+	content := msg["content"].([]any)
+	if len(content) != 2 {
+		t.Errorf("expected 2 content parts in merged message, got %d", len(content))
+	}
+}
+
+func TestTranslateRequestToolChoice(t *testing.T) {
+	tests := []struct {
+		name       string
+		toolChoice *llm.ToolChoice
+		wantType   string
+		wantName   string
+		wantOmit   bool
+	}{
+		{
+			name:       "auto",
+			toolChoice: &llm.ToolChoice{Mode: "auto"},
+			wantType:   "auto",
+		},
+		{
+			name:       "none omitted",
+			toolChoice: &llm.ToolChoice{Mode: "none"},
+			wantOmit:   true,
+		},
+		{
+			name:       "required maps to any",
+			toolChoice: &llm.ToolChoice{Mode: "required"},
+			wantType:   "any",
+		},
+		{
+			name:       "named tool",
+			toolChoice: &llm.ToolChoice{Mode: "named", ToolName: "get_weather"},
+			wantType:   "tool",
+			wantName:   "get_weather",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &llm.Request{
+				Model:      "claude-opus-4-6",
+				Messages:   []llm.Message{llm.UserMessage("Hi")},
+				ToolChoice: tt.toolChoice,
+				Tools: []llm.ToolDefinition{
+					{Name: "get_weather", Description: "Get weather", Parameters: json.RawMessage(`{}`)},
+				},
+			}
+
+			body, err := translateRequest(req)
+			if err != nil {
+				t.Fatalf("translateRequest error: %v", err)
+			}
+
+			var parsed map[string]any
+			if err := json.Unmarshal(body, &parsed); err != nil {
+				t.Fatalf("invalid JSON: %v", err)
+			}
+
+			tc, exists := parsed["tool_choice"]
+			if tt.wantOmit {
+				if exists {
+					t.Error("expected tool_choice to be omitted for none")
+				}
+				return
+			}
+
+			if !exists {
+				t.Fatal("expected tool_choice in body")
+			}
+
+			tcMap := tc.(map[string]any)
+			if tcMap["type"] != tt.wantType {
+				t.Errorf("expected type %q, got %v", tt.wantType, tcMap["type"])
+			}
+			if tt.wantName != "" {
+				if tcMap["name"] != tt.wantName {
+					t.Errorf("expected name %q, got %v", tt.wantName, tcMap["name"])
+				}
+			}
+		})
+	}
+}
+
+func TestTranslateRequestToolDefinitions(t *testing.T) {
+	req := &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("What's the weather?")},
+		Tools: []llm.ToolDefinition{
+			{
+				Name:        "get_weather",
+				Description: "Get weather for a city",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}}}`),
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	tools, ok := parsed["tools"].([]any)
+	if !ok {
+		t.Fatal("expected tools array")
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+
+	tool := tools[0].(map[string]any)
+	if tool["name"] != "get_weather" {
+		t.Errorf("expected get_weather, got %v", tool["name"])
+	}
+	if tool["description"] != "Get weather for a city" {
+		t.Errorf("expected description, got %v", tool["description"])
+	}
+	if _, ok := tool["input_schema"]; !ok {
+		t.Error("expected input_schema field (Anthropic format)")
+	}
+}
+
+func TestTranslateRequestToolResultMessage(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			llm.UserMessage("What's the weather?"),
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "call_1", Name: "get_weather", Arguments: json.RawMessage(`{"city":"SF"}`)}},
+				},
+			},
+			llm.ToolResultMessage("call_1", "72F and sunny", false),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	msgs := parsed["messages"].([]any)
+	// Should have: user, assistant, user (tool result mapped to user role)
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(msgs))
+	}
+
+	toolResultMsg := msgs[2].(map[string]any)
+	if toolResultMsg["role"] != "user" {
+		t.Errorf("tool result should have user role, got %v", toolResultMsg["role"])
+	}
+}
+
+// --- translateResponse tests ---
+
+func TestTranslateResponse(t *testing.T) {
+	raw := []byte(`{
+		"id": "msg_123",
+		"model": "claude-opus-4-6",
+		"type": "message",
+		"role": "assistant",
+		"content": [{"type": "text", "text": "Hello!"}],
+		"stop_reason": "end_turn",
+		"usage": {
+			"input_tokens": 10,
+			"output_tokens": 5
+		}
+	}`)
+
+	resp, err := translateResponse(raw)
+	if err != nil {
+		t.Fatalf("translateResponse error: %v", err)
+	}
+
+	if resp.ID != "msg_123" {
+		t.Errorf("expected msg_123, got %q", resp.ID)
+	}
+	if resp.Text() != "Hello!" {
+		t.Errorf("expected Hello!, got %q", resp.Text())
+	}
+	if resp.FinishReason.Reason != "stop" {
+		t.Errorf("expected stop, got %q", resp.FinishReason.Reason)
+	}
+	if resp.Usage.InputTokens != 10 {
+		t.Errorf("expected 10 input tokens, got %d", resp.Usage.InputTokens)
+	}
+}
+
+func TestTranslateToolUseResponse(t *testing.T) {
+	raw := []byte(`{
+		"id": "msg_456",
+		"model": "claude-opus-4-6",
+		"type": "message",
+		"role": "assistant",
+		"content": [
+			{"type": "text", "text": "Let me check."},
+			{"type": "tool_use", "id": "call_789", "name": "get_weather", "input": {"city": "SF"}}
+		],
+		"stop_reason": "tool_use",
+		"usage": {"input_tokens": 20, "output_tokens": 15}
+	}`)
+
+	resp, err := translateResponse(raw)
+	if err != nil {
+		t.Fatalf("translateResponse error: %v", err)
+	}
+
+	if resp.FinishReason.Reason != "tool_calls" {
+		t.Errorf("expected tool_calls, got %q", resp.FinishReason.Reason)
+	}
+
+	toolCalls := resp.ToolCalls()
+	if len(toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(toolCalls))
+	}
+	if toolCalls[0].Name != "get_weather" {
+		t.Errorf("expected get_weather, got %q", toolCalls[0].Name)
+	}
+	if toolCalls[0].ID != "call_789" {
+		t.Errorf("expected call_789, got %q", toolCalls[0].ID)
+	}
+}
+
+func TestTranslateResponseThinking(t *testing.T) {
+	raw := []byte(`{
+		"id": "msg_789",
+		"model": "claude-opus-4-6",
+		"type": "message",
+		"role": "assistant",
+		"content": [
+			{"type": "thinking", "thinking": "Let me reason about this..."},
+			{"type": "text", "text": "The answer is 42."}
+		],
+		"stop_reason": "end_turn",
+		"usage": {"input_tokens": 10, "output_tokens": 20}
+	}`)
+
+	resp, err := translateResponse(raw)
+	if err != nil {
+		t.Fatalf("translateResponse error: %v", err)
+	}
+
+	if resp.Reasoning() == "" {
+		t.Error("expected reasoning text")
+	}
+	if resp.Text() != "The answer is 42." {
+		t.Errorf("expected text, got %q", resp.Text())
+	}
+}
+
+func TestTranslateResponseRedactedThinking(t *testing.T) {
+	raw := []byte(`{
+		"id": "msg_790",
+		"model": "claude-opus-4-6",
+		"type": "message",
+		"role": "assistant",
+		"content": [
+			{"type": "redacted_thinking", "data": "abc123"},
+			{"type": "text", "text": "Done."}
+		],
+		"stop_reason": "end_turn",
+		"usage": {"input_tokens": 10, "output_tokens": 5}
+	}`)
+
+	resp, err := translateResponse(raw)
+	if err != nil {
+		t.Fatalf("translateResponse error: %v", err)
+	}
+
+	// Should have a redacted thinking part
+	found := false
+	for _, c := range resp.Message.Content {
+		if c.Kind == llm.KindRedactedThinking && c.Thinking != nil && c.Thinking.Redacted {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected redacted thinking content part")
+	}
+}
+
+func TestTranslateResponseCacheUsage(t *testing.T) {
+	raw := []byte(`{
+		"id": "msg_cache",
+		"model": "claude-opus-4-6",
+		"type": "message",
+		"role": "assistant",
+		"content": [{"type": "text", "text": "Hi"}],
+		"stop_reason": "end_turn",
+		"usage": {
+			"input_tokens": 100,
+			"output_tokens": 20,
+			"cache_read_input_tokens": 80,
+			"cache_creation_input_tokens": 10
+		}
+	}`)
+
+	resp, err := translateResponse(raw)
+	if err != nil {
+		t.Fatalf("translateResponse error: %v", err)
+	}
+
+	if resp.Usage.CacheReadTokens == nil || *resp.Usage.CacheReadTokens != 80 {
+		t.Errorf("expected 80 cache read tokens, got %v", resp.Usage.CacheReadTokens)
+	}
+	if resp.Usage.CacheWriteTokens == nil || *resp.Usage.CacheWriteTokens != 10 {
+		t.Errorf("expected 10 cache write tokens, got %v", resp.Usage.CacheWriteTokens)
+	}
+}
+
+// --- translateFinishReason tests ---
+
+func TestTranslateFinishReason(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"end_turn", "stop"},
+		{"stop_sequence", "stop"},
+		{"max_tokens", "length"},
+		{"tool_use", "tool_calls"},
+		{"unknown_reason", "unknown_reason"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			fr := translateFinishReason(tt.input)
+			if fr.Reason != tt.want {
+				t.Errorf("translateFinishReason(%q) = %q, want %q", tt.input, fr.Reason, tt.want)
+			}
+			if fr.Raw != tt.input {
+				t.Errorf("expected raw %q, got %q", tt.input, fr.Raw)
+			}
+		})
+	}
+}
+
+// --- Adapter integration tests (with httptest) ---
+
+func TestAdapterName(t *testing.T) {
+	a := New("test-key")
+	if a.Name() != "anthropic" {
+		t.Errorf("expected anthropic, got %q", a.Name())
+	}
+}
+
+func TestAdapterComplete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify headers
+		if r.Header.Get("x-api-key") != "test-key" {
+			t.Errorf("expected x-api-key header")
+		}
+		if r.Header.Get("anthropic-version") != "2023-06-01" {
+			t.Errorf("expected anthropic-version header")
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("expected Content-Type application/json")
+		}
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("expected /v1/messages, got %s", r.URL.Path)
+		}
+
+		// Verify request body
+		body, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		json.Unmarshal(body, &parsed)
+
+		if parsed["model"] != "claude-opus-4-6" {
+			t.Errorf("expected claude-opus-4-6 in body")
+		}
+
+		// Return response
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "msg_test",
+			"model": "claude-opus-4-6",
+			"type": "message",
+			"role": "assistant",
+			"content": [{"type": "text", "text": "Hello from test!"}],
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 5, "output_tokens": 3}
+		}`)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	resp, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("Complete error: %v", err)
+	}
+
+	if resp.ID != "msg_test" {
+		t.Errorf("expected msg_test, got %q", resp.ID)
+	}
+	if resp.Text() != "Hello from test!" {
+		t.Errorf("expected Hello from test!, got %q", resp.Text())
+	}
+	if resp.Provider != "anthropic" {
+		t.Errorf("expected anthropic provider, got %q", resp.Provider)
+	}
+}
+
+func TestAdapterCompleteErrorStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		fmt.Fprint(w, `{"error": {"message": "invalid api key"}}`)
+	}))
+	defer server.Close()
+
+	a := New("bad-key", WithBaseURL(server.URL))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	})
+	if err == nil {
+		t.Fatal("expected error for 401")
+	}
+
+	var authErr *llm.AuthenticationError
+	if !isAuthError(err) {
+		t.Errorf("expected AuthenticationError, got %T: %v", err, err)
+	}
+	_ = authErr
+}
+
+func TestAdapterCompleteBetaHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		betaHeader := r.Header.Get("anthropic-beta")
+		if betaHeader != "max-tokens-3-5-sonnet-2024-07-15" {
+			t.Errorf("expected beta header, got %q", betaHeader)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "msg_beta",
+			"model": "claude-opus-4-6",
+			"type": "message",
+			"role": "assistant",
+			"content": [{"type": "text", "text": "ok"}],
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 1, "output_tokens": 1}
+		}`)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"beta_headers": "max-tokens-3-5-sonnet-2024-07-15",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete error: %v", err)
+	}
+}
+
+func TestAdapterStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify stream: true in request
+		body, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		json.Unmarshal(body, &parsed)
+		if parsed["stream"] != true {
+			t.Errorf("expected stream: true in body")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+
+		events := []string{
+			`event: message_start` + "\n" + `data: {"type":"message_start","message":{"id":"msg_stream","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":5,"output_tokens":0}}}`,
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}`,
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}`,
+			`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+			`event: message_stop` + "\n" + `data: {"type":"message_stop"}`,
+		}
+
+		for _, evt := range events {
+			fmt.Fprintf(w, "%s\n\n", evt)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	if len(events) == 0 {
+		t.Fatal("expected stream events")
+	}
+
+	// Check we got text deltas
+	var textContent strings.Builder
+	for _, evt := range events {
+		if evt.Type == llm.EventTextDelta {
+			textContent.WriteString(evt.Delta)
+		}
+	}
+	if textContent.String() != "Hello world" {
+		t.Errorf("expected 'Hello world', got %q", textContent.String())
+	}
+
+	// Check we got a finish event
+	var gotFinish bool
+	for _, evt := range events {
+		if evt.Type == llm.EventFinish {
+			gotFinish = true
+			if evt.FinishReason == nil || evt.FinishReason.Reason != "stop" {
+				t.Error("expected stop finish reason")
+			}
+		}
+	}
+	if !gotFinish {
+		t.Error("expected finish event")
+	}
+}
+
+func TestAdapterStreamToolUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+
+		events := []string{
+			`event: message_start` + "\n" + `data: {"type":"message_start","message":{"id":"msg_tool","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":0}}}`,
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_1","name":"get_weather"}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":"}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"SF\"}"}}`,
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}`,
+			`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":10}}`,
+			`event: message_stop` + "\n" + `data: {"type":"message_stop"}`,
+		}
+
+		for _, evt := range events {
+			fmt.Fprintf(w, "%s\n\n", evt)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Weather?")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// Check we got tool call events
+	var gotToolStart, gotToolEnd bool
+	for _, evt := range events {
+		if evt.Type == llm.EventToolCallStart {
+			gotToolStart = true
+			if evt.ToolCall == nil || evt.ToolCall.Name != "get_weather" {
+				t.Error("expected get_weather tool call start")
+			}
+		}
+		if evt.Type == llm.EventToolCallEnd {
+			gotToolEnd = true
+		}
+	}
+	if !gotToolStart {
+		t.Error("expected tool call start event")
+	}
+	if !gotToolEnd {
+		t.Error("expected tool call end event")
+	}
+}
+
+func TestAdapterClose(t *testing.T) {
+	a := New("test-key")
+	if err := a.Close(); err != nil {
+		t.Errorf("expected no error from Close, got %v", err)
+	}
+}
+
+// isAuthError checks if an error is an AuthenticationError.
+func isAuthError(err error) bool {
+	_, ok := err.(*llm.AuthenticationError)
+	return ok
+}
+
+func intPtr(v int) *int { return &v }
