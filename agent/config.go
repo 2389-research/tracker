@@ -32,11 +32,14 @@ func (c SessionConfig) Validate() error {
 	if c.MaxTurns < 1 {
 		return fmt.Errorf("MaxTurns must be >= 1, got %d", c.MaxTurns)
 	}
-	if c.CommandTimeout < 0 {
-		return fmt.Errorf("CommandTimeout must be >= 0, got %v", c.CommandTimeout)
+	if c.CommandTimeout <= 0 {
+		return fmt.Errorf("CommandTimeout must be > 0, got %v", c.CommandTimeout)
 	}
-	if c.MaxCommandTimeout < 0 {
-		return fmt.Errorf("MaxCommandTimeout must be >= 0, got %v", c.MaxCommandTimeout)
+	if c.MaxCommandTimeout <= 0 {
+		return fmt.Errorf("MaxCommandTimeout must be > 0, got %v", c.MaxCommandTimeout)
+	}
+	if c.MaxCommandTimeout < c.CommandTimeout {
+		return fmt.Errorf("MaxCommandTimeout (%v) must be >= CommandTimeout (%v)", c.MaxCommandTimeout, c.CommandTimeout)
 	}
 	if c.LoopDetectionThreshold < 1 {
 		return fmt.Errorf("LoopDetectionThreshold must be >= 1, got %d", c.LoopDetectionThreshold)

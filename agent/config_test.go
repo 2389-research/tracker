@@ -37,4 +37,19 @@ func TestConfigValidation(t *testing.T) {
 	if err := bad.Validate(); err == nil {
 		t.Error("expected error for MaxTurns=0")
 	}
+
+	// Zero timeout should fail.
+	zeroTimeout := DefaultConfig()
+	zeroTimeout.CommandTimeout = 0
+	if err := zeroTimeout.Validate(); err == nil {
+		t.Error("expected error for CommandTimeout=0")
+	}
+
+	// MaxCommandTimeout < CommandTimeout should fail.
+	invertedTimeouts := DefaultConfig()
+	invertedTimeouts.CommandTimeout = 10 * time.Minute
+	invertedTimeouts.MaxCommandTimeout = 5 * time.Second
+	if err := invertedTimeouts.Validate(); err == nil {
+		t.Error("expected error when MaxCommandTimeout < CommandTimeout")
+	}
 }

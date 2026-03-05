@@ -7,8 +7,25 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/2389-research/mammoth-lite/agent/tools"
 	"github.com/2389-research/mammoth-lite/llm"
 )
+
+// stubTool is a minimal Tool implementation for unit tests that returns a fixed output.
+type stubTool struct {
+	name   string
+	output string
+}
+
+func (s *stubTool) Name() string                    { return s.name }
+func (s *stubTool) Description() string             { return "stub tool for testing" }
+func (s *stubTool) Parameters() json.RawMessage      { return json.RawMessage(`{"type":"object","properties":{}}`) }
+func (s *stubTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	return s.output, nil
+}
+
+// Compile-time check that stubTool implements tools.Tool.
+var _ tools.Tool = (*stubTool)(nil)
 
 // mockCompleter is a mock llm.Client for testing the agentic loop.
 type mockCompleter struct {
@@ -63,6 +80,9 @@ func TestSessionTextOnlyResponse(t *testing.T) {
 	if result.TotalToolCalls() != 0 {
 		t.Errorf("expected 0 tool calls, got %d", result.TotalToolCalls())
 	}
+	if result.MaxTurnsUsed {
+		t.Error("expected MaxTurnsUsed to be false for normal completion")
+	}
 }
 
 func TestSessionToolCallLoop(t *testing.T) {
@@ -95,7 +115,8 @@ func TestSessionToolCallLoop(t *testing.T) {
 	}
 
 	cfg := DefaultConfig()
-	sess := mustNewSession(t, client, cfg)
+	readTool := &stubTool{name: "read", output: "file contents here"}
+	sess := mustNewSession(t, client, cfg, WithTools(readTool))
 
 	result, err := sess.Run(context.Background(), "Read test.txt")
 	if err != nil {
@@ -136,7 +157,8 @@ func TestSessionMaxTurns(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.MaxTurns = 3
-	sess := mustNewSession(t, client, cfg)
+	readTool := &stubTool{name: "read", output: "stub"}
+	sess := mustNewSession(t, client, cfg, WithTools(readTool))
 
 	result, err := sess.Run(context.Background(), "Loop forever")
 	if err != nil {
@@ -144,6 +166,9 @@ func TestSessionMaxTurns(t *testing.T) {
 	}
 	if result.Turns != 3 {
 		t.Errorf("expected 3 turns (max), got %d", result.Turns)
+	}
+	if !result.MaxTurnsUsed {
+		t.Error("expected MaxTurnsUsed to be true")
 	}
 }
 

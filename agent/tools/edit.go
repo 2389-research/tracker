@@ -65,7 +65,8 @@ func (t *EditTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 	content, readErr := t.env.ReadFile(ctx, params.Path)
 
-	// When old_string is empty, create a new file or prepend to existing.
+	// When old_string is empty and the file doesn't exist, create a new file.
+	// When old_string is empty and the file does exist, return an error.
 	if params.OldString == "" {
 		if readErr != nil {
 			if err := t.env.WriteFile(ctx, params.Path, params.NewString); err != nil {
@@ -73,11 +74,7 @@ func (t *EditTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 			}
 			return fmt.Sprintf("created %s", params.Path), nil
 		}
-		newContent := params.NewString + content
-		if err := t.env.WriteFile(ctx, params.Path, newContent); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("prepended to %s", params.Path), nil
+		return "", fmt.Errorf("old_string is empty but %s already exists; provide the text to replace", params.Path)
 	}
 
 	if readErr != nil {

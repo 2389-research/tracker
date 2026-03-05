@@ -13,14 +13,15 @@ import (
 
 // SessionResult holds summary statistics and metadata from a completed session.
 type SessionResult struct {
-	SessionID     string
-	Duration      time.Duration
-	Turns         int
-	ToolCalls     map[string]int
-	FilesModified []string
-	FilesCreated  []string
-	Usage         llm.Usage
-	Error         error
+	SessionID      string
+	Duration       time.Duration
+	Turns          int
+	MaxTurnsUsed   bool
+	ToolCalls      map[string]int
+	FilesModified  []string
+	FilesCreated   []string
+	Usage          llm.Usage
+	Error          error
 }
 
 // TotalToolCalls returns the sum of all tool call counts.

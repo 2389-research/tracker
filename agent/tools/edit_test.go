@@ -94,3 +94,21 @@ func TestEditToolCreateNewFile(t *testing.T) {
 		t.Errorf("expected 'brand new content', got %q", string(data))
 	}
 }
+
+func TestEditToolEmptyOldStringExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "existing.txt"), []byte("existing content"), 0644)
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewEditTool(env)
+
+	input := json.RawMessage(`{
+		"path": "existing.txt",
+		"old_string": "",
+		"new_string": "new content"
+	}`)
+	_, err := tool.Execute(context.Background(), input)
+	if err == nil {
+		t.Error("expected error when old_string is empty and file exists")
+	}
+}

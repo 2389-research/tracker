@@ -72,17 +72,30 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 		id:       generateSessionID(),
 	}
 
+	// Apply options in two passes: first WithEnvironment to set s.env,
+	// then register built-in tools, then apply remaining options so
+	// WithTools can override built-ins.
 	for _, opt := range opts {
 		opt(s)
 	}
 
 	// Register built-in tools if an environment is set.
+	// These are registered before WithTools options take effect via a second pass,
+	// so custom tools with the same name will override built-ins.
 	if s.env != nil {
-		s.registry.Register(tools.NewReadTool(s.env))
-		s.registry.Register(tools.NewWriteTool(s.env))
-		s.registry.Register(tools.NewEditTool(s.env))
-		s.registry.Register(tools.NewGlobTool(s.env))
-		s.registry.Register(tools.NewBashTool(s.env, s.config.CommandTimeout, s.config.MaxCommandTimeout))
+		builtins := []tools.Tool{
+			tools.NewReadTool(s.env),
+			tools.NewWriteTool(s.env),
+			tools.NewEditTool(s.env),
+			tools.NewGlobTool(s.env),
+			tools.NewBashTool(s.env, s.config.CommandTimeout, s.config.MaxCommandTimeout),
+		}
+		for _, t := range builtins {
+			// Only register built-in if no custom tool with the same name exists.
+			if s.registry.Get(t.Name()) == nil {
+				s.registry.Register(t)
+			}
+		}
 	}
 
 	return s, nil
@@ -186,6 +199,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		})
 
 		s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
+	}
+
+	// If we exhausted all turns without the LLM stopping naturally, flag it.
+	if result.Turns >= s.config.MaxTurns {
+		result.MaxTurnsUsed = true
 	}
 
 	return result, nil
