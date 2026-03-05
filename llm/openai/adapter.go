@@ -1,0 +1,372 @@
+// ABOUTME: OpenAI Responses API adapter implementing the ProviderAdapter interface.
+// ABOUTME: Handles HTTP communication, SSE stream parsing, and request/response lifecycle.
+package openai
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/2389-research/mammoth-lite/llm"
+)
+
+const (
+	defaultBaseURL = "https://api.openai.com"
+	responsesPath  = "/v1/responses"
+)
+
+// Adapter implements llm.ProviderAdapter for the OpenAI Responses API.
+type Adapter struct {
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
+}
+
+// Option configures an Adapter.
+type Option func(*Adapter)
+
+// WithBaseURL overrides the default OpenAI API base URL.
+func WithBaseURL(url string) Option {
+	return func(a *Adapter) {
+		a.baseURL = url
+	}
+}
+
+// WithHTTPClient provides a custom http.Client.
+func WithHTTPClient(client *http.Client) Option {
+	return func(a *Adapter) {
+		a.httpClient = client
+	}
+}
+
+// New creates a new OpenAI adapter with the given API key and options.
+func New(apiKey string, opts ...Option) *Adapter {
+	a := &Adapter{
+		apiKey:  apiKey,
+		baseURL: defaultBaseURL,
+		httpClient: &http.Client{
+			Timeout: 5 * time.Minute,
+		},
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// Name returns the provider identifier.
+func (a *Adapter) Name() string {
+	return "openai"
+}
+
+// Complete sends a synchronous request to the OpenAI Responses API.
+func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	body, err := translateRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("openai: translate request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+responsesPath, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("openai: create request: %w", err)
+	}
+	a.setHeaders(httpReq)
+
+	start := time.Now()
+	httpResp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, &llm.NetworkError{SDKError: llm.SDKError{Msg: fmt.Sprintf("openai: %s", err.Error()), Cause: err}}
+	}
+	defer httpResp.Body.Close()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, &llm.NetworkError{SDKError: llm.SDKError{Msg: fmt.Sprintf("openai: read response: %s", err.Error()), Cause: err}}
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		msg := string(respBody)
+		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, msg, "openai")
+	}
+
+	resp, err := translateResponse(respBody)
+	if err != nil {
+		return nil, fmt.Errorf("openai: translate response: %w", err)
+	}
+
+	resp.Provider = "openai"
+	resp.Latency = time.Since(start)
+
+	return resp, nil
+}
+
+// Stream sends a streaming request and returns a channel of events.
+func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
+	ch := make(chan llm.StreamEvent, 64)
+
+	go func() {
+		defer close(ch)
+
+		body, err := translateRequest(req)
+		if err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: translate request: %w", err)}
+			return
+		}
+
+		// Inject stream: true into the body.
+		var bodyMap map[string]any
+		if err := json.Unmarshal(body, &bodyMap); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+			return
+		}
+		bodyMap["stream"] = true
+		body, err = json.Marshal(bodyMap)
+		if err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+			return
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+responsesPath, bytes.NewReader(body))
+		if err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+			return
+		}
+		a.setHeaders(httpReq)
+
+		httpResp, err := a.httpClient.Do(httpReq)
+		if err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
+			return
+		}
+		defer httpResp.Body.Close()
+
+		if httpResp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(httpResp.Body)
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "openai")}
+			return
+		}
+
+		a.parseSSE(httpResp.Body, ch)
+	}()
+
+	return ch
+}
+
+// Close releases resources held by the adapter.
+func (a *Adapter) Close() error {
+	return nil
+}
+
+// setHeaders applies standard OpenAI API headers to the request.
+func (a *Adapter) setHeaders(httpReq *http.Request) {
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
+}
+
+// parseSSE reads SSE events from the response body and emits StreamEvents.
+func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+
+	var eventType string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "event: ") {
+			eventType = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		a.handleSSEData(eventType, []byte(data), ch)
+		eventType = ""
+	}
+
+	if err := scanner.Err(); err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: SSE scan error: %w", err)}
+	}
+}
+
+// --- SSE event types for the OpenAI Responses API ---
+
+type sseResponseCreated struct {
+	Type     string `json:"type"`
+	Response struct {
+		ID    string `json:"id"`
+		Model string `json:"model"`
+	} `json:"response"`
+}
+
+type sseOutputItemAdded struct {
+	Type       string `json:"type"`
+	OutputIndex int   `json:"output_index"`
+	Item       struct {
+		Type string `json:"type"`
+		ID   string `json:"id,omitempty"`
+		Name string `json:"name,omitempty"`
+	} `json:"item"`
+}
+
+type sseOutputTextDelta struct {
+	Type        string `json:"type"`
+	OutputIndex int    `json:"output_index"`
+	ContentIndex int   `json:"content_index"`
+	Delta       string `json:"delta"`
+}
+
+type sseFunctionCallArgsDelta struct {
+	Type        string `json:"type"`
+	OutputIndex int    `json:"output_index"`
+	Delta       string `json:"delta"`
+}
+
+type sseOutputItemDone struct {
+	Type        string `json:"type"`
+	OutputIndex int    `json:"output_index"`
+	Item        struct {
+		Type      string `json:"type"`
+		ID        string `json:"id,omitempty"`
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	} `json:"item"`
+}
+
+type sseResponseCompleted struct {
+	Type     string `json:"type"`
+	Response struct {
+		ID                string              `json:"id"`
+		Status            string              `json:"status"`
+		Usage             openaiUsage         `json:"usage"`
+		IncompleteDetails *incompleteDetails  `json:"incomplete_details,omitempty"`
+		Output            []openaiOutputItem  `json:"output"`
+	} `json:"response"`
+}
+
+// handleSSEData processes a single SSE data payload.
+func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.StreamEvent) {
+	switch eventType {
+	case "response.created":
+		var evt sseResponseCreated
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: parse response.created: %w", err)}
+			return
+		}
+		ch <- llm.StreamEvent{
+			Type: llm.EventStreamStart,
+			Raw:  data,
+		}
+
+	case "response.output_item.added":
+		var evt sseOutputItemAdded
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: parse output_item.added: %w", err)}
+			return
+		}
+		switch evt.Item.Type {
+		case "message":
+			ch <- llm.StreamEvent{
+				Type:   llm.EventTextStart,
+				TextID: fmt.Sprintf("item_%d", evt.OutputIndex),
+			}
+		case "function_call":
+			ch <- llm.StreamEvent{
+				Type: llm.EventToolCallStart,
+				ToolCall: &llm.ToolCallData{
+					ID:   evt.Item.ID,
+					Name: evt.Item.Name,
+				},
+			}
+		case "reasoning":
+			ch <- llm.StreamEvent{
+				Type: llm.EventReasoningStart,
+			}
+		}
+
+	case "response.output_text.delta":
+		var evt sseOutputTextDelta
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: parse output_text.delta: %w", err)}
+			return
+		}
+		ch <- llm.StreamEvent{
+			Type:   llm.EventTextDelta,
+			TextID: fmt.Sprintf("item_%d", evt.OutputIndex),
+			Delta:  evt.Delta,
+		}
+
+	case "response.function_call_arguments.delta":
+		var evt sseFunctionCallArgsDelta
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: parse function_call_arguments.delta: %w", err)}
+			return
+		}
+		ch <- llm.StreamEvent{
+			Type:  llm.EventToolCallDelta,
+			Delta: evt.Delta,
+		}
+
+	case "response.output_item.done":
+		var evt sseOutputItemDone
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: parse output_item.done: %w", err)}
+			return
+		}
+		switch evt.Item.Type {
+		case "message":
+			ch <- llm.StreamEvent{
+				Type:   llm.EventTextEnd,
+				TextID: fmt.Sprintf("item_%d", evt.OutputIndex),
+			}
+		case "function_call":
+			ch <- llm.StreamEvent{
+				Type: llm.EventToolCallEnd,
+			}
+		case "reasoning":
+			ch <- llm.StreamEvent{
+				Type: llm.EventReasoningEnd,
+			}
+		}
+
+	case "response.completed":
+		var evt sseResponseCompleted
+		if err := json.Unmarshal(data, &evt); err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: parse response.completed: %w", err)}
+			return
+		}
+		hasFunctionCalls := false
+		for _, item := range evt.Response.Output {
+			if item.Type == "function_call" {
+				hasFunctionCalls = true
+				break
+			}
+		}
+		fr := translateFinishReason(evt.Response.Status, hasFunctionCalls, evt.Response.IncompleteDetails)
+		ch <- llm.StreamEvent{
+			Type:         llm.EventFinish,
+			FinishReason: &fr,
+			Usage: &llm.Usage{
+				InputTokens:  evt.Response.Usage.InputTokens,
+				OutputTokens: evt.Response.Usage.OutputTokens,
+				TotalTokens:  evt.Response.Usage.TotalTokens,
+			},
+		}
+
+	case "response.in_progress", "response.output_text.done",
+		"response.content_part.added", "response.content_part.done",
+		"response.function_call_arguments.done", "response.reasoning.done",
+		"response.reasoning.delta":
+		// Events we acknowledge but don't need to act on.
+		// reasoning.delta could be mapped if the API provides incremental reasoning text.
+	}
+}

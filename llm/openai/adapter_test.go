@@ -1,0 +1,649 @@
+// ABOUTME: Tests for the OpenAI Responses API adapter.
+// ABOUTME: Validates request/response translation, SSE stream parsing, and finish reason mapping.
+package openai
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/2389-research/mammoth-lite/llm"
+)
+
+// --- Request translation tests ---
+
+func TestTranslateRequestBasic(t *testing.T) {
+	req := &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	if raw["model"] != "gpt-4.1" {
+		t.Errorf("expected model gpt-4.1, got %v", raw["model"])
+	}
+
+	input, ok := raw["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("expected 1 input item, got %v", raw["input"])
+	}
+
+	item := input[0].(map[string]any)
+	if item["role"] != "user" || item["content"] != "Hello" {
+		t.Errorf("unexpected input item: %v", item)
+	}
+}
+
+func TestTranslateRequestSystemToInstructions(t *testing.T) {
+	req := &llm.Request{
+		Model: "gpt-4.1",
+		Messages: []llm.Message{
+			llm.SystemMessage("Be helpful"),
+			{Role: llm.RoleDeveloper, Content: []llm.ContentPart{{Kind: llm.KindText, Text: "Also be concise"}}},
+			llm.UserMessage("Hello"),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	instructions, ok := raw["instructions"].(string)
+	if !ok {
+		t.Fatal("expected instructions string")
+	}
+	if !strings.Contains(instructions, "Be helpful") || !strings.Contains(instructions, "Also be concise") {
+		t.Errorf("instructions should contain both system and developer text, got: %s", instructions)
+	}
+
+	// System/developer messages should NOT be in the input array.
+	input := raw["input"].([]any)
+	if len(input) != 1 {
+		t.Errorf("expected 1 input item (user only), got %d", len(input))
+	}
+}
+
+func TestTranslateRequestDefaultMaxOutputTokens(t *testing.T) {
+	req := &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+
+	maxTokens, ok := raw["max_output_tokens"].(float64)
+	if !ok || int(maxTokens) != 4096 {
+		t.Errorf("expected max_output_tokens 4096, got %v", raw["max_output_tokens"])
+	}
+}
+
+func TestTranslateRequestToolDefinitions(t *testing.T) {
+	req := &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		Tools: []llm.ToolDefinition{
+			{
+				Name:        "read_file",
+				Description: "Read a file",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`),
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+
+	tools := raw["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+
+	tool := tools[0].(map[string]any)
+	if tool["type"] != "function" {
+		t.Errorf("expected tool type 'function', got %v", tool["type"])
+	}
+	if tool["name"] != "read_file" {
+		t.Errorf("expected tool name 'read_file', got %v", tool["name"])
+	}
+}
+
+func TestTranslateRequestToolCallInInput(t *testing.T) {
+	req := &llm.Request{
+		Model: "gpt-4.1",
+		Messages: []llm.Message{
+			llm.UserMessage("Hello"),
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{
+						ID:        "call_123",
+						Name:      "read_file",
+						Arguments: json.RawMessage(`{"path":"foo.txt"}`),
+					}},
+				},
+			},
+			llm.ToolResultMessage("call_123", "file contents", false),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+
+	input := raw["input"].([]any)
+	if len(input) != 3 {
+		t.Fatalf("expected 3 input items, got %d", len(input))
+	}
+
+	// Second item should be function_call.
+	fc := input[1].(map[string]any)
+	if fc["type"] != "function_call" {
+		t.Errorf("expected function_call, got %v", fc["type"])
+	}
+	if fc["id"] != "call_123" {
+		t.Errorf("expected id call_123, got %v", fc["id"])
+	}
+	if fc["name"] != "read_file" {
+		t.Errorf("expected name read_file, got %v", fc["name"])
+	}
+
+	// Third item should be function_call_output.
+	fco := input[2].(map[string]any)
+	if fco["type"] != "function_call_output" {
+		t.Errorf("expected function_call_output, got %v", fco["type"])
+	}
+	if fco["call_id"] != "call_123" {
+		t.Errorf("expected call_id call_123, got %v", fco["call_id"])
+	}
+}
+
+func TestTranslateRequestToolChoiceModes(t *testing.T) {
+	tests := []struct {
+		mode     string
+		toolName string
+		want     any
+	}{
+		{"auto", "", "auto"},
+		{"none", "", "none"},
+		{"required", "", "required"},
+		{"named", "read_file", map[string]string{"type": "function", "name": "read_file"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			req := &llm.Request{
+				Model:    "gpt-4.1",
+				Messages: []llm.Message{llm.UserMessage("Hi")},
+				ToolChoice: &llm.ToolChoice{
+					Mode:     tt.mode,
+					ToolName: tt.toolName,
+				},
+			}
+
+			body, err := translateRequest(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var raw map[string]any
+			json.Unmarshal(body, &raw)
+
+			got := raw["tool_choice"]
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(tt.want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("tool_choice: got %s, want %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+func TestTranslateRequestReasoningEffort(t *testing.T) {
+	req := &llm.Request{
+		Model:           "o3",
+		Messages:        []llm.Message{llm.UserMessage("Think hard")},
+		ReasoningEffort: "high",
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+
+	reasoning := raw["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" {
+		t.Errorf("expected reasoning effort 'high', got %v", reasoning["effort"])
+	}
+}
+
+func TestTranslateRequestReasoningEffortFromProviderOptions(t *testing.T) {
+	req := &llm.Request{
+		Model:    "o3",
+		Messages: []llm.Message{llm.UserMessage("Think")},
+		ProviderOptions: map[string]any{
+			"openai": map[string]any{
+				"reasoning_effort": "medium",
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+
+	reasoning := raw["reasoning"].(map[string]any)
+	if reasoning["effort"] != "medium" {
+		t.Errorf("expected reasoning effort 'medium', got %v", reasoning["effort"])
+	}
+}
+
+// --- Response translation tests ---
+
+func TestTranslateResponseBasic(t *testing.T) {
+	raw := `{
+		"id": "resp_123",
+		"model": "gpt-4.1-2025-04-14",
+		"output": [
+			{
+				"type": "message",
+				"role": "assistant",
+				"content": [{"type": "output_text", "text": "Hello!"}]
+			}
+		],
+		"usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+		"status": "completed"
+	}`
+
+	resp, err := translateResponse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ID != "resp_123" {
+		t.Errorf("expected id resp_123, got %s", resp.ID)
+	}
+	if resp.Model != "gpt-4.1-2025-04-14" {
+		t.Errorf("expected model gpt-4.1-2025-04-14, got %s", resp.Model)
+	}
+	if resp.Text() != "Hello!" {
+		t.Errorf("expected text 'Hello!', got %q", resp.Text())
+	}
+	if resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 5 {
+		t.Errorf("unexpected usage: %+v", resp.Usage)
+	}
+	if resp.FinishReason.Reason != "stop" {
+		t.Errorf("expected finish reason 'stop', got %q", resp.FinishReason.Reason)
+	}
+}
+
+func TestTranslateResponseToolCall(t *testing.T) {
+	raw := `{
+		"id": "resp_456",
+		"model": "gpt-4.1",
+		"output": [
+			{
+				"type": "function_call",
+				"id": "call_789",
+				"name": "read_file",
+				"arguments": "{\"path\":\"foo.txt\"}"
+			}
+		],
+		"usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30},
+		"status": "completed"
+	}`
+
+	resp, err := translateResponse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := resp.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "read_file" {
+		t.Errorf("expected tool name 'read_file', got %q", calls[0].Name)
+	}
+	if resp.FinishReason.Reason != "tool_calls" {
+		t.Errorf("expected finish reason 'tool_calls', got %q", resp.FinishReason.Reason)
+	}
+}
+
+func TestTranslateResponseReasoning(t *testing.T) {
+	raw := `{
+		"id": "resp_r1",
+		"model": "o3",
+		"output": [
+			{
+				"type": "reasoning",
+				"summary": [
+					{"type": "summary_text", "text": "Let me think about this..."}
+				]
+			},
+			{
+				"type": "message",
+				"role": "assistant",
+				"content": [{"type": "output_text", "text": "The answer is 42."}]
+			}
+		],
+		"usage": {"input_tokens": 10, "output_tokens": 50, "total_tokens": 60, "output_tokens_details": {"reasoning_tokens": 40}},
+		"status": "completed"
+	}`
+
+	resp, err := translateResponse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reasoning := resp.Reasoning()
+	if reasoning != "Let me think about this..." {
+		t.Errorf("expected reasoning text 'Let me think about this...', got %q", reasoning)
+	}
+	if resp.Usage.ReasoningTokens == nil || *resp.Usage.ReasoningTokens != 40 {
+		t.Errorf("expected reasoning tokens 40, got %v", resp.Usage.ReasoningTokens)
+	}
+}
+
+// --- Finish reason tests ---
+
+func TestTranslateFinishReason(t *testing.T) {
+	tests := []struct {
+		status     string
+		hasCalls   bool
+		incomplete *incompleteDetails
+		wantReason string
+	}{
+		{"completed", false, nil, "stop"},
+		{"completed", true, nil, "tool_calls"},
+		{"incomplete", false, &incompleteDetails{Reason: "max_output_tokens"}, "length"},
+		{"incomplete", false, &incompleteDetails{Reason: "content_filter"}, "content_filter"},
+		{"failed", false, nil, "error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%v", tt.status, tt.hasCalls), func(t *testing.T) {
+			fr := translateFinishReason(tt.status, tt.hasCalls, tt.incomplete)
+			if fr.Reason != tt.wantReason {
+				t.Errorf("got reason %q, want %q", fr.Reason, tt.wantReason)
+			}
+			if fr.Raw != tt.status {
+				t.Errorf("got raw %q, want %q", fr.Raw, tt.status)
+			}
+		})
+	}
+}
+
+// --- Adapter integration tests (httptest) ---
+
+func TestAdapterComplete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify auth header.
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Errorf("expected Bearer auth, got %q", r.Header.Get("Authorization"))
+		}
+
+		// Verify request body.
+		body, _ := io.ReadAll(r.Body)
+		var raw map[string]any
+		json.Unmarshal(body, &raw)
+
+		if raw["model"] != "gpt-4.1" {
+			t.Errorf("expected model gpt-4.1, got %v", raw["model"])
+		}
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"id": "resp_test",
+			"model": "gpt-4.1-2025-04-14",
+			"output": [
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "Hello from OpenAI!"}]
+				}
+			],
+			"usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+			"status": "completed"
+		}`)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	resp, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.Text() != "Hello from OpenAI!" {
+		t.Errorf("expected 'Hello from OpenAI!', got %q", resp.Text())
+	}
+	if resp.Provider != "openai" {
+		t.Errorf("expected provider 'openai', got %q", resp.Provider)
+	}
+}
+
+func TestAdapterCompleteErrorStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error": {"message": "invalid api key"}}`)
+	}))
+	defer server.Close()
+
+	a := New("bad-key", WithBaseURL(server.URL))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	})
+	if err == nil {
+		t.Fatal("expected error for 401")
+	}
+
+	var authErr *llm.AuthenticationError
+	if !errors.As(err, &authErr) {
+		t.Errorf("expected AuthenticationError, got %T: %v", err, err)
+	}
+}
+
+func TestAdapterStream(t *testing.T) {
+	sseData := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_s1","model":"gpt-4.1"}}`,
+		"",
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello"}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":" world"}`,
+		"",
+		"event: response.output_item.done",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}`,
+		"",
+		"event: response.completed",
+		`data: {"type":"response.completed","response":{"id":"resp_s1","status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[]}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// Should have: StreamStart, TextStart, TextDelta("Hello"), TextDelta(" world"), TextEnd, Finish
+	if len(events) < 6 {
+		t.Fatalf("expected at least 6 events, got %d: %+v", len(events), events)
+	}
+
+	if events[0].Type != llm.EventStreamStart {
+		t.Errorf("first event should be StreamStart, got %v", events[0].Type)
+	}
+	if events[1].Type != llm.EventTextStart {
+		t.Errorf("second event should be TextStart, got %v", events[1].Type)
+	}
+	if events[2].Delta != "Hello" {
+		t.Errorf("expected delta 'Hello', got %q", events[2].Delta)
+	}
+	if events[3].Delta != " world" {
+		t.Errorf("expected delta ' world', got %q", events[3].Delta)
+	}
+	if events[4].Type != llm.EventTextEnd {
+		t.Errorf("fifth event should be TextEnd, got %v", events[4].Type)
+	}
+	if events[5].Type != llm.EventFinish {
+		t.Errorf("last event should be Finish, got %v", events[5].Type)
+	}
+}
+
+func TestAdapterStreamToolCall(t *testing.T) {
+	sseData := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_tc","model":"gpt-4.1"}}`,
+		"",
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"call_abc","name":"read_file"}}`,
+		"",
+		"event: response.function_call_arguments.delta",
+		`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
+		"",
+		"event: response.function_call_arguments.delta",
+		`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"foo.txt\"}"}`,
+		"",
+		"event: response.output_item.done",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"call_abc","name":"read_file","arguments":"{\"path\":\"foo.txt\"}"}}`,
+		"",
+		"event: response.completed",
+		`data: {"type":"response.completed","response":{"id":"resp_tc","status":"completed","usage":{"input_tokens":20,"output_tokens":15,"total_tokens":35},"output":[{"type":"function_call","id":"call_abc","name":"read_file","arguments":"{\"path\":\"foo.txt\"}"}]}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Read foo.txt")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// StreamStart, ToolCallStart, ToolCallDelta x2, ToolCallEnd, Finish
+	if len(events) < 6 {
+		t.Fatalf("expected at least 6 events, got %d", len(events))
+	}
+
+	if events[1].Type != llm.EventToolCallStart {
+		t.Errorf("expected ToolCallStart, got %v", events[1].Type)
+	}
+	if events[1].ToolCall == nil || events[1].ToolCall.Name != "read_file" {
+		t.Errorf("expected tool call name 'read_file', got %+v", events[1].ToolCall)
+	}
+	if events[2].Type != llm.EventToolCallDelta {
+		t.Errorf("expected ToolCallDelta, got %v", events[2].Type)
+	}
+
+	// Finish should have tool_calls reason.
+	lastEvt := events[len(events)-1]
+	if lastEvt.FinishReason == nil || lastEvt.FinishReason.Reason != "tool_calls" {
+		t.Errorf("expected finish reason 'tool_calls', got %+v", lastEvt.FinishReason)
+	}
+}
+
+func TestAdapterName(t *testing.T) {
+	a := New("key")
+	if a.Name() != "openai" {
+		t.Errorf("expected 'openai', got %q", a.Name())
+	}
+}
+
+func TestAdapterProviderOptions(t *testing.T) {
+	req := &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		ProviderOptions: map[string]any{
+			"openai": map[string]any{
+				"store": true,
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+
+	if raw["store"] != true {
+		t.Errorf("expected store=true from provider options, got %v", raw["store"])
+	}
+}
