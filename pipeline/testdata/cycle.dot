@@ -1,0 +1,11 @@
+digraph cycle_pipeline {
+    start [shape=Mdiamond label="Start"];
+    a [shape=box label="A"];
+    b [shape=box label="B"];
+    done [shape=Msquare label="Done"];
+
+    start -> a;
+    a -> b;
+    b -> a;
+    b -> done;
+}
