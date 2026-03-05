@@ -585,8 +585,9 @@ func TestAdapterCompleteErrorStatus(t *testing.T) {
 func TestAdapterCompleteBetaHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		betaHeader := r.Header.Get("anthropic-beta")
-		if betaHeader != "max-tokens-3-5-sonnet-2024-07-15" {
-			t.Errorf("expected beta header, got %q", betaHeader)
+		// Should contain both the auto-injected prompt-caching beta and the user-specified one.
+		if betaHeader != "prompt-caching-2024-07-31,max-tokens-3-5-sonnet-2024-07-15" {
+			t.Errorf("expected combined beta headers, got %q", betaHeader)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -749,6 +750,369 @@ func TestAdapterClose(t *testing.T) {
 	a := New("test-key")
 	if err := a.Close(); err != nil {
 		t.Errorf("expected no error from Close, got %v", err)
+	}
+}
+
+// --- Issue 1: Cache control injection tests ---
+
+func TestCacheControlInjection(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			llm.SystemMessage("You are helpful."),
+			llm.UserMessage("Hello"),
+		},
+		Tools: []llm.ToolDefinition{
+			{Name: "get_weather", Description: "Get weather", Parameters: json.RawMessage(`{}`)},
+			{Name: "get_time", Description: "Get time", Parameters: json.RawMessage(`{}`)},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Last system block should have cache_control
+	system := parsed["system"].([]any)
+	lastSystem := system[len(system)-1].(map[string]any)
+	cc, ok := lastSystem["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatal("expected cache_control on last system block")
+	}
+	if cc["type"] != "ephemeral" {
+		t.Errorf("expected ephemeral, got %v", cc["type"])
+	}
+
+	// Last tool should have cache_control
+	tools := parsed["tools"].([]any)
+	lastTool := tools[len(tools)-1].(map[string]any)
+	toolCC, ok := lastTool["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatal("expected cache_control on last tool")
+	}
+	if toolCC["type"] != "ephemeral" {
+		t.Errorf("expected ephemeral, got %v", toolCC["type"])
+	}
+
+	// First tool should NOT have cache_control
+	firstTool := tools[0].(map[string]any)
+	if _, ok := firstTool["cache_control"]; ok {
+		t.Error("first tool should not have cache_control")
+	}
+
+	// Last user message last content block should have cache_control
+	msgs := parsed["messages"].([]any)
+	lastMsg := msgs[len(msgs)-1].(map[string]any)
+	content := lastMsg["content"].([]any)
+	lastContent := content[len(content)-1].(map[string]any)
+	contentCC, ok := lastContent["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatal("expected cache_control on last user message content block")
+	}
+	if contentCC["type"] != "ephemeral" {
+		t.Errorf("expected ephemeral, got %v", contentCC["type"])
+	}
+}
+
+func TestCacheControlOptOut(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			llm.SystemMessage("You are helpful."),
+			llm.UserMessage("Hello"),
+		},
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"auto_cache": false,
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// System block should NOT have cache_control when opted out
+	system := parsed["system"].([]any)
+	lastSystem := system[len(system)-1].(map[string]any)
+	if _, ok := lastSystem["cache_control"]; ok {
+		t.Error("cache_control should not be present when auto_cache is false")
+	}
+}
+
+func TestCacheControlBetaHeaderAutoInjected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		betaHeader := r.Header.Get("anthropic-beta")
+		if !strings.Contains(betaHeader, "prompt-caching-2024-07-31") {
+			t.Errorf("expected prompt-caching beta header, got %q", betaHeader)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "msg_cache", "model": "claude-opus-4-6", "type": "message",
+			"role": "assistant", "content": [{"type": "text", "text": "ok"}],
+			"stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}
+		}`)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("Complete error: %v", err)
+	}
+}
+
+func TestCacheControlBetaHeaderNotInjectedWhenOptedOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		betaHeader := r.Header.Get("anthropic-beta")
+		if betaHeader != "" {
+			t.Errorf("expected no beta header when auto_cache is false, got %q", betaHeader)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "msg_no_cache", "model": "claude-opus-4-6", "type": "message",
+			"role": "assistant", "content": [{"type": "text", "text": "ok"}],
+			"stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}
+		}`)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"auto_cache": false,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete error: %v", err)
+	}
+}
+
+// --- Issue 2: Tool choice "none" omits tools array ---
+
+func TestToolChoiceNoneOmitsTools(t *testing.T) {
+	req := &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		ToolChoice: &llm.ToolChoice{Mode: "none"},
+		Tools: []llm.ToolDefinition{
+			{Name: "get_weather", Description: "Get weather", Parameters: json.RawMessage(`{}`)},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Tools should NOT be present when tool choice is "none"
+	if _, ok := parsed["tools"]; ok {
+		t.Error("tools array should be omitted when tool_choice mode is 'none'")
+	}
+
+	// tool_choice should also be omitted (translateToolChoice returns nil for "none")
+	if _, ok := parsed["tool_choice"]; ok {
+		t.Error("tool_choice should be omitted for 'none'")
+	}
+}
+
+// --- Issue 3: Beta headers accept array format ---
+
+func TestBetaHeadersArrayFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		betaHeader := r.Header.Get("anthropic-beta")
+		// Should contain prompt-caching (auto) + both user-specified headers
+		if !strings.Contains(betaHeader, "prompt-caching-2024-07-31") {
+			t.Errorf("missing prompt-caching in beta header: %q", betaHeader)
+		}
+		if !strings.Contains(betaHeader, "beta-one") {
+			t.Errorf("missing beta-one in beta header: %q", betaHeader)
+		}
+		if !strings.Contains(betaHeader, "beta-two") {
+			t.Errorf("missing beta-two in beta header: %q", betaHeader)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "msg_arr", "model": "claude-opus-4-6", "type": "message",
+			"role": "assistant", "content": [{"type": "text", "text": "ok"}],
+			"stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}
+		}`)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				// JSON arrays unmarshal to []any in Go
+				"beta_headers": []any{"beta-one", "beta-two"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete error: %v", err)
+	}
+}
+
+func TestCollectBetaHeadersStringFormat(t *testing.T) {
+	req := &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"beta_headers": "custom-beta-header",
+			},
+		},
+	}
+
+	result := collectBetaHeaders(req)
+	if !strings.Contains(result, "prompt-caching-2024-07-31") {
+		t.Errorf("expected prompt-caching in result: %q", result)
+	}
+	if !strings.Contains(result, "custom-beta-header") {
+		t.Errorf("expected custom-beta-header in result: %q", result)
+	}
+}
+
+func TestCollectBetaHeadersArrayFormat(t *testing.T) {
+	req := &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"beta_headers": []any{"header-a", "header-b"},
+			},
+		},
+	}
+
+	result := collectBetaHeaders(req)
+	if result != "prompt-caching-2024-07-31,header-a,header-b" {
+		t.Errorf("unexpected beta headers: %q", result)
+	}
+}
+
+// --- Issue 4: Image URL source format ---
+
+func TestImageURLSourceFormat(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleUser,
+				Content: []llm.ContentPart{
+					{
+						Kind: llm.KindImage,
+						Image: &llm.ImageData{
+							URL:       "https://example.com/image.png",
+							MediaType: "image/png",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	msgs := parsed["messages"].([]any)
+	msg := msgs[0].(map[string]any)
+	content := msg["content"].([]any)
+	imageBlock := content[0].(map[string]any)
+
+	source := imageBlock["source"].(map[string]any)
+	if source["type"] != "url" {
+		t.Errorf("expected type 'url', got %v", source["type"])
+	}
+	if source["url"] != "https://example.com/image.png" {
+		t.Errorf("expected url field, got %v", source["url"])
+	}
+	// "data" field should NOT be present for URL images
+	if _, ok := source["data"]; ok {
+		t.Error("data field should not be present for URL-based images")
+	}
+}
+
+func TestImageBase64SourceFormat(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-opus-4-6",
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleUser,
+				Content: []llm.ContentPart{
+					{
+						Kind: llm.KindImage,
+						Image: &llm.ImageData{
+							Data:      []byte("fakeimagebytes"),
+							MediaType: "image/png",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	msgs := parsed["messages"].([]any)
+	msg := msgs[0].(map[string]any)
+	content := msg["content"].([]any)
+	imageBlock := content[0].(map[string]any)
+
+	source := imageBlock["source"].(map[string]any)
+	if source["type"] != "base64" {
+		t.Errorf("expected type 'base64', got %v", source["type"])
+	}
+	if _, ok := source["data"]; !ok {
+		t.Error("expected data field for base64 images")
+	}
+	// "url" field should NOT be present for base64 images
+	if _, ok := source["url"]; ok {
+		t.Error("url field should not be present for base64 images")
 	}
 }
 

@@ -170,15 +170,9 @@ func (a *Adapter) setHeaders(httpReq *http.Request, req *llm.Request) {
 	httpReq.Header.Set("x-api-key", a.apiKey)
 	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
 
-	// Apply beta headers from provider options.
-	if req.ProviderOptions != nil {
-		if opts, ok := req.ProviderOptions["anthropic"]; ok {
-			if optsMap, ok := opts.(map[string]any); ok {
-				if beta, ok := optsMap["beta_headers"].(string); ok && beta != "" {
-					httpReq.Header.Set("anthropic-beta", beta)
-				}
-			}
-		}
+	// Collect and apply beta headers (user-specified + auto-injected).
+	if beta := collectBetaHeaders(req); beta != "" {
+		httpReq.Header.Set("anthropic-beta", beta)
 	}
 }
 

@@ -5,9 +5,13 @@ package anthropic
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 
 	"github.com/2389-research/mammoth-lite/llm"
 )
+
+// promptCachingBeta is the beta header value for prompt caching support.
+const promptCachingBeta = "prompt-caching-2024-07-31"
 
 // defaultMaxTokens is the default max_tokens value when not specified.
 // Anthropic requires max_tokens in every request.
@@ -30,6 +34,11 @@ type anthropicRequest struct {
 type anthropicMessage struct {
 	Role    string             `json:"role"`
 	Content []anthropicContent `json:"content"`
+}
+
+// cacheControl is the Anthropic cache_control annotation.
+type cacheControl struct {
+	Type string `json:"type"`
 }
 
 type anthropicContent struct {
@@ -57,18 +66,23 @@ type anthropicContent struct {
 
 	// redacted_thinking block fields
 	Data string `json:"data,omitempty"`
+
+	// cache control annotation
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicSource struct {
 	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 type anthropicTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }
 
 // translateRequest converts a unified llm.Request to Anthropic Messages API JSON.
@@ -114,18 +128,27 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 	// Merge consecutive same-role messages for strict alternation.
 	ar.Messages = mergeConsecutiveMessages(converted)
 
-	// Translate tools.
-	for _, t := range req.Tools {
-		ar.Tools = append(ar.Tools, anthropicTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.Parameters,
-		})
+	// Translate tools. Skip when tool choice mode is "none" since Anthropic
+	// rejects requests that include a tools array with tool_choice "none".
+	skipTools := req.ToolChoice != nil && req.ToolChoice.Mode == "none"
+	if !skipTools {
+		for _, t := range req.Tools {
+			ar.Tools = append(ar.Tools, anthropicTool{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.Parameters,
+			})
+		}
 	}
 
 	// Translate tool choice.
 	if req.ToolChoice != nil {
 		ar.ToolChoice = translateToolChoice(req.ToolChoice)
+	}
+
+	// Inject cache_control annotations when auto_cache is enabled (default true).
+	if autoCacheEnabled(req) {
+		injectCacheControl(&ar)
 	}
 
 	// Apply provider options (pass through anthropic-specific fields).
@@ -134,7 +157,7 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	// Merge provider_options["anthropic"] into the body (except beta_headers).
+	// Merge provider_options["anthropic"] into the body (except reserved keys).
 	if opts, ok := req.ProviderOptions["anthropic"]; ok {
 		if optsMap, ok := opts.(map[string]any); ok {
 			var bodyMap map[string]any
@@ -142,7 +165,7 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 				return nil, err
 			}
 			for k, v := range optsMap {
-				if k == "beta_headers" {
+				if k == "beta_headers" || k == "auto_cache" {
 					continue
 				}
 				bodyMap[k] = v
@@ -155,6 +178,90 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+// autoCacheEnabled returns true unless the request explicitly opts out of
+// automatic cache control injection via provider_options["anthropic"]["auto_cache"] = false.
+func autoCacheEnabled(req *llm.Request) bool {
+	if req.ProviderOptions == nil {
+		return true
+	}
+	opts, ok := req.ProviderOptions["anthropic"]
+	if !ok {
+		return true
+	}
+	optsMap, ok := opts.(map[string]any)
+	if !ok {
+		return true
+	}
+	if v, ok := optsMap["auto_cache"]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return true
+}
+
+// injectCacheControl adds ephemeral cache_control annotations to:
+//   - the last system content block
+//   - the last tool definition
+//   - the last content block of the last user message
+func injectCacheControl(ar *anthropicRequest) {
+	ephemeral := &cacheControl{Type: "ephemeral"}
+
+	// Last system content block.
+	if len(ar.System) > 0 {
+		ar.System[len(ar.System)-1].CacheControl = ephemeral
+	}
+
+	// Last tool definition.
+	if len(ar.Tools) > 0 {
+		ar.Tools[len(ar.Tools)-1].CacheControl = ephemeral
+	}
+
+	// Last content block of the last user message.
+	for i := len(ar.Messages) - 1; i >= 0; i-- {
+		if ar.Messages[i].Role == "user" && len(ar.Messages[i].Content) > 0 {
+			last := len(ar.Messages[i].Content) - 1
+			ar.Messages[i].Content[last].CacheControl = ephemeral
+			break
+		}
+	}
+}
+
+// collectBetaHeaders gathers all beta header values that should be sent,
+// combining user-specified values with auto-injected ones (like prompt caching).
+func collectBetaHeaders(req *llm.Request) string {
+	var headers []string
+
+	// Auto-inject prompt caching beta when auto_cache is enabled.
+	if autoCacheEnabled(req) {
+		headers = append(headers, promptCachingBeta)
+	}
+
+	// Add user-specified beta headers from provider options.
+	if req.ProviderOptions != nil {
+		if opts, ok := req.ProviderOptions["anthropic"]; ok {
+			if optsMap, ok := opts.(map[string]any); ok {
+				if beta, ok := optsMap["beta_headers"]; ok {
+					switch v := beta.(type) {
+					case string:
+						if v != "" {
+							headers = append(headers, v)
+						}
+					case []any:
+						for _, item := range v {
+							if s, ok := item.(string); ok && s != "" {
+								headers = append(headers, s)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return strings.Join(headers, ",")
 }
 
 // translateMessage converts a single llm.Message to Anthropic format.
@@ -190,7 +297,7 @@ func translateMessage(m llm.Message) anthropicMessage {
 						Source: &anthropicSource{
 							Type:      "url",
 							MediaType: part.Image.MediaType,
-							Data:      part.Image.URL,
+							URL:       part.Image.URL,
 						},
 					})
 				}
