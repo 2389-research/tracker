@@ -15,9 +15,10 @@ const (
 
 // Outcome represents the result of executing a handler on a pipeline node.
 type Outcome struct {
-	Status         string
-	ContextUpdates map[string]string
-	PreferredLabel string
+	Status             string
+	ContextUpdates     map[string]string
+	PreferredLabel     string
+	SuggestedNextNodes []string
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

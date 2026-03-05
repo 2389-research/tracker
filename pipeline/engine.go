@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -185,6 +186,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		if outcome.PreferredLabel != "" {
 			pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)
 		}
+		if len(outcome.SuggestedNextNodes) > 0 {
+			pctx.Set("suggested_next_nodes", strings.Join(outcome.SuggestedNextNodes, ","))
+		}
 
 		switch outcome.Status {
 		case OutcomeRetry:
@@ -303,7 +307,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	}, nil
 }
 
-// selectEdge picks the best outgoing edge using priority: condition > preferred label > weight > lexical.
+// selectEdge picks the best outgoing edge using priority: condition > preferred label > suggested IDs > weight > lexical.
 func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error) {
 	// Priority 1: Condition match.
 	for _, edge := range edges {
@@ -327,7 +331,18 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		}
 	}
 
-	// Priority 3: Edge weight (higher wins).
+	// Priority 3: Suggested next nodes (handler suggests specific targets).
+	if suggested, ok := pctx.Get("suggested_next_nodes"); ok && suggested != "" {
+		for _, edge := range edges {
+			for _, sid := range strings.Split(suggested, ",") {
+				if strings.TrimSpace(sid) == edge.To {
+					return edge, nil
+				}
+			}
+		}
+	}
+
+	// Priority 4: Edge weight (higher wins).
 	// Filter to edges without conditions (unconditional edges).
 	var unconditional []*Edge
 	for _, edge := range edges {

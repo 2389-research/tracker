@@ -495,6 +495,48 @@ func TestEngineWithStylesheet(t *testing.T) {
 	}
 }
 
+func TestEngineEdgeSelectionBySuggestedIDs(t *testing.T) {
+	g := NewGraph("suggested_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "decide", Shape: "diamond", Label: "Decide"})
+	g.AddNode(&Node{ID: "alpha", Shape: "box", Label: "Alpha"})
+	g.AddNode(&Node{ID: "beta", Shape: "box", Label: "Beta"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "decide"})
+	g.AddEdge(&Edge{From: "decide", To: "alpha", Label: "a"})
+	g.AddEdge(&Edge{From: "decide", To: "beta", Label: "b"})
+	g.AddEdge(&Edge{From: "alpha", To: "end"})
+	g.AddEdge(&Edge{From: "beta", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "conditional",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:             OutcomeSuccess,
+				SuggestedNextNodes: []string{"beta"},
+			}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	foundBeta := false
+	for _, nodeID := range result.CompletedNodes {
+		if nodeID == "beta" {
+			foundBeta = true
+		}
+	}
+	if !foundBeta {
+		t.Errorf("expected 'beta' via suggested IDs, completed: %v", result.CompletedNodes)
+	}
+}
+
 func TestEngineNoEdgesFromNode(t *testing.T) {
 	g := NewGraph("deadend_test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
