@@ -146,11 +146,23 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			continue
 		}
 
-		// Apply stylesheet to node before execution.
+		// Clear per-node edge selection hints so stale values from a
+		// previous node don't pollute routing for the current one.
+		pctx.Set(ContextKeyPreferredLabel, "")
+		pctx.Set("suggested_next_nodes", "")
+
+		// Apply stylesheet to a copy of node attrs so the shared Graph
+		// is not mutated. Handlers see resolved attrs; the original node
+		// retains its explicit attributes for future runs.
+		execNode := node
 		if stylesheet != nil {
 			resolved := stylesheet.Resolve(node)
-			for k, v := range resolved {
-				node.Attrs[k] = v
+			execNode = &Node{
+				ID:      node.ID,
+				Shape:   node.Shape,
+				Label:   node.Label,
+				Handler: node.Handler,
+				Attrs:   resolved,
 			}
 		}
 
@@ -162,8 +174,8 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			Message:   fmt.Sprintf("executing node %q", currentNodeID),
 		})
 
-		// Execute handler.
-		outcome, err := e.registry.Execute(ctx, node, pctx)
+		// Execute handler with the (possibly stylesheet-resolved) node.
+		outcome, err := e.registry.Execute(ctx, execNode, pctx)
 		if err != nil {
 			e.emit(PipelineEvent{
 				Type:      EventStageFailed,
@@ -179,7 +191,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		// Merge context updates from handler outcome.
 		pctx.Merge(outcome.ContextUpdates)
 
-		// Store outcome and preferred label in context for edge selection.
+		// Store outcome and edge selection hints in context.
 		if outcome.Status != "" {
 			pctx.Set(ContextKeyOutcome, outcome.Status)
 		}
@@ -192,7 +204,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 		switch outcome.Status {
 		case OutcomeRetry:
-			maxRetries := e.maxRetries(node)
+			maxRetries := e.maxRetries(execNode)
 			if cp.RetryCount(currentNodeID) < maxRetries {
 				cp.IncrementRetry(currentNodeID)
 				e.emit(PipelineEvent{
@@ -204,7 +216,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				})
 				// Jump to retry_target if specified, otherwise retry self.
 				target := currentNodeID
-				if rt, ok := node.Attrs["retry_target"]; ok {
+				if rt, ok := execNode.Attrs["retry_target"]; ok {
 					target = rt
 				}
 				cp.CurrentNode = target
@@ -214,7 +226,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			}
 
 			// Retries exhausted — check fallback.
-			if fallback, ok := node.Attrs["fallback_retry_target"]; ok {
+			if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
 				cp.CurrentNode = fallback
 				e.saveCheckpoint(cp, pctx, runID)
 				currentNodeID = fallback
@@ -229,10 +241,6 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				NodeID:    currentNodeID,
 				Message:   fmt.Sprintf("retries exhausted for node %q", currentNodeID),
 			})
-
-			if isGoalGate(node) {
-				return e.failResult(runID, cp, pctx), nil
-			}
 			return e.failResult(runID, cp, pctx), nil
 
 		case OutcomeFail:
@@ -244,7 +252,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				Message:   fmt.Sprintf("node %q failed", currentNodeID),
 			})
 
-			if isGoalGate(node) {
+			if isGoalGate(execNode) {
 				failedGoalGate = true
 				return e.failResult(runID, cp, pctx), nil
 			}

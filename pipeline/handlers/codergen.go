@@ -53,7 +53,6 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	_, runErr := sess.Run(ctx, prompt)
 	if runErr != nil {
 		// LLM errors are mapped to OutcomeFail, not handler errors.
-		pctx.Set(pipeline.ContextKeyLastResponse, runErr.Error())
 		return pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
 			ContextUpdates: map[string]string{
@@ -63,8 +62,6 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	}
 
 	responseText := collector.text()
-
-	pctx.Set(pipeline.ContextKeyLastResponse, responseText)
 
 	status := pipeline.OutcomeSuccess
 	if node.Attrs["auto_status"] == "true" {

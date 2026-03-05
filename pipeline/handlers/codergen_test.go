@@ -56,10 +56,9 @@ func TestCodergenHandlerSuccess(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
-	lastResp, ok := pctx.Get(pipeline.ContextKeyLastResponse)
-	if !ok {
-		t.Fatal("expected last_response in context")
-	}
+	// The handler returns last_response via ContextUpdates for the engine
+	// to merge, rather than writing directly to pctx.
+	lastResp := outcome.ContextUpdates[pipeline.ContextKeyLastResponse]
 	if lastResp != "Hello, World!" {
 		t.Errorf("expected 'Hello, World!', got %q", lastResp)
 	}

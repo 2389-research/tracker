@@ -18,16 +18,26 @@ type Checkpoint struct {
 	RetryCounts    map[string]int    `json:"retry_counts"`
 	Context        map[string]string `json:"context"`
 	Timestamp      time.Time         `json:"timestamp"`
+
+	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
+	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
+	completedSet map[string]bool `json:"-"`
+}
+
+// ensureSet lazily initializes the completed set from the slice.
+func (cp *Checkpoint) ensureSet() {
+	if cp.completedSet == nil {
+		cp.completedSet = make(map[string]bool, len(cp.CompletedNodes))
+		for _, id := range cp.CompletedNodes {
+			cp.completedSet[id] = true
+		}
+	}
 }
 
 // IsCompleted returns true if the given node ID has been marked as completed.
 func (cp *Checkpoint) IsCompleted(nodeID string) bool {
-	for _, id := range cp.CompletedNodes {
-		if id == nodeID {
-			return true
-		}
-	}
-	return false
+	cp.ensureSet()
+	return cp.completedSet[nodeID]
 }
 
 // RetryCount returns the number of retries recorded for the given node.
@@ -42,7 +52,13 @@ func (cp *Checkpoint) IncrementRetry(nodeID string) {
 }
 
 // MarkCompleted adds the given node ID to the completed nodes list.
+// Duplicate IDs are ignored.
 func (cp *Checkpoint) MarkCompleted(nodeID string) {
+	cp.ensureSet()
+	if cp.completedSet[nodeID] {
+		return
+	}
+	cp.completedSet[nodeID] = true
 	cp.CompletedNodes = append(cp.CompletedNodes, nodeID)
 }
 
