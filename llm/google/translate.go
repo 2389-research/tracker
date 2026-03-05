@@ -69,11 +69,13 @@ type geminiToolChoiceConfig struct {
 }
 
 type geminiGenConfig struct {
-	Temperature     *float64 `json:"temperature,omitempty"`
-	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
-	TopP            *float64 `json:"topP,omitempty"`
-	TopK            *int     `json:"topK,omitempty"`
-	StopSequences   []string `json:"stopSequences,omitempty"`
+	Temperature      *float64        `json:"temperature,omitempty"`
+	MaxOutputTokens  *int            `json:"maxOutputTokens,omitempty"`
+	TopP             *float64        `json:"topP,omitempty"`
+	TopK             *int            `json:"topK,omitempty"`
+	StopSequences    []string        `json:"stopSequences,omitempty"`
+	ResponseMimeType string          `json:"responseMimeType,omitempty"`
+	ResponseSchema   json.RawMessage `json:"responseSchema,omitempty"`
 }
 
 // translateRequest converts a unified llm.Request to Gemini API JSON.
@@ -124,8 +126,12 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		gr.ToolConfig = translateToolChoice(req.ToolChoice)
 	}
 
+	// Determine if response format requires generation config fields.
+	needsResponseFormat := req.ResponseFormat != nil &&
+		(req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
+
 	// Generation config.
-	if req.Temperature != nil || req.MaxTokens != nil || req.TopP != nil || len(req.StopSequences) > 0 {
+	if req.Temperature != nil || req.MaxTokens != nil || req.TopP != nil || len(req.StopSequences) > 0 || needsResponseFormat {
 		gc := &geminiGenConfig{
 			Temperature:   req.Temperature,
 			TopP:          req.TopP,
@@ -133,6 +139,12 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		}
 		if req.MaxTokens != nil {
 			gc.MaxOutputTokens = req.MaxTokens
+		}
+		if needsResponseFormat {
+			gc.ResponseMimeType = "application/json"
+			if req.ResponseFormat.Type == "json_schema" && len(req.ResponseFormat.JSONSchema) > 0 {
+				gc.ResponseSchema = req.ResponseFormat.JSONSchema
+			}
 		}
 		gr.GenerationConfig = gc
 	}

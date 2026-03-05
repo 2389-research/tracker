@@ -118,6 +118,23 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		}
 	}
 
+	// Append JSON response format instruction to system content when requested.
+	if req.ResponseFormat != nil {
+		switch req.ResponseFormat.Type {
+		case "json_object":
+			ar.System = append(ar.System, anthropicContent{
+				Type: "text",
+				Text: "Respond with valid JSON.",
+			})
+		case "json_schema":
+			instruction := "Respond with valid JSON conforming to this schema: " + string(req.ResponseFormat.JSONSchema)
+			ar.System = append(ar.System, anthropicContent{
+				Type: "text",
+				Text: instruction,
+			})
+		}
+	}
+
 	// Convert messages, mapping tool role to user role with tool_result blocks.
 	var converted []anthropicMessage
 	for _, m := range msgs {

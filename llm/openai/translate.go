@@ -21,12 +21,26 @@ type openaiRequest struct {
 	Input           []openaiInput  `json:"input"`
 	Tools           []openaiTool   `json:"tools,omitempty"`
 	ToolChoice      any            `json:"tool_choice,omitempty"`
+	Text            *openaiText    `json:"text,omitempty"`
 	Temperature     *float64       `json:"temperature,omitempty"`
 	TopP            *float64       `json:"top_p,omitempty"`
 	MaxOutputTokens *int           `json:"max_output_tokens,omitempty"`
 	Stop            []string       `json:"stop,omitempty"`
 	Reasoning       *openaiReason  `json:"reasoning,omitempty"`
 	Stream          bool           `json:"stream,omitempty"`
+}
+
+// openaiText holds the text output configuration including response format.
+type openaiText struct {
+	Format *openaiTextFormat `json:"format,omitempty"`
+}
+
+// openaiTextFormat specifies the response format constraint for text output.
+type openaiTextFormat struct {
+	Type   string          `json:"type"`
+	Name   string          `json:"name,omitempty"`
+	Schema json.RawMessage `json:"schema,omitempty"`
+	Strict *bool           `json:"strict,omitempty"`
 }
 
 // openaiInput represents a single item in the flat input array.
@@ -110,6 +124,27 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 	// Translate tool choice.
 	if req.ToolChoice != nil {
 		or.ToolChoice = translateToolChoice(req.ToolChoice)
+	}
+
+	// Translate response format to text.format configuration.
+	if req.ResponseFormat != nil {
+		switch req.ResponseFormat.Type {
+		case "json_object":
+			or.Text = &openaiText{
+				Format: &openaiTextFormat{Type: "json_object"},
+			}
+		case "json_schema":
+			f := &openaiTextFormat{
+				Type:   "json_schema",
+				Name:   "response",
+				Schema: req.ResponseFormat.JSONSchema,
+			}
+			if req.ResponseFormat.Strict {
+				strict := true
+				f.Strict = &strict
+			}
+			or.Text = &openaiText{Format: f}
+		}
 	}
 
 	// Reasoning effort from request field or provider options.
