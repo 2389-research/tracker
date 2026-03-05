@@ -68,6 +68,21 @@ func (cp *Checkpoint) MarkCompleted(nodeID string) {
 	cp.CompletedNodes = append(cp.CompletedNodes, nodeID)
 }
 
+// ClearCompleted removes a node from the completed set so it will re-execute.
+func (cp *Checkpoint) ClearCompleted(nodeID string) {
+	cp.ensureSet()
+	if !cp.completedSet[nodeID] {
+		return
+	}
+	delete(cp.completedSet, nodeID)
+	for i, id := range cp.CompletedNodes {
+		if id == nodeID {
+			cp.CompletedNodes = append(cp.CompletedNodes[:i], cp.CompletedNodes[i+1:]...)
+			break
+		}
+	}
+}
+
 // SaveCheckpoint writes the checkpoint to disk as JSON, creating directories as needed.
 func SaveCheckpoint(cp *Checkpoint, path string) error {
 	dir := filepath.Dir(path)

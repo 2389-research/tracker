@@ -81,12 +81,45 @@ func ParseDOT(dot string) (*Graph, error) {
 	return g, nil
 }
 
-// cleanQuotes removes surrounding double quotes from a DOT attribute value.
+// cleanQuotes removes surrounding double quotes from a DOT attribute value
+// and processes standard escape sequences (\n, \t, \\, \").
 func cleanQuotes(s string) string {
 	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
+		s = s[1 : len(s)-1]
 	}
-	return s
+	return unescapeDOT(s)
+}
+
+// unescapeDOT processes DOT escape sequences in attribute values.
+func unescapeDOT(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+				i++
+			case 't':
+				b.WriteByte('\t')
+				i++
+			case '\\':
+				b.WriteByte('\\')
+				i++
+			case '"':
+				b.WriteByte('"')
+				i++
+			default:
+				b.WriteByte(s[i])
+			}
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 // collectedNode holds a parsed DOT node and its raw attributes.

@@ -221,6 +221,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				if rt, ok := execNode.Attrs["retry_target"]; ok {
 					target = rt
 				}
+				// Clear completion status for all nodes reachable from the
+				// retry target so they re-execute on the next pass.
+				e.clearDownstream(target, cp)
 				cp.CurrentNode = target
 				e.saveCheckpoint(cp, pctx, runID)
 				currentNodeID = target
@@ -229,6 +232,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 			// Retries exhausted — check fallback.
 			if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
+				e.clearDownstream(fallback, cp)
 				cp.CurrentNode = fallback
 				e.saveCheckpoint(cp, pctx, runID)
 				currentNodeID = fallback
@@ -471,6 +475,28 @@ func (e *Engine) failResult(runID string, cp *Checkpoint, pctx *PipelineContext)
 		Status:         OutcomeFail,
 		CompletedNodes: cp.CompletedNodes,
 		Context:        pctx.Snapshot(),
+	}
+}
+
+// clearDownstream uses BFS from startNode to clear the completed status of all
+// reachable nodes. This is necessary when a retry loop jumps back to a prior
+// node — all downstream nodes must re-execute on the next pass.
+func (e *Engine) clearDownstream(startNode string, cp *Checkpoint) {
+	visited := make(map[string]bool)
+	queue := []string{startNode}
+	visited[startNode] = true
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		cp.ClearCompleted(current)
+
+		for _, edge := range e.graph.OutgoingEdges(current) {
+			if !visited[edge.To] {
+				visited[edge.To] = true
+				queue = append(queue, edge.To)
+			}
+		}
 	}
 }
 

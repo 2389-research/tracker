@@ -5,6 +5,8 @@ package handlers
 import (
 	"context"
 
+	"github.com/2389-research/mammoth-lite/agent"
+	"github.com/2389-research/mammoth-lite/agent/exec"
 	"github.com/2389-research/mammoth-lite/pipeline"
 )
 
@@ -16,9 +18,16 @@ type HandlerFunc func(ctx context.Context, node *pipeline.Node, pctx *pipeline.P
 type RegistryOption func(*registryConfig)
 
 type registryConfig struct {
+	// Stub overrides (for testing)
 	codergenFunc  HandlerFunc
 	toolExecFunc  HandlerFunc
 	humanCallback HandlerFunc
+	// Production dependencies
+	llmClient   agent.Completer
+	workingDir  string
+	execEnv     exec.ExecutionEnvironment
+	interviewer Interviewer
+	graph       *pipeline.Graph
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -39,6 +48,29 @@ func WithToolExecFunc(fn HandlerFunc) RegistryOption {
 func WithHumanCallback(fn HandlerFunc) RegistryOption {
 	return func(c *registryConfig) {
 		c.humanCallback = fn
+	}
+}
+
+// WithLLMClient sets the LLM client for the codergen handler.
+func WithLLMClient(client agent.Completer, workingDir string) RegistryOption {
+	return func(c *registryConfig) {
+		c.llmClient = client
+		c.workingDir = workingDir
+	}
+}
+
+// WithExecEnvironment sets the execution environment for the tool handler.
+func WithExecEnvironment(env exec.ExecutionEnvironment) RegistryOption {
+	return func(c *registryConfig) {
+		c.execEnv = env
+	}
+}
+
+// WithInterviewer sets the interviewer for the human handler.
+func WithInterviewer(interviewer Interviewer, graph *pipeline.Graph) RegistryOption {
+	return func(c *registryConfig) {
+		c.interviewer = interviewer
+		c.graph = graph
 	}
 }
 
@@ -63,18 +95,28 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	// Parallel handler needs the graph and registry for branch dispatch.
 	registry.Register(NewParallelHandler(graph, registry))
 
-	// Codergen: use stub or skip registration (requires LLM client in production).
-	if cfg.codergenFunc != nil {
+	// Codergen: prefer real handler, fall back to stub.
+	if cfg.llmClient != nil {
+		registry.Register(NewCodergenHandler(cfg.llmClient, cfg.workingDir))
+	} else if cfg.codergenFunc != nil {
 		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})
 	}
 
-	// Tool: use stub or skip registration (requires exec environment in production).
-	if cfg.toolExecFunc != nil {
+	// Tool: prefer real handler, fall back to stub.
+	if cfg.execEnv != nil {
+		registry.Register(NewToolHandler(cfg.execEnv))
+	} else if cfg.toolExecFunc != nil {
 		registry.Register(&funcHandler{name: "tool", fn: cfg.toolExecFunc})
 	}
 
-	// Human: use stub or skip registration (requires interviewer in production).
-	if cfg.humanCallback != nil {
+	// Human: prefer real handler, fall back to stub.
+	if cfg.interviewer != nil {
+		humanGraph := cfg.graph
+		if humanGraph == nil {
+			humanGraph = graph
+		}
+		registry.Register(NewHumanHandler(cfg.interviewer, humanGraph))
+	} else if cfg.humanCallback != nil {
 		registry.Register(&funcHandler{name: "wait.human", fn: cfg.humanCallback})
 	}
 
