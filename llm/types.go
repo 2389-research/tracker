@@ -66,6 +66,7 @@ type ToolCallData struct {
 // ToolResultData represents the result of executing a tool call.
 type ToolResultData struct {
 	ToolCallID     string `json:"tool_call_id"`
+	Name           string `json:"name,omitempty"`
 	Content        string `json:"content"`
 	IsError        bool   `json:"is_error"`
 	ImageData      []byte `json:"image_data,omitempty"`

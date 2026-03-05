@@ -166,6 +166,8 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
 	first := true
+	textActive := false
+	textID := "gemini_text_0"
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -195,12 +197,22 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 
 		for _, part := range candidate.Content.Parts {
 			if part.Text != "" {
+				if !textActive {
+					ch <- llm.StreamEvent{Type: llm.EventTextStart, TextID: textID}
+					textActive = true
+				}
 				ch <- llm.StreamEvent{
-					Type:  llm.EventTextDelta,
-					Delta: part.Text,
+					Type:   llm.EventTextDelta,
+					TextID: textID,
+					Delta:  part.Text,
 				}
 			}
 			if part.FunctionCall != nil {
+				// Close any active text block before tool calls.
+				if textActive {
+					ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: textID}
+					textActive = false
+				}
 				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
 				ch <- llm.StreamEvent{
 					Type: llm.EventToolCallStart,
@@ -216,6 +228,10 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 
 		// If this chunk has a finish reason, emit the finish event.
 		if candidate.FinishReason != "" {
+			if textActive {
+				ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: textID}
+				textActive = false
+			}
 			fr := translateFinishReason(candidate.FinishReason, hasToolCallParts(candidate.Content.Parts))
 			var usage *llm.Usage
 			if chunk.UsageMetadata != nil {

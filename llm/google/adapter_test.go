@@ -458,19 +458,25 @@ func TestAdapterStream(t *testing.T) {
 		events = append(events, evt)
 	}
 
-	// Should have: StreamStart, TextDelta("Hello"), TextDelta(" world"), Finish
-	if len(events) < 4 {
-		t.Fatalf("expected at least 4 events, got %d: %+v", len(events), events)
+	// Should have: StreamStart, TextStart, TextDelta("Hello"), TextDelta(" world"), TextEnd, Finish
+	if len(events) < 6 {
+		t.Fatalf("expected at least 6 events, got %d: %+v", len(events), events)
 	}
 
 	if events[0].Type != llm.EventStreamStart {
 		t.Errorf("first event should be StreamStart, got %v", events[0].Type)
 	}
-	if events[1].Delta != "Hello" {
-		t.Errorf("expected delta 'Hello', got %q", events[1].Delta)
+	if events[1].Type != llm.EventTextStart {
+		t.Errorf("second event should be TextStart, got %v", events[1].Type)
 	}
-	if events[2].Delta != " world" {
-		t.Errorf("expected delta ' world', got %q", events[2].Delta)
+	if events[2].Delta != "Hello" {
+		t.Errorf("expected delta 'Hello', got %q", events[2].Delta)
+	}
+	if events[3].Delta != " world" {
+		t.Errorf("expected delta ' world', got %q", events[3].Delta)
+	}
+	if events[4].Type != llm.EventTextEnd {
+		t.Errorf("fifth event should be TextEnd, got %v", events[4].Type)
 	}
 
 	lastEvt := events[len(events)-1]

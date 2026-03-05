@@ -73,6 +73,7 @@ type geminiGenConfig struct {
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
 	TopP            *float64 `json:"topP,omitempty"`
 	TopK            *int     `json:"topK,omitempty"`
+	StopSequences   []string `json:"stopSequences,omitempty"`
 }
 
 // translateRequest converts a unified llm.Request to Gemini API JSON.
@@ -124,9 +125,11 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 	}
 
 	// Generation config.
-	if req.Temperature != nil || req.MaxTokens != nil {
+	if req.Temperature != nil || req.MaxTokens != nil || req.TopP != nil || len(req.StopSequences) > 0 {
 		gc := &geminiGenConfig{
-			Temperature: req.Temperature,
+			Temperature:   req.Temperature,
+			TopP:          req.TopP,
+			StopSequences: req.StopSequences,
 		}
 		if req.MaxTokens != nil {
 			gc.MaxOutputTokens = req.MaxTokens
@@ -183,9 +186,14 @@ func translateMessageToContent(m llm.Message) *geminiContent {
 			}
 		case llm.KindToolResult:
 			if part.ToolResult != nil {
+				// Gemini uses the function name (not call ID) to match function responses.
+				funcName := part.ToolResult.Name
+				if funcName == "" {
+					funcName = part.ToolResult.ToolCallID
+				}
 				parts = append(parts, geminiPart{
 					FunctionResponse: &geminiFunctionResp{
-						Name: part.ToolResult.ToolCallID, // Gemini uses function name, but we store callID; see note below
+						Name: funcName,
 						Response: map[string]any{
 							"content": part.ToolResult.Content,
 							"error":   part.ToolResult.IsError,
@@ -352,6 +360,8 @@ func translateFinishReason(reason string, hasFunctionCalls bool) llm.FinishReaso
 // syntheticID generates a short random hex ID for Gemini tool calls (which lack native IDs).
 func syntheticID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("mammoth-lite: crypto/rand.Read failed: " + err.Error())
+	}
 	return "call_" + hex.EncodeToString(b)
 }

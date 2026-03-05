@@ -22,7 +22,9 @@ type openaiRequest struct {
 	Tools           []openaiTool   `json:"tools,omitempty"`
 	ToolChoice      any            `json:"tool_choice,omitempty"`
 	Temperature     *float64       `json:"temperature,omitempty"`
+	TopP            *float64       `json:"top_p,omitempty"`
 	MaxOutputTokens *int           `json:"max_output_tokens,omitempty"`
+	Stop            []string       `json:"stop,omitempty"`
 	Reasoning       *openaiReason  `json:"reasoning,omitempty"`
 	Stream          bool           `json:"stream,omitempty"`
 }
@@ -59,6 +61,8 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 	or := openaiRequest{
 		Model:       req.Model,
 		Temperature: req.Temperature,
+		TopP:        req.TopP,
+		Stop:        req.StopSequences,
 	}
 
 	// max_output_tokens

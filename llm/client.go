@@ -4,6 +4,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -82,13 +83,20 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 	envKeys := map[string][]string{
 		"anthropic": {"ANTHROPIC_API_KEY"},
 		"openai":    {"OPENAI_API_KEY"},
-		"gemini":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+		"google":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 	}
+
+	// Use deterministic priority order for default provider selection.
+	providerPriority := []string{"anthropic", "openai", "google"}
 
 	var opts []ClientOption
 	var firstProvider string
 
-	for name, constructor := range constructors {
+	for _, name := range providerPriority {
+		constructor, ok := constructors[name]
+		if !ok {
+			continue
+		}
 		envVars, ok := envKeys[name]
 		if !ok {
 			envVars = []string{fmt.Sprintf("%s_API_KEY", name)}
@@ -111,6 +119,32 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 			return nil, fmt.Errorf("failed to create %s adapter: %w", name, err)
 		}
 
+		opts = append(opts, WithProvider(adapter))
+		if firstProvider == "" {
+			firstProvider = name
+		}
+	}
+
+	// Also process any non-standard providers not in the priority list.
+	for name, constructor := range constructors {
+		if name == "anthropic" || name == "openai" || name == "google" {
+			continue
+		}
+		envVars := []string{fmt.Sprintf("%s_API_KEY", name)}
+		var apiKey string
+		for _, envVar := range envVars {
+			if v := os.Getenv(envVar); v != "" {
+				apiKey = v
+				break
+			}
+		}
+		if apiKey == "" {
+			continue
+		}
+		adapter, err := constructor(apiKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create %s adapter: %w", name, err)
+		}
 		opts = append(opts, WithProvider(adapter))
 		if firstProvider == "" {
 			firstProvider = name
@@ -171,6 +205,7 @@ func (c *Client) Complete(ctx context.Context, req *Request) (*Response, error) 
 }
 
 // Stream sends a streaming request to the resolved provider adapter.
+// Middleware is NOT applied to streaming requests (middleware only wraps Complete).
 // On provider resolution failure, it returns a channel containing a single error event.
 func (c *Client) Stream(ctx context.Context, req *Request) <-chan StreamEvent {
 	adapter, err := c.resolveProvider(req)
@@ -186,11 +221,11 @@ func (c *Client) Stream(ctx context.Context, req *Request) <-chan StreamEvent {
 
 // Close releases resources for all registered provider adapters.
 func (c *Client) Close() error {
-	var lastErr error
+	var errs []error
 	for _, adapter := range c.providers {
 		if err := adapter.Close(); err != nil {
-			lastErr = err
+			errs = append(errs, err)
 		}
 	}
-	return lastErr
+	return errors.Join(errs...)
 }
