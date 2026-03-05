@@ -12,6 +12,7 @@ var shapeHandlerMap = map[string]string{
 	"component":     "parallel",
 	"tripleoctagon": "parallel.fan_in",
 	"parallelogram": "tool",
+	"tab":           "subgraph",
 }
 
 // ShapeToHandler returns the handler name for a DOT node shape.

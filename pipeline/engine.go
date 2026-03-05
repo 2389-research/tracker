@@ -31,6 +31,7 @@ type Engine struct {
 	eventHandler      PipelineEventHandler
 	checkpointPath    string
 	resolveStylesheet bool
+	initialContext    map[string]string
 }
 
 // EngineOption configures optional Engine behavior.
@@ -57,6 +58,14 @@ func WithStylesheetResolution(enabled bool) EngineOption {
 	}
 }
 
+// WithInitialContext pre-populates the pipeline context with the given values.
+// Used by subgraph execution to pass parent context into child pipelines.
+func WithInitialContext(ctx map[string]string) EngineOption {
+	return func(e *Engine) {
+		e.initialContext = ctx
+	}
+}
+
 // NewEngine creates a pipeline engine for the given graph and handler registry.
 func NewEngine(graph *Graph, registry *HandlerRegistry, opts ...EngineOption) *Engine {
 	e := &Engine{
@@ -75,6 +84,10 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	runID := generateRunID()
 
 	pctx := NewPipelineContext()
+	// Apply initial context values (e.g., from a parent subgraph handler).
+	for k, v := range e.initialContext {
+		pctx.Set(k, v)
+	}
 	cp, err := e.loadOrCreateCheckpoint(runID)
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint load: %w", err)
