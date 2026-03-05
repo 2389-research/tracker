@@ -249,6 +249,12 @@ func collectBetaHeaders(req *llm.Request) string {
 						if v != "" {
 							headers = append(headers, v)
 						}
+					case []string:
+						for _, s := range v {
+							if s != "" {
+								headers = append(headers, s)
+							}
+						}
 					case []any:
 						for _, item := range v {
 							if s, ok := item.(string); ok && s != "" {
@@ -455,8 +461,8 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 			content = append(content, llm.ContentPart{
 				Kind: llm.KindRedactedThinking,
 				Thinking: &llm.ThinkingData{
-					Redacted: true,
-					Text:     block.Data,
+					Redacted:  true,
+					Signature: block.Data,
 				},
 			})
 		}

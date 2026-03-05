@@ -184,6 +184,9 @@ func ErrorFromStatusCode(statusCode int, message, provider string) error {
 	case 500, 502, 503, 504:
 		return &ServerError{ProviderError: base}
 	default:
+		if statusCode >= 400 && statusCode < 500 {
+			return &InvalidRequestError{ProviderError: base}
+		}
 		return &ServerError{ProviderError: base}
 	}
 }

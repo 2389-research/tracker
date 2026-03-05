@@ -358,9 +358,9 @@ func TestTranslateFinishReason(t *testing.T) {
 
 func TestAdapterComplete(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the API key is in query string.
-		if r.URL.Query().Get("key") != "test-key" {
-			t.Errorf("expected key=test-key, got %q", r.URL.Query().Get("key"))
+		// Verify the API key is in the header.
+		if r.Header.Get("x-goog-api-key") != "test-key" {
+			t.Errorf("expected x-goog-api-key=test-key, got %q", r.Header.Get("x-goog-api-key"))
 		}
 
 		// Verify URL pattern.

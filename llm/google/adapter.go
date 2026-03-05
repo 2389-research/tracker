@@ -66,12 +66,12 @@ func (a *Adapter) Name() string {
 
 // generateContentURL builds the full URL for a given model.
 func (a *Adapter) generateContentURL(model string) string {
-	return fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", a.baseURL, model, a.apiKey)
+	return fmt.Sprintf("%s/v1beta/models/%s:generateContent", a.baseURL, model)
 }
 
 // streamGenerateContentURL builds the streaming URL for a given model.
 func (a *Adapter) streamGenerateContentURL(model string) string {
-	return fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", a.baseURL, model, a.apiKey)
+	return fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", a.baseURL, model)
 }
 
 // Complete sends a synchronous request to the Gemini API.
@@ -86,6 +86,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 		return nil, fmt.Errorf("google: create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", a.apiKey)
 
 	start := time.Now()
 	httpResp, err := a.httpClient.Do(httpReq)
@@ -134,6 +135,7 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("x-goog-api-key", a.apiKey)
 
 		httpResp, err := a.httpClient.Do(httpReq)
 		if err != nil {

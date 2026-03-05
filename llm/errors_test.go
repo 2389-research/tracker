@@ -122,7 +122,8 @@ func TestErrorFromStatusCode(t *testing.T) {
 		{502, "*llm.ServerError", true},
 		{503, "*llm.ServerError", true},
 		{504, "*llm.ServerError", true},
-		{418, "*llm.ServerError", true}, // default case
+		{418, "*llm.InvalidRequestError", false}, // unknown 4xx defaults to non-retryable
+		{522, "*llm.ServerError", true},           // unknown 5xx defaults to retryable
 	}
 	for _, tt := range tests {
 		t.Run(string(rune('0'+tt.status/100))+"xx_"+string(rune('0'+tt.status%10)), func(t *testing.T) {

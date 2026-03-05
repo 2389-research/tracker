@@ -184,6 +184,8 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	// Track content block types by index for proper event emission.
 	blockTypes := make(map[int]string)
 	var eventType string
+	// Track input usage from message_start to include in finish event.
+	var inputUsage *anthropicUsage
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -198,7 +200,7 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 		}
 
 		data := strings.TrimPrefix(line, "data: ")
-		a.handleSSEData(eventType, []byte(data), ch, blockTypes)
+		a.handleSSEData(eventType, []byte(data), ch, blockTypes, &inputUsage)
 		eventType = ""
 	}
 
@@ -259,7 +261,7 @@ type sseMessageDelta struct {
 }
 
 // handleSSEData processes a single SSE data payload.
-func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.StreamEvent, blockTypes map[int]string) {
+func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.StreamEvent, blockTypes map[int]string, inputUsage **anthropicUsage) {
 	switch eventType {
 	case "message_start":
 		var evt sseMessageStart
@@ -267,6 +269,8 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: parse message_start: %w", err)}
 			return
 		}
+		u := evt.Message.Usage
+		*inputUsage = &u
 		ch <- llm.StreamEvent{
 			Type: llm.EventStreamStart,
 			Raw:  data,
@@ -358,12 +362,25 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 		}
 
 		fr := translateFinishReason(evt.Delta.StopReason)
+		usage := llm.Usage{
+			OutputTokens: evt.Usage.OutputTokens,
+		}
+		if *inputUsage != nil {
+			usage.InputTokens = (*inputUsage).InputTokens
+			usage.TotalTokens = (*inputUsage).InputTokens + evt.Usage.OutputTokens
+			if (*inputUsage).CacheReadInputTokens > 0 {
+				v := (*inputUsage).CacheReadInputTokens
+				usage.CacheReadTokens = &v
+			}
+			if (*inputUsage).CacheCreationInputTokens > 0 {
+				v := (*inputUsage).CacheCreationInputTokens
+				usage.CacheWriteTokens = &v
+			}
+		}
 		ch <- llm.StreamEvent{
 			Type:         llm.EventFinish,
 			FinishReason: &fr,
-			Usage: &llm.Usage{
-				OutputTokens: evt.Usage.OutputTokens,
-			},
+			Usage:        &usage,
 		}
 
 	case "message_stop", "ping":

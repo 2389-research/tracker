@@ -159,11 +159,14 @@ type ToolChoice struct {
 	ToolName string `json:"tool_name,omitempty"`
 }
 
-var (
-	ToolChoiceAuto     = ToolChoice{Mode: "auto"}
-	ToolChoiceNone     = ToolChoice{Mode: "none"}
-	ToolChoiceRequired = ToolChoice{Mode: "required"}
-)
+// ToolChoiceAuto returns a ToolChoice that lets the model decide whether to call tools.
+func ToolChoiceAuto() ToolChoice { return ToolChoice{Mode: "auto"} }
+
+// ToolChoiceNone returns a ToolChoice that prevents the model from calling tools.
+func ToolChoiceNone() ToolChoice { return ToolChoice{Mode: "none"} }
+
+// ToolChoiceRequired returns a ToolChoice that forces the model to call a tool.
+func ToolChoiceRequired() ToolChoice { return ToolChoice{Mode: "required"} }
 
 // ToolChoiceNamed creates a ToolChoice that forces the model to call a specific tool.
 func ToolChoiceNamed(name string) ToolChoice {

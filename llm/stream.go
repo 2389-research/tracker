@@ -96,6 +96,10 @@ func (a *StreamAccumulator) Process(event StreamEvent) {
 				Name: event.ToolCall.Name,
 			}
 			a.activeToolArgs.Reset()
+			// Initialize from start event args (e.g., Google sends full args on start).
+			if len(event.ToolCall.Arguments) > 0 {
+				a.activeToolArgs.Write(event.ToolCall.Arguments)
+			}
 		}
 
 	case EventToolCallDelta:
