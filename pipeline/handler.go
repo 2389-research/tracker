@@ -45,6 +45,12 @@ func (r *HandlerRegistry) Register(h Handler) {
 	r.handlers[h.Name()] = h
 }
 
+// Has reports whether a handler with the given name is registered.
+func (r *HandlerRegistry) Has(name string) bool {
+	_, ok := r.handlers[name]
+	return ok
+}
+
 // Get returns the handler registered under the given name, or nil if not found.
 func (r *HandlerRegistry) Get(name string) Handler {
 	return r.handlers[name]
