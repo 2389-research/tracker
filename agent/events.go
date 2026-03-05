@@ -17,6 +17,7 @@ const (
 	EventTextDelta     EventType = "text_delta"
 	EventError                 EventType = "error"
 	EventContextWindowWarning  EventType = "context_window_warning"
+	EventSteeringInjected      EventType = "steering_injected"
 )
 
 // Event carries data about something that happened during an agent session.

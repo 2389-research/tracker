@@ -54,6 +54,7 @@ type Session struct {
 	handler  EventHandler
 	registry *tools.Registry
 	env      exec.ExecutionEnvironment
+	steering <-chan string
 	messages []llm.Message
 	id       string
 	ran      bool
@@ -136,6 +137,15 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			result.Error = err
 			result.Duration = time.Since(start)
 			return result, err
+		}
+
+		if s.steering != nil {
+			select {
+			case msg := <-s.steering:
+				s.messages = append(s.messages, llm.UserMessage("[STEERING] "+msg))
+				s.emit(Event{Type: EventSteeringInjected, SessionID: s.id, Text: msg})
+			default:
+			}
 		}
 
 		s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
