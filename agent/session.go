@@ -72,16 +72,13 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 		id:       generateSessionID(),
 	}
 
-	// Apply options in two passes: first WithEnvironment to set s.env,
-	// then register built-in tools, then apply remaining options so
-	// WithTools can override built-ins.
+	// Apply all options first (including WithEnvironment and WithTools).
 	for _, opt := range opts {
 		opt(s)
 	}
 
 	// Register built-in tools if an environment is set.
-	// These are registered before WithTools options take effect via a second pass,
-	// so custom tools with the same name will override built-ins.
+	// Custom tools registered via WithTools take precedence over built-ins.
 	if s.env != nil {
 		builtins := []tools.Tool{
 			tools.NewReadTool(s.env),
@@ -118,7 +115,6 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	s.emit(Event{Type: EventSessionStart, SessionID: s.id})
 	defer func() {
-		result.Duration = time.Since(start)
 		s.emit(Event{Type: EventSessionEnd, SessionID: s.id})
 	}()
 
@@ -129,9 +125,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	s.messages = append(s.messages, llm.UserMessage(userInput))
 
 	// Agentic loop.
+	stoppedNaturally := false
 	for turn := 1; turn <= s.config.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			result.Error = err
+			result.Duration = time.Since(start)
 			return result, err
 		}
 
@@ -147,6 +145,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		resp, err := s.client.Complete(ctx, req)
 		if err != nil {
 			result.Error = err
+			result.Duration = time.Since(start)
 			s.emit(Event{Type: EventError, SessionID: s.id, Err: err})
 			return result, err
 		}
@@ -163,6 +162,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 				s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
 			}
 			s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
+			stoppedNaturally = true
 			break
 		}
 
@@ -201,11 +201,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 	}
 
-	// If we exhausted all turns without the LLM stopping naturally, flag it.
-	if result.Turns >= s.config.MaxTurns {
+	if !stoppedNaturally {
 		result.MaxTurnsUsed = true
 	}
 
+	result.Duration = time.Since(start)
 	return result, nil
 }
 

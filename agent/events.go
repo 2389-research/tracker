@@ -60,6 +60,8 @@ type multiHandler []EventHandler
 
 func (m multiHandler) HandleEvent(evt Event) {
 	for _, h := range m {
-		h.HandleEvent(evt)
+		if h != nil {
+			h.HandleEvent(evt)
+		}
 	}
 }

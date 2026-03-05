@@ -43,3 +43,17 @@ func TestMultiHandler(t *testing.T) {
 func TestNilHandlerNoPanic(t *testing.T) {
 	NoopHandler.HandleEvent(Event{Type: EventTurnStart})
 }
+
+func TestMultiHandlerWithNilNoPanic(t *testing.T) {
+	var received []Event
+	handler := EventHandlerFunc(func(evt Event) {
+		received = append(received, evt)
+	})
+
+	multi := MultiHandler(handler, nil, handler)
+	multi.HandleEvent(Event{Type: EventTurnStart})
+
+	if len(received) != 2 {
+		t.Fatalf("expected 2 events (nil skipped), got %d", len(received))
+	}
+}

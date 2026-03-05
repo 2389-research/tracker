@@ -5,7 +5,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/2389-research/mammoth-lite/agent/exec"
@@ -67,8 +69,12 @@ func (t *EditTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 	// When old_string is empty and the file doesn't exist, create a new file.
 	// When old_string is empty and the file does exist, return an error.
+	// Non-existence read errors trigger creation; other read errors are surfaced.
 	if params.OldString == "" {
 		if readErr != nil {
+			if !errors.Is(readErr, os.ErrNotExist) {
+				return "", fmt.Errorf("cannot read file: %w", readErr)
+			}
 			if err := t.env.WriteFile(ctx, params.Path, params.NewString); err != nil {
 				return "", err
 			}

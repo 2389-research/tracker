@@ -260,3 +260,48 @@ func TestNewSessionInvalidConfig(t *testing.T) {
 		t.Error("expected error for invalid config")
 	}
 }
+
+func TestSessionDurationIsSet(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("Hi"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	sess := mustNewSession(t, client, cfg)
+	result, err := sess.Run(context.Background(), "Hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Duration == 0 {
+		t.Error("expected Duration to be non-zero")
+	}
+}
+
+func TestSessionNaturalStopOnMaxTurn(t *testing.T) {
+	// Model stops with text on the very last allowed turn — should NOT set MaxTurnsUsed.
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("Done."),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 1
+	sess := mustNewSession(t, client, cfg)
+
+	result, err := sess.Run(context.Background(), "Quick task")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.MaxTurnsUsed {
+		t.Error("expected MaxTurnsUsed to be false when model stops naturally on final turn")
+	}
+}
