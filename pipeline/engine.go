@@ -20,6 +20,7 @@ type EngineResult struct {
 	Status         string
 	CompletedNodes []string
 	Context        map[string]string
+	Trace          *Trace
 }
 
 // Engine executes a pipeline graph by traversing nodes, dispatching handlers,
@@ -97,6 +98,11 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			}
 			stylesheet = ss
 		}
+	}
+
+	trace := &Trace{
+		RunID:     runID,
+		StartTime: time.Now(),
 	}
 
 	e.emit(PipelineEvent{
@@ -177,8 +183,18 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		})
 
 		// Execute handler with the (possibly stylesheet-resolved) node.
+		handlerStart := time.Now()
 		outcome, err := e.registry.Execute(ctx, execNode, pctx)
+		handlerDuration := time.Since(handlerStart)
 		if err != nil {
+			trace.AddEntry(TraceEntry{
+				Timestamp:   handlerStart,
+				NodeID:      currentNodeID,
+				HandlerName: execNode.Handler,
+				Status:      "error",
+				Duration:    handlerDuration,
+				Error:       err.Error(),
+			})
 			e.emit(PipelineEvent{
 				Type:      EventStageFailed,
 				Timestamp: time.Now(),
@@ -204,6 +220,16 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			pctx.Set("suggested_next_nodes", strings.Join(outcome.SuggestedNextNodes, ","))
 		}
 
+		// Build trace entry for this node execution. EdgeTo is filled in
+		// after edge selection below; early-return paths set it directly.
+		traceEntry := TraceEntry{
+			Timestamp:   handlerStart,
+			NodeID:      currentNodeID,
+			HandlerName: execNode.Handler,
+			Status:      outcome.Status,
+			Duration:    handlerDuration,
+		}
+
 		switch outcome.Status {
 		case OutcomeRetry:
 			maxRetries := e.maxRetries(execNode)
@@ -221,6 +247,8 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				if rt, ok := execNode.Attrs["retry_target"]; ok {
 					target = rt
 				}
+				traceEntry.EdgeTo = target
+				trace.AddEntry(traceEntry)
 				// Clear completion status for all nodes reachable from the
 				// retry target so they re-execute on the next pass.
 				e.clearDownstream(target, cp)
@@ -232,6 +260,8 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 			// Retries exhausted — check fallback.
 			if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
+				traceEntry.EdgeTo = fallback
+				trace.AddEntry(traceEntry)
 				e.clearDownstream(fallback, cp)
 				cp.CurrentNode = fallback
 				e.saveCheckpoint(cp, pctx, runID)
@@ -240,6 +270,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			}
 
 			// No fallback — fail.
+			trace.AddEntry(traceEntry)
 			e.emit(PipelineEvent{
 				Type:      EventStageFailed,
 				Timestamp: time.Now(),
@@ -247,7 +278,10 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				NodeID:    currentNodeID,
 				Message:   fmt.Sprintf("retries exhausted for node %q", currentNodeID),
 			})
-			return e.failResult(runID, cp, pctx), nil
+			trace.EndTime = time.Now()
+			result := e.failResult(runID, cp, pctx)
+			result.Trace = trace
+			return result, nil
 
 		case OutcomeFail:
 			e.emit(PipelineEvent{
@@ -259,7 +293,11 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			})
 
 			if isGoalGate(execNode) {
-				return e.failResult(runID, cp, pctx), nil
+				trace.AddEntry(traceEntry)
+				trace.EndTime = time.Now()
+				result := e.failResult(runID, cp, pctx)
+				result.Trace = trace
+				return result, nil
 			}
 
 			// Non-goal-gate failure: mark completed and continue.
@@ -283,26 +321,38 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		// Check if this is an exit node — pipeline complete.
 		if currentNodeID == e.graph.ExitNode {
 			if outcome.Status == OutcomeFail {
-				return e.failResult(runID, cp, pctx), nil
+				trace.AddEntry(traceEntry)
+				trace.EndTime = time.Now()
+				result := e.failResult(runID, cp, pctx)
+				result.Trace = trace
+				return result, nil
 			}
+			trace.AddEntry(traceEntry)
 			break
 		}
 
 		// Select next edge.
 		edges := e.graph.OutgoingEdges(currentNodeID)
 		if len(edges) == 0 {
+			trace.AddEntry(traceEntry)
 			return nil, fmt.Errorf("no outgoing edges from non-exit node %q", currentNodeID)
 		}
 
 		next, err := e.selectEdge(edges, pctx)
 		if err != nil {
+			trace.AddEntry(traceEntry)
 			return nil, fmt.Errorf("select edge from %q: %w", currentNodeID, err)
 		}
+
+		traceEntry.EdgeTo = next.To
+		trace.AddEntry(traceEntry)
 
 		currentNodeID = next.To
 		cp.CurrentNode = currentNodeID
 		e.saveCheckpoint(cp, pctx, runID)
 	}
+
+	trace.EndTime = time.Now()
 
 	e.emit(PipelineEvent{
 		Type:      EventPipelineCompleted,
@@ -316,6 +366,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		Status:         OutcomeSuccess,
 		CompletedNodes: cp.CompletedNodes,
 		Context:        pctx.Snapshot(),
+		Trace:          trace,
 	}, nil
 }
 
