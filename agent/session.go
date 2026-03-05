@@ -109,6 +109,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	s.ran = true
 
 	start := time.Now()
+	tracker := NewContextWindowTracker(s.config.ContextWindowLimit, s.config.ContextWindowWarningThreshold)
 
 	result := SessionResult{
 		SessionID: s.id,
@@ -156,6 +157,17 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 		result.Usage = result.Usage.Add(resp.Usage)
 		result.Turns = turn
+
+		tracker.Update(resp.Usage)
+		if tracker.ShouldWarn() {
+			s.emit(Event{
+				Type:               EventContextWindowWarning,
+				SessionID:          s.id,
+				Turn:               turn,
+				ContextUtilization: tracker.Utilization(),
+			})
+			tracker.MarkWarned()
+		}
 
 		s.messages = append(s.messages, resp.Message)
 
@@ -231,6 +243,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		result.MaxTurnsUsed = true
 	}
 
+	result.ContextUtilization = tracker.Utilization()
 	result.Duration = time.Since(start)
 	return result, nil
 }

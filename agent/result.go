@@ -21,8 +21,9 @@ type SessionResult struct {
 	ToolCalls      map[string]int
 	FilesModified  []string
 	FilesCreated   []string
-	Usage          llm.Usage
-	Error          error
+	Usage              llm.Usage
+	ContextUtilization float64
+	Error              error
 }
 
 // TotalToolCalls returns the sum of all tool call counts.

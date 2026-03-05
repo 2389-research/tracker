@@ -15,7 +15,8 @@ const (
 	EventToolCallStart EventType = "tool_call_start"
 	EventToolCallEnd   EventType = "tool_call_end"
 	EventTextDelta     EventType = "text_delta"
-	EventError         EventType = "error"
+	EventError                 EventType = "error"
+	EventContextWindowWarning  EventType = "context_window_warning"
 )
 
 // Event carries data about something that happened during an agent session.
@@ -28,8 +29,9 @@ type Event struct {
 	ToolInput  string
 	ToolOutput string
 	ToolError  string
-	Text string
-	Err  error
+	Text               string
+	Err                error
+	ContextUtilization float64
 }
 
 // EventHandler receives events emitted by the agent session.

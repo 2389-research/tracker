@@ -8,23 +8,27 @@ import (
 )
 
 type SessionConfig struct {
-	MaxTurns               int
-	CommandTimeout         time.Duration
-	MaxCommandTimeout      time.Duration
-	LoopDetectionThreshold int
-	WorkingDir             string
-	SystemPrompt           string
-	Model                  string
-	Provider               string
+	MaxTurns                      int
+	CommandTimeout                time.Duration
+	MaxCommandTimeout             time.Duration
+	LoopDetectionThreshold        int
+	ContextWindowLimit            int
+	ContextWindowWarningThreshold float64
+	WorkingDir                    string
+	SystemPrompt                  string
+	Model                         string
+	Provider                      string
 }
 
 func DefaultConfig() SessionConfig {
 	return SessionConfig{
-		MaxTurns:               50,
-		CommandTimeout:         10 * time.Second,
-		MaxCommandTimeout:      10 * time.Minute,
-		LoopDetectionThreshold: 10,
-		WorkingDir:             ".",
+		MaxTurns:                      50,
+		CommandTimeout:                10 * time.Second,
+		MaxCommandTimeout:             10 * time.Minute,
+		LoopDetectionThreshold:        10,
+		ContextWindowLimit:            200000,
+		ContextWindowWarningThreshold: 0.8,
+		WorkingDir:                    ".",
 	}
 }
 
@@ -43,6 +47,12 @@ func (c SessionConfig) Validate() error {
 	}
 	if c.LoopDetectionThreshold < 1 {
 		return fmt.Errorf("LoopDetectionThreshold must be >= 1, got %d", c.LoopDetectionThreshold)
+	}
+	if c.ContextWindowLimit < 1000 {
+		return fmt.Errorf("ContextWindowLimit must be >= 1000, got %d", c.ContextWindowLimit)
+	}
+	if c.ContextWindowWarningThreshold <= 0 || c.ContextWindowWarningThreshold > 1.0 {
+		return fmt.Errorf("ContextWindowWarningThreshold must be > 0 and <= 1.0, got %f", c.ContextWindowWarningThreshold)
 	}
 	return nil
 }
