@@ -44,6 +44,7 @@ func NewGraph(name string) *Graph {
 // AddNode adds a node to the graph and resolves its handler from its shape.
 // If the node has an Mdiamond shape, it is set as the start node.
 // If the node has an Msquare shape, it is set as the exit node.
+// Duplicate node IDs silently replace the previous node; use Validate to enforce uniqueness.
 func (g *Graph) AddNode(n *Node) {
 	if n.Attrs == nil {
 		n.Attrs = make(map[string]string)
@@ -62,6 +63,7 @@ func (g *Graph) AddNode(n *Node) {
 }
 
 // AddEdge adds a directed edge to the graph.
+// No referential integrity check is performed; use Validate to enforce that endpoints exist.
 func (g *Graph) AddEdge(e *Edge) {
 	if e.Attrs == nil {
 		e.Attrs = make(map[string]string)
