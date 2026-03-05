@@ -1,0 +1,144 @@
+// ABOUTME: Tests for the tool handler, verifying shell command execution via ExecutionEnvironment.
+// ABOUTME: Covers success, failure, missing command, timeout, and custom timeout scenarios.
+package handlers
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/mammoth-lite/pipeline"
+)
+
+func TestToolHandlerName(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	if h.Name() != "tool" {
+		t.Errorf("expected name %q, got %q", "tool", h.Name())
+	}
+}
+
+func TestToolHandlerImplementsHandler(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	var _ pipeline.Handler = NewToolHandler(env)
+}
+
+func TestToolHandlerSuccess(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "t1",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "echo hello"},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
+	}
+	stdout, _ := pctx.Get(pipeline.ContextKeyToolStdout)
+	if strings.TrimSpace(stdout) != "hello" {
+		t.Errorf("expected stdout %q, got %q", "hello", stdout)
+	}
+	if outcome.ContextUpdates[pipeline.ContextKeyToolStdout] != stdout {
+		t.Errorf("expected context update for stdout")
+	}
+}
+
+func TestToolHandlerFailure(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "t2",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "exit 1"},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected status %q, got %q", pipeline.OutcomeFail, outcome.Status)
+	}
+}
+
+func TestToolHandlerMissingCommand(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "t3",
+		Shape: "parallelogram",
+		Attrs: map[string]string{},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected error for missing tool_command")
+	}
+	if !strings.Contains(err.Error(), "tool_command") {
+		t.Errorf("expected error to mention tool_command, got: %v", err)
+	}
+}
+
+func TestToolHandlerTimeout(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandlerWithTimeout(env, 100*time.Millisecond)
+	node := &pipeline.Node{
+		ID:    "t4",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "sleep 30"},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected error for timeout")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+}
+
+func TestToolHandlerCustomTimeout(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "t5",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": "echo fast",
+			"timeout":      "5s",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
+	}
+	stdout, _ := pctx.Get(pipeline.ContextKeyToolStdout)
+	if strings.TrimSpace(stdout) != "fast" {
+		t.Errorf("expected stdout %q, got %q", "fast", stdout)
+	}
+}
+
+func TestToolHandlerDefaultTimeout(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	customTimeout := 10 * time.Second
+	h := NewToolHandlerWithTimeout(env, customTimeout)
+	if h.defaultTimeout != customTimeout {
+		t.Errorf("expected default timeout %v, got %v", customTimeout, h.defaultTimeout)
+	}
+}
