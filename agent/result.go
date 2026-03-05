@@ -17,6 +17,7 @@ type SessionResult struct {
 	Duration       time.Duration
 	Turns          int
 	MaxTurnsUsed   bool
+	LoopDetected   bool
 	ToolCalls      map[string]int
 	FilesModified  []string
 	FilesCreated   []string

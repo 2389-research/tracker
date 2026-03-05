@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/2389-research/mammoth-lite/agent/exec"
@@ -127,6 +128,8 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	// Agentic loop.
 	stoppedNaturally := false
+	var lastToolSignature string
+	consecutiveLoopCount := 0
 	for turn := 1; turn <= s.config.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			result.Error = err
@@ -164,6 +167,28 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			}
 			s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 			stoppedNaturally = true
+			break
+		}
+
+		// Compute tool call signature for loop detection.
+		toolNames := make([]string, len(toolCalls))
+		for i, call := range toolCalls {
+			toolNames[i] = call.Name
+		}
+		signature := strings.Join(toolNames, ",")
+
+		if signature == lastToolSignature {
+			consecutiveLoopCount++
+		} else {
+			lastToolSignature = signature
+			consecutiveLoopCount = 1
+		}
+
+		if consecutiveLoopCount >= s.config.LoopDetectionThreshold {
+			loopErr := fmt.Errorf("loop detected: same tool calls repeated %d times", consecutiveLoopCount)
+			s.emit(Event{Type: EventError, SessionID: s.id, Err: loopErr})
+			result.LoopDetected = true
+			s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 			break
 		}
 
