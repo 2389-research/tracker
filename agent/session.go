@@ -85,6 +85,7 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 			tools.NewWriteTool(s.env),
 			tools.NewEditTool(s.env),
 			tools.NewGlobTool(s.env),
+			tools.NewGrepSearchTool(s.env),
 			tools.NewBashTool(s.env, s.config.CommandTimeout, s.config.MaxCommandTimeout),
 		}
 		for _, t := range builtins {
