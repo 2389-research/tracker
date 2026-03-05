@@ -1,0 +1,10 @@
+digraph simple_pipeline {
+    graph [label="Simple Pipeline" default_max_retry="2"];
+
+    start [shape=Mdiamond label="Start"];
+    generate [shape=box label="Generate Code" prompt="Write hello world" llm_model="claude-sonnet-4-5"];
+    done [shape=Msquare label="Done"];
+
+    start -> generate;
+    generate -> done [label="success"];
+}

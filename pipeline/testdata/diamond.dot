@@ -1,0 +1,15 @@
+digraph diamond_pipeline {
+    graph [label="Diamond Pipeline"];
+
+    start [shape=Mdiamond label="Start"];
+    check [shape=diamond label="Review Result"];
+    pass_path [shape=box label="Ship It" prompt="Deploy"];
+    fail_path [shape=box label="Fix It" prompt="Fix bugs"];
+    done [shape=Msquare label="Done"];
+
+    start -> check;
+    check -> pass_path [label="pass" condition="outcome=success"];
+    check -> fail_path [label="fail" condition="outcome!=success"];
+    pass_path -> done;
+    fail_path -> done;
+}
