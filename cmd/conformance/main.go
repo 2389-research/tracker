@@ -547,12 +547,13 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Build a registry with built-in tools.
-	env := agentexec.NewLocalEnvironment(os.TempDir())
+	// Build a registry with built-in tools rooted at the current working directory.
+	env := agentexec.NewLocalEnvironment(".")
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadTool(env))
 	registry.Register(tools.NewWriteTool(env))
 	registry.Register(tools.NewEditTool(env))
+	registry.Register(tools.NewApplyPatchTool(env))
 	registry.Register(tools.NewGlobTool(env))
 	registry.Register(tools.NewGrepSearchTool(env))
 	registry.Register(tools.NewBashTool(env, 10*time.Second, 10*time.Minute))
@@ -852,6 +853,7 @@ func handleListHandlers(stdout, stderr io.Writer) int {
 	handlerNames := []string{
 		"start", "exit", "codergen", "conditional",
 		"parallel", "parallel.fan_in", "tool", "wait.human", "subgraph",
+		"stack.manager_loop",
 	}
 
 	// Filter to only those actually registered (some may not be if deps missing).

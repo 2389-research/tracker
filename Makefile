@@ -3,11 +3,14 @@
 
 .PHONY: build test clean
 
+GOCACHE ?= $(CURDIR)/.gocache
+
 build:
-	go build -o bin/conformance ./cmd/conformance
+	mkdir -p bin
+	GOCACHE=$(GOCACHE) go build -o bin/conformance ./cmd/conformance
 
 test:
-	go test ./...
+	GOCACHE=$(GOCACHE) go test ./...
 
 clean:
 	rm -rf bin/

@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -672,6 +674,47 @@ func TestToolDispatchBadJSON(t *testing.T) {
 	}
 }
 
+func TestToolDispatchApplyPatch(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+	defer os.Chdir(oldWd)
+
+	path := filepath.Join(dir, "code.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0644); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+
+	input := `{"tool_name":"apply_patch","arguments":{"patch":"*** Begin Patch\n*** Update File: code.txt\n@@\n-before\n+after\n*** End Patch\n"}}`
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "tool-dispatch"}, strings.NewReader(input), &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stdout: %s; stderr: %s", code, stdout.String(), stderr.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON on stdout, got: %s (err: %v)", stdout.String(), err)
+	}
+	if _, ok := result["error"]; ok {
+		t.Fatalf("expected apply_patch to succeed, got error response: %v", result["error"])
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read patched file: %v", err)
+	}
+	if string(data) != "after\n" {
+		t.Fatalf("patched content = %q, want %q", string(data), "after\n")
+	}
+}
+
 func TestSteeringAcknowledgment(t *testing.T) {
 	input := `{"message": "focus on error handling"}`
 	var stdout, stderr bytes.Buffer
@@ -918,7 +961,7 @@ func TestListHandlers(t *testing.T) {
 		handlerSet[h] = true
 	}
 
-	required := []string{"start", "codergen", "exit"}
+	required := []string{"start", "codergen", "exit", "stack.manager_loop"}
 	for _, r := range required {
 		if !handlerSet[r] {
 			t.Errorf("expected handler %q in list", r)
