@@ -5,7 +5,7 @@
 .cache/
 .gocache/
 bin/
-conformance
-mammoth
-tracker
-tracker-conformance
+/conformance
+/mammoth
+/tracker
+/tracker-conformance
