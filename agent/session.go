@@ -91,18 +91,12 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.registry.SetOutputLimits(s.config.ToolOutputLimits)
 
 	// Register built-in tools if an environment is set.
 	// Custom tools registered via WithTools take precedence over built-ins.
 	if s.env != nil {
-		builtins := []tools.Tool{
-			tools.NewReadTool(s.env),
-			tools.NewWriteTool(s.env),
-			tools.NewEditTool(s.env),
-			tools.NewGlobTool(s.env),
-			tools.NewGrepSearchTool(s.env),
-			tools.NewBashTool(s.env, s.config.CommandTimeout, s.config.MaxCommandTimeout),
-		}
+		builtins := builtInToolsForConfig(s.config, s.env)
 		for _, t := range builtins {
 			// Only register built-in if no custom tool with the same name exists.
 			if s.registry.Get(t.Name()) == nil {
@@ -161,13 +155,17 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		}
 
 		if s.steering != nil {
-			select {
-			case msg := <-s.steering:
-				s.messages = append(s.messages, llm.UserMessage("[STEERING] "+msg))
-				s.emit(Event{Type: EventSteeringInjected, SessionID: s.id, Text: msg})
-			default:
+			for {
+				select {
+				case msg := <-s.steering:
+					s.messages = append(s.messages, llm.UserMessage("[STEERING] "+msg))
+					s.emit(Event{Type: EventSteeringInjected, SessionID: s.id, Text: msg})
+				default:
+					goto steeringDrained
+				}
 			}
 		}
+	steeringDrained:
 
 		s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
 

@@ -17,19 +17,19 @@ This matrix tracks strict parity against StrongDM's published specs as of March 
 | pipeline | Attractor 6 | Interviewer variants include callback and queued answers | `pipeline/handlers/human.go` | `pipeline/handlers/interviewer_test.go` | PASS |
 | pipeline | Attractor Appendix B | Built-in handler surface includes `stack.manager_loop` | `pipeline/handlers/registry.go`, `pipeline/handlers/manager_loop.go` | `pipeline/handlers/human_test.go` | PASS |
 | agent | Coding Agent 2 | Session loops until natural completion, turn limit, or abort | `agent/session.go` | `agent/parity_coding_agent_test.go`, `agent/session_test.go` | PASS |
-| agent | Coding Agent 3 | Toolsets are provider-aligned rather than universal | `agent/session.go`, `agent/tools/registry.go`, provider profile wiring | `agent/parity_coding_agent_test.go` | TODO |
+| agent | Coding Agent 3 | Toolsets are provider-aligned rather than universal | `agent/profile.go`, `agent/session.go`, `agent/tools/apply_patch.go`, `agent/tools/registry.go` | `agent/parity_coding_agent_test.go`, `agent/tools/apply_patch_test.go` | PASS |
 | agent | Coding Agent 3.8 | Unknown tools return error results, not session failures | `agent/tools/registry.go`, `agent/session.go` | `agent/parity_coding_agent_test.go` | PASS |
-| agent | Coding Agent 3.8 | Tool execution errors become tool error results | `agent/tools/registry.go`, `agent/session.go` | `agent/parity_coding_agent_test.go` | TODO |
-| agent | Coding Agent 3.8 | Steering is injected between tool rounds | `agent/session.go` | `agent/parity_coding_agent_test.go` | TODO |
-| agent | Coding Agent 5 | Tool output truncation matches the spec contract | `agent/tools/registry.go`, truncation helpers | `agent/parity_coding_agent_test.go`, `agent/tools/*_test.go` | TODO |
+| agent | Coding Agent 3.8 | Tool execution errors become tool error results | `agent/tools/registry.go`, `agent/session.go` | `agent/parity_coding_agent_test.go` | PASS |
+| agent | Coding Agent 3.8 | Steering is injected between tool rounds | `agent/session.go` | `agent/parity_coding_agent_test.go`, `agent/steering_test.go` | PASS |
+| agent | Coding Agent 5 | Tool output truncation matches the spec contract | `agent/config.go`, `agent/session.go`, `agent/tools/registry.go`, truncation helpers | `agent/parity_coding_agent_test.go`, `agent/tools/registry_test.go`, `agent/tools/truncate_test.go` | PASS |
 | agent | Coding Agent 4 | Codergen uses the real agent loop with an execution environment and tools | `pipeline/handlers/codergen.go`, `pipeline/handlers/registry.go`, `agent/session.go` | `pipeline/handlers/codergen_parity_test.go`, `agent/parity_coding_agent_test.go` | PASS |
-| llm | Unified LLM 2 | Client resolves default providers deterministically | `llm/client.go` | `llm/parity_unified_llm_test.go` | TODO |
-| llm | Unified LLM 3 | `Complete` populates provider and latency on responses | `llm/client.go` | `llm/parity_unified_llm_test.go` | TODO |
-| llm | Unified LLM 3 | `Stream` emits a resolution error event when provider lookup fails | `llm/client.go`, `llm/stream.go` | `llm/parity_unified_llm_test.go` | TODO |
-| llm | Unified LLM 4 | Tool call translation round-trips across provider adapters | `llm/anthropic/translate.go`, `llm/openai/translate.go`, `llm/google/translate.go` | `llm/parity_unified_llm_test.go`, provider adapter tests | TODO |
-| llm | Unified LLM 4 | Finish reasons normalize to the shared contract | `llm/types.go`, provider translators | `llm/parity_unified_llm_test.go`, provider adapter tests | TODO |
-| llm | Unified LLM 4 | Usage fields include totals and cache-token data where available | `llm/types.go`, provider adapters | `llm/parity_unified_llm_test.go`, provider adapter tests | TODO |
-| llm | Unified LLM 6 | Retryable vs terminal provider errors map to the shared error types | `llm/errors.go`, `llm/retry.go` | `llm/parity_unified_llm_test.go`, `llm/errors_test.go`, `llm/retry_test.go` | TODO |
+| llm | Unified LLM 2 | Client resolves default providers deterministically | `llm/client.go` | `llm/parity_unified_llm_test.go`, `llm/client_test.go` | PASS |
+| llm | Unified LLM 3 | `Complete` populates provider and latency on responses | `llm/client.go` | `llm/parity_unified_llm_test.go`, `llm/client_test.go` | PASS |
+| llm | Unified LLM 3 | `Stream` emits a resolution error event when provider lookup fails | `llm/client.go`, `llm/stream.go` | `llm/parity_unified_llm_test.go`, `llm/client_test.go` | PASS |
+| llm | Unified LLM 4 | Tool call translation round-trips across provider adapters | `llm/anthropic/translate.go`, `llm/openai/translate.go`, `llm/google/translate.go` | `llm/openai/translate_parity_test.go`, `llm/anthropic/translate_parity_test.go`, `llm/google/translate_parity_test.go` | PASS |
+| llm | Unified LLM 4 | Finish reasons normalize to the shared contract | `llm/types.go`, `llm/anthropic/translate.go`, `llm/openai/translate.go`, `llm/google/translate.go` | `llm/openai/translate_parity_test.go`, `llm/anthropic/translate_parity_test.go`, `llm/google/translate_parity_test.go` | PASS |
+| llm | Unified LLM 4 | Usage fields include totals and cache-token data where available | `llm/types.go`, `llm/anthropic/translate.go`, `llm/openai/translate.go`, `llm/google/translate.go` | `llm/openai/translate_parity_test.go`, `llm/anthropic/translate_parity_test.go`, `llm/google/translate_parity_test.go` | PASS |
+| llm | Unified LLM 6 | Retryable vs terminal provider errors map to the shared error types | `llm/errors.go`, `llm/retry.go` | `llm/parity_unified_llm_test.go`, `llm/errors_test.go`, `llm/retry_test.go` | PASS |
 
 ## Verification
 

@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/mammoth-lite/llm"
@@ -98,5 +99,39 @@ func TestRegistryExecuteUnknownTool(t *testing.T) {
 	result := r.Execute(context.Background(), call)
 	if !result.IsError {
 		t.Error("expected error for unknown tool")
+	}
+}
+
+func TestRegistryUsesSpecDefaultOutputLimits(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&stubTool{name: "read", result: strings.Repeat("r", 40000)})
+	r.Register(&stubTool{name: "write", result: strings.Repeat("w", 2000)})
+
+	readResult := r.Execute(context.Background(), llm.ToolCallData{
+		ID:        "call_read",
+		Name:      "read",
+		Arguments: json.RawMessage(`{}`),
+	})
+	if readResult.IsError {
+		t.Fatal("expected read result to succeed")
+	}
+	if len(readResult.Content) != 40000 {
+		t.Fatalf("expected read output to remain untruncated at 40000 chars, got %d", len(readResult.Content))
+	}
+
+	writeResult := r.Execute(context.Background(), llm.ToolCallData{
+		ID:        "call_write",
+		Name:      "write",
+		Arguments: json.RawMessage(`{}`),
+	})
+	if writeResult.IsError {
+		t.Fatal("expected write result to succeed")
+	}
+	if !strings.HasPrefix(writeResult.Content, "[... truncated") {
+		prefix := writeResult.Content
+		if len(prefix) > 40 {
+			prefix = prefix[:40]
+		}
+		t.Fatalf("expected write output to be truncated, got prefix %q", prefix)
 	}
 }

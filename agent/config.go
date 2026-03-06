@@ -14,6 +14,7 @@ type SessionConfig struct {
 	LoopDetectionThreshold        int
 	ContextWindowLimit            int
 	ContextWindowWarningThreshold float64
+	ToolOutputLimits              map[string]int
 	WorkingDir                    string
 	SystemPrompt                  string
 	Model                         string
@@ -53,6 +54,11 @@ func (c SessionConfig) Validate() error {
 	}
 	if c.ContextWindowWarningThreshold <= 0 || c.ContextWindowWarningThreshold > 1.0 {
 		return fmt.Errorf("ContextWindowWarningThreshold must be > 0 and <= 1.0, got %f", c.ContextWindowWarningThreshold)
+	}
+	for name, limit := range c.ToolOutputLimits {
+		if limit <= 0 {
+			return fmt.Errorf("ToolOutputLimits[%q] must be > 0, got %d", name, limit)
+		}
 	}
 	return nil
 }

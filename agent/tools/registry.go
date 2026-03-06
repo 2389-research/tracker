@@ -21,17 +21,31 @@ type Tool interface {
 
 // Registry holds registered tools and dispatches execution requests.
 type Registry struct {
-	tools map[string]Tool
+	tools        map[string]Tool
+	outputLimits map[string]int
 }
 
 // NewRegistry creates an empty tool registry.
 func NewRegistry() *Registry {
-	return &Registry{tools: make(map[string]Tool)}
+	return &Registry{
+		tools:        make(map[string]Tool),
+		outputLimits: make(map[string]int),
+	}
 }
 
 // Register adds a tool to the registry, keyed by its name.
 func (r *Registry) Register(tool Tool) {
 	r.tools[tool.Name()] = tool
+}
+
+// SetOutputLimits configures per-tool output truncation limits.
+func (r *Registry) SetOutputLimits(limits map[string]int) {
+	clear(r.outputLimits)
+	for name, limit := range limits {
+		if limit > 0 {
+			r.outputLimits[name] = limit
+		}
+	}
 }
 
 // Get returns the tool with the given name, or nil if not found.
@@ -78,7 +92,7 @@ func (r *Registry) Execute(ctx context.Context, call llm.ToolCallData) llm.ToolR
 		return llm.ToolResultData{
 			ToolCallID: call.ID,
 			Name:       call.Name,
-			Content:    fmt.Sprintf("error: %s", err.Error()),
+			Content:    fmt.Sprintf("Tool error (%s): %s", call.Name, err.Error()),
 			IsError:    true,
 		}
 	}
@@ -86,7 +100,33 @@ func (r *Registry) Execute(ctx context.Context, call llm.ToolCallData) llm.ToolR
 	return llm.ToolResultData{
 		ToolCallID: call.ID,
 		Name:       call.Name,
-		Content:    truncateOutput(output, maxToolOutputLen),
+		Content:    truncateOutput(output, r.outputLimit(call.Name)),
 		IsError:    false,
+	}
+}
+
+func (r *Registry) outputLimit(toolName string) int {
+	if limit, ok := r.outputLimits[toolName]; ok && limit > 0 {
+		return limit
+	}
+	return defaultToolOutputLimit(toolName)
+}
+
+func defaultToolOutputLimit(toolName string) int {
+	switch toolName {
+	case "read":
+		return 50000
+	case "bash":
+		return 30000
+	case "grep_search":
+		return 20000
+	case "edit":
+		return 10000
+	case "apply_patch":
+		return 10000
+	case "write":
+		return 1000
+	default:
+		return maxToolOutputLen
 	}
 }
