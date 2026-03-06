@@ -84,14 +84,27 @@ func (q *QueueInterviewer) Ask(prompt string, choices []string, defaultChoice st
 // ConsoleInterviewer presents choices to a human via a console (Reader/Writer)
 // and collects their response. Supports selection by name or numeric index.
 type ConsoleInterviewer struct {
-	Reader io.Reader
-	Writer io.Writer
+	Reader  io.Reader
+	Writer  io.Writer
+	scanner *bufio.Scanner
 }
 
 // NewConsoleInterviewer creates a ConsoleInterviewer that reads from stdin and
 // writes to stdout.
 func NewConsoleInterviewer() *ConsoleInterviewer {
 	return &ConsoleInterviewer{Reader: os.Stdin, Writer: os.Stdout}
+}
+
+// readLine reads a single line from the reader, lazily initializing a shared
+// scanner so that buffered stdin data is not lost between calls.
+func (c *ConsoleInterviewer) readLine() (string, error) {
+	if c.scanner == nil {
+		c.scanner = bufio.NewScanner(c.Reader)
+	}
+	if !c.scanner.Scan() {
+		return "", fmt.Errorf("no input received")
+	}
+	return c.scanner.Text(), nil
 }
 
 // Ask displays the prompt and numbered choices, then reads a line of input.
@@ -117,15 +130,15 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 		fmt.Fprintf(c.Writer, "Enter choice: ")
 	}
 
-	scanner := bufio.NewScanner(c.Reader)
-	if !scanner.Scan() {
+	line, err := c.readLine()
+	if err != nil {
 		if defaultChoice != "" {
 			return defaultChoice, nil
 		}
-		return "", fmt.Errorf("no input received")
+		return "", err
 	}
 
-	input := strings.TrimSpace(scanner.Text())
+	input := strings.TrimSpace(line)
 	if input == "" && defaultChoice != "" {
 		return defaultChoice, nil
 	}
@@ -153,12 +166,12 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 func (c *ConsoleInterviewer) AskFreeform(prompt string) (string, error) {
 	fmt.Fprintf(c.Writer, "\n%s\n> ", prompt)
 
-	scanner := bufio.NewScanner(c.Reader)
-	if !scanner.Scan() {
-		return "", fmt.Errorf("no input received")
+	line, err := c.readLine()
+	if err != nil {
+		return "", err
 	}
 
-	input := strings.TrimSpace(scanner.Text())
+	input := strings.TrimSpace(line)
 	if input == "" {
 		return "", fmt.Errorf("empty input")
 	}
