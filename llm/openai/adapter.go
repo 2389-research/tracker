@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 const (
@@ -209,9 +209,9 @@ type sseResponseCreated struct {
 }
 
 type sseOutputItemAdded struct {
-	Type       string `json:"type"`
-	OutputIndex int   `json:"output_index"`
-	Item       struct {
+	Type        string `json:"type"`
+	OutputIndex int    `json:"output_index"`
+	Item        struct {
 		Type string `json:"type"`
 		ID   string `json:"id,omitempty"`
 		Name string `json:"name,omitempty"`
@@ -219,10 +219,10 @@ type sseOutputItemAdded struct {
 }
 
 type sseOutputTextDelta struct {
-	Type        string `json:"type"`
-	OutputIndex int    `json:"output_index"`
-	ContentIndex int   `json:"content_index"`
-	Delta       string `json:"delta"`
+	Type         string `json:"type"`
+	OutputIndex  int    `json:"output_index"`
+	ContentIndex int    `json:"content_index"`
+	Delta        string `json:"delta"`
 }
 
 type sseFunctionCallArgsDelta struct {
@@ -245,11 +245,11 @@ type sseOutputItemDone struct {
 type sseResponseCompleted struct {
 	Type     string `json:"type"`
 	Response struct {
-		ID                string              `json:"id"`
-		Status            string              `json:"status"`
-		Usage             openaiUsage         `json:"usage"`
-		IncompleteDetails *incompleteDetails  `json:"incomplete_details,omitempty"`
-		Output            []openaiOutputItem  `json:"output"`
+		ID                string             `json:"id"`
+		Status            string             `json:"status"`
+		Usage             openaiUsage        `json:"usage"`
+		IncompleteDetails *incompleteDetails `json:"incomplete_details,omitempty"`
+		Output            []openaiOutputItem `json:"output"`
 	} `json:"response"`
 }
 

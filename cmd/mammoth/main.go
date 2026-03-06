@@ -9,13 +9,13 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/llm"
-	"github.com/2389-research/mammoth-lite/llm/anthropic"
-	"github.com/2389-research/mammoth-lite/llm/google"
-	"github.com/2389-research/mammoth-lite/llm/openai"
-	"github.com/2389-research/mammoth-lite/pipeline"
-	"github.com/2389-research/mammoth-lite/pipeline/handlers"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/llm/anthropic"
+	"github.com/2389-research/tracker/llm/google"
+	"github.com/2389-research/tracker/llm/openai"
+	"github.com/2389-research/tracker/pipeline"
+	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 func main() {

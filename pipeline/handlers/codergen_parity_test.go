@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	agentexec "github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/llm"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	agentexec "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 type codergenInspectingCompleter struct {

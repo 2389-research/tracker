@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 // maxGrepResults caps the number of matching lines returned to avoid overwhelming output.
@@ -214,4 +214,3 @@ func isBinaryExtension(name string) bool {
 	}
 	return binaryExts[ext]
 }
-

@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestResultString(t *testing.T) {
 	r := SessionResult{
-		SessionID: "a3f2",
-		Duration:  2*time.Minute + 34*time.Second,
-		Turns:     14,
-		ToolCalls: map[string]int{"read": 12, "edit": 3, "bash": 8},
+		SessionID:     "a3f2",
+		Duration:      2*time.Minute + 34*time.Second,
+		Turns:         14,
+		ToolCalls:     map[string]int{"read": 12, "edit": 3, "bash": 8},
 		FilesModified: []string{"auth.go", "auth_test.go"},
 		FilesCreated:  []string{"oauth_handler.go"},
 		Usage: llm.Usage{

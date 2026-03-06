@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // ParallelResult captures the outcome of a single branch executed during fan-out.

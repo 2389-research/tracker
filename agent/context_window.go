@@ -2,7 +2,7 @@
 // ABOUTME: Provides utilization calculation and one-shot warning when approaching the limit.
 package agent
 
-import "github.com/2389-research/mammoth-lite/llm"
+import "github.com/2389-research/tracker/llm"
 
 // ContextWindowTracker monitors cumulative token usage against a configured limit.
 // Token counts accumulate monotonically (never decrease) over the session lifetime.

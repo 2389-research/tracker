@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/tools"
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/agent/tools"
+	"github.com/2389-research/tracker/llm"
 )
 
 // stubTool is a minimal Tool implementation for unit tests that returns a fixed output.
@@ -17,9 +17,11 @@ type stubTool struct {
 	output string
 }
 
-func (s *stubTool) Name() string                    { return s.name }
-func (s *stubTool) Description() string             { return "stub tool for testing" }
-func (s *stubTool) Parameters() json.RawMessage      { return json.RawMessage(`{"type":"object","properties":{}}`) }
+func (s *stubTool) Name() string        { return s.name }
+func (s *stubTool) Description() string { return "stub tool for testing" }
+func (s *stubTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
 func (s *stubTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
 	return s.output, nil
 }

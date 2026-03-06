@@ -8,28 +8,28 @@ import "time"
 type EventType string
 
 const (
-	EventSessionStart  EventType = "session_start"
-	EventSessionEnd    EventType = "session_end"
-	EventTurnStart     EventType = "turn_start"
-	EventTurnEnd       EventType = "turn_end"
-	EventToolCallStart EventType = "tool_call_start"
-	EventToolCallEnd   EventType = "tool_call_end"
-	EventTextDelta     EventType = "text_delta"
-	EventError                 EventType = "error"
-	EventContextWindowWarning  EventType = "context_window_warning"
-	EventSteeringInjected      EventType = "steering_injected"
+	EventSessionStart         EventType = "session_start"
+	EventSessionEnd           EventType = "session_end"
+	EventTurnStart            EventType = "turn_start"
+	EventTurnEnd              EventType = "turn_end"
+	EventToolCallStart        EventType = "tool_call_start"
+	EventToolCallEnd          EventType = "tool_call_end"
+	EventTextDelta            EventType = "text_delta"
+	EventError                EventType = "error"
+	EventContextWindowWarning EventType = "context_window_warning"
+	EventSteeringInjected     EventType = "steering_injected"
 )
 
 // Event carries data about something that happened during an agent session.
 type Event struct {
-	Type      EventType
-	Timestamp time.Time
-	SessionID string
-	Turn      int
-	ToolName   string
-	ToolInput  string
-	ToolOutput string
-	ToolError  string
+	Type               EventType
+	Timestamp          time.Time
+	SessionID          string
+	Turn               int
+	ToolName           string
+	ToolInput          string
+	ToolOutput         string
+	ToolError          string
 	Text               string
 	Err                error
 	ContextUtilization float64

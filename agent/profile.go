@@ -1,9 +1,9 @@
 package agent
 
 import (
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/agent/tools"
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/agent/tools"
+	"github.com/2389-research/tracker/llm"
 )
 
 func builtInToolsForConfig(cfg SessionConfig, env exec.ExecutionEnvironment) []tools.Tool {

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // defaultMaxOutputTokens is the default max_output_tokens value when not specified.
@@ -16,18 +16,18 @@ const defaultMaxOutputTokens = 4096
 
 // openaiRequest is the wire format for POST /v1/responses.
 type openaiRequest struct {
-	Model           string         `json:"model"`
-	Instructions    string         `json:"instructions,omitempty"`
-	Input           []openaiInput  `json:"input"`
-	Tools           []openaiTool   `json:"tools,omitempty"`
-	ToolChoice      any            `json:"tool_choice,omitempty"`
-	Text            *openaiText    `json:"text,omitempty"`
-	Temperature     *float64       `json:"temperature,omitempty"`
-	TopP            *float64       `json:"top_p,omitempty"`
-	MaxOutputTokens *int           `json:"max_output_tokens,omitempty"`
-	Stop            []string       `json:"stop,omitempty"`
-	Reasoning       *openaiReason  `json:"reasoning,omitempty"`
-	Stream          bool           `json:"stream,omitempty"`
+	Model           string        `json:"model"`
+	Instructions    string        `json:"instructions,omitempty"`
+	Input           []openaiInput `json:"input"`
+	Tools           []openaiTool  `json:"tools,omitempty"`
+	ToolChoice      any           `json:"tool_choice,omitempty"`
+	Text            *openaiText   `json:"text,omitempty"`
+	Temperature     *float64      `json:"temperature,omitempty"`
+	TopP            *float64      `json:"top_p,omitempty"`
+	MaxOutputTokens *int          `json:"max_output_tokens,omitempty"`
+	Stop            []string      `json:"stop,omitempty"`
+	Reasoning       *openaiReason `json:"reasoning,omitempty"`
+	Stream          bool          `json:"stream,omitempty"`
 }
 
 // openaiText holds the text output configuration including response format.
@@ -259,13 +259,13 @@ func translateToolChoice(tc *llm.ToolChoice) any {
 
 // openaiResponse is the wire format for an OpenAI Responses API response.
 type openaiResponse struct {
-	ID                string              `json:"id"`
-	Object            string              `json:"object"`
-	Model             string              `json:"model"`
-	Output            []openaiOutputItem  `json:"output"`
-	Usage             openaiUsage         `json:"usage"`
-	Status            string              `json:"status"`
-	IncompleteDetails *incompleteDetails  `json:"incomplete_details,omitempty"`
+	ID                string             `json:"id"`
+	Object            string             `json:"object"`
+	Model             string             `json:"model"`
+	Output            []openaiOutputItem `json:"output"`
+	Usage             openaiUsage        `json:"usage"`
+	Status            string             `json:"status"`
+	IncompleteDetails *incompleteDetails `json:"incomplete_details,omitempty"`
 }
 
 type openaiOutputItem struct {
@@ -291,10 +291,10 @@ type openaiSummaryBlock struct {
 }
 
 type openaiUsage struct {
-	InputTokens    int              `json:"input_tokens"`
-	OutputTokens   int              `json:"output_tokens"`
-	TotalTokens    int              `json:"total_tokens"`
-	OutputDetail   *openaiOutDetail `json:"output_tokens_details,omitempty"`
+	InputTokens  int              `json:"input_tokens"`
+	OutputTokens int              `json:"output_tokens"`
+	TotalTokens  int              `json:"total_tokens"`
+	OutputDetail *openaiOutDetail `json:"output_tokens_details,omitempty"`
 }
 
 type openaiOutDetail struct {

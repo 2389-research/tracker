@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestSprintExecIntegration(t *testing.T) {

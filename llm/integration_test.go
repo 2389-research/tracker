@@ -10,10 +10,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
-	"github.com/2389-research/mammoth-lite/llm/anthropic"
-	"github.com/2389-research/mammoth-lite/llm/google"
-	"github.com/2389-research/mammoth-lite/llm/openai"
+	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/llm/anthropic"
+	"github.com/2389-research/tracker/llm/google"
+	"github.com/2389-research/tracker/llm/openai"
 )
 
 func setupClient(t *testing.T) *llm.Client {

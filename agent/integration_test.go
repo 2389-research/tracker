@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestIntegrationReadWriteFlow(t *testing.T) {

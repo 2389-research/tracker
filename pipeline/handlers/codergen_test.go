@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 type fakeCompleter struct {

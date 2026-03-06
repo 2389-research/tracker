@@ -8,18 +8,18 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // --- Wire format types for the Gemini API ---
 
 // geminiRequest is the wire format for generateContent / streamGenerateContent.
 type geminiRequest struct {
-	Contents          []geminiContent      `json:"contents"`
-	SystemInstruction *geminiContent       `json:"systemInstruction,omitempty"`
-	Tools             []geminiToolDecl     `json:"tools,omitempty"`
-	ToolConfig        *geminiToolConfig    `json:"toolConfig,omitempty"`
-	GenerationConfig  *geminiGenConfig     `json:"generationConfig,omitempty"`
+	Contents          []geminiContent   `json:"contents"`
+	SystemInstruction *geminiContent    `json:"systemInstruction,omitempty"`
+	Tools             []geminiToolDecl  `json:"tools,omitempty"`
+	ToolConfig        *geminiToolConfig `json:"toolConfig,omitempty"`
+	GenerationConfig  *geminiGenConfig  `json:"generationConfig,omitempty"`
 }
 
 type geminiContent struct {
@@ -28,10 +28,10 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text             string                `json:"text,omitempty"`
-	FunctionCall     *geminiFunctionCall   `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionResp   `json:"functionResponse,omitempty"`
-	InlineData       *geminiInlineData     `json:"inlineData,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
+	FunctionResponse *geminiFunctionResp `json:"functionResponse,omitempty"`
+	InlineData       *geminiInlineData   `json:"inlineData,omitempty"`
 }
 
 type geminiFunctionCall struct {
@@ -213,7 +213,7 @@ func translateMessageToContent(m llm.Message) *geminiContent {
 					},
 				})
 			}
-		// Image content parts can be added when KindImage is defined in the core types.
+			// Image content parts can be added when KindImage is defined in the core types.
 		}
 	}
 
@@ -262,9 +262,9 @@ func translateToolChoice(tc *llm.ToolChoice) *geminiToolConfig {
 
 // geminiResponse is the wire format for a Gemini API response.
 type geminiResponse struct {
-	Candidates    []geminiCandidate  `json:"candidates"`
-	UsageMetadata *geminiUsageMeta   `json:"usageMetadata,omitempty"`
-	ModelVersion  string             `json:"modelVersion,omitempty"`
+	Candidates    []geminiCandidate `json:"candidates"`
+	UsageMetadata *geminiUsageMeta  `json:"usageMetadata,omitempty"`
+	ModelVersion  string            `json:"modelVersion,omitempty"`
 }
 
 type geminiCandidate struct {

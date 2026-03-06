@@ -6,7 +6,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestWithSteering_SetsChannel(t *testing.T) {

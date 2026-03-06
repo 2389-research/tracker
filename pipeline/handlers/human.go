@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // Interviewer defines the interface for presenting choices to a human (or automated)

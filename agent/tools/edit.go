@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 // EditTool implements the Tool interface for search/replace editing of files.

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // promptCachingBeta is the beta header value for prompt caching support.
@@ -412,13 +412,13 @@ func translateToolChoice(tc *llm.ToolChoice) any {
 
 // anthropicResponse is the wire format for an Anthropic Messages API response.
 type anthropicResponse struct {
-	ID         string                    `json:"id"`
-	Type       string                    `json:"type"`
-	Model      string                    `json:"model"`
-	Role       string                    `json:"role"`
-	Content    []anthropicContentBlock   `json:"content"`
-	StopReason string                    `json:"stop_reason"`
-	Usage      anthropicUsage            `json:"usage"`
+	ID         string                  `json:"id"`
+	Type       string                  `json:"type"`
+	Model      string                  `json:"model"`
+	Role       string                  `json:"role"`
+	Content    []anthropicContentBlock `json:"content"`
+	StopReason string                  `json:"stop_reason"`
+	Usage      anthropicUsage          `json:"usage"`
 }
 
 type anthropicContentBlock struct {

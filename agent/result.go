@@ -8,19 +8,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // SessionResult holds summary statistics and metadata from a completed session.
 type SessionResult struct {
-	SessionID      string
-	Duration       time.Duration
-	Turns          int
-	MaxTurnsUsed   bool
-	LoopDetected   bool
-	ToolCalls      map[string]int
-	FilesModified  []string
-	FilesCreated   []string
+	SessionID          string
+	Duration           time.Duration
+	Turns              int
+	MaxTurnsUsed       bool
+	LoopDetected       bool
+	ToolCalls          map[string]int
+	FilesModified      []string
+	FilesCreated       []string
 	Usage              llm.Usage
 	ContextUtilization float64
 	Error              error

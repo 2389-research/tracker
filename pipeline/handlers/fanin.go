@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // FanInHandler implements the fan-in side of parallel execution. It reads

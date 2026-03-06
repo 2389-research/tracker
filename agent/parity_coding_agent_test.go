@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/agent/tools"
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/agent/tools"
+	"github.com/2389-research/tracker/llm"
 )
 
 type inspectingCompleter struct {
@@ -295,11 +295,11 @@ func TestParitySessionToolOutputLimitOverride(t *testing.T) {
 
 func TestParityProviderProfilesExposeProviderAlignedToolsets(t *testing.T) {
 	testCases := []struct {
-		name          string
-		provider      string
-		model         string
-		wantPresent   string
-		wantMissing   string
+		name        string
+		provider    string
+		model       string
+		wantPresent string
+		wantMissing string
 	}{
 		{
 			name:        "openai provider gets apply_patch",

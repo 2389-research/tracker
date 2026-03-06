@@ -5,9 +5,9 @@ package handlers
 import (
 	"context"
 
-	"github.com/2389-research/mammoth-lite/agent"
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // HandlerFunc is a function that implements the core logic of a pipeline handler.

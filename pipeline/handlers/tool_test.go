@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestToolHandlerName(t *testing.T) {

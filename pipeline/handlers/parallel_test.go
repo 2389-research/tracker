@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // stubHandler is a configurable test handler that returns a fixed outcome or error.

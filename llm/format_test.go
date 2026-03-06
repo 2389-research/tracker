@@ -13,8 +13,8 @@ func TestResponseString(t *testing.T) {
 		Provider: "anthropic",
 		Model:    "claude-opus-4-6",
 		Usage: Usage{
-			InputTokens:  245,
-			OutputTokens: 89,
+			InputTokens:   245,
+			OutputTokens:  89,
 			EstimatedCost: 0.003,
 		},
 		Latency:      1200 * time.Millisecond,
@@ -46,8 +46,8 @@ func TestResponseStringWithCache(t *testing.T) {
 		Provider: "anthropic",
 		Model:    "claude-sonnet-4-6",
 		Usage: Usage{
-			InputTokens:     300,
-			OutputTokens:    100,
+			InputTokens:      300,
+			OutputTokens:     100,
 			CacheReadTokens:  &cacheRead,
 			CacheWriteTokens: &cacheWrite,
 		},
@@ -78,8 +78,8 @@ func TestResponseStringSubSecondLatency(t *testing.T) {
 
 func TestUsageString(t *testing.T) {
 	u := Usage{
-		InputTokens:  1000,
-		OutputTokens: 500,
+		InputTokens:   1000,
+		OutputTokens:  500,
 		EstimatedCost: 0.045,
 	}
 

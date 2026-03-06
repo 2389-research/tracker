@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 const defaultToolTimeout = 30 * time.Second

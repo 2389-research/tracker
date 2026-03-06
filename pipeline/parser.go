@@ -212,4 +212,3 @@ func copyAttrs(attrs map[string]string) map[string]string {
 
 // Compile-time check that dotCollector implements gographviz.Interface.
 var _ gographviz.Interface = (*dotCollector)(nil)
-

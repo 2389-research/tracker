@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent"
-	agentexec "github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/agent/tools"
-	"github.com/2389-research/mammoth-lite/llm"
-	"github.com/2389-research/mammoth-lite/pipeline"
-	"github.com/2389-research/mammoth-lite/pipeline/handlers"
-	"github.com/2389-research/mammoth-lite/llm/anthropic"
-	"github.com/2389-research/mammoth-lite/llm/google"
-	"github.com/2389-research/mammoth-lite/llm/openai"
+	"github.com/2389-research/tracker/agent"
+	agentexec "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/agent/tools"
+	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/llm/anthropic"
+	"github.com/2389-research/tracker/llm/google"
+	"github.com/2389-research/tracker/llm/openai"
+	"github.com/2389-research/tracker/pipeline"
+	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 func main() {
@@ -133,12 +133,12 @@ func (m *benchMessage) UnmarshalJSON(data []byte) error {
 
 // benchRequest is the JSON request format sent by the conformance bench.
 type benchRequest struct {
-	Model          string            `json:"model"`
-	Provider       string            `json:"provider"`
-	Messages       []benchMessage    `json:"messages"`
-	MaxTokens      *int              `json:"max_tokens,omitempty"`
+	Model          string               `json:"model"`
+	Provider       string               `json:"provider"`
+	Messages       []benchMessage       `json:"messages"`
+	MaxTokens      *int                 `json:"max_tokens,omitempty"`
 	Tools          []llm.ToolDefinition `json:"tools,omitempty"`
-	ResponseSchema *json.RawMessage  `json:"response_schema,omitempty"`
+	ResponseSchema *json.RawMessage     `json:"response_schema,omitempty"`
 }
 
 // toLLMRequest converts a benchRequest into an llm.Request suitable for the client.

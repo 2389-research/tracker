@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // --- translateRequest tests ---
@@ -913,8 +913,8 @@ func TestCacheControlBetaHeaderNotInjectedWhenOptedOut(t *testing.T) {
 
 func TestToolChoiceNoneOmitsTools(t *testing.T) {
 	req := &llm.Request{
-		Model:    "claude-opus-4-6",
-		Messages: []llm.Message{llm.UserMessage("Hi")},
+		Model:      "claude-opus-4-6",
+		Messages:   []llm.Message{llm.UserMessage("Hi")},
 		ToolChoice: &llm.ToolChoice{Mode: "none"},
 		Tools: []llm.ToolDefinition{
 			{Name: "get_weather", Description: "Get weather", Parameters: json.RawMessage(`{}`)},
