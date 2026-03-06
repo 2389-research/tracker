@@ -91,8 +91,6 @@ digraph HumanGateShowcase {
     prompt="The user picked the wildcard option. Invent a color and say something absurd about it."
   ];
 
-  ColorJoin [shape=tripleoctagon, label="Color Join"];
-
   // --- Gate 4: Choice with a default ---
   DefaultGate [
     shape=hexagon,
@@ -126,8 +124,6 @@ digraph HumanGateShowcase {
     reasoning_effort="low",
     prompt="The user likes hot food. Express awe and respect for their iron stomach."
   ];
-
-  SpiceJoin [shape=tripleoctagon, label="Spice Join"];
 
   // --- Gate 5: Second freeform to test chaining ---
   FinalFreeform [
@@ -163,22 +159,18 @@ digraph HumanGateShowcase {
   MultiChoiceGate -> GreenPath [label="[G] Green"];
   MultiChoiceGate -> WildcardPath [label="[W] Wildcard"];
 
-  RedPath -> ColorJoin;
-  BluePath -> ColorJoin;
-  GreenPath -> ColorJoin;
-  WildcardPath -> ColorJoin;
-
-  ColorJoin -> DefaultGate;
+  RedPath -> DefaultGate;
+  BluePath -> DefaultGate;
+  GreenPath -> DefaultGate;
+  WildcardPath -> DefaultGate;
 
   DefaultGate -> MildPath [label="[L] Mild"];
   DefaultGate -> MediumPath [label="[M] Medium"];
   DefaultGate -> HotPath [label="[H] Hot"];
 
-  MildPath -> SpiceJoin;
-  MediumPath -> SpiceJoin;
-  HotPath -> SpiceJoin;
-
-  SpiceJoin -> FinalFreeform;
+  MildPath -> FinalFreeform;
+  MediumPath -> FinalFreeform;
+  HotPath -> FinalFreeform;
   FinalFreeform -> FinalSummary;
   FinalSummary -> Exit;
 }
