@@ -1,0 +1,276 @@
+digraph AskAndExecute {
+  graph [
+    goal="Ask the user what they want via freeform input, then execute using multi-model parallel implementation, validation, cross-review, and conditional human approval.",
+    rankdir=LR,
+    default_max_retry=3,
+    default_fidelity="summary:medium"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit [shape=Msquare, label="Exit"];
+
+  SetupWorkspace [
+    shape=parallelogram,
+    label="Setup Workspace",
+    tool_command="set -eu\nmkdir -p .ai .ai/drafts .ai/runs\nprintf 'workspace-ready'"
+  ];
+
+  AskUser [
+    shape=hexagon,
+    label="What would you like to do?",
+    prompt="Describe what you would like to accomplish. Be as specific or general as you like."
+  ];
+
+  InterpretRequest [
+    shape=box,
+    label="Interpret Request",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="The user was asked what they want to do and responded with freeform text. Interpret their request and produce a concrete, actionable task specification including: scope, expected artifacts, success criteria, and any constraints. Be precise and unambiguous so that independent implementation agents can work from this spec without further clarification."
+  ];
+
+  ImplementParallel [shape=component, label="Implement (Parallel)"];
+
+  ImplementClaude [
+    shape=box,
+    label="Claude Implementation",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    fidelity="summary:high",
+    prompt="Implement the task specification end-to-end. Follow the interpreted spec precisely. Produce working code, tests, and documentation as required. Provide a concrete summary of all changes made and validation evidence."
+  ];
+
+  ImplementCodex [
+    shape=box,
+    label="Codex Implementation",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    fidelity="summary:high",
+    prompt="Implement the task specification end-to-end. Follow the interpreted spec precisely. Focus on implementation correctness, test coverage, and clean code. Provide a concrete summary of all changes made and validation evidence."
+  ];
+
+  ImplementGemini [
+    shape=box,
+    label="Gemini Implementation",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    fidelity="summary:high",
+    prompt="Implement the task specification end-to-end. Follow the interpreted spec precisely. Focus on robustness, edge cases, and verification. Provide a concrete summary of all changes made and validation evidence."
+  ];
+
+  ImplementJoin [shape=tripleoctagon, label="Implement Join"];
+
+  ValidateBuild [
+    shape=parallelogram,
+    label="Validate Build and Tests",
+    tool_command="set -eu\nif [ -f go.mod ]; then\n  go build ./... >/tmp/aae-build.log 2>&1 || { cat /tmp/aae-build.log; exit 1; }\n  go test ./... >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }\n  cat /tmp/aae-test.log\n  printf 'validation-pass-go'\n  exit 0\nfi\nif [ -f Package.swift ]; then\n  swift build >/tmp/aae-build.log 2>&1\n  swift test >/tmp/aae-test.log 2>&1 || true\n  cat /tmp/aae-build.log\n  cat /tmp/aae-test.log\n  if rg -n 'error:' /tmp/aae-build.log >/dev/null 2>&1; then exit 1; fi\n  if rg -n 'failed' /tmp/aae-test.log >/dev/null 2>&1; then exit 1; fi\n  printf 'validation-pass-swift'\n  exit 0\nfi\nif [ -f package.json ]; then\n  npm test >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }\n  printf 'validation-pass-node'\n  exit 0\nfi\nif [ -f pyproject.toml ]; then\n  uv run pytest >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }\n  cat /tmp/aae-test.log\n  printf 'validation-pass-python'\n  exit 0\nfi\nprintf 'validation-pass-no-known-build-system'"
+  ];
+
+  CommitWork [
+    shape=box,
+    label="Commit Work",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Prepare and execute a clean commit for implementation changes if there are staged/unstaged changes. Write a conventional commit message describing the work done. If no changes are present, report that no commit was needed. Include commit hash in your summary."
+  ];
+
+  ReviewParallel [shape=component, label="Reviews (Parallel)"];
+
+  ReviewClaude [
+    shape=box,
+    label="Claude Review",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Review the implementation against the original task specification. Evaluate correctness, completeness, code quality, and test coverage. Return clear PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewCodex [
+    shape=box,
+    label="Codex Review",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Review the implementation for quality, regression risk, and spec compliance. Return clear PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewGemini [
+    shape=box,
+    label="Gemini Review",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Review the implementation for robustness, edge case handling, and spec completeness. Return clear PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewsJoin [shape=tripleoctagon, label="Reviews Join"];
+
+  CritiquesParallel [shape=component, label="Cross-Critiques (Parallel)"];
+
+  CritiqueClaudeOnCodex [
+    shape=box,
+    label="Claude Critique of Codex Review",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Critique the Codex review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueClaudeOnGemini [
+    shape=box,
+    label="Claude Critique of Gemini Review",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueCodexOnClaude [
+    shape=box,
+    label="Codex Critique of Claude Review",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Critique the Claude review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueCodexOnGemini [
+    shape=box,
+    label="Codex Critique of Gemini Review",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueGeminiOnClaude [
+    shape=box,
+    label="Gemini Critique of Claude Review",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Critique the Claude review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueGeminiOnCodex [
+    shape=box,
+    label="Gemini Critique of Codex Review",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Critique the Codex review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiquesJoin [shape=tripleoctagon, label="Critiques Join"];
+
+  ReviewAnalysis [
+    shape=box,
+    label="Review Analysis",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    goal_gate=true,
+    retry_target="ImplementClaude",
+    prompt="Synthesize all reviews and critiques into one verdict. If models broadly agree the work is correct and complete, return success. If rework is needed but models agree on what to fix, return retry. If models fundamentally disagree on quality or correctness, return disagree to escalate to human approval."
+  ];
+
+  HumanApproval [
+    shape=hexagon,
+    label="Models disagree. Review the work and decide.",
+    human.default_choice="A",
+    prompt="The reviewing models could not reach consensus. Please review the implementation and choose how to proceed."
+  ];
+
+  ApproveCommit [
+    shape=box,
+    label="Approve and Commit",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The human approved the work. Ensure all changes are committed with a clean conventional commit message. Include commit hash in summary."
+  ];
+
+  ReworkInterpret [
+    shape=box,
+    label="Incorporate Rework Feedback",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="The human requested rework. Review the review analyses and human feedback to produce an updated task specification incorporating the required changes. Be specific about what must change."
+  ];
+
+  FailureSummary [
+    shape=box,
+    label="Failure Summary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    prompt="The human rejected the work. Summarize what was attempted, why it failed to satisfy, and concrete next steps if the user wants to try again."
+  ];
+
+  // Main flow
+  Start -> SetupWorkspace;
+  SetupWorkspace -> AskUser;
+  AskUser -> InterpretRequest;
+
+  // Parallel implementation
+  InterpretRequest -> ImplementParallel;
+  ImplementParallel -> ImplementClaude;
+  ImplementParallel -> ImplementCodex;
+  ImplementParallel -> ImplementGemini;
+  ImplementClaude -> ImplementJoin;
+  ImplementCodex -> ImplementJoin;
+  ImplementGemini -> ImplementJoin;
+
+  // Validation
+  ImplementJoin -> ValidateBuild;
+  ValidateBuild -> CommitWork [condition="outcome=success", label="validated"];
+  ValidateBuild -> ImplementClaude [condition="outcome=fail", label="fix_validation"];
+
+  // Parallel reviews
+  CommitWork -> ReviewParallel;
+  ReviewParallel -> ReviewClaude;
+  ReviewParallel -> ReviewCodex;
+  ReviewParallel -> ReviewGemini;
+  ReviewClaude -> ReviewsJoin;
+  ReviewCodex -> ReviewsJoin;
+  ReviewGemini -> ReviewsJoin;
+
+  // Cross-critiques
+  ReviewsJoin -> CritiquesParallel;
+  CritiquesParallel -> CritiqueClaudeOnCodex;
+  CritiquesParallel -> CritiqueClaudeOnGemini;
+  CritiquesParallel -> CritiqueCodexOnClaude;
+  CritiquesParallel -> CritiqueCodexOnGemini;
+  CritiquesParallel -> CritiqueGeminiOnClaude;
+  CritiquesParallel -> CritiqueGeminiOnCodex;
+  CritiqueClaudeOnCodex -> CritiquesJoin;
+  CritiqueClaudeOnGemini -> CritiquesJoin;
+  CritiqueCodexOnClaude -> CritiquesJoin;
+  CritiqueCodexOnGemini -> CritiquesJoin;
+  CritiqueGeminiOnClaude -> CritiquesJoin;
+  CritiqueGeminiOnCodex -> CritiquesJoin;
+
+  // Analysis and routing
+  CritiquesJoin -> ReviewAnalysis;
+  ReviewAnalysis -> CommitWork [condition="outcome=success", label="pass"];
+  ReviewAnalysis -> ImplementClaude [condition="outcome=retry", label="rework"];
+  ReviewAnalysis -> HumanApproval [condition="outcome=disagree", label="disagree"];
+
+  // Human approval routing
+  HumanApproval -> ApproveCommit [label="[A] Approve"];
+  HumanApproval -> ReworkInterpret [label="[R] Rework"];
+  HumanApproval -> FailureSummary [label="[X] Reject"];
+
+  // Rework loops back to implementation
+  ReworkInterpret -> ImplementParallel;
+
+  // Terminal edges
+  ApproveCommit -> Exit;
+  FailureSummary -> Exit;
+}
