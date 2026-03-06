@@ -386,6 +386,12 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		traceEntry.EdgeTo = next.To
 		trace.AddEntry(traceEntry)
 
+		// If the next node was already completed in this run (loop-back),
+		// clear its status so it re-executes instead of being skipped.
+		if cp.IsCompleted(next.To) {
+			cp.ClearCompleted(next.To)
+		}
+
 		currentNodeID = next.To
 		cp.CurrentNode = currentNodeID
 		e.saveCheckpoint(cp, pctx, runID)

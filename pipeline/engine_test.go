@@ -567,6 +567,57 @@ func TestEngineEdgeSelectionBySuggestedIDs(t *testing.T) {
 	}
 }
 
+func TestEngineLoopBackToConditionalNode(t *testing.T) {
+	// Regression: when a conditional node (e.g. ValidateBuild) fails and routes
+	// to another node that loops back, the engine must re-execute the conditional
+	// node instead of skipping it as "completed". The outcome must be preserved
+	// for edge selection.
+	//
+	// Graph: Start -> Validate --(outcome=success)--> End
+	//                 Validate --(outcome=fail)-----> Fix -> Validate (loop)
+	g := NewGraph("loopback_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "validate", Shape: "parallelogram", Label: "Validate"})
+	g.AddNode(&Node{ID: "fix", Shape: "box", Label: "Fix"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "validate"})
+	g.AddEdge(&Edge{From: "validate", To: "end", Condition: "outcome=success", Label: "pass"})
+	g.AddEdge(&Edge{From: "validate", To: "fix", Condition: "outcome=fail", Label: "fail"})
+	g.AddEdge(&Edge{From: "fix", To: "validate"})
+
+	reg := newTestRegistry()
+
+	// Validate fails the first time, succeeds the second.
+	var mu sync.Mutex
+	validateAttempts := 0
+	reg.Register(&testHandler{
+		name: "tool",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			mu.Lock()
+			validateAttempts++
+			attempt := validateAttempts
+			mu.Unlock()
+			if attempt == 1 {
+				return Outcome{Status: OutcomeFail}, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success after loop-back, got %q", result.Status)
+	}
+	if validateAttempts != 2 {
+		t.Errorf("expected validate to run twice, ran %d times", validateAttempts)
+	}
+}
+
 func TestEngineNoEdgesFromNode(t *testing.T) {
 	g := NewGraph("deadend_test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
