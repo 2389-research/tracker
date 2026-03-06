@@ -95,6 +95,18 @@ func TestCodergenHandlerLLMError(t *testing.T) {
 	}
 }
 
+func TestCodergenHandlerConfigurationErrorIsFatal(t *testing.T) {
+	cfgErr := &llm.ConfigurationError{SDKError: llm.SDKError{Msg: `unknown provider: "gemini"`}}
+	client := &fakeCompleter{err: cfgErr}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{ID: "gen", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "do something"}}
+	pctx := pipeline.NewPipelineContext()
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected hard error for ConfigurationError, got nil")
+	}
+}
+
 func TestCodergenHandlerAutoStatusSuccess(t *testing.T) {
 	client := &fakeCompleter{responseText: "STATUS:success\nAll tests pass."}
 	h := NewCodergenHandler(client, t.TempDir())

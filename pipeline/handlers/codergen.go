@@ -4,11 +4,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -59,7 +61,14 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	_, runErr := sess.Run(ctx, prompt)
 	if runErr != nil {
-		// LLM errors are mapped to OutcomeFail, not handler errors.
+		// Configuration errors (unknown provider, missing keys) are fatal —
+		// they won't resolve on retry, so crash the pipeline immediately.
+		var cfgErr *llm.ConfigurationError
+		if errors.As(runErr, &cfgErr) {
+			return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
+		}
+
+		// Other LLM errors (rate limits, network) are mapped to OutcomeFail.
 		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
 			ContextUpdates: map[string]string{
