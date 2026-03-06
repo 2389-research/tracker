@@ -219,9 +219,10 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 				ch <- llm.StreamEvent{
 					Type: llm.EventToolCallStart,
 					ToolCall: &llm.ToolCallData{
-						ID:        syntheticID(),
-						Name:      part.FunctionCall.Name,
-						Arguments: argsJSON,
+						ID:             syntheticID(),
+						Name:           part.FunctionCall.Name,
+						Arguments:      argsJSON,
+						ThoughtSigData: part.ThoughtSignature,
 					},
 				}
 				ch <- llm.StreamEvent{Type: llm.EventToolCallEnd}

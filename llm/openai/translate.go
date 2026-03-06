@@ -54,8 +54,10 @@ type openaiInput struct {
 	ID        string `json:"id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
-	// For function_call_output items (tool results)
-	CallID string `json:"call_id,omitempty"`
+	// For function_call_output items (tool results).
+	// CallID omits omitempty because OpenAI requires it on function_call_output items;
+	// an empty string is better than a missing field (clearer API error).
+	CallID string `json:"call_id"`
 	Output string `json:"output,omitempty"`
 }
 

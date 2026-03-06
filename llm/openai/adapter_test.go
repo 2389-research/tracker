@@ -193,6 +193,39 @@ func TestTranslateRequestToolCallInInput(t *testing.T) {
 	}
 }
 
+func TestTranslateRequestCallIDAlwaysPresent(t *testing.T) {
+	req := &llm.Request{
+		Model: "gpt-5.2",
+		Messages: []llm.Message{
+			llm.UserMessage("hi"),
+			{
+				Role: llm.RoleTool,
+				Content: []llm.ContentPart{{
+					Kind: llm.KindToolResult,
+					ToolResult: &llm.ToolResultData{
+						ToolCallID: "",
+						Content:    "result",
+					},
+				}},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+	input := raw["input"].([]any)
+
+	fco := input[1].(map[string]any)
+	if _, ok := fco["call_id"]; !ok {
+		t.Error("call_id field must always be present on function_call_output items, even when empty")
+	}
+}
+
 func TestTranslateRequestToolChoiceModes(t *testing.T) {
 	tests := []struct {
 		mode     string

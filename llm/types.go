@@ -58,9 +58,10 @@ type DocumentData struct {
 
 // ToolCallData represents a model-initiated tool invocation.
 type ToolCallData struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Arguments      json.RawMessage `json:"arguments"`
+	ThoughtSigData string          `json:"thought_signature,omitempty"`
 }
 
 // ToolResultData represents the result of executing a tool call.

@@ -32,6 +32,7 @@ type geminiPart struct {
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResp `json:"functionResponse,omitempty"`
 	InlineData       *geminiInlineData   `json:"inlineData,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 }
 
 type geminiFunctionCall struct {
@@ -194,6 +195,7 @@ func translateMessageToContent(m llm.Message) *geminiContent {
 						Name: part.ToolCall.Name,
 						Args: args,
 					},
+					ThoughtSignature: part.ToolCall.ThoughtSigData,
 				})
 			}
 		case llm.KindToolResult:
@@ -304,9 +306,10 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 				content = append(content, llm.ContentPart{
 					Kind: llm.KindToolCall,
 					ToolCall: &llm.ToolCallData{
-						ID:        syntheticID(),
-						Name:      part.FunctionCall.Name,
-						Arguments: argsJSON,
+						ID:             syntheticID(),
+						Name:           part.FunctionCall.Name,
+						Arguments:      argsJSON,
+						ThoughtSigData: part.ThoughtSignature,
 					},
 				})
 			}

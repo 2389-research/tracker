@@ -546,3 +546,77 @@ func TestAdapterStreamToolCall(t *testing.T) {
 		t.Errorf("expected finish reason 'tool_calls', got %+v", lastEvt.FinishReason)
 	}
 }
+
+func TestThoughtSignatureRoundTrip(t *testing.T) {
+	// Simulate Gemini response with thoughtSignature on a functionCall part.
+	respJSON := []byte(`{
+		"candidates": [{
+			"content": {
+				"role": "model",
+				"parts": [{
+					"functionCall": {"name": "read_file", "args": {"path": "main.go"}},
+					"thoughtSignature": "ABCD1234sig"
+				}]
+			},
+			"finishReason": "STOP"
+		}]
+	}`)
+
+	resp, err := translateResponse(respJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Message.Content) != 1 {
+		t.Fatalf("expected 1 content part, got %d", len(resp.Message.Content))
+	}
+	tc := resp.Message.Content[0].ToolCall
+	if tc == nil {
+		t.Fatal("expected tool call")
+	}
+	if tc.ThoughtSigData != "ABCD1234sig" {
+		t.Errorf("expected thoughtSignature 'ABCD1234sig', got %q", tc.ThoughtSigData)
+	}
+
+	// Now round-trip: translate a request that includes this tool call in history.
+	req := &llm.Request{
+		Model: "gemini-3-pro-preview",
+		Messages: []llm.Message{
+			llm.UserMessage("read main.go"),
+			resp.Message,
+			{
+				Role: llm.RoleTool,
+				Content: []llm.ContentPart{{
+					Kind: llm.KindToolResult,
+					ToolResult: &llm.ToolResultData{
+						ToolCallID: tc.ID,
+						Name:       "read_file",
+						Content:    "package main",
+					},
+				}},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+	contents := raw["contents"].([]any)
+
+	// contents[1] should be the model message with the function call + thoughtSignature.
+	modelMsg := contents[1].(map[string]any)
+	parts := modelMsg["parts"].([]any)
+	fcPart := parts[0].(map[string]any)
+
+	sig, ok := fcPart["thoughtSignature"]
+	if !ok {
+		t.Fatal("thoughtSignature missing from round-tripped request")
+	}
+	if sig != "ABCD1234sig" {
+		t.Errorf("expected 'ABCD1234sig', got %v", sig)
+	}
+}
