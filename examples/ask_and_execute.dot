@@ -18,7 +18,7 @@ digraph AskAndExecute {
   AskUser [
     shape=hexagon,
     label="What would you like to do?",
-    prompt="Describe what you would like to accomplish. Be as specific or general as you like."
+    mode="freeform"
   ];
 
   InterpretRequest [

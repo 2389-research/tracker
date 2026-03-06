@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/pipeline"
@@ -137,6 +138,119 @@ func TestHumanHandlerPassesLabelAsPrompt(t *testing.T) {
 	}
 	if len(recorder.choicesReceived) != 1 || recorder.choicesReceived[0] != "looks good" {
 		t.Errorf("expected choices [looks good], got %v", recorder.choicesReceived)
+	}
+}
+
+// --- Freeform mode tests ---
+
+type recordingFreeformInterviewer struct {
+	recordingInterviewer
+	freeformPromptReceived string
+	freeformResponse       string
+}
+
+func (r *recordingFreeformInterviewer) AskFreeform(prompt string) (string, error) {
+	r.freeformPromptReceived = prompt
+	return r.freeformResponse, nil
+}
+
+func TestHumanHandlerFreeformMode(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "What would you like to do?",
+		Attrs: map[string]string{"mode": "freeform"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	recorder := &recordingFreeformInterviewer{freeformResponse: "build me a REST API"}
+	h := NewHumanHandler(recorder, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected 'success', got %q", outcome.Status)
+	}
+	if recorder.freeformPromptReceived != "What would you like to do?" {
+		t.Errorf("expected freeform prompt 'What would you like to do?', got %q", recorder.freeformPromptReceived)
+	}
+	// Freeform response stored in context updates
+	resp, ok := outcome.ContextUpdates["human_response"]
+	if !ok {
+		t.Fatal("expected human_response in context updates")
+	}
+	if resp != "build me a REST API" {
+		t.Errorf("expected 'build me a REST API', got %q", resp)
+	}
+}
+
+func TestHumanHandlerFreeformFallsBackToChoiceMode(t *testing.T) {
+	// When interviewer does NOT implement FreeformInterviewer,
+	// freeform mode should error clearly.
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "What do you want?",
+		Attrs: map[string]string{"mode": "freeform"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	h := NewHumanHandler(&AutoApproveInterviewer{}, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected error when interviewer does not support freeform")
+	}
+}
+
+func TestAutoApproveInterviewerFreeform(t *testing.T) {
+	interviewer := &AutoApproveFreeformInterviewer{}
+	resp, err := interviewer.AskFreeform("What do you want?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "auto-approved" {
+		t.Errorf("expected 'auto-approved', got %q", resp)
+	}
+}
+
+func TestConsoleInterviewerFreeform(t *testing.T) {
+	input := "build me a REST API\n"
+	reader := strings.NewReader(input)
+	var output strings.Builder
+
+	interviewer := &ConsoleInterviewer{Reader: reader, Writer: &output}
+	resp, err := interviewer.AskFreeform("What would you like to do?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "build me a REST API" {
+		t.Errorf("expected 'build me a REST API', got %q", resp)
+	}
+	if !strings.Contains(output.String(), "What would you like to do?") {
+		t.Errorf("expected prompt in output, got %q", output.String())
+	}
+}
+
+func TestConsoleInterviewerFreeformEmptyInput(t *testing.T) {
+	input := "\n"
+	reader := strings.NewReader(input)
+	var output strings.Builder
+
+	interviewer := &ConsoleInterviewer{Reader: reader, Writer: &output}
+	_, err := interviewer.AskFreeform("What would you like to do?")
+	if err == nil {
+		t.Fatal("expected error for empty freeform input")
 	}
 }
 

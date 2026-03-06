@@ -20,6 +20,14 @@ type Interviewer interface {
 	Ask(prompt string, choices []string, defaultChoice string) (string, error)
 }
 
+// FreeformInterviewer extends Interviewer with open-ended text input.
+// Used by human gate nodes with mode="freeform" to capture arbitrary user input
+// instead of presenting fixed choices.
+type FreeformInterviewer interface {
+	Interviewer
+	AskFreeform(prompt string) (string, error)
+}
+
 // AutoApproveInterviewer always returns the default choice, or the first choice
 // if no default is specified. Useful for testing and non-interactive pipelines.
 type AutoApproveInterviewer struct{}
@@ -34,6 +42,17 @@ func (a *AutoApproveInterviewer) Ask(prompt string, choices []string, defaultCho
 		return defaultChoice, nil
 	}
 	return choices[0], nil
+}
+
+// AutoApproveFreeformInterviewer returns a canned response for freeform input.
+// Useful for testing and non-interactive pipelines.
+type AutoApproveFreeformInterviewer struct {
+	AutoApproveInterviewer
+}
+
+// AskFreeform returns a fixed "auto-approved" string.
+func (a *AutoApproveFreeformInterviewer) AskFreeform(prompt string) (string, error) {
+	return "auto-approved", nil
 }
 
 // CallbackInterviewer delegates question handling to a callback.
@@ -129,6 +148,24 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 	return "", fmt.Errorf("invalid choice: %q", input)
 }
 
+// AskFreeform displays the prompt and reads a line of freeform text input.
+// Returns an error if the input is empty.
+func (c *ConsoleInterviewer) AskFreeform(prompt string) (string, error) {
+	fmt.Fprintf(c.Writer, "\n%s\n> ", prompt)
+
+	scanner := bufio.NewScanner(c.Reader)
+	if !scanner.Scan() {
+		return "", fmt.Errorf("no input received")
+	}
+
+	input := strings.TrimSpace(scanner.Text())
+	if input == "" {
+		return "", fmt.Errorf("empty input")
+	}
+
+	return input, nil
+}
+
 // HumanHandler implements the pipeline.Handler interface for human gate nodes
 // (hexagon shape). It collects outgoing edge labels as choices, presents them
 // via the configured Interviewer, and returns the selected label as the
@@ -147,10 +184,34 @@ func NewHumanHandler(interviewer Interviewer, graph *pipeline.Graph) *HumanHandl
 // Name returns the handler name used for registry lookup.
 func (h *HumanHandler) Name() string { return "wait.human" }
 
-// Execute presents the outgoing edge labels as choices via the interviewer and
-// returns the selected label. Uses the node's Label as the prompt, falling back
-// to the node ID. Respects the "default_choice" node attribute.
+// Execute presents choices or collects freeform input via the interviewer.
+// When the node has mode="freeform", it captures open-ended text and stores it
+// in context as "human_response". Otherwise it presents outgoing edge labels as
+// choices. Uses the node's Label as the prompt, falling back to the node ID.
+// Respects the "default_choice" node attribute in choice mode.
 func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	prompt := node.Label
+	if prompt == "" {
+		prompt = fmt.Sprintf("Human gate: %s", node.ID)
+	}
+
+	// Freeform mode: capture open-ended text input.
+	if node.Attrs["mode"] == "freeform" {
+		fi, ok := h.interviewer.(FreeformInterviewer)
+		if !ok {
+			return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=freeform but interviewer does not support freeform input", node.ID)
+		}
+		response, err := fi.AskFreeform(prompt)
+		if err != nil {
+			return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
+		}
+		return pipeline.Outcome{
+			Status:         pipeline.OutcomeSuccess,
+			ContextUpdates: map[string]string{"human_response": response},
+		}, nil
+	}
+
+	// Choice mode: present outgoing edge labels.
 	edges := h.graph.OutgoingEdges(node.ID)
 	if len(edges) == 0 {
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has no outgoing edges to derive choices from", node.ID)
@@ -163,11 +224,6 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 			label = e.To
 		}
 		choices = append(choices, label)
-	}
-
-	prompt := node.Label
-	if prompt == "" {
-		prompt = fmt.Sprintf("Human gate: %s", node.ID)
 	}
 
 	defaultChoice := node.Attrs["default_choice"]
