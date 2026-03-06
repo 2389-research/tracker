@@ -1,16 +1,19 @@
 // ABOUTME: Tests for the conformance CLI binary subcommand dispatch.
-// ABOUTME: Covers unknown subcommands, no args, list-models, and client-from-env behaviors.
+// ABOUTME: Covers unknown subcommands, no args, list-models, client-from-env, and Tier 1 subcommand behaviors.
 package main
 
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/2389-research/mammoth-lite/llm"
 )
 
 func TestNoSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance"}, &stdout, &stderr)
+	code := run([]string{"conformance"}, nil, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatal("expected non-zero exit code when no subcommand given")
@@ -23,7 +26,7 @@ func TestNoSubcommand(t *testing.T) {
 
 func TestUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "bogus-command"}, &stdout, &stderr)
+	code := run([]string{"conformance", "bogus-command"}, nil, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
@@ -45,7 +48,7 @@ func TestUnknownSubcommand(t *testing.T) {
 
 func TestListModels(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "list-models"}, &stdout, &stderr)
+	code := run([]string{"conformance", "list-models"}, nil, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
@@ -93,7 +96,7 @@ func TestClientFromEnvWithKeys(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "client-from-env"}, &stdout, &stderr)
+	code := run([]string{"conformance", "client-from-env"}, nil, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
@@ -137,7 +140,7 @@ func TestClientFromEnvNoKeys(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "client-from-env"}, &stdout, &stderr)
+	code := run([]string{"conformance", "client-from-env"}, nil, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatal("expected non-zero exit code when no keys configured")
@@ -155,7 +158,6 @@ func TestClientFromEnvNoKeys(t *testing.T) {
 
 func TestUnimplementedSubcommands(t *testing.T) {
 	unimplemented := []string{
-		"complete", "stream", "tool-call", "generate-object",
 		"session-create", "process-input", "tool-dispatch", "steering", "events",
 		"parse", "validate", "run", "list-handlers",
 	}
@@ -163,7 +165,7 @@ func TestUnimplementedSubcommands(t *testing.T) {
 	for _, cmd := range unimplemented {
 		t.Run(cmd, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := run([]string{"conformance", cmd}, &stdout, &stderr)
+			code := run([]string{"conformance", cmd}, nil, &stdout, &stderr)
 
 			if code != 1 {
 				t.Fatalf("expected exit code 1 for unimplemented %q, got %d", cmd, code)
@@ -179,5 +181,418 @@ func TestUnimplementedSubcommands(t *testing.T) {
 				t.Fatalf("expected error %q, got %q", expected, result["error"])
 			}
 		})
+	}
+}
+
+// --- benchRequest parsing tests ---
+
+func TestParseBenchRequestSimpleContent(t *testing.T) {
+	input := `{
+		"model": "gpt-4o",
+		"provider": "openai",
+		"messages": [{"role": "user", "content": "Say hello"}],
+		"max_tokens": 100
+	}`
+
+	var br benchRequest
+	if err := json.Unmarshal([]byte(input), &br); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if br.Model != "gpt-4o" {
+		t.Fatalf("expected model gpt-4o, got %s", br.Model)
+	}
+	if br.Provider != "openai" {
+		t.Fatalf("expected provider openai, got %s", br.Provider)
+	}
+	if br.MaxTokens == nil || *br.MaxTokens != 100 {
+		t.Fatal("expected max_tokens 100")
+	}
+	if len(br.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(br.Messages))
+	}
+
+	msg := br.Messages[0]
+	if msg.Role != "user" {
+		t.Fatalf("expected role user, got %s", string(msg.Role))
+	}
+	if len(msg.Content) != 1 || msg.Content[0].Kind != llm.KindText || msg.Content[0].Text != "Say hello" {
+		t.Fatalf("expected text content 'Say hello', got %+v", msg.Content)
+	}
+}
+
+func TestParseBenchRequestArrayContent(t *testing.T) {
+	input := `{
+		"model": "claude-opus-4-6",
+		"provider": "anthropic",
+		"messages": [{"role": "user", "content": [{"kind": "text", "text": "Hello world"}]}],
+		"max_tokens": 50
+	}`
+
+	var br benchRequest
+	if err := json.Unmarshal([]byte(input), &br); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(br.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(br.Messages))
+	}
+
+	msg := br.Messages[0]
+	if len(msg.Content) != 1 || msg.Content[0].Kind != llm.KindText || msg.Content[0].Text != "Hello world" {
+		t.Fatalf("expected text content 'Hello world', got %+v", msg.Content)
+	}
+}
+
+func TestParseBenchRequestMultipleMessages(t *testing.T) {
+	input := `{
+		"model": "gpt-4o",
+		"provider": "openai",
+		"messages": [
+			{"role": "system", "content": "You are helpful"},
+			{"role": "user", "content": "Hi"}
+		]
+	}`
+
+	var br benchRequest
+	if err := json.Unmarshal([]byte(input), &br); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(br.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(br.Messages))
+	}
+
+	if br.Messages[0].Role != "system" || br.Messages[0].Content[0].Text != "You are helpful" {
+		t.Fatalf("unexpected system message: %+v", br.Messages[0])
+	}
+	if br.Messages[1].Role != "user" || br.Messages[1].Content[0].Text != "Hi" {
+		t.Fatalf("unexpected user message: %+v", br.Messages[1])
+	}
+}
+
+func TestParseBenchRequestWithTools(t *testing.T) {
+	input := `{
+		"model": "gpt-4o",
+		"provider": "openai",
+		"messages": [{"role": "user", "content": "What is the weather?"}],
+		"tools": [{"name": "get_weather", "description": "Get weather", "parameters": {"type": "object"}}]
+	}`
+
+	var br benchRequest
+	if err := json.Unmarshal([]byte(input), &br); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(br.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(br.Tools))
+	}
+	if br.Tools[0].Name != "get_weather" {
+		t.Fatalf("expected tool name get_weather, got %s", br.Tools[0].Name)
+	}
+}
+
+func TestParseBenchRequestWithResponseSchema(t *testing.T) {
+	input := `{
+		"model": "gpt-4o",
+		"provider": "openai",
+		"messages": [{"role": "user", "content": "Generate a person"}],
+		"response_schema": {"type": "object", "properties": {"name": {"type": "string"}}}
+	}`
+
+	var br benchRequest
+	if err := json.Unmarshal([]byte(input), &br); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if br.ResponseSchema == nil {
+		t.Fatal("expected response_schema to be set")
+	}
+}
+
+func TestBenchRequestToLLMRequest(t *testing.T) {
+	maxTokens := 100
+	br := benchRequest{
+		Model:    "gpt-4o",
+		Provider: "openai",
+		Messages: []benchMessage{
+			{Role: "user", Content: []llm.ContentPart{{Kind: llm.KindText, Text: "Hi"}}},
+		},
+		MaxTokens: &maxTokens,
+	}
+
+	req := br.toLLMRequest()
+
+	if req.Model != "gpt-4o" {
+		t.Fatalf("expected model gpt-4o, got %s", req.Model)
+	}
+	if req.Provider != "openai" {
+		t.Fatalf("expected provider openai, got %s", req.Provider)
+	}
+	if req.MaxTokens == nil || *req.MaxTokens != 100 {
+		t.Fatal("expected max_tokens 100")
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(req.Messages))
+	}
+	if req.Messages[0].Text() != "Hi" {
+		t.Fatalf("expected text Hi, got %s", req.Messages[0].Text())
+	}
+}
+
+func TestBenchRequestToLLMRequestWithResponseSchema(t *testing.T) {
+	schema := json.RawMessage(`{"type": "object"}`)
+	br := benchRequest{
+		Model:    "gpt-4o",
+		Provider: "openai",
+		Messages: []benchMessage{
+			{Role: "user", Content: []llm.ContentPart{{Kind: llm.KindText, Text: "Generate"}}},
+		},
+		ResponseSchema: &schema,
+	}
+
+	req := br.toLLMRequest()
+
+	if req.ResponseFormat == nil {
+		t.Fatal("expected ResponseFormat to be set")
+	}
+	if req.ResponseFormat.Type != "json_schema" {
+		t.Fatalf("expected type json_schema, got %s", req.ResponseFormat.Type)
+	}
+}
+
+// --- formatCompleteResponse tests ---
+
+func TestFormatCompleteResponse(t *testing.T) {
+	resp := &llm.Response{
+		ID:       "resp-123",
+		Model:    "gpt-4o",
+		Provider: "openai",
+		Message: llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: []llm.ContentPart{{Kind: llm.KindText, Text: "Hello!"}},
+		},
+		FinishReason: llm.FinishReason{Reason: "stop"},
+		Usage: llm.Usage{
+			InputTokens:  10,
+			OutputTokens: 5,
+			TotalTokens:  15,
+		},
+	}
+
+	result := formatCompleteResponse(resp, "openai")
+
+	if result["id"] != "resp-123" {
+		t.Fatalf("expected id resp-123, got %v", result["id"])
+	}
+	if result["text"] != "Hello!" {
+		t.Fatalf("expected text Hello!, got %v", result["text"])
+	}
+	if result["content"] != "Hello!" {
+		t.Fatalf("expected content Hello!, got %v", result["content"])
+	}
+	if result["model"] != "gpt-4o" {
+		t.Fatalf("expected model gpt-4o, got %v", result["model"])
+	}
+	if result["provider"] != "openai" {
+		t.Fatalf("expected provider openai, got %v", result["provider"])
+	}
+	if result["finish_reason"] != "stop" {
+		t.Fatalf("expected finish_reason stop, got %v", result["finish_reason"])
+	}
+
+	usage, ok := result["usage"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected usage to be a map, got %T", result["usage"])
+	}
+	if usage["input_tokens"] != 10 {
+		t.Fatalf("expected input_tokens 10, got %v", usage["input_tokens"])
+	}
+	if usage["output_tokens"] != 5 {
+		t.Fatalf("expected output_tokens 5, got %v", usage["output_tokens"])
+	}
+	if usage["total_tokens"] != 15 {
+		t.Fatalf("expected total_tokens 15, got %v", usage["total_tokens"])
+	}
+}
+
+func TestFormatCompleteResponseWithToolCalls(t *testing.T) {
+	resp := &llm.Response{
+		ID:       "resp-456",
+		Model:    "gpt-4o",
+		Provider: "openai",
+		Message: llm.Message{
+			Role: llm.RoleAssistant,
+			Content: []llm.ContentPart{
+				{Kind: llm.KindText, Text: "Let me check"},
+				{
+					Kind: llm.KindToolCall,
+					ToolCall: &llm.ToolCallData{
+						ID:        "call-1",
+						Name:      "get_weather",
+						Arguments: json.RawMessage(`{"location":"NYC"}`),
+					},
+				},
+			},
+		},
+		FinishReason: llm.FinishReason{Reason: "tool_use"},
+		Usage:        llm.Usage{InputTokens: 20, OutputTokens: 10, TotalTokens: 30},
+	}
+
+	result := formatCompleteResponse(resp, "openai")
+
+	toolCalls, ok := result["tool_calls"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("expected tool_calls to be a slice of maps, got %T", result["tool_calls"])
+	}
+	if len(toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(toolCalls))
+	}
+	if toolCalls[0]["id"] != "call-1" {
+		t.Fatalf("expected tool call id call-1, got %v", toolCalls[0]["id"])
+	}
+	if toolCalls[0]["name"] != "get_weather" {
+		t.Fatalf("expected tool call name get_weather, got %v", toolCalls[0]["name"])
+	}
+}
+
+// --- formatStreamEvent tests ---
+
+func TestFormatStreamEventStart(t *testing.T) {
+	event := llm.StreamEvent{Type: llm.EventStreamStart}
+	result := formatStreamEvent(event)
+
+	if result["type"] != "STREAM_START" {
+		t.Fatalf("expected type STREAM_START, got %v", result["type"])
+	}
+}
+
+func TestFormatStreamEventTextDelta(t *testing.T) {
+	event := llm.StreamEvent{Type: llm.EventTextDelta, Delta: "hello"}
+	result := formatStreamEvent(event)
+
+	if result["type"] != "TEXT_DELTA" {
+		t.Fatalf("expected type TEXT_DELTA, got %v", result["type"])
+	}
+	if result["text"] != "hello" {
+		t.Fatalf("expected text hello, got %v", result["text"])
+	}
+}
+
+func TestFormatStreamEventFinish(t *testing.T) {
+	usage := &llm.Usage{InputTokens: 5, OutputTokens: 3, TotalTokens: 8}
+	event := llm.StreamEvent{
+		Type:  llm.EventFinish,
+		Usage: usage,
+	}
+	result := formatStreamEvent(event)
+
+	if result["type"] != "FINISH" {
+		t.Fatalf("expected type FINISH, got %v", result["type"])
+	}
+	usageMap, ok := result["usage"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected usage map, got %T", result["usage"])
+	}
+	if usageMap["input_tokens"] != 5 {
+		t.Fatalf("expected input_tokens 5, got %v", usageMap["input_tokens"])
+	}
+}
+
+// --- Subcommand error handling tests ---
+
+func TestCompleteSubcommandBadJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("not valid json")
+	code := run([]string{"conformance", "complete"}, stdin, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON error on stdout, got: %s (err: %v)", stdout.String(), err)
+	}
+	if _, ok := result["error"]; !ok {
+		t.Fatal("expected 'error' key in JSON response")
+	}
+}
+
+func TestStreamSubcommandBadJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("{invalid")
+	code := run([]string{"conformance", "stream"}, stdin, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
+	}
+}
+
+func TestToolCallSubcommandBadJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("xxx")
+	code := run([]string{"conformance", "tool-call"}, stdin, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
+	}
+}
+
+func TestGenerateObjectSubcommandBadJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("yyy")
+	code := run([]string{"conformance", "generate-object"}, stdin, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
+	}
+}
+
+func TestCompleteSubcommandNoAPIKey(t *testing.T) {
+	// Clear all API keys so client creation fails.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+
+	input := `{"model": "gpt-4o", "provider": "openai", "messages": [{"role": "user", "content": "Hi"}]}`
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "complete"}, strings.NewReader(input), &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 when no API keys, got %d", code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON error, got: %s", stdout.String())
+	}
+	if _, ok := result["error"]; !ok {
+		t.Fatal("expected error key in response")
+	}
+}
+
+// --- benchMessage UnmarshalJSON edge cases ---
+
+func TestBenchMessageEmptyContent(t *testing.T) {
+	input := `{"role": "user", "content": ""}`
+	var msg benchMessage
+	if err := json.Unmarshal([]byte(input), &msg); err != nil {
+		t.Fatalf("failed to unmarshal empty content: %v", err)
+	}
+	if len(msg.Content) != 1 || msg.Content[0].Text != "" {
+		t.Fatalf("expected single empty text part, got %+v", msg.Content)
+	}
+}
+
+func TestBenchMessageNullContent(t *testing.T) {
+	input := `{"role": "user", "content": null}`
+	var msg benchMessage
+	if err := json.Unmarshal([]byte(input), &msg); err != nil {
+		t.Fatalf("failed to unmarshal null content: %v", err)
+	}
+	if len(msg.Content) != 0 {
+		t.Fatalf("expected no content parts for null, got %d", len(msg.Content))
 	}
 }
