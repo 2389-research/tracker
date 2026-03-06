@@ -182,7 +182,7 @@ digraph AskAndExecute {
   HumanApproval [
     shape=hexagon,
     label="Models disagree. Review the work and decide.",
-    human.default_choice="A",
+    default_choice="A",
     prompt="The reviewing models could not reach consensus. Please review the implementation and choose how to proceed."
   ];
 
