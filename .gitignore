@@ -1,3 +1,11 @@
 .workgraph
 .env
 *.env
+.ai/
+.cache/
+.gocache/
+bin/
+conformance
+mammoth
+tracker
+tracker-conformance

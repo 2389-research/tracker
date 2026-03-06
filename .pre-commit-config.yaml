@@ -1,0 +1,45 @@
+# ABOUTME: Pre-commit hooks for tracker.
+# ABOUTME: Keeps Go sources formatted and runs the repo's canonical test command.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^go\.(mod|sum)$
+      - id: end-of-file-fixer
+        exclude: ^go\.(mod|sum)$
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+        exclude: ^(bin/|tracker$|tracker-conformance$)
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-case-conflict
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -w
+        language: system
+        files: \.go$
+
+      - id: goimports
+        name: goimports
+        entry: goimports -w
+        language: system
+        files: \.go$
+
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: go mod tidy
+        language: system
+        pass_filenames: false
+        files: ^go\.(mod|sum)$
+
+      - id: make-test
+        name: make test
+        entry: make test
+        language: system
+        pass_filenames: false

@@ -1,0 +1,57 @@
+# ABOUTME: GitHub Actions CI workflow for tracker.
+# ABOUTME: Runs the repository's canonical test and build entrypoints and verifies both binaries.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: make test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binaries
+        run: make build
+
+      - name: Verify tracker binary
+        run: ./bin/tracker --help
+
+      - name: Verify tracker-conformance binary
+        run: ./bin/tracker-conformance list-handlers | grep -F stack.manager_loop
+
+      - name: Upload binary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracker-binaries-linux-amd64
+          path: |
+            bin/tracker
+            bin/tracker-conformance
+          retention-days: 7

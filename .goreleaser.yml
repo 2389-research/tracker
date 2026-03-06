@@ -1,0 +1,72 @@
+version: 2
+
+project_name: tracker
+
+before:
+  hooks:
+    - go mod tidy
+    - make test
+
+builds:
+  - id: tracker
+    binary: tracker
+    main: ./cmd/tracker
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+  - id: tracker-conformance
+    binary: tracker-conformance
+    main: ./cmd/tracker-conformance
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: tracker
+    ids:
+      - tracker
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_tracker_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+  - id: tracker-conformance
+    ids:
+      - tracker-conformance
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_tracker-conformance_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
