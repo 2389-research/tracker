@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/joho/godotenv"
+
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/llm/anthropic"
@@ -19,6 +21,9 @@ import (
 )
 
 func main() {
+	// Load .env file if present; ignore if missing.
+	_ = godotenv.Load()
+
 	var (
 		workdir    string
 		checkpoint string
