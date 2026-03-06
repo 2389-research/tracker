@@ -83,11 +83,11 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 	envKeys := map[string][]string{
 		"anthropic": {"ANTHROPIC_API_KEY"},
 		"openai":    {"OPENAI_API_KEY"},
-		"google":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+		"gemini":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 	}
 
 	// Use deterministic priority order for default provider selection.
-	providerPriority := []string{"anthropic", "openai", "google"}
+	providerPriority := []string{"anthropic", "openai", "gemini"}
 
 	var opts []ClientOption
 	var firstProvider string
@@ -127,7 +127,7 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 
 	// Also process any non-standard providers not in the priority list.
 	for name, constructor := range constructors {
-		if name == "anthropic" || name == "openai" || name == "google" {
+		if name == "anthropic" || name == "openai" || name == "gemini" {
 			continue
 		}
 		envVars := []string{fmt.Sprintf("%s_API_KEY", name)}

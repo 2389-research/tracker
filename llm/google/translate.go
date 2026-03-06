@@ -154,8 +154,8 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	// Merge provider_options["google"] into the body.
-	if opts, ok := req.ProviderOptions["google"]; ok {
+	// Merge provider_options["gemini"] into the body.
+	if opts, ok := req.ProviderOptions["gemini"]; ok {
 		if optsMap, ok := opts.(map[string]any); ok {
 			var bodyMap map[string]any
 			if err := json.Unmarshal(body, &bodyMap); err != nil {

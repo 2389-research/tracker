@@ -61,7 +61,7 @@ func New(apiKey string, opts ...Option) *Adapter {
 
 // Name returns the provider identifier.
 func (a *Adapter) Name() string {
-	return "google"
+	return "gemini"
 }
 
 // generateContentURL builds the full URL for a given model.
@@ -102,7 +102,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 
 	if httpResp.StatusCode != http.StatusOK {
 		msg := string(respBody)
-		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, msg, "google")
+		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, msg, "gemini")
 	}
 
 	resp, err := translateResponse(respBody)
@@ -110,7 +110,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 		return nil, fmt.Errorf("google: translate response: %w", err)
 	}
 
-	resp.Provider = "google"
+	resp.Provider = "gemini"
 	resp.Latency = time.Since(start)
 
 	return resp, nil
@@ -146,7 +146,7 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 
 		if httpResp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(httpResp.Body)
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "google")}
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "gemini")}
 			return
 		}
 

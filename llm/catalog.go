@@ -89,7 +89,7 @@ var defaultCatalog = []ModelInfo{
 	// Gemini models
 	{
 		ID:                "gemini-3-pro-preview",
-		Provider:          "google",
+		Provider:          "gemini",
 		DisplayName:       "Gemini 3 Pro Preview",
 		ContextWindow:     1000000,
 		MaxOutput:         8192,
@@ -102,7 +102,7 @@ var defaultCatalog = []ModelInfo{
 	},
 	{
 		ID:                "gemini-3-flash-preview",
-		Provider:          "google",
+		Provider:          "gemini",
 		DisplayName:       "Gemini 3 Flash Preview",
 		ContextWindow:     1000000,
 		MaxOutput:         8192,

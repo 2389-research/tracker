@@ -33,10 +33,10 @@ func TestParityNewClientFromEnvUsesDeterministicDefaultProviderPriority(t *testi
 	t.Setenv("GEMINI_API_KEY", "gemini-key")
 
 	client, err := NewClientFromEnv(map[string]func(string) (ProviderAdapter, error){
-		"google": func(apiKey string) (ProviderAdapter, error) {
+		"gemini": func(apiKey string) (ProviderAdapter, error) {
 			return &mockAdapter{
-				name:     "google",
-				response: &Response{ID: "g-1", Message: AssistantMessage("from google")},
+				name:     "gemini",
+				response: &Response{ID: "g-1", Message: AssistantMessage("from gemini")},
 			}, nil
 		},
 		"openai": func(apiKey string) (ProviderAdapter, error) {

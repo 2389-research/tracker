@@ -132,8 +132,8 @@ func TestClientFromEnvWithKeys(t *testing.T) {
 	if !providerSet["openai"] {
 		t.Error("expected 'openai' in providers list")
 	}
-	if providerSet["google"] {
-		t.Error("did not expect 'google' in providers list (no key set)")
+	if providerSet["gemini"] {
+		t.Error("did not expect 'gemini' in providers list (no key set)")
 	}
 }
 

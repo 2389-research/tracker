@@ -99,7 +99,7 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 			}
 			return openai.New(key, opts...), nil
 		},
-		"google": func(key string) (llm.ProviderAdapter, error) {
+		"gemini": func(key string) (llm.ProviderAdapter, error) {
 			var opts []google.Option
 			if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
 				opts = append(opts, google.WithBaseURL(base))

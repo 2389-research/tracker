@@ -396,7 +396,7 @@ func TestAdapterComplete(t *testing.T) {
 	if resp.Text() != "Hello from Gemini!" {
 		t.Errorf("expected 'Hello from Gemini!', got %q", resp.Text())
 	}
-	if resp.Provider != "google" {
+	if resp.Provider != "gemini" {
 		t.Errorf("expected provider 'google', got %q", resp.Provider)
 	}
 }
@@ -490,7 +490,7 @@ func TestAdapterStream(t *testing.T) {
 
 func TestAdapterName(t *testing.T) {
 	a := New("key")
-	if a.Name() != "google" {
+	if a.Name() != "gemini" {
 		t.Errorf("expected 'google', got %q", a.Name())
 	}
 }

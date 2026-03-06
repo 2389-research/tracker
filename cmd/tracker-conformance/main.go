@@ -891,7 +891,7 @@ func handleClientFromEnv(stdout, stderr io.Writer) int {
 	checks := []providerCheck{
 		{"anthropic", []string{"ANTHROPIC_API_KEY"}},
 		{"openai", []string{"OPENAI_API_KEY"}},
-		{"google", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
+		{"gemini", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
 	}
 
 	var availableProviders []string
@@ -959,7 +959,7 @@ func buildConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
 			}
 			return openai.New(key, opts...), nil
 		},
-		"google": func(key string) (llm.ProviderAdapter, error) {
+		"gemini": func(key string) (llm.ProviderAdapter, error) {
 			var opts []google.Option
 			if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
 				opts = append(opts, google.WithBaseURL(base))
