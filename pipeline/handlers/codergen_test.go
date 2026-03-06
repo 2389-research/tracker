@@ -4,6 +4,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/2389-research/mammoth-lite/llm"
@@ -145,5 +148,81 @@ func TestCodergenHandlerSystemPrompt(t *testing.T) {
 	}
 	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected 'success', got %q", outcome.Status)
+	}
+}
+
+func TestCodergenHandlerWritesArtifacts(t *testing.T) {
+	workdir := t.TempDir()
+	client := &fakeCompleter{responseText: "Hello, World!"}
+	h := NewCodergenHandler(client, workdir)
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "Write hello world"},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+
+	promptBytes, err := os.ReadFile(filepath.Join(workdir, "gen", "prompt.md"))
+	if err != nil {
+		t.Fatalf("expected prompt artifact: %v", err)
+	}
+	if string(promptBytes) != "Write hello world" {
+		t.Fatalf("prompt artifact = %q", string(promptBytes))
+	}
+
+	responseBytes, err := os.ReadFile(filepath.Join(workdir, "gen", "response.md"))
+	if err != nil {
+		t.Fatalf("expected response artifact: %v", err)
+	}
+	if string(responseBytes) != "Hello, World!" {
+		t.Fatalf("response artifact = %q", string(responseBytes))
+	}
+
+	statusBytes, err := os.ReadFile(filepath.Join(workdir, "gen", "status.json"))
+	if err != nil {
+		t.Fatalf("expected status artifact: %v", err)
+	}
+	var status map[string]any
+	if err := json.Unmarshal(statusBytes, &status); err != nil {
+		t.Fatalf("status artifact should be valid json: %v", err)
+	}
+	if status["outcome"] != pipeline.OutcomeSuccess {
+		t.Fatalf("status outcome = %v", status["outcome"])
+	}
+}
+
+func TestCodergenHandlerExpandsGoalFromContext(t *testing.T) {
+	workdir := t.TempDir()
+	client := &fakeCompleter{responseText: "ok"}
+	h := NewCodergenHandler(client, workdir)
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "Plan for $goal"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyGoal, "ship a hello world script")
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	promptBytes, err := os.ReadFile(filepath.Join(workdir, "gen", "prompt.md"))
+	if err != nil {
+		t.Fatalf("expected prompt artifact: %v", err)
+	}
+	if string(promptBytes) != "Plan for ship a hello world script" {
+		t.Fatalf("expanded prompt = %q", string(promptBytes))
 	}
 }

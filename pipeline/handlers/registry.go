@@ -91,13 +91,16 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	registry.Register(NewExitHandler())
 	registry.Register(NewConditionalHandler())
 	registry.Register(NewFanInHandler())
+	registry.Register(NewManagerLoopHandler())
 
 	// Parallel handler needs the graph and registry for branch dispatch.
 	registry.Register(NewParallelHandler(graph, registry))
 
 	// Codergen: prefer real handler, fall back to stub.
 	if cfg.llmClient != nil {
-		registry.Register(NewCodergenHandler(cfg.llmClient, cfg.workingDir))
+		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir)
+		handler.env = cfg.execEnv
+		registry.Register(handler)
 	} else if cfg.codergenFunc != nil {
 		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})
 	}

@@ -139,3 +139,11 @@ func TestHumanHandlerPassesLabelAsPrompt(t *testing.T) {
 		t.Errorf("expected choices [looks good], got %v", recorder.choicesReceived)
 	}
 }
+
+func TestManagerLoopHandlerIsRegistered(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	registry := NewDefaultRegistry(graph)
+	if !registry.Has("stack.manager_loop") {
+		t.Fatal("expected stack.manager_loop to be registered")
+	}
+}

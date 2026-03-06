@@ -85,6 +85,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	nodeOutcomes := make(map[string]string)
 
 	pctx := NewPipelineContext()
+	for key, value := range e.graph.Attrs {
+		pctx.Set("graph."+key, value)
+	}
 	// Apply initial context values (e.g., from a parent subgraph handler).
 	for k, v := range e.initialContext {
 		pctx.Set(k, v)
@@ -185,6 +188,20 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				Label:   node.Label,
 				Handler: node.Handler,
 				Attrs:   resolved,
+			}
+		}
+		if prompt := execNode.Attrs["prompt"]; prompt != "" {
+			execAttrs := make(map[string]string, len(execNode.Attrs))
+			for k, v := range execNode.Attrs {
+				execAttrs[k] = v
+			}
+			execAttrs["prompt"] = ExpandPromptVariables(prompt, pctx)
+			execNode = &Node{
+				ID:      execNode.ID,
+				Shape:   execNode.Shape,
+				Label:   execNode.Label,
+				Handler: execNode.Handler,
+				Attrs:   execAttrs,
 			}
 		}
 

@@ -63,10 +63,16 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 	}
 
 	return pipeline.Outcome{
-		Status: status,
-		ContextUpdates: map[string]string{
-			pipeline.ContextKeyToolStdout: result.Stdout,
-			pipeline.ContextKeyToolStderr: result.Stderr,
-		},
-	}, nil
+			Status: status,
+			ContextUpdates: map[string]string{
+				pipeline.ContextKeyToolStdout: result.Stdout,
+				pipeline.ContextKeyToolStderr: result.Stderr,
+			},
+		}, pipeline.WriteStatusArtifact(h.env.WorkingDir(), node.ID, pipeline.Outcome{
+			Status: status,
+			ContextUpdates: map[string]string{
+				pipeline.ContextKeyToolStdout: result.Stdout,
+				pipeline.ContextKeyToolStderr: result.Stderr,
+			},
+		})
 }

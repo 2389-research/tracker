@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/2389-research/mammoth-lite/agent"
+	"github.com/2389-research/mammoth-lite/agent/exec"
 	"github.com/2389-research/mammoth-lite/pipeline"
 )
 
@@ -15,6 +16,7 @@ import (
 // captures the response text, and maps it to a pipeline outcome.
 type CodergenHandler struct {
 	client     agent.Completer
+	env        exec.ExecutionEnvironment
 	workingDir string
 }
 
@@ -39,13 +41,18 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if prompt == "" {
 		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
 	}
+	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
 
 	config := h.buildConfig(node)
 
 	// Use a text collector event handler to capture the final response text,
 	// since SessionResult does not expose the conversation messages directly.
 	var collector textCollector
-	sess, err := agent.NewSession(h.client, config, agent.WithEventHandler(&collector))
+	opts := []agent.SessionOption{agent.WithEventHandler(&collector)}
+	if h.env != nil {
+		opts = append(opts, agent.WithEnvironment(h.env))
+	}
+	sess, err := agent.NewSession(h.client, config, opts...)
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q failed to create session: %w", node.ID, err)
 	}
@@ -53,12 +60,16 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	_, runErr := sess.Run(ctx, prompt)
 	if runErr != nil {
 		// LLM errors are mapped to OutcomeFail, not handler errors.
-		return pipeline.Outcome{
+		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
 			ContextUpdates: map[string]string{
 				pipeline.ContextKeyLastResponse: runErr.Error(),
 			},
-		}, nil
+		}
+		if err := pipeline.WriteStageArtifacts(h.workingDir, node.ID, prompt, runErr.Error(), outcome); err != nil {
+			return pipeline.Outcome{}, err
+		}
+		return outcome, nil
 	}
 
 	responseText := collector.text()
@@ -68,12 +79,16 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		status = parseAutoStatus(responseText)
 	}
 
-	return pipeline.Outcome{
+	outcome := pipeline.Outcome{
 		Status: status,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse: responseText,
 		},
-	}, nil
+	}
+	if err := pipeline.WriteStageArtifacts(h.workingDir, node.ID, prompt, responseText, outcome); err != nil {
+		return pipeline.Outcome{}, err
+	}
+	return outcome, nil
 }
 
 // buildConfig constructs a SessionConfig from the node's attributes, using
@@ -94,10 +109,6 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if sp, ok := node.Attrs["system_prompt"]; ok {
 		config.SystemPrompt = sp
 	}
-
-	// For codergen nodes, a single turn is sufficient since we just need
-	// the LLM to respond to a prompt without tool use.
-	config.MaxTurns = 1
 
 	return config
 }

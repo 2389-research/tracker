@@ -460,6 +460,36 @@ func TestEngineCheckpointResume(t *testing.T) {
 	}
 }
 
+func TestEngineMirrorsGraphGoalAndExpandsPrompt(t *testing.T) {
+	g := NewGraph("goal_prompt")
+	g.Attrs["goal"] = "ship a hello world script"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "plan", Shape: "box", Label: "Plan", Attrs: map[string]string{"prompt": "Plan for $goal"}})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "plan"})
+	g.AddEdge(&Edge{From: "plan", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			goal, ok := pctx.Get(ContextKeyGoal)
+			if !ok || goal != "ship a hello world script" {
+				t.Fatalf("graph goal = %q, ok=%v", goal, ok)
+			}
+			if node.Attrs["prompt"] != "Plan for ship a hello world script" {
+				t.Fatalf("prompt = %q", node.Attrs["prompt"])
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	if _, err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEngineWithStylesheet(t *testing.T) {
 	g := NewGraph("style_test")
 	g.Attrs["model_stylesheet"] = `* { llm_model: gpt-4; } #special { llm_model: claude-sonnet; }`

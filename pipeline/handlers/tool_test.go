@@ -4,6 +4,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +140,37 @@ func TestToolHandlerDefaultTimeout(t *testing.T) {
 	h := NewToolHandlerWithTimeout(env, customTimeout)
 	if h.defaultTimeout != customTimeout {
 		t.Errorf("expected default timeout %v, got %v", customTimeout, h.defaultTimeout)
+	}
+}
+
+func TestToolHandlerWritesStatusArtifact(t *testing.T) {
+	workdir := t.TempDir()
+	env := exec.NewLocalEnvironment(workdir)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "toolstep",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "echo hello"},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+
+	statusBytes, err := os.ReadFile(filepath.Join(workdir, "toolstep", "status.json"))
+	if err != nil {
+		t.Fatalf("expected status artifact: %v", err)
+	}
+	var status map[string]any
+	if err := json.Unmarshal(statusBytes, &status); err != nil {
+		t.Fatalf("status artifact should be valid json: %v", err)
+	}
+	if status["outcome"] != pipeline.OutcomeSuccess {
+		t.Fatalf("status outcome = %v", status["outcome"])
 	}
 }

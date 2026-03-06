@@ -36,6 +36,32 @@ func (a *AutoApproveInterviewer) Ask(prompt string, choices []string, defaultCho
 	return choices[0], nil
 }
 
+// CallbackInterviewer delegates question handling to a callback.
+type CallbackInterviewer struct {
+	AskFunc func(prompt string, choices []string, defaultChoice string) (string, error)
+}
+
+func (c *CallbackInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
+	if c == nil || c.AskFunc == nil {
+		return "", fmt.Errorf("callback interviewer has no AskFunc")
+	}
+	return c.AskFunc(prompt, choices, defaultChoice)
+}
+
+// QueueInterviewer returns pre-seeded answers in order.
+type QueueInterviewer struct {
+	Answers []string
+}
+
+func (q *QueueInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
+	if len(q.Answers) == 0 {
+		return "", fmt.Errorf("queue interviewer has no queued answers")
+	}
+	answer := q.Answers[0]
+	q.Answers = q.Answers[1:]
+	return answer, nil
+}
+
 // ConsoleInterviewer presents choices to a human via a console (Reader/Writer)
 // and collects their response. Supports selection by name or numeric index.
 type ConsoleInterviewer struct {

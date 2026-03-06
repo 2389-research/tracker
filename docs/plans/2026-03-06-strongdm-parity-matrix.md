@@ -12,17 +12,17 @@ This matrix tracks strict parity against StrongDM's published specs as of March 
 | pipeline | Attractor 3.4 | Unsatisfied goal gates reroute via node or graph retry targets before failing | `pipeline/engine.go`, `pipeline/checkpoint.go` | `pipeline/parity_attractor_test.go`, `pipeline/engine_test.go` | PASS |
 | pipeline | Attractor 8 | Stylesheet shape selectors work | `pipeline/stylesheet.go` | `pipeline/parity_attractor_test.go`, `pipeline/stylesheet_test.go` | PASS |
 | pipeline | Attractor 8 | Node `class` is comma-separated for stylesheet targeting | `pipeline/stylesheet.go` | `pipeline/parity_attractor_test.go`, `pipeline/stylesheet_test.go` | PASS |
-| pipeline | Attractor 9 | Graph attributes are mirrored into runtime context and `$goal` expands in prompts | `pipeline/engine.go`, `pipeline/transforms.go`, `pipeline/handlers/codergen.go` | `pipeline/engine_test.go`, `pipeline/handlers/codergen_test.go` | TODO |
-| pipeline | Attractor Appendix C | Stage artifacts write `prompt.md`, `response.md`, and `status.json` | `pipeline/engine.go`, `pipeline/handlers/codergen.go`, `pipeline/handlers/tool.go` | `pipeline/engine_test.go`, `pipeline/handlers/codergen_test.go`, `pipeline/handlers/tool_test.go` | TODO |
-| pipeline | Attractor 6 | Interviewer variants include callback and queued answers | `pipeline/handlers/human.go` | `pipeline/handlers/interviewer_test.go` | TODO |
-| pipeline | Attractor Appendix B | Built-in handler surface includes `stack.manager_loop` | `pipeline/handlers/registry.go`, `pipeline/handlers/manager_loop.go` | `pipeline/handlers/integration_test.go` | TODO |
-| agent | Coding Agent 2 | Session loops until natural completion, turn limit, or abort | `agent/session.go` | `agent/parity_coding_agent_test.go` | TODO |
+| pipeline | Attractor 9 | Graph attributes are mirrored into runtime context and `$goal` expands in prompts | `pipeline/engine.go`, `pipeline/transforms.go`, `pipeline/handlers/codergen.go` | `pipeline/engine_test.go`, `pipeline/handlers/codergen_test.go` | PASS |
+| pipeline | Attractor Appendix C | Stage artifacts write `prompt.md`, `response.md`, and `status.json` | `pipeline/artifacts.go`, `pipeline/handlers/codergen.go`, `pipeline/handlers/tool.go` | `pipeline/handlers/codergen_test.go`, `pipeline/handlers/tool_test.go` | PASS |
+| pipeline | Attractor 6 | Interviewer variants include callback and queued answers | `pipeline/handlers/human.go` | `pipeline/handlers/interviewer_test.go` | PASS |
+| pipeline | Attractor Appendix B | Built-in handler surface includes `stack.manager_loop` | `pipeline/handlers/registry.go`, `pipeline/handlers/manager_loop.go` | `pipeline/handlers/human_test.go` | PASS |
+| agent | Coding Agent 2 | Session loops until natural completion, turn limit, or abort | `agent/session.go` | `agent/parity_coding_agent_test.go`, `agent/session_test.go` | PASS |
 | agent | Coding Agent 3 | Toolsets are provider-aligned rather than universal | `agent/session.go`, `agent/tools/registry.go`, provider profile wiring | `agent/parity_coding_agent_test.go` | TODO |
-| agent | Coding Agent 3.8 | Unknown tools return error results, not session failures | `agent/tools/registry.go`, `agent/session.go` | `agent/parity_coding_agent_test.go` | TODO |
+| agent | Coding Agent 3.8 | Unknown tools return error results, not session failures | `agent/tools/registry.go`, `agent/session.go` | `agent/parity_coding_agent_test.go` | PASS |
 | agent | Coding Agent 3.8 | Tool execution errors become tool error results | `agent/tools/registry.go`, `agent/session.go` | `agent/parity_coding_agent_test.go` | TODO |
 | agent | Coding Agent 3.8 | Steering is injected between tool rounds | `agent/session.go` | `agent/parity_coding_agent_test.go` | TODO |
 | agent | Coding Agent 5 | Tool output truncation matches the spec contract | `agent/tools/registry.go`, truncation helpers | `agent/parity_coding_agent_test.go`, `agent/tools/*_test.go` | TODO |
-| agent | Coding Agent 4 | Codergen uses the real agent loop with an execution environment and tools | `pipeline/handlers/codergen.go`, `pipeline/handlers/registry.go`, `agent/session.go` | `pipeline/handlers/codergen_test.go`, `agent/parity_coding_agent_test.go` | TODO |
+| agent | Coding Agent 4 | Codergen uses the real agent loop with an execution environment and tools | `pipeline/handlers/codergen.go`, `pipeline/handlers/registry.go`, `agent/session.go` | `pipeline/handlers/codergen_parity_test.go`, `agent/parity_coding_agent_test.go` | PASS |
 | llm | Unified LLM 2 | Client resolves default providers deterministically | `llm/client.go` | `llm/parity_unified_llm_test.go` | TODO |
 | llm | Unified LLM 3 | `Complete` populates provider and latency on responses | `llm/client.go` | `llm/parity_unified_llm_test.go` | TODO |
 | llm | Unified LLM 3 | `Stream` emits a resolution error event when provider lookup fails | `llm/client.go`, `llm/stream.go` | `llm/parity_unified_llm_test.go` | TODO |
