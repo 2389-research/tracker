@@ -1,0 +1,184 @@
+digraph HumanGateShowcase {
+  graph [
+    goal="Exercise every human gate mode: freeform input, binary choice, multi-choice, default selection, and chained gates.",
+    rankdir=LR,
+    default_max_retry=0,
+    default_fidelity="summary:medium"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit [shape=Msquare, label="Exit"];
+
+  // --- Gate 1: Freeform text input ---
+  FreeformGate [
+    shape=hexagon,
+    label="Tell me something interesting.",
+    mode="freeform"
+  ];
+
+  EchoFreeform [
+    shape=box,
+    label="Echo Freeform Response",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user said something interesting via freeform input. Repeat it back to them and add a brief, witty reaction."
+  ];
+
+  // --- Gate 2: Simple yes/no binary choice ---
+  BinaryGate [
+    shape=hexagon,
+    label="Do you want to continue to the fun part?"
+  ];
+
+  YesPath [
+    shape=box,
+    label="Enthusiasm Check",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user chose to continue. Express excitement and summarize what is coming next: a multi-choice gate followed by a gate with a default."
+  ];
+
+  NoPath [
+    shape=box,
+    label="Early Exit Summary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user chose not to continue. Summarize what gates were tested so far (freeform and binary) and wish them well."
+  ];
+
+  // --- Gate 3: Multi-choice (3+ options) ---
+  MultiChoiceGate [
+    shape=hexagon,
+    label="Pick your favorite color."
+  ];
+
+  RedPath [
+    shape=box,
+    label="Red Commentary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user picked red. Say something fun about the color red."
+  ];
+
+  BluePath [
+    shape=box,
+    label="Blue Commentary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user picked blue. Say something fun about the color blue."
+  ];
+
+  GreenPath [
+    shape=box,
+    label="Green Commentary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user picked green. Say something fun about the color green."
+  ];
+
+  WildcardPath [
+    shape=box,
+    label="Wildcard Commentary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user picked the wildcard option. Invent a color and say something absurd about it."
+  ];
+
+  ColorJoin [shape=tripleoctagon, label="Color Join"];
+
+  // --- Gate 4: Choice with a default ---
+  DefaultGate [
+    shape=hexagon,
+    label="How spicy do you like your food?",
+    default_choice="[M] Medium"
+  ];
+
+  MildPath [
+    shape=box,
+    label="Mild Reaction",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user likes mild food. Gently roast them for their timid palate."
+  ];
+
+  MediumPath [
+    shape=box,
+    label="Medium Reaction",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user likes medium spice (or accepted the default). Acknowledge their balanced approach."
+  ];
+
+  HotPath [
+    shape=box,
+    label="Hot Reaction",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="low",
+    prompt="The user likes hot food. Express awe and respect for their iron stomach."
+  ];
+
+  SpiceJoin [shape=tripleoctagon, label="Spice Join"];
+
+  // --- Gate 5: Second freeform to test chaining ---
+  FinalFreeform [
+    shape=hexagon,
+    label="Any last words before we wrap up?",
+    mode="freeform"
+  ];
+
+  FinalSummary [
+    shape=box,
+    label="Final Summary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    prompt="Summarize the entire journey through all the human gates. Mention what the user said in freeform, which choices they made at each gate, and their final words. Make it feel like a fun recap."
+  ];
+
+  // --- Edges ---
+
+  Start -> FreeformGate;
+  FreeformGate -> EchoFreeform;
+  EchoFreeform -> BinaryGate;
+
+  BinaryGate -> YesPath [label="[Y] Yes"];
+  BinaryGate -> NoPath [label="[N] No"];
+
+  NoPath -> Exit;
+
+  YesPath -> MultiChoiceGate;
+
+  MultiChoiceGate -> RedPath [label="[R] Red"];
+  MultiChoiceGate -> BluePath [label="[B] Blue"];
+  MultiChoiceGate -> GreenPath [label="[G] Green"];
+  MultiChoiceGate -> WildcardPath [label="[W] Wildcard"];
+
+  RedPath -> ColorJoin;
+  BluePath -> ColorJoin;
+  GreenPath -> ColorJoin;
+  WildcardPath -> ColorJoin;
+
+  ColorJoin -> DefaultGate;
+
+  DefaultGate -> MildPath [label="[L] Mild"];
+  DefaultGate -> MediumPath [label="[M] Medium"];
+  DefaultGate -> HotPath [label="[H] Hot"];
+
+  MildPath -> SpiceJoin;
+  MediumPath -> SpiceJoin;
+  HotPath -> SpiceJoin;
+
+  SpiceJoin -> FinalFreeform;
+  FinalFreeform -> FinalSummary;
+  FinalSummary -> Exit;
+}
