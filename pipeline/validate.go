@@ -40,6 +40,7 @@ func Validate(g *Graph) error {
 	validateStartExit(g, ve)
 	validateShapes(g, ve)
 	validateEdgeEndpoints(g, ve)
+	validateExitOutgoingEdges(g, ve)
 	validateReachability(g, ve)
 	validateNoCycles(g, ve)
 
@@ -83,6 +84,15 @@ func validateEdgeEndpoints(g *Graph, ve *ValidationError) {
 		if _, ok := g.Nodes[e.To]; !ok {
 			ve.add(fmt.Sprintf("edge %s->%s references undeclared target node %q", e.From, e.To, e.To))
 		}
+	}
+}
+
+func validateExitOutgoingEdges(g *Graph, ve *ValidationError) {
+	if g.ExitNode == "" {
+		return
+	}
+	if outgoing := g.OutgoingEdges(g.ExitNode); len(outgoing) > 0 {
+		ve.add(fmt.Sprintf("exit node %q must not have outgoing edges", g.ExitNode))
 	}
 }
 

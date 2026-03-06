@@ -12,6 +12,7 @@ var shapeHandlerMap = map[string]string{
 	"component":     "parallel",
 	"tripleoctagon": "parallel.fan_in",
 	"parallelogram": "tool",
+	"house":         "stack.manager_loop",
 	"tab":           "subgraph",
 }
 
@@ -50,7 +51,9 @@ func (g *Graph) AddNode(n *Node) {
 	if n.Attrs == nil {
 		n.Attrs = make(map[string]string)
 	}
-	if handler, ok := ShapeToHandler(n.Shape); ok {
+	if handler := n.Attrs["type"]; handler != "" {
+		n.Handler = handler
+	} else if handler, ok := ShapeToHandler(n.Shape); ok {
 		n.Handler = handler
 	}
 	g.Nodes[n.ID] = n

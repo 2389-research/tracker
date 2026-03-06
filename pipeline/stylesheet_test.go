@@ -135,7 +135,7 @@ func TestResolveStyleNoMatchingRules(t *testing.T) {
 
 func TestResolveStyleMultipleClasses(t *testing.T) {
 	ss, _ := ParseStylesheet(".code { llm_model: claude-opus-4-6; }\n.fast { temperature: 0.1; }")
-	node := &Node{ID: "gen", Attrs: map[string]string{"class": "code fast"}}
+	node := &Node{ID: "gen", Attrs: map[string]string{"class": "code, fast"}}
 	resolved := ss.Resolve(node)
 	if resolved["llm_model"] != "claude-opus-4-6" {
 		t.Errorf("expected .code model")

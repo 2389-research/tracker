@@ -67,16 +67,18 @@ func ParseStylesheet(input string) (*Stylesheet, error) {
 }
 
 // specificityOf returns the specificity rank of a selector.
-// ID selectors (#name) have highest specificity (2), class selectors (.name)
-// are next (1), and the universal selector (*) has the lowest (0).
+// Specificity order is universal < shape < class < ID.
 func specificityOf(selector string) int {
+	if selector == "*" {
+		return 0
+	}
 	if strings.HasPrefix(selector, "#") {
-		return 2
+		return 3
 	}
 	if strings.HasPrefix(selector, ".") {
-		return 1
+		return 2
 	}
-	return 0
+	return 1
 }
 
 // Resolve applies the stylesheet to a node and returns the final resolved
@@ -142,14 +144,18 @@ func ruleMatchesNode(selector string, node *Node, nodeClasses map[string]bool) b
 	if strings.HasPrefix(selector, ".") {
 		return nodeClasses[selector[1:]]
 	}
-	return false
+	return node.Shape == selector
 }
 
 // parseClasses extracts the set of class names from a node's "class" attribute.
 func parseClasses(node *Node) map[string]bool {
 	classes := make(map[string]bool)
 	if classAttr, ok := node.Attrs["class"]; ok {
-		for _, c := range strings.Fields(classAttr) {
+		for _, c := range strings.Split(classAttr, ",") {
+			c = strings.TrimSpace(c)
+			if c == "" {
+				continue
+			}
 			classes[c] = true
 		}
 	}

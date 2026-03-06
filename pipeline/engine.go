@@ -82,6 +82,7 @@ func NewEngine(graph *Graph, registry *HandlerRegistry, opts ...EngineOption) *E
 // Run executes the pipeline to completion or failure.
 func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	runID := generateRunID()
+	nodeOutcomes := make(map[string]string)
 
 	pctx := NewPipelineContext()
 	// Apply initial context values (e.g., from a parent subgraph handler).
@@ -225,6 +226,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		// Store outcome and edge selection hints in context.
 		if outcome.Status != "" {
 			pctx.Set(ContextKeyOutcome, outcome.Status)
+			nodeOutcomes[currentNodeID] = outcome.Status
 		}
 		if outcome.PreferredLabel != "" {
 			pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)
@@ -304,16 +306,6 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				NodeID:    currentNodeID,
 				Message:   fmt.Sprintf("node %q failed", currentNodeID),
 			})
-
-			if isGoalGate(execNode) {
-				trace.AddEntry(traceEntry)
-				trace.EndTime = time.Now()
-				result := e.failResult(runID, cp, pctx)
-				result.Trace = trace
-				return result, nil
-			}
-
-			// Non-goal-gate failure: mark completed and continue.
 			cp.MarkCompleted(currentNodeID)
 
 		case OutcomeSuccess:
@@ -333,6 +325,23 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 		// Check if this is an exit node — pipeline complete.
 		if currentNodeID == e.graph.ExitNode {
+			target, retry, unsatisfied := e.goalGateRetryTarget(cp, nodeOutcomes)
+			if retry {
+				traceEntry.EdgeTo = target
+				trace.AddEntry(traceEntry)
+				e.clearDownstream(target, cp)
+				cp.CurrentNode = target
+				e.saveCheckpoint(cp, pctx, runID)
+				currentNodeID = target
+				continue
+			}
+			if unsatisfied {
+				trace.AddEntry(traceEntry)
+				trace.EndTime = time.Now()
+				result := e.failResult(runID, cp, pctx)
+				result.Trace = trace
+				return result, nil
+			}
 			if outcome.Status == OutcomeFail {
 				trace.AddEntry(traceEntry)
 				trace.EndTime = time.Now()
@@ -562,6 +571,34 @@ func (e *Engine) clearDownstream(startNode string, cp *Checkpoint) {
 			}
 		}
 	}
+}
+
+func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, bool, bool) {
+	for _, nodeID := range cp.CompletedNodes {
+		node := e.graph.Nodes[nodeID]
+		if node == nil || !isGoalGate(node) {
+			continue
+		}
+		status := nodeOutcomes[nodeID]
+		if status == OutcomeSuccess || status == "partial_success" {
+			continue
+		}
+		for _, target := range []string{
+			node.Attrs["retry_target"],
+			node.Attrs["fallback_retry_target"],
+			e.graph.Attrs["retry_target"],
+			e.graph.Attrs["fallback_retry_target"],
+		} {
+			if target == "" {
+				continue
+			}
+			if _, ok := e.graph.Nodes[target]; ok {
+				return target, true, true
+			}
+		}
+		return "", false, true
+	}
+	return "", false, false
 }
 
 // unwrapPathError extracts the underlying error from wrapped checkpoint errors

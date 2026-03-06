@@ -108,6 +108,14 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 }
 
 func resolveVariable(name string, ctx *PipelineContext) string {
-	val, _ := ctx.Get(name)
-	return val
+	if val, ok := ctx.Get(name); ok {
+		return val
+	}
+	if strings.HasPrefix(name, "context.") {
+		trimmed := strings.TrimPrefix(name, "context.")
+		if val, ok := ctx.Get(trimmed); ok {
+			return val
+		}
+	}
+	return ""
 }
