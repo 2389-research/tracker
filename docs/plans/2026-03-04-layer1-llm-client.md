@@ -18,7 +18,7 @@
 
 **Step 1: Initialize Go module**
 
-Run: `go mod init github.com/2389-research/mammoth-lite`
+Run: `go mod init github.com/2389-research/tracker`
 Expected: `go.mod` created
 
 **Step 2: Write the core type definitions (test-first — type compilation test)**
@@ -86,7 +86,7 @@ func TestUsageAddition(t *testing.T) {
 
 **Step 3: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./llm/ -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./llm/ -v`
 Expected: FAIL — types not defined yet
 
 **Step 4: Implement core types**
@@ -395,7 +395,7 @@ func (r Response) Reasoning() string {
 
 **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./llm/ -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./llm/ -v`
 Expected: PASS
 
 **Step 6: Commit**
@@ -1611,7 +1611,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestTranslateRequest(t *testing.T) {
@@ -1765,7 +1765,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // translateRequest converts a unified Request into Anthropic Messages API JSON.
@@ -2141,7 +2141,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 const (

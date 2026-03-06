@@ -623,8 +623,8 @@ func handleEvents(stdout, stderr io.Writer) int {
 	if err != nil {
 		// If no API keys available, emit synthetic events to satisfy conformance.
 		enc := json.NewEncoder(stdout)
-		enc.Encode(map[string]interface{}{"type": "session_start", "session_id": "conformance-test"})
-		enc.Encode(map[string]interface{}{"type": "session_end", "session_id": "conformance-test"})
+		enc.Encode(map[string]interface{}{"type": "session_start", "session_id": "tracker-conformance-test"})
+		enc.Encode(map[string]interface{}{"type": "session_end", "session_id": "tracker-conformance-test"})
 		return 0
 	}
 	defer client.Close()
@@ -658,7 +658,7 @@ func handleEvents(stdout, stderr io.Writer) int {
 // handleParse parses a DOT file and writes its graph AST as JSON.
 func handleParse(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 3 {
-		writeJSON(stdout, map[string]string{"error": "usage: conformance parse <dotfile>"})
+		writeJSON(stdout, map[string]string{"error": "usage: tracker-conformance parse <dotfile>"})
 		return 1
 	}
 	dotFile := args[2]
@@ -731,7 +731,7 @@ func handleParse(args []string, stdout, stderr io.Writer) int {
 // handleValidate validates a DOT file and writes diagnostics as JSON.
 func handleValidate(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 3 {
-		writeJSON(stdout, map[string]string{"error": "usage: conformance validate <dotfile>"})
+		writeJSON(stdout, map[string]string{"error": "usage: tracker-conformance validate <dotfile>"})
 		return 1
 	}
 	dotFile := args[2]
@@ -788,7 +788,7 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 // handleRun executes a pipeline DOT file and writes the result.
 func handleRun(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 3 {
-		writeJSON(stdout, map[string]string{"error": "usage: conformance run <dotfile>"})
+		writeJSON(stdout, map[string]string{"error": "usage: tracker-conformance run <dotfile>"})
 		return 1
 	}
 	dotFile := args[2]
@@ -942,7 +942,7 @@ func handleListModels(stdout, stderr io.Writer) int {
 }
 
 // buildConstructors returns the provider constructor map matching the pattern
-// used in cmd/mammoth/main.go.
+// used in cmd/tracker/main.go.
 func buildConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
 	return map[string]func(string) (llm.ProviderAdapter, error){
 		"anthropic": func(key string) (llm.ProviderAdapter, error) {

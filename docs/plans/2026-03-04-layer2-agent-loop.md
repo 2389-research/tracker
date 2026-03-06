@@ -6,7 +6,7 @@
 
 **Architecture:** Session-based agentic loop using Layer 1's `llm.Client`. Each turn calls `Complete()`, inspects the response for tool calls, executes them via a tool registry, appends results, and loops until the model produces a text-only response. An event emitter provides real-time visibility into session progress for UIs and loggers.
 
-**Tech Stack:** Go standard library only. Depends on Layer 1 (`github.com/2389-research/mammoth-lite/llm`).
+**Tech Stack:** Go standard library only. Depends on Layer 1 (`github.com/2389-research/tracker/llm`).
 
 ---
 
@@ -723,7 +723,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestResultString(t *testing.T) {
@@ -786,7 +786,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // SessionResult is the outcome of a completed agent session.
@@ -890,7 +890,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // stubTool is a minimal Tool for testing.
@@ -1006,7 +1006,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // Tool is the interface that all agent tools implement.
@@ -1133,7 +1133,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 func TestReadToolExecute(t *testing.T) {
@@ -1199,7 +1199,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 // ReadTool reads file contents.
@@ -1280,7 +1280,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 func TestWriteToolExecute(t *testing.T) {
@@ -1350,7 +1350,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 // WriteTool writes content to a file.
@@ -1443,7 +1443,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 func TestEditToolReplace(t *testing.T) {
@@ -1550,7 +1550,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 // EditTool performs search/replace edits on files.
@@ -1683,7 +1683,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 func TestBashToolExecute(t *testing.T) {
@@ -1770,7 +1770,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 // BashTool executes shell commands.
@@ -1901,7 +1901,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 func TestGlobToolExecute(t *testing.T) {
@@ -1971,7 +1971,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
+	"github.com/2389-research/tracker/agent/exec"
 )
 
 // GlobTool searches for files by pattern.
@@ -2062,7 +2062,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/llm"
 )
 
 // mockCompleter is a mock llm.Client for testing the agentic loop.
@@ -2271,9 +2271,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/agent/tools"
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/agent/tools"
+	"github.com/2389-research/tracker/llm"
 )
 
 // Completer is the interface needed from the LLM client.
@@ -2506,8 +2506,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestIntegrationReadWriteFlow(t *testing.T) {

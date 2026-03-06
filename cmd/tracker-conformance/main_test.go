@@ -498,7 +498,7 @@ func TestFormatStreamEventFinish(t *testing.T) {
 func TestCompleteSubcommandBadJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	stdin := strings.NewReader("not valid json")
-	code := run([]string{"conformance", "complete"}, stdin, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "complete"}, stdin, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
@@ -516,7 +516,7 @@ func TestCompleteSubcommandBadJSON(t *testing.T) {
 func TestStreamSubcommandBadJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	stdin := strings.NewReader("{invalid")
-	code := run([]string{"conformance", "stream"}, stdin, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "stream"}, stdin, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
@@ -526,7 +526,7 @@ func TestStreamSubcommandBadJSON(t *testing.T) {
 func TestToolCallSubcommandBadJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	stdin := strings.NewReader("xxx")
-	code := run([]string{"conformance", "tool-call"}, stdin, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "tool-call"}, stdin, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
@@ -536,7 +536,7 @@ func TestToolCallSubcommandBadJSON(t *testing.T) {
 func TestGenerateObjectSubcommandBadJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	stdin := strings.NewReader("yyy")
-	code := run([]string{"conformance", "generate-object"}, stdin, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "generate-object"}, stdin, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
@@ -552,7 +552,7 @@ func TestCompleteSubcommandNoAPIKey(t *testing.T) {
 
 	input := `{"model": "gpt-4o", "provider": "openai", "messages": [{"role": "user", "content": "Hi"}]}`
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "complete"}, strings.NewReader(input), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "complete"}, strings.NewReader(input), &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 when no API keys, got %d", code)
@@ -600,7 +600,7 @@ func TestSessionCreateNoAPIKey(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "session-create"}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "session-create"}, nil, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 when no API keys, got %d", code)
@@ -622,7 +622,7 @@ func TestSessionCreateWithKey(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "session-create"}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "session-create"}, nil, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
@@ -647,7 +647,7 @@ func TestSessionCreateWithKey(t *testing.T) {
 func TestToolDispatchUnknownTool(t *testing.T) {
 	input := `{"tool_name": "nonexistent_tool", "arguments": {}}`
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "tool-dispatch"}, strings.NewReader(input), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "tool-dispatch"}, strings.NewReader(input), &stdout, &stderr)
 
 	// Should exit 0 (graceful error, not crash).
 	if code != 0 {
@@ -670,7 +670,7 @@ func TestToolDispatchUnknownTool(t *testing.T) {
 
 func TestToolDispatchBadJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "tool-dispatch"}, strings.NewReader("not json"), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "tool-dispatch"}, strings.NewReader("not json"), &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
@@ -695,7 +695,7 @@ func TestToolDispatchApplyPatch(t *testing.T) {
 
 	input := `{"tool_name":"apply_patch","arguments":{"patch":"*** Begin Patch\n*** Update File: code.txt\n@@\n-before\n+after\n*** End Patch\n"}}`
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "tool-dispatch"}, strings.NewReader(input), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "tool-dispatch"}, strings.NewReader(input), &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; stdout: %s; stderr: %s", code, stdout.String(), stderr.String())
@@ -721,7 +721,7 @@ func TestToolDispatchApplyPatch(t *testing.T) {
 func TestSteeringAcknowledgment(t *testing.T) {
 	input := `{"message": "focus on error handling"}`
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "steering"}, strings.NewReader(input), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "steering"}, strings.NewReader(input), &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d", code)
@@ -745,7 +745,7 @@ func TestSteeringAcknowledgment(t *testing.T) {
 
 func TestSteeringBadJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "steering"}, strings.NewReader("bad"), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "steering"}, strings.NewReader("bad"), &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
@@ -760,7 +760,7 @@ func TestEventsOutputFormat(t *testing.T) {
 	t.Setenv("GOOGLE_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "events"}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "events"}, nil, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
@@ -786,7 +786,7 @@ func TestEventsOutputFormat(t *testing.T) {
 
 func TestProcessInputBadJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "process-input"}, strings.NewReader("zzz"), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "process-input"}, strings.NewReader("zzz"), &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
@@ -809,7 +809,7 @@ func TestProcessInputNoAPIKey(t *testing.T) {
 
 	input := `{"prompt": "Say hello", "model": "gpt-4o", "provider": "openai"}`
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "process-input"}, strings.NewReader(input), &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "process-input"}, strings.NewReader(input), &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 when no API keys, got %d", code)
@@ -821,7 +821,7 @@ func TestProcessInputNoAPIKey(t *testing.T) {
 func TestParseSimpleDOT(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	dotFile := "../../pipeline/testdata/simple.dot"
-	code := run([]string{"conformance", "parse", dotFile}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "parse", dotFile}, nil, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s; stdout: %s", code, stderr.String(), stdout.String())
@@ -862,7 +862,7 @@ func TestParseSimpleDOT(t *testing.T) {
 
 func TestParseMissingFile(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "parse", "/nonexistent/file.dot"}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "parse", "/nonexistent/file.dot"}, nil, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for missing file, got %d", code)
@@ -871,7 +871,7 @@ func TestParseMissingFile(t *testing.T) {
 
 func TestParseNoArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "parse"}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "parse"}, nil, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for no file arg, got %d", code)
@@ -881,7 +881,7 @@ func TestParseNoArgs(t *testing.T) {
 func TestValidateSimpleDOT(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	dotFile := "../../pipeline/testdata/simple.dot"
-	code := run([]string{"conformance", "validate", dotFile}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "validate", dotFile}, nil, &stdout, &stderr)
 
 	// Should always exit 0, even on errors (diagnostics carry the info).
 	if code != 0 {
@@ -907,7 +907,7 @@ func TestValidateSimpleDOT(t *testing.T) {
 func TestValidateInvalidDOT(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	dotFile := "../../pipeline/testdata/cycle.dot"
-	code := run([]string{"conformance", "validate", dotFile}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "validate", dotFile}, nil, &stdout, &stderr)
 
 	// Should always exit 0.
 	if code != 0 {
@@ -943,7 +943,7 @@ func TestValidateInvalidDOT(t *testing.T) {
 
 func TestListHandlers(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "list-handlers"}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "list-handlers"}, nil, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
@@ -974,7 +974,7 @@ func TestListHandlers(t *testing.T) {
 
 func TestRunNoArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"conformance", "run"}, nil, &stdout, &stderr)
+	code := run([]string{"tracker-conformance", "run"}, nil, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for no file arg, got %d", code)

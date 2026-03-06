@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Bring `mammoth-lite` to strict parity with StrongDM's published `attractor`, `coding-agent-loop`, and `unified-llm` specs.
+**Goal:** Bring `tracker` to strict parity with StrongDM's published `attractor`, `coding-agent-loop`, and `unified-llm` specs.
 
 **Architecture:** Use a spec-first parity program. Add failing conformance tests that encode upstream requirements, then change the local pipeline, agent, and LLM layers in small slices until those tests pass. Keep package boundaries where they already fit, but replace local behavior anywhere it diverges from the published StrongDM semantics.
 
@@ -539,9 +539,9 @@ git commit -m "fix: align unified LLM behavior with spec"
 ### Task 12: Run End-to-End Conformance and Tighten CLI Coverage
 
 **Files:**
-- Modify: `cmd/mammoth/main.go`
-- Modify: `cmd/conformance/main.go`
-- Modify: `cmd/conformance/main_test.go`
+- Modify: `cmd/tracker/main.go`
+- Modify: `cmd/tracker-conformance/main.go`
+- Modify: `cmd/tracker-conformance/main_test.go`
 - Modify: `pipeline/handlers/integration_test.go`
 - Modify: `agent/integration_test.go`
 - Modify: `llm/integration_test.go`
@@ -567,7 +567,7 @@ Change each completed row from `TODO` to `PASS` or a clearly named residual gap 
 **Step 4: Commit**
 
 ```bash
-git add cmd/mammoth/main.go cmd/conformance/main.go cmd/conformance/main_test.go pipeline/handlers/integration_test.go agent/integration_test.go llm/integration_test.go docs/plans/2026-03-06-strongdm-parity-matrix.md
+git add cmd/tracker/main.go cmd/tracker-conformance/main.go cmd/tracker-conformance/main_test.go pipeline/handlers/integration_test.go agent/integration_test.go llm/integration_test.go docs/plans/2026-03-06-strongdm-parity-matrix.md
 git commit -m "test: run StrongDM parity conformance end to end"
 ```
 

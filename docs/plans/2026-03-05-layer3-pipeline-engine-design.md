@@ -240,8 +240,8 @@ Specificity: universal `*` < class `.name` < ID `#name`. Explicit node attribute
 ## Dependencies
 
 - `github.com/awalterschulze/gographviz` — DOT parsing
-- `github.com/2389-research/mammoth-lite/agent` — Layer 2 agent sessions
-- `github.com/2389-research/mammoth-lite/llm` — Layer 1 LLM client (via agent)
+- `github.com/2389-research/tracker/agent` — Layer 2 agent sessions
+- `github.com/2389-research/tracker/llm` — Layer 1 LLM client (via agent)
 
 ## Build Order
 

@@ -4,7 +4,7 @@
 
 ## Goal
 
-Bring `mammoth-lite` to strict parity with StrongDM's published specs for:
+Bring `tracker` to strict parity with StrongDM's published specs for:
 
 - `attractor-spec.md`
 - `coding-agent-loop-spec.md`

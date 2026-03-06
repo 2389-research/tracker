@@ -373,7 +373,7 @@ func translateFinishReason(reason string, hasFunctionCalls bool) llm.FinishReaso
 func syntheticID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		panic("mammoth-lite: crypto/rand.Read failed: " + err.Error())
+		panic("tracker: crypto/rand.Read failed: " + err.Error())
 	}
 	return "call_" + hex.EncodeToString(b)
 }

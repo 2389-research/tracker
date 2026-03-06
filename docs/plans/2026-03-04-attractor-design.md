@@ -1,19 +1,19 @@
-# mammoth-lite: Go Implementation of Attractor
+# tracker: Go Implementation of Attractor
 
 ## Overview
 
 Go implementation of the [strongdm/attractor](https://github.com/strongdm/attractor) framework — a three-layer system for building AI-powered software factories.
 
-**Module path:** `github.com/2389-research/mammoth-lite`
+**Module path:** `github.com/2389-research/tracker`
 
 ## Architecture: Monorepo with Internal Packages
 
 Single `go.mod`, three internal packages mirroring the three spec layers. Built bottom-up: LLM Client → Agent Loop → Pipeline Engine.
 
 ```
-mammoth-lite/
+tracker/
 ├── cmd/
-│   └── mammoth/              # CLI entrypoint (run, validate, agent, ask)
+│   └── tracker/              # CLI entrypoint (run, validate, agent, ask)
 │       └── main.go
 ├── llm/                      # Layer 1: Unified LLM Client
 │   ├── client.go             # Client struct, routing, middleware
@@ -209,10 +209,10 @@ Built with `bubbletea` + `lipgloss`. Shows:
 ## CLI Interface
 
 ```bash
-mammoth run workflow.dot          # Run pipeline (add --tui for TUI mode)
-mammoth validate workflow.dot     # Validate DOT file
-mammoth agent "Fix the login bug" # One-shot agent task
-mammoth ask "What is 2+2?"        # Direct LLM query
+tracker run workflow.dot          # Run pipeline (add --tui for TUI mode)
+tracker validate workflow.dot     # Validate DOT file
+tracker agent "Fix the login bug" # One-shot agent task
+tracker ask "What is 2+2?"        # Direct LLM query
 ```
 
 ## Error Handling

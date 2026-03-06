@@ -226,7 +226,7 @@ func TestGraphIncomingEdges(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestNewGraph -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestNewGraph -v`
 Expected: FAIL — package doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -347,19 +347,19 @@ type Edge struct {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestNewGraph -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestNewGraph -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestGraph -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestGraph -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestShapeToHandler -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestShapeToHandler -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/graph.go pipeline/graph_test.go && git commit -m "feat(pipeline): add graph model with node, edge, and shape mapping"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/graph.go pipeline/graph_test.go && git commit -m "feat(pipeline): add graph model with node, edge, and shape mapping"
 ```
 
 ---
@@ -377,7 +377,7 @@ Parse DOT files using gographviz into our Graph model. Requires `go get github.c
 **Step 0: Install dependency**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && go get github.com/awalterschulze/gographviz
+cd /Users/harper/Public/src/2389/tracker && go get github.com/awalterschulze/gographviz
 ```
 
 **Step 1: Write the failing test**
@@ -575,7 +575,7 @@ func TestParseEmptyDOT(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestParse -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestParse -v`
 Expected: FAIL — ParseDOT doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -677,13 +677,13 @@ func cleanQuotes(s string) string {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestParse -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestParse -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/parser.go pipeline/parser_test.go pipeline/testdata/ && git commit -m "feat(pipeline): add DOT parser using gographviz"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/parser.go pipeline/parser_test.go pipeline/testdata/ && git commit -m "feat(pipeline): add DOT parser using gographviz"
 ```
 
 ---
@@ -876,7 +876,7 @@ func TestValidateEmptyGraph(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestValidate -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestValidate -v`
 Expected: FAIL — Validate doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -1036,13 +1036,13 @@ func validateNoCycles(g *Graph, ve *ValidationError) {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestValidate -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestValidate -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/validate.go pipeline/validate_test.go pipeline/testdata/cycle.dot && git commit -m "feat(pipeline): add graph validator with cycle detection and reachability"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/validate.go pipeline/validate_test.go pipeline/testdata/cycle.dot && git commit -m "feat(pipeline): add graph validator with cycle detection and reachability"
 ```
 
 ---
@@ -1203,7 +1203,7 @@ func TestContextSetInternal(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestContext -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestContext -v`
 Expected: FAIL — NewPipelineContext doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -1304,13 +1304,13 @@ func (c *PipelineContext) SetInternal(key, value string) {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestContext -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestContext -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/context.go pipeline/context_test.go && git commit -m "feat(pipeline): add thread-safe pipeline context with internal namespace"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/context.go pipeline/context_test.go && git commit -m "feat(pipeline): add thread-safe pipeline context with internal namespace"
 ```
 
 ---
@@ -1500,7 +1500,7 @@ func TestConditionWithSpaces(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestCondition -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestCondition -v`
 Expected: FAIL — EvaluateCondition doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -1569,13 +1569,13 @@ func resolveVariable(name string, ctx *PipelineContext) string {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestCondition -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestCondition -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/condition.go pipeline/condition_test.go && git commit -m "feat(pipeline): add condition evaluator for edge gating expressions"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/condition.go pipeline/condition_test.go && git commit -m "feat(pipeline): add condition evaluator for edge gating expressions"
 ```
 
 ---
@@ -1689,7 +1689,7 @@ func TestPipelineEventFields(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestPipeline -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestPipeline -v`
 Expected: FAIL — PipelineEventType doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -1767,13 +1767,13 @@ func (m pipelineMultiHandler) HandlePipelineEvent(evt PipelineEvent) {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestPipeline -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestPipeline -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/events.go pipeline/events_test.go && git commit -m "feat(pipeline): add pipeline event types and handler interface"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/events.go pipeline/events_test.go && git commit -m "feat(pipeline): add pipeline event types and handler interface"
 ```
 
 ---
@@ -1923,10 +1923,10 @@ func TestHandlerRegistryOverwrite(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestHandler -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestHandler -v`
 Expected: FAIL — Handler interface doesn't exist yet
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestOutcome -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestOutcome -v`
 Expected: FAIL
 
 **Step 3: Write minimal implementation**
@@ -1997,16 +1997,16 @@ func (r *HandlerRegistry) Execute(ctx context.Context, node *Node, pctx *Pipelin
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestHandler -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestHandler -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestOutcome -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestOutcome -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/handler.go pipeline/handler_test.go && git commit -m "feat(pipeline): add handler interface and registry for node execution"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/handler.go pipeline/handler_test.go && git commit -m "feat(pipeline): add handler interface and registry for node execution"
 ```
 
 ---
@@ -2037,7 +2037,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestStartHandlerName(t *testing.T) {
@@ -2072,7 +2072,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestExitHandlerName(t *testing.T) {
@@ -2107,7 +2107,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestConditionalHandlerName(t *testing.T) {
@@ -2144,8 +2144,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestToolHandlerName(t *testing.T) {
@@ -2285,7 +2285,7 @@ func TestToolHandlerDefaultTimeout(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestStart -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestStart -v`
 Expected: FAIL — package doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -2299,7 +2299,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // StartHandler handles the start node (Mdiamond shape).
@@ -2327,7 +2327,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // ExitHandler handles the exit node (Msquare shape).
@@ -2355,7 +2355,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // ConditionalHandler handles conditional routing nodes (diamond shape).
@@ -2386,8 +2386,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 const defaultToolTimeout = 30 * time.Second
@@ -2450,22 +2450,22 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestStart -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestStart -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestExit -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestExit -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestConditional -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestConditional -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestTool -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestTool -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/handlers/ && git commit -m "feat(pipeline): add start, exit, conditional, and tool handlers"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/handlers/ && git commit -m "feat(pipeline): add start, exit, conditional, and tool handlers"
 ```
 
 ---
@@ -2490,7 +2490,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestAutoApproveInterviewer(t *testing.T) {
@@ -2635,10 +2635,10 @@ func TestHumanHandlerPassesLabelAsPrompt(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestHuman -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestHuman -v`
 Expected: FAIL
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestAutoApprove -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestAutoApprove -v`
 Expected: FAIL
 
 **Step 3: Write minimal implementation**
@@ -2657,7 +2657,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // Interviewer is the interface for presenting choices to a human and collecting a response.
@@ -2791,16 +2791,16 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestHuman -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestHuman -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestAutoApprove -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestAutoApprove -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/handlers/human.go pipeline/handlers/human_test.go && git commit -m "feat(pipeline): add human gate handler with interviewer interface"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/handlers/human.go pipeline/handlers/human_test.go && git commit -m "feat(pipeline): add human gate handler with interviewer interface"
 ```
 
 ---
@@ -2825,8 +2825,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/2389-research/mammoth-lite/llm"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // fakeCompleter implements agent.Completer for testing the codergen handler.
@@ -3037,7 +3037,7 @@ func TestCodergenHandlerSystemPrompt(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestCodergen -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestCodergen -v`
 Expected: FAIL — NewCodergenHandler doesn't exist yet
 
 **Step 3: Write minimal implementation**
@@ -3054,9 +3054,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/mammoth-lite/agent"
-	"github.com/2389-research/mammoth-lite/agent/exec"
-	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // CodergenHandler invokes a Layer 2 agent session for LLM-driven code generation tasks.
@@ -3172,13 +3172,13 @@ func parseAutoStatus(text string) string {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -run TestCodergen -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -run TestCodergen -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/handlers/codergen.go pipeline/handlers/codergen_test.go && git commit -m "feat(pipeline): add codergen handler integrating Layer 2 agent sessions"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/handlers/codergen.go pipeline/handlers/codergen_test.go && git commit -m "feat(pipeline): add codergen handler integrating Layer 2 agent sessions"
 ```
 
 ---
@@ -3396,13 +3396,13 @@ func TestResolveStyleMultipleClasses(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestParseStylesheet -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestParseStylesheet -v`
 Expected: FAIL — ParseStylesheet doesn't exist yet
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestResolveStyle -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestResolveStyle -v`
 Expected: FAIL
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestStylesheet -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestStylesheet -v`
 Expected: FAIL
 
 **Step 3: Write minimal implementation**
@@ -3583,19 +3583,19 @@ func parseClasses(node *Node) map[string]bool {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestParseStylesheet -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestParseStylesheet -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestResolveStyle -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestResolveStyle -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestStylesheet -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestStylesheet -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/stylesheet.go pipeline/stylesheet_test.go && git commit -m "feat(pipeline): add CSS-like model stylesheet with specificity resolution"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/stylesheet.go pipeline/stylesheet_test.go && git commit -m "feat(pipeline): add CSS-like model stylesheet with specificity resolution"
 ```
 
 ---
@@ -4253,10 +4253,10 @@ func TestEngineNoEdgesFromNode(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestCheckpoint -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestCheckpoint -v`
 Expected: FAIL — Checkpoint types don't exist yet
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestEngine -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestEngine -v`
 Expected: FAIL — Engine types don't exist yet
 
 **Step 3: Write minimal implementation**
@@ -4792,19 +4792,19 @@ func generateRunID() string {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestCheckpoint -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestCheckpoint -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -run TestEngine -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -run TestEngine -v`
 Expected: PASS
 
-Run: `cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -v`
+Run: `cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -v`
 Expected: ALL PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/checkpoint.go pipeline/checkpoint_test.go pipeline/engine.go pipeline/engine_test.go && git commit -m "feat(pipeline): add execution engine with edge selection, retries, goal gates, and checkpoint"
+cd /Users/harper/Public/src/2389/tracker && git add pipeline/checkpoint.go pipeline/checkpoint_test.go pipeline/engine.go pipeline/engine_test.go && git commit -m "feat(pipeline): add execution engine with edge selection, retries, goal gates, and checkpoint"
 ```
 
 ---
@@ -4814,8 +4814,8 @@ cd /Users/harper/Public/src/2389/mammoth-lite && git add pipeline/checkpoint.go 
 After all 12 tasks are complete, run the full test suite to verify everything works together:
 
 ```bash
-cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/... -v -count=1
-cd /Users/harper/Public/src/2389/mammoth-lite && go test ./pipeline/handlers/... -v -count=1
+cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/... -v -count=1
+cd /Users/harper/Public/src/2389/tracker && go test ./pipeline/handlers/... -v -count=1
 ```
 
 Both commands should report all tests passing.
