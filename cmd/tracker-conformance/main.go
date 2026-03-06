@@ -131,7 +131,7 @@ func (m *benchMessage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// benchRequest is the JSON request format sent by the conformance bench.
+// benchRequest is the JSON request format sent by the benchmark harness.
 type benchRequest struct {
 	Model          string               `json:"model"`
 	Provider       string               `json:"provider"`
@@ -621,7 +621,7 @@ func (c *eventCollector) HandleEvent(evt agent.Event) {
 func handleEvents(stdout, stderr io.Writer) int {
 	client, err := createClient()
 	if err != nil {
-		// If no API keys available, emit synthetic events to satisfy conformance.
+		// If no API keys are available, emit synthetic events to satisfy the benchmark harness.
 		enc := json.NewEncoder(stdout)
 		enc.Encode(map[string]interface{}{"type": "session_start", "session_id": "tracker-conformance-test"})
 		enc.Encode(map[string]interface{}{"type": "session_end", "session_id": "tracker-conformance-test"})
