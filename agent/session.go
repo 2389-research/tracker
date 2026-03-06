@@ -68,6 +68,11 @@ type Session struct {
 	ran           bool
 }
 
+// ID returns the session's unique identifier.
+func (s *Session) ID() string {
+	return s.id
+}
+
 // NewSession creates a new agent session with the given LLM client, config, and options.
 // Returns an error if the config is invalid.
 func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (*Session, error) {

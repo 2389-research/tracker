@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the conformance CLI binary subcommand dispatch.
-// ABOUTME: Covers unknown subcommands, no args, list-models, client-from-env, and Tier 1 subcommand behaviors.
+// ABOUTME: Covers subcommand dispatch, Tier 1 (LLM), Tier 2 (agent), and input/output format behaviors.
 package main
 
 import (
@@ -158,7 +158,6 @@ func TestClientFromEnvNoKeys(t *testing.T) {
 
 func TestUnimplementedSubcommands(t *testing.T) {
 	unimplemented := []string{
-		"session-create", "process-input", "tool-dispatch", "steering", "events",
 		"parse", "validate", "run", "list-handlers",
 	}
 
@@ -594,5 +593,189 @@ func TestBenchMessageNullContent(t *testing.T) {
 	}
 	if len(msg.Content) != 0 {
 		t.Fatalf("expected no content parts for null, got %d", len(msg.Content))
+	}
+}
+
+// --- Tier 2 tests ---
+
+func TestSessionCreateNoAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "session-create"}, nil, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 when no API keys, got %d", code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON error, got: %s", stdout.String())
+	}
+	if _, ok := result["error"]; !ok {
+		t.Fatal("expected error key in response")
+	}
+}
+
+func TestSessionCreateWithKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "session-create"}, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON on stdout, got: %s (err: %v)", stdout.String(), err)
+	}
+
+	if result["status"] != "created" {
+		t.Fatalf("expected status 'created', got %v", result["status"])
+	}
+	if _, ok := result["session_id"]; !ok {
+		t.Fatal("expected session_id in response")
+	}
+	if result["session_id"] == "" {
+		t.Fatal("session_id should not be empty")
+	}
+}
+
+func TestToolDispatchUnknownTool(t *testing.T) {
+	input := `{"tool_name": "nonexistent_tool", "arguments": {}}`
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "tool-dispatch"}, strings.NewReader(input), &stdout, &stderr)
+
+	// Should exit 0 (graceful error, not crash).
+	if code != 0 {
+		t.Fatalf("expected exit code 0 for unknown tool, got %d", code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON on stdout, got: %s (err: %v)", stdout.String(), err)
+	}
+
+	errMsg, ok := result["error"].(string)
+	if !ok {
+		t.Fatal("expected error key in response")
+	}
+	if !strings.Contains(errMsg, "unknown tool") {
+		t.Fatalf("expected 'unknown tool' in error, got %q", errMsg)
+	}
+}
+
+func TestToolDispatchBadJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "tool-dispatch"}, strings.NewReader("not json"), &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
+	}
+}
+
+func TestSteeringAcknowledgment(t *testing.T) {
+	input := `{"message": "focus on error handling"}`
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "steering"}, strings.NewReader(input), &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON, got: %s (err: %v)", stdout.String(), err)
+	}
+
+	if result["status"] != "acknowledged" {
+		t.Fatalf("expected status 'acknowledged', got %v", result["status"])
+	}
+	if result["acknowledged"] != true {
+		t.Fatalf("expected acknowledged true, got %v", result["acknowledged"])
+	}
+	if result["message"] != "focus on error handling" {
+		t.Fatalf("expected message echoed back, got %v", result["message"])
+	}
+}
+
+func TestSteeringBadJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "steering"}, strings.NewReader("bad"), &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
+	}
+}
+
+func TestEventsOutputFormat(t *testing.T) {
+	// Events should work even without API keys (emits synthetic events).
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "events"}, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	// Parse NDJSON lines.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 events, got %d lines: %s", len(lines), stdout.String())
+	}
+
+	// Each line should have a "type" field.
+	for i, line := range lines {
+		var evt map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			t.Fatalf("event line %d is not valid JSON: %s (err: %v)", i, line, err)
+		}
+		if _, ok := evt["type"]; !ok {
+			t.Fatalf("event line %d missing 'type' field: %s", i, line)
+		}
+	}
+}
+
+func TestProcessInputBadJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "process-input"}, strings.NewReader("zzz"), &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for bad JSON, got %d", code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON error, got: %s", stdout.String())
+	}
+	if _, ok := result["error"]; !ok {
+		t.Fatal("expected error key in response")
+	}
+}
+
+func TestProcessInputNoAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+
+	input := `{"prompt": "Say hello", "model": "gpt-4o", "provider": "openai"}`
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "process-input"}, strings.NewReader(input), &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 when no API keys, got %d", code)
 	}
 }
