@@ -156,30 +156,20 @@ func TestClientFromEnvNoKeys(t *testing.T) {
 	}
 }
 
-func TestUnimplementedSubcommands(t *testing.T) {
-	unimplemented := []string{
-		"parse", "validate", "run", "list-handlers",
+func TestUnknownSubcommandNotImplemented(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "totally-fake"}, nil, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for unknown command, got %d", code)
 	}
 
-	for _, cmd := range unimplemented {
-		t.Run(cmd, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			code := run([]string{"conformance", cmd}, nil, &stdout, &stderr)
-
-			if code != 1 {
-				t.Fatalf("expected exit code 1 for unimplemented %q, got %d", cmd, code)
-			}
-
-			var result map[string]interface{}
-			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-				t.Fatalf("expected JSON for %q, got: %s (err: %v)", cmd, stdout.String(), err)
-			}
-
-			expected := "not implemented: " + cmd
-			if result["error"] != expected {
-				t.Fatalf("expected error %q, got %q", expected, result["error"])
-			}
-		})
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON, got: %s (err: %v)", stdout.String(), err)
+	}
+	if result["error"] != "not implemented: totally-fake" {
+		t.Fatalf("unexpected error: %v", result["error"])
 	}
 }
 
@@ -777,5 +767,170 @@ func TestProcessInputNoAPIKey(t *testing.T) {
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 when no API keys, got %d", code)
+	}
+}
+
+// --- Tier 3 tests ---
+
+func TestParseSimpleDOT(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	dotFile := "../../pipeline/testdata/simple.dot"
+	code := run([]string{"conformance", "parse", dotFile}, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s; stdout: %s", code, stderr.String(), stdout.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON, got: %s (err: %v)", stdout.String(), err)
+	}
+
+	nodes, ok := result["nodes"].([]interface{})
+	if !ok {
+		t.Fatalf("expected nodes array, got %T", result["nodes"])
+	}
+	if len(nodes) == 0 {
+		t.Fatal("expected at least one node")
+	}
+
+	edges, ok := result["edges"].([]interface{})
+	if !ok {
+		t.Fatalf("expected edges array, got %T", result["edges"])
+	}
+	if len(edges) == 0 {
+		t.Fatal("expected at least one edge")
+	}
+
+	// Check nodes have required fields.
+	for i, n := range nodes {
+		node := n.(map[string]interface{})
+		if _, ok := node["id"]; !ok {
+			t.Fatalf("node %d missing 'id'", i)
+		}
+		if _, ok := node["shape"]; !ok {
+			t.Fatalf("node %d missing 'shape'", i)
+		}
+	}
+}
+
+func TestParseMissingFile(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "parse", "/nonexistent/file.dot"}, nil, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for missing file, got %d", code)
+	}
+}
+
+func TestParseNoArgs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "parse"}, nil, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for no file arg, got %d", code)
+	}
+}
+
+func TestValidateSimpleDOT(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	dotFile := "../../pipeline/testdata/simple.dot"
+	code := run([]string{"conformance", "validate", dotFile}, nil, &stdout, &stderr)
+
+	// Should always exit 0, even on errors (diagnostics carry the info).
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON, got: %s (err: %v)", stdout.String(), err)
+	}
+
+	diagnostics, ok := result["diagnostics"].([]interface{})
+	if !ok {
+		t.Fatalf("expected diagnostics array, got %T", result["diagnostics"])
+	}
+
+	// simple.dot should be valid (no diagnostics).
+	if len(diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics for valid file, got %d", len(diagnostics))
+	}
+}
+
+func TestValidateInvalidDOT(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	dotFile := "../../pipeline/testdata/cycle.dot"
+	code := run([]string{"conformance", "validate", dotFile}, nil, &stdout, &stderr)
+
+	// Should always exit 0.
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON, got: %s (err: %v)", stdout.String(), err)
+	}
+
+	diagnostics, ok := result["diagnostics"].([]interface{})
+	if !ok {
+		t.Fatalf("expected diagnostics array, got %T", result["diagnostics"])
+	}
+
+	// cycle.dot should have validation errors.
+	if len(diagnostics) == 0 {
+		t.Fatal("expected diagnostics for invalid file")
+	}
+
+	// Each diagnostic should have severity and message.
+	for i, d := range diagnostics {
+		diag := d.(map[string]interface{})
+		if _, ok := diag["severity"]; !ok {
+			t.Fatalf("diagnostic %d missing 'severity'", i)
+		}
+		if _, ok := diag["message"]; !ok {
+			t.Fatalf("diagnostic %d missing 'message'", i)
+		}
+	}
+}
+
+func TestListHandlers(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "list-handlers"}, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var handlerList []string
+	if err := json.Unmarshal(stdout.Bytes(), &handlerList); err != nil {
+		t.Fatalf("expected JSON array of strings, got: %s (err: %v)", stdout.String(), err)
+	}
+
+	if len(handlerList) == 0 {
+		t.Fatal("expected at least one handler")
+	}
+
+	// Check for required handlers.
+	handlerSet := make(map[string]bool)
+	for _, h := range handlerList {
+		handlerSet[h] = true
+	}
+
+	required := []string{"start", "codergen", "exit"}
+	for _, r := range required {
+		if !handlerSet[r] {
+			t.Errorf("expected handler %q in list", r)
+		}
+	}
+}
+
+func TestRunNoArgs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"conformance", "run"}, nil, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for no file arg, got %d", code)
 	}
 }

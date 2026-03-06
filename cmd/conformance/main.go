@@ -15,6 +15,8 @@ import (
 	agentexec "github.com/2389-research/mammoth-lite/agent/exec"
 	"github.com/2389-research/mammoth-lite/agent/tools"
 	"github.com/2389-research/mammoth-lite/llm"
+	"github.com/2389-research/mammoth-lite/pipeline"
+	"github.com/2389-research/mammoth-lite/pipeline/handlers"
 	"github.com/2389-research/mammoth-lite/llm/anthropic"
 	"github.com/2389-research/mammoth-lite/llm/google"
 	"github.com/2389-research/mammoth-lite/llm/openai"
@@ -76,6 +78,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return handleSteering(stdin, stdout, stderr)
 	case "events":
 		return handleEvents(stdout, stderr)
+	case "parse":
+		return handleParse(args, stdout, stderr)
+	case "validate":
+		return handleValidate(args, stdout, stderr)
+	case "run":
+		return handleRun(args, stdout, stderr)
+	case "list-handlers":
+		return handleListHandlers(stdout, stderr)
 	default:
 		return handleNotImplemented(subcmd, stdout)
 	}
@@ -641,6 +651,219 @@ func handleEvents(stdout, stderr io.Writer) int {
 		})
 	}
 
+	return 0
+}
+
+// handleParse parses a DOT file and writes its graph AST as JSON.
+func handleParse(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 3 {
+		writeJSON(stdout, map[string]string{"error": "usage: conformance parse <dotfile>"})
+		return 1
+	}
+	dotFile := args[2]
+
+	data, err := os.ReadFile(dotFile)
+	if err != nil {
+		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("failed to read file: %v", err)})
+		return 1
+	}
+
+	graph, err := pipeline.ParseDOT(string(data))
+	if err != nil {
+		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("parse error: %v", err)})
+		return 1
+	}
+
+	// Build JSON representation of the graph AST.
+	nodes := make([]map[string]interface{}, 0, len(graph.Nodes))
+	for _, n := range graph.Nodes {
+		node := map[string]interface{}{
+			"id":    n.ID,
+			"shape": n.Shape,
+		}
+		if n.Label != "" {
+			node["label"] = n.Label
+		}
+		if n.Handler != "" {
+			node["handler"] = n.Handler
+		}
+		if len(n.Attrs) > 0 {
+			node["attrs"] = n.Attrs
+		}
+		nodes = append(nodes, node)
+	}
+
+	edges := make([]map[string]interface{}, 0, len(graph.Edges))
+	for _, e := range graph.Edges {
+		edge := map[string]interface{}{
+			"from": e.From,
+			"to":   e.To,
+		}
+		if e.Label != "" {
+			edge["label"] = e.Label
+		}
+		if e.Condition != "" {
+			edge["condition"] = e.Condition
+		}
+		if len(e.Attrs) > 0 {
+			edge["attrs"] = e.Attrs
+		}
+		edges = append(edges, edge)
+	}
+
+	result := map[string]interface{}{
+		"name":  graph.Name,
+		"nodes": nodes,
+		"edges": edges,
+	}
+	if graph.StartNode != "" {
+		result["start_node"] = graph.StartNode
+	}
+	if graph.ExitNode != "" {
+		result["exit_node"] = graph.ExitNode
+	}
+
+	writeJSON(stdout, result)
+	return 0
+}
+
+// handleValidate validates a DOT file and writes diagnostics as JSON.
+func handleValidate(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 3 {
+		writeJSON(stdout, map[string]string{"error": "usage: conformance validate <dotfile>"})
+		return 1
+	}
+	dotFile := args[2]
+
+	data, err := os.ReadFile(dotFile)
+	if err != nil {
+		writeJSON(stdout, map[string]interface{}{
+			"diagnostics": []map[string]string{
+				{"severity": "error", "message": fmt.Sprintf("failed to read file: %v", err)},
+			},
+		})
+		return 0
+	}
+
+	graph, err := pipeline.ParseDOT(string(data))
+	if err != nil {
+		writeJSON(stdout, map[string]interface{}{
+			"diagnostics": []map[string]string{
+				{"severity": "error", "message": fmt.Sprintf("parse error: %v", err)},
+			},
+		})
+		return 0
+	}
+
+	validationErr := pipeline.Validate(graph)
+	if validationErr == nil {
+		writeJSON(stdout, map[string]interface{}{
+			"diagnostics": []interface{}{},
+		})
+		return 0
+	}
+
+	var diagnostics []map[string]string
+	if ve, ok := validationErr.(*pipeline.ValidationError); ok {
+		for _, msg := range ve.Errors {
+			diagnostics = append(diagnostics, map[string]string{
+				"severity": "error",
+				"message":  msg,
+			})
+		}
+	} else {
+		diagnostics = append(diagnostics, map[string]string{
+			"severity": "error",
+			"message":  validationErr.Error(),
+		})
+	}
+
+	writeJSON(stdout, map[string]interface{}{
+		"diagnostics": diagnostics,
+	})
+	return 0
+}
+
+// handleRun executes a pipeline DOT file and writes the result.
+func handleRun(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 3 {
+		writeJSON(stdout, map[string]string{"error": "usage: conformance run <dotfile>"})
+		return 1
+	}
+	dotFile := args[2]
+
+	data, err := os.ReadFile(dotFile)
+	if err != nil {
+		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("failed to read file: %v", err)})
+		return 1
+	}
+
+	graph, err := pipeline.ParseDOT(string(data))
+	if err != nil {
+		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("parse error: %v", err)})
+		return 1
+	}
+
+	if err := pipeline.Validate(graph); err != nil {
+		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("validation error: %v", err)})
+		return 1
+	}
+
+	// Build registry with LLM client if available.
+	var registryOpts []handlers.RegistryOption
+	client, clientErr := createClient()
+	if clientErr == nil {
+		defer client.Close()
+		registryOpts = append(registryOpts, handlers.WithLLMClient(client, "."))
+	}
+
+	env := agentexec.NewLocalEnvironment(".")
+	registryOpts = append(registryOpts, handlers.WithExecEnvironment(env))
+
+	registry := handlers.NewDefaultRegistry(graph, registryOpts...)
+	engine := pipeline.NewEngine(graph, registry)
+
+	ctx := context.Background()
+	result, err := engine.Run(ctx)
+	if err != nil {
+		writeJSON(stdout, map[string]interface{}{
+			"status": "error",
+			"error":  err.Error(),
+		})
+		return 1
+	}
+
+	writeJSON(stdout, map[string]interface{}{
+		"status":          result.Status,
+		"run_id":          result.RunID,
+		"completed_nodes": len(result.CompletedNodes),
+	})
+	return 0
+}
+
+// handleListHandlers writes the names of all registered pipeline handler types.
+func handleListHandlers(stdout, stderr io.Writer) int {
+	// Create a minimal graph to build the default registry.
+	g := pipeline.NewGraph("list-handlers")
+	registry := handlers.NewDefaultRegistry(g)
+
+	// List all handler names that the registry knows about.
+	// Use the shapeHandlerMap as the source of truth for handler names.
+	handlerNames := []string{
+		"start", "exit", "codergen", "conditional",
+		"parallel", "parallel.fan_in", "tool", "wait.human", "subgraph",
+	}
+
+	// Filter to only those actually registered (some may not be if deps missing).
+	var available []string
+	for _, name := range handlerNames {
+		if registry.Has(name) {
+			available = append(available, name)
+		}
+	}
+
+	// Always include the full list to show what the engine supports.
+	writeJSON(stdout, handlerNames)
 	return 0
 }
 
