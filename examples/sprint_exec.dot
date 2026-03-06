@@ -1,0 +1,232 @@
+digraph SprintExec {
+  graph [
+    goal="Execute the next incomplete sprint from .ai/ledger.tsv through implementation, validation, multi-model review, and completion.",
+    rankdir=LR,
+    default_max_retry=0,
+    default_fidelity="summary:medium"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit [shape=Msquare, label="Exit"];
+
+  EnsureLedger [
+    shape=parallelogram,
+    label="Ensure Ledger",
+    tool_command="set -eu\nmkdir -p .ai .ai/drafts .ai/sprints\nif [ ! -f .ai/ledger.tsv ]; then\n  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)\n  printf 'sprint_id\\ttitle\\tstatus\\tcreated_at\\tupdated_at\\n001\\tBootstrap sprint\\tplanned\\t%s\\t%s\\n' \"$now\" \"$now\" > .ai/ledger.tsv\nfi\nprintf 'ledger-ready'"
+  ];
+
+  FindNextSprint [
+    shape=box,
+    label="Find Next Sprint",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Identify the next non-completed sprint in .ai/ledger.tsv and summarize the target sprint ID and why it is next."
+  ];
+
+  SetCurrentSprint [
+    shape=parallelogram,
+    label="Set Current Sprint",
+    tool_command="set -eu\ntarget=$(awk -F '\\t' 'NR>1 && $3!~/^completed$/ && $3!~/^skipped$/{print $1; exit}' .ai/ledger.tsv)\nif [ -z \"$target\" ]; then\n  target=$(awk -F '\\t' 'NR>1 && $3!~/^completed$/{print $1; exit}' .ai/ledger.tsv)\nfi\nif [ -z \"$target\" ]; then\n  target=$(awk -F '\\t' 'END{print $1}' .ai/ledger.tsv)\nfi\nprintf '%s' \"$target\" > .ai/current_sprint_id.txt\nprintf 'current-%s' \"$target\""
+  ];
+
+  ReadSprint [
+    shape=box,
+    label="Read Sprint",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Read the target sprint document under .ai/sprints/SPRINT-<id>.md and summarize requirements, DoD checklist status, and expected artifacts."
+  ];
+
+  MarkInProgress [
+    shape=parallelogram,
+    label="Mark In Progress",
+    tool_command="set -eu\ntarget=$(cat .ai/current_sprint_id.txt)\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nawk -F '\\t' -v OFS='\\t' -v target=\"$target\" -v now=\"$now\" '\nNR==1 {print; next}\n{ if ($1==target) { $3=\"in_progress\"; $5=now }; print }\n' .ai/ledger.tsv > .ai/ledger.tsv.tmp\nmv .ai/ledger.tsv.tmp .ai/ledger.tsv\nprintf 'in_progress-%s' \"$target\""
+  ];
+
+  ImplementSprint [
+    shape=box,
+    label="Implement Sprint",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    fidelity="summary:high",
+    prompt="Implement the sprint requirements end-to-end. If prior review/critique context exists, treat those findings as required fixes. Update the sprint doc checklist as work is completed, and provide a concrete summary of changes and validation evidence."
+  ];
+
+  ValidateBuild [
+    shape=parallelogram,
+    label="Validate Build and Tests",
+    tool_command="set -eu\nif [ -f go.mod ]; then\n  go build ./... >/tmp/sprint-exec-build.log 2>&1 || { cat /tmp/sprint-exec-build.log; exit 1; }\n  go test ./... >/tmp/sprint-exec-test.log 2>&1 || { cat /tmp/sprint-exec-test.log; exit 1; }\n  cat /tmp/sprint-exec-test.log\n  printf 'validation-pass-go'\n  exit 0\nfi\nif [ -f Package.swift ]; then\n  swift build >/tmp/sprint-exec-build.log 2>&1\n  swift test >/tmp/sprint-exec-test.log 2>&1 || true\n  cat /tmp/sprint-exec-build.log\n  cat /tmp/sprint-exec-test.log\n  if rg -n 'error:' /tmp/sprint-exec-build.log >/dev/null 2>&1; then exit 1; fi\n  if rg -n 'failed' /tmp/sprint-exec-test.log >/dev/null 2>&1; then exit 1; fi\n  printf 'validation-pass-swift'\n  exit 0\nfi\nif [ -f package.json ]; then\n  npm test >/tmp/sprint-exec-test.log 2>&1 || { cat /tmp/sprint-exec-test.log; exit 1; }\n  printf 'validation-pass-node'\n  exit 0\nfi\nprintf 'validation-pass-no-known-build-system'"
+  ];
+
+  CommitSprintWork [
+    shape=box,
+    label="Commit Sprint Work",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Prepare and execute a clean commit for sprint implementation changes if there are staged/unstaged changes. If no changes are present, report that no commit was needed. Include commit hash in your summary."
+  ];
+
+  ReviewParallel [shape=component, label="Reviews (Parallel)"];
+
+  ReviewClaude [
+    shape=box,
+    label="Claude Review",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Review sprint execution thoroughly: sprint doc checklist completion, implementation correctness, and validation evidence. Return clear PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewCodex [
+    shape=box,
+    label="Codex Review",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Review sprint execution for implementation quality, regression risk, and checklist completeness. Return clear PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewGemini [
+    shape=box,
+    label="Gemini Review",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Review sprint execution for delivery robustness, test coverage, and checklist completeness. Return clear PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewsJoin [shape=tripleoctagon, label="Reviews Join"];
+
+  CritiquesParallel [shape=component, label="Review Critiques (Parallel)"];
+
+  CritiqueClaudeOnCodex [
+    shape=box,
+    label="Claude Critique of Codex Review",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Critique the Codex review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueClaudeOnGemini [
+    shape=box,
+    label="Claude Critique of Gemini Review",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueCodexOnClaude [
+    shape=box,
+    label="Codex Critique of Claude Review",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Critique the Claude review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueCodexOnGemini [
+    shape=box,
+    label="Codex Critique of Gemini Review",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueGeminiOnClaude [
+    shape=box,
+    label="Gemini Critique of Claude Review",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Critique the Claude review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiqueGeminiOnCodex [
+    shape=box,
+    label="Gemini Critique of Codex Review",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Critique the Codex review for missing checks, weak evidence, or mistaken conclusions."
+  ];
+
+  CritiquesJoin [shape=tripleoctagon, label="Critiques Join"];
+
+  ReviewAnalysis [
+    shape=box,
+    label="Review Analysis",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    goal_gate=true,
+    retry_target="ImplementSprint",
+    prompt="Synthesize all reviews and critiques into one verdict. Return success only if sprint is truly complete and checklist is satisfied. Return retry if rework is needed. Return fail if blocked."
+  ];
+
+  CompleteSprint [
+    shape=parallelogram,
+    label="Complete Sprint",
+    tool_command="set -eu\ntarget=$(cat .ai/current_sprint_id.txt)\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nawk -F '\\t' -v OFS='\\t' -v target=\"$target\" -v now=\"$now\" '\nNR==1 {print; next}\n{ if ($1==target) { $3=\"completed\"; $5=now }; print }\n' .ai/ledger.tsv > .ai/ledger.tsv.tmp\nmv .ai/ledger.tsv.tmp .ai/ledger.tsv\nprintf 'completed-%s' \"$target\""
+  ];
+
+  FailureSummary [
+    shape=box,
+    label="Failure Summary",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    prompt="Summarize why sprint execution failed, what remains unresolved, and concrete next steps for recovery."
+  ];
+
+  Start -> EnsureLedger;
+  EnsureLedger -> FindNextSprint;
+  FindNextSprint -> SetCurrentSprint;
+  SetCurrentSprint -> ReadSprint;
+  ReadSprint -> MarkInProgress;
+  MarkInProgress -> ImplementSprint;
+
+  ImplementSprint -> ValidateBuild;
+  ValidateBuild -> CommitSprintWork [condition="outcome=success", label="validated"];
+  ValidateBuild -> ImplementSprint [condition="outcome=fail", label="fix_validation"];
+
+  CommitSprintWork -> ReviewParallel;
+
+  ReviewParallel -> ReviewClaude;
+  ReviewParallel -> ReviewCodex;
+  ReviewParallel -> ReviewGemini;
+  ReviewClaude -> ReviewsJoin;
+  ReviewCodex -> ReviewsJoin;
+  ReviewGemini -> ReviewsJoin;
+
+  ReviewsJoin -> CritiquesParallel;
+
+  CritiquesParallel -> CritiqueClaudeOnCodex;
+  CritiquesParallel -> CritiqueClaudeOnGemini;
+  CritiquesParallel -> CritiqueCodexOnClaude;
+  CritiquesParallel -> CritiqueCodexOnGemini;
+  CritiquesParallel -> CritiqueGeminiOnClaude;
+  CritiquesParallel -> CritiqueGeminiOnCodex;
+
+  CritiqueClaudeOnCodex -> CritiquesJoin;
+  CritiqueClaudeOnGemini -> CritiquesJoin;
+  CritiqueCodexOnClaude -> CritiquesJoin;
+  CritiqueCodexOnGemini -> CritiquesJoin;
+  CritiqueGeminiOnClaude -> CritiquesJoin;
+  CritiqueGeminiOnCodex -> CritiquesJoin;
+
+  CritiquesJoin -> ReviewAnalysis;
+
+  ReviewAnalysis -> CompleteSprint [condition="outcome=success", label="pass"];
+  ReviewAnalysis -> ImplementSprint [condition="outcome=retry", label="rework"];
+  ReviewAnalysis -> FailureSummary [condition="outcome=fail", label="fail"];
+
+  CompleteSprint -> Exit;
+  FailureSummary -> Exit;
+}

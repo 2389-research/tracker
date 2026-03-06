@@ -1,0 +1,182 @@
+digraph ConsensusTask {
+  graph [
+    label="Consensus Task Workflow",
+    goal="Produce a validated multi-model implementation plan and review consensus for the requested task.",
+    rankdir=LR,
+    default_fidelity="truncate",
+    default_max_retry=3,
+    retry_target="RefineDoD",
+    fallback_retry_target="Start"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit [shape=Msquare, label="Exit"];
+
+  RefineDoD [
+    shape=box,
+    label="Refine DoD Gate",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Refine the definition-of-done requirements for the current task and identify missing acceptance criteria."
+  ];
+
+  DefineDoDGemini [
+    shape=box,
+    label="Refine DoD (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Propose a complete DoD draft and assumptions for this task."
+  ];
+
+  DefineDoDGPT [
+    shape=box,
+    label="Refine DoD (GPT-5.2)",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Propose a complete DoD draft with measurable verification criteria."
+  ];
+
+  DefineDoDOpus [
+    shape=box,
+    label="Refine DoD (Opus)",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Propose a complete DoD draft with risk-based prioritization."
+  ];
+
+  ConsolidateDoD [
+    shape=box,
+    label="Consolidate DoD",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Merge DoD drafts into a single final DoD."
+  ];
+
+  PlanGemini [
+    shape=box,
+    label="Plan (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Create an implementation plan from the consolidated DoD."
+  ];
+
+  PlanGPT [
+    shape=box,
+    label="Plan (GPT-5.2)",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Create an implementation plan from the consolidated DoD."
+  ];
+
+  PlanOpus [
+    shape=box,
+    label="Plan (Opus)",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Create an implementation plan from the consolidated DoD."
+  ];
+
+  DebateConsolidate [
+    shape=box,
+    label="Debate and Consolidate Plans",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Synthesize the three plans into one final execution plan."
+  ];
+
+  Implement [
+    shape=box,
+    label="Implement",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    allow_partial=true,
+    prompt="Execute the final plan and summarize what was implemented."
+  ];
+
+  VerifyOutputs [
+    shape=box,
+    label="Verify Outputs",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Verify outputs against DoD and summarize evidence."
+  ];
+
+  ReviewGemini [
+    shape=box,
+    label="Review (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Review implementation and verification evidence."
+  ];
+
+  ReviewGPT [
+    shape=box,
+    label="Review (GPT-5.2)",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Review implementation and verification evidence."
+  ];
+
+  ReviewOpus [
+    shape=box,
+    label="Review (Opus)",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Review implementation and verification evidence."
+  ];
+
+  ReviewConsensus [
+    shape=box,
+    label="Review Consensus",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    max_retries=1,
+    retry_target="Implement",
+    prompt="Produce final consensus verdict. Use success when ready to exit, retry when rework is required, fail when blocked."
+  ];
+
+  Postmortem [
+    shape=box,
+    label="Postmortem",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Write a postmortem describing why consensus failed and what should change in the next loop."
+  ];
+
+  Start -> RefineDoD;
+  RefineDoD -> DefineDoDGemini;
+  DefineDoDGemini -> DefineDoDGPT;
+  DefineDoDGPT -> DefineDoDOpus;
+  DefineDoDOpus -> ConsolidateDoD;
+  ConsolidateDoD -> PlanGemini;
+  PlanGemini -> PlanGPT;
+  PlanGPT -> PlanOpus;
+  PlanOpus -> DebateConsolidate;
+  DebateConsolidate -> Implement;
+  Implement -> VerifyOutputs;
+  VerifyOutputs -> ReviewGemini;
+  ReviewGemini -> ReviewGPT;
+  ReviewGPT -> ReviewOpus;
+  ReviewOpus -> ReviewConsensus;
+  ReviewConsensus -> Exit [condition="outcome=success", label="pass"];
+  ReviewConsensus -> Postmortem [condition="outcome=retry", label="retry"];
+  ReviewConsensus -> Exit;
+  Postmortem -> PlanGemini [condition="context.internal.loop_restart_count=0", loop_restart=true, label="retry_once"];
+  Postmortem -> Exit [condition="context.internal.loop_restart_count!=0", label="stop_after_retry"];
+}

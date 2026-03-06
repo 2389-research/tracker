@@ -1,0 +1,436 @@
+digraph Megaplan {
+  graph [
+    goal="Create a high-quality sprint plan using multi-model orientation, drafting, critique, merge, and a quality gate before publishing.",
+    rankdir=LR,
+    default_max_retry=5,
+    default_fidelity="summary:medium"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit [shape=Msquare, label="Exit"];
+
+  SetupEnvironment [
+    shape=parallelogram,
+    label="Setup .ai workspace",
+    tool_command="set -eu\nmkdir -p .ai/drafts .ai/sprints\nif [ ! -f .ai/ledger.tsv ]; then\n  printf 'sprint_id\\ttitle\\tstatus\\tcreated_at\\tupdated_at\\n' > .ai/ledger.tsv\nfi\nprintf 'ready'"
+  ];
+
+  DetermineSprintId [
+    shape=parallelogram,
+    label="Determine Sprint ID",
+    tool_command="set -eu\nmkdir -p .ai\nlast=$(awk -F '\\t' 'NR>1{print $1}' .ai/ledger.tsv | sort | tail -n1)\nif [ -z \"$last\" ]; then\n  next=001\nelse\n  next=$(printf '%03d' $((10#$last + 1)))\nfi\nprintf '%s' \"$next\" > .ai/current_sprint_id.txt\nprintf 'sprint-%s' \"$next\""
+  ];
+
+  OrientParallel [shape=component, label="Orient (Parallel)"];
+
+  OrientConventions [
+    shape=box,
+    label="Read Conventions (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Review repository conventions and summarize coding, testing, release, and delivery constraints for sprint planning."
+  ];
+
+  OrientLedger [
+    shape=box,
+    label="Check Ledger (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Review .ai/ledger.tsv and summarize sprint throughput, active work, and carryover risk."
+  ];
+
+  OrientRecent [
+    shape=box,
+    label="Analyze Recent Sprints (Claude)",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    prompt="Inspect recent artifacts in .ai/sprints and .ai/drafts. Summarize recurring patterns, misses, and high-leverage practices."
+  ];
+
+  OrientSeedExplore [
+    shape=box,
+    label="Explore Seed Context (Claude)",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    prompt="Explore the codebase and identify architecture, risk hotspots, and implementation dependencies for the upcoming sprint."
+  ];
+
+  OrientJoin [shape=tripleoctagon, label="Orient Join"];
+
+  SynthesizeOrientation [
+    shape=box,
+    label="Synthesize Orientation",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Synthesize orientation outputs into a planning brief with assumptions, constraints, risks, and execution priorities."
+  ];
+
+  IntentParallel [shape=component, label="Intent (Parallel)"];
+
+  IntentClaude [
+    shape=box,
+    label="Claude Intent",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Draft a focused sprint intent document: scope, non-goals, constraints, milestones, DoD, and validation plan."
+  ];
+
+  IntentCodex [
+    shape=box,
+    label="Codex Intent",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Draft an implementation-first sprint intent emphasizing execution order, dependencies, and verification criteria."
+  ];
+
+  IntentGemini [
+    shape=box,
+    label="Gemini Intent",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Draft a delivery-focused sprint intent emphasizing predictable cadence, risk control, and observability."
+  ];
+
+  IntentJoin [shape=tripleoctagon, label="Intent Join"];
+
+  InitialDraftParallel [shape=component, label="Initial Drafts (Parallel)"];
+
+  DraftClaude [
+    shape=box,
+    label="Claude Initial Draft",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Create a complete sprint draft from the planning brief and intent context. Include milestones, DoD mapping, and validation steps."
+  ];
+
+  DraftCodex [
+    shape=box,
+    label="Codex Initial Draft",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Create an independent complete sprint draft with concrete implementation sequencing and test strategy."
+  ];
+
+  DraftGemini [
+    shape=box,
+    label="Gemini Initial Draft",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Create an independent complete sprint draft with risk controls, checkpoints, and rollout/verification cadence."
+  ];
+
+  InitialDraftJoin [shape=tripleoctagon, label="Initial Draft Join"];
+
+  QuestionsParallel [shape=component, label="Questions (Parallel)"];
+
+  QuestionsClaude [
+    shape=box,
+    label="Claude Questions",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    prompt="Generate concise high-signal clarification questions needed to resolve conflicts across initial drafts."
+  ];
+
+  QuestionsCodex [
+    shape=box,
+    label="Codex Questions",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Generate concise implementation-risk clarification questions for the sprint plan."
+  ];
+
+  QuestionsGemini [
+    shape=box,
+    label="Gemini Questions",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Generate concise delivery and validation clarification questions for the sprint plan."
+  ];
+
+  QuestionsJoin [shape=tripleoctagon, label="Questions Join"];
+
+  InterviewGate [
+    shape=hexagon,
+    label="Interview Decision",
+    human.default_choice="S",
+    prompt="Choose whether to answer interview questions now or skip interview and continue deterministically."
+  ];
+
+  CaptureInterview [
+    shape=box,
+    label="Capture Interview Answers",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    reasoning_effort="high",
+    prompt="Capture interview answers and summarize the concrete plan deltas that must be applied in revision."
+  ];
+
+  SkipInterview [
+    shape=box,
+    label="Skip Interview",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="low",
+    prompt="Document interview skip assumptions and constraints so revision remains deterministic and auditable."
+  ];
+
+  RevisedDraftParallel [shape=component, label="Revised Drafts (Parallel)"];
+
+  ReviseClaude [
+    shape=box,
+    label="Claude Revised Draft",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Revise the sprint draft using question/interview outcomes and strengthen clarity, traceability, and DoD mapping."
+  ];
+
+  ReviseCodex [
+    shape=box,
+    label="Codex Revised Draft",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Revise the sprint draft to improve implementation sequencing, dependency handling, and verification rigor."
+  ];
+
+  ReviseGemini [
+    shape=box,
+    label="Gemini Revised Draft",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Revise the sprint draft to improve delivery predictability, risk mitigation, and validation completeness."
+  ];
+
+  RevisedDraftJoin [shape=tripleoctagon, label="Revised Draft Join"];
+
+  CritiquesParallel [shape=component, label="Cross-Model Critiques (Parallel)"];
+
+  CritiqueClaudeOnCodex [
+    shape=box,
+    label="Claude Critique of Codex",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Critique the Codex revised draft for architecture, correctness, risk coverage, and execution quality."
+  ];
+
+  CritiqueClaudeOnGemini [
+    shape=box,
+    label="Claude Critique of Gemini",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Critique the Gemini revised draft for architecture, correctness, risk coverage, and execution quality."
+  ];
+
+  CritiqueCodexOnClaude [
+    shape=box,
+    label="Codex Critique of Claude",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Critique the Claude revised draft for implementation viability, dependency realism, and testability."
+  ];
+
+  CritiqueCodexOnGemini [
+    shape=box,
+    label="Codex Critique of Gemini",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Critique the Gemini revised draft for implementation viability, dependency realism, and testability."
+  ];
+
+  CritiqueGeminiOnClaude [
+    shape=box,
+    label="Gemini Critique of Claude",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Critique the Claude revised draft for delivery robustness, verification completeness, and operational risk."
+  ];
+
+  CritiqueGeminiOnCodex [
+    shape=box,
+    label="Gemini Critique of Codex",
+    llm_provider="gemini",
+    llm_model="gemini-3-flash-preview",
+    reasoning_effort="high",
+    prompt="Critique the Codex revised draft for delivery robustness, verification completeness, and operational risk."
+  ];
+
+  CritiquesJoin [shape=tripleoctagon, label="Critiques Join"];
+
+  MergeAnalysisParallel [shape=component, label="Merge Analysis (Parallel)"];
+
+  CompareArchitectures [
+    shape=box,
+    label="Compare Architectures",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Compare revised drafts and identify strongest architecture, sequencing, and dependency strategies."
+  ];
+
+  ExtractBestIdeas [
+    shape=box,
+    label="Extract Best Ideas",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Extract the best concrete ideas and improvements from each revised draft for final merge."
+  ];
+
+  SynthesizeCritiques [
+    shape=box,
+    label="Synthesize Critiques",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Synthesize all cross-model critiques into a prioritized edit list for final sprint assembly."
+  ];
+
+  MergeAnalysisJoin [shape=tripleoctagon, label="Merge Analysis Join"];
+
+  WriteMergeNotes [
+    shape=box,
+    label="Write Merge Notes",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Write merge notes describing what to keep, change, and reject from each revised draft before final composition."
+  ];
+
+  WriteFinalSprint [
+    shape=box,
+    label="Write Final Sprint",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Write the final production-ready sprint plan with explicit milestones, DoD, verification checklist, risks, and fallback strategies."
+  ];
+
+  FinalQualityGate [
+    shape=box,
+    label="Final Quality Gate",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    goal_gate=true,
+    max_retries=1,
+    retry_target="RevisedDraftParallel",
+    prompt="Assess whether the final sprint is execution-ready. Return success if quality is high and actionable, retry if rework is required, fail if blocked."
+  ];
+
+  PersistSprintPlaceholder [
+    shape=parallelogram,
+    label="Persist Sprint Placeholder",
+    tool_command="set -eu\nmkdir -p .ai/sprints\nif [ -f .ai/current_sprint_id.txt ]; then\n  sid=$(cat .ai/current_sprint_id.txt)\nelse\n  sid=001\nfi\nfile=.ai/sprints/SPRINT-${sid}.md\nif [ ! -f \"$file\" ]; then\n  printf '# Sprint %s\\n\\nGenerated by megaplan. See run logs for full model output.\\n' \"$sid\" > \"$file\"\nfi\nprintf 'persisted-%s' \"$sid\""
+  ];
+
+  SyncLedger [
+    shape=parallelogram,
+    label="Sync Ledger",
+    tool_command="set -eu\nmkdir -p .ai\nif [ ! -f .ai/ledger.tsv ]; then\n  printf 'sprint_id\\ttitle\\tstatus\\tcreated_at\\tupdated_at\\n' > .ai/ledger.tsv\nfi\nif [ -f .ai/current_sprint_id.txt ]; then\n  sprint_id=$(cat .ai/current_sprint_id.txt)\nelse\n  last=$(awk -F '\\t' 'NR>1{print $1}' .ai/ledger.tsv | sort | tail -n1)\n  if [ -z \"$last\" ]; then sprint_id=001; else sprint_id=$(printf '%03d' $((10#$last + 1))); fi\nfi\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nif awk -F '\\t' -v target=\"$sprint_id\" 'NR>1 && $1==target {found=1} END{exit found?0:1}' .ai/ledger.tsv; then\n  awk -F '\\t' -v OFS='\\t' -v target=\"$sprint_id\" -v now=\"$now\" '\nNR==1 {print; next}\n{ if ($1==target) { $2=\"Generated Sprint \" target; $3=\"planned\"; $5=now }; print }\n' .ai/ledger.tsv > .ai/ledger.tsv.tmp\n  mv .ai/ledger.tsv.tmp .ai/ledger.tsv\nelse\n  printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"$sprint_id\" \"Generated Sprint $sprint_id\" \"planned\" \"$now\" \"$now\" >> .ai/ledger.tsv\nfi\nprintf 'synced-%s' \"$sprint_id\""
+  ];
+
+  Start -> SetupEnvironment;
+  SetupEnvironment -> DetermineSprintId;
+
+  DetermineSprintId -> OrientParallel;
+  OrientParallel -> OrientConventions;
+  OrientParallel -> OrientLedger;
+  OrientParallel -> OrientRecent;
+  OrientParallel -> OrientSeedExplore;
+  OrientConventions -> OrientJoin;
+  OrientLedger -> OrientJoin;
+  OrientRecent -> OrientJoin;
+  OrientSeedExplore -> OrientJoin;
+
+  OrientJoin -> SynthesizeOrientation;
+
+  SynthesizeOrientation -> IntentParallel;
+  IntentParallel -> IntentClaude;
+  IntentParallel -> IntentCodex;
+  IntentParallel -> IntentGemini;
+  IntentClaude -> IntentJoin;
+  IntentCodex -> IntentJoin;
+  IntentGemini -> IntentJoin;
+
+  IntentJoin -> InitialDraftParallel;
+  InitialDraftParallel -> DraftClaude;
+  InitialDraftParallel -> DraftCodex;
+  InitialDraftParallel -> DraftGemini;
+  DraftClaude -> InitialDraftJoin;
+  DraftCodex -> InitialDraftJoin;
+  DraftGemini -> InitialDraftJoin;
+
+  InitialDraftJoin -> QuestionsParallel;
+  QuestionsParallel -> QuestionsClaude;
+  QuestionsParallel -> QuestionsCodex;
+  QuestionsParallel -> QuestionsGemini;
+  QuestionsClaude -> QuestionsJoin;
+  QuestionsCodex -> QuestionsJoin;
+  QuestionsGemini -> QuestionsJoin;
+
+  QuestionsJoin -> InterviewGate;
+  InterviewGate -> SkipInterview [label="[S] Skip interview"];
+  InterviewGate -> CaptureInterview [label="[A] Answer interview"];
+
+  CaptureInterview -> RevisedDraftParallel;
+  SkipInterview -> RevisedDraftParallel;
+
+  RevisedDraftParallel -> ReviseClaude;
+  RevisedDraftParallel -> ReviseCodex;
+  RevisedDraftParallel -> ReviseGemini;
+  ReviseClaude -> RevisedDraftJoin;
+  ReviseCodex -> RevisedDraftJoin;
+  ReviseGemini -> RevisedDraftJoin;
+
+  RevisedDraftJoin -> CritiquesParallel;
+  CritiquesParallel -> CritiqueClaudeOnCodex;
+  CritiquesParallel -> CritiqueClaudeOnGemini;
+  CritiquesParallel -> CritiqueCodexOnClaude;
+  CritiquesParallel -> CritiqueCodexOnGemini;
+  CritiquesParallel -> CritiqueGeminiOnClaude;
+  CritiquesParallel -> CritiqueGeminiOnCodex;
+  CritiqueClaudeOnCodex -> CritiquesJoin;
+  CritiqueClaudeOnGemini -> CritiquesJoin;
+  CritiqueCodexOnClaude -> CritiquesJoin;
+  CritiqueCodexOnGemini -> CritiquesJoin;
+  CritiqueGeminiOnClaude -> CritiquesJoin;
+  CritiqueGeminiOnCodex -> CritiquesJoin;
+
+  CritiquesJoin -> MergeAnalysisParallel;
+  MergeAnalysisParallel -> CompareArchitectures;
+  MergeAnalysisParallel -> ExtractBestIdeas;
+  MergeAnalysisParallel -> SynthesizeCritiques;
+  CompareArchitectures -> MergeAnalysisJoin;
+  ExtractBestIdeas -> MergeAnalysisJoin;
+  SynthesizeCritiques -> MergeAnalysisJoin;
+
+  MergeAnalysisJoin -> WriteMergeNotes;
+  WriteMergeNotes -> WriteFinalSprint;
+  WriteFinalSprint -> FinalQualityGate;
+  FinalQualityGate -> PersistSprintPlaceholder [condition="outcome=success", label="pass"];
+  FinalQualityGate -> RevisedDraftParallel [condition="outcome=retry", label="rework"];
+  FinalQualityGate -> Exit [condition="outcome=fail", label="blocked"];
+  PersistSprintPlaceholder -> SyncLedger;
+  SyncLedger -> Exit;
+}

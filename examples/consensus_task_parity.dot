@@ -1,0 +1,215 @@
+digraph ConsensusTaskParity {
+  graph [
+    label="Consensus Task Workflow (Parity)",
+    goal="$task",
+    rankdir=LR,
+    default_fidelity="truncate",
+    default_max_retry=3,
+    retry_target="CheckDoD",
+    fallback_retry_target="Start"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit [shape=Msquare, label="Exit"];
+
+  CheckDoD [
+    shape=box,
+    label="Refine DoD",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    max_retries=1,
+    prompt="Refine or propose definition of done for TASK=$task. If DoD is missing or weak, state concrete gaps. Produce concise acceptance criteria that are testable."
+  ];
+
+  DoDParallel [shape=component, label="DoD Refinement (Parallel)"];
+
+  DefineDoD_Gemini [
+    shape=box,
+    label="Refine DoD (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3.1-pro-preview-customtools",
+    reasoning_effort="high",
+    prompt="Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_gemini.md."
+  ];
+
+  DefineDoD_GPT [
+    shape=box,
+    label="Refine DoD (GPT)",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_gpt.md."
+  ];
+
+  DefineDoD_Opus [
+    shape=box,
+    label="Refine DoD (Opus)",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_opus.md."
+  ];
+
+  DoDJoin [shape=tripleoctagon, label="DoD Join"];
+
+  ConsolidateDoD [
+    shape=box,
+    label="Consolidate DoD",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Synthesize DoD proposals from all models into one consensus DoD with unambiguous, testable checks."
+  ];
+
+  PlanParallel [shape=component, label="Planning (Parallel)"];
+
+  PlanGemini [
+    shape=box,
+    label="Plan (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3.1-pro-preview-customtools",
+    reasoning_effort="high",
+    prompt="Create implementation plan from consensus DoD for TASK=$task."
+  ];
+
+  PlanGPT [
+    shape=box,
+    label="Plan (GPT)",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Create implementation plan from consensus DoD for TASK=$task."
+  ];
+
+  PlanOpus [
+    shape=box,
+    label="Plan (Opus)",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Create implementation plan from consensus DoD for TASK=$task."
+  ];
+
+  PlanJoin [shape=tripleoctagon, label="Plan Join"];
+
+  DebateConsolidate [
+    shape=box,
+    label="Debate & Consolidate",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Debate and synthesize the three plans into one final executable plan."
+  ];
+
+  Implement [
+    shape=box,
+    label="Implement",
+    llm_provider="openai",
+    llm_model="gpt-5.3-codex",
+    reasoning_effort="high",
+    allow_partial=true,
+    prompt="Execute final plan for TASK=$task and summarize concrete changes, artifacts, and constraints encountered."
+  ];
+
+  VerifyOutputs [
+    shape=box,
+    label="Verify Outputs",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Verify outputs against consensus DoD with evidence. If verification is weak or missing, mark as retry/fail with explicit gaps."
+  ];
+
+  ReviewParallel [shape=component, label="Reviews (Parallel)"];
+
+  ReviewGemini [
+    shape=box,
+    label="Review (Gemini)",
+    llm_provider="gemini",
+    llm_model="gemini-3.1-pro-preview-customtools",
+    reasoning_effort="high",
+    prompt="Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewGPT [
+    shape=box,
+    label="Review (GPT)",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    reasoning_effort="high",
+    prompt="Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewOpus [
+    shape=box,
+    label="Review (Opus)",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes."
+  ];
+
+  ReviewJoin [shape=tripleoctagon, label="Review Join"];
+
+  ReviewConsensus [
+    shape=box,
+    label="Review Consensus",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    max_retries=1,
+    retry_target="Implement",
+    goal_gate=true,
+    prompt="Reach final consensus using all reviews and verification evidence. Use success only if all critical checks pass; use retry if fixes are needed; use fail only if blocked."
+  ];
+
+  Postmortem [
+    shape=box,
+    label="Postmortem",
+    llm_provider="anthropic",
+    llm_model="claude-opus-4-6",
+    reasoning_effort="high",
+    prompt="Write failure postmortem and concrete plan improvements before restart."
+  ];
+
+  Start -> CheckDoD;
+  CheckDoD -> DoDParallel;
+
+  DoDParallel -> DefineDoD_Gemini;
+  DoDParallel -> DefineDoD_GPT;
+  DoDParallel -> DefineDoD_Opus;
+  DefineDoD_Gemini -> DoDJoin;
+  DefineDoD_GPT -> DoDJoin;
+  DefineDoD_Opus -> DoDJoin;
+
+  DoDJoin -> ConsolidateDoD;
+  ConsolidateDoD -> PlanParallel;
+
+  PlanParallel -> PlanGemini;
+  PlanParallel -> PlanGPT;
+  PlanParallel -> PlanOpus;
+  PlanGemini -> PlanJoin;
+  PlanGPT -> PlanJoin;
+  PlanOpus -> PlanJoin;
+
+  PlanJoin -> DebateConsolidate;
+  DebateConsolidate -> Implement;
+  Implement -> VerifyOutputs;
+
+  VerifyOutputs -> ReviewParallel;
+  ReviewParallel -> ReviewGemini;
+  ReviewParallel -> ReviewGPT;
+  ReviewParallel -> ReviewOpus;
+  ReviewGemini -> ReviewJoin;
+  ReviewGPT -> ReviewJoin;
+  ReviewOpus -> ReviewJoin;
+
+  ReviewJoin -> ReviewConsensus;
+  ReviewConsensus -> Exit [condition="outcome=success", label="pass"];
+  ReviewConsensus -> Postmortem [condition="outcome=retry", label="retry"];
+  ReviewConsensus -> Exit [condition="outcome=fail", label="fail"];
+
+  Postmortem -> PlanParallel [condition="context.internal.loop_restart_count=0", loop_restart=true, label="retry_once"];
+  Postmortem -> Exit [condition="context.internal.loop_restart_count!=0", label="stop_after_retry"];
+}
