@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/2389-research/tracker/tui/render"
 )
 
 // FreeformDoneMsg is emitted when the user submits a non-empty freeform response.
@@ -85,7 +87,7 @@ func (m FreeformModel) View() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(freeformPromptStyle.Render(m.prompt))
+	sb.WriteString(render.Prompt(m.prompt, 76))
 	sb.WriteString("\n\n")
 	sb.WriteString(freeformBorderStyle.Render(m.input.View()))
 	sb.WriteString("\n")

@@ -8,6 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/2389-research/tracker/tui/render"
 )
 
 // ChoiceDoneMsg is emitted when the user confirms a selection.
@@ -104,7 +106,7 @@ func (m ChoiceModel) View() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(choicePromptStyle.Render(m.prompt))
+	sb.WriteString(render.Prompt(m.prompt, 76))
 	sb.WriteString("\n\n")
 
 	for i, choice := range m.choices {
