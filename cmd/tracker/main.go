@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -206,6 +207,12 @@ func runTUI(dotFile, workdir, checkpoint string) error {
 	appModel.SetInitialNodes(buildNodeList(graph))
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
 
+	// Activity tracker: forwards LLM call summaries to the agent log.
+	activityTracker := llm.NewActivityTracker(func(evt llm.ActivityEvent) {
+		prog.Send(dashboard.LLMActivityMsg{Summary: evt.Summary()})
+	})
+	llmClient.AddMiddleware(activityTracker)
+
 	// Mode 2 interviewer: delegates gate prompts to the running dashboard program.
 	interviewer, _ := tui.NewBubbleteaInterviewerMode2(prog)
 
@@ -347,10 +354,11 @@ func buildNodeList(graph *pipeline.Graph) []dashboard.NodeEntry {
 	return entries
 }
 
-// printRunSummary outputs a concise run summary after the TUI exits.
+// printRunSummary outputs a run summary with timing, per-node breakdown, token
+// usage, and a simple ASCII node graph after the TUI exits.
 func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker) {
 	fmt.Println()
-	fmt.Println("─── Run Summary ───────────────────────────────────────────")
+	fmt.Println("═══ Run Summary ═══════════════════════════════════════════")
 
 	if result != nil {
 		fmt.Printf("  Run ID:  %s\n", result.RunID)
@@ -358,24 +366,105 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 		fmt.Printf("  Nodes:   %d completed\n", len(result.CompletedNodes))
 	}
 
+	// Total elapsed time from trace
+	if result != nil && result.Trace != nil && !result.Trace.StartTime.IsZero() {
+		elapsed := result.Trace.EndTime.Sub(result.Trace.StartTime)
+		fmt.Printf("  Time:    %s\n", formatElapsed(elapsed))
+	}
+
+	// Per-node timing table
+	if result != nil && result.Trace != nil && len(result.Trace.Entries) > 0 {
+		fmt.Println()
+		fmt.Println("─── Node Execution ────────────────────────────────────────")
+		fmt.Printf("  %-20s  %-10s  %-10s  %s\n", "Node", "Status", "Time", "Handler")
+		fmt.Printf("  %-20s  %-10s  %-10s  %s\n", "────", "──────", "────", "───────")
+		for _, entry := range result.Trace.Entries {
+			icon := "✓"
+			switch entry.Status {
+			case pipeline.OutcomeFail:
+				icon = "✗"
+			case pipeline.OutcomeRetry:
+				icon = "↻"
+			}
+			nodeID := entry.NodeID
+			if len(nodeID) > 20 {
+				nodeID = nodeID[:17] + "…"
+			}
+			fmt.Printf("  %-20s  %s %-8s  %-10s  %s\n",
+				nodeID, icon, entry.Status, formatElapsed(entry.Duration), entry.HandlerName)
+		}
+	}
+
+	// Token usage per provider
 	if tracker != nil {
 		providers := tracker.Providers()
 		if len(providers) > 0 {
-			fmt.Println("  Tokens:")
+			fmt.Println()
+			fmt.Println("─── Token Usage ───────────────────────────────────────────")
+			fmt.Printf("  %-12s  %10s  %10s\n", "Provider", "Input", "Output")
+			fmt.Printf("  %-12s  %10s  %10s\n", "────────", "─────", "──────")
 			for _, p := range providers {
 				u := tracker.ProviderUsage(p)
-				fmt.Printf("    %-12s  in: %-8d  out: %-8d\n", p, u.InputTokens, u.OutputTokens)
+				fmt.Printf("  %-12s  %10d  %10d\n", p, u.InputTokens, u.OutputTokens)
 			}
 			total := tracker.TotalUsage()
-			fmt.Printf("    %-12s  in: %-8d  out: %-8d\n", "total", total.InputTokens, total.OutputTokens)
+			fmt.Printf("  %-12s  %10d  %10d\n", "TOTAL", total.InputTokens, total.OutputTokens)
 			if total.EstimatedCost > 0 {
-				fmt.Printf("  Cost:    $%.4f\n", total.EstimatedCost)
+				fmt.Printf("  Cost: $%.4f\n", total.EstimatedCost)
 			}
 		}
 	}
 
-	if pipelineErr != nil {
-		fmt.Printf("  Error:   %v\n", pipelineErr)
+	// Simple ASCII node graph from trace
+	if result != nil && result.Trace != nil && len(result.Trace.Entries) > 0 {
+		fmt.Println()
+		fmt.Println("─── Pipeline Graph ────────────────────────────────────────")
+		printNodeGraph(result.Trace.Entries)
 	}
-	fmt.Println("───────────────────────────────────────────────────────────")
+
+	if pipelineErr != nil {
+		fmt.Println()
+		fmt.Printf("  ERROR: %v\n", pipelineErr)
+	}
+	fmt.Println("═══════════════════════════════════════════════════════════")
+}
+
+// printNodeGraph renders a simple vertical ASCII graph of the executed nodes.
+func printNodeGraph(entries []pipeline.TraceEntry) {
+	for i, entry := range entries {
+		icon := "✓"
+		switch entry.Status {
+		case pipeline.OutcomeFail:
+			icon = "✗"
+		case pipeline.OutcomeRetry:
+			icon = "↻"
+		}
+
+		label := entry.NodeID
+		timing := formatElapsed(entry.Duration)
+
+		fmt.Printf("  %s %s (%s)\n", icon, label, timing)
+
+		// Draw connector to next node
+		if i < len(entries)-1 {
+			if entry.EdgeTo != "" && entry.EdgeTo != entries[i+1].NodeID {
+				// Show branching
+				fmt.Printf("  │ → %s\n", entry.EdgeTo)
+			}
+			fmt.Println("  │")
+		}
+	}
+}
+
+// formatElapsed formats a duration for the summary display.
+func formatElapsed(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	minutes := int(d.Minutes())
+	seconds := int(d.Seconds()) % 60
+	return fmt.Sprintf("%dm%02ds", minutes, seconds)
 }

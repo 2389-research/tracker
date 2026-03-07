@@ -51,6 +51,9 @@ type GateFreeformMsg struct {
 // PipelineDoneMsg signals that the pipeline goroutine has finished.
 type PipelineDoneMsg struct{ Err error }
 
+// LLMActivityMsg wraps an LLM activity event for display in the agent log.
+type LLMActivityMsg struct{ Summary string }
+
 // tickMsg is sent periodically to update the elapsed time display.
 type tickMsg time.Time
 
@@ -186,6 +189,11 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PipelineEventMsg:
 		a.agentLog.AppendEvent(msg.Event)
 		a.applyPipelineEvent(msg.Event)
+		return a, nil
+
+	// ── LLM activity event ────────────────────────────────────────────────────
+	case LLMActivityMsg:
+		a.agentLog.AppendLine(msg.Summary)
 		return a, nil
 
 	// ── Human gate: choice ───────────────────────────────────────────────────
