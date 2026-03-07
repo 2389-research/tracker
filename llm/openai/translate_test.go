@@ -147,3 +147,86 @@ func TestTranslateRequestResponseFormatText(t *testing.T) {
 		t.Error("expected no 'text' field for 'text' response format type")
 	}
 }
+
+// TestTranslateRequestMultiTurnToolCall verifies the second-turn request format
+// when the assistant made a tool call on turn 1 and we're sending results back.
+func TestTranslateRequestMultiTurnToolCall(t *testing.T) {
+	// Simulate: system, user prompt, assistant (text + tool call), tool result
+	req := &llm.Request{
+		Model: "gpt-5.4",
+		Messages: []llm.Message{
+			llm.SystemMessage("You are helpful."),
+			llm.UserMessage("List files"),
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindText, Text: "I'll list the files for you."},
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{
+						ID:        "call_abc123",
+						Name:      "bash",
+						Arguments: json.RawMessage(`{"command":"ls -la"}`),
+					}},
+				},
+			},
+			llm.ToolResultMessage("call_abc123", "file1.txt\nfile2.txt", false),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	// System message should be extracted to instructions
+	instructions, _ := raw["instructions"].(string)
+	if instructions != "You are helpful." {
+		t.Errorf("instructions = %q, want 'You are helpful.'", instructions)
+	}
+
+	input, ok := raw["input"].([]any)
+	if !ok {
+		t.Fatal("expected input array")
+	}
+
+	// Dump for debugging
+	prettyJSON, _ := json.MarshalIndent(raw["input"], "", "  ")
+	t.Logf("input array:\n%s", prettyJSON)
+
+	// input[0]: user message
+	item0 := input[0].(map[string]any)
+	if item0["role"] != "user" {
+		t.Errorf("input[0] role = %v, want 'user'", item0["role"])
+	}
+
+	// input[1]: function_call (assistant text is NOT echoed back in Responses API)
+	// Echoed function_calls use "call_id" not "id" in the input array.
+	item1 := input[1].(map[string]any)
+	if item1["type"] != "function_call" {
+		t.Errorf("input[1] type = %v, want 'function_call'", item1["type"])
+	}
+	if item1["call_id"] != "call_abc123" {
+		t.Errorf("input[1] call_id = %v, want 'call_abc123'", item1["call_id"])
+	}
+	if _, hasID := item1["id"]; hasID {
+		t.Error("function_call input items should use 'call_id', not 'id'")
+	}
+
+	// input[2]: function_call_output
+	item2 := input[2].(map[string]any)
+	if item2["type"] != "function_call_output" {
+		t.Errorf("input[2] type = %v, want 'function_call_output'", item2["type"])
+	}
+	if item2["call_id"] != "call_abc123" {
+		t.Errorf("input[2] call_id = %v, want 'call_abc123'", item2["call_id"])
+	}
+
+	// Should only have 3 items (no assistant text item)
+	if len(input) != 3 {
+		t.Errorf("input length = %d, want 3 (user, function_call, function_call_output)", len(input))
+	}
+}

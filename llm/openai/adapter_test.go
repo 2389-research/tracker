@@ -176,8 +176,8 @@ func TestTranslateRequestToolCallInInput(t *testing.T) {
 	if fc["type"] != "function_call" {
 		t.Errorf("expected function_call, got %v", fc["type"])
 	}
-	if fc["id"] != "call_123" {
-		t.Errorf("expected id call_123, got %v", fc["id"])
+	if fc["call_id"] != "call_123" {
+		t.Errorf("expected call_id call_123, got %v", fc["call_id"])
 	}
 	if fc["name"] != "read_file" {
 		t.Errorf("expected name read_file, got %v", fc["name"])
@@ -233,6 +233,110 @@ func TestTranslateRequestCallIDFallback(t *testing.T) {
 	userMsg := input[0].(map[string]any)
 	if _, has := userMsg["call_id"]; has {
 		t.Error("user message should not have call_id field")
+	}
+}
+
+func TestTranslateRequestFunctionCallUsesCallID(t *testing.T) {
+	// The OpenAI Responses API requires function_call input items to use
+	// "call_id", not "id". This test verifies that echoing back a tool call
+	// from the assistant produces "call_id" in the JSON.
+	req := &llm.Request{
+		Model: "gpt-5.4",
+		Messages: []llm.Message{
+			llm.UserMessage("Do something"),
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{
+						ID:        "call_abc123",
+						Name:      "bash",
+						Arguments: json.RawMessage(`{"command":"ls"}`),
+					}},
+				},
+			},
+			llm.ToolResultMessage("call_abc123", "file1.txt\nfile2.txt", false),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	json.Unmarshal(body, &raw)
+
+	input := raw["input"].([]any)
+	if len(input) != 3 {
+		t.Fatalf("expected 3 input items, got %d", len(input))
+	}
+
+	// The function_call item (input[1]) MUST have "call_id", not "id"
+	fc := input[1].(map[string]any)
+	if fc["type"] != "function_call" {
+		t.Errorf("expected function_call, got %v", fc["type"])
+	}
+	if _, hasID := fc["id"]; hasID {
+		t.Error("function_call input items should use 'call_id', not 'id'")
+	}
+	if fc["call_id"] != "call_abc123" {
+		t.Errorf("expected call_id 'call_abc123', got %v", fc["call_id"])
+	}
+}
+
+func TestStreamToolCallCapturesCallID(t *testing.T) {
+	// GPT-5.4 sends call_id on function_call items in SSE events.
+	// The adapter must capture call_id and use it as the ToolCallData.ID.
+	sseData := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_tc","model":"gpt-5.4"}}`,
+		"",
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_item_001","call_id":"call_real_id","name":"bash"}}`,
+		"",
+		"event: response.function_call_arguments.delta",
+		`data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"cmd\":\"ls\"}"}`,
+		"",
+		"event: response.output_item.done",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_item_001","call_id":"call_real_id","name":"bash","arguments":"{\"cmd\":\"ls\"}"}}`,
+		"",
+		"event: response.completed",
+		`data: {"type":"response.completed","response":{"id":"resp_tc","status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[{"type":"function_call","id":"fc_item_001","call_id":"call_real_id","name":"bash","arguments":"{\"cmd\":\"ls\"}"}]}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gpt-5.4",
+		Messages: []llm.Message{llm.UserMessage("Run ls")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// Find the ToolCallStart event
+	var toolStart *llm.StreamEvent
+	for i := range events {
+		if events[i].Type == llm.EventToolCallStart {
+			toolStart = &events[i]
+			break
+		}
+	}
+	if toolStart == nil {
+		t.Fatal("expected ToolCallStart event")
+	}
+	// The ID should be call_id ("call_real_id"), not the item id ("fc_item_001")
+	if toolStart.ToolCall.ID != "call_real_id" {
+		t.Errorf("expected tool call ID 'call_real_id' (from call_id), got %q", toolStart.ToolCall.ID)
 	}
 }
 

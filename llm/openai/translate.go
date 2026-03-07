@@ -195,32 +195,35 @@ func translateMessageToInput(m llm.Message) []openaiInput {
 	var items []openaiInput
 
 	switch m.Role {
-	case llm.RoleUser, llm.RoleAssistant:
-		// Collect text parts into a single content string per message.
-		// Tool calls from assistant messages become separate function_call items.
+	case llm.RoleUser:
+		// User messages: collect text into a single content item.
 		var textParts []string
 		for _, part := range m.Content {
-			switch part.Kind {
-			case llm.KindText:
+			if part.Kind == llm.KindText {
 				textParts = append(textParts, part.Text)
-			case llm.KindToolCall:
-				if part.ToolCall != nil {
-					items = append(items, openaiInput{
-						Type:      "function_call",
-						ID:        part.ToolCall.ID,
-						Name:      part.ToolCall.Name,
-						Arguments: string(part.ToolCall.Arguments),
-					})
-				}
 			}
 		}
 		if len(textParts) > 0 {
-			// Text items come before function_call items in the input.
-			textItem := openaiInput{
-				Role:    string(m.Role),
+			items = append(items, openaiInput{
+				Role:    "user",
 				Content: strings.Join(textParts, ""),
+			})
+		}
+
+	case llm.RoleAssistant:
+		// Assistant messages: only echo function_call items back.
+		// The Responses API does not accept {role: "assistant"} items in input;
+		// assistant text is implicit in the conversation state.
+		// Echoed function_call items use "call_id" (not "id") in the input.
+		for _, part := range m.Content {
+			if part.Kind == llm.KindToolCall && part.ToolCall != nil {
+				items = append(items, openaiInput{
+					Type:      "function_call",
+					CallID:    part.ToolCall.ID,
+					Name:      part.ToolCall.Name,
+					Arguments: string(part.ToolCall.Arguments),
+				})
 			}
-			items = append([]openaiInput{textItem}, items...)
 		}
 
 	case llm.RoleTool:

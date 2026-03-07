@@ -11,6 +11,8 @@ func TestParityToolCallsFinishReasonsAndUsage(t *testing.T) {
 	body, err := translateRequest(&llm.Request{
 		Model: "gpt-5.2-codex",
 		Messages: []llm.Message{
+			// Assistant text is not echoed back in the Responses API input;
+			// only function_call items from assistant messages are included.
 			llm.AssistantMessage("prelude"),
 			llm.ToolResultMessage("call_1", "patched", false),
 		},
@@ -23,11 +25,12 @@ func TestParityToolCallsFinishReasonsAndUsage(t *testing.T) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
-	if len(req.Input) != 2 {
-		t.Fatalf("input item count = %d, want 2", len(req.Input))
+	// Only the tool result survives; assistant text is dropped.
+	if len(req.Input) != 1 {
+		t.Fatalf("input item count = %d, want 1", len(req.Input))
 	}
-	if req.Input[1].Type != "function_call_output" || req.Input[1].CallID != "call_1" {
-		t.Fatalf("tool result input = %+v", req.Input[1])
+	if req.Input[0].Type != "function_call_output" || req.Input[0].CallID != "call_1" {
+		t.Fatalf("tool result input = %+v", req.Input[0])
 	}
 
 	raw := []byte(`{

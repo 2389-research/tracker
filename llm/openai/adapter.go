@@ -224,9 +224,10 @@ type sseOutputItemAdded struct {
 	Type        string `json:"type"`
 	OutputIndex int    `json:"output_index"`
 	Item        struct {
-		Type string `json:"type"`
-		ID   string `json:"id,omitempty"`
-		Name string `json:"name,omitempty"`
+		Type   string `json:"type"`
+		ID     string `json:"id,omitempty"`
+		CallID string `json:"call_id,omitempty"`
+		Name   string `json:"name,omitempty"`
 	} `json:"item"`
 }
 
@@ -292,10 +293,15 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 				TextID: fmt.Sprintf("item_%d", evt.OutputIndex),
 			}
 		case "function_call":
+			// Prefer call_id over id for function_call items.
+			callID := evt.Item.CallID
+			if callID == "" {
+				callID = evt.Item.ID
+			}
 			ch <- llm.StreamEvent{
 				Type: llm.EventToolCallStart,
 				ToolCall: &llm.ToolCallData{
-					ID:   evt.Item.ID,
+					ID:   callID,
 					Name: evt.Item.Name,
 				},
 			}
