@@ -45,6 +45,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
 	}
 	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
+	prompt = pipeline.InjectPipelineContext(prompt, pctx)
 
 	config := h.buildConfig(node)
 

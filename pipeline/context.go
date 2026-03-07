@@ -12,6 +12,7 @@ const (
 	ContextKeyPreferredLabel = "preferred_label"
 	ContextKeyGoal           = "graph.goal"
 	ContextKeyLastResponse   = "last_response"
+	ContextKeyHumanResponse  = "human_response"
 	ContextKeyToolStdout     = "tool_stdout"
 	ContextKeyToolStderr     = "tool_stderr"
 )

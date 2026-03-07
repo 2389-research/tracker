@@ -220,7 +220,7 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 		}
 		return pipeline.Outcome{
 			Status:         pipeline.OutcomeSuccess,
-			ContextUpdates: map[string]string{"human_response": response},
+			ContextUpdates: map[string]string{pipeline.ContextKeyHumanResponse: response},
 		}, nil
 	}
 
