@@ -29,6 +29,7 @@ import (
 	"github.com/2389-research/tracker/tui/dashboard"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 )
 
 type runConfig struct {
@@ -103,8 +104,9 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 	// Create execution environment for tool handlers.
 	execEnv := exec.NewLocalEnvironment(workdir)
 
-	// Mode 1: BubbleteaInterviewer for human gate nodes (replaces ConsoleInterviewer).
-	interviewer := tui.NewBubbleteaInterviewer()
+	// Choose interviewer based on whether stdin is a terminal.
+	// BubbleteaInterviewer requires a TTY; ConsoleInterviewer works with plain stdin.
+	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()))
 
 	// Build the handler registry with real production dependencies.
 	registry := handlers.NewDefaultRegistry(graph,
@@ -339,6 +341,16 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 	}
 
 	return client, nil
+}
+
+// chooseInterviewer returns a BubbleteaInterviewer when stdin is a terminal
+// (nice arrow-key UI), or a ConsoleInterviewer for non-TTY contexts (piped
+// input, background processes, CI).
+func chooseInterviewer(isTerminal bool) handlers.FreeformInterviewer {
+	if isTerminal {
+		return tui.NewBubbleteaInterviewer()
+	}
+	return handlers.NewConsoleInterviewer()
 }
 
 // buildNodeList creates an ordered list of dashboard NodeEntry items from the

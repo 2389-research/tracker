@@ -332,6 +332,7 @@ func (a *AppModel) relayout() {
 	}
 
 	a.nodeList.SetWidth(nodeListW)
+	a.nodeList.SetHeight(contentHeight)
 	a.agentLog.SetSize(agentLogW, contentHeight)
 }
 

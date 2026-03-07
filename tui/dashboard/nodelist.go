@@ -27,9 +27,13 @@ type NodeEntry struct {
 }
 
 // NodeListModel renders a signal lamp panel of pipeline nodes.
+// When height is set and the list exceeds it, only a visible window is
+// rendered and auto-scrolls to keep the most recent running node visible.
 type NodeListModel struct {
-	nodes []NodeEntry
-	width int
+	nodes  []NodeEntry
+	width  int
+	height int // 0 means unlimited (render all)
+	offset int // first visible node index
 }
 
 // NewNodeListModel creates a node list with the given initial entries.
@@ -42,12 +46,22 @@ func (n *NodeListModel) SetWidth(width int) {
 	n.width = width
 }
 
+// SetHeight sets the maximum number of lines (including header and scroll
+// indicators) available for the node list. 0 means unlimited.
+func (n *NodeListModel) SetHeight(height int) {
+	n.height = height
+}
+
 // SetNodeStatus updates the status of the node with the given ID.
-// If the node is not found, no change is made.
+// If the node is not found, no change is made. When a node transitions to
+// NodeRunning, the viewport auto-scrolls to keep it visible.
 func (n *NodeListModel) SetNodeStatus(id string, status NodeStatus) {
 	for i := range n.nodes {
 		if n.nodes[i].ID == id {
 			n.nodes[i].Status = status
+			if status == NodeRunning {
+				n.ensureVisible(i)
+			}
 			return
 		}
 	}
@@ -58,13 +72,109 @@ func (n *NodeListModel) AddNode(entry NodeEntry) {
 	n.nodes = append(n.nodes, entry)
 }
 
+// visibleWindow returns the start and end (exclusive) indices of the node
+// slice to render, plus whether up/down scroll indicators are needed.
+func (n NodeListModel) visibleWindow() (start, end int, upIndicator, downIndicator bool) {
+	total := len(n.nodes)
+	if total == 0 {
+		return 0, 0, false, false
+	}
+
+	// header line = 1, each node = 1 line, indicators = 1 each
+	// If height is 0 or large enough for everything, show all.
+	if n.height <= 0 || n.height >= total+1 {
+		return 0, total, false, false
+	}
+
+	// Available lines for node rows: height - 1 (header)
+	avail := n.height - 1
+
+	// Reserve lines for scroll indicators
+	needUp := n.offset > 0
+	needDown := n.offset+avail < total
+	if needUp {
+		avail--
+	}
+	if needDown {
+		avail--
+	}
+	if avail < 1 {
+		avail = 1
+	}
+
+	start = n.offset
+	end = start + avail
+	if end > total {
+		end = total
+	}
+
+	// Recompute indicators with final bounds
+	upIndicator = start > 0
+	downIndicator = end < total
+
+	return start, end, upIndicator, downIndicator
+}
+
+// ensureVisible adjusts the scroll offset so that the node at index idx
+// is within the visible window.
+func (n *NodeListModel) ensureVisible(idx int) {
+	total := len(n.nodes)
+	if n.height <= 0 || total == 0 {
+		return
+	}
+
+	// When scrolled to the middle, both ↑ and ↓ indicators are shown, so
+	// available node lines = height - 1 (header) - 1 (up) - 1 (down).
+	// At the top only ↓ is shown; at the bottom only ↑. We use the
+	// worst-case (both indicators) and then clamp the offset.
+	avail := n.height - 3
+	if avail < 1 {
+		avail = 1
+	}
+
+	// Scroll down if below viewport
+	if idx >= n.offset+avail {
+		n.offset = idx - avail + 1
+	}
+	// Scroll up if above viewport
+	if idx < n.offset {
+		n.offset = idx
+	}
+
+	// Clamp
+	if n.offset < 0 {
+		n.offset = 0
+	}
+	maxOffset := total - avail
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if n.offset > maxOffset {
+		n.offset = maxOffset
+	}
+}
+
 // View renders the node list as a signal lamp panel.
 func (n NodeListModel) View() string {
 	var sb strings.Builder
 	sb.WriteString(zoneLabelStyle.Render("PIPELINE"))
 	sb.WriteString("\n")
 
-	for _, node := range n.nodes {
+	if len(n.nodes) == 0 {
+		sb.WriteString(dimTextStyle.Render("(no nodes)"))
+		sb.WriteString("\n")
+		return sb.String()
+	}
+
+	start, end, upInd, downInd := n.visibleWindow()
+
+	if upInd {
+		sb.WriteString(dimTextStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+		sb.WriteString("\n")
+	}
+
+	for i := start; i < end; i++ {
+		node := n.nodes[i]
 		lamp, style := signalLamp(node.Status)
 		label := node.Label
 		if label == "" {
@@ -81,8 +191,9 @@ func (n NodeListModel) View() string {
 		sb.WriteString("\n")
 	}
 
-	if len(n.nodes) == 0 {
-		sb.WriteString(dimTextStyle.Render("(no nodes)"))
+	if downInd {
+		remaining := len(n.nodes) - end
+		sb.WriteString(dimTextStyle.Render(fmt.Sprintf("  ↓ %d more", remaining)))
 		sb.WriteString("\n")
 	}
 

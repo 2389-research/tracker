@@ -2,6 +2,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -130,6 +131,86 @@ func TestNodeListSetWidthUpdates(t *testing.T) {
 	nl.SetWidth(80)
 	if nl.width != 80 {
 		t.Errorf("expected width=80, got %d", nl.width)
+	}
+}
+
+func TestNodeListSetHeightUpdates(t *testing.T) {
+	nl := NewNodeListModel(nil)
+	nl.SetHeight(20)
+	if nl.height != 20 {
+		t.Errorf("expected height=20, got %d", nl.height)
+	}
+}
+
+func TestNodeListViewClipsToHeight(t *testing.T) {
+	// Create 30 nodes — more than any reasonable terminal height
+	var nodes []NodeEntry
+	for i := 0; i < 30; i++ {
+		nodes = append(nodes, NodeEntry{
+			ID:     fmt.Sprintf("node%d", i),
+			Label:  fmt.Sprintf("Node %d", i),
+			Status: NodePending,
+		})
+	}
+	nl := NewNodeListModel(nodes)
+	nl.SetHeight(10)
+	nl.SetWidth(40)
+
+	view := nl.View()
+	lines := strings.Split(view, "\n")
+	// Remove trailing empty line if present
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	// Should not exceed the height (10 lines including header)
+	if len(lines) > 10 {
+		t.Errorf("expected at most 10 lines, got %d", len(lines))
+	}
+}
+
+func TestNodeListAutoScrollsToRunningNode(t *testing.T) {
+	// Create 30 nodes, set node 25 as running
+	var nodes []NodeEntry
+	for i := 0; i < 30; i++ {
+		status := NodePending
+		if i < 10 {
+			status = NodeDone
+		}
+		nodes = append(nodes, NodeEntry{
+			ID:     fmt.Sprintf("node%d", i),
+			Label:  fmt.Sprintf("Node %d", i),
+			Status: status,
+		})
+	}
+	nl := NewNodeListModel(nodes)
+	nl.SetHeight(10)
+	nl.SetWidth(40)
+	nl.SetNodeStatus("node25", NodeRunning)
+
+	view := nl.View()
+	// The running node should be visible in the output
+	if !strings.Contains(view, "Node 25") {
+		t.Errorf("expected running node 'Node 25' to be visible after auto-scroll, got:\n%s", view)
+	}
+}
+
+func TestNodeListScrollShowsIndicatorWhenClipped(t *testing.T) {
+	var nodes []NodeEntry
+	for i := 0; i < 30; i++ {
+		nodes = append(nodes, NodeEntry{
+			ID:     fmt.Sprintf("node%d", i),
+			Label:  fmt.Sprintf("Node %d", i),
+			Status: NodePending,
+		})
+	}
+	nl := NewNodeListModel(nodes)
+	nl.SetHeight(10)
+	nl.SetWidth(40)
+
+	view := nl.View()
+	// Should contain a scroll indicator showing there are more nodes below
+	if !strings.Contains(view, "↓") && !strings.Contains(view, "more") {
+		t.Errorf("expected scroll indicator when nodes are clipped, got:\n%s", view)
 	}
 }
 

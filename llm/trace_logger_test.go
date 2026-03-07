@@ -22,6 +22,134 @@ func TestTraceLoggerDefaultOmitsRawProviderEvents(t *testing.T) {
 	}
 }
 
+func TestTraceLoggerBatchesTextDeltas(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewTraceLogger(&buf, TraceLoggerOptions{})
+
+	// Simulate a streaming response: start, multiple text deltas, finish
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceRequestStart,
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceText,
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Preview:  "Now",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceText,
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Preview:  "I have a clear",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceText,
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Preview:  "picture",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:         TraceFinish,
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4-6",
+		FinishReason: "stop",
+		Usage:        Usage{InputTokens: 100, OutputTokens: 20},
+	})
+
+	got := buf.String()
+	// Should have exactly one "llm text" line (batched), not three separate lines
+	textLineCount := strings.Count(got, "llm text")
+	if textLineCount != 1 {
+		t.Errorf("expected 1 batched 'llm text' line, got %d in:\n%s", textLineCount, got)
+	}
+	// The batched line should contain the accumulated preview
+	if !strings.Contains(got, "Now") || !strings.Contains(got, "picture") {
+		t.Errorf("expected batched text to contain accumulated preview, got:\n%s", got)
+	}
+}
+
+func TestTraceLoggerBatchNotBrokenByHiddenProviderRaw(t *testing.T) {
+	// Reproduces the real production bug: TraceProviderRaw events (verbose=true
+	// on TraceBuilder) are interspersed between TraceText events. When the
+	// logger has verbose=false, these raw events should NOT flush the text batch.
+	var buf bytes.Buffer
+	logger := NewTraceLogger(&buf, TraceLoggerOptions{Verbose: false})
+
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceRequestStart,
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+	})
+	// Simulate: text, raw, text, raw, text, raw, finish
+	for _, word := range []string{"Now", "I have a clear", "picture"} {
+		logger.HandleTraceEvent(TraceEvent{
+			Kind:     TraceText,
+			Provider: "anthropic",
+			Model:    "claude-opus-4-6",
+			Preview:  word,
+		})
+		// Interspersed raw provider event (emitted by TraceBuilder with Verbose=true)
+		logger.HandleTraceEvent(TraceEvent{
+			Kind:          TraceProviderRaw,
+			Provider:      "anthropic",
+			Model:         "claude-opus-4-6",
+			ProviderEvent: "content_block_delta",
+			RawPreview:    `{"type":"content_block_delta"}`,
+		})
+	}
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:         TraceFinish,
+		Provider:     "anthropic",
+		Model:        "claude-opus-4-6",
+		FinishReason: "stop",
+		Usage:        Usage{InputTokens: 100, OutputTokens: 20},
+	})
+
+	got := buf.String()
+	textLineCount := strings.Count(got, "llm text")
+	if textLineCount != 1 {
+		t.Errorf("expected 1 batched 'llm text' line, got %d in:\n%s", textLineCount, got)
+	}
+}
+
+func TestTraceLoggerBatchesReasoningDeltas(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewTraceLogger(&buf, TraceLoggerOptions{})
+
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceRequestStart,
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceReasoning,
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+		Preview:  "Let me think",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceReasoning,
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+		Preview:  "about this",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:         TraceFinish,
+		Provider:     "anthropic",
+		Model:        "claude-opus-4-6",
+		FinishReason: "stop",
+		Usage:        Usage{InputTokens: 50, OutputTokens: 10},
+	})
+
+	got := buf.String()
+	thinkingCount := strings.Count(got, "llm thinking")
+	if thinkingCount != 1 {
+		t.Errorf("expected 1 batched 'llm thinking' line, got %d in:\n%s", thinkingCount, got)
+	}
+}
+
 func TestTraceLoggerWritesNormalizedEvents(t *testing.T) {
 	var buf bytes.Buffer
 	logger := NewTraceLogger(&buf, TraceLoggerOptions{})
