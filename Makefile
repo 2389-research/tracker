@@ -13,8 +13,12 @@ build:
 test:
 	GOCACHE=$(GOCACHE) go test ./...
 
+INSTALL_DIR ?= $(if $(XDG_BIN_HOME),$(XDG_BIN_HOME),$(HOME)/.local/bin)
+
 install: build
-	cp bin/tracker $(GOPATH)/bin/tracker 2>/dev/null || cp bin/tracker $(HOME)/go/bin/tracker
+	mkdir -p "$(INSTALL_DIR)"
+	cp bin/tracker "$(INSTALL_DIR)/tracker"
+	@echo "Installed tracker to $(INSTALL_DIR)/tracker"
 
 clean:
 	rm -rf bin/
