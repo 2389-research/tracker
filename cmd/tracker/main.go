@@ -35,7 +35,6 @@ func main() {
 	var (
 		workdir    string
 		checkpoint string
-		verbose    bool
 		tuiMode    bool
 	)
 
@@ -43,8 +42,6 @@ func main() {
 	flag.StringVar(&workdir, "workdir", "", "Working directory (default: current directory)")
 	flag.StringVar(&checkpoint, "c", "", "Checkpoint file path for resume support")
 	flag.StringVar(&checkpoint, "checkpoint", "", "Checkpoint file path for resume support")
-	flag.BoolVar(&verbose, "v", false, "Verbose event logging")
-	flag.BoolVar(&verbose, "verbose", false, "Verbose event logging")
 	flag.BoolVar(&tuiMode, "tui", false, "Full TUI dashboard mode with live progress and modal gates")
 
 	flag.Usage = func() {
@@ -74,7 +71,7 @@ func main() {
 	if tuiMode {
 		err = runTUI(dotFile, workdir, checkpoint)
 	} else {
-		err = run(dotFile, workdir, checkpoint, verbose)
+		err = run(dotFile, workdir, checkpoint)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -84,7 +81,7 @@ func main() {
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
-func run(dotFile, workdir, checkpoint string, verbose bool) error {
+func run(dotFile, workdir, checkpoint string) error {
 	// Read and parse the DOT file.
 	dotBytes, err := os.ReadFile(dotFile)
 	if err != nil {
@@ -128,11 +125,10 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
 
-	if verbose {
-		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
-			&pipeline.LoggingEventHandler{Writer: os.Stderr},
-		))
-	}
+	// Always log pipeline events to stdout in non-TUI mode.
+	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
+		&pipeline.LoggingEventHandler{Writer: os.Stdout},
+	))
 
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
@@ -152,15 +148,13 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 		return fmt.Errorf("pipeline execution: %w", err)
 	}
 
-	// Print result summary.
-	fmt.Fprintf(os.Stdout, "run_id=%s status=%s completed_nodes=%d\n",
-		result.RunID, result.Status, len(result.CompletedNodes))
-
+	// Print run summary.
+	var pipelineErr error
 	if result.Status != pipeline.OutcomeSuccess {
-		return fmt.Errorf("pipeline finished with status: %s", result.Status)
+		pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
 	}
-
-	return nil
+	printRunSummary(result, pipelineErr, tokenTracker)
+	return pipelineErr
 }
 
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
