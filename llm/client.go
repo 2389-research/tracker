@@ -15,6 +15,7 @@ type Client struct {
 	providers       map[string]ProviderAdapter
 	defaultProvider string
 	middleware      []Middleware
+	traceObservers  []TraceObserver
 }
 
 // ClientOption configures a Client during construction.
@@ -25,6 +26,7 @@ type clientConfig struct {
 	providers       map[string]ProviderAdapter
 	defaultProvider string
 	middleware      []Middleware
+	traceObservers  []TraceObserver
 }
 
 // WithProvider registers a provider adapter with the client.
@@ -45,6 +47,15 @@ func WithDefaultProvider(name string) ClientOption {
 func WithMiddleware(mw Middleware) ClientOption {
 	return func(c *clientConfig) {
 		c.middleware = append(c.middleware, mw)
+	}
+}
+
+// WithTraceObserver registers a live trace observer for completions.
+func WithTraceObserver(obs TraceObserver) ClientOption {
+	return func(c *clientConfig) {
+		if obs != nil {
+			c.traceObservers = append(c.traceObservers, obs)
+		}
 	}
 }
 
@@ -73,6 +84,7 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 		providers:       cfg.providers,
 		defaultProvider: cfg.defaultProvider,
 		middleware:      cfg.middleware,
+		traceObservers:  cfg.traceObservers,
 	}, nil
 }
 
@@ -183,9 +195,14 @@ func (c *Client) Complete(ctx context.Context, req *Request) (*Response, error) 
 	if err != nil {
 		return nil, err
 	}
+	traceObservers := c.collectTraceObservers(req)
 
 	// Build the innermost handler that calls the adapter.
 	handler := CompleteHandler(func(ctx context.Context, req *Request) (*Response, error) {
+		if len(traceObservers) > 0 {
+			return c.completeWithTrace(ctx, req, adapter, traceObservers)
+		}
+
 		start := time.Now()
 		resp, err := adapter.Complete(ctx, req)
 		if err != nil {
@@ -202,6 +219,41 @@ func (c *Client) Complete(ctx context.Context, req *Request) (*Response, error) 
 	}
 
 	return handler(ctx, req)
+}
+
+func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter ProviderAdapter, observers []TraceObserver) (*Response, error) {
+	start := time.Now()
+	streamReq := cloneRequest(req)
+	if streamReq.ProviderOptions == nil {
+		streamReq.ProviderOptions = make(map[string]any)
+	}
+	streamReq.ProviderOptions["tracker_emit_provider_events"] = true
+	traceBuilder := NewTraceBuilder(TraceOptions{
+		Provider: adapter.Name(),
+		Model:    req.Model,
+		Verbose:  true,
+	})
+	acc := NewStreamAccumulator()
+
+	for evt := range adapter.Stream(ctx, streamReq) {
+		if evt.Err != nil {
+			return nil, evt.Err
+		}
+
+		before := len(traceBuilder.events)
+		traceBuilder.Process(evt)
+		for _, traceEvt := range traceBuilder.events[before:] {
+			notifyTraceObservers(observers, traceEvt)
+		}
+
+		acc.Process(evt)
+	}
+
+	resp := acc.Response()
+	resp.Provider = adapter.Name()
+	resp.Model = req.Model
+	resp.Latency = time.Since(start)
+	return &resp, nil
 }
 
 // Stream sends a streaming request to the resolved provider adapter.
@@ -224,6 +276,42 @@ func (c *Client) Stream(ctx context.Context, req *Request) <-chan StreamEvent {
 // TokenTracker after the client is built from environment variables).
 func (c *Client) AddMiddleware(mw Middleware) {
 	c.middleware = append(c.middleware, mw)
+}
+
+// AddTraceObserver appends a live trace observer after client construction.
+func (c *Client) AddTraceObserver(obs TraceObserver) {
+	if obs != nil {
+		c.traceObservers = append(c.traceObservers, obs)
+	}
+}
+
+func (c *Client) collectTraceObservers(req *Request) []TraceObserver {
+	total := make([]TraceObserver, 0, len(c.traceObservers)+len(req.TraceObservers))
+	total = append(total, c.traceObservers...)
+	total = append(total, req.TraceObservers...)
+	return total
+}
+
+func notifyTraceObservers(observers []TraceObserver, evt TraceEvent) {
+	for _, obs := range observers {
+		if obs != nil {
+			obs.HandleTraceEvent(evt)
+		}
+	}
+}
+
+func cloneRequest(req *Request) *Request {
+	cp := *req
+	if req.ProviderOptions != nil {
+		cp.ProviderOptions = make(map[string]any, len(req.ProviderOptions))
+		for k, v := range req.ProviderOptions {
+			cp.ProviderOptions[k] = v
+		}
+	}
+	if req.TraceObservers != nil {
+		cp.TraceObservers = append([]TraceObserver(nil), req.TraceObservers...)
+	}
+	return &cp
 }
 
 // Close releases resources for all registered provider adapters.

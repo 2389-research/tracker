@@ -31,11 +31,15 @@ var _ tools.Tool = (*stubTool)(nil)
 
 // mockCompleter is a mock llm.Client for testing the agentic loop.
 type mockCompleter struct {
-	responses []*llm.Response
-	calls     int
+	responses  []*llm.Response
+	calls      int
+	onComplete func(req *llm.Request)
 }
 
 func (m *mockCompleter) Complete(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	if m.onComplete != nil {
+		m.onComplete(req)
+	}
 	if m.calls >= len(m.responses) {
 		return &llm.Response{
 			Message:      llm.AssistantMessage("done"),
@@ -305,5 +309,90 @@ func TestSessionNaturalStopOnMaxTurn(t *testing.T) {
 	}
 	if result.MaxTurnsUsed {
 		t.Error("expected MaxTurnsUsed to be false when model stops naturally on final turn")
+	}
+}
+
+func TestSessionEmitsLLMTraceEventsInTurnOrder(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{
+							Kind: llm.KindToolCall,
+							ToolCall: &llm.ToolCallData{
+								ID:        "call_1",
+								Name:      "read",
+								Arguments: json.RawMessage(`{"path":"go.mod"}`),
+							},
+						},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	client.onComplete = func(req *llm.Request) {
+		for _, obs := range req.TraceObservers {
+			obs.HandleTraceEvent(llm.TraceEvent{
+				Kind:     llm.TraceRequestStart,
+				Provider: "anthropic",
+				Model:    "claude-opus-4-6",
+			})
+			obs.HandleTraceEvent(llm.TraceEvent{
+				Kind:     llm.TraceReasoning,
+				Provider: "anthropic",
+				Model:    "claude-opus-4-6",
+				Preview:  "checking workspace",
+			})
+			obs.HandleTraceEvent(llm.TraceEvent{
+				Kind:     llm.TraceToolPrepare,
+				Provider: "anthropic",
+				Model:    "claude-opus-4-6",
+				ToolName: "read",
+				Preview:  `{"path":"go.mod"}`,
+			})
+		}
+	}
+
+	var got []EventType
+	handler := EventHandlerFunc(func(evt Event) {
+		got = append(got, evt.Type)
+	})
+
+	cfg := DefaultConfig()
+	sess := mustNewSession(t, client, cfg, WithEventHandler(handler), WithTools(&stubTool{name: "read", output: "ok"}))
+
+	if _, err := sess.Run(context.Background(), "inspect"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertContainsInOrder(t, got,
+		EventTurnStart,
+		EventLLMRequestStart,
+		EventLLMReasoning,
+		EventLLMToolPrepare,
+		EventToolCallStart,
+		EventToolCallEnd,
+		EventTurnEnd,
+	)
+}
+
+func assertContainsInOrder(t *testing.T, got []EventType, want ...EventType) {
+	t.Helper()
+
+	idx := 0
+	for _, evt := range got {
+		if idx < len(want) && evt == want[idx] {
+			idx++
+		}
+	}
+	if idx != len(want) {
+		t.Fatalf("got events %v, want subsequence %v", got, want)
 	}
 }

@@ -197,3 +197,45 @@ func TestClientSingleProviderDefaultsToIt(t *testing.T) {
 		t.Errorf("expected provider 'solo', got %q", resp.Provider)
 	}
 }
+
+func TestClientCompletePublishesTraceEvents(t *testing.T) {
+	provider := &mockAdapter{
+		name: "streamer",
+		events: []StreamEvent{
+			{Type: EventStreamStart},
+			{Type: EventTextStart, TextID: "t1"},
+			{Type: EventTextDelta, TextID: "t1", Delta: "hello"},
+			{Type: EventFinish, FinishReason: &FinishReason{Reason: "stop"}},
+		},
+	}
+
+	var traces []TraceEvent
+	client, err := NewClient(
+		WithProvider(provider),
+		WithDefaultProvider("streamer"),
+		WithTraceObserver(TraceObserverFunc(func(evt TraceEvent) {
+			traces = append(traces, evt)
+		})),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer client.Close()
+
+	resp, err := client.Complete(context.Background(), &Request{
+		Model:    "m",
+		Messages: []Message{UserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Text() != "hello" {
+		t.Fatalf("resp.Text() = %q, want %q", resp.Text(), "hello")
+	}
+	if len(traces) == 0 {
+		t.Fatal("expected trace events")
+	}
+	if traces[0].Kind != TraceRequestStart {
+		t.Fatalf("traces[0].Kind = %q, want %q", traces[0].Kind, TraceRequestStart)
+	}
+}

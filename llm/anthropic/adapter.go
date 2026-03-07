@@ -110,6 +110,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 // Stream sends a streaming request and returns a channel of events.
 func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
 	ch := make(chan llm.StreamEvent, 64)
+	emitProviderEvents := shouldEmitProviderEvents(req)
 
 	go func() {
 		defer close(ch)
@@ -153,7 +154,7 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 			return
 		}
 
-		a.parseSSE(httpResp.Body, ch)
+		a.parseSSE(httpResp.Body, ch, emitProviderEvents)
 	}()
 
 	return ch
@@ -177,7 +178,7 @@ func (a *Adapter) setHeaders(httpReq *http.Request, req *llm.Request) {
 }
 
 // parseSSE reads SSE events from the response body and emits StreamEvents.
-func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
+func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024) // Allow up to 1MB lines for large tool call args/thinking blocks.
 
@@ -200,6 +201,9 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 		}
 
 		data := strings.TrimPrefix(line, "data: ")
+		if emitProviderEvents {
+			ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: json.RawMessage(data)}
+		}
 		a.handleSSEData(eventType, []byte(data), ch, blockTypes, &inputUsage)
 		eventType = ""
 	}
@@ -207,6 +211,14 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	if err := scanner.Err(); err != nil {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: SSE scan error: %w", err)}
 	}
+}
+
+func shouldEmitProviderEvents(req *llm.Request) bool {
+	if req == nil || req.ProviderOptions == nil {
+		return false
+	}
+	enabled, _ := req.ProviderOptions["tracker_emit_provider_events"].(bool)
+	return enabled
 }
 
 // sseMessageStart is the top-level message_start event.

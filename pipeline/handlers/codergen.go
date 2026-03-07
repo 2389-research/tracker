@@ -17,9 +17,10 @@ import (
 // CodergenHandler invokes an agent session with the prompt from node attributes,
 // captures the response text, and maps it to a pipeline outcome.
 type CodergenHandler struct {
-	client     agent.Completer
-	env        exec.ExecutionEnvironment
-	workingDir string
+	client       agent.Completer
+	env          exec.ExecutionEnvironment
+	workingDir   string
+	eventHandler agent.EventHandler
 }
 
 // NewCodergenHandler creates a CodergenHandler that will use the given LLM client
@@ -47,10 +48,11 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	config := h.buildConfig(node)
 
-	// Use a text collector event handler to capture the final response text,
-	// since SessionResult does not expose the conversation messages directly.
-	var collector textCollector
-	opts := []agent.SessionOption{agent.WithEventHandler(&collector)}
+	// Capture both plain assistant text and a readable execution transcript,
+	// since tool-only sessions would otherwise write an empty response artifact.
+	var collector transcriptCollector
+	handler := agent.MultiHandler(&collector, h.eventHandler)
+	opts := []agent.SessionOption{agent.WithEventHandler(handler)}
 	if h.env != nil {
 		opts = append(opts, agent.WithEnvironment(h.env))
 	}
@@ -81,13 +83,21 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 				pipeline.ContextKeyLastResponse: runErr.Error(),
 			},
 		}
-		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, runErr.Error(), outcome); err != nil {
+		responseArtifact := collector.transcript()
+		if responseArtifact == "" {
+			responseArtifact = runErr.Error()
+		}
+		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
 			return pipeline.Outcome{}, err
 		}
 		return outcome, nil
 	}
 
 	responseText := collector.text()
+	responseArtifact := collector.transcript()
+	if responseArtifact == "" {
+		responseArtifact = responseText
+	}
 
 	status := pipeline.OutcomeSuccess
 	if node.Attrs["auto_status"] == "true" {
@@ -100,7 +110,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			pipeline.ContextKeyLastResponse: responseText,
 		},
 	}
-	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseText, outcome); err != nil {
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil
@@ -153,18 +163,51 @@ func parseAutoStatus(text string) string {
 	return pipeline.OutcomeSuccess
 }
 
-// textCollector is an event handler that accumulates text delta events
-// emitted by the agent session to reconstruct the final response.
-type textCollector struct {
-	parts []string
+// transcriptCollector preserves an ordered plain-text transcript of a session
+// while also keeping the concatenated assistant text for status parsing.
+type transcriptCollector struct {
+	lines     []string
+	textParts []string
 }
 
-func (c *textCollector) HandleEvent(evt agent.Event) {
-	if evt.Type == agent.EventTextDelta && evt.Text != "" {
-		c.parts = append(c.parts, evt.Text)
+func (c *transcriptCollector) HandleEvent(evt agent.Event) {
+	switch evt.Type {
+	case agent.EventTurnStart:
+		c.lines = append(c.lines, fmt.Sprintf("TURN %d", evt.Turn))
+	case agent.EventToolCallStart:
+		c.lines = append(c.lines, fmt.Sprintf("TOOL CALL: %s", evt.ToolName))
+		if evt.ToolInput != "" {
+			c.lines = append(c.lines, "INPUT:")
+			c.lines = append(c.lines, evt.ToolInput)
+		}
+	case agent.EventToolCallEnd:
+		c.lines = append(c.lines, fmt.Sprintf("TOOL RESULT: %s", evt.ToolName))
+		if evt.ToolOutput != "" {
+			c.lines = append(c.lines, "OUTPUT:")
+			c.lines = append(c.lines, evt.ToolOutput)
+		}
+		if evt.ToolError != "" {
+			c.lines = append(c.lines, "ERROR:")
+			c.lines = append(c.lines, evt.ToolError)
+		}
+	case agent.EventTextDelta:
+		if evt.Text != "" {
+			c.textParts = append(c.textParts, evt.Text)
+			c.lines = append(c.lines, "TEXT:")
+			c.lines = append(c.lines, evt.Text)
+		}
+	case agent.EventError:
+		if evt.Err != nil {
+			c.lines = append(c.lines, "ERROR:")
+			c.lines = append(c.lines, evt.Err.Error())
+		}
 	}
 }
 
-func (c *textCollector) text() string {
-	return strings.Join(c.parts, "")
+func (c *transcriptCollector) text() string {
+	return strings.Join(c.textParts, "")
+}
+
+func (c *transcriptCollector) transcript() string {
+	return strings.Join(c.lines, "\n")
 }

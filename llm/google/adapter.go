@@ -119,6 +119,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 // Stream sends a streaming request and returns a channel of events.
 func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
 	ch := make(chan llm.StreamEvent, 64)
+	emitProviderEvents := shouldEmitProviderEvents(req)
 
 	go func() {
 		defer close(ch)
@@ -150,7 +151,7 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 			return
 		}
 
-		a.parseSSE(httpResp.Body, ch)
+		a.parseSSE(httpResp.Body, ch, emitProviderEvents)
 	}()
 
 	return ch
@@ -163,7 +164,7 @@ func (a *Adapter) Close() error {
 
 // parseSSE reads SSE events from the Gemini streaming response.
 // Gemini sends each chunk as a complete JSON object in an SSE data line.
-func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
+func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
@@ -179,6 +180,9 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 		}
 
 		data := []byte(strings.TrimPrefix(line, "data: "))
+		if emitProviderEvents {
+			ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: data}
+		}
 
 		var chunk geminiResponse
 		if err := json.Unmarshal(data, &chunk); err != nil {
@@ -255,6 +259,14 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	if err := scanner.Err(); err != nil {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: SSE scan error: %w", err)}
 	}
+}
+
+func shouldEmitProviderEvents(req *llm.Request) bool {
+	if req == nil || req.ProviderOptions == nil {
+		return false
+	}
+	enabled, _ := req.ProviderOptions["tracker_emit_provider_events"].(bool)
+	return enabled
 }
 
 func hasToolCallParts(parts []geminiPart) bool {

@@ -253,3 +253,32 @@ func TestParallelHandlerResultsInContext(t *testing.T) {
 		t.Errorf("expected results for branch_a and branch_b, got %v", nodeIDs)
 	}
 }
+
+func TestParallelHandlerPreservesInternalArtifactDir(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_internal")
+	registry := pipeline.NewHandlerRegistry()
+	stub := &stubHandler{
+		name: "stub_internal",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
+			if !ok || dir == "" {
+				return pipeline.Outcome{Status: pipeline.OutcomeFail}, fmt.Errorf("missing internal artifact dir")
+			}
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	}
+	registry.Register(stub)
+
+	h := NewParallelHandler(g, registry)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+	pctx.SetInternal(pipeline.InternalKeyArtifactDir, "/tmp/artifacts/run-123")
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+}

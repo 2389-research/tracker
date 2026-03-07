@@ -46,6 +46,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	// Snapshot the shared context once before spawning branches.
 	snapshot := pctx.Snapshot()
+	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
 
 	type branchResult struct {
 		index  int
@@ -75,6 +76,9 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 			// Each branch gets its own isolated context from the snapshot.
 			branchCtx := pipeline.NewPipelineContextFrom(snapshot)
+			if artifactDir != "" {
+				branchCtx.SetInternal(pipeline.InternalKeyArtifactDir, artifactDir)
+			}
 
 			outcome, err := h.registry.Execute(ctx, tn, branchCtx)
 

@@ -28,6 +28,7 @@ type registryConfig struct {
 	execEnv     exec.ExecutionEnvironment
 	interviewer Interviewer
 	graph       *pipeline.Graph
+	agentEvents agent.EventHandler
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -74,6 +75,13 @@ func WithInterviewer(interviewer Interviewer, graph *pipeline.Graph) RegistryOpt
 	}
 }
 
+// WithAgentEventHandler forwards live agent session events from codergen runs.
+func WithAgentEventHandler(handler agent.EventHandler) RegistryOption {
+	return func(c *registryConfig) {
+		c.agentEvents = handler
+	}
+}
+
 // NewDefaultRegistry creates a HandlerRegistry pre-loaded with all built-in handlers.
 // The graph is needed for the parallel handler (to look up branch targets) and the
 // human handler (to look up outgoing edge labels). Optional RegistryOption funcs
@@ -100,6 +108,7 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	if cfg.llmClient != nil {
 		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir)
 		handler.env = cfg.execEnv
+		handler.eventHandler = cfg.agentEvents
 		registry.Register(handler)
 	} else if cfg.codergenFunc != nil {
 		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})

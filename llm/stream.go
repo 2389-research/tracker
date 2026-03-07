@@ -92,8 +92,9 @@ func (a *StreamAccumulator) Process(event StreamEvent) {
 	case EventToolCallStart:
 		if event.ToolCall != nil {
 			a.activeToolCall = &ToolCallData{
-				ID:   event.ToolCall.ID,
-				Name: event.ToolCall.Name,
+				ID:             event.ToolCall.ID,
+				Name:           event.ToolCall.Name,
+				ThoughtSigData: event.ToolCall.ThoughtSigData,
 			}
 			a.activeToolArgs.Reset()
 			// Initialize from start event args (e.g., Google sends full args on start).

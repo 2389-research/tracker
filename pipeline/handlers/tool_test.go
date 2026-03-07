@@ -174,3 +174,42 @@ func TestToolHandlerWritesStatusArtifact(t *testing.T) {
 		t.Fatalf("status outcome = %v", status["outcome"])
 	}
 }
+
+func TestToolHandlerWritesStatusArtifactToPipelineArtifactDir(t *testing.T) {
+	workdir := t.TempDir()
+	artifactRoot := filepath.Join(t.TempDir(), "runs", "run-123")
+	env := exec.NewLocalEnvironment(workdir)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "toolstep",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "echo hello"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.SetInternal(pipeline.InternalKeyArtifactDir, artifactRoot)
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+
+	statusPath := filepath.Join(artifactRoot, "toolstep", "status.json")
+	statusBytes, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("expected status artifact in pipeline artifact dir: %v", err)
+	}
+	var status map[string]any
+	if err := json.Unmarshal(statusBytes, &status); err != nil {
+		t.Fatalf("status artifact should be valid json: %v", err)
+	}
+	if status["outcome"] != pipeline.OutcomeSuccess {
+		t.Fatalf("status outcome = %v", status["outcome"])
+	}
+
+	if _, err := os.Stat(filepath.Join(workdir, "toolstep", "status.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no fallback artifact in workdir, got err=%v", err)
+	}
+}

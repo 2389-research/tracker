@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -20,6 +22,7 @@ type LogEntry struct {
 	NodeID    string
 	Message   string
 	IsError   bool
+	Dim       bool
 }
 
 // AgentLogModel is a scrollable data recorder of pipeline events and LLM activity.
@@ -99,6 +102,37 @@ func (a *AgentLogModel) AppendLine(line string) {
 	a.refreshViewport()
 }
 
+// AppendTrace adds a formatted LLM trace event to the log.
+func (a *AgentLogModel) AppendTrace(evt llm.TraceEvent, verbose bool) {
+	line := llm.FormatTraceLine(evt, verbose)
+	if line == "" {
+		return
+	}
+
+	a.entries = append(a.entries, LogEntry{
+		Time:      time.Now(),
+		EventType: string(evt.Kind),
+		Message:   line,
+		Dim:       evt.Kind == llm.TraceProviderRaw,
+	})
+	a.refreshViewport()
+}
+
+// AppendAgentEvent adds a formatted live agent event to the log.
+func (a *AgentLogModel) AppendAgentEvent(evt agent.Event) {
+	line := agent.FormatEventLine(evt)
+	if line == "" {
+		return
+	}
+
+	a.entries = append(a.entries, LogEntry{
+		Time:      time.Now(),
+		EventType: string(evt.Type),
+		Message:   line,
+	})
+	a.refreshViewport()
+}
+
 // SetSize updates the viewport dimensions.
 func (a *AgentLogModel) SetSize(width, height int) {
 	a.width = width
@@ -165,6 +199,8 @@ func formatLogEntry(e LogEntry, maxWidth int) string {
 
 	if e.IsError {
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorRed).Render(msg))
+	} else if e.Dim {
+		sb.WriteString(dimTextStyle.Render(msg))
 	} else if isCompletionEvent(e.EventType) {
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Render(msg))
 	} else {

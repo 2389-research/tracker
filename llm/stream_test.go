@@ -3,6 +3,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -42,5 +43,29 @@ func TestStreamAccumulator(t *testing.T) {
 	}
 	if resp.FinishReason.Reason != "stop" {
 		t.Errorf("expected stop, got %q", resp.FinishReason.Reason)
+	}
+}
+
+func TestStreamAccumulatorPreservesToolCallThoughtSignature(t *testing.T) {
+	acc := NewStreamAccumulator()
+
+	acc.Process(StreamEvent{
+		Type: EventToolCallStart,
+		ToolCall: &ToolCallData{
+			ID:             "call_1",
+			Name:           "bash",
+			Arguments:      json.RawMessage(`{"command":"ls"}`),
+			ThoughtSigData: "sig-123",
+		},
+	})
+	acc.Process(StreamEvent{Type: EventToolCallEnd})
+
+	resp := acc.Response()
+	calls := resp.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].ThoughtSigData != "sig-123" {
+		t.Fatalf("ThoughtSigData = %q, want %q", calls[0].ThoughtSigData, "sig-123")
 	}
 }

@@ -203,6 +203,7 @@ type Request struct {
 	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 	ProviderOptions map[string]any    `json:"provider_options,omitempty"`
+	TraceObservers  []TraceObserver   `json:"-"`
 }
 
 // FinishReason indicates why generation stopped.

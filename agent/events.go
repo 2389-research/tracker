@@ -2,7 +2,11 @@
 // ABOUTME: Defines EventType constants, Event struct, EventHandler interface, and multi-handler fan-out.
 package agent
 
-import "time"
+import (
+	"time"
+
+	"github.com/2389-research/tracker/llm"
+)
 
 // EventType identifies the kind of event emitted during an agent session.
 type EventType string
@@ -18,6 +22,12 @@ const (
 	EventError                EventType = "error"
 	EventContextWindowWarning EventType = "context_window_warning"
 	EventSteeringInjected     EventType = "steering_injected"
+	EventLLMRequestStart      EventType = "llm_request_start"
+	EventLLMReasoning         EventType = "llm_reasoning"
+	EventLLMText              EventType = "llm_text"
+	EventLLMToolPrepare       EventType = "llm_tool_prepare"
+	EventLLMFinish            EventType = "llm_finish"
+	EventLLMProviderRaw       EventType = "llm_provider_raw"
 )
 
 // Event carries data about something that happened during an agent session.
@@ -33,6 +43,12 @@ type Event struct {
 	Text               string
 	Err                error
 	ContextUtilization float64
+	Provider           string
+	Model              string
+	Preview            string
+	ProviderEvent      string
+	FinishReason       string
+	Usage              llm.Usage
 }
 
 // EventHandler receives events emitted by the agent session.

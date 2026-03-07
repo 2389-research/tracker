@@ -174,6 +174,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			Provider: s.config.Provider,
 			Messages: s.messages,
 			Tools:    s.registry.Definitions(),
+			TraceObservers: []llm.TraceObserver{
+				llm.TraceObserverFunc(func(traceEvt llm.TraceEvent) {
+					s.emitLLMTraceEvent(turn, traceEvt)
+				}),
+			},
 		}
 
 		resp, err := s.client.Complete(ctx, req)
@@ -281,6 +286,39 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 func (s *Session) emit(evt Event) {
 	evt.Timestamp = time.Now()
 	s.handler.HandleEvent(evt)
+}
+
+func (s *Session) emitLLMTraceEvent(turn int, traceEvt llm.TraceEvent) {
+	evt := Event{
+		SessionID:     s.id,
+		Turn:          turn,
+		Provider:      traceEvt.Provider,
+		Model:         traceEvt.Model,
+		Preview:       traceEvt.Preview,
+		ToolName:      traceEvt.ToolName,
+		ProviderEvent: traceEvt.ProviderEvent,
+		FinishReason:  traceEvt.FinishReason,
+		Usage:         traceEvt.Usage,
+	}
+
+	switch traceEvt.Kind {
+	case llm.TraceRequestStart:
+		evt.Type = EventLLMRequestStart
+	case llm.TraceReasoning:
+		evt.Type = EventLLMReasoning
+	case llm.TraceText:
+		evt.Type = EventLLMText
+	case llm.TraceToolPrepare:
+		evt.Type = EventLLMToolPrepare
+	case llm.TraceFinish:
+		evt.Type = EventLLMFinish
+	case llm.TraceProviderRaw:
+		evt.Type = EventLLMProviderRaw
+	default:
+		return
+	}
+
+	s.emit(evt)
 }
 
 // boolToErrStr converts a boolean error flag to a string for event reporting.

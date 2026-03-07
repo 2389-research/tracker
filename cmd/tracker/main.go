@@ -6,13 +6,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"time"
 
+	"github.com/2389-research/tracker/agent"
 	"github.com/joho/godotenv"
 
 	"github.com/2389-research/tracker/agent/exec"
@@ -28,50 +31,39 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type runConfig struct {
+	dotFile    string
+	workdir    string
+	checkpoint string
+	tuiMode    bool
+	verbose    bool
+}
+
+var errUsage = errors.New("usage")
+
 func main() {
 	// Load .env file if present; ignore if missing.
 	_ = godotenv.Load()
 
-	var (
-		workdir    string
-		checkpoint string
-		tuiMode    bool
-	)
-
-	flag.StringVar(&workdir, "w", "", "Working directory (default: current directory)")
-	flag.StringVar(&workdir, "workdir", "", "Working directory (default: current directory)")
-	flag.StringVar(&checkpoint, "c", "", "Checkpoint file path for resume support")
-	flag.StringVar(&checkpoint, "checkpoint", "", "Checkpoint file path for resume support")
-	flag.BoolVar(&tuiMode, "tui", false, "Full TUI dashboard mode with live progress and modal gates")
-
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: tracker <pipeline.dot> [flags]\n\nFlags:\n")
-		flag.PrintDefaults()
-	}
-
-	flag.Parse()
-
-	if flag.NArg() < 1 {
-		flag.Usage()
+	cfg, err := parseFlags(os.Args)
+	if err != nil {
+		printUsage(os.Stderr)
 		os.Exit(1)
 	}
 
-	dotFile := flag.Arg(0)
-
-	if workdir == "" {
+	if cfg.workdir == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: cannot determine working directory: %v\n", err)
 			os.Exit(1)
 		}
-		workdir = wd
+		cfg.workdir = wd
 	}
 
-	var err error
-	if tuiMode {
-		err = runTUI(dotFile, workdir, checkpoint)
+	if cfg.tuiMode {
+		err = runTUI(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
 	} else {
-		err = run(dotFile, workdir, checkpoint)
+		err = run(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -81,7 +73,7 @@ func main() {
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
-func run(dotFile, workdir, checkpoint string) error {
+func run(dotFile, workdir, checkpoint string, verbose bool) error {
 	// Read and parse the DOT file.
 	dotBytes, err := os.ReadFile(dotFile)
 	if err != nil {
@@ -106,6 +98,7 @@ func run(dotFile, workdir, checkpoint string) error {
 		return fmt.Errorf("create LLM client: %w", err)
 	}
 	defer llmClient.Close()
+	llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
 
 	// Create execution environment for tool handlers.
 	execEnv := exec.NewLocalEnvironment(workdir)
@@ -118,6 +111,13 @@ func run(dotFile, workdir, checkpoint string) error {
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
+		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
+			line := agent.FormatEventLine(evt)
+			if line == "" {
+				return
+			}
+			fmt.Fprintf(os.Stdout, "[%s] %s\n", time.Now().Format("15:04:05"), line)
+		})),
 	)
 
 	// Build engine options.
@@ -160,7 +160,7 @@ func run(dotFile, workdir, checkpoint string) error {
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
-func runTUI(dotFile, workdir, checkpoint string) error {
+func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 	// Read and parse the DOT file.
 	dotBytes, err := os.ReadFile(dotFile)
 	if err != nil {
@@ -200,14 +200,13 @@ func runTUI(dotFile, workdir, checkpoint string) error {
 	// Build the initial AppModel before creating the tea.Program so that we
 	// can reference the Program in the interviewer.
 	appModel := dashboard.NewAppModel(pipelineName, tokenTracker)
+	appModel.SetVerboseTrace(verbose)
 	appModel.SetInitialNodes(buildNodeList(graph))
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
 
-	// Activity tracker: forwards LLM call summaries to the agent log.
-	activityTracker := llm.NewActivityTracker(func(evt llm.ActivityEvent) {
-		prog.Send(dashboard.LLMActivityMsg{Summary: evt.Summary()})
-	})
-	llmClient.AddMiddleware(activityTracker)
+	llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+		prog.Send(dashboard.LLMTraceMsg{Event: evt})
+	}))
 
 	// Mode 2 interviewer: delegates gate prompts to the running dashboard program.
 	interviewer, _ := tui.NewBubbleteaInterviewerMode2(prog)
@@ -222,6 +221,9 @@ func runTUI(dotFile, workdir, checkpoint string) error {
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
+		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
+			prog.Send(dashboard.AgentEventMsg{Event: evt})
+		})),
 	)
 
 	// Build engine options.
@@ -265,6 +267,38 @@ func runTUI(dotFile, workdir, checkpoint string) error {
 	outcome := <-outcomeCh
 	printRunSummary(outcome.result, outcome.err, tokenTracker)
 	return outcome.err
+}
+
+func parseFlags(args []string) (runConfig, error) {
+	var cfg runConfig
+
+	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
+	fs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
+	fs.StringVar(&cfg.checkpoint, "c", "", "Checkpoint file path for resume support")
+	fs.StringVar(&cfg.checkpoint, "checkpoint", "", "Checkpoint file path for resume support")
+	fs.BoolVar(&cfg.tuiMode, "tui", false, "Full TUI dashboard mode with live progress and modal gates")
+	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return cfg, err
+	}
+	if fs.NArg() < 1 {
+		return cfg, errUsage
+	}
+
+	cfg.dotFile = fs.Arg(0)
+	return cfg, nil
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprintf(w, "Usage: tracker <pipeline.dot> [flags]\n\n")
+	fmt.Fprintf(w, "Flags:\n")
+	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
+	fmt.Fprintf(w, "  -c, --checkpoint string   Checkpoint file path for resume support\n")
+	fmt.Fprintf(w, "  --tui                     Full TUI dashboard mode with live progress and modal gates\n")
+	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
 }
 
 // buildLLMClient constructs the LLM client from environment variables with

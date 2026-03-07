@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/tui/components"
@@ -50,6 +51,12 @@ type PipelineDoneMsg struct{ Err error }
 
 // LLMActivityMsg wraps an LLM activity event for display in the activity log.
 type LLMActivityMsg struct{ Summary string }
+
+// LLMTraceMsg wraps a structured LLM trace event for display in the activity log.
+type LLMTraceMsg struct{ Event llm.TraceEvent }
+
+// AgentEventMsg wraps a live agent event for display in the activity log.
+type AgentEventMsg struct{ Event agent.Event }
 
 // tickMsg is sent periodically to update the elapsed time display.
 type tickMsg time.Time
@@ -108,6 +115,7 @@ type AppModel struct {
 	pipelineDone bool
 	pipelineErr  error
 	quitting     bool
+	verboseTrace bool
 
 	// Background viewport (rendered behind modal)
 	bgViewport viewport.Model
@@ -172,6 +180,14 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.agentLog.AppendLine(msg.Summary)
 		return a, nil
 
+	case LLMTraceMsg:
+		a.agentLog.AppendTrace(msg.Event, a.verboseTrace)
+		return a, nil
+
+	case AgentEventMsg:
+		a.agentLog.AppendAgentEvent(msg.Event)
+		return a, nil
+
 	case GateChoiceMsg:
 		a.modalKind = modalChoice
 		a.modalTitle = msg.Prompt
@@ -198,6 +214,11 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, nil
+}
+
+// SetVerboseTrace controls whether raw provider trace events are rendered.
+func (a *AppModel) SetVerboseTrace(verbose bool) {
+	a.verboseTrace = verbose
 }
 
 // updateModal routes keyboard input to the active gate component.

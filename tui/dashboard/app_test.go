@@ -8,6 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -66,6 +68,50 @@ func TestAppModelHandlesPipelineEventMsg(t *testing.T) {
 	updated := m2.(AppModel)
 	if updated.agentLog.Len() != 1 {
 		t.Errorf("expected 1 log entry after PipelineEventMsg, got %d", updated.agentLog.Len())
+	}
+}
+
+func TestAppModelHandlesLLMTraceMsg(t *testing.T) {
+	app := NewAppModel("pipe", nil)
+	app.width = 120
+	app.height = 40
+	app.relayout()
+
+	m2, _ := app.Update(LLMTraceMsg{Event: llm.TraceEvent{
+		Kind:     llm.TraceToolPrepare,
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+		ToolName: "read",
+		Preview:  `{"path":"go.mod"}`,
+	}})
+
+	updated := m2.(AppModel)
+	if updated.agentLog.Len() != 1 {
+		t.Fatalf("expected 1 log entry, got %d", updated.agentLog.Len())
+	}
+	if !strings.Contains(updated.agentLog.entries[0].Message, "read") {
+		t.Fatalf("expected tool name in message: %+v", updated.agentLog.entries[0])
+	}
+}
+
+func TestAppModelHandlesAgentEventMsg(t *testing.T) {
+	app := NewAppModel("pipe", nil)
+	app.width = 120
+	app.height = 40
+	app.relayout()
+
+	m2, _ := app.Update(AgentEventMsg{Event: agent.Event{
+		Type:      agent.EventToolCallStart,
+		ToolName:  "read",
+		ToolInput: `{"path":"go.mod"}`,
+	}})
+
+	updated := m2.(AppModel)
+	if updated.agentLog.Len() != 1 {
+		t.Fatalf("expected 1 log entry, got %d", updated.agentLog.Len())
+	}
+	if !strings.Contains(updated.agentLog.entries[0].Message, "tool start") {
+		t.Fatalf("expected tool start message, got %+v", updated.agentLog.entries[0])
 	}
 }
 

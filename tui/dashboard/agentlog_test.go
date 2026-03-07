@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -41,6 +43,40 @@ func TestAgentLogAppendMultipleLines(t *testing.T) {
 	log.AppendLine("line 3")
 	if log.Len() != 3 {
 		t.Errorf("expected 3 entries, got %d", log.Len())
+	}
+}
+
+func TestAgentLogAppendTrace(t *testing.T) {
+	log := NewAgentLogModel(80, 20)
+	log.AppendTrace(llm.TraceEvent{
+		Kind:     llm.TraceToolPrepare,
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+		ToolName: "read",
+		Preview:  `{"path":"go.mod"}`,
+	}, false)
+
+	if log.Len() != 1 {
+		t.Fatalf("expected 1 trace entry, got %d", log.Len())
+	}
+	if !strings.Contains(log.entries[0].Message, "read") {
+		t.Fatalf("expected tool name in log entry, got %q", log.entries[0].Message)
+	}
+}
+
+func TestAgentLogAppendAgentEvent(t *testing.T) {
+	log := NewAgentLogModel(80, 20)
+	log.AppendAgentEvent(agent.Event{
+		Type:      agent.EventToolCallStart,
+		ToolName:  "read",
+		ToolInput: `{"path":"go.mod"}`,
+	})
+
+	if log.Len() != 1 {
+		t.Fatalf("expected 1 agent event entry, got %d", log.Len())
+	}
+	if !strings.Contains(log.entries[0].Message, "tool start") {
+		t.Fatalf("expected tool start message, got %q", log.entries[0].Message)
 	}
 }
 

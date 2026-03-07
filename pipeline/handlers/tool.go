@@ -43,6 +43,11 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'tool_command'", node.ID)
 	}
 
+	artifactRoot := h.env.WorkingDir()
+	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
+		artifactRoot = dir
+	}
+
 	timeout := h.defaultTimeout
 	if timeoutStr, ok := node.Attrs["timeout"]; ok {
 		parsed, err := time.ParseDuration(timeoutStr)
@@ -68,7 +73,7 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 				pipeline.ContextKeyToolStdout: result.Stdout,
 				pipeline.ContextKeyToolStderr: result.Stderr,
 			},
-		}, pipeline.WriteStatusArtifact(h.env.WorkingDir(), node.ID, pipeline.Outcome{
+		}, pipeline.WriteStatusArtifact(artifactRoot, node.ID, pipeline.Outcome{
 			Status: status,
 			ContextUpdates: map[string]string{
 				pipeline.ContextKeyToolStdout: result.Stdout,
