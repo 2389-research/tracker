@@ -208,6 +208,13 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 		prompt = fmt.Sprintf("Human gate: %s", node.ID)
 	}
 
+	// Surface the previous node's output so the human has context for their
+	// decision. This is the complement of InjectPipelineContext which gives
+	// LLM nodes the human_response — here we give human gates the LLM output.
+	if lastResp, ok := pctx.Get(pipeline.ContextKeyLastResponse); ok && lastResp != "" {
+		prompt = prompt + "\n\n---\n" + lastResp
+	}
+
 	// Freeform mode: capture open-ended text input.
 	if node.Attrs["mode"] == "freeform" {
 		fi, ok := h.interviewer.(FreeformInterviewer)

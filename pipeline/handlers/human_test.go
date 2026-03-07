@@ -190,6 +190,68 @@ func TestHumanHandlerFreeformMode(t *testing.T) {
 	}
 }
 
+func TestHumanHandlerFreeformIncludesLastResponse(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Brainstorm with Human",
+		Attrs: map[string]string{"mode": "freeform"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	recorder := &recordingFreeformInterviewer{freeformResponse: "let's use Redis"}
+	h := NewHumanHandler(recorder, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+	// Simulate previous LLM node setting last_response
+	pctx.Set(pipeline.ContextKeyLastResponse, "What caching strategy should we use?")
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The prompt shown to the human should include the previous node's output
+	if !strings.Contains(recorder.freeformPromptReceived, "What caching strategy should we use?") {
+		t.Errorf("expected last_response in freeform prompt, got %q", recorder.freeformPromptReceived)
+	}
+	// The static label should still be present
+	if !strings.Contains(recorder.freeformPromptReceived, "Brainstorm with Human") {
+		t.Errorf("expected node label in freeform prompt, got %q", recorder.freeformPromptReceived)
+	}
+}
+
+func TestHumanHandlerChoiceIncludesLastResponse(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Review the proposal",
+	})
+	graph.AddNode(&pipeline.Node{ID: "approve", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "reject", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "approve", Label: "approve"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "reject", Label: "reject"})
+
+	recorder := &recordingInterviewer{response: "approve"}
+	h := NewHumanHandler(recorder, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyLastResponse, "Here is my proposal for the API design...")
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(recorder.promptReceived, "Here is my proposal for the API design...") {
+		t.Errorf("expected last_response in choice prompt, got %q", recorder.promptReceived)
+	}
+	if !strings.Contains(recorder.promptReceived, "Review the proposal") {
+		t.Errorf("expected node label in choice prompt, got %q", recorder.promptReceived)
+	}
+}
+
 func TestHumanHandlerFreeformFallsBackToChoiceMode(t *testing.T) {
 	// When interviewer does NOT implement FreeformInterviewer,
 	// freeform mode should error clearly.
