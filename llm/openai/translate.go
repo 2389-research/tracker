@@ -54,10 +54,8 @@ type openaiInput struct {
 	ID        string `json:"id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
-	// For function_call_output items (tool results).
-	// CallID omits omitempty because OpenAI requires it on function_call_output items;
-	// an empty string is better than a missing field (clearer API error).
-	CallID string `json:"call_id"`
+	// For function_call_output items (tool results)
+	CallID string `json:"call_id,omitempty"`
 	Output string `json:"output,omitempty"`
 }
 
@@ -229,9 +227,13 @@ func translateMessageToInput(m llm.Message) []openaiInput {
 		// Tool result messages become function_call_output items.
 		for _, part := range m.Content {
 			if part.Kind == llm.KindToolResult && part.ToolResult != nil {
+				callID := part.ToolResult.ToolCallID
+				if callID == "" {
+					callID = "call_unknown"
+				}
 				items = append(items, openaiInput{
 					Type:   "function_call_output",
-					CallID: part.ToolResult.ToolCallID,
+					CallID: callID,
 					Output: part.ToolResult.Content,
 				})
 			}

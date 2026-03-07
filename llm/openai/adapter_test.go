@@ -193,7 +193,7 @@ func TestTranslateRequestToolCallInInput(t *testing.T) {
 	}
 }
 
-func TestTranslateRequestCallIDAlwaysPresent(t *testing.T) {
+func TestTranslateRequestCallIDFallback(t *testing.T) {
 	req := &llm.Request{
 		Model: "gpt-5.2",
 		Messages: []llm.Message{
@@ -221,8 +221,18 @@ func TestTranslateRequestCallIDAlwaysPresent(t *testing.T) {
 	input := raw["input"].([]any)
 
 	fco := input[1].(map[string]any)
-	if _, ok := fco["call_id"]; !ok {
-		t.Error("call_id field must always be present on function_call_output items, even when empty")
+	callID, ok := fco["call_id"]
+	if !ok {
+		t.Fatal("call_id field must be present on function_call_output items")
+	}
+	if callID != "call_unknown" {
+		t.Errorf("expected fallback 'call_unknown', got %v", callID)
+	}
+
+	// Verify user messages don't get a spurious call_id
+	userMsg := input[0].(map[string]any)
+	if _, has := userMsg["call_id"]; has {
+		t.Error("user message should not have call_id field")
 	}
 }
 
