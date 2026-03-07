@@ -84,8 +84,8 @@ func TestAgentLogAppendEventWithError(t *testing.T) {
 func TestAgentLogViewContainsTitleWhenReady(t *testing.T) {
 	log := NewAgentLogModel(80, 20)
 	view := log.View()
-	if !strings.Contains(view, "Agent Log") {
-		t.Errorf("expected 'Agent Log' title in view, got: %q", view)
+	if !strings.Contains(view, "ACTIVITY LOG") {
+		t.Errorf("expected 'ACTIVITY LOG' title in view, got: %q", view)
 	}
 }
 

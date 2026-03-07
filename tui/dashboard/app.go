@@ -1,9 +1,8 @@
-// ABOUTME: Main TUI dashboard app — composes header, node list, agent log, and modal overlay.
-// ABOUTME: Implements tea.Model; runs in mode 2 (--tui flag) with pipeline in a goroutine.
+// ABOUTME: Main TUI dashboard app — "Signal Cabin" control panel layout with instrument cluster zones.
+// ABOUTME: Composes header gauge cluster, node signal panel, activity log, and track diagram status bar.
 package dashboard
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -19,10 +18,10 @@ import (
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
 const (
-	nodeListWidthPct = 30 // percent of terminal width used for the node list pane
-	minNodeListWidth = 22
+	nodeListWidthPct = 28 // percent of terminal width for the signal panel
+	minNodeListWidth = 20
 	minAgentLogWidth = 30
-	headerHeight     = 3 // two content lines + bottom border
+	headerHeight     = 4 // two content lines + border lines
 	statusBarHeight  = 1
 	tickInterval     = time.Second
 )
@@ -33,7 +32,6 @@ const (
 type PipelineEventMsg struct{ Event pipeline.PipelineEvent }
 
 // GateChoiceMsg requests a choice gate modal from the TUI.
-// Sent by BubbleteaInterviewer (mode 2) via tea.Program.Send().
 type GateChoiceMsg struct {
 	Prompt        string
 	Choices       []string
@@ -42,7 +40,6 @@ type GateChoiceMsg struct {
 }
 
 // GateFreeformMsg requests a freeform gate modal from the TUI.
-// Sent by BubbleteaInterviewer (mode 2) via tea.Program.Send().
 type GateFreeformMsg struct {
 	Prompt  string
 	ReplyCh chan<- string
@@ -51,7 +48,7 @@ type GateFreeformMsg struct {
 // PipelineDoneMsg signals that the pipeline goroutine has finished.
 type PipelineDoneMsg struct{ Err error }
 
-// LLMActivityMsg wraps an LLM activity event for display in the agent log.
+// LLMActivityMsg wraps an LLM activity event for display in the activity log.
 type LLMActivityMsg struct{ Summary string }
 
 // tickMsg is sent periodically to update the elapsed time display.
@@ -59,7 +56,6 @@ type tickMsg time.Time
 
 // ─── Modal state ──────────────────────────────────────────────────────────────
 
-// modalKind distinguishes the two gate types.
 type modalKind int
 
 const (
@@ -68,41 +64,29 @@ const (
 	modalFreeform           // showing a FreeformModel in a modal
 )
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Instrument panel frame styles ───────────────────────────────────────────
 
 var (
-	paneVerticalBorder = lipgloss.NewStyle().
+	// Outer frame — double-line bezel border around entire dashboard
+	outerFrameStyle = lipgloss.NewStyle().
+			Border(panelBorder).
+			BorderForeground(colorBezel)
+
+	// Vertical divider between node panel and activity log
+	paneDividerStyle = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, false, false).
-				BorderForeground(lipgloss.Color("8"))
+				BorderForeground(colorBezel)
 
-	headerBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.NormalBorder(), false, false, true, false).
-				BorderForeground(lipgloss.Color("8"))
-
-	statusBarStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("235")).
-			Padding(0, 1)
-
-	statusBarDimStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("8"))
-
-	statusBarErrorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("9")).
-				Bold(true)
-
-	statusBarSuccessStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("10"))
-
-	statusBarProgressStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("11"))
+	// Status bar at the bottom
+	statusBarBaseStyle = lipgloss.NewStyle().
+				Background(colorPanel).
+				Foreground(colorBrightText).
+				Padding(0, 1)
 )
 
 // ─── App model ────────────────────────────────────────────────────────────────
 
 // AppModel is the root bubbletea model for mode 2 (full TUI dashboard).
-// It composes a header, a node list pane, an agent log pane, and an optional
-// modal overlay for human gate prompts.
 type AppModel struct {
 	// Layout
 	width  int
@@ -118,7 +102,7 @@ type AppModel struct {
 	choiceModal   components.ChoiceModel
 	freeformModal components.FreeformModel
 	modalTitle    string
-	activeMsgCh   chan<- string // reply channel for the current gate
+	activeMsgCh   chan<- string
 
 	// Lifecycle
 	pipelineDone bool
@@ -130,7 +114,6 @@ type AppModel struct {
 }
 
 // NewAppModel constructs the dashboard AppModel.
-// pipelineName is displayed in the header; tracker provides live token counts.
 func NewAppModel(pipelineName string, tracker *llm.TokenTracker) AppModel {
 	return AppModel{
 		header:   NewHeaderModel(pipelineName, tracker),
@@ -140,7 +123,6 @@ func NewAppModel(pipelineName string, tracker *llm.TokenTracker) AppModel {
 }
 
 // SetInitialNodes pre-populates the node list with all pipeline nodes as pending.
-// Call this before starting the tea.Program so the user sees the full pipeline upfront.
 func (a *AppModel) SetInitialNodes(nodes []NodeEntry) {
 	a.nodeList = NewNodeListModel(nodes)
 }
@@ -161,19 +143,15 @@ func tickCmd() tea.Cmd {
 func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
-	// ── Tick for elapsed time updates ────────────────────────────────────────
 	case tickMsg:
-		// Just re-render (header reads time.Since on each View call)
 		return a, tickCmd()
 
-	// ── Terminal resize ──────────────────────────────────────────────────────
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
 		a.relayout()
 		return a, nil
 
-	// ── Keyboard input ───────────────────────────────────────────────────────
 	case tea.KeyMsg:
 		if a.modalKind != modalNone {
 			return a.updateModal(msg)
@@ -185,18 +163,15 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	// ── Pipeline event forwarded by TUIEventHandler ──────────────────────────
 	case PipelineEventMsg:
 		a.agentLog.AppendEvent(msg.Event)
 		a.applyPipelineEvent(msg.Event)
 		return a, nil
 
-	// ── LLM activity event ────────────────────────────────────────────────────
 	case LLMActivityMsg:
 		a.agentLog.AppendLine(msg.Summary)
 		return a, nil
 
-	// ── Human gate: choice ───────────────────────────────────────────────────
 	case GateChoiceMsg:
 		a.modalKind = modalChoice
 		a.modalTitle = msg.Prompt
@@ -204,7 +179,6 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.activeMsgCh = msg.ReplyCh
 		return a, nil
 
-	// ── Human gate: freeform ─────────────────────────────────────────────────
 	case GateFreeformMsg:
 		a.modalKind = modalFreeform
 		a.modalTitle = msg.Prompt
@@ -212,7 +186,6 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.activeMsgCh = msg.ReplyCh
 		return a, a.freeformModal.Init()
 
-	// ── Pipeline done ─────────────────────────────────────────────────────────
 	case PipelineDoneMsg:
 		a.pipelineDone = true
 		a.pipelineErr = msg.Err
@@ -236,7 +209,6 @@ func (a AppModel) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.choiceModal.IsDone() {
 			a.closeModal(a.choiceModal.Selected())
 			if cmd != nil {
-				// drain the ChoiceDoneMsg command so it doesn't confuse the root loop
 				cmd()
 			}
 			return a, nil
@@ -279,11 +251,10 @@ func (a *AppModel) closeModal(value string) {
 func (a *AppModel) applyPipelineEvent(evt pipeline.PipelineEvent) {
 	switch evt.Type {
 	case pipeline.EventPipelineStarted:
-		// No node-level action needed — header already shows elapsed time.
+		// No node-level action needed.
 
 	case pipeline.EventStageStarted:
 		if evt.NodeID != "" {
-			// Ensure node exists; add it if not already present.
 			found := false
 			for _, n := range a.nodeList.nodes {
 				if n.ID == evt.NodeID {
@@ -316,19 +287,25 @@ func (a *AppModel) relayout() {
 		return
 	}
 
-	a.header.SetWidth(a.width)
+	// Account for outer frame borders (2 chars horizontal)
+	innerWidth := a.width - 2
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
 
-	// Reserve rows for header (2 lines + border) and status bar
-	contentHeight := a.height - headerHeight - statusBarHeight
+	a.header.SetWidth(innerWidth)
+
+	// Reserve rows for header + border + status bar + outer frame
+	contentHeight := a.height - headerHeight - statusBarHeight - 2
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
 
-	nodeListW := a.width * nodeListWidthPct / 100
+	nodeListW := innerWidth * nodeListWidthPct / 100
 	if nodeListW < minNodeListWidth {
 		nodeListW = minNodeListWidth
 	}
-	agentLogW := a.width - nodeListW - 1 // -1 for border
+	agentLogW := innerWidth - nodeListW - 1 // -1 for divider
 	if agentLogW < minAgentLogWidth {
 		agentLogW = minAgentLogWidth
 	}
@@ -337,20 +314,18 @@ func (a *AppModel) relayout() {
 	a.agentLog.SetSize(agentLogW, contentHeight)
 }
 
-// View implements tea.Model. Renders all components, with modal overlay if active.
+// View implements tea.Model.
 func (a AppModel) View() string {
 	if a.quitting {
 		return ""
 	}
 
-	// Build the background (header + split panes + status bar)
 	background := a.renderBackground()
 
 	if a.modalKind == modalNone {
 		return background
 	}
 
-	// Render modal overlay centered over the background
 	var innerView string
 	switch a.modalKind {
 	case modalChoice:
@@ -363,73 +338,79 @@ func (a AppModel) View() string {
 	return modal.View(background)
 }
 
-// renderBackground builds the dashboard layout without any modal overlay.
+// renderBackground builds the full control panel layout.
 func (a AppModel) renderBackground() string {
 	var sb strings.Builder
 
-	// Header with bottom border separator
-	headerContent := a.header.View()
-	sb.WriteString(headerBorderStyle.Width(a.width).Render(headerContent))
+	// ── Header gauge cluster ──
+	sb.WriteString(a.header.View())
 	sb.WriteString("\n")
 
-	// Split panes: node list (left) | agent log (right)
+	// ── Horizontal separator between header and panes ──
+	innerWidth := a.width - 2
+	if innerWidth < 1 {
+		innerWidth = a.width
+	}
+	separator := lipgloss.NewStyle().Foreground(colorBezel).Render(
+		"╠" + strings.Repeat("═", innerWidth) + "╣",
+	)
+	sb.WriteString(separator)
+	sb.WriteString("\n")
+
+	// ── Split panes: signal panel (left) | activity log (right) ──
 	nodePane := a.nodeList.View()
 	logPane := a.agentLog.View()
 
-	// Render side by side with vertical border between them
 	panes := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		paneVerticalBorder.Render(nodePane),
+		paneDividerStyle.Render(nodePane),
 		logPane,
 	)
 	sb.WriteString(panes)
 	sb.WriteString("\n")
 
-	// Status bar
+	// ── Status bar with track diagram ──
 	sb.WriteString(a.statusBar())
 
-	return sb.String()
+	// Wrap everything in the outer instrument panel frame
+	content := sb.String()
+	return outerFrameStyle.Width(a.width - 2).Render(content)
 }
 
-// statusBar renders a one-line footer with pipeline status and node progress.
+// statusBar renders the bottom instrument panel strip with track diagram and progress.
 func (a AppModel) statusBar() string {
 	var parts []string
 
-	// Pipeline status indicator
-	if a.pipelineErr != nil {
-		parts = append(parts, statusBarErrorStyle.Render(fmt.Sprintf("Pipeline failed: %v", a.pipelineErr)))
-	} else if a.pipelineDone {
-		parts = append(parts, statusBarSuccessStyle.Render("Pipeline completed"))
-	} else {
-		parts = append(parts, statusBarProgressStyle.Render("Pipeline running…"))
+	// Track diagram: ●━●━◉━○━○
+	diagram := a.nodeList.TrackDiagram()
+	if diagram != "" {
+		parts = append(parts, diagram)
 	}
 
-	// Node progress
-	pending, running, done, failed := a.nodeList.Counts()
-	total := pending + running + done + failed
-	if total > 0 {
-		progress := fmt.Sprintf("%d/%d nodes complete", done, total)
-		if running > 0 {
-			progress += fmt.Sprintf("  %d running", running)
-		}
-		if failed > 0 {
-			progress += fmt.Sprintf("  %d failed", failed)
-		}
-		parts = append(parts, statusBarDimStyle.Render(progress))
+	// Progress summary: 6/10 ●6 ◉2 ○2
+	progress := a.nodeList.ProgressSummary()
+	if progress != "" {
+		parts = append(parts, progress)
+	}
+
+	// Pipeline status
+	if a.pipelineErr != nil {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorRed).Render("FAULT"))
+	} else if a.pipelineDone {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorGreen).Render("CLEAR"))
 	}
 
 	// Quit hint
-	parts = append(parts, statusBarDimStyle.Render("q to quit"))
+	parts = append(parts, dimTextStyle.Render("q to exit"))
 
-	content := strings.Join(parts, statusBarDimStyle.Render("  │  "))
+	content := strings.Join(parts, dimTextStyle.Render("  "))
 	if a.width > 0 {
-		return statusBarStyle.Width(a.width).Render(content)
+		return statusBarBaseStyle.Width(a.width - 4).Render(content)
 	}
-	return statusBarStyle.Render(content)
+	return statusBarBaseStyle.Render(content)
 }
 
 // PipelineErr returns the error from the pipeline goroutine, if any.
-// Used by cmd/tracker/main.go after the TUI program exits to surface failures.
 func (a AppModel) PipelineErr() error {
 	return a.pipelineErr
 }
@@ -441,5 +422,4 @@ func (a AppModel) IsPipelineDone() bool {
 
 // ─── Compile-time interface assertion ─────────────────────────────────────────
 
-// Ensure AppModel satisfies tea.Model at compile time.
 var _ tea.Model = AppModel{}

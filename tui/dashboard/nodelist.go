@@ -1,8 +1,9 @@
-// ABOUTME: Dashboard node list component showing pipeline node execution status.
-// ABOUTME: Renders a linear list with status icons: ✓ done, ⟳ running, ✗ failed, ○ pending.
+// ABOUTME: Dashboard node list — signal lamp panel showing pipeline node execution status.
+// ABOUTME: Uses colored indicator dots: ● done (green), ◉ running (amber), ○ pending (dim), ✖ failed (red).
 package dashboard
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -25,37 +26,7 @@ type NodeEntry struct {
 	Status NodeStatus
 }
 
-var (
-	nodeListTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("12")).
-				MarginBottom(1)
-
-	nodeDoneStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("10")) // green
-
-	nodeRunningStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("11")). // yellow
-				Bold(true)
-
-	nodeFailedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("9")) // red
-
-	nodePendingStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("8")) // gray
-
-	nodeLabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15"))
-)
-
-const (
-	iconDone    = "✓"
-	iconRunning = "⟳"
-	iconFailed  = "✗"
-	iconPending = "○"
-)
-
-// NodeListModel renders a list of pipeline nodes with execution status icons.
+// NodeListModel renders a signal lamp panel of pipeline nodes.
 type NodeListModel struct {
 	nodes []NodeEntry
 	width int
@@ -87,42 +58,48 @@ func (n *NodeListModel) AddNode(entry NodeEntry) {
 	n.nodes = append(n.nodes, entry)
 }
 
-// View renders the node list with status icons and labels.
+// View renders the node list as a signal lamp panel.
 func (n NodeListModel) View() string {
 	var sb strings.Builder
-	sb.WriteString(nodeListTitleStyle.Render("Pipeline"))
+	sb.WriteString(zoneLabelStyle.Render("PIPELINE"))
 	sb.WriteString("\n")
 
 	for _, node := range n.nodes {
-		icon, style := statusIconAndStyle(node.Status)
+		lamp, style := signalLamp(node.Status)
 		label := node.Label
 		if label == "" {
 			label = node.ID
 		}
-		line := style.Render(icon) + "  " + nodeLabelStyle.Render(label)
+		// Truncate long labels
+		maxLabel := n.width - 4
+		if maxLabel > 0 && len(label) > maxLabel {
+			label = label[:maxLabel-1] + "…"
+		}
+
+		line := style.Render(lamp) + " " + primaryTextStyle.Render(label)
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
 
 	if len(n.nodes) == 0 {
-		sb.WriteString(nodePendingStyle.Render("(no nodes)"))
+		sb.WriteString(dimTextStyle.Render("(no nodes)"))
 		sb.WriteString("\n")
 	}
 
 	return sb.String()
 }
 
-// statusIconAndStyle returns the icon character and lipgloss style for a given NodeStatus.
-func statusIconAndStyle(status NodeStatus) (string, lipgloss.Style) {
+// signalLamp returns the indicator character and style for a node status.
+func signalLamp(status NodeStatus) (string, lipgloss.Style) {
 	switch status {
 	case NodeDone:
-		return iconDone, nodeDoneStyle
+		return lampOn, lipgloss.NewStyle().Foreground(colorGreen)
 	case NodeRunning:
-		return iconRunning, nodeRunningStyle
+		return lampActive, lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 	case NodeFailed:
-		return iconFailed, nodeFailedStyle
+		return lampError, lipgloss.NewStyle().Foreground(colorRed)
 	default:
-		return iconPending, nodePendingStyle
+		return lampOff, lipgloss.NewStyle().Foreground(colorOff)
 	}
 }
 
@@ -141,4 +118,52 @@ func (n NodeListModel) Counts() (pending, running, done, failed int) {
 		}
 	}
 	return
+}
+
+// TrackDiagram renders a compact track diagram for the status bar.
+// Shows connected dots representing node states: ●━●━◉━○━○
+func (n NodeListModel) TrackDiagram() string {
+	if len(n.nodes) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, node := range n.nodes {
+		lamp, style := signalLamp(node.Status)
+		parts = append(parts, style.Render(lamp))
+	}
+
+	connector := dimTextStyle.Render(connectorH)
+	return strings.Join(parts, connector)
+}
+
+// ProgressSummary returns a compact string like "6/10 ● 2 ◉ 2 ○"
+func (n NodeListModel) ProgressSummary() string {
+	pending, running, done, failed := n.Counts()
+	total := pending + running + done + failed
+	if total == 0 {
+		return ""
+	}
+
+	var parts []string
+	parts = append(parts, primaryTextStyle.Render(fmt.Sprintf("%d/%d", done, total)))
+
+	if done > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorGreen).Render(
+			fmt.Sprintf("%s%d", lampOn, done)))
+	}
+	if running > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorAmber).Render(
+			fmt.Sprintf("%s%d", lampActive, running)))
+	}
+	if failed > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorRed).Render(
+			fmt.Sprintf("%s%d", lampError, failed)))
+	}
+	if pending > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorOff).Render(
+			fmt.Sprintf("%s%d", lampOff, pending)))
+	}
+
+	return strings.Join(parts, " ")
 }

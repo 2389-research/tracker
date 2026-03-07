@@ -1,5 +1,5 @@
-// ABOUTME: Dashboard agent log component — scrolling viewport of agent actions and pipeline events.
-// ABOUTME: Buffers log lines and renders a fixed-height scrollable view in [NodeID] message format.
+// ABOUTME: Dashboard activity log — scrolling data recorder showing LLM calls and pipeline events.
+// ABOUTME: "Signal Cabin" aesthetic: timestamped entries in [NodeID] format, color-coded by event type.
 package dashboard
 
 import (
@@ -13,34 +13,7 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-var (
-	agentLogTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("12"))
-
-	agentLogNodeStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("14")).
-				Bold(true)
-
-	agentLogMsgStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("15"))
-
-	agentLogTimestampStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("8")).
-				Faint(true)
-
-	agentLogEventStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("8")).
-				Faint(true)
-
-	agentLogErrorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("9"))
-
-	agentLogSuccessStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("10"))
-)
-
-// LogEntry represents a single line in the agent log.
+// LogEntry represents a single line in the activity log.
 type LogEntry struct {
 	Time      time.Time
 	EventType string
@@ -49,7 +22,7 @@ type LogEntry struct {
 	IsError   bool
 }
 
-// AgentLogModel is a scrollable log of pipeline events and agent actions.
+// AgentLogModel is a scrollable data recorder of pipeline events and LLM activity.
 type AgentLogModel struct {
 	entries  []LogEntry
 	viewport viewport.Model
@@ -58,7 +31,7 @@ type AgentLogModel struct {
 	ready    bool
 }
 
-// NewAgentLogModel creates an agent log model with the given viewport dimensions.
+// NewAgentLogModel creates an activity log model with the given viewport dimensions.
 func NewAgentLogModel(width, height int) AgentLogModel {
 	vp := viewport.New(width, height)
 	vp.SetContent("")
@@ -136,11 +109,11 @@ func (a *AgentLogModel) SetSize(width, height int) {
 	a.refreshViewport()
 }
 
-// View renders the agent log viewport.
+// View renders the activity log viewport.
 func (a AgentLogModel) View() string {
-	title := agentLogTitleStyle.Render("Agent Log")
+	title := zoneLabelStyle.Render("ACTIVITY LOG")
 	if !a.ready {
-		return title + "\n" + agentLogMsgStyle.Render("(initializing…)")
+		return title + "\n" + dimTextStyle.Render("initializing…")
 	}
 	return title + "\n" + a.viewport.View()
 }
@@ -159,28 +132,30 @@ func (a *AgentLogModel) refreshViewport() {
 	a.viewport.GotoBottom()
 }
 
-// formatLogEntry formats a log entry in the spec's [NodeID] message style.
+// formatLogEntry formats a log entry in the control panel data recorder style.
+// Format: HH:MM:SS [NodeID] message
 func formatLogEntry(e LogEntry, maxWidth int) string {
 	var sb strings.Builder
 
-	// Timestamp (compact)
+	// Timestamp in dim readout style
 	ts := e.Time.Format("15:04:05")
-	sb.WriteString(agentLogTimestampStyle.Render(ts))
+	sb.WriteString(dimTextStyle.Render(ts))
 	sb.WriteString(" ")
 
-	// [NodeID] prefix if present — this is the spec format
+	// [NodeID] as a signal label
 	if e.NodeID != "" {
-		sb.WriteString(agentLogNodeStyle.Render("[" + e.NodeID + "]"))
+		nodeStyle := lipgloss.NewStyle().Foreground(colorReadout).Bold(true)
+		sb.WriteString(nodeStyle.Render("[" + e.NodeID + "]"))
 		sb.WriteString(" ")
 	}
 
-	// Message with appropriate styling
+	// Message with status-appropriate styling
 	msg := e.Message
 	if maxWidth > 0 {
-		// Rough truncation to prevent wrapping
+		// Truncate to prevent wrapping
 		prefixLen := 9 // timestamp
 		if e.NodeID != "" {
-			prefixLen += len(e.NodeID) + 3 // brackets + space
+			prefixLen += len(e.NodeID) + 3
 		}
 		maxMsg := maxWidth - prefixLen - 2
 		if maxMsg > 0 && len(msg) > maxMsg {
@@ -189,11 +164,11 @@ func formatLogEntry(e LogEntry, maxWidth int) string {
 	}
 
 	if e.IsError {
-		sb.WriteString(agentLogErrorStyle.Render(msg))
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorRed).Render(msg))
 	} else if isCompletionEvent(e.EventType) {
-		sb.WriteString(agentLogSuccessStyle.Render(msg))
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Render(msg))
 	} else {
-		sb.WriteString(agentLogMsgStyle.Render(msg))
+		sb.WriteString(primaryTextStyle.Render(msg))
 	}
 
 	return sb.String()

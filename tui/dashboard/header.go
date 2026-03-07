@@ -1,5 +1,5 @@
-// ABOUTME: Dashboard header component showing pipeline name, elapsed time, status, and per-provider token counts.
-// ABOUTME: Renders a two-line status bar at the top of the TUI dashboard with formatted token counts (e.g., 12.4k/3.2k).
+// ABOUTME: Dashboard header — main gauge cluster showing pipeline name, elapsed time, status, and token readouts.
+// ABOUTME: "Signal Cabin" aesthetic: high-contrast readouts, amber/green status, ALL-CAPS zone label.
 package dashboard
 
 import (
@@ -12,40 +12,6 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
-var (
-	headerStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("18")).
-			Padding(0, 1)
-
-	headerTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("14"))
-
-	headerElapsedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("11"))
-
-	headerStatusRunning = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("11")).
-				Bold(true)
-
-	headerStatusDone = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("10")).
-				Bold(true)
-
-	headerStatusFailed = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("9")).
-				Bold(true)
-
-	headerTokenStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("10"))
-
-	headerSepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8"))
-
-	headerCostStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("13"))
-)
-
 // PipelineStatus represents the overall pipeline state shown in the header.
 type PipelineStatus int
 
@@ -55,7 +21,7 @@ const (
 	StatusFailed
 )
 
-// HeaderModel renders the top status bar of the TUI dashboard.
+// HeaderModel renders the top gauge cluster of the TUI dashboard.
 type HeaderModel struct {
 	pipelineName string
 	startTime    time.Time
@@ -89,78 +55,88 @@ func (h *HeaderModel) SetStatus(status PipelineStatus) {
 	h.status = status
 }
 
-// View renders the header as a two-line styled block.
-// Line 1: pipeline name, elapsed time, status
-// Line 2: per-provider token counts and cost
+// View renders the header as a two-line instrument cluster.
+// Line 1: TRACKER ━━ pipeline_name    ⏱ Xm XXs    STATUS
+// Line 2: PROVIDER: in/out  PROVIDER: in/out  ...
 func (h HeaderModel) View() string {
 	elapsed := time.Since(h.startTime).Truncate(time.Second)
 
-	// Line 1: name + elapsed + status
-	var line1Parts []string
-
+	// ── Line 1: name + time + status ──
 	name := h.pipelineName
 	if name == "" {
 		name = "pipeline"
 	}
-	line1Parts = append(line1Parts, headerTitleStyle.Render(name))
-	line1Parts = append(line1Parts, headerElapsedStyle.Render(fmt.Sprintf("⏱ %s", formatDuration(elapsed))))
-	line1Parts = append(line1Parts, h.renderStatus())
 
-	sep := headerSepStyle.Render("  ")
-	line1 := strings.Join(line1Parts, sep)
+	nameStr := lipgloss.NewStyle().Foreground(colorBrightText).Bold(true).Render(
+		"TRACKER " + dimTextStyle.Render("━━") + " " + name,
+	)
+	timeStr := readoutStyle.Render(fmt.Sprintf("⏱ %s", formatDuration(elapsed)))
+	statusStr := h.renderStatus()
 
-	// Line 2: per-provider token counts
+	// Build line 1 with spacing
+	line1Left := nameStr + "    " + timeStr
+	line1 := line1Left + "    " + statusStr
+
+	// ── Line 2: token readouts ──
 	line2 := h.renderTokenLine()
 
 	combined := line1 + "\n" + line2
 	if h.width > 0 {
-		return headerStyle.Width(h.width).Render(combined)
+		return lipgloss.NewStyle().
+			Background(colorPanel).
+			Padding(0, 1).
+			Width(h.width).
+			Render(combined)
 	}
-	return headerStyle.Render(combined)
+	return lipgloss.NewStyle().
+		Background(colorPanel).
+		Padding(0, 1).
+		Render(combined)
 }
 
-// renderStatus returns a styled status indicator.
+// renderStatus returns a signal-lamp style status indicator.
 func (h HeaderModel) renderStatus() string {
 	switch h.status {
 	case StatusCompleted:
-		return headerStatusDone.Render("completed")
+		return lipgloss.NewStyle().Foreground(colorGreen).Bold(true).Render(lampOn + " COMPLETED")
 	case StatusFailed:
-		return headerStatusFailed.Render("failed")
+		return lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render(lampError + " FAILED")
 	default:
-		return headerStatusRunning.Render("running")
+		return lipgloss.NewStyle().Foreground(colorAmber).Bold(true).Render(lampActive + " RUNNING")
 	}
 }
 
-// renderTokenLine builds the second header line with per-provider token counts.
+// renderTokenLine builds the second line: per-provider token readouts.
 func (h HeaderModel) renderTokenLine() string {
 	if h.tracker == nil {
-		return headerTokenStyle.Render("(no token data)")
+		return dimTextStyle.Render("awaiting LLM calls")
 	}
 
 	providers := h.tracker.Providers()
 	if len(providers) == 0 {
-		return headerTokenStyle.Render("(awaiting LLM calls)")
+		return dimTextStyle.Render("awaiting LLM calls")
 	}
 
 	var parts []string
 	for _, provider := range providers {
 		usage := h.tracker.ProviderUsage(provider)
-		tokenStr := fmt.Sprintf("%s: %s/%s",
-			capitalizeFirst(provider),
+		label := zoneLabelStyle.Render(strings.ToUpper(provider))
+		counts := readoutStyle.Render(fmt.Sprintf("%s/%s",
 			formatTokenCount(usage.InputTokens),
 			formatTokenCount(usage.OutputTokens),
-		)
-		parts = append(parts, headerTokenStyle.Render(tokenStr))
+		))
+		parts = append(parts, label+" "+counts)
 	}
 
-	// Add total cost if available
+	// Cost readout if available
 	total := h.tracker.TotalUsage()
 	if total.EstimatedCost > 0 {
-		parts = append(parts, headerCostStyle.Render(fmt.Sprintf("$%.2f", total.EstimatedCost)))
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorAmber).Render(
+			fmt.Sprintf("$%.2f", total.EstimatedCost),
+		))
 	}
 
-	sep := headerSepStyle.Render("  ")
-	return strings.Join(parts, sep)
+	return strings.Join(parts, dimTextStyle.Render("  "))
 }
 
 // formatTokenCount formats a token count for display.

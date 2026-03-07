@@ -335,16 +335,17 @@ func TestAppModelStatusBarCompletedMessage(t *testing.T) {
 	app := NewAppModel("pipe", nil)
 	app.pipelineDone = true
 	bar := app.statusBar()
-	if !strings.Contains(bar, "completed") {
-		t.Errorf("expected 'completed' in status bar, got: %q", bar)
+	if !strings.Contains(bar, "CLEAR") {
+		t.Errorf("expected 'CLEAR' in status bar, got: %q", bar)
 	}
 }
 
 func TestAppModelStatusBarRunningMessage(t *testing.T) {
 	app := NewAppModel("pipe", nil)
 	bar := app.statusBar()
-	if !strings.Contains(bar, "running") {
-		t.Errorf("expected 'running' in status bar, got: %q", bar)
+	// When running with no nodes, the status bar shows the quit hint
+	if !strings.Contains(bar, "q to exit") {
+		t.Errorf("expected 'q to exit' in status bar, got: %q", bar)
 	}
 }
 
@@ -353,11 +354,8 @@ func TestAppModelStatusBarErrorMessage(t *testing.T) {
 	app.pipelineDone = true
 	app.pipelineErr = &errImpl{msg: "boom"}
 	bar := app.statusBar()
-	if !strings.Contains(bar, "failed") {
-		t.Errorf("expected 'failed' in status bar, got: %q", bar)
-	}
-	if !strings.Contains(bar, "boom") {
-		t.Errorf("expected error message in status bar, got: %q", bar)
+	if !strings.Contains(bar, "FAULT") {
+		t.Errorf("expected 'FAULT' in status bar, got: %q", bar)
 	}
 }
 
@@ -367,11 +365,11 @@ func TestAppModelStatusBarShowsNodeProgress(t *testing.T) {
 	app.nodeList.AddNode(NodeEntry{ID: "n2", Status: NodeRunning})
 	app.nodeList.AddNode(NodeEntry{ID: "n3", Status: NodePending})
 	bar := app.statusBar()
-	if !strings.Contains(bar, "1/3 nodes complete") {
-		t.Errorf("expected '1/3 nodes complete' in status bar, got: %q", bar)
+	if !strings.Contains(bar, "1/3") {
+		t.Errorf("expected '1/3' progress in status bar, got: %q", bar)
 	}
-	if !strings.Contains(bar, "1 running") {
-		t.Errorf("expected '1 running' in status bar, got: %q", bar)
+	if !strings.Contains(bar, lampActive) {
+		t.Errorf("expected running lamp indicator in status bar, got: %q", bar)
 	}
 }
 

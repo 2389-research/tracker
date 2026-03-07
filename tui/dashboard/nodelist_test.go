@@ -36,17 +36,17 @@ func TestNodeListRendersStatusIcons(t *testing.T) {
 	nl := NewNodeListModel(nodes)
 	view := nl.View()
 
-	if !strings.Contains(view, iconDone) {
-		t.Errorf("expected done icon %q in view", iconDone)
+	if !strings.Contains(view, lampOn) {
+		t.Errorf("expected done lamp %q in view", lampOn)
 	}
-	if !strings.Contains(view, iconRunning) {
-		t.Errorf("expected running icon %q in view", iconRunning)
+	if !strings.Contains(view, lampActive) {
+		t.Errorf("expected running lamp %q in view", lampActive)
 	}
-	if !strings.Contains(view, iconFailed) {
-		t.Errorf("expected failed icon %q in view", iconFailed)
+	if !strings.Contains(view, lampError) {
+		t.Errorf("expected failed lamp %q in view", lampError)
 	}
-	if !strings.Contains(view, iconPending) {
-		t.Errorf("expected pending icon %q in view", iconPending)
+	if !strings.Contains(view, lampOff) {
+		t.Errorf("expected pending lamp %q in view", lampOff)
 	}
 }
 
@@ -133,17 +133,17 @@ func TestNodeListSetWidthUpdates(t *testing.T) {
 	}
 }
 
-func TestStatusIconAndStyleCoversAllCases(t *testing.T) {
+func TestSignalLampCoversAllCases(t *testing.T) {
 	cases := map[NodeStatus]string{
-		NodeDone:    iconDone,
-		NodeRunning: iconRunning,
-		NodeFailed:  iconFailed,
-		NodePending: iconPending,
+		NodeDone:    lampOn,
+		NodeRunning: lampActive,
+		NodeFailed:  lampError,
+		NodePending: lampOff,
 	}
-	for status, expectedIcon := range cases {
-		icon, _ := statusIconAndStyle(status)
-		if icon != expectedIcon {
-			t.Errorf("status %v: expected icon %q, got %q", status, expectedIcon, icon)
+	for status, expectedLamp := range cases {
+		lamp, _ := signalLamp(status)
+		if lamp != expectedLamp {
+			t.Errorf("status %v: expected lamp %q, got %q", status, expectedLamp, lamp)
 		}
 	}
 }

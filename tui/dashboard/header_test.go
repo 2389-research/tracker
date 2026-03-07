@@ -40,8 +40,8 @@ func TestHeaderRendersTokenCountsForProvider(t *testing.T) {
 
 	h := NewHeaderModel("test-pipeline", tracker)
 	view := h.View()
-	if !strings.Contains(view, "Openai") {
-		t.Errorf("expected provider 'Openai' in header, got: %q", view)
+	if !strings.Contains(view, "OPENAI") {
+		t.Errorf("expected provider 'OPENAI' in header, got: %q", view)
 	}
 	if !strings.Contains(view, "100") {
 		t.Errorf("expected input token count 100 in header, got: %q", view)
@@ -103,11 +103,11 @@ func TestHeaderMultipleProvidersShowsBoth(t *testing.T) {
 
 	h := NewHeaderModel("multi-provider", tracker)
 	view := h.View()
-	if !strings.Contains(view, "Openai") {
-		t.Errorf("expected 'Openai' in multi-provider header, got: %q", view)
+	if !strings.Contains(view, "OPENAI") {
+		t.Errorf("expected 'OPENAI' in multi-provider header, got: %q", view)
 	}
-	if !strings.Contains(view, "Anthropic") {
-		t.Errorf("expected 'Anthropic' in multi-provider header, got: %q", view)
+	if !strings.Contains(view, "ANTHROPIC") {
+		t.Errorf("expected 'ANTHROPIC' in multi-provider header, got: %q", view)
 	}
 }
 
@@ -156,8 +156,8 @@ func TestFormatDuration(t *testing.T) {
 func TestHeaderShowsRunningStatus(t *testing.T) {
 	h := NewHeaderModel("test", nil)
 	view := h.View()
-	if !strings.Contains(view, "running") {
-		t.Errorf("expected 'running' in header, got: %q", view)
+	if !strings.Contains(view, "RUNNING") {
+		t.Errorf("expected 'RUNNING' in header, got: %q", view)
 	}
 }
 
@@ -165,8 +165,8 @@ func TestHeaderShowsCompletedStatus(t *testing.T) {
 	h := NewHeaderModel("test", nil)
 	h.SetStatus(StatusCompleted)
 	view := h.View()
-	if !strings.Contains(view, "completed") {
-		t.Errorf("expected 'completed' in header, got: %q", view)
+	if !strings.Contains(view, "COMPLETED") {
+		t.Errorf("expected 'COMPLETED' in header, got: %q", view)
 	}
 }
 
@@ -174,8 +174,8 @@ func TestHeaderShowsFailedStatus(t *testing.T) {
 	h := NewHeaderModel("test", nil)
 	h.SetStatus(StatusFailed)
 	view := h.View()
-	if !strings.Contains(view, "failed") {
-		t.Errorf("expected 'failed' in header, got: %q", view)
+	if !strings.Contains(view, "FAILED") {
+		t.Errorf("expected 'FAILED' in header, got: %q", view)
 	}
 }
 
