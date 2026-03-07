@@ -25,6 +25,12 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.WorkingDir != "." {
 		t.Errorf("expected WorkingDir '.', got %q", cfg.WorkingDir)
 	}
+	if cfg.Model != DefaultModel {
+		t.Errorf("expected Model %q, got %q", DefaultModel, cfg.Model)
+	}
+	if cfg.Provider != DefaultProvider {
+		t.Errorf("expected Provider %q, got %q", DefaultProvider, cfg.Provider)
+	}
 }
 
 func TestConfigValidation(t *testing.T) {

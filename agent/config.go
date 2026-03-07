@@ -21,6 +21,11 @@ type SessionConfig struct {
 	Provider                      string
 }
 
+const (
+	DefaultModel    = "claude-sonnet-4-5"
+	DefaultProvider = "anthropic"
+)
+
 func DefaultConfig() SessionConfig {
 	return SessionConfig{
 		MaxTurns:                      50,
@@ -30,6 +35,8 @@ func DefaultConfig() SessionConfig {
 		ContextWindowLimit:            200000,
 		ContextWindowWarningThreshold: 0.8,
 		WorkingDir:                    ".",
+		Model:                         DefaultModel,
+		Provider:                      DefaultProvider,
 	}
 }
 
