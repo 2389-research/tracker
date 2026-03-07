@@ -219,6 +219,13 @@ func (c *Client) Stream(ctx context.Context, req *Request) <-chan StreamEvent {
 	return adapter.Stream(ctx, req)
 }
 
+// AddMiddleware appends a middleware to the client's existing middleware chain.
+// This allows post-construction addition of middleware (e.g., adding a
+// TokenTracker after the client is built from environment variables).
+func (c *Client) AddMiddleware(mw Middleware) {
+	c.middleware = append(c.middleware, mw)
+}
+
 // Close releases resources for all registered provider adapters.
 func (c *Client) Close() error {
 	var errs []error
