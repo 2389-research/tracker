@@ -59,6 +59,12 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, fmt.Errorf("node %q failed to create session: %w", node.ID, err)
 	}
 
+	// Determine artifact directory: prefer pipeline context, fall back to working dir.
+	artifactRoot := h.workingDir
+	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
+		artifactRoot = dir
+	}
+
 	_, runErr := sess.Run(ctx, prompt)
 	if runErr != nil {
 		// Configuration errors (unknown provider, missing keys) are fatal —
@@ -75,7 +81,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 				pipeline.ContextKeyLastResponse: runErr.Error(),
 			},
 		}
-		if err := pipeline.WriteStageArtifacts(h.workingDir, node.ID, prompt, runErr.Error(), outcome); err != nil {
+		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, runErr.Error(), outcome); err != nil {
 			return pipeline.Outcome{}, err
 		}
 		return outcome, nil
@@ -94,7 +100,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			pipeline.ContextKeyLastResponse: responseText,
 		},
 	}
-	if err := pipeline.WriteStageArtifacts(h.workingDir, node.ID, prompt, responseText, outcome); err != nil {
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseText, outcome); err != nil {
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil

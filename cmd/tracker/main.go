@@ -124,7 +124,9 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 	)
 
 	// Build engine options.
+	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 	var engineOpts []pipeline.EngineOption
+	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
 
 	if verbose {
 		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
@@ -229,7 +231,9 @@ func runTUI(dotFile, workdir, checkpoint string) error {
 	)
 
 	// Build engine options.
+	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 	var engineOpts []pipeline.EngineOption
+	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
 	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(eventHandler))
 	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
 	if checkpoint != "" {

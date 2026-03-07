@@ -16,6 +16,11 @@ const (
 	ContextKeyToolStderr     = "tool_stderr"
 )
 
+// Internal context keys used by the engine for bookkeeping.
+const (
+	InternalKeyArtifactDir = "_artifact_dir"
+)
+
 // PipelineContext is a thread-safe key-value store shared across all pipeline
 // nodes during execution. It has two namespaces: user-visible values and
 // internal engine bookkeeping (retry counters, loop state).

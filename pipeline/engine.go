@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ type Engine struct {
 	checkpointPath    string
 	resolveStylesheet bool
 	initialContext    map[string]string
+	artifactDir       string
 }
 
 // EngineOption configures optional Engine behavior.
@@ -55,6 +57,14 @@ func WithCheckpointPath(path string) EngineOption {
 func WithStylesheetResolution(enabled bool) EngineOption {
 	return func(e *Engine) {
 		e.resolveStylesheet = enabled
+	}
+}
+
+// WithArtifactDir sets the base directory for pipeline run artifacts.
+// Node artifacts are written to <artifactDir>/<nodeID>/ instead of the working directory.
+func WithArtifactDir(dir string) EngineOption {
+	return func(e *Engine) {
+		e.artifactDir = dir
 	}
 }
 
@@ -103,6 +113,11 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	// Restore context from checkpoint.
 	for k, v := range cp.Context {
 		pctx.Set(k, v)
+	}
+
+	// Set artifact directory so handlers can write artifacts outside the working directory.
+	if e.artifactDir != "" {
+		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
 	}
 
 	// Parse stylesheet if enabled and available.
