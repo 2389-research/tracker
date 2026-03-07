@@ -90,7 +90,7 @@ func (n *NodeListModel) AddNode(entry NodeEntry) {
 // View renders the node list with status icons and labels.
 func (n NodeListModel) View() string {
 	var sb strings.Builder
-	sb.WriteString(nodeListTitleStyle.Render("Pipeline Nodes"))
+	sb.WriteString(nodeListTitleStyle.Render("Pipeline"))
 	sb.WriteString("\n")
 
 	for _, node := range n.nodes {

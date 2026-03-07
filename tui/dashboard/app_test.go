@@ -19,11 +19,11 @@ func TestNewAppModelCreation(t *testing.T) {
 	_ = app
 }
 
-func TestAppModelInitReturnsNil(t *testing.T) {
+func TestAppModelInitReturnsTick(t *testing.T) {
 	app := NewAppModel("test", nil)
 	cmd := app.Init()
-	if cmd != nil {
-		t.Error("expected nil Cmd from Init")
+	if cmd == nil {
+		t.Error("expected non-nil tick Cmd from Init")
 	}
 }
 
@@ -358,6 +358,38 @@ func TestAppModelStatusBarErrorMessage(t *testing.T) {
 	}
 	if !strings.Contains(bar, "boom") {
 		t.Errorf("expected error message in status bar, got: %q", bar)
+	}
+}
+
+func TestAppModelStatusBarShowsNodeProgress(t *testing.T) {
+	app := NewAppModel("pipe", nil)
+	app.nodeList.AddNode(NodeEntry{ID: "n1", Status: NodeDone})
+	app.nodeList.AddNode(NodeEntry{ID: "n2", Status: NodeRunning})
+	app.nodeList.AddNode(NodeEntry{ID: "n3", Status: NodePending})
+	bar := app.statusBar()
+	if !strings.Contains(bar, "1/3 nodes complete") {
+		t.Errorf("expected '1/3 nodes complete' in status bar, got: %q", bar)
+	}
+	if !strings.Contains(bar, "1 running") {
+		t.Errorf("expected '1 running' in status bar, got: %q", bar)
+	}
+}
+
+func TestAppModelPipelineDoneSetsHeaderStatus(t *testing.T) {
+	app := NewAppModel("pipe", nil)
+	m2, _ := app.Update(PipelineDoneMsg{Err: nil})
+	updated := m2.(AppModel)
+	if updated.header.status != StatusCompleted {
+		t.Errorf("expected StatusCompleted, got %v", updated.header.status)
+	}
+}
+
+func TestAppModelPipelineDoneWithErrorSetsHeaderFailed(t *testing.T) {
+	app := NewAppModel("pipe", nil)
+	m2, _ := app.Update(PipelineDoneMsg{Err: &errImpl{msg: "boom"}})
+	updated := m2.(AppModel)
+	if updated.header.status != StatusFailed {
+		t.Errorf("expected StatusFailed, got %v", updated.header.status)
 	}
 }
 

@@ -5,6 +5,7 @@ package dashboard
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +22,9 @@ const (
 	nodeListWidthPct = 30 // percent of terminal width used for the node list pane
 	minNodeListWidth = 22
 	minAgentLogWidth = 30
+	headerHeight     = 3 // two content lines + bottom border
+	statusBarHeight  = 1
+	tickInterval     = time.Second
 )
 
 // ─── Messages sent into the TUI loop ─────────────────────────────────────────
@@ -47,6 +51,9 @@ type GateFreeformMsg struct {
 // PipelineDoneMsg signals that the pipeline goroutine has finished.
 type PipelineDoneMsg struct{ Err error }
 
+// tickMsg is sent periodically to update the elapsed time display.
+type tickMsg time.Time
+
 // ─── Modal state ──────────────────────────────────────────────────────────────
 
 // modalKind distinguishes the two gate types.
@@ -56,6 +63,36 @@ const (
 	modalNone     modalKind = iota
 	modalChoice             // showing a ChoiceModel in a modal
 	modalFreeform           // showing a FreeformModel in a modal
+)
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+var (
+	paneVerticalBorder = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder(), false, true, false, false).
+				BorderForeground(lipgloss.Color("8"))
+
+	headerBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder(), false, false, true, false).
+				BorderForeground(lipgloss.Color("8"))
+
+	statusBarStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("235")).
+			Padding(0, 1)
+
+	statusBarDimStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("8"))
+
+	statusBarErrorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("9")).
+				Bold(true)
+
+	statusBarSuccessStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("10"))
+
+	statusBarProgressStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("11"))
 )
 
 // ─── App model ────────────────────────────────────────────────────────────────
@@ -89,20 +126,6 @@ type AppModel struct {
 	bgViewport viewport.Model
 }
 
-var (
-	appBorderStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(lipgloss.Color("8"))
-
-	appStatusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8")).
-			Faint(true)
-
-	appErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("9")).
-			Bold(true)
-)
-
 // NewAppModel constructs the dashboard AppModel.
 // pipelineName is displayed in the header; tracker provides live token counts.
 func NewAppModel(pipelineName string, tracker *llm.TokenTracker) AppModel {
@@ -113,12 +136,26 @@ func NewAppModel(pipelineName string, tracker *llm.TokenTracker) AppModel {
 	}
 }
 
-// Init implements tea.Model. No initial commands needed.
-func (a AppModel) Init() tea.Cmd { return nil }
+// Init implements tea.Model. Starts the tick timer for elapsed time updates.
+func (a AppModel) Init() tea.Cmd {
+	return tickCmd()
+}
+
+// tickCmd returns a command that sends a tickMsg after the tick interval.
+func tickCmd() tea.Cmd {
+	return tea.Tick(tickInterval, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 // Update implements tea.Model and handles all messages.
 func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+
+	// ── Tick for elapsed time updates ────────────────────────────────────────
+	case tickMsg:
+		// Just re-render (header reads time.Since on each View call)
+		return a, tickCmd()
 
 	// ── Terminal resize ──────────────────────────────────────────────────────
 	case tea.WindowSizeMsg:
@@ -165,6 +202,11 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PipelineDoneMsg:
 		a.pipelineDone = true
 		a.pipelineErr = msg.Err
+		if msg.Err != nil {
+			a.header.SetStatus(StatusFailed)
+		} else {
+			a.header.SetStatus(StatusCompleted)
+		}
 		return a, nil
 	}
 
@@ -262,8 +304,8 @@ func (a *AppModel) relayout() {
 
 	a.header.SetWidth(a.width)
 
-	// Reserve 1 row for header, 1 for status bar.
-	contentHeight := a.height - 2
+	// Reserve rows for header (2 lines + border) and status bar
+	contentHeight := a.height - headerHeight - statusBarHeight
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -311,18 +353,19 @@ func (a AppModel) View() string {
 func (a AppModel) renderBackground() string {
 	var sb strings.Builder
 
-	// Header row
-	sb.WriteString(a.header.View())
+	// Header with bottom border separator
+	headerContent := a.header.View()
+	sb.WriteString(headerBorderStyle.Width(a.width).Render(headerContent))
 	sb.WriteString("\n")
 
 	// Split panes: node list (left) | agent log (right)
 	nodePane := a.nodeList.View()
 	logPane := a.agentLog.View()
 
-	// Render side by side; use lipgloss Join for clean alignment
+	// Render side by side with vertical border between them
 	panes := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		appBorderStyle.Render(nodePane),
+		paneVerticalBorder.Render(nodePane),
 		logPane,
 	)
 	sb.WriteString(panes)
@@ -334,15 +377,41 @@ func (a AppModel) renderBackground() string {
 	return sb.String()
 }
 
-// statusBar renders a one-line footer with pipeline status.
+// statusBar renders a one-line footer with pipeline status and node progress.
 func (a AppModel) statusBar() string {
+	var parts []string
+
+	// Pipeline status indicator
 	if a.pipelineErr != nil {
-		return appErrorStyle.Render(fmt.Sprintf("Pipeline failed: %v  (q to quit)", a.pipelineErr))
+		parts = append(parts, statusBarErrorStyle.Render(fmt.Sprintf("Pipeline failed: %v", a.pipelineErr)))
+	} else if a.pipelineDone {
+		parts = append(parts, statusBarSuccessStyle.Render("Pipeline completed"))
+	} else {
+		parts = append(parts, statusBarProgressStyle.Render("Pipeline running…"))
 	}
-	if a.pipelineDone {
-		return appStatusStyle.Render("Pipeline completed successfully  (q to quit)")
+
+	// Node progress
+	pending, running, done, failed := a.nodeList.Counts()
+	total := pending + running + done + failed
+	if total > 0 {
+		progress := fmt.Sprintf("%d/%d nodes complete", done, total)
+		if running > 0 {
+			progress += fmt.Sprintf("  %d running", running)
+		}
+		if failed > 0 {
+			progress += fmt.Sprintf("  %d failed", failed)
+		}
+		parts = append(parts, statusBarDimStyle.Render(progress))
 	}
-	return appStatusStyle.Render("Pipeline running…  (q to quit)")
+
+	// Quit hint
+	parts = append(parts, statusBarDimStyle.Render("q to quit"))
+
+	content := strings.Join(parts, statusBarDimStyle.Render("  │  "))
+	if a.width > 0 {
+		return statusBarStyle.Width(a.width).Render(content)
+	}
+	return statusBarStyle.Render(content)
 }
 
 // PipelineErr returns the error from the pipeline goroutine, if any.

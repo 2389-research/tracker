@@ -134,21 +134,21 @@ func TestAgentLogFormatIncludesTimestamp(t *testing.T) {
 		NodeID:    "mynode",
 		Message:   "test message",
 	}
-	result := formatLogEntry(entry)
+	result := formatLogEntry(entry, 0)
 	if !strings.Contains(result, "12:30:45") {
 		t.Errorf("expected timestamp '12:30:45' in formatted entry, got: %q", result)
 	}
 }
 
-func TestAgentLogFormatIncludesEventType(t *testing.T) {
+func TestAgentLogFormatCompletionEventStyledCorrectly(t *testing.T) {
 	entry := LogEntry{
 		Time:      time.Now(),
 		EventType: "stage_completed",
 		Message:   "done",
 	}
-	result := formatLogEntry(entry)
-	if !strings.Contains(result, "stage_completed") {
-		t.Errorf("expected event type in formatted entry, got: %q", result)
+	result := formatLogEntry(entry, 0)
+	if !strings.Contains(result, "done") {
+		t.Errorf("expected message in formatted entry, got: %q", result)
 	}
 }
 
@@ -157,7 +157,7 @@ func TestAgentLogFormatIncludesNodeID(t *testing.T) {
 		Time:   time.Now(),
 		NodeID: "node-xyz",
 	}
-	result := formatLogEntry(entry)
+	result := formatLogEntry(entry, 0)
 	if !strings.Contains(result, "node-xyz") {
 		t.Errorf("expected node ID in formatted entry, got: %q", result)
 	}
@@ -168,7 +168,7 @@ func TestAgentLogFormatIncludesMessage(t *testing.T) {
 		Time:    time.Now(),
 		Message: "pipeline is running",
 	}
-	result := formatLogEntry(entry)
+	result := formatLogEntry(entry, 0)
 	if !strings.Contains(result, "pipeline is running") {
 		t.Errorf("expected message in formatted entry, got: %q", result)
 	}
@@ -179,7 +179,7 @@ func TestAgentLogFormatEmptyEventTypeOmitsTypeField(t *testing.T) {
 		Time:    time.Now(),
 		Message: "bare message",
 	}
-	result := formatLogEntry(entry)
+	result := formatLogEntry(entry, 0)
 	if strings.Contains(result, "[]") {
 		t.Errorf("expected no empty brackets when EventType is empty, got: %q", result)
 	}

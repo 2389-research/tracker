@@ -1,9 +1,8 @@
 // ABOUTME: Dashboard agent log component — scrolling viewport of agent actions and pipeline events.
-// ABOUTME: Buffers log lines and renders a fixed-height scrollable view of the most recent entries.
+// ABOUTME: Buffers log lines and renders a fixed-height scrollable view in [NodeID] message format.
 package dashboard
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -19,18 +18,26 @@ var (
 				Bold(true).
 				Foreground(lipgloss.Color("12"))
 
-	agentLogEntryStyle = lipgloss.NewStyle().
+	agentLogNodeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("14")).
+				Bold(true)
+
+	agentLogMsgStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("15"))
 
 	agentLogTimestampStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("8")).
 				Faint(true)
 
-	agentLogEventTypeStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("14"))
+	agentLogEventStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("8")).
+				Faint(true)
 
 	agentLogErrorStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("9"))
+
+	agentLogSuccessStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("10"))
 )
 
 // LogEntry represents a single line in the agent log.
@@ -93,6 +100,12 @@ func (a *AgentLogModel) AppendEvent(evt pipeline.PipelineEvent) {
 			msg = evt.Err.Error()
 		}
 	}
+
+	// Generate a readable message from event type if no message provided
+	if msg == "" {
+		msg = eventTypeToMessage(evt.Type)
+	}
+
 	entry := LogEntry{
 		Time:      evt.Timestamp,
 		EventType: string(evt.Type),
@@ -127,7 +140,7 @@ func (a *AgentLogModel) SetSize(width, height int) {
 func (a AgentLogModel) View() string {
 	title := agentLogTitleStyle.Render("Agent Log")
 	if !a.ready {
-		return title + "\n" + agentLogEntryStyle.Render("(initializing…)")
+		return title + "\n" + agentLogMsgStyle.Render("(initializing…)")
 	}
 	return title + "\n" + a.viewport.View()
 }
@@ -139,34 +152,90 @@ func (a AgentLogModel) Len() int { return len(a.entries) }
 func (a *AgentLogModel) refreshViewport() {
 	var sb strings.Builder
 	for _, entry := range a.entries {
-		sb.WriteString(formatLogEntry(entry))
+		sb.WriteString(formatLogEntry(entry, a.width))
 		sb.WriteString("\n")
 	}
 	a.viewport.SetContent(sb.String())
 	a.viewport.GotoBottom()
 }
 
-func formatLogEntry(e LogEntry) string {
-	var parts []string
+// formatLogEntry formats a log entry in the spec's [NodeID] message style.
+func formatLogEntry(e LogEntry, maxWidth int) string {
+	var sb strings.Builder
 
+	// Timestamp (compact)
 	ts := e.Time.Format("15:04:05")
-	parts = append(parts, agentLogTimestampStyle.Render(ts))
+	sb.WriteString(agentLogTimestampStyle.Render(ts))
+	sb.WriteString(" ")
 
-	if e.EventType != "" {
-		parts = append(parts, agentLogEventTypeStyle.Render("["+e.EventType+"]"))
-	}
-
+	// [NodeID] prefix if present — this is the spec format
 	if e.NodeID != "" {
-		parts = append(parts, agentLogEntryStyle.Render(fmt.Sprintf("(%s)", e.NodeID)))
+		sb.WriteString(agentLogNodeStyle.Render("[" + e.NodeID + "]"))
+		sb.WriteString(" ")
 	}
 
-	if e.Message != "" {
-		msgStyle := agentLogEntryStyle
-		if e.IsError {
-			msgStyle = agentLogErrorStyle
+	// Message with appropriate styling
+	msg := e.Message
+	if maxWidth > 0 {
+		// Rough truncation to prevent wrapping
+		prefixLen := 9 // timestamp
+		if e.NodeID != "" {
+			prefixLen += len(e.NodeID) + 3 // brackets + space
 		}
-		parts = append(parts, msgStyle.Render(e.Message))
+		maxMsg := maxWidth - prefixLen - 2
+		if maxMsg > 0 && len(msg) > maxMsg {
+			msg = msg[:maxMsg-1] + "…"
+		}
 	}
 
-	return strings.Join(parts, " ")
+	if e.IsError {
+		sb.WriteString(agentLogErrorStyle.Render(msg))
+	} else if isCompletionEvent(e.EventType) {
+		sb.WriteString(agentLogSuccessStyle.Render(msg))
+	} else {
+		sb.WriteString(agentLogMsgStyle.Render(msg))
+	}
+
+	return sb.String()
+}
+
+// eventTypeToMessage converts a pipeline event type to a human-readable message.
+func eventTypeToMessage(t pipeline.PipelineEventType) string {
+	switch t {
+	case pipeline.EventPipelineStarted:
+		return "Pipeline started"
+	case pipeline.EventPipelineCompleted:
+		return "Pipeline completed"
+	case pipeline.EventPipelineFailed:
+		return "Pipeline failed"
+	case pipeline.EventStageStarted:
+		return "Starting…"
+	case pipeline.EventStageCompleted:
+		return "Done"
+	case pipeline.EventStageFailed:
+		return "Failed"
+	case pipeline.EventStageRetrying:
+		return "Retrying…"
+	case pipeline.EventParallelStarted:
+		return "Parallel group started"
+	case pipeline.EventParallelCompleted:
+		return "Parallel group completed"
+	case pipeline.EventInterviewStarted:
+		return "Awaiting input…"
+	case pipeline.EventInterviewCompleted:
+		return "Input received"
+	case pipeline.EventCheckpointSaved:
+		return "Checkpoint saved"
+	default:
+		return string(t)
+	}
+}
+
+// isCompletionEvent returns true for events that represent successful completions.
+func isCompletionEvent(eventType string) bool {
+	switch pipeline.PipelineEventType(eventType) {
+	case pipeline.EventStageCompleted, pipeline.EventPipelineCompleted, pipeline.EventParallelCompleted:
+		return true
+	}
+	return false
 }

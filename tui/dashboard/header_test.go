@@ -40,8 +40,8 @@ func TestHeaderRendersTokenCountsForProvider(t *testing.T) {
 
 	h := NewHeaderModel("test-pipeline", tracker)
 	view := h.View()
-	if !strings.Contains(view, "openai") {
-		t.Errorf("expected provider 'openai' in header, got: %q", view)
+	if !strings.Contains(view, "Openai") {
+		t.Errorf("expected provider 'Openai' in header, got: %q", view)
 	}
 	if !strings.Contains(view, "100") {
 		t.Errorf("expected input token count 100 in header, got: %q", view)
@@ -90,7 +90,7 @@ func TestHeaderSetStartTimeOverrides(t *testing.T) {
 	}
 }
 
-func TestHeaderMultipleProvidersShowsTotal(t *testing.T) {
+func TestHeaderMultipleProvidersShowsBoth(t *testing.T) {
 	tracker := llm.NewTokenTracker()
 	wrapped := tracker.WrapComplete(func(_ context.Context, req *llm.Request) (*llm.Response, error) {
 		return &llm.Response{
@@ -103,7 +103,90 @@ func TestHeaderMultipleProvidersShowsTotal(t *testing.T) {
 
 	h := NewHeaderModel("multi-provider", tracker)
 	view := h.View()
-	if !strings.Contains(view, "total") {
-		t.Errorf("expected 'total' in multi-provider header, got: %q", view)
+	if !strings.Contains(view, "Openai") {
+		t.Errorf("expected 'Openai' in multi-provider header, got: %q", view)
+	}
+	if !strings.Contains(view, "Anthropic") {
+		t.Errorf("expected 'Anthropic' in multi-provider header, got: %q", view)
+	}
+}
+
+func TestFormatTokenCountSmall(t *testing.T) {
+	if got := formatTokenCount(42); got != "42" {
+		t.Errorf("expected '42', got %q", got)
+	}
+	if got := formatTokenCount(999); got != "999" {
+		t.Errorf("expected '999', got %q", got)
+	}
+}
+
+func TestFormatTokenCountThousands(t *testing.T) {
+	if got := formatTokenCount(1000); got != "1.0k" {
+		t.Errorf("expected '1.0k', got %q", got)
+	}
+	if got := formatTokenCount(12400); got != "12.4k" {
+		t.Errorf("expected '12.4k', got %q", got)
+	}
+	if got := formatTokenCount(999999); got != "1000.0k" {
+		t.Errorf("expected '1000.0k', got %q", got)
+	}
+}
+
+func TestFormatTokenCountMillions(t *testing.T) {
+	if got := formatTokenCount(1000000); got != "1.0m" {
+		t.Errorf("expected '1.0m', got %q", got)
+	}
+	if got := formatTokenCount(2500000); got != "2.5m" {
+		t.Errorf("expected '2.5m', got %q", got)
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	if got := formatDuration(5 * time.Second); got != "5s" {
+		t.Errorf("expected '5s', got %q", got)
+	}
+	if got := formatDuration(2*time.Minute + 14*time.Second); got != "2m14s" {
+		t.Errorf("expected '2m14s', got %q", got)
+	}
+	if got := formatDuration(10 * time.Minute); got != "10m00s" {
+		t.Errorf("expected '10m00s', got %q", got)
+	}
+}
+
+func TestHeaderShowsRunningStatus(t *testing.T) {
+	h := NewHeaderModel("test", nil)
+	view := h.View()
+	if !strings.Contains(view, "running") {
+		t.Errorf("expected 'running' in header, got: %q", view)
+	}
+}
+
+func TestHeaderShowsCompletedStatus(t *testing.T) {
+	h := NewHeaderModel("test", nil)
+	h.SetStatus(StatusCompleted)
+	view := h.View()
+	if !strings.Contains(view, "completed") {
+		t.Errorf("expected 'completed' in header, got: %q", view)
+	}
+}
+
+func TestHeaderShowsFailedStatus(t *testing.T) {
+	h := NewHeaderModel("test", nil)
+	h.SetStatus(StatusFailed)
+	view := h.View()
+	if !strings.Contains(view, "failed") {
+		t.Errorf("expected 'failed' in header, got: %q", view)
+	}
+}
+
+func TestCapitalizeFirst(t *testing.T) {
+	if got := capitalizeFirst("openai"); got != "Openai" {
+		t.Errorf("expected 'Openai', got %q", got)
+	}
+	if got := capitalizeFirst(""); got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+	if got := capitalizeFirst("A"); got != "A" {
+		t.Errorf("expected 'A', got %q", got)
 	}
 }
