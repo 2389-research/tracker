@@ -203,6 +203,7 @@ func runTUI(dotFile, workdir, checkpoint string) error {
 	// Build the initial AppModel before creating the tea.Program so that we
 	// can reference the Program in the interviewer.
 	appModel := dashboard.NewAppModel(pipelineName, tokenTracker)
+	appModel.SetInitialNodes(buildNodeList(graph))
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
 
 	// Mode 2 interviewer: delegates gate prompts to the running dashboard program.
@@ -234,30 +235,31 @@ func runTUI(dotFile, workdir, checkpoint string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	type pipelineOutcome struct {
+		result *pipeline.EngineResult
+		err    error
+	}
+	outcomeCh := make(chan pipelineOutcome, 1)
+
 	go func() {
 		result, pipelineErr := engine.Run(ctx)
 		if pipelineErr == nil && result.Status != pipeline.OutcomeSuccess {
 			pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
 		}
+		outcomeCh <- pipelineOutcome{result: result, err: pipelineErr}
 		prog.Send(dashboard.PipelineDoneMsg{Err: pipelineErr})
-		if pipelineErr == nil {
-			// Print summary after TUI exits
-			_ = result
-		}
 	}()
 
 	// Start the TUI — this blocks until the program exits.
-	finalModel, err := prog.Run()
+	_, err = prog.Run()
 	if err != nil {
 		return fmt.Errorf("TUI program: %w", err)
 	}
 
-	// After TUI exits, print summary.
-	app, ok := finalModel.(dashboard.AppModel)
-	if ok && app.PipelineErr() != nil {
-		return app.PipelineErr()
-	}
-	return nil
+	// After TUI exits, print run summary.
+	outcome := <-outcomeCh
+	printRunSummary(outcome.result, outcome.err, tokenTracker)
+	return outcome.err
 }
 
 // buildLLMClient constructs the LLM client from environment variables with
@@ -298,4 +300,82 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 	}
 
 	return client, nil
+}
+
+// buildNodeList creates an ordered list of dashboard NodeEntry items from the
+// pipeline graph. Walks from StartNode in BFS order so the list reflects the
+// natural execution flow. All nodes start as NodePending.
+func buildNodeList(graph *pipeline.Graph) []dashboard.NodeEntry {
+	if graph.StartNode == "" {
+		return nil
+	}
+
+	var entries []dashboard.NodeEntry
+	visited := make(map[string]bool)
+	queue := []string{graph.StartNode}
+
+	for len(queue) > 0 {
+		nodeID := queue[0]
+		queue = queue[1:]
+		if visited[nodeID] {
+			continue
+		}
+		visited[nodeID] = true
+
+		node, ok := graph.Nodes[nodeID]
+		if !ok {
+			continue
+		}
+
+		label := node.Label
+		if label == "" {
+			label = node.ID
+		}
+		entries = append(entries, dashboard.NodeEntry{
+			ID:     node.ID,
+			Label:  label,
+			Status: dashboard.NodePending,
+		})
+
+		for _, edge := range graph.OutgoingEdges(nodeID) {
+			if !visited[edge.To] {
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+
+	return entries
+}
+
+// printRunSummary outputs a concise run summary after the TUI exits.
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker) {
+	fmt.Println()
+	fmt.Println("─── Run Summary ───────────────────────────────────────────")
+
+	if result != nil {
+		fmt.Printf("  Run ID:  %s\n", result.RunID)
+		fmt.Printf("  Status:  %s\n", result.Status)
+		fmt.Printf("  Nodes:   %d completed\n", len(result.CompletedNodes))
+	}
+
+	if tracker != nil {
+		providers := tracker.Providers()
+		if len(providers) > 0 {
+			fmt.Println("  Tokens:")
+			for _, p := range providers {
+				u := tracker.ProviderUsage(p)
+				fmt.Printf("    %-12s  in: %-8d  out: %-8d\n", p, u.InputTokens, u.OutputTokens)
+			}
+			total := tracker.TotalUsage()
+			fmt.Printf("    %-12s  in: %-8d  out: %-8d\n", "total", total.InputTokens, total.OutputTokens)
+			if total.EstimatedCost > 0 {
+				fmt.Printf("  Cost:    $%.4f\n", total.EstimatedCost)
+			}
+		}
+	}
+
+	if pipelineErr != nil {
+		fmt.Printf("  Error:   %v\n", pipelineErr)
+	}
+	fmt.Println("───────────────────────────────────────────────────────────")
 }

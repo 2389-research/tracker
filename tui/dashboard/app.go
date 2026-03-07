@@ -136,6 +136,12 @@ func NewAppModel(pipelineName string, tracker *llm.TokenTracker) AppModel {
 	}
 }
 
+// SetInitialNodes pre-populates the node list with all pipeline nodes as pending.
+// Call this before starting the tea.Program so the user sees the full pipeline upfront.
+func (a *AppModel) SetInitialNodes(nodes []NodeEntry) {
+	a.nodeList = NewNodeListModel(nodes)
+}
+
 // Init implements tea.Model. Starts the tick timer for elapsed time updates.
 func (a AppModel) Init() tea.Cmd {
 	return tickCmd()
