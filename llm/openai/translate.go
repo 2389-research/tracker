@@ -211,19 +211,33 @@ func translateMessageToInput(m llm.Message) []openaiInput {
 		}
 
 	case llm.RoleAssistant:
-		// Assistant messages: only echo function_call items back.
-		// The Responses API does not accept {role: "assistant"} items in input;
-		// assistant text is implicit in the conversation state.
+		// Assistant messages: emit text as {role: "assistant"} and tool calls
+		// as function_call items. Text must be included because this adapter
+		// replays full conversation history (no server-side state chaining).
 		// Echoed function_call items use "call_id" (not "id") in the input.
+		var textParts []string
 		for _, part := range m.Content {
-			if part.Kind == llm.KindToolCall && part.ToolCall != nil {
-				items = append(items, openaiInput{
-					Type:      "function_call",
-					CallID:    part.ToolCall.ID,
-					Name:      part.ToolCall.Name,
-					Arguments: string(part.ToolCall.Arguments),
-				})
+			switch part.Kind {
+			case llm.KindText:
+				textParts = append(textParts, part.Text)
+			case llm.KindToolCall:
+				if part.ToolCall != nil {
+					items = append(items, openaiInput{
+						Type:      "function_call",
+						CallID:    part.ToolCall.ID,
+						Name:      part.ToolCall.Name,
+						Arguments: string(part.ToolCall.Arguments),
+					})
+				}
 			}
+		}
+		if len(textParts) > 0 {
+			// Text items come before function_call items in the input.
+			textItem := openaiInput{
+				Role:    "assistant",
+				Content: strings.Join(textParts, ""),
+			}
+			items = append([]openaiInput{textItem}, items...)
 		}
 
 	case llm.RoleTool:

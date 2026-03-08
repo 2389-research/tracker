@@ -150,6 +150,35 @@ func TestTraceLoggerBatchesReasoningDeltas(t *testing.T) {
 	}
 }
 
+func TestTraceLoggerFlushDrainsBatch(t *testing.T) {
+	// When a stream terminates with an error (no TraceFinish), Flush()
+	// should drain any accumulated text/reasoning batch so output is not lost.
+	var buf bytes.Buffer
+	logger := NewTraceLogger(&buf, TraceLoggerOptions{})
+
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceRequestStart,
+		Provider: "openai",
+		Model:    "gpt-5.4",
+	})
+	logger.HandleTraceEvent(TraceEvent{
+		Kind:     TraceText,
+		Provider: "openai",
+		Model:    "gpt-5.4",
+		Preview:  "partial output before error",
+	})
+	// Simulate: no finish event, just an error — caller invokes Flush
+	logger.Flush()
+
+	got := buf.String()
+	if !strings.Contains(got, "llm text") {
+		t.Errorf("expected Flush to emit batched text line, got:\n%s", got)
+	}
+	if !strings.Contains(got, "partial output before error") {
+		t.Errorf("expected batched preview in flushed output, got:\n%s", got)
+	}
+}
+
 func TestTraceLoggerWritesNormalizedEvents(t *testing.T) {
 	var buf bytes.Buffer
 	logger := NewTraceLogger(&buf, TraceLoggerOptions{})

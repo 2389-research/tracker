@@ -237,6 +237,12 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 
 	for evt := range adapter.Stream(ctx, streamReq) {
 		if evt.Err != nil {
+			// Flush any buffered trace output before returning the error.
+			for _, obs := range observers {
+				if flusher, ok := obs.(interface{ Flush() }); ok {
+					flusher.Flush()
+				}
+			}
 			return nil, evt.Err
 		}
 

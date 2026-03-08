@@ -203,30 +203,38 @@ func TestTranslateRequestMultiTurnToolCall(t *testing.T) {
 		t.Errorf("input[0] role = %v, want 'user'", item0["role"])
 	}
 
-	// input[1]: function_call (assistant text is NOT echoed back in Responses API)
-	// Echoed function_calls use "call_id" not "id" in the input array.
+	// input[1]: assistant text (replayed for multi-turn context)
 	item1 := input[1].(map[string]any)
-	if item1["type"] != "function_call" {
-		t.Errorf("input[1] type = %v, want 'function_call'", item1["type"])
+	if item1["role"] != "assistant" {
+		t.Errorf("input[1] role = %v, want 'assistant'", item1["role"])
 	}
-	if item1["call_id"] != "call_abc123" {
-		t.Errorf("input[1] call_id = %v, want 'call_abc123'", item1["call_id"])
-	}
-	if _, hasID := item1["id"]; hasID {
-		t.Error("function_call input items should use 'call_id', not 'id'")
+	if item1["content"] != "I'll list the files for you." {
+		t.Errorf("input[1] content = %v, want assistant text", item1["content"])
 	}
 
-	// input[2]: function_call_output
+	// input[2]: function_call — uses "call_id" not "id" in input
 	item2 := input[2].(map[string]any)
-	if item2["type"] != "function_call_output" {
-		t.Errorf("input[2] type = %v, want 'function_call_output'", item2["type"])
+	if item2["type"] != "function_call" {
+		t.Errorf("input[2] type = %v, want 'function_call'", item2["type"])
 	}
 	if item2["call_id"] != "call_abc123" {
 		t.Errorf("input[2] call_id = %v, want 'call_abc123'", item2["call_id"])
 	}
+	if _, hasID := item2["id"]; hasID {
+		t.Error("function_call input items should use 'call_id', not 'id'")
+	}
 
-	// Should only have 3 items (no assistant text item)
-	if len(input) != 3 {
-		t.Errorf("input length = %d, want 3 (user, function_call, function_call_output)", len(input))
+	// input[3]: function_call_output
+	item3 := input[3].(map[string]any)
+	if item3["type"] != "function_call_output" {
+		t.Errorf("input[3] type = %v, want 'function_call_output'", item3["type"])
+	}
+	if item3["call_id"] != "call_abc123" {
+		t.Errorf("input[3] call_id = %v, want 'call_abc123'", item3["call_id"])
+	}
+
+	// 4 items: user, assistant text, function_call, function_call_output
+	if len(input) != 4 {
+		t.Errorf("input length = %d, want 4 (user, assistant_text, function_call, function_call_output)", len(input))
 	}
 }

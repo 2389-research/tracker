@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type TraceLoggerOptions struct {
 type TraceLogger struct {
 	w       io.Writer
 	verbose bool
+	mu      sync.Mutex
 
 	// Batching state for text/reasoning deltas
 	batchKind     TraceKind // TraceText or TraceReasoning, or "" when idle
@@ -38,6 +40,9 @@ func (l *TraceLogger) HandleTraceEvent(evt TraceEvent) {
 	if l == nil || l.w == nil {
 		return
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	// Batchable event kinds: accumulate and defer output.
 	if evt.Kind == TraceText || evt.Kind == TraceReasoning {
@@ -63,6 +68,18 @@ func (l *TraceLogger) HandleTraceEvent(evt TraceEvent) {
 
 	l.flushBatch()
 	l.writeLine(line)
+}
+
+// Flush forces any pending batched output to be written. Callers should
+// invoke this when a stream terminates without a normal finish event
+// (e.g. on error) to avoid losing buffered trace output.
+func (l *TraceLogger) Flush() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.flushBatch()
 }
 
 // flushBatch writes the accumulated text/reasoning batch as a single line.
