@@ -101,3 +101,38 @@ func TestFreeformModelDefaultWidthIs76(t *testing.T) {
 		t.Errorf("expected default width=76, got %d", m.width)
 	}
 }
+
+func TestFreeformModelSetHeightClampsOutput(t *testing.T) {
+	long := strings.Repeat("This is a long prompt sentence. ", 20)
+	m := NewFreeformModel(long)
+	m.SetWidth(40)
+	m.SetHeight(10)
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) > 10 {
+		t.Errorf("height=10: expected at most 10 lines, got %d", len(lines))
+	}
+}
+
+func TestFreeformModelSetHeightZeroIsUnbounded(t *testing.T) {
+	long := strings.Repeat("word ", 40)
+	m := NewFreeformModel(long)
+	m.SetWidth(40)
+	view := m.View()
+	if !strings.Contains(view, "word") {
+		t.Error("expected prompt content in view")
+	}
+}
+
+func TestFreeformModelScrollKeysUpdateViewport(t *testing.T) {
+	long := strings.Repeat("This is a long prompt sentence. ", 30)
+	m := NewFreeformModel(long)
+	m.SetWidth(40)
+	m.SetHeight(8)
+	_ = m.View()
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	fm := m2.(FreeformModel)
+	if fm.IsDone() {
+		t.Error("pgdown should not submit")
+	}
+}

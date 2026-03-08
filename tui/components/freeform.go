@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -35,6 +36,8 @@ type FreeformModel struct {
 	cancelled bool
 	err       string
 	width     int
+	height    int
+	vp        viewport.Model
 }
 
 // NewFreeformModel creates a freeform input model with the given prompt.
@@ -58,6 +61,12 @@ func (m *FreeformModel) SetWidth(w int) {
 	m.input.Width = w - 4
 }
 
+// SetHeight sets a maximum height for the component. When height > 0, the
+// prompt text is rendered inside a scrollable viewport while the text input
+// and hint text remain fixed at the bottom. When height is 0, the component
+// renders without any height constraint (backward-compatible default).
+func (m *FreeformModel) SetHeight(h int) { m.height = h }
+
 // Init satisfies tea.Model; focuses the text input.
 func (m FreeformModel) Init() tea.Cmd {
 	return textinput.Blink
@@ -80,6 +89,20 @@ func (m FreeformModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEsc, tea.KeyCtrlC:
 			m.cancelled = true
 			return m, func() tea.Msg { return FreeformCancelMsg{} }
+		case tea.KeyPgUp, tea.KeyPgDown:
+			// Route page-up/page-down to the viewport when height is set
+			if m.height > 0 {
+				var cmd tea.Cmd
+				m.vp, cmd = m.vp.Update(msg)
+				return m, cmd
+			}
+		}
+	case tea.MouseMsg:
+		// Route mouse messages to viewport when height is set
+		if m.height > 0 {
+			var cmd tea.Cmd
+			m.vp, cmd = m.vp.Update(msg)
+			return m, cmd
 		}
 	}
 
@@ -88,15 +111,11 @@ func (m FreeformModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// View renders the freeform input.
-func (m FreeformModel) View() string {
-	if m.done || m.cancelled {
-		return ""
-	}
-
+// inputAndHints renders the bordered text input, error text, and hint line as
+// a fixed-height block. This is used by View() both in unbounded mode and as
+// the fixed footer when viewport scrolling is active.
+func (m FreeformModel) inputAndHints() string {
 	var sb strings.Builder
-	sb.WriteString(render.Prompt(m.prompt, m.width))
-	sb.WriteString("\n\n")
 	sb.WriteString(freeformBorderStyle.Width(m.width - 4).Render(m.input.View()))
 	sb.WriteString("\n")
 
@@ -105,7 +124,49 @@ func (m FreeformModel) View() string {
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(lipgloss.NewStyle().Faint(true).Render("enter submit  esc cancel"))
+	hint := "enter submit  esc cancel"
+	if m.height > 0 {
+		hint = "enter submit  esc cancel  pgup/pgdn scroll"
+	}
+	sb.WriteString(lipgloss.NewStyle().Faint(true).Render(hint))
+	return sb.String()
+}
+
+// View renders the freeform input.
+func (m FreeformModel) View() string {
+	if m.done || m.cancelled {
+		return ""
+	}
+
+	// When no height constraint is set, render everything unbounded.
+	if m.height <= 0 {
+		var sb strings.Builder
+		sb.WriteString(render.Prompt(m.prompt, m.width))
+		sb.WriteString("\n\n")
+		sb.WriteString(m.inputAndHints())
+		return sb.String()
+	}
+
+	// Height-constrained mode: render prompt in a viewport, input fixed below.
+	footer := m.inputAndHints()
+	footerLines := strings.Count(footer, "\n") + 1
+	// Reserve 1 line for the blank separator between prompt and input
+	vpHeight := m.height - footerLines - 1
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+
+	// Re-create viewport on each View() call (value receiver means mutations
+	// don't persist). Preserve the scroll offset from m.vp which IS persisted
+	// through Update().
+	vp := viewport.New(m.width, vpHeight)
+	vp.SetContent(render.Prompt(m.prompt, m.width))
+	vp.YOffset = m.vp.YOffset
+
+	var sb strings.Builder
+	sb.WriteString(vp.View())
+	sb.WriteString("\n")
+	sb.WriteString(footer)
 	return sb.String()
 }
 
