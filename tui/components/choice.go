@@ -34,6 +34,7 @@ type ChoiceModel struct {
 	done          bool
 	cancelled     bool
 	selected      string
+	width         int
 }
 
 // NewChoiceModel creates a choice model with the given prompt, choices, and default.
@@ -53,8 +54,12 @@ func NewChoiceModel(prompt string, choices []string, defaultChoice string) Choic
 		choices:       choices,
 		defaultChoice: defaultChoice,
 		cursor:        cursor,
+		width:         76,
 	}
 }
+
+// SetWidth updates the width used for rendering the prompt.
+func (m *ChoiceModel) SetWidth(w int) { m.width = w }
 
 // Init satisfies tea.Model; no initial command needed.
 func (m ChoiceModel) Init() tea.Cmd { return nil }
@@ -106,7 +111,7 @@ func (m ChoiceModel) View() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(render.Prompt(m.prompt, 76))
+	sb.WriteString(render.Prompt(m.prompt, m.width))
 	sb.WriteString("\n\n")
 
 	for i, choice := range m.choices {

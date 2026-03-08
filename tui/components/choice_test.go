@@ -167,6 +167,26 @@ func TestChoiceModelNumberShortcut0IsIgnored(t *testing.T) {
 	}
 }
 
+func TestChoiceModelSetWidthAffectsPromptRendering(t *testing.T) {
+	long := strings.Repeat("word ", 40)
+	m := NewChoiceModel(long, []string{"yes", "no"}, "")
+	m.SetWidth(40)
+	view := m.View()
+	for _, line := range strings.Split(view, "\n") {
+		plain := stripANSI(line)
+		if len(plain) > 50 {
+			t.Errorf("line too long (%d chars) for width=40: %q", len(plain), plain)
+		}
+	}
+}
+
+func TestChoiceModelDefaultWidthIs76(t *testing.T) {
+	m := NewChoiceModel("test", []string{"a"}, "")
+	if m.width != 76 {
+		t.Errorf("expected default width=76, got %d", m.width)
+	}
+}
+
 func TestChoiceModelNumberShortcutsAllNine(t *testing.T) {
 	choices := []string{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine"}
 	for i, expected := range choices {
@@ -185,4 +205,23 @@ func TestChoiceModelNumberShortcutsAllNine(t *testing.T) {
 			t.Errorf("shortcut '%c': expected %q, got %q", key, expected, doneMsg.Value)
 		}
 	}
+}
+
+func stripANSI(s string) string {
+	var out strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == '\033' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
 }
