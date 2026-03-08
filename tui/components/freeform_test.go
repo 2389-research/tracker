@@ -80,3 +80,24 @@ func TestFreeformModelViewEmptyWhenDone(t *testing.T) {
 		t.Error("expected empty view when done")
 	}
 }
+
+func TestFreeformModelSetWidthAffectsPromptRendering(t *testing.T) {
+	long := strings.Repeat("word ", 40)
+	m := NewFreeformModel(long)
+	m.SetWidth(40)
+	view := m.View()
+	for _, line := range strings.Split(view, "\n") {
+		plain := stripANSI(line)
+		runeLen := len([]rune(plain))
+		if runeLen > 50 {
+			t.Errorf("line too long (%d runes) for width=40: %q", runeLen, plain)
+		}
+	}
+}
+
+func TestFreeformModelDefaultWidthIs76(t *testing.T) {
+	m := NewFreeformModel("test")
+	if m.width != 76 {
+		t.Errorf("expected default width=76, got %d", m.width)
+	}
+}

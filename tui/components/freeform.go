@@ -34,6 +34,7 @@ type FreeformModel struct {
 	done      bool
 	cancelled bool
 	err       string
+	width     int
 }
 
 // NewFreeformModel creates a freeform input model with the given prompt.
@@ -47,7 +48,14 @@ func NewFreeformModel(prompt string) FreeformModel {
 	return FreeformModel{
 		prompt: prompt,
 		input:  ti,
+		width:  76,
 	}
+}
+
+// SetWidth updates the width used for rendering the prompt and text input.
+func (m *FreeformModel) SetWidth(w int) {
+	m.width = w
+	m.input.Width = w - 4
 }
 
 // Init satisfies tea.Model; focuses the text input.
@@ -87,9 +95,9 @@ func (m FreeformModel) View() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(render.Prompt(m.prompt, 76))
+	sb.WriteString(render.Prompt(m.prompt, m.width))
 	sb.WriteString("\n\n")
-	sb.WriteString(freeformBorderStyle.Render(m.input.View()))
+	sb.WriteString(freeformBorderStyle.Width(m.width - 4).Render(m.input.View()))
 	sb.WriteString("\n")
 
 	if m.err != "" {
