@@ -36,7 +36,7 @@ type runConfig struct {
 	dotFile    string
 	workdir    string
 	checkpoint string
-	tuiMode    bool
+	noTUI      bool
 	verbose    bool
 }
 
@@ -61,10 +61,10 @@ func main() {
 		cfg.workdir = wd
 	}
 
-	if cfg.tuiMode {
-		err = runTUI(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
-	} else {
+	if cfg.noTUI {
 		err = run(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
+	} else {
+		err = runTUI(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -280,7 +280,7 @@ func parseFlags(args []string) (runConfig, error) {
 	fs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
 	fs.StringVar(&cfg.checkpoint, "c", "", "Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)")
 	fs.StringVar(&cfg.checkpoint, "checkpoint", "", "Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)")
-	fs.BoolVar(&cfg.tuiMode, "tui", false, "Full TUI dashboard mode with live progress and modal gates")
+	fs.BoolVar(&cfg.noTUI, "no-tui", false, "Disable TUI dashboard; use plain console output")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 
 	// Go's flag package stops parsing at the first non-flag argument.
@@ -317,7 +317,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
 	fmt.Fprintf(w, "  -c, --checkpoint string   Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)\n")
-	fmt.Fprintf(w, "  --tui                     Full TUI dashboard mode with live progress and modal gates\n")
+	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
 }
 

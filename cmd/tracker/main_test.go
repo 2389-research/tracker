@@ -61,7 +61,7 @@ func TestParseFlagsFlagsBeforeDotFile(t *testing.T) {
 }
 
 func TestParseFlagsMixedOrder(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "--tui", "pipeline.dot", "-c", "cp.json", "--verbose"})
+	cfg, err := parseFlags([]string{"tracker", "--no-tui", "pipeline.dot", "-c", "cp.json", "--verbose"})
 	if err != nil {
 		t.Fatalf("parseFlags returned error: %v", err)
 	}
@@ -71,10 +71,20 @@ func TestParseFlagsMixedOrder(t *testing.T) {
 	if cfg.checkpoint != "cp.json" {
 		t.Fatalf("checkpoint = %q, want %q", cfg.checkpoint, "cp.json")
 	}
-	if !cfg.tuiMode {
-		t.Fatal("expected tuiMode to be true")
+	if !cfg.noTUI {
+		t.Fatal("expected noTUI to be true")
 	}
 	if !cfg.verbose {
 		t.Fatal("expected verbose to be true")
+	}
+}
+
+func TestParseFlagsDefaultIsTUI(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "pipeline.dot"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.noTUI {
+		t.Fatal("expected noTUI to be false by default (TUI is the default)")
 	}
 }
