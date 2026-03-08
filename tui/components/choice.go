@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -35,6 +36,9 @@ type ChoiceModel struct {
 	cancelled     bool
 	selected      string
 	width         int
+	height        int
+	vp            viewport.Model
+	vpReady       bool
 }
 
 // NewChoiceModel creates a choice model with the given prompt, choices, and default.
@@ -61,6 +65,12 @@ func NewChoiceModel(prompt string, choices []string, defaultChoice string) Choic
 // SetWidth updates the width used for rendering the prompt.
 func (m *ChoiceModel) SetWidth(w int) { m.width = w }
 
+// SetHeight sets a maximum height for the component. When height > 0, the
+// prompt text is rendered inside a scrollable viewport while the choice list
+// and hint text remain fixed at the bottom. When height is 0, the component
+// renders without any height constraint (backward-compatible default).
+func (m *ChoiceModel) SetHeight(h int) { m.height = h }
+
 // Init satisfies tea.Model; no initial command needed.
 func (m ChoiceModel) Init() tea.Cmd { return nil }
 
@@ -86,6 +96,13 @@ func (m ChoiceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "ctrl+c":
 			m.cancelled = true
 			return m, func() tea.Msg { return ChoiceCancelMsg{} }
+		case "pgup", "pgdown":
+			// Route page-up/page-down to the viewport when height is set
+			if m.height > 0 {
+				var cmd tea.Cmd
+				m.vp, cmd = m.vp.Update(msg)
+				return m, cmd
+			}
 		default:
 			// Number shortcuts: 1-9 select directly
 			if len(msg.String()) == 1 {
@@ -100,8 +117,38 @@ func (m ChoiceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	case tea.MouseMsg:
+		// Route mouse messages to viewport when height is set
+		if m.height > 0 {
+			var cmd tea.Cmd
+			m.vp, cmd = m.vp.Update(msg)
+			return m, cmd
+		}
 	}
 	return m, nil
+}
+
+// choicesAndHints renders the interactive choice list and hint text as a
+// fixed-height block. This is used by View() both in unbounded mode and as
+// the fixed footer when viewport scrolling is active.
+func (m ChoiceModel) choicesAndHints() string {
+	var sb strings.Builder
+	for i, choice := range m.choices {
+		if i == m.cursor {
+			cursor := choiceCursorStyle.Render("▶ ")
+			sb.WriteString(choiceSelectedStyle.Render(cursor + choice))
+		} else {
+			sb.WriteString(choiceNormalStyle.Render("  " + choice))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+	hint := "↑/↓ navigate  enter select  esc cancel"
+	if m.height > 0 {
+		hint = "↑/↓ navigate  enter select  esc cancel  pgup/pgdn scroll"
+	}
+	sb.WriteString(lipgloss.NewStyle().Faint(true).Render(hint))
+	return sb.String()
 }
 
 // View renders the choice list.
@@ -110,23 +157,35 @@ func (m ChoiceModel) View() string {
 		return ""
 	}
 
-	var sb strings.Builder
-	sb.WriteString(render.Prompt(m.prompt, m.width))
-	sb.WriteString("\n\n")
-
-	for i, choice := range m.choices {
-		cursor := "  "
-		if i == m.cursor {
-			cursor = choiceCursorStyle.Render("▶ ")
-			sb.WriteString(choiceSelectedStyle.Render(cursor + choice))
-		} else {
-			sb.WriteString(choiceNormalStyle.Render("  " + choice))
-		}
-		sb.WriteString("\n")
+	// When no height constraint is set, render everything unbounded.
+	if m.height <= 0 {
+		var sb strings.Builder
+		sb.WriteString(render.Prompt(m.prompt, m.width))
+		sb.WriteString("\n\n")
+		sb.WriteString(m.choicesAndHints())
+		return sb.String()
 	}
 
+	// Height-constrained mode: render prompt in a viewport, choices fixed below.
+	footer := m.choicesAndHints()
+	footerLines := strings.Count(footer, "\n") + 1
+	// Reserve 1 line for the blank separator between prompt and choices
+	vpHeight := m.height - footerLines - 1
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+
+	// Re-create viewport on each View() call (value receiver means mutations
+	// don't persist). Preserve the scroll offset from m.vp which IS persisted
+	// through Update().
+	vp := viewport.New(m.width, vpHeight)
+	vp.SetContent(render.Prompt(m.prompt, m.width))
+	vp.YOffset = m.vp.YOffset
+
+	var sb strings.Builder
+	sb.WriteString(vp.View())
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().Faint(true).Render("↑/↓ navigate  enter select  esc cancel"))
+	sb.WriteString(footer)
 	return sb.String()
 }
 

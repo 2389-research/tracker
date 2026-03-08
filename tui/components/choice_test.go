@@ -207,6 +207,47 @@ func TestChoiceModelNumberShortcutsAllNine(t *testing.T) {
 	}
 }
 
+// ─── Viewport scrolling tests ─────────────────────────────────────────────────
+
+func TestChoiceModelSetHeightClampsOutput(t *testing.T) {
+	long := strings.Repeat("This is a long prompt sentence. ", 20)
+	m := NewChoiceModel(long, []string{"yes", "no", "maybe"}, "")
+	m.SetWidth(40)
+	m.SetHeight(10)
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) > 10 {
+		t.Errorf("height=10: expected at most 10 lines, got %d", len(lines))
+	}
+}
+
+func TestChoiceModelSetHeightZeroIsUnbounded(t *testing.T) {
+	long := strings.Repeat("word ", 40)
+	m := NewChoiceModel(long, []string{"a", "b"}, "")
+	m.SetWidth(40)
+	view := m.View()
+	if !strings.Contains(view, "word") {
+		t.Error("expected prompt content in view")
+	}
+}
+
+func TestChoiceModelScrollKeysUpdateViewport(t *testing.T) {
+	long := strings.Repeat("This is a long prompt sentence. ", 30)
+	m := NewChoiceModel(long, []string{"yes", "no"}, "")
+	m.SetWidth(40)
+	m.SetHeight(8)
+	_ = m.View()
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	cm := m2.(ChoiceModel)
+	if cm.IsDone() {
+		t.Error("pgdown should not select a choice")
+	}
+	view := cm.View()
+	if !strings.Contains(view, "yes") {
+		t.Error("expected choices visible after scroll")
+	}
+}
+
 func stripANSI(s string) string {
 	var out strings.Builder
 	inEscape := false
