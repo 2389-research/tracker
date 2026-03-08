@@ -94,6 +94,13 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	runID := generateRunID()
 	nodeOutcomes := make(map[string]string)
 
+	// Auto-derive checkpoint path from artifact directory when no explicit
+	// checkpoint path is configured. This ensures every run automatically
+	// saves checkpoint state for resume support.
+	if e.checkpointPath == "" && e.artifactDir != "" {
+		e.checkpointPath = filepath.Join(e.artifactDir, runID, "checkpoint.json")
+	}
+
 	pctx := NewPipelineContext()
 	for key, value := range e.graph.Attrs {
 		pctx.Set("graph."+key, value)

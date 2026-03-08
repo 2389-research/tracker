@@ -278,8 +278,8 @@ func parseFlags(args []string) (runConfig, error) {
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
 	fs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
-	fs.StringVar(&cfg.checkpoint, "c", "", "Checkpoint file path for resume support")
-	fs.StringVar(&cfg.checkpoint, "checkpoint", "", "Checkpoint file path for resume support")
+	fs.StringVar(&cfg.checkpoint, "c", "", "Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)")
+	fs.StringVar(&cfg.checkpoint, "checkpoint", "", "Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)")
 	fs.BoolVar(&cfg.tuiMode, "tui", false, "Full TUI dashboard mode with live progress and modal gates")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 
@@ -316,7 +316,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: tracker [flags] <pipeline.dot> [flags]\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
-	fmt.Fprintf(w, "  -c, --checkpoint string   Checkpoint file path for resume support\n")
+	fmt.Fprintf(w, "  -c, --checkpoint string   Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)\n")
 	fmt.Fprintf(w, "  --tui                     Full TUI dashboard mode with live progress and modal gates\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
 }

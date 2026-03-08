@@ -460,6 +460,50 @@ func TestEngineCheckpointResume(t *testing.T) {
 	}
 }
 
+func TestEngineAutoCheckpointWithArtifactDir(t *testing.T) {
+	g := NewGraph("auto_cp")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "step1", Shape: "box", Label: "Step 1"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "step1"})
+	g.AddEdge(&Edge{From: "step1", To: "end"})
+
+	dir := t.TempDir()
+	artifactDir := filepath.Join(dir, "runs")
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg, WithArtifactDir(artifactDir))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+
+	// A checkpoint.json should have been auto-created in the artifact dir.
+	cpPath := filepath.Join(artifactDir, result.RunID, "checkpoint.json")
+	if _, err := os.Stat(cpPath); os.IsNotExist(err) {
+		t.Fatalf("expected auto-checkpoint at %s, but file does not exist", cpPath)
+	}
+
+	// Verify the checkpoint is valid and contains the run ID.
+	cp, err := LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("load auto-checkpoint: %v", err)
+	}
+	if cp.RunID != result.RunID {
+		t.Errorf("checkpoint runID = %q, want %q", cp.RunID, result.RunID)
+	}
+}
+
 func TestEngineMirrorsGraphGoalAndExpandsPrompt(t *testing.T) {
 	g := NewGraph("goal_prompt")
 	g.Attrs["goal"] = "ship a hello world script"
