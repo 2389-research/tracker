@@ -38,7 +38,6 @@ type ChoiceModel struct {
 	width         int
 	height        int
 	vp            viewport.Model
-	vpReady       bool
 }
 
 // NewChoiceModel creates a choice model with the given prompt, choices, and default.
