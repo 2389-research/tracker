@@ -48,6 +48,10 @@ func main() {
 
 	cfg, err := parseFlags(os.Args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printUsage(os.Stdout)
+			os.Exit(0)
+		}
 		printUsage(os.Stderr)
 		os.Exit(1)
 	}
