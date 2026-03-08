@@ -192,6 +192,7 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.modalKind = modalChoice
 		a.modalTitle = msg.Prompt
 		a.choiceModal = components.NewChoiceModel(msg.Prompt, msg.Choices, msg.DefaultChoice)
+		a.choiceModal.SetWidth(a.modalContentWidth())
 		a.activeMsgCh = msg.ReplyCh
 		return a, nil
 
@@ -199,6 +200,7 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.modalKind = modalFreeform
 		a.modalTitle = msg.Prompt
 		a.freeformModal = components.NewFreeformModel(msg.Prompt)
+		a.freeformModal.SetWidth(a.modalContentWidth())
 		a.activeMsgCh = msg.ReplyCh
 		return a, a.freeformModal.Init()
 
@@ -440,6 +442,16 @@ func (a AppModel) PipelineErr() error {
 // IsPipelineDone reports whether the pipeline goroutine has finished.
 func (a AppModel) IsPipelineDone() bool {
 	return a.pipelineDone
+}
+
+// modalContentWidth returns the width available inside the modal chrome.
+// DoubleBorder = 2 chars + Padding(1,2) = 4 chars = 6 total horizontal.
+func (a AppModel) modalContentWidth() int {
+	w := a.width - 6
+	if w < 20 {
+		w = 20
+	}
+	return w
 }
 
 // ─── Compile-time interface assertion ─────────────────────────────────────────
