@@ -283,19 +283,37 @@ func parseFlags(args []string) (runConfig, error) {
 	fs.BoolVar(&cfg.tuiMode, "tui", false, "Full TUI dashboard mode with live progress and modal gates")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 
-	if err := fs.Parse(args[1:]); err != nil {
-		return cfg, err
+	// Go's flag package stops parsing at the first non-flag argument.
+	// To support flags in any order (e.g. "tracker pipeline.dot -c cp.json"),
+	// we gather all non-flag arguments across multiple parse passes.
+	remaining := args[1:]
+	var positional []string
+	for len(remaining) > 0 {
+		if err := fs.Parse(remaining); err != nil {
+			return cfg, err
+		}
+		positional = append(positional, fs.Args()...)
+		// If Parse consumed everything or stopped at a non-flag, we need
+		// to skip past the first positional arg and try parsing the rest.
+		if fs.NArg() == 0 {
+			break
+		}
+		// Skip the first positional arg and continue parsing the rest.
+		remaining = fs.Args()[1:]
+		positional = positional[:len(positional)-fs.NArg()]
+		positional = append(positional, fs.Args()[0])
 	}
-	if fs.NArg() < 1 {
+
+	if len(positional) < 1 {
 		return cfg, errUsage
 	}
 
-	cfg.dotFile = fs.Arg(0)
+	cfg.dotFile = positional[0]
 	return cfg, nil
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: tracker <pipeline.dot> [flags]\n\n")
+	fmt.Fprintf(w, "Usage: tracker [flags] <pipeline.dot> [flags]\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
 	fmt.Fprintf(w, "  -c, --checkpoint string   Checkpoint file path for resume support\n")

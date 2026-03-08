@@ -33,3 +33,48 @@ func TestParseFlagsEnablesVerbose(t *testing.T) {
 		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipe.dot")
 	}
 }
+
+func TestParseFlagsFlagsAfterDotFile(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "pipeline.dot", "-c", "checkpoint.json"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.dotFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	}
+	if cfg.checkpoint != "checkpoint.json" {
+		t.Fatalf("checkpoint = %q, want %q", cfg.checkpoint, "checkpoint.json")
+	}
+}
+
+func TestParseFlagsFlagsBeforeDotFile(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "-c", "checkpoint.json", "pipeline.dot"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.dotFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	}
+	if cfg.checkpoint != "checkpoint.json" {
+		t.Fatalf("checkpoint = %q, want %q", cfg.checkpoint, "checkpoint.json")
+	}
+}
+
+func TestParseFlagsMixedOrder(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--tui", "pipeline.dot", "-c", "cp.json", "--verbose"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.dotFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	}
+	if cfg.checkpoint != "cp.json" {
+		t.Fatalf("checkpoint = %q, want %q", cfg.checkpoint, "cp.json")
+	}
+	if !cfg.tuiMode {
+		t.Fatal("expected tuiMode to be true")
+	}
+	if !cfg.verbose {
+		t.Fatal("expected verbose to be true")
+	}
+}
