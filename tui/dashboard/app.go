@@ -160,6 +160,12 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.relayout()
 		return a, nil
 
+	case tea.MouseMsg:
+		if a.modalKind != modalNone {
+			return a.updateModal(msg)
+		}
+		return a, nil
+
 	case tea.KeyMsg:
 		if a.modalKind != modalNone {
 			return a.updateModal(msg)
@@ -193,6 +199,7 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.modalTitle = msg.Prompt
 		a.choiceModal = components.NewChoiceModel(msg.Prompt, msg.Choices, msg.DefaultChoice)
 		a.choiceModal.SetWidth(a.modalContentWidth())
+		a.choiceModal.SetHeight(a.modalContentHeight())
 		a.activeMsgCh = msg.ReplyCh
 		return a, nil
 
@@ -201,6 +208,7 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.modalTitle = msg.Prompt
 		a.freeformModal = components.NewFreeformModel(msg.Prompt)
 		a.freeformModal.SetWidth(a.modalContentWidth())
+		a.freeformModal.SetHeight(a.modalContentHeight())
 		a.activeMsgCh = msg.ReplyCh
 		return a, a.freeformModal.Init()
 
@@ -223,8 +231,8 @@ func (a *AppModel) SetVerboseTrace(verbose bool) {
 	a.verboseTrace = verbose
 }
 
-// updateModal routes keyboard input to the active gate component.
-func (a AppModel) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// updateModal routes keyboard and mouse input to the active gate component.
+func (a AppModel) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch a.modalKind {
 	case modalChoice:
 		m, cmd := a.choiceModal.Update(msg)
@@ -452,6 +460,17 @@ func (a AppModel) modalContentWidth() int {
 		w = 20
 	}
 	return w
+}
+
+// modalContentHeight returns the height available inside the modal chrome.
+// DoubleBorder = 2 chars + Padding(1,0) = 2 chars = 4 total vertical,
+// plus 1 for the title line and 1 for the title margin.
+func (a AppModel) modalContentHeight() int {
+	h := a.height - 6
+	if h < 5 {
+		h = 5
+	}
+	return h
 }
 
 // ─── Compile-time interface assertion ─────────────────────────────────────────
