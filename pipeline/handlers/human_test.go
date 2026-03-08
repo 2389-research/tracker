@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -313,6 +314,36 @@ func TestConsoleInterviewerFreeformEmptyInput(t *testing.T) {
 	_, err := interviewer.AskFreeform("What would you like to do?")
 	if err == nil {
 		t.Fatal("expected error for empty freeform input")
+	}
+}
+
+func TestConsoleInterviewerAskOutputHasNoANSI(t *testing.T) {
+	var out bytes.Buffer
+	ci := &ConsoleInterviewer{
+		Reader: strings.NewReader("approve\n"),
+		Writer: &out,
+	}
+	_, err := ci.Ask("Pick one", []string{"approve", "reject"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\033") {
+		t.Error("console output contains ANSI escape sequences")
+	}
+}
+
+func TestConsoleInterviewerAskFreeformOutputHasNoANSI(t *testing.T) {
+	var out bytes.Buffer
+	ci := &ConsoleInterviewer{
+		Reader: strings.NewReader("my response\n"),
+		Writer: &out,
+	}
+	_, err := ci.AskFreeform("Tell me something")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\033") {
+		t.Error("console output contains ANSI escape sequences")
 	}
 }
 

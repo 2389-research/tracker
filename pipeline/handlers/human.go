@@ -116,7 +116,7 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 		return "", fmt.Errorf("no choices available")
 	}
 
-	fmt.Fprintf(c.Writer, "\n%s\n", render.Prompt(prompt, 76))
+	fmt.Fprintf(c.Writer, "\n%s\n", render.PromptPlain(prompt, 76))
 	for i, choice := range choices {
 		marker := "  "
 		if choice == defaultChoice {
@@ -165,7 +165,7 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 // AskFreeform displays the prompt and reads a line of freeform text input.
 // Returns an error if the input is empty.
 func (c *ConsoleInterviewer) AskFreeform(prompt string) (string, error) {
-	fmt.Fprintf(c.Writer, "\n%s\n> ", render.Prompt(prompt, 76))
+	fmt.Fprintf(c.Writer, "\n%s\n> ", render.PromptPlain(prompt, 76))
 
 	line, err := c.readLine()
 	if err != nil {
