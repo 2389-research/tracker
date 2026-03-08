@@ -250,6 +250,7 @@ type sseOutputItemDone struct {
 	Item        struct {
 		Type      string `json:"type"`
 		ID        string `json:"id,omitempty"`
+		CallID    string `json:"call_id,omitempty"`
 		Name      string `json:"name,omitempty"`
 		Arguments string `json:"arguments,omitempty"`
 	} `json:"item"`
@@ -347,8 +348,17 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 				TextID: fmt.Sprintf("item_%d", evt.OutputIndex),
 			}
 		case "function_call":
+			callID := evt.Item.CallID
+			if callID == "" {
+				callID = evt.Item.ID
+			}
 			ch <- llm.StreamEvent{
 				Type: llm.EventToolCallEnd,
+				ToolCall: &llm.ToolCallData{
+					ID:        callID,
+					Name:      evt.Item.Name,
+					Arguments: json.RawMessage(evt.Item.Arguments),
+				},
 			}
 		case "reasoning":
 			ch <- llm.StreamEvent{

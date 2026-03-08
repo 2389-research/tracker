@@ -281,6 +281,7 @@ type openaiOutputItem struct {
 	Content []openaiContentBlock `json:"content,omitempty"`
 	// function_call fields
 	ID        string `json:"id,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	// reasoning fields
@@ -335,10 +336,15 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 			}
 		case "function_call":
 			hasFunctionCalls = true
+			// Prefer call_id over id for function_call items.
+			callID := item.CallID
+			if callID == "" {
+				callID = item.ID
+			}
 			content = append(content, llm.ContentPart{
 				Kind: llm.KindToolCall,
 				ToolCall: &llm.ToolCallData{
-					ID:        item.ID,
+					ID:        callID,
 					Name:      item.Name,
 					Arguments: json.RawMessage(item.Arguments),
 				},

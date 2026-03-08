@@ -338,6 +338,27 @@ func TestStreamToolCallCapturesCallID(t *testing.T) {
 	if toolStart.ToolCall.ID != "call_real_id" {
 		t.Errorf("expected tool call ID 'call_real_id' (from call_id), got %q", toolStart.ToolCall.ID)
 	}
+
+	// Find the ToolCallEnd event — it should carry the complete tool call data
+	var toolEnd *llm.StreamEvent
+	for i := range events {
+		if events[i].Type == llm.EventToolCallEnd {
+			toolEnd = &events[i]
+			break
+		}
+	}
+	if toolEnd == nil {
+		t.Fatal("expected ToolCallEnd event")
+	}
+	if toolEnd.ToolCall == nil {
+		t.Fatal("ToolCallEnd should include ToolCall data")
+	}
+	if toolEnd.ToolCall.ID != "call_real_id" {
+		t.Errorf("ToolCallEnd ID = %q, want 'call_real_id'", toolEnd.ToolCall.ID)
+	}
+	if toolEnd.ToolCall.Name != "bash" {
+		t.Errorf("ToolCallEnd Name = %q, want 'bash'", toolEnd.ToolCall.Name)
+	}
 }
 
 func TestTranslateRequestToolChoiceModes(t *testing.T) {
@@ -491,11 +512,48 @@ func TestTranslateResponseToolCall(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(calls))
 	}
+	if calls[0].ID != "call_789" {
+		t.Errorf("expected tool call ID 'call_789', got %q", calls[0].ID)
+	}
 	if calls[0].Name != "read_file" {
 		t.Errorf("expected tool name 'read_file', got %q", calls[0].Name)
 	}
 	if resp.FinishReason.Reason != "tool_calls" {
 		t.Errorf("expected finish reason 'tool_calls', got %q", resp.FinishReason.Reason)
+	}
+}
+
+func TestTranslateResponseToolCallPrefersCallID(t *testing.T) {
+	// When the API returns both id and call_id on a function_call output item,
+	// translateResponse must prefer call_id (the callable reference) over id
+	// (the item-level identifier).
+	raw := `{
+		"id": "resp_dual",
+		"model": "gpt-5.4",
+		"output": [
+			{
+				"type": "function_call",
+				"id": "fc_item_001",
+				"call_id": "call_real_id",
+				"name": "bash",
+				"arguments": "{\"cmd\":\"ls\"}"
+			}
+		],
+		"usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+		"status": "completed"
+	}`
+
+	resp, err := translateResponse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := resp.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].ID != "call_real_id" {
+		t.Errorf("expected tool call ID 'call_real_id' (from call_id), got %q", calls[0].ID)
 	}
 }
 
