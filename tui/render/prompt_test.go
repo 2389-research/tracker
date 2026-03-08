@@ -51,6 +51,35 @@ func TestPromptHandlesPlainText(t *testing.T) {
 	}
 }
 
+func TestPromptPlainWrapsWithoutANSI(t *testing.T) {
+	long := strings.Repeat("word ", 40) // ~200 chars
+	rendered := PromptPlain(long, 60)
+
+	for _, line := range strings.Split(rendered, "\n") {
+		if len(line) > 60 {
+			t.Errorf("line too long (%d chars): %q", len(line), line)
+		}
+	}
+	if strings.Contains(rendered, "\033") {
+		t.Error("PromptPlain output contains ANSI escape sequences")
+	}
+}
+
+func TestPromptPlainHandlesEmptyString(t *testing.T) {
+	rendered := PromptPlain("", 80)
+	if strings.TrimSpace(rendered) != "" {
+		t.Errorf("expected empty output for empty input, got %q", rendered)
+	}
+}
+
+func TestPromptPlainPreservesShortText(t *testing.T) {
+	input := "Just a question."
+	rendered := PromptPlain(input, 80)
+	if !strings.Contains(rendered, "Just a question.") {
+		t.Errorf("expected input text preserved, got %q", rendered)
+	}
+}
+
 // stripANSI removes ANSI escape sequences for length measurement.
 func stripANSI(s string) string {
 	var out strings.Builder
