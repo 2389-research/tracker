@@ -214,6 +214,42 @@ func TestNodeListScrollShowsIndicatorWhenClipped(t *testing.T) {
 	}
 }
 
+func TestNodeListHeight1ShowsOnlyHeader(t *testing.T) {
+	nodes := []NodeEntry{
+		{ID: "a", Label: "Alpha", Status: NodePending},
+		{ID: "b", Label: "Beta", Status: NodeRunning},
+	}
+	nl := NewNodeListModel(nodes)
+	nl.SetHeight(1)
+	nl.SetWidth(40)
+
+	view := nl.View()
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(lines) > 1 {
+		t.Errorf("height=1: expected at most 1 line, got %d:\n%s", len(lines), view)
+	}
+	if !strings.Contains(view, "PIPELINE") {
+		t.Error("height=1: expected PIPELINE header")
+	}
+}
+
+func TestNodeListHeight2ShowsHeaderAndOneNode(t *testing.T) {
+	nodes := []NodeEntry{
+		{ID: "a", Label: "Alpha", Status: NodePending},
+		{ID: "b", Label: "Beta", Status: NodeRunning},
+		{ID: "c", Label: "Gamma", Status: NodePending},
+	}
+	nl := NewNodeListModel(nodes)
+	nl.SetHeight(2)
+	nl.SetWidth(40)
+
+	view := nl.View()
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(lines) > 2 {
+		t.Errorf("height=2: expected at most 2 lines, got %d:\n%s", len(lines), view)
+	}
+}
+
 func TestSignalLampCoversAllCases(t *testing.T) {
 	cases := map[NodeStatus]string{
 		NodeDone:    lampOn,

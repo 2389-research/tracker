@@ -80,6 +80,11 @@ func (n NodeListModel) visibleWindow() (start, end int, upIndicator, downIndicat
 		return 0, 0, false, false
 	}
 
+	// Not enough room for header + any node rows
+	if n.height > 0 && n.height < 2 {
+		return 0, 0, false, false
+	}
+
 	// header line = 1, each node = 1 line, indicators = 1 each
 	// If height is 0 or large enough for everything, show all.
 	if n.height <= 0 || n.height >= total+1 {
@@ -89,13 +94,13 @@ func (n NodeListModel) visibleWindow() (start, end int, upIndicator, downIndicat
 	// Available lines for node rows: height - 1 (header)
 	avail := n.height - 1
 
-	// Reserve lines for scroll indicators
+	// Reserve lines for scroll indicators only if there is room
 	needUp := n.offset > 0
 	needDown := n.offset+avail < total
-	if needUp {
+	if needUp && avail > 1 {
 		avail--
 	}
-	if needDown {
+	if needDown && avail > 1 {
 		avail--
 	}
 	if avail < 1 {
@@ -108,9 +113,9 @@ func (n NodeListModel) visibleWindow() (start, end int, upIndicator, downIndicat
 		end = total
 	}
 
-	// Recompute indicators with final bounds
-	upIndicator = start > 0
-	downIndicator = end < total
+	// Only show indicators when there is room beyond the minimum node row
+	upIndicator = start > 0 && n.height > 2
+	downIndicator = end < total && n.height > 2
 
 	return start, end, upIndicator, downIndicator
 }
@@ -167,6 +172,11 @@ func (n NodeListModel) View() string {
 	}
 
 	start, end, upInd, downInd := n.visibleWindow()
+
+	// Height-constrained to show no nodes — just return the header
+	if start == end && len(n.nodes) > 0 {
+		return sb.String()
+	}
 
 	if upInd {
 		sb.WriteString(dimTextStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
