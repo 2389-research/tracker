@@ -217,11 +217,13 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		}
 
 		// Compute tool call signature for loop detection.
-		toolNames := make([]string, len(toolCalls))
+		// Include tool arguments so that different bash commands don't
+		// count as the same repeated call.
+		toolSigs := make([]string, len(toolCalls))
 		for i, call := range toolCalls {
-			toolNames[i] = call.Name
+			toolSigs[i] = call.Name + ":" + string(call.Arguments)
 		}
-		signature := strings.Join(toolNames, ",")
+		signature := strings.Join(toolSigs, ",")
 
 		if signature == lastToolSignature {
 			consecutiveLoopCount++
