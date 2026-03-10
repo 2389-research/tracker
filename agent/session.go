@@ -207,6 +207,22 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 		toolCalls := resp.ToolCalls()
 		if len(toolCalls) == 0 {
+			// If the response was truncated (hit max_tokens), inject a
+			// continuation prompt so the agent keeps working instead of
+			// stopping mid-thought.
+			if resp.FinishReason.Reason == "length" || resp.FinishReason.Reason == "max_tokens" {
+				text := resp.Text()
+				if text != "" {
+					s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
+				}
+				s.messages = append(s.messages, llm.UserMessage(
+					"Your previous response was truncated due to length. Continue where you left off. "+
+						"Use tool calls to make progress — do not output large blocks of text directly.",
+				))
+				s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
+				continue
+			}
+
 			text := resp.Text()
 			if text != "" {
 				s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
