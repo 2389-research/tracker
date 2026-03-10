@@ -606,8 +606,17 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 			var params struct {
 				Path string `json:"path"`
 			}
-			if json.Unmarshal(req.Arguments, &params) == nil && filepath.IsAbs(params.Path) {
-				data, readErr := os.ReadFile(params.Path)
+			if json.Unmarshal(req.Arguments, &params) == nil && params.Path != "" {
+				// The path may have been normalized to a relative path by normalizeToolArgs.
+				// Resolve it back to absolute using the working directory.
+				absPath := params.Path
+				if !filepath.IsAbs(absPath) {
+					if wd, wdErr := os.Getwd(); wdErr == nil {
+						absPath = filepath.Join(wd, absPath)
+					}
+				}
+				absPath = filepath.Clean(absPath)
+				data, readErr := os.ReadFile(absPath)
 				if readErr == nil {
 					writeJSON(stdout, map[string]interface{}{
 						"content": string(data),
