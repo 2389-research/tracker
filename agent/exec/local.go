@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -93,6 +94,14 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = e.workDir
+	// Start the command in its own process group so we can kill the entire
+	// group on timeout, preventing orphaned child processes (e.g. long-running
+	// servers started by the shell command).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Override the default WaitDelay-based kill with process group kill.
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
