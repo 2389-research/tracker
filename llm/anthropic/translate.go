@@ -15,7 +15,7 @@ const promptCachingBeta = "prompt-caching-2024-07-31"
 
 // defaultMaxTokens is the default max_tokens value when not specified.
 // Anthropic requires max_tokens in every request.
-const defaultMaxTokens = 4096
+const defaultMaxTokens = 16384
 
 // anthropicRequest is the wire format for the Anthropic Messages API.
 type anthropicRequest struct {

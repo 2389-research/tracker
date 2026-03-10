@@ -10,7 +10,7 @@ import (
 )
 
 // defaultMaxOutputTokens is the default max_output_tokens value when not specified.
-const defaultMaxOutputTokens = 4096
+const defaultMaxOutputTokens = 16384
 
 // --- Wire format types for the OpenAI Responses API ---
 

@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
@@ -134,6 +136,16 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	}
 	if sp, ok := node.Attrs["system_prompt"]; ok {
 		config.SystemPrompt = sp
+	}
+	if mt, ok := node.Attrs["max_turns"]; ok {
+		if v, err := strconv.Atoi(mt); err == nil && v > 0 {
+			config.MaxTurns = v
+		}
+	}
+	if ct, ok := node.Attrs["command_timeout"]; ok {
+		if d, err := time.ParseDuration(ct); err == nil && d > 0 {
+			config.CommandTimeout = d
+		}
 	}
 
 	return config

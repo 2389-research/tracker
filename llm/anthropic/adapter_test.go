@@ -85,8 +85,8 @@ func TestTranslateRequestDefaultMaxTokens(t *testing.T) {
 	if !ok {
 		t.Fatal("expected max_tokens")
 	}
-	if int(maxTokens) != 4096 {
-		t.Errorf("expected default 4096, got %v", maxTokens)
+	if int(maxTokens) != 16384 {
+		t.Errorf("expected default 16384, got %v", maxTokens)
 	}
 }
 

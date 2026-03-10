@@ -99,8 +99,8 @@ func TestTranslateRequestDefaultMaxOutputTokens(t *testing.T) {
 	json.Unmarshal(body, &raw)
 
 	maxTokens, ok := raw["max_output_tokens"].(float64)
-	if !ok || int(maxTokens) != 4096 {
-		t.Errorf("expected max_output_tokens 4096, got %v", raw["max_output_tokens"])
+	if !ok || int(maxTokens) != 16384 {
+		t.Errorf("expected max_output_tokens 16384, got %v", raw["max_output_tokens"])
 	}
 }
 
