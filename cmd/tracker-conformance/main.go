@@ -591,10 +591,11 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 	result, err := tool.Execute(ctx, req.Arguments)
 	if err != nil {
 		writeJSON(stdout, map[string]interface{}{
-			"error":  err.Error(),
-			"result": "",
+			"error":   err.Error(),
+			"result":  "",
+			"content": "",
 		})
-		return 1
+		return 0
 	}
 
 	writeJSON(stdout, map[string]interface{}{
@@ -808,14 +809,33 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	validationErr := pipeline.Validate(graph)
-	if validationErr == nil {
+
+	// Collect warnings for box nodes missing a prompt attribute.
+	var warnings []map[string]string
+	for _, node := range graph.Nodes {
+		if node.Shape == "box" && node.Attrs["prompt"] == "" {
+			warnings = append(warnings, map[string]string{
+				"severity": "warning",
+				"message":  fmt.Sprintf("node %q (shape=box) has no prompt attribute", node.ID),
+			})
+		}
+	}
+
+	if validationErr == nil && len(warnings) == 0 {
 		writeJSON(stdout, map[string]interface{}{
 			"diagnostics": []interface{}{},
 		})
 		return 0
 	}
 
-	var diagnostics []map[string]string
+	if validationErr == nil {
+		writeJSON(stdout, map[string]interface{}{
+			"diagnostics": warnings,
+		})
+		return 0
+	}
+
+	diagnostics := append([]map[string]string{}, warnings...)
 	if ve, ok := validationErr.(*pipeline.ValidationError); ok {
 		for _, msg := range ve.Errors {
 			diagnostics = append(diagnostics, map[string]string{
