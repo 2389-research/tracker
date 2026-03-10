@@ -57,6 +57,7 @@ func New(apiKey string, opts ...Option) *Adapter {
 		opt(a)
 	}
 	// Strip surrounding quotes that may be embedded in env var values.
+	a.apiKey = strings.Trim(a.apiKey, "\"'")
 	a.baseURL = strings.Trim(a.baseURL, "\"'")
 	return a
 }

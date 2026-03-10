@@ -58,6 +58,7 @@ func New(apiKey string, opts ...Option) *Adapter {
 		opt(a)
 	}
 	// Strip surrounding quotes that may be embedded in env var values.
+	a.apiKey = strings.Trim(a.apiKey, "\"'")
 	a.baseURL = strings.Trim(a.baseURL, "\"'")
 	// Normalize base URL: strip trailing /v1 suffix since responsesPath
 	// already includes the /v1 prefix. OPENAI_BASE_URL conventionally
