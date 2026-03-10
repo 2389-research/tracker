@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -261,6 +262,7 @@ func formatStreamEvent(event llm.StreamEvent) map[string]interface{} {
 
 	if event.Delta != "" {
 		result["text"] = event.Delta
+		result["delta"] = event.Delta
 	}
 
 	if event.Usage != nil {
@@ -273,6 +275,7 @@ func formatStreamEvent(event llm.StreamEvent) map[string]interface{} {
 
 	if event.FinishReason != nil {
 		result["finish_reason"] = event.FinishReason.Reason
+		result["done"] = true
 	}
 
 	if event.ToolCall != nil {
@@ -549,7 +552,10 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	// Build a registry with built-in tools rooted at the current working directory.
+	// Normalize tool arguments so that absolute paths from the benchmark
+	// harness are made relative to CWD.
 	env := agentexec.NewLocalEnvironment(".")
+	req.Arguments = normalizeToolArgs(req.Arguments)
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadTool(env))
 	registry.Register(tools.NewWriteTool(env))
@@ -596,6 +602,34 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 		"result":  result,
 	})
 	return 0
+}
+
+// normalizeToolArgs rewrites absolute "path" values in tool arguments to be
+// relative to the current working directory.
+func normalizeToolArgs(raw json.RawMessage) json.RawMessage {
+	var args map[string]interface{}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return raw
+	}
+	changed := false
+	if p, ok := args["path"].(string); ok && filepath.IsAbs(p) {
+		cwd, err := os.Getwd()
+		if err == nil {
+			rel, err := filepath.Rel(cwd, p)
+			if err == nil {
+				args["path"] = rel
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return raw
+	}
+	out, err := json.Marshal(args)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // steeringRequest is the JSON input for the steering subcommand.
