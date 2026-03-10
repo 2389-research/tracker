@@ -57,6 +57,11 @@ func New(apiKey string, opts ...Option) *Adapter {
 	for _, opt := range opts {
 		opt(a)
 	}
+	// Normalize base URL: strip trailing /v1 suffix since responsesPath
+	// already includes the /v1 prefix. OPENAI_BASE_URL conventionally
+	// includes /v1 (e.g. http://localhost:9999/v1), which would cause
+	// a double /v1/v1 path without this normalization.
+	a.baseURL = strings.TrimSuffix(a.baseURL, "/v1")
 	return a
 }
 
@@ -193,7 +198,20 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 		if emitProviderEvents {
 			ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: json.RawMessage(data)}
 		}
-		a.handleSSEData(eventType, []byte(data), ch)
+		// When no SSE "event:" line precedes the data, extract the type
+		// from the JSON payload itself. Some servers (including the
+		// AttractorBench mock) omit SSE event lines and embed the type
+		// in the data object.
+		resolvedType := eventType
+		if resolvedType == "" {
+			var peek struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal([]byte(data), &peek) == nil && peek.Type != "" {
+				resolvedType = peek.Type
+			}
+		}
+		a.handleSSEData(resolvedType, []byte(data), ch)
 		eventType = ""
 	}
 

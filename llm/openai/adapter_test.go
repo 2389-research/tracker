@@ -822,10 +822,98 @@ func TestAdapterStreamToolCall(t *testing.T) {
 	}
 }
 
+func TestAdapterStreamWithoutEventLines(t *testing.T) {
+	// SSE data with only "data:" lines, no "event:" lines.
+	// The type must be inferred from the JSON payload's "type" field.
+	sseData := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_s2","model":"gpt-4.1"}}`,
+		"",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message"}}`,
+		"",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello"}`,
+		"",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":" world"}`,
+		"",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_s2","status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[]}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	if len(events) < 6 {
+		t.Fatalf("expected at least 6 events, got %d: %+v", len(events), events)
+	}
+
+	if events[0].Type != llm.EventStreamStart {
+		t.Errorf("first event should be StreamStart, got %v", events[0].Type)
+	}
+	if events[2].Delta != "Hello" {
+		t.Errorf("expected delta 'Hello', got %q", events[2].Delta)
+	}
+	if events[5].Type != llm.EventFinish {
+		t.Errorf("last event should be Finish, got %v", events[5].Type)
+	}
+}
+
 func TestAdapterName(t *testing.T) {
 	a := New("key")
 	if a.Name() != "openai" {
 		t.Errorf("expected 'openai', got %q", a.Name())
+	}
+}
+
+func TestAdapterBaseURLWithV1Suffix(t *testing.T) {
+	// When OPENAI_BASE_URL includes /v1 (the standard convention),
+	// the adapter must not produce a double /v1/v1 path.
+	var requestPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "resp_001",
+			"output": [
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "ok"}]
+				}
+			],
+			"usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+			"status": "completed"
+		}`)
+	}))
+	defer server.Close()
+
+	// Simulate OPENAI_BASE_URL=http://host:port/v1
+	a := New("test-key", WithBaseURL(server.URL+"/v1"))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if requestPath != "/v1/responses" {
+		t.Errorf("expected request path /v1/responses, got %q", requestPath)
 	}
 }
 
