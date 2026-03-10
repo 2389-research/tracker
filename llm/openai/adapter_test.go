@@ -829,6 +829,43 @@ func TestAdapterName(t *testing.T) {
 	}
 }
 
+func TestAdapterBaseURLWithV1Suffix(t *testing.T) {
+	// When OPENAI_BASE_URL includes /v1 (the standard convention),
+	// the adapter must not produce a double /v1/v1 path.
+	var requestPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "resp_001",
+			"output": [
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "ok"}]
+				}
+			],
+			"usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+			"status": "completed"
+		}`)
+	}))
+	defer server.Close()
+
+	// Simulate OPENAI_BASE_URL=http://host:port/v1
+	a := New("test-key", WithBaseURL(server.URL+"/v1"))
+	_, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if requestPath != "/v1/responses" {
+		t.Errorf("expected request path /v1/responses, got %q", requestPath)
+	}
+}
+
 func TestAdapterProviderOptions(t *testing.T) {
 	req := &llm.Request{
 		Model:    "gpt-4.1",

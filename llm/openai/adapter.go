@@ -57,6 +57,11 @@ func New(apiKey string, opts ...Option) *Adapter {
 	for _, opt := range opts {
 		opt(a)
 	}
+	// Normalize base URL: strip trailing /v1 suffix since responsesPath
+	// already includes the /v1 prefix. OPENAI_BASE_URL conventionally
+	// includes /v1 (e.g. http://localhost:9999/v1), which would cause
+	// a double /v1/v1 path without this normalization.
+	a.baseURL = strings.TrimSuffix(a.baseURL, "/v1")
 	return a
 }
 
