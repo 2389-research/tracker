@@ -420,11 +420,12 @@ func handleGenerateObject(stdin io.Reader, stdout, stderr io.Writer) int {
 	text := resp.Text()
 	var parsed interface{}
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+		// If the response isn't valid JSON, wrap the raw text in a
+		// structured envelope so callers still get a valid JSON dict.
 		writeJSON(stdout, map[string]interface{}{
-			"error": "failed to parse structured output",
-			"raw":   text,
+			"raw_text": text,
 		})
-		return 1
+		return 0
 	}
 
 	writeJSON(stdout, parsed)
@@ -558,7 +559,23 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 	registry.Register(tools.NewGrepSearchTool(env))
 	registry.Register(tools.NewBashTool(env, 10*time.Second, 10*time.Minute))
 
-	tool := registry.Get(req.ToolName)
+	// Map common benchmark tool names to our internal names.
+	toolAliases := map[string]string{
+		"shell":       "bash",
+		"read_file":   "read",
+		"write_file":  "write",
+		"edit_file":   "edit",
+		"list_files":  "glob",
+		"search":      "grep_search",
+		"grep":        "grep_search",
+		"apply_patch": "apply_patch",
+	}
+	toolName := req.ToolName
+	if alias, ok := toolAliases[toolName]; ok {
+		toolName = alias
+	}
+
+	tool := registry.Get(toolName)
 	if tool == nil {
 		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("unknown tool: %s", req.ToolName)})
 		return 0

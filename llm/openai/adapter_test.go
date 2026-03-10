@@ -822,6 +822,57 @@ func TestAdapterStreamToolCall(t *testing.T) {
 	}
 }
 
+func TestAdapterStreamWithoutEventLines(t *testing.T) {
+	// SSE data with only "data:" lines, no "event:" lines.
+	// The type must be inferred from the JSON payload's "type" field.
+	sseData := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_s2","model":"gpt-4.1"}}`,
+		"",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message"}}`,
+		"",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello"}`,
+		"",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":" world"}`,
+		"",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_s2","status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[]}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	if len(events) < 6 {
+		t.Fatalf("expected at least 6 events, got %d: %+v", len(events), events)
+	}
+
+	if events[0].Type != llm.EventStreamStart {
+		t.Errorf("first event should be StreamStart, got %v", events[0].Type)
+	}
+	if events[2].Delta != "Hello" {
+		t.Errorf("expected delta 'Hello', got %q", events[2].Delta)
+	}
+	if events[5].Type != llm.EventFinish {
+		t.Errorf("last event should be Finish, got %v", events[5].Type)
+	}
+}
+
 func TestAdapterName(t *testing.T) {
 	a := New("key")
 	if a.Name() != "openai" {
