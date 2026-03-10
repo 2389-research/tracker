@@ -107,8 +107,8 @@ func TestCodergenHandlerLLMError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler should not return error on LLM failure, got: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
-		t.Errorf("expected 'fail', got %q", outcome.Status)
+	if outcome.Status != pipeline.OutcomeRetry {
+		t.Errorf("expected 'retry', got %q", outcome.Status)
 	}
 }
 

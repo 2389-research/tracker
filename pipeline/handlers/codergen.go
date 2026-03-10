@@ -79,9 +79,10 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 		}
 
-		// Other LLM errors (rate limits, network) are mapped to OutcomeFail.
+		// Other LLM errors (rate limits, network) are transient — map to
+		// OutcomeRetry so the pipeline engine retries the node automatically.
 		outcome := pipeline.Outcome{
-			Status: pipeline.OutcomeFail,
+			Status: pipeline.OutcomeRetry,
 			ContextUpdates: map[string]string{
 				pipeline.ContextKeyLastResponse: runErr.Error(),
 			},
