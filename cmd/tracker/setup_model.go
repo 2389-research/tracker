@@ -63,6 +63,8 @@ func (m setupModel) Init() tea.Cmd {
 
 func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case setupSaveMsg, setupCancelMsg:
+		return m, tea.Quit
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEsc, tea.KeyCtrlC:

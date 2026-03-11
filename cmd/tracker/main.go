@@ -51,6 +51,18 @@ const (
 
 var errUsage = errors.New("usage")
 
+type commandDeps struct {
+	loadEnv  func(string) error
+	runSetup func() error
+	run      func(string, string, string, bool) error
+	runTUI   func(string, string, string, bool) error
+}
+
+type setupResult struct {
+	values    map[string]string
+	cancelled bool
+}
+
 func main() {
 	cfg, err := parseFlags(os.Args)
 	if err != nil {
@@ -71,18 +83,7 @@ func main() {
 		cfg.workdir = wd
 	}
 
-	if cfg.mode == modeRun {
-		if err := loadEnvFiles(cfg.workdir); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	if cfg.noTUI {
-		err = run(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
-	} else {
-		err = runTUI(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
-	}
+	err = executeCommand(cfg, commandDeps{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -345,6 +346,34 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
 }
 
+func executeCommand(cfg runConfig, deps commandDeps) error {
+	if deps.loadEnv == nil {
+		deps.loadEnv = loadEnvFiles
+	}
+	if deps.runSetup == nil {
+		deps.runSetup = runSetup
+	}
+	if deps.run == nil {
+		deps.run = run
+	}
+	if deps.runTUI == nil {
+		deps.runTUI = runTUI
+	}
+
+	if cfg.mode == modeSetup {
+		return deps.runSetup()
+	}
+
+	if err := deps.loadEnv(cfg.workdir); err != nil {
+		return err
+	}
+
+	if cfg.noTUI {
+		return deps.run(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
+	}
+	return deps.runTUI(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
+}
+
 func loadEnvFiles(workdir string) error {
 	originalEnv := currentEnvKeys()
 
@@ -362,6 +391,67 @@ func loadEnvFiles(workdir string) error {
 	}
 
 	return nil
+}
+
+func runSetup() error {
+	return runSetupCommand(runSetupUI)
+}
+
+func runSetupCommand(runUI func(existing map[string]string) (setupResult, error)) error {
+	configPath, err := resolveConfigEnvPath()
+	if err != nil {
+		return fmt.Errorf("resolve XDG config dir: %w", err)
+	}
+
+	existing, err := readEnvFile(configPath)
+	if err != nil {
+		return err
+	}
+
+	result, err := runUI(existing)
+	if err != nil {
+		return err
+	}
+	if result.cancelled {
+		return nil
+	}
+
+	merged := mergeProviderEnv(existing, result.values)
+	if envMapsEqual(existing, merged) {
+		return nil
+	}
+
+	return writeEnvFile(configPath, merged)
+}
+
+func runSetupUI(existing map[string]string) (setupResult, error) {
+	model := newSetupModel(existing)
+	finalModel, err := tea.NewProgram(model).Run()
+	if err != nil {
+		return setupResult{}, err
+	}
+
+	final, ok := finalModel.(setupModel)
+	if !ok {
+		return setupResult{}, fmt.Errorf("unexpected setup model type %T", finalModel)
+	}
+
+	return setupResult{
+		values:    final.pendingUpdates(),
+		cancelled: final.cancelled,
+	}, nil
+}
+
+func envMapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func currentEnvKeys() map[string]struct{} {

@@ -184,6 +184,138 @@ func TestLoadEnvFilesDoesNotOverrideShellEnv(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandRoutesSetupMode(t *testing.T) {
+	var setupCalled bool
+
+	err := executeCommand(runConfig{mode: modeSetup}, commandDeps{
+		runSetup: func() error {
+			setupCalled = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeCommand returned error: %v", err)
+	}
+	if !setupCalled {
+		t.Fatal("expected setup command to be invoked")
+	}
+}
+
+func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
+	var loadEnvCalled bool
+	var runCalled bool
+
+	err := executeCommand(runConfig{
+		mode:    modeRun,
+		dotFile: "pipeline.dot",
+		workdir: "/tmp/workdir",
+		noTUI:   true,
+	}, commandDeps{
+		loadEnv: func(workdir string) error {
+			loadEnvCalled = true
+			if workdir != "/tmp/workdir" {
+				t.Fatalf("loadEnv workdir = %q, want %q", workdir, "/tmp/workdir")
+			}
+			return nil
+		},
+		run: func(dotFile, workdir, checkpoint string, verbose bool) error {
+			runCalled = true
+			if dotFile != "pipeline.dot" {
+				t.Fatalf("dotFile = %q, want %q", dotFile, "pipeline.dot")
+			}
+			return nil
+		},
+		runTUI: func(dotFile, workdir, checkpoint string, verbose bool) error {
+			t.Fatal("did not expect TUI path")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeCommand returned error: %v", err)
+	}
+	if !loadEnvCalled {
+		t.Fatal("expected env loading before run mode")
+	}
+	if !runCalled {
+		t.Fatal("expected non-TUI run path")
+	}
+}
+
+func TestRunSetupCommandSavesUpdatedKeys(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	configPath := filepath.Join(configHome, "tracker", ".env")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("OPENAI_API_KEY=old-openai\nEXTRA_FLAG=keep-me\n"), 0o600); err != nil {
+		t.Fatalf("write existing env file: %v", err)
+	}
+
+	err := runSetupCommand(func(existing map[string]string) (setupResult, error) {
+		if existing["OPENAI_API_KEY"] != "old-openai" {
+			t.Fatalf("existing OPENAI_API_KEY = %q, want %q", existing["OPENAI_API_KEY"], "old-openai")
+		}
+		return setupResult{
+			values: map[string]string{
+				"OPENAI_API_KEY":    "new-openai",
+				"GEMINI_API_KEY":    "new-gemini",
+				"UNRELATED_ENV_VAR": "ignored",
+			},
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("runSetupCommand returned error: %v", err)
+	}
+
+	values, err := readEnvFile(configPath)
+	if err != nil {
+		t.Fatalf("readEnvFile returned error: %v", err)
+	}
+	if values["OPENAI_API_KEY"] != "new-openai" {
+		t.Fatalf("OPENAI_API_KEY = %q, want %q", values["OPENAI_API_KEY"], "new-openai")
+	}
+	if values["GEMINI_API_KEY"] != "new-gemini" {
+		t.Fatalf("GEMINI_API_KEY = %q, want %q", values["GEMINI_API_KEY"], "new-gemini")
+	}
+	if values["EXTRA_FLAG"] != "keep-me" {
+		t.Fatalf("EXTRA_FLAG = %q, want %q", values["EXTRA_FLAG"], "keep-me")
+	}
+	if _, exists := values["UNRELATED_ENV_VAR"]; exists {
+		t.Fatal("did not expect unrelated ui values to be written")
+	}
+}
+
+func TestRunSetupCommandCancelLeavesFileUntouched(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	configPath := filepath.Join(configHome, "tracker", ".env")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	original := []byte("OPENAI_API_KEY=old-openai\nEXTRA_FLAG=keep-me\n")
+	if err := os.WriteFile(configPath, original, 0o600); err != nil {
+		t.Fatalf("write existing env file: %v", err)
+	}
+
+	err := runSetupCommand(func(existing map[string]string) (setupResult, error) {
+		return setupResult{cancelled: true}, nil
+	})
+	if err != nil {
+		t.Fatalf("runSetupCommand returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
+	}
+	if string(content) != string(original) {
+		t.Fatalf("config file changed on cancel: got %q want %q", string(content), string(original))
+	}
+}
+
 func unsetEnvForTest(t *testing.T, key string) {
 	t.Helper()
 
