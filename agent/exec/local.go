@@ -102,6 +102,10 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
+	// After killing, give pipes a few seconds to drain before force-closing.
+	// Without this, cmd.Run() can block forever if a child process inherited
+	// stdout/stderr and the SIGKILL didn't close them quickly enough.
+	cmd.WaitDelay = 5 * time.Second
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
