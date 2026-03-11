@@ -348,12 +348,10 @@ func printUsage(w io.Writer) {
 func loadEnvFiles(workdir string) error {
 	originalEnv := currentEnvKeys()
 
-	configDir, err := xdgConfigHome()
+	configEnvPath, err := resolveConfigEnvPath()
 	if err != nil {
 		return fmt.Errorf("resolve XDG config dir: %w", err)
 	}
-
-	configEnvPath := filepath.Join(configDir, "tracker", ".env")
 	if err := loadEnvFileIfPresent(configEnvPath, originalEnv); err != nil {
 		return err
 	}
@@ -364,18 +362,6 @@ func loadEnvFiles(workdir string) error {
 	}
 
 	return nil
-}
-
-func xdgConfigHome() (string, error) {
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return dir, nil
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config"), nil
 }
 
 func currentEnvKeys() map[string]struct{} {
