@@ -1,4 +1,5 @@
 .workgraph
+.worktrees/
 .env
 *.env
 .ai/
