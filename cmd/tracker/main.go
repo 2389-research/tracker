@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/agent"
@@ -33,6 +34,7 @@ import (
 )
 
 type runConfig struct {
+	mode       commandMode
 	dotFile    string
 	workdir    string
 	checkpoint string
@@ -40,12 +42,16 @@ type runConfig struct {
 	verbose    bool
 }
 
+type commandMode string
+
+const (
+	modeRun   commandMode = "run"
+	modeSetup commandMode = "setup"
+)
+
 var errUsage = errors.New("usage")
 
 func main() {
-	// Load .env file if present; ignore if missing.
-	_ = godotenv.Load()
-
 	cfg, err := parseFlags(os.Args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -63,6 +69,13 @@ func main() {
 			os.Exit(1)
 		}
 		cfg.workdir = wd
+	}
+
+	if cfg.mode == modeRun {
+		if err := loadEnvFiles(cfg.workdir); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if cfg.noTUI {
@@ -276,7 +289,12 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 }
 
 func parseFlags(args []string) (runConfig, error) {
-	var cfg runConfig
+	cfg := runConfig{mode: modeRun}
+
+	if len(args) > 1 && args[1] == string(modeSetup) {
+		cfg.mode = modeSetup
+		return cfg, nil
+	}
 
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -317,12 +335,81 @@ func parseFlags(args []string) (runConfig, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: tracker [flags] <pipeline.dot> [flags]\n\n")
+	fmt.Fprintf(w, "Usage:\n")
+	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot> [flags]\n")
+	fmt.Fprintf(w, "  tracker setup\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
 	fmt.Fprintf(w, "  -c, --checkpoint string   Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
+}
+
+func loadEnvFiles(workdir string) error {
+	originalEnv := currentEnvKeys()
+
+	configDir, err := xdgConfigHome()
+	if err != nil {
+		return fmt.Errorf("resolve XDG config dir: %w", err)
+	}
+
+	configEnvPath := filepath.Join(configDir, "tracker", ".env")
+	if err := loadEnvFileIfPresent(configEnvPath, originalEnv); err != nil {
+		return err
+	}
+
+	localEnvPath := filepath.Join(workdir, ".env")
+	if err := loadEnvFileIfPresent(localEnvPath, originalEnv); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func xdgConfigHome() (string, error) {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return dir, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config"), nil
+}
+
+func currentEnvKeys() map[string]struct{} {
+	keys := make(map[string]struct{})
+	for _, entry := range os.Environ() {
+		if idx := strings.IndexByte(entry, '='); idx > 0 {
+			keys[entry[:idx]] = struct{}{}
+		}
+	}
+	return keys
+}
+
+func loadEnvFileIfPresent(path string, originalEnv map[string]struct{}) error {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat env file %s: %w", path, err)
+	}
+
+	values, err := godotenv.Read(path)
+	if err != nil {
+		return fmt.Errorf("load env file %s: %w", path, err)
+	}
+
+	for key, value := range values {
+		if _, exists := originalEnv[key]; exists {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set env %s from %s: %w", key, path, err)
+		}
+	}
+	return nil
 }
 
 // buildLLMClient constructs the LLM client from environment variables with
