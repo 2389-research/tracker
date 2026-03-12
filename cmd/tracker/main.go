@@ -336,6 +336,7 @@ func parseFlags(args []string) (runConfig, error) {
 }
 
 func printUsage(w io.Writer) {
+	fmt.Fprint(w, renderStartupBanner())
 	fmt.Fprintf(w, "Usage:\n")
 	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot> [flags]\n")
 	fmt.Fprintf(w, "  tracker setup\n\n")
