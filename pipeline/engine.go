@@ -160,6 +160,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	for {
 		// Check context cancellation at the top of each iteration.
 		if err := ctx.Err(); err != nil {
+			e.saveCheckpoint(cp, pctx, runID)
 			e.emit(PipelineEvent{
 				Type:      EventPipelineFailed,
 				Timestamp: time.Now(),
@@ -167,7 +168,13 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				Message:   "context cancelled",
 				Err:       err,
 			})
-			return nil, fmt.Errorf("pipeline cancelled: %w", err)
+			return &EngineResult{
+				RunID:          runID,
+				Status:         OutcomeFail,
+				CompletedNodes: cp.CompletedNodes,
+				Context:        pctx.Snapshot(),
+				Trace:          trace,
+			}, fmt.Errorf("pipeline cancelled: %w", err)
 		}
 
 		node, ok := e.graph.Nodes[currentNodeID]
@@ -183,8 +190,16 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		pctx.Set(ContextKeyPreferredLabel, "")
 		pctx.Set("suggested_next_nodes", "")
 
-		// Skip already-completed nodes on resume.
+		// Skip already-completed nodes on resume, emitting synthetic events
+		// so the TUI shows them as green/done.
 		if cp.IsCompleted(currentNodeID) {
+			e.emit(PipelineEvent{
+				Type:      EventStageCompleted,
+				Timestamp: time.Now(),
+				RunID:     runID,
+				NodeID:    currentNodeID,
+				Message:   "previously completed (resumed)",
+			})
 			edges := e.graph.OutgoingEdges(currentNodeID)
 			if len(edges) == 0 {
 				// Completed exit node — we're done.
@@ -256,7 +271,15 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				Message:   fmt.Sprintf("handler error at node %q", currentNodeID),
 				Err:       err,
 			})
-			return nil, fmt.Errorf("handler error at node %q: %w", currentNodeID, err)
+			e.saveCheckpoint(cp, pctx, runID)
+			trace.EndTime = time.Now()
+			return &EngineResult{
+				RunID:          runID,
+				Status:         OutcomeFail,
+				CompletedNodes: cp.CompletedNodes,
+				Context:        pctx.Snapshot(),
+				Trace:          trace,
+			}, fmt.Errorf("handler error at node %q: %w", currentNodeID, err)
 		}
 
 		// Merge context updates from handler outcome.

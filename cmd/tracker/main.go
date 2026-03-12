@@ -34,12 +34,13 @@ import (
 )
 
 type runConfig struct {
-	mode       commandMode
-	dotFile    string
-	workdir    string
-	checkpoint string
-	noTUI      bool
-	verbose    bool
+	mode     commandMode
+	dotFile  string
+	workdir  string
+	resumeID string // run ID to resume (resolved to checkpoint path)
+	noTUI    bool
+	verbose  bool
+	jsonOut  bool // stream events as NDJSON to stdout
 }
 
 type commandMode string
@@ -54,7 +55,7 @@ var errUsage = errors.New("usage")
 type commandDeps struct {
 	loadEnv  func(string) error
 	runSetup func() error
-	run      func(string, string, string, bool) error
+	run      func(string, string, string, bool, bool) error
 	runTUI   func(string, string, string, bool) error
 }
 
@@ -92,7 +93,7 @@ func main() {
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
-func run(dotFile, workdir, checkpoint string, verbose bool) error {
+func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error {
 	// Read and parse the DOT file.
 	dotBytes, err := os.ReadFile(dotFile)
 	if err != nil {
@@ -117,7 +118,6 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 		return fmt.Errorf("create LLM client: %w", err)
 	}
 	defer llmClient.Close()
-	llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
 
 	// Create execution environment for tool handlers.
 	execEnv := exec.NewLocalEnvironment(workdir)
@@ -126,29 +126,50 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 	// BubbleteaInterviewer requires a TTY; ConsoleInterviewer works with plain stdin.
 	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()))
 
-	// Build the handler registry with real production dependencies.
-	registry := handlers.NewDefaultRegistry(graph,
-		handlers.WithLLMClient(llmClient, workdir),
-		handlers.WithExecEnvironment(execEnv),
-		handlers.WithInterviewer(interviewer, graph),
-		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
-			line := agent.FormatEventLine(evt)
-			if line == "" {
-				return
-			}
-			fmt.Fprintf(os.Stdout, "[%s] %s\n", time.Now().Format("15:04:05"), line)
-		})),
-	)
-
 	// Build engine options.
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
 
-	// Always log pipeline events to stdout in non-TUI mode.
-	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
-		&pipeline.LoggingEventHandler{Writer: os.Stdout},
-	))
+	// Log pipeline events to a JSONL activity log on disk.
+	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
+	defer activityLog.Close()
+
+	// Wire up event handlers based on output mode.
+	var agentEventHandler agent.EventHandler
+	if jsonOut {
+		// JSON streaming mode: all events go as typed NDJSON to stdout.
+		stream := newJSONStream(os.Stdout)
+		llmClient.AddTraceObserver(stream.traceObserver())
+		agentEventHandler = stream.agentHandler()
+		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
+			pipeline.PipelineMultiHandler(stream.pipelineHandler(), activityLog),
+		))
+	} else {
+		// Human-readable console output.
+		llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
+		agentEventHandler = agent.EventHandlerFunc(func(evt agent.Event) {
+			line := agent.FormatEventLine(evt)
+			if line == "" {
+				return
+			}
+			fmt.Fprintf(os.Stdout, "[%s] %s\n", time.Now().Format("15:04:05"), line)
+		})
+		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
+			pipeline.PipelineMultiHandler(
+				&pipeline.LoggingEventHandler{Writer: os.Stdout},
+				activityLog,
+			),
+		))
+	}
+
+	// Build the handler registry with real production dependencies.
+	registry := handlers.NewDefaultRegistry(graph,
+		handlers.WithLLMClient(llmClient, workdir),
+		handlers.WithExecEnvironment(execEnv),
+		handlers.WithInterviewer(interviewer, graph),
+		handlers.WithAgentEventHandler(agentEventHandler),
+	)
 
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
@@ -173,7 +194,7 @@ func run(dotFile, workdir, checkpoint string, verbose bool) error {
 	if result.Status != pipeline.OutcomeSuccess {
 		pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
 	}
-	printRunSummary(result, pipelineErr, tokenTracker)
+	printRunSummary(result, pipelineErr, tokenTracker, dotFile)
 	return pipelineErr
 }
 
@@ -221,7 +242,22 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 	// can reference the Program in the interviewer.
 	appModel := dashboard.NewAppModel(pipelineName, tokenTracker)
 	appModel.SetVerboseTrace(verbose)
-	appModel.SetInitialNodes(buildNodeList(graph))
+	nodeList := buildNodeList(graph)
+	// When resuming from a checkpoint, pre-mark completed nodes so the TUI
+	// shows them as green immediately (engine events fire before prog.Run).
+	if checkpoint != "" {
+		cp, cpErr := pipeline.LoadCheckpoint(checkpoint)
+		if cpErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load checkpoint for TUI: %v\n", cpErr)
+		} else {
+			for i := range nodeList {
+				if cp.IsCompleted(nodeList[i].ID) {
+					nodeList[i].Status = dashboard.NodeDone
+				}
+			}
+		}
+	}
+	appModel.SetInitialNodes(nodeList)
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
 
 	llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
@@ -248,9 +284,14 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 
 	// Build engine options.
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
+	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
+	defer activityLog.Close()
+
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
-	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(eventHandler))
+	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
+		pipeline.PipelineMultiHandler(eventHandler, activityLog),
+	))
 	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
@@ -279,13 +320,19 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 
 	// Start the TUI — this blocks until the program exits.
 	_, err = prog.Run()
+
+	// Cancel the pipeline context immediately so the background goroutine
+	// stops. Without this the user would need a second Ctrl+C to kill the
+	// pipeline after closing the TUI.
+	cancel()
+
 	if err != nil {
 		return fmt.Errorf("TUI program: %w", err)
 	}
 
-	// After TUI exits, print run summary.
+	// After TUI exits, wait for the pipeline goroutine to drain.
 	outcome := <-outcomeCh
-	printRunSummary(outcome.result, outcome.err, tokenTracker)
+	printRunSummary(outcome.result, outcome.err, tokenTracker, dotFile)
 	return outcome.err
 }
 
@@ -301,10 +348,11 @@ func parseFlags(args []string) (runConfig, error) {
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
 	fs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
-	fs.StringVar(&cfg.checkpoint, "c", "", "Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)")
-	fs.StringVar(&cfg.checkpoint, "checkpoint", "", "Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)")
+	fs.StringVar(&cfg.resumeID, "r", "", "Resume a previous run by ID (e.g. 13041bbb0a38)")
+	fs.StringVar(&cfg.resumeID, "resume", "", "Resume a previous run by ID (e.g. 13041bbb0a38)")
 	fs.BoolVar(&cfg.noTUI, "no-tui", false, "Disable TUI dashboard; use plain console output")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
+	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream events as newline-delimited JSON to stdout")
 
 	// Go's flag package stops parsing at the first non-flag argument.
 	// To support flags in any order (e.g. "tracker pipeline.dot -c cp.json"),
@@ -342,7 +390,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker setup\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
-	fmt.Fprintf(w, "  -c, --checkpoint string   Resume from a checkpoint file (auto-saved to .tracker/runs/<runID>/)\n")
+	fmt.Fprintf(w, "  -r, --resume string       Resume a previous run by ID (e.g. 13041bbb0a38)\n")
+	fmt.Fprintf(w, "  --json                    Stream events as newline-delimited JSON to stdout\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
 }
@@ -371,10 +420,77 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 
 	printStartupBanner()
 
-	if cfg.noTUI {
-		return deps.run(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
+	// Resolve run ID to checkpoint path.
+	checkpoint := ""
+	if cfg.resumeID != "" {
+		cp, err := resolveCheckpoint(cfg.workdir, cfg.resumeID)
+		if err != nil {
+			return err
+		}
+		checkpoint = cp
 	}
-	return deps.runTUI(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
+
+	// JSON streaming mode forces non-TUI.
+	if cfg.jsonOut {
+		cfg.noTUI = true
+	}
+
+	// Fall back to plain console mode when TUI is disabled or stdin is not a
+	// terminal (e.g. CI, piped input, cron). TUI requires a real TTY.
+	if cfg.noTUI || !isatty.IsTerminal(os.Stdin.Fd()) {
+		return deps.run(cfg.dotFile, cfg.workdir, checkpoint, cfg.verbose, cfg.jsonOut)
+	}
+	return deps.runTUI(cfg.dotFile, cfg.workdir, checkpoint, cfg.verbose)
+}
+
+// resolveCheckpoint finds the checkpoint file for a given run ID. It looks in
+// .tracker/runs/<runID>/checkpoint.json under the working directory. If the ID
+// is a prefix that uniquely matches one run, it resolves to that run.
+func resolveCheckpoint(workdir, runID string) (string, error) {
+	if runID == "" {
+		return "", fmt.Errorf("run ID cannot be empty")
+	}
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		return "", fmt.Errorf("cannot read runs directory: %w", err)
+	}
+
+	var matches []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), runID) {
+			matches = append(matches, e.Name())
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
+	case 1:
+		// Unique match (exact or prefix)
+	default:
+		// Check for exact match among the prefix matches
+		exact := false
+		for _, m := range matches {
+			if m == runID {
+				matches = []string{m}
+				exact = true
+				break
+			}
+		}
+		if !exact {
+			return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
+		}
+	}
+
+	cpPath := filepath.Join(runsDir, matches[0], "checkpoint.json")
+	if _, err := os.Stat(cpPath); err != nil {
+		return "", fmt.Errorf("checkpoint not found for run %s: %w", matches[0], err)
+	}
+	return cpPath, nil
 }
 
 func loadEnvFiles(workdir string) error {
@@ -523,6 +639,14 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 		return nil, err
 	}
 
+	// Wire infra-level retry middleware. Handles transient provider errors
+	// (502, 503, 429, timeouts) transparently so pipeline-level retries are
+	// reserved for actual node logic failures.
+	client.AddMiddleware(llm.NewRetryMiddleware(
+		llm.WithMaxRetries(3),
+		llm.WithBaseDelay(2*time.Second),
+	))
+
 	// Wire token tracker as middleware.
 	if tokenTracker != nil {
 		client.AddMiddleware(tokenTracker)
@@ -588,7 +712,7 @@ func buildNodeList(graph *pipeline.Graph) []dashboard.NodeEntry {
 
 // printRunSummary outputs a run summary with timing, per-node breakdown, token
 // usage, and a simple ASCII node graph after the TUI exits.
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker) {
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker, dotFile string) {
 	fmt.Println()
 	fmt.Println("═══ Run Summary ═══════════════════════════════════════════")
 
@@ -599,7 +723,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 	}
 
 	// Total elapsed time from trace
-	if result != nil && result.Trace != nil && !result.Trace.StartTime.IsZero() {
+	if result != nil && result.Trace != nil && !result.Trace.StartTime.IsZero() && !result.Trace.EndTime.IsZero() {
 		elapsed := result.Trace.EndTime.Sub(result.Trace.StartTime)
 		fmt.Printf("  Time:    %s\n", formatElapsed(elapsed))
 	}
@@ -658,6 +782,18 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 		fmt.Println()
 		fmt.Printf("  ERROR: %v\n", pipelineErr)
 	}
+
+	// Show resume hint when the pipeline didn't complete successfully.
+	if result != nil && result.Status != pipeline.OutcomeSuccess && result.RunID != "" {
+		pipelineArg := dotFile
+		if pipelineArg == "" {
+			pipelineArg = "<pipeline.dot>"
+		}
+		fmt.Println()
+		fmt.Println("─── Resume ────────────────────────────────────────────────")
+		fmt.Printf("  tracker -r %s %s\n", result.RunID, pipelineArg)
+	}
+
 	fmt.Println("═══════════════════════════════════════════════════════════")
 }
 

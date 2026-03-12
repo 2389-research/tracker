@@ -78,19 +78,22 @@ func TestAppModelHandlesLLMTraceMsg(t *testing.T) {
 	app.relayout()
 
 	m2, _ := app.Update(LLMTraceMsg{Event: llm.TraceEvent{
-		Kind:     llm.TraceToolPrepare,
+		Kind:     llm.TraceText,
 		Provider: "anthropic",
 		Model:    "claude-opus-4-6",
-		ToolName: "read",
-		Preview:  `{"path":"go.mod"}`,
+		Preview:  "Hello world",
 	}})
 
 	updated := m2.(AppModel)
-	if updated.agentLog.Len() != 1 {
-		t.Fatalf("expected 1 log entry, got %d", updated.agentLog.Len())
+	// Model header + text entry = 2
+	if updated.agentLog.Len() != 2 {
+		t.Fatalf("expected 2 log entries (header + text), got %d", updated.agentLog.Len())
 	}
-	if !strings.Contains(updated.agentLog.entries[0].Message, "read") {
-		t.Fatalf("expected tool name in message: %+v", updated.agentLog.entries[0])
+	if !strings.Contains(updated.agentLog.entries[0].Message, "anthropic/claude-opus-4-6") {
+		t.Fatalf("expected model header in first entry: %+v", updated.agentLog.entries[0])
+	}
+	if !strings.Contains(updated.agentLog.entries[1].Message, "Hello world") {
+		t.Fatalf("expected text content in second entry: %+v", updated.agentLog.entries[1])
 	}
 }
 
@@ -110,8 +113,8 @@ func TestAppModelHandlesAgentEventMsg(t *testing.T) {
 	if updated.agentLog.Len() != 1 {
 		t.Fatalf("expected 1 log entry, got %d", updated.agentLog.Len())
 	}
-	if !strings.Contains(updated.agentLog.entries[0].Message, "tool start") {
-		t.Fatalf("expected tool start message, got %+v", updated.agentLog.entries[0])
+	if !strings.Contains(updated.agentLog.entries[0].Message, "read") {
+		t.Fatalf("expected tool name in message, got %+v", updated.agentLog.entries[0])
 	}
 }
 

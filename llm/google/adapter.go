@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -259,9 +260,15 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: SSE scan error: %w", err)}
 	}
+}
+
+// isContextError returns true for context cancellation/deadline errors that
+// are expected during normal shutdown and should not surface as SSE errors.
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func shouldEmitProviderEvents(req *llm.Request) bool {

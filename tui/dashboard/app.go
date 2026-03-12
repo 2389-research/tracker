@@ -160,12 +160,6 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.relayout()
 		return a, nil
 
-	case tea.MouseMsg:
-		if a.modalKind != modalNone {
-			return a.updateModal(msg)
-		}
-		return a, nil
-
 	case tea.KeyMsg:
 		if a.modalKind != modalNone {
 			return a.updateModal(msg)
@@ -174,8 +168,20 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			a.quitting = true
 			return a, tea.Quit
+		case "ctrl+o":
+			a.agentLog.ToggleExpanded()
+			return a, nil
+		case "shift+up":
+			a.nodeList.ScrollUp()
+			return a, nil
+		case "shift+down":
+			a.nodeList.ScrollDown()
+			return a, nil
 		}
-		return a, nil
+		// Route scroll keys to the activity log viewport.
+		m, cmd := a.agentLog.Update(msg)
+		a.agentLog = m.(AgentLogModel)
+		return a, cmd
 
 	case PipelineEventMsg:
 		a.agentLog.AppendEvent(msg.Event)
@@ -432,7 +438,15 @@ func (a AppModel) statusBar() string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(colorGreen).Render("CLEAR"))
 	}
 
-	// Quit hint
+	// Expand/collapse hint
+	if a.agentLog.expanded {
+		parts = append(parts, dimTextStyle.Render("ctrl+o collapse"))
+	} else {
+		parts = append(parts, dimTextStyle.Render("ctrl+o expand"))
+	}
+
+	// Scroll/quit hints
+	parts = append(parts, dimTextStyle.Render("shift+↑↓ nodes"))
 	parts = append(parts, dimTextStyle.Render("q to exit"))
 
 	content := strings.Join(parts, dimTextStyle.Render("  "))

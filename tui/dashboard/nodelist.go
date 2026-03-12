@@ -120,6 +120,42 @@ func (n NodeListModel) visibleWindow() (start, end int, upIndicator, downIndicat
 	return start, end, upIndicator, downIndicator
 }
 
+// ScrollUp moves the node list viewport up by one row.
+func (n *NodeListModel) ScrollUp() {
+	// All nodes fit — no scrolling needed.
+	if n.height > 0 && n.height >= len(n.nodes)+1 {
+		return
+	}
+	if n.offset > 0 {
+		n.offset--
+	}
+}
+
+// ScrollDown moves the node list viewport down by one row.
+func (n *NodeListModel) ScrollDown() {
+	total := len(n.nodes)
+	if n.height <= 0 || total == 0 {
+		return
+	}
+	// All nodes fit — no scrolling needed.
+	if n.height >= total+1 {
+		return
+	}
+	// Use height-3 (header + two scroll indicators) for worst-case avail,
+	// consistent with ensureVisible.
+	avail := n.height - 3
+	if avail < 1 {
+		avail = 1
+	}
+	maxOffset := total - avail
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if n.offset < maxOffset {
+		n.offset++
+	}
+}
+
 // ensureVisible adjusts the scroll offset so that the node at index idx
 // is within the visible window.
 func (n *NodeListModel) ensureVisible(idx int) {

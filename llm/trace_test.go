@@ -56,6 +56,27 @@ func TestTraceBuilderEmitsNormalizedEvents(t *testing.T) {
 	}
 }
 
+func TestTraceBuilderPreservesSpacingInTextDeltas(t *testing.T) {
+	builder := NewTraceBuilder(TraceOptions{Provider: "anthropic", Model: "claude-opus-4-6"})
+
+	// Streaming APIs send chunks with leading spaces as word separators.
+	builder.Process(StreamEvent{Type: EventTextDelta, Delta: "Now"})
+	builder.Process(StreamEvent{Type: EventTextDelta, Delta: " I have"})
+	builder.Process(StreamEvent{Type: EventTextDelta, Delta: " a clear"})
+
+	events := builder.Events()
+	if len(events) != 3 {
+		t.Fatalf("expected 3 text events, got %d", len(events))
+	}
+	// The leading space must survive so coalesced text reads "Now I have a clear".
+	if events[1].Preview != " I have" {
+		t.Errorf("expected leading space preserved, got %q", events[1].Preview)
+	}
+	if events[2].Preview != " a clear" {
+		t.Errorf("expected leading space preserved, got %q", events[2].Preview)
+	}
+}
+
 func TestTraceBuilderEmitsProviderRawOnlyInVerboseMode(t *testing.T) {
 	builder := NewTraceBuilder(TraceOptions{
 		Provider: "openai",

@@ -81,7 +81,7 @@ func (b *TraceBuilder) Process(evt StreamEvent) {
 		})
 
 	case EventReasoningDelta:
-		preview := previewText(evt.ReasoningDelta)
+		preview := preserveSpacingText(evt.ReasoningDelta)
 		if preview == "" {
 			return
 		}
@@ -93,7 +93,7 @@ func (b *TraceBuilder) Process(evt StreamEvent) {
 		})
 
 	case EventTextDelta:
-		preview := previewText(evt.Delta)
+		preview := preserveSpacingText(evt.Delta)
 		if preview == "" {
 			return
 		}
@@ -203,6 +203,30 @@ func FormatTraceLine(evt TraceEvent, verbose bool) string {
 	return ""
 }
 
+// FormatCoalescedLine formats an accumulated text or reasoning block for the TUI log.
+// Shows clean content without the `preview="..."` wrapping, for a chat-like display.
+// The provider/model is shown in a separate header line via FormatModelHeader.
+func FormatCoalescedLine(kind TraceKind, accumulated string) string {
+	label := "◉ "
+	if kind == TraceReasoning {
+		label = "◉ thinking: "
+	}
+	text := strings.TrimSpace(accumulated)
+	return label + text
+}
+
+// FormatModelHeader returns a display string like "anthropic/claude-opus-4-6"
+// for use as a section header in the activity log.
+func FormatModelHeader(provider, model string) string {
+	if provider != "" && model != "" {
+		return provider + "/" + model
+	}
+	if provider != "" {
+		return provider
+	}
+	return model
+}
+
 func formatBaseLine(prefix string, evt TraceEvent) string {
 	line := prefix
 	if evt.Provider != "" || evt.Model != "" {
@@ -237,6 +261,14 @@ func previewText(text string) string {
 		return text
 	}
 	return text[:tracePreviewLimit-1] + "…"
+}
+
+// preserveSpacingText keeps all whitespace (including newlines) intact.
+// Streaming text deltas carry leading spaces as word separators and newlines
+// for paragraph structure; stripping them causes words to run together
+// or flattens structured output when chunks are coalesced.
+func preserveSpacingText(text string) string {
+	return text
 }
 
 func previewJSON(raw json.RawMessage) string {

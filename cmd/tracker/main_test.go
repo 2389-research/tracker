@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 	"github.com/2389-research/tracker/tui"
 )
@@ -40,7 +43,7 @@ func TestParseFlagsEnablesVerbose(t *testing.T) {
 }
 
 func TestParseFlagsFlagsAfterDotFile(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "pipeline.dot", "-c", "checkpoint.json"})
+	cfg, err := parseFlags([]string{"tracker", "pipeline.dot", "-r", "abc123"})
 	if err != nil {
 		t.Fatalf("parseFlags returned error: %v", err)
 	}
@@ -50,13 +53,13 @@ func TestParseFlagsFlagsAfterDotFile(t *testing.T) {
 	if cfg.dotFile != "pipeline.dot" {
 		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
 	}
-	if cfg.checkpoint != "checkpoint.json" {
-		t.Fatalf("checkpoint = %q, want %q", cfg.checkpoint, "checkpoint.json")
+	if cfg.resumeID != "abc123" {
+		t.Fatalf("resumeID = %q, want %q", cfg.resumeID, "abc123")
 	}
 }
 
 func TestParseFlagsFlagsBeforeDotFile(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "-c", "checkpoint.json", "pipeline.dot"})
+	cfg, err := parseFlags([]string{"tracker", "-r", "abc123", "pipeline.dot"})
 	if err != nil {
 		t.Fatalf("parseFlags returned error: %v", err)
 	}
@@ -66,13 +69,13 @@ func TestParseFlagsFlagsBeforeDotFile(t *testing.T) {
 	if cfg.dotFile != "pipeline.dot" {
 		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
 	}
-	if cfg.checkpoint != "checkpoint.json" {
-		t.Fatalf("checkpoint = %q, want %q", cfg.checkpoint, "checkpoint.json")
+	if cfg.resumeID != "abc123" {
+		t.Fatalf("resumeID = %q, want %q", cfg.resumeID, "abc123")
 	}
 }
 
 func TestParseFlagsMixedOrder(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "--no-tui", "pipeline.dot", "-c", "cp.json", "--verbose"})
+	cfg, err := parseFlags([]string{"tracker", "--no-tui", "pipeline.dot", "-r", "run42", "--verbose"})
 	if err != nil {
 		t.Fatalf("parseFlags returned error: %v", err)
 	}
@@ -82,8 +85,8 @@ func TestParseFlagsMixedOrder(t *testing.T) {
 	if cfg.dotFile != "pipeline.dot" {
 		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
 	}
-	if cfg.checkpoint != "cp.json" {
-		t.Fatalf("checkpoint = %q, want %q", cfg.checkpoint, "cp.json")
+	if cfg.resumeID != "run42" {
+		t.Fatalf("resumeID = %q, want %q", cfg.resumeID, "run42")
 	}
 	if !cfg.noTUI {
 		t.Fatal("expected noTUI to be true")
@@ -218,7 +221,7 @@ func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
 			}
 			return nil
 		},
-		run: func(dotFile, workdir, checkpoint string, verbose bool) error {
+		run: func(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error {
 			runCalled = true
 			if dotFile != "pipeline.dot" {
 				t.Fatalf("dotFile = %q, want %q", dotFile, "pipeline.dot")
@@ -313,6 +316,187 @@ func TestRunSetupCommandCancelLeavesFileUntouched(t *testing.T) {
 	}
 	if string(content) != string(original) {
 		t.Fatalf("config file changed on cancel: got %q want %q", string(content), string(original))
+	}
+}
+
+func TestPrintRunSummaryShowsResumeHintOnIncompleteRun(t *testing.T) {
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := &pipeline.EngineResult{
+		RunID:  "abc123",
+		Status: pipeline.OutcomeFail,
+	}
+	printRunSummary(result, fmt.Errorf("interrupted"), nil, "my_pipeline.dot")
+
+	w.Close()
+	os.Stdout = old
+
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "Resume") {
+		t.Fatalf("expected Resume section in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "tracker -r abc123 my_pipeline.dot") {
+		t.Fatalf("expected resume command with run ID in output, got:\n%s", output)
+	}
+}
+
+func TestPrintRunSummaryNoResumeOnSuccess(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := &pipeline.EngineResult{
+		RunID:  "abc123",
+		Status: pipeline.OutcomeSuccess,
+	}
+	printRunSummary(result, nil, nil, "my_pipeline.dot")
+
+	w.Close()
+	os.Stdout = old
+
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	output := string(buf[:n])
+
+	if strings.Contains(output, "Resume") {
+		t.Fatalf("did not expect Resume section on successful run, got:\n%s", output)
+	}
+}
+
+func TestResolveCheckpointExactMatch(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs", "abc123def456")
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cpPath := filepath.Join(runsDir, "checkpoint.json")
+	if err := os.WriteFile(cpPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write checkpoint: %v", err)
+	}
+
+	got, err := resolveCheckpoint(workdir, "abc123def456")
+	if err != nil {
+		t.Fatalf("resolveCheckpoint returned error: %v", err)
+	}
+	if got != cpPath {
+		t.Fatalf("got %q, want %q", got, cpPath)
+	}
+}
+
+func TestResolveCheckpointPrefixMatch(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs", "abc123def456")
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cpPath := filepath.Join(runsDir, "checkpoint.json")
+	if err := os.WriteFile(cpPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write checkpoint: %v", err)
+	}
+
+	got, err := resolveCheckpoint(workdir, "abc123")
+	if err != nil {
+		t.Fatalf("resolveCheckpoint returned error: %v", err)
+	}
+	if got != cpPath {
+		t.Fatalf("got %q, want %q", got, cpPath)
+	}
+}
+
+func TestResolveCheckpointAmbiguous(t *testing.T) {
+	workdir := t.TempDir()
+	base := filepath.Join(workdir, ".tracker", "runs")
+	for _, id := range []string{"abc123aaa", "abc123bbb"} {
+		dir := filepath.Join(base, id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "checkpoint.json"), []byte(`{}`), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	_, err := resolveCheckpoint(workdir, "abc123")
+	if err == nil {
+		t.Fatal("expected error for ambiguous prefix")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguous error, got: %v", err)
+	}
+}
+
+func TestResolveCheckpointNotFound(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, ".tracker", "runs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	_, err := resolveCheckpoint(workdir, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for missing run")
+	}
+	if !strings.Contains(err.Error(), "no run found") {
+		t.Fatalf("expected 'no run found' error, got: %v", err)
+	}
+}
+
+func TestResolveCheckpointMissingCheckpointFile(t *testing.T) {
+	workdir := t.TempDir()
+	// Run directory exists but has no checkpoint.json inside.
+	runDir := filepath.Join(workdir, ".tracker", "runs", "abc123def456")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	_, err := resolveCheckpoint(workdir, "abc123def456")
+	if err == nil {
+		t.Fatal("expected error for missing checkpoint file")
+	}
+	if !strings.Contains(err.Error(), "checkpoint not found") {
+		t.Fatalf("expected 'checkpoint not found' error, got: %v", err)
+	}
+}
+
+func TestResolveCheckpointAmbiguousWithExactMatch(t *testing.T) {
+	workdir := t.TempDir()
+	base := filepath.Join(workdir, ".tracker", "runs")
+	// Two dirs: "abc123" (exact) and "abc123def" (prefix match).
+	for _, id := range []string{"abc123", "abc123def"} {
+		dir := filepath.Join(base, id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "checkpoint.json"), []byte(`{}`), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	got, err := resolveCheckpoint(workdir, "abc123")
+	if err != nil {
+		t.Fatalf("expected exact match to resolve ambiguity, got error: %v", err)
+	}
+	want := filepath.Join(base, "abc123", "checkpoint.json")
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestParseFlagsJsonFlag(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--json", "pipeline.dot"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if !cfg.jsonOut {
+		t.Fatal("expected jsonOut to be true")
+	}
+	if cfg.dotFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
 	}
 }
 

@@ -19,6 +19,13 @@ var (
 	colorLabel      = lipgloss.Color("244") // #808080 — panel label grey
 	colorOff        = lipgloss.Color("239") // #4e4e4e — off indicator (pending)
 	colorDim        = lipgloss.Color("240") // dim grey for secondary text
+
+	// Tool palette — distinct colors per tool category
+	colorBash  = lipgloss.Color("178") // #d7af00 — gold terminal
+	colorFile  = lipgloss.Color("75")  // #5fafff — blue file ops (read/write/edit)
+	colorGrep  = lipgloss.Color("114") // #87d787 — green search (grep/glob)
+	colorAgent = lipgloss.Color("213") // #ff87ff — magenta spawn
+	colorPatch = lipgloss.Color("180") // #d7af87 — tan patch/apply
 )
 
 // ─── Signal lamp indicators ──────────────────────────────────────────────────
