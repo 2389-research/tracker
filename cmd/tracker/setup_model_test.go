@@ -455,34 +455,3 @@ func TestSetupModelFinishBanner(t *testing.T) {
 	}
 }
 
-// ── Taglines ────────────────────────────────────────────────────────────────
-
-func TestTaglinesNotEmpty(t *testing.T) {
-	tags := taglines()
-	if len(tags) == 0 {
-		t.Fatal("expected at least one tagline")
-	}
-	for i, tag := range tags {
-		if strings.TrimSpace(tag) == "" {
-			t.Fatalf("tagline[%d] is blank", i)
-		}
-	}
-}
-
-func TestRandomTaglineReturnsFromPool(t *testing.T) {
-	tag := randomTagline()
-	if tag == "" {
-		t.Fatal("randomTagline returned empty string")
-	}
-	pool := taglines()
-	found := false
-	for _, candidate := range pool {
-		if candidate == tag {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("randomTagline returned %q which is not in the pool", tag)
-	}
-}

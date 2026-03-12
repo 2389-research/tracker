@@ -368,6 +368,8 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 		return err
 	}
 
+	printStartupBanner()
+
 	if cfg.noTUI {
 		return deps.run(cfg.dotFile, cfg.workdir, cfg.checkpoint, cfg.verbose)
 	}

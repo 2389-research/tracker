@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"math/rand/v2"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -258,20 +257,9 @@ func (m setupModel) pendingUpdates() map[string]string {
 
 // ── View ────────────────────────────────────────────────────────────────────
 
+// ── Setup-specific styles (brand colors and shared styles live in branding.go) ──
+
 var (
-	// Brand colors
-	colorNeon    = lipgloss.Color("#00FFAA")
-	colorHot     = lipgloss.Color("#FF006E")
-	colorElec    = lipgloss.Color("#7B61FF")
-	colorSky     = lipgloss.Color("#00D4FF")
-	colorWarm    = lipgloss.Color("#FFB800")
-	colorMuted = lipgloss.Color("#666666")
-
-	// Styles
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorNeon)
-
 	subtitleStyle = lipgloss.NewStyle().
 			Foreground(colorSky).
 			Italic(true)
@@ -279,27 +267,12 @@ var (
 	checkboxStyle = lipgloss.NewStyle().
 			Foreground(colorElec)
 
-	selectedStyle = lipgloss.NewStyle().
-			Foreground(colorHot).
-			Bold(true)
-
 	labelStyle = lipgloss.NewStyle().
 			Foreground(colorSky).
 			Bold(true)
 
 	configuredHint = lipgloss.NewStyle().
 			Foreground(colorWarm).
-			Italic(true)
-
-	mutedStyle = lipgloss.NewStyle().
-			Foreground(colorMuted)
-
-	bannerStyle = lipgloss.NewStyle().
-			Foreground(colorNeon).
-			Bold(true)
-
-	taglineStyle = lipgloss.NewStyle().
-			Foreground(colorElec).
 			Italic(true)
 
 	borderStyle = lipgloss.NewStyle().
@@ -431,54 +404,3 @@ func (m setupModel) viewFinishBanner() string {
 	return b.String()
 }
 
-// ── Branding ────────────────────────────────────────────────────────────────
-
-var headerBox = lipgloss.NewStyle().
-	Border(lipgloss.DoubleBorder()).
-	BorderForeground(colorNeon).
-	Padding(0, 1).
-	Align(lipgloss.Center)
-
-func renderHeader() string {
-	art := bannerStyle.Render("▀█▀ █▀█ █▀█ █▀▀ █▄▀ █▀▀ █▀█") + "\n" +
-		bannerStyle.Render(" █  █▀▄ █▀█ █▄▄ █ █ ██▄ █▀▄")
-	box := headerBox.Render(art)
-
-	var b strings.Builder
-	b.WriteString(box)
-	b.WriteByte('\n')
-	b.WriteString(mutedStyle.Render("              by ") + selectedStyle.Render("2389.ai"))
-	b.WriteByte('\n')
-	return b.String()
-}
-
-func logo() string {
-	return `
-  ████████╗██████╗  █████╗  ██████╗██╗  ██╗███████╗██████╗
-  ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██╔════╝██╔══██╗
-     ██║   ██████╔╝███████║██║     █████╔╝ █████╗  ██████╔╝
-     ██║   ██╔══██╗██╔══██║██║     ██╔═██╗ ██╔══╝  ██╔══██╗
-     ██║   ██║  ██║██║  ██║╚██████╗██║  ██╗███████╗██║  ██║
-     ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
-                        by 2389.ai`
-}
-
-func taglines() []string {
-	return []string{
-		"Pipelines that think for themselves.",
-		"Your agents. Your rules. Your pipeline.",
-		"Ship agentic workflows, not YAML.",
-		"From DOT to done.",
-		"Because your agents deserve better plumbing.",
-		"Wire it up. Let it rip.",
-		"Orchestration without the orchestration tax.",
-		"The agentic pipeline engine.",
-		"Graphs in. Intelligence out.",
-		"Less glue code, more go time.",
-	}
-}
-
-func randomTagline() string {
-	pool := taglines()
-	return pool[rand.IntN(len(pool))]
-}
