@@ -24,6 +24,8 @@ tracker setup
 tracker examples/ask_and_execute.dot
 ```
 
+This works really well with the [dotpowers](https://github.com/2389-research/dotpowers) dot file
+
 ## What It Does
 
 Tracker has three layers:
