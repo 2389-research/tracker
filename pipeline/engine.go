@@ -328,15 +328,33 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 		switch outcome.Status {
 		case OutcomeRetry:
-			maxRetries := e.maxRetries(execNode)
-			if cp.RetryCount(currentNodeID) < maxRetries {
+			policy := ResolveRetryPolicy(execNode, e.graph.Attrs)
+			if cp.RetryCount(currentNodeID) < policy.MaxRetries {
 				cp.IncrementRetry(currentNodeID)
+
+				// Apply backoff before retrying, respecting context cancellation.
+				backoff := policy.BackoffFn(cp.RetryCount(currentNodeID), policy.BaseDelay)
+				if backoff > 0 {
+					select {
+					case <-time.After(backoff):
+					case <-ctx.Done():
+						e.saveCheckpoint(cp, pctx, runID)
+						return &EngineResult{
+							RunID:          runID,
+							Status:         OutcomeFail,
+							CompletedNodes: cp.CompletedNodes,
+							Context:        pctx.Snapshot(),
+							Trace:          trace,
+						}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
+					}
+				}
+
 				e.emit(PipelineEvent{
 					Type:      EventStageRetrying,
 					Timestamp: time.Now(),
 					RunID:     runID,
 					NodeID:    currentNodeID,
-					Message:   fmt.Sprintf("retrying node %q (attempt %d/%d)", currentNodeID, cp.RetryCount(currentNodeID), maxRetries),
+					Message:   fmt.Sprintf("retrying node %q (attempt %d/%d, policy=%s)", currentNodeID, cp.RetryCount(currentNodeID), policy.MaxRetries, policy.Name),
 				})
 				// Jump to retry_target if specified, otherwise retry self.
 				target := currentNodeID

@@ -213,6 +213,7 @@ func TestEngineEdgeSelectionByWeight(t *testing.T) {
 func TestEngineRetryLogic(t *testing.T) {
 	g := NewGraph("retry_test")
 	g.Attrs["default_max_retry"] = "3"
+	g.Attrs["default_retry_policy"] = "none"
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
 	g.AddNode(&Node{ID: "flaky", Shape: "box", Label: "Flaky"})
 	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
@@ -250,6 +251,7 @@ func TestEngineRetryLogic(t *testing.T) {
 func TestEngineRetryExhausted(t *testing.T) {
 	g := NewGraph("retry_exhaust_test")
 	g.Attrs["default_max_retry"] = "2"
+	g.Attrs["default_retry_policy"] = "none"
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
 	g.AddNode(&Node{ID: "stuck", Shape: "box", Label: "Stuck"})
 	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})

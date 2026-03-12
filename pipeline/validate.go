@@ -7,21 +7,37 @@ import (
 	"strings"
 )
 
-// ValidationError collects multiple validation failures into one error.
+// ValidationError collects multiple validation failures and warnings into one error.
 type ValidationError struct {
-	Errors []string
+	Errors   []string
+	Warnings []string
 }
 
 func (e *ValidationError) Error() string {
-	return strings.Join(e.Errors, "; ")
+	var parts []string
+	if len(e.Errors) > 0 {
+		parts = append(parts, "errors: "+strings.Join(e.Errors, "; "))
+	}
+	if len(e.Warnings) > 0 {
+		parts = append(parts, "warnings: "+strings.Join(e.Warnings, "; "))
+	}
+	return strings.Join(parts, " | ")
 }
 
 func (e *ValidationError) add(msg string) {
 	e.Errors = append(e.Errors, msg)
 }
 
+func (e *ValidationError) addWarning(msg string) {
+	e.Warnings = append(e.Warnings, msg)
+}
+
 func (e *ValidationError) hasErrors() bool {
 	return len(e.Errors) > 0
+}
+
+func (e *ValidationError) hasWarnings() bool {
+	return len(e.Warnings) > 0
 }
 
 // Validate checks a parsed Graph for structural correctness.
@@ -41,10 +57,13 @@ func Validate(g *Graph) error {
 	validateShapes(g, ve)
 	validateEdgeEndpoints(g, ve)
 	validateExitOutgoingEdges(g, ve)
+	validateNoDuplicateEdges(g, ve)
 	validateReachability(g, ve)
 	validateNoCycles(g, ve)
+	validateConditionalFailEdges(g, ve)
+	validateEdgeLabelConsistency(g, ve)
 
-	if ve.hasErrors() {
+	if ve.hasErrors() || ve.hasWarnings() {
 		return ve
 	}
 	return nil
@@ -187,4 +206,93 @@ func validateNoCycles(g *Graph, ve *ValidationError) {
 	if dfs(g.StartNode) {
 		ve.add("graph contains a cycle")
 	}
+}
+
+// validateNoDuplicateEdges checks for edges with identical From, To, and Condition.
+func validateNoDuplicateEdges(g *Graph, ve *ValidationError) {
+	type edgeKey struct{ from, to, condition string }
+	seen := make(map[edgeKey]bool)
+	for _, e := range g.Edges {
+		k := edgeKey{e.From, e.To, e.Condition}
+		if seen[k] {
+			ve.add(fmt.Sprintf("duplicate edge %s->%s (condition=%q)", e.From, e.To, e.Condition))
+		}
+		seen[k] = true
+	}
+}
+
+// validateConditionalFailEdges warns when a diamond (conditional) node has no
+// outgoing edge with a fail-like condition.
+func validateConditionalFailEdges(g *Graph, ve *ValidationError) {
+	for _, n := range g.Nodes {
+		if n.Shape != "diamond" {
+			continue
+		}
+		outgoing := g.OutgoingEdges(n.ID)
+		hasFail := false
+		for _, e := range outgoing {
+			cond := strings.ToLower(e.Condition)
+			if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
+				hasFail = true
+				break
+			}
+		}
+		if !hasFail {
+			ve.addWarning(fmt.Sprintf("conditional node %q has no fail edge", n.ID))
+		}
+	}
+}
+
+// validateEdgeLabelConsistency warns when a conditional (diamond) node has a mix
+// of labeled and unlabeled outgoing edges.
+func validateEdgeLabelConsistency(g *Graph, ve *ValidationError) {
+	for _, n := range g.Nodes {
+		if n.Shape != "diamond" {
+			continue
+		}
+		outgoing := g.OutgoingEdges(n.ID)
+		if len(outgoing) < 2 {
+			continue
+		}
+		labeled := 0
+		for _, e := range outgoing {
+			if e.Label != "" {
+				labeled++
+			}
+		}
+		if labeled > 0 && labeled < len(outgoing) {
+			ve.addWarning(fmt.Sprintf("conditional node %q has inconsistent edge label usage (%d/%d labeled)", n.ID, labeled, len(outgoing)))
+		}
+	}
+}
+
+// AutoFix applies automatic corrections to a graph and returns descriptions
+// of each fix applied. Currently fixes conditional nodes missing fail edges
+// by adding a self-referencing retry edge.
+func AutoFix(g *Graph) []string {
+	var fixes []string
+	for _, n := range g.Nodes {
+		if n.Shape != "diamond" {
+			continue
+		}
+		outgoing := g.OutgoingEdges(n.ID)
+		hasFail := false
+		for _, e := range outgoing {
+			cond := strings.ToLower(e.Condition)
+			if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
+				hasFail = true
+				break
+			}
+		}
+		if !hasFail {
+			g.AddEdge(&Edge{
+				From:      n.ID,
+				To:        n.ID,
+				Condition: "outcome=fail",
+				Label:     "retry",
+			})
+			fixes = append(fixes, fmt.Sprintf("added fail edge %s->%s (condition=%q, label=%q)", n.ID, n.ID, "outcome=fail", "retry"))
+		}
+	}
+	return fixes
 }

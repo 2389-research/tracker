@@ -184,3 +184,184 @@ func TestValidateEmptyGraph(t *testing.T) {
 		t.Fatal("expected error for empty graph")
 	}
 }
+
+func TestValidateDuplicateEdges(t *testing.T) {
+	g := NewGraph("dup-edges")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "a", Shape: "box"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "a"})
+	g.AddEdge(&Edge{From: "s", To: "a"})
+	g.AddEdge(&Edge{From: "a", To: "e"})
+
+	err := Validate(g)
+	if err == nil {
+		t.Fatal("expected error for duplicate edges")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error should mention 'duplicate', got: %v", err)
+	}
+}
+
+func TestValidateConditionalMissingFailEdge(t *testing.T) {
+	g := NewGraph("no-fail-edge")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "check", Shape: "diamond"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "e", Condition: "outcome=success", Label: "success"})
+
+	err := Validate(g)
+	if err == nil {
+		t.Fatal("expected warning for conditional node missing fail edge")
+	}
+	ve, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+	if !ve.hasWarnings() {
+		t.Fatal("expected warnings to be present")
+	}
+	found := false
+	for _, w := range ve.Warnings {
+		if strings.Contains(w, "check") && strings.Contains(w, "fail") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about missing fail edge on 'check', got warnings: %v", ve.Warnings)
+	}
+}
+
+func TestValidateConditionalWithFailEdge(t *testing.T) {
+	g := NewGraph("has-fail-edge")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "check", Shape: "diamond"})
+	g.AddNode(&Node{ID: "a", Shape: "box"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "e", Condition: "outcome=success", Label: "success"})
+	g.AddEdge(&Edge{From: "check", To: "a", Condition: "outcome=fail", Label: "fail"})
+	g.AddEdge(&Edge{From: "a", To: "e"})
+
+	err := Validate(g)
+	if err != nil {
+		ve, ok := err.(*ValidationError)
+		if ok && ve.hasErrors() {
+			t.Errorf("unexpected errors: %v", ve.Errors)
+		}
+		// Warnings about missing fail edge should NOT be present
+		if ok {
+			for _, w := range ve.Warnings {
+				if strings.Contains(w, "check") && strings.Contains(w, "fail") {
+					t.Errorf("should not warn about missing fail edge on 'check', got: %s", w)
+				}
+			}
+		}
+	}
+}
+
+func TestValidateEdgeLabelConsistency(t *testing.T) {
+	g := NewGraph("mixed-labels")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "check", Shape: "diamond"})
+	g.AddNode(&Node{ID: "a", Shape: "box"})
+	g.AddNode(&Node{ID: "b", Shape: "box"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "a", Label: "yes"})
+	g.AddEdge(&Edge{From: "check", To: "b"}) // no label
+	g.AddEdge(&Edge{From: "a", To: "e"})
+	g.AddEdge(&Edge{From: "b", To: "e"})
+
+	err := Validate(g)
+	if err == nil {
+		t.Fatal("expected warning for inconsistent edge labels")
+	}
+	ve, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+	found := false
+	for _, w := range ve.Warnings {
+		if strings.Contains(w, "check") && strings.Contains(w, "label") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about inconsistent labels on 'check', got warnings: %v", ve.Warnings)
+	}
+}
+
+func TestAutoFixMissingFailEdge(t *testing.T) {
+	g := NewGraph("autofix-fail")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "check", Shape: "diamond"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "e", Condition: "outcome=success", Label: "success"})
+
+	fixes := AutoFix(g)
+	if len(fixes) == 0 {
+		t.Fatal("expected AutoFix to apply at least one fix")
+	}
+	found := false
+	for _, f := range fixes {
+		if strings.Contains(f, "check") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected fix description to mention 'check', got: %v", fixes)
+	}
+
+	// Verify the fail edge was actually added
+	outgoing := g.OutgoingEdges("check")
+	hasFail := false
+	for _, e := range outgoing {
+		if strings.Contains(e.Condition, "fail") {
+			hasFail = true
+			break
+		}
+	}
+	if !hasFail {
+		t.Error("expected AutoFix to add a fail edge to 'check'")
+	}
+}
+
+func TestAutoFixNoChanges(t *testing.T) {
+	g := NewGraph("no-fix-needed")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "check", Shape: "diamond"})
+	g.AddNode(&Node{ID: "a", Shape: "box"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "e", Condition: "outcome=success", Label: "success"})
+	g.AddEdge(&Edge{From: "check", To: "a", Condition: "outcome=fail", Label: "fail"})
+	g.AddEdge(&Edge{From: "a", To: "e"})
+
+	fixes := AutoFix(g)
+	if len(fixes) != 0 {
+		t.Errorf("expected no fixes on correct graph, got: %v", fixes)
+	}
+}
+
+func TestValidationErrorWithWarnings(t *testing.T) {
+	ve := &ValidationError{
+		Errors:   []string{"bad node"},
+		Warnings: []string{"missing fail edge"},
+	}
+	msg := ve.Error()
+	if !strings.Contains(msg, "errors: bad node") {
+		t.Errorf("expected errors section, got: %s", msg)
+	}
+	if !strings.Contains(msg, "warnings: missing fail edge") {
+		t.Errorf("expected warnings section, got: %s", msg)
+	}
+	if !strings.Contains(msg, " | ") {
+		t.Errorf("expected ' | ' separator between errors and warnings, got: %s", msg)
+	}
+}

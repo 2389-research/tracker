@@ -453,6 +453,7 @@ func TestEngineRestartResetsRetryCountsForClearedNodes(t *testing.T) {
 	g := NewGraph("restart_retry_reset")
 	g.Attrs["max_restarts"] = "3"
 	g.Attrs["default_max_retry"] = "2"
+	g.Attrs["default_retry_policy"] = "none"
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
 	g.AddNode(&Node{ID: "a", Shape: "box", Label: "A"})
 	g.AddNode(&Node{ID: "flaky", Shape: "box", Label: "Flaky"})
