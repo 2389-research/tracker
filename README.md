@@ -2,6 +2,9 @@
 
 An agentic pipeline engine that executes multi-step AI workflows defined as Graphviz DOT graphs.
 
+<img width="1756" height="955" alt="image" src="https://github.com/user-attachments/assets/62b498d0-c09c-4ec5-8a4b-6e3b81299ea3" />
+
+
 Define your pipeline as nodes and edges. Tracker parses the graph, wires up LLM providers, dispatches tools, and runs the whole thing — with a TUI dashboard, checkpoints, and human-in-the-loop gates.
 
 ```
