@@ -48,6 +48,7 @@ type commandMode string
 const (
 	modeRun   commandMode = "run"
 	modeSetup commandMode = "setup"
+	modeAudit commandMode = "audit"
 )
 
 var errUsage = errors.New("usage")
@@ -344,6 +345,20 @@ func parseFlags(args []string) (runConfig, error) {
 		return cfg, nil
 	}
 
+	if len(args) > 1 && args[1] == string(modeAudit) {
+		cfg.mode = modeAudit
+		// Parse audit-specific flags: tracker audit [-w dir] <runID>
+		afs := flag.NewFlagSet("audit", flag.ContinueOnError)
+		afs.SetOutput(io.Discard)
+		afs.StringVar(&cfg.workdir, "w", "", "Working directory")
+		afs.StringVar(&cfg.workdir, "workdir", "", "Working directory")
+		_ = afs.Parse(args[2:])
+		if afs.NArg() > 0 {
+			cfg.resumeID = afs.Arg(0)
+		}
+		return cfg, nil
+	}
+
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
@@ -387,7 +402,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, renderStartupBanner())
 	fmt.Fprintf(w, "Usage:\n")
 	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot> [flags]\n")
-	fmt.Fprintf(w, "  tracker setup\n\n")
+	fmt.Fprintf(w, "  tracker setup\n")
+	fmt.Fprintf(w, "  tracker audit <runID>\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
 	fmt.Fprintf(w, "  -r, --resume string       Resume a previous run by ID (e.g. 13041bbb0a38)\n")
@@ -412,6 +428,13 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 
 	if cfg.mode == modeSetup {
 		return deps.runSetup()
+	}
+
+	if cfg.mode == modeAudit {
+		if cfg.resumeID == "" {
+			return fmt.Errorf("usage: tracker audit <runID>")
+		}
+		return runAudit(cfg.workdir, cfg.resumeID)
 	}
 
 	if err := deps.loadEnv(cfg.workdir); err != nil {

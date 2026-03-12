@@ -1,0 +1,418 @@
+// ABOUTME: Tests for the audit subcommand — verifies report generation from on-disk artifacts.
+// ABOUTME: Covers success, retries, restarts, not-found, and flag parsing for audit mode.
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// makeCheckpoint creates a checkpoint.json in the given run directory.
+func makeCheckpoint(t *testing.T, runDir string, cp map[string]interface{}) {
+	t.Helper()
+	data, err := json.MarshalIndent(cp, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal checkpoint: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "checkpoint.json"), data, 0o600); err != nil {
+		t.Fatalf("write checkpoint: %v", err)
+	}
+}
+
+// makeActivity creates an activity.jsonl in the given run directory.
+func makeActivity(t *testing.T, runDir string, lines []map[string]interface{}) {
+	t.Helper()
+	var buf strings.Builder
+	for _, line := range lines {
+		data, err := json.Marshal(line)
+		if err != nil {
+			t.Fatalf("marshal activity line: %v", err)
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(buf.String()), 0o644); err != nil {
+		t.Fatalf("write activity.jsonl: %v", err)
+	}
+}
+
+// setupTestRun creates a run directory with checkpoint and activity log for testing.
+func setupTestRun(t *testing.T, runID string) (workdir string, runDir string) {
+	t.Helper()
+	workdir = t.TempDir()
+	runDir = filepath.Join(workdir, ".tracker", "runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+	return workdir, runDir
+}
+
+func TestRunAudit_Success(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "abc123def456")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "abc123def456",
+		"current_node":    "",
+		"completed_nodes": []string{"Start", "Implement", "Review"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+
+	startTime := now.Add(-3 * time.Minute)
+	makeActivity(t, runDir, []map[string]interface{}{
+		{"ts": startTime.Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "abc123def456", "message": "pipeline started"},
+		{"ts": startTime.Add(1 * time.Second).Format(time.RFC3339Nano), "type": "stage_started", "run_id": "abc123def456", "node_id": "Start", "message": "executing node \"Start\""},
+		{"ts": startTime.Add(2 * time.Second).Format(time.RFC3339Nano), "type": "stage_completed", "run_id": "abc123def456", "node_id": "Start", "message": "node \"Start\" completed"},
+		{"ts": startTime.Add(3 * time.Second).Format(time.RFC3339Nano), "type": "stage_started", "run_id": "abc123def456", "node_id": "Implement", "message": "executing node \"Implement\""},
+		{"ts": startTime.Add(2*time.Minute + 32*time.Second).Format(time.RFC3339Nano), "type": "stage_completed", "run_id": "abc123def456", "node_id": "Implement", "message": "node \"Implement\" completed"},
+		{"ts": startTime.Add(2*time.Minute + 33*time.Second).Format(time.RFC3339Nano), "type": "stage_started", "run_id": "abc123def456", "node_id": "Review", "message": "executing node \"Review\""},
+		{"ts": startTime.Add(3 * time.Minute).Format(time.RFC3339Nano), "type": "stage_completed", "run_id": "abc123def456", "node_id": "Review", "message": "node \"Review\" completed"},
+		{"ts": startTime.Add(3*time.Minute + 1*time.Second).Format(time.RFC3339Nano), "type": "pipeline_completed", "run_id": "abc123def456", "message": "pipeline completed"},
+	})
+
+	// Capture stdout.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runAudit(workdir, "abc123def456")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("runAudit returned error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	// Verify header section.
+	if !strings.Contains(output, "abc123def456") {
+		t.Fatalf("expected run ID in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "3 completed") {
+		t.Fatalf("expected '3 completed' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Restarts:  0") {
+		t.Fatalf("expected restarts count in output, got:\n%s", output)
+	}
+
+	// Verify timeline section.
+	if !strings.Contains(output, "Timeline") {
+		t.Fatalf("expected Timeline section in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "pipeline_started") {
+		t.Fatalf("expected pipeline_started in timeline, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Implement") {
+		t.Fatalf("expected Implement node in timeline, got:\n%s", output)
+	}
+
+	// Verify no retries or errors sections with content.
+	if !strings.Contains(output, "Retries") {
+		t.Fatalf("expected Retries section in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Errors") {
+		t.Fatalf("expected Errors section in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Recommendations") {
+		t.Fatalf("expected Recommendations section in output, got:\n%s", output)
+	}
+}
+
+func TestRunAudit_WithRetries(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "retry123")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "retry123",
+		"current_node":    "",
+		"completed_nodes": []string{"Start", "Implement"},
+		"retry_counts":    map[string]int{"Implement": 3, "SpecReview": 1},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+
+	startTime := now.Add(-5 * time.Minute)
+	makeActivity(t, runDir, []map[string]interface{}{
+		{"ts": startTime.Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "retry123", "message": "pipeline started"},
+		{"ts": startTime.Add(5 * time.Minute).Format(time.RFC3339Nano), "type": "pipeline_completed", "run_id": "retry123", "message": "pipeline completed"},
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runAudit(workdir, "retry123")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("runAudit returned error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	// Verify retries section shows retry counts.
+	if !strings.Contains(output, "Implement") || !strings.Contains(output, "3 retries") {
+		t.Fatalf("expected Implement with 3 retries in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "SpecReview") || !strings.Contains(output, "1 retry") {
+		t.Fatalf("expected SpecReview with 1 retry in output, got:\n%s", output)
+	}
+
+	// Verify recommendations mention retries.
+	if !strings.Contains(output, "retry_policy") {
+		t.Fatalf("expected retry_policy recommendation in output, got:\n%s", output)
+	}
+}
+
+func TestRunAudit_WithRestarts(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "restart456")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "restart456",
+		"current_node":    "",
+		"completed_nodes": []string{"Start"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   2,
+	})
+
+	startTime := now.Add(-1 * time.Minute)
+	makeActivity(t, runDir, []map[string]interface{}{
+		{"ts": startTime.Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "restart456", "message": "pipeline started"},
+		{"ts": now.Format(time.RFC3339Nano), "type": "pipeline_completed", "run_id": "restart456", "message": "pipeline completed"},
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runAudit(workdir, "restart456")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("runAudit returned error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	// Verify restarts header.
+	if !strings.Contains(output, "Restarts:  2") {
+		t.Fatalf("expected 'Restarts:  2' in output, got:\n%s", output)
+	}
+
+	// Verify restart recommendation.
+	if !strings.Contains(output, "restarted 2 time") {
+		t.Fatalf("expected restart recommendation in output, got:\n%s", output)
+	}
+}
+
+func TestRunAudit_NotFound(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, ".tracker", "runs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	err := runAudit(workdir, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent run ID")
+	}
+	if !strings.Contains(err.Error(), "no run found") {
+		t.Fatalf("expected 'no run found' error, got: %v", err)
+	}
+}
+
+func TestParseFlagsAudit(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "audit", "abc123"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.mode != modeAudit {
+		t.Fatalf("mode = %q, want %q", cfg.mode, modeAudit)
+	}
+	if cfg.resumeID != "abc123" {
+		t.Fatalf("resumeID = %q, want %q", cfg.resumeID, "abc123")
+	}
+}
+
+func TestParseFlagsAuditNoRunID(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "audit"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.mode != modeAudit {
+		t.Fatalf("mode = %q, want %q", cfg.mode, modeAudit)
+	}
+	if cfg.resumeID != "" {
+		t.Fatalf("resumeID = %q, want empty", cfg.resumeID)
+	}
+}
+
+func TestRunAudit_WithErrors(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "error789")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "error789",
+		"current_node":    "Implement",
+		"completed_nodes": []string{"Start"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+
+	startTime := now.Add(-2 * time.Minute)
+	makeActivity(t, runDir, []map[string]interface{}{
+		{"ts": startTime.Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "error789", "message": "pipeline started"},
+		{"ts": startTime.Add(30 * time.Second).Format(time.RFC3339Nano), "type": "stage_started", "run_id": "error789", "node_id": "Implement", "message": "executing node \"Implement\""},
+		{"ts": startTime.Add(60 * time.Second).Format(time.RFC3339Nano), "type": "stage_failed", "run_id": "error789", "node_id": "Implement", "message": "node failed", "error": "handler error: exit code 1"},
+		{"ts": startTime.Add(61 * time.Second).Format(time.RFC3339Nano), "type": "pipeline_failed", "run_id": "error789", "message": "pipeline failed"},
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runAudit(workdir, "error789")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("runAudit returned error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	// Verify error appears in errors section.
+	if !strings.Contains(output, "handler error: exit code 1") {
+		t.Fatalf("expected error message in output, got:\n%s", output)
+	}
+
+	// Verify failed pipeline recommendation.
+	if !strings.Contains(output, "Pipeline failed at") {
+		t.Fatalf("expected pipeline failed recommendation, got:\n%s", output)
+	}
+}
+
+func TestRunAudit_MalformedActivityLines(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "malformed123")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "malformed123",
+		"current_node":    "",
+		"completed_nodes": []string{"Start"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+
+	// Write activity with some malformed lines mixed in.
+	content := `not valid json
+{"ts":"` + now.Format(time.RFC3339Nano) + `","type":"pipeline_started","run_id":"malformed123","message":"pipeline started"}
+{broken
+{"ts":"` + now.Format(time.RFC3339Nano) + `","type":"pipeline_completed","run_id":"malformed123","message":"pipeline completed"}
+`
+	if err := os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write activity: %v", err)
+	}
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runAudit(workdir, "malformed123")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("runAudit should tolerate malformed lines, got error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	// Should still have the valid events.
+	if !strings.Contains(output, "pipeline_started") {
+		t.Fatalf("expected valid events to still appear, got:\n%s", output)
+	}
+}
+
+func TestExecuteCommandRoutesAuditMode(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "auditcmd123")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "auditcmd123",
+		"current_node":    "",
+		"completed_nodes": []string{"Start"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+
+	makeActivity(t, runDir, []map[string]interface{}{
+		{"ts": now.Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "auditcmd123"},
+		{"ts": now.Format(time.RFC3339Nano), "type": "pipeline_completed", "run_id": "auditcmd123"},
+	})
+
+	// Redirect stdout so audit output doesn't pollute test output.
+	old := os.Stdout
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := executeCommand(runConfig{
+		mode:     modeAudit,
+		workdir:  workdir,
+		resumeID: "auditcmd123",
+	}, commandDeps{})
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("executeCommand audit mode returned error: %v", err)
+	}
+}
+
+func TestExecuteCommandAuditMissingRunID(t *testing.T) {
+	err := executeCommand(runConfig{
+		mode:    modeAudit,
+		workdir: t.TempDir(),
+	}, commandDeps{})
+	if err == nil {
+		t.Fatal("expected error when audit run ID is missing")
+	}
+	if !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("expected usage error, got: %v", err)
+	}
+}
