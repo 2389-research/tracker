@@ -460,6 +460,75 @@ func TestEngineCheckpointResume(t *testing.T) {
 	}
 }
 
+func TestEngineCheckpointResumeWithFidelityDegradation(t *testing.T) {
+	g := NewGraph("fidelity_resume")
+	g.Attrs["default_fidelity"] = "summary:medium"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "step1", Shape: "box", Label: "Step 1"})
+	g.AddNode(&Node{ID: "step2", Shape: "box", Label: "Step 2"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "step1"})
+	g.AddEdge(&Edge{From: "step1", To: "step2"})
+	g.AddEdge(&Edge{From: "step2", To: "end"})
+
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "cp.json")
+
+	// Pre-create checkpoint with context that includes keys that should be
+	// dropped at summary:low (which is summary:medium degraded one level).
+	cp := &Checkpoint{
+		RunID:          "fidelity-run",
+		CurrentNode:    "step2",
+		CompletedNodes: []string{"s", "step1"},
+		RetryCounts:    map[string]int{},
+		Context: map[string]string{
+			"graph.goal":      "build a widget",
+			"outcome":         "success",
+			"last_response":   "some output",
+			"unrelated_extra": "should be dropped",
+		},
+	}
+	if err := SaveCheckpoint(cp, cpPath); err != nil {
+		t.Fatalf("save checkpoint: %v", err)
+	}
+
+	reg := newTestRegistry()
+	var capturedCtx map[string]string
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			capturedCtx = pctx.Snapshot()
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+
+	// The graph default fidelity is summary:medium, which degrades to summary:low.
+	// In summary:low mode, only graph.goal and completed_summary are kept.
+	if capturedCtx["graph.goal"] != "build a widget" {
+		t.Errorf("expected graph.goal preserved, got %q", capturedCtx["graph.goal"])
+	}
+
+	// summary:low should include a completed_summary key.
+	if _, ok := capturedCtx["completed_summary"]; !ok {
+		t.Error("expected completed_summary key in degraded context")
+	}
+
+	// unrelated_extra should be dropped.
+	if val := capturedCtx["unrelated_extra"]; val != "" {
+		t.Errorf("expected unrelated_extra to be dropped, got %q", val)
+	}
+}
+
 func TestEngineAutoCheckpointWithArtifactDir(t *testing.T) {
 	g := NewGraph("auto_cp")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})

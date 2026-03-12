@@ -18,6 +18,7 @@ type Checkpoint struct {
 	RetryCounts    map[string]int    `json:"retry_counts"`
 	Context        map[string]string `json:"context"`
 	Timestamp      time.Time         `json:"timestamp"`
+	RestartCount   int               `json:"restart_count"`
 
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.

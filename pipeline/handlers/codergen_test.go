@@ -392,6 +392,84 @@ func TestCodergenHandlerWritesTranscriptForToolOnlyRun(t *testing.T) {
 	}
 }
 
+func TestCodergenHandlerFidelityCompactMode(t *testing.T) {
+	workdir := t.TempDir()
+	client := &fakeCompleter{responseText: "done"}
+	h := NewCodergenHandler(client, workdir, WithGraphAttrs(map[string]string{}))
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "do work", "fidelity": "compact"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyGoal, "build a widget")
+	pctx.Set(pipeline.ContextKeyOutcome, "success")
+	pctx.Set(pipeline.ContextKeyLastResponse, "long prior response that should be excluded")
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+
+	// Verify prompt artifact was written with context summary prepended.
+	promptBytes, err := os.ReadFile(filepath.Join(workdir, "gen", "prompt.md"))
+	if err != nil {
+		t.Fatalf("expected prompt artifact: %v", err)
+	}
+	promptStr := string(promptBytes)
+
+	// Compact mode: should include goal and outcome but NOT last_response.
+	if !strings.Contains(promptStr, "Context Summary") {
+		t.Errorf("expected context summary header in prompt, got:\n%s", promptStr)
+	}
+	if !strings.Contains(promptStr, "build a widget") {
+		t.Errorf("expected goal in context summary, got:\n%s", promptStr)
+	}
+	if strings.Contains(promptStr, "long prior response that should be excluded") {
+		t.Errorf("compact mode should NOT include last_response in context summary")
+	}
+}
+
+func TestCodergenHandlerFidelityFullUsesStandardInjection(t *testing.T) {
+	workdir := t.TempDir()
+	client := &fakeCompleter{responseText: "done"}
+	h := NewCodergenHandler(client, workdir, WithGraphAttrs(map[string]string{}))
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "do work", "fidelity": "full"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyLastResponse, "prior output")
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+
+	// Full fidelity: should use standard InjectPipelineContext, not context summary.
+	promptBytes, err := os.ReadFile(filepath.Join(workdir, "gen", "prompt.md"))
+	if err != nil {
+		t.Fatalf("expected prompt artifact: %v", err)
+	}
+	promptStr := string(promptBytes)
+
+	if strings.Contains(promptStr, "Context Summary") {
+		t.Errorf("full fidelity should NOT have Context Summary header")
+	}
+	if !strings.Contains(promptStr, "prior output") {
+		t.Errorf("full fidelity should include prior output via standard injection")
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if !strings.Contains(s, sub) {

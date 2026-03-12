@@ -122,6 +122,25 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		pctx.Set(k, v)
 	}
 
+	// Apply fidelity-aware context compaction on resume. When resuming from a
+	// checkpoint, in-memory session state is lost, so we degrade fidelity one
+	// level and compact the restored context accordingly.
+	if cp.CurrentNode != "" && len(cp.CompletedNodes) > 0 {
+		fidelity := ResolveFidelity(
+			e.nodeOrDefault(cp.CurrentNode),
+			e.graph.Attrs,
+		)
+		degraded := DegradeFidelity(fidelity)
+		compacted := CompactContext(pctx, cp.CompletedNodes, degraded, e.artifactDir, runID)
+		// Replace pipeline context with the compacted version.
+		for k := range pctx.Snapshot() {
+			pctx.Set(k, "")
+		}
+		for k, v := range compacted {
+			pctx.Set(k, v)
+		}
+	}
+
 	// Set artifact directory so handlers can write artifacts outside the working directory.
 	if e.artifactDir != "" {
 		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
@@ -432,9 +451,54 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		trace.AddEntry(traceEntry)
 
 		// If the next node was already completed in this run (loop-back),
-		// clear its status so it re-executes instead of being skipped.
+		// trigger restart loop handling instead of just clearing one node.
 		if cp.IsCompleted(next.To) {
-			cp.ClearCompleted(next.To)
+			maxRestarts := e.maxRestartsAllowed()
+			if cp.RestartCount >= maxRestarts {
+				e.emit(PipelineEvent{
+					Type:      EventPipelineFailed,
+					Timestamp: time.Now(),
+					RunID:     runID,
+					Message:   fmt.Sprintf("max restarts (%d) exceeded", maxRestarts),
+				})
+				e.saveCheckpoint(cp, pctx, runID)
+				trace.EndTime = time.Now()
+				return &EngineResult{
+					RunID:          runID,
+					Status:         OutcomeFail,
+					CompletedNodes: cp.CompletedNodes,
+					Context:        pctx.Snapshot(),
+					Trace:          trace,
+				}, fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
+			}
+
+			cp.RestartCount++
+
+			// Determine restart target: graph attr overrides the re-entered node.
+			restartTarget := next.To
+			if rt, ok := e.graph.Attrs["restart_target"]; ok && rt != "" {
+				if _, exists := e.graph.Nodes[rt]; exists {
+					restartTarget = rt
+				}
+			}
+
+			e.emit(PipelineEvent{
+				Type:      EventLoopRestart,
+				Timestamp: time.Now(),
+				RunID:     runID,
+				NodeID:    restartTarget,
+				Message:   fmt.Sprintf("loop detected, restarting from %q (restart %d/%d)", restartTarget, cp.RestartCount, maxRestarts),
+			})
+
+			// Clear the restart target and all its downstream nodes from completed.
+			e.clearDownstream(restartTarget, cp)
+			// Reset retry counts for cleared nodes so they get fresh budgets.
+			e.clearDownstreamRetryCounts(restartTarget, cp)
+
+			cp.CurrentNode = restartTarget
+			e.saveCheckpoint(cp, pctx, runID)
+			currentNodeID = restartTarget
+			continue
 		}
 
 		currentNodeID = next.To
@@ -641,6 +705,52 @@ func (e *Engine) clearDownstream(startNode string, cp *Checkpoint) {
 	}
 }
 
+// downstreamNodes returns all node IDs reachable from startNodeID via outgoing
+// edges, NOT including startNodeID itself.
+func downstreamNodes(graph *Graph, startNodeID string) []string {
+	visited := make(map[string]bool)
+	visited[startNodeID] = true
+	queue := []string{startNodeID}
+	var result []string
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		for _, edge := range graph.OutgoingEdges(current) {
+			if !visited[edge.To] {
+				visited[edge.To] = true
+				queue = append(queue, edge.To)
+				result = append(result, edge.To)
+			}
+		}
+	}
+	return result
+}
+
+// maxRestartsAllowed returns the max restart count from graph attrs, defaulting to 5.
+func (e *Engine) maxRestartsAllowed() int {
+	if mr, ok := e.graph.Attrs["max_restarts"]; ok {
+		if n, err := strconv.Atoi(mr); err == nil {
+			return n
+		}
+	}
+	return 5
+}
+
+// clearDownstreamRetryCounts resets retry counters for all nodes downstream
+// of the given start node (inclusive). This ensures nodes get fresh retry
+// budgets after a loop restart.
+func (e *Engine) clearDownstreamRetryCounts(startNode string, cp *Checkpoint) {
+	if cp.RetryCounts == nil {
+		return
+	}
+	delete(cp.RetryCounts, startNode)
+	for _, nodeID := range downstreamNodes(e.graph, startNode) {
+		delete(cp.RetryCounts, nodeID)
+	}
+}
+
 func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, bool, bool) {
 	for _, nodeID := range cp.CompletedNodes {
 		node := e.graph.Nodes[nodeID]
@@ -667,6 +777,15 @@ func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]str
 		return "", false, true
 	}
 	return "", false, false
+}
+
+// nodeOrDefault returns the node from the graph, or a default empty node if not found.
+// Used during checkpoint resume when the node may not exist in the graph.
+func (e *Engine) nodeOrDefault(nodeID string) *Node {
+	if n, ok := e.graph.Nodes[nodeID]; ok {
+		return n
+	}
+	return &Node{ID: nodeID, Attrs: map[string]string{}}
 }
 
 // unwrapPathError extracts the underlying error from wrapped checkpoint errors

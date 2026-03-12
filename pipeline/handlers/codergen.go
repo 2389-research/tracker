@@ -23,14 +23,29 @@ type CodergenHandler struct {
 	env          exec.ExecutionEnvironment
 	workingDir   string
 	eventHandler agent.EventHandler
+	graphAttrs   map[string]string
 }
 
 // NewCodergenHandler creates a CodergenHandler that will use the given LLM client
 // and working directory for agent sessions.
-func NewCodergenHandler(client agent.Completer, workingDir string) *CodergenHandler {
-	return &CodergenHandler{
+func NewCodergenHandler(client agent.Completer, workingDir string, opts ...CodergenOption) *CodergenHandler {
+	h := &CodergenHandler{
 		client:     client,
 		workingDir: workingDir,
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// CodergenOption configures optional CodergenHandler behavior.
+type CodergenOption func(*CodergenHandler)
+
+// WithGraphAttrs passes graph-level attributes to the handler for fidelity resolution.
+func WithGraphAttrs(attrs map[string]string) CodergenOption {
+	return func(h *CodergenHandler) {
+		h.graphAttrs = attrs
 	}
 }
 
@@ -47,7 +62,20 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
 	}
 	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
-	prompt = pipeline.InjectPipelineContext(prompt, pctx)
+
+	// Resolve fidelity for this node and inject compacted context when not full.
+	fidelity := pipeline.ResolveFidelity(node, h.graphAttrs)
+	if fidelity != pipeline.FidelityFull {
+		artifactDir := h.workingDir
+		if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
+			artifactDir = dir
+		}
+		runID := ""
+		compacted := pipeline.CompactContext(pctx, nil, fidelity, artifactDir, runID)
+		prompt = prependContextSummary(prompt, compacted, fidelity)
+	} else {
+		prompt = pipeline.InjectPipelineContext(prompt, pctx)
+	}
 
 	config := h.buildConfig(node)
 
@@ -175,6 +203,29 @@ func parseAutoStatus(text string) string {
 	}
 
 	return pipeline.OutcomeSuccess
+}
+
+// prependContextSummary adds a compacted context summary section to the prompt
+// based on the fidelity level and compacted context values.
+func prependContextSummary(prompt string, compacted map[string]string, fidelity pipeline.Fidelity) string {
+	if len(compacted) == 0 {
+		return prompt
+	}
+
+	var sections []string
+	sections = append(sections, fmt.Sprintf("# Context Summary (fidelity: %s)", fidelity))
+	for key, val := range compacted {
+		if val == "" {
+			continue
+		}
+		sections = append(sections, fmt.Sprintf("## %s\n%s", key, val))
+	}
+
+	if len(sections) <= 1 {
+		return prompt
+	}
+
+	return strings.Join(sections, "\n\n") + "\n\n---\n\n" + prompt
 }
 
 // transcriptCollector preserves an ordered plain-text transcript of a session

@@ -20,6 +20,7 @@ const (
 	EventInterviewCompleted PipelineEventType = "interview_completed"
 	EventParallelStarted    PipelineEventType = "parallel_started"
 	EventParallelCompleted  PipelineEventType = "parallel_completed"
+	EventLoopRestart        PipelineEventType = "loop_restart"
 )
 
 // PipelineEvent carries data about a single pipeline lifecycle occurrence.
