@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
 
 var providerEnvKeys = map[string]struct{}{
-	"OPENAI_API_KEY":    {},
-	"ANTHROPIC_API_KEY": {},
-	"GEMINI_API_KEY":    {},
+	"OPENAI_API_KEY":     {},
+	"ANTHROPIC_API_KEY":  {},
+	"GEMINI_API_KEY":     {},
+	"GOOGLE_API_KEY":     {},
+	"OPENAI_BASE_URL":    {},
+	"ANTHROPIC_BASE_URL": {},
+	"GEMINI_BASE_URL":    {},
 }
 
 func resolveConfigEnvPath() (string, error) {
@@ -75,21 +77,12 @@ func writeEnvFile(path string, values map[string]string) error {
 		return fmt.Errorf("mkdir config dir for %s: %w", path, err)
 	}
 
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var b strings.Builder
-	for _, key := range keys {
-		b.WriteString(key)
-		b.WriteByte('=')
-		b.WriteString(values[key])
-		b.WriteByte('\n')
+	content, err := godotenv.Marshal(values)
+	if err != nil {
+		return fmt.Errorf("marshal env values: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("write env file %s: %w", path, err)
 	}
 	return nil

@@ -72,6 +72,29 @@ func TestConfigEnvMergeProviderUpdates(t *testing.T) {
 	}
 }
 
+func TestConfigEnvMergeProviderBaseURLUpdates(t *testing.T) {
+	existing := map[string]string{
+		"OPENAI_API_KEY": "my-key",
+	}
+	updates := map[string]string{
+		"OPENAI_BASE_URL":    "https://custom.openai.example.com",
+		"ANTHROPIC_BASE_URL": "https://custom.anthropic.example.com",
+		"GEMINI_BASE_URL":    "https://custom.gemini.example.com",
+	}
+
+	merged := mergeProviderEnv(existing, updates)
+
+	if merged["OPENAI_BASE_URL"] != "https://custom.openai.example.com" {
+		t.Fatalf("OPENAI_BASE_URL = %q, want %q", merged["OPENAI_BASE_URL"], "https://custom.openai.example.com")
+	}
+	if merged["ANTHROPIC_BASE_URL"] != "https://custom.anthropic.example.com" {
+		t.Fatalf("ANTHROPIC_BASE_URL = %q, want %q", merged["ANTHROPIC_BASE_URL"], "https://custom.anthropic.example.com")
+	}
+	if merged["GEMINI_BASE_URL"] != "https://custom.gemini.example.com" {
+		t.Fatalf("GEMINI_BASE_URL = %q, want %q", merged["GEMINI_BASE_URL"], "https://custom.gemini.example.com")
+	}
+}
+
 func TestConfigEnvWriteEnvFileCreatesDirectoriesAndWritesValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "tracker", ".env")
 	values := map[string]string{
@@ -84,20 +107,15 @@ func TestConfigEnvWriteEnvFileCreatesDirectoriesAndWritesValues(t *testing.T) {
 		t.Fatalf("writeEnvFile returned error: %v", err)
 	}
 
-	content, err := os.ReadFile(path)
+	// Verify round-trip: read back should produce identical values.
+	readBack, err := readEnvFile(path)
 	if err != nil {
-		t.Fatalf("read written env file: %v", err)
+		t.Fatalf("readEnvFile returned error: %v", err)
 	}
-
-	got := string(content)
-	if !containsLine(got, "OPENAI_API_KEY=openai-key") {
-		t.Fatalf("written content missing OPENAI_API_KEY: %q", got)
-	}
-	if !containsLine(got, "ANTHROPIC_API_KEY=anthropic-key") {
-		t.Fatalf("written content missing ANTHROPIC_API_KEY: %q", got)
-	}
-	if !containsLine(got, "EXTRA_FLAG=keep-me") {
-		t.Fatalf("written content missing EXTRA_FLAG: %q", got)
+	for key, want := range values {
+		if readBack[key] != want {
+			t.Fatalf("round-trip %s = %q, want %q", key, readBack[key], want)
+		}
 	}
 
 	info, err := os.Stat(path)
@@ -109,26 +127,27 @@ func TestConfigEnvWriteEnvFileCreatesDirectoriesAndWritesValues(t *testing.T) {
 	}
 }
 
-func containsLine(content, want string) bool {
-	for _, line := range splitLines(content) {
-		if line == want {
-			return true
-		}
+func TestConfigEnvWriteEnvFileRoundTripsSpecialCharacters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	values := map[string]string{
+		"KEY_WITH_HASH":  "sk-abc123#456",
+		"KEY_WITH_SPACE": "has spaces in it",
+		"KEY_WITH_QUOTE": `has"quote`,
+		"URL_WITH_HASH":  "https://example.com/api#fragment",
 	}
-	return false
-}
 
-func splitLines(content string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(content); i++ {
-		if content[i] == '\n' {
-			lines = append(lines, content[start:i])
-			start = i + 1
+	if err := writeEnvFile(path, values); err != nil {
+		t.Fatalf("writeEnvFile returned error: %v", err)
+	}
+
+	readBack, err := readEnvFile(path)
+	if err != nil {
+		t.Fatalf("readEnvFile returned error: %v", err)
+	}
+
+	for key, want := range values {
+		if readBack[key] != want {
+			t.Fatalf("round-trip %s = %q, want %q", key, readBack[key], want)
 		}
 	}
-	if start < len(content) {
-		lines = append(lines, content[start:])
-	}
-	return lines
 }
