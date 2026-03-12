@@ -3,6 +3,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -21,9 +22,12 @@ type LogEntry struct {
 	EventType string
 	NodeID    string
 	Message   string
+	ToolName  string // tool name for color-coding tool events
 	IsError   bool
 	Dim       bool
 }
+
+const defaultCollapseLines = 4
 
 // AgentLogModel is a scrollable data recorder of pipeline events and LLM activity.
 type AgentLogModel struct {
@@ -32,6 +36,20 @@ type AgentLogModel struct {
 	width    int
 	height   int
 	ready    bool
+
+	// Text/reasoning coalescing: accumulate streaming chunks into a single entry.
+	// coalesceBuf is a pointer to avoid the strings.Builder copy-after-write panic
+	// when bubbletea copies the parent AppModel by value during Update.
+	coalesceBuf    *strings.Builder
+	coalesceKind   llm.TraceKind // which kind we're accumulating (TraceText or TraceReasoning)
+	coalesceActive bool
+
+	// activeModel tracks the current provider/model so we only emit a header
+	// line when the model changes, rather than repeating it on every line.
+	activeModel string
+
+	// expanded toggles between collapsed (4-line max) and full output display.
+	expanded bool
 }
 
 // NewAgentLogModel creates an activity log model with the given viewport dimensions.
@@ -39,10 +57,11 @@ func NewAgentLogModel(width, height int) AgentLogModel {
 	vp := viewport.New(width, height)
 	vp.SetContent("")
 	return AgentLogModel{
-		viewport: vp,
-		width:    width,
-		height:   height,
-		ready:    width > 0 && height > 0,
+		viewport:    vp,
+		width:       width,
+		height:      height,
+		ready:       width > 0 && height > 0,
+		coalesceBuf: &strings.Builder{},
 	}
 }
 
@@ -67,19 +86,14 @@ func (a AgentLogModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // AppendEvent adds a pipeline event to the log.
 func (a *AgentLogModel) AppendEvent(evt pipeline.PipelineEvent) {
-	isError := evt.Err != nil
-	msg := evt.Message
-	if isError && evt.Err != nil {
-		if msg != "" {
-			msg = msg + ": " + evt.Err.Error()
-		} else {
-			msg = evt.Err.Error()
-		}
-	}
+	isError := evt.Err != nil ||
+		evt.Type == pipeline.EventPipelineFailed ||
+		evt.Type == pipeline.EventStageFailed
 
-	// Generate a readable message from event type if no message provided
-	if msg == "" {
-		msg = eventTypeToMessage(evt.Type)
+	// Always use the styled event message; append error detail if present.
+	msg := eventTypeToMessage(evt.Type)
+	if evt.Err != nil {
+		msg = msg + "\n  " + evt.Err.Error()
 	}
 
 	entry := LogEntry{
@@ -103,7 +117,63 @@ func (a *AgentLogModel) AppendLine(line string) {
 }
 
 // AppendTrace adds a formatted LLM trace event to the log.
+// Text and reasoning chunks are coalesced into a single log entry rather than
+// producing one line per streaming delta. In non-verbose mode, internal LLM
+// events (start, finish, tool prepare) are suppressed for a clean chat-like log.
 func (a *AgentLogModel) AppendTrace(evt llm.TraceEvent, verbose bool) {
+	// Coalesce text and reasoning deltas into one entry.
+	if evt.Kind == llm.TraceText || evt.Kind == llm.TraceReasoning {
+		// Emit a model header when the provider/model changes.
+		modelKey := llm.FormatModelHeader(evt.Provider, evt.Model)
+		if modelKey != "" && modelKey != a.activeModel {
+			a.resetCoalesce()
+			a.activeModel = modelKey
+			a.entries = append(a.entries, LogEntry{
+				Time:      time.Now(),
+				EventType: "model_header",
+				Message:   "[" + modelKey + "]",
+			})
+		}
+
+		if a.coalesceActive && a.coalesceKind == evt.Kind {
+			// Append to existing buffer and update last entry in-place.
+			a.coalesceBuf.WriteString(evt.Preview)
+			a.entries[len(a.entries)-1].Message = llm.FormatCoalescedLine(evt.Kind, a.coalesceBuf.String())
+			a.refreshViewport()
+			return
+		}
+		// Start a new coalesced entry.
+		a.resetCoalesce()
+		a.coalesceActive = true
+		a.coalesceKind = evt.Kind
+		a.coalesceBuf.WriteString(evt.Preview)
+		a.entries = append(a.entries, LogEntry{
+			Time:      time.Now(),
+			EventType: string(evt.Kind),
+			Message:   llm.FormatCoalescedLine(evt.Kind, a.coalesceBuf.String()),
+		})
+		a.refreshViewport()
+		return
+	}
+
+	// In non-verbose mode, suppress internal LLM plumbing events.
+	// The actual tool execution is shown via agent events (EventToolCallStart/End).
+	// Tool prepare does NOT break text coalescing — it's an LLM-internal signal.
+	if !verbose {
+		switch evt.Kind {
+		case llm.TraceRequestStart, llm.TraceToolPrepare, llm.TraceProviderRaw:
+			return
+		case llm.TraceFinish:
+			// Finalize any active coalescing but don't add a log entry.
+			a.resetCoalesce()
+			return
+		}
+	}
+
+	// In verbose mode (or for event types not filtered above), break coalescing
+	// and show the raw trace line.
+	a.resetCoalesce()
+
 	line := llm.FormatTraceLine(evt, verbose)
 	if line == "" {
 		return
@@ -118,6 +188,13 @@ func (a *AgentLogModel) AppendTrace(evt llm.TraceEvent, verbose bool) {
 	a.refreshViewport()
 }
 
+// resetCoalesce ends any active text/reasoning accumulation.
+func (a *AgentLogModel) resetCoalesce() {
+	a.coalesceActive = false
+	a.coalesceBuf.Reset()
+	a.coalesceKind = ""
+}
+
 // AppendAgentEvent adds a formatted live agent event to the log.
 func (a *AgentLogModel) AppendAgentEvent(evt agent.Event) {
 	line := agent.FormatEventLine(evt)
@@ -128,8 +205,15 @@ func (a *AgentLogModel) AppendAgentEvent(evt agent.Event) {
 	a.entries = append(a.entries, LogEntry{
 		Time:      time.Now(),
 		EventType: string(evt.Type),
+		ToolName:  evt.ToolName,
 		Message:   line,
 	})
+	a.refreshViewport()
+}
+
+// ToggleExpanded switches between collapsed (4-line max) and full output display.
+func (a *AgentLogModel) ToggleExpanded() {
+	a.expanded = !a.expanded
 	a.refreshViewport()
 }
 
@@ -155,26 +239,28 @@ func (a AgentLogModel) View() string {
 // Len returns the number of log entries.
 func (a AgentLogModel) Len() int { return len(a.entries) }
 
-// refreshViewport rebuilds the viewport content from entries and scrolls to bottom.
+// refreshViewport rebuilds the viewport content from entries.
+// Only auto-scrolls to bottom if the user hasn't scrolled up.
 func (a *AgentLogModel) refreshViewport() {
+	atBottom := a.viewport.AtBottom()
+
 	var sb strings.Builder
 	for _, entry := range a.entries {
-		sb.WriteString(formatLogEntry(entry, a.width))
+		sb.WriteString(formatLogEntry(entry, a.width, a.expanded))
 		sb.WriteString("\n")
 	}
 	a.viewport.SetContent(sb.String())
-	a.viewport.GotoBottom()
+
+	if atBottom {
+		a.viewport.GotoBottom()
+	}
 }
 
-// formatLogEntry formats a log entry in the control panel data recorder style.
-// Format: HH:MM:SS [NodeID] message
-func formatLogEntry(e LogEntry, maxWidth int) string {
+// formatLogEntry formats a log entry with chat-like styling.
+// LLM text entries show as conversation messages, tool calls as action blocks,
+// and system events as dim status lines.
+func formatLogEntry(e LogEntry, maxWidth int, expanded bool) string {
 	var sb strings.Builder
-
-	// Timestamp in dim readout style
-	ts := e.Time.Format("15:04:05")
-	sb.WriteString(dimTextStyle.Render(ts))
-	sb.WriteString(" ")
 
 	// [NodeID] as a signal label
 	if e.NodeID != "" {
@@ -183,60 +269,138 @@ func formatLogEntry(e LogEntry, maxWidth int) string {
 		sb.WriteString(" ")
 	}
 
-	// Message with status-appropriate styling
+	// Available width for message content after prefix.
+	prefixLen := 0
+	if e.NodeID != "" {
+		prefixLen += len(e.NodeID) + 3 // "[nodeID] "
+	}
+	msgWidth := maxWidth - prefixLen - 2
+	if msgWidth < 20 {
+		msgWidth = 20
+	}
+
 	msg := e.Message
-	if maxWidth > 0 {
-		// Truncate to prevent wrapping
-		prefixLen := 9 // timestamp
-		if e.NodeID != "" {
-			prefixLen += len(e.NodeID) + 3
-		}
-		maxMsg := maxWidth - prefixLen - 2
-		if maxMsg > 0 && len(msg) > maxMsg {
-			msg = msg[:maxMsg-1] + "…"
+
+	// Multi-line content (LLM text, tool output, errors, banners) gets
+	// word-wrapped. Everything else gets single-line truncated.
+	wrapContent := isLLMTextEvent(e.EventType) || isToolEndEvent(e.EventType) ||
+		e.EventType == "model_header" || e.IsError
+	if maxWidth > 0 && !wrapContent {
+		if runeLen := len([]rune(msg)); runeLen > msgWidth {
+			msg = string([]rune(msg)[:msgWidth-1]) + "…"
 		}
 	}
 
-	if e.IsError {
-		sb.WriteString(lipgloss.NewStyle().Foreground(colorRed).Render(msg))
-	} else if e.Dim {
-		sb.WriteString(dimTextStyle.Render(msg))
-	} else if isCompletionEvent(e.EventType) {
-		sb.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Render(msg))
-	} else {
-		sb.WriteString(primaryTextStyle.Render(msg))
+	// Build the styled message, applying width constraint for wrapping entries.
+	var styledMsg string
+	switch {
+	case e.IsError:
+		styledMsg = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render(msg)
+	case e.Dim:
+		styledMsg = dimTextStyle.Render(msg)
+	case e.EventType == "model_header":
+		styledMsg = lipgloss.NewStyle().Foreground(colorReadout).Bold(true).Render(msg)
+	case isLLMTextEvent(e.EventType):
+		styledMsg = lipgloss.NewStyle().Foreground(colorBrightText).Bold(true).Width(msgWidth).Render(msg)
+	case isToolStartEvent(e.EventType):
+		styledMsg = lipgloss.NewStyle().Foreground(toolColor(e.ToolName)).Render(msg)
+	case isToolEndEvent(e.EventType):
+		styledMsg = lipgloss.NewStyle().Foreground(colorDim).Width(msgWidth).Render(msg)
+	case isCompletionEvent(e.EventType):
+		styledMsg = lipgloss.NewStyle().Foreground(colorGreen).Render(msg)
+	default:
+		styledMsg = primaryTextStyle.Render(msg)
 	}
+
+	// In collapsed mode, limit multi-line content to defaultCollapseLines.
+	if !expanded && wrapContent {
+		styledMsg = collapseLines(styledMsg, defaultCollapseLines)
+	}
+
+	sb.WriteString(styledMsg)
 
 	return sb.String()
 }
 
+// collapseLines truncates rendered text to maxLines, appending a dim ellipsis
+// indicator if content was cut. Returns the original string if within limit.
+func collapseLines(rendered string, maxLines int) string {
+	lines := strings.Split(rendered, "\n")
+	if len(lines) <= maxLines {
+		return rendered
+	}
+	truncated := strings.Join(lines[:maxLines], "\n")
+	more := fmt.Sprintf("  ┄┄ +%d lines (ctrl+o to expand)", len(lines)-maxLines)
+	return truncated + "\n" + dimTextStyle.Render(more)
+}
+
+// isLLMTextEvent returns true for coalesced LLM text or reasoning entries.
+func isLLMTextEvent(eventType string) bool {
+	switch llm.TraceKind(eventType) {
+	case llm.TraceText, llm.TraceReasoning:
+		return true
+	}
+	return false
+}
+
+// isToolStartEvent returns true for tool call start entries.
+func isToolStartEvent(eventType string) bool {
+	return agent.EventType(eventType) == agent.EventToolCallStart
+}
+
+// isToolEndEvent returns true for tool call end entries.
+func isToolEndEvent(eventType string) bool {
+	return agent.EventType(eventType) == agent.EventToolCallEnd
+}
+
+// toolColor returns a distinct color for each tool category.
+func toolColor(toolName string) lipgloss.TerminalColor {
+	switch toolName {
+	case "bash":
+		return colorBash
+	case "read", "write", "edit":
+		return colorFile
+	case "grep", "glob":
+		return colorGrep
+	case "spawn_agent":
+		return colorAgent
+	case "apply_patch":
+		return colorPatch
+	default:
+		return colorAmber
+	}
+}
+
 // eventTypeToMessage converts a pipeline event type to a human-readable message.
+// 90s Akihabara arcade aesthetic — neon box-drawing, signal lamps, and vibes.
 func eventTypeToMessage(t pipeline.PipelineEventType) string {
 	switch t {
 	case pipeline.EventPipelineStarted:
-		return "Pipeline started"
+		return "▶▶▶ " + lampActive + " PIPELINE GO ━━━━━━━━━━━━━━━━━━"
 	case pipeline.EventPipelineCompleted:
-		return "Pipeline completed"
+		return "━━━━━━━━━━━ " + lampOn + " ALL CLEAR " + lampOn + " ━━━━━━━━━━━"
 	case pipeline.EventPipelineFailed:
-		return "Pipeline failed"
+		return "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+			"  " + lampError + lampError + lampError + "  PIPELINE FAILED  " + lampError + lampError + lampError + "\n" +
+			"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	case pipeline.EventStageStarted:
-		return "Starting…"
+		return "▸ " + lampActive + " spinning up"
 	case pipeline.EventStageCompleted:
-		return "Done"
+		return "▸ " + lampOn + " clear!"
 	case pipeline.EventStageFailed:
-		return "Failed"
+		return "▸ " + lampError + " fault"
 	case pipeline.EventStageRetrying:
-		return "Retrying…"
+		return "▸ " + lampOff + " retry…"
 	case pipeline.EventParallelStarted:
-		return "Parallel group started"
+		return "┣━▸ " + lampActive + " parallel go"
 	case pipeline.EventParallelCompleted:
-		return "Parallel group completed"
+		return "┗━▸ " + lampOn + " parallel clear"
 	case pipeline.EventInterviewStarted:
-		return "Awaiting input…"
+		return "┃ " + lampOff + " waiting on human…"
 	case pipeline.EventInterviewCompleted:
-		return "Input received"
+		return "┃ " + lampOn + " got it"
 	case pipeline.EventCheckpointSaved:
-		return "Checkpoint saved"
+		return "━━ " + lampOn + " saved " + lampOn + " ━━"
 	default:
 		return string(t)
 	}

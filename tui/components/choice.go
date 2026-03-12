@@ -62,13 +62,36 @@ func NewChoiceModel(prompt string, choices []string, defaultChoice string) Choic
 }
 
 // SetWidth updates the width used for rendering the prompt.
-func (m *ChoiceModel) SetWidth(w int) { m.width = w }
+func (m *ChoiceModel) SetWidth(w int) {
+	m.width = w
+	m.refreshViewport()
+}
 
 // SetHeight sets a maximum height for the component. When height > 0, the
 // prompt text is rendered inside a scrollable viewport while the choice list
 // and hint text remain fixed at the bottom. When height is 0, the component
 // renders without any height constraint (backward-compatible default).
-func (m *ChoiceModel) SetHeight(h int) { m.height = h }
+func (m *ChoiceModel) SetHeight(h int) {
+	m.height = h
+	m.refreshViewport()
+}
+
+// refreshViewport initializes the internal viewport with proper dimensions and
+// content so that PgUp/PgDown scroll events actually work. Called from SetWidth
+// and SetHeight since both affect the viewport layout.
+func (m *ChoiceModel) refreshViewport() {
+	if m.height <= 0 || m.width <= 0 {
+		return
+	}
+	footer := m.choicesAndHints()
+	footerLines := strings.Count(footer, "\n") + 1
+	vpHeight := m.height - footerLines - 1
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	m.vp = viewport.New(m.width, vpHeight)
+	m.vp.SetContent(render.Prompt(m.prompt, m.width))
+}
 
 // Init satisfies tea.Model; no initial command needed.
 func (m ChoiceModel) Init() tea.Cmd { return nil }
@@ -165,26 +188,11 @@ func (m ChoiceModel) View() string {
 		return sb.String()
 	}
 
-	// Height-constrained mode: render prompt in a viewport, choices fixed below.
-	footer := m.choicesAndHints()
-	footerLines := strings.Count(footer, "\n") + 1
-	// Reserve 1 line for the blank separator between prompt and choices
-	vpHeight := m.height - footerLines - 1
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
-
-	// Re-create viewport on each View() call (value receiver means mutations
-	// don't persist). Preserve the scroll offset from m.vp which IS persisted
-	// through Update().
-	vp := viewport.New(m.width, vpHeight)
-	vp.SetContent(render.Prompt(m.prompt, m.width))
-	vp.YOffset = m.vp.YOffset
-
+	// Height-constrained mode: render prompt in viewport, choices fixed below.
 	var sb strings.Builder
-	sb.WriteString(vp.View())
+	sb.WriteString(m.vp.View())
 	sb.WriteString("\n")
-	sb.WriteString(footer)
+	sb.WriteString(m.choicesAndHints())
 	return sb.String()
 }
 
