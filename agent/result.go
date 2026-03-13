@@ -23,6 +23,8 @@ type SessionResult struct {
 	FilesCreated       []string
 	Usage              llm.Usage
 	ContextUtilization float64
+	ToolCacheHits      int
+	ToolCacheMisses    int
 	Error              error
 }
 

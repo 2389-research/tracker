@@ -262,7 +262,9 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			break
 		}
 
-		// Execute each tool call and collect results.
+		// Execute each tool call and collect results. Tool calls within a
+		// single batch are processed sequentially so that a mutating call
+		// mid-batch correctly invalidates the cache for subsequent reads.
 		var toolResults []llm.ContentPart
 		for _, call := range toolCalls {
 			s.emit(Event{
@@ -301,7 +303,9 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			if !cacheHit {
 				toolResult = s.registry.Execute(ctx, call)
 
-				if s.cache != nil && policy == tools.CachePolicyMutating {
+				// Invalidate cache on mutating tools or unknown tools (safe
+				// default: an unclassified tool may have side effects).
+				if s.cache != nil && policy != tools.CachePolicyCacheable {
 					s.cache.invalidateAll()
 				}
 
@@ -339,6 +343,10 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	}
 
 	result.ContextUtilization = tracker.Utilization()
+	if s.cache != nil {
+		result.ToolCacheHits = s.cache.hits
+		result.ToolCacheMisses = s.cache.misses
+	}
 	result.Duration = time.Since(start)
 	return result, nil
 }

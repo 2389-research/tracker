@@ -1,6 +1,9 @@
-// ABOUTME: Per-session cache for tool results, keyed on (tool name, arguments JSON).
+// ABOUTME: Per-session cache for tool results, keyed on (tool name, canonicalized arguments JSON).
 // ABOUTME: Supports store, get, invalidateAll, and tracks hit/miss stats.
 package agent
+
+import "bytes"
+import "encoding/json"
 
 type cacheKey struct {
 	toolName string
@@ -19,8 +22,18 @@ func newToolCache() *toolCache {
 	}
 }
 
+// compactJSON removes insignificant whitespace from JSON so that
+// semantically identical arguments match the same cache key.
+func compactJSON(raw string) string {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, []byte(raw)); err != nil {
+		return raw
+	}
+	return buf.String()
+}
+
 func (c *toolCache) get(toolName, argsJSON string) (string, bool) {
-	key := cacheKey{toolName: toolName, argsJSON: argsJSON}
+	key := cacheKey{toolName: toolName, argsJSON: compactJSON(argsJSON)}
 	if result, ok := c.results[key]; ok {
 		c.hits++
 		return result, true
@@ -30,7 +43,7 @@ func (c *toolCache) get(toolName, argsJSON string) (string, bool) {
 }
 
 func (c *toolCache) store(toolName, argsJSON, result string) {
-	key := cacheKey{toolName: toolName, argsJSON: argsJSON}
+	key := cacheKey{toolName: toolName, argsJSON: compactJSON(argsJSON)}
 	c.results[key] = result
 }
 

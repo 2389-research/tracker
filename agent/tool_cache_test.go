@@ -63,6 +63,20 @@ func TestToolCache_InvalidateAll(t *testing.T) {
 	}
 }
 
+func TestToolCache_JSONWhitespaceNormalized(t *testing.T) {
+	c := newToolCache()
+	c.store("read", `{"path":"main.go"}`, "file contents")
+
+	// Same JSON with different whitespace should be a hit.
+	result, hit := c.get("read", `{ "path" : "main.go" }`)
+	if !hit {
+		t.Fatal("expected cache hit with different whitespace")
+	}
+	if result != "file contents" {
+		t.Errorf("expected 'file contents', got %q", result)
+	}
+}
+
 func TestToolCache_StatsPreservedAfterInvalidation(t *testing.T) {
 	c := newToolCache()
 	c.store("read", `{"path":"a.go"}`, "a")

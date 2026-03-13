@@ -815,3 +815,77 @@ func TestSession_BatchToolCallsWithMidBatchInvalidation(t *testing.T) {
 		t.Errorf("expected 2 read executions (mid-batch invalidation), got %d", readCount)
 	}
 }
+
+func TestSession_UnknownToolInvalidatesCache(t *testing.T) {
+	// An unclassified tool (CachePolicyNone) should invalidate the cache
+	// as a safe default, since it may have side effects.
+	callCount := 0
+	countingTool := &countingReadTool{count: &callCount}
+	unknownTool := &stubTool{name: "custom_tool", output: "ok"}
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_2",
+							Name:      "custom_tool",
+							Arguments: json.RawMessage(`{}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_3",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = true
+	cfg.MaxTurns = 10
+	sess := mustNewSession(t, client, cfg, WithTools(countingTool, unknownTool))
+
+	_, err := sess.Run(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// read should execute twice: unknown tool invalidates cache as safe default.
+	if callCount != 2 {
+		t.Errorf("expected read to execute twice (unknown tool invalidated cache), got %d", callCount)
+	}
+}
