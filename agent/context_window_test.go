@@ -1,4 +1,4 @@
-// ABOUTME: Tests for context window tracking including token accumulation, utilization, and warning emission.
+// ABOUTME: Tests for context window tracking using latest input tokens for utilization calculation.
 // ABOUTME: Covers unit tests for ContextWindowTracker and integration tests for session-level warning events.
 package agent
 
@@ -14,30 +14,35 @@ func TestContextWindowTracker_Update(t *testing.T) {
 	tracker := NewContextWindowTracker(200000, 0.8)
 
 	tracker.Update(llm.Usage{InputTokens: 100, OutputTokens: 50})
-	if tracker.CurrentTokens != 150 {
-		t.Errorf("expected 150 tokens after first update, got %d", tracker.CurrentTokens)
+	expectedUtil := 100.0 / 200000.0
+	if tracker.Utilization() != expectedUtil {
+		t.Errorf("expected utilization %f after first update, got %f", expectedUtil, tracker.Utilization())
 	}
 
+	// Second update: InputTokens represents the full context size for that turn,
+	// so utilization should reflect only the latest input tokens.
 	tracker.Update(llm.Usage{InputTokens: 200, OutputTokens: 100})
-	if tracker.CurrentTokens != 450 {
-		t.Errorf("expected 450 tokens after second update, got %d", tracker.CurrentTokens)
+	expectedUtil = 200.0 / 200000.0
+	if tracker.Utilization() != expectedUtil {
+		t.Errorf("expected utilization %f after second update, got %f", expectedUtil, tracker.Utilization())
 	}
 }
 
 func TestContextWindowTracker_Utilization(t *testing.T) {
 	tracker := NewContextWindowTracker(1000, 0.8)
 
+	// Utilization is based on latest InputTokens only, not InputTokens+OutputTokens.
 	tracker.Update(llm.Usage{InputTokens: 300, OutputTokens: 200})
 	util := tracker.Utilization()
-	if util != 0.5 {
-		t.Errorf("expected utilization 0.5, got %f", util)
+	if util != 0.3 {
+		t.Errorf("expected utilization 0.3, got %f", util)
 	}
 }
 
 func TestContextWindowTracker_ShouldWarn(t *testing.T) {
 	t.Run("below threshold", func(t *testing.T) {
 		tracker := NewContextWindowTracker(1000, 0.8)
-		tracker.Update(llm.Usage{InputTokens: 300, OutputTokens: 200})
+		tracker.Update(llm.Usage{InputTokens: 500, OutputTokens: 200})
 		if tracker.ShouldWarn() {
 			t.Error("should not warn when utilization (0.5) is below threshold (0.8)")
 		}
@@ -45,7 +50,7 @@ func TestContextWindowTracker_ShouldWarn(t *testing.T) {
 
 	t.Run("at threshold", func(t *testing.T) {
 		tracker := NewContextWindowTracker(1000, 0.8)
-		tracker.Update(llm.Usage{InputTokens: 500, OutputTokens: 300})
+		tracker.Update(llm.Usage{InputTokens: 800, OutputTokens: 300})
 		if !tracker.ShouldWarn() {
 			t.Error("should warn when utilization (0.8) equals threshold (0.8)")
 		}
@@ -53,7 +58,7 @@ func TestContextWindowTracker_ShouldWarn(t *testing.T) {
 
 	t.Run("above threshold", func(t *testing.T) {
 		tracker := NewContextWindowTracker(1000, 0.8)
-		tracker.Update(llm.Usage{InputTokens: 600, OutputTokens: 300})
+		tracker.Update(llm.Usage{InputTokens: 900, OutputTokens: 300})
 		if !tracker.ShouldWarn() {
 			t.Error("should warn when utilization (0.9) is above threshold (0.8)")
 		}
@@ -62,7 +67,7 @@ func TestContextWindowTracker_ShouldWarn(t *testing.T) {
 
 func TestContextWindowTracker_WarnOnlyOnce(t *testing.T) {
 	tracker := NewContextWindowTracker(1000, 0.8)
-	tracker.Update(llm.Usage{InputTokens: 600, OutputTokens: 300})
+	tracker.Update(llm.Usage{InputTokens: 900, OutputTokens: 100})
 
 	if !tracker.ShouldWarn() {
 		t.Fatal("expected first ShouldWarn to return true")
@@ -73,8 +78,8 @@ func TestContextWindowTracker_WarnOnlyOnce(t *testing.T) {
 		t.Error("expected ShouldWarn to return false after MarkWarned")
 	}
 
-	// Even adding more tokens should not trigger another warning.
-	tracker.Update(llm.Usage{InputTokens: 50, OutputTokens: 50})
+	// Even with continued high utilization, warning should not re-trigger.
+	tracker.Update(llm.Usage{InputTokens: 950, OutputTokens: 50})
 	if tracker.ShouldWarn() {
 		t.Error("expected ShouldWarn to remain false after MarkWarned")
 	}
@@ -83,9 +88,6 @@ func TestContextWindowTracker_WarnOnlyOnce(t *testing.T) {
 func TestContextWindowTracker_ZeroTokens(t *testing.T) {
 	tracker := NewContextWindowTracker(200000, 0.8)
 
-	if tracker.CurrentTokens != 0 {
-		t.Errorf("expected 0 initial tokens, got %d", tracker.CurrentTokens)
-	}
 	if tracker.Utilization() != 0.0 {
 		t.Errorf("expected 0.0 initial utilization, got %f", tracker.Utilization())
 	}
@@ -99,8 +101,8 @@ func TestContextWindowTracker_ZeroTokens(t *testing.T) {
 
 func TestContextWindowSession_WarningEmitted(t *testing.T) {
 	// Set up a small context window (1000 tokens) so the mock responses cross the threshold.
-	// First response: 600 tokens (60% utilization) - no warning.
-	// Second response (after tool call): 500 tokens (110% cumulative) - warning emitted.
+	// First response: InputTokens 400 (40% utilization) - no warning.
+	// Second response (after tool call): InputTokens 850 (85% utilization) - warning emitted.
 	toolCallResp := &llm.Response{
 		Message: llm.Message{
 			Role: llm.RoleAssistant,
@@ -122,7 +124,7 @@ func TestContextWindowSession_WarningEmitted(t *testing.T) {
 	textResp := &llm.Response{
 		Message:      llm.AssistantMessage("Done."),
 		FinishReason: llm.FinishReason{Reason: "stop"},
-		Usage:        llm.Usage{InputTokens: 300, OutputTokens: 200, TotalTokens: 500},
+		Usage:        llm.Usage{InputTokens: 850, OutputTokens: 150, TotalTokens: 1000},
 	}
 
 	client := &mockCompleter{
@@ -190,7 +192,8 @@ func TestContextWindowSession_UtilizationInResult(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedUtil := 75.0 / 1000.0
+	// Utilization is based on latest InputTokens only.
+	expectedUtil := 50.0 / 1000.0
 	if result.ContextUtilization != expectedUtil {
 		t.Errorf("expected ContextUtilization %f, got %f", expectedUtil, result.ContextUtilization)
 	}
