@@ -190,6 +190,29 @@ func TestValidateNodeAttributes_CacheToolResults_Invalid(t *testing.T) {
 	}
 }
 
+func TestValidateNodeAttributes_CacheToolResults_GraphLevel_Invalid(t *testing.T) {
+	g := NewGraph("test")
+	g.Attrs["cache_tool_results"] = "banana"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "A", Shape: "box"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "e"})
+
+	reg := NewHandlerRegistry()
+	reg.Register(&semanticStubHandler{name: "start"})
+	reg.Register(&semanticStubHandler{name: "exit"})
+	reg.Register(&semanticStubHandler{name: "codergen"})
+
+	err := ValidateSemantic(g, reg)
+	if err == nil {
+		t.Error("graph-level cache_tool_results='banana' should be invalid")
+	}
+	if err != nil && !strings.Contains(err.Error(), "cache_tool_results") {
+		t.Errorf("error should mention cache_tool_results, got: %v", err)
+	}
+}
+
 func TestValidateSemantic_MixedErrors(t *testing.T) {
 	g := NewGraph("test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})

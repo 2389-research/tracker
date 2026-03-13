@@ -502,6 +502,76 @@ func TestSession_ToolCacheHit(t *testing.T) {
 	}
 }
 
+func TestSession_ToolCacheHitEmitsEvent(t *testing.T) {
+	callCount := 0
+	countingTool := &countingReadTool{count: &callCount}
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_2",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	var events []Event
+	handler := EventHandlerFunc(func(evt Event) {
+		events = append(events, evt)
+	})
+
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = true
+	cfg.MaxTurns = 10
+	sess := mustNewSession(t, client, cfg, WithTools(countingTool), WithEventHandler(handler))
+
+	_, err := sess.Run(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cacheHitCount := 0
+	for _, e := range events {
+		if e.Type == EventToolCacheHit {
+			cacheHitCount++
+			if e.ToolName != "read" {
+				t.Errorf("expected cache hit for 'read', got %q", e.ToolName)
+			}
+		}
+	}
+	if cacheHitCount != 1 {
+		t.Errorf("expected 1 EventToolCacheHit, got %d", cacheHitCount)
+	}
+}
+
 func TestSession_CacheInvalidatedByMutatingTool(t *testing.T) {
 	callCount := 0
 	countingTool := &countingReadTool{count: &callCount}

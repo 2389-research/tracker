@@ -139,9 +139,16 @@ func checkClauseSyntax(clause string) error {
 	return nil
 }
 
-// validateNodeAttributes checks that well-known node attributes have valid
-// types. Currently validates max_retries as a positive integer.
+// validateNodeAttributes checks that well-known node and graph attributes have
+// valid types.
 func validateNodeAttributes(g *Graph, ve *ValidationError) {
+	// Validate graph-level attributes.
+	if v, ok := g.Attrs["cache_tool_results"]; ok {
+		if v != "true" && v != "false" {
+			ve.add(fmt.Sprintf("graph has invalid cache_tool_results %q: must be \"true\" or \"false\"", v))
+		}
+	}
+
 	for _, node := range g.Nodes {
 		if mr, ok := node.Attrs["max_retries"]; ok {
 			n, err := strconv.Atoi(mr)
