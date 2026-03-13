@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/2389-research/tracker/agent/tools"
@@ -394,5 +395,353 @@ func assertContainsInOrder(t *testing.T, got []EventType, want ...EventType) {
 	}
 	if idx != len(want) {
 		t.Fatalf("got events %v, want subsequence %v", got, want)
+	}
+}
+
+// countingReadTool tracks how many times Execute is called.
+type countingReadTool struct {
+	count *int
+}
+
+func (t *countingReadTool) Name() string               { return "read" }
+func (t *countingReadTool) Description() string         { return "counting read" }
+func (t *countingReadTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (t *countingReadTool) CachePolicy() tools.CachePolicy {
+	return tools.CachePolicyCacheable
+}
+func (t *countingReadTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	*t.count++
+	return "file contents", nil
+}
+
+// noopMutatingTool is a mutating tool that does nothing.
+type noopMutatingTool struct{}
+
+func (t *noopMutatingTool) Name() string               { return "noop_write" }
+func (t *noopMutatingTool) Description() string         { return "mutating noop" }
+func (t *noopMutatingTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (t *noopMutatingTool) CachePolicy() tools.CachePolicy {
+	return tools.CachePolicyMutating
+}
+func (t *noopMutatingTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	return "wrote", nil
+}
+
+// failOnceReadTool fails on first call, succeeds on subsequent calls.
+type failOnceReadTool struct {
+	count *int
+}
+
+func (t *failOnceReadTool) Name() string               { return "read" }
+func (t *failOnceReadTool) Description() string         { return "fail-once read" }
+func (t *failOnceReadTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (t *failOnceReadTool) CachePolicy() tools.CachePolicy {
+	return tools.CachePolicyCacheable
+}
+func (t *failOnceReadTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	*t.count++
+	if *t.count == 1 {
+		return "", fmt.Errorf("file not found")
+	}
+	return "file contents", nil
+}
+
+func TestSession_ToolCacheHit(t *testing.T) {
+	callCount := 0
+	countingTool := &countingReadTool{count: &callCount}
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_2",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = true
+	cfg.MaxTurns = 10
+	sess := mustNewSession(t, client, cfg, WithTools(countingTool))
+
+	_, err := sess.Run(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected read to execute once (second call cached), got %d", callCount)
+	}
+}
+
+func TestSession_CacheInvalidatedByMutatingTool(t *testing.T) {
+	callCount := 0
+	countingTool := &countingReadTool{count: &callCount}
+	writeTool := &noopMutatingTool{}
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_2",
+							Name:      "noop_write",
+							Arguments: json.RawMessage(`{}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_3",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = true
+	cfg.MaxTurns = 10
+	sess := mustNewSession(t, client, cfg, WithTools(countingTool, writeTool))
+
+	_, err := sess.Run(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected read to execute twice (invalidated by write), got %d", callCount)
+	}
+}
+
+func TestSession_NoCacheWhenDisabled(t *testing.T) {
+	callCount := 0
+	countingTool := &countingReadTool{count: &callCount}
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_2",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = false
+	cfg.MaxTurns = 10
+	sess := mustNewSession(t, client, cfg, WithTools(countingTool))
+
+	_, err := sess.Run(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected read to execute twice (no cache), got %d", callCount)
+	}
+}
+
+func TestSession_CacheNotStoredOnError(t *testing.T) {
+	callCount := 0
+	failOnceTool := &failOnceReadTool{count: &callCount}
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_2",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"main.go"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = true
+	cfg.MaxTurns = 10
+	sess := mustNewSession(t, client, cfg, WithTools(failOnceTool))
+
+	_, err := sess.Run(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected 2 executions (error result not cached), got %d", callCount)
+	}
+}
+
+func TestSession_BatchToolCallsWithMidBatchInvalidation(t *testing.T) {
+	readCount := 0
+	countingTool := &countingReadTool{count: &readCount}
+	writeTool := &noopMutatingTool{}
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{
+							Kind: llm.KindToolCall,
+							ToolCall: &llm.ToolCallData{
+								ID:        "call_1",
+								Name:      "read",
+								Arguments: json.RawMessage(`{"path":"main.go"}`),
+							},
+						},
+						{
+							Kind: llm.KindToolCall,
+							ToolCall: &llm.ToolCallData{
+								ID:        "call_2",
+								Name:      "noop_write",
+								Arguments: json.RawMessage(`{}`),
+							},
+						},
+						{
+							Kind: llm.KindToolCall,
+							ToolCall: &llm.ToolCallData{
+								ID:        "call_3",
+								Name:      "read",
+								Arguments: json.RawMessage(`{"path":"main.go"}`),
+							},
+						},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = true
+	cfg.MaxTurns = 10
+	sess := mustNewSession(t, client, cfg, WithTools(countingTool, writeTool))
+
+	_, err := sess.Run(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if readCount != 2 {
+		t.Errorf("expected 2 read executions (mid-batch invalidation), got %d", readCount)
 	}
 }

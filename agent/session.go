@@ -66,6 +66,7 @@ type Session struct {
 	messages      []llm.Message
 	id            string
 	ran           bool
+	cache         *toolCache
 }
 
 // ID returns the session's unique identifier.
@@ -103,6 +104,11 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 				s.registry.Register(t)
 			}
 		}
+	}
+
+	// Initialize tool result cache if enabled.
+	if s.config.CacheToolResults {
+		s.cache = newToolCache()
 	}
 
 	// Register spawn_agent tool if a session runner is provided.
@@ -266,7 +272,44 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 				ToolInput: string(call.Arguments),
 			})
 
-			toolResult := s.registry.Execute(ctx, call)
+			tool := s.registry.Get(call.Name)
+			policy := tools.CachePolicyNone
+			if tool != nil {
+				policy = tools.GetCachePolicy(tool)
+			}
+
+			var toolResult llm.ToolResultData
+			cacheHit := false
+			if s.cache != nil && policy == tools.CachePolicyCacheable {
+				if cached, hit := s.cache.get(call.Name, string(call.Arguments)); hit {
+					toolResult = llm.ToolResultData{
+						ToolCallID: call.ID,
+						Name:       call.Name,
+						Content:    cached,
+						IsError:    false,
+					}
+					cacheHit = true
+					s.emit(Event{
+						Type:      EventToolCacheHit,
+						SessionID: s.id,
+						ToolName:  call.Name,
+						ToolInput: string(call.Arguments),
+					})
+				}
+			}
+
+			if !cacheHit {
+				toolResult = s.registry.Execute(ctx, call)
+
+				if s.cache != nil && policy == tools.CachePolicyMutating {
+					s.cache.invalidateAll()
+				}
+
+				if s.cache != nil && policy == tools.CachePolicyCacheable && !toolResult.IsError {
+					s.cache.store(call.Name, string(call.Arguments), toolResult.Content)
+				}
+			}
+
 			result.ToolCalls[call.Name]++
 
 			s.emit(Event{
