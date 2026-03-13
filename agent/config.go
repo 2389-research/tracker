@@ -19,6 +19,7 @@ type SessionConfig struct {
 	SystemPrompt                  string
 	Model                         string
 	Provider                      string
+	CacheToolResults              bool
 }
 
 const (

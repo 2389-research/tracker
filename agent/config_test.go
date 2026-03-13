@@ -59,3 +59,22 @@ func TestConfigValidation(t *testing.T) {
 		t.Error("expected error when MaxCommandTimeout < CommandTimeout")
 	}
 }
+
+func TestDefaultConfig_CacheToolResultsIsFalse(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.CacheToolResults {
+		t.Fatal("CacheToolResults should default to false")
+	}
+}
+
+func TestValidate_CacheToolResultsAcceptsBothValues(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.CacheToolResults = true
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("CacheToolResults=true should be valid: %v", err)
+	}
+	cfg.CacheToolResults = false
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("CacheToolResults=false should be valid: %v", err)
+	}
+}
