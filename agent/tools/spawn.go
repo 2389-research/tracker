@@ -70,3 +70,6 @@ func (t *SpawnAgentTool) Execute(ctx context.Context, input json.RawMessage) (st
 
 	return t.runner.RunChild(ctx, params.Task, params.SystemPrompt, params.MaxTurns)
 }
+
+// CachePolicy declares that spawn_agent is mutating and invalidates caches.
+func (t *SpawnAgentTool) CachePolicy() CachePolicy { return CachePolicyMutating }

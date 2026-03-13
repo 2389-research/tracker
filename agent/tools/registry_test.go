@@ -150,6 +150,22 @@ func TestBuiltinTools_CachePolicy(t *testing.T) {
 	}
 }
 
+func TestBuiltinTools_MutatingPolicy(t *testing.T) {
+	mutatingTools := []Tool{
+		&BashTool{},
+		&WriteTool{},
+		&EditTool{},
+		&ApplyPatchTool{},
+		&SpawnAgentTool{},
+	}
+	for _, tool := range mutatingTools {
+		policy := GetCachePolicy(tool)
+		if policy != CachePolicyMutating {
+			t.Errorf("%s: expected CachePolicyMutating, got %d", tool.Name(), policy)
+		}
+	}
+}
+
 func TestRegistryUsesSpecDefaultOutputLimits(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&stubTool{name: "read", result: strings.Repeat("r", 40000)})

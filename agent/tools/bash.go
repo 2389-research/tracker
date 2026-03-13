@@ -102,3 +102,6 @@ func (t *BashTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 	return b.String(), nil
 }
+
+// CachePolicy declares that bash execution is mutating and invalidates caches.
+func (t *BashTool) CachePolicy() CachePolicy { return CachePolicyMutating }

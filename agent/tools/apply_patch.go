@@ -293,3 +293,6 @@ func safePatchPath(root, rel string) (string, error) {
 	}
 	return abs, nil
 }
+
+// CachePolicy declares that apply_patch is mutating and invalidates caches.
+func (t *ApplyPatchTool) CachePolicy() CachePolicy { return CachePolicyMutating }

@@ -61,3 +61,6 @@ func (t *WriteTool) Execute(ctx context.Context, input json.RawMessage) (string,
 
 	return fmt.Sprintf("wrote %d bytes to %s", len(params.Content), params.Path), nil
 }
+
+// CachePolicy declares that write is mutating and invalidates caches.
+func (t *WriteTool) CachePolicy() CachePolicy { return CachePolicyMutating }

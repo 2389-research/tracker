@@ -102,3 +102,6 @@ func (t *EditTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 	return fmt.Sprintf("edited %s", params.Path), nil
 }
+
+// CachePolicy declares that edit is mutating and invalidates caches.
+func (t *EditTool) CachePolicy() CachePolicy { return CachePolicyMutating }
