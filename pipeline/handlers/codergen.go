@@ -177,6 +177,13 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		}
 	}
 
+	if v, ok := h.graphAttrs["cache_tool_results"]; ok && v == "true" {
+		config.CacheToolResults = true
+	}
+	if v, ok := node.Attrs["cache_tool_results"]; ok {
+		config.CacheToolResults = (v == "true")
+	}
+
 	return config
 }
 

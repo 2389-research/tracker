@@ -470,6 +470,46 @@ func TestCodergenHandlerFidelityFullUsesStandardInjection(t *testing.T) {
 	}
 }
 
+func TestBuildConfig_CacheToolResults_FromGraphAttrs(t *testing.T) {
+	h := &CodergenHandler{
+		graphAttrs: map[string]string{"cache_tool_results": "true"},
+	}
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{},
+	}
+	config := h.buildConfig(node)
+	if !config.CacheToolResults {
+		t.Error("expected CacheToolResults=true from graph attrs")
+	}
+}
+
+func TestBuildConfig_CacheToolResults_NodeOverridesGraph(t *testing.T) {
+	h := &CodergenHandler{
+		graphAttrs: map[string]string{"cache_tool_results": "true"},
+	}
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"cache_tool_results": "false"},
+	}
+	config := h.buildConfig(node)
+	if config.CacheToolResults {
+		t.Error("expected CacheToolResults=false (node override)")
+	}
+}
+
+func TestBuildConfig_CacheToolResults_DefaultFalse(t *testing.T) {
+	h := &CodergenHandler{}
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{},
+	}
+	config := h.buildConfig(node)
+	if config.CacheToolResults {
+		t.Error("expected CacheToolResults=false by default")
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if !strings.Contains(s, sub) {
