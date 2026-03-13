@@ -51,3 +51,6 @@ func (t *ReadTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 	}
 	return t.env.ReadFile(ctx, params.Path)
 }
+
+// CachePolicy declares that read results are cacheable for identical inputs.
+func (t *ReadTool) CachePolicy() CachePolicy { return CachePolicyCacheable }

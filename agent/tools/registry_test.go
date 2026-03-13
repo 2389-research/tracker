@@ -136,6 +136,20 @@ type cacheableMockTool struct{ mockTool }
 
 func (c cacheableMockTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
 
+func TestBuiltinTools_CachePolicy(t *testing.T) {
+	cacheableTools := []Tool{
+		&ReadTool{},
+		&GlobTool{},
+		&GrepSearchTool{},
+	}
+	for _, tool := range cacheableTools {
+		policy := GetCachePolicy(tool)
+		if policy != CachePolicyCacheable {
+			t.Errorf("%s: expected CachePolicyCacheable, got %d", tool.Name(), policy)
+		}
+	}
+}
+
 func TestRegistryUsesSpecDefaultOutputLimits(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&stubTool{name: "read", result: strings.Repeat("r", 40000)})

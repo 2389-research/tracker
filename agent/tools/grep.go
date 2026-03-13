@@ -214,3 +214,6 @@ func isBinaryExtension(name string) bool {
 	}
 	return binaryExts[ext]
 }
+
+// CachePolicy declares that grep results are cacheable for identical inputs.
+func (t *GrepSearchTool) CachePolicy() CachePolicy { return CachePolicyCacheable }

@@ -62,3 +62,6 @@ func (t *GlobTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 	return strings.Join(matches, "\n"), nil
 }
+
+// CachePolicy declares that glob results are cacheable for identical inputs.
+func (t *GlobTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
