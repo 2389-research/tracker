@@ -28,6 +28,7 @@ const (
 	EventLLMToolPrepare       EventType = "llm_tool_prepare"
 	EventLLMFinish            EventType = "llm_finish"
 	EventLLMProviderRaw       EventType = "llm_provider_raw"
+	EventToolCacheHit         EventType = "tool_cache_hit"
 )
 
 // Event carries data about something that happened during an agent session.
