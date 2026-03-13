@@ -140,6 +140,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	s.emit(Event{Type: EventSessionStart, SessionID: s.id})
 	defer func() {
+		// Finalize cache stats on every exit path.
+		if s.cache != nil {
+			result.ToolCacheHits = s.cache.hits
+			result.ToolCacheMisses = s.cache.misses
+		}
 		s.emit(Event{Type: EventSessionEnd, SessionID: s.id})
 	}()
 
@@ -240,10 +245,12 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 		// Compute tool call signature for loop detection.
 		// Include tool arguments so that different bash commands don't
-		// count as the same repeated call.
+		// count as the same repeated call. Arguments are compacted so
+		// that whitespace-only differences match (consistent with the
+		// tool cache key normalization).
 		toolSigs := make([]string, len(toolCalls))
 		for i, call := range toolCalls {
-			toolSigs[i] = call.Name + ":" + string(call.Arguments)
+			toolSigs[i] = call.Name + ":" + compactJSON(string(call.Arguments))
 		}
 		signature := strings.Join(toolSigs, ",")
 
@@ -343,10 +350,6 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	}
 
 	result.ContextUtilization = tracker.Utilization()
-	if s.cache != nil {
-		result.ToolCacheHits = s.cache.hits
-		result.ToolCacheMisses = s.cache.misses
-	}
 	result.Duration = time.Since(start)
 	return result, nil
 }

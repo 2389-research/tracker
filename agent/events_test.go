@@ -16,6 +16,15 @@ func TestEventTypes(t *testing.T) {
 		EventToolCallEnd,
 		EventTextDelta,
 		EventError,
+		EventContextWindowWarning,
+		EventSteeringInjected,
+		EventLLMRequestStart,
+		EventLLMReasoning,
+		EventLLMText,
+		EventLLMToolPrepare,
+		EventLLMFinish,
+		EventLLMProviderRaw,
+		EventToolCacheHit,
 	}
 	seen := make(map[EventType]bool)
 	for _, et := range types {

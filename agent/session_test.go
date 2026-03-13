@@ -570,6 +570,20 @@ func TestSession_ToolCacheHitEmitsEvent(t *testing.T) {
 	if cacheHitCount != 1 {
 		t.Errorf("expected 1 EventToolCacheHit, got %d", cacheHitCount)
 	}
+
+	// Verify event ordering: for the cached call, the sequence must be
+	// tool_call_start -> tool_cache_hit -> tool_call_end.
+	var eventTypes []EventType
+	for _, e := range events {
+		eventTypes = append(eventTypes, e.Type)
+	}
+	assertContainsInOrder(t, eventTypes,
+		EventToolCallStart,  // first read (real execution)
+		EventToolCallEnd,
+		EventToolCallStart,  // second read (cache hit)
+		EventToolCacheHit,
+		EventToolCallEnd,
+	)
 }
 
 func TestSession_CacheInvalidatedByMutatingTool(t *testing.T) {
