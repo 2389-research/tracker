@@ -199,6 +199,44 @@ func TestContextWindowSession_UtilizationInResult(t *testing.T) {
 	}
 }
 
+func TestSessionConfig_CompactionValidation(t *testing.T) {
+	t.Run("valid compaction auto", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.ContextCompaction = CompactionAuto
+		cfg.CompactionThreshold = 0.6
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("expected valid config: %v", err)
+		}
+	})
+
+	t.Run("invalid compaction threshold zero", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.ContextCompaction = CompactionAuto
+		cfg.CompactionThreshold = 0
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for CompactionThreshold = 0 when compaction is auto")
+		}
+	})
+
+	t.Run("invalid compaction threshold above one", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.ContextCompaction = CompactionAuto
+		cfg.CompactionThreshold = 1.1
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for CompactionThreshold > 1.0")
+		}
+	})
+
+	t.Run("none mode skips threshold validation", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.ContextCompaction = CompactionNone
+		cfg.CompactionThreshold = 0
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("CompactionNone should not validate threshold: %v", err)
+		}
+	})
+}
+
 func TestSessionConfig_ContextWindowValidation(t *testing.T) {
 	t.Run("valid defaults", func(t *testing.T) {
 		cfg := DefaultConfig()

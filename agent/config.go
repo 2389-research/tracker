@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+type CompactionMode string
+
+const (
+	CompactionNone CompactionMode = "none"
+	CompactionAuto CompactionMode = "auto"
+)
+
 type SessionConfig struct {
 	MaxTurns                      int
 	CommandTimeout                time.Duration
@@ -19,7 +26,9 @@ type SessionConfig struct {
 	SystemPrompt                  string
 	Model                         string
 	Provider                      string
-	CacheToolResults              bool
+	CacheToolResults    bool
+	ContextCompaction   CompactionMode
+	CompactionThreshold float64
 }
 
 const (
@@ -38,6 +47,7 @@ func DefaultConfig() SessionConfig {
 		WorkingDir:                    ".",
 		Model:                         DefaultModel,
 		Provider:                      DefaultProvider,
+		ContextCompaction:             CompactionNone,
 	}
 }
 
@@ -62,6 +72,11 @@ func (c SessionConfig) Validate() error {
 	}
 	if c.ContextWindowWarningThreshold <= 0 || c.ContextWindowWarningThreshold > 1.0 {
 		return fmt.Errorf("ContextWindowWarningThreshold must be > 0 and <= 1.0, got %f", c.ContextWindowWarningThreshold)
+	}
+	if c.ContextCompaction == CompactionAuto {
+		if c.CompactionThreshold <= 0 || c.CompactionThreshold > 1.0 {
+			return fmt.Errorf("CompactionThreshold must be > 0 and <= 1.0 when compaction is auto, got %f", c.CompactionThreshold)
+		}
 	}
 	for name, limit := range c.ToolOutputLimits {
 		if limit <= 0 {
