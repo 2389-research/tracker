@@ -102,6 +102,40 @@ func TestRegistryExecuteUnknownTool(t *testing.T) {
 	}
 }
 
+func TestCachePolicyProviderInterface(t *testing.T) {
+	if CachePolicyNone == CachePolicyCacheable {
+		t.Fatal("CachePolicyNone and CachePolicyCacheable must differ")
+	}
+	if CachePolicyCacheable == CachePolicyMutating {
+		t.Fatal("CachePolicyCacheable and CachePolicyMutating must differ")
+	}
+}
+
+func TestGetCachePolicy_DefaultsToNone(t *testing.T) {
+	policy := GetCachePolicy(mockTool{})
+	if policy != CachePolicyNone {
+		t.Errorf("expected CachePolicyNone, got %d", policy)
+	}
+}
+
+func TestGetCachePolicy_RespectsProvider(t *testing.T) {
+	policy := GetCachePolicy(cacheableMockTool{})
+	if policy != CachePolicyCacheable {
+		t.Errorf("expected CachePolicyCacheable, got %d", policy)
+	}
+}
+
+type mockTool struct{}
+
+func (m mockTool) Name() string                                                 { return "mock" }
+func (m mockTool) Description() string                                          { return "mock tool" }
+func (m mockTool) Parameters() json.RawMessage                                  { return json.RawMessage(`{}`) }
+func (m mockTool) Execute(_ context.Context, _ json.RawMessage) (string, error) { return "ok", nil }
+
+type cacheableMockTool struct{ mockTool }
+
+func (c cacheableMockTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
+
 func TestRegistryUsesSpecDefaultOutputLimits(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&stubTool{name: "read", result: strings.Repeat("r", 40000)})

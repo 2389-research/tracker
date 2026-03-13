@@ -19,6 +19,32 @@ type Tool interface {
 	Execute(ctx context.Context, input json.RawMessage) (string, error)
 }
 
+// CachePolicy declares how a tool's results may be cached.
+type CachePolicy int
+
+const (
+	// CachePolicyNone means the tool has no caching opinion (default).
+	CachePolicyNone CachePolicy = iota
+	// CachePolicyCacheable means results can be cached for identical inputs.
+	CachePolicyCacheable
+	// CachePolicyMutating means the tool modifies state and invalidates caches.
+	CachePolicyMutating
+)
+
+// CachePolicyProvider is an optional interface tools can implement to declare caching behavior.
+type CachePolicyProvider interface {
+	CachePolicy() CachePolicy
+}
+
+// GetCachePolicy returns the CachePolicy for a tool. If the tool implements
+// CachePolicyProvider, its declared policy is returned; otherwise CachePolicyNone.
+func GetCachePolicy(t Tool) CachePolicy {
+	if cp, ok := t.(CachePolicyProvider); ok {
+		return cp.CachePolicy()
+	}
+	return CachePolicyNone
+}
+
 // Registry holds registered tools and dispatches execution requests.
 type Registry struct {
 	tools        map[string]Tool
