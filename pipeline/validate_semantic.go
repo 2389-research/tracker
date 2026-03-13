@@ -148,6 +148,11 @@ func validateNodeAttributes(g *Graph, ve *ValidationError) {
 			ve.add(fmt.Sprintf("graph has invalid cache_tool_results %q: must be \"true\" or \"false\"", v))
 		}
 	}
+	if v, ok := g.Attrs["context_compaction"]; ok {
+		if v != "auto" && v != "none" {
+			ve.add(fmt.Sprintf("graph has invalid context_compaction %q: must be \"auto\" or \"none\"", v))
+		}
+	}
 
 	for _, node := range g.Nodes {
 		if mr, ok := node.Attrs["max_retries"]; ok {
@@ -159,6 +164,14 @@ func validateNodeAttributes(g *Graph, ve *ValidationError) {
 		if v, ok := node.Attrs["cache_tool_results"]; ok {
 			if v != "true" && v != "false" {
 				ve.add(fmt.Sprintf("node %q has invalid cache_tool_results %q: must be \"true\" or \"false\"", node.ID, v))
+			}
+		}
+		if v, ok := node.Attrs["context_compaction_threshold"]; ok {
+			f, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be a float", node.ID, v))
+			} else if f <= 0 || f > 1.0 {
+				ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be > 0 and <= 1.0", node.ID, v))
 			}
 		}
 	}

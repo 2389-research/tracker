@@ -184,6 +184,27 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		config.CacheToolResults = (v == "true")
 	}
 
+	// Context compaction: graph-level default, node-level override.
+	if v, ok := h.graphAttrs["context_compaction"]; ok && v == "auto" {
+		config.ContextCompaction = agent.CompactionAuto
+		config.CompactionThreshold = 0.6 // default threshold
+	}
+	if v, ok := node.Attrs["context_compaction"]; ok {
+		if v == "auto" {
+			config.ContextCompaction = agent.CompactionAuto
+			if config.CompactionThreshold == 0 {
+				config.CompactionThreshold = 0.6
+			}
+		} else {
+			config.ContextCompaction = agent.CompactionNone
+		}
+	}
+	if v, ok := node.Attrs["context_compaction_threshold"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			config.CompactionThreshold = f
+		}
+	}
+
 	return config
 }
 

@@ -213,6 +213,78 @@ func TestValidateNodeAttributes_CacheToolResults_GraphLevel_Invalid(t *testing.T
 	}
 }
 
+func TestValidateNodeAttributes_ContextCompaction_Valid(t *testing.T) {
+	g := NewGraph("test")
+	g.Attrs["context_compaction"] = "auto"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "A", Shape: "box", Attrs: map[string]string{"context_compaction_threshold": "0.6"}})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "e"})
+
+	reg := NewHandlerRegistry()
+	reg.Register(&semanticStubHandler{name: "codergen"})
+
+	err := ValidateSemantic(g, reg)
+	if err != nil {
+		t.Errorf("expected valid, got: %v", err)
+	}
+}
+
+func TestValidateNodeAttributes_ContextCompaction_InvalidMode(t *testing.T) {
+	g := NewGraph("test")
+	g.Attrs["context_compaction"] = "banana"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "e"})
+
+	reg := NewHandlerRegistry()
+	err := ValidateSemantic(g, reg)
+	if err == nil {
+		t.Error("expected error for invalid context_compaction value")
+	}
+	if !strings.Contains(err.Error(), "context_compaction") {
+		t.Errorf("error should mention context_compaction, got: %v", err)
+	}
+}
+
+func TestValidateNodeAttributes_ContextCompaction_InvalidThreshold(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "A", Shape: "box", Attrs: map[string]string{"context_compaction_threshold": "banana"}})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "e"})
+
+	reg := NewHandlerRegistry()
+	reg.Register(&semanticStubHandler{name: "codergen"})
+
+	err := ValidateSemantic(g, reg)
+	if err == nil {
+		t.Error("expected error for invalid threshold")
+	}
+	if !strings.Contains(err.Error(), "context_compaction_threshold") {
+		t.Errorf("error should mention context_compaction_threshold, got: %v", err)
+	}
+}
+
+func TestValidateNodeAttributes_ContextCompaction_ThresholdOutOfRange(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "A", Shape: "box", Attrs: map[string]string{"context_compaction_threshold": "1.5"}})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "e"})
+
+	reg := NewHandlerRegistry()
+	reg.Register(&semanticStubHandler{name: "codergen"})
+
+	err := ValidateSemantic(g, reg)
+	if err == nil {
+		t.Error("expected error for threshold > 1.0")
+	}
+}
+
 func TestValidateSemantic_MixedErrors(t *testing.T) {
 	g := NewGraph("test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
