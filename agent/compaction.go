@@ -22,7 +22,11 @@ func compactSummary(toolName, content string) string {
 		if lineCount == 0 && len(content) > 0 {
 			lineCount = 1
 		}
-		return fmt.Sprintf("[previously read: %d lines. Re-read with %s if needed.]", lineCount, toolName)
+		unit := "lines"
+		if lineCount == 1 {
+			unit = "line"
+		}
+		return fmt.Sprintf("[previously read: %d %s. Re-read with %s if needed.]", lineCount, unit, toolName)
 
 	case "grep_search", "grep":
 		matchCount := 0
@@ -61,14 +65,10 @@ func compactMessages(messages []llm.Message, currentTurn, protectedTurns int) []
 	turnCounter := 0
 
 	for i, msg := range messages {
-		// Track turns: an assistant message with at least one tool call starts a new turn.
+		// Track turns: every assistant message counts as a turn, matching the
+		// session loop's turn counter which increments on every LLM call.
 		if msg.Role == llm.RoleAssistant {
-			for _, part := range msg.Content {
-				if part.Kind == llm.KindToolCall {
-					turnCounter++
-					break
-				}
-			}
+			turnCounter++
 		}
 
 		// Compact tool results in old turns.

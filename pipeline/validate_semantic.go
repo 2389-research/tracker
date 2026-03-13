@@ -166,6 +166,11 @@ func validateNodeAttributes(g *Graph, ve *ValidationError) {
 				ve.add(fmt.Sprintf("node %q has invalid cache_tool_results %q: must be \"true\" or \"false\"", node.ID, v))
 			}
 		}
+		if v, ok := node.Attrs["context_compaction"]; ok {
+			if v != "auto" && v != "none" {
+				ve.add(fmt.Sprintf("node %q has invalid context_compaction %q: must be \"auto\" or \"none\"", node.ID, v))
+			}
+		}
 		if v, ok := node.Attrs["context_compaction_threshold"]; ok {
 			f, err := strconv.ParseFloat(v, 64)
 			if err != nil {

@@ -65,8 +65,9 @@ type Session struct {
 	steering      <-chan string
 	messages      []llm.Message
 	id            string
-	ran           bool
-	cache         *toolCache
+	ran              bool
+	cache            *toolCache
+	lastCompactTurn  int
 }
 
 // ID returns the session's unique identifier.
@@ -215,11 +216,13 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		}
 
 		// Check if context compaction is needed after updating utilization.
-		if s.config.ContextCompaction == CompactionAuto {
+		// Skip if we already compacted at this turn (no new tool results to compact).
+		if s.config.ContextCompaction == CompactionAuto && turn > s.lastCompactTurn {
 			prevLen := totalToolResultBytes(s.messages)
 			s.compactIfNeeded(tracker, turn)
 			newLen := totalToolResultBytes(s.messages)
 			if newLen < prevLen {
+				s.lastCompactTurn = turn
 				s.emit(Event{
 					Type:               EventContextCompaction,
 					SessionID:          s.id,

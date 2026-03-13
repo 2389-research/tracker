@@ -23,7 +23,7 @@ func TestCompactSummary_ReadTool(t *testing.T) {
 func TestCompactSummary_ReadToolAltName(t *testing.T) {
 	content := "     1\tpackage main\n"
 	summary := compactSummary("read", content)
-	expected := "[previously read: 1 lines. Re-read with read if needed.]"
+	expected := "[previously read: 1 line. Re-read with read if needed.]"
 	if summary != expected {
 		t.Errorf("expected %q, got %q", expected, summary)
 	}
@@ -201,6 +201,73 @@ func TestCompactMessages_DoesNotModifyOriginal(t *testing.T) {
 	_ = compactMessages(msgs, 8, 5)
 	if msgs[3].Content[0].ToolResult.Content != originalContent {
 		t.Error("compactMessages should not modify original messages")
+	}
+}
+
+func TestCompactMessages_MixedTextAndToolTurns(t *testing.T) {
+	// Simulate a session with text-only turns (e.g., truncation continuations)
+	// mixed with tool-call turns. Turn counting should count ALL assistant
+	// messages as turns, matching the session loop's turn counter.
+	var msgs []llm.Message
+	msgs = append(msgs, llm.SystemMessage("You are a helper."))
+	msgs = append(msgs, llm.UserMessage("Do the task."))
+
+	// Turn 1: tool call
+	msgs = append(msgs, llm.Message{
+		Role: llm.RoleAssistant,
+		Content: []llm.ContentPart{{
+			Kind:     llm.KindToolCall,
+			ToolCall: &llm.ToolCallData{ID: "call_1", Name: "read_file", Arguments: json.RawMessage(`{"path":"a.go"}`)},
+		}},
+	})
+	msgs = append(msgs, llm.Message{
+		Role: llm.RoleTool,
+		Content: []llm.ContentPart{{
+			Kind:       llm.KindToolResult,
+			ToolResult: &llm.ToolResultData{ToolCallID: "call_1", Name: "read_file", Content: "     1\tpackage a\n     2\t\n"},
+		}},
+	})
+
+	// Turn 2: text-only (truncation continuation)
+	msgs = append(msgs, llm.Message{
+		Role:    llm.RoleAssistant,
+		Content: []llm.ContentPart{{Kind: llm.KindText, Text: "Continuing..."}},
+	})
+
+	// Turn 3: tool call
+	msgs = append(msgs, llm.Message{
+		Role: llm.RoleAssistant,
+		Content: []llm.ContentPart{{
+			Kind:     llm.KindToolCall,
+			ToolCall: &llm.ToolCallData{ID: "call_2", Name: "read_file", Arguments: json.RawMessage(`{"path":"b.go"}`)},
+		}},
+	})
+	msgs = append(msgs, llm.Message{
+		Role: llm.RoleTool,
+		Content: []llm.ContentPart{{
+			Kind:       llm.KindToolResult,
+			ToolResult: &llm.ToolResultData{ToolCallID: "call_2", Name: "read_file", Content: "     1\tpackage b\n     2\t\n"},
+		}},
+	})
+
+	// currentTurn=8, protectedTurns=5 → cutoff=3. Turn 1 and turn 3 are both
+	// within the cutoff. Turn 2 (text-only) counts as a turn, so turn 3 (the
+	// second tool call) has turnCounter=3 which equals the cutoff → compacted.
+	// Turn 1 has turnCounter=1 → compacted.
+	result := compactMessages(msgs, 8, 5)
+
+	compacted := 0
+	for _, msg := range result {
+		if msg.Role == llm.RoleTool {
+			for _, part := range msg.Content {
+				if part.Kind == llm.KindToolResult && strings.HasPrefix(part.ToolResult.Content, "[previously") {
+					compacted++
+				}
+			}
+		}
+	}
+	if compacted != 2 {
+		t.Errorf("expected 2 compacted results (both tool-call turns before cutoff), got %d", compacted)
 	}
 }
 
