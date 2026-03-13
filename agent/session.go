@@ -214,6 +214,21 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			tracker.MarkWarned()
 		}
 
+		// Check if context compaction is needed after updating utilization.
+		if s.config.ContextCompaction == CompactionAuto {
+			prevLen := totalToolResultBytes(s.messages)
+			s.compactIfNeeded(tracker, turn)
+			newLen := totalToolResultBytes(s.messages)
+			if newLen < prevLen {
+				s.emit(Event{
+					Type:               EventContextCompaction,
+					SessionID:          s.id,
+					Turn:               turn,
+					ContextUtilization: tracker.Utilization(),
+				})
+			}
+		}
+
 		s.messages = append(s.messages, resp.Message)
 
 		toolCalls := resp.ToolCalls()

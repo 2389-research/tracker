@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/agent/tools"
@@ -901,5 +902,115 @@ func TestSession_UnknownToolInvalidatesCache(t *testing.T) {
 	// read should execute twice: unknown tool invalidates cache as safe default.
 	if callCount != 2 {
 		t.Errorf("expected read to execute twice (unknown tool invalidated cache), got %d", callCount)
+	}
+}
+
+func TestSession_CompactsWhenAboveThreshold(t *testing.T) {
+	// We need enough turns so that old tool results fall outside the protected window
+	// (defaultProtectedTurns=5). We generate 7 tool-call turns plus a final stop,
+	// with high utilization from turn 1 onward so compaction fires once old turns
+	// become eligible.
+	var responses []*llm.Response
+	for i := 1; i <= 7; i++ {
+		responses = append(responses, &llm.Response{
+			Message: llm.Message{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{{
+					Kind: llm.KindToolCall,
+					ToolCall: &llm.ToolCallData{
+						ID:        fmt.Sprintf("call_%d", i),
+						Name:      "read_file",
+						Arguments: json.RawMessage(fmt.Sprintf(`{"path":"file%d.go"}`, i)),
+					},
+				}},
+			},
+			FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			// Report high utilization so compaction threshold (0.3) is exceeded.
+			Usage: llm.Usage{InputTokens: 500, OutputTokens: 50},
+		})
+	}
+	responses = append(responses, &llm.Response{
+		Message:      llm.AssistantMessage("Done."),
+		FinishReason: llm.FinishReason{Reason: "stop"},
+		Usage:        llm.Usage{InputTokens: 600, OutputTokens: 10},
+	})
+
+	client := &mockCompleter{responses: responses}
+	cfg := DefaultConfig()
+	cfg.ContextWindowLimit = 1000
+	cfg.ContextCompaction = CompactionAuto
+	cfg.CompactionThreshold = 0.3
+	cfg.MaxTurns = 20
+
+	var events []Event
+	handler := EventHandlerFunc(func(evt Event) {
+		events = append(events, evt)
+	})
+
+	// Tool output must be longer than the compacted summary so that
+	// totalToolResultBytes decreases after compaction.
+	longOutput := strings.Repeat("package main // this is a long line of Go source code for testing compaction\n", 20)
+	readTool := &stubTool{name: "read_file", output: longOutput}
+	sess := mustNewSession(t, client, cfg, WithEventHandler(handler), WithTools(readTool))
+	_, err := sess.Run(context.Background(), "Read files")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	compactionEvents := 0
+	for _, evt := range events {
+		if evt.Type == EventContextCompaction {
+			compactionEvents++
+		}
+	}
+	if compactionEvents == 0 {
+		t.Error("expected at least one compaction event")
+	}
+}
+
+func TestSession_NoCompactionWhenDisabled(t *testing.T) {
+	responses := []*llm.Response{
+		{
+			Message: llm.Message{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{{
+					Kind: llm.KindToolCall,
+					ToolCall: &llm.ToolCallData{
+						ID: "call_1", Name: "read_file",
+						Arguments: json.RawMessage(`{"path":"a.go"}`),
+					},
+				}},
+			},
+			FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			Usage:        llm.Usage{InputTokens: 900, OutputTokens: 50},
+		},
+		{
+			Message:      llm.AssistantMessage("Done."),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+			Usage:        llm.Usage{InputTokens: 950, OutputTokens: 10},
+		},
+	}
+
+	client := &mockCompleter{responses: responses}
+	cfg := DefaultConfig()
+	cfg.ContextWindowLimit = 1000
+	// CompactionNone is default.
+
+	var events []Event
+	handler := EventHandlerFunc(func(evt Event) {
+		events = append(events, evt)
+	})
+
+	readTool := &stubTool{name: "read_file", output: "file content here"}
+	sess := mustNewSession(t, client, cfg, WithEventHandler(handler), WithTools(readTool))
+	_, err := sess.Run(context.Background(), "Read file")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, evt := range events {
+		if evt.Type == EventContextCompaction {
+			t.Error("should not emit compaction event when compaction is disabled")
+		}
 	}
 }
