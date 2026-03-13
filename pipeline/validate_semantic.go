@@ -149,5 +149,10 @@ func validateNodeAttributes(g *Graph, ve *ValidationError) {
 				ve.add(fmt.Sprintf("node %q has invalid max_retries %q: must be a non-negative integer", node.ID, mr))
 			}
 		}
+		if v, ok := node.Attrs["cache_tool_results"]; ok {
+			if v != "true" && v != "false" {
+				ve.add(fmt.Sprintf("node %q has invalid cache_tool_results %q: must be \"true\" or \"false\"", node.ID, v))
+			}
+		}
 	}
 }
