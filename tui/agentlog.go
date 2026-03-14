@@ -5,6 +5,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -59,11 +60,9 @@ func NewAgentLog(store *StateStore, thinking *ThinkingTracker, height int) *Agen
 	}
 }
 
-// SetWidth updates the terminal width.
-func (al *AgentLog) SetWidth(w int) { al.width = w }
-
-// SetHeight updates the viewport height.
-func (al *AgentLog) SetHeight(h int) {
+// SetSize updates both width and height for the agent log viewport.
+func (al *AgentLog) SetSize(w, h int) {
+	al.width = w
 	al.height = h
 	al.scroll.SetHeight(h)
 }
@@ -156,9 +155,8 @@ func (al *AgentLog) View() string {
 
 	// Show thinking indicator at the bottom if the focused node is thinking.
 	if al.isThinking() {
-		frame := al.thinking.Frame(al.focusedNode)
-		elapsed := al.thinking.Elapsed(al.focusedNode).Truncate(1e9)
-		indicator := Styles.Thinking.Render(fmt.Sprintf("%s Thinking %s", frame, elapsed))
+		elapsed := al.thinking.Elapsed(al.focusedNode).Seconds()
+		indicator := Styles.Thinking.Render(fmt.Sprintf("⟳ Thinking... (%.1fs)", elapsed))
 		sb.WriteString(indicator)
 		sb.WriteString("\n")
 	}
@@ -202,4 +200,18 @@ func (al *AgentLog) renderToolOutput(output string) string {
 		return Styles.Muted.Render(summary)
 	}
 	return Styles.DimText.Render(output)
+}
+
+// thinkingTickCmd returns a command that sends a MsgThinkingTick after 150ms.
+func thinkingTickCmd() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+		return MsgThinkingTick{}
+	})
+}
+
+// headerTickCmd returns a command that sends a MsgHeaderTick after 1s.
+func headerTickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return MsgHeaderTick{}
+	})
 }

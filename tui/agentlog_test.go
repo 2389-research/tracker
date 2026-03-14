@@ -44,8 +44,8 @@ func TestAgentLogThinkingIndicator(t *testing.T) {
 	al := NewAgentLog(store, tr, 20)
 	al.SetFocusedNode("n1")
 	view := al.View()
-	if !strings.Contains(view, "Thinking") {
-		t.Errorf("expected thinking indicator, got: %s", view)
+	if !strings.Contains(view, "⟳ Thinking...") {
+		t.Errorf("expected thinking indicator with ⟳ prefix, got: %s", view)
 	}
 }
 

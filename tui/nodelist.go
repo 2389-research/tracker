@@ -13,6 +13,7 @@ import (
 type NodeList struct {
 	store    *StateStore
 	thinking *ThinkingTracker
+	scroll   *ScrollView
 	height   int
 	width    int
 }
@@ -22,17 +23,19 @@ func NewNodeList(store *StateStore, thinking *ThinkingTracker, height int) *Node
 	return &NodeList{
 		store:    store,
 		thinking: thinking,
+		scroll:   NewScrollView(height),
 		height:   height,
 	}
 }
 
-// SetWidth updates the terminal width used for rendering.
-func (nl *NodeList) SetWidth(w int) { nl.width = w }
+// SetSize updates both width and height for the node list viewport.
+func (nl *NodeList) SetSize(w, h int) {
+	nl.width = w
+	nl.height = h
+	nl.scroll.SetHeight(h)
+}
 
-// SetHeight updates the viewport height.
-func (nl *NodeList) SetHeight(h int) { nl.height = h }
-
-// View renders the node list as a signal lamp panel.
+// View renders the node list as a signal lamp panel, clipped via ScrollView.
 func (nl *NodeList) View() string {
 	var sb strings.Builder
 	sb.WriteString(Styles.ZoneLabel.Render("PIPELINE"))
@@ -45,6 +48,8 @@ func (nl *NodeList) View() string {
 		return sb.String()
 	}
 
+	// Build all node lines and populate the scroll buffer.
+	var lines []string
 	for _, node := range nodes {
 		status := nl.store.NodeStatus(node.ID)
 		lamp, style := nodeLamp(status)
@@ -85,7 +90,17 @@ func (nl *NodeList) View() string {
 			}
 		}
 
-		sb.WriteString(line)
+		lines = append(lines, line)
+	}
+
+	// Replace scroll buffer contents and clip to visible range.
+	nl.scroll = NewScrollView(nl.height)
+	for _, l := range lines {
+		nl.scroll.Append(l)
+	}
+	start, end := nl.scroll.VisibleRange()
+	for i := start; i < end; i++ {
+		sb.WriteString(nl.scroll.Lines()[i])
 		sb.WriteString("\n")
 	}
 
