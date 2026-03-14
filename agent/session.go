@@ -68,6 +68,7 @@ type Session struct {
 	ran              bool
 	cache            *toolCache
 	lastCompactTurn  int
+	toolTimings      map[string]time.Duration
 }
 
 // ID returns the session's unique identifier.
@@ -82,11 +83,12 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 		return nil, fmt.Errorf("invalid session config: %w", err)
 	}
 	s := &Session{
-		client:   client,
-		config:   config,
-		handler:  NoopHandler,
-		registry: tools.NewRegistry(),
-		id:       generateSessionID(),
+		client:      client,
+		config:      config,
+		handler:     NoopHandler,
+		registry:    tools.NewRegistry(),
+		id:          generateSessionID(),
+		toolTimings: make(map[string]time.Duration),
 	}
 
 	// Apply all options first (including WithEnvironment and WithTools).
@@ -180,6 +182,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	steeringDrained:
 
 		s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
+		turnStart := time.Now()
 
 		req := &llm.Request{
 			Model:    s.config.Model,
@@ -202,6 +205,9 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		}
 
 		result.Usage = result.Usage.Add(resp.Usage)
+		if resp.Usage.EstimatedCost == 0 {
+			result.Usage.EstimatedCost += llm.EstimateCost(s.config.Model, resp.Usage)
+		}
 		result.Turns = turn
 
 		tracker.Update(resp.Usage)
@@ -223,6 +229,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			newLen := totalToolResultBytes(s.messages)
 			if newLen < prevLen {
 				s.lastCompactTurn = turn
+				result.CompactionsApplied++
 				s.emit(Event{
 					Type:               EventContextCompaction,
 					SessionID:          s.id,
@@ -231,6 +238,48 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 				})
 			}
 		}
+
+		// Emit per-turn metrics for observability.
+		turnDuration := time.Since(turnStart)
+		if turnDuration > result.LongestTurn {
+			result.LongestTurn = turnDuration
+		}
+
+		cacheHits, cacheMisses := 0, 0
+		if s.cache != nil {
+			cacheHits = s.cache.hits
+			cacheMisses = s.cache.misses
+		}
+
+		cacheRead, cacheWrite := 0, 0
+		if resp.Usage.CacheReadTokens != nil {
+			cacheRead = *resp.Usage.CacheReadTokens
+		}
+		if resp.Usage.CacheWriteTokens != nil {
+			cacheWrite = *resp.Usage.CacheWriteTokens
+		}
+
+		estimatedCost := resp.Usage.EstimatedCost
+		if estimatedCost == 0 {
+			estimatedCost = llm.EstimateCost(s.config.Model, resp.Usage)
+		}
+
+		s.emit(Event{
+			Type:      EventTurnMetrics,
+			SessionID: s.id,
+			Turn:      turn,
+			Metrics: &TurnMetrics{
+				InputTokens:        resp.Usage.InputTokens,
+				OutputTokens:       resp.Usage.OutputTokens,
+				CacheReadTokens:    cacheRead,
+				CacheWriteTokens:   cacheWrite,
+				ContextUtilization: tracker.Utilization(),
+				ToolCacheHits:      cacheHits,
+				ToolCacheMisses:    cacheMisses,
+				TurnDuration:       turnDuration,
+				EstimatedCost:      estimatedCost,
+			},
+		})
 
 		s.messages = append(s.messages, resp.Message)
 
@@ -325,8 +374,12 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 				}
 			}
 
+			var toolDuration time.Duration
 			if !cacheHit {
+				toolStart := time.Now()
 				toolResult = s.registry.Execute(ctx, call)
+				toolDuration = time.Since(toolStart)
+				s.toolTimings[call.Name] += toolDuration
 
 				// Invalidate cache on mutating tools or unknown tools (safe
 				// default: an unclassified tool may have side effects).
@@ -342,11 +395,12 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			result.ToolCalls[call.Name]++
 
 			s.emit(Event{
-				Type:       EventToolCallEnd,
-				SessionID:  s.id,
-				ToolName:   call.Name,
-				ToolOutput: toolResult.Content,
-				ToolError:  boolToErrStr(toolResult.IsError),
+				Type:         EventToolCallEnd,
+				SessionID:    s.id,
+				ToolName:     call.Name,
+				ToolOutput:   toolResult.Content,
+				ToolError:    boolToErrStr(toolResult.IsError),
+				ToolDuration: toolDuration,
 			})
 
 			toolResults = append(toolResults, llm.ContentPart{
@@ -367,6 +421,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		result.MaxTurnsUsed = true
 	}
 
+	result.ToolTimings = s.toolTimings
 	result.ContextUtilization = tracker.Utilization()
 	result.Duration = time.Since(start)
 	return result, nil
