@@ -352,7 +352,9 @@ func parseFlags(args []string) (runConfig, error) {
 		afs.SetOutput(io.Discard)
 		afs.StringVar(&cfg.workdir, "w", "", "Working directory")
 		afs.StringVar(&cfg.workdir, "workdir", "", "Working directory")
-		_ = afs.Parse(args[2:])
+		if err := afs.Parse(args[2:]); err != nil {
+			return cfg, fmt.Errorf("audit: %w", err)
+		}
 		if afs.NArg() > 0 {
 			cfg.resumeID = afs.Arg(0)
 		}

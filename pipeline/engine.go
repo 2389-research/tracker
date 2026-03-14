@@ -333,7 +333,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				cp.IncrementRetry(currentNodeID)
 
 				// Apply backoff before retrying, respecting context cancellation.
-				backoff := policy.BackoffFn(cp.RetryCount(currentNodeID), policy.BaseDelay)
+				// Use count-1 because IncrementRetry already advanced the counter
+				// and ExponentialBackoff treats attempt 0 as the first base-delay wait.
+				backoff := policy.BackoffFn(cp.RetryCount(currentNodeID)-1, policy.BaseDelay)
 				if backoff > 0 {
 					select {
 					case <-time.After(backoff):

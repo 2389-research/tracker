@@ -895,7 +895,7 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	validationErr := pipeline.Validate(graph)
+	validationErr := pipeline.ValidateAll(graph)
 
 	// Collect warnings for box nodes missing a prompt attribute.
 	var warnings []map[string]string
@@ -923,17 +923,16 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	diagnostics := append([]map[string]string{}, warnings...)
-	if ve, ok := validationErr.(*pipeline.ValidationError); ok {
-		for _, msg := range ve.Errors {
-			diagnostics = append(diagnostics, map[string]string{
-				"severity": "error",
-				"message":  msg,
-			})
-		}
-	} else {
+	for _, msg := range validationErr.Errors {
 		diagnostics = append(diagnostics, map[string]string{
 			"severity": "error",
-			"message":  validationErr.Error(),
+			"message":  msg,
+		})
+	}
+	for _, msg := range validationErr.Warnings {
+		diagnostics = append(diagnostics, map[string]string{
+			"severity": "warning",
+			"message":  msg,
 		})
 	}
 

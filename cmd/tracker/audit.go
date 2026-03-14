@@ -139,11 +139,14 @@ func runAudit(workdir, runID string) error {
 		return fmt.Errorf("load checkpoint: %w", err)
 	}
 
-	// Load activity log.
+	// Load activity log and sort by timestamp to handle concurrent writes.
 	activity, err := loadActivityLog(runDir)
 	if err != nil {
 		return fmt.Errorf("load activity log: %w", err)
 	}
+	sort.Slice(activity, func(i, j int) bool {
+		return activity[i].Timestamp.Before(activity[j].Timestamp)
+	})
 
 	// Determine pipeline status.
 	status := determinePipelineStatus(cp, activity)

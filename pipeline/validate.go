@@ -41,8 +41,28 @@ func (e *ValidationError) hasWarnings() bool {
 }
 
 // Validate checks a parsed Graph for structural correctness.
-// Returns nil if the graph is valid, or a ValidationError listing all problems.
+// Returns nil if the graph has no errors. Warning-only results return nil so
+// that callers treating non-nil as fatal do not block valid graphs.
+// Use ValidateAll to retrieve both errors and warnings.
 func Validate(g *Graph) error {
+	ve := validateGraph(g)
+	if ve != nil && ve.hasErrors() {
+		return ve
+	}
+	return nil
+}
+
+// ValidateAll checks a parsed Graph and returns a ValidationError containing
+// both errors and warnings. Returns nil only if neither exists.
+func ValidateAll(g *Graph) *ValidationError {
+	ve := validateGraph(g)
+	if ve != nil && (ve.hasErrors() || ve.hasWarnings()) {
+		return ve
+	}
+	return nil
+}
+
+func validateGraph(g *Graph) *ValidationError {
 	if g == nil {
 		return &ValidationError{Errors: []string{"graph is nil"}}
 	}
@@ -63,10 +83,7 @@ func Validate(g *Graph) error {
 	validateConditionalFailEdges(g, ve)
 	validateEdgeLabelConsistency(g, ve)
 
-	if ve.hasErrors() || ve.hasWarnings() {
-		return ve
-	}
-	return nil
+	return ve
 }
 
 // validateStartExit checks for exactly one start (Mdiamond) and one exit (Msquare) node.

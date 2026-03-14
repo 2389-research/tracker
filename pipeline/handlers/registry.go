@@ -106,7 +106,7 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 
 	// Codergen: prefer real handler, fall back to stub.
 	if cfg.llmClient != nil {
-		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir)
+		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir, WithGraphAttrs(graph.Attrs))
 		handler.env = cfg.execEnv
 		handler.eventHandler = cfg.agentEvents
 		registry.Register(handler)

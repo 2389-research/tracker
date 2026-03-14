@@ -211,13 +211,9 @@ func TestValidateConditionalMissingFailEdge(t *testing.T) {
 	g.AddEdge(&Edge{From: "s", To: "check"})
 	g.AddEdge(&Edge{From: "check", To: "e", Condition: "outcome=success", Label: "success"})
 
-	err := Validate(g)
-	if err == nil {
+	ve := ValidateAll(g)
+	if ve == nil {
 		t.Fatal("expected warning for conditional node missing fail edge")
-	}
-	ve, ok := err.(*ValidationError)
-	if !ok {
-		t.Fatalf("expected *ValidationError, got %T", err)
 	}
 	if !ve.hasWarnings() {
 		t.Fatal("expected warnings to be present")
@@ -275,13 +271,9 @@ func TestValidateEdgeLabelConsistency(t *testing.T) {
 	g.AddEdge(&Edge{From: "a", To: "e"})
 	g.AddEdge(&Edge{From: "b", To: "e"})
 
-	err := Validate(g)
-	if err == nil {
+	ve := ValidateAll(g)
+	if ve == nil {
 		t.Fatal("expected warning for inconsistent edge labels")
-	}
-	ve, ok := err.(*ValidationError)
-	if !ok {
-		t.Fatalf("expected *ValidationError, got %T", err)
 	}
 	found := false
 	for _, w := range ve.Warnings {

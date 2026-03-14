@@ -299,6 +299,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			loopErr := fmt.Errorf("loop detected: same tool calls repeated %d times", consecutiveLoopCount)
 			s.emit(Event{Type: EventError, SessionID: s.id, Err: loopErr})
 			result.LoopDetected = true
+			s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, &result)
 			s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 			break
 		}
