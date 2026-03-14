@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
@@ -497,6 +498,206 @@ func TestParseFlagsJsonFlag(t *testing.T) {
 	}
 	if cfg.dotFile != "pipeline.dot" {
 		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	}
+}
+
+func TestAggregateSessionStatsEmpty(t *testing.T) {
+	entries := []pipeline.TraceEntry{
+		{NodeID: "s", HandlerName: "start", Status: "success"},
+		{NodeID: "end", HandlerName: "exit", Status: "success"},
+	}
+	agg := aggregateSessionStats(entries)
+	if agg.TotalTurns != 0 {
+		t.Errorf("expected 0 turns, got %d", agg.TotalTurns)
+	}
+	if agg.TotalToolCalls != 0 {
+		t.Errorf("expected 0 tool calls, got %d", agg.TotalToolCalls)
+	}
+	if agg.Compactions != 0 {
+		t.Errorf("expected 0 compactions, got %d", agg.Compactions)
+	}
+	if len(agg.FilesCreated) != 0 {
+		t.Errorf("expected 0 files created, got %d", len(agg.FilesCreated))
+	}
+}
+
+func TestAggregateSessionStatsMultipleNodes(t *testing.T) {
+	entries := []pipeline.TraceEntry{
+		{NodeID: "s", HandlerName: "start", Status: "success"},
+		{
+			NodeID: "impl1", HandlerName: "codergen", Status: "success",
+			Stats: &pipeline.SessionStats{
+				Turns:          10,
+				TotalToolCalls: 50,
+				ToolCalls:      map[string]int{"bash": 30, "write": 20},
+				FilesCreated:   []string{"a.go", "b.go"},
+				FilesModified:  []string{"main.go"},
+				Compactions:    1,
+			},
+		},
+		{
+			NodeID: "impl2", HandlerName: "codergen", Status: "success",
+			Stats: &pipeline.SessionStats{
+				Turns:          5,
+				TotalToolCalls: 25,
+				ToolCalls:      map[string]int{"bash": 10, "read": 15},
+				FilesCreated:   []string{"c.go", "a.go"}, // a.go is a duplicate
+				FilesModified:  []string{"main.go", "util.go"},
+				Compactions:    2,
+			},
+		},
+		{NodeID: "end", HandlerName: "exit", Status: "success"},
+	}
+
+	agg := aggregateSessionStats(entries)
+
+	if agg.TotalTurns != 15 {
+		t.Errorf("expected 15 turns, got %d", agg.TotalTurns)
+	}
+	if agg.TotalToolCalls != 75 {
+		t.Errorf("expected 75 tool calls, got %d", agg.TotalToolCalls)
+	}
+	if agg.ToolCallsByName["bash"] != 40 {
+		t.Errorf("expected bash=40, got %d", agg.ToolCallsByName["bash"])
+	}
+	if agg.ToolCallsByName["write"] != 20 {
+		t.Errorf("expected write=20, got %d", agg.ToolCallsByName["write"])
+	}
+	if agg.ToolCallsByName["read"] != 15 {
+		t.Errorf("expected read=15, got %d", agg.ToolCallsByName["read"])
+	}
+	if agg.Compactions != 3 {
+		t.Errorf("expected 3 compactions, got %d", agg.Compactions)
+	}
+	// Deduplication: a.go appears in both, should appear once
+	if len(agg.FilesCreated) != 3 {
+		t.Errorf("expected 3 unique created files, got %d: %v", len(agg.FilesCreated), agg.FilesCreated)
+	}
+	// main.go appears in both modified lists, should appear once
+	if len(agg.FilesModified) != 2 {
+		t.Errorf("expected 2 unique modified files, got %d: %v", len(agg.FilesModified), agg.FilesModified)
+	}
+}
+
+func TestFormatToolBreakdownEmpty(t *testing.T) {
+	result := formatToolBreakdown(nil)
+	if result != "" {
+		t.Errorf("expected empty string for nil map, got %q", result)
+	}
+	result = formatToolBreakdown(map[string]int{})
+	if result != "" {
+		t.Errorf("expected empty string for empty map, got %q", result)
+	}
+}
+
+func TestFormatToolBreakdownSorted(t *testing.T) {
+	tools := map[string]int{"bash": 50, "write": 10, "read": 30}
+	result := formatToolBreakdown(tools)
+	// Should be sorted by count descending
+	if !strings.HasPrefix(result, "(bash: 50") {
+		t.Errorf("expected bash first (highest count), got %q", result)
+	}
+	if !strings.Contains(result, "read: 30") {
+		t.Errorf("expected read in breakdown, got %q", result)
+	}
+	if !strings.Contains(result, "write: 10") {
+		t.Errorf("expected write in breakdown, got %q", result)
+	}
+}
+
+func TestFormatNumber(t *testing.T) {
+	tests := []struct {
+		input    int
+		expected string
+	}{
+		{0, "0"},
+		{42, "42"},
+		{999, "999"},
+		{1000, "1,000"},
+		{12345, "12,345"},
+		{1234567, "1,234,567"},
+	}
+	for _, tc := range tests {
+		got := formatNumber(tc.input)
+		if got != tc.expected {
+			t.Errorf("formatNumber(%d) = %q, want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestPrintRunSummaryShowsTotals(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	now := time.Now()
+	result := &pipeline.EngineResult{
+		RunID:  "test-run",
+		Status: pipeline.OutcomeSuccess,
+		Trace: &pipeline.Trace{
+			RunID:     "test-run",
+			StartTime: now,
+			EndTime:   now.Add(5 * time.Minute),
+			Entries: []pipeline.TraceEntry{
+				{NodeID: "s", HandlerName: "start", Status: "success", Duration: 1 * time.Millisecond},
+				{
+					NodeID: "impl", HandlerName: "codergen", Status: "success",
+					Duration: 4 * time.Minute,
+					Stats: &pipeline.SessionStats{
+						Turns:          8,
+						TotalToolCalls: 42,
+						ToolCalls:      map[string]int{"bash": 30, "write": 12},
+						FilesCreated:   []string{"new.go"},
+						FilesModified:  []string{"main.go"},
+						Compactions:    1,
+					},
+				},
+				{NodeID: "end", HandlerName: "exit", Status: "success", Duration: 1 * time.Millisecond},
+			},
+		},
+	}
+	printRunSummary(result, nil, nil, "test.dot")
+
+	w.Close()
+	os.Stdout = old
+
+	var buf [8192]byte
+	n, _ := r.Read(buf[:])
+	output := string(buf[:n])
+
+	// Verify totals section
+	if !strings.Contains(output, "Totals") {
+		t.Errorf("expected Totals section in output")
+	}
+	if !strings.Contains(output, "LLM Turns") {
+		t.Errorf("expected LLM Turns in output")
+	}
+	if !strings.Contains(output, "Tool Calls") {
+		t.Errorf("expected Tool Calls in output")
+	}
+	if !strings.Contains(output, "bash: 30") {
+		t.Errorf("expected bash breakdown in output")
+	}
+	if !strings.Contains(output, "1 created") {
+		t.Errorf("expected files created count in output")
+	}
+	if !strings.Contains(output, "1 modified") {
+		t.Errorf("expected files modified count in output")
+	}
+
+	// Verify node table has Turns and Tools columns
+	if !strings.Contains(output, "Turns") && !strings.Contains(output, "Tools") {
+		t.Errorf("expected Turns and Tools columns in node table")
+	}
+
+	// Verify logo block characters are present in the output.
+	if !strings.Contains(output, "2389.ai") {
+		t.Errorf("expected 2389.ai branding in output")
+	}
+
+	// Verify Run Complete header
+	if !strings.Contains(output, "Run Complete") {
+		t.Errorf("expected Run Complete header in output")
 	}
 }
 

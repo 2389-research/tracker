@@ -29,6 +29,7 @@ import (
 	"github.com/2389-research/tracker/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 )
 
@@ -789,30 +790,176 @@ func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
 	return entries
 }
 
-// printRunSummary outputs a run summary with timing, per-node breakdown, token
-// usage, and a simple ASCII node graph after the TUI exits.
+// aggregatedStats holds totals computed from all trace entries with SessionStats.
+type aggregatedStats struct {
+	TotalTurns      int
+	TotalToolCalls  int
+	ToolCallsByName map[string]int
+	FilesCreated    []string
+	FilesModified   []string
+	Compactions     int
+}
+
+// aggregateSessionStats walks trace entries and sums up agent session metrics.
+func aggregateSessionStats(entries []pipeline.TraceEntry) aggregatedStats {
+	agg := aggregatedStats{
+		ToolCallsByName: make(map[string]int),
+	}
+	seenCreated := make(map[string]bool)
+	seenModified := make(map[string]bool)
+
+	for _, entry := range entries {
+		if entry.Stats == nil {
+			continue
+		}
+		s := entry.Stats
+		agg.TotalTurns += s.Turns
+		agg.TotalToolCalls += s.TotalToolCalls
+		agg.Compactions += s.Compactions
+		for name, count := range s.ToolCalls {
+			agg.ToolCallsByName[name] += count
+		}
+		for _, f := range s.FilesCreated {
+			if !seenCreated[f] {
+				seenCreated[f] = true
+				agg.FilesCreated = append(agg.FilesCreated, f)
+			}
+		}
+		for _, f := range s.FilesModified {
+			if !seenModified[f] {
+				seenModified[f] = true
+				agg.FilesModified = append(agg.FilesModified, f)
+			}
+		}
+	}
+	return agg
+}
+
+// formatToolBreakdown returns a parenthesized breakdown like "(bash: 198, write: 67)".
+func formatToolBreakdown(toolCalls map[string]int) string {
+	if len(toolCalls) == 0 {
+		return ""
+	}
+	// Sort by count descending, then name ascending for stability.
+	type toolCount struct {
+		name  string
+		count int
+	}
+	var sorted []toolCount
+	for name, count := range toolCalls {
+		sorted = append(sorted, toolCount{name, count})
+	}
+	for i := 0; i < len(sorted); i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[j].count > sorted[i].count ||
+				(sorted[j].count == sorted[i].count && sorted[j].name < sorted[i].name) {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+	var parts []string
+	for _, tc := range sorted {
+		parts = append(parts, fmt.Sprintf("%s: %d", tc.name, tc.count))
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// formatNumber adds comma separators to integers for readability.
+func formatNumber(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	s := fmt.Sprintf("%d", n)
+	var result []byte
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, byte(c))
+	}
+	return string(result)
+}
+
+// printRunSummary outputs a comprehensive run summary with the logo, aggregated
+// session stats, per-node breakdown, token usage, and ASCII pipeline graph.
 func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker, dotFile string) {
 	fmt.Println()
-	fmt.Println("═══ Run Summary ═══════════════════════════════════════════")
+
+	// Logo
+	fmt.Println(bannerStyle.Render(logo()))
+	fmt.Println()
+
+	// Header bar
+	fmt.Println("═══ Run Complete ══════════════════════════════════════════")
 
 	if result != nil {
-		fmt.Printf("  Run ID:  %s\n", result.RunID)
-		fmt.Printf("  Status:  %s\n", result.Status)
-		fmt.Printf("  Nodes:   %d completed\n", len(result.CompletedNodes))
+		fmt.Printf("  Run ID:    %s\n", result.RunID)
+
+		// Status with icon
+		statusIcon := "●"
+		statusText := result.Status
+		switch result.Status {
+		case pipeline.OutcomeSuccess:
+			statusText = selectedStyle.Render(statusIcon+" success")
+		case pipeline.OutcomeFail:
+			statusText = lipgloss.NewStyle().Foreground(colorHot).Render(statusIcon + " fail")
+		default:
+			statusText = mutedStyle.Render(statusIcon + " " + result.Status)
+		}
+		fmt.Printf("  Status:    %s\n", statusText)
 	}
 
 	// Total elapsed time from trace
 	if result != nil && result.Trace != nil && !result.Trace.StartTime.IsZero() && !result.Trace.EndTime.IsZero() {
 		elapsed := result.Trace.EndTime.Sub(result.Trace.StartTime)
-		fmt.Printf("  Time:    %s\n", formatElapsed(elapsed))
+		fmt.Printf("  Duration:  %s\n", formatElapsed(elapsed))
 	}
 
-	// Per-node timing table
+	// Aggregated totals section
+	if result != nil && result.Trace != nil && len(result.Trace.Entries) > 0 {
+		agg := aggregateSessionStats(result.Trace.Entries)
+
+		// Only show totals section if there are agent nodes with stats
+		if agg.TotalTurns > 0 || agg.TotalToolCalls > 0 {
+			fmt.Println()
+			fmt.Println("─── Totals ────────────────────────────────────────────────")
+			fmt.Printf("  LLM Turns:    %s\n", formatNumber(agg.TotalTurns))
+
+			toolLine := fmt.Sprintf("  Tool Calls:   %s", formatNumber(agg.TotalToolCalls))
+			if breakdown := formatToolBreakdown(agg.ToolCallsByName); breakdown != "" {
+				toolLine += "  " + breakdown
+			}
+			fmt.Println(toolLine)
+
+			if len(agg.FilesCreated) > 0 || len(agg.FilesModified) > 0 {
+				fmt.Printf("  Files:        %d created, %d modified\n",
+					len(agg.FilesCreated), len(agg.FilesModified))
+			}
+			if agg.Compactions > 0 {
+				fmt.Printf("  Compactions:  %d\n", agg.Compactions)
+			}
+
+			// Token totals inline
+			if tracker != nil {
+				total := tracker.TotalUsage()
+				if total.InputTokens > 0 || total.OutputTokens > 0 {
+					tokenLine := fmt.Sprintf("  Tokens:       %s in / %s out",
+						formatNumber(total.InputTokens), formatNumber(total.OutputTokens))
+					if total.EstimatedCost > 0 {
+						tokenLine += fmt.Sprintf("  ($%.2f)", total.EstimatedCost)
+					}
+					fmt.Println(tokenLine)
+				}
+			}
+		}
+	}
+
+	// Per-node timing table with turns and tools columns
 	if result != nil && result.Trace != nil && len(result.Trace.Entries) > 0 {
 		fmt.Println()
 		fmt.Println("─── Node Execution ────────────────────────────────────────")
-		fmt.Printf("  %-20s  %-10s  %-10s  %s\n", "Node", "Status", "Time", "Handler")
-		fmt.Printf("  %-20s  %-10s  %-10s  %s\n", "────", "──────", "────", "───────")
+		fmt.Printf("  %-22s  %-10s  %-10s  %5s  %5s  %s\n", "Node", "Status", "Time", "Turns", "Tools", "Handler")
+		fmt.Printf("  %-22s  %-10s  %-10s  %5s  %5s  %s\n", "────", "──────", "────", "─────", "─────", "───────")
 		for _, entry := range result.Trace.Entries {
 			icon := "✓"
 			switch entry.Status {
@@ -822,11 +969,19 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 				icon = "↻"
 			}
 			nodeID := entry.NodeID
-			if len(nodeID) > 20 {
-				nodeID = nodeID[:17] + "…"
+			if len(nodeID) > 22 {
+				nodeID = nodeID[:19] + "..."
 			}
-			fmt.Printf("  %-20s  %s %-8s  %-10s  %s\n",
-				nodeID, icon, entry.Status, formatElapsed(entry.Duration), entry.HandlerName)
+
+			turns := "-"
+			tools := "-"
+			if entry.Stats != nil {
+				turns = fmt.Sprintf("%d", entry.Stats.Turns)
+				tools = fmt.Sprintf("%d", entry.Stats.TotalToolCalls)
+			}
+
+			fmt.Printf("  %-22s  %s %-8s  %-10s  %5s  %5s  %s\n",
+				nodeID, icon, entry.Status, formatElapsed(entry.Duration), turns, tools, entry.HandlerName)
 		}
 	}
 
@@ -835,15 +990,15 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 		providers := tracker.Providers()
 		if len(providers) > 0 {
 			fmt.Println()
-			fmt.Println("─── Token Usage ───────────────────────────────────────────")
+			fmt.Println("─── Tokens by Provider ────────────────────────────────────")
 			fmt.Printf("  %-12s  %10s  %10s\n", "Provider", "Input", "Output")
 			fmt.Printf("  %-12s  %10s  %10s\n", "────────", "─────", "──────")
 			for _, p := range providers {
 				u := tracker.ProviderUsage(p)
-				fmt.Printf("  %-12s  %10d  %10d\n", p, u.InputTokens, u.OutputTokens)
+				fmt.Printf("  %-12s  %10s  %10s\n", p, formatNumber(u.InputTokens), formatNumber(u.OutputTokens))
 			}
 			total := tracker.TotalUsage()
-			fmt.Printf("  %-12s  %10d  %10d\n", "TOTAL", total.InputTokens, total.OutputTokens)
+			fmt.Printf("  %-12s  %10s  %10s\n", "TOTAL", formatNumber(total.InputTokens), formatNumber(total.OutputTokens))
 			if total.EstimatedCost > 0 {
 				fmt.Printf("  Cost: $%.4f\n", total.EstimatedCost)
 			}
@@ -853,7 +1008,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 	// Simple ASCII node graph from trace
 	if result != nil && result.Trace != nil && len(result.Trace.Entries) > 0 {
 		fmt.Println()
-		fmt.Println("─── Pipeline Graph ────────────────────────────────────────")
+		fmt.Println("─── Pipeline ──────────────────────────────────────────────")
 		printNodeGraph(result.Trace.Entries)
 	}
 

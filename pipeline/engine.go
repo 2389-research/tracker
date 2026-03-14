@@ -324,6 +324,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			HandlerName: execNode.Handler,
 			Status:      outcome.Status,
 			Duration:    handlerDuration,
+			Stats:       outcome.Stats,
 		}
 
 		switch outcome.Status {

@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+// SessionStats captures agent session metrics for a pipeline node.
+// Only populated for codergen (LLM agent) nodes.
+type SessionStats struct {
+	Turns          int
+	ToolCalls      map[string]int
+	TotalToolCalls int
+	FilesModified  []string
+	FilesCreated   []string
+	Compactions    int
+	LongestTurn    time.Duration
+	CacheHits      int
+	CacheMisses    int
+}
+
 // TraceEntry records the execution of a single pipeline node.
 type TraceEntry struct {
 	Timestamp   time.Time
@@ -17,6 +31,7 @@ type TraceEntry struct {
 	Duration    time.Duration
 	EdgeTo      string
 	Error       string
+	Stats       *SessionStats // nil for non-agent nodes
 }
 
 // Trace captures the full execution history of a pipeline run.

@@ -19,6 +19,7 @@ type Outcome struct {
 	ContextUpdates     map[string]string
 	PreferredLabel     string
 	SuggestedNextNodes []string
+	Stats              *SessionStats // optional, populated by codergen handler
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

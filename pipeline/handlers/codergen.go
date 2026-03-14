@@ -114,6 +114,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			ContextUpdates: map[string]string{
 				pipeline.ContextKeyLastResponse: runErr.Error(),
 			},
+			Stats: buildSessionStats(sessResult),
 		}
 		responseArtifact := collector.transcript()
 		if responseArtifact == "" {
@@ -143,6 +144,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse: responseText,
 		},
+		Stats: buildSessionStats(sessResult),
 	}
 	if sessResult.Usage.EstimatedCost > 0 {
 		outcome.ContextUpdates["last_cost"] = fmt.Sprintf("%.4f", sessResult.Usage.EstimatedCost)
@@ -318,4 +320,24 @@ func (c *transcriptCollector) text() string {
 
 func (c *transcriptCollector) transcript() string {
 	return strings.Join(c.lines, "\n")
+}
+
+// buildSessionStats converts an agent.SessionResult into a pipeline.SessionStats
+// for inclusion in the trace entry. Returns nil if sessResult is nil.
+func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
+	toolCalls := make(map[string]int, len(r.ToolCalls))
+	for k, v := range r.ToolCalls {
+		toolCalls[k] = v
+	}
+	return &pipeline.SessionStats{
+		Turns:          r.Turns,
+		ToolCalls:      toolCalls,
+		TotalToolCalls: r.TotalToolCalls(),
+		FilesModified:  r.FilesModified,
+		FilesCreated:   r.FilesCreated,
+		Compactions:    r.CompactionsApplied,
+		LongestTurn:    r.LongestTurn,
+		CacheHits:      r.ToolCacheHits,
+		CacheMisses:    r.ToolCacheMisses,
+	}
 }

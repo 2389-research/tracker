@@ -351,6 +351,185 @@ func TestEngineTraceRecordsErrors(t *testing.T) {
 	}
 }
 
+func TestSessionStatsDefaults(t *testing.T) {
+	stats := &SessionStats{}
+	if stats.Turns != 0 {
+		t.Errorf("expected zero Turns, got %d", stats.Turns)
+	}
+	if stats.TotalToolCalls != 0 {
+		t.Errorf("expected zero TotalToolCalls, got %d", stats.TotalToolCalls)
+	}
+	if stats.Compactions != 0 {
+		t.Errorf("expected zero Compactions, got %d", stats.Compactions)
+	}
+	if stats.ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls, got %v", stats.ToolCalls)
+	}
+}
+
+func TestSessionStatsPopulated(t *testing.T) {
+	stats := &SessionStats{
+		Turns:          12,
+		ToolCalls:      map[string]int{"bash": 5, "write": 3},
+		TotalToolCalls: 8,
+		FilesModified:  []string{"main.go"},
+		FilesCreated:   []string{"new.go", "new_test.go"},
+		Compactions:    2,
+		LongestTurn:    30 * time.Second,
+		CacheHits:      10,
+		CacheMisses:    4,
+	}
+
+	if stats.Turns != 12 {
+		t.Errorf("expected 12 Turns, got %d", stats.Turns)
+	}
+	if stats.TotalToolCalls != 8 {
+		t.Errorf("expected 8 TotalToolCalls, got %d", stats.TotalToolCalls)
+	}
+	if len(stats.ToolCalls) != 2 {
+		t.Errorf("expected 2 tool types, got %d", len(stats.ToolCalls))
+	}
+	if stats.ToolCalls["bash"] != 5 {
+		t.Errorf("expected bash=5, got %d", stats.ToolCalls["bash"])
+	}
+	if len(stats.FilesCreated) != 2 {
+		t.Errorf("expected 2 files created, got %d", len(stats.FilesCreated))
+	}
+	if len(stats.FilesModified) != 1 {
+		t.Errorf("expected 1 file modified, got %d", len(stats.FilesModified))
+	}
+	if stats.Compactions != 2 {
+		t.Errorf("expected 2 compactions, got %d", stats.Compactions)
+	}
+	if stats.LongestTurn != 30*time.Second {
+		t.Errorf("expected 30s longest turn, got %v", stats.LongestTurn)
+	}
+}
+
+func TestTraceEntryWithStats(t *testing.T) {
+	entry := TraceEntry{
+		NodeID:      "impl",
+		HandlerName: "codergen",
+		Status:      OutcomeSuccess,
+		Duration:    5 * time.Minute,
+		Stats: &SessionStats{
+			Turns:          7,
+			TotalToolCalls: 42,
+			ToolCalls:      map[string]int{"bash": 30, "write": 12},
+		},
+	}
+
+	if entry.Stats == nil {
+		t.Fatal("expected Stats to be set")
+	}
+	if entry.Stats.Turns != 7 {
+		t.Errorf("expected 7 turns, got %d", entry.Stats.Turns)
+	}
+	if entry.Stats.TotalToolCalls != 42 {
+		t.Errorf("expected 42 total tool calls, got %d", entry.Stats.TotalToolCalls)
+	}
+}
+
+func TestTraceEntryWithoutStats(t *testing.T) {
+	entry := TraceEntry{
+		NodeID:      "start",
+		HandlerName: "start",
+		Status:      OutcomeSuccess,
+		Duration:    1 * time.Millisecond,
+	}
+
+	if entry.Stats != nil {
+		t.Errorf("expected nil Stats for non-agent node, got %+v", entry.Stats)
+	}
+}
+
+func TestOutcomeWithStats(t *testing.T) {
+	outcome := Outcome{
+		Status: OutcomeSuccess,
+		Stats: &SessionStats{
+			Turns:          3,
+			TotalToolCalls: 15,
+		},
+	}
+	if outcome.Stats == nil {
+		t.Fatal("expected Stats on Outcome")
+	}
+	if outcome.Stats.Turns != 3 {
+		t.Errorf("expected 3 turns, got %d", outcome.Stats.Turns)
+	}
+}
+
+func TestEngineTracePropagatesStats(t *testing.T) {
+	g := NewGraph("stats_prop_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "work", Shape: "box", Label: "Work"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "work"})
+	g.AddEdge(&Edge{From: "work", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status: OutcomeSuccess,
+				Stats: &SessionStats{
+					Turns:          5,
+					TotalToolCalls: 20,
+					ToolCalls:      map[string]int{"bash": 15, "write": 5},
+					FilesCreated:   []string{"file.go"},
+					Compactions:    1,
+				},
+			}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	// Find the work node entry — it should have Stats populated.
+	var workEntry *TraceEntry
+	for i := range result.Trace.Entries {
+		if result.Trace.Entries[i].NodeID == "work" {
+			workEntry = &result.Trace.Entries[i]
+			break
+		}
+	}
+	if workEntry == nil {
+		t.Fatal("expected trace entry for 'work' node")
+	}
+	if workEntry.Stats == nil {
+		t.Fatal("expected Stats to be propagated to trace entry")
+	}
+	if workEntry.Stats.Turns != 5 {
+		t.Errorf("expected 5 turns, got %d", workEntry.Stats.Turns)
+	}
+	if workEntry.Stats.TotalToolCalls != 20 {
+		t.Errorf("expected 20 tool calls, got %d", workEntry.Stats.TotalToolCalls)
+	}
+	if workEntry.Stats.Compactions != 1 {
+		t.Errorf("expected 1 compaction, got %d", workEntry.Stats.Compactions)
+	}
+
+	// Start node should have nil Stats.
+	var startEntry *TraceEntry
+	for i := range result.Trace.Entries {
+		if result.Trace.Entries[i].NodeID == "s" {
+			startEntry = &result.Trace.Entries[i]
+			break
+		}
+	}
+	if startEntry == nil {
+		t.Fatal("expected trace entry for 's' node")
+	}
+	if startEntry.Stats != nil {
+		t.Errorf("expected nil Stats for start node, got %+v", startEntry.Stats)
+	}
+}
+
 func TestEngineTraceRecordsHandlerErrors(t *testing.T) {
 	g := NewGraph("trace_handler_err_test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
