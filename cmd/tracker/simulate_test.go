@@ -1,0 +1,218 @@
+// ABOUTME: Tests for the simulate subcommand — verifies dry-run output from DOT files.
+// ABOUTME: Covers execution plan, node listing, edge display, and error handling.
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const testDOT = `digraph pipeline {
+	graph [llm_model="claude-sonnet-4-6" default_retry_policy="standard"];
+	Start [shape=Mdiamond label="Begin"];
+	Implement [shape=box label="Write Code" llm_model="claude-sonnet-4-6"];
+	Review [shape=box label="Review Code"];
+	Gate [shape=hexagon label="Approve?"];
+	End [shape=Msquare label="Done"];
+
+	Start -> Implement;
+	Implement -> Review;
+	Review -> Gate;
+	Gate -> End [label="approved"];
+	Gate -> Implement [label="rejected"];
+}`
+
+func writeTestDOT(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pipeline.dot")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write dot file: %v", err)
+	}
+	return path
+}
+
+func TestSimulateShowsHeader(t *testing.T) {
+	path := writeTestDOT(t, testDOT)
+	var buf bytes.Buffer
+	err := runSimulate(path, &buf)
+	if err != nil {
+		t.Fatalf("runSimulate error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Pipeline Simulation") {
+		t.Error("missing header")
+	}
+	if !strings.Contains(output, "Nodes:     5") {
+		t.Errorf("expected 5 nodes, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Start") {
+		t.Error("missing start node")
+	}
+	if !strings.Contains(output, "End") {
+		t.Error("missing exit node")
+	}
+}
+
+func TestSimulateShowsGraphAttrs(t *testing.T) {
+	path := writeTestDOT(t, testDOT)
+	var buf bytes.Buffer
+	err := runSimulate(path, &buf)
+	if err != nil {
+		t.Fatalf("runSimulate error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "llm_model") {
+		t.Error("missing llm_model graph attribute")
+	}
+	if !strings.Contains(output, "default_retry_policy") {
+		t.Error("missing default_retry_policy graph attribute")
+	}
+}
+
+func TestSimulateShowsNodes(t *testing.T) {
+	path := writeTestDOT(t, testDOT)
+	var buf bytes.Buffer
+	err := runSimulate(path, &buf)
+	if err != nil {
+		t.Fatalf("runSimulate error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "codergen") {
+		t.Error("missing codergen handler for box nodes")
+	}
+	if !strings.Contains(output, "wait.human") {
+		t.Error("missing wait.human handler for hexagon node")
+	}
+	if !strings.Contains(output, "start") {
+		t.Error("missing start handler")
+	}
+	if !strings.Contains(output, "exit") {
+		t.Error("missing exit handler")
+	}
+}
+
+func TestSimulateShowsEdges(t *testing.T) {
+	path := writeTestDOT(t, testDOT)
+	var buf bytes.Buffer
+	err := runSimulate(path, &buf)
+	if err != nil {
+		t.Fatalf("runSimulate error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Start -> Implement") {
+		t.Error("missing Start -> Implement edge")
+	}
+	if !strings.Contains(output, "Gate -> End") {
+		t.Error("missing Gate -> End edge")
+	}
+	if !strings.Contains(output, "[approved]") {
+		t.Error("missing approved edge label")
+	}
+	if !strings.Contains(output, "[rejected]") {
+		t.Error("missing rejected edge label")
+	}
+}
+
+func TestSimulateShowsExecutionPlan(t *testing.T) {
+	path := writeTestDOT(t, testDOT)
+	var buf bytes.Buffer
+	err := runSimulate(path, &buf)
+	if err != nil {
+		t.Fatalf("runSimulate error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Execution Plan") {
+		t.Error("missing execution plan section")
+	}
+	// Start should be step 1
+	if !strings.Contains(output, "1.") {
+		t.Error("missing step numbering")
+	}
+}
+
+func TestSimulateShowsNodeAttributes(t *testing.T) {
+	path := writeTestDOT(t, testDOT)
+	var buf bytes.Buffer
+	err := runSimulate(path, &buf)
+	if err != nil {
+		t.Fatalf("runSimulate error: %v", err)
+	}
+
+	output := buf.String()
+	// The Implement node has llm_model attr
+	if !strings.Contains(output, "llm_model=claude-sonnet-4-6") {
+		t.Errorf("missing node-level llm_model attribute, got:\n%s", output)
+	}
+}
+
+func TestSimulateInvalidDOT(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.dot")
+	if err := os.WriteFile(path, []byte("not a valid dot file{{{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := runSimulate(path, &buf)
+	if err == nil {
+		t.Fatal("expected error for invalid DOT")
+	}
+	if !strings.Contains(err.Error(), "parse pipeline") {
+		t.Errorf("expected parse error, got: %v", err)
+	}
+}
+
+func TestSimulateMissingFile(t *testing.T) {
+	var buf bytes.Buffer
+	err := runSimulate("/nonexistent/pipeline.dot", &buf)
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestParseFlagsSimulate(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "simulate", "pipeline.dot"})
+	if err != nil {
+		t.Fatalf("parseFlags error: %v", err)
+	}
+	if cfg.mode != modeSimulate {
+		t.Errorf("mode = %q, want simulate", cfg.mode)
+	}
+	if cfg.dotFile != "pipeline.dot" {
+		t.Errorf("dotFile = %q, want pipeline.dot", cfg.dotFile)
+	}
+}
+
+func TestParseFlagsSimulateNoDotFile(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "simulate"})
+	if err != nil {
+		t.Fatalf("parseFlags error: %v", err)
+	}
+	if cfg.mode != modeSimulate {
+		t.Errorf("mode = %q, want simulate", cfg.mode)
+	}
+	if cfg.dotFile != "" {
+		t.Errorf("dotFile = %q, want empty", cfg.dotFile)
+	}
+}
+
+func TestExecuteCommandSimulateMissingDotFile(t *testing.T) {
+	err := executeCommand(runConfig{
+		mode: modeSimulate,
+	}, commandDeps{})
+	if err == nil {
+		t.Fatal("expected error for missing dot file")
+	}
+	if !strings.Contains(err.Error(), "usage") {
+		t.Errorf("expected usage error, got: %v", err)
+	}
+}
