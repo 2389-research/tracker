@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/2389-research/tracker/agent"
@@ -45,8 +46,10 @@ type Result struct {
 
 // Engine wraps pipeline.Engine with auto-wired internals.
 type Engine struct {
-	inner  *pipeline.Engine
-	client *llm.Client // nil if caller provided their own Completer
+	inner     *pipeline.Engine
+	client    *llm.Client // nil if caller provided their own Completer
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewEngine parses DOT, auto-wires all internals, and returns an Engine.
@@ -182,6 +185,9 @@ func buildClient(provider string) (*llm.Client, error) {
 		return nil, err
 	}
 
+	// LLM transport retries handle transient API errors (rate limits, 5xx).
+	// This is separate from pipeline-level RetryPolicy which controls
+	// node re-execution on logical failures.
 	client.AddMiddleware(llm.NewRetryMiddleware(
 		llm.WithMaxRetries(3),
 		llm.WithBaseDelay(2*time.Second),
@@ -200,14 +206,14 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 }
 
 // Close releases resources. Must be called if the engine was created
-// with NewEngine. Idempotent.
+// with NewEngine. Safe for concurrent use; idempotent.
 func (e *Engine) Close() error {
-	if e.client != nil {
-		err := e.client.Close()
-		e.client = nil
-		return err
-	}
-	return nil
+	e.closeOnce.Do(func() {
+		if e.client != nil {
+			e.closeErr = e.client.Close()
+		}
+	})
+	return e.closeErr
 }
 
 // Run parses DOT, auto-wires all internals, executes, and returns the result.
