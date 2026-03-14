@@ -93,14 +93,21 @@ func NewEngine(dotSource string, cfg Config) (*Engine, error) {
 		}
 	}()
 
-	// If a model is specified, inject it as a graph-level attribute so
-	// codergen nodes use it as their default.
-	if cfg.Model != "" {
+	// Inject model, provider, and retry policy as graph-level attributes
+	// so codergen nodes use them as defaults. DOT graph attrs take precedence.
+	if cfg.Model != "" || cfg.Provider != "" {
 		if graph.Attrs == nil {
 			graph.Attrs = make(map[string]string)
 		}
-		if _, exists := graph.Attrs["llm_model"]; !exists {
-			graph.Attrs["llm_model"] = cfg.Model
+		if cfg.Model != "" {
+			if _, exists := graph.Attrs["llm_model"]; !exists {
+				graph.Attrs["llm_model"] = cfg.Model
+			}
+		}
+		if cfg.Provider != "" {
+			if _, exists := graph.Attrs["llm_provider"]; !exists {
+				graph.Attrs["llm_provider"] = cfg.Provider
+			}
 		}
 	}
 

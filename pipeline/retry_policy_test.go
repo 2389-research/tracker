@@ -177,14 +177,14 @@ func TestLinearBackoff(t *testing.T) {
 		base    time.Duration
 		want    time.Duration
 	}{
-		{"attempt 0", 0, 2 * time.Second, 0},
-		{"attempt 1", 1, 2 * time.Second, 2 * time.Second},
-		{"attempt 2", 2, 2 * time.Second, 4 * time.Second},
-		{"attempt 3", 3, 2 * time.Second, 6 * time.Second},
+		{"attempt 0", 0, 2 * time.Second, 2 * time.Second},
+		{"attempt 1", 1, 2 * time.Second, 4 * time.Second},
+		{"attempt 2", 2, 2 * time.Second, 6 * time.Second},
+		{"attempt 3", 3, 2 * time.Second, 8 * time.Second},
 		{"capped at 60s", 100, 2 * time.Second, 60 * time.Second},
-		{"attempt 1 with 10s", 1, 10 * time.Second, 10 * time.Second},
-		{"attempt 6 with 10s", 6, 10 * time.Second, 60 * time.Second},
-		{"attempt 7 with 10s caps", 7, 10 * time.Second, 60 * time.Second},
+		{"attempt 1 with 10s", 1, 10 * time.Second, 20 * time.Second},
+		{"attempt 5 with 10s", 5, 10 * time.Second, 60 * time.Second},
+		{"attempt 6 with 10s caps", 6, 10 * time.Second, 60 * time.Second},
 	}
 
 	for _, tt := range tests {

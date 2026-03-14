@@ -126,9 +126,10 @@ func ExponentialBackoff(attempt int, base time.Duration) time.Duration {
 	return delay
 }
 
-// LinearBackoff returns attempt * base, capped at 60s.
+// LinearBackoff returns (attempt+1) * base, capped at 60s.
+// Like ExponentialBackoff, attempt is 0-indexed: attempt 0 = 1*base.
 func LinearBackoff(attempt int, base time.Duration) time.Duration {
-	delay := time.Duration(attempt) * base
+	delay := time.Duration(attempt+1) * base
 	if delay > maxBackoffDuration {
 		return maxBackoffDuration
 	}

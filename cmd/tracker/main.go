@@ -72,6 +72,7 @@ func main() {
 			printUsage(os.Stdout)
 			os.Exit(0)
 		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
 		printUsage(os.Stderr)
 		os.Exit(1)
 	}

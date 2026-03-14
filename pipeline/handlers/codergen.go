@@ -165,8 +165,15 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		config.WorkingDir = h.workingDir
 	}
 
+	// Model and provider: graph-level default, node-level override.
+	if model, ok := h.graphAttrs["llm_model"]; ok {
+		config.Model = model
+	}
 	if model, ok := node.Attrs["llm_model"]; ok {
 		config.Model = model
+	}
+	if provider, ok := h.graphAttrs["llm_provider"]; ok {
+		config.Provider = provider
 	}
 	if provider, ok := node.Attrs["llm_provider"]; ok {
 		config.Provider = provider
