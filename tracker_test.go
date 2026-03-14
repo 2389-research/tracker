@@ -109,16 +109,28 @@ func TestNewEngine_DefaultsWorkingDir(t *testing.T) {
 		},
 	}
 
-	engine, err := NewEngine(simpleDOT, Config{LLMClient: client})
+	// Zero-value WorkingDir should succeed (defaults to cwd).
+	// Verify by also constructing with an explicit WorkingDir and
+	// confirming both succeed without error.
+	engine1, err := NewEngine(simpleDOT, Config{LLMClient: client})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("default WorkingDir: unexpected error: %v", err)
 	}
-	defer engine.Close()
+	defer engine1.Close()
 
-	cwd, _ := os.Getwd()
-	if cwd == "" {
-		t.Skip("cannot determine cwd")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
 	}
+
+	engine2, err := NewEngine(simpleDOT, Config{
+		LLMClient:  client,
+		WorkingDir: cwd,
+	})
+	if err != nil {
+		t.Fatalf("explicit WorkingDir: unexpected error: %v", err)
+	}
+	defer engine2.Close()
 }
 
 func TestRun_WithInitialContext(t *testing.T) {

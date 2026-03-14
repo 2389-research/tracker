@@ -26,9 +26,9 @@ type Config struct {
 	WorkingDir    string                       // default: os.Getwd()
 	CheckpointDir string                       // default: empty (engine auto-generates)
 	ArtifactDir   string                       // default: empty (engine auto-generates)
-	Model         string                       // default: env or claude-sonnet-4-6
+	Model         string                       // default: env or claude-sonnet-4-6; DOT graph llm_model attr takes precedence
 	Provider      string                       // default: auto-detect from env
-	RetryPolicy   string                       // "none" (default), "default", "aggressive"
+	RetryPolicy   string                       // "none" (default), "standard", "aggressive"; DOT graph default_retry_policy attr takes precedence
 	EventHandler  pipeline.PipelineEventHandler // optional: live pipeline events
 	AgentEvents   agent.EventHandler            // optional: live agent session events
 	LLMClient     agent.Completer              // optional: override auto-created client
@@ -85,6 +85,14 @@ func NewEngine(dotSource string, cfg Config) (*Engine, error) {
 		completer = client
 	}
 
+	// Clean up the auto-created client if anything below fails.
+	built := false
+	defer func() {
+		if !built && client != nil {
+			client.Close()
+		}
+	}()
+
 	// If a model is specified, inject it as a graph-level attribute so
 	// codergen nodes use it as their default.
 	if cfg.Model != "" {
@@ -135,6 +143,7 @@ func NewEngine(dotSource string, cfg Config) (*Engine, error) {
 
 	inner := pipeline.NewEngine(graph, registry, engineOpts...)
 
+	built = true
 	return &Engine{
 		inner:  inner,
 		client: client,
