@@ -26,6 +26,7 @@ func TestEventTypes(t *testing.T) {
 		EventLLMProviderRaw,
 		EventToolCacheHit,
 		EventContextCompaction,
+		EventTurnMetrics,
 	}
 	seen := make(map[EventType]bool)
 	for _, et := range types {

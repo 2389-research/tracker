@@ -30,7 +30,21 @@ const (
 	EventLLMProviderRaw       EventType = "llm_provider_raw"
 	EventToolCacheHit         EventType = "tool_cache_hit"
 	EventContextCompaction    EventType = "context_compaction"
+	EventTurnMetrics          EventType = "turn_metrics"
 )
+
+// TurnMetrics captures per-turn token and performance data.
+type TurnMetrics struct {
+	InputTokens        int
+	OutputTokens       int
+	CacheReadTokens    int
+	CacheWriteTokens   int
+	ContextUtilization float64
+	ToolCacheHits      int
+	ToolCacheMisses    int
+	TurnDuration       time.Duration
+	EstimatedCost      float64
+}
 
 // Event carries data about something that happened during an agent session.
 type Event struct {
@@ -51,6 +65,8 @@ type Event struct {
 	ProviderEvent      string
 	FinishReason       string
 	Usage              llm.Usage
+	Metrics            *TurnMetrics
+	ToolDuration       time.Duration
 }
 
 // EventHandler receives events emitted by the agent session.
