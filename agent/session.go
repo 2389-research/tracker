@@ -239,47 +239,12 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			}
 		}
 
-		// Emit per-turn metrics for observability.
-		turnDuration := time.Since(turnStart)
-		if turnDuration > result.LongestTurn {
-			result.LongestTurn = turnDuration
-		}
-
-		cacheHits, cacheMisses := 0, 0
+		// Snapshot cache stats before tool execution to compute per-turn deltas.
+		prevCacheHits, prevCacheMisses := 0, 0
 		if s.cache != nil {
-			cacheHits = s.cache.hits
-			cacheMisses = s.cache.misses
+			prevCacheHits = s.cache.hits
+			prevCacheMisses = s.cache.misses
 		}
-
-		cacheRead, cacheWrite := 0, 0
-		if resp.Usage.CacheReadTokens != nil {
-			cacheRead = *resp.Usage.CacheReadTokens
-		}
-		if resp.Usage.CacheWriteTokens != nil {
-			cacheWrite = *resp.Usage.CacheWriteTokens
-		}
-
-		estimatedCost := resp.Usage.EstimatedCost
-		if estimatedCost == 0 {
-			estimatedCost = llm.EstimateCost(s.config.Model, resp.Usage)
-		}
-
-		s.emit(Event{
-			Type:      EventTurnMetrics,
-			SessionID: s.id,
-			Turn:      turn,
-			Metrics: &TurnMetrics{
-				InputTokens:        resp.Usage.InputTokens,
-				OutputTokens:       resp.Usage.OutputTokens,
-				CacheReadTokens:    cacheRead,
-				CacheWriteTokens:   cacheWrite,
-				ContextUtilization: tracker.Utilization(),
-				ToolCacheHits:      cacheHits,
-				ToolCacheMisses:    cacheMisses,
-				TurnDuration:       turnDuration,
-				EstimatedCost:      estimatedCost,
-			},
-		})
 
 		s.messages = append(s.messages, resp.Message)
 
@@ -297,6 +262,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 					"Your previous response was truncated due to length. Continue where you left off. "+
 						"Use tool calls to make progress — do not output large blocks of text directly.",
 				))
+				s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, &result)
 				s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 				continue
 			}
@@ -305,6 +271,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			if text != "" {
 				s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
 			}
+			s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, &result)
 			s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 			stoppedNaturally = true
 			break
@@ -414,6 +381,10 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			Content: toolResults,
 		})
 
+		// Emit per-turn metrics after tool execution so TurnDuration includes
+		// tool wall-clock time and cache stats reflect this turn's deltas.
+		s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, &result)
+
 		s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 	}
 
@@ -431,6 +402,51 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 func (s *Session) emit(evt Event) {
 	evt.Timestamp = time.Now()
 	s.handler.HandleEvent(evt)
+}
+
+// emitTurnMetrics emits an EventTurnMetrics event and updates LongestTurn on result.
+// It computes per-turn cache deltas from the snapshot taken before tool execution.
+func (s *Session) emitTurnMetrics(turn int, turnStart time.Time, resp *llm.Response, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult) {
+	turnDuration := time.Since(turnStart)
+	if turnDuration > result.LongestTurn {
+		result.LongestTurn = turnDuration
+	}
+
+	turnCacheHits, turnCacheMisses := 0, 0
+	if s.cache != nil {
+		turnCacheHits = s.cache.hits - prevCacheHits
+		turnCacheMisses = s.cache.misses - prevCacheMisses
+	}
+
+	cacheRead, cacheWrite := 0, 0
+	if resp.Usage.CacheReadTokens != nil {
+		cacheRead = *resp.Usage.CacheReadTokens
+	}
+	if resp.Usage.CacheWriteTokens != nil {
+		cacheWrite = *resp.Usage.CacheWriteTokens
+	}
+
+	estimatedCost := resp.Usage.EstimatedCost
+	if estimatedCost == 0 {
+		estimatedCost = llm.EstimateCost(s.config.Model, resp.Usage)
+	}
+
+	s.emit(Event{
+		Type:      EventTurnMetrics,
+		SessionID: s.id,
+		Turn:      turn,
+		Metrics: &TurnMetrics{
+			InputTokens:        resp.Usage.InputTokens,
+			OutputTokens:       resp.Usage.OutputTokens,
+			CacheReadTokens:    cacheRead,
+			CacheWriteTokens:   cacheWrite,
+			ContextUtilization: tracker.Utilization(),
+			ToolCacheHits:      turnCacheHits,
+			ToolCacheMisses:    turnCacheMisses,
+			TurnDuration:       turnDuration,
+			EstimatedCost:      estimatedCost,
+		},
+	})
 }
 
 func (s *Session) emitLLMTraceEvent(turn int, traceEvt llm.TraceEvent) {
