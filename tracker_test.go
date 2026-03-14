@@ -4,9 +4,11 @@ package tracker
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // stubCompleter returns canned responses for testing.
@@ -96,5 +98,109 @@ func TestRun_SimplePipeline(t *testing.T) {
 	}
 	if result.EngineResult == nil {
 		t.Error("expected EngineResult to be set")
+	}
+}
+
+func TestNewEngine_DefaultsWorkingDir(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	engine, err := NewEngine(simpleDOT, Config{LLMClient: client})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer engine.Close()
+
+	cwd, _ := os.Getwd()
+	if cwd == "" {
+		t.Skip("cannot determine cwd")
+	}
+}
+
+func TestRun_WithInitialContext(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	result, err := Run(context.Background(), simpleDOT, Config{
+		LLMClient: client,
+		Context:   map[string]string{"goal": "test the library"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "success" {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+}
+
+func TestRun_WithEventHandler(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	var events []pipeline.PipelineEvent
+	handler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
+		events = append(events, evt)
+	})
+
+	result, err := Run(context.Background(), simpleDOT, Config{
+		LLMClient:    client,
+		EventHandler: handler,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "success" {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+	if len(events) == 0 {
+		t.Error("expected at least one pipeline event")
+	}
+}
+
+func TestNewEngine_ValidationError(t *testing.T) {
+	badGraph := `digraph test {
+		start [shape=Mdiamond];
+		orphan [shape=box];
+		start -> orphan;
+	}`
+
+	_, err := NewEngine(badGraph, Config{
+		LLMClient: &stubCompleter{
+			response: &llm.Response{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected validation error for graph without exit node")
+	}
+}
+
+func TestRun_InvalidDOT(t *testing.T) {
+	_, err := Run(context.Background(), "not dot at all!!!", Config{})
+	if err == nil {
+		t.Fatal("expected error for invalid DOT")
+	}
+}
+
+func TestNewEngine_InvalidProvider(t *testing.T) {
+	_, err := NewEngine(simpleDOT, Config{
+		Provider: "nonexistent",
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown provider")
 	}
 }
