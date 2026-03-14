@@ -404,15 +404,182 @@ func TestExecuteCommandRoutesAuditMode(t *testing.T) {
 	}
 }
 
-func TestExecuteCommandAuditMissingRunID(t *testing.T) {
+func TestExecuteCommandAuditNoRunIDListsRuns(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "listabc123")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "listabc123",
+		"current_node":    "",
+		"completed_nodes": []string{"Start", "Build"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+	makeActivity(t, runDir, []map[string]interface{}{
+		{"ts": now.Add(-1 * time.Minute).Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "listabc123"},
+		{"ts": now.Format(time.RFC3339Nano), "type": "pipeline_completed", "run_id": "listabc123"},
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	err := executeCommand(runConfig{
 		mode:    modeAudit,
-		workdir: t.TempDir(),
+		workdir: workdir,
 	}, commandDeps{})
-	if err == nil {
-		t.Fatal("expected error when audit run ID is missing")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("listRuns returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "usage") {
-		t.Fatalf("expected usage error, got: %v", err)
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "listabc123") {
+		t.Fatalf("expected run ID in listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ok") {
+		t.Fatalf("expected 'ok' status in listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "1 runs total") {
+		t.Fatalf("expected '1 runs total' in listing, got:\n%s", output)
+	}
+}
+
+func TestListRunsMultipleRuns(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+
+	now := time.Now()
+
+	// Create a successful run.
+	successDir := filepath.Join(runsDir, "success111")
+	if err := os.MkdirAll(successDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeCheckpoint(t, successDir, map[string]interface{}{
+		"run_id":          "success111",
+		"current_node":    "",
+		"completed_nodes": []string{"A", "B", "C"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+	makeActivity(t, successDir, []map[string]interface{}{
+		{"ts": now.Add(-2 * time.Minute).Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "success111"},
+		{"ts": now.Format(time.RFC3339Nano), "type": "pipeline_completed", "run_id": "success111"},
+	})
+
+	// Create a failed run.
+	failDir := filepath.Join(runsDir, "fail222")
+	if err := os.MkdirAll(failDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeCheckpoint(t, failDir, map[string]interface{}{
+		"run_id":          "fail222",
+		"current_node":    "Implement",
+		"completed_nodes": []string{"Start"},
+		"retry_counts":    map[string]int{"Implement": 2},
+		"context":         map[string]string{},
+		"timestamp":       now.Add(-5 * time.Minute).Format(time.RFC3339),
+		"restart_count":   0,
+	})
+	makeActivity(t, failDir, []map[string]interface{}{
+		{"ts": now.Add(-10 * time.Minute).Format(time.RFC3339Nano), "type": "pipeline_started", "run_id": "fail222"},
+		{"ts": now.Add(-5 * time.Minute).Format(time.RFC3339Nano), "type": "pipeline_failed", "run_id": "fail222"},
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := listRuns(workdir)
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("listRuns returned error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "success111") {
+		t.Fatalf("expected success run in listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "fail222") {
+		t.Fatalf("expected failed run in listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "FAIL") {
+		t.Fatalf("expected FAIL status in listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Implement") {
+		t.Fatalf("expected failed node name in listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "2 runs total") {
+		t.Fatalf("expected '2 runs total' in listing, got:\n%s", output)
+	}
+}
+
+func TestListRunsEmptyDir(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, ".tracker", "runs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := listRuns(workdir)
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("listRuns returned error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "No runs found") {
+		t.Fatalf("expected 'No runs found' for empty dir, got:\n%s", output)
+	}
+}
+
+func TestListRunsNoRunsDir(t *testing.T) {
+	workdir := t.TempDir()
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := listRuns(workdir)
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("listRuns returned error: %v", err)
+	}
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "No runs found") {
+		t.Fatalf("expected 'No runs found' when dir missing, got:\n%s", output)
 	}
 }

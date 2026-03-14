@@ -125,6 +125,118 @@ func loadActivityLog(runDir string) ([]activityEntry, error) {
 	return entries, scanner.Err()
 }
 
+// listRuns shows all available runs with their status and node count.
+func listRuns(workdir string) error {
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No runs found. Run a pipeline first.")
+			return nil
+		}
+		return fmt.Errorf("cannot read runs directory: %w", err)
+	}
+
+	type runSummary struct {
+		runID     string
+		status    string
+		nodes     int
+		retries   int
+		restarts  int
+		timestamp time.Time
+		duration  time.Duration
+		failedAt  string
+	}
+
+	var runs []runSummary
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		runDir := filepath.Join(runsDir, e.Name())
+		cpPath := filepath.Join(runDir, "checkpoint.json")
+
+		cp, cpErr := pipeline.LoadCheckpoint(cpPath)
+		if cpErr != nil {
+			continue
+		}
+
+		activity, _ := loadActivityLog(runDir)
+		sort.Slice(activity, func(i, j int) bool {
+			return activity[i].Timestamp.Before(activity[j].Timestamp)
+		})
+
+		status := determinePipelineStatus(cp, activity)
+
+		totalRetries := 0
+		for _, count := range cp.RetryCounts {
+			totalRetries += count
+		}
+
+		var dur time.Duration
+		if len(activity) >= 2 {
+			first := activity[0].Timestamp
+			last := activity[len(activity)-1].Timestamp
+			dur = last.Sub(first)
+		}
+
+		rs := runSummary{
+			runID:     e.Name(),
+			status:    status,
+			nodes:     len(cp.CompletedNodes),
+			retries:   totalRetries,
+			restarts:  cp.RestartCount,
+			timestamp: cp.Timestamp,
+			duration:  dur,
+		}
+		if status == "fail" {
+			rs.failedAt = cp.CurrentNode
+		}
+		runs = append(runs, rs)
+	}
+
+	if len(runs) == 0 {
+		fmt.Println("No runs found. Run a pipeline first.")
+		return nil
+	}
+
+	// Sort by timestamp, most recent first.
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].timestamp.After(runs[j].timestamp)
+	})
+
+	fmt.Println()
+	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "Run ID", "Status", "Nodes", "Retries", "Duration", "Failed At")
+	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "──────", "──────", "─────", "───────", "────────", "─────────")
+
+	for _, r := range runs {
+		icon := "+"
+		switch r.status {
+		case "success":
+			icon = "ok"
+		case "fail":
+			icon = "FAIL"
+		}
+
+		durStr := ""
+		if r.duration > 0 {
+			durStr = formatElapsed(r.duration)
+		}
+
+		failedAt := ""
+		if r.failedAt != "" {
+			failedAt = r.failedAt
+		}
+
+		fmt.Printf("  %-14s  %-8s  %-6d  %-8d  %-10s  %s\n",
+			r.runID[:min(14, len(r.runID))], icon, r.nodes, r.retries, durStr, failedAt)
+	}
+
+	fmt.Printf("\n  %d runs total\n", len(runs))
+	fmt.Printf("  Inspect a run: tracker audit <runID>\n\n")
+	return nil
+}
+
 // runAudit loads run artifacts and prints a structured audit report.
 func runAudit(workdir, runID string) error {
 	runDir, err := resolveRunDir(workdir, runID)

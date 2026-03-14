@@ -406,7 +406,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage:\n")
 	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot> [flags]\n")
 	fmt.Fprintf(w, "  tracker setup\n")
-	fmt.Fprintf(w, "  tracker audit <runID>\n\n")
+	fmt.Fprintf(w, "  tracker audit [runID]\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
 	fmt.Fprintf(w, "  -r, --resume string       Resume a previous run by ID (e.g. 13041bbb0a38)\n")
@@ -435,7 +435,7 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 
 	if cfg.mode == modeAudit {
 		if cfg.resumeID == "" {
-			return fmt.Errorf("usage: tracker audit <runID>")
+			return listRuns(cfg.workdir)
 		}
 		return runAudit(cfg.workdir, cfg.resumeID)
 	}
