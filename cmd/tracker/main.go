@@ -139,13 +139,31 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
 	defer activityLog.Close()
 
+	// Wire LLM trace events to the activity log for complete audit trail.
+	llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+	}))
+
 	// Wire up event handlers based on output mode.
 	var agentEventHandler agent.EventHandler
+
+	// Agent event handler that always logs to activity log.
+	logAgentEvent := func(evt agent.Event) {
+		errMsg := ""
+		if evt.Err != nil {
+			errMsg = evt.Err.Error()
+		}
+		activityLog.WriteAgentEvent(string(evt.Type), evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+	}
+
 	if jsonOut {
 		// JSON streaming mode: all events go as typed NDJSON to stdout.
 		stream := newJSONStream(os.Stdout)
 		llmClient.AddTraceObserver(stream.traceObserver())
-		agentEventHandler = stream.agentHandler()
+		agentEventHandler = agent.EventHandlerFunc(func(evt agent.Event) {
+			logAgentEvent(evt)
+			stream.agentHandler().HandleEvent(evt)
+		})
 		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
 			pipeline.PipelineMultiHandler(stream.pipelineHandler(), activityLog),
 		))
@@ -153,6 +171,7 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 		// Human-readable console output.
 		llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
 		agentEventHandler = agent.EventHandlerFunc(func(evt agent.Event) {
+			logAgentEvent(evt)
 			line := agent.FormatEventLine(evt)
 			if line == "" {
 				return
@@ -264,8 +283,15 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 	appModel.SetInitialNodes(nodeList)
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
 
+	// Build activity log early so agent and LLM events can be captured.
+	artifactDir := filepath.Join(workdir, ".tracker", "runs")
+	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
+	defer activityLog.Close()
+
+	// Wire LLM trace events to both TUI and activity log.
 	llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
 		prog.Send(dashboard.LLMTraceMsg{Event: evt})
+		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
 	}))
 
 	// Mode 2 interviewer: delegates gate prompts to the running dashboard program.
@@ -283,13 +309,13 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
 			prog.Send(dashboard.AgentEventMsg{Event: evt})
+			errMsg := ""
+			if evt.Err != nil {
+				errMsg = evt.Err.Error()
+			}
+			activityLog.WriteAgentEvent(string(evt.Type), evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 		})),
 	)
-
-	// Build engine options.
-	artifactDir := filepath.Join(workdir, ".tracker", "runs")
-	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
-	defer activityLog.Close()
 
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))

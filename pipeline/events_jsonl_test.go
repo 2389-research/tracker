@@ -1,4 +1,5 @@
 // ABOUTME: Tests for the JSONL activity log event handler.
+// ABOUTME: Covers pipeline, agent, and LLM event logging to the unified activity.jsonl file.
 package pipeline
 
 import (
@@ -106,6 +107,140 @@ func TestJSONLEventHandlerCloseWithoutEvents(t *testing.T) {
 	// Close without writing any events should not panic
 	if err := h.Close(); err != nil {
 		t.Fatalf("Close without events: %v", err)
+	}
+}
+
+func TestJSONLEventHandlerWritesPipelineSource(t *testing.T) {
+	dir := t.TempDir()
+	h := NewJSONLEventHandler(dir)
+	defer h.Close()
+
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "src123",
+		Message:   "started",
+	})
+	h.Close()
+
+	data, err := os.ReadFile(filepath.Join(dir, "src123", "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var entry jsonlLogEntry
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if entry.Source != "pipeline" {
+		t.Errorf("source = %q, want pipeline", entry.Source)
+	}
+}
+
+func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
+	dir := t.TempDir()
+	h := NewJSONLEventHandler(dir)
+
+	// Open the file by sending a pipeline event first (to get run ID).
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "agent123",
+	})
+
+	h.WriteAgentEvent("tool_call_end", "execute_command", "output here", "", "", "", "anthropic", "claude-sonnet-4-6")
+	h.Close()
+
+	data, err := os.ReadFile(filepath.Join(dir, "agent123", "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+
+	var entry jsonlLogEntry
+	if err := json.Unmarshal([]byte(lines[1]), &entry); err != nil {
+		t.Fatalf("unmarshal agent line: %v", err)
+	}
+	if entry.Source != "agent" {
+		t.Errorf("source = %q, want agent", entry.Source)
+	}
+	if entry.ToolName != "execute_command" {
+		t.Errorf("tool_name = %q, want execute_command", entry.ToolName)
+	}
+	if entry.Content != "output here" {
+		t.Errorf("content = %q, want 'output here'", entry.Content)
+	}
+	if entry.Provider != "anthropic" {
+		t.Errorf("provider = %q, want anthropic", entry.Provider)
+	}
+}
+
+func TestJSONLEventHandlerWritesLLMEvents(t *testing.T) {
+	dir := t.TempDir()
+	h := NewJSONLEventHandler(dir)
+
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "llm123",
+	})
+
+	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hello world")
+	h.Close()
+
+	data, err := os.ReadFile(filepath.Join(dir, "llm123", "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+
+	var entry jsonlLogEntry
+	if err := json.Unmarshal([]byte(lines[1]), &entry); err != nil {
+		t.Fatalf("unmarshal llm line: %v", err)
+	}
+	if entry.Source != "llm" {
+		t.Errorf("source = %q, want llm", entry.Source)
+	}
+	if entry.Provider != "anthropic" {
+		t.Errorf("provider = %q, want anthropic", entry.Provider)
+	}
+	if entry.Model != "claude-sonnet-4-6" {
+		t.Errorf("model = %q, want claude-sonnet-4-6", entry.Model)
+	}
+	if entry.Content != "hello world" {
+		t.Errorf("content = %q, want 'hello world'", entry.Content)
+	}
+}
+
+func TestJSONLEventHandlerAgentErrorCombining(t *testing.T) {
+	dir := t.TempDir()
+	h := NewJSONLEventHandler(dir)
+
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "err123",
+	})
+
+	h.WriteAgentEvent("tool_call_end", "cmd", "", "exit code 1", "", "process killed", "", "")
+	h.Close()
+
+	data, err := os.ReadFile(filepath.Join(dir, "err123", "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var entry jsonlLogEntry
+	if err := json.Unmarshal([]byte(lines[1]), &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if entry.Error != "exit code 1: process killed" {
+		t.Errorf("error = %q, want 'exit code 1: process killed'", entry.Error)
 	}
 }
 
