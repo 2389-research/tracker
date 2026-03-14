@@ -51,7 +51,7 @@ func (sb *StatusBar) trackDiagram() string {
 	connector := Styles.DimText.Render("━")
 	var parts []string
 	for _, node := range nodes {
-		lamp, style := statusLamp(sb.store.NodeStatus(node.ID))
+		lamp, style := StatusLamp(sb.store.NodeStatus(node.ID))
 		parts = append(parts, style.Render(lamp))
 	}
 	return strings.Join(parts, connector)
@@ -61,18 +61,4 @@ func (sb *StatusBar) trackDiagram() string {
 func (sb *StatusBar) progressSummary() string {
 	done, total := sb.store.Progress()
 	return Styles.PrimaryText.Render(fmt.Sprintf("%d/%d", done, total))
-}
-
-// statusLamp returns the lamp character and color style for a node state.
-func statusLamp(state NodeState) (string, lipgloss.Style) {
-	switch state {
-	case NodeDone:
-		return LampDone, lipgloss.NewStyle().Foreground(ColorDone)
-	case NodeRunning:
-		return LampRunning, lipgloss.NewStyle().Foreground(ColorRunning).Bold(true)
-	case NodeFailed:
-		return LampFailed, lipgloss.NewStyle().Foreground(ColorFailed)
-	default:
-		return LampPending, lipgloss.NewStyle().Foreground(ColorPending)
-	}
 }

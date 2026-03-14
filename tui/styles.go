@@ -60,6 +60,20 @@ type StyleRegistry struct {
 	Thinking    lipgloss.Style
 }
 
+// StatusLamp returns the indicator character and style for a node status.
+func StatusLamp(status NodeState) (string, lipgloss.Style) {
+	switch status {
+	case NodeDone:
+		return LampDone, lipgloss.NewStyle().Foreground(ColorDone)
+	case NodeRunning:
+		return LampRunning, lipgloss.NewStyle().Foreground(ColorRunning).Bold(true)
+	case NodeFailed:
+		return LampFailed, lipgloss.NewStyle().Foreground(ColorFailed)
+	default:
+		return LampPending, lipgloss.NewStyle().Foreground(ColorPending)
+	}
+}
+
 // Styles is the global style registry instance.
 var Styles = StyleRegistry{
 	NodeName:    lipgloss.NewStyle().Foreground(ColorBrightText).Bold(true),

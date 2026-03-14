@@ -89,11 +89,15 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 		al.addEntry(logEntry{kind: entryToolStart, nodeID: m.NodeID, toolName: m.ToolName, text: m.ToolName})
 	case MsgToolCallEnd:
 		al.resetCoalesce()
-		output := m.Output
 		if m.Error != "" {
-			output = m.Error
+			al.addEntry(logEntry{kind: entryError, nodeID: m.NodeID, toolName: m.ToolName, text: m.Error})
 		}
-		al.addEntry(logEntry{kind: entryToolEnd, nodeID: m.NodeID, toolName: m.ToolName, text: output})
+		if m.Output != "" {
+			al.addEntry(logEntry{kind: entryToolEnd, nodeID: m.NodeID, toolName: m.ToolName, text: m.Output})
+		}
+		if m.Error == "" && m.Output == "" {
+			al.addEntry(logEntry{kind: entryToolEnd, nodeID: m.NodeID, toolName: m.ToolName, text: ""})
+		}
 	case MsgAgentError:
 		al.resetCoalesce()
 		al.addEntry(logEntry{kind: entryError, nodeID: m.NodeID, text: m.Error})
