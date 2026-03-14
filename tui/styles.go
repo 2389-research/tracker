@@ -36,6 +36,14 @@ var (
 	ColorPatch = lipgloss.Color("180") // #d7af87 — tan patch/apply
 )
 
+// Color aliases for semantic node status colors.
+var (
+	ColorRunning = ColorAmber
+	ColorDone    = ColorGreen
+	ColorFailed  = ColorRed
+	ColorPending = ColorOff
+)
+
 // StyleRegistry holds all shared lipgloss styles for the TUI.
 type StyleRegistry struct {
 	NodeName    lipgloss.Style
@@ -44,6 +52,12 @@ type StyleRegistry struct {
 	ZoneLabel   lipgloss.Style
 	Readout     lipgloss.Style
 	PanelBorder lipgloss.Border
+	Header      lipgloss.Style
+	Muted       lipgloss.Style
+	StatusBar   lipgloss.Style
+	ToolName    lipgloss.Style
+	Error       lipgloss.Style
+	Thinking    lipgloss.Style
 }
 
 // Styles is the global style registry instance.
@@ -54,4 +68,10 @@ var Styles = StyleRegistry{
 	ZoneLabel:   lipgloss.NewStyle().Foreground(ColorLabel).Bold(true),
 	Readout:     lipgloss.NewStyle().Foreground(ColorReadout),
 	PanelBorder: lipgloss.DoubleBorder(),
+	Header:      lipgloss.NewStyle().Foreground(ColorBrightText).Bold(true),
+	Muted:       lipgloss.NewStyle().Foreground(ColorDim),
+	StatusBar:   lipgloss.NewStyle().Background(ColorPanel).Padding(0, 1),
+	ToolName:    lipgloss.NewStyle().Foreground(ColorAmber).Bold(true),
+	Error:       lipgloss.NewStyle().Foreground(ColorRed).Bold(true),
+	Thinking:    lipgloss.NewStyle().Foreground(ColorAmber),
 }
