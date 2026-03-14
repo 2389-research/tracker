@@ -98,7 +98,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		artifactRoot = dir
 	}
 
-	_, runErr := sess.Run(ctx, prompt)
+	sessResult, runErr := sess.Run(ctx, prompt)
 	if runErr != nil {
 		// Configuration errors (unknown provider, missing keys) are fatal —
 		// they won't resolve on retry, so crash the pipeline immediately.
@@ -119,6 +119,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		if responseArtifact == "" {
 			responseArtifact = runErr.Error()
 		}
+		responseArtifact += "\n\n" + sessResult.String()
 		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
 			return pipeline.Outcome{}, err
 		}
@@ -130,6 +131,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if responseArtifact == "" {
 		responseArtifact = responseText
 	}
+	responseArtifact += "\n\n" + sessResult.String()
 
 	status := pipeline.OutcomeSuccess
 	if node.Attrs["auto_status"] == "true" {
@@ -141,6 +143,12 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse: responseText,
 		},
+	}
+	if sessResult.Usage.EstimatedCost > 0 {
+		outcome.ContextUpdates["last_cost"] = fmt.Sprintf("%.4f", sessResult.Usage.EstimatedCost)
+	}
+	if sessResult.Turns > 0 {
+		outcome.ContextUpdates["last_turns"] = strconv.Itoa(sessResult.Turns)
 	}
 	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
 		return pipeline.Outcome{}, err
