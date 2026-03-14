@@ -166,6 +166,37 @@ func TestCodergenHandlerAutoStatusRetry(t *testing.T) {
 	}
 }
 
+func TestCodergenHandlerAutoStatusMultiTurn(t *testing.T) {
+	// Simulates a multi-turn agent session where the LLM emits conversational
+	// text in early turns and the STATUS: line only in the final turn.
+	client := &fakeCompleter{responseText: "I'll fix the failing tests now.\nLet me read the conformance output.\nSTATUS:retry\nSome tests still failing."}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{ID: "fix", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "fix failures", "auto_status": "true"}}
+	pctx := pipeline.NewPipelineContext()
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeRetry {
+		t.Errorf("expected 'retry' from last STATUS line, got %q", outcome.Status)
+	}
+}
+
+func TestCodergenHandlerAutoStatusLastWins(t *testing.T) {
+	// When multiple STATUS: lines exist, the last one wins.
+	client := &fakeCompleter{responseText: "STATUS:success\nFirst pass done.\nSTATUS:retry\nActually needs another pass."}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{ID: "fix", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "fix failures", "auto_status": "true"}}
+	pctx := pipeline.NewPipelineContext()
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeRetry {
+		t.Errorf("expected 'retry' (last STATUS line wins), got %q", outcome.Status)
+	}
+}
+
 func TestCodergenHandlerSystemPrompt(t *testing.T) {
 	client := &fakeCompleter{responseText: "done"}
 	h := NewCodergenHandler(client, t.TempDir())

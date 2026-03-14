@@ -225,29 +225,29 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	return config
 }
 
-// parseAutoStatus extracts the STATUS directive from the first line of the
-// response text. Valid statuses are success, fail, and retry. Falls back to
-// success if no valid STATUS line is found.
+// parseAutoStatus scans the response text for STATUS: directives and returns
+// the last one found. In multi-turn agentic sessions, the LLM emits text across
+// many turns, so the STATUS: line appears in the final turn's output — not the
+// first line of the concatenated text. Falls back to success if no valid STATUS
+// line is found.
 func parseAutoStatus(text string) string {
-	firstLine := text
-	if idx := strings.Index(text, "\n"); idx >= 0 {
-		firstLine = text[:idx]
-	}
-	firstLine = strings.TrimSpace(firstLine)
-
-	if strings.HasPrefix(firstLine, "STATUS:") {
-		status := strings.TrimSpace(strings.TrimPrefix(firstLine, "STATUS:"))
+	result := pipeline.OutcomeSuccess
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "STATUS:") {
+			continue
+		}
+		status := strings.TrimSpace(strings.TrimPrefix(line, "STATUS:"))
 		switch status {
 		case "success":
-			return pipeline.OutcomeSuccess
+			result = pipeline.OutcomeSuccess
 		case "fail":
-			return pipeline.OutcomeFail
+			result = pipeline.OutcomeFail
 		case "retry":
-			return pipeline.OutcomeRetry
+			result = pipeline.OutcomeRetry
 		}
 	}
-
-	return pipeline.OutcomeSuccess
+	return result
 }
 
 // prependContextSummary adds a compacted context summary section to the prompt
