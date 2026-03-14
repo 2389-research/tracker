@@ -50,6 +50,7 @@ const (
 	modeSetup    commandMode = "setup"
 	modeAudit    commandMode = "audit"
 	modeSimulate commandMode = "simulate"
+	modeValidate commandMode = "validate"
 )
 
 var errUsage = errors.New("usage")
@@ -347,6 +348,14 @@ func parseFlags(args []string) (runConfig, error) {
 		return cfg, nil
 	}
 
+	if len(args) > 1 && args[1] == string(modeValidate) {
+		cfg.mode = modeValidate
+		if len(args) > 2 {
+			cfg.dotFile = args[2]
+		}
+		return cfg, nil
+	}
+
 	if len(args) > 1 && args[1] == string(modeSimulate) {
 		cfg.mode = modeSimulate
 		if len(args) > 2 {
@@ -415,6 +424,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage:\n")
 	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot> [flags]\n")
 	fmt.Fprintf(w, "  tracker setup\n")
+	fmt.Fprintf(w, "  tracker validate <pipeline.dot>\n")
 	fmt.Fprintf(w, "  tracker simulate <pipeline.dot>\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n\n")
 	fmt.Fprintf(w, "Flags:\n")
@@ -441,6 +451,13 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 
 	if cfg.mode == modeSetup {
 		return deps.runSetup()
+	}
+
+	if cfg.mode == modeValidate {
+		if cfg.dotFile == "" {
+			return fmt.Errorf("usage: tracker validate <pipeline.dot>")
+		}
+		return runValidate(cfg.dotFile, os.Stdout)
 	}
 
 	if cfg.mode == modeSimulate {
