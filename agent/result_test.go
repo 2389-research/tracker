@@ -41,6 +41,39 @@ func TestResultString(t *testing.T) {
 	}
 }
 
+func TestResultStringWithTimings(t *testing.T) {
+	r := SessionResult{
+		SessionID: "b4c1",
+		Duration:  1*time.Minute + 30*time.Second,
+		Turns:     5,
+		ToolCalls: map[string]int{"read": 3, "edit": 1},
+		Usage: llm.Usage{
+			InputTokens:   50000,
+			OutputTokens:  10000,
+			TotalTokens:   60000,
+			EstimatedCost: 1.25,
+		},
+		CompactionsApplied: 2,
+		LongestTurn:        15 * time.Second,
+		ToolTimings: map[string]time.Duration{
+			"read": 5 * time.Second,
+			"edit": 2 * time.Second,
+		},
+	}
+
+	s := r.String()
+
+	if !strings.Contains(s, "Compactions: 2") {
+		t.Errorf("expected 'Compactions: 2' in output: %s", s)
+	}
+	if !strings.Contains(s, "Longest turn: 15s") {
+		t.Errorf("expected 'Longest turn: 15s' in output: %s", s)
+	}
+	if !strings.Contains(s, "$1.25") {
+		t.Errorf("expected '$1.25' in output: %s", s)
+	}
+}
+
 func TestResultTotalToolCalls(t *testing.T) {
 	r := SessionResult{
 		ToolCalls: map[string]int{"read": 5, "write": 3},

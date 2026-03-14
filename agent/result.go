@@ -25,6 +25,9 @@ type SessionResult struct {
 	ContextUtilization float64
 	ToolCacheHits      int
 	ToolCacheMisses    int
+	ToolTimings        map[string]time.Duration
+	CompactionsApplied int
+	LongestTurn        time.Duration
 	Error              error
 }
 
@@ -76,6 +79,17 @@ func (r SessionResult) String() string {
 		fmt.Fprintf(&b, " | Cost: $%.2f", r.Usage.EstimatedCost)
 	}
 	b.WriteString("\n")
+
+	if r.CompactionsApplied > 0 || r.LongestTurn > 0 {
+		var extras []string
+		if r.CompactionsApplied > 0 {
+			extras = append(extras, fmt.Sprintf("Compactions: %d", r.CompactionsApplied))
+		}
+		if r.LongestTurn > 0 {
+			extras = append(extras, fmt.Sprintf("Longest turn: %s", r.LongestTurn.Round(time.Second)))
+		}
+		fmt.Fprintf(&b, "%s\n", strings.Join(extras, " | "))
+	}
 
 	return b.String()
 }
