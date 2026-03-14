@@ -86,5 +86,8 @@ func (h *JSONLEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 func (h *JSONLEventHandler) Close() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.file == nil {
+		return nil
+	}
 	return h.file.Close()
 }

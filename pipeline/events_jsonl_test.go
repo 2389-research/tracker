@@ -100,6 +100,15 @@ func TestJSONLEventHandlerNoopWithoutRunID(t *testing.T) {
 	}
 }
 
+func TestJSONLEventHandlerCloseWithoutEvents(t *testing.T) {
+	dir := t.TempDir()
+	h := NewJSONLEventHandler(dir)
+	// Close without writing any events should not panic
+	if err := h.Close(); err != nil {
+		t.Fatalf("Close without events: %v", err)
+	}
+}
+
 type testErr struct{ msg string }
 
 func (e *testErr) Error() string { return e.msg }
