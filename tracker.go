@@ -93,6 +93,17 @@ func NewEngine(dotSource string, cfg Config) (*Engine, error) {
 		}
 	}
 
+	// If a retry policy is specified, inject it as a graph-level attribute
+	// so nodes use it as the default retry strategy.
+	if cfg.RetryPolicy != "" {
+		if graph.Attrs == nil {
+			graph.Attrs = make(map[string]string)
+		}
+		if _, exists := graph.Attrs["default_retry_policy"]; !exists {
+			graph.Attrs["default_retry_policy"] = cfg.RetryPolicy
+		}
+	}
+
 	env := exec.NewLocalEnvironment(workDir)
 
 	registryOpts := []handlers.RegistryOption{

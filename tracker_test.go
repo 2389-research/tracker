@@ -204,3 +204,23 @@ func TestNewEngine_InvalidProvider(t *testing.T) {
 		t.Fatal("expected error for unknown provider")
 	}
 }
+
+func TestRun_WithRetryPolicy(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	result, err := Run(context.Background(), simpleDOT, Config{
+		LLMClient:   client,
+		RetryPolicy: "aggressive",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "success" {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+}
