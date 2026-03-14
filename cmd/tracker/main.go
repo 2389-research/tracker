@@ -26,9 +26,7 @@ import (
 	"github.com/2389-research/tracker/llm/openai"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
-	// TUI imports will be restored after clean-room rewrite.
-	// "github.com/2389-research/tracker/tui"
-	// "github.com/2389-research/tracker/tui/dashboard"
+	"github.com/2389-research/tracker/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
@@ -225,9 +223,141 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
-// STUB: TUI is being rewritten. Will be restored in Task 14.
 func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
-	return fmt.Errorf("TUI is being rewritten — use mode 1 (without --tui) for now")
+	dotBytes, err := os.ReadFile(dotFile)
+	if err != nil {
+		return fmt.Errorf("read pipeline file: %w", err)
+	}
+	graph, err := pipeline.ParseDOT(string(dotBytes))
+	if err != nil {
+		return fmt.Errorf("parse pipeline: %w", err)
+	}
+	if err := pipeline.Validate(graph); err != nil {
+		return fmt.Errorf("validate pipeline: %w", err)
+	}
+
+	tokenTracker := llm.NewTokenTracker()
+	llmClient, err := buildLLMClient(tokenTracker)
+	if err != nil {
+		return fmt.Errorf("create LLM client: %w", err)
+	}
+	defer llmClient.Close()
+
+	execEnv := exec.NewLocalEnvironment(workdir)
+
+	pipelineName := graph.Name
+	if pipelineName == "" {
+		base := filepath.Base(dotFile)
+		ext := filepath.Ext(base)
+		pipelineName = base[:len(base)-len(ext)]
+	}
+
+	// Build the TUI model.
+	store := tui.NewStateStore(tokenTracker)
+	appModel := tui.NewAppModel(store, pipelineName, "")
+	appModel.SetVerboseTrace(verbose)
+	nodeList := buildNodeList(graph)
+	appModel.SetInitialNodes(nodeList)
+
+	// Handle checkpoint resume — pre-mark completed nodes.
+	if checkpoint != "" {
+		cp, cpErr := pipeline.LoadCheckpoint(checkpoint)
+		if cpErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load checkpoint for TUI: %v\n", cpErr)
+		} else {
+			for _, n := range nodeList {
+				if cp.IsCompleted(n.ID) {
+					store.Apply(tui.MsgNodeCompleted{NodeID: n.ID, Outcome: "resumed"})
+				}
+			}
+		}
+	}
+
+	prog := tea.NewProgram(appModel, tea.WithAltScreen())
+
+	// Activity log.
+	artifactDir := filepath.Join(workdir, ".tracker", "runs")
+	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
+	defer activityLog.Close()
+
+	// Wire LLM trace events to both TUI and activity log.
+	llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+		for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
+			prog.Send(m)
+		}
+		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+	}))
+
+	// Mode 2 interviewer.
+	interviewer := tui.NewBubbleteaInterviewer(func(msg tea.Msg) {
+		prog.Send(msg)
+	})
+
+	// Pipeline event handler that adapts and sends to TUI.
+	pipelineHandler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
+		msg := tui.AdaptPipelineEvent(evt)
+		if msg != nil {
+			prog.Send(msg)
+		}
+	})
+
+	// Build handler registry.
+	registry := handlers.NewDefaultRegistry(graph,
+		handlers.WithLLMClient(llmClient, workdir),
+		handlers.WithExecEnvironment(execEnv),
+		handlers.WithInterviewer(interviewer, graph),
+		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
+			msg := tui.AdaptAgentEvent(evt, evt.SessionID)
+			if msg != nil {
+				prog.Send(msg)
+			}
+			errMsg := ""
+			if evt.Err != nil {
+				errMsg = evt.Err.Error()
+			}
+			activityLog.WriteAgentEvent(string(evt.Type), evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+		})),
+	)
+
+	var engineOpts []pipeline.EngineOption
+	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
+	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
+		pipeline.PipelineMultiHandler(pipelineHandler, activityLog),
+	))
+	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
+	if checkpoint != "" {
+		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
+	}
+
+	engine := pipeline.NewEngine(graph, registry, engineOpts...)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	type pipelineOutcome struct {
+		result *pipeline.EngineResult
+		err    error
+	}
+	outcomeCh := make(chan pipelineOutcome, 1)
+
+	go func() {
+		result, pipelineErr := engine.Run(ctx)
+		if pipelineErr == nil && result.Status != pipeline.OutcomeSuccess {
+			pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
+		}
+		outcomeCh <- pipelineOutcome{result: result, err: pipelineErr}
+		prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
+	}()
+
+	_, err = prog.Run()
+	cancel()
+	if err != nil {
+		return fmt.Errorf("TUI program: %w", err)
+	}
+
+	outcome := <-outcomeCh
+	printRunSummary(outcome.result, outcome.err, tokenTracker, dotFile)
+	return outcome.err
 }
 
 func parseFlags(args []string) (runConfig, error) {
@@ -608,27 +738,22 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 // chooseInterviewer returns a BubbleteaInterviewer when stdin is a terminal
 // (nice arrow-key UI), or a ConsoleInterviewer for non-TTY contexts (piped
 // input, background processes, CI).
-// STUB: TUI interviewer will be restored in Task 14.
 func chooseInterviewer(isTerminal bool) handlers.FreeformInterviewer {
-	_ = isTerminal
+	if isTerminal {
+		return tui.NewMode1Interviewer()
+	}
 	return handlers.NewConsoleInterviewer()
 }
 
 // buildNodeList creates an ordered list of node ID/label pairs from the
 // pipeline graph. Walks from StartNode in BFS order so the list reflects the
 // natural execution flow.
-// STUB: Will return tui.NodeEntry once the new TUI package is built.
-type stubNodeEntry struct {
-	ID    string
-	Label string
-}
-
-func buildNodeList(graph *pipeline.Graph) []stubNodeEntry {
+func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
 	if graph.StartNode == "" {
 		return nil
 	}
 
-	var entries []stubNodeEntry
+	var entries []tui.NodeEntry
 	visited := make(map[string]bool)
 	queue := []string{graph.StartNode}
 
@@ -649,7 +774,7 @@ func buildNodeList(graph *pipeline.Graph) []stubNodeEntry {
 		if label == "" {
 			label = node.ID
 		}
-		entries = append(entries, stubNodeEntry{
+		entries = append(entries, tui.NodeEntry{
 			ID:    node.ID,
 			Label: label,
 		})

@@ -9,12 +9,14 @@ import (
 
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
+	"github.com/2389-research/tracker/tui"
 )
 
-// STUB: TestChooseInterviewerReturnsBubbleteaWhenTerminal is disabled
-// during TUI rewrite. Will be restored in Task 14.
 func TestChooseInterviewerReturnsBubbleteaWhenTerminal(t *testing.T) {
-	t.Skip("TUI rewrite in progress — chooseInterviewer is stubbed")
+	iv := chooseInterviewer(true)
+	if _, ok := iv.(*tui.BubbleteaInterviewer); !ok {
+		t.Errorf("expected *tui.BubbleteaInterviewer when terminal, got %T", iv)
+	}
 }
 
 func TestChooseInterviewerReturnsConsoleWhenNotTerminal(t *testing.T) {

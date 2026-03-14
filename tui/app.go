@@ -225,6 +225,16 @@ func (a *AppModel) ActiveNode() string {
 	return ""
 }
 
+// SetVerboseTrace enables or disables verbose LLM trace output in the agent log.
+func (a *AppModel) SetVerboseTrace(v bool) {
+	a.agentLog.SetVerboseTrace(v)
+}
+
+// SetInitialNodes configures the ordered node list via the state store.
+func (a *AppModel) SetInitialNodes(entries []NodeEntry) {
+	a.store.SetNodes(entries)
+}
+
 // String implements fmt.Stringer for debug purposes.
 func (a AppModel) String() string {
 	done, total := a.store.Progress()
