@@ -109,6 +109,9 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case MsgModalDismiss:
 		a.modal.Hide()
 		return a, nil
+	case MsgPipelineDone:
+		// Pipeline finished — exit the TUI so the summary page can be printed.
+		return a, tea.Quit
 	}
 
 	// Handle tick messages — re-schedule ticks.

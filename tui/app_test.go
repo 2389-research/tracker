@@ -165,6 +165,17 @@ func TestAppQuitKey(t *testing.T) {
 	}
 }
 
+func TestAppPipelineDoneQuitsApp(t *testing.T) {
+	store := NewStateStore(nil)
+	app := NewAppModel(store, "test", "run1")
+	app.Init()
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	_, cmd := app.Update(MsgPipelineDone{})
+	if cmd == nil {
+		t.Error("expected quit command when pipeline completes")
+	}
+}
+
 func TestAppCtrlCKey(t *testing.T) {
 	store := NewStateStore(nil)
 	app := NewAppModel(store, "test", "run1")
