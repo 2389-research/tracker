@@ -89,6 +89,44 @@ func TestShapeToHandler(t *testing.T) {
 	}
 }
 
+func TestDiamondWithPromptUsesCodergen(t *testing.T) {
+	g := NewGraph("test")
+	// Diamond with prompt should upgrade to codergen with auto_status.
+	g.AddNode(&Node{ID: "check", Shape: "diamond", Attrs: map[string]string{
+		"prompt": "Run tests. If pass: outcome=success. If fail: outcome=fail",
+	}})
+	node := g.Nodes["check"]
+	if node.Handler != "codergen" {
+		t.Errorf("expected diamond+prompt to use codergen, got %q", node.Handler)
+	}
+	if node.Attrs["auto_status"] != "true" {
+		t.Errorf("expected auto_status=true, got %q", node.Attrs["auto_status"])
+	}
+}
+
+func TestDiamondWithoutPromptStaysConditional(t *testing.T) {
+	g := NewGraph("test")
+	// Diamond without prompt stays as conditional.
+	g.AddNode(&Node{ID: "check", Shape: "diamond"})
+	node := g.Nodes["check"]
+	if node.Handler != "conditional" {
+		t.Errorf("expected diamond without prompt to stay conditional, got %q", node.Handler)
+	}
+}
+
+func TestDiamondWithExplicitTypeNotOverridden(t *testing.T) {
+	g := NewGraph("test")
+	// Diamond with explicit type should keep it, even with a prompt.
+	g.AddNode(&Node{ID: "check", Shape: "diamond", Attrs: map[string]string{
+		"type":   "custom_handler",
+		"prompt": "some prompt",
+	}})
+	node := g.Nodes["check"]
+	if node.Handler != "custom_handler" {
+		t.Errorf("expected explicit type to be preserved, got %q", node.Handler)
+	}
+}
+
 func TestGraphStartAndExitNodes(t *testing.T) {
 	g := NewGraph("test")
 	g.AddNode(&Node{ID: "begin", Shape: "Mdiamond"})

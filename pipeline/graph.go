@@ -56,6 +56,14 @@ func (g *Graph) AddNode(n *Node) {
 	} else if handler, ok := ShapeToHandler(n.Shape); ok {
 		n.Handler = handler
 	}
+	// Diamond nodes with a prompt should use codergen (LLM evaluation)
+	// instead of the no-op conditional handler.
+	if n.Shape == "diamond" && n.Handler == "conditional" && n.Attrs["prompt"] != "" {
+		n.Handler = "codergen"
+		if n.Attrs["auto_status"] == "" {
+			n.Attrs["auto_status"] = "true"
+		}
+	}
 	g.Nodes[n.ID] = n
 
 	switch n.Shape {
