@@ -4,9 +4,11 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -748,5 +750,186 @@ func TestEngineNoEdgesFromNode(t *testing.T) {
 	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error for dead-end non-exit node")
+	}
+}
+
+func TestEngineConditionalEdgeMatchesOutcome(t *testing.T) {
+	// Verifies that after a handler returns OutcomeSuccess, edges conditioned
+	// on outcome=success are selected. This is the basic contract that
+	// conditional routing depends on.
+	g := NewGraph("cond_edge_basic")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "verify", Shape: "box", Label: "Verify", Handler: "codergen"})
+	g.AddNode(&Node{ID: "pass_step", Shape: "box", Label: "PassStep", Handler: "codergen"})
+	g.AddNode(&Node{ID: "fail_step", Shape: "box", Label: "FailStep", Handler: "codergen"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "verify"})
+	g.AddEdge(&Edge{From: "verify", To: "pass_step", Condition: "outcome=success"})
+	g.AddEdge(&Edge{From: "verify", To: "fail_step", Condition: "outcome=fail"})
+	g.AddEdge(&Edge{From: "pass_step", To: "end"})
+	g.AddEdge(&Edge{From: "fail_step", To: "end"})
+
+	reg := newTestRegistry()
+	// Override codergen to return success (no ContextUpdates for outcome —
+	// the engine should set it automatically from outcome.Status).
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+	// The "pass_step" node should have been reached (not fail_step).
+	foundPass := false
+	foundFail := false
+	for _, n := range result.CompletedNodes {
+		if n == "pass_step" {
+			foundPass = true
+		}
+		if n == "fail_step" {
+			foundFail = true
+		}
+	}
+	if !foundPass {
+		t.Errorf("expected 'pass_step' in completed nodes, got %v", result.CompletedNodes)
+	}
+	if foundFail {
+		t.Errorf("did not expect 'fail_step' in completed nodes, got %v", result.CompletedNodes)
+	}
+}
+
+func TestEngineConditionalEdgeMatchesFail(t *testing.T) {
+	// When handler returns OutcomeFail, edges conditioned on outcome=fail
+	// should be selected.
+	g := NewGraph("cond_edge_fail")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "check", Shape: "box", Label: "Check", Handler: "codergen"})
+	g.AddNode(&Node{ID: "ok_step", Shape: "box", Label: "OKStep", Handler: "codergen"})
+	g.AddNode(&Node{ID: "nok_step", Shape: "box", Label: "NOKStep", Handler: "codergen"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "ok_step", Condition: "outcome=success"})
+	g.AddEdge(&Edge{From: "check", To: "nok_step", Condition: "outcome=fail"})
+	g.AddEdge(&Edge{From: "ok_step", To: "end"})
+	g.AddEdge(&Edge{From: "nok_step", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeFail}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected completion, got error: %v", err)
+	}
+	found := false
+	for _, n := range result.CompletedNodes {
+		if n == "nok_step" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'nok_step' in completed nodes, got %v", result.CompletedNodes)
+	}
+}
+
+func TestEngineConditionalEdgeDiagnosticOnMismatch(t *testing.T) {
+	// All edges have conditions, none match — error should include diagnostic info.
+	g := NewGraph("cond_edge_diag")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "step", Shape: "box", Label: "Step", Handler: "codergen"})
+	g.AddNode(&Node{ID: "a", Shape: "Msquare", Label: "A"})
+	g.AddNode(&Node{ID: "b", Shape: "Msquare", Label: "B"})
+
+	g.AddEdge(&Edge{From: "s", To: "step"})
+	// Conditions that won't match "success" status.
+	g.AddEdge(&Edge{From: "step", To: "a", Condition: "custom_key=alpha"})
+	g.AddEdge(&Edge{From: "step", To: "b", Condition: "custom_key=beta"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	_, err := engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error when no edges match")
+	}
+	if !strings.Contains(err.Error(), "no matching edges") {
+		t.Errorf("expected 'no matching edges' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "custom_key=alpha") {
+		t.Errorf("expected condition text in diagnostic, got: %v", err)
+	}
+}
+
+func TestEngineResumePreservesEdgeContext(t *testing.T) {
+	// On checkpoint resume, completed nodes should route correctly using
+	// the preserved context (not cleared hints).
+	g := NewGraph("resume_edge")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "a", Shape: "box", Label: "A", Handler: "codergen"})
+	g.AddNode(&Node{ID: "b", Shape: "box", Label: "B", Handler: "codergen"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "a"})
+	g.AddEdge(&Edge{From: "a", To: "b", Condition: "outcome=success"})
+	g.AddEdge(&Edge{From: "a", To: "end", Condition: "outcome=fail"})
+	g.AddEdge(&Edge{From: "b", To: "end"})
+
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "cp.json")
+
+	// Create a checkpoint where "s" and "a" are completed, with outcome=success.
+	cp := &Checkpoint{
+		CompletedNodes: []string{"s", "a"},
+		CurrentNode:    "s",
+		Context: map[string]string{
+			"outcome": "success",
+		},
+	}
+	cpData, _ := json.Marshal(cp)
+	os.WriteFile(cpPath, cpData, 0644)
+
+	reg := newTestRegistry()
+	bExecuted := false
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if node.ID == "b" {
+				bExecuted = true
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected success on resume, got error: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+	if !bExecuted {
+		t.Error("expected node B to execute after resuming through A's conditional edge")
 	}
 }

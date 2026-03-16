@@ -201,16 +201,10 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			return nil, fmt.Errorf("node %q not found in graph", currentNodeID)
 		}
 
-		// Clear per-node edge selection hints so stale values from a
-		// previous node don't pollute routing for the current one.
-		// This must happen before the IsCompleted skip so that resume
-		// paths through selectEdge also see clean context.
-		pctx.Set(ContextKeyOutcome, "")
-		pctx.Set(ContextKeyPreferredLabel, "")
-		pctx.Set("suggested_next_nodes", "")
-
 		// Skip already-completed nodes on resume, emitting synthetic events
-		// so the TUI shows them as green/done.
+		// so the TUI shows them as green/done. The checkpoint context
+		// preserves edge selection hints (outcome, preferred label) from the
+		// original execution, so selectEdge can route correctly.
 		if cp.IsCompleted(currentNodeID) {
 			e.emit(PipelineEvent{
 				Type:      EventStageCompleted,
@@ -231,6 +225,12 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			currentNodeID = next.To
 			continue
 		}
+
+		// Clear per-node edge selection hints so stale values from a
+		// previous node don't pollute routing for the current one.
+		pctx.Set(ContextKeyOutcome, "")
+		pctx.Set(ContextKeyPreferredLabel, "")
+		pctx.Set("suggested_next_nodes", "")
 
 		// Apply stylesheet to a copy of node attrs so the shared Graph
 		// is not mutated. Handlers see resolved attrs; the original node
@@ -589,7 +589,15 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		}
 	}
 	if len(unconditional) == 0 {
-		return nil, fmt.Errorf("no matching edges: all %d edges have conditions that evaluated to false", len(edges))
+		// Build diagnostic: show each condition and the context values it references.
+		var diag []string
+		for _, edge := range edges {
+			if edge.Condition != "" {
+				outcomeVal, _ := pctx.Get(ContextKeyOutcome)
+				diag = append(diag, fmt.Sprintf("  %s->%s condition=%q (outcome=%q)", edge.From, edge.To, edge.Condition, outcomeVal))
+			}
+		}
+		return nil, fmt.Errorf("no matching edges: all %d edges have conditions that evaluated to false:\n%s", len(edges), strings.Join(diag, "\n"))
 	}
 
 	sort.SliceStable(unconditional, func(i, j int) bool {
