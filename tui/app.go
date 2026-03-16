@@ -177,7 +177,9 @@ func (a AppModel) View() string {
 	nodeView := a.nodeList.View()
 	nodePanel := lipgloss.NewStyle().
 		Width(nodeWidth).
+		MaxWidth(nodeWidth).
 		Height(contentHeight).
+		MaxHeight(contentHeight).
 		PaddingRight(1).
 		Render(nodeView)
 
@@ -193,7 +195,9 @@ func (a AppModel) View() string {
 	logView := a.agentLog.View()
 	logPanel := lipgloss.NewStyle().
 		Width(logWidth - 1).
+		MaxWidth(logWidth - 1).
 		Height(contentHeight).
+		MaxHeight(contentHeight).
 		PaddingLeft(1).
 		Render(logView)
 

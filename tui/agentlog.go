@@ -157,15 +157,32 @@ func (al *AgentLog) View() string {
 		return sb.String()
 	}
 
+	// Render all entries into individual lines.
+	var rendered []string
 	for _, entry := range al.entries {
 		line := al.renderEntry(entry)
-		sb.WriteString(line)
-		sb.WriteString("\n")
+		// Split multi-line output into separate lines for proper clipping.
+		parts := strings.Split(line, "\n")
+		rendered = append(rendered, parts...)
 	}
 
-	// Show activity phase indicator at the bottom.
+	// Add activity indicator as the final line.
 	if indicator := al.activityIndicator(); indicator != "" {
-		sb.WriteString(indicator)
+		rendered = append(rendered, indicator)
+	}
+
+	// Clip to viewport height (show tail, auto-scroll behavior).
+	// Reserve 1 line for the "ACTIVITY LOG" header already written above.
+	maxLines := al.height - 1
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	if len(rendered) > maxLines {
+		rendered = rendered[len(rendered)-maxLines:]
+	}
+
+	for _, l := range rendered {
+		sb.WriteString(l)
 		sb.WriteString("\n")
 	}
 

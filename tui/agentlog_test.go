@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -131,6 +132,27 @@ func TestAgentLogThinkingOverToolIndicator(t *testing.T) {
 	}
 	if strings.Contains(view, "⟳ Thinking") {
 		t.Error("should not show thinking indicator while tool is running")
+	}
+}
+
+func TestAgentLogClipsToViewportHeight(t *testing.T) {
+	store := NewStateStore(nil)
+	tr := NewThinkingTracker()
+	// Create a very short viewport (5 lines total, 4 usable after header).
+	al := NewAgentLog(store, tr, 5)
+	// Add more entries than fit in the viewport.
+	for i := 0; i < 20; i++ {
+		al.Update(MsgTextChunk{NodeID: "n1", Text: fmt.Sprintf("line-%d\n", i)})
+	}
+	view := al.View()
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	// Should be clipped to 5 lines (1 header + 4 content).
+	if len(lines) > 5 {
+		t.Errorf("expected at most 5 lines in viewport, got %d:\n%s", len(lines), view)
+	}
+	// Should show the latest entries (tail behavior), not the oldest.
+	if !strings.Contains(view, "line-19") {
+		t.Errorf("expected latest entry visible in clipped view, got:\n%s", view)
 	}
 }
 
