@@ -46,8 +46,8 @@ func TestToolHandlerSuccess(t *testing.T) {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
 	}
 	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
-	if strings.TrimSpace(stdout) != "hello" {
-		t.Errorf("expected stdout %q, got %q", "hello", stdout)
+	if stdout != "hello" {
+		t.Errorf("expected stdout %q (trimmed), got %q", "hello", stdout)
 	}
 }
 
@@ -211,5 +211,27 @@ func TestToolHandlerWritesStatusArtifactToPipelineArtifactDir(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(workdir, "toolstep", "status.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected no fallback artifact in workdir, got err=%v", err)
+	}
+}
+
+func TestToolHandlerTrimsStdout(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	// printf adds no newline, but echo and other commands do.
+	// Also test with explicit trailing whitespace.
+	node := &pipeline.Node{
+		ID:    "trim",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "printf '  validation-pass  \n\n'"},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
+	if stdout != "validation-pass" {
+		t.Errorf("expected trimmed stdout %q, got %q", "validation-pass", stdout)
 	}
 }

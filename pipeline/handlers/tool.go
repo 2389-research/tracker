@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/agent/exec"
@@ -67,17 +68,23 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		status = pipeline.OutcomeFail
 	}
 
+	// Trim trailing whitespace from stdout/stderr so edge conditions
+	// like context.tool_stdout=pass match reliably (shell commands
+	// often emit trailing newlines).
+	stdout := strings.TrimSpace(result.Stdout)
+	stderr := strings.TrimSpace(result.Stderr)
+
 	return pipeline.Outcome{
 			Status: status,
 			ContextUpdates: map[string]string{
-				pipeline.ContextKeyToolStdout: result.Stdout,
-				pipeline.ContextKeyToolStderr: result.Stderr,
+				pipeline.ContextKeyToolStdout: stdout,
+				pipeline.ContextKeyToolStderr: stderr,
 			},
 		}, pipeline.WriteStatusArtifact(artifactRoot, node.ID, pipeline.Outcome{
 			Status: status,
 			ContextUpdates: map[string]string{
-				pipeline.ContextKeyToolStdout: result.Stdout,
-				pipeline.ContextKeyToolStderr: result.Stderr,
+				pipeline.ContextKeyToolStdout: stdout,
+				pipeline.ContextKeyToolStderr: stderr,
 			},
 		})
 }
