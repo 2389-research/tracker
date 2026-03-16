@@ -232,22 +232,24 @@ func TestAdaptLLMTraceEventFinish(t *testing.T) {
 func TestAdaptLLMTraceEventToolPrepare(t *testing.T) {
 	evt := llm.TraceEvent{Kind: llm.TraceToolPrepare, ToolName: "bash"}
 	msgs := AdaptLLMTraceEvent(evt, "n1", false)
-	var hasToolStart bool
+	// TraceToolPrepare should only send MsgThinkingStopped — the MsgToolCallStart
+	// with full ToolInput arrives from AdaptAgentEvent(EventToolCallStart).
+	var hasThinkingStopped bool
 	for _, m := range msgs {
-		if v, ok := m.(MsgToolCallStart); ok {
-			hasToolStart = true
-			if v.ToolName != "bash" {
-				t.Errorf("expected tool bash, got %s", v.ToolName)
-			}
+		if _, ok := m.(MsgThinkingStopped); ok {
+			hasThinkingStopped = true
+		}
+		if _, ok := m.(MsgToolCallStart); ok {
+			t.Error("TraceToolPrepare should not send MsgToolCallStart (handled by agent event)")
 		}
 	}
-	if !hasToolStart {
-		t.Error("expected MsgToolCallStart")
+	if !hasThinkingStopped {
+		t.Error("expected MsgThinkingStopped")
 	}
 }
 
 func TestAdaptLLMTraceEventVerboseFilter(t *testing.T) {
-	evt := llm.TraceEvent{Kind: llm.TraceProviderRaw, Preview: "raw"}
+	evt := llm.TraceEvent{Kind: llm.TraceProviderRaw, RawPreview: "raw"}
 	msgs := AdaptLLMTraceEvent(evt, "n1", false)
 	if len(msgs) != 0 {
 		t.Errorf("expected no messages in non-verbose, got %d", len(msgs))

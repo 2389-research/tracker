@@ -27,8 +27,9 @@ type MsgReasoningChunk struct {
 	Text   string
 }
 type MsgToolCallStart struct {
-	NodeID   string
-	ToolName string
+	NodeID    string
+	ToolName  string
+	ToolInput string
 }
 type MsgToolCallEnd struct {
 	NodeID   string
@@ -70,4 +71,5 @@ type MsgGateFreeform struct {
 type MsgThinkingTick struct{}
 type MsgHeaderTick struct{}
 type MsgToggleExpand struct{}
+type MsgModalDismiss struct{}
 type MsgPipelineDone struct{ Err error }

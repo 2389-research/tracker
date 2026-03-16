@@ -44,7 +44,7 @@ func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 	case agent.EventTextDelta:
 		return MsgTextChunk{NodeID: nodeID, Text: evt.Text}
 	case agent.EventToolCallStart:
-		return MsgToolCallStart{NodeID: nodeID, ToolName: evt.ToolName}
+		return MsgToolCallStart{NodeID: nodeID, ToolName: evt.ToolName, ToolInput: evt.ToolInput}
 	case agent.EventToolCallEnd:
 		return MsgToolCallEnd{
 			NodeID:   nodeID,
@@ -89,8 +89,9 @@ func AdaptLLMTraceEvent(evt llm.TraceEvent, nodeID string, verbose bool) []tea.M
 			MsgThinkingStopped{NodeID: nodeID},
 		}
 	case llm.TraceToolPrepare:
+		// Only stop thinking here — the MsgToolCallStart with full ToolInput
+		// arrives from AdaptAgentEvent(EventToolCallStart) shortly after.
 		return []tea.Msg{
-			MsgToolCallStart{NodeID: nodeID, ToolName: evt.ToolName},
 			MsgThinkingStopped{NodeID: nodeID},
 		}
 	case llm.TraceProviderRaw:
@@ -98,7 +99,7 @@ func AdaptLLMTraceEvent(evt llm.TraceEvent, nodeID string, verbose bool) []tea.M
 			return nil
 		}
 		return []tea.Msg{
-			MsgLLMProviderRaw{NodeID: nodeID, Data: evt.Preview},
+			MsgLLMProviderRaw{NodeID: nodeID, Data: evt.RawPreview},
 		}
 	default:
 		return nil

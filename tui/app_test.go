@@ -90,6 +90,68 @@ func TestAppFreeformModalRouting(t *testing.T) {
 	}
 }
 
+func TestAppModalChoiceEnterDismisses(t *testing.T) {
+	store := NewStateStore(nil)
+	app := NewAppModel(store, "test", "run1")
+	app.Init()
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	ch := make(chan string, 1)
+	app.Update(MsgGateChoice{Prompt: "Pick", Options: []string{"a", "b"}, ReplyCh: ch})
+	if !app.modal.Visible() {
+		t.Fatal("expected modal visible after gate choice")
+	}
+	// Press Enter to select
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Verify reply was sent
+	select {
+	case val := <-ch:
+		if val != "a" {
+			t.Errorf("expected selection 'a', got %q", val)
+		}
+	default:
+		t.Fatal("expected reply on channel after Enter")
+	}
+	// The cmd should produce MsgModalDismiss
+	if cmd == nil {
+		t.Fatal("expected dismiss command after Enter")
+	}
+	// Simulate bubbletea processing the command
+	app.Update(MsgModalDismiss{})
+	if app.modal.Visible() {
+		t.Error("expected modal hidden after dismiss")
+	}
+}
+
+func TestAppModalFreeformEnterDismisses(t *testing.T) {
+	store := NewStateStore(nil)
+	app := NewAppModel(store, "test", "run1")
+	app.Init()
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	ch := make(chan string, 1)
+	app.Update(MsgGateFreeform{Prompt: "Enter value", ReplyCh: ch})
+	if !app.modal.Visible() {
+		t.Fatal("expected modal visible after gate freeform")
+	}
+	// Type some text then press Enter
+	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	select {
+	case val := <-ch:
+		if val != "hello" {
+			t.Errorf("expected 'hello', got %q", val)
+		}
+	default:
+		t.Fatal("expected reply on channel after Enter")
+	}
+	if cmd == nil {
+		t.Fatal("expected dismiss command after Enter")
+	}
+	app.Update(MsgModalDismiss{})
+	if app.modal.Visible() {
+		t.Error("expected modal hidden after dismiss")
+	}
+}
+
 func TestAppQuitKey(t *testing.T) {
 	store := NewStateStore(nil)
 	app := NewAppModel(store, "test", "run1")

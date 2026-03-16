@@ -69,3 +69,21 @@ func TestThinkingTrackerNotThinkingFrame(t *testing.T) {
 		t.Errorf("expected empty frame for non-thinking node")
 	}
 }
+
+func TestThinkingTrackerToolRunning(t *testing.T) {
+	tr := NewThinkingTracker()
+	if tr.IsToolRunning("n1") {
+		t.Error("should not be running tool initially")
+	}
+	tr.StartTool("n1", "bash")
+	if !tr.IsToolRunning("n1") {
+		t.Error("should be running tool after StartTool")
+	}
+	if tr.ToolName("n1") != "bash" {
+		t.Errorf("expected tool name 'bash', got %q", tr.ToolName("n1"))
+	}
+	tr.StopTool("n1")
+	if tr.IsToolRunning("n1") {
+		t.Error("should not be running tool after StopTool")
+	}
+}

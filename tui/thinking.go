@@ -9,9 +9,10 @@ type thinkingState struct {
 	startedAt time.Time
 	frame     int
 	active    bool
+	toolName  string // non-empty when a tool is executing (distinct from LLM thinking)
 }
 
-// ThinkingTracker manages per-node thinking animation state.
+// ThinkingTracker manages per-node thinking and tool execution animation state.
 type ThinkingTracker struct {
 	nodes map[string]*thinkingState
 	tick  int
@@ -70,6 +71,39 @@ func (tr *ThinkingTracker) Elapsed(nodeID string) time.Duration {
 		return time.Since(ns.startedAt)
 	}
 	return 0
+}
+
+// StartTool marks a node as executing a tool (distinct from LLM thinking).
+func (tr *ThinkingTracker) StartTool(nodeID, toolName string) {
+	ns, ok := tr.nodes[nodeID]
+	if !ok {
+		ns = &thinkingState{startedAt: time.Now(), frame: tr.tick}
+		tr.nodes[nodeID] = ns
+	}
+	ns.toolName = toolName
+}
+
+// StopTool clears the tool-running state for a node.
+func (tr *ThinkingTracker) StopTool(nodeID string) {
+	if ns, ok := tr.nodes[nodeID]; ok {
+		ns.toolName = ""
+	}
+}
+
+// IsToolRunning returns whether a node is currently executing a tool.
+func (tr *ThinkingTracker) IsToolRunning(nodeID string) bool {
+	if ns, ok := tr.nodes[nodeID]; ok {
+		return ns.toolName != ""
+	}
+	return false
+}
+
+// ToolName returns the name of the tool currently running on a node.
+func (tr *ThinkingTracker) ToolName(nodeID string) string {
+	if ns, ok := tr.nodes[nodeID]; ok {
+		return ns.toolName
+	}
+	return ""
 }
 
 // Tick advances the global animation counter by one frame.

@@ -128,6 +128,7 @@ func (c *ChoiceContent) Update(msg tea.Msg) tea.Cmd {
 			if c.replyCh != nil {
 				c.replyCh <- selected
 			}
+			return func() tea.Msg { return MsgModalDismiss{} }
 		}
 	}
 	return nil
@@ -199,6 +200,7 @@ func (f *FreeformContent) Update(msg tea.Msg) tea.Cmd {
 			if f.replyCh != nil {
 				f.replyCh <- val
 			}
+			return func() tea.Msg { return MsgModalDismiss{} }
 		}
 	}
 	return nil

@@ -686,7 +686,7 @@ func TestPrintRunSummaryShowsTotals(t *testing.T) {
 	}
 
 	// Verify node table has Turns and Tools columns
-	if !strings.Contains(output, "Turns") && !strings.Contains(output, "Tools") {
+	if !strings.Contains(output, "Turns") || !strings.Contains(output, "Tools") {
 		t.Errorf("expected Turns and Tools columns in node table")
 	}
 

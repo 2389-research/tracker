@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -63,6 +64,11 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle global keys first.
 	if km, ok := msg.(tea.KeyMsg); ok {
+		// Ctrl+C always quits, even with modal visible.
+		if km.Type == tea.KeyCtrlC {
+			return a, tea.Quit
+		}
+
 		// If modal is visible, route keys to it instead of global handling.
 		if a.modal.Visible() {
 			cmd := a.modal.Update(km)
@@ -73,8 +79,6 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-		case km.Type == tea.KeyCtrlC:
-			return a, tea.Quit
 		case km.Type == tea.KeyRunes && string(km.Runes) == "q":
 			return a, tea.Quit
 		case km.Type == tea.KeyCtrlO:
@@ -102,6 +106,9 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		content := NewFreeformContent(m.Prompt, m.ReplyCh)
 		a.modal.Show(content)
 		return a, nil
+	case MsgModalDismiss:
+		a.modal.Hide()
+		return a, nil
 	}
 
 	// Handle tick messages — re-schedule ticks.
@@ -118,13 +125,17 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Apply message to state store.
 	a.store.Apply(msg)
 
-	// Route thinking state changes to the tracker.
+	// Route thinking and tool state changes to the tracker.
 	switch m := msg.(type) {
 	case MsgThinkingStarted:
 		a.thinking.Start(m.NodeID)
 		a.agentLog.SetFocusedNode(m.NodeID)
 	case MsgThinkingStopped:
 		a.thinking.Stop(m.NodeID)
+	case MsgToolCallStart:
+		a.thinking.StartTool(m.NodeID, m.ToolName)
+	case MsgToolCallEnd:
+		a.thinking.StopTool(m.NodeID)
 	}
 
 	// Forward to child components.
@@ -167,21 +178,27 @@ func (a AppModel) View() string {
 	nodePanel := lipgloss.NewStyle().
 		Width(nodeWidth).
 		Height(contentHeight).
-		BorderRight(true).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(ColorBezel).
+		PaddingRight(1).
 		Render(nodeView)
+
+	// Thin vertical separator between panels.
+	sepStyle := lipgloss.NewStyle().Foreground(ColorBezel)
+	var sepLines []string
+	for i := 0; i < contentHeight; i++ {
+		sepLines = append(sepLines, sepStyle.Render("│"))
+	}
+	separator := strings.Join(sepLines, "\n")
 
 	// Render agent log panel.
 	logView := a.agentLog.View()
 	logPanel := lipgloss.NewStyle().
-		Width(logWidth).
+		Width(logWidth - 1).
 		Height(contentHeight).
 		PaddingLeft(1).
 		Render(logView)
 
 	// Join content panels horizontally.
-	content := lipgloss.JoinHorizontal(lipgloss.Top, nodePanel, logPanel)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, nodePanel, separator, logPanel)
 
 	// Render status bar.
 	statusView := a.statusB.View()
@@ -209,7 +226,7 @@ func (a *AppModel) relayout() {
 	}
 
 	nodeWidth := a.lay.width / nodeListWidthFrac
-	logWidth := a.lay.width - nodeWidth
+	logWidth := a.lay.width - nodeWidth - 1 // -1 for separator column
 
 	a.nodeList.SetSize(nodeWidth, contentHeight)
 	a.agentLog.SetSize(logWidth, contentHeight)

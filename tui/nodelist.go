@@ -57,12 +57,17 @@ func (nl *NodeList) View() string {
 		status := nl.store.NodeStatus(node.ID)
 		lamp, style := StatusLamp(status)
 
-		// Override lamp with thinking animation frame when the node is thinking.
-		if status == NodeRunning && nl.thinking.IsThinking(node.ID) {
-			frame := nl.thinking.Frame(node.ID)
-			if frame != "" {
-				lamp = frame
-				style = lipgloss.NewStyle().Foreground(ColorRunning).Bold(true)
+		// Override lamp based on activity phase for running nodes.
+		if status == NodeRunning {
+			if nl.thinking.IsToolRunning(node.ID) {
+				lamp = "⚡"
+				style = lipgloss.NewStyle().Foreground(ColorBash).Bold(true)
+			} else if nl.thinking.IsThinking(node.ID) {
+				frame := nl.thinking.Frame(node.ID)
+				if frame != "" {
+					lamp = frame
+					style = lipgloss.NewStyle().Foreground(ColorRunning).Bold(true)
+				}
 			}
 		}
 
@@ -79,10 +84,14 @@ func (nl *NodeList) View() string {
 
 		line := style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
 
-		// Show elapsed thinking time for running nodes.
-		if status == NodeRunning && nl.thinking.IsThinking(node.ID) {
-			elapsed := nl.thinking.Elapsed(node.ID).Truncate(time.Second)
-			line += " " + Styles.Muted.Render(elapsed.String())
+		// Show activity context for running nodes.
+		if status == NodeRunning {
+			if toolName := nl.thinking.ToolName(node.ID); toolName != "" {
+				line += " " + Styles.Muted.Render(toolName)
+			} else if nl.thinking.IsThinking(node.ID) {
+				elapsed := nl.thinking.Elapsed(node.ID).Truncate(time.Second)
+				line += " " + Styles.Muted.Render(elapsed.String())
+			}
 		}
 
 		// Show error for failed nodes.
