@@ -8,6 +8,26 @@ import (
 	"testing"
 )
 
+// stripANSI removes ANSI escape sequences for text content checks.
+func stripANSI(s string) string {
+	var out strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == '\033' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
 func TestAgentLogTextCoalescing(t *testing.T) {
 	store := NewStateStore(nil)
 	tr := NewThinkingTracker()
@@ -15,7 +35,8 @@ func TestAgentLogTextCoalescing(t *testing.T) {
 	al.Update(MsgTextChunk{NodeID: "n1", Text: "Hello "})
 	al.Update(MsgTextChunk{NodeID: "n1", Text: "world"})
 	view := al.View()
-	if !strings.Contains(view, "Hello world") {
+	plain := stripANSI(view)
+	if !strings.Contains(plain, "Hello world") {
 		t.Errorf("expected coalesced text, got: %s", view)
 	}
 }
@@ -28,10 +49,11 @@ func TestAgentLogToolCallBreaksCoalescing(t *testing.T) {
 	al.Update(MsgToolCallStart{NodeID: "n1", ToolName: "exec"})
 	al.Update(MsgTextChunk{NodeID: "n1", Text: "after"})
 	view := al.View()
-	if !strings.Contains(view, "before") || !strings.Contains(view, "after") {
+	plain := stripANSI(view)
+	if !strings.Contains(plain, "before") || !strings.Contains(plain, "after") {
 		t.Errorf("expected both text segments, got: %s", view)
 	}
-	if !strings.Contains(view, "exec") {
+	if !strings.Contains(plain, "exec") {
 		t.Errorf("expected tool name, got: %s", view)
 	}
 }
@@ -153,6 +175,44 @@ func TestAgentLogClipsToViewportHeight(t *testing.T) {
 	// Should show the latest entries (tail behavior), not the oldest.
 	if !strings.Contains(view, "line-19") {
 		t.Errorf("expected latest entry visible in clipped view, got:\n%s", view)
+	}
+}
+
+func TestAgentLogMarkdownRendering(t *testing.T) {
+	store := NewStateStore(nil)
+	tr := NewThinkingTracker()
+	al := NewAgentLog(store, tr, 40)
+	al.SetSize(80, 40)
+	al.Update(MsgTextChunk{NodeID: "n1", Text: "Here is **bold** and `code`."})
+	view := al.View()
+	// Glamour should render the markdown — the raw asterisks should be gone.
+	if strings.Contains(view, "**bold**") {
+		t.Errorf("expected glamour to render markdown, but raw ** still present:\n%s", view)
+	}
+	// The actual text content should still be present.
+	if !strings.Contains(view, "bold") {
+		t.Errorf("expected 'bold' text in rendered output, got:\n%s", view)
+	}
+	if !strings.Contains(view, "code") {
+		t.Errorf("expected 'code' text in rendered output, got:\n%s", view)
+	}
+}
+
+func TestAgentLogMarkdownCacheInvalidation(t *testing.T) {
+	store := NewStateStore(nil)
+	tr := NewThinkingTracker()
+	al := NewAgentLog(store, tr, 40)
+	al.SetSize(80, 40)
+	al.Update(MsgTextChunk{NodeID: "n1", Text: "Hello"})
+	view1 := al.View()
+	// Append more text to the same entry (coalescing).
+	al.Update(MsgTextChunk{NodeID: "n1", Text: " **world**"})
+	view2 := al.View()
+	if view1 == view2 {
+		t.Error("expected view to change after appending text")
+	}
+	if !strings.Contains(view2, "world") {
+		t.Errorf("expected 'world' in updated view, got:\n%s", view2)
 	}
 }
 

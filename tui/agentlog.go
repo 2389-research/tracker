@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -31,6 +32,10 @@ type logEntry struct {
 	text      string
 	toolName  string
 	toolInput string
+
+	// Cached glamour-rendered markdown for text entries.
+	mdCache      string
+	mdCacheWidth int
 }
 
 const defaultMaxCollapsedLines = 4
@@ -46,6 +51,10 @@ type AgentLog struct {
 	expanded     bool
 	verboseTrace bool
 	focusedNode  string
+
+	// Markdown renderer for LLM text output, recreated on width change.
+	mdRenderer *glamour.TermRenderer
+	mdWidth    int
 
 	// Coalescing state: accumulate sequential text chunks into one entry.
 	coalescing    bool
@@ -66,9 +75,39 @@ func NewAgentLog(store *StateStore, thinking *ThinkingTracker, height int) *Agen
 
 // SetSize updates both width and height for the agent log viewport.
 func (al *AgentLog) SetSize(w, h int) {
+	if w != al.width {
+		// Width changed — invalidate all markdown caches.
+		for i := range al.entries {
+			al.entries[i].mdCache = ""
+			al.entries[i].mdCacheWidth = 0
+		}
+		al.mdRenderer = nil
+		al.mdWidth = 0
+	}
 	al.width = w
 	al.height = h
 	al.scroll.SetHeight(h)
+}
+
+// getMarkdownRenderer returns a glamour renderer for the current width, creating one if needed.
+func (al *AgentLog) getMarkdownRenderer() *glamour.TermRenderer {
+	w := al.width
+	if w <= 0 {
+		w = 80
+	}
+	if al.mdRenderer != nil && al.mdWidth == w {
+		return al.mdRenderer
+	}
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(w),
+	)
+	if err != nil {
+		return nil
+	}
+	al.mdRenderer = r
+	al.mdWidth = w
+	return r
 }
 
 // SetFocusedNode sets the node ID to show the thinking indicator for.
@@ -120,8 +159,10 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 func (al *AgentLog) appendCoalesced(kind logEntryKind, nodeID, text string) {
 	if al.coalescing && al.coalesceKind == kind && al.coalesceNode == nodeID {
 		al.coalesceBuf.WriteString(text)
-		// Update the last entry in-place.
-		al.entries[len(al.entries)-1].text = al.coalesceBuf.String()
+		// Update the last entry in-place and invalidate its render cache.
+		last := &al.entries[len(al.entries)-1]
+		last.text = al.coalesceBuf.String()
+		last.mdCache = ""
 		return
 	}
 	// Start a new coalesced entry.
@@ -159,8 +200,8 @@ func (al *AgentLog) View() string {
 
 	// Render all entries into individual lines.
 	var rendered []string
-	for _, entry := range al.entries {
-		line := al.renderEntry(entry)
+	for i := range al.entries {
+		line := al.renderEntry(i)
 		// Split multi-line output into separate lines for proper clipping.
 		parts := strings.Split(line, "\n")
 		rendered = append(rendered, parts...)
@@ -222,17 +263,19 @@ func (al *AgentLog) isToolRunning() bool {
 	return al.thinking.IsToolRunning(al.focusedNode)
 }
 
-// renderEntry formats a single log entry for display.
-func (al *AgentLog) renderEntry(e logEntry) string {
+// renderEntry formats a single log entry for display, using the entry index
+// so text entries can cache their glamour-rendered markdown in place.
+func (al *AgentLog) renderEntry(idx int) string {
+	e := &al.entries[idx]
 	switch e.kind {
 	case entryText:
-		return Styles.PrimaryText.Render(e.text)
+		return al.renderMarkdown(e)
 	case entryReasoning:
 		return Styles.Muted.Render(e.text)
 	case entryToolStart:
 		return toolStyle(e.toolName).Render(formatToolDisplay(e.toolName, e.toolInput))
 	case entryToolEnd:
-		return al.renderToolOutput(e)
+		return al.renderToolOutput(*e)
 	case entryError:
 		return Styles.Error.Render("ERROR: " + e.text)
 	case entryRaw:
@@ -240,6 +283,25 @@ func (al *AgentLog) renderEntry(e logEntry) string {
 	default:
 		return e.text
 	}
+}
+
+// renderMarkdown renders a text entry through glamour, caching the result.
+func (al *AgentLog) renderMarkdown(e *logEntry) string {
+	if e.mdCache != "" && e.mdCacheWidth == al.width {
+		return e.mdCache
+	}
+	r := al.getMarkdownRenderer()
+	if r == nil {
+		return Styles.PrimaryText.Render(e.text)
+	}
+	rendered, err := r.Render(e.text)
+	if err != nil {
+		return Styles.PrimaryText.Render(e.text)
+	}
+	rendered = strings.TrimRight(rendered, "\n")
+	e.mdCache = rendered
+	e.mdCacheWidth = al.width
+	return rendered
 }
 
 // renderToolOutput renders tool output, collapsing it if not expanded.
