@@ -56,8 +56,14 @@ func (g *Graph) AddNode(n *Node) {
 	} else if handler, ok := ShapeToHandler(n.Shape); ok {
 		n.Handler = handler
 	}
-	// Diamond nodes with a prompt should use codergen (LLM evaluation)
-	// instead of the no-op conditional handler.
+	// Diamond nodes with a tool_command should use the tool handler
+	// regardless of shape (the generator sometimes uses diamond shape
+	// for tool verification nodes).
+	if n.Handler == "conditional" && n.Attrs["tool_command"] != "" {
+		n.Handler = "tool"
+	}
+	// Diamond nodes with a prompt (but no tool_command) should use
+	// codergen (LLM evaluation) instead of the no-op conditional handler.
 	if n.Shape == "diamond" && n.Handler == "conditional" && n.Attrs["prompt"] != "" {
 		n.Handler = "codergen"
 		if n.Attrs["auto_status"] == "" {

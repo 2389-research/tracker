@@ -104,6 +104,19 @@ func TestDiamondWithPromptUsesCodergen(t *testing.T) {
 	}
 }
 
+func TestDiamondWithToolCommandUsesTool(t *testing.T) {
+	g := NewGraph("test")
+	// Diamond with tool_command should use tool handler, even with a prompt.
+	g.AddNode(&Node{ID: "check", Shape: "diamond", Attrs: map[string]string{
+		"tool_command": "echo pass",
+		"prompt":       "Verify something",
+	}})
+	node := g.Nodes["check"]
+	if node.Handler != "tool" {
+		t.Errorf("expected diamond+tool_command to use tool, got %q", node.Handler)
+	}
+}
+
 func TestDiamondWithoutPromptStaysConditional(t *testing.T) {
 	g := NewGraph("test")
 	// Diamond without prompt stays as conditional.
