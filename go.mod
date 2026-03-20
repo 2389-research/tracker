@@ -2,8 +2,6 @@ module github.com/2389-research/tracker
 
 go 1.25.5
 
-replace github.com/2389-research/dippin-lang => ../../dippin-lang
-
 require github.com/awalterschulze/gographviz v2.0.3+incompatible
 
 require (

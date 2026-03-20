@@ -73,13 +73,19 @@ func validateGraph(g *Graph) *ValidationError {
 		return ve
 	}
 
-	validateStartExit(g, ve)
+	// Structural checks covered by Dippin's validator (DIP001–DIP006).
+	// Skip when the graph was produced from already-validated Dippin IR.
+	if !g.DippinValidated {
+		validateStartExit(g, ve)
+		validateEdgeEndpoints(g, ve)
+		validateExitOutgoingEdges(g, ve)
+		validateReachability(g, ve)
+		validateNoCycles(g, ve)
+	}
+
+	// Tracker-specific checks always run.
 	validateShapes(g, ve)
-	validateEdgeEndpoints(g, ve)
-	validateExitOutgoingEdges(g, ve)
 	validateNoDuplicateEdges(g, ve)
-	validateReachability(g, ve)
-	validateNoCycles(g, ve)
 	validateConditionalFailEdges(g, ve)
 	validateEdgeLabelConsistency(g, ve)
 

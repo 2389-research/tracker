@@ -94,6 +94,7 @@ func (s *jsonStream) agentHandler() agent.EventHandler {
 			Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
 			Source:    "agent",
 			Type:      string(evt.Type),
+			NodeID:    evt.NodeID,
 			Provider:  evt.Provider,
 			Model:     evt.Model,
 			ToolName:  evt.ToolName,

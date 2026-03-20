@@ -11,9 +11,9 @@ import (
 
 // runValidateCmd parses and validates a pipeline file, printing results to w.
 // Returns an error if validation finds structural problems.
-// Auto-detects format based on file extension.
-func runValidateCmd(pipelineFile string, w io.Writer) error {
-	graph, err := loadPipeline(pipelineFile)
+// Auto-detects format based on file extension unless formatOverride is set.
+func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
+	graph, err := loadPipeline(pipelineFile, formatOverride)
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}

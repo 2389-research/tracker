@@ -142,6 +142,48 @@ func TestResolveRetryPolicy(t *testing.T) {
 	}
 }
 
+func TestResolveRetryPolicyBaseDelay(t *testing.T) {
+	tests := []struct {
+		name      string
+		nodeAttrs map[string]string
+		wantDelay time.Duration
+	}{
+		{
+			name:      "base_delay overrides policy default",
+			nodeAttrs: map[string]string{"retry_policy": "standard", "base_delay": "500ms"},
+			wantDelay: 500 * time.Millisecond,
+		},
+		{
+			name:      "base_delay with seconds",
+			nodeAttrs: map[string]string{"retry_policy": "aggressive", "base_delay": "5s"},
+			wantDelay: 5 * time.Second,
+		},
+		{
+			name:      "no base_delay uses policy default",
+			nodeAttrs: map[string]string{"retry_policy": "standard"},
+			wantDelay: 2 * time.Second,
+		},
+		{
+			name:      "invalid base_delay ignored",
+			nodeAttrs: map[string]string{"retry_policy": "standard", "base_delay": "not-a-duration"},
+			wantDelay: 2 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := &Node{
+				ID:    "test_node",
+				Attrs: tt.nodeAttrs,
+			}
+			policy := ResolveRetryPolicy(node, map[string]string{})
+			if policy.BaseDelay != tt.wantDelay {
+				t.Errorf("policy.BaseDelay = %v, want %v", policy.BaseDelay, tt.wantDelay)
+			}
+		})
+	}
+}
+
 func TestExponentialBackoff(t *testing.T) {
 	tests := []struct {
 		name    string

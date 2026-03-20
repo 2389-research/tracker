@@ -38,7 +38,7 @@ func (e *LocalEnvironment) WorkingDir() string {
 // safePath validates that a relative path resolves inside the working directory.
 func (e *LocalEnvironment) safePath(rel string) (string, error) {
 	if filepath.IsAbs(rel) {
-		return "", fmt.Errorf("absolute paths not allowed: %s", rel)
+		return "", fmt.Errorf("absolute paths not allowed: %s (use a relative path like %q instead)", rel, filepath.Base(rel))
 	}
 
 	joined := filepath.Join(e.workDir, rel)

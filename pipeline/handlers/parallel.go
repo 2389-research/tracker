@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -24,13 +25,17 @@ type ParallelResult struct {
 // an isolated context snapshot. It blocks until all branches complete, then
 // stores the collected results as JSON in the pipeline context.
 type ParallelHandler struct {
-	graph    *pipeline.Graph
-	registry *pipeline.HandlerRegistry
+	graph        *pipeline.Graph
+	registry     *pipeline.HandlerRegistry
+	eventHandler pipeline.PipelineEventHandler
 }
 
 // NewParallelHandler creates a ParallelHandler with the given graph and registry.
-func NewParallelHandler(graph *pipeline.Graph, registry *pipeline.HandlerRegistry) *ParallelHandler {
-	return &ParallelHandler{graph: graph, registry: registry}
+func NewParallelHandler(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, eventHandler pipeline.PipelineEventHandler) *ParallelHandler {
+	if eventHandler == nil {
+		eventHandler = pipeline.PipelineNoopHandler
+	}
+	return &ParallelHandler{graph: graph, registry: registry, eventHandler: eventHandler}
 }
 
 // Name returns the handler name used for registry lookup.
@@ -43,6 +48,17 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if len(edges) == 0 {
 		return pipeline.Outcome{}, fmt.Errorf("parallel node %q has no outgoing edges", node.ID)
 	}
+
+	branchIDs := make([]string, len(edges))
+	for i, edge := range edges {
+		branchIDs[i] = edge.To
+	}
+	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventParallelStarted,
+		Timestamp: time.Now(),
+		NodeID:    node.ID,
+		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
+	})
 
 	// Snapshot the shared context once before spawning branches.
 	snapshot := pctx.Snapshot()
@@ -126,6 +142,13 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if anySuccess {
 		status = pipeline.OutcomeSuccess
 	}
+
+	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventParallelCompleted,
+		Timestamp: time.Now(),
+		NodeID:    node.ID,
+		Message:   fmt.Sprintf("fan-in complete, aggregate status: %s", status),
+	})
 
 	return pipeline.Outcome{Status: status}, nil
 }

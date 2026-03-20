@@ -147,7 +147,7 @@ func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
 		RunID:     "agent123",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "execute_command", "output here", "", "", "", "anthropic", "claude-sonnet-4-6")
+	h.WriteAgentEvent("tool_call_end", "gen_code", "execute_command", "output here", "", "", "", "anthropic", "claude-sonnet-4-6")
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "agent123", "activity.jsonl"))
@@ -174,6 +174,9 @@ func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
 	}
 	if entry.Provider != "anthropic" {
 		t.Errorf("provider = %q, want anthropic", entry.Provider)
+	}
+	if entry.NodeID != "gen_code" {
+		t.Errorf("node_id = %q, want gen_code", entry.NodeID)
 	}
 }
 
@@ -227,7 +230,7 @@ func TestJSONLEventHandlerAgentErrorCombining(t *testing.T) {
 		RunID:     "err123",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "cmd", "", "exit code 1", "", "process killed", "", "")
+	h.WriteAgentEvent("tool_call_end", "", "cmd", "", "exit code 1", "", "process killed", "", "")
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "err123", "activity.jsonl"))

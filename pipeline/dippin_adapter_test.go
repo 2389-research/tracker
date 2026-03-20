@@ -629,6 +629,82 @@ func TestFromDippinIR_RetryConfig(t *testing.T) {
 	}
 }
 
+func TestFromDippinIR_RetryPolicy(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "RetryPolicyTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "worker",
+				Kind: ir.NodeAgent,
+				Config: ir.AgentConfig{
+					Prompt: "do work",
+				},
+				Retry: ir.RetryConfig{
+					Policy: "aggressive",
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "worker"},
+			{From: "worker", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	node := graph.Nodes["worker"]
+	if got := node.Attrs["retry_policy"]; got != "aggressive" {
+		t.Errorf("retry_policy = %q, want %q", got, "aggressive")
+	}
+
+	// Verify it integrates with ResolveRetryPolicy.
+	policy := ResolveRetryPolicy(node, graph.Attrs)
+	if policy.Name != "aggressive" {
+		t.Errorf("resolved policy Name = %q, want %q", policy.Name, "aggressive")
+	}
+}
+
+func TestFromDippinIR_RetryEmptyPolicyOmitted(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "NoPolicySet",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "worker",
+				Kind: ir.NodeAgent,
+				Config: ir.AgentConfig{
+					Prompt: "do work",
+				},
+				Retry: ir.RetryConfig{},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "worker"},
+			{From: "worker", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	node := graph.Nodes["worker"]
+	if _, ok := node.Attrs["retry_policy"]; ok {
+		t.Errorf("expected no retry_policy attr when empty, got %q", node.Attrs["retry_policy"])
+	}
+}
+
 // TestFromDippinIR_Errors verifies error handling.
 func TestFromDippinIR_Errors(t *testing.T) {
 	tests := []struct {

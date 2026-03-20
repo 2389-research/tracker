@@ -107,7 +107,7 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input json.RawMessage) (st
 // safePath validates that a relative path resolves inside the working directory.
 func (t *GrepSearchTool) safePath(rel string) (string, error) {
 	if filepath.IsAbs(rel) {
-		return "", fmt.Errorf("absolute paths not allowed: %s", rel)
+		return "", fmt.Errorf("absolute paths not allowed: %s (use a relative path like %q instead)", rel, filepath.Base(rel))
 	}
 
 	joined := filepath.Join(t.env.WorkingDir(), rel)

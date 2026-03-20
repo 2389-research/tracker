@@ -26,8 +26,22 @@ const simpleDOT = `digraph test {
 	start -> finish;
 }`
 
+const simpleDip = `workflow test
+  start: s
+  exit: e
+
+  agent s
+    label: Start
+
+  agent e
+    label: Exit
+
+  edges
+    s -> e
+`
+
 func TestNewEngine_InvalidDOT(t *testing.T) {
-	_, err := NewEngine("not valid dot {{{", Config{})
+	_, err := NewEngine("not valid dot {{{", Config{Format: "dot"})
 	if err == nil {
 		t.Fatal("expected error for invalid DOT source")
 	}
@@ -42,6 +56,7 @@ func TestNewEngine_ValidDOT(t *testing.T) {
 	}
 
 	engine, err := NewEngine(simpleDOT, Config{
+		Format:    "dot",
 		LLMClient: client,
 	})
 	if err != nil {
@@ -54,6 +69,53 @@ func TestNewEngine_ValidDOT(t *testing.T) {
 	}
 }
 
+func TestNewEngine_DipFormat(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	engine, err := NewEngine(simpleDip, Config{
+		Format:    "dip",
+		LLMClient: client,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer engine.Close()
+
+	if engine.inner == nil {
+		t.Fatal("expected inner engine to be set")
+	}
+}
+
+func TestNewEngine_AutoDetectDOT(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	// Empty format with "digraph" prefix should auto-detect as DOT.
+	engine, err := NewEngine(simpleDOT, Config{
+		LLMClient: client,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer engine.Close()
+}
+
+func TestNewEngine_UnknownFormat(t *testing.T) {
+	_, err := NewEngine("anything", Config{Format: "yaml"})
+	if err == nil {
+		t.Fatal("expected error for unknown format")
+	}
+}
+
 func TestEngine_CloseIdempotent(t *testing.T) {
 	client := &stubCompleter{
 		response: &llm.Response{
@@ -62,7 +124,7 @@ func TestEngine_CloseIdempotent(t *testing.T) {
 		},
 	}
 
-	engine, err := NewEngine(simpleDOT, Config{LLMClient: client})
+	engine, err := NewEngine(simpleDOT, Config{Format: "dot", LLMClient: client})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,6 +146,7 @@ func TestRun_SimplePipeline(t *testing.T) {
 	}
 
 	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:    "dot",
 		LLMClient: client,
 	})
 	if err != nil {
@@ -101,6 +164,26 @@ func TestRun_SimplePipeline(t *testing.T) {
 	}
 }
 
+func TestRun_DipPipeline(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	result, err := Run(context.Background(), simpleDip, Config{
+		Format:    "dip",
+		LLMClient: client,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "success" {
+		t.Errorf("expected status=success, got %q", result.Status)
+	}
+}
+
 func TestNewEngine_DefaultsWorkingDir(t *testing.T) {
 	client := &stubCompleter{
 		response: &llm.Response{
@@ -112,7 +195,7 @@ func TestNewEngine_DefaultsWorkingDir(t *testing.T) {
 	// Zero-value WorkingDir should succeed (defaults to cwd).
 	// Verify by also constructing with an explicit WorkingDir and
 	// confirming both succeed without error.
-	engine1, err := NewEngine(simpleDOT, Config{LLMClient: client})
+	engine1, err := NewEngine(simpleDOT, Config{Format: "dot", LLMClient: client})
 	if err != nil {
 		t.Fatalf("default WorkingDir: unexpected error: %v", err)
 	}
@@ -124,6 +207,7 @@ func TestNewEngine_DefaultsWorkingDir(t *testing.T) {
 	}
 
 	engine2, err := NewEngine(simpleDOT, Config{
+		Format:     "dot",
 		LLMClient:  client,
 		WorkingDir: cwd,
 	})
@@ -142,6 +226,7 @@ func TestRun_WithInitialContext(t *testing.T) {
 	}
 
 	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:    "dot",
 		LLMClient: client,
 		Context:   map[string]string{"goal": "test the library"},
 	})
@@ -167,6 +252,7 @@ func TestRun_WithEventHandler(t *testing.T) {
 	})
 
 	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:       "dot",
 		LLMClient:    client,
 		EventHandler: handler,
 	})
@@ -189,6 +275,7 @@ func TestNewEngine_ValidationError(t *testing.T) {
 	}`
 
 	_, err := NewEngine(badGraph, Config{
+		Format: "dot",
 		LLMClient: &stubCompleter{
 			response: &llm.Response{
 				Message:      llm.AssistantMessage("done"),
@@ -202,7 +289,7 @@ func TestNewEngine_ValidationError(t *testing.T) {
 }
 
 func TestRun_InvalidDOT(t *testing.T) {
-	_, err := Run(context.Background(), "not dot at all!!!", Config{})
+	_, err := Run(context.Background(), "not dot at all!!!", Config{Format: "dot"})
 	if err == nil {
 		t.Fatal("expected error for invalid DOT")
 	}
@@ -210,6 +297,7 @@ func TestRun_InvalidDOT(t *testing.T) {
 
 func TestNewEngine_InvalidProvider(t *testing.T) {
 	_, err := NewEngine(simpleDOT, Config{
+		Format:   "dot",
 		Provider: "nonexistent",
 	})
 	if err == nil {
@@ -226,6 +314,7 @@ func TestRun_WithRetryPolicy(t *testing.T) {
 	}
 
 	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:      "dot",
 		LLMClient:   client,
 		RetryPolicy: "aggressive",
 	})

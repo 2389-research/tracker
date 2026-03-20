@@ -341,6 +341,24 @@ func TestAutoFixNoChanges(t *testing.T) {
 	}
 }
 
+func TestValidateDippinValidatedSkipsStructural(t *testing.T) {
+	// A graph with DippinValidated=true should skip structural checks
+	// (start/exit, edge endpoints, reachability, cycles, exit outgoing edges).
+	// This graph is intentionally missing an exit node, which would normally
+	// fail validation — but passes because Dippin already checked it.
+	g := NewGraph("dippin-validated")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "work", Shape: "box"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "work"})
+	g.AddEdge(&Edge{From: "work", To: "e"})
+	g.DippinValidated = true
+
+	if err := Validate(g); err != nil {
+		t.Errorf("expected DippinValidated graph to pass, got: %v", err)
+	}
+}
+
 func TestValidationErrorWithWarnings(t *testing.T) {
 	ve := &ValidationError{
 		Errors:   []string{"bad node"},

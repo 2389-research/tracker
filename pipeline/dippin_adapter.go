@@ -64,6 +64,11 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		return nil, err
 	}
 
+	// Mark that this graph was produced from validated Dippin IR.
+	// Tracker's validateGraph will skip structural checks that
+	// Dippin already covers (DIP001–DIP006).
+	g.DippinValidated = true
+
 	return g, nil
 }
 
@@ -252,7 +257,7 @@ func extractRetryAttrs(retry ir.RetryConfig, attrs map[string]string) {
 	if retry.MaxRetries > 0 {
 		attrs["max_retries"] = strconv.Itoa(retry.MaxRetries)
 	}
-	if retry.RetryTarget != "" {
+if retry.RetryTarget != "" {
 		attrs["retry_target"] = retry.RetryTarget
 	}
 	if retry.FallbackTarget != "" {
@@ -331,16 +336,20 @@ func ensureStartExitNodes(g *Graph) error {
 		return fmt.Errorf("exit node %q not found in graph", g.ExitNode)
 	}
 
-	// Ensure start node has Mdiamond shape
+	// Ensure start node has Mdiamond shape and start handler.
+	// The node may have been added with a different shape (e.g. "box" for agent kind)
+	// so we override both shape and handler to match the start/exit convention.
 	startNode := g.Nodes[g.StartNode]
 	if startNode.Shape != "Mdiamond" {
 		startNode.Shape = "Mdiamond"
+		startNode.Handler = "start"
 	}
 
-	// Ensure exit node has Msquare shape
+	// Ensure exit node has Msquare shape and exit handler.
 	exitNode := g.Nodes[g.ExitNode]
 	if exitNode.Shape != "Msquare" {
 		exitNode.Shape = "Msquare"
+		exitNode.Handler = "exit"
 	}
 
 	return nil

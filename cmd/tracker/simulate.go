@@ -11,9 +11,9 @@ import (
 )
 
 // runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
-// Auto-detects format based on file extension.
-func runSimulateCmd(pipelineFile string, w io.Writer) error {
-	graph, err := loadPipeline(pipelineFile)
+// Auto-detects format based on file extension unless formatOverride is set.
+func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
+	graph, err := loadPipeline(pipelineFile, formatOverride)
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}

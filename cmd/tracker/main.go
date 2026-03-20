@@ -1,5 +1,5 @@
 // ABOUTME: CLI entry point for the tracker pipeline engine.
-// ABOUTME: Loads a DOT file, wires up LLM clients, exec environment, and runs the pipeline.
+// ABOUTME: Loads a pipeline file (.dip preferred, .dot deprecated) and runs it.
 // ABOUTME: Mode 1 (default): BubbleteaInterviewer for human gates with inline TUI per gate.
 // ABOUTME: Mode 2 (--tui): Full dashboard TUI with header, node list, agent log, and modal gates.
 package main
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/2389-research/dippin-lang/parser"
+	"github.com/2389-research/dippin-lang/validator"
 	"github.com/2389-research/tracker/agent"
 	"github.com/joho/godotenv"
 
@@ -35,13 +36,14 @@ import (
 )
 
 type runConfig struct {
-	mode     commandMode
-	dotFile  string
-	workdir  string
-	resumeID string // run ID to resume (resolved to checkpoint path)
-	noTUI    bool
-	verbose  bool
-	jsonOut  bool // stream events as NDJSON to stdout
+	mode         commandMode
+	pipelineFile string
+	format       string // "dip", "dot", or "" (auto-detect from extension)
+	workdir      string
+	resumeID     string // run ID to resume (resolved to checkpoint path)
+	noTUI        bool
+	verbose      bool
+	jsonOut      bool // stream events as NDJSON to stdout
 }
 
 type commandMode string
@@ -59,8 +61,8 @@ var errUsage = errors.New("usage")
 type commandDeps struct {
 	loadEnv  func(string) error
 	runSetup func() error
-	run      func(string, string, string, bool, bool) error
-	runTUI   func(string, string, string, bool) error
+	run      func(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error
+	runTUI   func(pipelineFile, workdir, checkpoint, format string, verbose bool) error
 }
 
 type setupResult struct {
@@ -105,10 +107,18 @@ func detectPipelineFormat(filename string) string {
 	return "dot" // default to DOT for .dot and unknown extensions
 }
 
-// loadPipeline reads and parses a pipeline file, auto-detecting format.
-// Returns a Graph ready for validation and execution.
-func loadPipeline(filename string) (*pipeline.Graph, error) {
-	format := detectPipelineFormat(filename)
+// loadPipeline reads and parses a pipeline file, auto-detecting format from
+// extension unless formatOverride is set. Emits a deprecation warning to stderr
+// when the resolved format is "dot".
+func loadPipeline(filename, formatOverride string) (*pipeline.Graph, error) {
+	format := formatOverride
+	if format == "" {
+		format = detectPipelineFormat(filename)
+	}
+
+	if format == "dot" {
+		emitDOTDeprecationWarning(os.Stderr)
+	}
 
 	fileBytes, err := os.ReadFile(filename)
 	if err != nil {
@@ -121,18 +131,39 @@ func loadPipeline(filename string) (*pipeline.Graph, error) {
 	case "dot":
 		return pipeline.ParseDOT(string(fileBytes))
 	default:
-		return nil, fmt.Errorf("unknown pipeline format: %s", format)
+		return nil, fmt.Errorf("unknown pipeline format: %q (valid: dip, dot)", format)
 	}
 }
 
-// loadDippinPipeline parses a .dip file using dippin-lang parser
-// and converts to Tracker's Graph representation.
+// emitDOTDeprecationWarning prints a one-line warning that DOT is deprecated.
+func emitDOTDeprecationWarning(w io.Writer) {
+	fmt.Fprintln(w, "WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
+}
+
+// loadDippinPipeline parses a .dip file using dippin-lang parser,
+// runs Dippin's built-in validator and linter, then converts to Tracker's
+// Graph representation. Validation errors are fatal; lint warnings are
+// printed to stderr but do not block execution.
 func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
-	// Import the parser dynamically to avoid hard dependency
 	p := parser.NewParser(source, filename)
 	workflow, err := p.Parse()
 	if err != nil {
 		return nil, fmt.Errorf("parse Dippin file: %w", err)
+	}
+
+	// Run Dippin structural validation (DIP001–DIP009).
+	valResult := validator.Validate(workflow)
+	if valResult.HasErrors() {
+		for _, d := range valResult.Diagnostics {
+			fmt.Fprintln(os.Stderr, d.String())
+		}
+		return nil, fmt.Errorf("%d validation error(s) in %s", len(valResult.Errors()), filename)
+	}
+
+	// Run Dippin lint checks (DIP101–DIP115). Warnings only — don't block.
+	lintResult := validator.Lint(workflow)
+	for _, d := range lintResult.Diagnostics {
+		fmt.Fprintln(os.Stderr, d.String())
 	}
 
 	graph, err := pipeline.FromDippinIR(workflow)
@@ -145,9 +176,9 @@ func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
-func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error {
+func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error {
 	// Read and parse the pipeline file (auto-detect .dip or .dot).
-	graph, err := loadPipeline(dotFile)
+	graph, err := loadPipeline(pipelineFile, format)
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}
@@ -196,8 +227,10 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 		if evt.Err != nil {
 			errMsg = evt.Err.Error()
 		}
-		activityLog.WriteAgentEvent(string(evt.Type), evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 	}
+
+	var pipelineEventHandler pipeline.PipelineEventHandler
 
 	if jsonOut {
 		// JSON streaming mode: all events go as typed NDJSON to stdout.
@@ -207,9 +240,7 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 			logAgentEvent(evt)
 			stream.agentHandler().HandleEvent(evt)
 		})
-		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
-			pipeline.PipelineMultiHandler(stream.pipelineHandler(), activityLog),
-		))
+		pipelineEventHandler = pipeline.PipelineMultiHandler(stream.pipelineHandler(), activityLog)
 	} else {
 		// Human-readable console output.
 		llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
@@ -219,15 +250,18 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 			if line == "" {
 				return
 			}
-			fmt.Fprintf(os.Stdout, "[%s] %s\n", time.Now().Format("15:04:05"), line)
+			if evt.NodeID != "" {
+				fmt.Fprintf(os.Stdout, "[%s] [%s] %s\n", time.Now().Format("15:04:05"), evt.NodeID, line)
+			} else {
+				fmt.Fprintf(os.Stdout, "[%s] %s\n", time.Now().Format("15:04:05"), line)
+			}
 		})
-		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
-			pipeline.PipelineMultiHandler(
-				&pipeline.LoggingEventHandler{Writer: os.Stdout},
-				activityLog,
-			),
-		))
+		pipelineEventHandler = pipeline.PipelineMultiHandler(
+			&pipeline.LoggingEventHandler{Writer: os.Stdout},
+			activityLog,
+		)
 	}
+	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineEventHandler))
 
 	// Build the handler registry with real production dependencies.
 	registry := handlers.NewDefaultRegistry(graph,
@@ -235,6 +269,7 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agentEventHandler),
+		handlers.WithPipelineEventHandler(pipelineEventHandler),
 	)
 
 	if checkpoint != "" {
@@ -260,15 +295,15 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 	if result.Status != pipeline.OutcomeSuccess {
 		pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
 	}
-	printRunSummary(result, pipelineErr, tokenTracker, dotFile)
+	printRunSummary(result, pipelineErr, tokenTracker, pipelineFile)
 	return pipelineErr
 }
 
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
-func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
-	graph, err := loadPipeline(dotFile)
+func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) error {
+	graph, err := loadPipeline(pipelineFile, format)
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}
@@ -287,7 +322,7 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 
 	pipelineName := graph.Name
 	if pipelineName == "" {
-		base := filepath.Base(dotFile)
+		base := filepath.Base(pipelineFile)
 		ext := filepath.Ext(base)
 		pipelineName = base[:len(base)-len(ext)]
 	}
@@ -341,6 +376,9 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 		}
 	})
 
+	// Combine pipeline event handlers for both TUI and activity log.
+	pipelineCombo := pipeline.PipelineMultiHandler(pipelineHandler, activityLog)
+
 	// Build handler registry.
 	registry := handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
@@ -355,15 +393,14 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 			if evt.Err != nil {
 				errMsg = evt.Err.Error()
 			}
-			activityLog.WriteAgentEvent(string(evt.Type), evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+			activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 		})),
+		handlers.WithPipelineEventHandler(pipelineCombo),
 	)
 
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
-	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(
-		pipeline.PipelineMultiHandler(pipelineHandler, activityLog),
-	))
+	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineCombo))
 	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
@@ -396,7 +433,7 @@ func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
 	}
 
 	outcome := <-outcomeCh
-	printRunSummary(outcome.result, outcome.err, tokenTracker, dotFile)
+	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
 	return outcome.err
 }
 
@@ -411,7 +448,7 @@ func parseFlags(args []string) (runConfig, error) {
 	if len(args) > 1 && args[1] == string(modeValidate) {
 		cfg.mode = modeValidate
 		if len(args) > 2 {
-			cfg.dotFile = args[2]
+			cfg.pipelineFile = args[2]
 		}
 		return cfg, nil
 	}
@@ -419,7 +456,7 @@ func parseFlags(args []string) (runConfig, error) {
 	if len(args) > 1 && args[1] == string(modeSimulate) {
 		cfg.mode = modeSimulate
 		if len(args) > 2 {
-			cfg.dotFile = args[2]
+			cfg.pipelineFile = args[2]
 		}
 		return cfg, nil
 	}
@@ -449,6 +486,7 @@ func parseFlags(args []string) (runConfig, error) {
 	fs.BoolVar(&cfg.noTUI, "no-tui", false, "Disable TUI dashboard; use plain console output")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream events as newline-delimited JSON to stdout")
+	fs.StringVar(&cfg.format, "format", "", "Pipeline format override: dip (default) or dot")
 
 	// Go's flag package stops parsing at the first non-flag argument.
 	// To support flags in any order (e.g. "tracker pipeline.dot -c cp.json"),
@@ -475,21 +513,22 @@ func parseFlags(args []string) (runConfig, error) {
 		return cfg, errUsage
 	}
 
-	cfg.dotFile = positional[0]
+	cfg.pipelineFile = positional[0]
 	return cfg, nil
 }
 
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, renderStartupBanner())
 	fmt.Fprintf(w, "Usage:\n")
-	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot|pipeline.dip> [flags]\n")
+	fmt.Fprintf(w, "  tracker [flags] <pipeline.dip> [flags]\n")
 	fmt.Fprintf(w, "  tracker setup\n")
-	fmt.Fprintf(w, "  tracker validate <pipeline.dot|pipeline.dip>\n")
-	fmt.Fprintf(w, "  tracker simulate <pipeline.dot|pipeline.dip>\n")
+	fmt.Fprintf(w, "  tracker validate <pipeline.dip>\n")
+	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
 	fmt.Fprintf(w, "  -r, --resume string       Resume a previous run by ID (e.g. 13041bbb0a38)\n")
+	fmt.Fprintf(w, "  --format string           Pipeline format override: dip (default) or dot (deprecated)\n")
 	fmt.Fprintf(w, "  --json                    Stream events as newline-delimited JSON to stdout\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
@@ -514,17 +553,17 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 	}
 
 	if cfg.mode == modeValidate {
-		if cfg.dotFile == "" {
-			return fmt.Errorf("usage: tracker validate <pipeline.dot|pipeline.dip>")
+		if cfg.pipelineFile == "" {
+			return fmt.Errorf("usage: tracker validate <pipeline.dip>")
 		}
-		return runValidateCmd(cfg.dotFile, os.Stdout)
+		return runValidateCmd(cfg.pipelineFile, cfg.format, os.Stdout)
 	}
 
 	if cfg.mode == modeSimulate {
-		if cfg.dotFile == "" {
-			return fmt.Errorf("usage: tracker simulate <pipeline.dot|pipeline.dip>")
+		if cfg.pipelineFile == "" {
+			return fmt.Errorf("usage: tracker simulate <pipeline.dip>")
 		}
-		return runSimulateCmd(cfg.dotFile, os.Stdout)
+		return runSimulateCmd(cfg.pipelineFile, cfg.format, os.Stdout)
 	}
 
 	if cfg.mode == modeAudit {
@@ -558,9 +597,9 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 	// Fall back to plain console mode when TUI is disabled or stdin is not a
 	// terminal (e.g. CI, piped input, cron). TUI requires a real TTY.
 	if cfg.noTUI || !isatty.IsTerminal(os.Stdin.Fd()) {
-		return deps.run(cfg.dotFile, cfg.workdir, checkpoint, cfg.verbose, cfg.jsonOut)
+		return deps.run(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.verbose, cfg.jsonOut)
 	}
-	return deps.runTUI(cfg.dotFile, cfg.workdir, checkpoint, cfg.verbose)
+	return deps.runTUI(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.verbose)
 }
 
 // resolveCheckpoint finds the checkpoint file for a given run ID. It looks in
@@ -921,7 +960,7 @@ func formatNumber(n int) string {
 
 // printRunSummary outputs a comprehensive run summary with the logo, aggregated
 // session stats, per-node breakdown, token usage, and ASCII pipeline graph.
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker, dotFile string) {
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker, pipelineFile string) {
 	fmt.Println()
 
 	// Logo
@@ -1058,9 +1097,9 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 
 	// Show resume hint when the pipeline didn't complete successfully.
 	if result != nil && result.Status != pipeline.OutcomeSuccess && result.RunID != "" {
-		pipelineArg := dotFile
+		pipelineArg := pipelineFile
 		if pipelineArg == "" {
-			pipelineArg = "<pipeline.dot>"
+			pipelineArg = "<pipeline.dip>"
 		}
 		fmt.Println()
 		fmt.Println("─── Resume ────────────────────────────────────────────────")

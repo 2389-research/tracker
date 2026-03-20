@@ -22,6 +22,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install dippin CLI
+        run: go install github.com/2389-research/dippin-lang/cmd/dippin@latest
+
+      - name: Lint .dip files
+        run: make lint
+
       - name: Run tests
         run: make test
 

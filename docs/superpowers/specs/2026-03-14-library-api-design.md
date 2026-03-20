@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add a top-level `tracker` package that lets consumers (primarily Mammoth) run DOT pipelines in one function call, without manually wiring LLM clients, handler registries, or execution environments.
+Add a top-level `tracker` package that lets consumers (primarily Mammoth) run pipelines (`.dip` or `.dot`) in one function call, without manually wiring LLM clients, handler registries, or execution environments.
 
 ## Problem
 
@@ -24,7 +24,7 @@ engine := pipeline.NewEngine(graph, registry,
 result, err := engine.Run(ctx)
 ```
 
-Mammoth (the primary consumer) wants to hand tracker a DOT graph and say "run this."
+Mammoth (the primary consumer) wants to hand tracker a pipeline (`.dip` preferred, `.dot` deprecated) and say "run this."
 
 ## Design
 
@@ -37,15 +37,17 @@ New package at module root: `github.com/2389-research/tracker`. This is the only
 ```go
 package tracker
 
-// Run parses DOT, auto-wires all internals, executes, and returns the result.
+// Run parses a pipeline source (.dip or .dot), auto-wires all internals,
+// executes, and returns the result. The format is specified via cfg.Format
+// ("dip" preferred, "dot" deprecated; defaults to "dip").
 // The LLM client is created from environment variables unless cfg.LLMClient
 // is provided. All other dependencies are constructed automatically.
-func Run(ctx context.Context, dotSource string, cfg Config) (*Result, error)
+func Run(ctx context.Context, source string, cfg Config) (*Result, error)
 
-// NewEngine parses DOT and auto-wires all internals, returning an Engine
-// for manual control. The caller must call Close() when done to release
-// resources (e.g., auto-created LLM clients).
-func NewEngine(dotSource string, cfg Config) (*Engine, error)
+// NewEngine parses a pipeline source and auto-wires all internals, returning
+// an Engine for manual control. The caller must call Close() when done to
+// release resources (e.g., auto-created LLM clients).
+func NewEngine(source string, cfg Config) (*Engine, error)
 
 // Engine wraps pipeline.Engine with auto-wired internals.
 type Engine struct { /* unexported fields */ }
@@ -61,6 +63,7 @@ func (e *Engine) Close() error
 // Zero-value Config uses environment variables for LLM credentials,
 // the current working directory, and auto-generated run directories.
 type Config struct {
+    Format        string                        // "dip" (default) or "dot" (deprecated)
     WorkingDir    string                        // default: os.Getwd()
     CheckpointDir string                        // default: .tracker/runs/<runID>/
     ArtifactDir   string                        // default: .tracker/runs/<runID>/
@@ -89,7 +92,7 @@ type Result struct {
 
 When `Run` or `NewEngine` is called:
 
-1. **Parse & Validate**: `pipeline.ParseDOT(dotSource)` then `pipeline.Validate(graph)`. Errors returned immediately.
+1. **Parse & Validate**: For `.dip` (default): parse via `dippin-lang` then `pipeline.FromDippinIR()`. For `.dot` (deprecated): `pipeline.ParseDOT(source)`. Then `pipeline.Validate(graph)`. Errors returned immediately.
 
 2. **LLM Client**: If `cfg.LLMClient` is set, use it. Otherwise, `llm.NewClientFromEnv()` with all registered provider constructors (anthropic, openai, google). `cfg.Model` and `cfg.Provider` override env defaults. Invalid provider or model values surface as errors from `NewEngine`/`Run` at construction time — fail fast, not at first LLM call. Construction is purely synchronous (no I/O), so no `context.Context` is needed for `NewEngine`.
 
@@ -123,7 +126,7 @@ result, err := engine.RunGraph(ctx, graph)
 
 After (with tracker):
 ```go
-result, err := tracker.Run(ctx, dotSource, tracker.Config{
+result, err := tracker.Run(ctx, dipSource, tracker.Config{
     WorkingDir:    workDir,
     CheckpointDir: cpDir,
     ArtifactDir:   artifactDir,
@@ -146,8 +149,9 @@ result, err := tracker.Run(ctx, dotSource, tracker.Config{
 - Test that zero-value Config produces valid defaults
 - Test that `cfg.LLMClient` override skips env detection
 - Test that `Close()` is idempotent
-- Integration test: parse a simple DOT, run with a stub handler, verify result
-- Test invalid DOT source returns parse error
+- Integration test: parse a simple `.dip`, run with a stub handler, verify result
+- Integration test: parse a simple `.dot` (deprecated path), verify backward compat
+- Test invalid source returns parse error
 - Test invalid provider/model returns construction error
 
 ## Files

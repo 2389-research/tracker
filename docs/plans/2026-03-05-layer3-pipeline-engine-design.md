@@ -2,11 +2,15 @@
 
 ## Goal
 
-Build a DOT-based pipeline orchestration engine that parses Graphviz DOT files into directed graphs, validates them, and executes nodes sequentially with support for conditional routing, parallel fan-out/fan-in, human gates, retry logic, checkpoint/resume, and multi-model LLM configuration via stylesheets.
+Build a pipeline orchestration engine that parses workflow definitions into directed graphs, validates them, and executes nodes sequentially with support for conditional routing, parallel fan-out/fan-in, human gates, retry logic, checkpoint/resume, and multi-model LLM configuration via stylesheets.
+
+The engine supports two input formats:
+- **Dippin (`.dip`)** — preferred format, parsed via `dippin-lang` and converted through `FromDippinIR()`
+- **DOT (`.dot`)** — deprecated format, parsed via `gographviz` (retained for backward compatibility)
 
 ## Architecture
 
-The pipeline engine is the top layer of the three-layer attractor architecture. It consumes DOT pipeline definitions and orchestrates execution by invoking Layer 2 (agent sessions) for LLM tasks and Layer 1 (LLM client) indirectly through the agent.
+The pipeline engine is the top layer of the three-layer attractor architecture. It consumes pipeline definitions (`.dip` or `.dot`) and orchestrates execution by invoking Layer 2 (agent sessions) for LLM tasks and Layer 1 (LLM client) indirectly through the agent.
 
 The engine follows a five-phase lifecycle: Parse → Validate → Initialize → Execute → Finalize. Execution is single-threaded at the engine level (one node at a time), with parallel fan-out handled by spawning goroutines within the parallel handler.
 
@@ -14,25 +18,26 @@ The engine follows a five-phase lifecycle: Parse → Validate → Initialize →
 
 ```
 pipeline/
-├── graph.go          # Graph, Node, Edge data model
-├── parser.go         # DOT → Graph using gographviz
-├── validate.go       # DAG validation rules
-├── context.go        # Pipeline context (shared key-value state)
-├── condition.go      # Condition expression evaluator
-├── handler.go        # Handler interface + registry
-├── engine.go         # Core execution loop
-├── checkpoint.go     # Checkpoint/resume serialization
-├── events.go         # Pipeline event types
-├── stylesheet.go     # Model stylesheet (CSS-like LLM config)
+├── graph.go            # Graph, Node, Edge data model
+├── parser.go           # DOT → Graph using gographviz (deprecated format)
+├── dippin_adapter.go   # Dippin IR → Graph via FromDippinIR() (preferred format)
+├── validate.go         # DAG validation rules
+├── context.go          # Pipeline context (shared key-value state)
+├── condition.go        # Condition expression evaluator
+├── handler.go          # Handler interface + registry
+├── engine.go           # Core execution loop
+├── checkpoint.go       # Checkpoint/resume serialization
+├── events.go           # Pipeline event types
+├── stylesheet.go       # Model stylesheet (CSS-like LLM config)
 ├── handlers/
-│   ├── start.go      # Start node (no-op)
-│   ├── exit.go       # Exit node (no-op)
-│   ├── codergen.go   # LLM agent task (invokes Layer 2)
-│   ├── tool.go       # Shell command execution
-│   ├── conditional.go # Diamond routing node
-│   ├── parallel.go   # Fan-out (component shape)
-│   ├── fanin.go      # Fan-in (tripleoctagon shape)
-│   └── human.go      # Human gate (hexagon shape)
+│   ├── start.go        # Start node (no-op)
+│   ├── exit.go         # Exit node (no-op)
+│   ├── codergen.go     # LLM agent task (invokes Layer 2)
+│   ├── tool.go         # Shell command execution
+│   ├── conditional.go  # Diamond routing node
+│   ├── parallel.go     # Fan-out (component shape)
+│   ├── fanin.go        # Fan-in (tripleoctagon shape)
+│   └── human.go        # Human gate (hexagon shape)
 └── *_test.go files
 ```
 
@@ -239,7 +244,8 @@ Specificity: universal `*` < class `.name` < ID `#name`. Explicit node attribute
 
 ## Dependencies
 
-- `github.com/awalterschulze/gographviz` — DOT parsing
+- `github.com/2389-research/dippin-lang/parser` — Dippin `.dip` parsing (preferred format)
+- `github.com/awalterschulze/gographviz` — DOT parsing (deprecated format)
 - `github.com/2389-research/tracker/agent` — Layer 2 agent sessions
 - `github.com/2389-research/tracker/llm` — Layer 1 LLM client (via agent)
 
@@ -248,17 +254,18 @@ Specificity: universal `*` < class `.name` < ID `#name`. Explicit node attribute
 Bottom-up, matching Layer 1 and Layer 2 patterns:
 
 1. Graph model (data types)
-2. DOT parser (gographviz → Graph)
-3. Validator (structural rules)
-4. Context (shared state)
-5. Condition evaluator
-6. Events
-7. Handler interface + registry
-8. Individual handlers (start, exit, tool, conditional, codergen, human, parallel, fan-in)
-9. Stylesheet
-10. Engine (execution loop)
-11. Checkpoint (serialization/resume)
-12. Integration tests
+2. Dippin IR adapter (`FromDippinIR` — preferred format)
+3. DOT parser (gographviz → Graph — deprecated format)
+4. Validator (structural rules)
+5. Context (shared state)
+6. Condition evaluator
+7. Events
+8. Handler interface + registry
+9. Individual handlers (start, exit, tool, conditional, codergen, human, parallel, fan-in)
+10. Stylesheet
+11. Engine (execution loop)
+12. Checkpoint (serialization/resume)
+13. Integration tests
 
 ## NLSpec
 

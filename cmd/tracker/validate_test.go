@@ -35,7 +35,7 @@ const warningOnlyDOT = `digraph test {
 func TestValidateValid(t *testing.T) {
 	path := writeTestDOT(t, validDOT)
 	var buf bytes.Buffer
-	err := runValidateCmd(path, &buf)
+	err := runValidateCmd(path, "", &buf)
 	if err != nil {
 		t.Fatalf("expected no error for valid DOT, got: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestValidateValid(t *testing.T) {
 func TestValidateErrors(t *testing.T) {
 	path := writeTestDOT(t, invalidDOTNoStart)
 	var buf bytes.Buffer
-	err := runValidateCmd(path, &buf)
+	err := runValidateCmd(path, "", &buf)
 	if err == nil {
 		t.Fatal("expected error for invalid DOT")
 	}
@@ -67,7 +67,7 @@ func TestValidateErrors(t *testing.T) {
 func TestValidateWarningsOnly(t *testing.T) {
 	path := writeTestDOT(t, warningOnlyDOT)
 	var buf bytes.Buffer
-	err := runValidateCmd(path, &buf)
+	err := runValidateCmd(path, "", &buf)
 	if err != nil {
 		t.Fatalf("warnings should not cause error, got: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestValidateWarningsOnly(t *testing.T) {
 
 func TestValidateMissingFile(t *testing.T) {
 	var buf bytes.Buffer
-	err := runValidateCmd("/nonexistent/file.dot", &buf)
+	err := runValidateCmd("/nonexistent/file.dot", "", &buf)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -92,7 +92,7 @@ func TestValidateInvalidSyntax(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	err := runValidateCmd(path, &buf)
+	err := runValidateCmd(path, "", &buf)
 	if err == nil {
 		t.Fatal("expected error for invalid syntax")
 	}
@@ -109,12 +109,12 @@ func TestParseFlagsValidate(t *testing.T) {
 	if cfg.mode != modeValidate {
 		t.Errorf("mode = %q, want validate", cfg.mode)
 	}
-	if cfg.dotFile != "pipeline.dot" {
-		t.Errorf("dotFile = %q, want pipeline.dot", cfg.dotFile)
+	if cfg.pipelineFile != "pipeline.dot" {
+		t.Errorf("pipelineFile = %q, want pipeline.dot", cfg.pipelineFile)
 	}
 }
 
-func TestExecuteCommandValidateMissingDotFile(t *testing.T) {
+func TestExecuteCommandValidateMissingPipelineFile(t *testing.T) {
 	err := executeCommand(runConfig{
 		mode: modeValidate,
 	}, commandDeps{})

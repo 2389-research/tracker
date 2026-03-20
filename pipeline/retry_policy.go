@@ -108,6 +108,14 @@ func ResolveRetryPolicy(node *Node, graphAttrs map[string]string) *RetryPolicy {
 		}
 	}
 
+	// Apply base_delay override from node attr (set by Dippin adapter
+	// from ir.RetryConfig.BaseDelay, e.g. "500ms", "2s").
+	if bd, ok := node.Attrs["base_delay"]; ok {
+		if d, err := time.ParseDuration(bd); err == nil {
+			policy.BaseDelay = d
+		}
+	}
+
 	return policy
 }
 

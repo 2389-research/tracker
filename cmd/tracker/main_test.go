@@ -38,8 +38,8 @@ func TestParseFlagsEnablesVerbose(t *testing.T) {
 	if !cfg.verbose {
 		t.Fatal("expected verbose to be true")
 	}
-	if cfg.dotFile != "pipe.dot" {
-		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipe.dot")
+	if cfg.pipelineFile != "pipe.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.pipelineFile, "pipe.dot")
 	}
 }
 
@@ -51,8 +51,8 @@ func TestParseFlagsFlagsAfterDotFile(t *testing.T) {
 	if cfg.mode != modeRun {
 		t.Fatalf("mode = %q, want %q", cfg.mode, modeRun)
 	}
-	if cfg.dotFile != "pipeline.dot" {
-		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	if cfg.pipelineFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.pipelineFile, "pipeline.dot")
 	}
 	if cfg.resumeID != "abc123" {
 		t.Fatalf("resumeID = %q, want %q", cfg.resumeID, "abc123")
@@ -67,8 +67,8 @@ func TestParseFlagsFlagsBeforeDotFile(t *testing.T) {
 	if cfg.mode != modeRun {
 		t.Fatalf("mode = %q, want %q", cfg.mode, modeRun)
 	}
-	if cfg.dotFile != "pipeline.dot" {
-		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	if cfg.pipelineFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.pipelineFile, "pipeline.dot")
 	}
 	if cfg.resumeID != "abc123" {
 		t.Fatalf("resumeID = %q, want %q", cfg.resumeID, "abc123")
@@ -83,8 +83,8 @@ func TestParseFlagsMixedOrder(t *testing.T) {
 	if cfg.mode != modeRun {
 		t.Fatalf("mode = %q, want %q", cfg.mode, modeRun)
 	}
-	if cfg.dotFile != "pipeline.dot" {
-		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	if cfg.pipelineFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.pipelineFile, "pipeline.dot")
 	}
 	if cfg.resumeID != "run42" {
 		t.Fatalf("resumeID = %q, want %q", cfg.resumeID, "run42")
@@ -118,8 +118,21 @@ func TestParseFlagsSetupMode(t *testing.T) {
 	if cfg.mode != modeSetup {
 		t.Fatalf("mode = %q, want %q", cfg.mode, modeSetup)
 	}
-	if cfg.dotFile != "" {
-		t.Fatalf("dotFile = %q, want empty", cfg.dotFile)
+	if cfg.pipelineFile != "" {
+		t.Fatalf("dotFile = %q, want empty", cfg.pipelineFile)
+	}
+}
+
+func TestParseFlagsFormatFlag(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--format", "dot", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.format != "dot" {
+		t.Fatalf("format = %q, want %q", cfg.format, "dot")
+	}
+	if cfg.pipelineFile != "pipeline.dip" {
+		t.Fatalf("pipelineFile = %q, want %q", cfg.pipelineFile, "pipeline.dip")
 	}
 }
 
@@ -210,10 +223,10 @@ func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
 	var runCalled bool
 
 	err := executeCommand(runConfig{
-		mode:    modeRun,
-		dotFile: "pipeline.dot",
-		workdir: "/tmp/workdir",
-		noTUI:   true,
+		mode:         modeRun,
+		pipelineFile: "pipeline.dot",
+		workdir:      "/tmp/workdir",
+		noTUI:        true,
 	}, commandDeps{
 		loadEnv: func(workdir string) error {
 			loadEnvCalled = true
@@ -222,14 +235,14 @@ func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
 			}
 			return nil
 		},
-		run: func(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error {
+		run: func(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error {
 			runCalled = true
-			if dotFile != "pipeline.dot" {
-				t.Fatalf("dotFile = %q, want %q", dotFile, "pipeline.dot")
+			if pipelineFile != "pipeline.dot" {
+				t.Fatalf("pipelineFile = %q, want %q", pipelineFile, "pipeline.dot")
 			}
 			return nil
 		},
-		runTUI: func(dotFile, workdir, checkpoint string, verbose bool) error {
+		runTUI: func(pipelineFile, workdir, checkpoint, format string, verbose bool) error {
 			t.Fatal("did not expect TUI path")
 			return nil
 		},
@@ -496,8 +509,8 @@ func TestParseFlagsJsonFlag(t *testing.T) {
 	if !cfg.jsonOut {
 		t.Fatal("expected jsonOut to be true")
 	}
-	if cfg.dotFile != "pipeline.dot" {
-		t.Fatalf("dotFile = %q, want %q", cfg.dotFile, "pipeline.dot")
+	if cfg.pipelineFile != "pipeline.dot" {
+		t.Fatalf("dotFile = %q, want %q", cfg.pipelineFile, "pipeline.dot")
 	}
 }
 

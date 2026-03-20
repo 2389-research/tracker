@@ -23,12 +23,13 @@ type registryConfig struct {
 	toolExecFunc  HandlerFunc
 	humanCallback HandlerFunc
 	// Production dependencies
-	llmClient   agent.Completer
-	workingDir  string
-	execEnv     exec.ExecutionEnvironment
-	interviewer Interviewer
-	graph       *pipeline.Graph
-	agentEvents agent.EventHandler
+	llmClient      agent.Completer
+	workingDir     string
+	execEnv        exec.ExecutionEnvironment
+	interviewer    Interviewer
+	graph          *pipeline.Graph
+	agentEvents    agent.EventHandler
+	pipelineEvents pipeline.PipelineEventHandler
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -82,6 +83,13 @@ func WithAgentEventHandler(handler agent.EventHandler) RegistryOption {
 	}
 }
 
+// WithPipelineEventHandler forwards pipeline events from handlers that emit them (e.g. parallel).
+func WithPipelineEventHandler(handler pipeline.PipelineEventHandler) RegistryOption {
+	return func(c *registryConfig) {
+		c.pipelineEvents = handler
+	}
+}
+
 // NewDefaultRegistry creates a HandlerRegistry pre-loaded with all built-in handlers.
 // The graph is needed for the parallel handler (to look up branch targets) and the
 // human handler (to look up outgoing edge labels). Optional RegistryOption funcs
@@ -102,7 +110,7 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	registry.Register(NewManagerLoopHandler())
 
 	// Parallel handler needs the graph and registry for branch dispatch.
-	registry.Register(NewParallelHandler(graph, registry))
+	registry.Register(NewParallelHandler(graph, registry, cfg.pipelineEvents))
 
 	// Codergen: prefer real handler, fall back to stub.
 	if cfg.llmClient != nil {

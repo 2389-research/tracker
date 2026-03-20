@@ -152,8 +152,16 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	}()
 
 	// Initialize conversation.
+	// Always inject the base environment prompt so the model knows the rules
+	// (relative paths, working directory constraints) regardless of what the
+	// caller's system_prompt says.
+	basePrompt := "All file paths in tool calls MUST be relative to the working directory. " +
+		"NEVER use absolute paths starting with '/'. " +
+		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\"."
 	if s.config.SystemPrompt != "" {
-		s.messages = append(s.messages, llm.SystemMessage(s.config.SystemPrompt))
+		s.messages = append(s.messages, llm.SystemMessage(basePrompt+"\n\n"+s.config.SystemPrompt))
+	} else {
+		s.messages = append(s.messages, llm.SystemMessage(basePrompt))
 	}
 	s.messages = append(s.messages, llm.UserMessage(userInput))
 

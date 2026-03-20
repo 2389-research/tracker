@@ -86,8 +86,9 @@ func (h *JSONLEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 
 // WriteAgentEvent logs an agent event to the activity log.
 // The caller is responsible for passing the event; the handler writes
-// it to the same JSONL file as pipeline events.
-func (h *JSONLEventHandler) WriteAgentEvent(evtType, toolName, toolOutput, toolError, text, errMsg, provider, model string) {
+// it to the same JSONL file as pipeline events. The nodeID identifies
+// which pipeline node (branch) produced this event.
+func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutput, toolError, text, errMsg, provider, model string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -104,6 +105,7 @@ func (h *JSONLEventHandler) WriteAgentEvent(evtType, toolName, toolOutput, toolE
 		Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
 		Source:    "agent",
 		Type:      evtType,
+		NodeID:    nodeID,
 		ToolName:  toolName,
 		Content:   content,
 		Provider:  provider,

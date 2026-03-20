@@ -82,7 +82,10 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// Capture both plain assistant text and a readable execution transcript,
 	// since tool-only sessions would otherwise write an empty response artifact.
 	var collector transcriptCollector
-	handler := agent.MultiHandler(&collector, h.eventHandler)
+	// Wrap the event handler so every agent event carries this node's ID.
+	// Critical for parallel branches where multiple sessions emit concurrently.
+	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
+	handler := agent.MultiHandler(&collector, scopedHandler)
 	opts := []agent.SessionOption{agent.WithEventHandler(handler)}
 	if h.env != nil {
 		opts = append(opts, agent.WithEnvironment(h.env))

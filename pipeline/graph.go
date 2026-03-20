@@ -31,6 +31,12 @@ type Graph struct {
 	Attrs     map[string]string
 	StartNode string
 	ExitNode  string
+
+	// DippinValidated is set by the Dippin adapter when the source IR has
+	// already been validated by dippin-lang's validator. When true, Tracker
+	// skips structural checks (start/exit, edge endpoints, reachability,
+	// cycles, exit outgoing edges) that Dippin already covers.
+	DippinValidated bool
 }
 
 // NewGraph creates an empty Graph with the given name.

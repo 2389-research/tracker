@@ -61,7 +61,7 @@ func buildTestGraph(branchNodeIDs []string, branchHandlerName string) *pipeline.
 }
 
 func TestParallelHandlerName(t *testing.T) {
-	h := NewParallelHandler(nil, nil)
+	h := NewParallelHandler(nil, nil, nil)
 	if h.Name() != "parallel" {
 		t.Errorf("expected 'parallel', got %q", h.Name())
 	}
@@ -72,7 +72,7 @@ func TestParallelHandlerNoEdges(t *testing.T) {
 	g.AddNode(&pipeline.Node{ID: "parallel_node", Shape: "component", Handler: "parallel"})
 	registry := pipeline.NewHandlerRegistry()
 
-	h := NewParallelHandler(g, registry)
+	h := NewParallelHandler(g, registry, nil)
 	node := g.Nodes["parallel_node"]
 	pctx := pipeline.NewPipelineContext()
 
@@ -91,7 +91,7 @@ func TestParallelHandlerSuccess(t *testing.T) {
 	}
 	registry.Register(stub)
 
-	h := NewParallelHandler(g, registry)
+	h := NewParallelHandler(g, registry, nil)
 	node := g.Nodes["parallel_node"]
 	pctx := pipeline.NewPipelineContext()
 
@@ -125,7 +125,7 @@ func TestParallelHandlerPartialFailure(t *testing.T) {
 	}
 	registry.Register(mixed)
 
-	h := NewParallelHandler(g, registry)
+	h := NewParallelHandler(g, registry, nil)
 	node := g.Nodes["parallel_node"]
 	pctx := pipeline.NewPipelineContext()
 
@@ -148,7 +148,7 @@ func TestParallelHandlerAllFail(t *testing.T) {
 	}
 	registry.Register(stub)
 
-	h := NewParallelHandler(g, registry)
+	h := NewParallelHandler(g, registry, nil)
 	node := g.Nodes["parallel_node"]
 	pctx := pipeline.NewPipelineContext()
 
@@ -182,7 +182,7 @@ func TestParallelHandlerContextIsolation(t *testing.T) {
 	}
 	registry.Register(writer)
 
-	h := NewParallelHandler(g, registry)
+	h := NewParallelHandler(g, registry, nil)
 	node := g.Nodes["parallel_node"]
 	pctx := pipeline.NewPipelineContext()
 	pctx.Set("shared_key", "original")
@@ -219,7 +219,7 @@ func TestParallelHandlerResultsInContext(t *testing.T) {
 	}
 	registry.Register(stub)
 
-	h := NewParallelHandler(g, registry)
+	h := NewParallelHandler(g, registry, nil)
 	node := g.Nodes["parallel_node"]
 	pctx := pipeline.NewPipelineContext()
 
@@ -269,7 +269,7 @@ func TestParallelHandlerPreservesInternalArtifactDir(t *testing.T) {
 	}
 	registry.Register(stub)
 
-	h := NewParallelHandler(g, registry)
+	h := NewParallelHandler(g, registry, nil)
 	node := g.Nodes["parallel_node"]
 	pctx := pipeline.NewPipelineContext()
 	pctx.SetInternal(pipeline.InternalKeyArtifactDir, "/tmp/artifacts/run-123")

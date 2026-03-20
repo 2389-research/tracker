@@ -51,6 +51,7 @@ type Event struct {
 	Type               EventType
 	Timestamp          time.Time
 	SessionID          string
+	NodeID             string // Pipeline node that owns this session (empty for standalone sessions).
 	Turn               int
 	ToolName           string
 	ToolInput          string
@@ -101,4 +102,24 @@ func (m multiHandler) HandleEvent(evt Event) {
 			h.HandleEvent(evt)
 		}
 	}
+}
+
+// NodeScopedHandler wraps an EventHandler and stamps every event with a
+// pipeline NodeID. This lets parallel branches identify their events without
+// the agent layer needing to know about pipeline concepts.
+func NodeScopedHandler(nodeID string, inner EventHandler) EventHandler {
+	if inner == nil {
+		return NoopHandler
+	}
+	return &nodeScopedHandler{nodeID: nodeID, inner: inner}
+}
+
+type nodeScopedHandler struct {
+	nodeID string
+	inner  EventHandler
+}
+
+func (h *nodeScopedHandler) HandleEvent(evt Event) {
+	evt.NodeID = h.nodeID
+	h.inner.HandleEvent(evt)
 }

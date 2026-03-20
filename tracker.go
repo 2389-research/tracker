@@ -1,4 +1,4 @@
-// ABOUTME: Top-level convenience API for running DOT pipelines with auto-wired dependencies.
+// ABOUTME: Top-level convenience API for running pipelines (.dip preferred, .dot deprecated) with auto-wired dependencies.
 // ABOUTME: Consumers import only this package — LLM clients, registries, and environments are built automatically.
 package tracker
 
@@ -6,9 +6,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/2389-research/dippin-lang/parser"
+	"github.com/2389-research/dippin-lang/validator"
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
@@ -26,9 +29,10 @@ type Config struct {
 	WorkingDir    string                       // default: os.Getwd()
 	CheckpointDir string                       // default: empty (engine auto-generates)
 	ArtifactDir   string                       // default: empty (engine auto-generates)
-	Model         string                       // default: env or claude-sonnet-4-6; DOT graph llm_model attr takes precedence
+	Format        string                       // "dip" (default), "dot" (deprecated); empty = auto-detect
+	Model         string                       // default: env or claude-sonnet-4-6; graph-level attrs take precedence
 	Provider      string                       // default: auto-detect from env
-	RetryPolicy   string                       // "none" (default), "standard", "aggressive"; DOT graph default_retry_policy attr takes precedence
+	RetryPolicy   string                       // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
 	EventHandler  pipeline.PipelineEventHandler // optional: live pipeline events
 	AgentEvents   agent.EventHandler            // optional: live agent session events
 	LLMClient     agent.Completer              // optional: override auto-created client
@@ -52,12 +56,16 @@ type Engine struct {
 	closeErr  error
 }
 
-// NewEngine parses DOT, auto-wires all internals, and returns an Engine.
+// NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
+// auto-wires all internals, and returns an Engine.
+// Format is auto-detected from content if Config.Format is empty:
+// sources starting with "digraph" or "strict digraph" are treated as DOT,
+// everything else as .dip.
 // The caller must call Close() when done to release resources.
-func NewEngine(dotSource string, cfg Config) (*Engine, error) {
-	graph, err := pipeline.ParseDOT(dotSource)
+func NewEngine(source string, cfg Config) (*Engine, error) {
+	graph, err := parsePipelineSource(source, cfg.Format)
 	if err != nil {
-		return nil, fmt.Errorf("parse DOT: %w", err)
+		return nil, err
 	}
 
 	if err := pipeline.Validate(graph); err != nil {
@@ -94,7 +102,7 @@ func NewEngine(dotSource string, cfg Config) (*Engine, error) {
 	}()
 
 	// Inject model, provider, and retry policy as graph-level attributes
-	// so codergen nodes use them as defaults. DOT graph attrs take precedence.
+	// so codergen nodes use them as defaults. Pipeline-level attrs take precedence.
 	if cfg.Model != "" || cfg.Provider != "" {
 		if graph.Attrs == nil {
 			graph.Attrs = make(map[string]string)
@@ -131,6 +139,9 @@ func NewEngine(dotSource string, cfg Config) (*Engine, error) {
 	if cfg.AgentEvents != nil {
 		registryOpts = append(registryOpts, handlers.WithAgentEventHandler(cfg.AgentEvents))
 	}
+	if cfg.EventHandler != nil {
+		registryOpts = append(registryOpts, handlers.WithPipelineEventHandler(cfg.EventHandler))
+	}
 	registry := handlers.NewDefaultRegistry(graph, registryOpts...)
 
 	var engineOpts []pipeline.EngineOption
@@ -155,6 +166,56 @@ func NewEngine(dotSource string, cfg Config) (*Engine, error) {
 		inner:  inner,
 		client: client,
 	}, nil
+}
+
+// parsePipelineSource parses a pipeline source string using the given format.
+// If format is empty, auto-detects: DOT sources start with "digraph" or
+// "strict digraph"; everything else is treated as .dip.
+func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
+	if format == "" {
+		trimmed := strings.TrimSpace(source)
+		if strings.HasPrefix(trimmed, "digraph") || strings.HasPrefix(trimmed, "strict digraph") {
+			format = "dot"
+		} else {
+			format = "dip"
+		}
+	}
+
+	switch format {
+	case "dot":
+		fmt.Fprintln(os.Stderr, "WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
+		graph, err := pipeline.ParseDOT(source)
+		if err != nil {
+			return nil, fmt.Errorf("parse DOT: %w", err)
+		}
+		return graph, nil
+	case "dip":
+		p := parser.NewParser(source, "inline.dip")
+		wf, err := p.Parse()
+		if err != nil {
+			return nil, fmt.Errorf("parse pipeline: %w", err)
+		}
+		// Run Dippin structural validation (DIP001–DIP009).
+		valResult := validator.Validate(wf)
+		if valResult.HasErrors() {
+			for _, d := range valResult.Diagnostics {
+				fmt.Fprintln(os.Stderr, d.String())
+			}
+			return nil, fmt.Errorf("%d validation error(s)", len(valResult.Errors()))
+		}
+		// Lint warnings (DIP101–DIP115) — print but don't block.
+		lintResult := validator.Lint(wf)
+		for _, d := range lintResult.Diagnostics {
+			fmt.Fprintln(os.Stderr, d.String())
+		}
+		graph, err := pipeline.FromDippinIR(wf)
+		if err != nil {
+			return nil, fmt.Errorf("convert pipeline IR: %w", err)
+		}
+		return graph, nil
+	default:
+		return nil, fmt.Errorf("unknown format %q (valid: dip, dot)", format)
+	}
 }
 
 // buildClient creates an LLM client from environment variables with
@@ -232,10 +293,10 @@ func (e *Engine) Close() error {
 	return e.closeErr
 }
 
-// Run parses DOT, auto-wires all internals, executes, and returns the result.
+// Run parses a pipeline source, auto-wires all internals, executes, and returns the result.
 // This is the one-call convenience function. It handles Close() automatically.
-func Run(ctx context.Context, dotSource string, cfg Config) (*Result, error) {
-	engine, err := NewEngine(dotSource, cfg)
+func Run(ctx context.Context, source string, cfg Config) (*Result, error) {
+	engine, err := NewEngine(source, cfg)
 	if err != nil {
 		return nil, err
 	}
