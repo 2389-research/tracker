@@ -29,6 +29,7 @@ type nodeInfo struct {
 	errMsg   string
 	thinking bool
 	retryMsg string
+	waiting  bool // true when waiting for provider to respond (before thinking starts)
 }
 
 // StateStore is the central state container for the TUI.
@@ -93,6 +94,14 @@ func (s *StateStore) IsThinking(id string) bool {
 	return false
 }
 
+// IsWaiting returns whether the node is waiting for provider response.
+func (s *StateStore) IsWaiting(id string) bool {
+	if ni, ok := s.nodeState[id]; ok {
+		return ni.waiting
+	}
+	return false
+}
+
 // PipelineDone returns whether the pipeline has completed (success or failure).
 func (s *StateStore) PipelineDone() bool { return s.pipelineDone }
 
@@ -142,7 +151,10 @@ func (s *StateStore) Apply(msg interface{}) {
 		s.pipelineErr = m.Error
 	case MsgThinkingStarted:
 		s.ensure(m.NodeID).thinking = true
+		s.ensure(m.NodeID).waiting = false // clear waiting state when thinking starts
 	case MsgThinkingStopped:
 		s.ensure(m.NodeID).thinking = false
+	case MsgLLMRequestPreparing:
+		s.ensure(m.NodeID).waiting = true // set waiting state before provider responds
 	}
 }

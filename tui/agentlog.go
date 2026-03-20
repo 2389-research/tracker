@@ -261,7 +261,7 @@ func (al *AgentLog) View() string {
 }
 
 // activityIndicator returns the current phase indicator string for the focused node.
-// Priority: tool running > LLM thinking > nothing.
+// Priority: tool running > waiting for provider > LLM thinking > nothing.
 func (al *AgentLog) activityIndicator() string {
 	if al.focusedNode == "" {
 		return ""
@@ -269,6 +269,9 @@ func (al *AgentLog) activityIndicator() string {
 	if toolName := al.thinking.ToolName(al.focusedNode); toolName != "" {
 		elapsed := al.thinking.Elapsed(al.focusedNode).Seconds()
 		return toolStyle(toolName).Render(fmt.Sprintf("⚡ %s (%.1fs)", toolName, elapsed))
+	}
+	if al.store.IsWaiting(al.focusedNode) {
+		return Styles.Muted.Render("⏳ Waiting for provider...")
 	}
 	if al.isThinking() {
 		elapsed := al.thinking.Elapsed(al.focusedNode).Seconds()

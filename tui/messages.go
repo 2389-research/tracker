@@ -47,6 +47,11 @@ type MsgAgentError struct {
 }
 
 // LLM provider messages.
+type MsgLLMRequestPreparing struct {
+	NodeID   string
+	Provider string
+	Model    string
+}
 type MsgLLMRequestStart struct {
 	NodeID   string
 	Provider string

@@ -1,0 +1,345 @@
+workflow FixTrackerVisibility
+  goal: "Diagnose and fix the tracker TUI's silent periods where it appears locked up, using multi-model ideation and iterative ralph-loop implementation."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  agent ExploreVisibilityGaps
+    label: "Explore Visibility Gaps"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    max_turns: 30
+    max_retries: 3
+    retry_target: ExploreVisibilityGaps
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Investigate why the tracker TUI appears "locked up" during normal operation.
+      The TUI sometimes shows no feedback while work is actively happening.
+
+      ## Investigation Steps
+      1. Read the TUI implementation:
+         - tui/app.go, tui/nodelist.go, tui/agentlog.go, tui/statusbar.go
+         - tui/thinking.go, tui/messages.go, tui/adapter.go, tui/state.go
+      2. Read the execution pipeline:
+         - pipeline/engine.go (Engine.Run loop, selectEdge)
+         - agent/session.go (Session.Run, turn loop)
+         - llm/client.go (Complete, streaming)
+         - llm/trace_logger.go (event batching, 150ms flush)
+      3. Read the handler chain:
+         - pipeline/handlers/codergen.go
+         - cmd/tracker/main.go (event routing)
+      4. Identify EVERY silent gap — where operations happen with NO TUI feedback:
+         - Between node transitions (edge selection)
+         - Between LLM turns inside a session
+         - During context compaction
+         - Before first TraceRequestStart
+         - Between tool completion and next LLM request
+         - During provider network latency
+         - Output buffering in trace logger
+
+      ## Output
+      Write a comprehensive analysis to `.ai/visibility/gaps-analysis.md` with:
+      - **Silent Gaps**: Every identified gap, its duration range, and why it's silent
+      - **Event Flow**: The complete chain from engine to TUI, noting where events are missing
+      - **Root Causes**: Categorized list of why each gap exists
+      - **Severity Ranking**: Which gaps cause the most user confusion, ranked
+
+  agent IdeateOpus
+    label: "Ideate (Opus)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    max_turns: 20
+    max_retries: 2
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Read `.ai/visibility/gaps-analysis.md` and propose solutions for fixing tracker's
+      silent periods. Focus on PRACTICAL, minimal-diff fixes.
+
+      ## Constraints
+      - Solutions must not break the existing event architecture
+      - Prefer emitting new events over restructuring the TUI
+      - Each fix should be independently shippable
+      - Consider both --no-tui (console) and TUI dashboard modes
+
+      ## Think About
+      - What new event types or messages are needed?
+      - Where should "heartbeat" or "phase change" events be emitted?
+      - How to show per-turn progress in agentic loops?
+      - How to surface edge selection / context compaction visually?
+      - What's the right granularity — too many events is also bad
+
+      ## Output
+      Write proposals to `.ai/visibility/ideas-opus.md` with:
+      - **Proposed Fixes**: Numbered list with file, location, and change description
+      - **Priority Order**: Which fixes give most visibility improvement per effort
+      - **Risk Assessment**: What could break with each change
+
+  agent IdeateGPT
+    label: "Ideate (GPT)"
+    model: gpt-5.4
+    provider: openai
+    reasoning_effort: high
+    max_turns: 20
+    max_retries: 2
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Read `.ai/visibility/gaps-analysis.md` and propose solutions for fixing tracker's
+      silent periods. Bring a fresh perspective — challenge assumptions.
+
+      ## Constraints
+      - Solutions must not break the existing event architecture
+      - Prefer emitting new events over restructuring the TUI
+      - Each fix should be independently shippable
+
+      ## Think About
+      - What do the best CLI tools (k9s, lazygit, htop) do for progress indication?
+      - Are there patterns from other pipeline runners worth borrowing?
+      - Could a simple elapsed-time heartbeat solve 80% of the problem?
+      - What about showing a "phase" indicator (thinking / tooling / routing / compacting)?
+
+      ## Output
+      Write proposals to `.ai/visibility/ideas-gpt.md` with:
+      - **Proposed Fixes**: Numbered list with file, location, and change description
+      - **Fresh Ideas**: Anything unconventional worth considering
+      - **Priority Order**: Which fixes give most visibility improvement per effort
+
+  agent IdeateGemini
+    label: "Ideate (Gemini)"
+    model: gpt-4o
+    provider: openai
+    reasoning_effort: high
+    max_turns: 20
+    max_retries: 2
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Read `.ai/visibility/gaps-analysis.md` and propose solutions for fixing tracker's
+      silent periods. Focus on user experience and perception of responsiveness.
+
+      ## Constraints
+      - Solutions must not break the existing event architecture
+      - Prefer emitting new events over restructuring the TUI
+      - Each fix should be independently shippable
+
+      ## Think About
+      - Perceived performance vs actual performance
+      - What feedback keeps users confident the system is working?
+      - Minimal information that eliminates "is it stuck?" anxiety
+      - How to handle truly long operations (60s+ LLM calls) gracefully
+
+      ## Output
+      Write proposals to `.ai/visibility/ideas-gemini.md` with:
+      - **Proposed Fixes**: Numbered list with file, location, and change description
+      - **UX Principles**: What makes a CLI feel "alive" vs "frozen"
+      - **Priority Order**: Which fixes give most visibility improvement per effort
+
+  agent BuildConsensus
+    label: "Build Consensus Plan"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    max_turns: 30
+    max_retries: 2
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Read all three ideation documents:
+      - `.ai/visibility/ideas-opus.md`
+      - `.ai/visibility/ideas-gpt.md`
+      - `.ai/visibility/ideas-gemini.md`
+
+      Synthesize the best ideas into a concrete, ordered implementation plan.
+
+      ## Process
+      1. Identify overlapping ideas (proposed by 2+ models)
+      2. Evaluate unique ideas on merit
+      3. Order by impact-to-effort ratio
+      4. Create a task checklist with specific file changes
+
+      ## Output
+      Write the implementation plan to `.ai/ralph/task.md` with:
+      - **Goal**: Fix tracker TUI silent periods so users always know what's happening
+      - **Completion Criteria**: Clear pass/fail tests for each fix
+      - **Task Checklist**: Ordered `- [ ]` items, each with:
+        - Which file(s) to modify
+        - What event/message to add
+        - Expected user-visible behavior change
+      - **Constraints**: What NOT to change (don't break existing events, don't restructure TUI)
+
+      Also write the max iteration count:
+      ```
+      printf '15' > .ai/ralph/max-iterations.txt
+      ```
+      And initialize the iteration log:
+      ```
+      printf '# Iteration Log\n\n' > .ai/ralph/iteration-log.md
+      ```
+
+  tool SetupRalphState
+    label: "Setup Ralph State"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      mkdir -p .ai/ralph
+      if [ ! -f .ai/ralph/max-iterations.txt ]; then
+        printf '15' > .ai/ralph/max-iterations.txt
+      fi
+      if [ ! -f .ai/ralph/iteration-log.md ]; then
+        printf '# Iteration Log\n\n' > .ai/ralph/iteration-log.md
+      fi
+      if [ ! -f .ai/ralph/iteration-count.txt ]; then
+        printf '0' > .ai/ralph/iteration-count.txt
+      fi
+      printf 'ready'
+
+  tool IncrementCounter
+    label: "Increment Iteration"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      counter_file=".ai/ralph/iteration-count.txt"
+      mkdir -p .ai/ralph
+      if [ -f "$counter_file" ]; then
+        count=$(cat "$counter_file")
+      else
+        count=0
+      fi
+      count=$((count + 1))
+      printf '%d' "$count" > "$counter_file"
+      printf '%d' "$count"
+
+  agent RalphIterate
+    label: "Ralph Iterate"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    max_turns: 50
+    max_retries: 3
+    retry_target: RalphIterate
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Philosophy
+      Iteration > Perfection. Failures are Data. Persistence Wins.
+
+      ## Task
+      Read `.ai/ralph/task.md` for your assignment — fixing tracker TUI silent periods.
+      This is an iterative loop. Each pass, you should make real, testable progress.
+
+      ## Process
+      1. Read `.ai/ralph/task.md` for the full plan and checklist
+      2. Read `.ai/ralph/iteration-log.md` to see what previous iterations did
+      3. Check `git log --oneline -20` and `git diff` for recent changes
+      4. Pick the NEXT uncompleted checklist item from task.md
+      5. Implement it — write the actual Go code changes
+      6. Run `go build ./...` to verify compilation
+      7. Run `go test ./...` to verify tests pass (or at minimum `go vet ./...`)
+      8. If tests fail, fix them before moving on
+      9. Update `.ai/ralph/iteration-log.md` with what you did
+      10. Mark the item as done in `.ai/ralph/task.md`: `- [x]`
+      11. Commit your changes with a descriptive message
+
+      ## Completion
+      When ALL checklist items in task.md are marked `[x]`:
+      - Write "RALPH_COMPLETE" as the final line of `.ai/ralph/iteration-log.md`
+      - Set STATUS: success
+
+      When you made progress but items remain:
+      - Set STATUS: fail (this triggers the next iteration)
+
+      ## Important
+      - ONE checklist item per iteration — small, testable increments
+      - If stuck on the same item for 2 iterations, skip it and note why
+      - Always run go build before committing
+      - Read your previous iteration log to avoid repeating work
+
+  tool CheckCompletion
+    label: "Check Completion"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      if [ -f .ai/ralph/iteration-log.md ] && grep -q 'RALPH_COMPLETE' .ai/ralph/iteration-log.md 2>/dev/null; then
+        printf 'complete'
+      else
+        printf 'continue'
+      fi
+
+  tool CheckBudget
+    label: "Check Iteration Budget"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      count=$(cat .ai/ralph/iteration-count.txt 2>/dev/null || printf '0')
+      max=$(cat .ai/ralph/max-iterations.txt 2>/dev/null || printf '15')
+      if [ "$count" -ge "$max" ]; then
+        printf 'budget_exhausted'
+      else
+        printf 'budget_ok'
+      fi
+
+  tool FinalBuild
+    label: "Final Build & Test"
+    timeout: 2m
+    command:
+      #!/bin/sh
+      set -e
+      cd "$(git rev-parse --show-toplevel)"
+      go build ./... 2>&1
+      go vet ./... 2>&1
+      printf 'build_pass'
+
+  agent WrapUp
+    label: "Wrap Up"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    max_retries: 2
+    prompt:
+      You are working in `run.working_dir`.
+
+      Read `.ai/ralph/iteration-log.md` and `.ai/ralph/task.md`.
+
+      Write a final summary to `.ai/visibility/summary.md` with:
+      - **What was fixed**: Each visibility gap that was addressed
+      - **Before/After**: What the user experience was vs what it is now
+      - **Remaining gaps**: Any items not completed and why
+      - **Testing notes**: How to verify the fixes (what to look for in the TUI)
+
+  edges
+    Start -> ExploreVisibilityGaps
+    ExploreVisibilityGaps -> IdeateOpus
+    IdeateOpus -> IdeateGPT
+    IdeateGPT -> IdeateGemini
+    IdeateGemini -> BuildConsensus
+    BuildConsensus -> SetupRalphState
+    SetupRalphState -> IncrementCounter
+    IncrementCounter -> RalphIterate
+    RalphIterate -> CheckCompletion
+    CheckCompletion -> Exit  when ctx.tool_stdout = complete  label: "all done"
+    CheckCompletion -> CheckBudget  when ctx.tool_stdout = continue  label: "more work"
+    CheckBudget -> IncrementCounter  when ctx.tool_stdout = budget_ok  label: "next iteration"  restart: true
+    CheckBudget -> FinalBuild  when ctx.tool_stdout = budget_exhausted  label: "out of iterations"
+    FinalBuild -> WrapUp  when ctx.tool_stdout = build_pass  label: "build ok"
+    FinalBuild -> WrapUp  when ctx.tool_stdout != build_pass  label: "build issues"
+    WrapUp -> Exit

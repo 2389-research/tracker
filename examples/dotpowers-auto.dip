@@ -1,0 +1,1192 @@
+workflow dotpowers_auto
+  goal: "Given a project idea or spec, brainstorm the design autonomously, plan, implement with TDD, review via multi-model consensus, and ship working software — running fully headless with no human intervention."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  tool CheckExistingPlans
+    label: "Check Existing Plans"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      if [ -f docs/plans/plan.md ] && grep -q '^- \[ \]' docs/plans/plan.md 2>/dev/null; then
+        printf 'resume'
+      else
+        printf 'fresh'
+      fi
+
+  tool ArchiveOldPlans
+    label: "Archive Old Plans"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      if ls docs/plans/*.md 1>/dev/null 2>&1; then
+        archive_dir="docs/plans/archive/run-$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$archive_dir"
+        for f in docs/plans/*.md; do [ -f "$f" ] && cp "$f" "$archive_dir/"; done
+        rm -f docs/plans/brainstorm.md docs/plans/design-brief.md
+        printf 'archived to %s' "$archive_dir"
+      else
+        printf 'clean'
+      fi
+
+  agent ExploreIdea
+    label: "Explore Idea"
+    fidelity: full
+    goal_gate: true
+    max_retries: 2
+    retry_target: ExploreIdea
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior software architect starting a brainstorm session.
+
+      ## Task
+      Explore the working directory to understand what we're building. Read EVERYTHING — idea docs, specs, READMEs, existing code, config files. Your job is to absorb all available context before proceeding.
+
+      ## Process
+      1. List all files in the working directory (ls -la, and ls any subdirectories)
+      2. Read every file that could describe the project (*.md, README*, SPEC*, idea*, etc.)
+      3. Read any source code files to understand existing implementation
+      4. Summarize what you understand so far
+      5. Identify the SINGLE most important open question — the one that would most change the design if answered differently
+      6. Write your understanding and question to docs/plans/brainstorm.md
+      8. Format the question as multiple choice (2-4 options) with your recommended answer marked
+      9. Apply YAGNI ruthlessly — cut anything not strictly needed for v1. If a feature is nice-to-have, drop it.
+
+      ## Important
+      - Do NOT ask the human to describe the project if there are files that already describe it
+      - If the directory is truly empty (no files at all), your question should be: what are we building?
+      - If there IS context, your question should dig deeper into a specific design decision
+
+      ## Output
+      Write to docs/plans/brainstorm.md with sections:
+      - **Existing context:** [what was already in the directory]
+      - **Understanding:** What I think we're building
+      - **Key Question:** The most important thing to clarify next (multiple choice)
+      - **Recommendation:** Which option I'd pick and why
+
+  agent AutoBrainstorm
+    label: "Auto Brainstorm"
+    fidelity: full
+    goal_gate: true
+    max_retries: 2
+    retry_target: AutoBrainstorm
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior software architect continuing an autonomous brainstorm session. There is no human in the loop — you must answer your own questions using best judgment.
+
+      ## Task
+      Read the current brainstorm state and advance it by answering the outstanding question yourself.
+
+      ## Process
+      1. Read docs/plans/brainstorm.md for the current state of the brainstorm
+      2. Find the latest **Key Question** or **Next question** (the most recent unanswered one)
+      3. Pick the best answer using your judgment — prefer the recommended option unless you have strong reason not to
+      4. Update your understanding based on the answer you chose
+      5. Identify the NEXT most important open question (one at a time!)
+      6. Consider these dimensions (work through them across iterations):
+         - Purpose and goals
+         - Constraints and non-goals
+         - Success criteria
+         - Architecture approaches (propose 2-3 with trade-offs when ready)
+         - Tech stack
+         - Error handling strategy
+         - Testing strategy
+         - Component breakdown
+      7. Format as multiple choice with your recommendation
+      8. When you believe you have enough to write a design brief, instead of a question write: READY_FOR_DESIGN
+      Apply YAGNI at every step — propose the simplest approach that covers the core use case. Drop nice-to-haves.
+
+      ## Output
+      Append to docs/plans/brainstorm.md with:
+      - **Auto-answer:** [which option was chosen and why]
+      - **Updated understanding:** [what changed]
+      - **Next question:** [multiple choice] OR **READY_FOR_DESIGN**
+
+  tool CheckBrainstormDone
+    label: "Brainstorm Complete?"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      if grep -q 'READY_FOR_DESIGN' docs/plans/brainstorm.md 2>/dev/null; then
+        printf 'done'
+      else
+        printf 'more_questions'
+      fi
+
+  agent WriteDesignBrief
+    label: "Write Design Brief"
+    goal_gate: true
+    max_retries: 2
+    retry_target: WriteDesignBrief
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior software architect producing a complete design brief from the brainstorm.
+
+      ## Context
+      Read docs/plans/brainstorm.md for the full brainstorm conversation (auto-answered).
+
+      ## MANDATORY: Propose Approaches
+      Before writing the full brief, present 2-3 different architectural approaches with trade-offs.
+      Lead with your recommended approach and explain why.
+      Include these as the first section of the design brief so the approach is clearly documented.
+
+      ## Task
+      Synthesize the brainstorm into a structured design brief. Cover ALL of these sections:
+
+      1. **Architecture and Components** — components, data flow, key decisions. If not resolved in brainstorm, propose 2-3 approaches with trade-offs and select recommended.
+      2. **Tech Stack** — language, framework, key dependencies. Justify each choice.
+      3. **Error Handling** — error categories, handling strategies, recovery patterns.
+      4. **Testing Strategy** — test framework (appropriate for the language), test levels (unit/integration/e2e), coverage targets.
+      5. **Component Breakdown** — detailed specs with dependency graph. Mark which can be built in parallel vs must be sequential.
+
+      ## Rules
+      - Scale each section to complexity — few sentences for simple projects, 200-300 words for complex ones
+      - YAGNI ruthlessly — cut anything not strictly needed for v1
+      - Be specific: exact library names, exact file paths where possible
+
+      ## Output
+      Write to docs/plans/design-brief.md with clear section headings.
+
+  agent CommitBrief
+    label: "Commit Brief"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CommitBrief
+    prompt:
+      You are working in `run.working_dir`.
+
+      Stage and commit the design brief and brainstorm history:
+      git add docs/plans/design-brief.md docs/plans/brainstorm.md
+      git commit -m 'docs(design): add project design brief'
+
+      Also create a dated archive copy:
+      cp docs/plans/design-brief.md "docs/plans/$(date +%Y-%m-%d)-$(basename $(pwd))-design.md"
+      git add docs/plans/*-design.md
+      git commit --amend --no-edit
+
+      Verify: git log --oneline -1
+
+  agent DraftPlan
+    label: "Draft Plan (GPT-5.2)"
+    fidelity: full
+    goal_gate: true
+    max_retries: 3
+    retry_target: AutoRecover
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior architect creating a detailed implementation plan using strict TDD.
+
+      ## Context
+      Read docs/plans/design-brief.md for the project design.
+
+      ## Task
+      Create a step-by-step implementation plan. Write it assuming the implementing engineer has ZERO context and questionable taste. Document everything they need.
+
+      ## Plan Header (MANDATORY)
+      Start the plan with:
+      - Goal (one sentence)
+      - Architecture (2-3 sentences)
+      - Tech stack (language, framework, key deps, test framework, linter)
+
+      ## Task Format (MANDATORY — follow EXACTLY)
+      Every task MUST be a markdown checkbox with a task ID:
+
+      - [ ] task-001: Short descriptive title
+        **Files:** exact paths to create/modify/test
+        **Step 1: Write the failing test**
+        (complete test code — not pseudocode, not 'add appropriate tests')
+        **Step 2: Run test to verify it fails**
+        (exact command + expected failure output)
+        **Step 3: Write minimal implementation**
+        (complete implementation code — not 'implement the logic' or 'add validation')
+        **Step 4: Run test to verify it passes**
+        (exact command + expected output)
+        **Step 5: Commit**
+        (exact git command with conventional commit message)
+
+      - [ ] task-002: Next task title
+        ...
+
+      ## IRON RULES
+      - NEVER write 'implement the logic', 'add appropriate', 'write a complete implementation', 'add validation logic', or 'TODO'. Every function body must be written out in full.
+      - NEVER write tautological tests. A test that asserts `width() == 16` is WRONG if width should be computed from content. Test the BEHAVIOR, not hardcoded values.
+      - Every requirement in the design brief MUST have a corresponding task AND test. If the design brief says 'render X in the bottom-right', there must be a test that asserts X is rendered.
+      - Each step is ONE action (2-5 minutes). 'Write test' and 'run test' are separate steps.
+      - Tag each task as PARALLEL or SEQUENTIAL based on dependencies.
+      - Include setup tasks (project init, deps, tooling) before implementation tasks.
+
+      ## FILE DISCIPLINE
+      - Prefer FEW files. A simple project should be ONE source file and ONE test file. Do NOT split code into multiple files unless there is a clear architectural reason (separate packages, 500+ lines, genuinely distinct domains).
+      - All tests for a source file go in ONE corresponding test file (e.g. main_test.go, app_test.py, index.test.ts). NEVER create a separate test file per test function or per task.
+      - When a task says 'write a failing test', that means ADD a test function to the existing test file, not create a new file.
+      - If the plan has 8 tasks, the result should NOT have 8 test files. It should have 1-2 test files with 8+ test functions.
+
+      ## YAGNI
+      Ruthlessly cut anything not strictly needed for v1. If a feature is 'nice to have', drop it. If there's a simpler approach that covers 80% of the use case, prefer it. Do not plan for hypothetical future requirements.
+
+      ## Output
+      Write your plan to docs/plans/plan.md
+
+  tool ValidatePlanFormat
+    label: "Validate Plan Format"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      set -eu
+      PLAN='docs/plans/plan.md'
+      mkdir -p .tracker
+      COUNTER='.tracker/plan_validate_count'
+      GEN='.tracker/plan_validate_gen'
+      cur_gen=$(ls -1d .tracker/runs/*/ 2>/dev/null | tail -1 || echo 'none')
+      old_gen=''
+      [ -f "$GEN" ] && old_gen=$(cat "$GEN")
+      if [ "$cur_gen" != "$old_gen" ]; then
+        printf '0' > "$COUNTER"
+        printf '%s' "$cur_gen" > "$GEN"
+      fi
+      vc=0
+      [ -f "$COUNTER" ] && vc=$(cat "$COUNTER")
+      vc=$((vc + 1))
+      printf '%s' "$vc" > "$COUNTER"
+      if [ "$vc" -gt 5 ]; then
+        printf 'fail_retries_exhausted'
+        exit 0
+      fi
+      if [ ! -s "$PLAN" ]; then
+        printf 'fail_no_plan'
+        exit 0
+      fi
+      count=$(grep -c '^- \[ \] task-[0-9]\+:' "$PLAN" || true)
+      if [ "$count" -eq 0 ]; then
+        printf 'fail_no_checkboxes'
+        exit 0
+      fi
+      handwaves=$(grep -ciE '(write a complete implementation|add appropriate|add validation logic|add error handling logic|add the logic)' "$PLAN" || true)
+      if [ "$handwaves" -gt 0 ]; then
+        printf 'fail_handwaves'
+        exit 0
+      fi
+      printf 'format_ok'
+
+  agent AuditPlanSpec
+    label: "Audit Plan vs Spec (Opus)"
+    goal_gate: true
+    max_retries: 2
+    retry_target: PatchPlan
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a meticulous spec compliance auditor for implementation plans.
+
+      ## Task
+      Verify that every requirement in the design brief has a corresponding task AND test in the plan.
+
+      ## Process
+      1. Read docs/plans/design-brief.md — extract every concrete requirement:
+         - Features and behaviors (e.g. 'render corner counter in bottom-right')
+         - Data types and constraints (e.g. 'State.x as i16')
+         - Error handling requirements
+         - UI/rendering specifications
+         - API contracts
+
+      2. Read docs/plans/plan.md — for each requirement, verify:
+         a. There is a task that implements it (with complete code, not hand-waves)
+         b. There is a test that would FAIL if the requirement were missing
+         c. The test is NOT tautological (does not assert hardcoded values that could drift from reality)
+
+      3. Flag each gap with structured output:
+         - MISSING_TASK: requirement has no corresponding task
+         - MISSING_TEST: requirement has a task but no test
+         - TAUTOLOGICAL_TEST: test asserts a hardcoded value instead of computing from content
+         - VAGUE_IMPLEMENTATION: task says 'implement X' without complete code
+
+      ## Output
+      Write results to docs/plans/plan-audit.txt:
+      - If all requirements covered: write the single word APPROVED
+      - If gaps found: write structured gap list, one GAP block per issue:
+
+      GAP: design-brief.md requirement: 'quoted requirement text'
+        MISSING_TEST: description of what test is needed
+        SUGGESTED_FIX: what the test should assert
+
+      End your response with APPROVED or GAPS_FOUND.
+
+      outcome=success if APPROVED
+      outcome=fail if GAPS_FOUND
+
+  agent PatchPlan
+    label: "Patch Plan (GPT-5.2)"
+    goal_gate: true
+    max_retries: 2
+    retry_target: AutoRecover
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are patching an implementation plan to address gaps identified by the spec auditor.
+
+      ## Context
+      1. Read docs/plans/plan-audit.txt for the list of gaps
+      2. Read docs/plans/plan.md for the current plan
+      3. Read docs/plans/design-brief.md for the original requirements
+
+      ## Task
+      For each GAP in the audit:
+      - MISSING_TASK: Add a new task with full TDD steps (failing test with complete code, exact run command, minimal implementation with complete code, exact run command, commit command)
+      - MISSING_TEST: Add a test to the existing task that would fail if the requirement were missing
+      - TAUTOLOGICAL_TEST: Replace the hardcoded assertion with one that computes the expected value from the actual content
+      - VAGUE_IMPLEMENTATION: Replace the hand-wave with complete code
+
+      ## Rules
+      - New task IDs continue from the highest existing ID (e.g., if plan has task-012, new tasks start at task-013)
+      - Use the same checkbox format: - [ ] task-NNN: Title
+      - Every function body must be complete code — NEVER write 'implement the logic'
+      - Every test must verify behavior, not hardcoded values
+      - Do NOT remove or modify existing passing tasks — only add or fix flagged ones
+
+      ## Output
+      Update docs/plans/plan.md in place with the fixes.
+
+  agent CommitPlan
+    label: "Commit Plan"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CommitPlan
+    prompt:
+      You are working in `run.working_dir`.
+
+      Stage and commit the plan and all planning artifacts:
+      git add docs/plans/plan.md docs/plans/plan-audit.txt
+      git commit -m 'docs(plan): add implementation plan'
+
+      Verify: git log --oneline -1
+
+  agent SetupProject
+    label: "Setup Project"
+    goal_gate: true
+    max_retries: 2
+    retry_target: SetupProject
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Initialize the project based on the plan's tech stack section.
+
+      ## Process
+      1. Read docs/plans/plan.md — extract the tech stack from the plan header
+      1b. Ensure a git repo exists and create a feature branch:
+          git rev-parse --git-dir >/dev/null 2>&1 || git init
+          branch_name="feature/$(basename $(pwd))"
+          git checkout -b "$branch_name" 2>/dev/null || echo "Already on branch $branch_name"
+          Never implement directly on main/master without explicit human consent.
+      2. Initialize the project for the identified language/framework:
+         - Python: uv init (if no pyproject.toml), uv add deps, uv add --dev test/lint deps
+         - Node: npm init, npm install deps
+         - Go: go mod init
+         - Rust: cargo init
+         - (adapt for other languages as needed)
+      3. Set up quality tooling based on the language:
+         - Python: ruff, mypy, pre-commit
+         - Node: eslint/biome, prettier, typescript
+         - Go: golangci-lint, go vet
+         - Rust: clippy, rustfmt
+         - (adapt as needed)
+      4. Configure pre-commit hooks if the ecosystem supports it
+      5. Create initial directory structure per the plan
+      6. Ensure .gitignore exists and includes at minimum: .env, .tracker/, *.bak, __pycache__/, .mypy_cache/, .ruff_cache/, node_modules/, target/
+      7. Run the test command to verify it works (even with 0 tests)
+      8. Commit: git add -A && git commit -m 'chore(setup): initialize project with deps and tooling'
+
+      ## Success Criteria
+      - Project initializes cleanly
+      - Quality tools configured and runnable
+      - Test framework runs (even if 0 tests)
+      - All committed
+
+  tool VerifyBaseline
+    label: "Verify Baseline"
+    timeout: 120s
+    command:
+      set -eu
+      mkdir -p .tracker
+      rm -f .tracker/plan_validate_count .tracker/rework_count .tracker/impl_count_* .tracker/batch_count
+      if [ -f pyproject.toml ]; then
+        uv run pytest --co -q 2>/dev/null || uv run python -m pytest --co -q 2>/dev/null || echo 'no-tests-yet'
+        printf 'baseline-verified-python'
+      elif [ -f package.json ]; then
+        npm test 2>/dev/null || echo 'no-tests-yet'
+        printf 'baseline-verified-node'
+      elif [ -f go.mod ]; then
+        go build ./... 2>&1 || true
+        go test ./... 2>&1 || echo 'no-tests-yet'
+        printf 'baseline-verified-go'
+      elif [ -f Cargo.toml ]; then
+        cargo build 2>&1 || true
+        cargo test 2>&1 || echo 'no-tests-yet'
+        printf 'baseline-verified-rust'
+      else
+        printf 'baseline-verified-unknown'
+      fi
+
+  tool PickNextTask
+    label: "Pick Next Task"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      set -eu
+      rm -f docs/plans/implementer-status.txt
+      PLAN='docs/plans/plan.md'
+      total=$(grep -c '^- \[.\] task-[0-9]' "$PLAN" 2>/dev/null || true)
+      if [ "$total" -eq 0 ]; then
+        printf 'no_tasks_found'
+        exit 0
+      fi
+      target=$(grep -oE 'task-[0-9]+' "$PLAN" | while read -r tid; do
+        if grep -q "^- \[ \] $tid" "$PLAN"; then
+          echo "$tid"
+          break
+        fi
+      done)
+      if [ -z "$target" ]; then
+        printf 'all_complete'
+        exit 0
+      fi
+      printf '%s' "$target" > docs/plans/current_task_id.txt
+      printf 'next_task-%s' "$target"
+
+  agent ImplementTask
+    label: "Implement Task (TDD)"
+    fidelity: full
+    goal_gate: true
+    max_retries: 2
+    retry_target: ImplementTask
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a disciplined software engineer implementing a single task using strict TDD.
+
+      ## IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
+      Write code before the test? Delete it. Start over. No exceptions.
+      - Don't keep it as 'reference'
+      - Don't 'adapt' it while writing tests
+      - Delete means delete
+
+      ## Autonomous Mode
+      You are running fully headless. If you encounter ambiguity in the task spec, use your best judgment and proceed. Do NOT write questions to implementer-status.txt — just implement.
+
+      ## Context
+      1. Read docs/plans/plan.md — find the task matching the ID in docs/plans/current_task_id.txt
+      2. Read the task's complete specification including all code and commands
+
+      ## Process — RED GREEN REFACTOR
+      ### RED — Write Failing Test
+      1. Write ONE minimal test showing what should happen
+      2. One behavior per test, clear descriptive name
+      3. Use real code — no mocks unless absolutely unavoidable
+      4. Run the test: confirm it FAILS
+      5. Confirm it fails because the feature is missing, not due to typos or imports
+
+      ### GREEN — Write Minimal Implementation
+      1. Write the SIMPLEST code to make the test pass
+      2. Do NOT add features, refactor, or 'improve' beyond the test
+      3. Run the test: confirm it PASSES
+      4. Confirm ALL other tests still pass
+      5. Confirm output is pristine — no errors, no warnings
+
+      ### REFACTOR (only after green)
+      1. Remove duplication, improve names, extract helpers
+      2. Keep tests green throughout
+      3. Do NOT add new behavior during refactor
+
+      ### COMMIT
+      Run the project's linter and formatter. Fix all issues.
+      Stage only the files you created or modified — use git add with specific file paths, NOT git add -A.
+      Never stage .env, .tracker/, or other infrastructure files.
+      git commit -m '<type>(<scope>): <description>'
+
+      ## File Discipline
+      - Add new test functions to the EXISTING test file. Do NOT create a new test file for each task.
+      - Do NOT split code into new source files unless there is a clear reason (separate package, 500+ lines). Append to existing files.
+      - If the plan says 'create foo_test.go' but a test file already exists for that package, IGNORE the filename and add to the existing test file.
+
+      ## Self-Review Checklist
+      Before finishing, honestly assess:
+      - Completeness: fully implemented everything in the task spec? Missed requirements? Edge cases?
+      - Quality: clear names? clean and maintainable?
+      - Discipline: avoided overbuilding (YAGNI)? only built what was requested?
+      - Testing: tests verify behavior (not mocks)? TDD followed strictly?
+      - File count: did you create unnecessary files? Could any new files be merged into existing ones?
+
+      ## Forbidden Rationalizations
+      - 'Too simple to test' — simple code breaks. Test takes 30 seconds.
+      - 'I'll test after' — tests passing immediately prove nothing.
+      - 'Need to explore first' — fine, but throw away exploration and start with TDD.
+      - 'Test is hard to write = design unclear' — listen to the test.
+
+      ## When Re-entered After Review Failure
+      If context shows a previous spec or quality review failed:
+      1. Read the review feedback CAREFULLY before touching code
+      2. Verify each finding against the actual codebase — reviewers can be wrong
+      3. For valid findings: fix them. For invalid findings: document why they're wrong.
+      4. Prioritize: blocking issues first, then simple fixes, then complex fixes
+      5. Do NOT blindly implement every suggestion — check YAGNI. Reviewers sometimes add scope.
+      6. After fixes: re-run full test suite to confirm nothing broke
+
+      ## VERIFICATION GATE
+      Before claiming success, you MUST have fresh evidence from THIS session:
+      - Run the test suite. Read output. Check exit codes. Count failures. THEN claim.
+      - Do NOT say 'should work', 'probably passes', 'seems correct'.
+      - If you haven't run the tests in THIS session, you cannot claim they pass.
+
+      ## Success Criteria
+      - Failing test written FIRST, verified failing
+      - Minimal implementation passes the test
+      - All existing tests still pass
+      - Linter/formatter clean
+      - Committed with conventional commit message
+
+  agent SpecReview
+    label: "Spec Compliance Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: ImplementTask
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a meticulous spec compliance reviewer.
+
+      ## CRITICAL FRAMING
+      The implementer finished suspiciously quickly. Their work may be incomplete, inaccurate, or optimistic. You MUST verify everything independently.
+
+      ## Context
+      1. Read docs/plans/plan.md — find the task matching the ID in docs/plans/current_task_id.txt
+      2. Get the full diff for this task's changes:
+         BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null || git rev-list --max-parents=0 HEAD)
+         git diff $BASE...HEAD to see all changes on this branch
+         git log --oneline $BASE..HEAD to see all commits
+
+      ## Verification Process
+      DO NOT take the implementer's word for anything. DO NOT trust completeness claims.
+
+      1. Read actual code files — every line changed
+      2. Compare implementation to task requirements LINE BY LINE
+      3. Check for:
+         - **Missing requirements:** Did they implement everything? Skip requirements? Claim something works but didn't implement?
+         - **Extra/unneeded work:** Built things not requested? Over-engineered? Added 'nice to haves'?
+         - **Misunderstandings:** Interpreted requirements differently? Solved wrong problem?
+      4. Run the tests yourself to verify they actually pass
+      5. Verify TDD was followed: check git log for test commit before implementation commit
+
+      ## VERIFICATION GATE
+      Before claiming success, you MUST have fresh evidence from THIS session:
+      - Run the test suite. Read output. Check exit codes. Count failures. THEN claim.
+      - Do NOT say 'should work', 'probably passes', 'seems correct'.
+      - If you haven't run the tests in THIS session, you cannot claim they pass.
+
+      ## Output
+      If spec compliant: state PASS with evidence (specific code references)
+      If issues found: state FAIL with exact file:line references for each issue
+
+      outcome=success if PASS
+      outcome=fail if FAIL (will route back to implementation)
+
+  agent QualityReview
+    label: "Code Quality Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: ImplementTask
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior code reviewer focused on quality, patterns, and maintainability.
+
+      ## Prerequisite
+      This review only runs AFTER spec compliance has passed. The code is functionally correct — now assess quality.
+
+      ## Context
+      1. Read docs/plans/current_task_id.txt for the task being reviewed
+      2. Read the changed files: git diff HEAD~1
+      3. Read docs/plans/plan.md for architectural context
+
+      ## Review Dimensions
+      1. **Code Quality:** naming, readability, error handling, type safety, defensive programming
+      2. **Patterns:** consistency with existing codebase patterns, DRY, separation of concerns
+      3. **Architecture:** SOLID principles, loose coupling, appropriate abstraction level
+      4. **Security:** input validation, injection risks, secrets handling
+      5. **Testing:** test quality (not just coverage), edge cases, meaningful assertions
+      6. **Performance:** obvious inefficiencies, N+1 queries, unnecessary allocations
+
+      ## Issue Categories
+      - **Critical** (must fix): security vulnerabilities, data loss risks, broken functionality
+      - **Important** (should fix): poor patterns, maintainability concerns, missing error handling
+      - **Suggestion** (nice to have): style improvements, minor optimizations
+
+      ## VERIFICATION GATE
+      Before claiming success, you MUST have fresh evidence from THIS session:
+      - Run the test suite. Read output. Check exit codes. Count failures. THEN claim.
+      - Do NOT say 'should work', 'probably passes', 'seems correct'.
+      - If you haven't run the tests in THIS session, you cannot claim they pass.
+
+      ## Output
+      If no Critical or Important issues: PASS
+      If Critical or Important issues found: FAIL with file:line references and fix guidance
+
+      outcome=success if PASS
+      outcome=fail if FAIL
+
+  tool CheckImplementBudget
+    label: "Check Implement Budget"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      set -eu
+      mkdir -p .tracker
+      TASK=$(cat docs/plans/current_task_id.txt)
+      COUNTER=".tracker/impl_count_${TASK}"
+      count=0
+      [ -f "$COUNTER" ] && count=$(cat "$COUNTER")
+      count=$((count + 1))
+      printf '%s' "$count" > "$COUNTER"
+      if [ "$count" -gt 5 ]; then
+        printf 'budget_exhausted'
+      else
+        printf 'budget_ok'
+      fi
+
+  tool MarkTaskComplete
+    label: "Mark Task Complete"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      set -eu
+      target=$(cat docs/plans/current_task_id.txt)
+      sed -i.bak "s/^- \[ \] ${target}/- [x] ${target}/" docs/plans/plan.md
+      rm -f docs/plans/plan.md.bak
+      printf 'completed-%s' "$target"
+
+  agent DebugInvestigate
+    label: "Debug Investigation"
+    fidelity: full
+    goal_gate: true
+    max_retries: 2
+    retry_target: ReplanTask
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior debugger performing root cause analysis.
+
+      ## IRON LAW: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
+      If you haven't completed the investigation, you cannot propose fixes.
+
+      ## Context
+      The implementation for the task in docs/plans/current_task_id.txt has failed after multiple attempts.
+
+      ## Phase 1: Root Cause Investigation
+      1. Read error messages carefully — full stack traces, line numbers, error codes
+      2. Reproduce the failure: run the exact failing command
+      3. Check recent changes: git diff, git log --oneline -5
+      4. Trace data flow: where does the bad value originate? Trace backward
+
+      ## Phase 2: Pattern Analysis
+      1. Find working examples in the same codebase
+      2. Compare working vs broken — identify EVERY difference
+      3. Understand dependencies and assumptions
+
+      ## Phase 3: TDD Fix
+      1. Write a failing test that reproduces the bug FIRST
+      2. Run it — confirm it FAILS for the RIGHT reason (the actual bug, not a typo)
+      3. Write the SMALLEST fix to make the test pass
+      4. Run it — confirm it PASSES
+      5. Run ALL tests — confirm nothing else broke
+      6. Commit the test first, then the fix
+
+      You MUST see the test fail before writing the fix. If you wrote a fix before the test, delete the fix and start over.
+
+      ## CRITICAL: >= 3 failed attempts means WRONG ARCHITECTURE
+      If you've tried 3+ fixes and each reveals new coupling or shared state:
+      - This is NOT a failed hypothesis — this is a wrong architecture
+      - Report ARCHITECTURE_ISSUE and describe what's fundamentally broken
+      - outcome=fail to escalate to replanning
+
+      ## VERIFICATION GATE
+      Before claiming success, you MUST have fresh evidence from THIS session:
+      - Run the test suite. Read output. Check exit codes. Count failures. THEN claim.
+      - Do NOT say 'should work', 'probably passes', 'seems correct'.
+      - If you haven't run the tests in THIS session, you cannot claim they pass.
+
+      ## Output
+      outcome=success if root cause found and fixed with regression test
+      outcome=fail if architecture issue or unable to resolve
+
+  agent ReplanTask
+    label: "Replan Task"
+    max_retries: 1
+    retry_target: AutoRecover
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      The current task has failed implementation AND debugging. Rethink the approach.
+
+      ## Context
+      1. Read docs/plans/current_task_id.txt for the task
+      2. Read docs/plans/plan.md for the original task spec
+      3. Read git log to understand what was tried and why it failed
+
+      ## Process
+      1. Analyze what went wrong — was the task spec flawed? Dependencies missing? Wrong approach?
+      2. Write a revised task spec that addresses the root cause
+      3. Update docs/plans/plan.md with the revised task
+      4. Reset the task checkbox in docs/plans/plan.md back to unchecked: - [ ] task-xxx
+
+      ## Output
+      outcome=success if task successfully replanned
+      outcome=fail if the problem is fundamental and needs escalation
+
+  agent AutoRecover
+    label: "Auto Recover"
+    goal_gate: true
+    max_retries: 2
+    retry_target: AutoRecover
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are an autonomous recovery agent. The pipeline is stuck and there is no human to help. You must self-recover or declare failure.
+
+      ## Context
+      Read all available context from the pipeline — error messages, failed tasks, debug output, plan state.
+
+      ## Process
+      1. Read docs/plans/current_task_id.txt (if it exists) for the stuck task
+      2. Read docs/plans/plan.md for the current plan state
+      3. Read git log --oneline -10 for recent history
+      4. Read any error output from context
+      5. Diagnose: Is this a task-level issue (bad spec, missing dep) or a systemic issue (wrong architecture)?
+
+      ## Recovery Strategies (try in order)
+      1. **Simplify the task** — Can you break it into smaller pieces or use a simpler approach?
+      2. **Skip and compensate** — Can you mark this task as skipped and adjust downstream tasks?
+      3. **Revert and retry** — Can you git revert the broken changes and try a different approach?
+      4. **Reduce scope** — Can you drop a non-critical feature to unblock the pipeline?
+
+      ## Output
+      If recovered: update plan.md and report what changed
+      outcome=success if recovery succeeded and pipeline can continue
+
+      If unrecoverable: write a clear explanation of why
+      outcome=fail if the problem is fundamental and cannot be self-recovered
+
+  tool ValidateBuild
+    label: "Validate Full Build"
+    timeout: 120s
+    command:
+      set -eu
+      echo '=== Running full validation ==='
+      if [ -f pyproject.toml ]; then
+        echo '--- pytest ---'
+        uv run pytest -v 2>&1 || { echo 'PYTEST_FAIL'; exit 1; }
+        echo '--- ruff ---'
+        uv run ruff check . 2>&1 || { echo 'RUFF_FAIL'; exit 1; }
+        echo '--- mypy ---'
+        uv run mypy . 2>&1 || echo 'mypy-skipped'
+        printf 'validation-pass'
+      elif [ -f package.json ]; then
+        echo '--- npm test ---'
+        npm test 2>&1 || { echo 'TEST_FAIL'; exit 1; }
+        echo '--- lint ---'
+        npx eslint . 2>&1 || npx biome check . 2>&1 || echo 'lint-skipped'
+        printf 'validation-pass'
+      elif [ -f go.mod ]; then
+        echo '--- go build ---'
+        go build ./... 2>&1 || { echo 'BUILD_FAIL'; exit 1; }
+        echo '--- go test ---'
+        go test ./... 2>&1 || { echo 'TEST_FAIL'; exit 1; }
+        echo '--- go vet ---'
+        go vet ./... 2>&1 || echo 'vet-skipped'
+        printf 'validation-pass'
+      elif [ -f Cargo.toml ]; then
+        echo '--- cargo build ---'
+        cargo build 2>&1 || { echo 'BUILD_FAIL'; exit 1; }
+        echo '--- cargo test ---'
+        cargo test 2>&1 || { echo 'TEST_FAIL'; exit 1; }
+        echo '--- cargo clippy ---'
+        cargo clippy 2>&1 || echo 'clippy-skipped'
+        printf 'validation-pass'
+      else
+        echo 'Unknown build system — manual validation needed'
+        printf 'validation-unknown'
+      fi
+
+  parallel ReviewFanOut -> FinalReviewOpus, FinalReviewGPT, FinalReviewGemini
+
+  agent FinalReviewOpus
+    label: "Final Review (Opus)"
+    fidelity: summary:high
+    goal_gate: true
+    max_retries: 2
+    retry_target: FinalReviewOpus
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior code reviewer performing final review of the complete implementation.
+
+      ## Pre-check (MANDATORY — do this FIRST)
+      Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+      If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+      or if no application source files exist beyond __init__.py, config, and tooling,
+      immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+      substantive implementation exists to review.' Do NOT proceed with quality review.
+
+      ## IRON LAW: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+      Run commands. Read output. Check exit codes. THEN make claims.
+      Forbidden words: 'should', 'probably', 'seems to'.
+
+      ## Context
+      1. Read docs/plans/plan.md for the original requirements
+      2. Run: git log --oneline to see all commits
+      3. Run: git diff main...HEAD (or first commit) to see all changes
+
+      ## Review Dimensions
+      1. **Plan Alignment:** Compare implementation to plan. Identify deviations — justified improvements vs problematic departures. Verify ALL planned functionality implemented.
+      2. **Code Quality:** Patterns, error handling, type safety, naming, maintainability
+      3. **Architecture:** SOLID, separation of concerns, loose coupling
+      4. **Test Coverage:** Are edge cases covered? Are tests meaningful or trivial?
+      5. **Security:** Input validation, injection risks, secrets handling
+
+      ## Output
+      For each issue found, provide: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+
+      Return PASS/FAIL with detailed reasoning.
+
+  agent FinalReviewGPT
+    label: "Final Review (GPT-5.4)"
+    fidelity: summary:high
+    goal_gate: true
+    max_retries: 2
+    retry_target: FinalReviewGPT
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior code reviewer performing final review of the complete implementation.
+
+      ## Pre-check (MANDATORY — do this FIRST)
+      Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+      If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+      or if no application source files exist beyond __init__.py, config, and tooling,
+      immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+      substantive implementation exists to review.' Do NOT proceed with quality review.
+
+      ## Context
+      1. Read docs/plans/plan.md for the original requirements
+      2. Run: git log --oneline to see all commits
+      3. Run: git diff main...HEAD (or first commit) to see all changes
+
+      ## Review Focus
+      1. **Completeness:** Is every planned feature implemented? Any gaps?
+      2. **Quality:** Code patterns, error handling, naming conventions
+      3. **Testing:** Coverage, edge cases, test quality
+      4. **Performance:** Obvious inefficiencies, resource leaks
+      5. **Security:** OWASP top 10, input validation
+
+      ## Output
+      For each issue: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+      Return PASS/FAIL with reasoning.
+
+  agent FinalReviewGemini
+    label: "Final Review (Gemini)"
+    fidelity: summary:high
+    goal_gate: true
+    max_retries: 2
+    retry_target: FinalReviewGemini
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior code reviewer performing final review of the complete implementation.
+
+      ## Pre-check (MANDATORY — do this FIRST)
+      Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+      If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+      or if no application source files exist beyond __init__.py, config, and tooling,
+      immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+      substantive implementation exists to review.' Do NOT proceed with quality review.
+
+      ## Context
+      1. Read docs/plans/plan.md for the original requirements
+      2. Run: git log --oneline to see all commits
+      3. Run: git diff main...HEAD (or first commit) to see all changes
+
+      ## Review Focus
+      1. **Delivery Robustness:** Will this work reliably in production?
+      2. **Test Coverage:** Are tests comprehensive and meaningful?
+      3. **Edge Cases:** What could go wrong? Missing error handling?
+      4. **Documentation:** Is the code self-documenting? Missing comments on complex logic?
+
+      ## Output
+      For each issue: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+      Return PASS/FAIL with reasoning.
+
+  fan_in ReviewsJoin <- FinalReviewOpus, FinalReviewGPT, FinalReviewGemini
+
+  parallel CritiqueFanOut -> CritiqueOpusOnGPT, CritiqueOpusOnGemini, CritiqueGPTOnOpus, CritiqueGPTOnGemini, CritiqueGeminiOnOpus, CritiqueGeminiOnGPT
+
+  agent CritiqueOpusOnGPT
+    label: "Opus Critiques GPT Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CritiqueOpusOnGPT
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the GPT-5.4 review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueOpusOnGemini
+    label: "Opus Critiques Gemini Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CritiqueOpusOnGemini
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGPTOnOpus
+    label: "GPT Critiques Opus Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CritiqueGPTOnOpus
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Opus review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGPTOnGemini
+    label: "GPT Critiques Gemini Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CritiqueGPTOnGemini
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGeminiOnOpus
+    label: "Gemini Critiques Opus Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CritiqueGeminiOnOpus
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Opus review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGeminiOnGPT
+    label: "Gemini Critiques GPT Review"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CritiqueGeminiOnGPT
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the GPT-5.4 review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  fan_in CritiquesJoin <- CritiqueOpusOnGPT, CritiqueOpusOnGemini, CritiqueGPTOnOpus, CritiqueGPTOnGemini, CritiqueGeminiOnOpus, CritiqueGeminiOnGPT
+
+  agent ReviewConsensus
+    label: "Review Consensus"
+    goal_gate: true
+    max_retries: 1
+    retry_target: ImplementTask
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Synthesize all reviews and cross-critiques into a single final verdict.
+
+      ## Process
+      1. Read all review outputs and critique outputs from context
+      2. Identify issues confirmed by multiple reviewers (high confidence)
+      3. Identify issues challenged by critiques (lower confidence — investigate)
+      4. Categorize confirmed issues: Critical / Important / Suggestion
+      5. For each Critical/Important issue, provide exact fix guidance
+
+      ## Verdict Rules
+      - **SUCCESS:** No Critical issues. No more than 2 Important issues (and they're minor). Ship it.
+      - **RETRY:** Critical issues found OR 3+ Important issues. Route back to implementation for fixes.
+      - **FAIL:** Fundamental architectural problems that can't be fixed incrementally. Route to failure summary.
+
+      ## Output
+      State your verdict clearly:
+      outcome=success — ready to ship
+      outcome=retry — needs fixes (list them)
+      outcome=fail — blocked, route to failure summary
+
+  tool CheckReworkBudget
+    label: "Check Rework Budget"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      set -eu
+      mkdir -p .tracker
+      COUNTER='.tracker/rework_count'
+      count=0
+      [ -f "$COUNTER" ] && count=$(cat "$COUNTER")
+      count=$((count + 1))
+      printf '%s' "$count" > "$COUNTER"
+      if [ "$count" -gt 2 ]; then
+        printf 'budget_exhausted'
+      else
+        printf 'budget_ok'
+      fi
+
+  agent FailureSummary
+    label: "Failure Summary"
+    goal_gate: true
+    max_retries: 2
+    retry_target: FailureSummary
+    prompt:
+      You are working in `run.working_dir`.
+
+      Summarize why the pipeline failed, what remains unresolved, and concrete next steps for recovery. Write to docs/plans/failure-summary.md.
+
+  tool VerifyTestsFinal
+    label: "Final Test Verification"
+    timeout: 120s
+    command:
+      set -eu
+      echo '=== Final verification before ship ==='
+      if [ -f pyproject.toml ]; then
+        uv run pytest -v 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
+      elif [ -f package.json ]; then
+        npm test 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
+      elif [ -f go.mod ]; then
+        go test ./... 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
+      elif [ -f Cargo.toml ]; then
+        cargo test 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
+      fi
+      printf 'final-verification-pass'
+
+  agent CreatePR
+    label: "Create Pull Request"
+    goal_gate: true
+    max_retries: 2
+    retry_target: CreatePR
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Finalize the project and push if possible.
+
+      ## Process
+      1. Ensure git repo exists:
+         git rev-parse --git-dir >/dev/null 2>&1 || { git init && git add -A && git commit -m 'chore: initial commit'; }
+      2. If no remote is configured (git remote | head -1 is empty):
+         - Log: 'No remote configured — skipping PR creation'
+         - Report: branch name, commit count, and working directory location
+         - outcome=success (project is complete, just no remote to push to)
+      3. If remote exists:
+         a. git push -u origin HEAD
+         b. Generate PR title (under 70 chars) and body from:
+            - docs/plans/plan.md (what was planned)
+            - git log --oneline (what was implemented)
+            - Test results from context
+         c. Create PR: gh pr create --title '<title>' --body '<summary + test plan>'
+         d. Report the PR URL
+
+  edges
+    Start -> CheckExistingPlans
+    CheckExistingPlans -> PickNextTask  when ctx.tool_stdout = resume  label: "resume — plan exists"  weight: 2
+    CheckExistingPlans -> ArchiveOldPlans  when ctx.tool_stdout = fresh  label: "fresh start"
+    ArchiveOldPlans -> ExploreIdea
+    ExploreIdea -> AutoBrainstorm
+    AutoBrainstorm -> CheckBrainstormDone
+    CheckBrainstormDone -> AutoBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  restart: true
+    CheckBrainstormDone -> WriteDesignBrief  when ctx.tool_stdout = done  label: "ready for design"  weight: 2
+    WriteDesignBrief -> CommitBrief
+    CommitBrief -> DraftPlan
+    DraftPlan -> ValidatePlanFormat
+    ValidatePlanFormat -> AuditPlanSpec  when ctx.tool_stdout = format_ok  label: "format ok"  weight: 2
+    ValidatePlanFormat -> AutoRecover  when ctx.tool_stdout = fail_retries_exhausted  label: "plan loop exhausted"
+    ValidatePlanFormat -> DraftPlan  when ctx.tool_stdout != format_ok and ctx.tool_stdout != fail_retries_exhausted  label: "format fail"  restart: true
+    AuditPlanSpec -> CommitPlan  when ctx.outcome = success  label: "plan approved"  weight: 2
+    AuditPlanSpec -> PatchPlan  when ctx.outcome = fail  label: "gaps found"
+    PatchPlan -> ValidatePlanFormat  restart: true
+    CommitPlan -> SetupProject
+    SetupProject -> VerifyBaseline
+    VerifyBaseline -> PickNextTask
+    PickNextTask -> ImplementTask  when ctx.tool_stdout != all_complete and ctx.tool_stdout != no_tasks_found  label: "has task"  weight: 2
+    PickNextTask -> ValidateBuild  when ctx.tool_stdout = all_complete  label: "all done"
+    PickNextTask -> AutoRecover  when ctx.tool_stdout = no_tasks_found  label: "no tasks in plan"
+    ImplementTask -> SpecReview
+    SpecReview -> QualityReview  when ctx.outcome = success  label: "spec pass"  weight: 2
+    SpecReview -> CheckImplementBudget  when ctx.outcome = fail  label: "spec fail"
+    QualityReview -> MarkTaskComplete  when ctx.outcome = success  label: "quality pass"  weight: 2
+    QualityReview -> CheckImplementBudget  when ctx.outcome = fail  label: "quality fail"
+    CheckImplementBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "retry ok"  weight: 2  restart: true
+    CheckImplementBudget -> AutoRecover  when ctx.tool_stdout = budget_exhausted  label: "too many attempts"
+    MarkTaskComplete -> PickNextTask  restart: true
+    ImplementTask -> DebugInvestigate  when ctx.outcome = fail  label: "retries exhausted"
+    DebugInvestigate -> ImplementTask  when ctx.outcome = success  label: "fixed, re-verify"  weight: 2  restart: true
+    DebugInvestigate -> ReplanTask  when ctx.outcome = fail  label: "can't fix"
+    ReplanTask -> PickNextTask  when ctx.outcome = success  label: replanned  weight: 2  restart: true
+    ReplanTask -> AutoRecover  when ctx.outcome = fail  label: stuck
+    AutoRecover -> PickNextTask  when ctx.outcome = success  label: recovered  weight: 2  restart: true
+    AutoRecover -> FailureSummary  when ctx.outcome = fail  label: unrecoverable
+    ValidateBuild -> ReviewFanOut  when ctx.outcome = success  label: "build pass"  weight: 2
+    ValidateBuild -> CheckReworkBudget  when ctx.outcome = fail  label: "build fail"
+    ReviewFanOut -> FinalReviewOpus
+    ReviewFanOut -> FinalReviewGPT
+    ReviewFanOut -> FinalReviewGemini
+    FinalReviewOpus -> ReviewsJoin
+    FinalReviewGPT -> ReviewsJoin
+    FinalReviewGemini -> ReviewsJoin
+    ReviewsJoin -> CritiqueFanOut
+    CritiqueFanOut -> CritiqueOpusOnGPT
+    CritiqueFanOut -> CritiqueOpusOnGemini
+    CritiqueFanOut -> CritiqueGPTOnOpus
+    CritiqueFanOut -> CritiqueGPTOnGemini
+    CritiqueFanOut -> CritiqueGeminiOnOpus
+    CritiqueFanOut -> CritiqueGeminiOnGPT
+    CritiqueOpusOnGPT -> CritiquesJoin
+    CritiqueOpusOnGemini -> CritiquesJoin
+    CritiqueGPTOnOpus -> CritiquesJoin
+    CritiqueGPTOnGemini -> CritiquesJoin
+    CritiqueGeminiOnOpus -> CritiquesJoin
+    CritiqueGeminiOnGPT -> CritiquesJoin
+    CritiquesJoin -> ReviewConsensus
+    ReviewConsensus -> VerifyTestsFinal  when ctx.outcome = success  label: pass  weight: 2
+    ReviewConsensus -> CheckReworkBudget  when ctx.outcome = retry  label: rework
+    ReviewConsensus -> FailureSummary  when ctx.outcome = fail  label: blocked
+    CheckReworkBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "rework ok"  weight: 2  restart: true
+    CheckReworkBudget -> FailureSummary  when ctx.tool_stdout = budget_exhausted  label: "rework budget exhausted"
+    FailureSummary -> Exit
+    VerifyTestsFinal -> CreatePR  when ctx.outcome = success  label: "tests pass"  weight: 2
+    VerifyTestsFinal -> CheckReworkBudget  when ctx.outcome = fail  label: "tests fail"
+    CreatePR -> FailureSummary  when ctx.outcome = fail  label: "PR failed"
+    CreatePR -> Exit  when ctx.outcome = success  label: shipped  weight: 2

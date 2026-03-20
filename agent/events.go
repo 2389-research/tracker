@@ -31,6 +31,7 @@ const (
 	EventToolCacheHit         EventType = "tool_cache_hit"
 	EventContextCompaction    EventType = "context_compaction"
 	EventTurnMetrics          EventType = "turn_metrics"
+	EventLLMRequestPreparing  EventType = "llm_request_preparing"
 )
 
 // TurnMetrics captures per-turn token and performance data.

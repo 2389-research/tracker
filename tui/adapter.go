@@ -43,6 +43,8 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 // Returns nil for event types that have no TUI representation.
 func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 	switch evt.Type {
+	case agent.EventLLMRequestPreparing:
+		return MsgLLMRequestPreparing{NodeID: nodeID, Provider: evt.Provider, Model: evt.Model}
 	case agent.EventTextDelta:
 		return MsgTextChunk{NodeID: nodeID, Text: evt.Text}
 	case agent.EventToolCallStart:

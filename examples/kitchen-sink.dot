@@ -1,0 +1,1524 @@
+// ABOUTME: Fully autonomous kitchen sink pipeline with no human gates.
+// ABOUTME: Fork of kitchen-sink.dot — omakase, cookoff, scenarios, all running headless.
+digraph dotpowers {
+  graph [
+    label="kitchen-sink-auto — Fully Autonomous Kitchen Sink Pipeline",
+    goal="Given a project idea or spec, explore the design autonomously, plan, implement with TDD, review via multi-model consensus, and ship working software with parallel design exploration (omakase), parallel implementation (cookoff), and real-dependency scenario validation — running fully headless with no human intervention.",
+    rankdir=LR,
+    default_max_retry=2,
+    retry_target="PickWinner",
+    fallback_retry_target="ExploreIdea",
+    default_fidelity="summary:high",
+    model_stylesheet="
+      * { llm_model: claude-opus-4-6; llm_provider: anthropic; reasoning_effort: high; }
+      .implement { llm_model: gpt-5.4; llm_provider: openai; reasoning_effort: high; }
+      .draft { llm_model: gpt-5.2; llm_provider: openai; reasoning_effort: high; }
+      .opinion { llm_model: gemini-3.5-flash; llm_provider: gemini; reasoning_effort: high; }
+    "
+  ];
+
+  // ============================================================
+  // TERMINALS
+  // ============================================================
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  // ============================================================
+  // RESUME / ARCHIVE — preserve old plans, skip brainstorm if resuming
+  // ============================================================
+
+  CheckExistingPlans [
+    shape=parallelogram,
+    label="Check Existing Plans",
+    tool_command="#!/bin/sh\nif [ -f docs/plans/plan.md ] && grep -q '^- \\[ \\]' docs/plans/plan.md 2>/dev/null; then\n  printf 'resume'\nelse\n  printf 'fresh'\nfi"
+  ];
+
+  ArchiveOldPlans [
+    shape=parallelogram,
+    label="Archive Old Plans",
+    tool_command="#!/bin/sh\nif ls docs/plans/*.md 1>/dev/null 2>&1; then\n  archive_dir=\"docs/plans/archive/run-$(date +%Y%m%d-%H%M%S)\"\n  mkdir -p \"$archive_dir\"\n  for f in docs/plans/*.md; do [ -f \"$f\" ] && cp \"$f\" \"$archive_dir/\"; done\n  rm -f docs/plans/brainstorm-context.md docs/plans/design-brief.md docs/plans/design-explore-*.md\n  printf 'archived to %s' \"$archive_dir\"\nelse\n  printf 'clean'\nfi"
+  ];
+
+  // ============================================================
+  // PHASE 0 — OMAKASE  (parallel design exploration replaces brainstorm loop)
+  // ============================================================
+
+  ExploreIdea [
+    shape=box,
+    label="Explore Idea",
+    goal_gate=true,
+    retry_target="ExploreIdea",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior software architect exploring a project idea autonomously.
+
+## Task
+Explore the working directory to understand what we're building. Read EVERYTHING — idea docs, specs, READMEs, existing code, config files. Your job is to absorb all available context and synthesize it into a brainstorm context document.
+
+## Process
+1. List all files in the working directory (ls -la, and ls any subdirectories)
+2. Read every file that could describe the project (*.md, README*, SPEC*, idea*, etc.)
+3. Read any source code files to understand existing implementation
+4. Summarize what you understand so far
+5. Identify key open questions and constraints
+6. Write your understanding to docs/plans/brainstorm-context.md
+7. Apply YAGNI ruthlessly — cut anything not strictly needed for v1. If a feature is nice-to-have, drop it.
+
+## Important
+- This pipeline runs fully autonomously with no human intervention
+- If the directory is truly empty (no files at all), note that we need a project idea and proceed with what you can infer
+- If there IS context, capture every relevant detail for the parallel design explorations
+- Make your best judgment calls — there is no human to ask
+
+## Output
+Write to docs/plans/brainstorm-context.md with sections:
+- **Existing context:** [what was already in the directory]
+- **Understanding:** What I think we're building
+- **Key Questions:** Open questions and constraints for design exploration
+- **Constraints:** Non-goals and limitations
+"
+  ];
+
+  OmakaseFanOut [shape=component, label="Omakase: Parallel Design Exploration"];
+
+  DesignExploreOpus [
+    shape=box,
+    label="Design Explore (Opus)",
+    goal_gate=true,
+    retry_target="DesignExploreOpus",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior software architect independently exploring design options.
+
+## Context
+Read docs/plans/brainstorm-context.md for the project understanding and constraints.
+
+## Task
+Independently propose a complete architecture and design for this project. Do NOT coordinate with other models — your independent perspective is valuable.
+
+## Process
+1. Read docs/plans/brainstorm-context.md
+2. Propose 2-3 architectural approaches with trade-offs
+3. Recommend a tech stack with justification for each choice
+4. Break down into components with dependency graph
+5. Outline a testing strategy (unit/integration/e2e)
+6. Apply YAGNI ruthlessly — propose the simplest approach that covers the core use case
+
+## Output
+Write to docs/plans/design-explore-opus.md with sections:
+- **Architectural Approaches:** 2-3 options with trade-offs, recommended choice marked
+- **Tech Stack:** language, framework, key deps, test framework, linter
+- **Components:** breakdown with dependency graph
+- **Testing Strategy:** test levels and what to cover
+- **Trade-offs:** what you considered and rejected, and why
+"
+  ];
+
+  DesignExploreGPT [
+    shape=box,
+    class="implement",
+    label="Design Explore (GPT-5.4)",
+    goal_gate=true,
+    retry_target="DesignExploreGPT",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior software architect independently exploring design options.
+
+## Context
+Read docs/plans/brainstorm-context.md for the project understanding and constraints.
+
+## Task
+Independently propose a complete architecture and design for this project. Do NOT coordinate with other models — your independent perspective is valuable.
+
+## Process
+1. Read docs/plans/brainstorm-context.md
+2. Propose 2-3 architectural approaches with trade-offs
+3. Recommend a tech stack with justification for each choice
+4. Break down into components with dependency graph
+5. Outline a testing strategy (unit/integration/e2e)
+6. Apply YAGNI ruthlessly — propose the simplest approach that covers the core use case
+
+## Output
+Write to docs/plans/design-explore-gpt.md with sections:
+- **Architectural Approaches:** 2-3 options with trade-offs, recommended choice marked
+- **Tech Stack:** language, framework, key deps, test framework, linter
+- **Components:** breakdown with dependency graph
+- **Testing Strategy:** test levels and what to cover
+- **Trade-offs:** what you considered and rejected, and why
+"
+  ];
+
+  DesignExploreGemini [
+    shape=box,
+    class="opinion",
+    label="Design Explore (Gemini)",
+    goal_gate=true,
+    retry_target="DesignExploreGemini",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior software architect independently exploring design options.
+
+## Context
+Read docs/plans/brainstorm-context.md for the project understanding and constraints.
+
+## Task
+Independently propose a complete architecture and design for this project. Do NOT coordinate with other models — your independent perspective is valuable.
+
+## Process
+1. Read docs/plans/brainstorm-context.md
+2. Propose 2-3 architectural approaches with trade-offs
+3. Recommend a tech stack with justification for each choice
+4. Break down into components with dependency graph
+5. Outline a testing strategy (unit/integration/e2e)
+6. Apply YAGNI ruthlessly — propose the simplest approach that covers the core use case
+
+## Output
+Write to docs/plans/design-explore-gemini.md with sections:
+- **Architectural Approaches:** 2-3 options with trade-offs, recommended choice marked
+- **Tech Stack:** language, framework, key deps, test framework, linter
+- **Components:** breakdown with dependency graph
+- **Testing Strategy:** test levels and what to cover
+- **Trade-offs:** what you considered and rejected, and why
+"
+  ];
+
+  OmakaseJoin [shape=tripleoctagon, label="Omakase Join"];
+
+  ConsolidateDesigns [
+    shape=box,
+    label="Consolidate Designs",
+    goal_gate=true,
+    retry_target="ConsolidateDesigns",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior architect synthesizing multiple independent design explorations into a single coherent design brief.
+
+## Context
+Three models independently explored design options. Read all three:
+1. docs/plans/design-explore-opus.md
+2. docs/plans/design-explore-gpt.md
+3. docs/plans/design-explore-gemini.md
+
+## Task
+Compare all three explorations, cherry-pick the strongest ideas from each, resolve conflicts, and produce a single coherent design brief.
+
+## Process
+1. Read all three design exploration documents
+2. Compare architectural approaches — which is simplest? Most robust? Best trade-offs?
+3. Compare tech stack choices — where do they agree? Where do they diverge?
+4. Compare component breakdowns — which is cleanest?
+5. Compare testing strategies — which is most comprehensive?
+6. Cherry-pick the best ideas from each, resolving conflicts
+7. Apply YAGNI — if two models wanted a feature and one didn't, lean toward dropping it
+
+## Output
+Write to docs/plans/design-brief.md with sections:
+1. **Architecture and Components** — components, data flow, key decisions
+2. **Tech Stack** — language, framework, key dependencies. Justify each choice.
+3. **Error Handling** — error categories, handling strategies, recovery patterns
+4. **Testing Strategy** — test framework, test levels, coverage targets
+5. **Component Breakdown** — detailed specs with dependency graph
+
+Note which ideas came from which model's exploration, giving credit where due.
+"
+  ];
+
+  // ============================================================
+  // PHASE 1 — DESIGN BRIEF  (auto-approved — no human gate)
+  // ============================================================
+
+  CommitBrief [
+    shape=box,
+    class="implement",
+    label="Commit Brief",
+    goal_gate=true,
+    retry_target="CommitBrief",
+    prompt="You are working in `run.working_dir`.
+
+Stage and commit the design brief and brainstorm history:
+git add docs/plans/design-brief.md docs/plans/brainstorm-context.md docs/plans/design-explore-*.md
+git commit -m 'docs(design): add project design brief'
+
+Also create a dated archive copy:
+cp docs/plans/design-brief.md \"docs/plans/$(date +%Y-%m-%d)-$(basename $(pwd))-design.md\"
+git add docs/plans/*-design.md
+git commit --amend --no-edit
+
+Verify: git log --oneline -1
+"
+  ];
+
+  // ============================================================
+  // PHASE 2 — PLAN  (draft-audit-patch loop)
+  // ============================================================
+
+  DraftPlan [
+    shape=box,
+    class="draft",
+    label="Draft Plan (GPT-5.2)",
+    goal_gate=true,
+    retry_target="AutoRecover",
+    max_retries=3,
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior architect creating a detailed implementation plan using strict TDD.
+
+## Context
+Read docs/plans/design-brief.md for the project design.
+
+## Task
+Create a step-by-step implementation plan. Write it assuming the implementing engineer has ZERO context and questionable taste. Document everything they need.
+
+## Plan Header (MANDATORY)
+Start the plan with:
+- Goal (one sentence)
+- Architecture (2-3 sentences)
+- Tech stack (language, framework, key deps, test framework, linter)
+
+## Task Format (MANDATORY — follow EXACTLY)
+Every task MUST be a markdown checkbox with a task ID:
+
+- [ ] task-001: Short descriptive title
+  **Files:** exact paths to create/modify/test
+  **Step 1: Write the failing test**
+  (complete test code — not pseudocode, not 'add appropriate tests')
+  **Step 2: Run test to verify it fails**
+  (exact command + expected failure output)
+  **Step 3: Write minimal implementation**
+  (complete implementation code — not 'implement the logic' or 'add validation')
+  **Step 4: Run test to verify it passes**
+  (exact command + expected output)
+  **Step 5: Commit**
+  (exact git command with conventional commit message)
+
+- [ ] task-002: Next task title
+  ...
+
+## IRON RULES
+- NEVER write 'implement the logic', 'add appropriate', 'write a complete implementation', 'add validation', or 'TODO'. Every function body must be written out in full.
+- NEVER write tautological tests. A test that asserts `width() == 16` is WRONG if width should be computed from content. Test the BEHAVIOR, not hardcoded values.
+- Every requirement in the design brief MUST have a corresponding task AND test. If the design brief says 'render X in the bottom-right', there must be a test that asserts X is rendered.
+- Each step is ONE action (2-5 minutes). 'Write test' and 'run test' are separate steps.
+- Tag each task as PARALLEL or SEQUENTIAL based on dependencies.
+- Include setup tasks (project init, deps, tooling) before implementation tasks.
+
+## FILE DISCIPLINE
+- Prefer FEW files. A simple project should be ONE source file and ONE test file. Do NOT split code into multiple files unless there is a clear architectural reason (separate packages, 500+ lines, genuinely distinct domains).
+- All tests for a source file go in ONE corresponding test file (e.g. main_test.go, app_test.py, index.test.ts). NEVER create a separate test file per test function or per task.
+- When a task says 'write a failing test', that means ADD a test function to the existing test file, not create a new file.
+- If the plan has 8 tasks, the result should NOT have 8 test files. It should have 1-2 test files with 8+ test functions.
+
+## YAGNI
+Ruthlessly cut anything not strictly needed for v1. If a feature is 'nice to have', drop it. If there's a simpler approach that covers 80% of the use case, prefer it. Do not plan for hypothetical future requirements.
+
+## Output
+Write your plan to docs/plans/plan.md
+"
+  ];
+
+  ValidatePlanFormat [
+    shape=parallelogram,
+    label="Validate Plan Format",
+    tool_command="#!/bin/sh\nset -eu\nPLAN='docs/plans/plan.md'\nmkdir -p .tracker\nCOUNTER='.tracker/plan_validate_count'\nGEN='.tracker/plan_validate_gen'\ncur_gen=$(ls -1d .tracker/runs/*/ 2>/dev/null | tail -1 || echo 'none')\nold_gen=''\n[ -f \"$GEN\" ] && old_gen=$(cat \"$GEN\")\nif [ \"$cur_gen\" != \"$old_gen\" ]; then\n  printf '0' > \"$COUNTER\"\n  printf '%s' \"$cur_gen\" > \"$GEN\"\nfi\nvc=0\n[ -f \"$COUNTER\" ] && vc=$(cat \"$COUNTER\")\nvc=$((vc + 1))\nprintf '%s' \"$vc\" > \"$COUNTER\"\nif [ \"$vc\" -gt 5 ]; then\n  printf 'fail_retries_exhausted'\n  exit 0\nfi\nif [ ! -s \"$PLAN\" ]; then\n  printf 'fail_no_plan'\n  exit 0\nfi\ncount=$(grep -c '^- \\[ \\] task-[0-9]\\+:' \"$PLAN\" || true)\nif [ \"$count\" -eq 0 ]; then\n  printf 'fail_no_checkboxes'\n  exit 0\nfi\nhandwaves=$(grep -ciE '(write a complete implementation|add appropriate|add validation logic|add error handling logic|add the logic)' \"$PLAN\" || true)\nif [ \"$handwaves\" -gt 0 ]; then\n  printf 'fail_handwaves'\n  exit 0\nfi\nprintf 'format_ok'"
+  ];
+
+  AuditPlanSpec [
+    shape=box,
+    label="Audit Plan vs Spec (Opus)",
+    goal_gate=true,
+    retry_target="PatchPlan",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a meticulous spec compliance auditor for implementation plans.
+
+## Task
+Verify that every requirement in the design brief has a corresponding task AND test in the plan.
+
+## Process
+1. Read docs/plans/design-brief.md — extract every concrete requirement:
+   - Features and behaviors (e.g. 'render corner counter in bottom-right')
+   - Data types and constraints (e.g. 'State.x as i16')
+   - Error handling requirements
+   - UI/rendering specifications
+   - API contracts
+
+2. Read docs/plans/plan.md — for each requirement, verify:
+   a. There is a task that implements it (with complete code, not hand-waves)
+   b. There is a test that would FAIL if the requirement were missing
+   c. The test is NOT tautological (does not assert hardcoded values that could drift from reality)
+
+3. Flag each gap with structured output:
+   - MISSING_TASK: requirement has no corresponding task
+   - MISSING_TEST: requirement has a task but no test
+   - TAUTOLOGICAL_TEST: test asserts a hardcoded value instead of computing from content
+   - VAGUE_IMPLEMENTATION: task says 'implement X' without complete code
+
+## Output
+Write results to docs/plans/plan-audit.txt:
+- If all requirements covered: write the single word APPROVED
+- If gaps found: write structured gap list, one GAP block per issue:
+
+GAP: design-brief.md requirement: 'quoted requirement text'
+  MISSING_TEST: description of what test is needed
+  SUGGESTED_FIX: what the test should assert
+
+End your response with APPROVED or GAPS_FOUND.
+
+outcome=success if APPROVED
+outcome=fail if GAPS_FOUND
+"
+  ];
+
+  PatchPlan [
+    shape=box,
+    class="draft",
+    label="Patch Plan (GPT-5.2)",
+    goal_gate=true,
+    retry_target="AutoRecover",
+    max_retries=2,
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are patching an implementation plan to address gaps identified by the spec auditor.
+
+## Context
+1. Read docs/plans/plan-audit.txt for the list of gaps
+2. Read docs/plans/plan.md for the current plan
+3. Read docs/plans/design-brief.md for the original requirements
+
+## Task
+For each GAP in the audit:
+- MISSING_TASK: Add a new task with full TDD steps (failing test with complete code, exact run command, minimal implementation with complete code, exact run command, commit command)
+- MISSING_TEST: Add a test to the existing task that would fail if the requirement were missing
+- TAUTOLOGICAL_TEST: Replace the hardcoded assertion with one that computes the expected value from the actual content
+- VAGUE_IMPLEMENTATION: Replace the hand-wave with complete code
+
+## Rules
+- New task IDs continue from the highest existing ID (e.g., if plan has task-012, new tasks start at task-013)
+- Use the same checkbox format: - [ ] task-NNN: Title
+- Every function body must be complete code — NEVER write 'implement the logic'
+- Every test must verify behavior, not hardcoded values
+- Do NOT remove or modify existing passing tasks — only add or fix flagged ones
+
+## Output
+Update docs/plans/plan.md in place with the fixes.
+"
+  ];
+
+  CommitPlan [
+    shape=box,
+    class="implement",
+    label="Commit Plan",
+    goal_gate=true,
+    retry_target="CommitPlan",
+    prompt="You are working in `run.working_dir`.
+
+Stage and commit the plan and all planning artifacts:
+git add docs/plans/plan.md docs/plans/plan-audit.txt
+git commit -m 'docs(plan): add implementation plan'
+
+Verify: git log --oneline -1
+"
+  ];
+
+  // ============================================================
+  // PHASE 3 — SETUP  (superpowers:using-git-worktrees)
+  // ============================================================
+
+  SetupProject [
+    shape=box,
+    class="implement",
+    label="Setup Project",
+    goal_gate=true,
+    retry_target="SetupProject",
+    prompt="You are working in `run.working_dir`.
+
+## Task
+Initialize the project based on the plan's tech stack section.
+
+## Process
+1. Read docs/plans/plan.md — extract the tech stack from the plan header
+1b. Ensure a git repo exists and create a feature branch:
+    git rev-parse --git-dir >/dev/null 2>&1 || git init
+    branch_name=\"feature/$(basename $(pwd))\"
+    git checkout -b \"$branch_name\" 2>/dev/null || echo \"Already on branch $branch_name\"
+    Never implement directly on main/master without explicit human consent.
+2. Initialize the project for the identified language/framework:
+   - Python: uv init (if no pyproject.toml), uv add deps, uv add --dev test/lint deps
+   - Node: npm init, npm install deps
+   - Go: go mod init
+   - Rust: cargo init
+   - (adapt for other languages as needed)
+3. Set up quality tooling based on the language:
+   - Python: ruff, mypy, pre-commit
+   - Node: eslint/biome, prettier, typescript
+   - Go: golangci-lint, go vet
+   - Rust: clippy, rustfmt
+   - (adapt as needed)
+4. Configure pre-commit hooks if the ecosystem supports it
+5. Create initial directory structure per the plan
+6. Ensure .gitignore exists and includes at minimum: .env, .tracker/, *.bak, __pycache__/, .mypy_cache/, .ruff_cache/, node_modules/, target/, .scratch/, .cookoff/
+7. Run the test command to verify it works (even with 0 tests)
+8. Commit: git add -A && git commit -m 'chore(setup): initialize project with deps and tooling'
+
+## Success Criteria
+- Project initializes cleanly
+- Quality tools configured and runnable
+- Test framework runs (even if 0 tests)
+- All committed
+"
+  ];
+
+  VerifyBaseline [
+    shape=parallelogram,
+    label="Verify Baseline",
+    tool_command="set -eu\nmkdir -p .tracker\nrm -f .tracker/plan_validate_count .tracker/rework_count .tracker/impl_count_* .tracker/batch_count\nif [ -f pyproject.toml ]; then\n  uv run pytest --co -q 2>/dev/null || uv run python -m pytest --co -q 2>/dev/null || echo 'no-tests-yet'\n  printf 'baseline-verified-python'\nelif [ -f package.json ]; then\n  npm test 2>/dev/null || echo 'no-tests-yet'\n  printf 'baseline-verified-node'\nelif [ -f go.mod ]; then\n  go build ./... 2>&1 || true\n  go test ./... 2>&1 || echo 'no-tests-yet'\n  printf 'baseline-verified-go'\nelif [ -f Cargo.toml ]; then\n  cargo build 2>&1 || true\n  cargo test 2>&1 || echo 'no-tests-yet'\n  printf 'baseline-verified-rust'\nelse\n  printf 'baseline-verified-unknown'\nfi"
+  ];
+
+  // ============================================================
+  // PHASE 4 — IMPLEMENT LOOP  (COOKOFF — parallel implementation)
+  // ============================================================
+
+  PickNextTask [
+    shape=parallelogram,
+    label="Pick Next Task",
+    tool_command="#!/bin/sh\nset -eu\nrm -f docs/plans/implementer-status.txt\nPLAN='docs/plans/plan.md'\ntotal=$(grep -c '^- \\[.\\] task-[0-9]' \"$PLAN\" 2>/dev/null || true)\nif [ \"$total\" -eq 0 ]; then\n  printf 'no_tasks_found'\n  exit 0\nfi\ntarget=$(grep -oE 'task-[0-9]+' \"$PLAN\" | while read -r tid; do\n  if grep -q \"^- \\[ \\] $tid\" \"$PLAN\"; then\n    echo \"$tid\"\n    break\n  fi\ndone)\nif [ -z \"$target\" ]; then\n  printf 'all_complete'\n  exit 0\nfi\nprintf '%s' \"$target\" > docs/plans/current_task_id.txt\nprintf 'next_task-%s' \"$target\""
+  ];
+
+  CookoffFanOut [shape=component, label="Cookoff: Parallel Implementation"];
+
+  ImplementTaskOpus [
+    shape=box,
+    label="Implement Task (Opus)",
+    goal_gate=true,
+    retry_target="ImplementTaskOpus",
+    max_retries=2,
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a disciplined software engineer implementing a single task using strict TDD.
+You are working in a cookoff — your implementation will be compared against two others.
+
+## WORKING DIRECTORY
+All your work MUST happen inside `.cookoff/opus/` relative to the project root.
+1. mkdir -p .cookoff/opus
+2. Copy the project source files (not .git, not .tracker, not .cookoff) into .cookoff/opus/ if not already there
+3. Do all implementation work inside .cookoff/opus/
+
+## IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
+Write code before the test? Delete it. Start over. No exceptions.
+- Don't keep it as 'reference'
+- Don't 'adapt' it while writing tests
+- Delete means delete
+
+## Autonomous Mode
+This pipeline runs fully autonomously. If the spec is ambiguous, make your best judgment call and document your assumptions in docs/plans/implementer-status.txt.
+Always write READY_TO_IMPLEMENT to docs/plans/implementer-status.txt and proceed with implementation.
+
+## Context
+1. Read docs/plans/plan.md — find the task matching the ID in docs/plans/current_task_id.txt
+2. Read the task's complete specification including all code and commands
+
+## Process — RED GREEN REFACTOR
+### RED — Write Failing Test
+1. Write ONE minimal test showing what should happen
+2. One behavior per test, clear descriptive name
+3. Use real code — no mocks unless absolutely unavoidable
+4. Run the test: confirm it FAILS
+5. Confirm it fails because the feature is missing, not due to typos or imports
+
+### GREEN — Write Minimal Implementation
+1. Write the SIMPLEST code to make the test pass
+2. Do NOT add features, refactor, or 'improve' beyond the test
+3. Run the test: confirm it PASSES
+4. Confirm ALL other tests still pass
+5. Confirm output is pristine — no errors, no warnings
+
+### REFACTOR (only after green)
+1. Remove duplication, improve names, extract helpers
+2. Keep tests green throughout
+3. Do NOT add new behavior during refactor
+
+## File Discipline
+- Add new test functions to the EXISTING test file. Do NOT create a new test file for each task.
+- Do NOT split code into new source files unless there is a clear reason (separate package, 500+ lines). Append to existing files.
+
+## Self-Review Checklist
+Before finishing, honestly assess:
+- Completeness: fully implemented everything in the task spec? Missed requirements? Edge cases?
+- Quality: clear names? clean and maintainable?
+- Discipline: avoided overbuilding (YAGNI)? only built what was requested?
+- Testing: tests verify behavior (not mocks)? TDD followed strictly?
+- File count: did you create unnecessary files? Could any new files be merged into existing ones?
+
+## VERIFICATION GATE
+Before claiming success, you MUST have fresh evidence from THIS session:
+- Run the test suite inside .cookoff/opus/. Read output. Check exit codes. Count failures. THEN claim.
+- Do NOT say 'should work', 'probably passes', 'seems correct'.
+- If you haven't run the tests in THIS session, you cannot claim they pass.
+
+## Success Criteria
+- Failing test written FIRST, verified failing
+- Minimal implementation passes the test
+- All existing tests still pass
+- Committed within .cookoff/opus/
+"
+  ];
+
+  ImplementTaskGPT [
+    shape=box,
+    class="implement",
+    label="Implement Task (GPT-5.4)",
+    goal_gate=true,
+    retry_target="ImplementTaskGPT",
+    max_retries=2,
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a disciplined software engineer implementing a single task using strict TDD.
+You are working in a cookoff — your implementation will be compared against two others.
+
+## WORKING DIRECTORY
+All your work MUST happen inside `.cookoff/gpt/` relative to the project root.
+1. mkdir -p .cookoff/gpt
+2. Copy the project source files (not .git, not .tracker, not .cookoff) into .cookoff/gpt/ if not already there
+3. Do all implementation work inside .cookoff/gpt/
+
+## IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
+Write code before the test? Delete it. Start over. No exceptions.
+- Don't keep it as 'reference'
+- Don't 'adapt' it while writing tests
+- Delete means delete
+
+## Autonomous Mode
+This pipeline runs fully autonomously. If the spec is ambiguous, make your best judgment call and document your assumptions in docs/plans/implementer-status.txt.
+Always write READY_TO_IMPLEMENT to docs/plans/implementer-status.txt and proceed with implementation.
+
+## Context
+1. Read docs/plans/plan.md — find the task matching the ID in docs/plans/current_task_id.txt
+2. Read the task's complete specification including all code and commands
+
+## Process — RED GREEN REFACTOR
+### RED — Write Failing Test
+1. Write ONE minimal test showing what should happen
+2. One behavior per test, clear descriptive name
+3. Use real code — no mocks unless absolutely unavoidable
+4. Run the test: confirm it FAILS
+5. Confirm it fails because the feature is missing, not due to typos or imports
+
+### GREEN — Write Minimal Implementation
+1. Write the SIMPLEST code to make the test pass
+2. Do NOT add features, refactor, or 'improve' beyond the test
+3. Run the test: confirm it PASSES
+4. Confirm ALL other tests still pass
+5. Confirm output is pristine — no errors, no warnings
+
+### REFACTOR (only after green)
+1. Remove duplication, improve names, extract helpers
+2. Keep tests green throughout
+3. Do NOT add new behavior during refactor
+
+## File Discipline
+- Add new test functions to the EXISTING test file. Do NOT create a new test file for each task.
+- Do NOT split code into new source files unless there is a clear reason (separate package, 500+ lines). Append to existing files.
+
+## Self-Review Checklist
+Before finishing, honestly assess:
+- Completeness: fully implemented everything in the task spec? Missed requirements? Edge cases?
+- Quality: clear names? clean and maintainable?
+- Discipline: avoided overbuilding (YAGNI)? only built what was requested?
+- Testing: tests verify behavior (not mocks)? TDD followed strictly?
+- File count: did you create unnecessary files? Could any new files be merged into existing ones?
+
+## VERIFICATION GATE
+Before claiming success, you MUST have fresh evidence from THIS session:
+- Run the test suite inside .cookoff/gpt/. Read output. Check exit codes. Count failures. THEN claim.
+- Do NOT say 'should work', 'probably passes', 'seems correct'.
+- If you haven't run the tests in THIS session, you cannot claim they pass.
+
+## Success Criteria
+- Failing test written FIRST, verified failing
+- Minimal implementation passes the test
+- All existing tests still pass
+- Committed within .cookoff/gpt/
+"
+  ];
+
+  ImplementTaskGemini [
+    shape=box,
+    class="opinion",
+    label="Implement Task (Gemini)",
+    goal_gate=true,
+    retry_target="ImplementTaskGemini",
+    max_retries=2,
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a disciplined software engineer implementing a single task using strict TDD.
+You are working in a cookoff — your implementation will be compared against two others.
+
+## WORKING DIRECTORY
+All your work MUST happen inside `.cookoff/gemini/` relative to the project root.
+1. mkdir -p .cookoff/gemini
+2. Copy the project source files (not .git, not .tracker, not .cookoff) into .cookoff/gemini/ if not already there
+3. Do all implementation work inside .cookoff/gemini/
+
+## IRON LAW: NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
+Write code before the test? Delete it. Start over. No exceptions.
+- Don't keep it as 'reference'
+- Don't 'adapt' it while writing tests
+- Delete means delete
+
+## Autonomous Mode
+This pipeline runs fully autonomously. If the spec is ambiguous, make your best judgment call and document your assumptions in docs/plans/implementer-status.txt.
+Always write READY_TO_IMPLEMENT to docs/plans/implementer-status.txt and proceed with implementation.
+
+## Context
+1. Read docs/plans/plan.md — find the task matching the ID in docs/plans/current_task_id.txt
+2. Read the task's complete specification including all code and commands
+
+## Process — RED GREEN REFACTOR
+### RED — Write Failing Test
+1. Write ONE minimal test showing what should happen
+2. One behavior per test, clear descriptive name
+3. Use real code — no mocks unless absolutely unavoidable
+4. Run the test: confirm it FAILS
+5. Confirm it fails because the feature is missing, not due to typos or imports
+
+### GREEN — Write Minimal Implementation
+1. Write the SIMPLEST code to make the test pass
+2. Do NOT add features, refactor, or 'improve' beyond the test
+3. Run the test: confirm it PASSES
+4. Confirm ALL other tests still pass
+5. Confirm output is pristine — no errors, no warnings
+
+### REFACTOR (only after green)
+1. Remove duplication, improve names, extract helpers
+2. Keep tests green throughout
+3. Do NOT add new behavior during refactor
+
+## File Discipline
+- Add new test functions to the EXISTING test file. Do NOT create a new test file for each task.
+- Do NOT split code into new source files unless there is a clear reason (separate package, 500+ lines). Append to existing files.
+
+## Self-Review Checklist
+Before finishing, honestly assess:
+- Completeness: fully implemented everything in the task spec? Missed requirements? Edge cases?
+- Quality: clear names? clean and maintainable?
+- Discipline: avoided overbuilding (YAGNI)? only built what was requested?
+- Testing: tests verify behavior (not mocks)? TDD followed strictly?
+- File count: did you create unnecessary files? Could any new files be merged into existing ones?
+
+## VERIFICATION GATE
+Before claiming success, you MUST have fresh evidence from THIS session:
+- Run the test suite inside .cookoff/gemini/. Read output. Check exit codes. Count failures. THEN claim.
+- Do NOT say 'should work', 'probably passes', 'seems correct'.
+- If you haven't run the tests in THIS session, you cannot claim they pass.
+
+## Success Criteria
+- Failing test written FIRST, verified failing
+- Minimal implementation passes the test
+- All existing tests still pass
+- Committed within .cookoff/gemini/
+"
+  ];
+
+  CookoffJoin [shape=tripleoctagon, label="Cookoff Join"];
+
+  PickWinner [
+    shape=box,
+    label="Pick Winner",
+    goal_gate=true,
+    retry_target="PickWinner",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a judge evaluating three parallel implementations of the same task.
+
+## Context
+1. Read docs/plans/current_task_id.txt for the task being implemented
+2. Read docs/plans/plan.md for the task specification
+3. Examine implementations in .cookoff/opus/, .cookoff/gpt/, .cookoff/gemini/
+
+## Process
+1. For each implementation (opus, gpt, gemini):
+   a. Read the source code changes
+   b. Run the test suite inside that directory
+   c. Note: test pass/fail, code quality, completeness, adherence to TDD
+2. Compare all three:
+   - Which passes all tests?
+   - Which has the cleanest code?
+   - Which best follows the task spec?
+   - Which is simplest (YAGNI)?
+3. Pick the winner
+4. Copy the winner's files to the main project directory (overwriting)
+5. Run the full test suite from the project root to verify
+6. Stage and commit:
+   git add -A
+   git commit -m '<type>(<scope>): <description> (cookoff winner: <model>)'
+
+## Output
+State which model won and why. Report test results.
+
+outcome=success if winner selected and tests pass
+outcome=fail if no implementation passes tests
+"
+  ];
+
+  SpecReview [
+    shape=box,
+    label="Spec Compliance Review",
+    goal_gate=true,
+    retry_target="PickWinner",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a meticulous spec compliance reviewer.
+
+## CRITICAL FRAMING
+The implementer finished suspiciously quickly. Their work may be incomplete, inaccurate, or optimistic. You MUST verify everything independently.
+
+## Context
+1. Read docs/plans/plan.md — find the task matching the ID in docs/plans/current_task_id.txt
+2. Get the full diff for this task's changes:
+   BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null || git rev-list --max-parents=0 HEAD)
+   git diff $BASE...HEAD to see all changes on this branch
+   git log --oneline $BASE..HEAD to see all commits
+
+## Verification Process
+DO NOT take the implementer's word for anything. DO NOT trust completeness claims.
+
+1. Read actual code files — every line changed
+2. Compare implementation to task requirements LINE BY LINE
+3. Check for:
+   - **Missing requirements:** Did they implement everything? Skip requirements? Claim something works but didn't implement?
+   - **Extra/unneeded work:** Built things not requested? Over-engineered? Added 'nice to haves'?
+   - **Misunderstandings:** Interpreted requirements differently? Solved wrong problem?
+4. Run the tests yourself to verify they actually pass
+5. Verify TDD was followed: check git log for test commit before implementation commit
+
+## VERIFICATION GATE
+Before claiming success, you MUST have fresh evidence from THIS session:
+- Run the test suite. Read output. Check exit codes. Count failures. THEN claim.
+- Do NOT say 'should work', 'probably passes', 'seems correct'.
+- If you haven't run the tests in THIS session, you cannot claim they pass.
+
+## Output
+If spec compliant: state PASS with evidence (specific code references)
+If issues found: state FAIL with exact file:line references for each issue
+
+outcome=success if PASS
+outcome=fail if FAIL (will route back to implementation)
+"
+  ];
+
+  QualityReview [
+    shape=box,
+    class="implement",
+    label="Code Quality Review",
+    goal_gate=true,
+    retry_target="PickWinner",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior code reviewer focused on quality, patterns, and maintainability.
+
+## Prerequisite
+This review only runs AFTER spec compliance has passed. The code is functionally correct — now assess quality.
+
+## Context
+1. Read docs/plans/current_task_id.txt for the task being reviewed
+2. Read the changed files: git diff HEAD~1
+3. Read docs/plans/plan.md for architectural context
+
+## Review Dimensions
+1. **Code Quality:** naming, readability, error handling, type safety, defensive programming
+2. **Patterns:** consistency with existing codebase patterns, DRY, separation of concerns
+3. **Architecture:** SOLID principles, loose coupling, appropriate abstraction level
+4. **Security:** input validation, injection risks, secrets handling
+5. **Testing:** test quality (not just coverage), edge cases, meaningful assertions
+6. **Performance:** obvious inefficiencies, N+1 queries, unnecessary allocations
+
+## Issue Categories
+- **Critical** (must fix): security vulnerabilities, data loss risks, broken functionality
+- **Important** (should fix): poor patterns, maintainability concerns, missing error handling
+- **Suggestion** (nice to have): style improvements, minor optimizations
+
+## VERIFICATION GATE
+Before claiming success, you MUST have fresh evidence from THIS session:
+- Run the test suite. Read output. Check exit codes. Count failures. THEN claim.
+- Do NOT say 'should work', 'probably passes', 'seems correct'.
+- If you haven't run the tests in THIS session, you cannot claim they pass.
+
+## Output
+If no Critical or Important issues: PASS
+If Critical or Important issues found: FAIL with file:line references and fix guidance
+
+outcome=success if PASS
+outcome=fail if FAIL
+"
+  ];
+
+  CheckImplementBudget [
+    shape=parallelogram,
+    label="Check Implement Budget",
+    tool_command="#!/bin/sh\nset -eu\nmkdir -p .tracker\nTASK=$(cat docs/plans/current_task_id.txt)\nCOUNTER=\".tracker/impl_count_${TASK}\"\ncount=0\n[ -f \"$COUNTER\" ] && count=$(cat \"$COUNTER\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$COUNTER\"\nif [ \"$count\" -gt 5 ]; then\n  printf 'budget_exhausted'\nelse\n  printf 'budget_ok'\nfi"
+  ];
+
+  MarkTaskComplete [
+    shape=parallelogram,
+    label="Mark Task Complete",
+    tool_command="#!/bin/sh\nset -eu\ntarget=$(cat docs/plans/current_task_id.txt)\nsed -i.bak \"s/^- \\[ \\] ${target}/- [x] ${target}/\" docs/plans/plan.md\nrm -f docs/plans/plan.md.bak\nprintf 'completed-%s' \"$target\""
+  ];
+
+  // ============================================================
+  // PHASE 4 — ESCALATION PATH  (superpowers:systematic-debugging)
+  // ============================================================
+
+  DebugInvestigate [
+    shape=box,
+    label="Debug Investigation",
+    goal_gate=true,
+    max_retries=2,
+    retry_target="ReplanTask",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior debugger performing root cause analysis.
+
+## IRON LAW: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
+If you haven't completed the investigation, you cannot propose fixes.
+
+## Context
+The implementation for the task in docs/plans/current_task_id.txt has failed after multiple attempts.
+
+## Phase 1: Root Cause Investigation
+1. Read error messages carefully — full stack traces, line numbers, error codes
+2. Reproduce the failure: run the exact failing command
+3. Check recent changes: git diff, git log --oneline -5
+4. Trace data flow: where does the bad value originate? Trace backward
+
+## Phase 2: Pattern Analysis
+1. Find working examples in the same codebase
+2. Compare working vs broken — identify EVERY difference
+3. Understand dependencies and assumptions
+
+## Phase 3: TDD Fix
+1. Write a failing test that reproduces the bug FIRST
+2. Run it — confirm it FAILS for the RIGHT reason (the actual bug, not a typo)
+3. Write the SMALLEST fix to make the test pass
+4. Run it — confirm it PASSES
+5. Run ALL tests — confirm nothing else broke
+6. Commit the test first, then the fix
+
+You MUST see the test fail before writing the fix. If you wrote a fix before the test, delete the fix and start over.
+
+## CRITICAL: >= 3 failed attempts means WRONG ARCHITECTURE
+If you've tried 3+ fixes and each reveals new coupling or shared state:
+- This is NOT a failed hypothesis — this is a wrong architecture
+- Report ARCHITECTURE_ISSUE and describe what's fundamentally broken
+- outcome=fail to escalate to replanning
+
+## VERIFICATION GATE
+Before claiming success, you MUST have fresh evidence from THIS session:
+- Run the test suite. Read output. Check exit codes. Count failures. THEN claim.
+- Do NOT say 'should work', 'probably passes', 'seems correct'.
+- If you haven't run the tests in THIS session, you cannot claim they pass.
+
+## Output
+outcome=success if root cause found and fixed with regression test
+outcome=fail if architecture issue or unable to resolve
+"
+  ];
+
+  ReplanTask [
+    shape=box,
+    label="Replan Task",
+    max_retries=1,
+    retry_target="AutoRecover",
+    prompt="You are working in `run.working_dir`.
+
+## Task
+The current task has failed implementation AND debugging. Rethink the approach.
+
+## Context
+1. Read docs/plans/current_task_id.txt for the task
+2. Read docs/plans/plan.md for the original task spec
+3. Read git log to understand what was tried and why it failed
+
+## Process
+1. Analyze what went wrong — was the task spec flawed? Dependencies missing? Wrong approach?
+2. Write a revised task spec that addresses the root cause
+3. Update docs/plans/plan.md with the revised task
+4. Reset the task checkbox in docs/plans/plan.md back to unchecked: - [ ] task-xxx
+
+## Output
+outcome=success if task successfully replanned
+outcome=fail if the problem is fundamental and cannot be resolved autonomously
+"
+  ];
+
+  AutoRecover [
+    shape=box,
+    label="Auto Recover",
+    goal_gate=true,
+    retry_target="AutoRecover",
+    max_retries=2,
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are an autonomous recovery agent. The pipeline is stuck and there is no human to ask for help.
+
+## Task
+Diagnose the failure, attempt self-recovery, and either unblock the pipeline or produce a failure summary.
+
+## Process
+1. Read all available context: docs/plans/plan.md, docs/plans/current_task_id.txt, git log, error output
+2. Identify the root cause of the blockage
+3. Attempt recovery strategies in order:
+   a. If the task spec is ambiguous — make a reasonable assumption and document it
+   b. If the code is broken — revert to last working state and retry with a different approach
+   c. If dependencies are missing — install them
+   d. If the approach is fundamentally wrong — simplify the task to its bare minimum
+4. If recovery succeeds, update the plan and reset the task for retry
+5. If recovery fails after all strategies, write a failure summary
+
+## Output
+outcome=success if recovered and ready to retry
+outcome=fail if unrecoverable — will route to FailureSummary
+"
+  ];
+
+  // ============================================================
+  // PHASE 4.5 — SCENARIO VALIDATION  (real-dependency testing)
+  // ============================================================
+
+  WriteScenarios [
+    shape=box,
+    label="Write Scenarios",
+    goal_gate=true,
+    retry_target="WriteScenarios",
+    fidelity="full",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior QA engineer writing end-to-end scenario tests with real dependencies.
+
+## Context
+1. Read docs/plans/design-brief.md for requirements
+2. Read docs/plans/plan.md for planned features
+3. Read the source code to understand what was implemented
+
+## Task
+Write e2e scenario tests that exercise the application with ZERO mocks and real dependencies only.
+
+## Process
+1. Identify key user journeys and integration points from the design brief
+2. For each scenario:
+   a. Write a self-contained test script in .scratch/
+   b. Each scenario MUST be independent — no ordering dependencies between scenarios
+   c. Use REAL dependencies (real filesystem, real network calls, real databases)
+   d. ZERO mocks — if a dependency isn't available, skip the scenario with a clear message
+3. Name scenarios descriptively: .scratch/scenario_<name>.py (or appropriate extension)
+4. Add .scratch/ to .gitignore if not already there
+
+## IRON RULES
+- NO MOCKS. Period. If you can't test it with real dependencies, document why and skip it.
+- Each scenario must be runnable independently
+- Each scenario must clean up after itself
+- Scenarios test the APPLICATION, not the test framework
+
+## Output
+Write scenario files to .scratch/ directory.
+Report how many scenarios were written and what they cover.
+"
+  ];
+
+  RunScenarios [
+    shape=parallelogram,
+    label="Run Scenarios",
+    tool_command="#!/bin/sh\nset -eu\nmkdir -p .scratch\nif [ ! -d .scratch ] || [ -z \"$(ls -A .scratch/ 2>/dev/null)\" ]; then\n  printf 'scenarios_pass'\n  exit 0\nfi\nfailed=0\npassed=0\nfor f in .scratch/scenario_*; do\n  [ -f \"$f\" ] || continue\n  echo \"=== Running $f ===\"\n  if [ -f pyproject.toml ]; then\n    uv run python \"$f\" 2>&1 || { failed=$((failed + 1)); continue; }\n  elif [ -f package.json ]; then\n    node \"$f\" 2>&1 || { failed=$((failed + 1)); continue; }\n  elif [ -f go.mod ]; then\n    go run \"$f\" 2>&1 || { failed=$((failed + 1)); continue; }\n  else\n    python3 \"$f\" 2>&1 || { failed=$((failed + 1)); continue; }\n  fi\n  passed=$((passed + 1))\ndone\nif [ \"$failed\" -gt 0 ]; then\n  printf 'scenarios_fail_%d_of_%d' \"$failed\" \"$((failed + passed))\"\nelse\n  printf 'scenarios_pass'\nfi"
+  ];
+
+  FixScenarioFailures [
+    shape=box,
+    class="implement",
+    label="Fix Scenario Failures",
+    goal_gate=true,
+    retry_target="FixScenarioFailures",
+    max_retries=3,
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior engineer fixing implementation bugs found by scenario tests.
+
+## CRITICAL: Fix the IMPLEMENTATION, not the scenarios.
+Scenarios represent real user behavior. If a scenario fails, the code is wrong, not the scenario.
+
+## Context
+1. Read the scenario test output from context to understand what failed
+2. Read the failing scenario files in .scratch/ to understand what was expected
+3. Read the implementation code to find the bug
+
+## Process
+1. Identify which scenario(s) failed and why
+2. Trace the failure to the implementation code
+3. Fix the implementation (NOT the scenario)
+4. Re-run the failing scenario to verify the fix
+5. Run the full test suite to ensure no regressions
+6. Commit the fix
+
+## Output
+outcome=success if all failing scenarios now pass and full test suite passes
+outcome=fail if unable to fix after investigation
+"
+  ];
+
+  ExtractScenarioPatterns [
+    shape=box,
+    label="Extract Scenario Patterns",
+    goal_gate=true,
+    retry_target="ExtractScenarioPatterns",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are extracting reusable patterns from scenario test results.
+
+## Task
+1. Read all scenario files in .scratch/
+2. For each scenario, extract:
+   - What was tested (user journey / integration point)
+   - What dependencies were exercised
+   - Key assertions and expectations
+3. Write patterns to scenarios.jsonl (one JSON object per line)
+4. Commit scenarios.jsonl
+
+## Output Format (scenarios.jsonl)
+Each line is a JSON object with:
+- scenario: name of the scenario
+- journey: description of the user journey tested
+- dependencies: list of real dependencies exercised
+- assertions: list of key assertions made
+- result: pass/fail
+
+## Output
+Commit scenarios.jsonl and report summary.
+"
+  ];
+
+  // ============================================================
+  // PHASE 5 — FINAL REVIEW  (superpowers:verification-before-completion +
+  //                           superpowers:requesting-code-review)
+  // ============================================================
+
+  ValidateBuild [
+    shape=parallelogram,
+    label="Validate Full Build",
+    tool_command="set -eu\necho '=== Running full validation ==='\nif [ -f pyproject.toml ]; then\n  echo '--- pytest ---'\n  uv run pytest -v 2>&1 || { echo 'PYTEST_FAIL'; exit 1; }\n  echo '--- ruff ---'\n  uv run ruff check . 2>&1 || { echo 'RUFF_FAIL'; exit 1; }\n  echo '--- mypy ---'\n  uv run mypy . 2>&1 || echo 'mypy-skipped'\n  printf 'validation-pass'\nelif [ -f package.json ]; then\n  echo '--- npm test ---'\n  npm test 2>&1 || { echo 'TEST_FAIL'; exit 1; }\n  echo '--- lint ---'\n  npx eslint . 2>&1 || npx biome check . 2>&1 || echo 'lint-skipped'\n  printf 'validation-pass'\nelif [ -f go.mod ]; then\n  echo '--- go build ---'\n  go build ./... 2>&1 || { echo 'BUILD_FAIL'; exit 1; }\n  echo '--- go test ---'\n  go test ./... 2>&1 || { echo 'TEST_FAIL'; exit 1; }\n  echo '--- go vet ---'\n  go vet ./... 2>&1 || echo 'vet-skipped'\n  printf 'validation-pass'\nelif [ -f Cargo.toml ]; then\n  echo '--- cargo build ---'\n  cargo build 2>&1 || { echo 'BUILD_FAIL'; exit 1; }\n  echo '--- cargo test ---'\n  cargo test 2>&1 || { echo 'TEST_FAIL'; exit 1; }\n  echo '--- cargo clippy ---'\n  cargo clippy 2>&1 || echo 'clippy-skipped'\n  printf 'validation-pass'\nelse\n  echo 'Unknown build system — manual validation needed'\n  printf 'validation-unknown'\nfi"
+  ];
+
+  ReviewFanOut [shape=component, label="Final Reviews (Parallel)"];
+
+  FinalReviewOpus [
+    shape=box,
+    label="Final Review (Opus)",
+    goal_gate=true,
+    retry_target="FinalReviewOpus",
+    fidelity="summary:high",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior code reviewer performing final review of the complete implementation.
+
+## Pre-check (MANDATORY — do this FIRST)
+Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+or if no application source files exist beyond __init__.py, config, and tooling,
+immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+substantive implementation exists to review.' Do NOT proceed with quality review.
+
+## IRON LAW: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+Run commands. Read output. Check exit codes. THEN make claims.
+Forbidden words: 'should', 'probably', 'seems to'.
+
+## Context
+1. Read docs/plans/plan.md for the original requirements
+2. Run: git log --oneline to see all commits
+3. Run: git diff main...HEAD (or first commit) to see all changes
+
+## Review Dimensions
+1. **Plan Alignment:** Compare implementation to plan. Identify deviations — justified improvements vs problematic departures. Verify ALL planned functionality implemented.
+2. **Code Quality:** Patterns, error handling, type safety, naming, maintainability
+3. **Architecture:** SOLID, separation of concerns, loose coupling
+4. **Test Coverage:** Are edge cases covered? Are tests meaningful or trivial?
+5. **Security:** Input validation, injection risks, secrets handling
+
+## Output
+For each issue found, provide: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+
+Return PASS/FAIL with detailed reasoning.
+"
+  ];
+
+  FinalReviewGPT [
+    shape=box,
+    class="implement",
+    label="Final Review (GPT-5.4)",
+    goal_gate=true,
+    retry_target="FinalReviewGPT",
+    fidelity="summary:high",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior code reviewer performing final review of the complete implementation.
+
+## Pre-check (MANDATORY — do this FIRST)
+Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+or if no application source files exist beyond __init__.py, config, and tooling,
+immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+substantive implementation exists to review.' Do NOT proceed with quality review.
+
+## Context
+1. Read docs/plans/plan.md for the original requirements
+2. Run: git log --oneline to see all commits
+3. Run: git diff main...HEAD (or first commit) to see all changes
+
+## Review Focus
+1. **Completeness:** Is every planned feature implemented? Any gaps?
+2. **Quality:** Code patterns, error handling, naming conventions
+3. **Testing:** Coverage, edge cases, test quality
+4. **Performance:** Obvious inefficiencies, resource leaks
+5. **Security:** OWASP top 10, input validation
+
+## Output
+For each issue: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+Return PASS/FAIL with reasoning.
+"
+  ];
+
+  FinalReviewGemini [
+    shape=box,
+    class="opinion",
+    label="Final Review (Gemini)",
+    goal_gate=true,
+    retry_target="FinalReviewGemini",
+    fidelity="summary:high",
+    prompt="You are working in `run.working_dir`.
+
+## Role
+You are a senior code reviewer performing final review of the complete implementation.
+
+## Pre-check (MANDATORY — do this FIRST)
+Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+or if no application source files exist beyond __init__.py, config, and tooling,
+immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+substantive implementation exists to review.' Do NOT proceed with quality review.
+
+## Context
+1. Read docs/plans/plan.md for the original requirements
+2. Run: git log --oneline to see all commits
+3. Run: git diff main...HEAD (or first commit) to see all changes
+
+## Review Focus
+1. **Delivery Robustness:** Will this work reliably in production?
+2. **Test Coverage:** Are tests comprehensive and meaningful?
+3. **Edge Cases:** What could go wrong? Missing error handling?
+4. **Documentation:** Is the code self-documenting? Missing comments on complex logic?
+
+## Output
+For each issue: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+Return PASS/FAIL with reasoning.
+"
+  ];
+
+  ReviewsJoin [shape=tripleoctagon, label="Reviews Join"];
+
+  CritiqueFanOut [shape=component, label="Cross-Critiques (Parallel)"];
+
+  CritiqueOpusOnGPT [
+    shape=box,
+    label="Opus Critiques GPT Review",
+    goal_gate=true,
+    retry_target="CritiqueOpusOnGPT",
+    prompt="You are working in `run.working_dir`.
+
+Critique the GPT-5.4 review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references."
+  ];
+
+  CritiqueOpusOnGemini [
+    shape=box,
+    label="Opus Critiques Gemini Review",
+    goal_gate=true,
+    retry_target="CritiqueOpusOnGemini",
+    prompt="You are working in `run.working_dir`.
+
+Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references."
+  ];
+
+  CritiqueGPTOnOpus [
+    shape=box,
+    class="implement",
+    label="GPT Critiques Opus Review",
+    goal_gate=true,
+    retry_target="CritiqueGPTOnOpus",
+    prompt="You are working in `run.working_dir`.
+
+Critique the Opus review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references."
+  ];
+
+  CritiqueGPTOnGemini [
+    shape=box,
+    class="implement",
+    label="GPT Critiques Gemini Review",
+    goal_gate=true,
+    retry_target="CritiqueGPTOnGemini",
+    prompt="You are working in `run.working_dir`.
+
+Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references."
+  ];
+
+  CritiqueGeminiOnOpus [
+    shape=box,
+    class="opinion",
+    label="Gemini Critiques Opus Review",
+    goal_gate=true,
+    retry_target="CritiqueGeminiOnOpus",
+    prompt="You are working in `run.working_dir`.
+
+Critique the Opus review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references."
+  ];
+
+  CritiqueGeminiOnGPT [
+    shape=box,
+    class="opinion",
+    label="Gemini Critiques GPT Review",
+    goal_gate=true,
+    retry_target="CritiqueGeminiOnGPT",
+    prompt="You are working in `run.working_dir`.
+
+Critique the GPT-5.4 review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references."
+  ];
+
+  CritiquesJoin [shape=tripleoctagon, label="Critiques Join"];
+
+  ReviewConsensus [
+    shape=box,
+    label="Review Consensus",
+    goal_gate=true,
+    retry_target="PickWinner",
+    max_retries=1,
+    prompt="You are working in `run.working_dir`.
+
+## Task
+Synthesize all reviews and cross-critiques into a single final verdict.
+
+## Process
+1. Read all review outputs and critique outputs from context
+2. Identify issues confirmed by multiple reviewers (high confidence)
+3. Identify issues challenged by critiques (lower confidence — investigate)
+4. Categorize confirmed issues: Critical / Important / Suggestion
+5. For each Critical/Important issue, provide exact fix guidance
+
+## Verdict Rules
+- **SUCCESS:** No Critical issues. No more than 2 Important issues (and they're minor). Ship it.
+- **RETRY:** Critical issues found OR 3+ Important issues. Route back to implementation for fixes.
+- **FAIL:** Fundamental architectural problems that can't be fixed incrementally. Route to auto-recovery.
+
+## Output
+State your verdict clearly:
+outcome=success — ready to ship
+outcome=retry — needs fixes (list them)
+outcome=fail — blocked, route to auto-recovery
+"
+  ];
+
+  CheckReworkBudget [
+    shape=parallelogram,
+    label="Check Rework Budget",
+    tool_command="#!/bin/sh\nset -eu\nmkdir -p .tracker\nCOUNTER='.tracker/rework_count'\ncount=0\n[ -f \"$COUNTER\" ] && count=$(cat \"$COUNTER\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$COUNTER\"\nif [ \"$count\" -gt 2 ]; then\n  printf 'budget_exhausted'\nelse\n  printf 'budget_ok'\nfi"
+  ];
+
+  FailureSummary [
+    shape=box,
+    label="Failure Summary",
+    goal_gate=true,
+    retry_target="FailureSummary",
+    prompt="You are working in `run.working_dir`.
+
+Summarize why the pipeline failed, what remains unresolved, and concrete next steps for recovery. Write to docs/plans/failure-summary.md."
+  ];
+
+  // ============================================================
+  // PHASE 6 — FINISH  (auto-ship via PR — no human gate)
+  // ============================================================
+
+  VerifyTestsFinal [
+    shape=parallelogram,
+    label="Final Test Verification",
+    tool_command="set -eu\necho '=== Final verification before ship ==='\nif [ -f pyproject.toml ]; then\n  uv run pytest -v 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }\nelif [ -f package.json ]; then\n  npm test 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }\nelif [ -f go.mod ]; then\n  go test ./... 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }\nelif [ -f Cargo.toml ]; then\n  cargo test 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }\nfi\nprintf 'final-verification-pass'"
+  ];
+
+  CreatePR [
+    shape=box,
+    class="implement",
+    label="Create Pull Request",
+    goal_gate=true,
+    retry_target="CreatePR",
+    prompt="You are working in `run.working_dir`.
+
+## Task
+Finalize the project and push if possible.
+
+## Process
+1. Ensure git repo exists:
+   git rev-parse --git-dir >/dev/null 2>&1 || { git init && git add -A && git commit -m 'chore: initial commit'; }
+2. If no remote is configured (git remote | head -1 is empty):
+   - Log: 'No remote configured — skipping PR creation'
+   - Report: branch name, commit count, and working directory location
+   - outcome=success (project is complete, just no remote to push to)
+3. If remote exists:
+   a. git push -u origin HEAD
+   b. Generate PR title (under 70 chars) and body from:
+      - docs/plans/plan.md (what was planned)
+      - git log --oneline (what was implemented)
+      - Test results from context
+   c. Create PR: gh pr create --title '<title>' --body '<summary + test plan>'
+   d. Report the PR URL
+"
+  ];
+
+  // ============================================================
+  // EDGES
+  // ============================================================
+
+  // Resume check → Phase 0: Omakase (parallel design exploration)
+  Start -> CheckExistingPlans;
+  CheckExistingPlans -> PickNextTask [label="resume — plan exists", condition="context.tool_stdout=resume", weight=2];
+  CheckExistingPlans -> ArchiveOldPlans [label="fresh start", condition="context.tool_stdout=fresh"];
+  ArchiveOldPlans -> ExploreIdea;
+  ExploreIdea -> OmakaseFanOut;
+  OmakaseFanOut -> DesignExploreOpus;
+  OmakaseFanOut -> DesignExploreGPT;
+  OmakaseFanOut -> DesignExploreGemini;
+  DesignExploreOpus -> OmakaseJoin;
+  DesignExploreGPT -> OmakaseJoin;
+  DesignExploreGemini -> OmakaseJoin;
+  OmakaseJoin -> ConsolidateDesigns;
+
+  // Phase 1: Design Brief (auto-approved — no human gate)
+  ConsolidateDesigns -> CommitBrief;
+
+  // Phase 2: Plan (draft-audit-patch loop)
+  CommitBrief -> DraftPlan;
+  DraftPlan -> ValidatePlanFormat;
+  ValidatePlanFormat -> AuditPlanSpec [label="format ok", condition="context.tool_stdout=format_ok", weight=2];
+  ValidatePlanFormat -> AutoRecover [label="plan loop exhausted", condition="context.tool_stdout=fail_retries_exhausted"];
+  ValidatePlanFormat -> DraftPlan [label="format fail", condition="context.tool_stdout!=format_ok && context.tool_stdout!=fail_retries_exhausted"];
+  AuditPlanSpec -> CommitPlan [label="plan approved", condition="outcome=success", weight=2];
+  AuditPlanSpec -> PatchPlan [label="gaps found", condition="outcome=fail"];
+  PatchPlan -> ValidatePlanFormat;
+
+  // Phase 3: Setup
+  CommitPlan -> SetupProject;
+  SetupProject -> VerifyBaseline;
+
+  // Phase 4: Implement Loop (Cookoff)
+  VerifyBaseline -> PickNextTask;
+  PickNextTask -> CookoffFanOut [label="has task", condition="context.tool_stdout!=all_complete && context.tool_stdout!=no_tasks_found", weight=2];
+  PickNextTask -> WriteScenarios [label="all done", condition="context.tool_stdout=all_complete"];
+  PickNextTask -> AutoRecover [label="no tasks in plan", condition="context.tool_stdout=no_tasks_found"];
+
+  CookoffFanOut -> ImplementTaskOpus;
+  CookoffFanOut -> ImplementTaskGPT;
+  CookoffFanOut -> ImplementTaskGemini;
+  ImplementTaskOpus -> CookoffJoin;
+  ImplementTaskGPT -> CookoffJoin;
+  ImplementTaskGemini -> CookoffJoin;
+  CookoffJoin -> PickWinner;
+
+  PickWinner -> SpecReview [condition="outcome=success", label="winner picked", weight=2];
+  SpecReview -> QualityReview [condition="outcome=success", label="spec pass", weight=2];
+  SpecReview -> CheckImplementBudget [condition="outcome=fail", label="spec fail"];
+  QualityReview -> MarkTaskComplete [condition="outcome=success", label="quality pass", weight=2];
+  QualityReview -> CheckImplementBudget [condition="outcome=fail", label="quality fail"];
+  CheckImplementBudget -> CookoffFanOut [label="retry ok", condition="context.tool_stdout=budget_ok", weight=2];
+  CheckImplementBudget -> AutoRecover [label="too many attempts", condition="context.tool_stdout=budget_exhausted"];
+  MarkTaskComplete -> PickNextTask;
+
+  // Phase 4: Escalation (graduated retry)
+  PickWinner -> DebugInvestigate [condition="outcome=fail", label="retries exhausted"];
+  DebugInvestigate -> CookoffFanOut [condition="outcome=success", label="fixed, re-verify", weight=2];
+  DebugInvestigate -> ReplanTask [condition="outcome=fail", label="can't fix"];
+  ReplanTask -> PickNextTask [condition="outcome=success", label="replanned", weight=2];
+  ReplanTask -> AutoRecover [condition="outcome=fail", label="stuck"];
+  AutoRecover -> PickNextTask [condition="outcome=success", label="recovered", weight=2];
+  AutoRecover -> FailureSummary [condition="outcome=fail", label="unrecoverable"];
+
+  // Phase 4.5: Scenario Validation
+  WriteScenarios -> RunScenarios;
+  RunScenarios -> ExtractScenarioPatterns [label="scenarios pass", condition="context.tool_stdout=scenarios_pass", weight=2];
+  RunScenarios -> FixScenarioFailures [label="scenarios fail", condition="context.tool_stdout!=scenarios_pass"];
+  FixScenarioFailures -> RunScenarios;
+  ExtractScenarioPatterns -> ValidateBuild;
+
+  // Phase 5: Final Review
+  ValidateBuild -> ReviewFanOut [condition="outcome=success", label="build pass", weight=2];
+  ValidateBuild -> CheckReworkBudget [condition="outcome=fail", label="build fail"];
+
+  ReviewFanOut -> FinalReviewOpus;
+  ReviewFanOut -> FinalReviewGPT;
+  ReviewFanOut -> FinalReviewGemini;
+  FinalReviewOpus -> ReviewsJoin;
+  FinalReviewGPT -> ReviewsJoin;
+  FinalReviewGemini -> ReviewsJoin;
+
+  ReviewsJoin -> CritiqueFanOut;
+
+  CritiqueFanOut -> CritiqueOpusOnGPT;
+  CritiqueFanOut -> CritiqueOpusOnGemini;
+  CritiqueFanOut -> CritiqueGPTOnOpus;
+  CritiqueFanOut -> CritiqueGPTOnGemini;
+  CritiqueFanOut -> CritiqueGeminiOnOpus;
+  CritiqueFanOut -> CritiqueGeminiOnGPT;
+  CritiqueOpusOnGPT -> CritiquesJoin;
+  CritiqueOpusOnGemini -> CritiquesJoin;
+  CritiqueGPTOnOpus -> CritiquesJoin;
+  CritiqueGPTOnGemini -> CritiquesJoin;
+  CritiqueGeminiOnOpus -> CritiquesJoin;
+  CritiqueGeminiOnGPT -> CritiquesJoin;
+
+  CritiquesJoin -> ReviewConsensus;
+
+  ReviewConsensus -> VerifyTestsFinal [condition="outcome=success", label="pass", weight=2];
+  ReviewConsensus -> CheckReworkBudget [condition="outcome=retry", label="rework"];
+  ReviewConsensus -> FailureSummary [condition="outcome=fail", label="blocked"];
+  CheckReworkBudget -> CookoffFanOut [label="rework ok", condition="context.tool_stdout=budget_ok", weight=2];
+  CheckReworkBudget -> FailureSummary [label="rework budget exhausted", condition="context.tool_stdout=budget_exhausted"];
+  FailureSummary -> Exit;
+
+  // Phase 6: Finish (auto-ship via PR)
+  VerifyTestsFinal -> CreatePR [condition="outcome=success", label="tests pass", weight=2];
+  VerifyTestsFinal -> CheckReworkBudget [condition="outcome=fail", label="tests fail"];
+  CreatePR -> FailureSummary [condition="outcome=fail", label="PR failed"];
+  CreatePR -> Exit [condition="outcome=success", label="shipped", weight=2];
+}

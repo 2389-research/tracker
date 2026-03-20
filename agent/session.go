@@ -204,6 +204,14 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			},
 		}
 
+		s.emit(Event{
+			Type:      EventLLMRequestPreparing,
+			SessionID: s.id,
+			Turn:      turn,
+			Provider:  s.config.Provider,
+			Model:     s.config.Model,
+		})
+
 		resp, err := s.client.Complete(ctx, req)
 		if err != nil {
 			result.Error = err

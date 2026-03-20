@@ -1,0 +1,21 @@
+{
+  "run_id": "1ae243fba06f",
+  "current_node": "IdeateOpus",
+  "completed_nodes": [
+    "Start",
+    "ExploreVisibilityGaps"
+  ],
+  "retry_counts": {},
+  "context": {
+    "graph.default_fidelity": "summary:high",
+    "graph.default_max_retries": "2",
+    "last_cost": "0.0067",
+    "last_response": "",
+    "last_turns": "6",
+    "outcome": "success",
+    "preferred_label": "",
+    "suggested_next_nodes": ""
+  },
+  "timestamp": "2026-03-20T15:59:05.390939-05:00",
+  "restart_count": 0
+}
