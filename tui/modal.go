@@ -189,6 +189,8 @@ func (f *FreeformContent) Update(msg tea.Msg) tea.Cmd {
 	switch km.Type {
 	case tea.KeyRunes:
 		f.buffer = append(f.buffer, km.Runes...)
+	case tea.KeySpace:
+		f.buffer = append(f.buffer, ' ')
 	case tea.KeyBackspace:
 		if len(f.buffer) > 0 {
 			f.buffer = f.buffer[:len(f.buffer)-1]

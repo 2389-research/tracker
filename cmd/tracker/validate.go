@@ -1,50 +1,45 @@
-// ABOUTME: Validate subcommand — checks DOT pipeline files for structural errors and warnings.
+// ABOUTME: Validate subcommand — checks pipeline files (.dot or .dip) for structural errors and warnings.
 // ABOUTME: Returns exit code 0 for valid pipelines, 1 for errors. Suitable for CI/pre-commit.
 package main
 
 import (
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// runValidate parses and validates a DOT file, printing results to w.
+// runValidateCmd parses and validates a pipeline file, printing results to w.
 // Returns an error if validation finds structural problems.
-func runValidate(dotFile string, w io.Writer) error {
-	dotBytes, err := os.ReadFile(dotFile)
+// Auto-detects format based on file extension.
+func runValidateCmd(pipelineFile string, w io.Writer) error {
+	graph, err := loadPipeline(pipelineFile)
 	if err != nil {
-		return fmt.Errorf("read pipeline file: %w", err)
-	}
-
-	graph, err := pipeline.ParseDOT(string(dotBytes))
-	if err != nil {
-		return fmt.Errorf("parse pipeline: %w", err)
+		return fmt.Errorf("load pipeline: %w", err)
 	}
 
 	result := pipeline.ValidateAll(graph)
 
 	if result == nil {
-		fmt.Fprintf(w, "%s: valid (%d nodes, %d edges)\n", dotFile, len(graph.Nodes), len(graph.Edges))
+		fmt.Fprintf(w, "%s: valid (%d nodes, %d edges)\n", pipelineFile, len(graph.Nodes), len(graph.Edges))
 		return nil
 	}
 
 	if len(result.Warnings) > 0 {
 		for _, warn := range result.Warnings {
-			fmt.Fprintf(w, "%s: warning: %s\n", dotFile, warn)
+			fmt.Fprintf(w, "%s: warning: %s\n", pipelineFile, warn)
 		}
 	}
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			fmt.Fprintf(w, "%s: error: %s\n", dotFile, e)
+			fmt.Fprintf(w, "%s: error: %s\n", pipelineFile, e)
 		}
 		return fmt.Errorf("%d validation error(s)", len(result.Errors))
 	}
 
 	// Warnings only — still valid.
 	fmt.Fprintf(w, "%s: valid with %d warning(s) (%d nodes, %d edges)\n",
-		dotFile, len(result.Warnings), len(graph.Nodes), len(graph.Edges))
+		pipelineFile, len(result.Warnings), len(graph.Nodes), len(graph.Edges))
 	return nil
 }

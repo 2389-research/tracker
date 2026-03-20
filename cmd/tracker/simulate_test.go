@@ -38,9 +38,9 @@ func writeTestDOT(t *testing.T, content string) string {
 func TestSimulateShowsHeader(t *testing.T) {
 	path := writeTestDOT(t, testDOT)
 	var buf bytes.Buffer
-	err := runSimulate(path, &buf)
+	err := runSimulateCmd(path, &buf)
 	if err != nil {
-		t.Fatalf("runSimulate error: %v", err)
+		t.Fatalf("runSimulateCmd error: %v", err)
 	}
 
 	output := buf.String()
@@ -61,9 +61,9 @@ func TestSimulateShowsHeader(t *testing.T) {
 func TestSimulateShowsGraphAttrs(t *testing.T) {
 	path := writeTestDOT(t, testDOT)
 	var buf bytes.Buffer
-	err := runSimulate(path, &buf)
+	err := runSimulateCmd(path, &buf)
 	if err != nil {
-		t.Fatalf("runSimulate error: %v", err)
+		t.Fatalf("runSimulateCmd error: %v", err)
 	}
 
 	output := buf.String()
@@ -78,9 +78,9 @@ func TestSimulateShowsGraphAttrs(t *testing.T) {
 func TestSimulateShowsNodes(t *testing.T) {
 	path := writeTestDOT(t, testDOT)
 	var buf bytes.Buffer
-	err := runSimulate(path, &buf)
+	err := runSimulateCmd(path, &buf)
 	if err != nil {
-		t.Fatalf("runSimulate error: %v", err)
+		t.Fatalf("runSimulateCmd error: %v", err)
 	}
 
 	output := buf.String()
@@ -101,9 +101,9 @@ func TestSimulateShowsNodes(t *testing.T) {
 func TestSimulateShowsEdges(t *testing.T) {
 	path := writeTestDOT(t, testDOT)
 	var buf bytes.Buffer
-	err := runSimulate(path, &buf)
+	err := runSimulateCmd(path, &buf)
 	if err != nil {
-		t.Fatalf("runSimulate error: %v", err)
+		t.Fatalf("runSimulateCmd error: %v", err)
 	}
 
 	output := buf.String()
@@ -124,9 +124,9 @@ func TestSimulateShowsEdges(t *testing.T) {
 func TestSimulateShowsExecutionPlan(t *testing.T) {
 	path := writeTestDOT(t, testDOT)
 	var buf bytes.Buffer
-	err := runSimulate(path, &buf)
+	err := runSimulateCmd(path, &buf)
 	if err != nil {
-		t.Fatalf("runSimulate error: %v", err)
+		t.Fatalf("runSimulateCmd error: %v", err)
 	}
 
 	output := buf.String()
@@ -142,9 +142,9 @@ func TestSimulateShowsExecutionPlan(t *testing.T) {
 func TestSimulateShowsNodeAttributes(t *testing.T) {
 	path := writeTestDOT(t, testDOT)
 	var buf bytes.Buffer
-	err := runSimulate(path, &buf)
+	err := runSimulateCmd(path, &buf)
 	if err != nil {
-		t.Fatalf("runSimulate error: %v", err)
+		t.Fatalf("runSimulateCmd error: %v", err)
 	}
 
 	output := buf.String()
@@ -162,18 +162,18 @@ func TestSimulateInvalidDOT(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runSimulate(path, &buf)
+	err := runSimulateCmd(path, &buf)
 	if err == nil {
 		t.Fatal("expected error for invalid DOT")
 	}
-	if !strings.Contains(err.Error(), "parse pipeline") {
+	if !strings.Contains(err.Error(), "load pipeline") {
 		t.Errorf("expected parse error, got: %v", err)
 	}
 }
 
 func TestSimulateMissingFile(t *testing.T) {
 	var buf bytes.Buffer
-	err := runSimulate("/nonexistent/pipeline.dot", &buf)
+	err := runSimulateCmd("/nonexistent/pipeline.dot", &buf)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}

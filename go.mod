@@ -2,9 +2,12 @@ module github.com/2389-research/tracker
 
 go 1.25.5
 
+replace github.com/2389-research/dippin-lang => ../../dippin-lang
+
 require github.com/awalterschulze/gographviz v2.0.3+incompatible
 
 require (
+	github.com/2389-research/dippin-lang v0.1.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0

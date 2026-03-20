@@ -1,0 +1,48 @@
+workflow test_complex
+  start: init
+  exit: done
+  
+  defaults
+    model: gpt-4
+    provider: openai
+    retry_policy: standard
+    max_retries: 3
+    fidelity: strict
+  
+  agent init
+    label: "Initialize"
+    prompt: "Start the workflow"
+    model: claude-sonnet-4-5
+  
+  agent process
+    label: "Process Data"
+    prompt: "Process the input"
+    system_prompt: "You are a data processor"
+    max_turns: 5
+    reasoning_effort: high
+    fidelity: strict
+    auto_status: true
+  
+  tool verify
+    label: "Verify Results"
+    command: "verify.sh"
+    timeout: 30s
+    retry
+      policy: aggressive
+      max_retries: 5
+      retry_target: process
+  
+  human approve
+    label: "Approve?"
+    mode: choice
+    default: yes
+  
+  agent done
+    label: "Complete"
+  
+  edges
+    init -> process
+    process -> verify [label: "success"]
+    verify -> approve [label: "verified"]
+    approve -> done [label: "approved" condition: "ctx.choice == \"yes\""]
+    approve -> init [label: "retry" condition: "ctx.choice == \"no\""]

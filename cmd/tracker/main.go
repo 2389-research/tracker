@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/dippin-lang/parser"
 	"github.com/2389-research/tracker/agent"
 	"github.com/joho/godotenv"
 
@@ -95,18 +96,60 @@ func main() {
 	}
 }
 
+// detectPipelineFormat returns "dip" or "dot" based on file extension.
+func detectPipelineFormat(filename string) string {
+	ext := filepath.Ext(filename)
+	if ext == ".dip" {
+		return "dip"
+	}
+	return "dot" // default to DOT for .dot and unknown extensions
+}
+
+// loadPipeline reads and parses a pipeline file, auto-detecting format.
+// Returns a Graph ready for validation and execution.
+func loadPipeline(filename string) (*pipeline.Graph, error) {
+	format := detectPipelineFormat(filename)
+
+	fileBytes, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("read pipeline file: %w", err)
+	}
+
+	switch format {
+	case "dip":
+		return loadDippinPipeline(string(fileBytes), filename)
+	case "dot":
+		return pipeline.ParseDOT(string(fileBytes))
+	default:
+		return nil, fmt.Errorf("unknown pipeline format: %s", format)
+	}
+}
+
+// loadDippinPipeline parses a .dip file using dippin-lang parser
+// and converts to Tracker's Graph representation.
+func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
+	// Import the parser dynamically to avoid hard dependency
+	p := parser.NewParser(source, filename)
+	workflow, err := p.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parse Dippin file: %w", err)
+	}
+
+	graph, err := pipeline.FromDippinIR(workflow)
+	if err != nil {
+		return nil, fmt.Errorf("convert Dippin IR to graph: %w", err)
+	}
+
+	return graph, nil
+}
+
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error {
-	// Read and parse the DOT file.
-	dotBytes, err := os.ReadFile(dotFile)
+	// Read and parse the pipeline file (auto-detect .dip or .dot).
+	graph, err := loadPipeline(dotFile)
 	if err != nil {
-		return fmt.Errorf("read pipeline file: %w", err)
-	}
-
-	graph, err := pipeline.ParseDOT(string(dotBytes))
-	if err != nil {
-		return fmt.Errorf("parse pipeline: %w", err)
+		return fmt.Errorf("load pipeline: %w", err)
 	}
 
 	if err := pipeline.Validate(graph); err != nil {
@@ -225,13 +268,9 @@ func run(dotFile, workdir, checkpoint string, verbose bool, jsonOut bool) error 
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
 func runTUI(dotFile, workdir, checkpoint string, verbose bool) error {
-	dotBytes, err := os.ReadFile(dotFile)
+	graph, err := loadPipeline(dotFile)
 	if err != nil {
-		return fmt.Errorf("read pipeline file: %w", err)
-	}
-	graph, err := pipeline.ParseDOT(string(dotBytes))
-	if err != nil {
-		return fmt.Errorf("parse pipeline: %w", err)
+		return fmt.Errorf("load pipeline: %w", err)
 	}
 	if err := pipeline.Validate(graph); err != nil {
 		return fmt.Errorf("validate pipeline: %w", err)
@@ -443,10 +482,10 @@ func parseFlags(args []string) (runConfig, error) {
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, renderStartupBanner())
 	fmt.Fprintf(w, "Usage:\n")
-	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot> [flags]\n")
+	fmt.Fprintf(w, "  tracker [flags] <pipeline.dot|pipeline.dip> [flags]\n")
 	fmt.Fprintf(w, "  tracker setup\n")
-	fmt.Fprintf(w, "  tracker validate <pipeline.dot>\n")
-	fmt.Fprintf(w, "  tracker simulate <pipeline.dot>\n")
+	fmt.Fprintf(w, "  tracker validate <pipeline.dot|pipeline.dip>\n")
+	fmt.Fprintf(w, "  tracker simulate <pipeline.dot|pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
@@ -476,16 +515,16 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 
 	if cfg.mode == modeValidate {
 		if cfg.dotFile == "" {
-			return fmt.Errorf("usage: tracker validate <pipeline.dot>")
+			return fmt.Errorf("usage: tracker validate <pipeline.dot|pipeline.dip>")
 		}
-		return runValidate(cfg.dotFile, os.Stdout)
+		return runValidateCmd(cfg.dotFile, os.Stdout)
 	}
 
 	if cfg.mode == modeSimulate {
 		if cfg.dotFile == "" {
-			return fmt.Errorf("usage: tracker simulate <pipeline.dot>")
+			return fmt.Errorf("usage: tracker simulate <pipeline.dot|pipeline.dip>")
 		}
-		return runSimulate(cfg.dotFile, os.Stdout)
+		return runSimulateCmd(cfg.dotFile, os.Stdout)
 	}
 
 	if cfg.mode == modeAudit {

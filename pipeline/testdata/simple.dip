@@ -1,0 +1,18 @@
+workflow simple_pipeline
+  start: start
+  exit: done
+
+  agent start
+    label: "Start"
+
+  agent generate
+    label: "Generate Code"
+    prompt: "Write hello world"
+    model: claude-sonnet-4-5
+
+  agent done
+    label: "Done"
+
+  edges
+    start -> generate
+    generate -> done [label: "success"]

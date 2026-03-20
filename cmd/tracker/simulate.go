@@ -1,26 +1,21 @@
-// ABOUTME: Simulate subcommand — dry-runs a DOT pipeline without LLM calls.
+// ABOUTME: Simulate subcommand — dry-runs a pipeline (.dot or .dip) without LLM calls.
 // ABOUTME: Shows execution plan: node order, handlers, edges, conditions, and graph attributes.
 package main
 
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// runSimulate parses a DOT file and prints the execution plan without running anything.
-func runSimulate(dotFile string, w io.Writer) error {
-	dotBytes, err := os.ReadFile(dotFile)
+// runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
+// Auto-detects format based on file extension.
+func runSimulateCmd(pipelineFile string, w io.Writer) error {
+	graph, err := loadPipeline(pipelineFile)
 	if err != nil {
-		return fmt.Errorf("read pipeline file: %w", err)
-	}
-
-	graph, err := pipeline.ParseDOT(string(dotBytes))
-	if err != nil {
-		return fmt.Errorf("parse pipeline: %w", err)
+		return fmt.Errorf("load pipeline: %w", err)
 	}
 
 	if validationErr := pipeline.ValidateAll(graph); validationErr != nil && len(validationErr.Errors) > 0 {
@@ -31,7 +26,7 @@ func runSimulate(dotFile string, w io.Writer) error {
 		}
 	}
 
-	printSimHeader(w, graph, dotFile)
+	printSimHeader(w, graph, pipelineFile)
 	printSimNodes(w, graph)
 	printSimEdges(w, graph)
 	printSimExecutionPlan(w, graph)

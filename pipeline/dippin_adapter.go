@@ -1,0 +1,347 @@
+// ABOUTME: Adapter that converts Dippin IR (from dippin-lang parser) to Tracker's Graph model.
+// ABOUTME: Provides FromDippinIR() to enable tracker to execute .dip files natively.
+package pipeline
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/2389-research/dippin-lang/ir"
+)
+
+// FromDippinIR converts a Dippin IR Workflow to a Tracker Graph.
+// The resulting Graph is semantically equivalent to one produced by ParseDOT
+// for the same workflow, enabling transparent interoperability.
+//
+// Field mappings:
+//   - IR Workflow.Name → Graph.Name
+//   - IR Workflow.Start → Graph.StartNode
+//   - IR Workflow.Exit → Graph.ExitNode
+//   - IR Workflow.Defaults → Graph.Attrs (flattened)
+//   - IR Node → Graph.Node (with kind → shape mapping)
+//   - IR Edge → Graph.Edge (with condition serialization)
+//
+// Returns an error if:
+//   - workflow is nil
+//   - Start or Exit are empty
+//   - A node has an unknown NodeKind
+func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
+	if workflow == nil {
+		return nil, fmt.Errorf("nil workflow")
+	}
+	if workflow.Start == "" {
+		return nil, fmt.Errorf("workflow missing Start node")
+	}
+	if workflow.Exit == "" {
+		return nil, fmt.Errorf("workflow missing Exit node")
+	}
+
+	g := NewGraph(workflow.Name)
+	g.StartNode = workflow.Start
+	g.ExitNode = workflow.Exit
+
+	// Map workflow-level defaults to graph attributes
+	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
+
+	// Map IR nodes to Graph nodes
+	for _, irNode := range workflow.Nodes {
+		gNode, err := convertNode(irNode)
+		if err != nil {
+			return nil, fmt.Errorf("node %s: %w", irNode.ID, err)
+		}
+		g.AddNode(gNode)
+	}
+
+	// Map IR edges to Graph edges
+	for _, irEdge := range workflow.Edges {
+		gEdge := convertEdge(irEdge)
+		g.AddEdge(gEdge)
+	}
+
+	// Ensure start/exit nodes exist
+	if err := ensureStartExitNodes(g); err != nil {
+		return nil, err
+	}
+
+	return g, nil
+}
+
+// NodeKindToShape maps IR NodeKind to DOT shape strings.
+// This mapping ensures the Graph produced by FromDippinIR matches
+// the shape convention used by ParseDOT, maintaining handler compatibility.
+var nodeKindToShapeMap = map[ir.NodeKind]string{
+	ir.NodeAgent:    "box",           // → codergen
+	ir.NodeHuman:    "hexagon",       // → wait.human
+	ir.NodeTool:     "parallelogram", // → tool
+	ir.NodeParallel: "component",     // → parallel
+	ir.NodeFanIn:    "tripleoctagon", // → parallel.fan_in
+	ir.NodeSubgraph: "tab",           // → subgraph
+}
+
+// NodeKindToShape returns the DOT shape for a given NodeKind.
+// Returns ("", false) if the kind is not recognized.
+func NodeKindToShape(kind ir.NodeKind) (string, bool) {
+	shape, ok := nodeKindToShapeMap[kind]
+	return shape, ok
+}
+
+// convertNode transforms an IR Node to a Graph Node.
+// Extracts configuration from the NodeConfig union into flat string attrs.
+func convertNode(irNode *ir.Node) (*Node, error) {
+	shape, ok := NodeKindToShape(irNode.Kind)
+	if !ok {
+		return nil, fmt.Errorf("unknown node kind: %s", irNode.Kind)
+	}
+
+	gNode := &Node{
+		ID:    irNode.ID,
+		Shape: shape,
+		Label: irNode.Label,
+		Attrs: make(map[string]string),
+	}
+
+	// Extract kind-specific config into attrs
+	if err := extractNodeAttrs(irNode.Config, gNode.Attrs); err != nil {
+		return nil, err
+	}
+
+	// Extract retry config
+	extractRetryAttrs(irNode.Retry, gNode.Attrs)
+
+	return gNode, nil
+}
+
+// extractNodeAttrs flattens IR NodeConfig into string attributes.
+// Each NodeConfig type maps to specific attribute keys expected by handlers.
+// Handles both value and pointer types for compatibility.
+func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
+	if config == nil {
+		return nil
+	}
+
+	switch cfg := config.(type) {
+	case ir.AgentConfig:
+		extractAgentAttrs(cfg, attrs)
+	case *ir.AgentConfig:
+		extractAgentAttrs(*cfg, attrs)
+
+	case ir.HumanConfig:
+		extractHumanAttrs(cfg, attrs)
+	case *ir.HumanConfig:
+		extractHumanAttrs(*cfg, attrs)
+
+	case ir.ToolConfig:
+		extractToolAttrs(cfg, attrs)
+	case *ir.ToolConfig:
+		extractToolAttrs(*cfg, attrs)
+
+	case ir.ParallelConfig:
+		extractParallelAttrs(cfg, attrs)
+	case *ir.ParallelConfig:
+		extractParallelAttrs(*cfg, attrs)
+
+	case ir.FanInConfig:
+		extractFanInAttrs(cfg, attrs)
+	case *ir.FanInConfig:
+		extractFanInAttrs(*cfg, attrs)
+
+	case ir.SubgraphConfig:
+		extractSubgraphAttrs(cfg, attrs)
+	case *ir.SubgraphConfig:
+		extractSubgraphAttrs(*cfg, attrs)
+
+	default:
+		return fmt.Errorf("unknown config type: %T", config)
+	}
+
+	return nil
+}
+
+func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
+	if cfg.Prompt != "" {
+		attrs["prompt"] = cfg.Prompt
+	}
+	if cfg.SystemPrompt != "" {
+		attrs["system_prompt"] = cfg.SystemPrompt
+	}
+	if cfg.Model != "" {
+		attrs["model"] = cfg.Model
+	}
+	if cfg.Provider != "" {
+		attrs["provider"] = cfg.Provider
+	}
+	if cfg.MaxTurns > 0 {
+		attrs["max_turns"] = strconv.Itoa(cfg.MaxTurns)
+	}
+	if cfg.CmdTimeout > 0 {
+		attrs["cmd_timeout"] = cfg.CmdTimeout.String()
+	}
+	if cfg.CacheTools {
+		attrs["cache_tools"] = "true"
+	}
+	if cfg.Compaction != "" {
+		attrs["compaction"] = cfg.Compaction
+	}
+	if cfg.CompactionThreshold > 0 {
+		attrs["compaction_threshold"] = fmt.Sprintf("%.2f", cfg.CompactionThreshold)
+	}
+	if cfg.ReasoningEffort != "" {
+		attrs["reasoning_effort"] = cfg.ReasoningEffort
+	}
+	if cfg.Fidelity != "" {
+		attrs["fidelity"] = cfg.Fidelity
+	}
+	if cfg.AutoStatus {
+		attrs["auto_status"] = "true"
+	}
+	if cfg.GoalGate {
+		attrs["goal_gate"] = "true"
+	}
+}
+
+func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {
+	if cfg.Mode != "" {
+		attrs["mode"] = cfg.Mode
+	}
+	if cfg.Default != "" {
+		attrs["default"] = cfg.Default
+	}
+}
+
+func extractToolAttrs(cfg ir.ToolConfig, attrs map[string]string) {
+	if cfg.Command != "" {
+		attrs["tool_command"] = cfg.Command
+	}
+	if cfg.Timeout > 0 {
+		attrs["timeout"] = cfg.Timeout.String()
+	}
+}
+
+func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
+	if len(cfg.Targets) > 0 {
+		attrs["parallel_targets"] = strings.Join(cfg.Targets, ",")
+	}
+}
+
+func extractFanInAttrs(cfg ir.FanInConfig, attrs map[string]string) {
+	if len(cfg.Sources) > 0 {
+		attrs["fan_in_sources"] = strings.Join(cfg.Sources, ",")
+	}
+}
+
+func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
+	if cfg.Ref != "" {
+		attrs["subgraph_ref"] = cfg.Ref
+	}
+	if len(cfg.Params) > 0 {
+		// Serialize params as comma-separated key=value pairs
+		var pairs []string
+		for k, v := range cfg.Params {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", k, v))
+		}
+		attrs["subgraph_params"] = strings.Join(pairs, ",")
+	}
+}
+
+// extractRetryAttrs converts IR RetryConfig to string attributes.
+func extractRetryAttrs(retry ir.RetryConfig, attrs map[string]string) {
+	if retry.Policy != "" {
+		attrs["retry_policy"] = retry.Policy
+	}
+	if retry.MaxRetries > 0 {
+		attrs["max_retries"] = strconv.Itoa(retry.MaxRetries)
+	}
+	if retry.RetryTarget != "" {
+		attrs["retry_target"] = retry.RetryTarget
+	}
+	if retry.FallbackTarget != "" {
+		attrs["fallback_target"] = retry.FallbackTarget
+	}
+}
+
+// extractWorkflowDefaults maps IR WorkflowDefaults to graph-level attributes.
+// These provide fallback values for nodes that don't specify per-node config.
+func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]string) {
+	if defaults.Model != "" {
+		attrs["default_model"] = defaults.Model
+	}
+	if defaults.Provider != "" {
+		attrs["default_provider"] = defaults.Provider
+	}
+	if defaults.RetryPolicy != "" {
+		attrs["default_retry_policy"] = defaults.RetryPolicy
+	}
+	if defaults.MaxRetries > 0 {
+		attrs["default_max_retries"] = strconv.Itoa(defaults.MaxRetries)
+	}
+	if defaults.Fidelity != "" {
+		attrs["default_fidelity"] = defaults.Fidelity
+	}
+	if defaults.MaxRestarts > 0 {
+		attrs["max_restarts"] = strconv.Itoa(defaults.MaxRestarts)
+	}
+	if defaults.RestartTarget != "" {
+		attrs["restart_target"] = defaults.RestartTarget
+	}
+	if defaults.CacheTools {
+		attrs["cache_tools"] = "true"
+	}
+	if defaults.Compaction != "" {
+		attrs["default_compaction"] = defaults.Compaction
+	}
+}
+
+// convertEdge transforms an IR Edge to a Graph Edge.
+// Serializes the parsed Condition back to a raw string for the tracker engine.
+func convertEdge(irEdge *ir.Edge) *Edge {
+	gEdge := &Edge{
+		From:  irEdge.From,
+		To:    irEdge.To,
+		Label: irEdge.Label,
+		Attrs: make(map[string]string),
+	}
+
+	// Serialize condition if present
+	if irEdge.Condition != nil {
+		gEdge.Condition = irEdge.Condition.Raw
+		gEdge.Attrs["condition"] = irEdge.Condition.Raw
+	}
+
+	// Preserve weight
+	if irEdge.Weight > 0 {
+		gEdge.Attrs["weight"] = strconv.Itoa(irEdge.Weight)
+	}
+
+	// Mark restart edges
+	if irEdge.Restart {
+		gEdge.Attrs["restart"] = "true"
+	}
+
+	return gEdge
+}
+
+// ensureStartExitNodes verifies that the start and exit nodes exist in the graph.
+// Returns an error if either is missing.
+func ensureStartExitNodes(g *Graph) error {
+	if _, ok := g.Nodes[g.StartNode]; !ok {
+		return fmt.Errorf("start node %q not found in graph", g.StartNode)
+	}
+	if _, ok := g.Nodes[g.ExitNode]; !ok {
+		return fmt.Errorf("exit node %q not found in graph", g.ExitNode)
+	}
+
+	// Ensure start node has Mdiamond shape
+	startNode := g.Nodes[g.StartNode]
+	if startNode.Shape != "Mdiamond" {
+		startNode.Shape = "Mdiamond"
+	}
+
+	// Ensure exit node has Msquare shape
+	exitNode := g.Nodes[g.ExitNode]
+	if exitNode.Shape != "Msquare" {
+		exitNode.Shape = "Msquare"
+	}
+
+	return nil
+}

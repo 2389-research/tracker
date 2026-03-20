@@ -35,7 +35,7 @@ const warningOnlyDOT = `digraph test {
 func TestValidateValid(t *testing.T) {
 	path := writeTestDOT(t, validDOT)
 	var buf bytes.Buffer
-	err := runValidate(path, &buf)
+	err := runValidateCmd(path, &buf)
 	if err != nil {
 		t.Fatalf("expected no error for valid DOT, got: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestValidateValid(t *testing.T) {
 func TestValidateErrors(t *testing.T) {
 	path := writeTestDOT(t, invalidDOTNoStart)
 	var buf bytes.Buffer
-	err := runValidate(path, &buf)
+	err := runValidateCmd(path, &buf)
 	if err == nil {
 		t.Fatal("expected error for invalid DOT")
 	}
@@ -67,7 +67,7 @@ func TestValidateErrors(t *testing.T) {
 func TestValidateWarningsOnly(t *testing.T) {
 	path := writeTestDOT(t, warningOnlyDOT)
 	var buf bytes.Buffer
-	err := runValidate(path, &buf)
+	err := runValidateCmd(path, &buf)
 	if err != nil {
 		t.Fatalf("warnings should not cause error, got: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestValidateWarningsOnly(t *testing.T) {
 
 func TestValidateMissingFile(t *testing.T) {
 	var buf bytes.Buffer
-	err := runValidate("/nonexistent/file.dot", &buf)
+	err := runValidateCmd("/nonexistent/file.dot", &buf)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -92,12 +92,12 @@ func TestValidateInvalidSyntax(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	err := runValidate(path, &buf)
+	err := runValidateCmd(path, &buf)
 	if err == nil {
 		t.Fatal("expected error for invalid syntax")
 	}
-	if !strings.Contains(err.Error(), "parse pipeline") {
-		t.Errorf("expected parse error, got: %v", err)
+	if !strings.Contains(err.Error(), "load pipeline") {
+		t.Errorf("expected load pipeline error, got: %v", err)
 	}
 }
 
