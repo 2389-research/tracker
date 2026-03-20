@@ -338,8 +338,10 @@ workflow FixTrackerVisibility
     RalphIterate -> CheckCompletion
     CheckCompletion -> Exit  when ctx.tool_stdout = complete  label: "all done"
     CheckCompletion -> CheckBudget  when ctx.tool_stdout = continue  label: "more work"
+    CheckCompletion -> CheckBudget  label: "fallback — assume continue"
     CheckBudget -> IncrementCounter  when ctx.tool_stdout = budget_ok  label: "next iteration"  restart: true
     CheckBudget -> FinalBuild  when ctx.tool_stdout = budget_exhausted  label: "out of iterations"
+    CheckBudget -> FinalBuild  label: "fallback — assume exhausted"
     FinalBuild -> WrapUp  when ctx.tool_stdout = build_pass  label: "build ok"
-    FinalBuild -> WrapUp  when ctx.tool_stdout != build_pass  label: "build issues"
+    FinalBuild -> WrapUp  label: "build issues"
     WrapUp -> Exit

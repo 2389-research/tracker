@@ -3,6 +3,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/2389-research/tracker/llm"
 )
 
@@ -17,6 +19,19 @@ const (
 	NodeRetrying
 )
 
+// NodePhase represents the current activity phase of a running node.
+type NodePhase int
+
+const (
+	PhaseIdle NodePhase = iota
+	PhasePreparing
+	PhaseWaiting
+	PhaseThinking
+	PhaseTooling
+	PhaseCompacting
+	PhaseRouting
+)
+
 // NodeEntry identifies a node in the pipeline with its display label.
 type NodeEntry struct {
 	ID    string
@@ -25,11 +40,13 @@ type NodeEntry struct {
 
 // nodeInfo holds per-node mutable state.
 type nodeInfo struct {
-	status   NodeState
-	errMsg   string
-	thinking bool
-	retryMsg string
-	waiting  bool // true when waiting for provider to respond (before thinking starts)
+	status       NodeState
+	errMsg       string
+	thinking     bool
+	retryMsg     string
+	waiting      bool      // true when waiting for provider to respond (before thinking starts)
+	phase        NodePhase // current activity phase
+	phaseStarted time.Time // when current phase started (for elapsed time tracking)
 }
 
 // StateStore is the central state container for the TUI.
@@ -100,6 +117,22 @@ func (s *StateStore) IsWaiting(id string) bool {
 		return ni.waiting
 	}
 	return false
+}
+
+// GetPhase returns the current activity phase of a node.
+func (s *StateStore) GetPhase(id string) NodePhase {
+	if ni, ok := s.nodeState[id]; ok {
+		return ni.phase
+	}
+	return PhaseIdle
+}
+
+// PhaseElapsed returns how long the node has been in its current phase.
+func (s *StateStore) PhaseElapsed(id string) time.Duration {
+	if ni, ok := s.nodeState[id]; ok && ni.phase != PhaseIdle && !ni.phaseStarted.IsZero() {
+		return time.Since(ni.phaseStarted)
+	}
+	return 0
 }
 
 // PipelineDone returns whether the pipeline has completed (success or failure).
