@@ -1,0 +1,268 @@
+workflow AskAndExecute
+  goal: "Ask the user what they want via freeform input, then execute using multi-model parallel implementation, validation, cross-review, and conditional human approval."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 3
+    fidelity: summary:medium
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  tool SetupWorkspace
+    label: "Setup Workspace"
+    command:
+      set -eu
+      mkdir -p .ai .ai/drafts .ai/runs
+      printf 'workspace-ready'
+
+  human AskUser
+    label: "What would you like to do?"
+    mode: freeform
+
+  agent InterpretRequest
+    label: "Interpret Request"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      The user was asked what they want to do and responded with freeform text. Interpret their request and produce a concrete, actionable task specification including: scope, expected artifacts, success criteria, and any constraints. Be precise and unambiguous so that independent implementation agents can work from this spec without further clarification.
+
+  parallel ImplementParallel -> ImplementClaude, ImplementCodex, ImplementGemini
+
+  agent ImplementClaude
+    label: "Claude Implementation"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: summary:high
+    prompt:
+      Implement the task specification end-to-end. Follow the interpreted spec precisely. Produce working code, tests, and documentation as required. Provide a concrete summary of all changes made and validation evidence.
+
+  agent ImplementCodex
+    label: "Codex Implementation"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    fidelity: summary:high
+    prompt:
+      Implement the task specification end-to-end. Follow the interpreted spec precisely. Focus on implementation correctness, test coverage, and clean code. Provide a concrete summary of all changes made and validation evidence.
+
+  agent ImplementGemini
+    label: "Gemini Implementation"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    fidelity: summary:high
+    prompt:
+      Implement the task specification end-to-end. Follow the interpreted spec precisely. Focus on robustness, edge cases, and verification. Provide a concrete summary of all changes made and validation evidence.
+
+  fan_in ImplementJoin <- ImplementClaude, ImplementCodex, ImplementGemini
+
+  tool ValidateBuild
+    label: "Validate Build and Tests"
+    command:
+      set -eu
+      if [ -f go.mod ]; then
+        go build ./... >/tmp/aae-build.log 2>&1 || { cat /tmp/aae-build.log; exit 1; }
+        go test ./... >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }
+        cat /tmp/aae-test.log
+        printf 'validation-pass-go'
+        exit 0
+      fi
+      if [ -f Package.swift ]; then
+        swift build >/tmp/aae-build.log 2>&1
+        swift test >/tmp/aae-test.log 2>&1 || true
+        cat /tmp/aae-build.log
+        cat /tmp/aae-test.log
+        if rg -n 'error:' /tmp/aae-build.log >/dev/null 2>&1; then exit 1; fi
+        if rg -n 'failed' /tmp/aae-test.log >/dev/null 2>&1; then exit 1; fi
+        printf 'validation-pass-swift'
+        exit 0
+      fi
+      if [ -f package.json ]; then
+        npm test >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }
+        printf 'validation-pass-node'
+        exit 0
+      fi
+      if [ -f pyproject.toml ]; then
+        uv run pytest >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }
+        cat /tmp/aae-test.log
+        printf 'validation-pass-python'
+        exit 0
+      fi
+      printf 'validation-pass-no-known-build-system'
+
+  agent CommitWork
+    label: "Commit Work"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Prepare and execute a clean commit for implementation changes if there are staged/unstaged changes. Write a conventional commit message describing the work done. If no changes are present, report that no commit was needed. Include commit hash in your summary.
+
+  parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
+
+  agent ReviewClaude
+    label: "Claude Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Review the implementation against the original task specification. Evaluate correctness, completeness, code quality, and test coverage. Return clear PASS/FAIL reasoning and required fixes.
+
+  agent ReviewCodex
+    label: "Codex Review"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Review the implementation for quality, regression risk, and spec compliance. Return clear PASS/FAIL reasoning and required fixes.
+
+  agent ReviewGemini
+    label: "Gemini Review"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Review the implementation for robustness, edge case handling, and spec completeness. Return clear PASS/FAIL reasoning and required fixes.
+
+  fan_in ReviewsJoin <- ReviewClaude, ReviewCodex, ReviewGemini
+
+  parallel CritiquesParallel -> CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
+
+  agent CritiqueClaudeOnCodex
+    label: "Claude Critique of Codex Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Critique the Codex review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueClaudeOnGemini
+    label: "Claude Critique of Gemini Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueCodexOnClaude
+    label: "Codex Critique of Claude Review"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Critique the Claude review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueCodexOnGemini
+    label: "Codex Critique of Gemini Review"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueGeminiOnClaude
+    label: "Gemini Critique of Claude Review"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Critique the Claude review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueGeminiOnCodex
+    label: "Gemini Critique of Codex Review"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Critique the Codex review for missing checks, weak evidence, or mistaken conclusions.
+
+  fan_in CritiquesJoin <- CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
+
+  agent ReviewAnalysis
+    label: "Review Analysis"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    retry_target: ImplementClaude
+    prompt:
+      Synthesize all reviews and critiques into one verdict. If models broadly agree the work is correct and complete, return success. If rework is needed but models agree on what to fix, return retry. If models fundamentally disagree on quality or correctness, return disagree to escalate to human approval.
+
+  human HumanApproval
+    label: "Models disagree. Review the work and decide."
+
+  agent ApproveCommit
+    label: "Approve and Commit"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The human approved the work. Ensure all changes are committed with a clean conventional commit message. Include commit hash in summary.
+
+  agent ReworkInterpret
+    label: "Incorporate Rework Feedback"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      The human requested rework. Review the review analyses and human feedback to produce an updated task specification incorporating the required changes. Be specific about what must change.
+
+  agent FailureSummary
+    label: "Failure Summary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      The human rejected the work. Summarize what was attempted, why it failed to satisfy, and concrete next steps if the user wants to try again.
+
+  edges
+    Start -> SetupWorkspace
+    SetupWorkspace -> AskUser
+    AskUser -> InterpretRequest
+    InterpretRequest -> ImplementParallel
+    ImplementParallel -> ImplementClaude
+    ImplementParallel -> ImplementCodex
+    ImplementParallel -> ImplementGemini
+    ImplementClaude -> ImplementJoin
+    ImplementCodex -> ImplementJoin
+    ImplementGemini -> ImplementJoin
+    ImplementJoin -> ValidateBuild
+    ValidateBuild -> CommitWork  when ctx.outcome = success  label: validated
+    ValidateBuild -> ImplementClaude  when ctx.outcome = fail  label: fix_validation
+    CommitWork -> ReviewParallel
+    ReviewParallel -> ReviewClaude
+    ReviewParallel -> ReviewCodex
+    ReviewParallel -> ReviewGemini
+    ReviewClaude -> ReviewsJoin
+    ReviewCodex -> ReviewsJoin
+    ReviewGemini -> ReviewsJoin
+    ReviewsJoin -> CritiquesParallel
+    CritiquesParallel -> CritiqueClaudeOnCodex
+    CritiquesParallel -> CritiqueClaudeOnGemini
+    CritiquesParallel -> CritiqueCodexOnClaude
+    CritiquesParallel -> CritiqueCodexOnGemini
+    CritiquesParallel -> CritiqueGeminiOnClaude
+    CritiquesParallel -> CritiqueGeminiOnCodex
+    CritiqueClaudeOnCodex -> CritiquesJoin
+    CritiqueClaudeOnGemini -> CritiquesJoin
+    CritiqueCodexOnClaude -> CritiquesJoin
+    CritiqueCodexOnGemini -> CritiquesJoin
+    CritiqueGeminiOnClaude -> CritiquesJoin
+    CritiqueGeminiOnCodex -> CritiquesJoin
+    CritiquesJoin -> ReviewAnalysis
+    ReviewAnalysis -> CommitWork  when ctx.outcome = success  label: pass
+    ReviewAnalysis -> ImplementClaude  when ctx.outcome = retry  label: rework
+    ReviewAnalysis -> HumanApproval  when ctx.outcome = disagree  label: disagree
+    HumanApproval -> ApproveCommit  label: "[A] Approve"
+    HumanApproval -> ReworkInterpret  label: "[R] Rework"
+    HumanApproval -> FailureSummary  label: "[X] Reject"
+    ReworkInterpret -> ImplementParallel
+    ApproveCommit -> Exit
+    FailureSummary -> Exit

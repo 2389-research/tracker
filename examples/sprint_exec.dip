@@ -1,0 +1,260 @@
+workflow SprintExec
+  goal: "Execute the next incomplete sprint from .ai/ledger.tsv through implementation, validation, multi-model review, and completion."
+  start: Start
+  exit: Exit
+
+  defaults
+    fidelity: summary:medium
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  tool EnsureLedger
+    label: "Ensure Ledger"
+    command:
+      set -eu
+      mkdir -p .ai .ai/drafts .ai/sprints
+      if [ ! -f .ai/ledger.tsv ]; then
+        now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        printf 'sprint_id\ttitle\tstatus\tcreated_at\tupdated_at\n001\tBootstrap sprint\tplanned\t%s\t%s\n' "$now" "$now" > .ai/ledger.tsv
+      fi
+      printf 'ledger-ready'
+
+  agent FindNextSprint
+    label: "Find Next Sprint"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Identify the next non-completed sprint in .ai/ledger.tsv and summarize the target sprint ID and why it is next.
+
+  tool SetCurrentSprint
+    label: "Set Current Sprint"
+    command:
+      set -eu
+      target=$(awk -F '\t' 'NR>1 && $3!~/^completed$/ && $3!~/^skipped$/{print $1; exit}' .ai/ledger.tsv)
+      if [ -z "$target" ]; then
+        target=$(awk -F '\t' 'NR>1 && $3!~/^completed$/{print $1; exit}' .ai/ledger.tsv)
+      fi
+      if [ -z "$target" ]; then
+        target=$(awk -F '\t' 'END{print $1}' .ai/ledger.tsv)
+      fi
+      printf '%s' "$target" > .ai/current_sprint_id.txt
+      printf 'current-%s' "$target"
+
+  agent ReadSprint
+    label: "Read Sprint"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Read the target sprint document under .ai/sprints/SPRINT-<id>.md and summarize requirements, DoD checklist status, and expected artifacts.
+
+  tool MarkInProgress
+    label: "Mark In Progress"
+    command:
+      set -eu
+      target=$(cat .ai/current_sprint_id.txt)
+      now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      awk -F '\t' -v OFS='\t' -v target="$target" -v now="$now" '
+      NR==1 {print; next}
+      { if ($1==target) { $3="in_progress"; $5=now }; print }
+      ' .ai/ledger.tsv > .ai/ledger.tsv.tmp
+      mv .ai/ledger.tsv.tmp .ai/ledger.tsv
+      printf 'in_progress-%s' "$target"
+
+  agent ImplementSprint
+    label: "Implement Sprint"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: summary:high
+    prompt:
+      Implement the sprint requirements end-to-end. If prior review/critique context exists, treat those findings as required fixes. Update the sprint doc checklist as work is completed, and provide a concrete summary of changes and validation evidence.
+
+  tool ValidateBuild
+    label: "Validate Build and Tests"
+    command:
+      set -eu
+      if [ -f go.mod ]; then
+        go build ./... >/tmp/sprint-exec-build.log 2>&1 || { cat /tmp/sprint-exec-build.log; exit 1; }
+        go test ./... >/tmp/sprint-exec-test.log 2>&1 || { cat /tmp/sprint-exec-test.log; exit 1; }
+        cat /tmp/sprint-exec-test.log
+        printf 'validation-pass-go'
+        exit 0
+      fi
+      if [ -f Package.swift ]; then
+        swift build >/tmp/sprint-exec-build.log 2>&1
+        swift test >/tmp/sprint-exec-test.log 2>&1 || true
+        cat /tmp/sprint-exec-build.log
+        cat /tmp/sprint-exec-test.log
+        if rg -n 'error:' /tmp/sprint-exec-build.log >/dev/null 2>&1; then exit 1; fi
+        if rg -n 'failed' /tmp/sprint-exec-test.log >/dev/null 2>&1; then exit 1; fi
+        printf 'validation-pass-swift'
+        exit 0
+      fi
+      if [ -f package.json ]; then
+        npm test >/tmp/sprint-exec-test.log 2>&1 || { cat /tmp/sprint-exec-test.log; exit 1; }
+        printf 'validation-pass-node'
+        exit 0
+      fi
+      printf 'validation-pass-no-known-build-system'
+
+  agent CommitSprintWork
+    label: "Commit Sprint Work"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Prepare and execute a clean commit for sprint implementation changes if there are staged/unstaged changes. If no changes are present, report that no commit was needed. Include commit hash in your summary.
+
+  parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
+
+  agent ReviewClaude
+    label: "Claude Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Review sprint execution thoroughly: sprint doc checklist completion, implementation correctness, and validation evidence. Return clear PASS/FAIL reasoning and required fixes.
+
+  agent ReviewCodex
+    label: "Codex Review"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Review sprint execution for implementation quality, regression risk, and checklist completeness. Return clear PASS/FAIL reasoning and required fixes.
+
+  agent ReviewGemini
+    label: "Gemini Review"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Review sprint execution for delivery robustness, test coverage, and checklist completeness. Return clear PASS/FAIL reasoning and required fixes.
+
+  fan_in ReviewsJoin <- ReviewClaude, ReviewCodex, ReviewGemini
+
+  parallel CritiquesParallel -> CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
+
+  agent CritiqueClaudeOnCodex
+    label: "Claude Critique of Codex Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Critique the Codex review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueClaudeOnGemini
+    label: "Claude Critique of Gemini Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueCodexOnClaude
+    label: "Codex Critique of Claude Review"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Critique the Claude review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueCodexOnGemini
+    label: "Codex Critique of Gemini Review"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueGeminiOnClaude
+    label: "Gemini Critique of Claude Review"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Critique the Claude review for missing checks, weak evidence, or mistaken conclusions.
+
+  agent CritiqueGeminiOnCodex
+    label: "Gemini Critique of Codex Review"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Critique the Codex review for missing checks, weak evidence, or mistaken conclusions.
+
+  fan_in CritiquesJoin <- CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
+
+  agent ReviewAnalysis
+    label: "Review Analysis"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    retry_target: ImplementSprint
+    prompt:
+      Synthesize all reviews and critiques into one verdict. Return success only if sprint is truly complete and checklist is satisfied. Return retry if rework is needed. Return fail if blocked.
+
+  tool CompleteSprint
+    label: "Complete Sprint"
+    command:
+      set -eu
+      target=$(cat .ai/current_sprint_id.txt)
+      now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      awk -F '\t' -v OFS='\t' -v target="$target" -v now="$now" '
+      NR==1 {print; next}
+      { if ($1==target) { $3="completed"; $5=now }; print }
+      ' .ai/ledger.tsv > .ai/ledger.tsv.tmp
+      mv .ai/ledger.tsv.tmp .ai/ledger.tsv
+      printf 'completed-%s' "$target"
+
+  agent FailureSummary
+    label: "Failure Summary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Summarize why sprint execution failed, what remains unresolved, and concrete next steps for recovery.
+
+  edges
+    Start -> EnsureLedger
+    EnsureLedger -> FindNextSprint
+    FindNextSprint -> SetCurrentSprint
+    SetCurrentSprint -> ReadSprint
+    ReadSprint -> MarkInProgress
+    MarkInProgress -> ImplementSprint
+    ImplementSprint -> ValidateBuild
+    ValidateBuild -> CommitSprintWork  when ctx.outcome = success  label: validated
+    ValidateBuild -> ImplementSprint  when ctx.outcome = fail  label: fix_validation
+    CommitSprintWork -> ReviewParallel
+    ReviewParallel -> ReviewClaude
+    ReviewParallel -> ReviewCodex
+    ReviewParallel -> ReviewGemini
+    ReviewClaude -> ReviewsJoin
+    ReviewCodex -> ReviewsJoin
+    ReviewGemini -> ReviewsJoin
+    ReviewsJoin -> CritiquesParallel
+    CritiquesParallel -> CritiqueClaudeOnCodex
+    CritiquesParallel -> CritiqueClaudeOnGemini
+    CritiquesParallel -> CritiqueCodexOnClaude
+    CritiquesParallel -> CritiqueCodexOnGemini
+    CritiquesParallel -> CritiqueGeminiOnClaude
+    CritiquesParallel -> CritiqueGeminiOnCodex
+    CritiqueClaudeOnCodex -> CritiquesJoin
+    CritiqueClaudeOnGemini -> CritiquesJoin
+    CritiqueCodexOnClaude -> CritiquesJoin
+    CritiqueCodexOnGemini -> CritiquesJoin
+    CritiqueGeminiOnClaude -> CritiquesJoin
+    CritiqueGeminiOnCodex -> CritiquesJoin
+    CritiquesJoin -> ReviewAnalysis
+    ReviewAnalysis -> CompleteSprint  when ctx.outcome = success  label: pass
+    ReviewAnalysis -> ImplementSprint  when ctx.outcome = retry  label: rework
+    ReviewAnalysis -> FailureSummary  when ctx.outcome = fail  label: fail
+    CompleteSprint -> Exit
+    FailureSummary -> Exit

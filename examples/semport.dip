@@ -1,0 +1,226 @@
+workflow Semport
+  goal: "Build OmniAgentsSDK: port all files from openai-agents-python to Swift (Phase 1: port all, Phase 2: fix until builds)."
+  start: Start
+  exit: Exit
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  tool InitLedger
+    label: "Init semport ledger"
+    command:
+      set -eu
+      mkdir -p .ai/semport semport
+      if [ ! -f semport/ledger.tsv ]; then
+        printf 'filepath\tiso8601\tdisposition\n' > semport/ledger.tsv
+        for f in \
+          agent.py agent_output.py agent_tool_input.py agent_tool_state.py \
+          exceptions.py items.py result.py run.py run_config.py run_context.py \
+          run_state.py run_error_handlers.py model_settings.py usage.py \
+          strict_schema.py prompts.py function_schema.py stream_events.py \
+          lifecycle.py \
+          tool.py tool_context.py tool_guardrails.py \
+          guardrail.py \
+          handoffs/__init__.py handoffs/history.py \
+          extensions/handoff_filters.py extensions/handoff_prompt.py \
+          memory/session.py memory/session_settings.py memory/util.py \
+          models/interface.py models/multi_provider.py \
+          run_internal/run_loop.py run_internal/run_steps.py \
+          run_internal/turn_preparation.py run_internal/turn_resolution.py \
+          run_internal/tool_execution.py run_internal/tool_actions.py \
+          run_internal/tool_planning.py run_internal/tool_use_tracker.py \
+          run_internal/guardrails.py run_internal/items.py \
+          run_internal/streaming.py run_internal/approvals.py \
+          run_internal/error_handlers.py run_internal/session_persistence.py \
+          tracing/spans.py tracing/traces.py tracing/context.py \
+          tracing/processor_interface.py tracing/span_data.py \
+          tracing/create.py tracing/setup.py tracing/scope.py; do
+          if [ -f "references/openai-agents-python/src/agents/$f" ]; then
+            printf '%s\t%s\tnew\n' "$f" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          fi
+        done >> semport/ledger.tsv
+        echo "Ledger: $(grep -c 'new' semport/ledger.tsv) files to port"
+      fi
+
+  tool PickFile
+    label: "Pick next file (exit 1 when done)"
+    command:
+      set -eu
+      next_row=$(awk -F '\t' 'NR>1 && $3=="new"{print; exit}' semport/ledger.tsv || true)
+      if [ -z "$next_row" ]; then
+        printf 'ALL_PORTED'
+        exit 1
+      fi
+      printf '%s\n' "$next_row" > .ai/semport/current_file.tsv
+      filepath=$(printf '%s' "$next_row" | cut -f1)
+      cp "references/openai-agents-python/src/agents/$filepath" .ai/semport/current_source.py
+      printf 'Picked: %s' "$filepath"
+
+  tool LoadSource
+    label: "Load Python source + existing Swift files"
+    command:
+      set -eu
+      filepath=$(cut -f1 .ai/semport/current_file.tsv)
+      printf '=== Python Source: %s ===\n' "$filepath"
+      cat .ai/semport/current_source.py
+      printf '\n\n=== Existing OmniAgentsSDK Swift files ===\n'
+      find Sources/OmniAgentsSDK -name '*.swift' -type f | sort
+      printf '\n\n=== OmniAICore public types ===\n'
+      grep -h 'public.*struct \|public.*protocol \|public.*class \|public.*enum ' Sources/OmniAICore/*.swift 2>/dev/null | head -50 || true
+
+  agent PortFile
+    label: "Port to Swift (GPT-5.2)"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      You are building OmniAgentsSDK — a clean Swift agent framework ported from the OpenAI Agents Python SDK. The Python source and existing Swift files are shown above.
+
+      Port this Python file to Swift. The ONLY dependency is OmniAICore (import OmniAICore), which provides: Client, Request, Response, Message, ContentPart, Tool, ToolCall, ToolResult, JSONSchema, JSONValue, StreamEvent, Usage, FinishReason.
+
+      Swift rules:
+      - Target: Sources/OmniAgentsSDK/
+      - Swift 5 language mode, minimal concurrency. Use async/await. Mark closures @Sendable when stored.
+      - Protocols for abstractions. Codable for serialization. Generics where Python uses TypeVar.
+      - Function types CANNOT have argument labels: write (_ ctx: Foo, _ input: Bar) -> Baz NOT (ctx: Foo, input: Bar) -> Baz.
+      - Use @escaping for closures in properties. Avoid bare 'any Protocol' in stored properties.
+      - If you reference types from OTHER files not yet created (Agent, Runner, RunResult, etc.), add a // MARK: - Forward Declarations section with placeholder structs/protocols. These will be replaced later.
+      - DO NOT skip or simplify the port. Include ALL types, ALL methods, ALL logic from the Python.
+
+      Output COMPLETE Swift inside:
+      ```swift:Sources/OmniAgentsSDK/FileName.swift
+      // code
+      ```
+      You may output multiple files. The path after the colon is where the file will be written.
+
+  tool WriteFile
+    label: "Write Swift file(s)"
+    command:
+      set -eu
+      RUN_DIR=$(ls -dt .ai/attractor-runs/semport-* | head -1)
+      response="$RUN_DIR/PortFile/response.md"
+      if [ ! -f "$response" ]; then
+        printf 'no response'
+        exit 1
+      fi
+      python3 -c "
+      import re, sys, os
+      text = open('$response').read()
+      blocks = re.findall(r'\x60\x60\x60swift:([^\n]+)\n(.*?)\x60\x60\x60', text, re.DOTALL)
+      if not blocks:
+          print('no swift blocks found', file=sys.stderr)
+          sys.exit(1)
+      for path, code in blocks:
+          path = path.strip()
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          with open(path, 'w') as f:
+              f.write(code)
+          print(f'Wrote {path} ({len(code)} bytes)')
+      "
+
+  tool MarkPorted
+    label: "Mark file as ported"
+    command:
+      set -eu
+      fpath=$(cut -f1 .ai/semport/current_file.tsv)
+      awk -F '\t' -v OFS='\t' -v fp="$fpath" '
+      NR==1 {print; next}
+      { if ($1==fp && $3=="new") { $3="ported" } ; print }
+      ' semport/ledger.tsv > semport/ledger.tsv.tmp
+      mv semport/ledger.tsv.tmp semport/ledger.tsv
+      remaining=$(awk -F '\t' 'NR>1 && $3=="new"' semport/ledger.tsv | wc -l | tr -d ' ')
+      printf 'ported %s (%s remaining)' "$fpath" "$remaining"
+
+  tool TryBuild
+    label: "Try building OmniAgentsSDK"
+    command:
+      set -eu
+      swift build --target OmniAgentsSDK >/tmp/semport-build.log 2>&1 || { printf 'FAIL\n'; grep 'error:' /tmp/semport-build.log | head -40; exit 1; }
+      printf 'PASS'
+
+  tool LoadErrors
+    label: "Load build errors + source"
+    command:
+      set -eu
+      total=$(grep -c 'error:' /tmp/semport-build.log || echo 0)
+      printf '=== Total errors: %s ===\n\n' "$total"
+      printf '=== Error count by file ===\n'
+      grep 'error:' /tmp/semport-build.log | grep -o 'OmniAgentsSDK/[^:]*' | sort | uniq -c | sort -rn
+      printf '\n=== Top errors (first 80) ===\n'
+      grep 'error:' /tmp/semport-build.log | head -80
+      printf '\n=== Source of top 5 files with most errors ===\n'
+      for f in $(grep 'error:' /tmp/semport-build.log | grep -o 'Sources/OmniAgentsSDK/[^:]*' | sort | uniq -c | sort -rn | head -5 | awk '{print $2}'); do
+        printf '\n--- %s (%s lines) ---\n' "$f" "$(wc -l < "$f" 2>/dev/null || echo '?')"
+        cat "$f" 2>/dev/null
+      done
+
+  agent FixErrors
+    label: "Fix build errors (Sonnet)"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Fix the Swift build errors shown above. You can read any file in Sources/OmniAgentsSDK/ to see the full source. Fix AS MANY files as possible in one pass.
+
+      Strategy:
+      1. Look at the error counts by file. Start with files that have the MOST errors.
+      2. Read each file, understand the errors, fix them.
+      3. Common issues: duplicate type declarations across files (keep the most complete one, remove the other), missing imports, function type labels (use _ not named params), type mismatches with OmniAICore, unterminated string literals, ambiguous type names (qualify with module prefix).
+      4. If a type is defined in multiple files, consolidate into one file and remove from others.
+      5. Write the fixed files using the Write tool.
+
+      Fix at least 5-10 files per pass. The goal is to reduce the error count significantly each iteration.
+
+  tool WriteFixed
+    label: "Write fixed files"
+    command:
+      set -eu
+      RUN_DIR=$(ls -dt .ai/attractor-runs/semport-* | head -1)
+      response="$RUN_DIR/FixErrors/response.md"
+      if [ ! -f "$response" ]; then
+        printf 'no response'
+        exit 1
+      fi
+      python3 -c "
+      import re, sys, os
+      text = open('$response').read()
+      blocks = re.findall(r'\x60\x60\x60swift:([^\n]+)\n(.*?)\x60\x60\x60', text, re.DOTALL)
+      if not blocks:
+          print('no swift blocks found', file=sys.stderr)
+          sys.exit(1)
+      for path, code in blocks:
+          path = path.strip()
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          with open(path, 'w') as f:
+              f.write(code)
+          print(f'Wrote {path} ({len(code)} bytes)')
+      "
+
+  tool VerifyBuild
+    label: "Verify build after fix"
+    command:
+      set -eu
+      swift build --target OmniAgentsSDK >/tmp/semport-build.log 2>&1 || { errs=$(grep -c 'error:' /tmp/semport-build.log); printf 'STILL_FAILING (%s errors)' "$errs"; exit 1; }
+      printf 'BUILD_CLEAN'
+
+  edges
+    Start -> InitLedger
+    InitLedger -> PickFile
+    PickFile -> LoadSource
+    PickFile -> TryBuild  when ctx.outcome = fail  label: "all ported"
+    LoadSource -> PortFile
+    PortFile -> WriteFile
+    WriteFile -> MarkPorted
+    MarkPorted -> PickFile  label: next  restart: true
+    TryBuild -> Exit  when ctx.outcome = success  label: clean
+    TryBuild -> LoadErrors  when ctx.outcome = fail  label: errors
+    LoadErrors -> FixErrors
+    FixErrors -> WriteFixed
+    WriteFixed -> VerifyBuild
+    VerifyBuild -> Exit  when ctx.outcome = success  label: clean
+    VerifyBuild -> LoadErrors  when ctx.outcome = fail  label: retry  restart: true

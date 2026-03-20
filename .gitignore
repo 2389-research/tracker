@@ -11,3 +11,5 @@ bin/
 /tracker
 /tracker-conformance
 /generate
+.DS_Store
+.tracker/runs/

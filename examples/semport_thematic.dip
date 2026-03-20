@@ -1,0 +1,175 @@
+workflow SemportThematic
+  goal: "Port $source_ref into $target_name via evolving thematic checklist and iterative implementation/validation."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 5
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  tool EnsureWorkspace
+    label: "Ensure semport workspace files"
+    command:
+      set -eu
+      mkdir -p .ai/semport/$target_name
+      if [ ! -f .ai/semport/$target_name/thematic-spec.md ]; then
+        cat > .ai/semport/$target_name/thematic-spec.md <<'SPECEOF'
+      # $target_name Thematic Semport Spec
+
+      ## Scope
+      - Semantic port of $source_ref into $target_module.
+
+      ## Checklist
+      <!-- planner maintains checklist here -->
+
+      ## Validation Feedback
+      <!-- validator/appraiser writes concise latest loop feedback here -->
+      SPECEOF
+      fi
+      if [ ! -f .ai/semport/$target_name/validation-feedback.md ]; then
+        cat > .ai/semport/$target_name/validation-feedback.md <<'FBEOF'
+      # Validation Feedback
+      - none yet
+      FBEOF
+      fi
+      printf 'workspace ready'
+
+  parallel PlanParallel -> PlanGPT, PlanOpus, PlanGemini
+
+  agent PlanGPT
+    label: "Plan Themes (GPT-5.2)"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Use tools to inspect $source_ref and $target_module. Propose thematic sections and a concrete markdown checklist for semantic porting. Create a numbered artifact `.ai/semport/$target_name/plan-gpt-NNN.md` where NNN is next zero-padded index (scan existing plan-gpt-*.md, max+1, start 001). If .ai/semport/$target_name/thematic-spec.md already exists, UPDATE it in-place and preserve completed items; do not rewrite from scratch. Consume .ai/semport/$target_name/validation-feedback.md and fold its failures/gaps into checklist updates. Output concise rationale and what changed.
+
+  agent PlanOpus
+    label: "Plan Themes (Opus-4.6)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Use tools to inspect $source_ref and $target_module. Propose thematic sections and a concrete markdown checklist for semantic porting. Create a numbered artifact `.ai/semport/$target_name/plan-opus-NNN.md` where NNN is next zero-padded index (scan existing plan-opus-*.md, max+1, start 001). If .ai/semport/$target_name/thematic-spec.md already exists, UPDATE it in-place and preserve completed items; do not rewrite from scratch. Consume .ai/semport/$target_name/validation-feedback.md and fold its failures/gaps into checklist updates. Output concise rationale and what changed.
+
+  agent PlanGemini
+    label: "Plan Themes (Gemini 3.1 Pro)"
+    model: gemini-3.1-pro-preview-customtools
+    provider: gemini
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Use tools to inspect $source_ref and $target_module. Propose thematic sections and a concrete markdown checklist for semantic porting. Create a numbered artifact `.ai/semport/$target_name/plan-gemini-NNN.md` where NNN is next zero-padded index (scan existing plan-gemini-*.md, max+1, start 001). If .ai/semport/$target_name/thematic-spec.md already exists, UPDATE it in-place and preserve completed items; do not rewrite from scratch. Consume .ai/semport/$target_name/validation-feedback.md and fold its failures/gaps into checklist updates. Output concise rationale and what changed.
+
+  fan_in PlanJoin <- PlanGPT, PlanOpus, PlanGemini
+
+  agent ConsolidatePlan
+    label: "Consolidate Plan Into Spec (Opus)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Using parallel planner outputs and repository inspection via tools, consolidate into .ai/semport/$target_name/thematic-spec.md. Also write snapshot `.ai/semport/$target_name/thematic-spec-NNN.md` where NNN is next zero-padded index (scan thematic-spec-*.md, max+1, start 001). Maintain one authoritative checklist with explicit [ ] and [x] items grouped by theme. Keep completed checks intact. Add a short 'Next implementation target' section naming exactly one checklist slice to implement next.
+
+  agent ImplementSlice
+    label: "Implement Next Checklist Slice (GPT-5.3 Codex)"
+    model: gpt-5.3-codex
+    provider: openai
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Read .ai/semport/$target_name/thematic-spec.md and implement the highest-priority unchecked checklist slices in $target_module using semantic parity with $source_ref. Tackle as many related items as you can in one pass while keeping the build green. Discover needed files yourself via tools; do not expect preloaded file dumps. Make concrete code changes, then mark only truly completed checklist entries as [x]. Write a short implementation note section into .ai/semport/$target_name/thematic-spec.md describing what changed. Also write `.ai/semport/$target_name/implement-NNN.md` where NNN is next zero-padded index (scan implement-*.md, max+1, start 001) containing changed files, tests/build commands run, and any blockers.
+
+  tool BuildGate
+    label: "Build gate (must pass)"
+    command:
+      set -eu
+      swift build --target $target_name >/tmp/semport-thematic-$target_name-build.log 2>&1 || {
+        printf 'BUILD_FAIL\n'
+        grep 'error:' /tmp/semport-thematic-$target_name-build.log | head -80 || true
+        exit 1
+      }
+      printf 'BUILD_PASS'
+
+  parallel ValidateParallel -> ValidateGPT, ValidateOpus, ValidateGemini
+
+  agent ValidateGPT
+    label: "Validate (GPT-5.2)"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Validate the latest implementation against .ai/semport/$target_name/thematic-spec.md and $source_ref by using tools. Report missing behavior, incomplete checklist claims, and concrete evidence commands/files. Write findings to numbered artifact `.ai/semport/$target_name/validation-gpt-NNN.md` where NNN is next zero-padded index (scan validation-gpt-*.md, max+1, start 001).
+
+  agent ValidateOpus
+    label: "Validate (Opus-4.6)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Validate the latest implementation against .ai/semport/$target_name/thematic-spec.md and $source_ref by using tools. Report missing behavior, incomplete checklist claims, and concrete evidence commands/files. Write findings to numbered artifact `.ai/semport/$target_name/validation-opus-NNN.md` where NNN is next zero-padded index (scan validation-opus-*.md, max+1, start 001).
+
+  agent ValidateGemini
+    label: "Validate (Gemini 3.1 Pro)"
+    model: gemini-3.1-pro-preview-customtools
+    provider: gemini
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Validate the latest implementation against .ai/semport/$target_name/thematic-spec.md and $source_ref by using tools. Report missing behavior, incomplete checklist claims, and concrete evidence commands/files. Write findings to numbered artifact `.ai/semport/$target_name/validation-gemini-NNN.md` where NNN is next zero-padded index (scan validation-gemini-*.md, max+1, start 001).
+
+  fan_in ValidateJoin <- ValidateGPT, ValidateOpus, ValidateGemini
+
+  agent ConsolidateValidation
+    label: "Consolidate Validation + Update Spec (Opus)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Consolidate validation outputs from all three validators. Write numbered consensus artifact `.ai/semport/$target_name/validation-consensus-NNN.md` where NNN is next zero-padded index (scan validation-consensus-*.md, max+1, start 001). Update .ai/semport/$target_name/validation-feedback.md with precise failure reasons and what to fix next. Then update .ai/semport/$target_name/thematic-spec.md in-place: keep truthful [x], revert any invalid completion to [ ], and add/refine checklist items based on discovered gaps. Do not rewrite whole file if it already exists.
+
+  tool CheckCompletion
+    label: "Check if checklist fully complete"
+    command:
+      set -eu
+      if rg -n '^- \[ \]' .ai/semport/$target_name/thematic-spec.md >/dev/null 2>&1; then
+        printf 'INCOMPLETE'
+        exit 1
+      fi
+      printf 'COMPLETE'
+
+  edges
+    Start -> EnsureWorkspace
+    EnsureWorkspace -> PlanParallel
+    PlanParallel -> PlanGPT
+    PlanParallel -> PlanOpus
+    PlanParallel -> PlanGemini
+    PlanGPT -> PlanJoin
+    PlanOpus -> PlanJoin
+    PlanGemini -> PlanJoin
+    PlanJoin -> ConsolidatePlan
+    ConsolidatePlan -> ImplementSlice
+    ImplementSlice -> BuildGate
+    BuildGate -> ValidateParallel  when ctx.outcome = success  label: build_passed
+    BuildGate -> PlanParallel  when ctx.outcome = fail  label: build_failed_replan  restart: true
+    ValidateParallel -> ValidateGPT
+    ValidateParallel -> ValidateOpus
+    ValidateParallel -> ValidateGemini
+    ValidateGPT -> ValidateJoin
+    ValidateOpus -> ValidateJoin
+    ValidateGemini -> ValidateJoin
+    ValidateJoin -> ConsolidateValidation
+    ConsolidateValidation -> CheckCompletion
+    CheckCompletion -> Exit  when ctx.outcome = success  label: all_checked_and_validated
+    CheckCompletion -> PlanParallel  when ctx.outcome = fail  label: needs_more_porting  restart: true

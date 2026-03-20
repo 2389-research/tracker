@@ -1,0 +1,192 @@
+workflow ConsensusTaskParity
+  goal: "$task"
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 3
+    fidelity: truncate
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  agent CheckDoD
+    label: "Refine DoD"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    max_retries: 1
+    prompt:
+      Refine or propose definition of done for TASK=$task. If DoD is missing or weak, state concrete gaps. Produce concise acceptance criteria that are testable.
+
+  parallel DoDParallel -> DefineDoD_Gemini, DefineDoD_GPT, DefineDoD_Opus
+
+  agent DefineDoD_Gemini
+    label: "Refine DoD (Gemini)"
+    model: gemini-3.1-pro-preview-customtools
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_gemini.md.
+
+  agent DefineDoD_GPT
+    label: "Refine DoD (GPT)"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_gpt.md.
+
+  agent DefineDoD_Opus
+    label: "Refine DoD (Opus)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_opus.md.
+
+  fan_in DoDJoin <- DefineDoD_Gemini, DefineDoD_GPT, DefineDoD_Opus
+
+  agent ConsolidateDoD
+    label: "Consolidate DoD"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Synthesize DoD proposals from all models into one consensus DoD with unambiguous, testable checks.
+
+  parallel PlanParallel -> PlanGemini, PlanGPT, PlanOpus
+
+  agent PlanGemini
+    label: "Plan (Gemini)"
+    model: gemini-3.1-pro-preview-customtools
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Create implementation plan from consensus DoD for TASK=$task.
+
+  agent PlanGPT
+    label: "Plan (GPT)"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Create implementation plan from consensus DoD for TASK=$task.
+
+  agent PlanOpus
+    label: "Plan (Opus)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Create implementation plan from consensus DoD for TASK=$task.
+
+  fan_in PlanJoin <- PlanGemini, PlanGPT, PlanOpus
+
+  agent DebateConsolidate
+    label: "Debate & Consolidate"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Debate and synthesize the three plans into one final executable plan.
+
+  agent Implement
+    label: Implement
+    model: gpt-5.3-codex
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Execute final plan for TASK=$task and summarize concrete changes, artifacts, and constraints encountered.
+
+  agent VerifyOutputs
+    label: "Verify Outputs"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Verify outputs against consensus DoD with evidence. If verification is weak or missing, mark as retry/fail with explicit gaps.
+
+  parallel ReviewParallel -> ReviewGemini, ReviewGPT, ReviewOpus
+
+  agent ReviewGemini
+    label: "Review (Gemini)"
+    model: gemini-3.1-pro-preview-customtools
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes.
+
+  agent ReviewGPT
+    label: "Review (GPT)"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes.
+
+  agent ReviewOpus
+    label: "Review (Opus)"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes.
+
+  fan_in ReviewJoin <- ReviewGemini, ReviewGPT, ReviewOpus
+
+  agent ReviewConsensus
+    label: "Review Consensus"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    max_retries: 1
+    retry_target: Implement
+    prompt:
+      Reach final consensus using all reviews and verification evidence. Use success only if all critical checks pass; use retry if fixes are needed; use fail only if blocked.
+
+  agent Postmortem
+    label: Postmortem
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Write failure postmortem and concrete plan improvements before restart.
+
+  edges
+    Start -> CheckDoD
+    CheckDoD -> DoDParallel
+    DoDParallel -> DefineDoD_Gemini
+    DoDParallel -> DefineDoD_GPT
+    DoDParallel -> DefineDoD_Opus
+    DefineDoD_Gemini -> DoDJoin
+    DefineDoD_GPT -> DoDJoin
+    DefineDoD_Opus -> DoDJoin
+    DoDJoin -> ConsolidateDoD
+    ConsolidateDoD -> PlanParallel
+    PlanParallel -> PlanGemini
+    PlanParallel -> PlanGPT
+    PlanParallel -> PlanOpus
+    PlanGemini -> PlanJoin
+    PlanGPT -> PlanJoin
+    PlanOpus -> PlanJoin
+    PlanJoin -> DebateConsolidate
+    DebateConsolidate -> Implement
+    Implement -> VerifyOutputs
+    VerifyOutputs -> ReviewParallel
+    ReviewParallel -> ReviewGemini
+    ReviewParallel -> ReviewGPT
+    ReviewParallel -> ReviewOpus
+    ReviewGemini -> ReviewJoin
+    ReviewGPT -> ReviewJoin
+    ReviewOpus -> ReviewJoin
+    ReviewJoin -> ReviewConsensus
+    ReviewConsensus -> Exit  when ctx.outcome = success  label: pass
+    ReviewConsensus -> Postmortem  when ctx.outcome = retry  label: retry
+    ReviewConsensus -> Exit  when ctx.outcome = fail  label: fail
+    Postmortem -> PlanParallel  when ctx.internal.loop_restart_count = 0  label: retry_once  restart: true
+    Postmortem -> Exit  when ctx.internal.loop_restart_count != 0  label: stop_after_retry

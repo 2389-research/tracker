@@ -1,0 +1,143 @@
+workflow HumanGateShowcase
+  goal: "Exercise every human gate mode: freeform input, binary choice, multi-choice, default selection, and chained gates."
+  start: Start
+  exit: Exit
+
+  defaults
+    fidelity: summary:medium
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  human FreeformGate
+    label: "Tell me something interesting."
+    mode: freeform
+
+  agent EchoFreeform
+    label: "Echo Freeform Response"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user said something interesting via freeform input. Repeat it back to them and add a brief, witty reaction.
+
+  human BinaryGate
+    label: "Do you want to continue to the fun part?"
+
+  agent YesPath
+    label: "Enthusiasm Check"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user chose to continue. Express excitement and summarize what is coming next: a multi-choice gate followed by a gate with a default.
+
+  agent NoPath
+    label: "Early Exit Summary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user chose not to continue. Summarize what gates were tested so far (freeform and binary) and wish them well.
+
+  human MultiChoiceGate
+    label: "Pick your favorite color."
+
+  agent RedPath
+    label: "Red Commentary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user picked red. Say something fun about the color red.
+
+  agent BluePath
+    label: "Blue Commentary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user picked blue. Say something fun about the color blue.
+
+  agent GreenPath
+    label: "Green Commentary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user picked green. Say something fun about the color green.
+
+  agent WildcardPath
+    label: "Wildcard Commentary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user picked the wildcard option. Invent a color and say something absurd about it.
+
+  human DefaultGate
+    label: "How spicy do you like your food?"
+
+  agent MildPath
+    label: "Mild Reaction"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user likes mild food. Gently roast them for their timid palate.
+
+  agent MediumPath
+    label: "Medium Reaction"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user likes medium spice (or accepted the default). Acknowledge their balanced approach.
+
+  agent HotPath
+    label: "Hot Reaction"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The user likes hot food. Express awe and respect for their iron stomach.
+
+  human FinalFreeform
+    label: "Any last words before we wrap up?"
+    mode: freeform
+
+  agent FinalSummary
+    label: "Final Summary"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Summarize the entire journey through all the human gates. Mention what the user said in freeform, which choices they made at each gate, and their final words. Make it feel like a fun recap.
+
+  edges
+    Start -> FreeformGate
+    FreeformGate -> EchoFreeform
+    EchoFreeform -> BinaryGate
+    BinaryGate -> YesPath  label: "[Y] Yes"
+    BinaryGate -> NoPath  label: "[N] No"
+    NoPath -> Exit
+    YesPath -> MultiChoiceGate
+    MultiChoiceGate -> RedPath  label: "[R] Red"
+    MultiChoiceGate -> BluePath  label: "[B] Blue"
+    MultiChoiceGate -> GreenPath  label: "[G] Green"
+    MultiChoiceGate -> WildcardPath  label: "[W] Wildcard"
+    RedPath -> DefaultGate
+    BluePath -> DefaultGate
+    GreenPath -> DefaultGate
+    WildcardPath -> DefaultGate
+    DefaultGate -> MildPath  label: "[L] Mild"
+    DefaultGate -> MediumPath  label: "[M] Medium"
+    DefaultGate -> HotPath  label: "[H] Hot"
+    MildPath -> FinalFreeform
+    MediumPath -> FinalFreeform
+    HotPath -> FinalFreeform
+    FinalFreeform -> FinalSummary
+    FinalSummary -> Exit

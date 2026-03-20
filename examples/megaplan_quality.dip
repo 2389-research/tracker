@@ -1,0 +1,436 @@
+workflow Megaplan
+  goal: "Create a high-quality sprint plan using multi-model orientation, drafting, critique, merge, and a quality gate before publishing."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 5
+    fidelity: summary:medium
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  tool SetupEnvironment
+    label: "Setup .ai workspace"
+    command:
+      set -eu
+      mkdir -p .ai/drafts .ai/sprints
+      if [ ! -f .ai/ledger.tsv ]; then
+        printf 'sprint_id\ttitle\tstatus\tcreated_at\tupdated_at\n' > .ai/ledger.tsv
+      fi
+      printf 'ready'
+
+  tool DetermineSprintId
+    label: "Determine Sprint ID"
+    command:
+      set -eu
+      mkdir -p .ai
+      last=$(awk -F '\t' 'NR>1{print $1}' .ai/ledger.tsv | sort | tail -n1)
+      if [ -z "$last" ]; then
+        next=001
+      else
+        next=$(printf '%03d' $((10#$last + 1)))
+      fi
+      printf '%s' "$next" > .ai/current_sprint_id.txt
+      printf 'sprint-%s' "$next"
+
+  parallel OrientParallel -> OrientConventions, OrientLedger, OrientRecent, OrientSeedExplore
+
+  agent OrientConventions
+    label: "Read Conventions (Gemini)"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Review repository conventions and summarize coding, testing, release, and delivery constraints for sprint planning.
+
+  agent OrientLedger
+    label: "Check Ledger (Gemini)"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Review .ai/ledger.tsv and summarize sprint throughput, active work, and carryover risk.
+
+  agent OrientRecent
+    label: "Analyze Recent Sprints (Claude)"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Inspect recent artifacts in .ai/sprints and .ai/drafts. Summarize recurring patterns, misses, and high-leverage practices.
+
+  agent OrientSeedExplore
+    label: "Explore Seed Context (Claude)"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Explore the codebase and identify architecture, risk hotspots, and implementation dependencies for the upcoming sprint.
+
+  fan_in OrientJoin <- OrientConventions, OrientLedger, OrientRecent, OrientSeedExplore
+
+  agent SynthesizeOrientation
+    label: "Synthesize Orientation"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Synthesize orientation outputs into a planning brief with assumptions, constraints, risks, and execution priorities.
+
+  parallel IntentParallel -> IntentClaude, IntentCodex, IntentGemini
+
+  agent IntentClaude
+    label: "Claude Intent"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Draft a focused sprint intent document: scope, non-goals, constraints, milestones, DoD, and validation plan.
+
+  agent IntentCodex
+    label: "Codex Intent"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Draft an implementation-first sprint intent emphasizing execution order, dependencies, and verification criteria.
+
+  agent IntentGemini
+    label: "Gemini Intent"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Draft a delivery-focused sprint intent emphasizing predictable cadence, risk control, and observability.
+
+  fan_in IntentJoin <- IntentClaude, IntentCodex, IntentGemini
+
+  parallel InitialDraftParallel -> DraftClaude, DraftCodex, DraftGemini
+
+  agent DraftClaude
+    label: "Claude Initial Draft"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Create a complete sprint draft from the planning brief and intent context. Include milestones, DoD mapping, and validation steps.
+
+  agent DraftCodex
+    label: "Codex Initial Draft"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Create an independent complete sprint draft with concrete implementation sequencing and test strategy.
+
+  agent DraftGemini
+    label: "Gemini Initial Draft"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Create an independent complete sprint draft with risk controls, checkpoints, and rollout/verification cadence.
+
+  fan_in InitialDraftJoin <- DraftClaude, DraftCodex, DraftGemini
+
+  parallel QuestionsParallel -> QuestionsClaude, QuestionsCodex, QuestionsGemini
+
+  agent QuestionsClaude
+    label: "Claude Questions"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Generate concise high-signal clarification questions needed to resolve conflicts across initial drafts.
+
+  agent QuestionsCodex
+    label: "Codex Questions"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Generate concise implementation-risk clarification questions for the sprint plan.
+
+  agent QuestionsGemini
+    label: "Gemini Questions"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Generate concise delivery and validation clarification questions for the sprint plan.
+
+  fan_in QuestionsJoin <- QuestionsClaude, QuestionsCodex, QuestionsGemini
+
+  human InterviewGate
+    label: "Interview Decision"
+
+  agent CaptureInterview
+    label: "Capture Interview Answers"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Capture interview answers and summarize the concrete plan deltas that must be applied in revision.
+
+  agent SkipInterview
+    label: "Skip Interview"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: low
+    prompt:
+      Document interview skip assumptions and constraints so revision remains deterministic and auditable.
+
+  parallel RevisedDraftParallel -> ReviseClaude, ReviseCodex, ReviseGemini
+
+  agent ReviseClaude
+    label: "Claude Revised Draft"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Revise the sprint draft using question/interview outcomes and strengthen clarity, traceability, and DoD mapping.
+
+  agent ReviseCodex
+    label: "Codex Revised Draft"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Revise the sprint draft to improve implementation sequencing, dependency handling, and verification rigor.
+
+  agent ReviseGemini
+    label: "Gemini Revised Draft"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Revise the sprint draft to improve delivery predictability, risk mitigation, and validation completeness.
+
+  fan_in RevisedDraftJoin <- ReviseClaude, ReviseCodex, ReviseGemini
+
+  parallel CritiquesParallel -> CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
+
+  agent CritiqueClaudeOnCodex
+    label: "Claude Critique of Codex"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Critique the Codex revised draft for architecture, correctness, risk coverage, and execution quality.
+
+  agent CritiqueClaudeOnGemini
+    label: "Claude Critique of Gemini"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Critique the Gemini revised draft for architecture, correctness, risk coverage, and execution quality.
+
+  agent CritiqueCodexOnClaude
+    label: "Codex Critique of Claude"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Critique the Claude revised draft for implementation viability, dependency realism, and testability.
+
+  agent CritiqueCodexOnGemini
+    label: "Codex Critique of Gemini"
+    model: gpt-5.2
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Critique the Gemini revised draft for implementation viability, dependency realism, and testability.
+
+  agent CritiqueGeminiOnClaude
+    label: "Gemini Critique of Claude"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Critique the Claude revised draft for delivery robustness, verification completeness, and operational risk.
+
+  agent CritiqueGeminiOnCodex
+    label: "Gemini Critique of Codex"
+    model: gemini-3-flash-preview
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Critique the Codex revised draft for delivery robustness, verification completeness, and operational risk.
+
+  fan_in CritiquesJoin <- CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
+
+  parallel MergeAnalysisParallel -> CompareArchitectures, ExtractBestIdeas, SynthesizeCritiques
+
+  agent CompareArchitectures
+    label: "Compare Architectures"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Compare revised drafts and identify strongest architecture, sequencing, and dependency strategies.
+
+  agent ExtractBestIdeas
+    label: "Extract Best Ideas"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Extract the best concrete ideas and improvements from each revised draft for final merge.
+
+  agent SynthesizeCritiques
+    label: "Synthesize Critiques"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Synthesize all cross-model critiques into a prioritized edit list for final sprint assembly.
+
+  fan_in MergeAnalysisJoin <- CompareArchitectures, ExtractBestIdeas, SynthesizeCritiques
+
+  agent WriteMergeNotes
+    label: "Write Merge Notes"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Write merge notes describing what to keep, change, and reject from each revised draft before final composition.
+
+  agent WriteFinalSprint
+    label: "Write Final Sprint"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Write the final production-ready sprint plan with explicit milestones, DoD, verification checklist, risks, and fallback strategies.
+
+  agent FinalQualityGate
+    label: "Final Quality Gate"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    max_retries: 1
+    retry_target: RevisedDraftParallel
+    prompt:
+      Assess whether the final sprint is execution-ready. Return success if quality is high and actionable, retry if rework is required, fail if blocked.
+
+  tool PersistSprintPlaceholder
+    label: "Persist Sprint Placeholder"
+    command:
+      set -eu
+      mkdir -p .ai/sprints
+      if [ -f .ai/current_sprint_id.txt ]; then
+        sid=$(cat .ai/current_sprint_id.txt)
+      else
+        sid=001
+      fi
+      file=.ai/sprints/SPRINT-${sid}.md
+      if [ ! -f "$file" ]; then
+        printf '# Sprint %s\n\nGenerated by megaplan. See run logs for full model output.\n' "$sid" > "$file"
+      fi
+      printf 'persisted-%s' "$sid"
+
+  tool SyncLedger
+    label: "Sync Ledger"
+    command:
+      set -eu
+      mkdir -p .ai
+      if [ ! -f .ai/ledger.tsv ]; then
+        printf 'sprint_id\ttitle\tstatus\tcreated_at\tupdated_at\n' > .ai/ledger.tsv
+      fi
+      if [ -f .ai/current_sprint_id.txt ]; then
+        sprint_id=$(cat .ai/current_sprint_id.txt)
+      else
+        last=$(awk -F '\t' 'NR>1{print $1}' .ai/ledger.tsv | sort | tail -n1)
+        if [ -z "$last" ]; then sprint_id=001; else sprint_id=$(printf '%03d' $((10#$last + 1))); fi
+      fi
+      now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      if awk -F '\t' -v target="$sprint_id" 'NR>1 && $1==target {found=1} END{exit found?0:1}' .ai/ledger.tsv; then
+        awk -F '\t' -v OFS='\t' -v target="$sprint_id" -v now="$now" '
+      NR==1 {print; next}
+      { if ($1==target) { $2="Generated Sprint " target; $3="planned"; $5=now }; print }
+      ' .ai/ledger.tsv > .ai/ledger.tsv.tmp
+        mv .ai/ledger.tsv.tmp .ai/ledger.tsv
+      else
+        printf '%s\t%s\t%s\t%s\t%s\n' "$sprint_id" "Generated Sprint $sprint_id" "planned" "$now" "$now" >> .ai/ledger.tsv
+      fi
+      printf 'synced-%s' "$sprint_id"
+
+  edges
+    Start -> SetupEnvironment
+    SetupEnvironment -> DetermineSprintId
+    DetermineSprintId -> OrientParallel
+    OrientParallel -> OrientConventions
+    OrientParallel -> OrientLedger
+    OrientParallel -> OrientRecent
+    OrientParallel -> OrientSeedExplore
+    OrientConventions -> OrientJoin
+    OrientLedger -> OrientJoin
+    OrientRecent -> OrientJoin
+    OrientSeedExplore -> OrientJoin
+    OrientJoin -> SynthesizeOrientation
+    SynthesizeOrientation -> IntentParallel
+    IntentParallel -> IntentClaude
+    IntentParallel -> IntentCodex
+    IntentParallel -> IntentGemini
+    IntentClaude -> IntentJoin
+    IntentCodex -> IntentJoin
+    IntentGemini -> IntentJoin
+    IntentJoin -> InitialDraftParallel
+    InitialDraftParallel -> DraftClaude
+    InitialDraftParallel -> DraftCodex
+    InitialDraftParallel -> DraftGemini
+    DraftClaude -> InitialDraftJoin
+    DraftCodex -> InitialDraftJoin
+    DraftGemini -> InitialDraftJoin
+    InitialDraftJoin -> QuestionsParallel
+    QuestionsParallel -> QuestionsClaude
+    QuestionsParallel -> QuestionsCodex
+    QuestionsParallel -> QuestionsGemini
+    QuestionsClaude -> QuestionsJoin
+    QuestionsCodex -> QuestionsJoin
+    QuestionsGemini -> QuestionsJoin
+    QuestionsJoin -> InterviewGate
+    InterviewGate -> SkipInterview  label: "[S] Skip interview"
+    InterviewGate -> CaptureInterview  label: "[A] Answer interview"
+    CaptureInterview -> RevisedDraftParallel
+    SkipInterview -> RevisedDraftParallel
+    RevisedDraftParallel -> ReviseClaude
+    RevisedDraftParallel -> ReviseCodex
+    RevisedDraftParallel -> ReviseGemini
+    ReviseClaude -> RevisedDraftJoin
+    ReviseCodex -> RevisedDraftJoin
+    ReviseGemini -> RevisedDraftJoin
+    RevisedDraftJoin -> CritiquesParallel
+    CritiquesParallel -> CritiqueClaudeOnCodex
+    CritiquesParallel -> CritiqueClaudeOnGemini
+    CritiquesParallel -> CritiqueCodexOnClaude
+    CritiquesParallel -> CritiqueCodexOnGemini
+    CritiquesParallel -> CritiqueGeminiOnClaude
+    CritiquesParallel -> CritiqueGeminiOnCodex
+    CritiqueClaudeOnCodex -> CritiquesJoin
+    CritiqueClaudeOnGemini -> CritiquesJoin
+    CritiqueCodexOnClaude -> CritiquesJoin
+    CritiqueCodexOnGemini -> CritiquesJoin
+    CritiqueGeminiOnClaude -> CritiquesJoin
+    CritiqueGeminiOnCodex -> CritiquesJoin
+    CritiquesJoin -> MergeAnalysisParallel
+    MergeAnalysisParallel -> CompareArchitectures
+    MergeAnalysisParallel -> ExtractBestIdeas
+    MergeAnalysisParallel -> SynthesizeCritiques
+    CompareArchitectures -> MergeAnalysisJoin
+    ExtractBestIdeas -> MergeAnalysisJoin
+    SynthesizeCritiques -> MergeAnalysisJoin
+    MergeAnalysisJoin -> WriteMergeNotes
+    WriteMergeNotes -> WriteFinalSprint
+    WriteFinalSprint -> FinalQualityGate
+    FinalQualityGate -> PersistSprintPlaceholder  when ctx.outcome = success  label: pass
+    FinalQualityGate -> RevisedDraftParallel  when ctx.outcome = retry  label: rework
+    FinalQualityGate -> Exit  when ctx.outcome = fail  label: blocked
+    PersistSprintPlaceholder -> SyncLedger
+    SyncLedger -> Exit
