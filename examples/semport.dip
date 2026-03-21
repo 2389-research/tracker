@@ -219,8 +219,10 @@ workflow Semport
     MarkPorted -> PickFile  label: next  restart: true
     TryBuild -> Exit  when ctx.outcome = success  label: clean
     TryBuild -> LoadErrors  when ctx.outcome = fail  label: errors
+    TryBuild -> Exit  label: "fallback to exit"
     LoadErrors -> FixErrors
     FixErrors -> WriteFixed
     WriteFixed -> VerifyBuild
     VerifyBuild -> Exit  when ctx.outcome = success  label: clean
     VerifyBuild -> LoadErrors  when ctx.outcome = fail  label: retry  restart: true
+    VerifyBuild -> Exit  label: "fallback to exit"

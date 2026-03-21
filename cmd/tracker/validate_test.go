@@ -30,6 +30,7 @@ const warningOnlyDOT = `digraph test {
 	EndA [shape=Msquare];
 	Start -> Check;
 	Check -> EndA [label="yes" condition="outcome=success"];
+	Check -> EndA [label="no" condition="outcome=fail"];
 }`
 
 func TestValidateValid(t *testing.T) {

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -18,7 +19,20 @@ func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		return fmt.Errorf("load pipeline: %w", err)
 	}
 
-	result := pipeline.ValidateAll(graph)
+	// Create a handler registry for semantic validation
+	registry := pipeline.NewHandlerRegistry()
+	// Register standard handlers (these are the ones Tracker supports)
+	// Note: We don't need actual LLM clients for validation, just handler names
+	registry.Register(&mockHandler{name: "codergen"})
+	registry.Register(&mockHandler{name: "tool"})
+	registry.Register(&mockHandler{name: "subgraph"})
+	registry.Register(&mockHandler{name: "spawn"})
+	registry.Register(&mockHandler{name: "start"})
+	registry.Register(&mockHandler{name: "exit"})
+	registry.Register(&mockHandler{name: "conditional"})
+
+	// Run structural + semantic validation + lint
+	result := pipeline.ValidateAllWithLint(graph, registry)
 
 	if result == nil {
 		fmt.Fprintf(w, "%s: valid (%d nodes, %d edges)\n", pipelineFile, len(graph.Nodes), len(graph.Edges))
@@ -27,7 +41,7 @@ func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 
 	if len(result.Warnings) > 0 {
 		for _, warn := range result.Warnings {
-			fmt.Fprintf(w, "%s: warning: %s\n", pipelineFile, warn)
+			fmt.Fprintf(w, "%s\n", warn)
 		}
 	}
 
@@ -42,4 +56,15 @@ func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	fmt.Fprintf(w, "%s: valid with %d warning(s) (%d nodes, %d edges)\n",
 		pipelineFile, len(result.Warnings), len(graph.Nodes), len(graph.Edges))
 	return nil
+}
+
+// mockHandler is a minimal handler implementation for validation purposes.
+type mockHandler struct {
+	name string
+}
+
+func (h *mockHandler) Name() string { return h.name }
+
+func (h *mockHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 }

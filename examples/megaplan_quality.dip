@@ -85,7 +85,7 @@ workflow Megaplan
 
   agent IntentClaude
     label: "Claude Intent"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -113,7 +113,7 @@ workflow Megaplan
 
   agent DraftClaude
     label: "Claude Initial Draft"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -188,7 +188,7 @@ workflow Megaplan
 
   agent ReviseClaude
     label: "Claude Revised Draft"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -216,7 +216,7 @@ workflow Megaplan
 
   agent CritiqueClaudeOnCodex
     label: "Claude Critique of Codex"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -224,7 +224,7 @@ workflow Megaplan
 
   agent CritiqueClaudeOnGemini
     label: "Claude Critique of Gemini"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -294,7 +294,7 @@ workflow Megaplan
 
   agent WriteMergeNotes
     label: "Write Merge Notes"
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -302,7 +302,7 @@ workflow Megaplan
 
   agent WriteFinalSprint
     label: "Write Final Sprint"
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -430,7 +430,8 @@ workflow Megaplan
     WriteMergeNotes -> WriteFinalSprint
     WriteFinalSprint -> FinalQualityGate
     FinalQualityGate -> PersistSprintPlaceholder  when ctx.outcome = success  label: pass
-    FinalQualityGate -> RevisedDraftParallel  when ctx.outcome = retry  label: rework
+    FinalQualityGate -> RevisedDraftParallel  when ctx.outcome = retry  label: rework  restart: true
     FinalQualityGate -> Exit  when ctx.outcome = fail  label: blocked
+    FinalQualityGate -> Exit
     PersistSprintPlaceholder -> SyncLedger
     SyncLedger -> Exit

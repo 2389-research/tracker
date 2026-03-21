@@ -1,0 +1,472 @@
+workflow parallel_ralph_dev
+  goal: "Develop a new feature on an existing codebase using parallel adaptive ralph loops. Contract-first decomposition, branch-isolated streams, velocity-aware model switching, objective quality gates."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+    model: claude-haiku-4-5
+    provider: anthropic
+
+  agent Exit
+    label: Exit
+    model: claude-haiku-4-5
+    provider: anthropic
+
+  # ─── Phase 1: Understand & Decompose ────────────────────────────
+
+  agent ExploreCodebase
+    label: "Explore Codebase"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    max_turns: 30
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Explore the existing codebase to understand its architecture, conventions, and extension points.
+
+      ## Process
+      1. Read the project's README, CLAUDE.md, or similar documentation
+      2. Examine the directory structure and key entry points
+      3. Identify the tech stack, build system, and test framework
+      4. Note coding conventions (naming, patterns, error handling)
+      5. Identify where new feature code should live
+
+      ## Output
+      Write a codebase orientation to `.ai/codebase-orientation.md` with:
+      - **Architecture**: High-level structure and key modules
+      - **Conventions**: Naming, patterns, and style rules
+      - **Extension Points**: Where new features plug in
+      - **Build/Test**: How to build, test, and lint
+      - **Dependencies**: Key libraries and their roles
+
+  tool CheckSpec
+    label: "Check for Feature Spec"
+    timeout: 30s
+    command:
+      #!/bin/sh
+      if [ -f .ai/feature-spec.md ]; then
+        printf 'spec_exists'
+      else
+        printf 'no_spec'
+      fi
+
+  subgraph Brainstorm
+    label: "Brainstorm Requirements"
+    ref: subgraphs/brainstorm-human
+
+  agent DecomposeFeature
+    label: "Decompose into Streams"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    max_turns: 40
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Decompose the feature into 2 parallel implementation streams with clear boundaries.
+
+      ## Inputs
+      - `.ai/codebase-orientation.md` — codebase architecture
+      - `.ai/feature-spec.md` — feature requirements (if exists)
+      - Context from brainstorming (if it ran)
+
+      ## Decomposition Rules
+      1. Prefer VERTICAL slices (end-to-end for a capability) over horizontal layers
+      2. Each stream must own DISTINCT files — no file can appear in 2 streams
+      3. Shared resources (DB schema, config, shared types) go in contracts, not streams
+      4. Each stream should be independently buildable and testable
+      5. Identify ALL cross-stream dependencies and put them in contracts
+
+      ## Stream Count Heuristic
+      - 1 stream: change touches ≤3 files, no new API, no migrations
+      - 2 streams (default): new API + implementation, or UI + backend
+      - Write your reasoning for the stream count to `.ai/decomposition-rationale.md`
+
+      ## Output — write ALL of these files:
+
+      ### 1. Stream task files
+      For each stream, write `.ai/streams/stream-{a,b}/task.md` with:
+      ```
+      # Stream {id} — {description}
+
+      ## File Ownership
+      These are the ONLY files this stream may create or modify:
+      - path/to/file1.go
+      - path/to/file2.go
+      - path/to/file2_test.go
+
+      ## Contracts (read-only)
+      - .ai/contracts/interfaces.go
+      - .ai/contracts/types.go
+
+      ## Checklist
+      - [ ] Task 1 description
+      - [ ] Task 2 description
+      - [ ] Task 3 description
+      - [ ] Write tests for all new code
+      ```
+
+      ### 2. Contract files
+      Write `.ai/contracts/` with typed interfaces, shared types, error model:
+      - Interfaces/function signatures that cross stream boundaries
+      - Shared data types and enums
+      - Error types and error handling conventions
+      - 3-5 golden test cases (executable examples)
+
+      ### 3. Dependency graph
+      Write `.ai/decomposition-deps.md` with:
+      - Inputs consumed by each stream
+      - Outputs produced by each stream
+      - Shared resources and their single owner
+      - Build/test order
+
+      ## Self-Validation
+      Before finishing, verify:
+      - No file appears in 2+ stream ownership lists
+      - All cross-stream dependencies are in contracts
+      - Each stream has 3-8 checklist items (not too few, not too many)
+      - Contract files are syntactically valid for the project's language
+
+  tool ValidateDecomposition
+    label: "Validate Decomposition"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      errors=""
+
+      # Check stream task files exist
+      for stream in a b; do
+        if [ ! -f ".ai/streams/stream-$stream/task.md" ]; then
+          errors="$errors\nMissing .ai/streams/stream-$stream/task.md"
+        fi
+      done
+
+      # Check contracts exist
+      if [ ! -d ".ai/contracts" ] || [ -z "$(ls .ai/contracts/ 2>/dev/null)" ]; then
+        errors="$errors\nMissing .ai/contracts/ directory or empty"
+      fi
+
+      # Check for file ownership overlaps
+      if [ -f .ai/streams/stream-a/task.md ] && [ -f .ai/streams/stream-b/task.md ]; then
+        overlap=$(grep -h '^\- ' .ai/streams/stream-a/task.md .ai/streams/stream-b/task.md 2>/dev/null | grep -v '^\- \[' | sort | uniq -d)
+        if [ -n "$overlap" ]; then
+          errors="$errors\nFile ownership overlap detected: $overlap"
+        fi
+      fi
+
+      if [ -n "$errors" ]; then
+        printf 'validation_failed:%b' "$errors"
+      else
+        printf 'valid'
+      fi
+
+  agent CommitContracts
+    label: "Commit Contracts & Plans"
+    model: claude-haiku-4-5
+    provider: anthropic
+    max_turns: 10
+    prompt:
+      You are working in `run.working_dir`.
+
+      Commit the decomposition artifacts:
+      - `.ai/contracts/` — shared interfaces and types
+      - `.ai/streams/` — stream task files
+      - `.ai/codebase-orientation.md`
+      - `.ai/decomposition-rationale.md`
+      - `.ai/decomposition-deps.md`
+
+      Use a descriptive commit message like:
+      "feat: decompose feature into parallel streams with contracts"
+
+  # ─── Phase 2: Parallel Implementation ───────────────────────────
+
+  tool CreateBranches
+    label: "Create Stream Branches"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      base=$(git rev-parse --abbrev-ref HEAD)
+      for stream in a b; do
+        git branch -f "feature/stream-$stream" "$base" 2>/dev/null || true
+      done
+      printf 'branches_created'
+
+  subgraph StreamA
+    label: "Stream A — Adaptive Ralph"
+    ref: subgraphs/adaptive-ralph-stream
+    params:
+      stream_id: stream-a
+      branch: feature/stream-a
+      max_iterations: 8
+
+  subgraph StreamB
+    label: "Stream B — Adaptive Ralph"
+    ref: subgraphs/adaptive-ralph-stream
+    params:
+      stream_id: stream-b
+      branch: feature/stream-b
+      max_iterations: 8
+
+  parallel ParallelStreams -> StreamA, StreamB
+
+  fan_in StreamsJoin <- StreamA, StreamB
+
+  # ─── Phase 3: Integration ───────────────────────────────────────
+
+  tool ContractCheck
+    label: "Verify Contracts"
+    timeout: 2m
+    command:
+      #!/bin/sh
+      set -e
+      # Merge stream branches to a temporary integration branch
+      base=$(git rev-parse --abbrev-ref HEAD)
+      git checkout -b feature/integration "$base" 2>/dev/null || git checkout feature/integration
+
+      # Merge each stream
+      merge_ok=true
+      for stream in a b; do
+        if ! git merge --no-ff "feature/stream-$stream" -m "integrate stream-$stream" 2>/dev/null; then
+          merge_ok=false
+          git merge --abort 2>/dev/null || true
+          break
+        fi
+      done
+
+      if [ "$merge_ok" = false ]; then
+        git checkout "$base" 2>/dev/null || true
+        printf 'merge_conflict'
+        exit 0
+      fi
+
+      # Run build and contract tests
+      if go build ./... 2>&1 && go test ./... 2>&1; then
+        printf 'contracts_pass'
+      else
+        printf 'contracts_fail'
+      fi
+
+  tool MergeBranches
+    label: "Merge Stream Branches"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      # We're already on feature/integration from ContractCheck
+      # Just verify we're in a good state
+      if git rev-parse --verify feature/integration >/dev/null 2>&1; then
+        git checkout feature/integration
+        printf 'merged'
+      else
+        printf 'merge_failed'
+      fi
+
+  tool IntegrationTest
+    label: "Run Integration Tests"
+    timeout: 5m
+    command:
+      #!/bin/sh
+      set -e
+      go build ./... 2>&1
+      go vet ./... 2>&1
+      if go test ./... 2>&1; then
+        printf 'tests_pass'
+      else
+        printf 'tests_fail'
+      fi
+
+  agent IntegrationFix
+    label: "Fix Integration Issues"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    max_turns: 40
+    max_retries: 2
+    retry_target: IntegrationFix
+    prompt:
+      You are working in `run.working_dir` on branch `feature/integration`.
+
+      ## Task
+      The integration tests are failing after merging parallel stream branches.
+      Diagnose and fix the issues.
+
+      ## Process
+      1. Run `go build ./...` and `go test ./...` to see current failures
+      2. Read `.ai/contracts/` for the agreed interfaces
+      3. Read `.ai/streams/stream-a/task.md` and `.ai/streams/stream-b/task.md` for what each stream implemented
+      4. Identify mismatches between stream implementations and contracts
+      5. Fix the issues — prefer minimal changes that align with the contracts
+      6. Run tests again to verify
+      7. Commit fixes with descriptive messages
+
+      ## Constraints
+      - Fix integration issues, don't rewrite stream code
+      - Align implementations with contracts, not the other way around
+      - If contracts were wrong, update contracts AND both implementations
+
+  # ─── Phase 4: Quality Gates & Review ────────────────────────────
+
+  tool ObjectiveGates
+    label: "Objective Quality Gates"
+    timeout: 3m
+    command:
+      #!/bin/sh
+      gate_results=""
+      all_pass=true
+
+      # Gate 1: Build
+      if go build ./... 2>/dev/null; then
+        gate_results="$gate_results\n[PASS] go build"
+      else
+        gate_results="$gate_results\n[FAIL] go build"
+        all_pass=false
+      fi
+
+      # Gate 2: Tests
+      if go test ./... 2>/dev/null; then
+        gate_results="$gate_results\n[PASS] go test"
+      else
+        gate_results="$gate_results\n[FAIL] go test"
+        all_pass=false
+      fi
+
+      # Gate 3: Vet
+      if go vet ./... 2>/dev/null; then
+        gate_results="$gate_results\n[PASS] go vet"
+      else
+        gate_results="$gate_results\n[FAIL] go vet"
+        all_pass=false
+      fi
+
+      # Gate 4: No TODOs in new code
+      todo_count=$(git diff main --unified=0 2>/dev/null | grep -c '^\+.*TODO' || true)
+      if [ "$todo_count" -eq 0 ]; then
+        gate_results="$gate_results\n[PASS] no TODOs in new code"
+      else
+        gate_results="$gate_results\n[WARN] $todo_count TODOs in new code"
+      fi
+
+      printf '%b' "$gate_results" > .ai/gate-results.txt
+
+      if [ "$all_pass" = true ]; then
+        printf 'gates_pass'
+      else
+        printf 'gates_fail'
+      fi
+
+  agent SingleReview
+    label: "Final Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    max_turns: 30
+    prompt:
+      You are working in `run.working_dir` on branch `feature/integration`.
+
+      ## Task
+      Review the integrated feature for correctness, quality, and completeness.
+
+      ## Context
+      - `.ai/feature-spec.md` or brainstorm context — the requirements
+      - `.ai/contracts/` — the agreed interfaces
+      - `.ai/gate-results.txt` — objective gate results
+      - `.ai/streams/stream-*/task.md` — what each stream was supposed to do
+      - `git diff main...HEAD` — all changes being reviewed
+
+      ## Review Focus
+      Objective gates already verified: build, tests, vet, TODOs.
+      Focus your review on what automated checks CANNOT catch:
+      1. **Contract adherence** — do implementations match the agreed interfaces?
+      2. **Requirement coverage** — are all requirements addressed?
+      3. **Security** — auth, injection, secrets, unsafe deserialization
+      4. **Edge cases** — error paths, empty inputs, concurrency
+      5. **Consistency** — do the two streams' code feel like one coherent feature?
+
+      ## Output
+      Write your review to `.ai/review.md` with:
+      - **Verdict**: approve / request_changes
+      - **Issues**: numbered list of concerns (if any)
+      - **Suggestions**: optional improvements (non-blocking)
+
+      If approving, set STATUS: success.
+      If requesting changes, set STATUS: fail with details.
+
+  human HumanApproval
+    label: "Human Approval"
+
+  agent CreatePR
+    label: "Create Pull Request"
+    model: claude-haiku-4-5
+    provider: anthropic
+    max_turns: 10
+    prompt:
+      You are working in `run.working_dir` on branch `feature/integration`.
+
+      ## Task
+      Create a pull request from `feature/integration` to main.
+
+      Read `.ai/review.md` for the review summary.
+      Read `.ai/streams/stream-*/task.md` for what was implemented.
+
+      Create the PR with:
+      - A clear title describing the feature
+      - A body summarizing what was built across both streams
+      - Reference to any relevant issues
+
+      Use `gh pr create` to create the PR.
+
+  # ─── Edges ──────────────────────────────────────────────────────
+
+  edges
+    # Phase 1: Understand & Decompose
+    Start -> ExploreCodebase
+    ExploreCodebase -> CheckSpec
+    CheckSpec -> Brainstorm         when ctx.tool_stdout = no_spec         label: "need requirements"
+    CheckSpec -> DecomposeFeature   when ctx.tool_stdout = spec_exists     label: "spec found"
+    CheckSpec -> DecomposeFeature   label: "fallback"
+    Brainstorm -> DecomposeFeature
+    DecomposeFeature -> ValidateDecomposition
+    ValidateDecomposition -> CommitContracts     when ctx.tool_stdout = valid              label: "decomposition valid"
+    ValidateDecomposition -> DecomposeFeature    when ctx.tool_stdout startswith validation_failed  label: "fix decomposition"  restart: true
+    ValidateDecomposition -> CommitContracts     label: "fallback"
+
+    # Phase 2: Parallel Implementation
+    CommitContracts -> CreateBranches
+    CreateBranches -> ParallelStreams
+    ParallelStreams -> StreamA
+    ParallelStreams -> StreamB
+    StreamA -> StreamsJoin
+    StreamB -> StreamsJoin
+
+    # Phase 3: Integration
+    StreamsJoin -> ContractCheck
+    ContractCheck -> MergeBranches      when ctx.tool_stdout = contracts_pass  label: "contracts ok"
+    ContractCheck -> IntegrationFix     when ctx.tool_stdout = merge_conflict  label: "merge conflict"
+    ContractCheck -> IntegrationFix     when ctx.tool_stdout = contracts_fail  label: "contract tests fail"
+    ContractCheck -> IntegrationFix     label: "fallback"
+    MergeBranches -> IntegrationTest
+    MergeBranches -> IntegrationFix     label: "fallback"
+    IntegrationTest -> ObjectiveGates   when ctx.tool_stdout = tests_pass  label: "tests pass"
+    IntegrationTest -> IntegrationFix   when ctx.tool_stdout = tests_fail  label: "tests fail"
+    IntegrationTest -> IntegrationFix   label: "fallback"
+    IntegrationFix -> IntegrationTest   restart: true
+
+    # Phase 4: Quality Gates & Review
+    ObjectiveGates -> SingleReview      when ctx.tool_stdout = gates_pass  label: "gates pass"
+    ObjectiveGates -> IntegrationFix    when ctx.tool_stdout = gates_fail  label: "gates fail"
+    ObjectiveGates -> IntegrationFix    label: "fallback"
+    SingleReview -> HumanApproval
+    HumanApproval -> CreatePR           when ctx.outcome = success  label: "approved"
+    HumanApproval -> IntegrationFix     when ctx.outcome = fail     label: "changes requested"
+    HumanApproval -> CreatePR           label: "fallback"
+
+    # Phase 5: Ship
+    CreatePR -> Exit

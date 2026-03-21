@@ -1,0 +1,76 @@
+workflow brainstorm_human
+  goal: "Brainstorm a project design interactively with a human, refining understanding through iterative Q&A until ready for a design brief."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  human HumanBrainstorm
+    label: "Brainstorm with Human"
+    mode: freeform
+
+  agent RefineUnderstanding
+    label: "Refine Understanding"
+    fidelity: full
+    goal_gate: true
+    max_retries: 2
+    retry_target: RefineUnderstanding
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are continuing a brainstorm session with the human.
+
+      ## Task
+      Incorporate the human's answer and dig deeper.
+
+      ## Process
+      1. Read docs/plans/brainstorm.md for the current state of the brainstorm
+      2. Read the human's response from context
+      3. Update your understanding based on their answer
+      4. Identify the NEXT most important open question (one at a time!)
+      5. Consider these dimensions (work through them across iterations):
+         - Purpose and goals
+         - Constraints and non-goals
+         - Success criteria
+         - Architecture approaches (propose 2-3 with trade-offs when ready)
+         - Tech stack
+         - Error handling strategy
+         - Testing strategy
+         - Component breakdown
+      6. Format as multiple choice with your recommendation
+      7. When you believe you have enough to write a design brief, instead of a question write: READY_FOR_DESIGN
+      Apply YAGNI at every step — propose the simplest approach that covers the core use case. Drop nice-to-haves.
+
+      ## Output
+      Append to docs/plans/brainstorm.md with:
+      - **Human said:** [their answer]
+      - **Updated understanding:** [what changed]
+      - **Next question:** [multiple choice] OR **READY_FOR_DESIGN**
+
+  tool CheckBrainstormDone
+    label: "Brainstorm Complete?"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      if grep -q 'READY_FOR_DESIGN' docs/plans/brainstorm.md 2>/dev/null; then
+        printf 'done'
+      else
+        printf 'more_questions'
+      fi
+
+  edges
+    Start -> HumanBrainstorm
+    HumanBrainstorm -> RefineUnderstanding
+    RefineUnderstanding -> CheckBrainstormDone
+    CheckBrainstormDone -> HumanBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  restart: true
+    CheckBrainstormDone -> Exit  when ctx.tool_stdout = done  label: "ready for design"  weight: 2
+    CheckBrainstormDone -> HumanBrainstorm  label: fallback  restart: true

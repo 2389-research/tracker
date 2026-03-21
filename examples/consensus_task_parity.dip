@@ -15,7 +15,7 @@ workflow ConsensusTaskParity
 
   agent CheckDoD
     label: "Refine DoD"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     max_retries: 1
@@ -42,7 +42,7 @@ workflow ConsensusTaskParity
 
   agent DefineDoD_Opus
     label: "Refine DoD (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -52,7 +52,7 @@ workflow ConsensusTaskParity
 
   agent ConsolidateDoD
     label: "Consolidate DoD"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -78,7 +78,7 @@ workflow ConsensusTaskParity
 
   agent PlanOpus
     label: "Plan (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -104,7 +104,7 @@ workflow ConsensusTaskParity
 
   agent VerifyOutputs
     label: "Verify Outputs"
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -130,7 +130,7 @@ workflow ConsensusTaskParity
 
   agent ReviewOpus
     label: "Review (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -151,7 +151,7 @@ workflow ConsensusTaskParity
 
   agent Postmortem
     label: Postmortem
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -188,5 +188,7 @@ workflow ConsensusTaskParity
     ReviewConsensus -> Exit  when ctx.outcome = success  label: pass
     ReviewConsensus -> Postmortem  when ctx.outcome = retry  label: retry
     ReviewConsensus -> Exit  when ctx.outcome = fail  label: fail
+    ReviewConsensus -> Exit  label: "fallback to exit"
     Postmortem -> PlanParallel  when ctx.internal.loop_restart_count = 0  label: retry_once  restart: true
     Postmortem -> Exit  when ctx.internal.loop_restart_count != 0  label: stop_after_retry
+    Postmortem -> Exit  label: "fallback to exit"

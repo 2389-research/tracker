@@ -1,0 +1,167 @@
+workflow design_review_parallel
+  goal: "Run parallel multi-model design exploration, join results, and consolidate into a single design brief."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  parallel OmakaseFanOut -> DesignExploreOpus, DesignExploreGPT, DesignExploreGemini
+
+  agent DesignExploreOpus
+    label: "Design Explore (Opus)"
+    fidelity: full
+    goal_gate: true
+    retry_target: DesignExploreOpus
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior software architect independently exploring design options.
+
+      ## Context
+      Read docs/plans/brainstorm-context.md for the project understanding and constraints.
+
+      ## Task
+      Independently propose a complete architecture and design for this project. Do NOT coordinate with other models — your independent perspective is valuable.
+
+      ## Process
+      1. Read docs/plans/brainstorm-context.md
+      2. Propose 2-3 architectural approaches with trade-offs
+      3. Recommend a tech stack with justification for each choice
+      4. Break down into components with dependency graph
+      5. Outline a testing strategy (unit/integration/e2e)
+      6. Apply YAGNI ruthlessly — propose the simplest approach that covers the core use case
+
+      ## Output
+      Write to docs/plans/design-explore-opus.md with sections:
+      - **Architectural Approaches:** 2-3 options with trade-offs, recommended choice marked
+      - **Tech Stack:** language, framework, key deps, test framework, linter
+      - **Components:** breakdown with dependency graph
+      - **Testing Strategy:** test levels and what to cover
+      - **Trade-offs:** what you considered and rejected, and why
+
+  agent DesignExploreGPT
+    label: "Design Explore (GPT-5.4)"
+    fidelity: full
+    goal_gate: true
+    retry_target: DesignExploreGPT
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior software architect independently exploring design options.
+
+      ## Context
+      Read docs/plans/brainstorm-context.md for the project understanding and constraints.
+
+      ## Task
+      Independently propose a complete architecture and design for this project. Do NOT coordinate with other models — your independent perspective is valuable.
+
+      ## Process
+      1. Read docs/plans/brainstorm-context.md
+      2. Propose 2-3 architectural approaches with trade-offs
+      3. Recommend a tech stack with justification for each choice
+      4. Break down into components with dependency graph
+      5. Outline a testing strategy (unit/integration/e2e)
+      6. Apply YAGNI ruthlessly — propose the simplest approach that covers the core use case
+
+      ## Output
+      Write to docs/plans/design-explore-gpt.md with sections:
+      - **Architectural Approaches:** 2-3 options with trade-offs, recommended choice marked
+      - **Tech Stack:** language, framework, key deps, test framework, linter
+      - **Components:** breakdown with dependency graph
+      - **Testing Strategy:** test levels and what to cover
+      - **Trade-offs:** what you considered and rejected, and why
+
+  agent DesignExploreGemini
+    label: "Design Explore (Gemini)"
+    fidelity: full
+    goal_gate: true
+    retry_target: DesignExploreGemini
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior software architect independently exploring design options.
+
+      ## Context
+      Read docs/plans/brainstorm-context.md for the project understanding and constraints.
+
+      ## Task
+      Independently propose a complete architecture and design for this project. Do NOT coordinate with other models — your independent perspective is valuable.
+
+      ## Process
+      1. Read docs/plans/brainstorm-context.md
+      2. Propose 2-3 architectural approaches with trade-offs
+      3. Recommend a tech stack with justification for each choice
+      4. Break down into components with dependency graph
+      5. Outline a testing strategy (unit/integration/e2e)
+      6. Apply YAGNI ruthlessly — propose the simplest approach that covers the core use case
+
+      ## Output
+      Write to docs/plans/design-explore-gemini.md with sections:
+      - **Architectural Approaches:** 2-3 options with trade-offs, recommended choice marked
+      - **Tech Stack:** language, framework, key deps, test framework, linter
+      - **Components:** breakdown with dependency graph
+      - **Testing Strategy:** test levels and what to cover
+      - **Trade-offs:** what you considered and rejected, and why
+
+  fan_in OmakaseJoin <- DesignExploreOpus, DesignExploreGPT, DesignExploreGemini
+
+  agent ConsolidateDesigns
+    label: "Consolidate Designs"
+    fidelity: full
+    goal_gate: true
+    retry_target: ConsolidateDesigns
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior architect synthesizing multiple independent design explorations into a single coherent design brief.
+
+      ## Context
+      Three models independently explored design options. Read all three:
+      1. docs/plans/design-explore-opus.md
+      2. docs/plans/design-explore-gpt.md
+      3. docs/plans/design-explore-gemini.md
+
+      ## Task
+      Compare all three explorations, cherry-pick the strongest ideas from each, resolve conflicts, and produce a single coherent design brief.
+
+      ## Process
+      1. Read all three design exploration documents
+      2. Compare architectural approaches — which is simplest? Most robust? Best trade-offs?
+      3. Compare tech stack choices — where do they agree? Where do they diverge?
+      4. Compare component breakdowns — which is cleanest?
+      5. Compare testing strategies — which is most comprehensive?
+      6. Cherry-pick the best ideas from each, resolving conflicts
+      7. Apply YAGNI — if two models wanted a feature and one didn't, lean toward dropping it
+
+      ## Output
+      Write to docs/plans/design-brief.md with sections:
+      1. **Architecture and Components** — components, data flow, key decisions
+      2. **Tech Stack** — language, framework, key dependencies. Justify each choice.
+      3. **Error Handling** — error categories, handling strategies, recovery patterns
+      4. **Testing Strategy** — test framework, test levels, coverage targets
+      5. **Component Breakdown** — detailed specs with dependency graph
+
+      Note which ideas came from which model's exploration, giving credit where due.
+
+  edges
+    Start -> OmakaseFanOut
+    OmakaseFanOut -> DesignExploreOpus
+    OmakaseFanOut -> DesignExploreGPT
+    OmakaseFanOut -> DesignExploreGemini
+    DesignExploreOpus -> OmakaseJoin
+    DesignExploreGPT -> OmakaseJoin
+    DesignExploreGemini -> OmakaseJoin
+    OmakaseJoin -> ConsolidateDesigns
+    ConsolidateDesigns -> Exit

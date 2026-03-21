@@ -115,7 +115,7 @@ workflow SprintExec
 
   agent ReviewClaude
     label: "Claude Review"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -143,7 +143,7 @@ workflow SprintExec
 
   agent CritiqueClaudeOnCodex
     label: "Claude Critique of Codex Review"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -151,7 +151,7 @@ workflow SprintExec
 
   agent CritiqueClaudeOnGemini
     label: "Claude Critique of Gemini Review"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -231,7 +231,8 @@ workflow SprintExec
     MarkInProgress -> ImplementSprint
     ImplementSprint -> ValidateBuild
     ValidateBuild -> CommitSprintWork  when ctx.outcome = success  label: validated
-    ValidateBuild -> ImplementSprint  when ctx.outcome = fail  label: fix_validation
+    ValidateBuild -> ImplementSprint  when ctx.outcome = fail  label: fix_validation  restart: true
+    ValidateBuild -> CommitSprintWork
     CommitSprintWork -> ReviewParallel
     ReviewParallel -> ReviewClaude
     ReviewParallel -> ReviewCodex
@@ -254,7 +255,8 @@ workflow SprintExec
     CritiqueGeminiOnCodex -> CritiquesJoin
     CritiquesJoin -> ReviewAnalysis
     ReviewAnalysis -> CompleteSprint  when ctx.outcome = success  label: pass
-    ReviewAnalysis -> ImplementSprint  when ctx.outcome = retry  label: rework
+    ReviewAnalysis -> ImplementSprint  when ctx.outcome = retry  label: rework  restart: true
     ReviewAnalysis -> FailureSummary  when ctx.outcome = fail  label: fail
+    ReviewAnalysis -> FailureSummary
     CompleteSprint -> Exit
     FailureSummary -> Exit

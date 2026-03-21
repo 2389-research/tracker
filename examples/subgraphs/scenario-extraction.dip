@@ -1,0 +1,175 @@
+workflow ScenarioExtraction
+  goal: "Write, run, fix, and extract patterns from end-to-end scenario tests"
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 3
+    fidelity: truncate
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  agent WriteScenarios
+    label: "Write Scenarios"
+    fidelity: full
+    goal_gate: true
+    retry_target: WriteScenarios
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior QA engineer writing end-to-end scenario tests that exercise the real system with real dependencies.
+
+      ## Context
+      1. Read docs/plans/design-brief.md for the project requirements
+      2. Read docs/plans/plan.md for the implementation plan and what was built
+      3. Read ALL implemented source code to understand the actual system
+
+      ## Task
+      Write end-to-end scenario tests in the `.scratch/` directory. Each scenario exercises the system as a real user would, with real dependencies.
+
+      ## Rules
+      - ZERO mocks allowed. A test that uses mocks is not testing your system — it is testing your assumptions about the system.
+      - Use real APIs in sandbox/test mode, real storage, real auth (with test credentials)
+      - Each scenario MUST be independent — no ordering dependencies between scenarios
+      - Each scenario should be a complete script that can run on its own
+      - Use whatever language/framework is appropriate for the project
+      - Name scenario files descriptively: e.g., `.scratch/scenario_user_signup.py`, `.scratch/scenario_data_export.sh`
+
+      ## Scenario Structure
+      Each scenario should follow given/when/then:
+      - **Given:** Set up preconditions (create test data, configure test environment)
+      - **When:** Execute the action being tested (call the API, run the command, interact with the UI)
+      - **Then:** Assert the expected outcome (check responses, verify side effects, validate state)
+      - **Cleanup:** Tear down any test data created
+
+      ## What to Cover
+      - Happy path for each major feature in the design brief
+      - Key error paths (invalid input, missing dependencies, auth failures)
+      - Integration points between components
+      - Data flow end-to-end
+
+      ## Output
+      - Write scenario files to `.scratch/` directory
+      - Each file should be executable and self-contained
+      - Add `.scratch/` to .gitignore if not already there:
+        grep -q '.scratch/' .gitignore 2>/dev/null || echo '.scratch/' >> .gitignore
+
+  tool RunScenarios
+    label: "Run Scenarios"
+    timeout: 120s
+    command:
+      #!/bin/sh
+      set -eu
+      mkdir -p .scratch
+      if [ -z "$(ls -A .scratch/ 2>/dev/null)" ]; then
+        printf 'scenarios_fail'
+        exit 0
+      fi
+      pass=0
+      fail=0
+      for f in .scratch/scenario_*; do
+        [ -f "$f" ] || continue
+        echo "=== Running: $f ==="
+        chmod +x "$f" 2>/dev/null || true
+        if sh "$f" 2>&1; then
+          echo "PASS: $f"
+          pass=$((pass + 1))
+        else
+          echo "FAIL: $f"
+          fail=$((fail + 1))
+        fi
+      done
+      echo "Results: $pass passed, $fail failed"
+      if [ "$fail" -gt 0 ]; then
+        printf 'scenarios_fail'
+      else
+        printf 'scenarios_pass'
+      fi
+
+  agent FixScenarioFailures
+    label: "Fix Scenario Failures"
+    goal_gate: true
+    max_retries: 3
+    retry_target: FixScenarioFailures
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior engineer fixing issues revealed by real-dependency scenario tests.
+
+      ## IRON LAW: FIX THE IMPLEMENTATION, NOT THE SCENARIO
+      Scenarios represent real-world usage. If a scenario fails, the implementation is wrong — not the scenario. Only fix the scenario if it has a genuine bug (wrong test data, typo in setup).
+
+      ## Context
+      1. Read the scenario failure output from context
+      2. Read the failing scenario file(s) in `.scratch/`
+      3. Read the relevant implementation code
+
+      ## Process
+      1. Identify what's broken — is it the scenario or the implementation?
+      2. Fix the implementation to make the scenario pass
+      3. Re-run the specific failing scenario to verify the fix:
+         sh .scratch/scenario_<name>
+      4. Run the full test suite to verify nothing else broke:
+         - Python: uv run pytest -v
+         - Node: npm test
+         - Go: go test ./...
+         - Rust: cargo test
+      5. Commit the fix:
+         git add <changed files> && git commit -m 'fix(<scope>): <description of scenario fix>'
+
+      ## Success Criteria
+      - The failing scenario now passes
+      - All existing unit/integration tests still pass
+      - Implementation is correct, not just patched to pass the scenario
+
+  agent ExtractScenarioPatterns
+    label: "Extract Scenario Patterns"
+    goal_gate: true
+    retry_target: ExtractScenarioPatterns
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior QA engineer extracting reusable test patterns from passing scenarios.
+
+      ## Context
+      Read all passing scenario files in `.scratch/`
+
+      ## Task
+      Extract robust, reusable patterns from the passing scenarios into `scenarios.jsonl`.
+
+      ## Output Format
+      Each line of `scenarios.jsonl` is a JSON object with:
+      - `name`: short identifier (e.g., 'user_signup_happy_path')
+      - `description`: one-sentence description of what the scenario validates
+      - `given`: array of precondition descriptions
+      - `when`: array of action descriptions
+      - `then`: array of expected outcome descriptions
+      - `validates`: array of design-brief requirements this scenario covers
+
+      ## Process
+      1. Read each scenario file in `.scratch/`
+      2. Extract the given/when/then structure
+      3. Map each scenario to the requirements it validates from docs/plans/design-brief.md
+      4. Write one JSON line per scenario to `scenarios.jsonl`
+      5. Commit: git add scenarios.jsonl && git commit -m 'test(scenarios): extract scenario patterns'
+
+      ## Success Criteria
+      - Every passing scenario has a corresponding entry in scenarios.jsonl
+      - Each entry maps to at least one design-brief requirement
+      - File is valid JSONL (one JSON object per line)
+
+  edges
+    Start -> WriteScenarios
+    WriteScenarios -> RunScenarios
+    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout = scenarios_pass  label: "all pass"  weight: 2
+    RunScenarios -> FixScenarioFailures  when ctx.tool_stdout = scenarios_fail  label: failures
+    RunScenarios -> FixScenarioFailures  label: "fallback — assume failure"
+    FixScenarioFailures -> RunScenarios  restart: true
+    ExtractScenarioPatterns -> Exit

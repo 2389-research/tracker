@@ -29,6 +29,7 @@ type SessionConfig struct {
 	CacheToolResults    bool
 	ContextCompaction   CompactionMode
 	CompactionThreshold float64
+	ReasoningEffort     string // OpenAI reasoning effort: "low", "medium", "high"
 }
 
 const (

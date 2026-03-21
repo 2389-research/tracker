@@ -4,7 +4,7 @@ workflow RalphLoop
   exit: Exit
 
   defaults
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     max_retries: 2
     fidelity: summary:high
@@ -102,7 +102,7 @@ workflow RalphLoop
 
   agent WrapUp
     label: "Wrap Up (Budget Exhausted)"
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -124,6 +124,8 @@ workflow RalphLoop
     Iterate -> CheckCompletion
     CheckCompletion -> Exit  when ctx.tool_stdout = complete  label: done
     CheckCompletion -> CheckBudget  when ctx.tool_stdout = continue  label: "more work needed"
+    CheckCompletion -> CheckBudget  label: "fallback to continue"
     CheckBudget -> IncrementCounter  when ctx.tool_stdout = budget_ok  label: "next iteration"  restart: true
     CheckBudget -> WrapUp  when ctx.tool_stdout = budget_exhausted  label: "out of iterations"
+    CheckBudget -> WrapUp  label: "fallback to wrap up"
     WrapUp -> Exit

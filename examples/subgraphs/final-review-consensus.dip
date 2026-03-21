@@ -1,0 +1,242 @@
+workflow final_review_consensus
+  goal: "Multi-model final review with cross-critique consensus. Three LLMs independently review, then cross-critique each other's reviews, and a consensus agent synthesizes a final verdict."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: "Start"
+    prompt:
+      Pass through to final review fan-out.
+
+  parallel ReviewFanOut -> FinalReviewOpus, FinalReviewGPT, FinalReviewGemini
+
+  agent FinalReviewOpus
+    label: "Final Review (Opus)"
+    fidelity: summary:high
+    goal_gate: true
+    retry_target: FinalReviewOpus
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior code reviewer performing final review of the complete implementation.
+
+      ## Pre-check (MANDATORY — do this FIRST)
+      Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+      If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+      or if no application source files exist beyond __init__.py, config, and tooling,
+      immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+      substantive implementation exists to review.' Do NOT proceed with quality review.
+
+      ## IRON LAW: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+      Run commands. Read output. Check exit codes. THEN make claims.
+      Forbidden words: 'should', 'probably', 'seems to'.
+
+      ## Context
+      1. Read docs/plans/plan.md for the original requirements
+      2. Run: git log --oneline to see all commits
+      3. Run: git diff main...HEAD (or first commit) to see all changes
+
+      ## Review Dimensions
+      1. **Plan Alignment:** Compare implementation to plan. Identify deviations — justified improvements vs problematic departures. Verify ALL planned functionality implemented.
+      2. **Code Quality:** Patterns, error handling, type safety, naming, maintainability
+      3. **Architecture:** SOLID, separation of concerns, loose coupling
+      4. **Test Coverage:** Are edge cases covered? Are tests meaningful or trivial?
+      5. **Security:** Input validation, injection risks, secrets handling
+
+      ## Output
+      For each issue found, provide: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+
+      Return PASS/FAIL with detailed reasoning.
+
+  agent FinalReviewGPT
+    label: "Final Review (GPT-5.4)"
+    fidelity: summary:high
+    goal_gate: true
+    retry_target: FinalReviewGPT
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior code reviewer performing final review of the complete implementation.
+
+      ## Pre-check (MANDATORY — do this FIRST)
+      Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+      If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+      or if no application source files exist beyond __init__.py, config, and tooling,
+      immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+      substantive implementation exists to review.' Do NOT proceed with quality review.
+
+      ## Context
+      1. Read docs/plans/plan.md for the original requirements
+      2. Run: git log --oneline to see all commits
+      3. Run: git diff main...HEAD (or first commit) to see all changes
+
+      ## Review Focus
+      1. **Completeness:** Is every planned feature implemented? Any gaps?
+      2. **Quality:** Code patterns, error handling, naming conventions
+      3. **Testing:** Coverage, edge cases, test quality
+      4. **Performance:** Obvious inefficiencies, resource leaks
+      5. **Security:** OWASP top 10, input validation
+
+      ## Output
+      For each issue: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+      Return PASS/FAIL with reasoning.
+
+  agent FinalReviewGemini
+    label: "Final Review (Gemini)"
+    fidelity: summary:high
+    goal_gate: true
+    retry_target: FinalReviewGemini
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior code reviewer performing final review of the complete implementation.
+
+      ## Pre-check (MANDATORY — do this FIRST)
+      Before reviewing code quality, verify substantive application code exists beyond scaffolding.
+      If the only tests are trivial (assert True, assert 1==1, or similar no-op assertions),
+      or if no application source files exist beyond __init__.py, config, and tooling,
+      immediately return FAIL with 'NO_APPLICATION_CODE — project contains only scaffolding, no
+      substantive implementation exists to review.' Do NOT proceed with quality review.
+
+      ## Context
+      1. Read docs/plans/plan.md for the original requirements
+      2. Run: git log --oneline to see all commits
+      3. Run: git diff main...HEAD (or first commit) to see all changes
+
+      ## Review Focus
+      1. **Delivery Robustness:** Will this work reliably in production?
+      2. **Test Coverage:** Are tests comprehensive and meaningful?
+      3. **Edge Cases:** What could go wrong? Missing error handling?
+      4. **Documentation:** Is the code self-documenting? Missing comments on complex logic?
+
+      ## Output
+      For each issue: severity (Critical/Important/Suggestion), file:line, description, fix guidance.
+      Return PASS/FAIL with reasoning.
+
+  fan_in ReviewsJoin <- FinalReviewOpus, FinalReviewGPT, FinalReviewGemini
+
+  parallel CritiqueFanOut -> CritiqueOpusOnGPT, CritiqueOpusOnGemini, CritiqueGPTOnOpus, CritiqueGPTOnGemini, CritiqueGeminiOnOpus, CritiqueGeminiOnGPT
+
+  agent CritiqueOpusOnGPT
+    label: "Opus Critiques GPT Review"
+    goal_gate: true
+    retry_target: CritiqueOpusOnGPT
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the GPT-5.4 review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueOpusOnGemini
+    label: "Opus Critiques Gemini Review"
+    goal_gate: true
+    retry_target: CritiqueOpusOnGemini
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGPTOnOpus
+    label: "GPT Critiques Opus Review"
+    goal_gate: true
+    retry_target: CritiqueGPTOnOpus
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Opus review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGPTOnGemini
+    label: "GPT Critiques Gemini Review"
+    goal_gate: true
+    retry_target: CritiqueGPTOnGemini
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGeminiOnOpus
+    label: "Gemini Critiques Opus Review"
+    goal_gate: true
+    retry_target: CritiqueGeminiOnOpus
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the Opus review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  agent CritiqueGeminiOnGPT
+    label: "Gemini Critiques GPT Review"
+    goal_gate: true
+    retry_target: CritiqueGeminiOnGPT
+    prompt:
+      You are working in `run.working_dir`.
+
+      Critique the GPT-5.4 review for missing checks, weak evidence, or mistaken conclusions. Are there issues they missed? Did they flag false positives? Be specific with file:line references.
+
+  fan_in CritiquesJoin <- CritiqueOpusOnGPT, CritiqueOpusOnGemini, CritiqueGPTOnOpus, CritiqueGPTOnGemini, CritiqueGeminiOnOpus, CritiqueGeminiOnGPT
+
+  agent ReviewConsensus
+    label: "Review Consensus"
+    goal_gate: true
+    max_retries: 1
+    retry_target: ReviewConsensus
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Task
+      Synthesize all reviews and cross-critiques into a single final verdict.
+
+      ## Process
+      1. Read all review outputs and critique outputs from context
+      2. Identify issues confirmed by multiple reviewers (high confidence)
+      3. Identify issues challenged by critiques (lower confidence — investigate)
+      4. Categorize confirmed issues: Critical / Important / Suggestion
+      5. For each Critical/Important issue, provide exact fix guidance
+
+      ## Verdict Rules
+      - **SUCCESS:** No Critical issues. No more than 2 Important issues (and they're minor). Ship it.
+      - **RETRY:** Critical issues found OR 3+ Important issues. Route back to implementation for fixes.
+      - **FAIL:** Fundamental architectural problems that can't be fixed incrementally. Route to auto-recovery.
+
+      ## Output
+      State your verdict clearly:
+      outcome=success — ready to ship
+      outcome=retry — needs fixes (list them)
+      outcome=fail — blocked, route to auto-recovery
+
+  agent Exit
+    label: "Exit"
+    prompt:
+      Workflow complete.
+
+  edges
+    Start -> ReviewFanOut
+    ReviewFanOut -> FinalReviewOpus
+    ReviewFanOut -> FinalReviewGPT
+    ReviewFanOut -> FinalReviewGemini
+    FinalReviewOpus -> ReviewsJoin
+    FinalReviewGPT -> ReviewsJoin
+    FinalReviewGemini -> ReviewsJoin
+    ReviewsJoin -> CritiqueFanOut
+    CritiqueFanOut -> CritiqueOpusOnGPT
+    CritiqueFanOut -> CritiqueOpusOnGemini
+    CritiqueFanOut -> CritiqueGPTOnOpus
+    CritiqueFanOut -> CritiqueGPTOnGemini
+    CritiqueFanOut -> CritiqueGeminiOnOpus
+    CritiqueFanOut -> CritiqueGeminiOnGPT
+    CritiqueOpusOnGPT -> CritiquesJoin
+    CritiqueOpusOnGemini -> CritiquesJoin
+    CritiqueGPTOnOpus -> CritiquesJoin
+    CritiqueGPTOnGemini -> CritiquesJoin
+    CritiqueGeminiOnOpus -> CritiquesJoin
+    CritiqueGeminiOnGPT -> CritiquesJoin
+    CritiquesJoin -> ReviewConsensus
+    ReviewConsensus -> Exit  when ctx.outcome = success  label: "approved"  weight: 2
+    ReviewConsensus -> Exit  when ctx.outcome = retry  label: "rework needed"
+    ReviewConsensus -> Exit  when ctx.outcome = fail  label: "blocked"
+    ReviewConsensus -> Exit  label: "fallback"

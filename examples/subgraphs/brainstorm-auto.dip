@@ -1,0 +1,72 @@
+workflow brainstorm_auto
+  goal: "Brainstorm a project design autonomously, answering questions with best judgment through iterative refinement until ready for a design brief."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  agent AutoBrainstorm
+    label: "Auto Brainstorm"
+    fidelity: full
+    goal_gate: true
+    max_retries: 2
+    retry_target: AutoBrainstorm
+    prompt:
+      You are working in `run.working_dir`.
+
+      ## Role
+      You are a senior software architect continuing an autonomous brainstorm session. There is no human in the loop — you must answer your own questions using best judgment.
+
+      ## Task
+      Read the current brainstorm state and advance it by answering the outstanding question yourself.
+
+      ## Process
+      1. Read docs/plans/brainstorm.md for the current state of the brainstorm
+      2. Find the latest **Key Question** or **Next question** (the most recent unanswered one)
+      3. Pick the best answer using your judgment — prefer the recommended option unless you have strong reason not to
+      4. Update your understanding based on the answer you chose
+      5. Identify the NEXT most important open question (one at a time!)
+      6. Consider these dimensions (work through them across iterations):
+         - Purpose and goals
+         - Constraints and non-goals
+         - Success criteria
+         - Architecture approaches (propose 2-3 with trade-offs when ready)
+         - Tech stack
+         - Error handling strategy
+         - Testing strategy
+         - Component breakdown
+      7. Format as multiple choice with your recommendation
+      8. When you believe you have enough to write a design brief, instead of a question write: READY_FOR_DESIGN
+      Apply YAGNI at every step — propose the simplest approach that covers the core use case. Drop nice-to-haves.
+
+      ## Output
+      Append to docs/plans/brainstorm.md with:
+      - **Auto-answer:** [which option was chosen and why]
+      - **Updated understanding:** [what changed]
+      - **Next question:** [multiple choice] OR **READY_FOR_DESIGN**
+
+  tool CheckBrainstormDone
+    label: "Brainstorm Complete?"
+    timeout: 60s
+    command:
+      #!/bin/sh
+      if grep -q 'READY_FOR_DESIGN' docs/plans/brainstorm.md 2>/dev/null; then
+        printf 'done'
+      else
+        printf 'more_questions'
+      fi
+
+  edges
+    Start -> AutoBrainstorm
+    AutoBrainstorm -> CheckBrainstormDone
+    CheckBrainstormDone -> AutoBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  restart: true
+    CheckBrainstormDone -> Exit  when ctx.tool_stdout = done  label: "ready for design"  weight: 2
+    CheckBrainstormDone -> AutoBrainstorm  label: fallback  restart: true

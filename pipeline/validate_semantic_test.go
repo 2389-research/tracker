@@ -32,7 +32,7 @@ func TestHandlerRegistry_Has(t *testing.T) {
 
 func TestValidateSemantic_NilGraph(t *testing.T) {
 	reg := NewHandlerRegistry()
-	err := ValidateSemantic(nil, reg)
+	err, _ := ValidateSemantic(nil, reg)
 	if err == nil {
 		t.Fatal("expected error for nil graph")
 	}
@@ -54,7 +54,7 @@ func TestValidateSemantic_UnregisteredHandler(t *testing.T) {
 	reg.Register(&semanticStubHandler{name: "start"})
 	reg.Register(&semanticStubHandler{name: "exit"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Fatal("expected error for unregistered handler")
 	}
@@ -75,7 +75,7 @@ func TestValidateSemantic_StartExitSkipped(t *testing.T) {
 	// Registry has no handlers at all — start and exit should be skipped.
 	reg := NewHandlerRegistry()
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err != nil {
 		t.Errorf("expected no error when only start/exit nodes present, got: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestValidateSemantic_InvalidConditionSyntax(t *testing.T) {
 	reg := NewHandlerRegistry()
 	reg.Register(&semanticStubHandler{name: "conditional"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Fatal("expected error for invalid condition syntax")
 	}
@@ -116,7 +116,7 @@ func TestValidateSemantic_InvalidMaxRetries(t *testing.T) {
 	reg := NewHandlerRegistry()
 	reg.Register(&semanticStubHandler{name: "codergen"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Fatal("expected error for invalid max_retries")
 	}
@@ -143,7 +143,7 @@ func TestValidateSemantic_AllValid(t *testing.T) {
 	reg.Register(&semanticStubHandler{name: "codergen"})
 	reg.Register(&semanticStubHandler{name: "conditional"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err != nil {
 		t.Errorf("expected no error for valid graph, got: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestValidateNodeAttributes_CacheToolResults_Valid(t *testing.T) {
 	reg.Register(&semanticStubHandler{name: "exit"})
 	reg.Register(&semanticStubHandler{name: "codergen"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err != nil {
 		t.Errorf("cache_tool_results='true' should be valid, got: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestValidateNodeAttributes_CacheToolResults_Invalid(t *testing.T) {
 	reg.Register(&semanticStubHandler{name: "exit"})
 	reg.Register(&semanticStubHandler{name: "codergen"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Error("cache_tool_results='banana' should be invalid")
 	}
@@ -204,7 +204,7 @@ func TestValidateNodeAttributes_CacheToolResults_GraphLevel_Invalid(t *testing.T
 	reg.Register(&semanticStubHandler{name: "exit"})
 	reg.Register(&semanticStubHandler{name: "codergen"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Error("graph-level cache_tool_results='banana' should be invalid")
 	}
@@ -225,7 +225,7 @@ func TestValidateNodeAttributes_ContextCompaction_Valid(t *testing.T) {
 	reg := NewHandlerRegistry()
 	reg.Register(&semanticStubHandler{name: "codergen"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err != nil {
 		t.Errorf("expected valid, got: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestValidateNodeAttributes_ContextCompaction_InvalidMode(t *testing.T) {
 	g.AddEdge(&Edge{From: "s", To: "e"})
 
 	reg := NewHandlerRegistry()
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Error("expected error for invalid context_compaction value")
 	}
@@ -259,7 +259,7 @@ func TestValidateNodeAttributes_ContextCompaction_InvalidThreshold(t *testing.T)
 	reg := NewHandlerRegistry()
 	reg.Register(&semanticStubHandler{name: "codergen"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Error("expected error for invalid threshold")
 	}
@@ -279,7 +279,7 @@ func TestValidateNodeAttributes_ContextCompaction_ThresholdOutOfRange(t *testing
 	reg := NewHandlerRegistry()
 	reg.Register(&semanticStubHandler{name: "codergen"})
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Error("expected error for threshold > 1.0")
 	}
@@ -300,7 +300,7 @@ func TestValidateSemantic_MixedErrors(t *testing.T) {
 	// codergen not registered — so we get handler + condition + attribute errors.
 	reg := NewHandlerRegistry()
 
-	err := ValidateSemantic(g, reg)
+	err, _ := ValidateSemantic(g, reg)
 	if err == nil {
 		t.Fatal("expected multiple errors")
 	}

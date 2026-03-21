@@ -62,6 +62,34 @@ func ValidateAll(g *Graph) *ValidationError {
 	return nil
 }
 
+// ValidateAllWithLint checks a parsed Graph for structural and semantic issues,
+// including Dippin lint warnings. Returns a ValidationError with both errors and warnings.
+func ValidateAllWithLint(g *Graph, registry *HandlerRegistry) *ValidationError {
+	// First, run structural validation
+	ve := validateGraph(g)
+	if ve == nil {
+		ve = &ValidationError{}
+	}
+
+	// Then, run semantic validation (includes lint rules)
+	if registry != nil {
+		err, lintWarnings := ValidateSemantic(g, registry)
+		if err != nil {
+			if verr, ok := err.(*ValidationError); ok {
+				ve.Errors = append(ve.Errors, verr.Errors...)
+			} else {
+				ve.Errors = append(ve.Errors, err.Error())
+			}
+		}
+		ve.Warnings = append(ve.Warnings, lintWarnings...)
+	}
+
+	if ve.hasErrors() || ve.hasWarnings() {
+		return ve
+	}
+	return nil
+}
+
 func validateGraph(g *Graph) *ValidationError {
 	if g == nil {
 		return &ValidationError{Errors: []string{"graph is nil"}}

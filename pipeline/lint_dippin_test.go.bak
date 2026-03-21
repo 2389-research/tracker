@@ -1,0 +1,618 @@
+// ABOUTME: Tests for Dippin semantic lint rules (DIP101-DIP112).
+// ABOUTME: Each rule has positive (warning) and negative (no warning) test cases.
+package pipeline
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestLintDIP110_EmptyPrompt(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Agent1",
+		Handler: "codergen",
+		Attrs:   map[string]string{}, // No prompt
+	})
+
+	warnings := LintDippinRules(g)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP110") && strings.Contains(w, "Agent1") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected DIP110 warning for empty prompt")
+	}
+}
+
+func TestLintDIP110_NoWarningWithPrompt(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Agent1",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "do something"},
+	})
+
+	warnings := LintDippinRules(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP110") {
+			t.Errorf("unexpected DIP110 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP111_ToolWithoutTimeout(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "RunTests",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "pytest"}, // No timeout
+	})
+
+	warnings := LintDippinRules(g)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP111") && strings.Contains(w, "RunTests") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected DIP111 warning for tool without timeout")
+	}
+}
+
+func TestLintDIP111_NoWarningWithTimeout(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "RunTests",
+		Handler: "tool",
+		Attrs: map[string]string{
+			"tool_command": "pytest",
+			"timeout":      "60s",
+		},
+	})
+
+	warnings := LintDippinRules(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP111") {
+			t.Errorf("unexpected DIP111 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP102_NoDefaultEdge(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Check", Handler: "codergen"})
+	g.AddNode(&Node{ID: "Pass", Handler: "codergen"})
+	g.AddNode(&Node{ID: "Fail", Handler: "codergen"})
+
+	// Two conditional edges, no unconditional fallback
+	g.AddEdge(&Edge{From: "Check", To: "Pass", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "Check", To: "Fail", Condition: "ctx.outcome = fail"})
+
+	warnings := LintDippinRules(g)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP102") && strings.Contains(w, "Check") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected DIP102 warning for missing default edge")
+	}
+}
+
+func TestLintDIP102_NoWarningWithDefault(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Check", Handler: "codergen"})
+	g.AddNode(&Node{ID: "Pass", Handler: "codergen"})
+	g.AddNode(&Node{ID: "Fail", Handler: "codergen"})
+
+	g.AddEdge(&Edge{From: "Check", To: "Pass", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "Check", To: "Fail"}) // Unconditional fallback
+
+	warnings := LintDippinRules(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP102") {
+			t.Errorf("unexpected DIP102 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP104_UnboundedRetry(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Task",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":       "do task",
+			"retry_target": "Task", // Retry to self with no bounds
+		},
+	})
+
+	warnings := lintDIP104(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP104 warning for unbounded retry")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP104") && strings.Contains(w, "Task") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP104 warning mentioning Task, got: %v", warnings)
+	}
+}
+
+func TestLintDIP104_NoWarningWithMaxRetries(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Task",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":       "do task",
+			"retry_target": "Task",
+			"max_retries":  "3",
+		},
+	})
+
+	warnings := lintDIP104(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP104") {
+			t.Errorf("unexpected DIP104 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP108_UnknownProvider(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Agent1",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":       "test",
+			"llm_provider": "unknown_provider",
+		},
+	})
+
+	warnings := lintDIP108(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP108 warning for unknown provider")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP108") && strings.Contains(w, "unknown_provider") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP108 warning for unknown_provider, got: %v", warnings)
+	}
+}
+
+func TestLintDIP108_NoWarningForKnownProvider(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Agent1",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":       "test",
+			"llm_provider": "openai",
+		},
+	})
+
+	warnings := lintDIP108(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP108") {
+			t.Errorf("unexpected DIP108 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP101_UnreachableViaConditional(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Handler: "start"})
+	g.AddNode(&Node{ID: "A", Handler: "codergen", Attrs: map[string]string{"prompt": "a"}})
+	g.AddNode(&Node{ID: "B", Handler: "codergen", Attrs: map[string]string{"prompt": "b"}})
+
+	g.AddEdge(&Edge{From: "Start", To: "A"}) // Unconditional
+	g.AddEdge(&Edge{From: "A", To: "B", Condition: "ctx.x = y"}) // Conditional only
+
+	warnings := lintDIP101(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP101 warning for node only reachable via conditional")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP101") && strings.Contains(w, "B") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP101 warning for B, got: %v", warnings)
+	}
+}
+
+func TestLintDIP101_NoWarningForUnconditionalPath(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Handler: "start"})
+	g.AddNode(&Node{ID: "A", Handler: "codergen", Attrs: map[string]string{"prompt": "a"}})
+	g.AddNode(&Node{ID: "B", Handler: "codergen", Attrs: map[string]string{"prompt": "b"}})
+
+	g.AddEdge(&Edge{From: "Start", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "B"}) // Unconditional path to B
+
+	warnings := lintDIP101(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP101") {
+			t.Errorf("unexpected DIP101 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP107_UnusedWrite(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "a",
+			"writes": "summary",
+		},
+	})
+	g.AddNode(&Node{
+		ID:      "B",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "b",
+			// No reads
+		},
+	})
+
+	warnings := lintDIP107(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP107 warning for unused write")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP107") && strings.Contains(w, "summary") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP107 warning for summary, got: %v", warnings)
+	}
+}
+
+func TestLintDIP107_NoWarningWhenRead(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "a",
+			"writes": "summary",
+		},
+	})
+	g.AddNode(&Node{
+		ID:      "B",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "b",
+			"reads":  "summary",
+		},
+	})
+
+	warnings := lintDIP107(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP107") {
+			t.Errorf("unexpected DIP107 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP112_ReadsNotProduced(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Handler: "start"})
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "a",
+			"reads":  "plan", // No upstream node produces "plan"
+		},
+	})
+
+	g.AddEdge(&Edge{From: "Start", To: "A"})
+
+	warnings := lintDIP112(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP112 warning for reads not produced upstream")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP112") && strings.Contains(w, "plan") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP112 warning for plan, got: %v", warnings)
+	}
+}
+
+func TestLintDIP112_NoWarningWithUpstreamWrite(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Handler: "start"})
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "a",
+			"writes": "plan",
+		},
+	})
+	g.AddNode(&Node{
+		ID:      "B",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "b",
+			"reads":  "plan",
+		},
+	})
+
+	g.AddEdge(&Edge{From: "Start", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "B"})
+
+	warnings := lintDIP112(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP112") {
+			t.Errorf("unexpected DIP112 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP105_NoSuccessPath(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Handler: "start"})
+	g.AddNode(&Node{ID: "A", Handler: "codergen", Attrs: map[string]string{"prompt": "a"}})
+	g.AddNode(&Node{ID: "Exit", Handler: "exit"})
+
+	g.AddEdge(&Edge{From: "Start", To: "A"})
+	// Only conditional edge to exit
+	g.AddEdge(&Edge{From: "A", To: "Exit", Condition: "ctx.x = y"})
+
+	warnings := lintDIP105(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP105 warning for no guaranteed success path")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP105") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP105 warning, got: %v", warnings)
+	}
+}
+
+func TestLintDIP105_NoWarningWithUnconditionalPath(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Handler: "start"})
+	g.AddNode(&Node{ID: "A", Handler: "codergen", Attrs: map[string]string{"prompt": "a"}})
+	g.AddNode(&Node{ID: "Exit", Handler: "exit"})
+
+	g.AddEdge(&Edge{From: "Start", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "Exit"}) // Unconditional path to exit
+
+	warnings := lintDIP105(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP105") {
+			t.Errorf("unexpected DIP105 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP106_UndefinedVariable(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "Use ${ctx.unknown_var} in prompt",
+		},
+	})
+
+	warnings := lintDIP106(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP106 warning for undefined variable reference")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP106") && strings.Contains(w, "ctx.unknown_var") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP106 warning for ctx.unknown_var, got: %v", warnings)
+	}
+}
+
+func TestLintDIP106_NoWarningForReservedKeys(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "Use ${ctx.last_response} in prompt",
+		},
+	})
+
+	warnings := lintDIP106(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP106") {
+			t.Errorf("unexpected DIP106 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP103_OverlappingConditions(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Check", Handler: "codergen", Attrs: map[string]string{"prompt": "check"}})
+	g.AddNode(&Node{ID: "A", Handler: "codergen", Attrs: map[string]string{"prompt": "a"}})
+	g.AddNode(&Node{ID: "B", Handler: "codergen", Attrs: map[string]string{"prompt": "b"}})
+
+	// Duplicate conditions
+	g.AddEdge(&Edge{From: "Check", To: "A", Condition: "ctx.x = y"})
+	g.AddEdge(&Edge{From: "Check", To: "B", Condition: "ctx.x = y"})
+
+	warnings := lintDIP103(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP103 warning for overlapping conditions")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP103") && strings.Contains(w, "Check") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP103 warning for Check, got: %v", warnings)
+	}
+}
+
+func TestLintDIP103_NoWarningForDifferentConditions(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Check", Handler: "codergen", Attrs: map[string]string{"prompt": "check"}})
+	g.AddNode(&Node{ID: "A", Handler: "codergen", Attrs: map[string]string{"prompt": "a"}})
+	g.AddNode(&Node{ID: "B", Handler: "codergen", Attrs: map[string]string{"prompt": "b"}})
+
+	g.AddEdge(&Edge{From: "Check", To: "A", Condition: "ctx.x = y"})
+	g.AddEdge(&Edge{From: "Check", To: "B", Condition: "ctx.x = z"})
+
+	warnings := lintDIP103(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP103") {
+			t.Errorf("unexpected DIP103 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDIP109_NamespaceCollision(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "a",
+			"writes": "model",
+		},
+	})
+	g.AddNode(&Node{
+		ID:      "Sub",
+		Handler: "subgraph",
+		Attrs: map[string]string{
+			"params": "model=gpt-4", // Shadows context key "model"
+		},
+	})
+
+	warnings := lintDIP109(g)
+	if len(warnings) == 0 {
+		t.Error("expected DIP109 warning for namespace collision")
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP109") && strings.Contains(w, "model") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected DIP109 warning for model, got: %v", warnings)
+	}
+}
+
+func TestLintDIP109_NoWarningForNonCollidingParams(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "A",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "a",
+			"writes": "summary",
+		},
+	})
+	g.AddNode(&Node{
+		ID:      "Sub",
+		Handler: "subgraph",
+		Attrs: map[string]string{
+			"params": "model=gpt-4", // Doesn't shadow anything
+		},
+	})
+
+	warnings := lintDIP109(g)
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP109") {
+			t.Errorf("unexpected DIP109 warning: %s", w)
+		}
+	}
+}
+
+func TestLintDippinRules_EmptyGraph(t *testing.T) {
+	g := NewGraph("test")
+	warnings := LintDippinRules(g)
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for empty graph, got %d", len(warnings))
+	}
+}
+
+func TestLintDippinRules_MultipleWarnings(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Agent1",
+		Handler: "codergen",
+		Attrs:   map[string]string{}, // Empty prompt -> DIP110
+	})
+	g.AddNode(&Node{
+		ID:      "Tool1",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "ls"}, // No timeout -> DIP111
+	})
+
+	warnings := LintDippinRules(g)
+	if len(warnings) < 2 {
+		t.Errorf("expected at least 2 warnings, got %d: %v", len(warnings), warnings)
+	}
+
+	hasDIP110 := false
+	hasDIP111 := false
+	for _, w := range warnings {
+		if strings.Contains(w, "DIP110") {
+			hasDIP110 = true
+		}
+		if strings.Contains(w, "DIP111") {
+			hasDIP111 = true
+		}
+	}
+
+	if !hasDIP110 {
+		t.Error("expected DIP110 warning")
+	}
+	if !hasDIP111 {
+		t.Error("expected DIP111 warning")
+	}
+}

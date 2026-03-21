@@ -52,7 +52,7 @@ workflow SemportThematic
 
   agent PlanOpus
     label: "Plan Themes (Opus-4.6)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -72,7 +72,7 @@ workflow SemportThematic
 
   agent ConsolidatePlan
     label: "Consolidate Plan Into Spec (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -112,7 +112,7 @@ workflow SemportThematic
 
   agent ValidateOpus
     label: "Validate (Opus-4.6)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -132,7 +132,7 @@ workflow SemportThematic
 
   agent ConsolidateValidation
     label: "Consolidate Validation + Update Spec (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -163,6 +163,7 @@ workflow SemportThematic
     ImplementSlice -> BuildGate
     BuildGate -> ValidateParallel  when ctx.outcome = success  label: build_passed
     BuildGate -> PlanParallel  when ctx.outcome = fail  label: build_failed_replan  restart: true
+    BuildGate -> ValidateParallel  label: "fallback to validate"
     ValidateParallel -> ValidateGPT
     ValidateParallel -> ValidateOpus
     ValidateParallel -> ValidateGemini
@@ -173,3 +174,4 @@ workflow SemportThematic
     ConsolidateValidation -> CheckCompletion
     CheckCompletion -> Exit  when ctx.outcome = success  label: all_checked_and_validated
     CheckCompletion -> PlanParallel  when ctx.outcome = fail  label: needs_more_porting  restart: true
+    CheckCompletion -> Exit  label: "fallback to exit"

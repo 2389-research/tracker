@@ -10,19 +10,24 @@ import (
 
 // ValidateSemantic checks a Graph for semantic correctness against a handler
 // registry. It verifies that referenced handlers are registered, edge conditions
-// parse correctly, and node attributes have valid types.
-func ValidateSemantic(g *Graph, registry *HandlerRegistry) error {
+// parse correctly, and node attributes have valid types. It also runs Dippin
+// lint rules and returns both errors and warnings.
+func ValidateSemantic(g *Graph, registry *HandlerRegistry) (errors error, warnings []string) {
 	if g == nil {
-		return &ValidationError{Errors: []string{"graph is nil"}}
+		return &ValidationError{Errors: []string{"graph is nil"}}, nil
 	}
 	ve := &ValidationError{}
 	validateHandlerRegistration(g, registry, ve)
 	validateConditionSyntax(g, ve)
 	validateNodeAttributes(g, ve)
+
+	// Run Dippin lint rules (warnings only)
+	lintWarnings := LintDippinRules(g)
+
 	if ve.hasErrors() {
-		return ve
+		return ve, lintWarnings
 	}
-	return nil
+	return nil, lintWarnings
 }
 
 // validateHandlerRegistration checks that every node's handler is registered

@@ -193,10 +193,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		turnStart := time.Now()
 
 		req := &llm.Request{
-			Model:    s.config.Model,
-			Provider: s.config.Provider,
-			Messages: s.messages,
-			Tools:    s.registry.Definitions(),
+			Model:           s.config.Model,
+			Provider:        s.config.Provider,
+			Messages:        s.messages,
+			Tools:           s.registry.Definitions(),
+			ReasoningEffort: s.config.ReasoningEffort,
 			TraceObservers: []llm.TraceObserver{
 				llm.TraceObserverFunc(func(traceEvt llm.TraceEvent) {
 					s.emitLLMTraceEvent(turn, traceEvt)

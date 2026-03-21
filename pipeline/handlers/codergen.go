@@ -197,6 +197,15 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		}
 	}
 
+	// Wire reasoning_effort from node attrs to session config.
+	// Graph-level default, node-level override.
+	if re, ok := h.graphAttrs["reasoning_effort"]; ok && re != "" {
+		config.ReasoningEffort = re
+	}
+	if re, ok := node.Attrs["reasoning_effort"]; ok && re != "" {
+		config.ReasoningEffort = re
+	}
+
 	if v, ok := h.graphAttrs["cache_tool_results"]; ok && v == "true" {
 		config.CacheToolResults = true
 	}

@@ -15,7 +15,7 @@ workflow ConsensusTask
 
   agent RefineDoD
     label: "Refine DoD Gate"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -39,7 +39,7 @@ workflow ConsensusTask
 
   agent DefineDoDOpus
     label: "Refine DoD (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -47,7 +47,7 @@ workflow ConsensusTask
 
   agent ConsolidateDoD
     label: "Consolidate DoD"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -71,7 +71,7 @@ workflow ConsensusTask
 
   agent PlanOpus
     label: "Plan (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -87,7 +87,7 @@ workflow ConsensusTask
 
   agent Implement
     label: Implement
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -95,7 +95,7 @@ workflow ConsensusTask
 
   agent VerifyOutputs
     label: "Verify Outputs"
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -119,7 +119,7 @@ workflow ConsensusTask
 
   agent ReviewOpus
     label: "Review (Opus)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -137,7 +137,7 @@ workflow ConsensusTask
 
   agent Postmortem
     label: Postmortem
-    model: claude-opus-4-6
+    model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -164,3 +164,4 @@ workflow ConsensusTask
     ReviewConsensus -> Exit
     Postmortem -> PlanGemini  when ctx.internal.loop_restart_count = 0  label: retry_once  restart: true
     Postmortem -> Exit  when ctx.internal.loop_restart_count != 0  label: stop_after_retry
+    Postmortem -> Exit  label: "fallback to exit"
