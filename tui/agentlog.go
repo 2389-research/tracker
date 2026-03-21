@@ -57,10 +57,10 @@ type AgentLog struct {
 	mdWidth    int
 
 	// Coalescing state: accumulate sequential text chunks into one entry.
-	coalescing    bool
-	coalesceBuf   strings.Builder
-	coalesceKind  logEntryKind
-	coalesceNode  string
+	coalescing   bool
+	coalesceBuf  strings.Builder
+	coalesceKind logEntryKind
+	coalesceNode string
 }
 
 // NewAgentLog creates an AgentLog with the given state, thinking tracker, and viewport height.
@@ -101,6 +101,7 @@ func (al *AgentLog) getMarkdownRenderer() *glamour.TermRenderer {
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(w),
+		glamour.WithPreservedNewLines(),
 	)
 	if err != nil {
 		return nil
@@ -204,6 +205,11 @@ func (al *AgentLog) View() string {
 		line := al.renderEntry(i)
 		// Split multi-line output into separate lines for proper clipping.
 		parts := strings.Split(line, "\n")
+		// Drop trailing empty element so entries ending with \n don't
+		// waste a viewport slot on a blank line.
+		if len(parts) > 0 && parts[len(parts)-1] == "" {
+			parts = parts[:len(parts)-1]
+		}
 		rendered = append(rendered, parts...)
 	}
 
@@ -299,6 +305,7 @@ func (al *AgentLog) renderMarkdown(e *logEntry) string {
 		return Styles.PrimaryText.Render(e.text)
 	}
 	rendered = strings.TrimRight(rendered, "\n")
+	rendered = strings.TrimLeft(rendered, "\n")
 	e.mdCache = rendered
 	e.mdCacheWidth = al.width
 	return rendered

@@ -74,6 +74,8 @@ func (tr *ThinkingTracker) Elapsed(nodeID string) time.Duration {
 }
 
 // StartTool marks a node as executing a tool (distinct from LLM thinking).
+// Resets the phase timestamp so the elapsed display reflects tool duration
+// rather than accumulated thinking+tool time.
 func (tr *ThinkingTracker) StartTool(nodeID, toolName string) {
 	ns, ok := tr.nodes[nodeID]
 	if !ok {
@@ -81,6 +83,7 @@ func (tr *ThinkingTracker) StartTool(nodeID, toolName string) {
 		tr.nodes[nodeID] = ns
 	}
 	ns.toolName = toolName
+	ns.startedAt = time.Now()
 }
 
 // StopTool clears the tool-running state for a node.

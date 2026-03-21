@@ -70,9 +70,10 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 
 	// Trim trailing whitespace from stdout/stderr so edge conditions
 	// like context.tool_stdout=pass match reliably (shell commands
-	// often emit trailing newlines).
-	stdout := strings.TrimSpace(result.Stdout)
-	stderr := strings.TrimSpace(result.Stderr)
+	// often emit trailing newlines). Only trim the right side to
+	// preserve any intentional leading whitespace or indentation.
+	stdout := strings.TrimRight(result.Stdout, " \t\n\r")
+	stderr := strings.TrimRight(result.Stderr, " \t\n\r")
 
 	return pipeline.Outcome{
 			Status: status,

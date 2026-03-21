@@ -218,7 +218,7 @@ func TestToolHandlerTrimsStdout(t *testing.T) {
 	env := exec.NewLocalEnvironment(t.TempDir())
 	h := NewToolHandler(env)
 	// printf adds no newline, but echo and other commands do.
-	// Also test with explicit trailing whitespace.
+	// Only trailing whitespace should be trimmed; leading whitespace is preserved.
 	node := &pipeline.Node{
 		ID:    "trim",
 		Shape: "parallelogram",
@@ -231,7 +231,7 @@ func TestToolHandlerTrimsStdout(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
-	if stdout != "validation-pass" {
-		t.Errorf("expected trimmed stdout %q, got %q", "validation-pass", stdout)
+	if stdout != "  validation-pass" {
+		t.Errorf("expected right-trimmed stdout %q, got %q", "  validation-pass", stdout)
 	}
 }

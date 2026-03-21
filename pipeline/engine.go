@@ -126,6 +126,16 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	// checkpoint, in-memory session state is lost, so we degrade fidelity one
 	// level and compact the restored context accordingly.
 	if cp.CurrentNode != "" && len(cp.CompletedNodes) > 0 {
+		// Preserve routing hints before compaction strips them — the
+		// resume loop needs outcome/preferred_label to route through
+		// already-completed conditional nodes.
+		routingHints := make(map[string]string)
+		for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, "suggested_next_nodes"} {
+			if val, ok := pctx.Get(key); ok && val != "" {
+				routingHints[key] = val
+			}
+		}
+
 		fidelity := ResolveFidelity(
 			e.nodeOrDefault(cp.CurrentNode),
 			e.graph.Attrs,
@@ -138,6 +148,12 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		}
 		for k, v := range compacted {
 			pctx.Set(k, v)
+		}
+		// Re-inject routing hints that compaction may have dropped.
+		for k, v := range routingHints {
+			if existing, ok := pctx.Get(k); !ok || existing == "" {
+				pctx.Set(k, v)
+			}
 		}
 	}
 

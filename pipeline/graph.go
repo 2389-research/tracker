@@ -57,20 +57,23 @@ func (g *Graph) AddNode(n *Node) {
 	if n.Attrs == nil {
 		n.Attrs = make(map[string]string)
 	}
-	if handler := n.Attrs["type"]; handler != "" {
-		n.Handler = handler
+	explicitType := n.Attrs["type"]
+	if explicitType != "" {
+		n.Handler = explicitType
 	} else if handler, ok := ShapeToHandler(n.Shape); ok {
 		n.Handler = handler
 	}
 	// Diamond nodes with a tool_command should use the tool handler
 	// regardless of shape (the generator sometimes uses diamond shape
-	// for tool verification nodes).
-	if n.Handler == "conditional" && n.Attrs["tool_command"] != "" {
+	// for tool verification nodes). Skip if handler was set explicitly
+	// via the type attribute to respect user intent.
+	if explicitType == "" && n.Handler == "conditional" && n.Attrs["tool_command"] != "" {
 		n.Handler = "tool"
 	}
 	// Diamond nodes with a prompt (but no tool_command) should use
 	// codergen (LLM evaluation) instead of the no-op conditional handler.
-	if n.Shape == "diamond" && n.Handler == "conditional" && n.Attrs["prompt"] != "" {
+	// Skip if handler was set explicitly via the type attribute.
+	if explicitType == "" && n.Shape == "diamond" && n.Handler == "conditional" && n.Attrs["prompt"] != "" {
 		n.Handler = "codergen"
 		if n.Attrs["auto_status"] == "" {
 			n.Attrs["auto_status"] = "true"
