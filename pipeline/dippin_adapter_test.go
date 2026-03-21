@@ -201,10 +201,10 @@ func TestFromDippinIR_AgentConfig(t *testing.T) {
 		{"llm_model", "claude-3.5-sonnet"},
 		{"llm_provider", "anthropic"},
 		{"max_turns", "5"},
-		{"cmd_timeout", "30s"},
-		{"cache_tools", "true"},
-		{"compaction", "aggressive"},
-		{"compaction_threshold", "0.75"},
+		{"command_timeout", "30s"},
+		{"cache_tool_results", "true"},
+		{"context_compaction", "aggressive"},
+		{"context_compaction_threshold", "0.75"},
 		{"reasoning_effort", "high"},
 		{"fidelity", "strict"},
 		{"auto_status", "true"},
@@ -254,8 +254,8 @@ func TestFromDippinIR_HumanConfig(t *testing.T) {
 	if node.Attrs["mode"] != "choice" {
 		t.Errorf("mode = %q, want %q", node.Attrs["mode"], "choice")
 	}
-	if node.Attrs["default"] != "yes" {
-		t.Errorf("default = %q, want %q", node.Attrs["default"], "yes")
+	if node.Attrs["default_choice"] != "yes" {
+		t.Errorf("default_choice = %q, want %q", node.Attrs["default_choice"], "yes")
 	}
 }
 
@@ -485,15 +485,15 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 		key   string
 		value string
 	}{
-		{"default_model", "gpt-4"},
-		{"default_provider", "openai"},
+		{"llm_model", "gpt-4"},
+		{"llm_provider", "openai"},
 		{"default_retry_policy", "standard"},
-		{"default_max_retries", "3"},
+		{"default_max_retry", "3"},
 		{"default_fidelity", "strict"},
 		{"max_restarts", "10"},
 		{"restart_target", "start"},
-		{"cache_tools", "true"},
-		{"default_compaction", "conservative"},
+		{"cache_tool_results", "true"},
+		{"context_compaction", "conservative"},
 	}
 
 	for _, tt := range tests {

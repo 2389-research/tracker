@@ -185,16 +185,16 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 		attrs["max_turns"] = strconv.Itoa(cfg.MaxTurns)
 	}
 	if cfg.CmdTimeout > 0 {
-		attrs["cmd_timeout"] = cfg.CmdTimeout.String()
+		attrs["command_timeout"] = cfg.CmdTimeout.String()
 	}
 	if cfg.CacheTools {
-		attrs["cache_tools"] = "true"
+		attrs["cache_tool_results"] = "true"
 	}
 	if cfg.Compaction != "" {
-		attrs["compaction"] = cfg.Compaction
+		attrs["context_compaction"] = cfg.Compaction
 	}
 	if cfg.CompactionThreshold > 0 {
-		attrs["compaction_threshold"] = fmt.Sprintf("%.2f", cfg.CompactionThreshold)
+		attrs["context_compaction_threshold"] = fmt.Sprintf("%.2f", cfg.CompactionThreshold)
 	}
 	if cfg.ReasoningEffort != "" {
 		attrs["reasoning_effort"] = cfg.ReasoningEffort
@@ -215,7 +215,7 @@ func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {
 		attrs["mode"] = cfg.Mode
 	}
 	if cfg.Default != "" {
-		attrs["default"] = cfg.Default
+		attrs["default_choice"] = cfg.Default
 	}
 }
 
@@ -274,16 +274,16 @@ func extractRetryAttrs(retry ir.RetryConfig, attrs map[string]string) {
 // These provide fallback values for nodes that don't specify per-node config.
 func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]string) {
 	if defaults.Model != "" {
-		attrs["default_model"] = defaults.Model
+		attrs["llm_model"] = defaults.Model
 	}
 	if defaults.Provider != "" {
-		attrs["default_provider"] = defaults.Provider
+		attrs["llm_provider"] = defaults.Provider
 	}
 	if defaults.RetryPolicy != "" {
 		attrs["default_retry_policy"] = defaults.RetryPolicy
 	}
 	if defaults.MaxRetries > 0 {
-		attrs["default_max_retries"] = strconv.Itoa(defaults.MaxRetries)
+		attrs["default_max_retry"] = strconv.Itoa(defaults.MaxRetries)
 	}
 	if defaults.Fidelity != "" {
 		attrs["default_fidelity"] = defaults.Fidelity
@@ -295,10 +295,10 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 		attrs["restart_target"] = defaults.RestartTarget
 	}
 	if defaults.CacheTools {
-		attrs["cache_tools"] = "true"
+		attrs["cache_tool_results"] = "true"
 	}
 	if defaults.Compaction != "" {
-		attrs["default_compaction"] = defaults.Compaction
+		attrs["context_compaction"] = defaults.Compaction
 	}
 }
 
