@@ -62,8 +62,8 @@ func TestDippinAdapter_E2E_Simple(t *testing.T) {
 	if generateNode.Attrs["prompt"] != "Write hello world" {
 		t.Errorf("generate node prompt = %q, want %q", generateNode.Attrs["prompt"], "Write hello world")
 	}
-	if generateNode.Attrs["model"] != "claude-sonnet-4-5" {
-		t.Errorf("generate node model = %q, want %q", generateNode.Attrs["model"], "claude-sonnet-4-5")
+	if generateNode.Attrs["llm_model"] != "claude-sonnet-4-5" {
+		t.Errorf("generate node llm_model = %q, want %q", generateNode.Attrs["llm_model"], "claude-sonnet-4-5")
 	}
 
 	doneNode := graph.Nodes["done"]

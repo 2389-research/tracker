@@ -41,6 +41,11 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	g.StartNode = workflow.Start
 	g.ExitNode = workflow.Exit
 
+	// Map workflow-level goal to graph attributes (used by prompt expansion, fidelity, context)
+	if workflow.Goal != "" {
+		g.Attrs["goal"] = workflow.Goal
+	}
+
 	// Map workflow-level defaults to graph attributes
 	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
 
@@ -171,10 +176,10 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 		attrs["system_prompt"] = cfg.SystemPrompt
 	}
 	if cfg.Model != "" {
-		attrs["model"] = cfg.Model
+		attrs["llm_model"] = cfg.Model
 	}
 	if cfg.Provider != "" {
-		attrs["provider"] = cfg.Provider
+		attrs["llm_provider"] = cfg.Provider
 	}
 	if cfg.MaxTurns > 0 {
 		attrs["max_turns"] = strconv.Itoa(cfg.MaxTurns)
@@ -257,11 +262,11 @@ func extractRetryAttrs(retry ir.RetryConfig, attrs map[string]string) {
 	if retry.MaxRetries > 0 {
 		attrs["max_retries"] = strconv.Itoa(retry.MaxRetries)
 	}
-if retry.RetryTarget != "" {
+	if retry.RetryTarget != "" {
 		attrs["retry_target"] = retry.RetryTarget
 	}
 	if retry.FallbackTarget != "" {
-		attrs["fallback_target"] = retry.FallbackTarget
+		attrs["fallback_retry_target"] = retry.FallbackTarget
 	}
 }
 

@@ -13,3 +13,4 @@ bin/
 /generate
 .DS_Store
 .tracker/runs/
+.scratch/

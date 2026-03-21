@@ -198,8 +198,8 @@ func TestFromDippinIR_AgentConfig(t *testing.T) {
 	}{
 		{"prompt", "Analyze the code"},
 		{"system_prompt", "You are a code reviewer"},
-		{"model", "claude-3.5-sonnet"},
-		{"provider", "anthropic"},
+		{"llm_model", "claude-3.5-sonnet"},
+		{"llm_provider", "anthropic"},
 		{"max_turns", "5"},
 		{"cmd_timeout", "30s"},
 		{"cache_tools", "true"},
@@ -619,7 +619,7 @@ func TestFromDippinIR_RetryConfig(t *testing.T) {
 		{"retry_policy", "aggressive"},
 		{"max_retries", "5"},
 		{"retry_target", "start"},
-		{"fallback_target", "exit"},
+		{"fallback_retry_target", "exit"},
 	}
 
 	for _, tt := range tests {
