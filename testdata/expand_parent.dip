@@ -1,0 +1,11 @@
+workflow ParentWorkflow
+  goal: "Test subgraph parameter passing"
+  start: RunChild
+  exit: RunChild
+
+  subgraph RunChild
+    ref: child_workflow
+    params:
+      task: review code
+      severity: high
+      model: gpt-4

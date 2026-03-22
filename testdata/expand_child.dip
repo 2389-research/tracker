@@ -1,0 +1,12 @@
+workflow ChildWorkflow
+  start: DoWork
+  exit: DoWork
+
+  agent DoWork
+    llm_model: ${params.model}
+    prompt:
+      Task: ${params.task}
+      Severity level: ${params.severity}
+      Model to use: ${params.model}
+      
+      Please confirm the task parameters.

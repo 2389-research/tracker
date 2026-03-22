@@ -1,0 +1,13 @@
+workflow ContextVarsDemo
+  goal: "Demonstrate context variable expansion"
+  start: Process
+  exit: Process
+
+  agent Process
+    prompt:
+      Testing variable expansion in prompts.
+      
+      Our goal is: ${graph.goal}
+      
+      Please output STATUS:success if you can see the goal.
+    auto_status: true

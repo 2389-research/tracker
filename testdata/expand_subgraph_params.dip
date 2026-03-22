@@ -1,0 +1,24 @@
+workflow Parent
+  goal: "Test subgraph parameter passing"
+  start: CallChild
+  exit: CallChild
+  
+  subgraph CallChild
+    ref: child
+    params:
+      task=review code,severity=high
+
+---
+
+workflow Child
+  goal: "Child workflow that receives params"
+  start: Process
+  exit: Process
+  
+  agent Process
+    prompt:
+      Task: ${params.task}
+      Severity: ${params.severity}
+      Execute the task at the specified severity.
+      Output STATUS:success when done.
+    auto_status: true

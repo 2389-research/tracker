@@ -1,0 +1,12 @@
+workflow GoalAware
+  goal: "Build secure authentication system"
+  start: Work
+  exit: Work
+  
+  agent Work
+    prompt:
+      Our goal is: ${graph.goal}
+      
+      Remember to focus on security best practices.
+      Output STATUS:success when you understand the goal.
+    auto_status: true
