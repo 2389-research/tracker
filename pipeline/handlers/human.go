@@ -209,6 +209,17 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 		prompt = fmt.Sprintf("Human gate: %s", node.ID)
 	}
 
+	// Expand ${ctx.key} and ${graph.key} variables in prompt
+	// (params expansion would have happened during InjectParamsIntoGraph for subgraphs)
+	var graphAttrs map[string]string
+	if h.graph != nil {
+		graphAttrs = h.graph.Attrs
+	}
+	expandedPrompt, err := pipeline.ExpandVariables(prompt, pctx, nil, graphAttrs, false)
+	if err == nil && expandedPrompt != "" {
+		prompt = expandedPrompt
+	}
+
 	// Surface the previous node's output so the human has context for their
 	// decision. This is the complement of InjectPipelineContext which gives
 	// LLM nodes the human_response — here we give human gates the LLM output.

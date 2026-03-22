@@ -61,6 +61,16 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if prompt == "" {
 		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
 	}
+	
+	// Expand ${namespace.key} variables in prompt (ctx, params, graph namespaces)
+	// This handles the new templating system
+	prompt, err := pipeline.ExpandVariables(prompt, pctx, nil, h.graphAttrs, false)
+	if err != nil {
+		// Lenient mode should not error, but just in case, return the error
+		return pipeline.Outcome{}, fmt.Errorf("node %q variable expansion failed: %w", node.ID, err)
+	}
+	
+	// Legacy support: expand old $goal syntax
 	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
 
 	// Resolve fidelity for this node and inject compacted context when not full.

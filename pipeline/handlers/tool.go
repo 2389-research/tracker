@@ -44,6 +44,15 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'tool_command'", node.ID)
 	}
 
+	// Expand ${namespace.key} variables in command (ctx, params, graph namespaces)
+	// Note: params are nil here since tool nodes don't have subgraph params directly,
+	// but if called within a subgraph, the params would have been expanded during
+	// InjectParamsIntoGraph before the subgraph engine runs.
+	expandedCommand, err := pipeline.ExpandVariables(command, pctx, nil, nil, false)
+	if err == nil && expandedCommand != "" {
+		command = expandedCommand
+	}
+
 	artifactRoot := h.env.WorkingDir()
 	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
 		artifactRoot = dir

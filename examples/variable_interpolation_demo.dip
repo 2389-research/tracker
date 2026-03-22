@@ -1,0 +1,45 @@
+workflow VariableInterpolationDemo
+  goal: "Demonstrate all three variable interpolation namespaces"
+  start: AskUser
+  exit: Report
+
+  human AskUser
+    label: "What task should we execute?"
+    mode: freeform
+
+  agent AnalyzeRequest
+    label: "Analyze Request"
+    prompt:
+      # Using ctx namespace to access user input
+      The user requested: ${ctx.human_response}
+      
+      # Using graph namespace to access workflow metadata
+      Our workflow goal is: ${graph.goal}
+      Workflow name: ${graph.name}
+      
+      Analyze the user's request and determine if it's feasible.
+      Output STATUS:success if feasible, STATUS:fail otherwise.
+    auto_status: true
+
+  subgraph ExecuteWithParams
+    ref: examples/variable_interpolation_child.dip
+    params:
+      task_description: analyze code
+      severity_level: high
+      preferred_model: claude-sonnet-4-6
+
+  agent Report
+    label: "Generate Report"
+    prompt:
+      # Accessing previous agent outputs via ctx namespace
+      User's request: ${ctx.human_response}
+      Analysis result: ${ctx.last_response}
+      Workflow: ${graph.name}
+      
+      Generate a final summary report.
+
+  edges
+    AskUser -> AnalyzeRequest
+    AnalyzeRequest -> ExecuteWithParams  when ctx.outcome = success
+    AnalyzeRequest -> Report  when ctx.outcome = fail
+    ExecuteWithParams -> Report

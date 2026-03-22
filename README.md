@@ -197,6 +197,51 @@ workflow <Name>
     B -> D  when ctx.outcome = fail     label: retry
 ```
 
+### .dip Variable Interpolation
+
+Tracker supports `${namespace.key}` variable interpolation in prompts and node attributes. Three namespaces are available:
+
+**`${ctx.*}`** — Runtime pipeline context:
+- `${ctx.outcome}` — Last node status (success/fail/retry)
+- `${ctx.last_response}` — Previous agent output
+- `${ctx.human_response}` — Human input
+- `${ctx.tool_stdout}` — Tool command output
+- `${ctx.tool_stderr}` — Tool command errors
+- Custom keys written by nodes via `context_updates`
+
+**`${params.*}`** — Subgraph parameters:
+```
+subgraph SecurityScan
+  ref: security/scanner.dip
+  params:
+    severity: critical
+    model: claude-opus-4-6
+
+# In security/scanner.dip:
+agent Scanner
+  model: ${params.model}
+  prompt: Scan for ${params.severity} vulnerabilities.
+```
+
+**`${graph.*}`** — Workflow attributes:
+- `${graph.goal}` — Workflow goal
+- `${graph.name}` — Workflow name
+
+Example combining all namespaces:
+```
+agent Reporter
+  prompt:
+    # Graph context
+    Workflow: ${graph.name}
+    Goal: ${graph.goal}
+    
+    # Runtime context
+    User requested: ${ctx.human_response}
+    Previous output: ${ctx.last_response}
+    
+    Generate a summary report.
+```
+
 ### .dip Node Attributes
 
 | Attribute | Node types | Purpose |
@@ -204,7 +249,7 @@ workflow <Name>
 | `label` | all | Display name |
 | `model` | agent | LLM model ID |
 | `provider` | agent | `anthropic`, `openai`, `gemini` |
-| `prompt` | agent | Main prompt (supports multiline) |
+| `prompt` | agent | Main prompt (supports multiline and `${var}` expansion) |
 | `system_prompt` | agent | System prompt |
 | `reasoning_effort` | agent | `high`, `medium`, `low` |
 | `fidelity` | agent | `strict`, `summary:high`, `summary:medium`, `truncate` |
@@ -216,6 +261,7 @@ workflow <Name>
 | `command` | tool | Shell command (supports multiline) |
 | `timeout` | tool | Command timeout |
 | `ref` | subgraph | Path to sub-pipeline file |
+| `params` | subgraph | Comma-separated params (e.g., `key1=val1,key2=val2`) |
 
 ### .dip Edge Syntax
 
