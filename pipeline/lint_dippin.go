@@ -103,7 +103,7 @@ func lintDIP104(g *Graph) []string {
 	for _, node := range g.Nodes {
 		retryTarget, hasRetry := node.Attrs["retry_target"]
 		maxRetries, hasMax := node.Attrs["max_retries"]
-		fallbackTarget, hasFallback := node.Attrs["fallback_target"]
+		fallbackTarget, hasFallback := node.Attrs["fallback_retry_target"]
 
 		// If node has retry_target but no max_retries or fallback, it's unbounded
 		if hasRetry && retryTarget != "" && (!hasMax || maxRetries == "" || maxRetries == "0") && (!hasFallback || fallbackTarget == "") {

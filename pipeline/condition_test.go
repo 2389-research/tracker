@@ -459,6 +459,30 @@ func TestConditionNotIn(t *testing.T) {
 	}
 }
 
+func TestConditionCtxInternalPrefix(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.SetInternal("loop_restart_count", "0")
+	result, err := EvaluateCondition("ctx.internal.loop_restart_count = 0", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected ctx.internal.loop_restart_count = 0 to match")
+	}
+}
+
+func TestConditionBareInternalPrefix(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.SetInternal("loop_restart_count", "3")
+	result, err := EvaluateCondition("internal.loop_restart_count = 3", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected internal.loop_restart_count = 3 to match")
+	}
+}
+
 func TestConditionANDORPrecedenceAllFalse(t *testing.T) {
 	// When both OR branches are false
 	ctx := NewPipelineContext()

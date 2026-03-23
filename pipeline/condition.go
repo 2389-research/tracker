@@ -140,12 +140,34 @@ func resolveVariable(name string, ctx *PipelineContext) string {
 	}
 	// Strip namespace prefixes: "ctx.outcome" → "outcome", "context.outcome" → "outcome"
 	if strings.HasPrefix(name, "ctx.") {
-		if val, ok := ctx.Get(strings.TrimPrefix(name, "ctx.")); ok {
+		bare := strings.TrimPrefix(name, "ctx.")
+		// Handle ctx.internal.* — delegate to the internal map.
+		if strings.HasPrefix(bare, "internal.") {
+			internalKey := strings.TrimPrefix(bare, "internal.")
+			if val, ok := ctx.GetInternal(internalKey); ok {
+				return val
+			}
+		}
+		if val, ok := ctx.Get(bare); ok {
 			return val
 		}
 	}
 	if strings.HasPrefix(name, "context.") {
-		if val, ok := ctx.Get(strings.TrimPrefix(name, "context.")); ok {
+		bare := strings.TrimPrefix(name, "context.")
+		if strings.HasPrefix(bare, "internal.") {
+			internalKey := strings.TrimPrefix(bare, "internal.")
+			if val, ok := ctx.GetInternal(internalKey); ok {
+				return val
+			}
+		}
+		if val, ok := ctx.Get(bare); ok {
+			return val
+		}
+	}
+	// Handle bare internal.* references.
+	if strings.HasPrefix(name, "internal.") {
+		internalKey := strings.TrimPrefix(name, "internal.")
+		if val, ok := ctx.GetInternal(internalKey); ok {
 			return val
 		}
 	}
