@@ -10,6 +10,10 @@ A commit-by-commit porting pipeline (DOT file) that walks the entire git history
 - **Target**: `/Users/harper/workspace/personal/glimpser-go` (empty, standalone Go repo)
 - **Go module**: `github.com/harperreed/glimpser-go`
 
+## Working Directories
+
+All pipeline nodes execute with the **glimpser-go repo as the working directory**. When nodes need to inspect the source repo, they must use absolute paths or `cd` into `/Users/harper/workspace/personal/glimpser` explicitly, then return. The `$goal` attribute includes both paths for reference.
+
 ## Porting Strategy
 
 - Walk the entire git history of glimpser from the very first commit
@@ -37,11 +41,12 @@ The Bootstrap node runs first. If the Go repo is empty (no `go.mod`), it:
 5. Creates `.ai/` directory for intermediate artifacts
 6. Commits the bootstrap
 
-If the repo already has `go.mod`, this node passes through.
+If the repo already has `go.mod` AND `ledger.py`, this node passes through. If `go.mod` exists but `ledger.py` is missing, it creates only the missing pieces.
 
 - **Model**: GPT-5.4 / OpenAI
-- **Node type**: `stack.steer`
-- **Outcomes**: `initialized` → FetchNextCommit, `exists` → FetchNextCommit
+- **Node type**: `stack.observe` (single default edge to FetchNextCommit)
+- **is_codergen**: true
+- **allow_partial**: false
 
 ### Node 1: Fetch & Identify Next Commit
 
@@ -57,6 +62,8 @@ If fully caught up (no new commits after fetching): write completion report and 
 
 - **Model**: Opus 4.6 / Anthropic
 - **Node type**: `stack.steer`
+- **is_codergen**: true
+- **allow_partial**: false
 - **Outcomes**: `process` → AnalyzePlanPort, `done` → Exit
 
 ### Node 2: Analyze & Plan Port
@@ -78,6 +85,8 @@ Analyzes:
 
 - **Model**: Opus 4.6 / Anthropic
 - **Node type**: `stack.steer`
+- **is_codergen**: true
+- **allow_partial**: false
 - **Outcomes**: `port` → FinalizePlan, `skip` → FetchNextCommit (loop_restart)
 
 ### Node 3: Finalize Plan
@@ -92,6 +101,8 @@ Ensures:
 
 - **Model**: GPT-5.4 / OpenAI
 - **Node type**: `stack.observe`
+- **is_codergen**: true
+- **allow_partial**: false
 
 ### Node 4: Implement Port
 
@@ -105,6 +116,8 @@ Guidelines:
 
 - **Model**: GPT-5.4 / OpenAI
 - **Node type**: `stack.observe`
+- **is_codergen**: true
+- **allow_partial**: true
 - **Timeout**: 2400s (large commits may need time)
 
 ### Node 5: Test/Validate
@@ -120,6 +133,8 @@ Writes results to `.ai/glimpser_validation_report_NN.md`.
 
 - **Model**: GPT-5.4 / OpenAI
 - **Node type**: `stack.steer`
+- **is_codergen**: true
+- **allow_partial**: true
 - **Outcomes**: `yes` (pass) → FinalizeAndUpdateLedger, `retry` (fail) → AnalyzeFailure
 
 ### Node 5a: Analyze Failure
@@ -131,8 +146,10 @@ Inspects validation reports, build errors, test failures. Writes `.ai/glimpser_f
 
 - **Model**: Opus 4.6 / Anthropic
 - **Node type**: `stack.observe`
+- **is_codergen**: true
+- **allow_partial**: false
 
-Flows into → FinalizeAndUpdateLedger (which re-attempts via the loop)
+Flows into → ImplementPort for a retry attempt. The `default_max_retry="4"` controls how many times this retry sub-loop can execute before the pipeline fails the commit.
 
 ### Node 6: Finalize & Update Ledger
 
@@ -145,8 +162,18 @@ Flows into → FinalizeAndUpdateLedger (which re-attempts via the loop)
 
 - **Model**: GPT-5.4 / OpenAI
 - **Node type**: `stack.observe`
+- **is_codergen**: true
+- **allow_partial**: false
 
 ### Exit
+
+- **Node type**: `exit`
+- **Shape**: `doublecircle`
+
+### Start
+
+- **Node type**: `start`
+- **Shape**: `circle`
 
 Terminal node. Reached when all commits are processed.
 
@@ -163,7 +190,7 @@ FinalizePlan → ImplementPort
 ImplementPort → TestValidate
 TestValidate → FinalizeAndUpdateLedger [condition="outcome=yes"]
 TestValidate → AnalyzeFailure [condition="outcome=retry"]
-AnalyzeFailure → FinalizeAndUpdateLedger
+AnalyzeFailure → ImplementPort (retry sub-loop, bounded by default_max_retry=4)
 FinalizeAndUpdateLedger → FetchNextCommit [loop_restart=true]
 ```
 
@@ -182,7 +209,7 @@ A Python script (`ledger.py`) in the glimpser-go repo root, managing `ledger.tsv
 
 ### Commands
 
-- `python3 ledger.py add <shortsha> <timestamp>` — add a new entry with disposition `new`
+- `python3 ledger.py add <shortsha> <timestamp> [summary]` — add a new entry with disposition `new` (summary auto-populated from git log if omitted)
 - `python3 ledger.py update <shortsha> <disposition>` — change disposition
 - `python3 ledger.py earliest` — print the earliest `new` entry
 - `python3 ledger.py sort` — sort by timestamp
@@ -203,9 +230,10 @@ All intermediate files in `.ai/` within the glimpser-go repo:
 ## Pipeline Configuration
 
 - `rankdir="LR"` — left-to-right layout
+- `goal` — "Port the Python glimpser project at /Users/harper/workspace/personal/glimpser to idiomatic Go at /Users/harper/workspace/personal/glimpser-go (module github.com/harperreed/glimpser-go). Walk the git history commit-by-commit, analyze each commit semantically, and port relevant changes using Go idioms and standard patterns. Track disposition in ledger.tsv. The working directory is the glimpser-go repo."
 - `context_fidelity_default="truncate"`
 - `context_thread_default="glimpser-port"`
-- `default_max_retry="4"`
+- `default_max_retry="4"` — applies per-node; if a node (e.g., TestValidate) exhausts retries, the pipeline halts for that commit
 - `max_agent_turns="8"` per node
 - `reasoning_effort="high"` for all nodes
 
