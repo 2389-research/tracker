@@ -1,5 +1,5 @@
-// ABOUTME: AgentLog component — append-only streaming log with line-level styling.
-// ABOUTME: Styles lines once on newline, never re-renders. Stable viewport via fixed tail slice.
+// ABOUTME: AgentLog component — append-only streaming log with per-node streams.
+// ABOUTME: Each node gets its own line buffer. Parallel branches interleave with labeled separators.
 package tui
 
 import (
@@ -14,9 +14,22 @@ import (
 
 const defaultMaxCollapsedLines = 4
 
-// AgentLog renders a streaming activity log. Text arrives as token-level chunks
-// and is accumulated into lines. Each line is styled once when a newline arrives
-// and cached permanently. The viewport always shows the last N styled lines.
+// nodeStream holds per-node streaming state.
+type nodeStream struct {
+	current     strings.Builder // in-progress line (no newline yet)
+	inCodeBlock bool
+}
+
+// styledLine is one rendered line in the log, tagged with its source node.
+type styledLine struct {
+	nodeID string
+	text   string
+}
+
+// AgentLog renders a streaming activity log. Each pipeline node gets its own
+// line accumulation buffer. Lines from concurrent nodes interleave in the
+// unified log with separators when the source node changes. Lines are styled
+// once on newline and never re-rendered.
 type AgentLog struct {
 	store        *StateStore
 	thinking     *ThinkingTracker
@@ -25,18 +38,14 @@ type AgentLog struct {
 	width        int
 	expanded     bool
 	verboseTrace bool
-	focusedNode  string
 
-	// styledLines is the append-only buffer of rendered lines.
-	// Lines are styled once and never re-rendered.
-	styledLines []string
+	// Per-node streaming state.
+	streams map[string]*nodeStream
 
-	// current accumulates the in-progress line (no newline yet).
-	current     strings.Builder
-	currentNode string
-
-	// inCodeBlock tracks whether we're inside a fenced code block.
-	inCodeBlock bool
+	// Unified styled line buffer (append-only). Each line is tagged with
+	// its source node so we can insert separators when the source changes.
+	lines    []styledLine
+	lastNode string // node ID of the last line appended (for separator logic)
 }
 
 // NewAgentLog creates an AgentLog with the given state, thinking tracker, and viewport height.
@@ -46,6 +55,7 @@ func NewAgentLog(store *StateStore, thinking *ThinkingTracker, height int) *Agen
 		thinking: thinking,
 		scroll:   NewScrollView(height),
 		height:   height,
+		streams:  make(map[string]*nodeStream),
 	}
 }
 
@@ -56,19 +66,24 @@ func (al *AgentLog) SetSize(w, h int) {
 	al.scroll.SetHeight(h)
 }
 
-// SetFocusedNode sets the node ID to show the thinking indicator for.
-func (al *AgentLog) SetFocusedNode(nodeID string) {
-	if nodeID != "" && nodeID != al.focusedNode && len(al.styledLines) > 0 {
-		al.flushCurrent()
-		sep := Styles.Muted.Render(fmt.Sprintf("─── %s ", nodeID))
-		al.styledLines = append(al.styledLines, sep)
-	}
-	al.focusedNode = nodeID
-}
+// SetFocusedNode is a no-op kept for interface compatibility.
+// The activity log no longer tracks a single focused node —
+// it shows all active nodes with separators.
+func (al *AgentLog) SetFocusedNode(nodeID string) {}
 
 // SetVerboseTrace enables or disables verbose trace output.
 func (al *AgentLog) SetVerboseTrace(v bool) {
 	al.verboseTrace = v
+}
+
+// stream returns the per-node stream, creating it if needed.
+func (al *AgentLog) stream(nodeID string) *nodeStream {
+	s, ok := al.streams[nodeID]
+	if !ok {
+		s = &nodeStream{}
+		al.streams[nodeID] = s
+	}
+	return s
 }
 
 // Update processes messages and updates the log.
@@ -77,21 +92,20 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	case MsgTextChunk:
 		al.appendText(m.NodeID, m.Text)
 	case MsgReasoningChunk:
-		al.appendReasoning(m.Text)
+		al.appendReasoning(m.NodeID, m.Text)
 	case MsgToolCallStart:
-		al.flushCurrent()
-		line := toolStyle(m.ToolName).Render(formatToolDisplay(m.ToolName, m.ToolInput))
-		al.styledLines = append(al.styledLines, line)
+		al.flushNode(m.NodeID)
+		al.addLine(m.NodeID, toolStyle(m.ToolName).Render(formatToolDisplay(m.ToolName, m.ToolInput)))
 	case MsgToolCallEnd:
-		al.flushCurrent()
+		al.flushNode(m.NodeID)
 		al.appendToolEnd(m)
 	case MsgAgentError:
-		al.flushCurrent()
-		al.styledLines = append(al.styledLines, Styles.Error.Render("ERROR: "+m.Error))
+		al.flushNode(m.NodeID)
+		al.addLine(m.NodeID, Styles.Error.Render("ERROR: "+m.Error))
 	case MsgLLMProviderRaw:
 		if al.verboseTrace {
-			al.flushCurrent()
-			al.styledLines = append(al.styledLines, Styles.DimText.Render(m.Data))
+			al.flushNode(m.NodeID)
+			al.addLine(m.NodeID, Styles.DimText.Render(m.Data))
 		}
 	case MsgToggleExpand:
 		al.expanded = !al.expanded
@@ -99,29 +113,28 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// appendText processes streaming LLM text, splitting on newlines.
-// Complete lines get styled immediately. The trailing partial line
-// stays in al.current and renders as plain text.
+// appendText processes streaming LLM text for a specific node.
+// Complete lines (ending with \n) get styled and appended to the unified log.
+// The partial trailing line stays in the node's stream buffer.
 func (al *AgentLog) appendText(nodeID, text string) {
-	al.currentNode = nodeID
+	s := al.stream(nodeID)
 	for _, ch := range text {
 		if ch == '\n' {
-			line := al.current.String()
-			al.current.Reset()
-			al.styledLines = append(al.styledLines, al.styleLine(line))
+			line := s.current.String()
+			s.current.Reset()
+			al.addLine(nodeID, al.styleLine(s, line))
 		} else {
-			al.current.WriteRune(ch)
+			s.current.WriteRune(ch)
 		}
 	}
 }
 
 // appendReasoning adds reasoning text as muted lines.
-func (al *AgentLog) appendReasoning(text string) {
-	lines := strings.Split(text, "\n")
-	for _, line := range lines {
+func (al *AgentLog) appendReasoning(nodeID, text string) {
+	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line != "" {
-			al.styledLines = append(al.styledLines, Styles.Muted.Render(line))
+			al.addLine(nodeID, Styles.Muted.Render(line))
 		}
 	}
 }
@@ -129,49 +142,63 @@ func (al *AgentLog) appendReasoning(text string) {
 // appendToolEnd adds collapsed or expanded tool output.
 func (al *AgentLog) appendToolEnd(m MsgToolCallEnd) {
 	if m.Error != "" {
-		al.styledLines = append(al.styledLines, Styles.Error.Render("  ✗ "+m.ToolName+": "+m.Error))
+		al.addLine(m.NodeID, Styles.Error.Render("  ✗ "+m.ToolName+": "+m.Error))
 		return
 	}
 	if m.Output == "" {
-		al.styledLines = append(al.styledLines, Styles.Muted.Render("  ✓ "+m.ToolName))
+		al.addLine(m.NodeID, Styles.Muted.Render("  ✓ "+m.ToolName))
 		return
 	}
 	lines := strings.Split(m.Output, "\n")
 	if !al.expanded && len(lines) > defaultMaxCollapsedLines {
-		al.styledLines = append(al.styledLines,
+		al.addLine(m.NodeID,
 			Styles.Muted.Render(fmt.Sprintf("  ✓ %s (%d lines, ctrl+o to expand)", m.ToolName, len(lines))))
 		return
 	}
 	for _, line := range lines {
-		al.styledLines = append(al.styledLines, Styles.DimText.Render(line))
+		al.addLine(m.NodeID, Styles.DimText.Render(line))
 	}
 }
 
-// flushCurrent finalizes any in-progress line.
-func (al *AgentLog) flushCurrent() {
-	if al.current.Len() > 0 {
-		al.styledLines = append(al.styledLines, al.styleLine(al.current.String()))
-		al.current.Reset()
+// addLine appends a styled line to the unified log.
+// Inserts a node separator when the source node changes.
+func (al *AgentLog) addLine(nodeID, text string) {
+	if nodeID != "" && nodeID != al.lastNode && al.lastNode != "" {
+		al.lines = append(al.lines, styledLine{
+			nodeID: "",
+			text:   Styles.Muted.Render(fmt.Sprintf("─── %s ", nodeID)),
+		})
 	}
+	al.lastNode = nodeID
+	al.lines = append(al.lines, styledLine{nodeID: nodeID, text: text})
+}
+
+// flushNode finalizes any in-progress line for a specific node.
+func (al *AgentLog) flushNode(nodeID string) {
+	s, ok := al.streams[nodeID]
+	if !ok || s.current.Len() == 0 {
+		return
+	}
+	al.addLine(nodeID, al.styleLine(s, s.current.String()))
+	s.current.Reset()
 }
 
 // styleLine applies lightweight line-level formatting.
-// Styled once, cached forever. No re-interpretation.
-func (al *AgentLog) styleLine(line string) string {
+func (al *AgentLog) styleLine(s *nodeStream, line string) string {
 	trimmed := strings.TrimSpace(line)
 
 	// Code fence toggle.
 	if strings.HasPrefix(trimmed, "```") {
-		al.inCodeBlock = !al.inCodeBlock
+		s.inCodeBlock = !s.inCodeBlock
 		return Styles.Muted.Render(line)
 	}
 
-	// Inside code block — dim monospace.
-	if al.inCodeBlock {
+	// Inside code block.
+	if s.inCodeBlock {
 		return Styles.DimText.Render(line)
 	}
 
-	// Headers — bold.
+	// Headers.
 	if strings.HasPrefix(trimmed, "# ") {
 		return lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Render(trimmed)
 	}
@@ -182,36 +209,28 @@ func (al *AgentLog) styleLine(line string) string {
 		return lipgloss.NewStyle().Bold(true).Render(trimmed)
 	}
 
-	// Bullet lists — keep indent, primary text.
+	// Bullets and numbered lists.
 	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
 		return Styles.PrimaryText.Render(line)
 	}
-
-	// Numbered lists.
 	if len(trimmed) > 2 && trimmed[0] >= '0' && trimmed[0] <= '9' && (trimmed[1] == '.' || (len(trimmed) > 2 && trimmed[2] == '.')) {
 		return Styles.PrimaryText.Render(line)
 	}
 
-	// Bold text (**...**) — just render as primary, lipgloss handles bold inline
-	// Empty lines.
 	if trimmed == "" {
 		return ""
 	}
 
-	// Default.
 	return Styles.PrimaryText.Render(line)
 }
 
-// termLines counts how many terminal rows a styled string occupies,
-// accounting for embedded newlines and line wrapping at the given width.
+// termLines counts how many terminal rows a styled string occupies.
 func termLines(s string, width int) int {
 	if width <= 0 {
 		width = 80
 	}
 	n := 0
 	for _, line := range strings.Split(s, "\n") {
-		// Each line takes at least 1 row; longer lines wrap.
-		// Use lipgloss.Width for accurate ANSI-aware width.
 		w := lipgloss.Width(line)
 		if w == 0 {
 			n++
@@ -222,30 +241,77 @@ func termLines(s string, width int) int {
 	return n
 }
 
+// activeNodeIndicators builds a multi-line indicator showing all currently
+// active nodes (thinking, running tools, waiting for provider).
+func (al *AgentLog) activeNodeIndicators() string {
+	var indicators []string
+
+	// Collect all nodes that are currently running.
+	for _, entry := range al.store.Nodes() {
+		if al.store.NodeStatus(entry.ID) != NodeRunning {
+			continue
+		}
+		nodeLabel := entry.Label
+		if nodeLabel == "" {
+			nodeLabel = entry.ID
+		}
+
+		if toolName := al.thinking.ToolName(entry.ID); toolName != "" {
+			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
+			indicators = append(indicators,
+				toolStyle(toolName).Render(fmt.Sprintf("⚡ %s: %s (%.1fs)", nodeLabel, toolName, elapsed)))
+		} else if al.store.IsWaiting(entry.ID) {
+			indicators = append(indicators,
+				Styles.Muted.Render(fmt.Sprintf("⏳ %s: waiting for provider...", nodeLabel)))
+		} else if al.thinking.IsThinking(entry.ID) {
+			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
+			indicators = append(indicators,
+				Styles.Thinking.Render(fmt.Sprintf("⟳ %s: thinking... (%.1fs)", nodeLabel, elapsed)))
+		}
+	}
+
+	if len(indicators) == 0 {
+		return " "
+	}
+	return strings.Join(indicators, "\n")
+}
+
 // View renders the agent log viewport.
 func (al *AgentLog) View() string {
 	var sb strings.Builder
 	sb.WriteString(Styles.ZoneLabel.Render("ACTIVITY LOG"))
 	sb.WriteString("\n")
 
-	// Budget: total height minus header (1) and indicator (1),
-	// and optionally in-progress line (1).
-	reserved := 2 // header + indicator
-	if al.current.Len() > 0 {
-		reserved = 3
+	// Build the indicator (may be multi-line for parallel nodes).
+	indicator := al.activeNodeIndicators()
+	indicatorRows := termLines(indicator, al.width)
+
+	// Count in-progress partial lines from all active streams.
+	var partials []string
+	for nodeID, s := range al.streams {
+		if s.current.Len() > 0 {
+			prefix := ""
+			if len(al.streams) > 1 {
+				prefix = Styles.Muted.Render(nodeID+": ") + ""
+			}
+			partials = append(partials, prefix+Styles.PrimaryText.Render(s.current.String()))
+		}
 	}
-	budget := al.height - reserved
+	partialRows := len(partials)
+
+	// Budget for styled content lines.
+	// Total height - header(1) - indicator rows - partial line rows.
+	budget := al.height - 1 - indicatorRows - partialRows
 	if budget < 1 {
 		budget = 1
 	}
 
-	// Walk backwards through styled lines, counting actual terminal rows,
-	// until we fill the budget.
-	totalStyled := len(al.styledLines)
+	// Walk backwards through styled lines counting terminal rows.
+	totalLines := len(al.lines)
 	usedRows := 0
-	start := totalStyled
+	start := totalLines
 	for start > 0 {
-		rows := termLines(al.styledLines[start-1], al.width)
+		rows := termLines(al.lines[start-1].text, al.width)
 		if usedRows+rows > budget {
 			break
 		}
@@ -253,62 +319,28 @@ func (al *AgentLog) View() string {
 		start--
 	}
 
-	for i := start; i < totalStyled; i++ {
-		sb.WriteString(al.styledLines[i])
-		sb.WriteString("\n")
-	}
-
-	// In-progress line (unstyled, still accumulating tokens).
-	if al.current.Len() > 0 {
-		sb.WriteString(Styles.PrimaryText.Render(al.current.String()))
-		sb.WriteString("\n")
-	} else if totalStyled == 0 && !al.isThinking() && !al.isToolRunning() {
+	// Render styled lines.
+	if totalLines == 0 && len(partials) == 0 && indicator == " " {
 		sb.WriteString(Styles.DimText.Render("awaiting activity..."))
 		sb.WriteString("\n")
+	} else {
+		for i := start; i < totalLines; i++ {
+			sb.WriteString(al.lines[i].text)
+			sb.WriteString("\n")
+		}
 	}
 
-	// Activity indicator — always present (space when idle).
-	indicator := al.activityIndicator()
-	if indicator == "" {
-		indicator = " "
+	// Render in-progress partial lines.
+	for _, p := range partials {
+		sb.WriteString(p)
+		sb.WriteString("\n")
 	}
+
+	// Activity indicators (always present).
 	sb.WriteString(indicator)
 	sb.WriteString("\n")
 
 	return sb.String()
-}
-
-// activityIndicator returns the current phase indicator string for the focused node.
-func (al *AgentLog) activityIndicator() string {
-	if al.focusedNode == "" {
-		return ""
-	}
-	if toolName := al.thinking.ToolName(al.focusedNode); toolName != "" {
-		elapsed := al.thinking.Elapsed(al.focusedNode).Seconds()
-		return toolStyle(toolName).Render(fmt.Sprintf("⚡ %s (%.1fs)", toolName, elapsed))
-	}
-	if al.store.IsWaiting(al.focusedNode) {
-		return Styles.Muted.Render("⏳ Waiting for provider...")
-	}
-	if al.isThinking() {
-		elapsed := al.thinking.Elapsed(al.focusedNode).Seconds()
-		return Styles.Thinking.Render(fmt.Sprintf("⟳ Thinking... (%.1fs)", elapsed))
-	}
-	return ""
-}
-
-func (al *AgentLog) isThinking() bool {
-	if al.focusedNode == "" {
-		return false
-	}
-	return al.thinking.IsThinking(al.focusedNode)
-}
-
-func (al *AgentLog) isToolRunning() bool {
-	if al.focusedNode == "" {
-		return false
-	}
-	return al.thinking.IsToolRunning(al.focusedNode)
 }
 
 // thinkingTickCmd returns a command that sends a MsgThinkingTick after 150ms.

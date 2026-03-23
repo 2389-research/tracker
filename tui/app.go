@@ -269,9 +269,6 @@ func (a *AppModel) resolveNodeID(nodeID string) string {
 	if nodeID != "" {
 		return nodeID
 	}
-	if a.agentLog.focusedNode != "" {
-		return a.agentLog.focusedNode
-	}
 	return a.ActiveNode()
 }
 

@@ -100,6 +100,14 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		go func(idx int, tn *pipeline.Node) {
 			defer wg.Done()
 
+			// Emit stage started so the TUI shows the branch as running.
+			h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+				Type:      pipeline.EventStageStarted,
+				Timestamp: time.Now(),
+				NodeID:    tn.ID,
+				Message:   fmt.Sprintf("parallel branch %q started", tn.ID),
+			})
+
 			// Each branch gets its own isolated context from the snapshot.
 			branchCtx := pipeline.NewPipelineContextFrom(snapshot)
 			if artifactDir != "" {
@@ -116,6 +124,22 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			if err != nil {
 				pr.Status = pipeline.OutcomeFail
 				pr.Error = err.Error()
+			}
+
+			// Emit stage completed/failed so the TUI updates the branch status.
+			if pr.Status == pipeline.OutcomeFail {
+				h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+					Type:      pipeline.EventStageFailed,
+					Timestamp: time.Now(),
+					NodeID:    tn.ID,
+					Message:   pr.Error,
+				})
+			} else {
+				h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+					Type:      pipeline.EventStageCompleted,
+					Timestamp: time.Now(),
+					NodeID:    tn.ID,
+				})
 			}
 
 			resultsCh <- branchResult{index: idx, result: pr}

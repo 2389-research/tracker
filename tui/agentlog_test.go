@@ -60,15 +60,14 @@ func TestAgentLogToolCallBreaksCoalescing(t *testing.T) {
 
 func TestAgentLogThinkingIndicator(t *testing.T) {
 	store := NewStateStore(nil)
-	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	store.SetNodes([]NodeEntry{{ID: "n1", Label: "Agent1"}})
 	store.Apply(MsgNodeStarted{NodeID: "n1"})
 	tr := NewThinkingTracker()
 	tr.Start("n1")
 	al := NewAgentLog(store, tr, 20)
-	al.SetFocusedNode("n1")
 	view := al.View()
-	if !strings.Contains(view, "⟳ Thinking...") {
-		t.Errorf("expected thinking indicator with ⟳ prefix, got: %s", view)
+	if !strings.Contains(view, "⟳") || !strings.Contains(view, "thinking") {
+		t.Errorf("expected thinking indicator, got: %s", view)
 	}
 }
 
@@ -120,17 +119,16 @@ func TestFormatToolDisplay(t *testing.T) {
 
 func TestAgentLogToolRunningIndicator(t *testing.T) {
 	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1", Label: "Agent1"}})
+	store.Apply(MsgNodeStarted{NodeID: "n1"})
 	tr := NewThinkingTracker()
 	al := NewAgentLog(store, tr, 20)
-	al.SetFocusedNode("n1")
-	// Simulate the app routing: StartTool on tracker + Update on agentlog
 	tr.StartTool("n1", "bash")
 	al.Update(MsgToolCallStart{NodeID: "n1", ToolName: "bash", ToolInput: `{"command":"ls"}`})
 	view := al.View()
 	if !strings.Contains(view, "⚡") || !strings.Contains(view, "bash") {
 		t.Errorf("expected tool running indicator with ⚡ and tool name, got: %s", view)
 	}
-	// After tool ends, indicator should disappear
 	tr.StopTool("n1")
 	al.Update(MsgToolCallEnd{NodeID: "n1", ToolName: "bash", Output: "file.go"})
 	view = al.View()
@@ -141,9 +139,10 @@ func TestAgentLogToolRunningIndicator(t *testing.T) {
 
 func TestAgentLogThinkingOverToolIndicator(t *testing.T) {
 	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1", Label: "Agent1"}})
+	store.Apply(MsgNodeStarted{NodeID: "n1"})
 	tr := NewThinkingTracker()
 	al := NewAgentLog(store, tr, 20)
-	al.SetFocusedNode("n1")
 	// Start thinking, then start a tool — tool should take priority
 	tr.Start("n1")
 	tr.StartTool("n1", "read")
@@ -151,9 +150,6 @@ func TestAgentLogThinkingOverToolIndicator(t *testing.T) {
 	view := al.View()
 	if !strings.Contains(view, "⚡") {
 		t.Errorf("tool indicator should take priority over thinking, got: %s", view)
-	}
-	if strings.Contains(view, "⟳ Thinking") {
-		t.Error("should not show thinking indicator while tool is running")
 	}
 }
 

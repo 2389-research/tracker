@@ -229,17 +229,6 @@ func TestAppResolveNodeIDUsesExplicit(t *testing.T) {
 	}
 }
 
-func TestAppResolveNodeIDFallsBackToFocused(t *testing.T) {
-	store := NewStateStore(nil)
-	store.SetNodes([]NodeEntry{{ID: "n1"}})
-	app := NewAppModel(store, "test", "run1")
-	app.agentLog.focusedNode = "n1"
-	got := app.resolveNodeID("")
-	if got != "n1" {
-		t.Errorf("expected focused nodeID 'n1', got %q", got)
-	}
-}
-
 func TestAppResolveNodeIDFallsBackToActive(t *testing.T) {
 	store := NewStateStore(nil)
 	store.SetNodes([]NodeEntry{{ID: "n1"}})
@@ -264,9 +253,7 @@ func TestAppThinkingStartedEmptyNodeID(t *testing.T) {
 	if !app.thinking.IsThinking("n1") {
 		t.Error("expected thinking started for active node n1")
 	}
-	if app.agentLog.focusedNode != "n1" {
-		t.Errorf("expected focusedNode 'n1', got %q", app.agentLog.focusedNode)
-	}
+	// focusedNode is no longer tracked — the log shows all active nodes.
 }
 
 func TestAppThinkingStoppedEmptyNodeID(t *testing.T) {
@@ -274,6 +261,7 @@ func TestAppThinkingStoppedEmptyNodeID(t *testing.T) {
 	store.SetNodes([]NodeEntry{{ID: "n1"}})
 	app := NewAppModel(store, "test", "run1")
 	app.Init()
+	store.Apply(MsgNodeStarted{NodeID: "n1"})
 	// Start thinking on n1 explicitly, then stop with empty nodeID.
 	app.Update(MsgThinkingStarted{NodeID: "n1"})
 	app.Update(MsgThinkingStopped{NodeID: ""})
@@ -287,9 +275,9 @@ func TestAppToolCallEmptyNodeID(t *testing.T) {
 	store.SetNodes([]NodeEntry{{ID: "n1"}})
 	app := NewAppModel(store, "test", "run1")
 	app.Init()
-	// Focus n1 via a thinking started message.
+	store.Apply(MsgNodeStarted{NodeID: "n1"})
 	app.Update(MsgThinkingStarted{NodeID: "n1"})
-	// Start tool with empty nodeID — should resolve to focused n1.
+	// Start tool with empty nodeID — should resolve to active n1.
 	app.Update(MsgToolCallStart{NodeID: "", ToolName: "bash"})
 	if !app.thinking.IsToolRunning("n1") {
 		t.Error("expected tool running for node n1")
