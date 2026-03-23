@@ -1,240 +1,174 @@
-# Dippin-Lang Compliance Critique - Complete Package
+# Tracker
 
-**Date:** 2024-03-21  
-**Status:** ✅ Complete and Ready for Use  
-**Package Size:** 76KB, 7 documents
+Pipeline orchestration engine for multi-agent LLM workflows. Define pipelines in `.dip` files (Dippin language), execute them with parallel agents, and watch progress in a TUI dashboard.
 
----
+Built by [2389.ai](https://2389.ai).
 
-## 📁 Files Included
+## Quick Start
 
-| File | Size | Purpose | Read Time |
-|------|------|---------|-----------|
-| **INDEX.md** | 8KB | Navigation guide | 10 min |
-| **QUICK_REFERENCE.md** ⭐ | 5KB | One-page TL;DR | 5 min |
-| **EXECUTIVE_SUMMARY.md** | 7KB | Executive findings | 10 min |
-| **CRITIQUE_SUMMARY.md** | 14KB | Technical details | 20 min |
-| **CRITICAL_REVIEW_OF_DIPPIN_ANALYSIS.md** | 23KB | Full critique | 30 min |
-| **VERIFICATION_ACTION_PLAN.md** | 10KB | Step-by-step guide | 15 min |
-| **REVIEW_COMPLETE.md** | 9KB | Summary & status | 10 min |
+```bash
+# Install
+go install github.com/2389-research/tracker/cmd/tracker@latest
 
----
+# Run a pipeline
+tracker examples/ask_and_execute.dip
 
-## 🚀 Quick Start
+# Validate a pipeline without running it
+tracker validate examples/build_product.dip
 
-### If You Have 5 Minutes
-→ Read **QUICK_REFERENCE.md**
-
-### If You're a Decision Maker
-→ Read **EXECUTIVE_SUMMARY.md**
-
-### If You're Implementing
-→ Read **VERIFICATION_ACTION_PLAN.md**
-
-### If You Want Full Details
-→ Read **CRITICAL_REVIEW_OF_DIPPIN_ANALYSIS.md**
-
----
-
-## 🎯 Key Findings
-
-### ✅ What's Validated (High Confidence)
-
-- **Semantic linting (DIP101-112):** 12/12 rules implemented ✅
-- **Node types:** All 6 supported ✅
-- **IR field extraction:** 13/13 AgentConfig fields ✅
-- **Reasoning effort:** End-to-end wiring verified ✅
-- **Variable interpolation:** All 3 namespaces working ✅
-- **Test coverage:** 365+ tests, 84% coverage ✅
-
-### ❌ What's Wrong
-
-- **Previous claim:** "98% complete, only CLI missing"
-- **Reality:** ~80-90% complete, 9 structural rules unknown
-- **Coverage:** Claimed >90%, actually 84%
-- **Methodology:** No spec citation, circular reasoning
-
-### ❓ What's Unknown
-
-- **Structural validation (DIP001-009):** 9 rules never verified
-- **Execution semantics:** Not tested at runtime
-- **Official examples:** Never run through tracker
-
----
-
-## 📊 Corrected Assessment
-
-| Feature | Previous | Actual | Confidence |
-|---------|----------|--------|------------|
-| **Overall** | 98% | ~80-90% | 70% |
-| Semantic Lint | ✅ 12/12 | ✅ 12/12 | 95% |
-| Structural Validation | Not checked | ❓ Unknown | 10% |
-| Node Types | ✅ 6/6 | ✅ 6/6 | 95% |
-| Execution | ✅ Complete | ⚠️ Untested | 60% |
-
----
-
-## 🎓 What We Found
-
-### Critical Gap
-
-The dippin-lang spec defines **21 validation rules** (not 12):
-- **DIP001-DIP009:** Structural errors (MUST fix)
-- **DIP101-DIP112:** Semantic warnings (SHOULD fix)
-
-**Previous analysis only checked DIP101-112 and completely ignored DIP001-009.**
-
-### Methodology Flaws
-
-1. Never cited actual specification
-2. Assumed implementation = requirements  
-3. Used circular reasoning (tracker proves tracker)
-4. Overstated metrics (84% → ">90%")
-5. Confused extensions with requirements
-
----
-
-## 📋 Recommendations
-
-### Immediate Action (2-3 hours)
-
-**Execute VERIFICATION_ACTION_PLAN.md:**
-
-1. Verify DIP001-009 implementation (1 hour)
-2. Test execution semantics (1 hour)
-3. Run official dippin examples (30 min)
-4. Generate evidence report (30 min)
-
-### Why Verify First?
-
-- **Cost:** 2-3 hours
-- **Risk if skip:** Days of rework
-- **ROI:** 10-40x
-- **Confidence:** 95% vs 70%
-
-**Recommendation:** Spend 2-3 hours to get from 70% to 95% confidence.
-
----
-
-## 🔍 How to Use This Package
-
-### For Decision Makers
-
-1. Read QUICK_REFERENCE.md (5 min)
-2. Decide: verify first or proceed?
-3. Allocate resources
-
-### For Implementers
-
-1. Read VERIFICATION_ACTION_PLAN.md (15 min)
-2. Execute verification steps
-3. Make decisions based on findings
-
-### For Reviewers
-
-1. Read CRITICAL_REVIEW_OF_DIPPIN_ANALYSIS.md (30 min)
-2. Verify methodology
-3. Provide feedback
-
----
-
-## ✅ Quality Metrics
-
-This review achieved:
-
-- [x] Located actual dippin-lang specification
-- [x] Found all 21 validation rules (not just 12)
-- [x] Verified implemented features
-- [x] Identified critical gap (9 rules unchecked)
-- [x] Corrected estimate (98% → 80-90%)
-- [x] Provided actionable plan
-- [x] Created comprehensive docs
-- [x] Honest about confidence levels
-
-**Quality Grade:** A (95%)
-
----
-
-## 📞 Quick Answers
-
-**Q: Is "98% complete" wrong?**  
-A: Yes. Actual is ~80-90% pending verification.
-
-**Q: What's the biggest gap?**  
-A: 9 structural validation rules (DIP001-009) never checked.
-
-**Q: How long to verify?**  
-A: 2-3 hours following VERIFICATION_ACTION_PLAN.md
-
-**Q: Should we trust previous analysis?**  
-A: Trust identified features, not completeness claim.
-
-**Q: Can we claim 100% compliance?**  
-A: Not until DIP001-009 verified and execution tested.
-
----
-
-## 🎯 Bottom Line
-
-**Previous Analysis:**
-- Grade: C+ (65%)
-- Correct about features
-- Wrong about completeness
-- Poor methodology
-
-**This Review:**
-- Grade: A (95%)
-- Spec-verified
-- Evidence-based
-- Actionable
-
-**Recommendation:**
-Execute 2-3 hour verification before any implementation decisions.
-
----
-
-## 📦 Package Contents
-
-```
-critique-package/
-├── README.md                          (this file)
-├── INDEX.md                           (8KB, navigation)
-├── QUICK_REFERENCE.md                 (5KB, TL;DR)
-├── EXECUTIVE_SUMMARY.md               (7KB, executive level)
-├── CRITIQUE_SUMMARY.md                (14KB, technical)
-├── CRITICAL_REVIEW_OF_DIPPIN_ANALYSIS.md  (23KB, full critique)
-├── VERIFICATION_ACTION_PLAN.md        (10KB, action steps)
-└── REVIEW_COMPLETE.md                 (9KB, completion summary)
+# Resume a stopped run
+tracker -r <run-id> examples/build_product.dip
 ```
 
-**Total:** 76KB, 7 documents, production-ready
+## Pipeline Examples
 
----
+### `ask_and_execute.dip`
+Competitive implementation: ask the user what to build, fan out to 3 agents (Claude/Codex/Gemini) in isolated git worktrees, cross-critique the implementations, select the best one, apply it, clean up the rest.
 
-## 🚦 Next Steps
+### `build_product.dip`
+Sequential milestone builder: read a SPEC.md, decompose into milestones, implement each with verification loops, cross-review the complete result, verify full spec compliance.
 
-1. ✅ Review complete
-2. ⏸️ Read QUICK_REFERENCE.md or INDEX.md
-3. ⏸️ Make verification decision
-4. ⏸️ Execute chosen path
+### `build_product_with_superspec.dip`
+Parallel stream execution for large structured specs: reads the spec's work streams and dependency graph, executes independent streams in parallel (with git worktree isolation), enforces quality gates between phases, cross-reviews with 3 specialized reviewers (architect/QA/product), and audits traceability.
 
----
+## Dippin Language
 
-## ⭐ Start Here
+Pipelines are defined in `.dip` files using the [Dippin language](https://github.com/2389-research/dippin-lang):
 
-**New to this package?**  
-→ Start with **QUICK_REFERENCE.md** (5 minutes)
+```dip
+workflow MyPipeline
+  goal: "Build something great"
+  start: Begin
+  exit: Done
 
-**Need full details?**  
-→ Read **INDEX.md** for navigation
+  defaults
+    model: claude-sonnet-4-6
+    provider: anthropic
 
-**Ready to verify?**  
-→ Follow **VERIFICATION_ACTION_PLAN.md**
+  agent Begin
+    label: Start
 
----
+  human AskUser
+    label: "What should we build?"
+    mode: freeform
 
-**Status:** ✅ Complete  
-**Quality:** High (spec-verified, evidence-based)  
-**Recommendation:** Ready for decision and action
+  agent Implement
+    label: "Build It"
+    prompt: |
+      The user wants: ${ctx.human_response}
+      Implement it following the project's conventions.
 
-**All documentation is complete and ready for use.**
+  agent Done
+    label: Done
+
+  edges
+    Begin -> AskUser
+    AskUser -> Implement
+    Implement -> Done
+```
+
+### Node Types
+
+| Type | Shape | Description |
+|------|-------|-------------|
+| `agent` | box | LLM agent session (codergen) |
+| `human` | hexagon | Human-in-the-loop gate (choice or freeform) |
+| `tool` | parallelogram | Shell command execution |
+| `parallel` | component | Fan-out to concurrent branches |
+| `fan_in` | tripleoctagon | Join parallel branches |
+| `subgraph` | tab | Execute a referenced sub-pipeline |
+
+### Variable Interpolation
+
+Three namespaces for `${...}` syntax in prompts:
+
+- `${ctx.outcome}` — runtime pipeline context (outcome, last_response, human_response, tool_stdout)
+- `${params.model}` — subgraph parameters passed from parent
+- `${graph.goal}` — workflow-level attributes
+
+### Edge Conditions
+
+```dip
+edges
+  Check -> Pass  when ctx.outcome = success
+  Check -> Fail  when ctx.outcome = fail
+  Check -> Retry when ctx.outcome = retry
+  Gate -> Next   when ctx.tool_stdout contains all-done
+  Gate -> Loop   when ctx.tool_stdout not contains all-done
+```
+
+Supported operators: `=`, `!=`, `contains`, `not contains`, `startswith`, `not startswith`, `endswith`, `not endswith`, `in`, `not in`, `&&`, `||`, `not`.
+
+### Per-Node Working Directory
+
+For git worktree isolation in parallel implementations:
+
+```dip
+agent ImplementClaude
+  working_dir: .ai/worktrees/claude
+  model: claude-sonnet-4-6
+  prompt: Implement the spec in this isolated worktree.
+```
+
+### Human Gates
+
+Freeform mode captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`.
+
+```dip
+human ApproveSpec
+  label: "Review the spec. Approve, refine, or reject."
+  mode: freeform
+
+edges
+  ApproveSpec -> Build  label: "approve"
+  ApproveSpec -> Revise label: "refine"  restart: true
+  ApproveSpec -> Done   label: "reject"
+```
+
+Submit with **Ctrl+S**. Enter inserts newlines.
+
+## TUI
+
+The terminal UI shows:
+
+- **Pipeline panel**: node list with status lamps (pending/running/done/failed), thinking spinners, and tool execution indicators
+- **Activity log**: streaming LLM output with line-level formatting (headers, code blocks, bullets), tool call display, and node change separators
+- **Subgraph nodes**: dynamically inserted and indented under their parent
+
+### Keyboard
+
+| Key | Action |
+|-----|--------|
+| Ctrl+O | Toggle expand/collapse tool output |
+| Ctrl+S | Submit human gate input |
+| Esc | Submit human gate input (quick approval) |
+
+## Architecture
+
+```
+Layer 1: LLM Client (anthropic, openai, google providers)
+Layer 2: Agent Session (tool execution, context compaction, event streaming)
+Layer 3: Pipeline Engine (graph execution, edge routing, checkpoints)
+    ├── Handlers: codergen, tool, human, parallel, fan_in, subgraph, conditional
+    ├── Dippin Adapter: converts IR to Graph, synthesizes implicit edges
+    └── TUI: bubbletea app with node list, activity log, modal overlays
+```
+
+## Development
+
+```bash
+# Run tests
+go test ./... -short
+
+# Validate all example pipelines
+for f in examples/*.dip; do tracker validate "$f"; done
+
+# Check with dippin-lang tools
+dippin check examples/build_product_with_superspec.dip
+dippin lint examples/build_product_with_superspec.dip
+dippin simulate -all-paths examples/build_product_with_superspec.dip
+```
+
+## License
+
+See [LICENSE](LICENSE).
