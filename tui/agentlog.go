@@ -202,29 +202,55 @@ func (al *AgentLog) styleLine(line string) string {
 	return Styles.PrimaryText.Render(line)
 }
 
+// termLines counts how many terminal rows a styled string occupies,
+// accounting for embedded newlines and line wrapping at the given width.
+func termLines(s string, width int) int {
+	if width <= 0 {
+		width = 80
+	}
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		// Each line takes at least 1 row; longer lines wrap.
+		// Use lipgloss.Width for accurate ANSI-aware width.
+		w := lipgloss.Width(line)
+		if w == 0 {
+			n++
+		} else {
+			n += (w-1)/width + 1
+		}
+	}
+	return n
+}
+
 // View renders the agent log viewport.
 func (al *AgentLog) View() string {
 	var sb strings.Builder
 	sb.WriteString(Styles.ZoneLabel.Render("ACTIVITY LOG"))
 	sb.WriteString("\n")
 
-	// Reserve lines for: header (already written), activity indicator, and
-	// optionally the in-progress partial line.
+	// Budget: total height minus header (1) and indicator (1),
+	// and optionally in-progress line (1).
 	reserved := 2 // header + indicator
 	if al.current.Len() > 0 {
-		reserved = 3 // header + in-progress + indicator
+		reserved = 3
 	}
-	maxContent := al.height - reserved
-	if maxContent < 1 {
-		maxContent = 1
+	budget := al.height - reserved
+	if budget < 1 {
+		budget = 1
 	}
 
+	// Walk backwards through styled lines, counting actual terminal rows,
+	// until we fill the budget.
 	totalStyled := len(al.styledLines)
-
-	// Show the tail of styled lines, leaving room for reserved lines.
-	start := totalStyled - maxContent
-	if start < 0 {
-		start = 0
+	usedRows := 0
+	start := totalStyled
+	for start > 0 {
+		rows := termLines(al.styledLines[start-1], al.width)
+		if usedRows+rows > budget {
+			break
+		}
+		usedRows += rows
+		start--
 	}
 
 	for i := start; i < totalStyled; i++ {
