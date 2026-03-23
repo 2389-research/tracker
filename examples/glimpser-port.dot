@@ -1,10 +1,10 @@
 digraph SemportThematic {
   graph [
     label="$target_name Thematic Semport (Agentic Loop)",
-    goal="Port $source_ref into $target_name via evolving thematic checklist and iterative implementation/validation. The source is a Python/Flask surveillance platform. The target is idiomatic Go (module github.com/harperreed/glimpser-go). Do NOT mirror Python structure — use Go-native patterns (net/http, database/sql, goroutines, interfaces, error returns).",
+    goal="Port $source_ref into $target_name via evolving thematic checklist and iterative implementation/validation. The source is a Python/Flask surveillance platform. The target is idiomatic Go (module github.com/harperreed/glimpser-go-2). Do NOT mirror Python structure — use Go-native patterns (net/http, database/sql, goroutines, interfaces, error returns).",
     source_ref="/Users/harper/workspace/personal/glimpser",
     target_module=".",
-    target_name="glimpser-go",
+    target_name="glimpser-go-2",
     rankdir=LR,
     default_max_retry=5,
     retry_target="Plan",
@@ -17,7 +17,7 @@ digraph SemportThematic {
   EnsureWorkspace [
     shape=parallelogram,
     label="Ensure semport workspace files",
-    tool_command="set -eu\nmkdir -p .ai/semport/$target_name\nif [ ! -f go.mod ]; then\n  go mod init github.com/harperreed/glimpser-go\n  mkdir -p cmd/glimpser internal .ai/semport/$target_name\nfi\nif [ ! -f .ai/semport/$target_name/thematic-spec.md ]; then\n  cat > .ai/semport/$target_name/thematic-spec.md <<'SPECEOF'\n# $target_name Thematic Semport Spec\n\n## Scope\n- Semantic port of $source_ref into $target_module.\n- Target: idiomatic Go (github.com/harperreed/glimpser-go)\n- Source: Python/Flask surveillance platform\n\n## Checklist\n<!-- planner maintains checklist here -->\n\n## Validation Feedback\n<!-- validator/appraiser writes concise latest loop feedback here -->\nSPECEOF\nfi\nif [ ! -f .ai/semport/$target_name/validation-feedback.md ]; then\n  cat > .ai/semport/$target_name/validation-feedback.md <<'FBEOF'\n# Validation Feedback\n- none yet\nFBEOF\nfi\nprintf 'workspace ready'"
+    tool_command="set -e\nmkdir -p .ai/semport/glimpser-go-2\nif [ ! -f go.mod ]; then\n  go mod init github.com/harperreed/glimpser-go-2\n  mkdir -p cmd/glimpser internal .ai/semport/glimpser-go-2\nfi\nif [ ! -f .ai/semport/glimpser-go-2/thematic-spec.md ]; then\n  cat > .ai/semport/glimpser-go-2/thematic-spec.md <<'SPECEOF'\n# glimpser-go-2 Thematic Semport Spec\n\n## Scope\n- Semantic port of /Users/harper/workspace/personal/glimpser into glimpser-go-2.\n- Target: idiomatic Go (github.com/harperreed/glimpser-go-2)\n- Source: Python/Flask surveillance platform\n\n## Checklist\n<!-- planner maintains checklist here -->\n\n## Validation Feedback\n<!-- validator/appraiser writes concise latest loop feedback here -->\nSPECEOF\nfi\nif [ ! -f .ai/semport/glimpser-go-2/validation-feedback.md ]; then\n  cat > .ai/semport/glimpser-go-2/validation-feedback.md <<'FBEOF'\n# Validation Feedback\n- none yet\nFBEOF\nfi\nprintf 'workspace ready'"
   ];
 
   Plan [
@@ -44,7 +44,7 @@ digraph SemportThematic {
   BuildGate [
     shape=parallelogram,
     label="Build gate (must pass)",
-    tool_command="set -eu\ngo build ./... >/tmp/semport-thematic-$target_name-build.log 2>&1 || {\n  printf 'BUILD_FAIL\\n'\n  head -80 /tmp/semport-thematic-$target_name-build.log || true\n  exit 1\n}\ngo vet ./... >>/tmp/semport-thematic-$target_name-build.log 2>&1 || {\n  printf 'VET_FAIL\\n'\n  tail -40 /tmp/semport-thematic-$target_name-build.log || true\n  exit 1\n}\nprintf 'BUILD_PASS'"
+    tool_command="set -e\ngo build ./... >/tmp/semport-thematic-glimpser-go-2-build.log 2>&1 || {\n  printf 'BUILD_FAIL\\n'\n  head -80 /tmp/semport-thematic-glimpser-go-2-build.log || true\n  exit 1\n}\ngo vet ./... >>/tmp/semport-thematic-glimpser-go-2-build.log 2>&1 || {\n  printf 'VET_FAIL\\n'\n  tail -40 /tmp/semport-thematic-glimpser-go-2-build.log || true\n  exit 1\n}\nprintf 'BUILD_PASS'"
   ];
 
   Validate [
@@ -60,7 +60,7 @@ digraph SemportThematic {
   CheckCompletion [
     shape=parallelogram,
     label="Check if checklist fully complete",
-    tool_command="set -eu\nif rg -n '^- \\[ \\]' .ai/semport/$target_name/thematic-spec.md >/dev/null 2>&1; then\n  printf 'INCOMPLETE'\n  exit 1\nfi\nprintf 'COMPLETE'"
+    tool_command="set -e\nif rg -n '^- \\[ \\]' .ai/semport/glimpser-go-2/thematic-spec.md >/dev/null 2>&1; then\n  printf 'INCOMPLETE'\n  exit 1\nfi\nprintf 'COMPLETE'"
   ];
 
   Start -> EnsureWorkspace;
