@@ -237,6 +237,14 @@ func (al *AgentLog) View() string {
 	}
 
 	// Render only the visible tail entries.
+	// Cap each entry to half the viewport height so one massive entry
+	// (e.g., a long LLM response or tool output) can't consume the
+	// entire viewport and make it look like the log "cleared."
+	maxEntryLines := maxLines / 2
+	if maxEntryLines < 4 {
+		maxEntryLines = 4
+	}
+
 	var rendered []string
 	for i := startIdx; i < len(al.entries); i++ {
 		line := al.renderEntry(i)
@@ -246,6 +254,10 @@ func (al *AgentLog) View() string {
 		// waste a viewport slot on a blank line.
 		if len(parts) > 0 && parts[len(parts)-1] == "" {
 			parts = parts[:len(parts)-1]
+		}
+		// If a single entry exceeds the cap, show only its tail.
+		if len(parts) > maxEntryLines {
+			parts = parts[len(parts)-maxEntryLines:]
 		}
 		rendered = append(rendered, parts...)
 	}
