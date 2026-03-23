@@ -31,40 +31,50 @@ func ExpandVariables(
 		return text, nil
 	}
 
-	result := text
-	for {
-		// Find the start of a variable
-		startIdx := strings.Index(result, "${")
+	// Single-pass expansion: scan left to right, replacing variables.
+	// After each replacement, advance past the inserted value to prevent
+	// recursive expansion (e.g., if a value itself contains "${...}").
+	// Malformed tokens are skipped, not treated as terminators.
+	var buf strings.Builder
+	buf.Grow(len(text))
+	pos := 0
+	for pos < len(text) {
+		// Find the next variable start.
+		startIdx := strings.Index(text[pos:], "${")
 		if startIdx == -1 {
+			buf.WriteString(text[pos:])
 			break
 		}
+		startIdx += pos
 
-		// Find the matching closing brace
-		endIdx := strings.Index(result[startIdx:], "}")
+		// Write everything before the variable.
+		buf.WriteString(text[pos:startIdx])
+
+		// Find the closing brace.
+		endIdx := strings.Index(text[startIdx+2:], "}")
 		if endIdx == -1 {
-			// No closing brace found - treat as literal text
+			// No closing brace — write the rest as literal.
+			buf.WriteString(text[startIdx:])
+			pos = len(text)
 			break
 		}
-		endIdx += startIdx
+		endIdx += startIdx + 2
 
-		// Extract the variable expression (e.g., "ctx.key")
-		varExpr := result[startIdx+2 : endIdx]
-		if varExpr == "" {
-			// Empty variable ${} - treat as literal
-			break
-		}
+		// Extract the variable expression.
+		varExpr := text[startIdx+2 : endIdx]
 
-		// Parse namespace and key
+		// Parse namespace.key — skip malformed tokens.
 		parts := strings.SplitN(varExpr, ".", 2)
-		if len(parts) != 2 {
-			// Malformed variable (no dot) - treat as literal
-			break
+		if varExpr == "" || len(parts) != 2 {
+			// Malformed: write as literal and continue scanning.
+			buf.WriteString(text[startIdx : endIdx+1])
+			pos = endIdx + 1
+			continue
 		}
 
 		namespace := parts[0]
 		key := parts[1]
 
-		// Look up the value
 		value, found, err := lookupVariable(namespace, key, ctx, params, graphAttrs)
 		if err != nil {
 			return "", err
@@ -78,13 +88,15 @@ func ExpandVariables(
 					namespace, key, namespace, available,
 				)
 			}
-			// Lenient mode: replace with empty string
 			value = ""
 		}
 
-		// Replace the variable with its value
-		result = result[:startIdx] + value + result[endIdx+1:]
+		// Write the resolved value (NOT re-scanned for further variables).
+		buf.WriteString(value)
+		pos = endIdx + 1
 	}
+
+	result := buf.String()
 
 	return result, nil
 }

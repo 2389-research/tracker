@@ -104,11 +104,6 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
 	}
 
-	// Copy workflow goal to graph attrs.
-	if workflow.Goal != "" {
-		g.Attrs["goal"] = workflow.Goal
-	}
-
 	// Mark that this graph was produced from validated Dippin IR.
 	// Tracker's validateGraph will skip structural checks that
 	// Dippin already covers (DIP001–DIP006).

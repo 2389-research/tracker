@@ -302,6 +302,11 @@ func TestExpandVariables_MalformedSyntax(t *testing.T) {
 			input:    "Value: ${unknown.key}",
 			expected: "Value: ",
 		},
+		{
+			name:     "malformed then valid",
+			input:    "Bad: ${ctxkey} then Good: ${ctx.key}",
+			expected: "Bad: ${ctxkey} then Good: value",
+		},
 	}
 
 	for _, tt := range tests {
@@ -332,6 +337,21 @@ func TestExpandVariables_ConsecutiveVariables(t *testing.T) {
 	}
 	if result != expected {
 		t.Errorf("got %q, want %q", result, expected)
+	}
+}
+
+func TestExpandVariables_NoRecursiveExpansion(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("user_input", "value is ${ctx.secret}")
+	ctx.Set("secret", "SHOULD_NOT_APPEAR")
+
+	result, err := ExpandVariables("Input: ${ctx.user_input}", ctx, nil, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "Input: value is ${ctx.secret}"
+	if result != expected {
+		t.Errorf("got %q, want %q (no recursive expansion)", result, expected)
 	}
 }
 
