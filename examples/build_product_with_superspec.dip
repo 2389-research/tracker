@@ -945,7 +945,8 @@ workflow BuildProductWithSuperspec
     StreamA -> Phase1Join
     StreamB -> Phase1Join
     Phase1Join -> MergePhase1
-    MergePhase1 -> GatePhase1
+    MergePhase1 -> GatePhase1  when ctx.outcome = success
+    MergePhase1 -> EscalateToHuman  when ctx.outcome = fail
     GatePhase1 -> SetupPhase2Worktrees  when ctx.outcome = success
     GatePhase1 -> FixPhase1  when ctx.outcome = fail
     FixPhase1 -> GatePhase1  restart: true
@@ -955,7 +956,8 @@ workflow BuildProductWithSuperspec
     StreamC -> Phase2Join
     StreamE -> Phase2Join
     Phase2Join -> MergePhase2
-    MergePhase2 -> GatePhase2
+    MergePhase2 -> GatePhase2  when ctx.outcome = success
+    MergePhase2 -> EscalateToHuman  when ctx.outcome = fail
     GatePhase2 -> StreamD  when ctx.outcome = success
     GatePhase2 -> FixPhase2  when ctx.outcome = fail
     FixPhase2 -> GatePhase2  restart: true
@@ -971,7 +973,8 @@ workflow BuildProductWithSuperspec
     StreamF -> Phase4Join
     StreamG -> Phase4Join
     Phase4Join -> MergePhase4
-    MergePhase4 -> GatePhase4
+    MergePhase4 -> GatePhase4  when ctx.outcome = success
+    MergePhase4 -> EscalateToHuman  when ctx.outcome = fail
     GatePhase4 -> SetupPhase5Worktrees  when ctx.outcome = success
     GatePhase4 -> FixPhase4  when ctx.outcome = fail
     FixPhase4 -> GatePhase4  restart: true
@@ -981,7 +984,8 @@ workflow BuildProductWithSuperspec
     StreamH -> Phase5Join
     StreamI -> Phase5Join
     Phase5Join -> MergePhase5
-    MergePhase5 -> ReviewParallel
+    MergePhase5 -> ReviewParallel  when ctx.outcome = success
+    MergePhase5 -> EscalateToHuman  when ctx.outcome = fail
 
     # Phase 6: Cross-review
     ReviewArchitect -> ReviewJoin
