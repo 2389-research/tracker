@@ -184,13 +184,13 @@ func TestAgentLogViewportOptimizationMatchesFullRender(t *testing.T) {
 	viewportHeight := 10
 	al := NewAgentLog(store, tr, viewportHeight)
 	al.SetSize(80, viewportHeight)
-	// Add many entries — more than fit in the viewport.
+	// Add many lines — more than fit in the viewport.
+	// Each entry ends with \n so it becomes a finalized styled line.
 	for i := 0; i < 100; i++ {
-		// Use separate node IDs to prevent coalescing, so we get distinct entries.
-		al.Update(MsgTextChunk{NodeID: fmt.Sprintf("n%d", i), Text: fmt.Sprintf("entry-%d", i)})
+		al.Update(MsgTextChunk{NodeID: "n1", Text: fmt.Sprintf("entry-%d\n", i)})
 	}
 	optimizedView := al.View()
-	// The optimized view should still show the tail entries and clip correctly.
+	// The view should clip to viewport height.
 	lines := strings.Split(strings.TrimRight(optimizedView, "\n"), "\n")
 	if len(lines) > viewportHeight {
 		t.Errorf("expected at most %d lines, got %d", viewportHeight, len(lines))
@@ -205,35 +205,33 @@ func TestAgentLogViewportOptimizationMatchesFullRender(t *testing.T) {
 	}
 }
 
-func TestAgentLogMarkdownRendering(t *testing.T) {
+func TestAgentLogLineStyleHeaders(t *testing.T) {
 	store := NewStateStore(nil)
 	tr := NewThinkingTracker()
 	al := NewAgentLog(store, tr, 40)
 	al.SetSize(80, 40)
-	al.Update(MsgTextChunk{NodeID: "n1", Text: "Here is **bold** and `code`."})
+	al.Update(MsgTextChunk{NodeID: "n1", Text: "# Big Header\n## Sub Header\nplain text\n"})
 	view := al.View()
-	// Glamour should render the markdown — the raw asterisks should be gone.
-	if strings.Contains(view, "**bold**") {
-		t.Errorf("expected glamour to render markdown, but raw ** still present:\n%s", view)
+	if !strings.Contains(view, "Big Header") {
+		t.Errorf("expected header text visible, got:\n%s", view)
 	}
-	// The actual text content should still be present.
-	if !strings.Contains(view, "bold") {
-		t.Errorf("expected 'bold' text in rendered output, got:\n%s", view)
+	if !strings.Contains(view, "Sub Header") {
+		t.Errorf("expected sub header text visible, got:\n%s", view)
 	}
-	if !strings.Contains(view, "code") {
-		t.Errorf("expected 'code' text in rendered output, got:\n%s", view)
+	if !strings.Contains(view, "plain text") {
+		t.Errorf("expected plain text visible, got:\n%s", view)
 	}
 }
 
-func TestAgentLogMarkdownCacheInvalidation(t *testing.T) {
+func TestAgentLogStreamingTextAccumulates(t *testing.T) {
 	store := NewStateStore(nil)
 	tr := NewThinkingTracker()
 	al := NewAgentLog(store, tr, 40)
 	al.SetSize(80, 40)
 	al.Update(MsgTextChunk{NodeID: "n1", Text: "Hello"})
 	view1 := al.View()
-	// Append more text to the same entry (coalescing).
-	al.Update(MsgTextChunk{NodeID: "n1", Text: " **world**"})
+	// Append more text (still on the same line, no newline yet).
+	al.Update(MsgTextChunk{NodeID: "n1", Text: " world"})
 	view2 := al.View()
 	if view1 == view2 {
 		t.Error("expected view to change after appending text")
