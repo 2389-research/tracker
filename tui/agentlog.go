@@ -164,9 +164,23 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// appendCoalesced accumulates sequential text/reasoning chunks into one entry.
+// appendCoalesced accumulates sequential text/reasoning chunks into one entry,
+// but splits on natural boundaries (double newline, or when the entry exceeds
+// a size threshold) to prevent one massive entry from destabilizing the viewport.
+const maxCoalesceBytes = 512
+
 func (al *AgentLog) appendCoalesced(kind logEntryKind, nodeID, text string) {
 	if al.coalescing && al.coalesceKind == kind && al.coalesceNode == nodeID {
+		// If the current entry is getting large, finalize it and start a new one.
+		if al.coalesceBuf.Len()+len(text) > maxCoalesceBytes || strings.Contains(text, "\n\n") {
+			al.resetCoalesce()
+			al.coalescing = true
+			al.coalesceKind = kind
+			al.coalesceNode = nodeID
+			al.coalesceBuf.WriteString(text)
+			al.addEntry(logEntry{kind: kind, nodeID: nodeID, text: al.coalesceBuf.String()})
+			return
+		}
 		al.coalesceBuf.WriteString(text)
 		// Update the last entry in-place and invalidate its render cache.
 		last := &al.entries[len(al.entries)-1]
