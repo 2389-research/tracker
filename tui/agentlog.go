@@ -181,6 +181,9 @@ func (al *AgentLog) flushNode(nodeID string) {
 	}
 	al.addLine(nodeID, al.styleLine(s, s.current.String()))
 	s.current.Reset()
+	// Reset code block state on flush — an unclosed fence from a crashed
+	// or interrupted node should not permanently corrupt styling.
+	s.inCodeBlock = false
 }
 
 // styleLine applies lightweight line-level formatting.

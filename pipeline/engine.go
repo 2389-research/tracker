@@ -691,7 +691,7 @@ func (e *Engine) saveCheckpoint(cp *Checkpoint, pctx *PipelineContext, runID str
 	if err := SaveCheckpoint(cp, e.checkpointPath); err != nil {
 		// Log but don't fail the pipeline for checkpoint errors.
 		e.emit(PipelineEvent{
-			Type:      EventCheckpointSaved,
+			Type:      EventCheckpointFailed,
 			Timestamp: time.Now(),
 			RunID:     runID,
 			Message:   fmt.Sprintf("checkpoint save error: %v", err),

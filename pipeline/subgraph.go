@@ -32,6 +32,9 @@ func NewSubgraphHandler(
 	pipelineEvents PipelineEventHandler,
 	factory RegistryFactory,
 ) *SubgraphHandler {
+	if registry == nil && factory == nil {
+		panic("NewSubgraphHandler: registry and factory cannot both be nil")
+	}
 	if pipelineEvents == nil {
 		pipelineEvents = PipelineNoopHandler
 	}

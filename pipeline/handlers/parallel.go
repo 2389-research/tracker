@@ -99,6 +99,24 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		wg.Add(1)
 		go func(idx int, tn *pipeline.Node) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					resultsCh <- branchResult{
+						index: idx,
+						result: ParallelResult{
+							NodeID: tn.ID,
+							Status: pipeline.OutcomeFail,
+							Error:  fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r),
+						},
+					}
+					h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+						Type:      pipeline.EventStageFailed,
+						Timestamp: time.Now(),
+						NodeID:    tn.ID,
+						Message:   fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
+					})
+				}
+			}()
 
 			// Emit stage started so the TUI shows the branch as running.
 			h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
