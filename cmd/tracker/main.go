@@ -285,14 +285,14 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	result, err := engine.Run(ctx)
-	if err != nil {
-		return fmt.Errorf("pipeline execution: %w", err)
-	}
+	result, runErr := engine.Run(ctx)
 
-	// Print run summary.
+	// Print run summary with resume hint even on cancellation/error,
+	// as long as we have a result with a run ID.
 	var pipelineErr error
-	if result.Status != pipeline.OutcomeSuccess {
+	if runErr != nil {
+		pipelineErr = fmt.Errorf("pipeline execution: %w", runErr)
+	} else if result.Status != pipeline.OutcomeSuccess {
 		pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
 	}
 	printRunSummary(result, pipelineErr, tokenTracker, pipelineFile)
@@ -978,7 +978,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 		statusText := result.Status
 		switch result.Status {
 		case pipeline.OutcomeSuccess:
-			statusText = selectedStyle.Render(statusIcon+" success")
+			statusText = selectedStyle.Render(statusIcon + " success")
 		case pipeline.OutcomeFail:
 			statusText = lipgloss.NewStyle().Foreground(colorHot).Render(statusIcon + " fail")
 		default:
