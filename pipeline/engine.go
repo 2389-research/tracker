@@ -192,6 +192,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		currentNodeID = cp.CurrentNode
 	}
 
+	// Track nodes visited during resume skip to detect cycles in looping pipelines.
+	resumeVisited := make(map[string]bool)
+
 	for {
 		// Check context cancellation at the top of each iteration.
 		if err := ctx.Err(); err != nil {
@@ -222,6 +225,20 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		// from the checkpoint to replay routing decisions deterministically,
 		// falling back to selectEdge only when no stored selection exists.
 		if cp.IsCompleted(currentNodeID) {
+			// Detect cycles in the resume skip path. For looping pipelines
+			// (A → B → C → A), all nodes may be marked completed. Without
+			// this check, the skip path would loop forever.
+			if resumeVisited[currentNodeID] {
+				// We've looped back to a completed node we already skipped.
+				// Clear it (and downstream) from completed so the engine
+				// re-executes this iteration of the loop.
+				e.clearDownstream(currentNodeID, cp)
+				e.clearDownstreamRetryCounts(currentNodeID, cp)
+				resumeVisited = nil
+				continue
+			}
+			resumeVisited[currentNodeID] = true
+
 			e.emit(PipelineEvent{
 				Type:      EventStageCompleted,
 				Timestamp: time.Now(),
@@ -246,6 +263,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			currentNodeID = next.To
 			continue
 		}
+
+		// Past the resume skip phase — clear the visited tracker.
+		resumeVisited = nil
 
 		// Clear per-node edge selection hints so stale values from a
 		// previous node don't pollute routing for the current one.

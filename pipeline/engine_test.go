@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // testHandler is a configurable stub handler for engine tests.
@@ -931,5 +932,86 @@ func TestEngineResumePreservesEdgeContext(t *testing.T) {
 	}
 	if !bExecuted {
 		t.Error("expected node B to execute after resuming through A's conditional edge")
+	}
+}
+
+func TestEngineResumeLoopingPipelineDoesNotInfiniteLoop(t *testing.T) {
+	// Regression test: a looping pipeline (Plan → Implement → Gate → Plan)
+	// where all loop nodes are marked completed on resume should not
+	// cycle through the skip path forever. The engine should detect the
+	// cycle and re-execute the loop.
+	g := NewGraph("loop_resume")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "plan", Shape: "box", Label: "Plan", Handler: "codergen"})
+	g.AddNode(&Node{ID: "impl", Shape: "box", Label: "Implement", Handler: "codergen"})
+	g.AddNode(&Node{ID: "gate", Shape: "diamond", Label: "Gate", Handler: "conditional",
+		Attrs: map[string]string{}})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "plan"})
+	g.AddEdge(&Edge{From: "plan", To: "impl"})
+	g.AddEdge(&Edge{From: "impl", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "plan", Label: "retry"})
+	g.AddEdge(&Edge{From: "gate", To: "end", Label: "done"})
+
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "cp.json")
+
+	// Checkpoint: all loop nodes completed, sitting at start. This
+	// simulates a ctrl-c during a loop iteration where the checkpoint
+	// was saved at the beginning of the graph traversal.
+	cp := &Checkpoint{
+		CompletedNodes: []string{"s", "plan", "impl", "gate"},
+		CurrentNode:    "s",
+		Context: map[string]string{
+			ContextKeyPreferredLabel: "retry",
+		},
+	}
+	cpData, _ := json.Marshal(cp)
+	os.WriteFile(cpPath, cpData, 0644)
+
+	reg := newTestRegistry()
+	var mu sync.Mutex
+	executedNodes := []string{}
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			mu.Lock()
+			executedNodes = append(executedNodes, node.ID)
+			mu.Unlock()
+			// On re-execution, gate should route to "done".
+			pctx.Set(ContextKeyPreferredLabel, "done")
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "conditional",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			mu.Lock()
+			executedNodes = append(executedNodes, node.ID)
+			mu.Unlock()
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	// Use a context with timeout to prevent infinite loop from hanging the test.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath))
+	result, err := engine.Run(ctx)
+	if err != nil {
+		t.Fatalf("engine run failed (may have infinite-looped): %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// The loop nodes should have been re-executed after cycle detection.
+	if len(executedNodes) == 0 {
+		t.Error("expected loop nodes to be re-executed, but none were")
 	}
 }
