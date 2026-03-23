@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -63,13 +64,22 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 		return !result, nil
 	}
 
+	// resolveAndWarn resolves a variable and logs a warning if not found.
+	resolveAndWarn := func(name string) string {
+		val, found := resolveVariable(name, ctx)
+		if !found {
+			fmt.Fprintf(os.Stderr, "warning: unresolved condition variable %q (defaulting to empty string)\n", name)
+		}
+		return val
+	}
+
 	// Try negated word-based operators first: "key not contains value", etc.
 	// These must be checked BEFORE the non-negated versions to avoid partial matches.
 	for _, op := range []string{" not contains ", " not startswith ", " not endswith ", " not in "} {
 		if idx := strings.Index(clause, op); idx >= 0 {
 			key := strings.TrimSpace(clause[:idx])
 			value := strings.TrimSpace(clause[idx+len(op):])
-			actual := resolveVariable(key, ctx)
+			actual := resolveAndWarn(key)
 			positiveOp := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(op), "not "))
 			switch positiveOp {
 			case "contains":
@@ -96,7 +106,7 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 		if idx := strings.Index(clause, op); idx >= 0 {
 			key := strings.TrimSpace(clause[:idx])
 			value := strings.TrimSpace(clause[idx+len(op):])
-			actual := resolveVariable(key, ctx)
+			actual := resolveAndWarn(key)
 			switch strings.TrimSpace(op) {
 			case "contains":
 				return strings.Contains(actual, value), nil
@@ -120,23 +130,23 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 	if idx := strings.Index(clause, "!="); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
 		expected := strings.TrimSpace(clause[idx+2:])
-		actual := resolveVariable(key, ctx)
+		actual := resolveAndWarn(key)
 		return actual != expected, nil
 	}
 
 	if idx := strings.Index(clause, "="); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
 		expected := strings.TrimSpace(clause[idx+1:])
-		actual := resolveVariable(key, ctx)
+		actual := resolveAndWarn(key)
 		return actual == expected, nil
 	}
 
 	return false, fmt.Errorf("invalid condition clause: %q (expected key=value or key!=value)", clause)
 }
 
-func resolveVariable(name string, ctx *PipelineContext) string {
+func resolveVariable(name string, ctx *PipelineContext) (string, bool) {
 	if val, ok := ctx.Get(name); ok {
-		return val
+		return val, true
 	}
 	// Strip namespace prefixes: "ctx.outcome" → "outcome", "context.outcome" → "outcome"
 	if strings.HasPrefix(name, "ctx.") {
@@ -145,11 +155,11 @@ func resolveVariable(name string, ctx *PipelineContext) string {
 		if strings.HasPrefix(bare, "internal.") {
 			internalKey := strings.TrimPrefix(bare, "internal.")
 			if val, ok := ctx.GetInternal(internalKey); ok {
-				return val
+				return val, true
 			}
 		}
 		if val, ok := ctx.Get(bare); ok {
-			return val
+			return val, true
 		}
 	}
 	if strings.HasPrefix(name, "context.") {
@@ -157,19 +167,19 @@ func resolveVariable(name string, ctx *PipelineContext) string {
 		if strings.HasPrefix(bare, "internal.") {
 			internalKey := strings.TrimPrefix(bare, "internal.")
 			if val, ok := ctx.GetInternal(internalKey); ok {
-				return val
+				return val, true
 			}
 		}
 		if val, ok := ctx.Get(bare); ok {
-			return val
+			return val, true
 		}
 	}
 	// Handle bare internal.* references.
 	if strings.HasPrefix(name, "internal.") {
 		internalKey := strings.TrimPrefix(name, "internal.")
 		if val, ok := ctx.GetInternal(internalKey); ok {
-			return val
+			return val, true
 		}
 	}
-	return ""
+	return "", false
 }

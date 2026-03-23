@@ -13,6 +13,7 @@ import (
 )
 
 const defaultMaxCollapsedLines = 4
+const maxLogLines = 10000
 
 // nodeStream holds per-node streaming state.
 type nodeStream struct {
@@ -107,6 +108,9 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 			al.flushNode(m.NodeID)
 			al.addLine(m.NodeID, Styles.DimText.Render(m.Data))
 		}
+	case MsgNodeCompleted:
+		al.flushNode(m.NodeID)
+		delete(al.streams, m.NodeID)
 	case MsgToggleExpand:
 		al.expanded = !al.expanded
 	}
@@ -162,6 +166,7 @@ func (al *AgentLog) appendToolEnd(m MsgToolCallEnd) {
 
 // addLine appends a styled line to the unified log.
 // Inserts a node separator when the source node changes.
+// Trims oldest entries when the log exceeds maxLogLines.
 func (al *AgentLog) addLine(nodeID, text string) {
 	if nodeID != "" && nodeID != al.lastNode && al.lastNode != "" {
 		al.lines = append(al.lines, styledLine{
@@ -171,6 +176,12 @@ func (al *AgentLog) addLine(nodeID, text string) {
 	}
 	al.lastNode = nodeID
 	al.lines = append(al.lines, styledLine{nodeID: nodeID, text: text})
+
+	// Cap the line buffer to prevent unbounded memory growth.
+	if len(al.lines) > maxLogLines {
+		trim := len(al.lines) - maxLogLines
+		al.lines = al.lines[trim:]
+	}
 }
 
 // flushNode finalizes any in-progress line for a specific node.

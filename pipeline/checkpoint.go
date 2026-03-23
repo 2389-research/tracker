@@ -20,6 +20,11 @@ type Checkpoint struct {
 	Timestamp      time.Time         `json:"timestamp"`
 	RestartCount   int               `json:"restart_count"`
 
+	// EdgeSelections stores the selected outgoing edge target for each
+	// completed node (nodeID -> selected edge To). Used on resume to
+	// replay routing decisions instead of re-evaluating stale conditions.
+	EdgeSelections map[string]string `json:"edge_selections,omitempty"`
+
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
 	completedSet map[string]bool `json:"-"`
@@ -67,6 +72,23 @@ func (cp *Checkpoint) MarkCompleted(nodeID string) {
 	}
 	cp.completedSet[nodeID] = true
 	cp.CompletedNodes = append(cp.CompletedNodes, nodeID)
+}
+
+// SetEdgeSelection records the selected outgoing edge for a completed node.
+func (cp *Checkpoint) SetEdgeSelection(nodeID, edgeTo string) {
+	if cp.EdgeSelections == nil {
+		cp.EdgeSelections = make(map[string]string)
+	}
+	cp.EdgeSelections[nodeID] = edgeTo
+}
+
+// GetEdgeSelection returns the stored edge selection for a node, if any.
+func (cp *Checkpoint) GetEdgeSelection(nodeID string) (string, bool) {
+	if cp.EdgeSelections == nil {
+		return "", false
+	}
+	v, ok := cp.EdgeSelections[nodeID]
+	return v, ok
 }
 
 // ClearCompleted removes a node from the completed set so it will re-execute.

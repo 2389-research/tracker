@@ -218,9 +218,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		}
 
 		// Skip already-completed nodes on resume, emitting synthetic events
-		// so the TUI shows them as green/done. The checkpoint context
-		// preserves edge selection hints (outcome, preferred label) from the
-		// original execution, so selectEdge can route correctly.
+		// so the TUI shows them as green/done. Use stored edge selections
+		// from the checkpoint to replay routing decisions deterministically,
+		// falling back to selectEdge only when no stored selection exists.
 		if cp.IsCompleted(currentNodeID) {
 			e.emit(PipelineEvent{
 				Type:      EventStageCompleted,
@@ -233,6 +233,11 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			if len(edges) == 0 {
 				// Completed exit node — we're done.
 				break
+			}
+			// Prefer stored edge selection from the original run.
+			if storedTo, ok := cp.GetEdgeSelection(currentNodeID); ok {
+				currentNodeID = storedTo
+				continue
 			}
 			next, err := e.selectEdge(edges, pctx)
 			if err != nil {
@@ -437,7 +442,14 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			cp.MarkCompleted(currentNodeID)
 
 		default:
-			// Treat unknown status as success.
+			// Treat unknown status as success but warn so it's observable.
+			e.emit(PipelineEvent{
+				Type:      EventWarning,
+				Timestamp: time.Now(),
+				RunID:     runID,
+				NodeID:    currentNodeID,
+				Message:   fmt.Sprintf("unknown outcome status %q from node %q; treating as success", outcome.Status, currentNodeID),
+			})
 			cp.MarkCompleted(currentNodeID)
 		}
 
@@ -486,6 +498,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 		traceEntry.EdgeTo = next.To
 		trace.AddEntry(traceEntry)
+
+		// Store the edge selection so checkpoint resume can replay it.
+		cp.SetEdgeSelection(currentNodeID, next.To)
 
 		// If the next node was already completed in this run (loop-back),
 		// trigger restart loop handling instead of just clearing one node.
@@ -625,6 +640,17 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		// Priority 5: Lexical ordering by To field.
 		return unconditional[i].To < unconditional[j].To
 	})
+
+	// Warn when multiple unconditional edges have equal weight and lexical
+	// tiebreaker is used — this may indicate a missing condition or weight.
+	if len(unconditional) > 1 && edgeWeight(unconditional[0]) == edgeWeight(unconditional[1]) {
+		e.emit(PipelineEvent{
+			Type:      EventEdgeTiebreaker,
+			Timestamp: time.Now(),
+			NodeID:    unconditional[0].From,
+			Message:   fmt.Sprintf("lexical tiebreaker used: %d unconditional edges from %q with equal weight; selected %q", len(unconditional), unconditional[0].From, unconditional[0].To),
+		})
+	}
 
 	return unconditional[0], nil
 }

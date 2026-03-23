@@ -22,6 +22,8 @@ const (
 	EventParallelStarted    PipelineEventType = "parallel_started"
 	EventParallelCompleted  PipelineEventType = "parallel_completed"
 	EventLoopRestart        PipelineEventType = "loop_restart"
+	EventWarning            PipelineEventType = "warning"
+	EventEdgeTiebreaker     PipelineEventType = "edge_tiebreaker"
 )
 
 // PipelineEvent carries data about a single pipeline lifecycle occurrence.

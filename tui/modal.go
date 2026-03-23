@@ -224,13 +224,23 @@ func (f *FreeformContent) Update(msg tea.Msg) tea.Cmd {
 		case "ctrl+s":
 			return f.submit()
 		case "esc":
-			// Also allow Esc to submit if there's content (quick approval).
+			// Esc with empty textarea dismisses without submitting (cancel).
+			// Esc with content submits (quick approval).
+			if strings.TrimSpace(f.textarea.Value()) == "" {
+				return f.cancel()
+			}
 			return f.submit()
 		}
 	}
 	var cmd tea.Cmd
 	f.textarea, cmd = f.textarea.Update(msg)
 	return cmd
+}
+
+// cancel dismisses the modal without submitting any value.
+func (f *FreeformContent) cancel() tea.Cmd {
+	f.done = true
+	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
 // submit sends the current textarea value and dismisses the modal.
@@ -257,6 +267,6 @@ func (f *FreeformContent) View() string {
 	sb.WriteString("\n\n")
 
 	hintStyle := lipgloss.NewStyle().Faint(true)
-	sb.WriteString(hintStyle.Render("enter newline  ctrl+s submit  esc submit"))
+	sb.WriteString(hintStyle.Render("enter newline  ctrl+s submit  esc submit/cancel"))
 	return sb.String()
 }

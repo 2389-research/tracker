@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -59,9 +60,16 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 	}
 
 	// Per-node working directory override (e.g., for git worktree isolation).
-	// Prepend a cd so the shell command runs in the target directory.
+	// Validate against path traversal and shell metacharacters before use.
 	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
-		command = fmt.Sprintf("cd %q && %s", wd, command)
+		if strings.ContainsAny(wd, "`$;|\n\r") {
+			return pipeline.Outcome{}, fmt.Errorf("node %q has unsafe working_dir %q: contains shell metacharacters", node.ID, wd)
+		}
+		cleaned := filepath.Clean(wd)
+		if strings.Contains(cleaned, "..") {
+			return pipeline.Outcome{}, fmt.Errorf("node %q has unsafe working_dir %q: path traversal detected", node.ID, wd)
+		}
+		command = fmt.Sprintf("cd %q && %s", cleaned, command)
 	}
 
 	timeout := h.defaultTimeout
