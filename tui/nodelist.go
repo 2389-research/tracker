@@ -76,13 +76,24 @@ func (nl *NodeList) View() string {
 			label = node.ID
 		}
 
+		// For subgraph child nodes, show only the child portion of the label
+		// and indent based on nesting depth.
+		indent := ""
+		if IsSubgraphNode(node.ID) {
+			depth := SubgraphDepth(node.ID)
+			indent = strings.Repeat("  ", depth)
+			if label == node.ID {
+				label = SubgraphChildLabel(node.ID)
+			}
+		}
+
 		// Truncate long labels.
-		maxLabel := nl.width - 4
+		maxLabel := nl.width - 4 - len(indent)
 		if maxLabel > 0 && len(label) > maxLabel {
 			label = label[:maxLabel-1] + "…"
 		}
 
-		line := style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
+		line := indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
 
 		// Show activity context for running nodes.
 		if status == NodeRunning {

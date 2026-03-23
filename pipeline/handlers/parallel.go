@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,11 +45,16 @@ func (h *ParallelHandler) Name() string { return "parallel" }
 
 // Execute fans out to all outgoing edge targets concurrently, collects results,
 // and returns OutcomeSuccess if at least one branch succeeded, OutcomeFail if all failed.
+// If the parallel node has branch.N.* attributes, those override the target node's
+// attrs (e.g., llm_model, llm_provider, fidelity) for that specific branch.
 func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	edges := h.graph.OutgoingEdges(node.ID)
 	if len(edges) == 0 {
 		return pipeline.Outcome{}, fmt.Errorf("parallel node %q has no outgoing edges", node.ID)
 	}
+
+	// Parse per-branch overrides from the parallel node's attrs.
+	branchOverrides := parseBranchOverrides(node.Attrs)
 
 	branchIDs := make([]string, len(edges))
 	for i, edge := range edges {
@@ -86,6 +93,9 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			continue
 		}
 
+		// Apply per-branch overrides if present.
+		execNode := applyBranchOverrides(targetNode, branchOverrides)
+
 		wg.Add(1)
 		go func(idx int, tn *pipeline.Node) {
 			defer wg.Done()
@@ -109,7 +119,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			}
 
 			resultsCh <- branchResult{index: idx, result: pr}
-		}(i, targetNode)
+		}(i, execNode)
 	}
 
 	// Wait for all goroutines, then close the channel.
@@ -151,4 +161,83 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	})
 
 	return pipeline.Outcome{Status: status}, nil
+}
+
+// branchOverride holds per-branch attr overrides parsed from the parallel node.
+type branchOverride struct {
+	target string
+	attrs  map[string]string
+}
+
+// parseBranchOverrides extracts branch.N.* attributes from a parallel node
+// and returns a map of target node ID → override attrs.
+// Format: branch.0.target=NodeA, branch.0.llm_model=gpt-4, etc.
+func parseBranchOverrides(nodeAttrs map[string]string) map[string]map[string]string {
+	// First pass: group attrs by branch index.
+	indexed := make(map[int]map[string]string)
+	for key, val := range nodeAttrs {
+		if !strings.HasPrefix(key, "branch.") {
+			continue
+		}
+		rest := key[len("branch."):]
+		dotIdx := strings.Index(rest, ".")
+		if dotIdx < 0 {
+			continue
+		}
+		idx, err := strconv.Atoi(rest[:dotIdx])
+		if err != nil {
+			continue
+		}
+		attrName := rest[dotIdx+1:]
+		if indexed[idx] == nil {
+			indexed[idx] = make(map[string]string)
+		}
+		indexed[idx][attrName] = val
+	}
+
+	// Second pass: key by target node ID.
+	byTarget := make(map[string]map[string]string)
+	for _, branchAttrs := range indexed {
+		target := branchAttrs["target"]
+		if target == "" {
+			continue
+		}
+		overrides := make(map[string]string)
+		for k, v := range branchAttrs {
+			if k != "target" {
+				overrides[k] = v
+			}
+		}
+		if len(overrides) > 0 {
+			byTarget[target] = overrides
+		}
+	}
+	return byTarget
+}
+
+// applyBranchOverrides creates a shallow clone of the target node with
+// branch-specific attr overrides applied. If no overrides exist for this
+// target, returns the original node unchanged.
+func applyBranchOverrides(target *pipeline.Node, overrides map[string]map[string]string) *pipeline.Node {
+	branchAttrs, ok := overrides[target.ID]
+	if !ok || len(branchAttrs) == 0 {
+		return target
+	}
+
+	// Clone attrs and apply overrides.
+	clonedAttrs := make(map[string]string, len(target.Attrs)+len(branchAttrs))
+	for k, v := range target.Attrs {
+		clonedAttrs[k] = v
+	}
+	for k, v := range branchAttrs {
+		clonedAttrs[k] = v
+	}
+
+	return &pipeline.Node{
+		ID:      target.ID,
+		Shape:   target.Shape,
+		Label:   target.Label,
+		Handler: target.Handler,
+		Attrs:   clonedAttrs,
+	}
 }

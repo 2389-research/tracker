@@ -373,6 +373,92 @@ func TestConditionANDORPrecedence(t *testing.T) {
 	}
 }
 
+// --- ctx. namespace prefix ---
+
+func TestConditionCtxDotPrefix(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("outcome", "success")
+	result, err := EvaluateCondition("ctx.outcome = success", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected 'ctx.outcome = success' to match when outcome=success")
+	}
+}
+
+func TestConditionCtxDotPrefixFail(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("outcome", "fail")
+	result, err := EvaluateCondition("ctx.outcome = success", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result {
+		t.Error("expected 'ctx.outcome = success' to be false when outcome=fail")
+	}
+}
+
+func TestConditionCtxDotPrefixContains(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("tool_stdout", "all-done")
+	result, err := EvaluateCondition("ctx.tool_stdout contains all-done", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected 'ctx.tool_stdout contains all-done' to match")
+	}
+}
+
+func TestConditionCtxDotNotContains(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("tool_stdout", "milestone-1")
+	result, err := EvaluateCondition("ctx.tool_stdout not contains all-done", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected 'ctx.tool_stdout not contains all-done' to be true when stdout=milestone-1")
+	}
+}
+
+func TestConditionCtxDotNotContainsFalse(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("tool_stdout", "all-done")
+	result, err := EvaluateCondition("ctx.tool_stdout not contains all-done", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result {
+		t.Error("expected 'ctx.tool_stdout not contains all-done' to be false when stdout=all-done")
+	}
+}
+
+func TestConditionNotStartswith(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("status", "error: something")
+	result, err := EvaluateCondition("status not startswith success", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected negated startswith to be true")
+	}
+}
+
+func TestConditionNotIn(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("env", "test")
+	result, err := EvaluateCondition("env not in dev,staging,prod", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected 'test' not in 'dev,staging,prod' to be true")
+	}
+}
+
 func TestConditionANDORPrecedenceAllFalse(t *testing.T) {
 	// When both OR branches are false
 	ctx := NewPipelineContext()

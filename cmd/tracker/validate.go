@@ -30,6 +30,10 @@ func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	registry.Register(&mockHandler{name: "start"})
 	registry.Register(&mockHandler{name: "exit"})
 	registry.Register(&mockHandler{name: "conditional"})
+	registry.Register(&mockHandler{name: "wait.human"})
+	registry.Register(&mockHandler{name: "parallel"})
+	registry.Register(&mockHandler{name: "parallel.fan_in"})
+	registry.Register(&mockHandler{name: "manager_loop"})
 
 	// Run structural + semantic validation + lint
 	result := pipeline.ValidateAllWithLint(graph, registry)

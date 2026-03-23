@@ -45,6 +45,10 @@ func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 	switch evt.Type {
 	case agent.EventLLMRequestPreparing:
 		return MsgLLMRequestPreparing{NodeID: nodeID, Provider: evt.Provider, Model: evt.Model}
+	case agent.EventLLMRequestStart:
+		return MsgThinkingStarted{NodeID: nodeID}
+	case agent.EventLLMFinish:
+		return MsgThinkingStopped{NodeID: nodeID}
 	case agent.EventTextDelta:
 		return MsgTextChunk{NodeID: nodeID, Text: evt.Text}
 	case agent.EventToolCallStart:
@@ -73,31 +77,25 @@ func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 func AdaptLLMTraceEvent(evt llm.TraceEvent, nodeID string, verbose bool) []tea.Msg {
 	switch evt.Kind {
 	case llm.TraceRequestStart:
+		// Thinking start/stop is handled by AdaptAgentEvent (which has the node ID).
+		// LLM trace only emits provider-level messages.
 		return []tea.Msg{
 			MsgLLMRequestStart{NodeID: nodeID, Provider: evt.Provider, Model: evt.Model},
-			MsgThinkingStarted{NodeID: nodeID},
 		}
 	case llm.TraceText:
 		return []tea.Msg{
 			MsgTextChunk{NodeID: nodeID, Text: evt.Preview},
-			MsgThinkingStopped{NodeID: nodeID},
 		}
 	case llm.TraceReasoning:
 		return []tea.Msg{
 			MsgReasoningChunk{NodeID: nodeID, Text: evt.Preview},
-			MsgThinkingStopped{NodeID: nodeID},
 		}
 	case llm.TraceFinish:
 		return []tea.Msg{
 			MsgLLMFinish{NodeID: nodeID},
-			MsgThinkingStopped{NodeID: nodeID},
 		}
 	case llm.TraceToolPrepare:
-		// Only stop thinking here — the MsgToolCallStart with full ToolInput
-		// arrives from AdaptAgentEvent(EventToolCallStart) shortly after.
-		return []tea.Msg{
-			MsgThinkingStopped{NodeID: nodeID},
-		}
+		return nil // MsgToolCallStart arrives from AdaptAgentEvent shortly after
 	case llm.TraceProviderRaw:
 		if !verbose {
 			return nil

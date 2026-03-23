@@ -51,10 +51,12 @@ func TestChoiceContentSelection(t *testing.T) {
 func TestFreeformContentSubmit(t *testing.T) {
 	ch := make(chan string, 1)
 	f := NewFreeformContent("Enter value", ch)
+	// Type characters into the textarea.
 	for _, r := range "hello" {
 		f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
-	f.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Submit with Ctrl+S (Enter inserts newlines in the textarea).
+	f.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	select {
 	case got := <-ch:
 		if got != "hello" {
@@ -62,5 +64,40 @@ func TestFreeformContentSubmit(t *testing.T) {
 		}
 	default:
 		t.Error("expected value on reply channel")
+	}
+}
+
+func TestFreeformContentMultiline(t *testing.T) {
+	ch := make(chan string, 1)
+	f := NewFreeformContent("Enter value", ch)
+	for _, r := range "line one" {
+		f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	// Enter creates a newline, not submit.
+	f.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	for _, r := range "line two" {
+		f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	f.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	select {
+	case got := <-ch:
+		if !strings.Contains(got, "line one") || !strings.Contains(got, "line two") {
+			t.Errorf("expected multiline content, got %q", got)
+		}
+	default:
+		t.Error("expected value on reply channel")
+	}
+}
+
+func TestFreeformContentEmptyNoSubmit(t *testing.T) {
+	ch := make(chan string, 1)
+	f := NewFreeformContent("Enter value", ch)
+	// Try to submit empty textarea.
+	f.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	select {
+	case got := <-ch:
+		t.Errorf("should not submit empty, got %q", got)
+	default:
+		// expected
 	}
 }

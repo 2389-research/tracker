@@ -237,10 +237,36 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 		if err != nil {
 			return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
 		}
-		return pipeline.Outcome{
+
+		outcome := pipeline.Outcome{
 			Status:         pipeline.OutcomeSuccess,
 			ContextUpdates: map[string]string{pipeline.ContextKeyHumanResponse: response},
-		}, nil
+		}
+
+		// If the node has outgoing labeled edges, try to match the response
+		// text against edge labels to set PreferredLabel for routing.
+		// This allows freeform human gates to also function as routing nodes
+		// (e.g., type "approve" to take the "approve" edge, or type detailed
+		// feedback to take the default/fallback edge).
+		if h.graph != nil {
+			edges := h.graph.OutgoingEdges(node.ID)
+			normalized := strings.ToLower(strings.TrimSpace(response))
+			for _, e := range edges {
+				if e.Label != "" && strings.ToLower(e.Label) == normalized {
+					outcome.PreferredLabel = e.Label
+					break
+				}
+			}
+			// Also check the default attribute as a shorthand.
+			if outcome.PreferredLabel == "" && node.Attrs["default"] != "" {
+				defLabel := node.Attrs["default"]
+				if strings.ToLower(defLabel) == normalized {
+					outcome.PreferredLabel = defLabel
+				}
+			}
+		}
+
+		return outcome, nil
 	}
 
 	// Choice mode: present outgoing edge labels.

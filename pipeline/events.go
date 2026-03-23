@@ -51,6 +51,27 @@ func (pipelineNoopHandler) HandlePipelineEvent(PipelineEvent) {}
 // PipelineNoopHandler is a handler that does nothing, useful as a default.
 var PipelineNoopHandler PipelineEventHandler = pipelineNoopHandler{}
 
+// NodeScopedPipelineHandler wraps a PipelineEventHandler and prefixes every
+// event's NodeID with parentNodeID + "/". Child pipeline lifecycle events
+// (started/completed/failed) are filtered out because the parent engine
+// already tracks the subgraph node's lifecycle.
+func NodeScopedPipelineHandler(parentNodeID string, inner PipelineEventHandler) PipelineEventHandler {
+	if inner == nil {
+		return PipelineNoopHandler
+	}
+	return PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		// Filter child pipeline lifecycle events — the parent tracks these.
+		switch evt.Type {
+		case EventPipelineStarted, EventPipelineCompleted, EventPipelineFailed:
+			return
+		}
+		if evt.NodeID != "" {
+			evt.NodeID = parentNodeID + "/" + evt.NodeID
+		}
+		inner.HandlePipelineEvent(evt)
+	})
+}
+
 // PipelineMultiHandler fans out each event to every provided handler.
 // Nil handlers in the list are safely skipped.
 func PipelineMultiHandler(handlers ...PipelineEventHandler) PipelineEventHandler {

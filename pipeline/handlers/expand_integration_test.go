@@ -122,7 +122,7 @@ func TestSubgraphParamInjection_Integration(t *testing.T) {
 	graphs := map[string]*pipeline.Graph{
 		"child": childGraph,
 	}
-	subgraphHandler := pipeline.NewSubgraphHandler(graphs, registry)
+	subgraphHandler := pipeline.NewSubgraphHandler(graphs, registry, nil, nil)
 	registry.Register(subgraphHandler)
 	
 	// Run parent graph

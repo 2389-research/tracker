@@ -385,7 +385,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
-			msg := tui.AdaptAgentEvent(evt, evt.SessionID)
+			msg := tui.AdaptAgentEvent(evt, evt.NodeID)
 			if msg != nil {
 				prog.Send(msg)
 			}

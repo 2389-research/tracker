@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -251,6 +252,158 @@ func TestParallelHandlerResultsInContext(t *testing.T) {
 	}
 	if !nodeIDs["branch_a"] || !nodeIDs["branch_b"] {
 		t.Errorf("expected results for branch_a and branch_b, got %v", nodeIDs)
+	}
+}
+
+func TestParseBranchOverrides(t *testing.T) {
+	attrs := map[string]string{
+		"branch.0.target":       "AgentA",
+		"branch.0.llm_model":    "gpt-4",
+		"branch.0.llm_provider": "openai",
+		"branch.1.target":       "AgentB",
+		"branch.1.llm_model":    "claude-opus-4",
+		"branch.1.fidelity":     "compact",
+		"parallel_targets":      "AgentA,AgentB", // unrelated attr, should be ignored
+	}
+
+	overrides := parseBranchOverrides(attrs)
+
+	if len(overrides) != 2 {
+		t.Fatalf("expected 2 branch overrides, got %d", len(overrides))
+	}
+	if overrides["AgentA"]["llm_model"] != "gpt-4" {
+		t.Errorf("AgentA llm_model = %q, want gpt-4", overrides["AgentA"]["llm_model"])
+	}
+	if overrides["AgentA"]["llm_provider"] != "openai" {
+		t.Errorf("AgentA llm_provider = %q, want openai", overrides["AgentA"]["llm_provider"])
+	}
+	if overrides["AgentB"]["llm_model"] != "claude-opus-4" {
+		t.Errorf("AgentB llm_model = %q, want claude-opus-4", overrides["AgentB"]["llm_model"])
+	}
+	if overrides["AgentB"]["fidelity"] != "compact" {
+		t.Errorf("AgentB fidelity = %q, want compact", overrides["AgentB"]["fidelity"])
+	}
+	// "target" should not be in the override attrs
+	if _, ok := overrides["AgentA"]["target"]; ok {
+		t.Error("target key should not be in override attrs")
+	}
+}
+
+func TestParseBranchOverrides_Empty(t *testing.T) {
+	overrides := parseBranchOverrides(map[string]string{"some_attr": "value"})
+	if len(overrides) != 0 {
+		t.Errorf("expected 0 overrides, got %d", len(overrides))
+	}
+}
+
+func TestParallelHandlerBranchOverrides(t *testing.T) {
+	g := pipeline.NewGraph("test")
+	parallelNode := &pipeline.Node{
+		ID:      "fanout",
+		Shape:   "component",
+		Handler: "parallel",
+		Attrs: map[string]string{
+			"branch.0.target":    "AgentA",
+			"branch.0.llm_model": "gpt-4",
+			"branch.1.target":    "AgentB",
+			"branch.1.llm_model": "claude-opus-4",
+		},
+	}
+	g.AddNode(parallelNode)
+
+	// Both branches use the same handler but we'll capture which model each sees.
+	agentA := &pipeline.Node{
+		ID:    "AgentA",
+		Shape: "box",
+		Attrs: map[string]string{"llm_model": "default-model"},
+	}
+	agentB := &pipeline.Node{
+		ID:    "AgentB",
+		Shape: "box",
+		Attrs: map[string]string{"llm_model": "default-model"},
+	}
+	g.AddNode(agentA)
+	g.AddNode(agentB)
+	// Override handler after AddNode (AddNode auto-maps shape→handler)
+	g.Nodes["AgentA"].Handler = "stub_branch"
+	g.Nodes["AgentB"].Handler = "stub_branch"
+	g.AddEdge(&pipeline.Edge{From: "fanout", To: "AgentA"})
+	g.AddEdge(&pipeline.Edge{From: "fanout", To: "AgentB"})
+
+	// Track which model each branch received.
+	models := make(map[string]string)
+	var mu sync.Mutex
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(&stubHandler{
+		name: "stub_branch",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			mu.Lock()
+			models[node.ID] = node.Attrs["llm_model"]
+			mu.Unlock()
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), parallelNode, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+
+	if models["AgentA"] != "gpt-4" {
+		t.Errorf("AgentA saw model %q, want gpt-4", models["AgentA"])
+	}
+	if models["AgentB"] != "claude-opus-4" {
+		t.Errorf("AgentB saw model %q, want claude-opus-4", models["AgentB"])
+	}
+}
+
+func TestParallelHandlerBranchOverridesPreserveOriginal(t *testing.T) {
+	g := pipeline.NewGraph("test")
+	parallelNode := &pipeline.Node{
+		ID:      "fanout",
+		Shape:   "component",
+		Handler: "parallel",
+		Attrs: map[string]string{
+			"branch.0.target":    "Agent",
+			"branch.0.llm_model": "overridden-model",
+		},
+	}
+	g.AddNode(parallelNode)
+
+	originalAttrs := map[string]string{"llm_model": "original-model", "prompt": "do stuff"}
+	agent := &pipeline.Node{
+		ID:      "Agent",
+		Shape:   "box",
+		Handler: "stub_preserve",
+		Attrs:   originalAttrs,
+	}
+	g.AddNode(agent)
+	g.AddEdge(&pipeline.Edge{From: "fanout", To: "Agent"})
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(&stubHandler{
+		name:    "stub_preserve",
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	pctx := pipeline.NewPipelineContext()
+
+	_, err := h.Execute(context.Background(), parallelNode, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the original node was NOT mutated.
+	if g.Nodes["Agent"].Attrs["llm_model"] != "original-model" {
+		t.Errorf("original node was mutated: llm_model = %q", g.Nodes["Agent"].Attrs["llm_model"])
 	}
 }
 

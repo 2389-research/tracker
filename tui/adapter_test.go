@@ -161,10 +161,9 @@ func TestAdaptLLMTraceEvent(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("expected at least one message")
 	}
-	var hasRequest, hasThinking bool
+	var hasRequest bool
 	for _, m := range msgs {
-		switch v := m.(type) {
-		case MsgLLMRequestStart:
+		if v, ok := m.(MsgLLMRequestStart); ok {
 			hasRequest = true
 			if v.Provider != "anthropic" {
 				t.Errorf("expected provider anthropic, got %s", v.Provider)
@@ -172,42 +171,33 @@ func TestAdaptLLMTraceEvent(t *testing.T) {
 			if v.Model != "claude-sonnet-4-6" {
 				t.Errorf("expected model claude-sonnet-4-6, got %s", v.Model)
 			}
-		case MsgThinkingStarted:
-			hasThinking = true
 		}
 	}
 	if !hasRequest {
 		t.Error("expected MsgLLMRequestStart")
 	}
-	if !hasThinking {
-		t.Error("expected MsgThinkingStarted")
-	}
+	// MsgThinkingStarted now comes from AdaptAgentEvent, not LLM trace.
 }
 
 func TestAdaptLLMTraceEventText(t *testing.T) {
 	evt := llm.TraceEvent{Kind: llm.TraceText, Preview: "hello world"}
 	msgs := AdaptLLMTraceEvent(evt, "n1", false)
-	if len(msgs) < 2 {
-		t.Fatalf("expected at least 2 messages, got %d", len(msgs))
+	if len(msgs) < 1 {
+		t.Fatalf("expected at least 1 message, got %d", len(msgs))
 	}
-	var hasText, hasStopped bool
+	var hasText bool
 	for _, m := range msgs {
-		switch v := m.(type) {
-		case MsgTextChunk:
+		if v, ok := m.(MsgTextChunk); ok {
 			hasText = true
 			if v.Text != "hello world" {
 				t.Errorf("expected text 'hello world', got %s", v.Text)
 			}
-		case MsgThinkingStopped:
-			hasStopped = true
 		}
 	}
 	if !hasText {
 		t.Error("expected MsgTextChunk")
 	}
-	if !hasStopped {
-		t.Error("expected MsgThinkingStopped")
-	}
+	// MsgThinkingStopped now comes from AdaptAgentEvent, not LLM trace.
 }
 
 func TestAdaptLLMTraceEventReasoning(t *testing.T) {
@@ -241,19 +231,9 @@ func TestAdaptLLMTraceEventFinish(t *testing.T) {
 func TestAdaptLLMTraceEventToolPrepare(t *testing.T) {
 	evt := llm.TraceEvent{Kind: llm.TraceToolPrepare, ToolName: "bash"}
 	msgs := AdaptLLMTraceEvent(evt, "n1", false)
-	// TraceToolPrepare should only send MsgThinkingStopped — the MsgToolCallStart
-	// with full ToolInput arrives from AdaptAgentEvent(EventToolCallStart).
-	var hasThinkingStopped bool
-	for _, m := range msgs {
-		if _, ok := m.(MsgThinkingStopped); ok {
-			hasThinkingStopped = true
-		}
-		if _, ok := m.(MsgToolCallStart); ok {
-			t.Error("TraceToolPrepare should not send MsgToolCallStart (handled by agent event)")
-		}
-	}
-	if !hasThinkingStopped {
-		t.Error("expected MsgThinkingStopped")
+	// TraceToolPrepare now returns nil — thinking state is managed by agent events.
+	if msgs != nil {
+		t.Errorf("expected nil for TraceToolPrepare, got %d messages", len(msgs))
 	}
 }
 

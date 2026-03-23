@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/llm"
@@ -152,6 +153,56 @@ func (s *StateStore) Progress() (done, total int) {
 	return
 }
 
+// IsSubgraphNode returns true if the node ID contains a "/" separator,
+// indicating it belongs to a child subgraph pipeline.
+func IsSubgraphNode(id string) bool {
+	return strings.Contains(id, "/")
+}
+
+// SubgraphDepth returns the nesting depth of a node (0 for top-level nodes).
+func SubgraphDepth(id string) int {
+	return strings.Count(id, "/")
+}
+
+// SubgraphChildLabel extracts the last segment of a namespaced node ID
+// for display (e.g., "Parent/Child" → "Child").
+func SubgraphChildLabel(id string) string {
+	if idx := strings.LastIndex(id, "/"); idx >= 0 {
+		return id[idx+1:]
+	}
+	return id
+}
+
+// ensureSubgraphNode lazily inserts a subgraph node into the ordered node list
+// after its parent. This allows the TUI to display dynamically-discovered
+// child nodes from subgraph execution.
+func (s *StateStore) ensureSubgraphNode(id string) {
+	if _, ok := s.nodeState[id]; ok {
+		return // already known
+	}
+	s.nodeState[id] = &nodeInfo{}
+
+	// Find the parent node and insert after it (and any existing children).
+	parentID := id[:strings.LastIndex(id, "/")]
+	insertIdx := len(s.nodes) // default: append at end
+	for i, e := range s.nodes {
+		if e.ID == parentID {
+			// Find the last child of this parent to insert after.
+			insertIdx = i + 1
+			for insertIdx < len(s.nodes) && strings.HasPrefix(s.nodes[insertIdx].ID, parentID+"/") {
+				insertIdx++
+			}
+			break
+		}
+	}
+
+	label := SubgraphChildLabel(id)
+	entry := NodeEntry{ID: id, Label: label}
+	s.nodes = append(s.nodes, NodeEntry{}) // grow
+	copy(s.nodes[insertIdx+1:], s.nodes[insertIdx:])
+	s.nodes[insertIdx] = entry
+}
+
 // ensure lazily creates node info for unknown node IDs.
 func (s *StateStore) ensure(id string) *nodeInfo {
 	ni, ok := s.nodeState[id]
@@ -166,6 +217,9 @@ func (s *StateStore) ensure(id string) *nodeInfo {
 func (s *StateStore) Apply(msg interface{}) {
 	switch m := msg.(type) {
 	case MsgNodeStarted:
+		if IsSubgraphNode(m.NodeID) {
+			s.ensureSubgraphNode(m.NodeID)
+		}
 		s.ensure(m.NodeID).status = NodeRunning
 	case MsgNodeCompleted:
 		s.ensure(m.NodeID).status = NodeDone

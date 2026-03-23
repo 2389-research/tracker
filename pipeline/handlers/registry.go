@@ -30,6 +30,7 @@ type registryConfig struct {
 	graph          *pipeline.Graph
 	agentEvents    agent.EventHandler
 	pipelineEvents pipeline.PipelineEventHandler
+	subgraphs      map[string]*pipeline.Graph
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -90,6 +91,44 @@ func WithPipelineEventHandler(handler pipeline.PipelineEventHandler) RegistryOpt
 	}
 }
 
+// WithSubgraphs provides named sub-graphs that can be executed by subgraph nodes.
+func WithSubgraphs(graphs map[string]*pipeline.Graph) RegistryOption {
+	return func(c *registryConfig) {
+		c.subgraphs = graphs
+	}
+}
+
+// NewRegistryFactory returns a RegistryFactory that creates child registries
+// with event handlers scoped to the parent node ID. This enables subgraph nodes
+// to emit events that are namespaced (e.g., "SubgraphNode/ChildAgent") so the
+// TUI can distinguish events from nested pipelines.
+func NewRegistryFactory(opts ...RegistryOption) pipeline.RegistryFactory {
+	return func(childGraph *pipeline.Graph, parentNodeID string) *pipeline.HandlerRegistry {
+		// Build a config from the original options to extract event handlers.
+		parentCfg := &registryConfig{}
+		for _, opt := range opts {
+			opt(parentCfg)
+		}
+
+		// Create scoped options: wrap agent events with node namespacing.
+		scopedOpts := make([]RegistryOption, len(opts))
+		copy(scopedOpts, opts)
+
+		if parentCfg.agentEvents != nil {
+			scopedOpts = append(scopedOpts, WithAgentEventHandler(
+				agent.NodeScopedHandler(parentNodeID, parentCfg.agentEvents),
+			))
+		}
+		if parentCfg.pipelineEvents != nil {
+			scopedOpts = append(scopedOpts, WithPipelineEventHandler(
+				pipeline.NodeScopedPipelineHandler(parentNodeID, parentCfg.pipelineEvents),
+			))
+		}
+
+		return NewDefaultRegistry(childGraph, scopedOpts...)
+	}
+}
+
 // NewDefaultRegistry creates a HandlerRegistry pre-loaded with all built-in handlers.
 // The graph is needed for the parallel handler (to look up branch targets) and the
 // human handler (to look up outgoing edge labels). Optional RegistryOption funcs
@@ -138,6 +177,14 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 		registry.Register(NewHumanHandler(cfg.interviewer, humanGraph))
 	} else if cfg.humanCallback != nil {
 		registry.Register(&funcHandler{name: "wait.human", fn: cfg.humanCallback})
+	}
+
+	// Subgraph handler: register if subgraphs are provided.
+	if cfg.subgraphs != nil && len(cfg.subgraphs) > 0 {
+		factory := NewRegistryFactory(opts...)
+		registry.Register(pipeline.NewSubgraphHandler(
+			cfg.subgraphs, registry, cfg.pipelineEvents, factory,
+		))
 	}
 
 	return registry

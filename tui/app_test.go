@@ -132,9 +132,9 @@ func TestAppModalFreeformEnterDismisses(t *testing.T) {
 	if !app.modal.Visible() {
 		t.Fatal("expected modal visible after gate freeform")
 	}
-	// Type some text then press Enter
+	// Type some text then submit with Ctrl+S (Enter inserts newlines in textarea).
 	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
-	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	select {
 	case val := <-ch:
 		if val != "hello" {

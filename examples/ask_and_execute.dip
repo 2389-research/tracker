@@ -1,36 +1,110 @@
 workflow AskAndExecute
-  goal: "Ask the user what they want via freeform input, then execute using multi-model parallel implementation, validation, cross-review, and conditional human approval."
+  goal: "Ask the user what to build, explore and spec it, fan out to 3 isolated implementations via git worktrees, cross-critique, select the best, apply it, and clean up everything else."
   start: Start
-  exit: Exit
+  exit: Done
 
   defaults
-    max_retries: 3
-    fidelity: summary:medium
+    max_retries: 2
+    fidelity: summary:high
+    model: claude-sonnet-4-6
+    provider: anthropic
 
   agent Start
     label: Start
 
-  agent Exit
-    label: Exit
+  agent Done
+    label: Done
+
+  # ─── Phase 1: Understand ───────────────────────────────────
 
   tool SetupWorkspace
     label: "Setup Workspace"
+    timeout: 10s
     command:
       set -eu
-      mkdir -p .ai .ai/drafts .ai/runs
+      mkdir -p .ai/worktrees .ai/candidates .ai/decisions
+      echo '.ai/' >> .gitignore 2>/dev/null || true
+      sort -u .gitignore -o .gitignore
       printf 'workspace-ready'
 
   human AskUser
-    label: "What would you like to do?"
+    label: "What would you like done?"
     mode: freeform
 
-  agent InterpretRequest
-    label: "Interpret Request"
+  agent Explore
+    label: "Explore Codebase"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
+    fidelity: full
     prompt:
-      The user was asked what they want to do and responded with freeform text. Interpret their request and produce a concrete, actionable task specification including: scope, expected artifacts, success criteria, and any constraints. Be precise and unambiguous so that independent implementation agents can work from this spec without further clarification.
+      The user wants: ${ctx.human_response}
+
+      Explore the codebase thoroughly. Understand the architecture, conventions,
+      test patterns, and relevant files. Identify constraints, dependencies, and
+      any existing code that relates to the request.
+
+      Output a structured exploration summary:
+      - **Relevant files**: paths and their roles
+      - **Architecture constraints**: patterns that must be followed
+      - **Test conventions**: how tests are structured and run
+      - **Risks**: anything that could go wrong
+      - **Build system**: how to build and test
+
+  agent WriteSpec
+    label: "Write Implementation Spec"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Based on the exploration of the codebase, write a precise implementation
+      specification for the user's request: ${ctx.human_response}
+
+      The spec must be concrete enough that three independent agents can implement
+      it without further clarification and produce comparable results.
+
+      Structure:
+      ## Objective
+      One sentence.
+
+      ## Scope
+      Exactly which files to create/modify. Nothing else should be touched.
+
+      ## Requirements
+      Numbered list. Each requirement is testable.
+
+      ## Non-requirements
+      Explicitly list what is OUT of scope to prevent over-engineering.
+
+      ## Success criteria
+      How to verify the implementation is correct and complete.
+
+      ## Constraints
+      Architecture patterns, naming conventions, test patterns to follow.
+
+      Write the spec to .ai/decisions/spec.md
+
+  human ApproveSpec
+    label: "Review the spec. Approve, refine, or reject."
+    mode: freeform
+    default: approve
+
+  # ─── Phase 2: Isolated Implementation ──────────────────────
+
+  tool SetupWorktrees
+    label: "Create Git Worktrees"
+    timeout: 30s
+    command:
+      set -eu
+      MAIN_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+      for NAME in claude codex gemini; do
+        BRANCH="impl/$NAME"
+        WTDIR=".ai/worktrees/$NAME"
+        git worktree remove --force "$WTDIR" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+        git worktree add "$WTDIR" -b "$BRANCH" HEAD
+      done
+      printf 'worktrees-ready'
 
   parallel ImplementParallel -> ImplementClaude, ImplementCodex, ImplementGemini
 
@@ -38,233 +112,304 @@ workflow AskAndExecute
     label: "Claude Implementation"
     model: claude-sonnet-4-6
     provider: anthropic
+    working_dir: .ai/worktrees/claude
     reasoning_effort: high
-    fidelity: summary:high
+    fidelity: full
     prompt:
-      Implement the task specification end-to-end. Follow the interpreted spec precisely. Produce working code, tests, and documentation as required. Provide a concrete summary of all changes made and validation evidence.
+      You are implementing a spec in an isolated git worktree. Read the spec
+      from .ai/decisions/spec.md in the main repo (parent directory).
+
+      RULES:
+      - Implement EXACTLY what the spec says. Nothing more, nothing less.
+      - Follow all constraints listed in the spec.
+      - Run tests after implementation to verify.
+      - Do NOT create documentation files unless the spec requires them.
+      - Do NOT modify files outside the scope listed in the spec.
+
+      When done, commit your work on this branch with a conventional commit message.
 
   agent ImplementCodex
     label: "Codex Implementation"
-    model: gpt-5.2
+    model: gpt-5.4
     provider: openai
+    working_dir: .ai/worktrees/codex
     reasoning_effort: high
-    fidelity: summary:high
+    fidelity: full
     prompt:
-      Implement the task specification end-to-end. Follow the interpreted spec precisely. Focus on implementation correctness, test coverage, and clean code. Provide a concrete summary of all changes made and validation evidence.
+      You are implementing a spec in an isolated git worktree. Read the spec
+      from .ai/decisions/spec.md in the main repo (parent directory).
+
+      RULES:
+      - Implement EXACTLY what the spec says. Nothing more, nothing less.
+      - Follow all constraints listed in the spec.
+      - Run tests after implementation to verify.
+      - Do NOT create documentation files unless the spec requires them.
+      - Do NOT modify files outside the scope listed in the spec.
+
+      When done, commit your work on this branch with a conventional commit message.
 
   agent ImplementGemini
     label: "Gemini Implementation"
-    model: gemini-3-flash-preview
-    provider: gemini
+    model: gemini-2.5-pro
+    provider: google
+    working_dir: .ai/worktrees/gemini
     reasoning_effort: high
-    fidelity: summary:high
+    fidelity: full
     prompt:
-      Implement the task specification end-to-end. Follow the interpreted spec precisely. Focus on robustness, edge cases, and verification. Provide a concrete summary of all changes made and validation evidence.
+      You are implementing a spec in an isolated git worktree. Read the spec
+      from .ai/decisions/spec.md in the main repo (parent directory).
+
+      RULES:
+      - Implement EXACTLY what the spec says. Nothing more, nothing less.
+      - Follow all constraints listed in the spec.
+      - Run tests after implementation to verify.
+      - Do NOT create documentation files unless the spec requires them.
+      - Do NOT modify files outside the scope listed in the spec.
+
+      When done, commit your work on this branch with a conventional commit message.
 
   fan_in ImplementJoin <- ImplementClaude, ImplementCodex, ImplementGemini
 
-  tool ValidateBuild
-    label: "Validate Build and Tests"
+  # ─── Phase 3: Capture Evidence ─────────────────────────────
+
+  tool CaptureAndTest
+    label: "Capture Diffs & Run Tests"
+    timeout: 300s
+    command:
+      set -eu
+      MAIN=$(git rev-parse --abbrev-ref HEAD)
+      RESULTS=""
+      for NAME in claude codex gemini; do
+        WTDIR=".ai/worktrees/$NAME"
+        BRANCH="impl/$NAME"
+        DIFF_FILE=".ai/candidates/$NAME.diff"
+        TEST_FILE=".ai/candidates/$NAME.test"
+
+        # Capture the diff against main
+        git -C "$WTDIR" diff "$MAIN"..HEAD > "$DIFF_FILE" 2>/dev/null || true
+
+        # Run tests in the worktree
+        cd "$WTDIR"
+        if [ -f go.mod ]; then
+          go build ./... > "$OLDPWD/.ai/candidates/$NAME.test" 2>&1 && \
+          go test ./... >> "$OLDPWD/.ai/candidates/$NAME.test" 2>&1
+          TEST_EXIT=$?
+        elif [ -f package.json ]; then
+          npm test > "$OLDPWD/.ai/candidates/$NAME.test" 2>&1
+          TEST_EXIT=$?
+        else
+          echo "no known build system" > "$OLDPWD/.ai/candidates/$NAME.test"
+          TEST_EXIT=0
+        fi
+        cd "$OLDPWD"
+
+        DIFF_LINES=$(wc -l < "$DIFF_FILE" | tr -d ' ')
+        if [ $TEST_EXIT -eq 0 ]; then
+          RESULTS="$RESULTS\n$NAME: TESTS PASS, diff=$DIFF_LINES lines"
+        else
+          RESULTS="$RESULTS\n$NAME: TESTS FAIL (exit=$TEST_EXIT), diff=$DIFF_LINES lines"
+        fi
+      done
+      printf "$RESULTS"
+
+  # ─── Phase 4: Cross-Critique ───────────────────────────────
+
+  agent CrossCritique
+    label: "Cross-Critique All Implementations"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are a senior engineer evaluating three independent implementations of the
+      same spec. Read:
+      - The spec: .ai/decisions/spec.md
+      - Claude's diff: .ai/candidates/claude.diff
+      - Claude's tests: .ai/candidates/claude.test
+      - Codex's diff: .ai/candidates/codex.diff
+      - Codex's tests: .ai/candidates/codex.test
+      - Gemini's diff: .ai/candidates/gemini.diff
+      - Gemini's tests: .ai/candidates/gemini.test
+
+      For EACH implementation, evaluate:
+
+      1. **Spec fidelity** (most important): Does it implement exactly what was
+         specified? Nothing missing? Nothing extra? No scope creep? No unnecessary
+         refactoring, documentation, or "improvements" beyond the spec?
+
+      2. **Test evidence**: Do the tests pass? Did the implementation add appropriate
+         tests? Are there test failures that indicate bugs?
+
+      3. **Minimality**: Is the diff focused? Does it touch only the files the spec
+         requires? Is the code clean without being over-engineered?
+
+      Write a structured comparison to .ai/decisions/critique.md with:
+      - Per-implementation assessment (strengths, weaknesses, spec deviations)
+      - Head-to-head comparison table
+      - Ranking: 1st, 2nd, 3rd with clear justification
+      - Any disqualifications (test failures, spec violations, scope creep)
+
+  # ─── Phase 5: Select & Apply ───────────────────────────────
+
+  agent SelectWinner
+    label: "Select Best Implementation"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Read the critique at .ai/decisions/critique.md.
+
+      Select the winning implementation using this strict priority:
+        1. SPEC FIDELITY — the implementation that most faithfully matches
+           the spec wins. Anything extra is a penalty, not a bonus.
+        2. TEST EVIDENCE — among spec-faithful implementations, prefer the
+           one with the strongest passing test evidence.
+        3. MINIMALITY — among tied implementations, prefer the smallest,
+           cleanest diff.
+
+      Write your decision to .ai/decisions/selection.md with:
+      ## Winner
+      Name of winning implementation (claude, codex, or gemini).
+
+      ## Rationale
+      Why this one won. Reference specific spec requirements.
+
+      ## Runner-up
+      Second place and what it did differently.
+
+      ## Rejected
+      For EACH non-winner: why it was not selected. Be specific — this is
+      the record of why that approach was not taken.
+
+      ## Spec compliance checklist
+      For the winner only: check each numbered requirement from the spec.
+
+      IMPORTANT: Output exactly one of these as the last line:
+      STATUS:success
+
+  tool ApplyWinner
+    label: "Apply Winner & Clean Up"
+    timeout: 60s
+    command:
+      set -eu
+      MAIN=$(git rev-parse --abbrev-ref HEAD)
+
+      # Extract winner name from selection.md
+      WINNER=$(grep -A1 '## Winner' .ai/decisions/selection.md | tail -1 | tr -d ' \n' | tr '[:upper:]' '[:lower:]')
+
+      # Validate
+      if [ -z "$WINNER" ] || ! echo "claude codex gemini" | grep -qw "$WINNER"; then
+        echo "ERROR: could not determine winner from .ai/decisions/selection.md"
+        echo "Parsed: '$WINNER'"
+        exit 1
+      fi
+
+      BRANCH="impl/$WINNER"
+
+      # Merge the winning branch
+      git merge "$BRANCH" --no-edit -m "feat: apply $WINNER implementation (selected by cross-critique)"
+
+      # Remove all worktrees
+      for NAME in claude codex gemini; do
+        git worktree remove --force ".ai/worktrees/$NAME" 2>/dev/null || true
+        git branch -D "impl/$NAME" 2>/dev/null || true
+      done
+
+      # Clean up candidate artifacts (keep decisions)
+      rm -rf .ai/worktrees .ai/candidates
+
+      printf "applied: $WINNER"
+
+  # ─── Phase 6: Verify ───────────────────────────────────────
+
+  tool FinalBuild
+    label: "Final Build & Test"
+    timeout: 300s
     command:
       set -eu
       if [ -f go.mod ]; then
-        go build ./... >/tmp/aae-build.log 2>&1 || { cat /tmp/aae-build.log; exit 1; }
-        go test ./... >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }
-        cat /tmp/aae-test.log
-        printf 'validation-pass-go'
-        exit 0
+        go build ./... 2>&1
+        go test ./... 2>&1
+      elif [ -f package.json ]; then
+        npm test 2>&1
       fi
-      if [ -f Package.swift ]; then
-        swift build >/tmp/aae-build.log 2>&1
-        swift test >/tmp/aae-test.log 2>&1 || true
-        cat /tmp/aae-build.log
-        cat /tmp/aae-test.log
-        if rg -n 'error:' /tmp/aae-build.log >/dev/null 2>&1; then exit 1; fi
-        if rg -n 'failed' /tmp/aae-test.log >/dev/null 2>&1; then exit 1; fi
-        printf 'validation-pass-swift'
-        exit 0
+      # Verify no worktrees remain
+      REMAINING=$(git worktree list --porcelain | grep -c 'worktree' || true)
+      if [ "$REMAINING" -gt 1 ]; then
+        echo "WARNING: leftover worktrees detected"
+        git worktree list
+        exit 1
       fi
-      if [ -f package.json ]; then
-        npm test >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }
-        printf 'validation-pass-node'
-        exit 0
+      # Verify no impl branches remain
+      if git branch | grep -q 'impl/'; then
+        echo "WARNING: leftover impl branches"
+        git branch | grep 'impl/'
+        exit 1
       fi
-      if [ -f pyproject.toml ]; then
-        uv run pytest >/tmp/aae-test.log 2>&1 || { cat /tmp/aae-test.log; exit 1; }
-        cat /tmp/aae-test.log
-        printf 'validation-pass-python'
-        exit 0
-      fi
-      printf 'validation-pass-no-known-build-system'
+      printf 'verified-clean'
 
-  agent CommitWork
-    label: "Commit Work"
-    model: gpt-5.2
-    provider: openai
-    reasoning_effort: high
-    prompt:
-      Prepare and execute a clean commit for implementation changes if there are staged/unstaged changes. Write a conventional commit message describing the work done. If no changes are present, report that no commit was needed. Include commit hash in your summary.
-
-  parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
-
-  agent ReviewClaude
-    label: "Claude Review"
+  agent FinalVerify
+    label: "Verify Spec Compliance"
     model: claude-sonnet-4-6
-    provider: anthropic
-    reasoning_effort: high
-    prompt:
-      Review the implementation against the original task specification. Evaluate correctness, completeness, code quality, and test coverage. Return clear PASS/FAIL reasoning and required fixes.
-
-  agent ReviewCodex
-    label: "Codex Review"
-    model: gpt-5.2
-    provider: openai
-    reasoning_effort: high
-    prompt:
-      Review the implementation for quality, regression risk, and spec compliance. Return clear PASS/FAIL reasoning and required fixes.
-
-  agent ReviewGemini
-    label: "Gemini Review"
-    model: gemini-3-flash-preview
-    provider: gemini
-    reasoning_effort: high
-    prompt:
-      Review the implementation for robustness, edge case handling, and spec completeness. Return clear PASS/FAIL reasoning and required fixes.
-
-  fan_in ReviewsJoin <- ReviewClaude, ReviewCodex, ReviewGemini
-
-  parallel CritiquesParallel -> CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
-
-  agent CritiqueClaudeOnCodex
-    label: "Claude Critique of Codex Review"
-    model: claude-sonnet-4-6
-    provider: anthropic
-    reasoning_effort: high
-    prompt:
-      Critique the Codex review for missing checks, weak evidence, or mistaken conclusions.
-
-  agent CritiqueClaudeOnGemini
-    label: "Claude Critique of Gemini Review"
-    model: claude-sonnet-4-6
-    provider: anthropic
-    reasoning_effort: high
-    prompt:
-      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions.
-
-  agent CritiqueCodexOnClaude
-    label: "Codex Critique of Claude Review"
-    model: gpt-5.2
-    provider: openai
-    reasoning_effort: high
-    prompt:
-      Critique the Claude review for missing checks, weak evidence, or mistaken conclusions.
-
-  agent CritiqueCodexOnGemini
-    label: "Codex Critique of Gemini Review"
-    model: gpt-5.2
-    provider: openai
-    reasoning_effort: high
-    prompt:
-      Critique the Gemini review for missing checks, weak evidence, or mistaken conclusions.
-
-  agent CritiqueGeminiOnClaude
-    label: "Gemini Critique of Claude Review"
-    model: gemini-3-flash-preview
-    provider: gemini
-    reasoning_effort: high
-    prompt:
-      Critique the Claude review for missing checks, weak evidence, or mistaken conclusions.
-
-  agent CritiqueGeminiOnCodex
-    label: "Gemini Critique of Codex Review"
-    model: gemini-3-flash-preview
-    provider: gemini
-    reasoning_effort: high
-    prompt:
-      Critique the Codex review for missing checks, weak evidence, or mistaken conclusions.
-
-  fan_in CritiquesJoin <- CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
-
-  agent ReviewAnalysis
-    label: "Review Analysis"
-    model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
     goal_gate: true
     retry_target: ImplementClaude
+    fallback_target: EscalateToHuman
     prompt:
-      Synthesize all reviews and critiques into one verdict. If models broadly agree the work is correct and complete, return success. If rework is needed but models agree on what to fix, return retry. If models fundamentally disagree on quality or correctness, return disagree to escalate to human approval.
+      The winning implementation has been applied. Verify:
 
-  human HumanApproval
-    label: "Models disagree. Review the work and decide."
+      1. Read the spec at .ai/decisions/spec.md
+      2. Check every numbered requirement is satisfied
+      3. Verify no files were modified outside the spec's scope
+      4. Verify no documentation files were created unless required by spec
+      5. Verify no leftover artifacts in .ai/candidates/ or .ai/worktrees/
+      6. Confirm tests pass (check ${ctx.tool_stdout} from the build step)
 
-  agent ApproveCommit
-    label: "Approve and Commit"
+      If everything checks out, output STATUS:success
+      If something is wrong, describe what and output STATUS:fail
+    auto_status: true
+
+  human EscalateToHuman
+    label: "Verification failed after retry. Please review."
+    mode: freeform
+
+  agent CommitFinal
+    label: "Final Commit"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
     prompt:
-      The human approved the work. Ensure all changes are committed with a clean conventional commit message. Include commit hash in summary.
+      Ensure all changes are committed. The merge commit should already exist
+      from ApplyWinner. If there are additional uncommitted changes from
+      verification fixes, commit them with a conventional commit message.
+      Include the commit hash in your output.
 
-  agent ReworkInterpret
-    label: "Incorporate Rework Feedback"
-    model: claude-sonnet-4-6
-    provider: anthropic
-    reasoning_effort: high
-    prompt:
-      The human requested rework. Review the review analyses and human feedback to produce an updated task specification incorporating the required changes. Be specific about what must change.
-
-  agent FailureSummary
-    label: "Failure Summary"
-    model: claude-sonnet-4-6
-    provider: anthropic
-    reasoning_effort: high
-    prompt:
-      The human rejected the work. Summarize what was attempted, why it failed to satisfy, and concrete next steps if the user wants to try again.
+  # ─── Edges ─────────────────────────────────────────────────
 
   edges
     Start -> SetupWorkspace
     SetupWorkspace -> AskUser
-    AskUser -> InterpretRequest
-    InterpretRequest -> ImplementParallel
-    ImplementParallel -> ImplementClaude
-    ImplementParallel -> ImplementCodex
-    ImplementParallel -> ImplementGemini
+    AskUser -> Explore
+    Explore -> WriteSpec
+    WriteSpec -> ApproveSpec
+    ApproveSpec -> SetupWorktrees  label: "approve"
+    ApproveSpec -> WriteSpec  label: "refine"  restart: true
+    ApproveSpec -> Done  label: "reject"
+    SetupWorktrees -> ImplementParallel
     ImplementClaude -> ImplementJoin
     ImplementCodex -> ImplementJoin
     ImplementGemini -> ImplementJoin
-    ImplementJoin -> ValidateBuild
-    ValidateBuild -> CommitWork  when ctx.outcome = success  label: validated
-    ValidateBuild -> ImplementClaude  when ctx.outcome = fail  label: fix_validation  restart: true
-    ValidateBuild -> CommitWork
-    CommitWork -> ReviewParallel
-    ReviewParallel -> ReviewClaude
-    ReviewParallel -> ReviewCodex
-    ReviewParallel -> ReviewGemini
-    ReviewClaude -> ReviewsJoin
-    ReviewCodex -> ReviewsJoin
-    ReviewGemini -> ReviewsJoin
-    ReviewsJoin -> CritiquesParallel
-    CritiquesParallel -> CritiqueClaudeOnCodex
-    CritiquesParallel -> CritiqueClaudeOnGemini
-    CritiquesParallel -> CritiqueCodexOnClaude
-    CritiquesParallel -> CritiqueCodexOnGemini
-    CritiquesParallel -> CritiqueGeminiOnClaude
-    CritiquesParallel -> CritiqueGeminiOnCodex
-    CritiqueClaudeOnCodex -> CritiquesJoin
-    CritiqueClaudeOnGemini -> CritiquesJoin
-    CritiqueCodexOnClaude -> CritiquesJoin
-    CritiqueCodexOnGemini -> CritiquesJoin
-    CritiqueGeminiOnClaude -> CritiquesJoin
-    CritiqueGeminiOnCodex -> CritiquesJoin
-    CritiquesJoin -> ReviewAnalysis
-    ReviewAnalysis -> CommitWork  when ctx.outcome = success  label: pass  restart: true
-    ReviewAnalysis -> ImplementClaude  when ctx.outcome = retry  label: rework  restart: true
-    ReviewAnalysis -> HumanApproval  when ctx.outcome = disagree  label: disagree
-    ReviewAnalysis -> HumanApproval
-    HumanApproval -> ApproveCommit  label: "[A] Approve"
-    HumanApproval -> ReworkInterpret  label: "[R] Rework"
-    HumanApproval -> FailureSummary  label: "[X] Reject"
-    ReworkInterpret -> ImplementParallel  restart: true
-    ApproveCommit -> Exit
-    FailureSummary -> Exit
+    ImplementJoin -> CaptureAndTest
+    CaptureAndTest -> CrossCritique
+    CrossCritique -> SelectWinner
+    SelectWinner -> ApplyWinner
+    ApplyWinner -> FinalBuild
+    FinalBuild -> FinalVerify  when ctx.outcome = success
+    FinalBuild -> EscalateToHuman  when ctx.outcome = fail
+    FinalVerify -> CommitFinal  when ctx.outcome = success
+    FinalVerify -> EscalateToHuman  when ctx.outcome = fail
+    EscalateToHuman -> CommitFinal  label: "accept"
+    EscalateToHuman -> Done  label: "abandon"
+    CommitFinal -> Done

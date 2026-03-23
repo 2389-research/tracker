@@ -58,6 +58,12 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		artifactRoot = dir
 	}
 
+	// Per-node working directory override (e.g., for git worktree isolation).
+	// Prepend a cd so the shell command runs in the target directory.
+	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
+		command = fmt.Sprintf("cd %q && %s", wd, command)
+	}
+
 	timeout := h.defaultTimeout
 	if timeoutStr, ok := node.Attrs["timeout"]; ok {
 		parsed, err := time.ParseDuration(timeoutStr)

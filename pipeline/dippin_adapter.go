@@ -64,9 +64,49 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		g.AddEdge(gEdge)
 	}
 
+	// Synthesize implicit edges from parallel fan-out targets and fan-in sources.
+	// The dippin IR stores these in ParallelConfig.Targets and FanInConfig.Sources
+	// rather than as explicit edges, but tracker's Graph.OutgoingEdges requires
+	// real Edge entries to traverse the graph. Skip if the edge already exists
+	// from the explicit edge list to avoid duplicates.
+	existingEdges := make(map[[2]string]bool)
+	for _, e := range g.Edges {
+		existingEdges[[2]string{e.From, e.To}] = true
+	}
+	for _, irNode := range workflow.Nodes {
+		switch cfg := irNode.Config.(type) {
+		case ir.ParallelConfig:
+			for _, target := range cfg.Targets {
+				key := [2]string{irNode.ID, target}
+				if !existingEdges[key] {
+					g.AddEdge(&Edge{From: irNode.ID, To: target})
+					existingEdges[key] = true
+				}
+			}
+		case ir.FanInConfig:
+			for _, source := range cfg.Sources {
+				key := [2]string{source, irNode.ID}
+				if !existingEdges[key] {
+					g.AddEdge(&Edge{From: source, To: irNode.ID})
+					existingEdges[key] = true
+				}
+			}
+		}
+	}
+
 	// Ensure start/exit nodes exist
 	if err := ensureStartExitNodes(g); err != nil {
 		return nil, err
+	}
+
+	// Convert stylesheet rules to graph attrs for engine resolution.
+	if len(workflow.Stylesheet) > 0 {
+		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
+	}
+
+	// Copy workflow goal to graph attrs.
+	if workflow.Goal != "" {
+		g.Attrs["goal"] = workflow.Goal
 	}
 
 	// Mark that this graph was produced from validated Dippin IR.
@@ -118,6 +158,9 @@ func convertNode(irNode *ir.Node) (*Node, error) {
 
 	// Extract retry config
 	extractRetryAttrs(irNode.Retry, gNode.Attrs)
+
+	// Extract IO declarations (reads/writes)
+	extractNodeIO(irNode.IO, gNode.Attrs)
 
 	return gNode, nil
 }
@@ -232,6 +275,21 @@ func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
 	if len(cfg.Targets) > 0 {
 		attrs["parallel_targets"] = strings.Join(cfg.Targets, ",")
 	}
+	// Per-branch config (block form) — serialize as namespaced attrs for handler use.
+	// The parallel handler reads branch.N.* to override target node attrs per-branch.
+	for i, branch := range cfg.Branches {
+		prefix := fmt.Sprintf("branch.%d.", i)
+		attrs[prefix+"target"] = branch.Target
+		if branch.Model != "" {
+			attrs[prefix+"llm_model"] = branch.Model
+		}
+		if branch.Provider != "" {
+			attrs[prefix+"llm_provider"] = branch.Provider
+		}
+		if branch.Fidelity != "" {
+			attrs[prefix+"fidelity"] = branch.Fidelity
+		}
+	}
 }
 
 func extractFanInAttrs(cfg ir.FanInConfig, attrs map[string]string) {
@@ -262,11 +320,24 @@ func extractRetryAttrs(retry ir.RetryConfig, attrs map[string]string) {
 	if retry.MaxRetries > 0 {
 		attrs["max_retries"] = strconv.Itoa(retry.MaxRetries)
 	}
+	if retry.BaseDelay > 0 {
+		attrs["base_delay"] = retry.BaseDelay.String()
+	}
 	if retry.RetryTarget != "" {
 		attrs["retry_target"] = retry.RetryTarget
 	}
 	if retry.FallbackTarget != "" {
 		attrs["fallback_retry_target"] = retry.FallbackTarget
+	}
+}
+
+// extractNodeIO converts IR NodeIO (reads/writes) to string attributes.
+func extractNodeIO(io ir.NodeIO, attrs map[string]string) {
+	if len(io.Reads) > 0 {
+		attrs["reads"] = strings.Join(io.Reads, ",")
+	}
+	if len(io.Writes) > 0 {
+		attrs["writes"] = strings.Join(io.Writes, ",")
 	}
 }
 
@@ -300,6 +371,9 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 	if defaults.Compaction != "" {
 		attrs["context_compaction"] = defaults.Compaction
 	}
+	if defaults.OnResume != "" {
+		attrs["on_resume"] = defaults.OnResume
+	}
 }
 
 // convertEdge transforms an IR Edge to a Graph Edge.
@@ -329,6 +403,37 @@ func convertEdge(irEdge *ir.Edge) *Edge {
 	}
 
 	return gEdge
+}
+
+// serializeStylesheet converts IR stylesheet rules to the CSS-like format
+// expected by ParseStylesheet. Each rule becomes "selector { key: value; }".
+func serializeStylesheet(rules []ir.StylesheetRule) string {
+	var parts []string
+	for _, rule := range rules {
+		selector := serializeSelector(rule.Selector)
+		var props []string
+		for k, v := range rule.Properties {
+			props = append(props, fmt.Sprintf("%s: %s", k, v))
+		}
+		parts = append(parts, fmt.Sprintf("%s { %s; }", selector, strings.Join(props, "; ")))
+	}
+	return strings.Join(parts, " ")
+}
+
+// serializeSelector converts an IR StyleSelector to CSS-like syntax.
+func serializeSelector(sel ir.StyleSelector) string {
+	switch sel.Kind {
+	case "universal":
+		return "*"
+	case "kind":
+		return sel.Value
+	case "class":
+		return "." + sel.Value
+	case "id":
+		return "#" + sel.Value
+	default:
+		return sel.Value
+	}
 }
 
 // ensureStartExitNodes verifies that the start and exit nodes exist in the graph.

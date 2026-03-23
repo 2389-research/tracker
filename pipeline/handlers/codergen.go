@@ -89,6 +89,11 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	config := h.buildConfig(node)
 
+	// Per-node working directory override (e.g., for git worktree isolation).
+	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
+		config.WorkingDir = wd
+	}
+
 	// Capture both plain assistant text and a readable execution transcript,
 	// since tool-only sessions would otherwise write an empty response artifact.
 	var collector transcriptCollector

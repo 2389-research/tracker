@@ -63,7 +63,34 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 		return !result, nil
 	}
 
-	// Try word-based operators first (contains, startswith, endswith, in).
+	// Try negated word-based operators first: "key not contains value", etc.
+	// These must be checked BEFORE the non-negated versions to avoid partial matches.
+	for _, op := range []string{" not contains ", " not startswith ", " not endswith ", " not in "} {
+		if idx := strings.Index(clause, op); idx >= 0 {
+			key := strings.TrimSpace(clause[:idx])
+			value := strings.TrimSpace(clause[idx+len(op):])
+			actual := resolveVariable(key, ctx)
+			positiveOp := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(op), "not "))
+			switch positiveOp {
+			case "contains":
+				return !strings.Contains(actual, value), nil
+			case "startswith":
+				return !strings.HasPrefix(actual, value), nil
+			case "endswith":
+				return !strings.HasSuffix(actual, value), nil
+			case "in":
+				items := strings.Split(value, ",")
+				for _, item := range items {
+					if strings.TrimSpace(item) == actual {
+						return false, nil
+					}
+				}
+				return true, nil
+			}
+		}
+	}
+
+	// Try word-based operators (contains, startswith, endswith, in).
 	// These are checked before = and != to avoid false matches on the = character.
 	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
 		if idx := strings.Index(clause, op); idx >= 0 {
@@ -111,9 +138,14 @@ func resolveVariable(name string, ctx *PipelineContext) string {
 	if val, ok := ctx.Get(name); ok {
 		return val
 	}
+	// Strip namespace prefixes: "ctx.outcome" → "outcome", "context.outcome" → "outcome"
+	if strings.HasPrefix(name, "ctx.") {
+		if val, ok := ctx.Get(strings.TrimPrefix(name, "ctx.")); ok {
+			return val
+		}
+	}
 	if strings.HasPrefix(name, "context.") {
-		trimmed := strings.TrimPrefix(name, "context.")
-		if val, ok := ctx.Get(trimmed); ok {
+		if val, ok := ctx.Get(strings.TrimPrefix(name, "context.")); ok {
 			return val
 		}
 	}

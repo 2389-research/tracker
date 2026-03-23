@@ -21,7 +21,7 @@ func TestSubgraphHandler_Execute(t *testing.T) {
 		name: "subgraph",
 		executeFn: NewSubgraphHandler(
 			map[string]*Graph{"child": subGraph},
-			reg,
+			reg, nil, nil,
 		).Execute,
 	})
 
@@ -74,7 +74,7 @@ func TestSubgraphHandler_ContextPropagation(t *testing.T) {
 
 	handler := NewSubgraphHandler(
 		map[string]*Graph{"ctx_child": subGraph},
-		reg,
+		reg, nil, nil,
 	)
 
 	// Set up parent context with a value.
@@ -105,7 +105,7 @@ func TestSubgraphHandler_MissingSubgraph(t *testing.T) {
 	reg := newTestRegistry()
 	handler := NewSubgraphHandler(
 		map[string]*Graph{},
-		reg,
+		reg, nil, nil,
 	)
 
 	node := &Node{
@@ -128,7 +128,7 @@ func TestSubgraphHandler_MissingRef(t *testing.T) {
 	reg := newTestRegistry()
 	handler := NewSubgraphHandler(
 		map[string]*Graph{},
-		reg,
+		reg, nil, nil,
 	)
 
 	// Node without subgraph_ref attribute.
@@ -168,7 +168,7 @@ func TestSubgraphHandler_SubgraphFailure(t *testing.T) {
 
 	handler := NewSubgraphHandler(
 		map[string]*Graph{"fail_child": subGraph},
-		reg,
+		reg, nil, nil,
 	)
 
 	node := &Node{

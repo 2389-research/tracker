@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -33,6 +34,9 @@ func NewModal(width, height int) *Modal {
 func (m *Modal) Show(content ModalContent) {
 	m.content = content
 	m.visible = true
+	if fc, ok := content.(*FreeformContent); ok {
+		fc.SetWidth(m.width)
+	}
 }
 
 // Hide removes the modal from view.
@@ -47,9 +51,13 @@ func (m *Modal) Visible() bool {
 }
 
 // SetSize updates the terminal dimensions used for centering.
+// Propagates width to freeform content so the textarea fills the modal.
 func (m *Modal) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+	if fc, ok := m.content.(*FreeformContent); ok {
+		fc.SetWidth(width)
+	}
 }
 
 // Update forwards messages to the modal content.
@@ -159,70 +167,96 @@ func (c *ChoiceContent) View() string {
 
 // ── FreeformContent ──────────────────────────────────────────────────────────
 
-// FreeformContent captures free-text input with basic line editing.
-// Sends the submitted value on replyCh when Enter is pressed.
+// FreeformContent captures free-text input using a wrapping textarea.
+// Enter inserts newlines; Ctrl+S submits. The textarea expands vertically
+// as the user types, wrapping at the viewport width.
 type FreeformContent struct {
-	prompt  string
-	buffer  []rune
-	replyCh chan<- string
-	done    bool
+	prompt   string
+	textarea textarea.Model
+	replyCh  chan<- string
+	done     bool
 }
 
-// NewFreeformContent creates a freeform input content model. If replyCh is nil,
-// no reply is sent on submit (useful for rendering-only tests).
+// NewFreeformContent creates a freeform input content model with a wrapping
+// textarea. If replyCh is nil, no reply is sent on submit (useful for tests).
 func NewFreeformContent(prompt string, replyCh chan<- string) *FreeformContent {
+	ta := textarea.New()
+	ta.Placeholder = "Type your response..."
+	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	ta.SetWidth(60)
+	ta.SetHeight(4)
+	ta.MaxHeight = 20
+	ta.CharLimit = 0 // no limit
+	ta.Focus()
+
+	// Style the textarea to match the TUI palette.
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Base = lipgloss.NewStyle().
+		BorderForeground(ColorLabel)
+	ta.BlurredStyle.Base = ta.FocusedStyle.Base
+
 	return &FreeformContent{
-		prompt:  prompt,
-		replyCh: replyCh,
+		prompt:   prompt,
+		textarea: ta,
+		replyCh:  replyCh,
 	}
 }
 
-// Update handles rune input, backspace, and Enter for submission.
+// SetWidth adjusts the textarea to fit the available modal width.
+func (f *FreeformContent) SetWidth(w int) {
+	// Account for modal padding and borders.
+	innerWidth := w - 8
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+	f.textarea.SetWidth(innerWidth)
+}
+
+// Update handles keyboard input. Ctrl+S submits, everything else goes
+// to the textarea (Enter inserts newlines, arrow keys navigate, etc.).
 func (f *FreeformContent) Update(msg tea.Msg) tea.Cmd {
 	if f.done {
 		return nil
 	}
-	km, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return nil
-	}
-	switch km.Type {
-	case tea.KeyRunes:
-		f.buffer = append(f.buffer, km.Runes...)
-	case tea.KeySpace:
-		f.buffer = append(f.buffer, ' ')
-	case tea.KeyBackspace:
-		if len(f.buffer) > 0 {
-			f.buffer = f.buffer[:len(f.buffer)-1]
-		}
-	case tea.KeyEnter:
-		val := strings.TrimSpace(string(f.buffer))
-		if val != "" {
-			f.done = true
-			if f.replyCh != nil {
-				f.replyCh <- val
-			}
-			return func() tea.Msg { return MsgModalDismiss{} }
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.String() {
+		case "ctrl+s":
+			return f.submit()
+		case "esc":
+			// Also allow Esc to submit if there's content (quick approval).
+			return f.submit()
 		}
 	}
-	return nil
+	var cmd tea.Cmd
+	f.textarea, cmd = f.textarea.Update(msg)
+	return cmd
 }
 
-// View renders the prompt and current text input buffer.
+// submit sends the current textarea value and dismisses the modal.
+func (f *FreeformContent) submit() tea.Cmd {
+	val := strings.TrimSpace(f.textarea.Value())
+	if val == "" {
+		return nil
+	}
+	f.done = true
+	if f.replyCh != nil {
+		f.replyCh <- val
+	}
+	return func() tea.Msg { return MsgModalDismiss{} }
+}
+
+// View renders the prompt, wrapping textarea, and key hints.
 func (f *FreeformContent) View() string {
 	var sb strings.Builder
 	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout)
 	sb.WriteString(promptStyle.Render(f.prompt))
 	sb.WriteString("\n\n")
 
-	inputStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorLabel).
-		Padding(0, 1)
-	sb.WriteString(inputStyle.Render(string(f.buffer) + "█"))
+	sb.WriteString(f.textarea.View())
 	sb.WriteString("\n\n")
 
 	hintStyle := lipgloss.NewStyle().Faint(true)
-	sb.WriteString(hintStyle.Render("enter submit"))
+	sb.WriteString(hintStyle.Render("enter newline  ctrl+s submit  esc submit"))
 	return sb.String()
 }
