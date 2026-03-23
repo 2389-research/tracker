@@ -276,10 +276,14 @@ func (al *AgentLog) View() string {
 		rendered = append(rendered, parts...)
 	}
 
-	// Add activity indicator as the final line.
-	if indicator := al.activityIndicator(); indicator != "" {
-		rendered = append(rendered, indicator)
+	// Always reserve the last line for the activity indicator.
+	// When idle, show an empty line to prevent viewport height from
+	// oscillating as the indicator appears and disappears between turns.
+	indicator := al.activityIndicator()
+	if indicator == "" {
+		indicator = " "
 	}
+	rendered = append(rendered, indicator)
 
 	// Clip to viewport height (show tail, auto-scroll behavior).
 	if len(rendered) > maxLines {
