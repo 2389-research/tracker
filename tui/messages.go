@@ -12,6 +12,10 @@ type MsgNodeFailed struct {
 	NodeID string
 	Error  string
 }
+type MsgNodeRetrying struct {
+	NodeID  string
+	Message string
+}
 type MsgPipelineCompleted struct{}
 type MsgPipelineFailed struct{ Error string }
 

@@ -41,6 +41,21 @@ func TestNodeListSignalLamps(t *testing.T) {
 	}
 }
 
+func TestNodeListRetryDisplay(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	store.Apply(MsgNodeRetrying{NodeID: "n1", Message: "retrying in 5s"})
+	tr := NewThinkingTracker()
+	nl := NewNodeList(store, tr, 10)
+	view := nl.View()
+	if !strings.Contains(view, "↻") {
+		t.Errorf("expected retry lamp in view, got: %s", view)
+	}
+	if !strings.Contains(view, "retrying in 5s") {
+		t.Errorf("expected retry message in view, got: %s", view)
+	}
+}
+
 func TestNodeListThinkingAnimation(t *testing.T) {
 	store := NewStateStore(nil)
 	store.SetNodes([]NodeEntry{{ID: "n1"}})

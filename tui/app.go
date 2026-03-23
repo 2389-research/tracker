@@ -12,10 +12,10 @@ import (
 
 // Layout constants for the dashboard grid.
 const (
-	nodeListWidthFrac = 4  // node list gets 1/nodeListWidthFrac of terminal width
-	headerRows        = 1  // header occupies one row
-	statusBarRows     = 1  // status bar occupies one row
-	minContentHeight  = 4  // minimum rows for the main content area
+	nodeListWidthFrac = 4 // node list gets 1/nodeListWidthFrac of terminal width
+	headerRows        = 1 // header occupies one row
+	statusBarRows     = 1 // status bar occupies one row
+	minContentHeight  = 4 // minimum rows for the main content area
 )
 
 // layout holds mutable terminal dimensions shared via pointer.
@@ -129,16 +129,30 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.store.Apply(msg)
 
 	// Route thinking and tool state changes to the tracker.
+	// NodeIDs may be empty when events come from the global LLM trace
+	// observer; resolve them to the currently active node.
 	switch m := msg.(type) {
 	case MsgThinkingStarted:
-		a.thinking.Start(m.NodeID)
-		a.agentLog.SetFocusedNode(m.NodeID)
+		nodeID := a.resolveNodeID(m.NodeID)
+		if nodeID != "" {
+			a.thinking.Start(nodeID)
+			a.agentLog.SetFocusedNode(nodeID)
+		}
 	case MsgThinkingStopped:
-		a.thinking.Stop(m.NodeID)
+		nodeID := a.resolveNodeID(m.NodeID)
+		if nodeID != "" {
+			a.thinking.Stop(nodeID)
+		}
 	case MsgToolCallStart:
-		a.thinking.StartTool(m.NodeID, m.ToolName)
+		nodeID := a.resolveNodeID(m.NodeID)
+		if nodeID != "" {
+			a.thinking.StartTool(nodeID, m.ToolName)
+		}
 	case MsgToolCallEnd:
-		a.thinking.StopTool(m.NodeID)
+		nodeID := a.resolveNodeID(m.NodeID)
+		if nodeID != "" {
+			a.thinking.StopTool(nodeID)
+		}
 	}
 
 	// Forward to child components.
@@ -247,6 +261,18 @@ func (a *AppModel) ActiveNode() string {
 		}
 	}
 	return ""
+}
+
+// resolveNodeID returns the given nodeID if non-empty, otherwise falls back to
+// the currently focused node or the first running node.
+func (a *AppModel) resolveNodeID(nodeID string) string {
+	if nodeID != "" {
+		return nodeID
+	}
+	if a.agentLog.focusedNode != "" {
+		return a.agentLog.focusedNode
+	}
+	return a.ActiveNode()
 }
 
 // SetVerboseTrace enables or disables verbose LLM trace output in the agent log.

@@ -24,6 +24,8 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 			errMsg = evt.Err.Error()
 		}
 		return MsgNodeFailed{NodeID: evt.NodeID, Error: errMsg}
+	case pipeline.EventStageRetrying:
+		return MsgNodeRetrying{NodeID: evt.NodeID, Message: evt.Message}
 	case pipeline.EventPipelineCompleted:
 		return MsgPipelineCompleted{}
 	case pipeline.EventPipelineFailed:

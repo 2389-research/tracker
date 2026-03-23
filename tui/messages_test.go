@@ -13,6 +13,7 @@ func TestPipelineMessagesAreTeaMsgs(t *testing.T) {
 		MsgNodeStarted{NodeID: "n1"},
 		MsgNodeCompleted{NodeID: "n1", Outcome: "success"},
 		MsgNodeFailed{NodeID: "n1", Error: "boom"},
+		MsgNodeRetrying{NodeID: "n1", Message: "retrying in 5s"},
 		MsgPipelineCompleted{},
 		MsgPipelineFailed{Error: "fatal"},
 	}

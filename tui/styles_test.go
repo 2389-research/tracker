@@ -27,6 +27,17 @@ func TestThinkingFrames(t *testing.T) {
 	}
 }
 
+func TestStatusLampRetrying(t *testing.T) {
+	lamp, style := StatusLamp(NodeRetrying)
+	if lamp != "↻" {
+		t.Errorf("expected retry lamp '↻', got %q", lamp)
+	}
+	rendered := style.Render("x")
+	if rendered == "" {
+		t.Error("retrying lamp style renders empty")
+	}
+}
+
 func TestStylesNotZero(t *testing.T) {
 	s := Styles.NodeName.Render("test")
 	if s == "" {

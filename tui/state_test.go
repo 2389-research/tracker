@@ -71,6 +71,18 @@ func TestStateStoreThinking(t *testing.T) {
 	}
 }
 
+func TestStateStoreNodeRetrying(t *testing.T) {
+	s := NewStateStore(nil)
+	s.SetNodes([]NodeEntry{{ID: "n1", Label: "Step 1"}})
+	s.Apply(MsgNodeRetrying{NodeID: "n1", Message: "retrying in 5s"})
+	if s.NodeStatus("n1") != NodeRetrying {
+		t.Errorf("expected retrying, got %v", s.NodeStatus("n1"))
+	}
+	if s.NodeRetryMessage("n1") != "retrying in 5s" {
+		t.Errorf("expected retry message 'retrying in 5s', got %q", s.NodeRetryMessage("n1"))
+	}
+}
+
 func TestStateStoreCompletedCount(t *testing.T) {
 	s := NewStateStore(nil)
 	s.SetNodes([]NodeEntry{{ID: "n1"}, {ID: "n2"}, {ID: "n3"}})

@@ -20,6 +20,7 @@ func TestAdaptPipelineEvent(t *testing.T) {
 		{"stage started", pipeline.PipelineEvent{Type: pipeline.EventStageStarted, NodeID: "n1"}, "MsgNodeStarted"},
 		{"stage completed", pipeline.PipelineEvent{Type: pipeline.EventStageCompleted, NodeID: "n1"}, "MsgNodeCompleted"},
 		{"stage failed", pipeline.PipelineEvent{Type: pipeline.EventStageFailed, NodeID: "n1", Err: errors.New("boom")}, "MsgNodeFailed"},
+		{"stage retrying", pipeline.PipelineEvent{Type: pipeline.EventStageRetrying, NodeID: "n1", Message: "retrying in 5s"}, "MsgNodeRetrying"},
 		{"pipeline completed", pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted}, "MsgPipelineCompleted"},
 		{"pipeline failed", pipeline.PipelineEvent{Type: pipeline.EventPipelineFailed, Message: "fatal"}, "MsgPipelineFailed"},
 	}
@@ -53,6 +54,14 @@ func TestAdaptPipelineEvent(t *testing.T) {
 				}
 				if m.Error != "boom" {
 					t.Errorf("expected error boom, got %s", m.Error)
+				}
+			case "MsgNodeRetrying":
+				m, ok := msg.(MsgNodeRetrying)
+				if !ok {
+					t.Errorf("expected MsgNodeRetrying, got %T", msg)
+				}
+				if m.Message != "retrying in 5s" {
+					t.Errorf("expected message 'retrying in 5s', got %s", m.Message)
 				}
 			case "MsgPipelineCompleted":
 				if _, ok := msg.(MsgPipelineCompleted); !ok {

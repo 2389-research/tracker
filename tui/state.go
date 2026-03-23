@@ -14,6 +14,7 @@ const (
 	NodeRunning
 	NodeDone
 	NodeFailed
+	NodeRetrying
 )
 
 // NodeEntry identifies a node in the pipeline with its display label.
@@ -27,6 +28,7 @@ type nodeInfo struct {
 	status   NodeState
 	errMsg   string
 	thinking bool
+	retryMsg string
 }
 
 // StateStore is the central state container for the TUI.
@@ -71,6 +73,14 @@ func (s *StateStore) NodeStatus(id string) NodeState {
 func (s *StateStore) NodeError(id string) string {
 	if ni, ok := s.nodeState[id]; ok {
 		return ni.errMsg
+	}
+	return ""
+}
+
+// NodeRetryMessage returns the retry message for a retrying node.
+func (s *StateStore) NodeRetryMessage(id string) string {
+	if ni, ok := s.nodeState[id]; ok {
+		return ni.retryMsg
 	}
 	return ""
 }
@@ -121,6 +131,10 @@ func (s *StateStore) Apply(msg interface{}) {
 		ni := s.ensure(m.NodeID)
 		ni.status = NodeFailed
 		ni.errMsg = m.Error
+	case MsgNodeRetrying:
+		ni := s.ensure(m.NodeID)
+		ni.status = NodeRetrying
+		ni.retryMsg = m.Message
 	case MsgPipelineCompleted:
 		s.pipelineDone = true
 	case MsgPipelineFailed:

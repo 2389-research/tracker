@@ -102,6 +102,14 @@ func (nl *NodeList) View() string {
 			}
 		}
 
+		// Show retry info for retrying nodes.
+		if status == NodeRetrying {
+			retryMsg := nl.store.NodeRetryMessage(node.ID)
+			if retryMsg != "" {
+				line += " " + Styles.Muted.Render(retryMsg)
+			}
+		}
+
 		lines = append(lines, line)
 	}
 

@@ -219,6 +219,106 @@ func TestAppToggleExpand(t *testing.T) {
 	// No crash is a pass — the toggle routes to AgentLog
 }
 
+func TestAppResolveNodeIDUsesExplicit(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}, {ID: "n2"}})
+	app := NewAppModel(store, "test", "run1")
+	got := app.resolveNodeID("n2")
+	if got != "n2" {
+		t.Errorf("expected explicit nodeID 'n2', got %q", got)
+	}
+}
+
+func TestAppResolveNodeIDFallsBackToFocused(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	app := NewAppModel(store, "test", "run1")
+	app.agentLog.focusedNode = "n1"
+	got := app.resolveNodeID("")
+	if got != "n1" {
+		t.Errorf("expected focused nodeID 'n1', got %q", got)
+	}
+}
+
+func TestAppResolveNodeIDFallsBackToActive(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	app := NewAppModel(store, "test", "run1")
+	// Mark n1 as running so ActiveNode returns it.
+	store.Apply(MsgNodeStarted{NodeID: "n1"})
+	got := app.resolveNodeID("")
+	if got != "n1" {
+		t.Errorf("expected active nodeID 'n1', got %q", got)
+	}
+}
+
+func TestAppThinkingStartedEmptyNodeID(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	app := NewAppModel(store, "test", "run1")
+	app.Init()
+	// Mark n1 as running so it becomes the active node.
+	store.Apply(MsgNodeStarted{NodeID: "n1"})
+	// Send thinking started with empty nodeID — should resolve to n1.
+	app.Update(MsgThinkingStarted{NodeID: ""})
+	if !app.thinking.IsThinking("n1") {
+		t.Error("expected thinking started for active node n1")
+	}
+	if app.agentLog.focusedNode != "n1" {
+		t.Errorf("expected focusedNode 'n1', got %q", app.agentLog.focusedNode)
+	}
+}
+
+func TestAppThinkingStoppedEmptyNodeID(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	app := NewAppModel(store, "test", "run1")
+	app.Init()
+	// Start thinking on n1 explicitly, then stop with empty nodeID.
+	app.Update(MsgThinkingStarted{NodeID: "n1"})
+	app.Update(MsgThinkingStopped{NodeID: ""})
+	if app.thinking.IsThinking("n1") {
+		t.Error("expected thinking stopped for node n1")
+	}
+}
+
+func TestAppToolCallEmptyNodeID(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	app := NewAppModel(store, "test", "run1")
+	app.Init()
+	// Focus n1 via a thinking started message.
+	app.Update(MsgThinkingStarted{NodeID: "n1"})
+	// Start tool with empty nodeID — should resolve to focused n1.
+	app.Update(MsgToolCallStart{NodeID: "", ToolName: "bash"})
+	if !app.thinking.IsToolRunning("n1") {
+		t.Error("expected tool running for node n1")
+	}
+	if app.thinking.ToolName("n1") != "bash" {
+		t.Errorf("expected tool name 'bash', got %q", app.thinking.ToolName("n1"))
+	}
+	// Stop tool with empty nodeID.
+	app.Update(MsgToolCallEnd{NodeID: ""})
+	if app.thinking.IsToolRunning("n1") {
+		t.Error("expected tool stopped for node n1")
+	}
+}
+
+func TestAppThinkingEmptyNodeIDNoActiveNode(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{{ID: "n1"}})
+	app := NewAppModel(store, "test", "run1")
+	app.Init()
+	// No running nodes, no focused node — empty nodeID should be a no-op.
+	app.Update(MsgThinkingStarted{NodeID: ""})
+	if app.thinking.IsThinking("n1") {
+		t.Error("expected no thinking state when no active node")
+	}
+	if app.thinking.IsThinking("") {
+		t.Error("expected no thinking state for empty nodeID")
+	}
+}
+
 func TestAppWindowResize(t *testing.T) {
 	store := NewStateStore(nil)
 	store.SetNodes([]NodeEntry{{ID: "n1"}})

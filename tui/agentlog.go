@@ -199,9 +199,38 @@ func (al *AgentLog) View() string {
 		return sb.String()
 	}
 
-	// Render all entries into individual lines.
+	// Calculate viewport capacity (reserve 1 for header already written above).
+	maxLines := al.height - 1
+	if maxLines < 1 {
+		maxLines = 1
+	}
+
+	// Work backwards to find which entries to render.
+	// Each entry may produce multiple lines, so we over-estimate slightly
+	// (maxLines+10) to ensure we never clip too aggressively.
+	startIdx := len(al.entries)
+	estimatedLines := 0
+	for startIdx > 0 && estimatedLines < maxLines+10 {
+		startIdx--
+		e := &al.entries[startIdx]
+		// Estimate lines: cached entries have known line count,
+		// uncached entries use a rough estimate based on text length.
+		if e.mdCache != "" && e.mdCacheWidth == al.width {
+			estimatedLines += strings.Count(e.mdCache, "\n") + 1
+		} else {
+			// Rough estimate: 1 line per 80 chars, minimum 1.
+			chars := len(e.text)
+			est := chars/80 + 1
+			if est < 1 {
+				est = 1
+			}
+			estimatedLines += est
+		}
+	}
+
+	// Render only the visible tail entries.
 	var rendered []string
-	for i := range al.entries {
+	for i := startIdx; i < len(al.entries); i++ {
 		line := al.renderEntry(i)
 		// Split multi-line output into separate lines for proper clipping.
 		parts := strings.Split(line, "\n")
@@ -219,11 +248,6 @@ func (al *AgentLog) View() string {
 	}
 
 	// Clip to viewport height (show tail, auto-scroll behavior).
-	// Reserve 1 line for the "ACTIVITY LOG" header already written above.
-	maxLines := al.height - 1
-	if maxLines < 1 {
-		maxLines = 1
-	}
 	if len(rendered) > maxLines {
 		rendered = rendered[len(rendered)-maxLines:]
 	}

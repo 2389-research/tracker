@@ -69,6 +69,8 @@ func StatusLamp(status NodeState) (string, lipgloss.Style) {
 		return LampRunning, lipgloss.NewStyle().Foreground(ColorRunning).Bold(true)
 	case NodeFailed:
 		return LampFailed, lipgloss.NewStyle().Foreground(ColorFailed)
+	case NodeRetrying:
+		return "↻", lipgloss.NewStyle().Foreground(ColorAmber)
 	default:
 		return LampPending, lipgloss.NewStyle().Foreground(ColorPending)
 	}

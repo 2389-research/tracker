@@ -178,6 +178,33 @@ func TestAgentLogClipsToViewportHeight(t *testing.T) {
 	}
 }
 
+func TestAgentLogViewportOptimizationMatchesFullRender(t *testing.T) {
+	store := NewStateStore(nil)
+	tr := NewThinkingTracker()
+	viewportHeight := 10
+	al := NewAgentLog(store, tr, viewportHeight)
+	al.SetSize(80, viewportHeight)
+	// Add many entries — more than fit in the viewport.
+	for i := 0; i < 100; i++ {
+		// Use separate node IDs to prevent coalescing, so we get distinct entries.
+		al.Update(MsgTextChunk{NodeID: fmt.Sprintf("n%d", i), Text: fmt.Sprintf("entry-%d", i)})
+	}
+	optimizedView := al.View()
+	// The optimized view should still show the tail entries and clip correctly.
+	lines := strings.Split(strings.TrimRight(optimizedView, "\n"), "\n")
+	if len(lines) > viewportHeight {
+		t.Errorf("expected at most %d lines, got %d", viewportHeight, len(lines))
+	}
+	// Should contain the latest entry (tail behavior).
+	if !strings.Contains(optimizedView, "entry-99") {
+		t.Errorf("expected latest entry visible, got:\n%s", optimizedView)
+	}
+	// Should NOT contain early entries that scrolled off.
+	if strings.Contains(optimizedView, "entry-0") {
+		t.Errorf("early entry should not be visible in clipped view, got:\n%s", optimizedView)
+	}
+}
+
 func TestAgentLogMarkdownRendering(t *testing.T) {
 	store := NewStateStore(nil)
 	tr := NewThinkingTracker()
