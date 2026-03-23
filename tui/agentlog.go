@@ -208,28 +208,31 @@ func (al *AgentLog) View() string {
 	sb.WriteString(Styles.ZoneLabel.Render("ACTIVITY LOG"))
 	sb.WriteString("\n")
 
-	// Reserve 2 lines: 1 for header (already written), 1 for activity indicator.
-	maxLines := al.height - 2
-	if maxLines < 1 {
-		maxLines = 1
+	// Reserve lines for: header (already written), activity indicator, and
+	// optionally the in-progress partial line.
+	reserved := 2 // header + indicator
+	if al.current.Len() > 0 {
+		reserved = 3 // header + in-progress + indicator
+	}
+	maxContent := al.height - reserved
+	if maxContent < 1 {
+		maxContent = 1
 	}
 
-	// Collect lines: styled (permanent) + current in-progress + indicator.
 	totalStyled := len(al.styledLines)
 
-	// Determine the window of styled lines to show.
-	start := totalStyled - maxLines
+	// Show the tail of styled lines, leaving room for reserved lines.
+	start := totalStyled - maxContent
 	if start < 0 {
 		start = 0
 	}
 
-	// Write the visible styled lines.
 	for i := start; i < totalStyled; i++ {
 		sb.WriteString(al.styledLines[i])
 		sb.WriteString("\n")
 	}
 
-	// Show the in-progress line (unstyled, still accumulating).
+	// In-progress line (unstyled, still accumulating tokens).
 	if al.current.Len() > 0 {
 		sb.WriteString(Styles.PrimaryText.Render(al.current.String()))
 		sb.WriteString("\n")
@@ -238,7 +241,7 @@ func (al *AgentLog) View() string {
 		sb.WriteString("\n")
 	}
 
-	// Activity indicator — always present (space when idle) to prevent viewport shift.
+	// Activity indicator — always present (space when idle).
 	indicator := al.activityIndicator()
 	if indicator == "" {
 		indicator = " "
