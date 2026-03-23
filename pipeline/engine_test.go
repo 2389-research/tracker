@@ -608,6 +608,47 @@ func TestEngineMirrorsGraphGoalAndExpandsPrompt(t *testing.T) {
 	}
 }
 
+func TestEngineExpandsGraphVariablesInToolCommand(t *testing.T) {
+	g := NewGraph("graph_vars")
+	g.Attrs["target_name"] = "myapp"
+	g.Attrs["source_ref"] = "main"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "tool", Shape: "box", Label: "Tool",
+		Attrs: map[string]string{"type": "tool", "tool_command": "echo $target_name $source_ref"}})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "tool"})
+	g.AddEdge(&Edge{From: "tool", To: "end"})
+
+	reg := newTestRegistry()
+	var capturedCommand string
+	var handlerCalled bool
+	reg.Register(&testHandler{
+		name: "tool",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			handlerCalled = true
+			capturedCommand = node.Attrs["tool_command"]
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Fatalf("expected success, got %q", result.Status)
+	}
+	if !handlerCalled {
+		t.Fatal("tool handler was never called")
+	}
+
+	expected := "echo myapp main"
+	if capturedCommand != expected {
+		t.Errorf("tool_command = %q, want %q", capturedCommand, expected)
+	}
+}
+
 func TestEngineWithStylesheet(t *testing.T) {
 	g := NewGraph("style_test")
 	g.Attrs["model_stylesheet"] = `* { llm_model: gpt-4; } #special { llm_model: claude-sonnet; }`

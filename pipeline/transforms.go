@@ -15,6 +15,27 @@ func ExpandPromptVariables(prompt string, ctx *PipelineContext) string {
 	return prompt
 }
 
+// ExpandGraphVariables substitutes $key references in text with values from
+// graph-level attributes stored in the pipeline context as "graph.<key>".
+// For example, graph[target_name="foo"] stored as "graph.target_name" expands
+// $target_name to "foo". This applies to any node attribute (prompt,
+// tool_command, etc.) so all handlers get uniform variable expansion.
+func ExpandGraphVariables(text string, ctx *PipelineContext) string {
+	if text == "" || ctx == nil || !strings.Contains(text, "$") {
+		return text
+	}
+	for key, val := range ctx.Snapshot() {
+		if !strings.HasPrefix(key, "graph.") {
+			continue
+		}
+		varName := "$" + strings.TrimPrefix(key, "graph.")
+		if strings.Contains(text, varName) {
+			text = strings.ReplaceAll(text, varName, val)
+		}
+	}
+	return text
+}
+
 // contextKeysForInjection lists the pipeline context keys whose values should
 // be appended to the LLM prompt so that downstream nodes can see prior outputs.
 var contextKeysForInjection = []struct {

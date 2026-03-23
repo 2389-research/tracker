@@ -75,3 +75,63 @@ func TestInjectPipelineContext_BothKeys(t *testing.T) {
 		t.Fatalf("expected last response, got %q", result)
 	}
 }
+
+func TestExpandGraphVariables_Basic(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("graph.target_name", "myapp")
+	ctx.Set("graph.source_ref", "main")
+
+	result := ExpandGraphVariables("build $target_name from $source_ref", ctx)
+	if result != "build myapp from main" {
+		t.Fatalf("expected graph variable expansion, got %q", result)
+	}
+}
+
+func TestExpandGraphVariables_NoDollarSign(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("graph.target_name", "myapp")
+
+	result := ExpandGraphVariables("no variables here", ctx)
+	if result != "no variables here" {
+		t.Fatalf("expected unchanged text, got %q", result)
+	}
+}
+
+func TestExpandGraphVariables_GoalKey(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("graph.goal", "build a CLI tool")
+
+	// $goal should be expanded via graph.goal.
+	result := ExpandGraphVariables("achieve $goal", ctx)
+	if result != "achieve build a CLI tool" {
+		t.Fatalf("expected $goal expansion from graph.goal, got %q", result)
+	}
+}
+
+func TestExpandGraphVariables_NilContext(t *testing.T) {
+	result := ExpandGraphVariables("text with $var", nil)
+	if result != "text with $var" {
+		t.Fatalf("expected unchanged text with nil context, got %q", result)
+	}
+}
+
+func TestExpandGraphVariables_EmptyText(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("graph.foo", "bar")
+	result := ExpandGraphVariables("", ctx)
+	if result != "" {
+		t.Fatalf("expected empty string, got %q", result)
+	}
+}
+
+func TestExpandGraphVariables_IgnoresNonGraphKeys(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("outcome", "success")
+	ctx.Set("graph.target", "foo")
+
+	// $outcome should NOT be expanded (not a graph.* key).
+	result := ExpandGraphVariables("status=$outcome target=$target", ctx)
+	if result != "status=$outcome target=foo" {
+		t.Fatalf("expected only graph vars expanded, got %q", result)
+	}
+}

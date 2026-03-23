@@ -287,18 +287,30 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				Attrs:   resolved,
 			}
 		}
-		if prompt := execNode.Attrs["prompt"]; prompt != "" {
+		// Expand graph-level variables ($goal, $target_name, etc.) in all
+		// node attributes so every handler gets uniform variable expansion.
+		{
 			execAttrs := make(map[string]string, len(execNode.Attrs))
+			changed := false
 			for k, v := range execNode.Attrs {
-				execAttrs[k] = v
+				expanded := ExpandGraphVariables(v, pctx)
+				// Also expand legacy $goal via ExpandPromptVariables for the prompt attr.
+				if k == "prompt" {
+					expanded = ExpandPromptVariables(expanded, pctx)
+				}
+				execAttrs[k] = expanded
+				if expanded != v {
+					changed = true
+				}
 			}
-			execAttrs["prompt"] = ExpandPromptVariables(prompt, pctx)
-			execNode = &Node{
-				ID:      execNode.ID,
-				Shape:   execNode.Shape,
-				Label:   execNode.Label,
-				Handler: execNode.Handler,
-				Attrs:   execAttrs,
+			if changed {
+				execNode = &Node{
+					ID:      execNode.ID,
+					Shape:   execNode.Shape,
+					Label:   execNode.Label,
+					Handler: execNode.Handler,
+					Attrs:   execAttrs,
+				}
 			}
 		}
 
