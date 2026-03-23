@@ -112,7 +112,15 @@ func (al *AgentLog) getMarkdownRenderer() *glamour.TermRenderer {
 }
 
 // SetFocusedNode sets the node ID to show the thinking indicator for.
+// When the focus changes, a separator is added to visually distinguish
+// output from different nodes in the activity log.
 func (al *AgentLog) SetFocusedNode(nodeID string) {
+	if nodeID != "" && nodeID != al.focusedNode && len(al.entries) > 0 {
+		al.resetCoalesce()
+		label := nodeID
+		sep := fmt.Sprintf("─── %s ", label)
+		al.addEntry(logEntry{kind: entryText, nodeID: nodeID, text: sep})
+	}
 	al.focusedNode = nodeID
 }
 
