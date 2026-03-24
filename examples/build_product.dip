@@ -253,7 +253,7 @@ workflow BuildProduct
   agent ReviewGemini
     label: "Gemini Review"
     model: gemini-2.5-pro
-    provider: google
+    provider: gemini
     reasoning_effort: high
     prompt:
       Review the COMPLETE implementation against SPEC.md. All milestones are done.

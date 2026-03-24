@@ -151,7 +151,7 @@ workflow AskAndExecute
   agent ImplementGemini
     label: "Gemini Implementation"
     model: gemini-2.5-pro
-    provider: google
+    provider: gemini
     working_dir: .ai/worktrees/gemini
     reasoning_effort: high
     fidelity: full
