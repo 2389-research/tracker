@@ -423,6 +423,44 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 		"response.function_call_arguments.done", "response.reasoning.done",
 		"response.reasoning.delta":
 		// Events we acknowledge but don't need to act on.
-		// reasoning.delta could be mapped if the API provides incremental reasoning text.
+
+	case "error", "response.failed":
+		// API error inside the SSE stream. Surface it so the caller can
+		// report it instead of silently returning an empty response.
+		var errEvt struct {
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+				Code    string `json:"code"`
+			} `json:"error"`
+			Response struct {
+				StatusDetails struct {
+					Error struct {
+						Message string `json:"message"`
+						Code    string `json:"code"`
+					} `json:"error"`
+				} `json:"status_details"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal(data, &errEvt); err == nil {
+			msg := errEvt.Error.Message
+			if msg == "" {
+				msg = errEvt.Response.StatusDetails.Error.Message
+			}
+			if msg == "" {
+				msg = fmt.Sprintf("unknown API error (event type: %s)", eventType)
+			}
+			ch <- llm.StreamEvent{
+				Type: llm.EventError,
+				Err:  fmt.Errorf("openai: %s", msg),
+			}
+		}
+
+	default:
+		// Unknown event type — emit as raw provider event for debugging.
+		ch <- llm.StreamEvent{
+			Type: llm.EventProviderEvent,
+			Raw:  data,
+		}
 	}
 }
