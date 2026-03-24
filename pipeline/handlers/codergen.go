@@ -125,7 +125,14 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 			return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 		}
 
-		// Other LLM errors (rate limits, network) are transient — map to
+		// Non-retryable provider errors (quota exceeded, auth failed, model
+		// not found, invalid request) are fatal — retrying won't help and
+		// wastes the entire pipeline run.
+		if pe, ok := runErr.(llm.ProviderErrorInterface); ok && !pe.Retryable() {
+			return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
+		}
+
+		// Retryable errors (rate limits, network, server errors) — map to
 		// OutcomeRetry so the pipeline engine retries the node automatically.
 		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeRetry,

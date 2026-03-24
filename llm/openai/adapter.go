@@ -444,15 +444,19 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 		}
 		if err := json.Unmarshal(data, &errEvt); err == nil {
 			msg := errEvt.Error.Message
+			code := errEvt.Error.Code
 			if msg == "" {
 				msg = errEvt.Response.StatusDetails.Error.Message
+				code = errEvt.Response.StatusDetails.Error.Code
 			}
 			if msg == "" {
 				msg = fmt.Sprintf("unknown API error (event type: %s)", eventType)
 			}
+			// Map the error code to a typed error so the caller can
+			// distinguish retryable from fatal failures.
 			ch <- llm.StreamEvent{
 				Type: llm.EventError,
-				Err:  fmt.Errorf("openai: %s", msg),
+				Err:  sseErrorToTyped(code, msg),
 			}
 		}
 
@@ -462,5 +466,37 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 			Type: llm.EventProviderEvent,
 			Raw:  data,
 		}
+	}
+}
+
+// sseErrorToTyped maps an OpenAI error code from an SSE stream event to a
+// typed error from the llm error hierarchy. This ensures non-retryable errors
+// (quota, auth, invalid request) are fatal and don't waste retries.
+func sseErrorToTyped(code, message string) error {
+	base := llm.ProviderError{
+		SDKError:  llm.SDKError{Msg: "openai: " + message},
+		Provider:  "openai",
+		ErrorCode: code,
+	}
+	switch code {
+	case "insufficient_quota":
+		return &llm.QuotaExceededError{ProviderError: base}
+	case "invalid_api_key", "authentication_error":
+		return &llm.AuthenticationError{ProviderError: base}
+	case "model_not_found":
+		return &llm.NotFoundError{ProviderError: base}
+	case "invalid_request_error", "invalid_request":
+		return &llm.InvalidRequestError{ProviderError: base}
+	case "context_length_exceeded":
+		return &llm.ContextLengthError{ProviderError: base}
+	case "content_filter", "content_policy_violation":
+		return &llm.ContentFilterError{ProviderError: base}
+	case "rate_limit_exceeded":
+		return &llm.RateLimitError{ProviderError: base}
+	case "server_error", "internal_error":
+		return &llm.ServerError{ProviderError: base}
+	default:
+		// Unknown code — treat as non-retryable to be safe.
+		return &llm.InvalidRequestError{ProviderError: base}
 	}
 }
