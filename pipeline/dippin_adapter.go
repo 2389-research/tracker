@@ -73,9 +73,25 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	for _, e := range g.Edges {
 		existingEdges[[2]string{e.From, e.To}] = true
 	}
+	// Build a lookup of fan-in nodes by their source sets, so we can link
+	// parallel nodes directly to their corresponding fan-in join node.
+	// The parallel handler dispatches branches internally — the engine only
+	// needs an edge from the parallel node to the join node to advance.
+	fanInBySource := make(map[string]string) // source node ID -> fan-in node ID
+	for _, irNode := range workflow.Nodes {
+		if cfg, ok := irNode.Config.(ir.FanInConfig); ok {
+			for _, source := range cfg.Sources {
+				fanInBySource[source] = irNode.ID
+			}
+		}
+	}
+
 	for _, irNode := range workflow.Nodes {
 		switch cfg := irNode.Config.(type) {
 		case ir.ParallelConfig:
+			// Synthesize edges from parallel to each branch target (for BFS
+			// node discovery in the TUI) AND from parallel to the fan-in
+			// join node (for engine navigation after the handler completes).
 			for _, target := range cfg.Targets {
 				key := [2]string{irNode.ID, target}
 				if !existingEdges[key] {
@@ -83,7 +99,27 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 					existingEdges[key] = true
 				}
 			}
+			// Also link parallel -> fan-in directly. The parallel handler
+			// stores this as "parallel_join" so it can set suggested_next_nodes.
+			if len(cfg.Targets) > 0 {
+				if joinID, ok := fanInBySource[cfg.Targets[0]]; ok {
+					key := [2]string{irNode.ID, joinID}
+					if !existingEdges[key] {
+						g.AddEdge(&Edge{From: irNode.ID, To: joinID})
+						existingEdges[key] = true
+					}
+					// Store the join node ID so the parallel handler can hint
+					// the engine to navigate there after execution.
+					if node, ok := g.Nodes[irNode.ID]; ok {
+						node.Attrs["parallel_join"] = joinID
+					}
+				}
+			}
 		case ir.FanInConfig:
+			// Fan-in source edges are needed so BFS can discover the branch
+			// nodes (for the TUI node list). These edges exist in the graph
+			// but the engine skips them — after the parallel handler completes,
+			// the engine follows the Parallel -> FanIn edge directly.
 			for _, source := range cfg.Sources {
 				key := [2]string{source, irNode.ID}
 				if !existingEdges[key] {

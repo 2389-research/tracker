@@ -202,7 +202,17 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Message:   fmt.Sprintf("fan-in complete, aggregate status: %s", status),
 	})
 
-	return pipeline.Outcome{Status: status}, nil
+	outcome := pipeline.Outcome{Status: status}
+
+	// Hint the engine to navigate to the fan-in join node, skipping the
+	// branch target edges (which the handler already dispatched internally).
+	if joinID := node.Attrs["parallel_join"]; joinID != "" {
+		outcome.ContextUpdates = map[string]string{
+			"suggested_next_nodes": joinID,
+		}
+	}
+
+	return outcome, nil
 }
 
 // branchOverride holds per-branch attr overrides parsed from the parallel node.
