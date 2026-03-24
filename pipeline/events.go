@@ -24,7 +24,41 @@ const (
 	EventLoopRestart        PipelineEventType = "loop_restart"
 	EventWarning            PipelineEventType = "warning"
 	EventEdgeTiebreaker     PipelineEventType = "edge_tiebreaker"
+
+	// Decision audit trail events — capture decision points for post-run reconstruction.
+	EventDecisionEdge       PipelineEventType = "decision_edge"
+	EventDecisionCondition  PipelineEventType = "decision_condition"
+	EventDecisionOutcome    PipelineEventType = "decision_outcome"
+	EventDecisionRestart    PipelineEventType = "decision_restart"
 )
+
+// DecisionDetail carries structured data about a pipeline decision point.
+// It is attached to PipelineEvent via the Decision field for audit trail events.
+type DecisionDetail struct {
+	// Edge selection fields.
+	EdgeFrom     string `json:"edge_from,omitempty"`
+	EdgeTo       string `json:"edge_to,omitempty"`
+	EdgePriority string `json:"edge_priority,omitempty"` // "condition", "label", "suggested", "weight", "lexical"
+
+	// Condition evaluation fields.
+	EdgeCondition  string `json:"edge_condition,omitempty"`
+	ConditionMatch bool   `json:"condition_match,omitempty"`
+
+	// Node outcome fields.
+	OutcomeStatus  string            `json:"outcome_status,omitempty"`
+	ContextUpdates map[string]string `json:"context_updates,omitempty"`
+
+	// Context snapshot at the decision point (routing-relevant keys).
+	ContextSnapshot map[string]string `json:"context_snapshot,omitempty"`
+
+	// Restart/loop fields.
+	RestartCount int      `json:"restart_count,omitempty"`
+	ClearedNodes []string `json:"cleared_nodes,omitempty"`
+
+	// Session stats from handler outcome.
+	TokenInput  int `json:"token_input,omitempty"`
+	TokenOutput int `json:"token_output,omitempty"`
+}
 
 // PipelineEvent carries data about a single pipeline lifecycle occurrence.
 type PipelineEvent struct {
@@ -34,6 +68,7 @@ type PipelineEvent struct {
 	NodeID    string
 	Message   string
 	Err       error
+	Decision  *DecisionDetail // non-nil for decision audit trail events
 }
 
 // PipelineEventHandler receives pipeline events for observability purposes.

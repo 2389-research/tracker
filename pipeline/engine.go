@@ -337,6 +337,27 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 			pctx.Set("suggested_next_nodes", strings.Join(outcome.SuggestedNextNodes, ","))
 		}
 
+		// Emit decision_outcome event capturing handler result details.
+		{
+			detail := &DecisionDetail{
+				OutcomeStatus:   outcome.Status,
+				ContextUpdates:  outcome.ContextUpdates,
+				ContextSnapshot: e.routingContextSnapshot(pctx),
+			}
+			if outcome.Stats != nil {
+				detail.TokenInput = outcome.Stats.CacheHits   // input tokens approximated by cache hits
+				detail.TokenOutput = outcome.Stats.CacheMisses // output tokens approximated by cache misses
+			}
+			e.emit(PipelineEvent{
+				Type:      EventDecisionOutcome,
+				Timestamp: time.Now(),
+				RunID:     runID,
+				NodeID:    currentNodeID,
+				Message:   fmt.Sprintf("node %q outcome: %s", currentNodeID, outcome.Status),
+				Decision:  detail,
+			})
+		}
+
 		// Build trace entry for this node execution. EdgeTo is filled in
 		// after edge selection below; early-return paths set it directly.
 		traceEntry := TraceEntry{
@@ -542,6 +563,23 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				Message:   fmt.Sprintf("loop detected, restarting from %q (restart %d/%d)", restartTarget, cp.RestartCount, maxRestarts),
 			})
 
+			// Collect nodes that will be cleared for the audit trail.
+			clearedNodes := append([]string{restartTarget}, downstreamNodes(e.graph, restartTarget)...)
+
+			// Emit decision_restart event with restart details.
+			e.emit(PipelineEvent{
+				Type:      EventDecisionRestart,
+				Timestamp: time.Now(),
+				RunID:     runID,
+				NodeID:    restartTarget,
+				Message:   fmt.Sprintf("restart %d: clearing %d nodes from %q", cp.RestartCount, len(clearedNodes), restartTarget),
+				Decision: &DecisionDetail{
+					RestartCount:    cp.RestartCount,
+					ClearedNodes:    clearedNodes,
+					ContextSnapshot: e.routingContextSnapshot(pctx),
+				},
+			})
+
 			// Clear the restart target and all its downstream nodes from completed.
 			e.clearDownstream(restartTarget, cp)
 			// Reset retry counts for cleared nodes so they get fresh budgets.
@@ -578,6 +616,9 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 
 // selectEdge picks the best outgoing edge using priority: condition > preferred label > suggested IDs > weight > lexical.
 func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error) {
+	// Build a context snapshot for decision audit trail.
+	ctxSnap := e.routingContextSnapshot(pctx)
+
 	// Priority 1: Condition match.
 	for _, edge := range edges {
 		if edge.Condition != "" {
@@ -585,7 +626,22 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 			if err != nil {
 				return nil, fmt.Errorf("evaluate condition on edge %s->%s: %w", edge.From, edge.To, err)
 			}
+			// Emit condition evaluation event for every tested condition.
+			e.emit(PipelineEvent{
+				Type:      EventDecisionCondition,
+				Timestamp: time.Now(),
+				NodeID:    edge.From,
+				Message:   fmt.Sprintf("condition %q on edge %s->%s evaluated to %v", edge.Condition, edge.From, edge.To, match),
+				Decision: &DecisionDetail{
+					EdgeFrom:        edge.From,
+					EdgeTo:          edge.To,
+					EdgeCondition:   edge.Condition,
+					ConditionMatch:  match,
+					ContextSnapshot: ctxSnap,
+				},
+			})
 			if match {
+				e.emitEdgeSelected(edge, "condition", ctxSnap)
 				return edge, nil
 			}
 		}
@@ -595,6 +651,7 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 	if preferred, ok := pctx.Get(ContextKeyPreferredLabel); ok && preferred != "" {
 		for _, edge := range edges {
 			if edge.Label == preferred {
+				e.emitEdgeSelected(edge, "label", ctxSnap)
 				return edge, nil
 			}
 		}
@@ -605,6 +662,7 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		for _, edge := range edges {
 			for _, sid := range strings.Split(suggested, ",") {
 				if strings.TrimSpace(sid) == edge.To {
+					e.emitEdgeSelected(edge, "suggested", ctxSnap)
 					return edge, nil
 				}
 			}
@@ -641,9 +699,12 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		return unconditional[i].To < unconditional[j].To
 	})
 
-	// Warn when multiple unconditional edges have equal weight and lexical
-	// tiebreaker is used — this may indicate a missing condition or weight.
+	// Determine the priority level used for the winning edge.
+	priority := "weight"
 	if len(unconditional) > 1 && edgeWeight(unconditional[0]) == edgeWeight(unconditional[1]) {
+		priority = "lexical"
+		// Warn when multiple unconditional edges have equal weight and lexical
+		// tiebreaker is used — this may indicate a missing condition or weight.
 		e.emit(PipelineEvent{
 			Type:      EventEdgeTiebreaker,
 			Timestamp: time.Now(),
@@ -652,7 +713,36 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		})
 	}
 
+	e.emitEdgeSelected(unconditional[0], priority, ctxSnap)
 	return unconditional[0], nil
+}
+
+// emitEdgeSelected emits a decision_edge event recording which edge was selected and why.
+func (e *Engine) emitEdgeSelected(edge *Edge, priority string, ctxSnap map[string]string) {
+	e.emit(PipelineEvent{
+		Type:      EventDecisionEdge,
+		Timestamp: time.Now(),
+		NodeID:    edge.From,
+		Message:   fmt.Sprintf("edge selected %s->%s via %s", edge.From, edge.To, priority),
+		Decision: &DecisionDetail{
+			EdgeFrom:        edge.From,
+			EdgeTo:          edge.To,
+			EdgeCondition:   edge.Condition,
+			EdgePriority:    priority,
+			ContextSnapshot: ctxSnap,
+		},
+	})
+}
+
+// routingContextSnapshot returns a map of the key context values relevant to edge routing.
+func (e *Engine) routingContextSnapshot(pctx *PipelineContext) map[string]string {
+	snap := make(map[string]string)
+	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeyToolStdout, ContextKeyHumanResponse, "suggested_next_nodes"} {
+		if val, ok := pctx.Get(key); ok && val != "" {
+			snap[key] = val
+		}
+	}
+	return snap
 }
 
 // edgeWeight parses the "weight" attribute as an integer, defaulting to 0.

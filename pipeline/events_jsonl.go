@@ -23,6 +23,20 @@ type jsonlLogEntry struct {
 	Model     string `json:"model,omitempty"`
 	ToolName  string `json:"tool_name,omitempty"`
 	Content   string `json:"content,omitempty"`
+
+	// Decision audit trail fields.
+	EdgeFrom        string            `json:"edge_from,omitempty"`
+	EdgeTo          string            `json:"edge_to,omitempty"`
+	EdgeCondition   string            `json:"edge_condition,omitempty"`
+	EdgePriority    string            `json:"edge_priority,omitempty"`
+	ConditionMatch  *bool             `json:"condition_match,omitempty"`
+	OutcomeStatus   string            `json:"outcome_status,omitempty"`
+	ContextSnapshot map[string]string `json:"context_snapshot,omitempty"`
+	ContextUpdates  map[string]string `json:"context_updates,omitempty"`
+	RestartCount    *int              `json:"restart_count,omitempty"`
+	ClearedNodes    []string          `json:"cleared_nodes,omitempty"`
+	TokenInput      int               `json:"token_input,omitempty"`
+	TokenOutput     int               `json:"token_output,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a file.
@@ -80,6 +94,26 @@ func (h *JSONLEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 	}
 	if evt.Err != nil {
 		entry.Error = evt.Err.Error()
+	}
+	if d := evt.Decision; d != nil {
+		entry.EdgeFrom = d.EdgeFrom
+		entry.EdgeTo = d.EdgeTo
+		entry.EdgeCondition = d.EdgeCondition
+		entry.EdgePriority = d.EdgePriority
+		if d.EdgeCondition != "" {
+			match := d.ConditionMatch
+			entry.ConditionMatch = &match
+		}
+		entry.OutcomeStatus = d.OutcomeStatus
+		entry.ContextSnapshot = d.ContextSnapshot
+		entry.ContextUpdates = d.ContextUpdates
+		if d.RestartCount > 0 {
+			rc := d.RestartCount
+			entry.RestartCount = &rc
+		}
+		entry.ClearedNodes = d.ClearedNodes
+		entry.TokenInput = d.TokenInput
+		entry.TokenOutput = d.TokenOutput
 	}
 	h.writeEntry(entry)
 }
