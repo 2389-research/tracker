@@ -54,9 +54,17 @@ const (
 	modeAudit    commandMode = "audit"
 	modeSimulate commandMode = "simulate"
 	modeValidate commandMode = "validate"
+	modeVersion  commandMode = "version"
 )
 
 var errUsage = errors.New("usage")
+
+// Build-time variables set via -ldflags.
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
 
 type commandDeps struct {
 	loadEnv  func(string) error
@@ -440,6 +448,21 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 func parseFlags(args []string) (runConfig, error) {
 	cfg := runConfig{mode: modeRun}
 
+	// Handle --version and -v anywhere in args.
+	if len(args) > 1 {
+		switch args[1] {
+		case "version", "--version", "-v":
+			cfg.mode = modeVersion
+			return cfg, nil
+		case "--help", "-h", "help":
+			return cfg, flag.ErrHelp
+		case "list":
+			// "tracker list" is an alias for "tracker audit" (list recent runs).
+			cfg.mode = modeAudit
+			return cfg, nil
+		}
+	}
+
 	if len(args) > 1 && args[1] == string(modeSetup) {
 		cfg.mode = modeSetup
 		return cfg, nil
@@ -524,7 +547,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker setup\n")
 	fmt.Fprintf(w, "  tracker validate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
-	fmt.Fprintf(w, "  tracker audit [runID]\n\n")
+	fmt.Fprintf(w, "  tracker audit [runID]\n")
+	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")
+	fmt.Fprintf(w, "  tracker version               Show version information\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  -w, --workdir string      Working directory (default: current directory)\n")
 	fmt.Fprintf(w, "  -r, --resume string       Resume a previous run by ID (e.g. 13041bbb0a38)\n")
@@ -532,6 +557,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --json                    Stream events as newline-delimited JSON to stdout\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
+	fmt.Fprintf(w, "  -v, --version             Show version information\n")
 }
 
 func executeCommand(cfg runConfig, deps commandDeps) error {
@@ -546,6 +572,13 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 	}
 	if deps.runTUI == nil {
 		deps.runTUI = runTUI
+	}
+
+	if cfg.mode == modeVersion {
+		fmt.Printf("tracker %s\n", version)
+		fmt.Printf("  commit: %s\n", commit)
+		fmt.Printf("  built:  %s\n", date)
+		return nil
 	}
 
 	if cfg.mode == modeSetup {
