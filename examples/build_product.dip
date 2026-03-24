@@ -5,6 +5,7 @@ workflow BuildProduct
 
   defaults
     max_retries: 3
+    max_restarts: 50
     fidelity: full
     model: claude-sonnet-4-6
     provider: anthropic
@@ -124,10 +125,11 @@ workflow BuildProduct
 
   agent Implement
     label: "Implement Current Milestone"
-    model: claude-sonnet-4-6
+    model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
     fidelity: full
+    max_turns: 50
     prompt:
       Read the current milestone spec at .ai/milestones/current.md.
       Read the full spec at SPEC.md for context.
@@ -203,20 +205,34 @@ workflow BuildProduct
 
   agent FixMilestone
     label: "Fix Milestone Issues"
-    model: claude-sonnet-4-6
+    model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
     fidelity: full
+    max_turns: 50
     retry_target: TestMilestone
-    max_retries: 3
+    max_retries: 5
     fallback_target: EscalateToHuman
     prompt:
       The current milestone failed verification. Read:
       - The milestone spec: .ai/milestones/current.md
-      - The verification feedback (in context from the previous agent)
+      - The test output showing failures (in context from the previous node)
+      - The relevant source files causing the failures
 
-      Fix ONLY the specific issues identified. Do not expand scope.
-      Commit the fix with a message like "fix(milestone-N): [what was fixed]"
+      This is a FULL implementation session, not a quick patch. You have the
+      tools and time to properly investigate root causes, understand the domain
+      logic, read the test expectations, and make correct fixes.
+
+      Steps:
+      1. Read the failing test file to understand what it expects
+      2. Read the source code being tested to understand the current behavior
+      3. Identify the root cause (not just the symptom)
+      4. Implement the correct fix
+      5. Run the specific failing test to verify before committing
+      6. Commit the fix with a message like "fix(milestone-N): [what was fixed]"
+
+      Do NOT make superficial patches. If a test expects story events to NOT
+      merge, understand WHY they're merging and fix the decision logic.
 
   # ─── Phase 3: Cross-Review ─────────────────────────────────
 
@@ -385,14 +401,11 @@ workflow BuildProduct
     # Build loop: pick → implement → test → verify → mark done → pick next
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
     PickNextMilestone -> ReviewParallel  when ctx.tool_stdout contains all-done
-    PickNextMilestone -> EscalateToHuman
     Implement -> TestMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
     TestMilestone -> FixMilestone  when ctx.outcome = fail
-    TestMilestone -> FixMilestone
     VerifyMilestone -> MarkMilestoneDone  when ctx.outcome = success
     VerifyMilestone -> FixMilestone  when ctx.outcome = fail
-    VerifyMilestone -> EscalateToHuman
     MarkMilestoneDone -> PickNextMilestone  restart: true
     FixMilestone -> TestMilestone  restart: true
 
