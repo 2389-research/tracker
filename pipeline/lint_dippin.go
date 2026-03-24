@@ -122,7 +122,7 @@ func lintDIP108(g *Graph) []string {
 	knownModels := map[string][]string{
 		"openai":    {"gpt-4o", "gpt-4o-mini", "gpt-5.4", "o1", "o1-mini", "o3-mini"},
 		"anthropic": {"claude-opus-4", "claude-sonnet-4", "claude-sonnet-4-5", "claude-haiku-4"},
-		"google":    {"gemini-2.0-flash-exp", "gemini-2.5-flash", "gemini-2.5-pro"},
+		"gemini":    {"gemini-2.0-flash-exp", "gemini-2.5-flash", "gemini-2.5-pro"},
 	}
 
 	for _, node := range g.Nodes {
