@@ -26,7 +26,7 @@ tracker -r <run-id> examples/build_product.dip
 Competitive implementation: ask the user what to build, fan out to 3 agents (Claude/Codex/Gemini) in isolated git worktrees, cross-critique the implementations, select the best one, apply it, clean up the rest.
 
 ### `build_product.dip`
-Sequential milestone builder: read a SPEC.md, decompose into milestones, implement each with verification loops, cross-review the complete result, verify full spec compliance.
+Sequential milestone builder: read a SPEC.md, decompose into milestones, implement each with verification loops (opus-powered fix agent with 50 turns), cross-review the complete result, verify full spec compliance.
 
 ### `build_product_with_superspec.dip`
 Parallel stream execution for large structured specs: reads the spec's work streams and dependency graph, executes independent streams in parallel (with git worktree isolation), enforces quality gates between phases, cross-reviews with 3 specialized reviewers (architect/QA/product), and audits traceability.
@@ -86,6 +86,8 @@ Three namespaces for `${...}` syntax in prompts:
 - `${params.model}` — subgraph parameters passed from parent
 - `${graph.goal}` — workflow-level attributes
 
+Variables are expanded in a single pass — resolved values are never re-scanned, preventing recursive expansion.
+
 ### Edge Conditions
 
 ```dip
@@ -99,6 +101,8 @@ edges
 
 Supported operators: `=`, `!=`, `contains`, `not contains`, `startswith`, `not startswith`, `endswith`, `not endswith`, `in`, `not in`, `&&`, `||`, `not`.
 
+Conditions support the `ctx.` namespace prefix (dippin convention) and `internal.*` references for engine-managed state.
+
 ### Per-Node Working Directory
 
 For git worktree isolation in parallel implementations:
@@ -110,9 +114,11 @@ agent ImplementClaude
   prompt: Implement the spec in this isolated worktree.
 ```
 
+The `working_dir` attribute is validated against path traversal and shell metacharacters.
+
 ### Human Gates
 
-Freeform mode captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`.
+Freeform mode captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`. Esc with empty textarea cancels without submitting.
 
 ```dip
 human ApproveSpec
@@ -125,15 +131,35 @@ edges
   ApproveSpec -> Done   label: "reject"
 ```
 
-Submit with **Ctrl+S**. Enter inserts newlines.
+Submit with **Ctrl+S**. Enter inserts newlines. Esc cancels (empty) or submits (with content).
+
+### Providers
+
+Tracker supports three LLM providers: `anthropic`, `openai`, `gemini`. Configure API keys via `tracker setup` or in `~/.config/tracker/.env`.
+
+**Important**: Use `gemini` (not `google`) as the provider name in `.dip` files.
+
+Non-retryable provider errors (quota exceeded, auth failure, model not found) immediately fail the pipeline instead of silently retrying.
 
 ## TUI
 
 The terminal UI shows:
 
-- **Pipeline panel**: node list with status lamps (pending/running/done/failed), thinking spinners, and tool execution indicators
-- **Activity log**: streaming LLM output with line-level formatting (headers, code blocks, bullets), tool call display, and node change separators
+- **Pipeline panel**: node list in source declaration order with status lamps, thinking spinners, and tool execution indicators
+- **Activity log**: per-node streaming with line-level formatting (headers, code blocks, bullets), node change separators, and multi-node activity indicators for parallel execution
 - **Subgraph nodes**: dynamically inserted and indented under their parent
+
+### Status Icons
+
+| Icon | Meaning |
+|------|---------|
+| ○ | Pending — not yet reached |
+| 🟡 (spinner) | Running — LLM thinking |
+| ⚡ | Running — tool executing |
+| ● (green) | Completed successfully |
+| ✗ (red) | Failed |
+| ↻ (amber) | Retrying |
+| ⊘ (dim) | Skipped — pipeline took a different path |
 
 ### Keyboard
 
@@ -141,14 +167,35 @@ The terminal UI shows:
 |-----|--------|
 | Ctrl+O | Toggle expand/collapse tool output |
 | Ctrl+S | Submit human gate input |
-| Esc | Submit human gate input (quick approval) |
+| Esc | Cancel (empty) or submit (with content) |
+
+## Decision Audit Trail
+
+Every run produces an `activity.jsonl` log in `.tracker/runs/<id>/` that captures:
+
+- **Pipeline events**: node start/complete/fail, checkpoint saves
+- **Agent events**: LLM turns, tool calls, text output
+- **Decision events**: edge selection (with priority level and context snapshot), condition evaluations (with match results), node outcomes (with token counts), restart detections
+
+Reconstruct any routing decision after the fact:
+
+```bash
+# See all edge decisions
+grep 'decision_edge' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
+
+# See condition evaluations
+grep 'decision_condition' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
+
+# See node outcomes with token counts
+grep 'decision_outcome' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
+```
 
 ## Architecture
 
 ```
-Layer 1: LLM Client (anthropic, openai, google providers)
+Layer 1: LLM Client (anthropic, openai, gemini providers)
 Layer 2: Agent Session (tool execution, context compaction, event streaming)
-Layer 3: Pipeline Engine (graph execution, edge routing, checkpoints)
+Layer 3: Pipeline Engine (graph execution, edge routing, checkpoints, decision audit)
     ├── Handlers: codergen, tool, human, parallel, fan_in, subgraph, conditional
     ├── Dippin Adapter: converts IR to Graph, synthesizes implicit edges
     └── TUI: bubbletea app with node list, activity log, modal overlays
