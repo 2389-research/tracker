@@ -385,12 +385,16 @@ workflow BuildProduct
     # Build loop: pick → implement → test → verify → mark done → pick next
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
     PickNextMilestone -> ReviewParallel  when ctx.tool_stdout contains all-done
+    PickNextMilestone -> EscalateToHuman
     Implement -> TestMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
     TestMilestone -> FixMilestone  when ctx.outcome = fail
+    TestMilestone -> FixMilestone
     VerifyMilestone -> MarkMilestoneDone  when ctx.outcome = success
     VerifyMilestone -> FixMilestone  when ctx.outcome = fail
+    VerifyMilestone -> EscalateToHuman
     MarkMilestoneDone -> PickNextMilestone  restart: true
+    FixMilestone -> TestMilestone  restart: true
 
     # Cross-review
     ReviewClaude -> ReviewJoin
@@ -399,13 +403,16 @@ workflow BuildProduct
     ReviewJoin -> SynthesizeReviews
     SynthesizeReviews -> FinalBuild  when ctx.outcome = success
     SynthesizeReviews -> ApplyReviewFixes  when ctx.outcome = fail
+    SynthesizeReviews -> EscalateToHuman
     ApplyReviewFixes -> FinalBuild
 
     # Final verification
     FinalBuild -> FinalSpecCheck  when ctx.outcome = success
     FinalBuild -> EscalateToHuman  when ctx.outcome = fail
+    FinalBuild -> EscalateToHuman
     FinalSpecCheck -> Cleanup  when ctx.outcome = success
     FinalSpecCheck -> EscalateToHuman  when ctx.outcome = fail
+    FinalSpecCheck -> EscalateToHuman
     EscalateToHuman -> Cleanup  label: "accept"
     EscalateToHuman -> Done  label: "abandon"
     Cleanup -> FinalCommit

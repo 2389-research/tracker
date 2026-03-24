@@ -42,4 +42,5 @@ workflow VariableInterpolationDemo
     AskUser -> AnalyzeRequest
     AnalyzeRequest -> ExecuteWithParams  when ctx.outcome = success
     AnalyzeRequest -> Report  when ctx.outcome = fail
+    AnalyzeRequest -> Report
     ExecuteWithParams -> Report

@@ -408,8 +408,10 @@ workflow AskAndExecute
     ApplyWinner -> FinalBuild
     FinalBuild -> FinalVerify  when ctx.outcome = success
     FinalBuild -> EscalateToHuman  when ctx.outcome = fail
+    FinalBuild -> EscalateToHuman
     FinalVerify -> CommitFinal  when ctx.outcome = success
     FinalVerify -> EscalateToHuman  when ctx.outcome = fail
+    FinalVerify -> EscalateToHuman
     EscalateToHuman -> CommitFinal  label: "accept"
     EscalateToHuman -> Done  label: "abandon"
     CommitFinal -> Done

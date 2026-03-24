@@ -947,8 +947,10 @@ workflow BuildProductWithSuperspec
     Phase1Join -> MergePhase1
     MergePhase1 -> GatePhase1  when ctx.outcome = success
     MergePhase1 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase1 -> EscalateToHuman
     GatePhase1 -> SetupPhase2Worktrees  when ctx.outcome = success
     GatePhase1 -> FixPhase1  when ctx.outcome = fail
+    GatePhase1 -> EscalateToHuman
     FixPhase1 -> GatePhase1  restart: true
 
     # Phase 2: Core (C + E parallel)
@@ -958,14 +960,17 @@ workflow BuildProductWithSuperspec
     Phase2Join -> MergePhase2
     MergePhase2 -> GatePhase2  when ctx.outcome = success
     MergePhase2 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase2 -> EscalateToHuman
     GatePhase2 -> StreamD  when ctx.outcome = success
     GatePhase2 -> FixPhase2  when ctx.outcome = fail
+    GatePhase2 -> EscalateToHuman
     FixPhase2 -> GatePhase2  restart: true
 
     # Phase 3: Story engine (D sequential, depends on C)
     StreamD -> GateStreamD
     GateStreamD -> SetupPhase4Worktrees  when ctx.outcome = success
     GateStreamD -> FixStreamD  when ctx.outcome = fail
+    GateStreamD -> EscalateToHuman
     FixStreamD -> GateStreamD  restart: true
 
     # Phase 4: Surface (F + G parallel)
@@ -975,8 +980,10 @@ workflow BuildProductWithSuperspec
     Phase4Join -> MergePhase4
     MergePhase4 -> GatePhase4  when ctx.outcome = success
     MergePhase4 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase4 -> EscalateToHuman
     GatePhase4 -> SetupPhase5Worktrees  when ctx.outcome = success
     GatePhase4 -> FixPhase4  when ctx.outcome = fail
+    GatePhase4 -> EscalateToHuman
     FixPhase4 -> GatePhase4  restart: true
 
     # Phase 5: Quality & Docs (H + I parallel)
@@ -986,6 +993,7 @@ workflow BuildProductWithSuperspec
     Phase5Join -> MergePhase5
     MergePhase5 -> ReviewParallel  when ctx.outcome = success
     MergePhase5 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase5 -> EscalateToHuman
 
     # Phase 6: Cross-review
     ReviewArchitect -> ReviewJoin
@@ -994,13 +1002,16 @@ workflow BuildProductWithSuperspec
     ReviewJoin -> SynthesizeReviews
     SynthesizeReviews -> FinalGates  when ctx.outcome = success
     SynthesizeReviews -> ApplyReviewFixes  when ctx.outcome = fail
+    SynthesizeReviews -> Done
     ApplyReviewFixes -> FinalGates
 
     # Phase 7: Final verification
     FinalGates -> TraceabilityAudit  when ctx.outcome = success
     FinalGates -> EscalateToHuman  when ctx.outcome = fail
+    FinalGates -> EscalateToHuman
     TraceabilityAudit -> Cleanup  when ctx.outcome = success
     TraceabilityAudit -> EscalateToHuman  when ctx.outcome = fail
+    TraceabilityAudit -> EscalateToHuman
     EscalateToHuman -> Cleanup  label: "accept"
     EscalateToHuman -> Done  label: "abandon"
     Cleanup -> FinalCommit
