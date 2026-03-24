@@ -152,6 +152,24 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
+	// An agent session that produced zero output is not a success —
+	// the LLM either failed silently, returned an empty response, or
+	// the provider/model is misconfigured. Treat as fail so the pipeline
+	// doesn't silently skip work.
+	if strings.TrimSpace(responseText) == "" && sessResult.TotalToolCalls() == 0 {
+		outcome := pipeline.Outcome{
+			Status: pipeline.OutcomeFail,
+			ContextUpdates: map[string]string{
+				pipeline.ContextKeyLastResponse: fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID),
+			},
+			Stats: buildSessionStats(sessResult),
+		}
+		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
+			return pipeline.Outcome{}, err
+		}
+		return outcome, nil
+	}
+
 	status := pipeline.OutcomeSuccess
 	if node.Attrs["auto_status"] == "true" {
 		status = parseAutoStatus(responseText)
