@@ -825,9 +825,31 @@ func chooseInterviewer(isTerminal bool) handlers.FreeformInterviewer {
 }
 
 // buildNodeList creates an ordered list of node ID/label pairs from the
-// pipeline graph. Walks from StartNode in BFS order so the list reflects the
-// natural execution flow.
+// pipeline graph. Uses the declaration order from the source file (NodeOrder)
+// when available, falling back to BFS from StartNode for DOT-format pipelines.
 func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
+	// Prefer declaration order from the source file — this keeps nodes
+	// in the order the author wrote them, with "Done" at the end.
+	if len(graph.NodeOrder) > 0 {
+		var entries []tui.NodeEntry
+		for _, nodeID := range graph.NodeOrder {
+			node, ok := graph.Nodes[nodeID]
+			if !ok {
+				continue
+			}
+			label := node.Label
+			if label == "" {
+				label = node.ID
+			}
+			entries = append(entries, tui.NodeEntry{
+				ID:    node.ID,
+				Label: label,
+			})
+		}
+		return entries
+	}
+
+	// Fallback: BFS from StartNode for DOT-format pipelines.
 	if graph.StartNode == "" {
 		return nil
 	}

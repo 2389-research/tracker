@@ -49,13 +49,14 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	// Map workflow-level defaults to graph attributes
 	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
 
-	// Map IR nodes to Graph nodes
+	// Map IR nodes to Graph nodes, preserving declaration order.
 	for _, irNode := range workflow.Nodes {
 		gNode, err := convertNode(irNode)
 		if err != nil {
 			return nil, fmt.Errorf("node %s: %w", irNode.ID, err)
 		}
 		g.AddNode(gNode)
+		g.NodeOrder = append(g.NodeOrder, irNode.ID)
 	}
 
 	// Map IR edges to Graph edges
