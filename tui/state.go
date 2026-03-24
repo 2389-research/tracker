@@ -18,6 +18,7 @@ const (
 	NodeDone
 	NodeFailed
 	NodeRetrying
+	NodeSkipped
 )
 
 // NodePhase represents the current activity phase of a running node.
@@ -203,6 +204,17 @@ func (s *StateStore) ensureSubgraphNode(id string) {
 	s.nodes[insertIdx] = entry
 }
 
+// markSkippedNodes transitions all remaining NodePending nodes to NodeSkipped
+// when the pipeline completes. This distinguishes "not yet reached" from
+// "not needed" in the TUI.
+func (s *StateStore) markSkippedNodes() {
+	for _, e := range s.nodes {
+		if ni, ok := s.nodeState[e.ID]; ok && ni.status == NodePending {
+			ni.status = NodeSkipped
+		}
+	}
+}
+
 // ensure lazily creates node info for unknown node IDs.
 func (s *StateStore) ensure(id string) *nodeInfo {
 	ni, ok := s.nodeState[id]
@@ -233,9 +245,11 @@ func (s *StateStore) Apply(msg interface{}) {
 		ni.retryMsg = m.Message
 	case MsgPipelineCompleted:
 		s.pipelineDone = true
+		s.markSkippedNodes()
 	case MsgPipelineFailed:
 		s.pipelineDone = true
 		s.pipelineErr = m.Error
+		s.markSkippedNodes()
 	case MsgThinkingStarted:
 		s.ensure(m.NodeID).thinking = true
 		s.ensure(m.NodeID).waiting = false // clear waiting state when thinking starts

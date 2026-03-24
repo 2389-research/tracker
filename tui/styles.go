@@ -71,6 +71,8 @@ func StatusLamp(status NodeState) (string, lipgloss.Style) {
 		return LampFailed, lipgloss.NewStyle().Foreground(ColorFailed)
 	case NodeRetrying:
 		return "↻", lipgloss.NewStyle().Foreground(ColorAmber)
+	case NodeSkipped:
+		return "⊘", lipgloss.NewStyle().Foreground(ColorDim)
 	default:
 		return LampPending, lipgloss.NewStyle().Foreground(ColorPending)
 	}
