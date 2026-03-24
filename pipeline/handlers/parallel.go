@@ -48,9 +48,29 @@ func (h *ParallelHandler) Name() string { return "parallel" }
 // If the parallel node has branch.N.* attributes, those override the target node's
 // attrs (e.g., llm_model, llm_provider, fidelity) for that specific branch.
 func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	edges := h.graph.OutgoingEdges(node.ID)
+	// Determine branch targets. Prefer the parallel_targets attr (set by the
+	// dippin adapter from ParallelConfig.Targets) which excludes the fan-in
+	// join edge. Fall back to outgoing graph edges for DOT-format pipelines
+	// that don't have the attr.
+	var edges []*pipeline.Edge
+	joinID := node.Attrs["parallel_join"]
+	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
+		for _, target := range strings.Split(targetsAttr, ",") {
+			target = strings.TrimSpace(target)
+			if target != "" {
+				edges = append(edges, &pipeline.Edge{From: node.ID, To: target})
+			}
+		}
+	} else {
+		// DOT fallback: use outgoing edges, excluding the fan-in join.
+		for _, e := range h.graph.OutgoingEdges(node.ID) {
+			if e.To != joinID {
+				edges = append(edges, e)
+			}
+		}
+	}
 	if len(edges) == 0 {
-		return pipeline.Outcome{}, fmt.Errorf("parallel node %q has no outgoing edges", node.ID)
+		return pipeline.Outcome{}, fmt.Errorf("parallel node %q has no branch targets", node.ID)
 	}
 
 	// Parse per-branch overrides from the parallel node's attrs.

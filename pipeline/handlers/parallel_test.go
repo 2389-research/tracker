@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -42,7 +43,9 @@ func buildTestGraph(branchNodeIDs []string, branchHandlerName string) *pipeline.
 		ID:      "parallel_node",
 		Shape:   "component",
 		Handler: "parallel",
-		Attrs:   map[string]string{},
+		Attrs: map[string]string{
+			"parallel_targets": strings.Join(branchNodeIDs, ","),
+		},
 	}
 	g.AddNode(parallelNode)
 
@@ -303,6 +306,7 @@ func TestParallelHandlerBranchOverrides(t *testing.T) {
 		Shape:   "component",
 		Handler: "parallel",
 		Attrs: map[string]string{
+			"parallel_targets":   "AgentA,AgentB",
 			"branch.0.target":    "AgentA",
 			"branch.0.llm_model": "gpt-4",
 			"branch.1.target":    "AgentB",
@@ -371,6 +375,7 @@ func TestParallelHandlerBranchOverridesPreserveOriginal(t *testing.T) {
 		Shape:   "component",
 		Handler: "parallel",
 		Attrs: map[string]string{
+			"parallel_targets":   "Agent",
 			"branch.0.target":    "Agent",
 			"branch.0.llm_model": "overridden-model",
 		},
