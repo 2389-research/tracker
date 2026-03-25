@@ -290,17 +290,20 @@ func (al *AgentLog) activeNodeIndicators() string {
 	return strings.Join(indicators, "\n")
 }
 
-// View renders the agent log viewport.
+// View renders the agent log viewport. The indicator is always rendered at the
+// bottom — content fills upward from the remaining space. This guarantees the
+// indicator is never pushed off-screen regardless of content size or wrapping.
 func (al *AgentLog) View() string {
-	var sb strings.Builder
-	sb.WriteString(Styles.ZoneLabel.Render("ACTIVITY LOG"))
-	sb.WriteString("\n")
+	width := al.width
+	if width <= 0 {
+		width = 80
+	}
 
-	// Build the indicator (may be multi-line for parallel nodes).
+	// 1. Build the fixed bottom section: indicator + partials.
 	indicator := al.activeNodeIndicators()
-	indicatorRows := termLines(indicator, al.width)
+	indicatorRendered := indicator + "\n"
+	bottomRows := termLines(indicator, width)
 
-	// Count in-progress partial lines from all active streams.
 	var partials []string
 	for nodeID, s := range al.streams {
 		if s.current.Len() > 0 {
@@ -308,32 +311,37 @@ func (al *AgentLog) View() string {
 			if len(al.streams) > 1 {
 				prefix = Styles.Muted.Render(nodeID+": ") + ""
 			}
-			partials = append(partials, prefix+Styles.PrimaryText.Render(s.current.String()))
+			line := prefix + Styles.PrimaryText.Render(s.current.String())
+			partials = append(partials, line)
+			bottomRows += termLines(line, width)
 		}
 	}
-	partialRows := len(partials)
 
-	// Budget for styled content lines.
-	// Total height - header(1) - indicator rows - partial line rows.
-	budget := al.height - 1 - indicatorRows - partialRows
-	if budget < 1 {
-		budget = 1
+	// 2. Calculate how many rows are available for styled content.
+	// height = header(1) + content + partials + indicator
+	contentBudget := al.height - 1 - bottomRows
+	if contentBudget < 1 {
+		contentBudget = 1
 	}
 
-	// Walk backwards through styled lines counting terminal rows.
+	// 3. Walk backwards through styled lines, counting actual terminal rows.
 	totalLines := len(al.lines)
 	usedRows := 0
 	start := totalLines
 	for start > 0 {
-		rows := termLines(al.lines[start-1].text, al.width)
-		if usedRows+rows > budget {
+		rows := termLines(al.lines[start-1].text, width)
+		if usedRows+rows > contentBudget {
 			break
 		}
 		usedRows += rows
 		start--
 	}
 
-	// Render styled lines.
+	// 4. Render: header, then content, then partials, then indicator.
+	var sb strings.Builder
+	sb.WriteString(Styles.ZoneLabel.Render("ACTIVITY LOG"))
+	sb.WriteString("\n")
+
 	if totalLines == 0 && len(partials) == 0 && indicator == " " {
 		sb.WriteString(Styles.DimText.Render("awaiting activity..."))
 		sb.WriteString("\n")
@@ -344,16 +352,12 @@ func (al *AgentLog) View() string {
 		}
 	}
 
-	// Render in-progress partial lines.
 	for _, p := range partials {
 		sb.WriteString(p)
 		sb.WriteString("\n")
 	}
 
-	// Activity indicators (always present).
-	sb.WriteString(indicator)
-	sb.WriteString("\n")
-
+	sb.WriteString(indicatorRendered)
 	return sb.String()
 }
 
