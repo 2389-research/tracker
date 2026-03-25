@@ -858,66 +858,89 @@ func chooseInterviewer(isTerminal bool) handlers.FreeformInterviewer {
 }
 
 // buildNodeList creates an ordered list of node ID/label pairs from the
-// pipeline graph. Uses the declaration order from the source file (NodeOrder)
-// when available, falling back to BFS from StartNode for DOT-format pipelines.
+// pipeline graph in topological (execution) order. Start is first, Done is
+// last, everything in between is ordered by when it would be reached during
+// execution. Uses Kahn's algorithm with BFS tie-breaking from StartNode.
 func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
-	// Prefer declaration order from the source file — this keeps nodes
-	// in the order the author wrote them, with "Done" at the end.
-	if len(graph.NodeOrder) > 0 {
-		var entries []tui.NodeEntry
-		for _, nodeID := range graph.NodeOrder {
-			node, ok := graph.Nodes[nodeID]
-			if !ok {
-				continue
-			}
-			label := node.Label
-			if label == "" {
-				label = node.ID
-			}
-			entries = append(entries, tui.NodeEntry{
-				ID:    node.ID,
-				Label: label,
-			})
-		}
-		return entries
-	}
-
-	// Fallback: BFS from StartNode for DOT-format pipelines.
 	if graph.StartNode == "" {
 		return nil
 	}
 
-	var entries []tui.NodeEntry
+	// Build in-degree map (only count non-restart edges to get forward flow).
+	inDegree := make(map[string]int)
+	for id := range graph.Nodes {
+		inDegree[id] = 0
+	}
+	for _, e := range graph.Edges {
+		if e.Attrs == nil || e.Attrs["restart"] != "true" {
+			inDegree[e.To]++
+		}
+	}
+
+	// Kahn's algorithm: start with nodes that have in-degree 0.
+	// Use a queue seeded with StartNode first for deterministic ordering.
+	var queue []string
+	if inDegree[graph.StartNode] == 0 {
+		queue = append(queue, graph.StartNode)
+	}
+	for id := range graph.Nodes {
+		if inDegree[id] == 0 && id != graph.StartNode {
+			queue = append(queue, id)
+		}
+	}
+
+	var order []string
 	visited := make(map[string]bool)
-	queue := []string{graph.StartNode}
 
 	for len(queue) > 0 {
 		nodeID := queue[0]
 		queue = queue[1:]
+
 		if visited[nodeID] {
 			continue
 		}
 		visited[nodeID] = true
+		order = append(order, nodeID)
 
+		for _, edge := range graph.OutgoingEdges(nodeID) {
+			if edge.Attrs != nil && edge.Attrs["restart"] == "true" {
+				continue // skip restart back-edges
+			}
+			inDegree[edge.To]--
+			if inDegree[edge.To] <= 0 && !visited[edge.To] {
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+
+	// Add any nodes not reached by topo sort (shouldn't happen but be safe).
+	for id := range graph.Nodes {
+		if !visited[id] {
+			order = append(order, id)
+		}
+	}
+
+	// Build entries, ensuring exit node is always last.
+	var entries []tui.NodeEntry
+	var exitEntry *tui.NodeEntry
+	for _, nodeID := range order {
 		node, ok := graph.Nodes[nodeID]
 		if !ok {
 			continue
 		}
-
 		label := node.Label
 		if label == "" {
 			label = node.ID
 		}
-		entries = append(entries, tui.NodeEntry{
-			ID:    node.ID,
-			Label: label,
-		})
-
-		for _, edge := range graph.OutgoingEdges(nodeID) {
-			if !visited[edge.To] {
-				queue = append(queue, edge.To)
-			}
+		entry := tui.NodeEntry{ID: node.ID, Label: label}
+		if nodeID == graph.ExitNode {
+			exitEntry = &entry
+			continue
 		}
+		entries = append(entries, entry)
+	}
+	if exitEntry != nil {
+		entries = append(entries, *exitEntry)
 	}
 
 	return entries
