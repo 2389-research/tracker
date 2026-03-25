@@ -445,12 +445,15 @@ workflow BuildProduct
     # Build loop: pick → implement → test → verify → mark done → pick next
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
     PickNextMilestone -> ReviewParallel  when ctx.tool_stdout contains all-done
+    PickNextMilestone -> EscalateToHuman
     Implement -> TestMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
     TestMilestone -> EscalateToHuman  when ctx.tool_stdout contains escalate
     TestMilestone -> FixMilestone  when ctx.outcome = fail
+    TestMilestone -> EscalateToHuman
     VerifyMilestone -> MarkMilestoneDone  when ctx.outcome = success
     VerifyMilestone -> FixMilestone  when ctx.outcome = fail
+    VerifyMilestone -> EscalateToHuman
     MarkMilestoneDone -> PickNextMilestone  restart: true
     FixMilestone -> TestMilestone  restart: true
 
