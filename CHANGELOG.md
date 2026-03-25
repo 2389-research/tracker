@@ -5,6 +5,20 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Hybrid Radio+Freeform Gate**: Human gates with labeled outgoing edges present a radio list of labels plus an "other" option for custom freeform feedback
+- **Split-Pane Review View**: Long human gate prompts (20+ lines) use a fullscreen split-pane with glamour-rendered scrollable viewport and textarea
+
+### Fixed
+
+- **Gate deadlocks on cancel**: Ctrl+C and Esc now close reply channels to unblock pipeline handler goroutines (was causing hangs)
+- **Activity log indicator**: indicator line no longer pushed off bottom of viewport during parallel execution
+- **Silent failure audit**: addressed remaining medium/high findings from provider error handling audit
+- **Review content**: fixed content display and hybrid gate edge cases
+
 ## [0.8.0] - 2026-03-25
 
 ### Added

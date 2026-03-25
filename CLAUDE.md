@@ -33,6 +33,12 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Safe fallbacks go to EscalateToHuman or Done, not to FixX or the same gate
 - Conditions `outcome=success` + `outcome=fail` are exhaustive — no fallback needed on those
 
+### Human gate UX
+- Freeform gates with labeled edges use the hybrid radio+freeform modal (HybridContent), NOT plain FreeformContent
+- Long prompts (20+ lines) use the split-pane ReviewContent with glamour-rendered viewport, NOT inline freeform
+- All modal content types must implement Cancellable — Ctrl+C calls Cancel() to close reply channels and prevent goroutine hangs
+- Never block a pipeline handler goroutine on a channel send/receive without a cancellation path
+
 ### TUI stability
 - The activity log is append-only with line-level styling — no glamour markdown rendering
 - Each line is styled once on newline and never re-rendered

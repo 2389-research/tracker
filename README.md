@@ -72,11 +72,13 @@ workflow MyPipeline
 | Type | Shape | Description |
 |------|-------|-------------|
 | `agent` | box | LLM agent session (codergen) |
-| `human` | hexagon | Human-in-the-loop gate (choice or freeform) |
+| `human` | hexagon | Human-in-the-loop gate (choice, freeform, or hybrid) |
 | `tool` | parallelogram | Shell command execution |
 | `parallel` | component | Fan-out to concurrent branches |
 | `fan_in` | tripleoctagon | Join parallel branches |
 | `subgraph` | tab | Execute a referenced sub-pipeline |
+| `manager_loop` | house | Managed iteration loop |
+| `conditional` | diamond | Condition-based routing |
 
 ### Variable Interpolation
 
@@ -118,7 +120,13 @@ The `working_dir` attribute is validated against path traversal and shell metach
 
 ### Human Gates
 
-Freeform mode captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`. Esc with empty textarea cancels without submitting.
+Three gate modes:
+
+- **Choice mode** (default): presents outgoing edge labels as a radio list. Arrow keys navigate, Enter selects.
+- **Freeform mode** (`mode: freeform`): captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`.
+- **Hybrid mode** (automatic): when a freeform gate has labeled outgoing edges, the TUI presents a radio list of labels plus an "other" option for custom feedback. Selecting a label submits it directly; selecting "other" opens a textarea.
+
+Long prompts (20+ lines, e.g., plan approval) automatically use a split-pane **review view**: scrollable glamour-rendered viewport on top, textarea on bottom. PgUp/PgDn scroll the plan.
 
 ```dip
 human ApproveSpec
@@ -131,7 +139,7 @@ edges
   ApproveSpec -> Done   label: "reject"
 ```
 
-Submit with **Ctrl+S**. Enter inserts newlines. Esc cancels (empty) or submits (with content).
+Submit with **Ctrl+S**. Enter inserts newlines. Esc cancels (empty) or submits (with content). Ctrl+C cancels and unblocks the pipeline (no deadlock).
 
 ### Providers
 
@@ -145,7 +153,7 @@ Non-retryable provider errors (quota exceeded, auth failure, model not found) im
 
 The terminal UI shows:
 
-- **Pipeline panel**: node list in source declaration order with status lamps, thinking spinners, and tool execution indicators
+- **Pipeline panel**: node list in topological execution order (Kahn's algorithm) with status lamps, thinking spinners, and tool execution indicators
 - **Activity log**: per-node streaming with line-level formatting (headers, code blocks, bullets), node change separators, and multi-node activity indicators for parallel execution
 - **Subgraph nodes**: dynamically inserted and indented under their parent
 
@@ -168,6 +176,8 @@ The terminal UI shows:
 | Ctrl+O | Toggle expand/collapse tool output |
 | Ctrl+S | Submit human gate input |
 | Esc | Cancel (empty) or submit (with content) |
+| PgUp/PgDn | Scroll review viewport (plan approval) |
+| q | Quit |
 
 ## Decision Audit Trail
 
@@ -196,7 +206,7 @@ grep 'decision_outcome' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
 Layer 1: LLM Client (anthropic, openai, gemini providers)
 Layer 2: Agent Session (tool execution, context compaction, event streaming)
 Layer 3: Pipeline Engine (graph execution, edge routing, checkpoints, decision audit)
-    ├── Handlers: codergen, tool, human, parallel, fan_in, subgraph, conditional
+    ├── Handlers: codergen, tool, human, parallel, fan_in, subgraph, conditional, manager_loop
     ├── Dippin Adapter: converts IR to Graph, synthesizes implicit edges
     └── TUI: bubbletea app with node list, activity log, modal overlays
 ```
