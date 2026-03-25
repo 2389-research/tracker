@@ -150,29 +150,41 @@ func (h *HybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 }
 
 func (h *HybridContent) submitLabel(label string) tea.Cmd {
+	if h.done {
+		return nil
+	}
 	h.done = true
 	if h.replyCh != nil {
 		h.replyCh <- label
+		h.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
 func (h *HybridContent) submitOther() tea.Cmd {
 	val := strings.TrimSpace(h.textarea.Value())
-	if val == "" {
+	if val == "" || h.done {
 		return nil
 	}
 	h.done = true
 	if h.replyCh != nil {
 		h.replyCh <- val
+		h.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
+// Cancel implements Cancellable for external cancellation (e.g., Ctrl+C).
+func (h *HybridContent) Cancel() { h.cancel() }
+
 func (h *HybridContent) cancel() tea.Cmd {
+	if h.done {
+		return nil
+	}
 	h.done = true
 	if h.replyCh != nil {
 		close(h.replyCh)
+		h.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }

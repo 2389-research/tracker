@@ -17,6 +17,13 @@ type ModalContent interface {
 	View() string
 }
 
+// Cancellable is an optional interface for modal content that can be
+// cancelled externally (e.g., on Ctrl+C quit). Implementations should
+// close their reply channel to unblock the pipeline handler.
+type Cancellable interface {
+	Cancel()
+}
+
 // Modal renders a bordered overlay centered over background terminal content.
 type Modal struct {
 	width   int
@@ -47,6 +54,17 @@ func (m *Modal) Show(content ModalContent) {
 func (m *Modal) Hide() {
 	m.visible = false
 	m.content = nil
+}
+
+// CancelAndHide cancels the modal content (closing reply channels)
+// and hides it. Used on Ctrl+C to prevent pipeline goroutine hangs.
+func (m *Modal) CancelAndHide() {
+	if m.content != nil {
+		if c, ok := m.content.(Cancellable); ok {
+			c.Cancel()
+		}
+	}
+	m.Hide()
 }
 
 // Visible reports whether the modal is currently displayed.
@@ -154,11 +172,28 @@ func (c *ChoiceContent) Update(msg tea.Msg) tea.Cmd {
 			selected := c.choices[c.cursor]
 			if c.replyCh != nil {
 				c.replyCh <- selected
+				c.replyCh = nil
 			}
 			return func() tea.Msg { return MsgModalDismiss{} }
 		}
+	case tea.KeyEscape:
+		c.done = true
+		if c.replyCh != nil {
+			close(c.replyCh)
+			c.replyCh = nil
+		}
+		return func() tea.Msg { return MsgModalDismiss{} }
 	}
 	return nil
+}
+
+// Cancel implements Cancellable for external cancellation (e.g., Ctrl+C).
+func (c *ChoiceContent) Cancel() {
+	if !c.done && c.replyCh != nil {
+		c.done = true
+		close(c.replyCh)
+		c.replyCh = nil
+	}
 }
 
 // View renders the prompt and choice list with a cursor indicator.
@@ -256,12 +291,19 @@ func (f *FreeformContent) Update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+// Cancel implements Cancellable for external cancellation (e.g., Ctrl+C).
+func (f *FreeformContent) Cancel() { f.cancel() }
+
 // cancel dismisses the modal without submitting any value.
 // Closes the reply channel so the pipeline handler unblocks.
 func (f *FreeformContent) cancel() tea.Cmd {
+	if f.done {
+		return nil
+	}
 	f.done = true
 	if f.replyCh != nil {
 		close(f.replyCh)
+		f.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
@@ -272,9 +314,13 @@ func (f *FreeformContent) submit() tea.Cmd {
 	if val == "" {
 		return nil
 	}
+	if f.done {
+		return nil
+	}
 	f.done = true
 	if f.replyCh != nil {
 		f.replyCh <- val
+		f.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }

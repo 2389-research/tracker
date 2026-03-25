@@ -101,6 +101,7 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKeyMsg processes keyboard input, returning early for quit and modal keys.
 func (a AppModel) handleKeyMsg(km tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if km.Type == tea.KeyCtrlC {
+		a.modal.CancelAndHide()
 		return a, tea.Quit
 	}
 	if a.modal.Visible() {
@@ -298,9 +299,13 @@ func buildFreeformContent(m MsgGateFreeform, width, height int) ModalContent {
 	isLong := strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000
 
 	// Long prompts always get the review pane (plan needs to be readable).
-	// If there are also labels, they become the textarea placeholder hint.
+	// If there are also labels, show them in the textarea placeholder.
 	if isLong {
-		return NewReviewContent(m.Prompt, m.ReplyCh, width, height)
+		rc := NewReviewContent(m.Prompt, m.ReplyCh, width, height)
+		if len(m.Labels) > 0 {
+			rc.textarea.Placeholder = strings.Join(m.Labels, " / ") + " (or type feedback)"
+		}
+		return rc
 	}
 
 	// Short prompt with labels gets the hybrid radio view.

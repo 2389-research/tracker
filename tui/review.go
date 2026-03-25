@@ -18,6 +18,10 @@ import (
 // review view instead of the simple freeform modal.
 const longPromptThreshold = 20
 
+// reviewChrome is the number of rows consumed by non-viewport elements:
+// textarea(4) + divider(1) + header(1) + hint(1) + padding(2) = 9
+const reviewChrome = 9
+
 // ReviewContent presents a split-pane view for reviewing long content
 // (e.g., execution plans). Top pane is a scrollable glamour-rendered
 // viewport, bottom pane is a textarea for the user's response.
@@ -38,6 +42,13 @@ func (r *ReviewContent) IsFullscreen() bool { return true }
 // rendered via glamour in the viewport. A temp file is written so the user
 // can open the plan in an external editor.
 func NewReviewContent(prompt string, replyCh chan<- string, width, height int) *ReviewContent {
+	if width < 40 {
+		width = 80
+	}
+	if height < 10 {
+		height = 24
+	}
+
 	// Split prompt into the gate label and the plan content.
 	label, plan := splitPromptAndPlan(prompt)
 
@@ -54,12 +65,8 @@ func NewReviewContent(prompt string, replyCh chan<- string, width, height int) *
 		rendered = header + "\n\n" + rendered
 	}
 
-	// Calculate split: viewport gets most of the space, textarea gets 6 lines.
-	taHeight := 4
-	dividerHeight := 1
-	headerHeight := 1
-	hintHeight := 1
-	vpHeight := height - taHeight - dividerHeight - headerHeight - hintHeight - 2
+	// Calculate split: viewport gets most of the space, textarea gets 4 lines.
+	vpHeight := height - reviewChrome
 	if vpHeight < 5 {
 		vpHeight = 5
 	}
@@ -73,7 +80,7 @@ func NewReviewContent(prompt string, replyCh chan<- string, width, height int) *
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
 	ta.SetWidth(width - 4)
-	ta.SetHeight(taHeight)
+	ta.SetHeight(4)
 	ta.CharLimit = 0
 	ta.Focus()
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
@@ -95,8 +102,7 @@ func NewReviewContent(prompt string, replyCh chan<- string, width, height int) *
 func (r *ReviewContent) SetSize(w, h int) {
 	r.width = w
 	r.height = h
-	taHeight := 4
-	vpHeight := h - taHeight - 4
+	vpHeight := h - reviewChrome
 	if vpHeight < 5 {
 		vpHeight = 5
 	}
@@ -132,13 +138,14 @@ func (r *ReviewContent) Update(msg tea.Msg) tea.Cmd {
 
 func (r *ReviewContent) submit() tea.Cmd {
 	val := strings.TrimSpace(r.textarea.Value())
-	if val == "" {
+	if val == "" || r.done {
 		return nil
 	}
 	r.done = true
 	r.cleanup()
 	if r.replyCh != nil {
 		r.replyCh <- val
+		r.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
@@ -151,11 +158,18 @@ func (r *ReviewContent) cleanup() {
 	}
 }
 
+// Cancel implements Cancellable for external cancellation (e.g., Ctrl+C).
+func (r *ReviewContent) Cancel() { r.cancel() }
+
 func (r *ReviewContent) cancel() tea.Cmd {
+	if r.done {
+		return nil
+	}
 	r.done = true
 	r.cleanup()
 	if r.replyCh != nil {
 		close(r.replyCh)
+		r.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
