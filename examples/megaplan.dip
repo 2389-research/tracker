@@ -15,6 +15,7 @@ workflow Megaplan
 
   tool SetupEnvironment
     label: "Setup .ai workspace"
+    timeout: 60s
     command:
       set -eu
       mkdir -p .ai/drafts .ai/sprints
@@ -25,6 +26,7 @@ workflow Megaplan
 
   tool DetermineSprintId
     label: "Determine Sprint ID"
+    timeout: 60s
     command:
       set -eu
       mkdir -p .ai
@@ -310,6 +312,7 @@ workflow Megaplan
 
   tool PersistSprintPlaceholder
     label: "Persist Sprint Placeholder"
+    timeout: 60s
     command:
       set -eu
       mkdir -p .ai/sprints
@@ -326,6 +329,7 @@ workflow Megaplan
 
   tool SyncLedger
     label: "Sync Ledger"
+    timeout: 60s
     command:
       set -eu
       mkdir -p .ai

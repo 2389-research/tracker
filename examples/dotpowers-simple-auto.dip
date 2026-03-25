@@ -50,6 +50,7 @@ workflow dotpowers_simple_auto
     fidelity: full
     goal_gate: true
     retry_target: ExploreIdea
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -88,6 +89,7 @@ workflow dotpowers_simple_auto
     fidelity: full
     goal_gate: true
     retry_target: AutoBrainstorm
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -139,6 +141,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: WriteDesignBrief
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -176,6 +179,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: CommitBrief
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -302,6 +306,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: PatchPlan
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -385,6 +390,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: CommitPlan
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -400,6 +406,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: SetupProject
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -588,6 +595,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: ImplementTask
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -635,6 +643,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: ImplementTask
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -795,6 +804,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: AutoRecover
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -870,6 +880,7 @@ workflow dotpowers_simple_auto
     fidelity: summary:high
     goal_gate: true
     retry_target: FinalReview
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -933,6 +944,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: FailureSummary
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -961,6 +973,7 @@ workflow dotpowers_simple_auto
     provider: anthropic
     goal_gate: true
     retry_target: CreatePR
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 

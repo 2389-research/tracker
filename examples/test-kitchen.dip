@@ -50,6 +50,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: ExploreIdea
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -89,6 +90,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: DesignExploreOpus
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -125,6 +127,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: DesignExploreGPT
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -161,6 +164,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: DesignExploreGemini
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -197,6 +201,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: ConsolidateDesigns
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -249,6 +254,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: IncorporateDesignFeedback
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -269,6 +275,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CommitBrief
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -395,6 +402,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: PatchPlan
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -478,6 +486,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CommitPlan
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -493,6 +502,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: SetupProject
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -836,6 +846,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: PickWinner
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -897,6 +908,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: PickWinner
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -944,6 +956,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: PickWinner
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1109,6 +1122,7 @@ workflow dotpowers
     fidelity: full
     goal_gate: true
     retry_target: ResumeAfterHelp
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1168,6 +1182,7 @@ workflow dotpowers
     fidelity: summary:high
     goal_gate: true
     retry_target: FinalReviewOpus
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1209,6 +1224,7 @@ workflow dotpowers
     fidelity: summary:high
     goal_gate: true
     retry_target: FinalReviewGPT
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1245,6 +1261,7 @@ workflow dotpowers
     fidelity: summary:high
     goal_gate: true
     retry_target: FinalReviewGemini
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1283,6 +1300,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CritiqueOpusOnGPT
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1294,6 +1312,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CritiqueOpusOnGemini
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1305,6 +1324,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CritiqueGPTOnOpus
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1316,6 +1336,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CritiqueGPTOnGemini
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1327,6 +1348,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CritiqueGeminiOnOpus
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1338,6 +1360,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CritiqueGeminiOnGPT
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1398,6 +1421,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: FailureSummary
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 
@@ -1426,6 +1450,7 @@ workflow dotpowers
     provider: anthropic
     goal_gate: true
     retry_target: CreatePR
+    max_retries: 3
     prompt:
       You are working in `run.working_dir`.
 

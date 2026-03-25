@@ -14,6 +14,7 @@ workflow SemportThematic
 
   tool EnsureWorkspace
     label: "Ensure semport workspace files"
+    timeout: 60s
     command:
       set -eu
       mkdir -p .ai/semport/$target_name
@@ -90,6 +91,7 @@ workflow SemportThematic
 
   tool BuildGate
     label: "Build gate (must pass)"
+    timeout: 60s
     command:
       set -eu
       swift build --target $target_name >/tmp/semport-thematic-$target_name-build.log 2>&1 || {
@@ -141,6 +143,7 @@ workflow SemportThematic
 
   tool CheckCompletion
     label: "Check if checklist fully complete"
+    timeout: 60s
     command:
       set -eu
       if rg -n '^- \[ \]' .ai/semport/$target_name/thematic-spec.md >/dev/null 2>&1; then
