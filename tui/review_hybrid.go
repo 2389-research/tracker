@@ -19,7 +19,6 @@ type ReviewHybridContent struct {
 	viewport viewport.Model
 	labels   []string
 	cursor   int
-	onOther  bool
 	replyCh  chan<- string
 	done     bool
 	width    int
@@ -48,7 +47,7 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 	}
 
 	// Radio options take ~(len(labels)+3) lines. Viewport gets the rest.
-	radioHeight := len(labels) + 4 // labels + other + hints + divider
+	radioHeight := len(labels) + 3 // labels + hints + divider
 	vpHeight := height - radioHeight - 1
 	if vpHeight < 5 {
 		vpHeight = 5
@@ -91,8 +90,7 @@ func (r *ReviewHybridContent) SetSize(w, h int) {
 	r.viewport.Height = vpHeight
 }
 
-func (r *ReviewHybridContent) totalOptions() int { return len(r.labels) + 1 }
-func (r *ReviewHybridContent) isOnOther() bool   { return r.cursor >= len(r.labels) }
+func (r *ReviewHybridContent) totalOptions() int { return len(r.labels) }
 
 // Update handles navigation and selection.
 func (r *ReviewHybridContent) Update(msg tea.Msg) tea.Cmd {
@@ -109,10 +107,9 @@ func (r *ReviewHybridContent) Update(msg tea.Msg) tea.Cmd {
 		r.viewport, cmd = r.viewport.Update(msg)
 		return cmd
 	case "ctrl+s", "enter":
-		if r.isOnOther() {
-			return nil // can't submit "other" without a textarea in this view
+		if len(r.labels) > 0 {
+			return r.submitLabel(r.labels[r.cursor])
 		}
-		return r.submitLabel(r.labels[r.cursor])
 	case "esc":
 		return r.cancel()
 	}
