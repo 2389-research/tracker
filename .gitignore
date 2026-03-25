@@ -12,5 +12,7 @@ bin/
 /tracker-conformance
 /generate
 .DS_Store
-.tracker/runs/
+.tracker/
 .scratch/
+coverage.out
+*.bak

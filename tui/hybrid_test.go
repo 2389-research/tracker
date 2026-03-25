@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -75,21 +76,8 @@ func TestHybridContentViewRendersLabels(t *testing.T) {
 	h := NewHybridContent("Pick one", []string{"a", "b", "c"}, "", nil)
 	view := h.View()
 	for _, label := range []string{"a", "b", "c", "other"} {
-		if !contains(view, label) {
+		if !strings.Contains(view, label) {
 			t.Errorf("expected %q in view", label)
 		}
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && searchString(s, sub)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
