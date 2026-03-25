@@ -296,25 +296,20 @@ func (a *AppModel) SetInitialNodes(entries []NodeEntry) {
 // - Labels + short prompt → HybridContent (radio + freeform)
 // - Short prompt, no labels → FreeformContent (simple modal)
 func buildFreeformContent(m MsgGateFreeform, width, height int) ModalContent {
-	isLong := strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000
-
-	// Long prompts always get the review pane (plan needs to be readable).
-	// If there are also labels, show them in the textarea placeholder.
-	if isLong {
-		rc := NewReviewContent(m.Prompt, m.ReplyCh, width, height)
-		if len(m.Labels) > 0 {
-			rc.textarea.Placeholder = strings.Join(m.Labels, " / ") + " (or type feedback)"
-		}
-		return rc
-	}
-
-	// Short prompt with labels gets the hybrid radio view.
+	// Labels always get the hybrid radio view — the user needs to see their options.
+	// The plan content (after ---) stays in the activity log where it's scrollable.
 	if len(m.Labels) > 0 {
 		label := m.Prompt
 		if idx := strings.Index(label, "\n\n---\n"); idx >= 0 {
 			label = label[:idx]
 		}
 		return NewHybridContent(label, m.Labels, m.Default, m.ReplyCh)
+	}
+
+	// Long prompts without labels get the review pane.
+	isLong := strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000
+	if isLong {
+		return NewReviewContent(m.Prompt, m.ReplyCh, width, height)
 	}
 
 	return NewFreeformContent(m.Prompt, m.ReplyCh)
