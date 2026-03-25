@@ -5,7 +5,9 @@ project_name: tracker
 before:
   hooks:
     - go mod tidy
-    - make test
+    - make fmt-check
+    - make vet
+    - make test-short
 
 builds:
   - id: tracker
@@ -65,8 +67,10 @@ snapshot:
 
 changelog:
   sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
+  groups:
+    - title: Features
+      regexp: '^feat'
+    - title: Fixes
+      regexp: '^fix'
+    - title: Other
+      order: 999
