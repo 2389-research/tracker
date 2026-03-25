@@ -5,7 +5,7 @@ workflow BuildProduct
 
   defaults
     max_retries: 3
-    max_restarts: 30
+    max_restarts: 50
     fidelity: full
     model: claude-sonnet-4-6
     provider: anthropic
@@ -148,6 +148,23 @@ workflow BuildProduct
     timeout: 300s
     command:
       set -eu
+
+      # Track fix attempts per milestone. After 3 failed fix cycles,
+      # signal escalation instead of looping forever.
+      ATTEMPT_FILE=".ai/milestones/fix_attempts"
+      ATTEMPTS=0
+      if [ -f "$ATTEMPT_FILE" ]; then
+        ATTEMPTS=$(cat "$ATTEMPT_FILE")
+      fi
+      ATTEMPTS=$((ATTEMPTS + 1))
+      echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+
+      if [ "$ATTEMPTS" -gt 3 ]; then
+        echo "ESCALATE: milestone failed after 3 fix attempts"
+        printf 'escalate'
+        exit 1
+      fi
+
       # Run the project's test suite
       if [ -f go.mod ]; then
         go build ./... 2>&1
@@ -169,6 +186,8 @@ workflow BuildProduct
         eval "$VERIFY_CMD" 2>&1
       fi
 
+      # Tests passed — reset attempt counter
+      echo "0" > "$ATTEMPT_FILE"
       printf 'tests-pass'
 
   agent VerifyMilestone
@@ -200,6 +219,8 @@ workflow BuildProduct
       DONE_COUNT=$(ls "$DONE_DIR" 2>/dev/null | wc -l | tr -d ' ')
       NEXT=$((DONE_COUNT + 1))
       cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
+      # Reset fix attempt counter for next milestone
+      rm -f .ai/milestones/fix_attempts
       rm .ai/milestones/current.md
       printf "milestone-$NEXT-complete"
 
@@ -403,6 +424,7 @@ workflow BuildProduct
     PickNextMilestone -> ReviewParallel  when ctx.tool_stdout contains all-done
     Implement -> TestMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
+    TestMilestone -> EscalateToHuman  when ctx.tool_stdout contains escalate
     TestMilestone -> FixMilestone  when ctx.outcome = fail
     VerifyMilestone -> MarkMilestoneDone  when ctx.outcome = success
     VerifyMilestone -> FixMilestone  when ctx.outcome = fail
