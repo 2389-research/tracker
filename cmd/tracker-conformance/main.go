@@ -33,31 +33,37 @@ func main() {
 // run executes the tracker-conformance CLI, dispatching on args[1] as the subcommand.
 // Input comes from stdin; output goes to stdout; errors and usage go to stderr.
 // Returns the exit code.
+func printConformanceUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage: tracker-conformance <subcommand>")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  client-from-env   Check provider configuration from env vars")
+	fmt.Fprintln(w, "  list-models       List all known models")
+	fmt.Fprintln(w, "  complete           Send a completion request")
+	fmt.Fprintln(w, "  stream             Send a streaming request")
+	fmt.Fprintln(w, "  tool-call          Execute a tool call")
+	fmt.Fprintln(w, "  generate-object    Generate a structured object")
+	fmt.Fprintln(w, "  session-create     Create a conversation session")
+	fmt.Fprintln(w, "  process-input      Process user input in a session")
+	fmt.Fprintln(w, "  tool-dispatch      Dispatch tool execution")
+	fmt.Fprintln(w, "  steering           Apply mid-session steering")
+	fmt.Fprintln(w, "  events             List pipeline events")
+	fmt.Fprintln(w, "  parse              Parse a pipeline DOT file")
+	fmt.Fprintln(w, "  validate           Validate a pipeline graph")
+	fmt.Fprintln(w, "  run                Run a pipeline")
+	fmt.Fprintln(w, "  list-handlers      List registered handlers")
+}
+
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
-		fmt.Fprintln(stderr, "Usage: tracker-conformance <subcommand>")
-		fmt.Fprintln(stderr, "")
-		fmt.Fprintln(stderr, "Subcommands:")
-		fmt.Fprintln(stderr, "  client-from-env   Check provider configuration from env vars")
-		fmt.Fprintln(stderr, "  list-models       List all known models")
-		fmt.Fprintln(stderr, "  complete           Send a completion request")
-		fmt.Fprintln(stderr, "  stream             Send a streaming request")
-		fmt.Fprintln(stderr, "  tool-call          Execute a tool call")
-		fmt.Fprintln(stderr, "  generate-object    Generate a structured object")
-		fmt.Fprintln(stderr, "  session-create     Create a conversation session")
-		fmt.Fprintln(stderr, "  process-input      Process user input in a session")
-		fmt.Fprintln(stderr, "  tool-dispatch      Dispatch tool execution")
-		fmt.Fprintln(stderr, "  steering           Apply mid-session steering")
-		fmt.Fprintln(stderr, "  events             List pipeline events")
-		fmt.Fprintln(stderr, "  parse              Parse a pipeline DOT file")
-		fmt.Fprintln(stderr, "  validate           Validate a pipeline graph")
-		fmt.Fprintln(stderr, "  run                Run a pipeline")
-		fmt.Fprintln(stderr, "  list-handlers      List registered handlers")
+		printConformanceUsage(stderr)
 		return 1
 	}
 
-	subcmd := args[1]
+	return dispatchSubcommand(args[1], args, stdin, stdout, stderr)
+}
 
+func dispatchSubcommand(subcmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch subcmd {
 	case "client-from-env":
 		return handleClientFromEnv(stdout, stderr)

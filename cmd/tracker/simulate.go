@@ -162,37 +162,53 @@ func printSimExecutionPlan(w io.Writer, graph *pipeline.Graph) {
 			continue
 		}
 
-		label := node.Label
-		if label == "" || label == node.ID {
-			label = node.ID
-		}
+		printSimPlanStep(w, node, step)
+		queue = printSimPlanEdges(w, graph, nodeID, visited, queue)
+	}
 
-		// Show step number with handler type.
-		fmt.Fprintf(w, "  %2d. %s  (%s)\n", step, label, node.Handler)
+	printSimUnreachable(w, graph, visited)
+}
 
-		// Show outgoing edges.
-		edges := graph.OutgoingEdges(nodeID)
-		for _, edge := range edges {
-			arrow := "\u2514\u2500>"
-			extra := ""
-			if edge.Label != "" {
-				extra = fmt.Sprintf(" [%s]", edge.Label)
-			}
-			if edge.Condition != "" {
-				extra += fmt.Sprintf(" (when: %s)", edge.Condition)
-			}
-			fmt.Fprintf(w, "      %s %s%s\n", arrow, edge.To, extra)
-			if !visited[edge.To] {
-				queue = append(queue, edge.To)
-			}
-		}
+// printSimPlanStep prints a single step in the execution plan.
+func printSimPlanStep(w io.Writer, node *pipeline.Node, step int) {
+	label := node.Label
+	if label == "" || label == node.ID {
+		label = node.ID
+	}
+	fmt.Fprintf(w, "  %2d. %s  (%s)\n", step, label, node.Handler)
+}
 
-		if len(edges) == 0 && nodeID != graph.ExitNode {
-			fmt.Fprintln(w, "      ! dead end (no outgoing edges)")
+// printSimPlanEdges prints outgoing edges for a node and enqueues unvisited targets.
+func printSimPlanEdges(w io.Writer, graph *pipeline.Graph, nodeID string, visited map[string]bool, queue []string) []string {
+	edges := graph.OutgoingEdges(nodeID)
+	for _, edge := range edges {
+		extra := formatEdgeAnnotation(*edge)
+		fmt.Fprintf(w, "      \u2514\u2500> %s%s\n", edge.To, extra)
+		if !visited[edge.To] {
+			queue = append(queue, edge.To)
 		}
 	}
 
-	// Check for unreachable nodes.
+	if len(edges) == 0 && nodeID != graph.ExitNode {
+		fmt.Fprintln(w, "      ! dead end (no outgoing edges)")
+	}
+	return queue
+}
+
+// formatEdgeAnnotation returns label and condition annotations for an edge.
+func formatEdgeAnnotation(edge pipeline.Edge) string {
+	extra := ""
+	if edge.Label != "" {
+		extra = fmt.Sprintf(" [%s]", edge.Label)
+	}
+	if edge.Condition != "" {
+		extra += fmt.Sprintf(" (when: %s)", edge.Condition)
+	}
+	return extra
+}
+
+// printSimUnreachable reports any nodes not visited during BFS.
+func printSimUnreachable(w io.Writer, graph *pipeline.Graph, visited map[string]bool) {
 	var unreachable []string
 	for id := range graph.Nodes {
 		if !visited[id] {

@@ -84,9 +84,33 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 	gr := geminiRequest{}
 
 	// Extract system/developer messages into systemInstruction.
+	gr.SystemInstruction, gr.Contents = extractSystemAndContents(req.Messages)
+
+	// Tool definitions.
+	gr.Tools = translateGeminiTools(req.Tools)
+
+	// Tool choice.
+	if req.ToolChoice != nil {
+		gr.ToolConfig = translateToolChoice(req.ToolChoice)
+	}
+
+	// Generation config.
+	gr.GenerationConfig = buildGenerationConfig(req)
+
+	body, err := json.Marshal(gr)
+	if err != nil {
+		return nil, err
+	}
+
+	return mergeProviderOptions(body, req.ProviderOptions, "gemini")
+}
+
+// extractSystemAndContents separates system/developer messages into a
+// systemInstruction and converts remaining messages to Gemini contents.
+func extractSystemAndContents(messages []llm.Message) (*geminiContent, []geminiContent) {
 	var sysParts []geminiPart
-	var msgs []llm.Message
-	for _, m := range req.Messages {
+	var contents []geminiContent
+	for _, m := range messages {
 		if m.Role == llm.RoleSystem || m.Role == llm.RoleDeveloper {
 			for _, part := range m.Content {
 				if part.Kind == llm.KindText {
@@ -94,85 +118,78 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 				}
 			}
 		} else {
-			msgs = append(msgs, m)
+			content := translateMessageToContent(m)
+			if content != nil {
+				contents = append(contents, *content)
+			}
 		}
 	}
-	if len(sysParts) > 0 {
-		gr.SystemInstruction = &geminiContent{Parts: sysParts}
+	if len(sysParts) == 0 {
+		return nil, contents
 	}
+	return &geminiContent{Parts: sysParts}, contents
+}
 
-	// Build contents array.
-	for _, m := range msgs {
-		content := translateMessageToContent(m)
-		if content != nil {
-			gr.Contents = append(gr.Contents, *content)
-		}
+// translateGeminiTools converts unified tool definitions to Gemini format.
+func translateGeminiTools(tools []llm.ToolDefinition) []geminiToolDecl {
+	if len(tools) == 0 {
+		return nil
 	}
-
-	// Tool definitions.
-	if len(req.Tools) > 0 {
-		var decls []geminiFuncDecl
-		for _, t := range req.Tools {
-			decls = append(decls, geminiFuncDecl{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  t.Parameters,
-			})
-		}
-		gr.Tools = []geminiToolDecl{{FunctionDeclarations: decls}}
+	var decls []geminiFuncDecl
+	for _, t := range tools {
+		decls = append(decls, geminiFuncDecl{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.Parameters,
+		})
 	}
+	return []geminiToolDecl{{FunctionDeclarations: decls}}
+}
 
-	// Tool choice.
-	if req.ToolChoice != nil {
-		gr.ToolConfig = translateToolChoice(req.ToolChoice)
-	}
-
-	// Determine if response format requires generation config fields.
+// buildGenerationConfig creates a Gemini generation config from the request fields.
+func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 	needsResponseFormat := req.ResponseFormat != nil &&
 		(req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
 
-	// Generation config.
-	if req.Temperature != nil || req.MaxTokens != nil || req.TopP != nil || len(req.StopSequences) > 0 || needsResponseFormat {
-		gc := &geminiGenConfig{
-			Temperature:   req.Temperature,
-			TopP:          req.TopP,
-			StopSequences: req.StopSequences,
-		}
-		if req.MaxTokens != nil {
-			gc.MaxOutputTokens = req.MaxTokens
-		}
-		if needsResponseFormat {
-			gc.ResponseMimeType = "application/json"
-			if req.ResponseFormat.Type == "json_schema" && len(req.ResponseFormat.JSONSchema) > 0 {
-				gc.ResponseSchema = req.ResponseFormat.JSONSchema
-			}
-		}
-		gr.GenerationConfig = gc
+	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat {
+		return nil
 	}
 
-	body, err := json.Marshal(gr)
-	if err != nil {
+	gc := &geminiGenConfig{
+		Temperature:   req.Temperature,
+		TopP:          req.TopP,
+		StopSequences: req.StopSequences,
+	}
+	if req.MaxTokens != nil {
+		gc.MaxOutputTokens = req.MaxTokens
+	}
+	if needsResponseFormat {
+		gc.ResponseMimeType = "application/json"
+		if req.ResponseFormat.Type == "json_schema" && len(req.ResponseFormat.JSONSchema) > 0 {
+			gc.ResponseSchema = req.ResponseFormat.JSONSchema
+		}
+	}
+	return gc
+}
+
+// mergeProviderOptions merges provider-specific options into the JSON body.
+func mergeProviderOptions(body []byte, providerOpts map[string]any, providerKey string) ([]byte, error) {
+	opts, ok := providerOpts[providerKey]
+	if !ok {
+		return body, nil
+	}
+	optsMap, ok := opts.(map[string]any)
+	if !ok {
+		return body, nil
+	}
+	var bodyMap map[string]any
+	if err := json.Unmarshal(body, &bodyMap); err != nil {
 		return nil, err
 	}
-
-	// Merge provider_options["gemini"] into the body.
-	if opts, ok := req.ProviderOptions["gemini"]; ok {
-		if optsMap, ok := opts.(map[string]any); ok {
-			var bodyMap map[string]any
-			if err := json.Unmarshal(body, &bodyMap); err != nil {
-				return nil, err
-			}
-			for k, v := range optsMap {
-				bodyMap[k] = v
-			}
-			body, err = json.Marshal(bodyMap)
-			if err != nil {
-				return nil, err
-			}
-		}
+	for k, v := range optsMap {
+		bodyMap[k] = v
 	}
-
-	return body, nil
+	return json.Marshal(bodyMap)
 }
 
 // translateMessageToContent converts a unified llm.Message to a Gemini content item.

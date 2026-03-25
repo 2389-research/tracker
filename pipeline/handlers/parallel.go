@@ -48,32 +48,11 @@ func (h *ParallelHandler) Name() string { return "parallel" }
 // If the parallel node has branch.N.* attributes, those override the target node's
 // attrs (e.g., llm_model, llm_provider, fidelity) for that specific branch.
 func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	// Determine branch targets. Prefer the parallel_targets attr (set by the
-	// dippin adapter from ParallelConfig.Targets) which excludes the fan-in
-	// join edge. Fall back to outgoing graph edges for DOT-format pipelines
-	// that don't have the attr.
-	var edges []*pipeline.Edge
-	joinID := node.Attrs["parallel_join"]
-	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
-		for _, target := range strings.Split(targetsAttr, ",") {
-			target = strings.TrimSpace(target)
-			if target != "" {
-				edges = append(edges, &pipeline.Edge{From: node.ID, To: target})
-			}
-		}
-	} else {
-		// DOT fallback: use outgoing edges, excluding the fan-in join.
-		for _, e := range h.graph.OutgoingEdges(node.ID) {
-			if e.To != joinID {
-				edges = append(edges, e)
-			}
-		}
-	}
-	if len(edges) == 0 {
-		return pipeline.Outcome{}, fmt.Errorf("parallel node %q has no branch targets", node.ID)
+	edges, err := h.resolveBranchEdges(node)
+	if err != nil {
+		return pipeline.Outcome{}, err
 	}
 
-	// Parse per-branch overrides from the parallel node's attrs.
 	branchOverrides := parseBranchOverrides(node.Attrs)
 
 	branchIDs := make([]string, len(edges))
@@ -87,133 +66,15 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
 	})
 
-	// Snapshot the shared context once before spawning branches.
-	snapshot := pctx.Snapshot()
-	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
+	collected := h.executeBranches(ctx, edges, branchOverrides, pctx)
 
-	type branchResult struct {
-		index  int
-		result ParallelResult
-	}
-
-	resultsCh := make(chan branchResult, len(edges))
-	var wg sync.WaitGroup
-
-	for i, edge := range edges {
-		targetNode, ok := h.graph.Nodes[edge.To]
-		if !ok {
-			resultsCh <- branchResult{
-				index: i,
-				result: ParallelResult{
-					NodeID: edge.To,
-					Status: pipeline.OutcomeFail,
-					Error:  fmt.Sprintf("target node %q not found in graph", edge.To),
-				},
-			}
-			continue
-		}
-
-		// Apply per-branch overrides if present.
-		execNode := applyBranchOverrides(targetNode, branchOverrides)
-
-		wg.Add(1)
-		go func(idx int, tn *pipeline.Node) {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					resultsCh <- branchResult{
-						index: idx,
-						result: ParallelResult{
-							NodeID: tn.ID,
-							Status: pipeline.OutcomeFail,
-							Error:  fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r),
-						},
-					}
-					h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-						Type:      pipeline.EventStageFailed,
-						Timestamp: time.Now(),
-						NodeID:    tn.ID,
-						Message:   fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
-					})
-				}
-			}()
-
-			// Emit stage started so the TUI shows the branch as running.
-			h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-				Type:      pipeline.EventStageStarted,
-				Timestamp: time.Now(),
-				NodeID:    tn.ID,
-				Message:   fmt.Sprintf("parallel branch %q started", tn.ID),
-			})
-
-			// Each branch gets its own isolated context from the snapshot.
-			branchCtx := pipeline.NewPipelineContextFrom(snapshot)
-			if artifactDir != "" {
-				branchCtx.SetInternal(pipeline.InternalKeyArtifactDir, artifactDir)
-			}
-
-			outcome, err := h.registry.Execute(ctx, tn, branchCtx)
-
-			pr := ParallelResult{
-				NodeID:         tn.ID,
-				Status:         outcome.Status,
-				ContextUpdates: outcome.ContextUpdates,
-			}
-			if err != nil {
-				pr.Status = pipeline.OutcomeFail
-				pr.Error = err.Error()
-			}
-
-			// Emit stage completed/failed so the TUI updates the branch status.
-			if pr.Status == pipeline.OutcomeFail {
-				h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-					Type:      pipeline.EventStageFailed,
-					Timestamp: time.Now(),
-					NodeID:    tn.ID,
-					Message:   pr.Error,
-				})
-			} else {
-				h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-					Type:      pipeline.EventStageCompleted,
-					Timestamp: time.Now(),
-					NodeID:    tn.ID,
-				})
-			}
-
-			resultsCh <- branchResult{index: idx, result: pr}
-		}(i, execNode)
-	}
-
-	// Wait for all goroutines, then close the channel.
-	wg.Wait()
-	close(resultsCh)
-
-	// Collect results preserving edge order.
-	collected := make([]ParallelResult, len(edges))
-	for br := range resultsCh {
-		collected[br.index] = br.result
-	}
-
-	// Marshal results and store in context for the fan-in handler.
 	resultsJSON, err := json.Marshal(collected)
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("failed to marshal parallel results: %w", err)
 	}
 	pctx.Set("parallel.results", string(resultsJSON))
 
-	// Determine aggregate status: success if at least one branch succeeded.
-	anySuccess := false
-	for _, r := range collected {
-		if r.Status == pipeline.OutcomeSuccess {
-			anySuccess = true
-			break
-		}
-	}
-
-	status := pipeline.OutcomeFail
-	if anySuccess {
-		status = pipeline.OutcomeSuccess
-	}
+	status := aggregateStatus(collected)
 
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:      pipeline.EventParallelCompleted,
@@ -223,16 +84,130 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	})
 
 	outcome := pipeline.Outcome{Status: status}
-
-	// Hint the engine to navigate to the fan-in join node, skipping the
-	// branch target edges (which the handler already dispatched internally).
 	if joinID := node.Attrs["parallel_join"]; joinID != "" {
-		outcome.ContextUpdates = map[string]string{
-			"suggested_next_nodes": joinID,
+		outcome.ContextUpdates = map[string]string{"suggested_next_nodes": joinID}
+	}
+	return outcome, nil
+}
+
+// resolveBranchEdges determines the branch target edges for a parallel node.
+func (h *ParallelHandler) resolveBranchEdges(node *pipeline.Node) ([]*pipeline.Edge, error) {
+	var edges []*pipeline.Edge
+	joinID := node.Attrs["parallel_join"]
+	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
+		for _, target := range strings.Split(targetsAttr, ",") {
+			target = strings.TrimSpace(target)
+			if target != "" {
+				edges = append(edges, &pipeline.Edge{From: node.ID, To: target})
+			}
+		}
+	} else {
+		for _, e := range h.graph.OutgoingEdges(node.ID) {
+			if e.To != joinID {
+				edges = append(edges, e)
+			}
 		}
 	}
+	if len(edges) == 0 {
+		return nil, fmt.Errorf("parallel node %q has no branch targets", node.ID)
+	}
+	return edges, nil
+}
 
-	return outcome, nil
+// branchResultMsg pairs a branch index with its parallel result.
+type branchResultMsg struct {
+	index  int
+	result ParallelResult
+}
+
+// executeBranches spawns goroutines for each branch and collects results.
+func (h *ParallelHandler) executeBranches(ctx context.Context, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) []ParallelResult {
+	snapshot := pctx.Snapshot()
+	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
+
+	resultsCh := make(chan branchResultMsg, len(edges))
+	var wg sync.WaitGroup
+
+	for i, edge := range edges {
+		targetNode, ok := h.graph.Nodes[edge.To]
+		if !ok {
+			resultsCh <- branchResultMsg{
+				index:  i,
+				result: ParallelResult{NodeID: edge.To, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("target node %q not found in graph", edge.To)},
+			}
+			continue
+		}
+
+		execNode := applyBranchOverrides(targetNode, branchOverrides)
+		wg.Add(1)
+		go h.runBranch(ctx, i, execNode, snapshot, artifactDir, resultsCh, &wg)
+	}
+
+	wg.Wait()
+	close(resultsCh)
+
+	collected := make([]ParallelResult, len(edges))
+	for br := range resultsCh {
+		collected[br.index] = br.result
+	}
+	return collected
+}
+
+// runBranch executes a single parallel branch in its own goroutine.
+func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			resultsCh <- branchResultMsg{
+				index:  idx,
+				result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
+			}
+			h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+				Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
+				Message: fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
+			})
+		}
+	}()
+
+	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type: pipeline.EventStageStarted, Timestamp: time.Now(), NodeID: tn.ID,
+		Message: fmt.Sprintf("parallel branch %q started", tn.ID),
+	})
+
+	branchCtx := pipeline.NewPipelineContextFrom(snapshot)
+	if artifactDir != "" {
+		branchCtx.SetInternal(pipeline.InternalKeyArtifactDir, artifactDir)
+	}
+
+	outcome, err := h.registry.Execute(ctx, tn, branchCtx)
+
+	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: outcome.ContextUpdates}
+	if err != nil {
+		pr.Status = pipeline.OutcomeFail
+		pr.Error = err.Error()
+	}
+
+	if pr.Status == pipeline.OutcomeFail {
+		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID, Message: pr.Error,
+		})
+	} else {
+		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventStageCompleted, Timestamp: time.Now(), NodeID: tn.ID,
+		})
+	}
+
+	resultsCh <- branchResultMsg{index: idx, result: pr}
+}
+
+// aggregateStatus returns success if at least one branch succeeded, fail otherwise.
+func aggregateStatus(results []ParallelResult) string {
+	for _, r := range results {
+		if r.Status == pipeline.OutcomeSuccess {
+			return pipeline.OutcomeSuccess
+		}
+	}
+	return pipeline.OutcomeFail
 }
 
 // branchOverride holds per-branch attr overrides parsed from the parallel node.

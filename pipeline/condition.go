@@ -64,84 +64,95 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 		return !result, nil
 	}
 
-	// resolveAndWarn resolves a variable and logs a warning if not found.
-	resolveAndWarn := func(name string) string {
-		val, found := resolveVariable(name, ctx)
-		if !found {
-			fmt.Fprintf(os.Stderr, "warning: unresolved condition variable %q (defaulting to empty string)\n", name)
-		}
-		return val
+	// Try negated word-based operators first.
+	if result, ok := tryNegatedWordOp(clause, ctx); ok {
+		return result, nil
 	}
 
-	// Try negated word-based operators first: "key not contains value", etc.
-	// These must be checked BEFORE the non-negated versions to avoid partial matches.
-	for _, op := range []string{" not contains ", " not startswith ", " not endswith ", " not in "} {
-		if idx := strings.Index(clause, op); idx >= 0 {
-			key := strings.TrimSpace(clause[:idx])
-			value := strings.TrimSpace(clause[idx+len(op):])
-			actual := resolveAndWarn(key)
-			positiveOp := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(op), "not "))
-			switch positiveOp {
-			case "contains":
-				return !strings.Contains(actual, value), nil
-			case "startswith":
-				return !strings.HasPrefix(actual, value), nil
-			case "endswith":
-				return !strings.HasSuffix(actual, value), nil
-			case "in":
-				items := strings.Split(value, ",")
-				for _, item := range items {
-					if strings.TrimSpace(item) == actual {
-						return false, nil
-					}
-				}
-				return true, nil
-			}
-		}
-	}
-
-	// Try word-based operators (contains, startswith, endswith, in).
-	// These are checked before = and != to avoid false matches on the = character.
-	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
-		if idx := strings.Index(clause, op); idx >= 0 {
-			key := strings.TrimSpace(clause[:idx])
-			value := strings.TrimSpace(clause[idx+len(op):])
-			actual := resolveAndWarn(key)
-			switch strings.TrimSpace(op) {
-			case "contains":
-				return strings.Contains(actual, value), nil
-			case "startswith":
-				return strings.HasPrefix(actual, value), nil
-			case "endswith":
-				return strings.HasSuffix(actual, value), nil
-			case "in":
-				items := strings.Split(value, ",")
-				for _, item := range items {
-					if strings.TrimSpace(item) == actual {
-						return true, nil
-					}
-				}
-				return false, nil
-			}
-		}
+	// Try word-based operators.
+	if result, ok := tryWordOp(clause, ctx); ok {
+		return result, nil
 	}
 
 	// Try != first since it contains = as a substring.
 	if idx := strings.Index(clause, "!="); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
 		expected := strings.TrimSpace(clause[idx+2:])
-		actual := resolveAndWarn(key)
+		actual := resolveAndWarnVar(key, ctx)
 		return actual != expected, nil
 	}
 
 	if idx := strings.Index(clause, "="); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
 		expected := strings.TrimSpace(clause[idx+1:])
-		actual := resolveAndWarn(key)
+		actual := resolveAndWarnVar(key, ctx)
 		return actual == expected, nil
 	}
 
 	return false, fmt.Errorf("invalid condition clause: %q (expected key=value or key!=value)", clause)
+}
+
+// resolveAndWarnVar resolves a variable and logs a warning if not found.
+func resolveAndWarnVar(name string, ctx *PipelineContext) string {
+	val, found := resolveVariable(name, ctx)
+	if !found {
+		fmt.Fprintf(os.Stderr, "warning: unresolved condition variable %q (defaulting to empty string)\n", name)
+	}
+	return val
+}
+
+// tryNegatedWordOp checks for "key not contains/startswith/endswith/in value" operators.
+// Returns (result, true) if matched, (false, false) if no match.
+func tryNegatedWordOp(clause string, ctx *PipelineContext) (bool, bool) {
+	for _, op := range []string{" not contains ", " not startswith ", " not endswith ", " not in "} {
+		idx := strings.Index(clause, op)
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(clause[:idx])
+		value := strings.TrimSpace(clause[idx+len(op):])
+		actual := resolveAndWarnVar(key, ctx)
+		positiveOp := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(op), "not "))
+		result := evalWordOp(positiveOp, actual, value)
+		return !result, true
+	}
+	return false, false
+}
+
+// tryWordOp checks for "key contains/startswith/endswith/in value" operators.
+// Returns (result, true) if matched, (false, false) if no match.
+func tryWordOp(clause string, ctx *PipelineContext) (bool, bool) {
+	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
+		idx := strings.Index(clause, op)
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(clause[:idx])
+		value := strings.TrimSpace(clause[idx+len(op):])
+		actual := resolveAndWarnVar(key, ctx)
+		return evalWordOp(strings.TrimSpace(op), actual, value), true
+	}
+	return false, false
+}
+
+// evalWordOp evaluates a single word-based operator.
+func evalWordOp(op, actual, value string) bool {
+	switch op {
+	case "contains":
+		return strings.Contains(actual, value)
+	case "startswith":
+		return strings.HasPrefix(actual, value)
+	case "endswith":
+		return strings.HasSuffix(actual, value)
+	case "in":
+		for _, item := range strings.Split(value, ",") {
+			if strings.TrimSpace(item) == actual {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func resolveVariable(name string, ctx *PipelineContext) (string, bool) {

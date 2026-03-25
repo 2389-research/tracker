@@ -147,42 +147,67 @@ func checkClauseSyntax(clause string) error {
 // validateNodeAttributes checks that well-known node and graph attributes have
 // valid types.
 func validateNodeAttributes(g *Graph, ve *ValidationError) {
-	// Validate graph-level attributes.
-	if v, ok := g.Attrs["cache_tool_results"]; ok {
-		if v != "true" && v != "false" {
-			ve.add(fmt.Sprintf("graph has invalid cache_tool_results %q: must be \"true\" or \"false\"", v))
-		}
-	}
-	if v, ok := g.Attrs["context_compaction"]; ok {
-		if v != "auto" && v != "none" {
-			ve.add(fmt.Sprintf("graph has invalid context_compaction %q: must be \"auto\" or \"none\"", v))
-		}
-	}
-
+	validateGraphAttrs(g.Attrs, ve)
 	for _, node := range g.Nodes {
-		if mr, ok := node.Attrs["max_retries"]; ok {
-			n, err := strconv.Atoi(mr)
-			if err != nil || n < 0 {
-				ve.add(fmt.Sprintf("node %q has invalid max_retries %q: must be a non-negative integer", node.ID, mr))
-			}
-		}
-		if v, ok := node.Attrs["cache_tool_results"]; ok {
-			if v != "true" && v != "false" {
-				ve.add(fmt.Sprintf("node %q has invalid cache_tool_results %q: must be \"true\" or \"false\"", node.ID, v))
-			}
-		}
-		if v, ok := node.Attrs["context_compaction"]; ok {
-			if v != "auto" && v != "none" {
-				ve.add(fmt.Sprintf("node %q has invalid context_compaction %q: must be \"auto\" or \"none\"", node.ID, v))
-			}
-		}
-		if v, ok := node.Attrs["context_compaction_threshold"]; ok {
-			f, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be a float", node.ID, v))
-			} else if f <= 0 || f > 1.0 {
-				ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be > 0 and <= 1.0", node.ID, v))
-			}
+		validateSingleNodeAttrs(node, ve)
+	}
+}
+
+// validateGraphAttrs validates graph-level attribute values.
+func validateGraphAttrs(attrs map[string]string, ve *ValidationError) {
+	validateBoolAttr(attrs, "cache_tool_results", "graph", "", ve)
+	validateEnumAttr(attrs, "context_compaction", []string{"auto", "none"}, "graph", "", ve)
+}
+
+// validateSingleNodeAttrs validates a single node's attribute values.
+func validateSingleNodeAttrs(node *Node, ve *ValidationError) {
+	if mr, ok := node.Attrs["max_retries"]; ok {
+		n, err := strconv.Atoi(mr)
+		if err != nil || n < 0 {
+			ve.add(fmt.Sprintf("node %q has invalid max_retries %q: must be a non-negative integer", node.ID, mr))
 		}
 	}
+	validateBoolAttr(node.Attrs, "cache_tool_results", "node", node.ID, ve)
+	validateEnumAttr(node.Attrs, "context_compaction", []string{"auto", "none"}, "node", node.ID, ve)
+	if v, ok := node.Attrs["context_compaction_threshold"]; ok {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be a float", node.ID, v))
+		} else if f <= 0 || f > 1.0 {
+			ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be > 0 and <= 1.0", node.ID, v))
+		}
+	}
+}
+
+// validateBoolAttr checks that an attribute value is "true" or "false".
+func validateBoolAttr(attrs map[string]string, key, scope, nodeID string, ve *ValidationError) {
+	v, ok := attrs[key]
+	if !ok {
+		return
+	}
+	if v != "true" && v != "false" {
+		prefix := scope
+		if nodeID != "" {
+			prefix = fmt.Sprintf("node %q", nodeID)
+		}
+		ve.add(fmt.Sprintf("%s has invalid %s %q: must be \"true\" or \"false\"", prefix, key, v))
+	}
+}
+
+// validateEnumAttr checks that an attribute value is one of the allowed values.
+func validateEnumAttr(attrs map[string]string, key string, allowed []string, scope, nodeID string, ve *ValidationError) {
+	v, ok := attrs[key]
+	if !ok {
+		return
+	}
+	for _, a := range allowed {
+		if v == a {
+			return
+		}
+	}
+	prefix := scope
+	if nodeID != "" {
+		prefix = fmt.Sprintf("node %q", nodeID)
+	}
+	ve.add(fmt.Sprintf("%s has invalid %s %q: must be %q", prefix, key, v, strings.Join(allowed, "\" or \"")))
 }

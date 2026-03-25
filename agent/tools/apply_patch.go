@@ -54,53 +54,63 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, input json.RawMessage) (st
 		return "", err
 	}
 
-	changed := 0
 	for _, op := range ops {
-		switch op.kind {
-		case patchAdd:
-			if err := t.env.WriteFile(ctx, op.path, op.content); err != nil {
-				return "", err
-			}
-		case patchUpdate:
-			content, err := t.env.ReadFile(ctx, op.path)
-			if err != nil {
-				return "", err
-			}
-			updated, err := applyHunks(content, op.hunks)
-			if err != nil {
-				return "", fmt.Errorf("update %s: %w", op.path, err)
-			}
-			targetPath := op.path
-			if op.moveTo != "" {
-				targetPath = op.moveTo
-			}
-			if err := t.env.WriteFile(ctx, targetPath, updated); err != nil {
-				return "", err
-			}
-			if op.moveTo != "" && op.moveTo != op.path {
-				path, err := safePatchPath(t.env.WorkingDir(), op.path)
-				if err != nil {
-					return "", err
-				}
-				if err := os.Remove(path); err != nil {
-					return "", err
-				}
-			}
-		case patchDelete:
-			path, err := safePatchPath(t.env.WorkingDir(), op.path)
-			if err != nil {
-				return "", err
-			}
-			if err := os.Remove(path); err != nil {
-				return "", err
-			}
-		default:
-			return "", fmt.Errorf("unsupported patch operation")
+		if err := t.applyOp(ctx, op); err != nil {
+			return "", err
 		}
-		changed++
 	}
 
-	return fmt.Sprintf("applied patch (%d file(s) changed)", changed), nil
+	return fmt.Sprintf("applied patch (%d file(s) changed)", len(ops)), nil
+}
+
+// applyOp applies a single patch operation (add, update, or delete).
+func (t *ApplyPatchTool) applyOp(ctx context.Context, op patchOperation) error {
+	switch op.kind {
+	case patchAdd:
+		return t.env.WriteFile(ctx, op.path, op.content)
+	case patchUpdate:
+		return t.applyUpdateOp(ctx, op)
+	case patchDelete:
+		return t.applyDeleteOp(op)
+	default:
+		return fmt.Errorf("unsupported patch operation")
+	}
+}
+
+// applyUpdateOp reads, patches, and writes an updated file, handling optional moves.
+func (t *ApplyPatchTool) applyUpdateOp(ctx context.Context, op patchOperation) error {
+	content, err := t.env.ReadFile(ctx, op.path)
+	if err != nil {
+		return err
+	}
+	updated, err := applyHunks(content, op.hunks)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", op.path, err)
+	}
+	targetPath := op.path
+	if op.moveTo != "" {
+		targetPath = op.moveTo
+	}
+	if err := t.env.WriteFile(ctx, targetPath, updated); err != nil {
+		return err
+	}
+	if op.moveTo != "" && op.moveTo != op.path {
+		path, err := safePatchPath(t.env.WorkingDir(), op.path)
+		if err != nil {
+			return err
+		}
+		return os.Remove(path)
+	}
+	return nil
+}
+
+// applyDeleteOp removes a file safely within the working directory.
+func (t *ApplyPatchTool) applyDeleteOp(op patchOperation) error {
+	path, err := safePatchPath(t.env.WorkingDir(), op.path)
+	if err != nil {
+		return err
+	}
+	return os.Remove(path)
 }
 
 type patchKind string
@@ -138,24 +148,12 @@ func parsePatch(patch string) ([]patchOperation, error) {
 		case line == "*** End Patch":
 			return ops, nil
 		case strings.HasPrefix(line, "*** Add File: "):
-			path := strings.TrimPrefix(line, "*** Add File: ")
-			i++
-			var content []string
-			for i < len(lines) && !strings.HasPrefix(lines[i], "*** ") {
-				if lines[i] == "" && i == len(lines)-1 {
-					break
-				}
-				if !strings.HasPrefix(lines[i], "+") {
-					return nil, fmt.Errorf("add file lines must start with +")
-				}
-				content = append(content, strings.TrimPrefix(lines[i], "+"))
-				i++
+			op, next, err := parseAddFile(lines, i)
+			if err != nil {
+				return nil, err
 			}
-			ops = append(ops, patchOperation{
-				kind:    patchAdd,
-				path:    path,
-				content: joinPatchLines(content, false),
-			})
+			ops = append(ops, op)
+			i = next
 		case strings.HasPrefix(line, "*** Delete File: "):
 			ops = append(ops, patchOperation{
 				kind: patchDelete,
@@ -163,46 +161,77 @@ func parsePatch(patch string) ([]patchOperation, error) {
 			})
 			i++
 		case strings.HasPrefix(line, "*** Update File: "):
-			path := strings.TrimPrefix(line, "*** Update File: ")
-			i++
-			moveTo := ""
-			if i < len(lines) && strings.HasPrefix(lines[i], "*** Move to: ") {
-				moveTo = strings.TrimPrefix(lines[i], "*** Move to: ")
-				i++
+			op, next, err := parseUpdateFile(lines, i)
+			if err != nil {
+				return nil, err
 			}
-			var hunks []patchHunk
-			for i < len(lines) {
-				switch {
-				case strings.HasPrefix(lines[i], "*** "), lines[i] == "*** End Patch":
-					goto doneUpdate
-				case strings.HasPrefix(lines[i], "@@"):
-					i++
-					hunk, next, err := parseHunk(lines, i)
-					if err != nil {
-						return nil, err
-					}
-					hunks = append(hunks, hunk)
-					i = next
-				default:
-					return nil, fmt.Errorf("expected hunk header, got %q", lines[i])
-				}
-			}
-		doneUpdate:
-			if len(hunks) == 0 {
-				return nil, fmt.Errorf("update %s has no hunks", path)
-			}
-			ops = append(ops, patchOperation{
-				kind:   patchUpdate,
-				path:   path,
-				moveTo: moveTo,
-				hunks:  hunks,
-			})
+			ops = append(ops, op)
+			i = next
 		default:
 			return nil, fmt.Errorf("unexpected patch line %q", line)
 		}
 	}
 
 	return nil, fmt.Errorf("patch is missing *** End Patch")
+}
+
+// parseAddFile parses an "*** Add File:" block starting at line index i.
+func parseAddFile(lines []string, i int) (patchOperation, int, error) {
+	path := strings.TrimPrefix(lines[i], "*** Add File: ")
+	i++
+	var content []string
+	for i < len(lines) && !strings.HasPrefix(lines[i], "*** ") {
+		if lines[i] == "" && i == len(lines)-1 {
+			break
+		}
+		if !strings.HasPrefix(lines[i], "+") {
+			return patchOperation{}, 0, fmt.Errorf("add file lines must start with +")
+		}
+		content = append(content, strings.TrimPrefix(lines[i], "+"))
+		i++
+	}
+	return patchOperation{
+		kind:    patchAdd,
+		path:    path,
+		content: joinPatchLines(content, false),
+	}, i, nil
+}
+
+// parseUpdateFile parses an "*** Update File:" block starting at line index i.
+func parseUpdateFile(lines []string, i int) (patchOperation, int, error) {
+	path := strings.TrimPrefix(lines[i], "*** Update File: ")
+	i++
+	moveTo := ""
+	if i < len(lines) && strings.HasPrefix(lines[i], "*** Move to: ") {
+		moveTo = strings.TrimPrefix(lines[i], "*** Move to: ")
+		i++
+	}
+	var hunks []patchHunk
+	for i < len(lines) {
+		if strings.HasPrefix(lines[i], "*** ") || lines[i] == "*** End Patch" {
+			break
+		}
+		if strings.HasPrefix(lines[i], "@@") {
+			i++
+			hunk, next, err := parseHunk(lines, i)
+			if err != nil {
+				return patchOperation{}, 0, err
+			}
+			hunks = append(hunks, hunk)
+			i = next
+		} else {
+			return patchOperation{}, 0, fmt.Errorf("expected hunk header, got %q", lines[i])
+		}
+	}
+	if len(hunks) == 0 {
+		return patchOperation{}, 0, fmt.Errorf("update %s has no hunks", path)
+	}
+	return patchOperation{
+		kind:   patchUpdate,
+		path:   path,
+		moveTo: moveTo,
+		hunks:  hunks,
+	}, i, nil
 }
 
 func parseHunk(lines []string, start int) (patchHunk, int, error) {

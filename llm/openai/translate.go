@@ -87,10 +87,37 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		or.MaxOutputTokens = &v
 	}
 
-	// Extract system/developer messages into the instructions string.
+	// Extract system/developer messages into instructions; keep the rest.
+	or.Instructions, or.Input = extractInstructionsAndInput(req.Messages)
+
+	// Translate tool definitions.
+	or.Tools = translateToolDefs(req.Tools)
+
+	// Translate tool choice.
+	if req.ToolChoice != nil {
+		or.ToolChoice = translateToolChoice(req.ToolChoice)
+	}
+
+	// Translate response format.
+	or.Text = translateResponseFormat(req.ResponseFormat)
+
+	// Reasoning effort.
+	or.Reasoning = translateReasoningEffort(req)
+
+	body, err := json.Marshal(or)
+	if err != nil {
+		return nil, err
+	}
+
+	return mergeProviderOptions(body, req.ProviderOptions, "openai", []string{"reasoning_effort"})
+}
+
+// extractInstructionsAndInput separates system/developer messages into an
+// instructions string and converts remaining messages to flat input items.
+func extractInstructionsAndInput(messages []llm.Message) (string, []openaiInput) {
 	var instructions []string
-	var msgs []llm.Message
-	for _, m := range req.Messages {
+	var input []openaiInput
+	for _, m := range messages {
 		if m.Role == llm.RoleSystem || m.Role == llm.RoleDeveloper {
 			for _, part := range m.Content {
 				if part.Kind == llm.KindText {
@@ -98,56 +125,52 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 				}
 			}
 		} else {
-			msgs = append(msgs, m)
+			input = append(input, translateMessageToInput(m)...)
 		}
 	}
-	if len(instructions) > 0 {
-		or.Instructions = strings.Join(instructions, "\n")
-	}
+	return strings.Join(instructions, "\n"), input
+}
 
-	// Build flat input array from remaining messages.
-	for _, m := range msgs {
-		items := translateMessageToInput(m)
-		or.Input = append(or.Input, items...)
-	}
-
-	// Translate tool definitions.
-	for _, t := range req.Tools {
-		or.Tools = append(or.Tools, openaiTool{
+// translateToolDefs converts unified tool definitions to OpenAI format.
+func translateToolDefs(tools []llm.ToolDefinition) []openaiTool {
+	var out []openaiTool
+	for _, t := range tools {
+		out = append(out, openaiTool{
 			Type:        "function",
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.Parameters,
 		})
 	}
+	return out
+}
 
-	// Translate tool choice.
-	if req.ToolChoice != nil {
-		or.ToolChoice = translateToolChoice(req.ToolChoice)
+// translateResponseFormat converts unified ResponseFormat to OpenAI text format.
+func translateResponseFormat(rf *llm.ResponseFormat) *openaiText {
+	if rf == nil {
+		return nil
 	}
-
-	// Translate response format to text.format configuration.
-	if req.ResponseFormat != nil {
-		switch req.ResponseFormat.Type {
-		case "json_object":
-			or.Text = &openaiText{
-				Format: &openaiTextFormat{Type: "json_object"},
-			}
-		case "json_schema":
-			f := &openaiTextFormat{
-				Type:   "json_schema",
-				Name:   "response",
-				Schema: req.ResponseFormat.JSONSchema,
-			}
-			if req.ResponseFormat.Strict {
-				strict := true
-				f.Strict = &strict
-			}
-			or.Text = &openaiText{Format: f}
+	switch rf.Type {
+	case "json_object":
+		return &openaiText{Format: &openaiTextFormat{Type: "json_object"}}
+	case "json_schema":
+		f := &openaiTextFormat{
+			Type:   "json_schema",
+			Name:   "response",
+			Schema: rf.JSONSchema,
 		}
+		if rf.Strict {
+			strict := true
+			f.Strict = &strict
+		}
+		return &openaiText{Format: f}
+	default:
+		return nil
 	}
+}
 
-	// Reasoning effort from request field or provider options.
+// translateReasoningEffort extracts reasoning effort from request or provider options.
+func translateReasoningEffort(req *llm.Request) *openaiReason {
 	effort := req.ReasoningEffort
 	if effort == "" {
 		if opts, ok := req.ProviderOptions["openai"]; ok {
@@ -158,105 +181,109 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 			}
 		}
 	}
-	if effort != "" {
-		or.Reasoning = &openaiReason{Effort: effort}
+	if effort == "" {
+		return nil
 	}
+	return &openaiReason{Effort: effort}
+}
 
-	body, err := json.Marshal(or)
-	if err != nil {
+// mergeProviderOptions merges provider-specific options into the JSON body,
+// skipping any keys in the reserved list.
+func mergeProviderOptions(body []byte, providerOpts map[string]any, providerKey string, reserved []string) ([]byte, error) {
+	opts, ok := providerOpts[providerKey]
+	if !ok {
+		return body, nil
+	}
+	optsMap, ok := opts.(map[string]any)
+	if !ok {
+		return body, nil
+	}
+	skipSet := make(map[string]bool, len(reserved))
+	for _, k := range reserved {
+		skipSet[k] = true
+	}
+	var bodyMap map[string]any
+	if err := json.Unmarshal(body, &bodyMap); err != nil {
 		return nil, err
 	}
-
-	// Merge provider_options["openai"] into the body (except reserved keys).
-	if opts, ok := req.ProviderOptions["openai"]; ok {
-		if optsMap, ok := opts.(map[string]any); ok {
-			var bodyMap map[string]any
-			if err := json.Unmarshal(body, &bodyMap); err != nil {
-				return nil, err
-			}
-			for k, v := range optsMap {
-				if k == "reasoning_effort" {
-					continue
-				}
-				bodyMap[k] = v
-			}
-			body, err = json.Marshal(bodyMap)
-			if err != nil {
-				return nil, err
-			}
+	for k, v := range optsMap {
+		if skipSet[k] {
+			continue
 		}
+		bodyMap[k] = v
 	}
-
-	return body, nil
+	return json.Marshal(bodyMap)
 }
 
 // translateMessageToInput converts a single llm.Message to one or more flat input items.
 func translateMessageToInput(m llm.Message) []openaiInput {
-	var items []openaiInput
-
 	switch m.Role {
 	case llm.RoleUser:
-		// User messages: collect text into a single content item.
-		var textParts []string
-		for _, part := range m.Content {
-			if part.Kind == llm.KindText {
-				textParts = append(textParts, part.Text)
-			}
-		}
-		if len(textParts) > 0 {
-			items = append(items, openaiInput{
-				Role:    "user",
-				Content: strings.Join(textParts, ""),
-			})
-		}
-
+		return translateUserInput(m.Content)
 	case llm.RoleAssistant:
-		// Assistant messages: emit text as {role: "assistant"} and tool calls
-		// as function_call items. Text must be included because this adapter
-		// replays full conversation history (no server-side state chaining).
-		// Echoed function_call items use "call_id" (not "id") in the input.
-		var textParts []string
-		for _, part := range m.Content {
-			switch part.Kind {
-			case llm.KindText:
-				textParts = append(textParts, part.Text)
-			case llm.KindToolCall:
-				if part.ToolCall != nil {
-					items = append(items, openaiInput{
-						Type:      "function_call",
-						CallID:    part.ToolCall.ID,
-						Name:      part.ToolCall.Name,
-						Arguments: string(part.ToolCall.Arguments),
-					})
-				}
-			}
-		}
-		if len(textParts) > 0 {
-			// Text items come before function_call items in the input.
-			textItem := openaiInput{
-				Role:    "assistant",
-				Content: strings.Join(textParts, ""),
-			}
-			items = append([]openaiInput{textItem}, items...)
-		}
-
+		return translateAssistantInput(m.Content)
 	case llm.RoleTool:
-		// Tool result messages become function_call_output items.
-		for _, part := range m.Content {
-			if part.Kind == llm.KindToolResult && part.ToolResult != nil {
-				callID := part.ToolResult.ToolCallID
-				if callID == "" {
-					callID = "call_unknown"
-				}
+		return translateToolInput(m.Content)
+	}
+	return nil
+}
+
+// translateUserInput collects user text parts into a single input item.
+func translateUserInput(content []llm.ContentPart) []openaiInput {
+	var textParts []string
+	for _, part := range content {
+		if part.Kind == llm.KindText {
+			textParts = append(textParts, part.Text)
+		}
+	}
+	if len(textParts) == 0 {
+		return nil
+	}
+	return []openaiInput{{Role: "user", Content: strings.Join(textParts, "")}}
+}
+
+// translateAssistantInput emits text and tool call items for assistant messages.
+func translateAssistantInput(content []llm.ContentPart) []openaiInput {
+	var items []openaiInput
+	var textParts []string
+	for _, part := range content {
+		switch part.Kind {
+		case llm.KindText:
+			textParts = append(textParts, part.Text)
+		case llm.KindToolCall:
+			if part.ToolCall != nil {
 				items = append(items, openaiInput{
-					Type:   "function_call_output",
-					CallID: callID,
-					Output: part.ToolResult.Content,
+					Type:      "function_call",
+					CallID:    part.ToolCall.ID,
+					Name:      part.ToolCall.Name,
+					Arguments: string(part.ToolCall.Arguments),
 				})
 			}
 		}
 	}
+	if len(textParts) > 0 {
+		textItem := openaiInput{Role: "assistant", Content: strings.Join(textParts, "")}
+		items = append([]openaiInput{textItem}, items...)
+	}
+	return items
+}
 
+// translateToolInput converts tool result parts into function_call_output items.
+func translateToolInput(content []llm.ContentPart) []openaiInput {
+	var items []openaiInput
+	for _, part := range content {
+		if part.Kind == llm.KindToolResult && part.ToolResult != nil {
+			callID := part.ToolResult.ToolCallID
+			if callID == "" {
+				callID = "call_unknown"
+			}
+			items = append(items, openaiInput{
+				Type:   "function_call_output",
+				CallID: callID,
+				Output: part.ToolResult.Content,
+			})
+		}
+	}
 	return items
 }
 
@@ -334,63 +361,8 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		return nil, err
 	}
 
-	var content []llm.ContentPart
-	hasFunctionCalls := false
-
-	for _, item := range or.Output {
-		switch item.Type {
-		case "message":
-			for _, block := range item.Content {
-				if block.Type == "output_text" {
-					content = append(content, llm.ContentPart{
-						Kind: llm.KindText,
-						Text: block.Text,
-					})
-				}
-			}
-		case "function_call":
-			hasFunctionCalls = true
-			// Prefer call_id over id for function_call items.
-			callID := item.CallID
-			if callID == "" {
-				callID = item.ID
-			}
-			content = append(content, llm.ContentPart{
-				Kind: llm.KindToolCall,
-				ToolCall: &llm.ToolCallData{
-					ID:        callID,
-					Name:      item.Name,
-					Arguments: json.RawMessage(item.Arguments),
-				},
-			})
-		case "reasoning":
-			var reasoningText []string
-			for _, s := range item.Summary {
-				if s.Type == "summary_text" {
-					reasoningText = append(reasoningText, s.Text)
-				}
-			}
-			if len(reasoningText) > 0 {
-				content = append(content, llm.ContentPart{
-					Kind: llm.KindThinking,
-					Thinking: &llm.ThinkingData{
-						Text: strings.Join(reasoningText, ""),
-					},
-				})
-			}
-		}
-	}
-
-	usage := llm.Usage{
-		InputTokens:  or.Usage.InputTokens,
-		OutputTokens: or.Usage.OutputTokens,
-		TotalTokens:  or.Usage.TotalTokens,
-	}
-	if or.Usage.OutputDetail != nil && or.Usage.OutputDetail.ReasoningTokens > 0 {
-		v := or.Usage.OutputDetail.ReasoningTokens
-		usage.ReasoningTokens = &v
-	}
-
+	content, hasFunctionCalls := translateOutputItems(or.Output)
+	usage := translateUsage(or.Usage)
 	fr := translateFinishReason(or.Status, hasFunctionCalls, or.IncompleteDetails)
 
 	return &llm.Response{
@@ -404,6 +376,82 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		Usage:        usage,
 		Raw:          raw,
 	}, nil
+}
+
+// translateOutputItems converts OpenAI output items to unified content parts.
+func translateOutputItems(items []openaiOutputItem) ([]llm.ContentPart, bool) {
+	var content []llm.ContentPart
+	hasFunctionCalls := false
+
+	for _, item := range items {
+		switch item.Type {
+		case "message":
+			content = append(content, translateMessageBlocks(item.Content)...)
+		case "function_call":
+			hasFunctionCalls = true
+			content = append(content, translateFunctionCallItem(item))
+		case "reasoning":
+			if part, ok := translateReasoningItem(item.Summary); ok {
+				content = append(content, part)
+			}
+		}
+	}
+	return content, hasFunctionCalls
+}
+
+func translateMessageBlocks(blocks []openaiContentBlock) []llm.ContentPart {
+	var parts []llm.ContentPart
+	for _, block := range blocks {
+		if block.Type == "output_text" {
+			parts = append(parts, llm.ContentPart{Kind: llm.KindText, Text: block.Text})
+		}
+	}
+	return parts
+}
+
+func translateFunctionCallItem(item openaiOutputItem) llm.ContentPart {
+	callID := item.CallID
+	if callID == "" {
+		callID = item.ID
+	}
+	return llm.ContentPart{
+		Kind: llm.KindToolCall,
+		ToolCall: &llm.ToolCallData{
+			ID:        callID,
+			Name:      item.Name,
+			Arguments: json.RawMessage(item.Arguments),
+		},
+	}
+}
+
+func translateReasoningItem(summary []openaiSummaryBlock) (llm.ContentPart, bool) {
+	var texts []string
+	for _, s := range summary {
+		if s.Type == "summary_text" {
+			texts = append(texts, s.Text)
+		}
+	}
+	if len(texts) == 0 {
+		return llm.ContentPart{}, false
+	}
+	return llm.ContentPart{
+		Kind:     llm.KindThinking,
+		Thinking: &llm.ThinkingData{Text: strings.Join(texts, "")},
+	}, true
+}
+
+// translateUsage converts OpenAI usage to unified format.
+func translateUsage(u openaiUsage) llm.Usage {
+	usage := llm.Usage{
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+	}
+	if u.OutputDetail != nil && u.OutputDetail.ReasoningTokens > 0 {
+		v := u.OutputDetail.ReasoningTokens
+		usage.ReasoningTokens = &v
+	}
+	return usage
 }
 
 // translateFinishReason maps OpenAI Responses API status to the unified finish reason format.

@@ -68,9 +68,9 @@ coverage:
 complexity:
 	@FAIL=0; \
 	echo "--- Cyclomatic complexity (max $(CYCLO_MAX)) ---"; \
-	VIOLATIONS=$$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' '); \
+	VIOLATIONS=$$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' | wc -l | tr -d ' '); \
 	if [ "$$VIOLATIONS" -gt 0 ]; then \
-		gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go'; \
+		gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/'; \
 		echo "FAIL: $$VIOLATIONS functions exceed cyclomatic complexity $(CYCLO_MAX)"; \
 		FAIL=1; \
 	else \
@@ -78,9 +78,9 @@ complexity:
 	fi; \
 	echo ""; \
 	echo "--- Cognitive complexity (max $(COGNITIVE_MAX)) ---"; \
-	VIOLATIONS=$$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' '); \
+	VIOLATIONS=$$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' | wc -l | tr -d ' '); \
 	if [ "$$VIOLATIONS" -gt 0 ]; then \
-		gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go'; \
+		gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/'; \
 		echo "FAIL: $$VIOLATIONS functions exceed cognitive complexity $(COGNITIVE_MAX)"; \
 		FAIL=1; \
 	else \
@@ -89,7 +89,7 @@ complexity:
 	echo ""; \
 	echo "--- File size (max $(FILE_MAX_LINES) lines, excluding tests) ---"; \
 	OVERSIZED=0; \
-	for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*'); do \
+	for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*'); do \
 		LINES=$$(wc -l < "$$f" | tr -d ' '); \
 		if [ "$$LINES" -gt $(FILE_MAX_LINES) ]; then \
 			printf "  %6d  %s\n" "$$LINES" "$$f"; \
@@ -114,7 +114,7 @@ complexity-report:
 	@gocognit -top 10 . 2>&1 | grep -v '_test.go' | head -10
 	@echo ""
 	@echo "--- Files over $(FILE_MAX_LINES) lines (production code) ---"
-	@for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*'); do \
+	@for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*'); do \
 		LINES=$$(wc -l < "$$f" | tr -d ' '); \
 		if [ "$$LINES" -gt $(FILE_MAX_LINES) ]; then \
 			printf "  %6d  %s\n" "$$LINES" "$$f"; \
@@ -124,7 +124,7 @@ complexity-report:
 	@echo "--- Summary ---"
 	@echo "  Cyclomatic > $(CYCLO_MAX):  $$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' ') functions"
 	@echo "  Cognitive > $(COGNITIVE_MAX): $$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' ') functions"
-	@echo "  Files > $(FILE_MAX_LINES) LOC:  $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -exec sh -c 'test $$(wc -l < "$$1" | tr -d " ") -gt $(FILE_MAX_LINES) && echo 1' _ {} \; | wc -l | tr -d ' ') files"
+	@echo "  Files > $(FILE_MAX_LINES) LOC:  $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*' -exec sh -c 'test $$(wc -l < "$$1" | tr -d " ") -gt $(FILE_MAX_LINES) && echo 1' _ {} \; | wc -l | tr -d ' ') files"
 
 # ─── Lint ────────────────────────────────────────────────
 

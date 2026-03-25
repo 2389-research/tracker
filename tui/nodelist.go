@@ -51,80 +51,11 @@ func (nl *NodeList) View() string {
 		return sb.String()
 	}
 
-	// Build all node lines.
 	var lines []string
 	for _, node := range nodes {
-		status := nl.store.NodeStatus(node.ID)
-		lamp, style := StatusLamp(status)
-
-		// Override lamp based on activity phase for running nodes.
-		if status == NodeRunning {
-			if nl.thinking.IsToolRunning(node.ID) {
-				lamp = "⚡"
-				style = lipgloss.NewStyle().Foreground(ColorBash).Bold(true)
-			} else if nl.thinking.IsThinking(node.ID) {
-				frame := nl.thinking.Frame(node.ID)
-				if frame != "" {
-					lamp = frame
-					style = lipgloss.NewStyle().Foreground(ColorRunning).Bold(true)
-				}
-			}
-		}
-
-		label := node.Label
-		if label == "" {
-			label = node.ID
-		}
-
-		// For subgraph child nodes, show only the child portion of the label
-		// and indent based on nesting depth.
-		indent := ""
-		if IsSubgraphNode(node.ID) {
-			depth := SubgraphDepth(node.ID)
-			indent = strings.Repeat("  ", depth)
-			if label == node.ID {
-				label = SubgraphChildLabel(node.ID)
-			}
-		}
-
-		// Truncate long labels.
-		maxLabel := nl.width - 4 - len(indent)
-		if maxLabel > 0 && len(label) > maxLabel {
-			label = label[:maxLabel-1] + "…"
-		}
-
-		line := indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
-
-		// Show activity context for running nodes.
-		if status == NodeRunning {
-			if toolName := nl.thinking.ToolName(node.ID); toolName != "" {
-				line += " " + Styles.Muted.Render(toolName)
-			} else if nl.thinking.IsThinking(node.ID) {
-				elapsed := nl.thinking.Elapsed(node.ID).Truncate(time.Second)
-				line += " " + Styles.Muted.Render(elapsed.String())
-			}
-		}
-
-		// Show error for failed nodes.
-		if status == NodeFailed {
-			errMsg := nl.store.NodeError(node.ID)
-			if errMsg != "" {
-				line += " " + Styles.Error.Render(errMsg)
-			}
-		}
-
-		// Show retry info for retrying nodes.
-		if status == NodeRetrying {
-			retryMsg := nl.store.NodeRetryMessage(node.ID)
-			if retryMsg != "" {
-				line += " " + Styles.Muted.Render(retryMsg)
-			}
-		}
-
-		lines = append(lines, line)
+		lines = append(lines, nl.renderNodeLine(node))
 	}
 
-	// Clip lines to the configured height.
 	if nl.height > 0 && len(lines) > nl.height {
 		lines = lines[:nl.height]
 	}
@@ -134,4 +65,73 @@ func (nl *NodeList) View() string {
 	}
 
 	return sb.String()
+}
+
+// renderNodeLine builds the display line for a single node entry.
+func (nl *NodeList) renderNodeLine(node NodeEntry) string {
+	status := nl.store.NodeStatus(node.ID)
+	lamp, style := nl.resolveLamp(node.ID, status)
+
+	label := node.Label
+	if label == "" {
+		label = node.ID
+	}
+
+	indent := ""
+	if IsSubgraphNode(node.ID) {
+		depth := SubgraphDepth(node.ID)
+		indent = strings.Repeat("  ", depth)
+		if label == node.ID {
+			label = SubgraphChildLabel(node.ID)
+		}
+	}
+
+	maxLabel := nl.width - 4 - len(indent)
+	if maxLabel > 0 && len(label) > maxLabel {
+		label = label[:maxLabel-1] + "…"
+	}
+
+	line := indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
+	line += nl.nodeStatusSuffix(node.ID, status)
+	return line
+}
+
+// resolveLamp returns the lamp icon and style for a node, overriding for active phases.
+func (nl *NodeList) resolveLamp(nodeID string, status NodeState) (string, lipgloss.Style) {
+	lamp, style := StatusLamp(status)
+	if status != NodeRunning {
+		return lamp, style
+	}
+	if nl.thinking.IsToolRunning(nodeID) {
+		return "⚡", lipgloss.NewStyle().Foreground(ColorBash).Bold(true)
+	}
+	if nl.thinking.IsThinking(nodeID) {
+		if frame := nl.thinking.Frame(nodeID); frame != "" {
+			return frame, lipgloss.NewStyle().Foreground(ColorRunning).Bold(true)
+		}
+	}
+	return lamp, style
+}
+
+// nodeStatusSuffix returns trailing text for running/failed/retrying nodes.
+func (nl *NodeList) nodeStatusSuffix(nodeID string, status NodeState) string {
+	switch status {
+	case NodeRunning:
+		if toolName := nl.thinking.ToolName(nodeID); toolName != "" {
+			return " " + Styles.Muted.Render(toolName)
+		}
+		if nl.thinking.IsThinking(nodeID) {
+			elapsed := nl.thinking.Elapsed(nodeID).Truncate(time.Second)
+			return " " + Styles.Muted.Render(elapsed.String())
+		}
+	case NodeFailed:
+		if errMsg := nl.store.NodeError(nodeID); errMsg != "" {
+			return " " + Styles.Error.Render(errMsg)
+		}
+	case NodeRetrying:
+		if retryMsg := nl.store.NodeRetryMessage(nodeID); retryMsg != "" {
+			return " " + Styles.Muted.Render(retryMsg)
+		}
+	}
+	return ""
 }

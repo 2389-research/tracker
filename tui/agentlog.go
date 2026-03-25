@@ -395,39 +395,8 @@ const toolDisplayLimit = 80
 func formatToolDisplay(toolName, toolInput string) string {
 	input := parseToolInputJSON(toolInput)
 
-	switch toolName {
-	case "bash":
-		if cmd := input["command"]; cmd != "" {
-			return "▸ $ " + truncateToolText(cmd, toolDisplayLimit)
-		}
-	case "read":
-		if path := input["path"]; path != "" {
-			return "▸ read " + path
-		}
-	case "write":
-		if path := input["path"]; path != "" {
-			return "▸ write " + path
-		}
-	case "edit", "apply_patch":
-		if path := input["path"]; path != "" {
-			return "▸ edit " + path
-		}
-	case "grep":
-		if pattern := input["pattern"]; pattern != "" {
-			s := "▸ grep " + pattern
-			if p := input["path"]; p != "" {
-				s += " " + p
-			}
-			return s
-		}
-	case "glob":
-		if p := input["pattern"]; p != "" {
-			return "▸ glob " + p
-		}
-	case "spawn_agent":
-		if task := input["task"]; task != "" {
-			return "▸ spawn: " + truncateToolText(task, toolDisplayLimit)
-		}
+	if s := formatKnownTool(toolName, input); s != "" {
+		return s
 	}
 
 	for _, key := range []string{"path", "command", "pattern", "task", "query", "name", "url"} {
@@ -436,6 +405,52 @@ func formatToolDisplay(toolName, toolInput string) string {
 		}
 	}
 	return "▸ " + toolName
+}
+
+// formatKnownTool returns a formatted display string for known tool types,
+// or empty string if the tool is not recognized or has no relevant input.
+func formatKnownTool(toolName string, input map[string]string) string {
+	switch toolName {
+	case "bash":
+		return formatToolPath("▸ $ ", input["command"], true)
+	case "read":
+		return formatToolPath("▸ read ", input["path"], false)
+	case "write":
+		return formatToolPath("▸ write ", input["path"], false)
+	case "edit", "apply_patch":
+		return formatToolPath("▸ edit ", input["path"], false)
+	case "grep":
+		return formatGrepTool(input)
+	case "glob":
+		return formatToolPath("▸ glob ", input["pattern"], false)
+	case "spawn_agent":
+		return formatToolPath("▸ spawn: ", input["task"], true)
+	}
+	return ""
+}
+
+// formatToolPath formats a tool display with an optional truncation.
+func formatToolPath(prefix, value string, truncate bool) string {
+	if value == "" {
+		return ""
+	}
+	if truncate {
+		return prefix + truncateToolText(value, toolDisplayLimit)
+	}
+	return prefix + value
+}
+
+// formatGrepTool formats the grep tool display with pattern and optional path.
+func formatGrepTool(input map[string]string) string {
+	pattern := input["pattern"]
+	if pattern == "" {
+		return ""
+	}
+	s := "▸ grep " + pattern
+	if p := input["path"]; p != "" {
+		s += " " + p
+	}
+	return s
 }
 
 // parseToolInputJSON extracts string values from tool input JSON.

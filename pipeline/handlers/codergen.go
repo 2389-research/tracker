@@ -57,48 +57,63 @@ func (h *CodergenHandler) Name() string { return "codergen" }
 // handler error). Supports auto_status parsing of STATUS:success/fail/retry
 // from the response text.
 func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	prompt, err := h.resolvePrompt(node, pctx)
+	if err != nil {
+		return pipeline.Outcome{}, err
+	}
+
+	config := h.buildConfig(node)
+	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
+		config.WorkingDir = wd
+	}
+
+	collector, sess, err := h.createSession(node, config)
+	if err != nil {
+		return pipeline.Outcome{}, err
+	}
+
+	artifactRoot := h.resolveArtifactRoot(pctx)
+
+	sessResult, runErr := sess.Run(ctx, prompt)
+	if runErr != nil {
+		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, collector)
+	}
+
+	return h.buildSuccessOutcome(node, prompt, artifactRoot, sessResult, collector)
+}
+
+// resolvePrompt extracts, expands variables, and applies fidelity context to the node prompt.
+func (h *CodergenHandler) resolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext) (string, error) {
 	prompt := node.Attrs["prompt"]
 	if prompt == "" {
-		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
+		return "", fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
 	}
 
-	// Expand ${namespace.key} variables in prompt (ctx, params, graph namespaces)
-	// This handles the new templating system
 	prompt, err := pipeline.ExpandVariables(prompt, pctx, nil, h.graphAttrs, false)
 	if err != nil {
-		// Lenient mode should not error, but just in case, return the error
-		return pipeline.Outcome{}, fmt.Errorf("node %q variable expansion failed: %w", node.ID, err)
+		return "", fmt.Errorf("node %q variable expansion failed: %w", node.ID, err)
 	}
 
-	// Legacy support: expand old $goal syntax
 	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
 
-	// Resolve fidelity for this node and inject compacted context when not full.
 	fidelity := pipeline.ResolveFidelity(node, h.graphAttrs)
 	if fidelity != pipeline.FidelityFull {
 		artifactDir := h.workingDir
 		if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
 			artifactDir = dir
 		}
-		runID := ""
-		compacted := pipeline.CompactContext(pctx, nil, fidelity, artifactDir, runID)
+		compacted := pipeline.CompactContext(pctx, nil, fidelity, artifactDir, "")
 		prompt = prependContextSummary(prompt, compacted, fidelity)
 	} else {
 		prompt = pipeline.InjectPipelineContext(prompt, pctx)
 	}
 
-	config := h.buildConfig(node)
+	return prompt, nil
+}
 
-	// Per-node working directory override (e.g., for git worktree isolation).
-	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
-		config.WorkingDir = wd
-	}
-
-	// Capture both plain assistant text and a readable execution transcript,
-	// since tool-only sessions would otherwise write an empty response artifact.
+// createSession builds the agent session with a transcript collector and scoped event handler.
+func (h *CodergenHandler) createSession(node *pipeline.Node, config agent.SessionConfig) (*transcriptCollector, *agent.Session, error) {
 	var collector transcriptCollector
-	// Wrap the event handler so every agent event carries this node's ID.
-	// Critical for parallel branches where multiple sessions emit concurrently.
 	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
 	handler := agent.MultiHandler(&collector, scopedHandler)
 	opts := []agent.SessionOption{agent.WithEventHandler(handler)}
@@ -107,51 +122,50 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	}
 	sess, err := agent.NewSession(h.client, config, opts...)
 	if err != nil {
-		return pipeline.Outcome{}, fmt.Errorf("node %q failed to create session: %w", node.ID, err)
+		return nil, nil, fmt.Errorf("node %q failed to create session: %w", node.ID, err)
 	}
+	return &collector, sess, nil
+}
 
-	// Determine artifact directory: prefer pipeline context, fall back to working dir.
-	artifactRoot := h.workingDir
+// resolveArtifactRoot returns the artifact directory from pipeline context or working dir.
+func (h *CodergenHandler) resolveArtifactRoot(pctx *pipeline.PipelineContext) string {
 	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
-		artifactRoot = dir
+		return dir
+	}
+	return h.workingDir
+}
+
+// handleRunError processes session run errors, distinguishing fatal from retryable.
+func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
+	var cfgErr *llm.ConfigurationError
+	if errors.As(runErr, &cfgErr) {
+		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}
 
-	sessResult, runErr := sess.Run(ctx, prompt)
-	if runErr != nil {
-		// Configuration errors (unknown provider, missing keys) are fatal —
-		// they won't resolve on retry, so crash the pipeline immediately.
-		var cfgErr *llm.ConfigurationError
-		if errors.As(runErr, &cfgErr) {
-			return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
-		}
-
-		// Non-retryable provider errors (quota exceeded, auth failed, model
-		// not found, invalid request) are fatal — retrying won't help and
-		// wastes the entire pipeline run.
-		if pe, ok := runErr.(llm.ProviderErrorInterface); ok && !pe.Retryable() {
-			return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
-		}
-
-		// Retryable errors (rate limits, network, server errors) — map to
-		// OutcomeRetry so the pipeline engine retries the node automatically.
-		outcome := pipeline.Outcome{
-			Status: pipeline.OutcomeRetry,
-			ContextUpdates: map[string]string{
-				pipeline.ContextKeyLastResponse: runErr.Error(),
-			},
-			Stats: buildSessionStats(sessResult),
-		}
-		responseArtifact := collector.transcript()
-		if responseArtifact == "" {
-			responseArtifact = runErr.Error()
-		}
-		responseArtifact += "\n\n" + sessResult.String()
-		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
-			return pipeline.Outcome{}, err
-		}
-		return outcome, nil
+	if pe, ok := runErr.(llm.ProviderErrorInterface); ok && !pe.Retryable() {
+		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}
 
+	outcome := pipeline.Outcome{
+		Status: pipeline.OutcomeRetry,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyLastResponse: runErr.Error(),
+		},
+		Stats: buildSessionStats(sessResult),
+	}
+	responseArtifact := collector.transcript()
+	if responseArtifact == "" {
+		responseArtifact = runErr.Error()
+	}
+	responseArtifact += "\n\n" + sessResult.String()
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
+		return pipeline.Outcome{}, err
+	}
+	return outcome, nil
+}
+
+// buildSuccessOutcome constructs the outcome for a successful session run.
+func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
 	responseText := collector.text()
 	responseArtifact := collector.transcript()
 	if responseArtifact == "" {
@@ -159,10 +173,6 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
-	// An agent session that produced zero output is not a success —
-	// the LLM either failed silently, returned an empty response, or
-	// the provider/model is misconfigured. Treat as fail so the pipeline
-	// doesn't silently skip work.
 	if strings.TrimSpace(responseText) == "" && sessResult.TotalToolCalls() == 0 {
 		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
@@ -210,7 +220,16 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		config.WorkingDir = h.workingDir
 	}
 
-	// Model and provider: graph-level default, node-level override.
+	h.applyModelProvider(&config, node)
+	h.applySessionLimits(&config, node)
+	h.applyReasoningEffort(&config, node)
+	h.applyCacheAndCompaction(&config, node)
+
+	return config
+}
+
+// applyModelProvider sets model and provider from graph-level defaults and node-level overrides.
+func (h *CodergenHandler) applyModelProvider(config *agent.SessionConfig, node *pipeline.Node) {
 	if model, ok := h.graphAttrs["llm_model"]; ok {
 		config.Model = model
 	}
@@ -223,6 +242,10 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if provider, ok := node.Attrs["llm_provider"]; ok {
 		config.Provider = provider
 	}
+}
+
+// applySessionLimits sets system prompt, max turns, and command timeout.
+func (h *CodergenHandler) applySessionLimits(config *agent.SessionConfig, node *pipeline.Node) {
 	if sp, ok := node.Attrs["system_prompt"]; ok {
 		config.SystemPrompt = sp
 	}
@@ -236,16 +259,20 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 			config.CommandTimeout = d
 		}
 	}
+}
 
-	// Wire reasoning_effort from node attrs to session config.
-	// Graph-level default, node-level override.
+// applyReasoningEffort sets reasoning effort from graph and node attrs.
+func (h *CodergenHandler) applyReasoningEffort(config *agent.SessionConfig, node *pipeline.Node) {
 	if re, ok := h.graphAttrs["reasoning_effort"]; ok && re != "" {
 		config.ReasoningEffort = re
 	}
 	if re, ok := node.Attrs["reasoning_effort"]; ok && re != "" {
 		config.ReasoningEffort = re
 	}
+}
 
+// applyCacheAndCompaction configures tool result caching and context compaction.
+func (h *CodergenHandler) applyCacheAndCompaction(config *agent.SessionConfig, node *pipeline.Node) {
 	if v, ok := h.graphAttrs["cache_tool_results"]; ok && v == "true" {
 		config.CacheToolResults = true
 	}
@@ -253,10 +280,9 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		config.CacheToolResults = (v == "true")
 	}
 
-	// Context compaction: graph-level default, node-level override.
 	if v, ok := h.graphAttrs["context_compaction"]; ok && v == "auto" {
 		config.ContextCompaction = agent.CompactionAuto
-		config.CompactionThreshold = 0.6 // default threshold
+		config.CompactionThreshold = 0.6
 	}
 	if v, ok := node.Attrs["context_compaction"]; ok {
 		if v == "auto" {
@@ -273,8 +299,6 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 			config.CompactionThreshold = f
 		}
 	}
-
-	return config
 }
 
 // parseAutoStatus scans the response text for STATUS: directives and returns

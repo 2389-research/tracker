@@ -168,17 +168,21 @@ func (a *Adapter) Close() error {
 
 // parseSSE reads SSE events from the Gemini streaming response.
 // Gemini sends each chunk as a complete JSON object in an SSE data line.
+// geminiStreamState tracks mutable state across SSE chunks.
+type geminiStreamState struct {
+	first      bool
+	textActive bool
+	textID     string
+}
+
 func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
-	first := true
-	textActive := false
-	textID := "gemini_text_0"
+	state := &geminiStreamState{first: true, textID: "gemini_text_0"}
 
 	for scanner.Scan() {
 		line := scanner.Text()
-
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -194,74 +198,72 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 			return
 		}
 
-		if first {
+		if state.first {
 			ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: data}
-			first = false
+			state.first = false
 		}
 
 		if len(chunk.Candidates) == 0 {
 			continue
 		}
 
-		candidate := chunk.Candidates[0]
-
-		for _, part := range candidate.Content.Parts {
-			if part.Text != "" {
-				if !textActive {
-					ch <- llm.StreamEvent{Type: llm.EventTextStart, TextID: textID}
-					textActive = true
-				}
-				ch <- llm.StreamEvent{
-					Type:   llm.EventTextDelta,
-					TextID: textID,
-					Delta:  part.Text,
-				}
-			}
-			if part.FunctionCall != nil {
-				// Close any active text block before tool calls.
-				if textActive {
-					ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: textID}
-					textActive = false
-				}
-				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-				ch <- llm.StreamEvent{
-					Type: llm.EventToolCallStart,
-					ToolCall: &llm.ToolCallData{
-						ID:             syntheticID(),
-						Name:           part.FunctionCall.Name,
-						Arguments:      argsJSON,
-						ThoughtSigData: part.ThoughtSignature,
-					},
-				}
-				ch <- llm.StreamEvent{Type: llm.EventToolCallEnd}
-			}
-		}
-
-		// If this chunk has a finish reason, emit the finish event.
-		if candidate.FinishReason != "" {
-			if textActive {
-				ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: textID}
-				textActive = false
-			}
-			fr := translateFinishReason(candidate.FinishReason, hasToolCallParts(candidate.Content.Parts))
-			var usage *llm.Usage
-			if chunk.UsageMetadata != nil {
-				usage = &llm.Usage{
-					InputTokens:  chunk.UsageMetadata.PromptTokenCount,
-					OutputTokens: chunk.UsageMetadata.CandidatesTokenCount,
-					TotalTokens:  chunk.UsageMetadata.TotalTokenCount,
-				}
-			}
-			ch <- llm.StreamEvent{
-				Type:         llm.EventFinish,
-				FinishReason: &fr,
-				Usage:        usage,
-			}
-		}
+		a.processCandidate(chunk.Candidates[0], &chunk, ch, state)
 	}
 
 	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: SSE scan error: %w", err)}
+	}
+}
+
+// processCandidate handles a single candidate from a Gemini SSE chunk.
+func (a *Adapter) processCandidate(candidate geminiCandidate, chunk *geminiResponse, ch chan<- llm.StreamEvent, state *geminiStreamState) {
+	for _, part := range candidate.Content.Parts {
+		a.processGeminiPart(part, ch, state)
+	}
+
+	if candidate.FinishReason != "" {
+		if state.textActive {
+			ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: state.textID}
+			state.textActive = false
+		}
+		fr := translateFinishReason(candidate.FinishReason, hasToolCallParts(candidate.Content.Parts))
+		var usage *llm.Usage
+		if chunk.UsageMetadata != nil {
+			usage = &llm.Usage{
+				InputTokens:  chunk.UsageMetadata.PromptTokenCount,
+				OutputTokens: chunk.UsageMetadata.CandidatesTokenCount,
+				TotalTokens:  chunk.UsageMetadata.TotalTokenCount,
+			}
+		}
+		ch <- llm.StreamEvent{Type: llm.EventFinish, FinishReason: &fr, Usage: usage}
+	}
+}
+
+// processGeminiPart emits stream events for a single content part.
+func (a *Adapter) processGeminiPart(part geminiPart, ch chan<- llm.StreamEvent, state *geminiStreamState) {
+	if part.Text != "" {
+		if !state.textActive {
+			ch <- llm.StreamEvent{Type: llm.EventTextStart, TextID: state.textID}
+			state.textActive = true
+		}
+		ch <- llm.StreamEvent{Type: llm.EventTextDelta, TextID: state.textID, Delta: part.Text}
+	}
+	if part.FunctionCall != nil {
+		if state.textActive {
+			ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: state.textID}
+			state.textActive = false
+		}
+		argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+		ch <- llm.StreamEvent{
+			Type: llm.EventToolCallStart,
+			ToolCall: &llm.ToolCallData{
+				ID:             syntheticID(),
+				Name:           part.FunctionCall.Name,
+				Arguments:      argsJSON,
+				ThoughtSigData: part.ThoughtSignature,
+			},
+		}
+		ch <- llm.StreamEvent{Type: llm.EventToolCallEnd}
 	}
 }
 

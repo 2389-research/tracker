@@ -30,63 +30,58 @@ func FormatEventLine(evt Event) string {
 func formatToolStart(evt Event) string {
 	input := parseToolInput(evt.ToolInput)
 
-	switch evt.ToolName {
-	case "bash":
-		cmd := input["command"]
-		if cmd == "" {
-			return "━ bash"
-		}
-		return "$ " + previewEventText(cmd)
-
-	case "read":
-		path := input["path"]
-		if path != "" {
-			return "━ read " + path
-		}
-
-	case "write":
-		path := input["path"]
-		if path != "" {
-			return "━ write " + path
-		}
-
-	case "edit":
-		path := input["path"]
-		if path != "" {
-			return "━ edit " + path
-		}
-
-	case "apply_patch":
-		path := input["path"]
-		if path != "" {
-			return "━ patch " + path
-		}
-
-	case "grep":
-		pattern := input["pattern"]
-		path := input["path"]
-		s := "━ grep " + pattern
-		if path != "" {
-			s += " " + path
-		}
+	if s := formatKnownToolStart(evt.ToolName, input); s != "" {
 		return s
-
-	case "glob":
-		pattern := input["pattern"]
-		return "━ glob " + pattern
-
-	case "spawn_agent":
-		task := input["task"]
-		if task != "" {
-			return "━ spawn_agent: " + previewEventText(task)
-		}
 	}
 
-	// Fallback: show tool name with best-effort summary
 	if summary := extractInputSummary(input); summary != "" {
 		return "━ " + evt.ToolName + ": " + previewEventText(summary)
 	}
 	return "━ " + evt.ToolName
+}
+
+// formatKnownToolStart returns a formatted string for known tool types,
+// or empty string if the tool is not recognized or has no relevant input.
+func formatKnownToolStart(toolName string, input map[string]string) string {
+	switch toolName {
+	case "bash":
+		return formatBashStart(input)
+	case "read", "write", "edit":
+		return formatPathTool("━ "+toolName+" ", input["path"])
+	case "apply_patch":
+		return formatPathTool("━ patch ", input["path"])
+	case "grep":
+		return formatGrepStart(input)
+	case "glob":
+		return "━ glob " + input["pattern"]
+	case "spawn_agent":
+		if task := input["task"]; task != "" {
+			return "━ spawn_agent: " + previewEventText(task)
+		}
+	}
+	return ""
+}
+
+func formatBashStart(input map[string]string) string {
+	if cmd := input["command"]; cmd != "" {
+		return "$ " + previewEventText(cmd)
+	}
+	return "━ bash"
+}
+
+func formatPathTool(prefix, path string) string {
+	if path != "" {
+		return prefix + path
+	}
+	return ""
+}
+
+func formatGrepStart(input map[string]string) string {
+	s := "━ grep " + input["pattern"]
+	if path := input["path"]; path != "" {
+		s += " " + path
+	}
+	return s
 }
 
 // formatToolEnd renders tool results cleanly.

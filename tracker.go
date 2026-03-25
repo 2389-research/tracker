@@ -80,17 +80,9 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		}
 	}
 
-	// Build or use provided LLM client.
-	var client *llm.Client
-	var completer agent.Completer
-	if cfg.LLMClient != nil {
-		completer = cfg.LLMClient
-	} else {
-		client, err = buildClient(cfg.Provider)
-		if err != nil {
-			return nil, fmt.Errorf("create LLM client: %w", err)
-		}
-		completer = client
+	client, completer, err := resolveCompleter(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Clean up the auto-created client if anything below fails.
@@ -101,8 +93,34 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		}
 	}()
 
-	// Inject model, provider, and retry policy as graph-level attributes
-	// so codergen nodes use them as defaults. Pipeline-level attrs take precedence.
+	injectGraphDefaults(graph, cfg)
+
+	registry := buildRegistry(graph, completer, workDir, cfg)
+	engineOpts := buildEngineOpts(cfg)
+	inner := pipeline.NewEngine(graph, registry, engineOpts...)
+
+	built = true
+	return &Engine{
+		inner:  inner,
+		client: client,
+	}, nil
+}
+
+// resolveCompleter returns the LLM client and completer, building a client from env if needed.
+func resolveCompleter(cfg Config) (*llm.Client, agent.Completer, error) {
+	if cfg.LLMClient != nil {
+		return nil, cfg.LLMClient, nil
+	}
+	client, err := buildClient(cfg.Provider)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create LLM client: %w", err)
+	}
+	return client, client, nil
+}
+
+// injectGraphDefaults sets model, provider, and retry policy as graph-level attrs
+// when specified in Config and not already present in the graph.
+func injectGraphDefaults(graph *pipeline.Graph, cfg Config) {
 	if cfg.Model != "" || cfg.Provider != "" {
 		if graph.Attrs == nil {
 			graph.Attrs = make(map[string]string)
@@ -118,9 +136,6 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 			}
 		}
 	}
-
-	// If a retry policy is specified, inject it as a graph-level attribute
-	// so nodes use it as the default retry strategy.
 	if cfg.RetryPolicy != "" {
 		if graph.Attrs == nil {
 			graph.Attrs = make(map[string]string)
@@ -129,9 +144,11 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 			graph.Attrs["default_retry_policy"] = cfg.RetryPolicy
 		}
 	}
+}
 
+// buildRegistry creates a handler registry with all dependencies wired.
+func buildRegistry(graph *pipeline.Graph, completer agent.Completer, workDir string, cfg Config) *pipeline.HandlerRegistry {
 	env := exec.NewLocalEnvironment(workDir)
-
 	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(completer, workDir),
 		handlers.WithExecEnvironment(env),
@@ -142,30 +159,26 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 	if cfg.EventHandler != nil {
 		registryOpts = append(registryOpts, handlers.WithPipelineEventHandler(cfg.EventHandler))
 	}
-	registry := handlers.NewDefaultRegistry(graph, registryOpts...)
+	return handlers.NewDefaultRegistry(graph, registryOpts...)
+}
 
-	var engineOpts []pipeline.EngineOption
+// buildEngineOpts constructs engine options from Config.
+func buildEngineOpts(cfg Config) []pipeline.EngineOption {
+	var opts []pipeline.EngineOption
 	if cfg.CheckpointDir != "" {
-		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(cfg.CheckpointDir))
+		opts = append(opts, pipeline.WithCheckpointPath(cfg.CheckpointDir))
 	}
 	if cfg.ArtifactDir != "" {
-		engineOpts = append(engineOpts, pipeline.WithArtifactDir(cfg.ArtifactDir))
+		opts = append(opts, pipeline.WithArtifactDir(cfg.ArtifactDir))
 	}
 	if cfg.EventHandler != nil {
-		engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(cfg.EventHandler))
+		opts = append(opts, pipeline.WithPipelineEventHandler(cfg.EventHandler))
 	}
 	if len(cfg.Context) > 0 {
-		engineOpts = append(engineOpts, pipeline.WithInitialContext(cfg.Context))
+		opts = append(opts, pipeline.WithInitialContext(cfg.Context))
 	}
-	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
-
-	inner := pipeline.NewEngine(graph, registry, engineOpts...)
-
-	built = true
-	return &Engine{
-		inner:  inner,
-		client: client,
-	}, nil
+	opts = append(opts, pipeline.WithStylesheetResolution(true))
+	return opts
 }
 
 // parsePipelineSource parses a pipeline source string using the given format.

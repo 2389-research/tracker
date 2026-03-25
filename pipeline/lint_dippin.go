@@ -114,62 +114,61 @@ func lintDIP104(g *Graph) []string {
 	return warnings
 }
 
+// knownProviderModels maps provider names to recognized model patterns.
+var knownProviderModels = map[string][]string{
+	"openai":    {"gpt-4o", "gpt-4o-mini", "gpt-5.4", "o1", "o1-mini", "o3-mini"},
+	"anthropic": {"claude-opus-4", "claude-sonnet-4", "claude-sonnet-4-5", "claude-haiku-4"},
+	"gemini":    {"gemini-2.0-flash-exp", "gemini-2.5-flash", "gemini-2.5-pro"},
+}
+
 // lintDIP108 checks for unknown model/provider combinations.
 func lintDIP108(g *Graph) []string {
 	var warnings []string
-
-	// Known good combinations (not exhaustive, just common ones)
-	knownModels := map[string][]string{
-		"openai":    {"gpt-4o", "gpt-4o-mini", "gpt-5.4", "o1", "o1-mini", "o3-mini"},
-		"anthropic": {"claude-opus-4", "claude-sonnet-4", "claude-sonnet-4-5", "claude-haiku-4"},
-		"gemini":    {"gemini-2.0-flash-exp", "gemini-2.5-flash", "gemini-2.5-pro"},
-	}
 
 	for _, node := range g.Nodes {
 		if node.Handler != "codergen" {
 			continue
 		}
 
-		model := node.Attrs["llm_model"]
-		if model == "" {
-			model = node.Attrs["model"]
-		}
-		if model == "" {
-			model = g.Attrs["llm_model"]
-		}
+		model := resolveAttr(node.Attrs, g.Attrs, "llm_model", "model")
+		provider := resolveAttr(node.Attrs, g.Attrs, "llm_provider", "provider")
 
-		provider := node.Attrs["llm_provider"]
-		if provider == "" {
-			provider = node.Attrs["provider"]
-		}
-		if provider == "" {
-			provider = g.Attrs["llm_provider"]
-		}
-
-		// Skip if both are empty (will use defaults)
-		if model == "" && provider == "" {
+		if model == "" || provider == "" {
 			continue
 		}
 
-		// Check if combination is known
-		if provider != "" && model != "" {
-			if knownForProvider, ok := knownModels[provider]; ok {
-				found := false
-				for _, m := range knownForProvider {
-					if strings.Contains(model, m) || strings.Contains(m, model) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					warnings = append(warnings, fmt.Sprintf(
-						"warning[DIP108]: node %q has potentially unknown model/provider combination %q/%q",
-						node.ID, model, provider))
-				}
-			}
+		if !isKnownModelProvider(provider, model) {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP108]: node %q has potentially unknown model/provider combination %q/%q",
+				node.ID, model, provider))
 		}
 	}
 	return warnings
+}
+
+// resolveAttr looks up an attribute by primary and fallback keys in node attrs, then graph attrs.
+func resolveAttr(nodeAttrs, graphAttrs map[string]string, primaryKey, fallbackKey string) string {
+	if v := nodeAttrs[primaryKey]; v != "" {
+		return v
+	}
+	if v := nodeAttrs[fallbackKey]; v != "" {
+		return v
+	}
+	return graphAttrs[primaryKey]
+}
+
+// isKnownModelProvider checks if the model matches any known pattern for the provider.
+func isKnownModelProvider(provider, model string) bool {
+	knownForProvider, ok := knownProviderModels[provider]
+	if !ok {
+		return true // unknown provider, don't warn
+	}
+	for _, m := range knownForProvider {
+		if strings.Contains(model, m) || strings.Contains(m, model) {
+			return true
+		}
+	}
+	return false
 }
 
 // lintDIP101 checks for nodes only reachable via conditional edges.
@@ -279,7 +278,34 @@ func lintDIP112(g *Graph) []string {
 		return warnings
 	}
 
-	// Collect writes per node
+	nodeWrites := collectNodeWrites(g)
+	reservedKeys := reservedContextKeys()
+
+	for _, node := range g.Nodes {
+		reads := node.Attrs["reads"]
+		if reads == "" {
+			continue
+		}
+
+		upstreamKeys := collectUpstreamKeys(g, node.ID, nodeWrites)
+
+		for _, key := range strings.Split(reads, ",") {
+			key = strings.TrimSpace(key)
+			if key == "" || reservedKeys[key] {
+				continue
+			}
+			if !upstreamKeys[key] {
+				warnings = append(warnings, fmt.Sprintf(
+					"warning[DIP112]: node %q reads key %q not produced by upstream writes", node.ID, key))
+			}
+		}
+	}
+
+	return warnings
+}
+
+// collectNodeWrites builds a map of node ID -> set of context keys written.
+func collectNodeWrites(g *Graph) map[string]map[string]bool {
 	nodeWrites := make(map[string]map[string]bool)
 	for _, node := range g.Nodes {
 		if w := node.Attrs["writes"]; w != "" {
@@ -292,243 +318,34 @@ func lintDIP112(g *Graph) []string {
 			}
 		}
 	}
-
-	// For each node, collect upstream writes via BFS
-	for _, node := range g.Nodes {
-		reads := node.Attrs["reads"]
-		if reads == "" {
-			continue
-		}
-
-		// BFS backwards to find all upstream nodes
-		upstream := make(map[string]bool)
-		queue := []string{node.ID}
-		visited := make(map[string]bool)
-		visited[node.ID] = true
-
-		for len(queue) > 0 {
-			current := queue[0]
-			queue = queue[1:]
-
-			for _, edge := range g.Edges {
-				if edge.To == current && !visited[edge.From] {
-					visited[edge.From] = true
-					upstream[edge.From] = true
-					queue = append(queue, edge.From)
-				}
-			}
-		}
-
-		// Collect all keys produced upstream
-		upstreamKeys := make(map[string]bool)
-		for upstreamNode := range upstream {
-			for key := range nodeWrites[upstreamNode] {
-				upstreamKeys[key] = true
-			}
-		}
-
-		// Check each read key
-		for _, key := range strings.Split(reads, ",") {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-
-			// Skip reserved context keys (these are always available)
-			reservedKeys := map[string]bool{
-				"goal": true, "outcome": true, "last_response": true,
-				"last_cost": true, "last_turns": true, "human_response": true,
-			}
-			if reservedKeys[key] {
-				continue
-			}
-
-			if !upstreamKeys[key] {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP112]: node %q reads key %q not produced by upstream writes", node.ID, key))
-			}
-		}
-	}
-
-	return warnings
+	return nodeWrites
 }
 
-// lintDIP105 checks for no guaranteed success path from start to exit.
-func lintDIP105(g *Graph) []string {
-	var warnings []string
-	if g.StartNode == "" || g.ExitNode == "" {
-		return warnings
-	}
-
-	// BFS from start to exit using only unconditional edges
+// collectUpstreamKeys performs BFS backwards from nodeID and collects all context
+// keys written by upstream nodes.
+func collectUpstreamKeys(g *Graph, nodeID string, nodeWrites map[string]map[string]bool) map[string]bool {
+	upstream := make(map[string]bool)
+	queue := []string{nodeID}
 	visited := make(map[string]bool)
-	queue := []string{g.StartNode}
-	visited[g.StartNode] = true
+	visited[nodeID] = true
 
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-
-		if current == g.ExitNode {
-			// Found a guaranteed path
-			return warnings
-		}
-
-		for _, edge := range g.OutgoingEdges(current) {
-			if edge.Condition == "" && !visited[edge.To] {
-				visited[edge.To] = true
-				queue = append(queue, edge.To)
+		for _, edge := range g.Edges {
+			if edge.To == current && !visited[edge.From] {
+				visited[edge.From] = true
+				upstream[edge.From] = true
+				queue = append(queue, edge.From)
 			}
 		}
 	}
 
-	warnings = append(warnings, "warning[DIP105]: no guaranteed success path from start to exit (all paths require conditions)")
-	return warnings
-}
-
-// lintDIP106 checks for undefined variable references in prompts.
-func lintDIP106(g *Graph) []string {
-	var warnings []string
-
-	// Collect all writes to determine available keys
-	allWrites := make(map[string]bool)
-	for _, node := range g.Nodes {
-		if w := node.Attrs["writes"]; w != "" {
-			for _, key := range strings.Split(w, ",") {
-				key = strings.TrimSpace(key)
-				if key != "" {
-					allWrites[key] = true
-				}
-			}
+	upstreamKeys := make(map[string]bool)
+	for upNode := range upstream {
+		for key := range nodeWrites[upNode] {
+			upstreamKeys[key] = true
 		}
 	}
-
-	// Reserved context keys
-	reservedKeys := map[string]bool{
-		"goal": true, "outcome": true, "last_response": true,
-		"last_cost": true, "last_turns": true, "human_response": true,
-	}
-
-	for _, node := range g.Nodes {
-		prompt := node.Attrs["prompt"]
-		if prompt == "" {
-			continue
-		}
-
-		// Find all ${...} references
-		refs := findVariableReferences(prompt)
-		for _, ref := range refs {
-			// Parse ${ctx.X}, ${params.Y}, ${graph.Z}
-			parts := strings.SplitN(ref, ".", 2)
-			if len(parts) != 2 {
-				continue
-			}
-
-			namespace := parts[0]
-			key := parts[1]
-
-			// Check if key is defined
-			if namespace == "ctx" {
-				if !reservedKeys[key] && !allWrites[key] {
-					warnings = append(warnings, fmt.Sprintf(
-						"warning[DIP106]: node %q prompt references undefined variable ${ctx.%s}", node.ID, key))
-				}
-			}
-			// params and graph namespaces are user-provided, skip checking
-		}
-	}
-
-	return warnings
-}
-
-// findVariableReferences extracts ${...} patterns from a string.
-func findVariableReferences(s string) []string {
-	var refs []string
-	for {
-		start := strings.Index(s, "${")
-		if start == -1 {
-			break
-		}
-		end := strings.Index(s[start:], "}")
-		if end == -1 {
-			break
-		}
-		ref := s[start+2 : start+end]
-		refs = append(refs, ref)
-		s = s[start+end+1:]
-	}
-	return refs
-}
-
-// lintDIP103 checks for overlapping conditions on edges from the same node.
-func lintDIP103(g *Graph) []string {
-	var warnings []string
-
-	// Group edges by source node
-	outgoing := make(map[string][]*Edge)
-	for _, edge := range g.Edges {
-		outgoing[edge.From] = append(outgoing[edge.From], edge)
-	}
-
-	for nodeID, edges := range outgoing {
-		if len(edges) < 2 {
-			continue
-		}
-
-		// Check for identical conditions
-		conditions := make(map[string]int)
-		for _, edge := range edges {
-			if edge.Condition != "" {
-				conditions[edge.Condition]++
-			}
-		}
-
-		for cond, count := range conditions {
-			if count > 1 {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP103]: node %q has %d edges with identical condition %q",
-					nodeID, count, cond))
-			}
-		}
-	}
-
-	return warnings
-}
-
-// lintDIP109 checks for namespace collisions in subgraph params.
-func lintDIP109(g *Graph) []string {
-	var warnings []string
-
-	// Reserved context keys
-	reservedKeys := map[string]bool{
-		"goal": true, "outcome": true, "last_response": true,
-		"last_cost": true, "last_turns": true, "human_response": true,
-	}
-
-	for _, node := range g.Nodes {
-		if node.Handler != "subgraph" && node.Handler != "spawn" {
-			continue
-		}
-
-		params := node.Attrs["params"]
-		if params == "" {
-			continue
-		}
-
-		// Parse params (format: key1=val1,key2=val2)
-		for _, pair := range strings.Split(params, ",") {
-			kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
-			if len(kv) < 1 {
-				continue
-			}
-			key := strings.TrimSpace(kv[0])
-			if reservedKeys[key] {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP109]: node %q params key %q collides with reserved context key",
-					node.ID, key))
-			}
-		}
-	}
-
-	return warnings
+	return upstreamKeys
 }

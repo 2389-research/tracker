@@ -60,32 +60,9 @@ func (a AppModel) Init() tea.Cmd {
 
 // Update routes messages through global keys, modal, state store, and child components.
 func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	// Handle global keys first.
 	if km, ok := msg.(tea.KeyMsg); ok {
-		// Ctrl+C always quits, even with modal visible.
-		if km.Type == tea.KeyCtrlC {
-			return a, tea.Quit
-		}
-
-		// If modal is visible, route keys to it instead of global handling.
-		if a.modal.Visible() {
-			cmd := a.modal.Update(km)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			return a, tea.Batch(cmds...)
-		}
-
-		switch {
-		case km.Type == tea.KeyRunes && string(km.Runes) == "q":
-			return a, tea.Quit
-		case km.Type == tea.KeyCtrlO:
-			// Toggle expand in agent log.
-			a.agentLog.Update(MsgToggleExpand{})
-			return a, nil
-		}
+		return a.handleKeyMsg(km)
 	}
 
 	// Handle window resize.
@@ -96,66 +73,21 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Handle gate messages — show modal.
-	switch m := msg.(type) {
-	case MsgGateChoice:
-		content := NewChoiceContent(m.Prompt, m.Options, m.ReplyCh)
-		a.modal.Show(content)
-		return a, nil
-	case MsgGateFreeform:
-		content := NewFreeformContent(m.Prompt, m.ReplyCh)
-		a.modal.Show(content)
-		return a, nil
-	case MsgModalDismiss:
-		a.modal.Hide()
-		return a, nil
-	case MsgPipelineDone:
-		// Pipeline finished — exit the TUI so the summary page can be printed.
-		return a, tea.Quit
+	// Handle gate/modal messages.
+	if model, cmd, handled := a.handleModalMsg(msg); handled {
+		return model, cmd
 	}
 
-	// Handle tick messages — re-schedule ticks.
-	switch msg.(type) {
-	case MsgThinkingTick:
-		a.thinking.Tick()
-		cmds = append(cmds, thinkingTickCmd())
-	case MsgHeaderTick:
-		a.header.Update(msg)
-		cmds = append(cmds, headerTickCmd())
-		return a, tea.Batch(cmds...)
+	// Handle tick messages.
+	if model, cmd, handled := a.handleTickMsg(msg); handled {
+		return model, cmd
 	}
 
-	// Apply message to state store.
+	// Apply message to state store and route to thinking tracker and children.
 	a.store.Apply(msg)
+	a.routeThinkingMsg(msg)
 
-	// Route thinking and tool state changes to the tracker.
-	// NodeIDs may be empty when events come from the global LLM trace
-	// observer; resolve them to the currently active node.
-	switch m := msg.(type) {
-	case MsgThinkingStarted:
-		nodeID := a.resolveNodeID(m.NodeID)
-		if nodeID != "" {
-			a.thinking.Start(nodeID)
-			a.agentLog.SetFocusedNode(nodeID)
-		}
-	case MsgThinkingStopped:
-		nodeID := a.resolveNodeID(m.NodeID)
-		if nodeID != "" {
-			a.thinking.Stop(nodeID)
-		}
-	case MsgToolCallStart:
-		nodeID := a.resolveNodeID(m.NodeID)
-		if nodeID != "" {
-			a.thinking.StartTool(nodeID, m.ToolName)
-		}
-	case MsgToolCallEnd:
-		nodeID := a.resolveNodeID(m.NodeID)
-		if nodeID != "" {
-			a.thinking.StopTool(nodeID)
-		}
-	}
-
-	// Forward to child components.
+	var cmds []tea.Cmd
 	if cmd := a.nodeList.Update(msg); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -164,6 +96,81 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, tea.Batch(cmds...)
+}
+
+// handleKeyMsg processes keyboard input, returning early for quit and modal keys.
+func (a AppModel) handleKeyMsg(km tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if km.Type == tea.KeyCtrlC {
+		return a, tea.Quit
+	}
+	if a.modal.Visible() {
+		cmd := a.modal.Update(km)
+		return a, cmd
+	}
+	switch {
+	case km.Type == tea.KeyRunes && string(km.Runes) == "q":
+		return a, tea.Quit
+	case km.Type == tea.KeyCtrlO:
+		a.agentLog.Update(MsgToggleExpand{})
+		return a, nil
+	}
+	return a, nil
+}
+
+// handleModalMsg handles gate choice/freeform, dismiss, and pipeline done messages.
+// Returns (model, cmd, true) if the message was handled.
+func (a AppModel) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch m := msg.(type) {
+	case MsgGateChoice:
+		a.modal.Show(NewChoiceContent(m.Prompt, m.Options, m.ReplyCh))
+		return a, nil, true
+	case MsgGateFreeform:
+		a.modal.Show(NewFreeformContent(m.Prompt, m.ReplyCh))
+		return a, nil, true
+	case MsgModalDismiss:
+		a.modal.Hide()
+		return a, nil, true
+	case MsgPipelineDone:
+		return a, tea.Quit, true
+	}
+	return a, nil, false
+}
+
+// handleTickMsg handles thinking and header tick messages.
+// Returns (model, cmd, true) if the message was handled.
+func (a AppModel) handleTickMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg.(type) {
+	case MsgThinkingTick:
+		a.thinking.Tick()
+		return a, thinkingTickCmd(), true
+	case MsgHeaderTick:
+		a.header.Update(msg)
+		return a, headerTickCmd(), true
+	}
+	return a, nil, false
+}
+
+// routeThinkingMsg routes thinking and tool state changes to the tracker.
+func (a *AppModel) routeThinkingMsg(msg tea.Msg) {
+	switch m := msg.(type) {
+	case MsgThinkingStarted:
+		if nodeID := a.resolveNodeID(m.NodeID); nodeID != "" {
+			a.thinking.Start(nodeID)
+			a.agentLog.SetFocusedNode(nodeID)
+		}
+	case MsgThinkingStopped:
+		if nodeID := a.resolveNodeID(m.NodeID); nodeID != "" {
+			a.thinking.Stop(nodeID)
+		}
+	case MsgToolCallStart:
+		if nodeID := a.resolveNodeID(m.NodeID); nodeID != "" {
+			a.thinking.StartTool(nodeID, m.ToolName)
+		}
+	case MsgToolCallEnd:
+		if nodeID := a.resolveNodeID(m.NodeID); nodeID != "" {
+			a.thinking.StopTool(nodeID)
+		}
+	}
 }
 
 // View composes the dashboard layout: header, content (node list + agent log), status bar.

@@ -204,72 +204,77 @@ func (h *HumanHandler) Name() string { return "wait.human" }
 // choices. Uses the node's Label as the prompt, falling back to the node ID.
 // Respects the "default_choice" node attribute in choice mode.
 func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	prompt := h.resolveHumanPrompt(node, pctx)
+
+	if node.Attrs["mode"] == "freeform" {
+		return h.executeFreeform(node, prompt)
+	}
+	return h.executeChoice(node, prompt)
+}
+
+// resolveHumanPrompt builds the full prompt with variable expansion and last response context.
+func (h *HumanHandler) resolveHumanPrompt(node *pipeline.Node, pctx *pipeline.PipelineContext) string {
 	prompt := node.Label
 	if prompt == "" {
 		prompt = fmt.Sprintf("Human gate: %s", node.ID)
 	}
 
-	// Expand ${ctx.key} and ${graph.key} variables in prompt
-	// (params expansion would have happened during InjectParamsIntoGraph for subgraphs)
 	var graphAttrs map[string]string
 	if h.graph != nil {
 		graphAttrs = h.graph.Attrs
 	}
-	expandedPrompt, err := pipeline.ExpandVariables(prompt, pctx, nil, graphAttrs, false)
-	if err == nil && expandedPrompt != "" {
-		prompt = expandedPrompt
+	if expanded, err := pipeline.ExpandVariables(prompt, pctx, nil, graphAttrs, false); err == nil && expanded != "" {
+		prompt = expanded
 	}
 
-	// Surface the previous node's output so the human has context for their
-	// decision. This is the complement of InjectPipelineContext which gives
-	// LLM nodes the human_response — here we give human gates the LLM output.
 	if lastResp, ok := pctx.Get(pipeline.ContextKeyLastResponse); ok && lastResp != "" {
 		prompt = prompt + "\n\n---\n" + lastResp
 	}
 
-	// Freeform mode: capture open-ended text input.
-	if node.Attrs["mode"] == "freeform" {
-		fi, ok := h.interviewer.(FreeformInterviewer)
-		if !ok {
-			return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=freeform but interviewer does not support freeform input", node.ID)
-		}
-		response, err := fi.AskFreeform(prompt)
-		if err != nil {
-			return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
-		}
+	return prompt
+}
 
-		outcome := pipeline.Outcome{
-			Status:         pipeline.OutcomeSuccess,
-			ContextUpdates: map[string]string{pipeline.ContextKeyHumanResponse: response},
-		}
-
-		// If the node has outgoing labeled edges, try to match the response
-		// text against edge labels to set PreferredLabel for routing.
-		// This allows freeform human gates to also function as routing nodes
-		// (e.g., type "approve" to take the "approve" edge, or type detailed
-		// feedback to take the default/fallback edge).
-		if h.graph != nil {
-			edges := h.graph.OutgoingEdges(node.ID)
-			normalized := strings.ToLower(strings.TrimSpace(response))
-			for _, e := range edges {
-				if e.Label != "" && strings.ToLower(e.Label) == normalized {
-					outcome.PreferredLabel = e.Label
-					break
-				}
-			}
-			// Also check the default attribute as a shorthand.
-			if outcome.PreferredLabel == "" && node.Attrs["default"] != "" {
-				defLabel := node.Attrs["default"]
-				if strings.ToLower(defLabel) == normalized {
-					outcome.PreferredLabel = defLabel
-				}
-			}
-		}
-
-		return outcome, nil
+// executeFreeform handles freeform mode: captures open-ended text and optionally routes by label.
+func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
+	fi, ok := h.interviewer.(FreeformInterviewer)
+	if !ok {
+		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=freeform but interviewer does not support freeform input", node.ID)
+	}
+	response, err := fi.AskFreeform(prompt)
+	if err != nil {
+		return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
 	}
 
-	// Choice mode: present outgoing edge labels.
+	outcome := pipeline.Outcome{
+		Status:         pipeline.OutcomeSuccess,
+		ContextUpdates: map[string]string{pipeline.ContextKeyHumanResponse: response},
+	}
+
+	if h.graph != nil {
+		outcome.PreferredLabel = matchFreeformLabel(h.graph, node, response)
+	}
+
+	return outcome, nil
+}
+
+// matchFreeformLabel tries to match freeform response text against outgoing edge labels.
+func matchFreeformLabel(graph *pipeline.Graph, node *pipeline.Node, response string) string {
+	normalized := strings.ToLower(strings.TrimSpace(response))
+	for _, e := range graph.OutgoingEdges(node.ID) {
+		if e.Label != "" && strings.ToLower(e.Label) == normalized {
+			return e.Label
+		}
+	}
+	if defLabel := node.Attrs["default"]; defLabel != "" {
+		if strings.ToLower(defLabel) == normalized {
+			return defLabel
+		}
+	}
+	return ""
+}
+
+// executeChoice handles choice mode: presents outgoing edge labels as options.
+func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
 	edges := h.graph.OutgoingEdges(node.ID)
 	if len(edges) == 0 {
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has no outgoing edges to derive choices from", node.ID)
@@ -284,9 +289,7 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 		choices = append(choices, label)
 	}
 
-	defaultChoice := node.Attrs["default_choice"]
-
-	selected, err := h.interviewer.Ask(prompt, choices, defaultChoice)
+	selected, err := h.interviewer.Ask(prompt, choices, node.Attrs["default_choice"])
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate interview failed for node %q: %w", node.ID, err)
 	}

@@ -91,75 +91,52 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 // NewClientFromEnv creates a Client by reading API keys from environment variables.
 // The constructors map keys are provider names ("anthropic", "openai", "gemini") and
 // values are factory functions that create adapters from an API key.
+// providerEnvKeys maps provider names to their environment variable names.
+var providerEnvKeys = map[string][]string{
+	"anthropic": {"ANTHROPIC_API_KEY"},
+	"openai":    {"OPENAI_API_KEY"},
+	"gemini":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+}
+
+// providerPriority defines the deterministic order for default provider selection.
+var providerPriority = []string{"anthropic", "openai", "gemini"}
+
 func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapter, error)) (*Client, error) {
-	envKeys := map[string][]string{
-		"anthropic": {"ANTHROPIC_API_KEY"},
-		"openai":    {"OPENAI_API_KEY"},
-		"gemini":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-	}
-
-	// Use deterministic priority order for default provider selection.
-	providerPriority := []string{"anthropic", "openai", "gemini"}
-
 	var opts []ClientOption
 	var firstProvider string
 
+	// Process standard providers in priority order.
 	for _, name := range providerPriority {
 		constructor, ok := constructors[name]
 		if !ok {
 			continue
 		}
-		envVars, ok := envKeys[name]
-		if !ok {
-			envVars = []string{fmt.Sprintf("%s_API_KEY", name)}
-		}
-
-		var apiKey string
-		for _, envVar := range envVars {
-			if v := os.Getenv(envVar); v != "" {
-				apiKey = v
-				break
-			}
-		}
-
-		if apiKey == "" {
-			continue
-		}
-
-		adapter, err := constructor(apiKey)
+		opt, err := tryBuildProvider(name, constructor)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create %s adapter: %w", name, err)
+			return nil, err
 		}
-
-		opts = append(opts, WithProvider(adapter))
-		if firstProvider == "" {
-			firstProvider = name
+		if opt != nil {
+			opts = append(opts, opt)
+			if firstProvider == "" {
+				firstProvider = name
+			}
 		}
 	}
 
-	// Also process any non-standard providers not in the priority list.
+	// Process non-standard providers.
 	for name, constructor := range constructors {
 		if name == "anthropic" || name == "openai" || name == "gemini" {
 			continue
 		}
-		envVars := []string{fmt.Sprintf("%s_API_KEY", name)}
-		var apiKey string
-		for _, envVar := range envVars {
-			if v := os.Getenv(envVar); v != "" {
-				apiKey = v
-				break
-			}
-		}
-		if apiKey == "" {
-			continue
-		}
-		adapter, err := constructor(apiKey)
+		opt, err := tryBuildProvider(name, constructor)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create %s adapter: %w", name, err)
+			return nil, err
 		}
-		opts = append(opts, WithProvider(adapter))
-		if firstProvider == "" {
-			firstProvider = name
+		if opt != nil {
+			opts = append(opts, opt)
+			if firstProvider == "" {
+				firstProvider = name
+			}
 		}
 	}
 
@@ -168,6 +145,34 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 	}
 
 	return NewClient(opts...)
+}
+
+// tryBuildProvider attempts to find an API key in the environment and build a provider adapter.
+// Returns nil option if no API key is found.
+func tryBuildProvider(name string, constructor func(string) (ProviderAdapter, error)) (ClientOption, error) {
+	envVars, ok := providerEnvKeys[name]
+	if !ok {
+		envVars = []string{fmt.Sprintf("%s_API_KEY", name)}
+	}
+
+	var apiKey string
+	for _, envVar := range envVars {
+		if v := os.Getenv(envVar); v != "" {
+			apiKey = v
+			break
+		}
+	}
+
+	if apiKey == "" {
+		return nil, nil
+	}
+
+	adapter, err := constructor(apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create %s adapter: %w", name, err)
+	}
+
+	return WithProvider(adapter), nil
 }
 
 // resolveProvider determines which provider adapter to use for a request.
