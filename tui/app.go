@@ -300,8 +300,19 @@ func buildFreeformContent(m MsgGateFreeform, width, height int) ModalContent {
 	// The plan content (after ---) stays in the activity log where it's scrollable.
 	if len(m.Labels) > 0 {
 		label := m.Prompt
+		context := ""
 		if idx := strings.Index(label, "\n\n---\n"); idx >= 0 {
+			context = label[idx+6:]
 			label = label[:idx]
+		}
+		// If there's substantial context (agent output, error info),
+		// show it in a scrollable review pane with radio labels below.
+		if len(context) > 200 || strings.Count(context, "\n") > 5 {
+			return NewReviewHybridContent(label, context, m.Labels, m.Default, m.ReplyCh, width, height)
+		}
+		// Short or no context — simple radio modal.
+		if context != "" {
+			label = label + "\n\n" + Styles.DimText.Render(truncateContext(context, 5))
 		}
 		return NewHybridContent(label, m.Labels, m.Default, m.ReplyCh)
 	}
@@ -313,6 +324,15 @@ func buildFreeformContent(m MsgGateFreeform, width, height int) ModalContent {
 	}
 
 	return NewFreeformContent(m.Prompt, m.ReplyCh)
+}
+
+// truncateContext returns the first N lines of context text.
+func truncateContext(s string, maxLines int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (%d more lines in activity log)", len(lines)-maxLines)
 }
 
 // String implements fmt.Stringer for debug purposes.
