@@ -1,7 +1,7 @@
 {
   "tests": [
     {
-      "name": "happy path reaches Done",
+      "name": "happy path — approve spec, implement, review, ship",
       "scenario": {},
       "expect": {
         "status": "success",
@@ -9,10 +9,19 @@
       }
     },
     {
-      "name": "all nodes reachable from start",
-      "scenario": {},
+      "name": "spec rejected — reaches Done via reject edge",
+      "scenario": {"ApproveSpec.preferred_label": "reject"},
       "expect": {
-        "status": "success"
+        "status": "success",
+        "visited": ["ApproveSpec", "Done"]
+      }
+    },
+    {
+      "name": "build fails — escalate to human",
+      "scenario": {"FinalBuild.outcome": "fail"},
+      "expect": {
+        "status": "success",
+        "visited": ["FinalBuild", "EscalateToHuman"]
       }
     }
   ]

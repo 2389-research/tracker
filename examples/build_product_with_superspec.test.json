@@ -1,7 +1,7 @@
 {
   "tests": [
     {
-      "name": "happy path reaches Done",
+      "name": "happy path — all phases pass, review, ship",
       "scenario": {},
       "expect": {
         "status": "success",
@@ -9,10 +9,39 @@
       }
     },
     {
-      "name": "pipeline terminates",
-      "scenario": {},
+      "name": "plan rejected — reaches Done",
+      "scenario": {"ApprovePlan.preferred_label": "reject"},
       "expect": {
-        "status": "success"
+        "status": "success",
+        "visited": ["ApprovePlan", "Done"]
+      }
+    },
+    {
+      "name": "phase 1 gate fails — fix loop fires",
+      "scenario": {"GatePhase1.outcome": "fail"},
+      "expect": {
+        "visited": ["GatePhase1", "FixPhase1"]
+      }
+    },
+    {
+      "name": "merge conflict — escalate",
+      "scenario": {"MergePhase1.outcome": "fail"},
+      "expect": {
+        "visited": ["MergePhase1", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "review finds blocking issues — fix and re-gate",
+      "scenario": {"SynthesizeReviews.outcome": "fail"},
+      "expect": {
+        "visited": ["SynthesizeReviews", "ApplyReviewFixes", "FinalGates"]
+      }
+    },
+    {
+      "name": "final gates fail — escalate",
+      "scenario": {"FinalGates.outcome": "fail"},
+      "expect": {
+        "visited": ["FinalGates", "EscalateToHuman"]
       }
     }
   ]

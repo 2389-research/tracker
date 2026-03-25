@@ -9,11 +9,33 @@
       }
     },
     {
-      "name": "review and final gates reachable",
-      "scenario": {"tool_stdout": "all-done"},
+      "name": "plan rejected — reaches Done",
+      "scenario": {"ApprovePlan.preferred_label": "reject"},
       "expect": {
         "status": "success",
-        "visited": ["ReviewParallel", "FinalBuild", "Done"]
+        "visited": ["ApprovePlan", "Done"]
+      }
+    },
+    {
+      "name": "decompose fails — escalate",
+      "scenario": {"Decompose.outcome": "fail"},
+      "expect": {
+        "status": "success",
+        "visited": ["Decompose", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "milestone fix exhausted — escalate",
+      "scenario": {"TestMilestone.tool_stdout": "escalate", "TestMilestone.outcome": "fail"},
+      "expect": {
+        "visited": ["TestMilestone", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "final build fails — escalate",
+      "scenario": {"tool_stdout": "all-done", "FinalBuild.outcome": "fail"},
+      "expect": {
+        "visited": ["FinalBuild", "EscalateToHuman"]
       }
     }
   ]
