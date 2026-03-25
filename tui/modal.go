@@ -30,12 +30,21 @@ func NewModal(width, height int) *Modal {
 	return &Modal{width: width, height: height}
 }
 
+// FullscreenContent is an optional interface for modal content that wants
+// to fill the entire terminal instead of being centered in a bordered box.
+type FullscreenContent interface {
+	IsFullscreen() bool
+}
+
 // Show displays the modal with the given content.
 func (m *Modal) Show(content ModalContent) {
 	m.content = content
 	m.visible = true
 	if fc, ok := content.(*FreeformContent); ok {
 		fc.SetWidth(m.width)
+	}
+	if rc, ok := content.(*ReviewContent); ok {
+		rc.SetSize(m.width, m.height)
 	}
 }
 
@@ -51,12 +60,15 @@ func (m *Modal) Visible() bool {
 }
 
 // SetSize updates the terminal dimensions used for centering.
-// Propagates width to freeform content so the textarea fills the modal.
+// Propagates dimensions to content that needs them.
 func (m *Modal) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 	if fc, ok := m.content.(*FreeformContent); ok {
 		fc.SetWidth(width)
+	}
+	if rc, ok := m.content.(*ReviewContent); ok {
+		rc.SetSize(width, height)
 	}
 }
 
@@ -69,9 +81,15 @@ func (m *Modal) Update(msg tea.Msg) tea.Cmd {
 }
 
 // View renders the modal overlaid on the given background content.
+// Fullscreen content fills the terminal; other content is centered in a box.
 func (m *Modal) View(background string) string {
 	if !m.visible || m.content == nil {
 		return background
+	}
+
+	// Fullscreen content replaces the background entirely.
+	if fs, ok := m.content.(FullscreenContent); ok && fs.IsFullscreen() {
+		return m.content.View()
 	}
 
 	borderStyle := lipgloss.NewStyle().

@@ -125,7 +125,12 @@ func (a AppModel) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.modal.Show(NewChoiceContent(m.Prompt, m.Options, m.ReplyCh))
 		return a, nil, true
 	case MsgGateFreeform:
-		a.modal.Show(NewFreeformContent(m.Prompt, m.ReplyCh))
+		// Use split-pane review for long prompts (plan approval, etc.)
+		if strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000 {
+			a.modal.Show(NewReviewContent(m.Prompt, m.ReplyCh, a.lay.width, a.lay.height))
+		} else {
+			a.modal.Show(NewFreeformContent(m.Prompt, m.ReplyCh))
+		}
 		return a, nil, true
 	case MsgModalDismiss:
 		a.modal.Hide()
