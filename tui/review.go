@@ -136,14 +136,27 @@ func (r *ReviewContent) submit() tea.Cmd {
 		return nil
 	}
 	r.done = true
+	r.cleanup()
 	if r.replyCh != nil {
 		r.replyCh <- val
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
+// cleanup removes the temp file if one was created.
+func (r *ReviewContent) cleanup() {
+	if r.tmpFile != "" {
+		os.Remove(r.tmpFile)
+		r.tmpFile = ""
+	}
+}
+
 func (r *ReviewContent) cancel() tea.Cmd {
 	r.done = true
+	r.cleanup()
+	if r.replyCh != nil {
+		close(r.replyCh)
+	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 

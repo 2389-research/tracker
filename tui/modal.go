@@ -40,12 +40,7 @@ type FullscreenContent interface {
 func (m *Modal) Show(content ModalContent) {
 	m.content = content
 	m.visible = true
-	if fc, ok := content.(*FreeformContent); ok {
-		fc.SetWidth(m.width)
-	}
-	if rc, ok := content.(*ReviewContent); ok {
-		rc.SetSize(m.width, m.height)
-	}
+	m.propagateSize()
 }
 
 // Hide removes the modal from view.
@@ -60,15 +55,21 @@ func (m *Modal) Visible() bool {
 }
 
 // SetSize updates the terminal dimensions used for centering.
-// Propagates dimensions to content that needs them.
 func (m *Modal) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	if fc, ok := m.content.(*FreeformContent); ok {
-		fc.SetWidth(width)
-	}
-	if rc, ok := m.content.(*ReviewContent); ok {
-		rc.SetSize(width, height)
+	m.propagateSize()
+}
+
+// propagateSize sends dimensions to content types that need them.
+func (m *Modal) propagateSize() {
+	switch c := m.content.(type) {
+	case *FreeformContent:
+		c.SetWidth(m.width)
+	case *HybridContent:
+		c.SetWidth(m.width)
+	case *ReviewContent:
+		c.SetSize(m.width, m.height)
 	}
 }
 
@@ -256,8 +257,12 @@ func (f *FreeformContent) Update(msg tea.Msg) tea.Cmd {
 }
 
 // cancel dismisses the modal without submitting any value.
+// Closes the reply channel so the pipeline handler unblocks.
 func (f *FreeformContent) cancel() tea.Cmd {
 	f.done = true
+	if f.replyCh != nil {
+		close(f.replyCh)
+	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 

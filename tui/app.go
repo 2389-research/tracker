@@ -291,21 +291,27 @@ func (a *AppModel) SetInitialNodes(entries []NodeEntry) {
 }
 
 // buildFreeformContent selects the best content type for a freeform gate:
-// - Labels present → HybridContent (radio + freeform)
-// - Long prompt → ReviewContent (scrollable split-pane)
-// - Short prompt → FreeformContent (simple modal)
+// - Long prompt → ReviewContent (scrollable split-pane), labels shown in hint
+// - Labels + short prompt → HybridContent (radio + freeform)
+// - Short prompt, no labels → FreeformContent (simple modal)
 func buildFreeformContent(m MsgGateFreeform, width, height int) ModalContent {
+	isLong := strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000
+
+	// Long prompts always get the review pane (plan needs to be readable).
+	// If there are also labels, they become the textarea placeholder hint.
+	if isLong {
+		return NewReviewContent(m.Prompt, m.ReplyCh, width, height)
+	}
+
+	// Short prompt with labels gets the hybrid radio view.
 	if len(m.Labels) > 0 {
-		// Extract just the gate label (before the --- separator) for the hybrid view.
 		label := m.Prompt
 		if idx := strings.Index(label, "\n\n---\n"); idx >= 0 {
 			label = label[:idx]
 		}
 		return NewHybridContent(label, m.Labels, m.Default, m.ReplyCh)
 	}
-	if strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000 {
-		return NewReviewContent(m.Prompt, m.ReplyCh, width, height)
-	}
+
 	return NewFreeformContent(m.Prompt, m.ReplyCh)
 }
 

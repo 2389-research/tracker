@@ -171,6 +171,9 @@ func (h *HybridContent) submitOther() tea.Cmd {
 
 func (h *HybridContent) cancel() tea.Cmd {
 	h.done = true
+	if h.replyCh != nil {
+		close(h.replyCh)
+	}
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
