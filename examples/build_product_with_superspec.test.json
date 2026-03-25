@@ -1,0 +1,43 @@
+{
+  "tests": [
+    {
+      "name": "happy path — all phases pass, review passes, ship",
+      "scenario": {"outcome": "success", "tool_stdout": "phase-ready"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "Setup", "AnalyzeSpec", "BuildPlan", "ApprovePlan", "SetupPhase1Worktrees", "Phase1Parallel", "Phase1Join", "MergePhase1", "GatePhase1", "SetupPhase2Worktrees", "Phase2Parallel", "Phase2Join", "MergePhase2", "GatePhase2", "StreamD", "GateStreamD", "SetupPhase4Worktrees", "Phase4Parallel", "Phase4Join", "MergePhase4", "GatePhase4", "SetupPhase5Worktrees", "Phase5Parallel", "Phase5Join", "MergePhase5", "ReviewParallel", "ReviewJoin", "SynthesizeReviews", "FinalGates", "TraceabilityAudit", "Cleanup", "FinalCommit", "Done"],
+        "not_visited": ["FixPhase1", "FixPhase2", "FixStreamD", "FixPhase4", "ApplyReviewFixes", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "plan rejected",
+      "scenario": {"preferred_label": "reject"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "Setup", "AnalyzeSpec", "BuildPlan", "ApprovePlan", "Done"],
+        "not_visited": ["SetupPhase1Worktrees"]
+      }
+    },
+    {
+      "name": "phase 1 gate fails — fix loop",
+      "scenario": {"outcome": "fail"},
+      "expect": {
+        "visited": ["GatePhase1", "FixPhase1"]
+      }
+    },
+    {
+      "name": "merge conflict — escalate",
+      "scenario": {"outcome": "fail"},
+      "expect": {
+        "visited": ["MergePhase1", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "review finds blocking issues — fix then re-gate",
+      "scenario": {"outcome": "fail"},
+      "expect": {
+        "visited": ["SynthesizeReviews", "ApplyReviewFixes", "FinalGates"]
+      }
+    }
+  ]
+}

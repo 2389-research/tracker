@@ -1,0 +1,30 @@
+{
+  "tests": [
+    {
+      "name": "happy path — approve spec, implement, review, ship",
+      "scenario": {"outcome": "success", "tool_stdout": "worktrees-ready"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "SetupWorkspace", "AskUser", "Explore", "WriteSpec", "ApproveSpec", "SetupWorktrees", "ImplementParallel", "ImplementJoin", "CaptureAndTest", "CrossCritique", "SelectWinner", "ApplyWinner", "FinalBuild", "FinalVerify", "CommitFinal", "Done"],
+        "not_visited": ["EscalateToHuman"]
+      }
+    },
+    {
+      "name": "spec rejected — user rejects at approval",
+      "scenario": {"preferred_label": "reject"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "SetupWorkspace", "AskUser", "Explore", "WriteSpec", "ApproveSpec", "Done"],
+        "not_visited": ["SetupWorktrees", "ImplementParallel"]
+      }
+    },
+    {
+      "name": "build fails — escalate to human",
+      "scenario": {"outcome": "fail"},
+      "expect": {
+        "status": "success",
+        "visited": ["EscalateToHuman"]
+      }
+    }
+  ]
+}

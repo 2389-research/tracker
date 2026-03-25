@@ -1,0 +1,44 @@
+{
+  "tests": [
+    {
+      "name": "happy path — all milestones pass, review passes, ship",
+      "scenario": {"outcome": "success", "tool_stdout": "all-done"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "Setup", "ReadSpec", "Decompose", "ApprovePlan", "PickNextMilestone", "ReviewParallel", "ReviewJoin", "SynthesizeReviews", "FinalBuild", "FinalSpecCheck", "Cleanup", "FinalCommit", "Done"],
+        "not_visited": ["FixMilestone", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "plan rejected",
+      "scenario": {"preferred_label": "reject"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "Setup", "ReadSpec", "Decompose", "ApprovePlan", "Done"],
+        "not_visited": ["PickNextMilestone"]
+      }
+    },
+    {
+      "name": "decompose fails — escalate",
+      "scenario": {"outcome": "fail"},
+      "expect": {
+        "status": "success",
+        "visited": ["Decompose", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "milestone test fails — fix loop",
+      "scenario": {"outcome": "fail", "tool_stdout": "tests-fail"},
+      "expect": {
+        "visited": ["TestMilestone", "FixMilestone"]
+      }
+    },
+    {
+      "name": "milestone fix exhausted — escalate",
+      "scenario": {"outcome": "fail", "tool_stdout": "escalate"},
+      "expect": {
+        "visited": ["TestMilestone", "EscalateToHuman"]
+      }
+    }
+  ]
+}
