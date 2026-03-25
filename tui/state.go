@@ -232,7 +232,9 @@ func (s *StateStore) Apply(msg interface{}) {
 		if IsSubgraphNode(m.NodeID) {
 			s.ensureSubgraphNode(m.NodeID)
 		}
-		s.ensure(m.NodeID).status = NodeRunning
+		ni := s.ensure(m.NodeID)
+		ni.status = NodeRunning
+		ni.retryMsg = ""
 	case MsgNodeCompleted:
 		s.ensure(m.NodeID).status = NodeDone
 	case MsgNodeFailed:

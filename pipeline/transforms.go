@@ -1,3 +1,5 @@
+// ABOUTME: Variable expansion and context injection for pipeline node attributes.
+// ABOUTME: Expands $goal, graph-level variables, and appends prior node outputs to LLM prompts.
 package pipeline
 
 import (
@@ -15,20 +17,32 @@ func ExpandPromptVariables(prompt string, ctx *PipelineContext) string {
 	return prompt
 }
 
+// GraphVarMap extracts graph-level variables from the pipeline context as a
+// $key → value map. Call once per node and pass the result to ExpandGraphVariables
+// to avoid repeated Snapshot() copies.
+func GraphVarMap(ctx *PipelineContext) map[string]string {
+	if ctx == nil {
+		return nil
+	}
+	vars := make(map[string]string)
+	for key, val := range ctx.Snapshot() {
+		if strings.HasPrefix(key, "graph.") {
+			vars["$"+strings.TrimPrefix(key, "graph.")] = val
+		}
+	}
+	return vars
+}
+
 // ExpandGraphVariables substitutes $key references in text with values from
-// graph-level attributes stored in the pipeline context as "graph.<key>".
-// For example, graph[target_name="foo"] stored as "graph.target_name" expands
-// $target_name to "foo". This applies to any node attribute (prompt,
-// tool_command, etc.) so all handlers get uniform variable expansion.
-func ExpandGraphVariables(text string, ctx *PipelineContext) string {
-	if text == "" || ctx == nil || !strings.Contains(text, "$") {
+// graph-level attributes. The vars map should come from GraphVarMap.
+// For example, graph[target_name="foo"] expands $target_name to "foo".
+// This applies to any node attribute (prompt, tool_command, etc.) so all
+// handlers get uniform variable expansion.
+func ExpandGraphVariables(text string, vars map[string]string) string {
+	if text == "" || len(vars) == 0 || !strings.Contains(text, "$") {
 		return text
 	}
-	for key, val := range ctx.Snapshot() {
-		if !strings.HasPrefix(key, "graph.") {
-			continue
-		}
-		varName := "$" + strings.TrimPrefix(key, "graph.")
+	for varName, val := range vars {
 		if strings.Contains(text, varName) {
 			text = strings.ReplaceAll(text, varName, val)
 		}

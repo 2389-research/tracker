@@ -70,3 +70,35 @@ func TestLoggingEventHandlerNormalEvents(t *testing.T) {
 		t.Errorf("expected node_a in output, got: %q", output)
 	}
 }
+
+func TestLoggingEventHandlerResumedThenPipelineComplete(t *testing.T) {
+	var buf bytes.Buffer
+	h := &LoggingEventHandler{Writer: &buf}
+
+	now := time.Now()
+
+	// All nodes are resumed — no stage_started follows.
+	for _, id := range []string{"node_a", "node_b"} {
+		h.HandlePipelineEvent(PipelineEvent{
+			Type:      EventStageCompleted,
+			Timestamp: now,
+			NodeID:    id,
+			Message:   "previously completed (resumed)",
+		})
+	}
+
+	// Pipeline completes directly after resumed nodes.
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineCompleted,
+		Timestamp: now,
+		Message:   "pipeline completed",
+	})
+
+	output := buf.String()
+	if !strings.Contains(output, "resumed 2 completed nodes") {
+		t.Errorf("expected batched resume summary, got: %q", output)
+	}
+	if !strings.Contains(output, "pipeline_completed") {
+		t.Errorf("expected pipeline_completed event, got: %q", output)
+	}
+}

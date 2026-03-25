@@ -290,10 +290,11 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		// Expand graph-level variables ($goal, $target_name, etc.) in all
 		// node attributes so every handler gets uniform variable expansion.
 		{
+			graphVars := GraphVarMap(pctx)
 			execAttrs := make(map[string]string, len(execNode.Attrs))
 			changed := false
 			for k, v := range execNode.Attrs {
-				expanded := ExpandGraphVariables(v, pctx)
+				expanded := ExpandGraphVariables(v, graphVars)
 				// Also expand legacy $goal via ExpandPromptVariables for the prompt attr.
 				if k == "prompt" {
 					expanded = ExpandPromptVariables(expanded, pctx)
@@ -377,7 +378,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 				ContextSnapshot: e.routingContextSnapshot(pctx),
 			}
 			if outcome.Stats != nil {
-				detail.TokenInput = outcome.Stats.CacheHits   // input tokens approximated by cache hits
+				detail.TokenInput = outcome.Stats.CacheHits    // input tokens approximated by cache hits
 				detail.TokenOutput = outcome.Stats.CacheMisses // output tokens approximated by cache misses
 			}
 			e.emit(PipelineEvent{

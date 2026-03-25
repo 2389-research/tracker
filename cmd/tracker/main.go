@@ -451,7 +451,7 @@ func parseFlags(args []string) (runConfig, error) {
 	// Handle --version and -v anywhere in args.
 	if len(args) > 1 {
 		switch args[1] {
-		case "version", "--version", "-v":
+		case "version", "--version":
 			cfg.mode = modeVersion
 			return cfg, nil
 		case "--help", "-h", "help":
@@ -557,7 +557,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --json                    Stream events as newline-delimited JSON to stdout\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
-	fmt.Fprintf(w, "  -v, --version             Show version information\n")
+	fmt.Fprintf(w, "  --version                 Show version information\n")
 }
 
 func executeCommand(cfg runConfig, deps commandDeps) error {
