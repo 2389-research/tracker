@@ -188,4 +188,3 @@ func TestSession_ResultHasCostEstimate(t *testing.T) {
 		t.Errorf("expected cost in range [0.40, 0.50], got %.4f", cost)
 	}
 }
-

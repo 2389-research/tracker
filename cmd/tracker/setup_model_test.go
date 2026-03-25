@@ -454,4 +454,3 @@ func TestSetupModelFinishBanner(t *testing.T) {
 		t.Fatalf("expected block-letter ASCII art in finish banner, got:\n%s", view)
 	}
 }
-

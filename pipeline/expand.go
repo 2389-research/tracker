@@ -17,9 +17,10 @@ import (
 // In strict mode (strict=true), undefined variables return an error.
 //
 // Examples:
-//   ${ctx.human_response} → value from PipelineContext
-//   ${params.model} → value from subgraph params
-//   ${graph.goal} → value from graph attributes
+//
+//	${ctx.human_response} → value from PipelineContext
+//	${params.model} → value from subgraph params
+//	${graph.goal} → value from graph attributes
 func ExpandVariables(
 	text string,
 	ctx *PipelineContext,

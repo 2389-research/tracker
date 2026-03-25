@@ -117,7 +117,7 @@ func lintDIP104(g *Graph) []string {
 // lintDIP108 checks for unknown model/provider combinations.
 func lintDIP108(g *Graph) []string {
 	var warnings []string
-	
+
 	// Known good combinations (not exhaustive, just common ones)
 	knownModels := map[string][]string{
 		"openai":    {"gpt-4o", "gpt-4o-mini", "gpt-5.4", "o1", "o1-mini", "o3-mini"},

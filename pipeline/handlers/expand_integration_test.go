@@ -15,7 +15,7 @@ func TestVariableExpansion_Integration(t *testing.T) {
 	mock := &mockLLMClient{
 		response: "STATUS:success",
 	}
-	
+
 	// Create a graph with variable references
 	graph := &pipeline.Graph{
 		Name: "test",
@@ -27,7 +27,7 @@ func TestVariableExpansion_Integration(t *testing.T) {
 				ID:    "test",
 				Shape: "agent",
 				Attrs: map[string]string{
-					"prompt": "Goal: ${graph.goal}\nUser input: ${ctx.human_response}",
+					"prompt":      "Goal: ${graph.goal}\nUser input: ${ctx.human_response}",
 					"auto_status": "true",
 				},
 			},
@@ -35,24 +35,24 @@ func TestVariableExpansion_Integration(t *testing.T) {
 		StartNode: "test",
 		ExitNode:  "test",
 	}
-	
+
 	// Create context with human response
 	ctx := pipeline.NewPipelineContext()
 	ctx.Set("human_response", "build a test app")
-	
+
 	// Create handler
 	handler := NewCodergenHandler(mock, "/tmp", WithGraphAttrs(graph.Attrs))
-	
+
 	// Execute
 	outcome, err := handler.Execute(context.Background(), graph.Nodes["test"], ctx)
 	if err != nil {
 		t.Fatalf("execution failed: %v", err)
 	}
-	
+
 	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("got status %q, want success", outcome.Status)
 	}
-	
+
 	// Verify that the prompt was expanded correctly
 	if !strings.Contains(mock.lastPrompt, "Goal: Test variable expansion") {
 		t.Errorf("graph.goal not expanded in prompt: %s", mock.lastPrompt)
@@ -84,7 +84,7 @@ func TestSubgraphParamInjection_Integration(t *testing.T) {
 		StartNode: "process",
 		ExitNode:  "process",
 	}
-	
+
 	// Create parent graph with subgraph call
 	parentGraph := &pipeline.Graph{
 		Name: "parent",
@@ -105,38 +105,38 @@ func TestSubgraphParamInjection_Integration(t *testing.T) {
 		StartNode: "call_child",
 		ExitNode:  "call_child",
 	}
-	
+
 	// Create mock client
 	mock := &mockLLMClient{
 		response: "STATUS:success",
 	}
-	
+
 	// Create registry
 	registry := pipeline.NewHandlerRegistry()
-	
+
 	// Register agent handler
 	agentHandler := NewCodergenHandler(mock, "/tmp", WithGraphAttrs(childGraph.Attrs))
 	registry.Register(agentHandler)
-	
+
 	// Register subgraph handler
 	graphs := map[string]*pipeline.Graph{
 		"child": childGraph,
 	}
 	subgraphHandler := pipeline.NewSubgraphHandler(graphs, registry, nil, nil)
 	registry.Register(subgraphHandler)
-	
+
 	// Run parent graph
 	engine := pipeline.NewEngine(parentGraph, registry)
 	result, err := engine.Run(context.Background())
-	
+
 	if err != nil {
 		t.Fatalf("execution failed: %v", err)
 	}
-	
+
 	if result.Status != pipeline.OutcomeSuccess {
 		t.Errorf("got status %q, want success", result.Status)
 	}
-	
+
 	// Verify params were expanded
 	if !strings.Contains(mock.lastPrompt, "code review") {
 		t.Errorf("params.task not expanded: %s", mock.lastPrompt)
@@ -165,7 +165,7 @@ func (m *mockLLMClient) Complete(ctx context.Context, req *llm.Request) (*llm.Re
 		}
 		m.lastPrompt = strings.Join(textParts, "\n")
 	}
-	
+
 	return &llm.Response{
 		Message: llm.Message{
 			Role: "assistant",

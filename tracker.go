@@ -26,17 +26,17 @@ import (
 // Zero-value Config uses environment variables for LLM credentials,
 // the current working directory, and auto-generated run directories.
 type Config struct {
-	WorkingDir    string                       // default: os.Getwd()
-	CheckpointDir string                       // default: empty (engine auto-generates)
-	ArtifactDir   string                       // default: empty (engine auto-generates)
-	Format        string                       // "dip" (default), "dot" (deprecated); empty = auto-detect
-	Model         string                       // default: env or claude-sonnet-4-6; graph-level attrs take precedence
-	Provider      string                       // default: auto-detect from env
-	RetryPolicy   string                       // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
+	WorkingDir    string                        // default: os.Getwd()
+	CheckpointDir string                        // default: empty (engine auto-generates)
+	ArtifactDir   string                        // default: empty (engine auto-generates)
+	Format        string                        // "dip" (default), "dot" (deprecated); empty = auto-detect
+	Model         string                        // default: env or claude-sonnet-4-6; graph-level attrs take precedence
+	Provider      string                        // default: auto-detect from env
+	RetryPolicy   string                        // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
 	EventHandler  pipeline.PipelineEventHandler // optional: live pipeline events
 	AgentEvents   agent.EventHandler            // optional: live agent session events
-	LLMClient     agent.Completer              // optional: override auto-created client
-	Context       map[string]string            // optional: initial pipeline context
+	LLMClient     agent.Completer               // optional: override auto-created client
+	Context       map[string]string             // optional: initial pipeline context
 }
 
 // Result contains the outcome of a pipeline execution.

@@ -13,7 +13,7 @@ import (
 // jsonlLogEntry is the on-disk format for one activity log line.
 type jsonlLogEntry struct {
 	Timestamp string `json:"ts"`
-	Source    string `json:"source"`             // "pipeline", "agent", "llm"
+	Source    string `json:"source"` // "pipeline", "agent", "llm"
 	Type      string `json:"type"`
 	RunID     string `json:"run_id,omitempty"`
 	NodeID    string `json:"node_id,omitempty"`

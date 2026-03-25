@@ -403,4 +403,3 @@ func (m setupModel) viewFinishBanner() string {
 
 	return b.String()
 }
-

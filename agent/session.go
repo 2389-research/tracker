@@ -56,19 +56,19 @@ func WithSessionRunner(runner tools.SessionRunner) SessionOption {
 // Session holds the state for a single agent conversation loop.
 // A Session is single-use: Run must only be called once.
 type Session struct {
-	client        Completer
-	config        SessionConfig
-	handler       EventHandler
-	registry      *tools.Registry
-	env           exec.ExecutionEnvironment
-	sessionRunner tools.SessionRunner
-	steering      <-chan string
-	messages      []llm.Message
-	id            string
-	ran              bool
-	cache            *toolCache
-	lastCompactTurn  int
-	toolTimings      map[string]time.Duration
+	client          Completer
+	config          SessionConfig
+	handler         EventHandler
+	registry        *tools.Registry
+	env             exec.ExecutionEnvironment
+	sessionRunner   tools.SessionRunner
+	steering        <-chan string
+	messages        []llm.Message
+	id              string
+	ran             bool
+	cache           *toolCache
+	lastCompactTurn int
+	toolTimings     map[string]time.Duration
 }
 
 // ID returns the session's unique identifier.

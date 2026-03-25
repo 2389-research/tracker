@@ -404,7 +404,7 @@ type countingReadTool struct {
 	count *int
 }
 
-func (t *countingReadTool) Name() string               { return "read" }
+func (t *countingReadTool) Name() string                { return "read" }
 func (t *countingReadTool) Description() string         { return "counting read" }
 func (t *countingReadTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
 func (t *countingReadTool) CachePolicy() tools.CachePolicy {
@@ -418,7 +418,7 @@ func (t *countingReadTool) Execute(_ context.Context, _ json.RawMessage) (string
 // noopMutatingTool is a mutating tool that does nothing.
 type noopMutatingTool struct{}
 
-func (t *noopMutatingTool) Name() string               { return "noop_write" }
+func (t *noopMutatingTool) Name() string                { return "noop_write" }
 func (t *noopMutatingTool) Description() string         { return "mutating noop" }
 func (t *noopMutatingTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
 func (t *noopMutatingTool) CachePolicy() tools.CachePolicy {
@@ -433,7 +433,7 @@ type failOnceReadTool struct {
 	count *int
 }
 
-func (t *failOnceReadTool) Name() string               { return "read" }
+func (t *failOnceReadTool) Name() string                { return "read" }
 func (t *failOnceReadTool) Description() string         { return "fail-once read" }
 func (t *failOnceReadTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
 func (t *failOnceReadTool) CachePolicy() tools.CachePolicy {
@@ -579,9 +579,9 @@ func TestSession_ToolCacheHitEmitsEvent(t *testing.T) {
 		eventTypes = append(eventTypes, e.Type)
 	}
 	assertContainsInOrder(t, eventTypes,
-		EventToolCallStart,  // first read (real execution)
+		EventToolCallStart, // first read (real execution)
 		EventToolCallEnd,
-		EventToolCallStart,  // second read (cache hit)
+		EventToolCallStart, // second read (cache hit)
 		EventToolCacheHit,
 		EventToolCallEnd,
 	)

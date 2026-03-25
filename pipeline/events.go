@@ -26,10 +26,10 @@ const (
 	EventEdgeTiebreaker     PipelineEventType = "edge_tiebreaker"
 
 	// Decision audit trail events — capture decision points for post-run reconstruction.
-	EventDecisionEdge       PipelineEventType = "decision_edge"
-	EventDecisionCondition  PipelineEventType = "decision_condition"
-	EventDecisionOutcome    PipelineEventType = "decision_outcome"
-	EventDecisionRestart    PipelineEventType = "decision_restart"
+	EventDecisionEdge      PipelineEventType = "decision_edge"
+	EventDecisionCondition PipelineEventType = "decision_condition"
+	EventDecisionOutcome   PipelineEventType = "decision_outcome"
+	EventDecisionRestart   PipelineEventType = "decision_restart"
 )
 
 // DecisionDetail carries structured data about a pipeline decision point.

@@ -107,7 +107,7 @@ func TestLintDIP104_UnboundedRetry(t *testing.T) {
 	g.AddNode(&Node{
 		ID:      "Task",
 		Handler: "codergen",
-		Attrs:   map[string]string{
+		Attrs: map[string]string{
 			"prompt":       "do work",
 			"retry_target": "Task",
 		},

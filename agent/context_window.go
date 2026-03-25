@@ -8,10 +8,10 @@ import "github.com/2389-research/tracker/llm"
 // InputTokens from each LLM response already represents the full conversation context
 // for that turn, so utilization reflects the latest input token count, not a cumulative sum.
 type ContextWindowTracker struct {
-	Limit            int
-	WarningThreshold float64
+	Limit             int
+	WarningThreshold  float64
 	latestInputTokens int
-	WarningEmitted   bool
+	WarningEmitted    bool
 }
 
 // NewContextWindowTracker creates a tracker with the given token limit and warning threshold.

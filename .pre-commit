@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# ABOUTME: Pre-commit hook enforcing quality gates.
+# ABOUTME: Install with: ln -sf ../../.pre-commit .git/hooks/pre-commit
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+pass() { printf "${GREEN}✓${NC} %s\n" "$1"; }
+fail() { printf "${RED}✗${NC} %s\n" "$1"; exit 1; }
+warn() { printf "${YELLOW}!${NC} %s\n" "$1"; }
+
+echo "═══ Pre-commit Quality Gates ═══"
+
+# 1. Format check
+echo ""
+echo "--- Format ---"
+UNFORMATTED=$(gofmt -l . 2>&1 | grep -v vendor || true)
+if [ -n "$UNFORMATTED" ]; then
+  fail "gofmt: these files need formatting:\n$UNFORMATTED"
+fi
+pass "gofmt"
+
+# 2. Vet
+echo ""
+echo "--- Vet ---"
+go vet ./... 2>&1 || fail "go vet failed"
+pass "go vet"
+
+# 3. Build
+echo ""
+echo "--- Build ---"
+go build ./... 2>&1 || fail "go build failed"
+pass "go build"
+
+# 4. Tests (short mode for speed)
+echo ""
+echo "--- Tests ---"
+RESULT=$(go test ./... -short -count=1 2>&1)
+PASS_COUNT=$(echo "$RESULT" | grep -c '^ok' || true)
+FAIL_COUNT=$(echo "$RESULT" | grep -c '^FAIL' || true)
+if [ "$FAIL_COUNT" -gt 0 ]; then
+  echo "$RESULT" | grep '^FAIL'
+  fail "tests failed ($FAIL_COUNT packages)"
+fi
+pass "tests ($PASS_COUNT packages)"
+
+# 5. Race detector on core packages
+echo ""
+echo "--- Race Detector ---"
+go test -race -short -count=1 ./pipeline/... ./tui/... 2>&1 | tail -5 || fail "race detected"
+pass "race detector"
+
+# 6. Coverage (check core packages meet 85% threshold)
+echo ""
+echo "--- Coverage ---"
+COVERAGE=$(go test ./pipeline/... -short -coverprofile=/tmp/tracker-coverage.out 2>&1 | tail -1)
+TOTAL=$(go tool cover -func=/tmp/tracker-coverage.out 2>/dev/null | tail -1 | awk '{print $NF}' | tr -d '%')
+if [ -n "$TOTAL" ]; then
+  THRESHOLD=80
+  if (( $(echo "$TOTAL < $THRESHOLD" | bc -l) )); then
+    fail "pipeline coverage ${TOTAL}% < ${THRESHOLD}% threshold"
+  fi
+  pass "pipeline coverage ${TOTAL}%"
+else
+  warn "could not compute coverage"
+fi
+
+# 7. Dippin lint (core pipelines only, for speed)
+echo ""
+echo "--- Dippin Lint ---"
+if command -v dippin >/dev/null 2>&1; then
+  LINT_FAIL=0
+  for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip; do
+    ERRORS=$(dippin check "$f" 2>&1 | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('errors',0))" 2>/dev/null || echo "0")
+    if [ "$ERRORS" -gt 0 ]; then
+      echo "  $f: $ERRORS errors"
+      LINT_FAIL=1
+    fi
+  done
+  if [ "$LINT_FAIL" -gt 0 ]; then
+    fail "dippin lint errors in core pipelines"
+  fi
+  pass "dippin lint (core pipelines)"
+else
+  warn "dippin CLI not found — skipping .dip lint"
+fi
+
+echo ""
+echo "═══ All gates passed ═══"

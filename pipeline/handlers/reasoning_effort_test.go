@@ -11,10 +11,10 @@ import (
 
 func TestCodergenHandler_ReasoningEffort(t *testing.T) {
 	tests := []struct {
-		name               string
-		nodeAttrs          map[string]string
-		graphAttrs         map[string]string
-		expectedEffort     string
+		name           string
+		nodeAttrs      map[string]string
+		graphAttrs     map[string]string
+		expectedEffort string
 	}{
 		{
 			name: "node level reasoning_effort",

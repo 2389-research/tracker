@@ -1,5 +1,5 @@
 # ABOUTME: GitHub Actions CI workflow for tracker.
-# ABOUTME: Runs the repository's canonical test and build entrypoints and verifies both binaries.
+# ABOUTME: Enforces all quality gates: format, vet, build, test, race, coverage, dippin lint, doctor.
 name: CI
 
 on:
@@ -9,8 +9,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Test
+  quality-gates:
+    name: Quality Gates
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -23,29 +23,31 @@ jobs:
           cache: true
 
       - name: Install dippin CLI
-        run: go install github.com/2389-research/dippin-lang/cmd/dippin@latest
+        run: go install github.com/2389-research/dippin-lang/cmd/dippin@v0.4.3
 
-      - name: Lint .dip files
+      - name: Format check
+        run: make fmt-check
+
+      - name: Vet
+        run: make vet
+
+      - name: Build
+        run: make build
+
+      - name: Tests
+        run: make test-short
+
+      - name: Race detector
+        run: make test-race
+
+      - name: Coverage
+        run: make coverage
+
+      - name: Dippin lint
         run: make lint
 
-      - name: Run tests
-        run: make test
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build binaries
-        run: make build
+      - name: Dippin doctor
+        run: make doctor
 
       - name: Verify tracker binary
         run: ./bin/tracker --help

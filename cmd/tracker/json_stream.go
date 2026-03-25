@@ -16,7 +16,7 @@ import (
 // jsonStreamEvent is the unified NDJSON output format for --json mode.
 type jsonStreamEvent struct {
 	Timestamp string `json:"ts"`
-	Source     string `json:"source"`             // "pipeline", "llm", "agent"
+	Source    string `json:"source"`              // "pipeline", "llm", "agent"
 	Type      string `json:"type"`                // event type within source
 	RunID     string `json:"run_id,omitempty"`    // pipeline run ID
 	NodeID    string `json:"node_id,omitempty"`   // pipeline node ID
