@@ -73,6 +73,8 @@ type MsgGateChoice struct {
 type MsgGateFreeform struct {
 	NodeID  string
 	Prompt  string
+	Labels  []string // outgoing edge labels (e.g., "approve", "adjust", "reject")
+	Default string   // default label (pre-selected)
 	ReplyCh chan<- string
 }
 

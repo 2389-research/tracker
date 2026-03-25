@@ -13,6 +13,7 @@ import (
 // Compile-time interface assertions.
 var _ handlers.Interviewer = (*BubbleteaInterviewer)(nil)
 var _ handlers.FreeformInterviewer = (*BubbleteaInterviewer)(nil)
+var _ handlers.LabeledFreeformInterviewer = (*BubbleteaInterviewer)(nil)
 
 // SendFunc is a function that sends a Bubbletea message to a running program.
 // In Mode 2, this is typically tea.Program.Send.
@@ -54,6 +55,15 @@ func (b *BubbleteaInterviewer) AskFreeform(prompt string) (string, error) {
 	return b.askMode1Freeform(prompt)
 }
 
+// AskFreeformWithLabels presents labeled options alongside a freeform textarea.
+func (b *BubbleteaInterviewer) AskFreeformWithLabels(prompt string, labels []string, defaultLabel string) (string, error) {
+	if b.send != nil {
+		return b.askMode2FreeformWithLabels(prompt, labels, defaultLabel)
+	}
+	// Mode 1 fallback: just use regular freeform.
+	return b.askMode1Freeform(prompt)
+}
+
 // ── Mode 2: delegate to persistent TUI program ──────────────────────────────
 
 func (b *BubbleteaInterviewer) askMode2Choice(prompt string, choices []string, defaultChoice string) (string, error) {
@@ -74,6 +84,21 @@ func (b *BubbleteaInterviewer) askMode2Freeform(prompt string) (string, error) {
 	ch := make(chan string, 1)
 	b.send(MsgGateFreeform{
 		Prompt:  prompt,
+		ReplyCh: ch,
+	})
+	reply, ok := <-ch
+	if !ok {
+		return "", fmt.Errorf("TUI program closed before responding to gate")
+	}
+	return reply, nil
+}
+
+func (b *BubbleteaInterviewer) askMode2FreeformWithLabels(prompt string, labels []string, defaultLabel string) (string, error) {
+	ch := make(chan string, 1)
+	b.send(MsgGateFreeform{
+		Prompt:  prompt,
+		Labels:  labels,
+		Default: defaultLabel,
 		ReplyCh: ch,
 	})
 	reply, ok := <-ch

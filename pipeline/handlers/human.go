@@ -29,6 +29,14 @@ type FreeformInterviewer interface {
 	AskFreeform(prompt string) (string, error)
 }
 
+// LabeledFreeformInterviewer extends FreeformInterviewer with label awareness.
+// When outgoing edges have labels, the TUI can present them as selectable
+// options alongside a freeform textarea for custom input.
+type LabeledFreeformInterviewer interface {
+	FreeformInterviewer
+	AskFreeformWithLabels(prompt string, labels []string, defaultLabel string) (string, error)
+}
+
 // AutoApproveInterviewer always returns the default choice, or the first choice
 // if no default is specified. Useful for testing and non-interactive pipelines.
 type AutoApproveInterviewer struct{}
@@ -240,7 +248,26 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	if !ok {
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=freeform but interviewer does not support freeform input", node.ID)
 	}
-	response, err := fi.AskFreeform(prompt)
+
+	// Collect edge labels for the labeled variant.
+	var labels []string
+	if h.graph != nil {
+		for _, e := range h.graph.OutgoingEdges(node.ID) {
+			if e.Label != "" {
+				labels = append(labels, e.Label)
+			}
+		}
+	}
+	defaultLabel := node.Attrs["default"]
+
+	// Use labeled variant if available and there are labels.
+	var response string
+	var err error
+	if lfi, ok := fi.(LabeledFreeformInterviewer); ok && len(labels) > 0 {
+		response, err = lfi.AskFreeformWithLabels(prompt, labels, defaultLabel)
+	} else {
+		response, err = fi.AskFreeform(prompt)
+	}
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
 	}

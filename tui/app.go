@@ -125,12 +125,8 @@ func (a AppModel) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.modal.Show(NewChoiceContent(m.Prompt, m.Options, m.ReplyCh))
 		return a, nil, true
 	case MsgGateFreeform:
-		// Use split-pane review for long prompts (plan approval, etc.)
-		if strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000 {
-			a.modal.Show(NewReviewContent(m.Prompt, m.ReplyCh, a.lay.width, a.lay.height))
-		} else {
-			a.modal.Show(NewFreeformContent(m.Prompt, m.ReplyCh))
-		}
+		content := buildFreeformContent(m, a.lay.width, a.lay.height)
+		a.modal.Show(content)
 		return a, nil, true
 	case MsgModalDismiss:
 		a.modal.Hide()
@@ -292,6 +288,25 @@ func (a *AppModel) SetVerboseTrace(v bool) {
 // SetInitialNodes configures the ordered node list via the state store.
 func (a *AppModel) SetInitialNodes(entries []NodeEntry) {
 	a.store.SetNodes(entries)
+}
+
+// buildFreeformContent selects the best content type for a freeform gate:
+// - Labels present → HybridContent (radio + freeform)
+// - Long prompt → ReviewContent (scrollable split-pane)
+// - Short prompt → FreeformContent (simple modal)
+func buildFreeformContent(m MsgGateFreeform, width, height int) ModalContent {
+	if len(m.Labels) > 0 {
+		// Extract just the gate label (before the --- separator) for the hybrid view.
+		label := m.Prompt
+		if idx := strings.Index(label, "\n\n---\n"); idx >= 0 {
+			label = label[:idx]
+		}
+		return NewHybridContent(label, m.Labels, m.Default, m.ReplyCh)
+	}
+	if strings.Count(m.Prompt, "\n") > longPromptThreshold || len(m.Prompt) > 2000 {
+		return NewReviewContent(m.Prompt, m.ReplyCh, width, height)
+	}
+	return NewFreeformContent(m.Prompt, m.ReplyCh)
 }
 
 // String implements fmt.Stringer for debug purposes.
