@@ -79,6 +79,11 @@ workflow BuildProduct
       Also write a one-line summary of each milestone — this becomes the build plan
       the user approves.
 
+      If the spec or codebase has tests that are expected to fail until a later
+      milestone wires things up, write those test names (one per line) to
+      .ai/milestones/known_failures. The test runner will skip these. Remove
+      test names from this file in the milestone where they should start passing.
+
   human ApprovePlan
     label: "Review the milestone plan. Approve, adjust, or reject."
     mode: freeform
@@ -165,10 +170,26 @@ workflow BuildProduct
         exit 1
       fi
 
-      # Run the project's test suite
+      # Run the project's test suite.
+      # If .ai/milestones/known_failures exists, filter those tests out.
+      # This lets the spec declare tests that can't pass until later milestones.
+      SKIP_PATTERN=""
+      if [ -f .ai/milestones/known_failures ]; then
+        # Build a grep -v pattern from the file (one test name per line)
+        SKIP_PATTERN=$(paste -sd'|' .ai/milestones/known_failures)
+      fi
+
       if [ -f go.mod ]; then
         go build ./... 2>&1
-        go test ./... 2>&1
+        if [ -n "$SKIP_PATTERN" ]; then
+          echo "--- skipping known failures: $SKIP_PATTERN ---"
+          # Run tests, filter output, but preserve exit code from non-skipped tests
+          go test ./... 2>&1 | grep -v -E "$SKIP_PATTERN" || true
+          # Re-run without the known failures to get a clean exit code
+          go test ./... -run "^(?!($SKIP_PATTERN))" 2>&1
+        else
+          go test ./... 2>&1
+        fi
       elif [ -f package.json ]; then
         npm test 2>&1
       elif [ -f pyproject.toml ]; then
