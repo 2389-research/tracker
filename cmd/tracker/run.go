@@ -27,14 +27,9 @@ import (
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error {
-	// Read and parse the pipeline file (auto-detect .dip or .dot).
-	graph, err := loadPipeline(pipelineFile, format)
+	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
-		return fmt.Errorf("load pipeline: %w", err)
-	}
-
-	if err := pipeline.Validate(graph); err != nil {
-		return fmt.Errorf("validate pipeline: %w", err)
+		return err
 	}
 
 	// Token tracker for LLM usage accumulation.
@@ -73,15 +68,6 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 		activityLog, llmClient, verbose, jsonOut,
 	)
 	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineEventHandler))
-
-	// Load subgraph references from the pipeline.
-	subgraphs, err := loadSubgraphs(graph, pipelineFile)
-	if err != nil {
-		return fmt.Errorf("load subgraphs: %w", err)
-	}
-	if err := validateSubgraphRefs(graph, subgraphs); err != nil {
-		return fmt.Errorf("subgraph validation: %w", err)
-	}
 
 	// Build the handler registry with real production dependencies.
 	registry := handlers.NewDefaultRegistry(graph,
@@ -189,13 +175,29 @@ func buildPlainEventHandlers(
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
-func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) error {
+// loadAndValidatePipeline loads, validates, and resolves subgraphs for a pipeline file.
+func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[string]*pipeline.Graph, error) {
 	graph, err := loadPipeline(pipelineFile, format)
 	if err != nil {
-		return fmt.Errorf("load pipeline: %w", err)
+		return nil, nil, fmt.Errorf("load pipeline: %w", err)
 	}
 	if err := pipeline.Validate(graph); err != nil {
-		return fmt.Errorf("validate pipeline: %w", err)
+		return nil, nil, fmt.Errorf("validate pipeline: %w", err)
+	}
+	subgraphs, err := loadSubgraphs(graph, pipelineFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load subgraphs: %w", err)
+	}
+	if err := validateSubgraphRefs(graph, subgraphs); err != nil {
+		return nil, nil, fmt.Errorf("subgraph validation: %w", err)
+	}
+	return graph, subgraphs, nil
+}
+
+func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) error {
+	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
+	if err != nil {
+		return err
 	}
 
 	tokenTracker := llm.NewTokenTracker()
@@ -256,15 +258,6 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 
 	// Combine pipeline event handlers for both TUI and activity log.
 	pipelineCombo := pipeline.PipelineMultiHandler(pipelineHandler, activityLog)
-
-	// Load subgraph references from the pipeline.
-	subgraphs, err := loadSubgraphs(graph, pipelineFile)
-	if err != nil {
-		return fmt.Errorf("load subgraphs: %w", err)
-	}
-	if err := validateSubgraphRefs(graph, subgraphs); err != nil {
-		return fmt.Errorf("subgraph validation: %w", err)
-	}
 
 	// Build handler registry.
 	registry := handlers.NewDefaultRegistry(graph,

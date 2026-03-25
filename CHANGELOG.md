@@ -5,19 +5,25 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-03-25
 
 ### Added
 
+- **Subgraph Loading**: CLI now loads and executes subgraph references from `.dip` files. Path resolution tries relative to parent file, with `.dip` extension auto-appended, recursive loading with cycle detection
 - **Hybrid Radio+Freeform Gate**: Human gates with labeled outgoing edges present a radio list of labels plus an "other" option for custom freeform feedback
 - **Split-Pane Review View**: Long human gate prompts (20+ lines) use a fullscreen split-pane with glamour-rendered scrollable viewport and textarea
+- **Upfront Subgraph Validation**: Every subgraph node is validated at load time — missing refs, empty refs, and circular refs all fail immediately with clear messages
 
 ### Fixed
 
-- **Gate deadlocks on cancel**: Ctrl+C and Esc now close reply channels to unblock pipeline handler goroutines (was causing hangs)
-- **Activity log indicator**: indicator line no longer pushed off bottom of viewport during parallel execution
-- **Silent failure audit**: addressed remaining medium/high findings from provider error handling audit
-- **Review content**: fixed content display and hybrid gate edge cases
+- **Subgraph handler was never wired**: The CLI had SubgraphHandler and WithSubgraphs but never called either — subgraph nodes always failed at runtime with "subgraph not found"
+- **Child registry used wrong graph for human gates**: RegistryFactory now overrides WithInterviewer with the child graph so human gates inside subgraphs see the correct edge labels
+- **Circular subgraph refs caused runtime stack overflow**: Now detected at load time via absolute-path cycle detection
+- **Concurrent subgraph executions shared mutable state**: InjectParamsIntoGraph now deep-clones Attrs, Edges, and NodeOrder instead of sharing pointers
+- **Gate deadlocks on cancel**: Ctrl+C and Esc close reply channels on all gate types (Choice, Freeform, Hybrid, Review)
+- **Labels hidden by long prompt**: Labeled gates always use hybrid radio view regardless of prompt length
+- **Activity log indicator pushed off viewport**: Fixed terminal row budget calculation
+- **67 root-level analysis markdown files removed**: Cleaned repo of stale LLM analysis artifacts
 
 ## [0.8.0] - 2026-03-25
 
