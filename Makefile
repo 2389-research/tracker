@@ -2,7 +2,7 @@
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
 .PHONY: build test test-race test-short lint fmt fmt-check vet coverage \
-        doctor ci install clean setup-hooks
+        doctor complexity complexity-report ci install clean setup-hooks
 
 GOCACHE ?= $(CURDIR)/.gocache
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -10,6 +10,11 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS  = -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 COVERAGE_THRESHOLD ?= 80
+
+# Complexity thresholds
+CYCLO_MAX     ?= 15
+COGNITIVE_MAX ?= 25
+FILE_MAX_LINES ?= 500
 
 # ─── Build ───────────────────────────────────────────────
 
@@ -58,6 +63,71 @@ coverage:
 	fi
 	@rm -f coverage.out
 
+# ─── Complexity ──────────────────────────────────────────
+
+complexity:
+	@FAIL=0; \
+	echo "--- Cyclomatic complexity (max $(CYCLO_MAX)) ---"; \
+	VIOLATIONS=$$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' '); \
+	if [ "$$VIOLATIONS" -gt 0 ]; then \
+		gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go'; \
+		echo "FAIL: $$VIOLATIONS functions exceed cyclomatic complexity $(CYCLO_MAX)"; \
+		FAIL=1; \
+	else \
+		echo "OK: all functions within limit"; \
+	fi; \
+	echo ""; \
+	echo "--- Cognitive complexity (max $(COGNITIVE_MAX)) ---"; \
+	VIOLATIONS=$$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' '); \
+	if [ "$$VIOLATIONS" -gt 0 ]; then \
+		gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go'; \
+		echo "FAIL: $$VIOLATIONS functions exceed cognitive complexity $(COGNITIVE_MAX)"; \
+		FAIL=1; \
+	else \
+		echo "OK: all functions within limit"; \
+	fi; \
+	echo ""; \
+	echo "--- File size (max $(FILE_MAX_LINES) lines, excluding tests) ---"; \
+	OVERSIZED=0; \
+	for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*'); do \
+		LINES=$$(wc -l < "$$f" | tr -d ' '); \
+		if [ "$$LINES" -gt $(FILE_MAX_LINES) ]; then \
+			printf "  %6d  %s\n" "$$LINES" "$$f"; \
+			OVERSIZED=$$((OVERSIZED + 1)); \
+		fi; \
+	done; \
+	if [ "$$OVERSIZED" -gt 0 ]; then \
+		echo "FAIL: $$OVERSIZED files exceed $(FILE_MAX_LINES) lines"; \
+		FAIL=1; \
+	else \
+		echo "OK: all files within limit"; \
+	fi; \
+	if [ "$$FAIL" -gt 0 ]; then exit 1; fi
+
+complexity-report:
+	@echo "═══ Complexity Report ═══"
+	@echo ""
+	@echo "--- Top 10 cyclomatic complexity (production code) ---"
+	@gocyclo -top 10 . 2>&1 | grep -v '_test.go' | head -10
+	@echo ""
+	@echo "--- Top 10 cognitive complexity (production code) ---"
+	@gocognit -top 10 . 2>&1 | grep -v '_test.go' | head -10
+	@echo ""
+	@echo "--- Files over $(FILE_MAX_LINES) lines (production code) ---"
+	@for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*'); do \
+		LINES=$$(wc -l < "$$f" | tr -d ' '); \
+		if [ "$$LINES" -gt $(FILE_MAX_LINES) ]; then \
+			printf "  %6d  %s\n" "$$LINES" "$$f"; \
+		fi; \
+	done | sort -rn
+	@echo ""
+	@echo "--- Summary ---"
+	@echo "  Cyclomatic > $(CYCLO_MAX):  $$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' ') functions"
+	@echo "  Cognitive > $(COGNITIVE_MAX): $$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' ') functions"
+	@echo "  Files > $(FILE_MAX_LINES) LOC:  $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -exec sh -c 'test $$(wc -l < "$$1" | tr -d " ") -gt $(FILE_MAX_LINES) && echo 1' _ {} \; | wc -l | tr -d ' ') files"
+
+# ─── Lint ────────────────────────────────────────────────
+
 lint:
 	@command -v dippin >/dev/null 2>&1 || { echo "dippin CLI not found; skipping .dip lint"; exit 0; }
 	@FAIL=0; \
@@ -87,7 +157,7 @@ doctor:
 
 # ─── CI (all gates in sequence) ──────────────────────────
 
-ci: fmt-check vet build test-short test-race coverage lint doctor
+ci: fmt-check vet build test-short test-race coverage lint doctor complexity
 	@echo ""
 	@echo "═══ All CI gates passed ═══"
 
