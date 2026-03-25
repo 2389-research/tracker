@@ -74,14 +74,24 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 	)
 	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineEventHandler))
 
+	// Load subgraph references from the pipeline.
+	subgraphs, err := loadSubgraphs(graph, pipelineFile)
+	if err != nil {
+		return fmt.Errorf("load subgraphs: %w", err)
+	}
+
 	// Build the handler registry with real production dependencies.
-	registry := handlers.NewDefaultRegistry(graph,
+	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agentEventHandler),
 		handlers.WithPipelineEventHandler(pipelineEventHandler),
-	)
+	}
+	if len(subgraphs) > 0 {
+		registryOpts = append(registryOpts, handlers.WithSubgraphs(subgraphs))
+	}
+	registry := handlers.NewDefaultRegistry(graph, registryOpts...)
 
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
@@ -247,8 +257,14 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 	// Combine pipeline event handlers for both TUI and activity log.
 	pipelineCombo := pipeline.PipelineMultiHandler(pipelineHandler, activityLog)
 
+	// Load subgraph references from the pipeline.
+	subgraphs, err := loadSubgraphs(graph, pipelineFile)
+	if err != nil {
+		return fmt.Errorf("load subgraphs: %w", err)
+	}
+
 	// Build handler registry.
-	registry := handlers.NewDefaultRegistry(graph,
+	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
@@ -264,7 +280,11 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 			activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 		})),
 		handlers.WithPipelineEventHandler(pipelineCombo),
-	)
+	}
+	if len(subgraphs) > 0 {
+		registryOpts = append(registryOpts, handlers.WithSubgraphs(subgraphs))
+	}
+	registry := handlers.NewDefaultRegistry(graph, registryOpts...)
 
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))

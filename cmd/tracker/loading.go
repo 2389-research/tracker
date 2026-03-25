@@ -1,5 +1,5 @@
 // ABOUTME: Pipeline file loading — reads .dip or .dot files and converts to Graph.
-// ABOUTME: Auto-detects format from extension; emits deprecation warning for DOT.
+// ABOUTME: Auto-detects format from extension; resolves and loads subgraph references recursively.
 package main
 
 import (
@@ -53,6 +53,69 @@ func loadPipeline(filename, formatOverride string) (*pipeline.Graph, error) {
 // emitDOTDeprecationWarning prints a one-line warning that DOT is deprecated.
 func emitDOTDeprecationWarning(w io.Writer) {
 	fmt.Fprintln(w, "WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
+}
+
+// loadSubgraphs scans the graph for subgraph nodes and loads their referenced
+// .dip files. Refs are resolved relative to the parent pipeline file's directory.
+// Returns a map of ref → *Graph suitable for handlers.WithSubgraphs().
+// Recursively loads nested subgraph refs.
+func loadSubgraphs(graph *pipeline.Graph, parentFile string) (map[string]*pipeline.Graph, error) {
+	parentDir := filepath.Dir(parentFile)
+	subgraphs := make(map[string]*pipeline.Graph)
+	return subgraphs, loadSubgraphsRecursive(graph, parentDir, subgraphs, make(map[string]bool))
+}
+
+func loadSubgraphsRecursive(graph *pipeline.Graph, baseDir string, subgraphs map[string]*pipeline.Graph, visited map[string]bool) error {
+	for _, node := range graph.Nodes {
+		ref := node.Attrs["subgraph_ref"]
+		if ref == "" {
+			continue
+		}
+		if subgraphs[ref] != nil || visited[ref] {
+			continue // already loaded or in-progress (cycle guard)
+		}
+		visited[ref] = true
+
+		// Resolve path: try multiple strategies.
+		resolved, err := resolveSubgraphPath(ref, baseDir)
+		if err != nil {
+			return fmt.Errorf("subgraph ref %q from node %q: %w", ref, node.ID, err)
+		}
+
+		subGraph, err := loadPipeline(resolved, "")
+		if err != nil {
+			return fmt.Errorf("load subgraph %q (node %q): %w", ref, node.ID, err)
+		}
+		subgraphs[ref] = subGraph
+
+		// Recursively load nested subgraphs.
+		subDir := filepath.Dir(resolved)
+		if err := loadSubgraphsRecursive(subGraph, subDir, subgraphs, visited); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveSubgraphPath finds the file for a subgraph ref. Tries (in order):
+// 1. Relative to parent dir (ref as-is)
+// 2. Relative to parent dir with .dip extension appended
+// 3. Ref as-is from cwd
+// 4. Ref with .dip extension from cwd
+func resolveSubgraphPath(ref, baseDir string) (string, error) {
+	candidates := []string{
+		filepath.Join(baseDir, ref),
+		filepath.Join(baseDir, ref+".dip"),
+		ref,
+		ref + ".dip",
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("file not found (tried: %s, %s, %s, %s)",
+		candidates[0], candidates[1], candidates[2], candidates[3])
 }
 
 // loadDippinPipeline parses a .dip file using dippin-lang parser,
