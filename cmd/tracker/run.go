@@ -79,19 +79,19 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 	if err != nil {
 		return fmt.Errorf("load subgraphs: %w", err)
 	}
+	if err := validateSubgraphRefs(graph, subgraphs); err != nil {
+		return fmt.Errorf("subgraph validation: %w", err)
+	}
 
 	// Build the handler registry with real production dependencies.
-	registryOpts := []handlers.RegistryOption{
+	registry := handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agentEventHandler),
 		handlers.WithPipelineEventHandler(pipelineEventHandler),
-	}
-	if len(subgraphs) > 0 {
-		registryOpts = append(registryOpts, handlers.WithSubgraphs(subgraphs))
-	}
-	registry := handlers.NewDefaultRegistry(graph, registryOpts...)
+		handlers.WithSubgraphs(subgraphs),
+	)
 
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
@@ -262,9 +262,12 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 	if err != nil {
 		return fmt.Errorf("load subgraphs: %w", err)
 	}
+	if err := validateSubgraphRefs(graph, subgraphs); err != nil {
+		return fmt.Errorf("subgraph validation: %w", err)
+	}
 
 	// Build handler registry.
-	registryOpts := []handlers.RegistryOption{
+	registry := handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
@@ -280,11 +283,8 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 			activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 		})),
 		handlers.WithPipelineEventHandler(pipelineCombo),
-	}
-	if len(subgraphs) > 0 {
-		registryOpts = append(registryOpts, handlers.WithSubgraphs(subgraphs))
-	}
-	registry := handlers.NewDefaultRegistry(graph, registryOpts...)
+		handlers.WithSubgraphs(subgraphs),
+	)
 
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))

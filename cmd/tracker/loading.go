@@ -71,8 +71,11 @@ func loadSubgraphsRecursive(graph *pipeline.Graph, baseDir string, subgraphs map
 		if ref == "" {
 			continue
 		}
-		if subgraphs[ref] != nil || visited[ref] {
-			continue // already loaded or in-progress (cycle guard)
+		if subgraphs[ref] != nil {
+			continue // already loaded
+		}
+		if visited[ref] {
+			return fmt.Errorf("circular subgraph reference detected: %q is already being loaded (cycle)", ref)
 		}
 		visited[ref] = true
 
@@ -92,6 +95,25 @@ func loadSubgraphsRecursive(graph *pipeline.Graph, baseDir string, subgraphs map
 		subDir := filepath.Dir(resolved)
 		if err := loadSubgraphsRecursive(subGraph, subDir, subgraphs, visited); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateSubgraphRefs checks that every subgraph node in the graph has a
+// corresponding entry in the loaded subgraphs map. Catches missing refs early
+// instead of failing at execution time.
+func validateSubgraphRefs(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) error {
+	for _, node := range graph.Nodes {
+		if node.Handler != "subgraph" {
+			continue
+		}
+		ref := node.Attrs["subgraph_ref"]
+		if ref == "" {
+			return fmt.Errorf("subgraph node %q has no subgraph_ref attribute", node.ID)
+		}
+		if subgraphs[ref] == nil {
+			return fmt.Errorf("subgraph node %q references %q but it was not loaded", node.ID, ref)
 		}
 	}
 	return nil

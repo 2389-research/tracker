@@ -125,6 +125,13 @@ func NewRegistryFactory(opts ...RegistryOption) pipeline.RegistryFactory {
 			))
 		}
 
+		// Override the interviewer graph to use the child graph, not the parent.
+		// WithInterviewer's graph field is used by the human handler to look up
+		// outgoing edge labels — it must match the graph being executed.
+		if parentCfg.interviewer != nil {
+			scopedOpts = append(scopedOpts, WithInterviewer(parentCfg.interviewer, childGraph))
+		}
+
 		return NewDefaultRegistry(childGraph, scopedOpts...)
 	}
 }

@@ -203,7 +203,7 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 		Name:            g.Name,
 		Nodes:           make(map[string]*Node, len(g.Nodes)),
 		Edges:           make([]*Edge, len(g.Edges)),
-		Attrs:           g.Attrs, // Graph attrs are read-only, can share
+		Attrs:           copyStringMap(g.Attrs),
 		StartNode:       g.StartNode,
 		ExitNode:        g.ExitNode,
 		DippinValidated: g.DippinValidated,
@@ -244,4 +244,12 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 	copy(clone.Edges, g.Edges)
 
 	return clone, nil
+}
+
+func copyStringMap(m map[string]string) map[string]string {
+	c := make(map[string]string, len(m))
+	for k, v := range m {
+		c[k] = v
+	}
+	return c
 }
