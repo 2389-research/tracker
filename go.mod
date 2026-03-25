@@ -5,7 +5,7 @@ go 1.25.5
 require github.com/awalterschulze/gographviz v2.0.3+incompatible
 
 require (
-	github.com/2389-research/dippin-lang v0.3.1-0.20260325024641-fdc35ad03302
+	github.com/2389-research/dippin-lang v0.3.1-0.20260325152421-d58d905291fa
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
