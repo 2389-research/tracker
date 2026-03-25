@@ -112,18 +112,22 @@ func (b *BubbleteaInterviewer) askMode2FreeformWithLabels(prompt string, labels 
 
 // choiceRunner wraps ChoiceContent in a tea.Model for inline Mode 1 programs.
 type choiceRunner struct {
-	content *ChoiceContent
-	replyCh chan string
-	result  string
+	content   *ChoiceContent
+	replyCh   chan string
+	result    string
+	cancelled bool
 }
 
 func (r choiceRunner) Init() tea.Cmd { return nil }
 
 func (r choiceRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	r.content.Update(msg)
-	// Check if a result was sent on the reply channel.
 	select {
-	case val := <-r.replyCh:
+	case val, ok := <-r.replyCh:
+		if !ok {
+			r.cancelled = true
+			return r, tea.Quit
+		}
 		r.result = val
 		return r, tea.Quit
 	default:
@@ -166,9 +170,10 @@ func (b *BubbleteaInterviewer) askMode1Choice(prompt string, choices []string, d
 
 // freeformRunner wraps FreeformContent in a tea.Model for inline Mode 1 programs.
 type freeformRunner struct {
-	content *FreeformContent
-	replyCh chan string
-	result  string
+	content   *FreeformContent
+	replyCh   chan string
+	result    string
+	cancelled bool
 }
 
 func (r freeformRunner) Init() tea.Cmd { return nil }
@@ -176,7 +181,11 @@ func (r freeformRunner) Init() tea.Cmd { return nil }
 func (r freeformRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	r.content.Update(msg)
 	select {
-	case val := <-r.replyCh:
+	case val, ok := <-r.replyCh:
+		if !ok {
+			r.cancelled = true
+			return r, tea.Quit
+		}
 		r.result = val
 		return r, tea.Quit
 	default:
@@ -196,5 +205,8 @@ func (b *BubbleteaInterviewer) askMode1Freeform(prompt string) (string, error) {
 		return "", fmt.Errorf("TUI freeform gate failed: %w", err)
 	}
 	fr := finalModel.(freeformRunner)
+	if fr.cancelled {
+		return "", fmt.Errorf("gate cancelled by user")
+	}
 	return fr.result, nil
 }

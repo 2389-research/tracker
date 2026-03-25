@@ -212,17 +212,18 @@ func splitPromptAndPlan(prompt string) (label, plan string) {
 }
 
 // renderMarkdownForReview renders markdown via glamour for the review viewport.
+// Falls back to raw markdown with a notice if glamour fails.
 func renderMarkdownForReview(md string, width int) string {
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
-		return md
+		return "[markdown rendering unavailable]\n\n" + md
 	}
 	rendered, err := r.Render(md)
 	if err != nil {
-		return md
+		return "[markdown rendering unavailable]\n\n" + md
 	}
 	return strings.TrimSpace(rendered)
 }
