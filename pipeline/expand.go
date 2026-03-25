@@ -202,8 +202,9 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 	clone := &Graph{
 		Name:            g.Name,
 		Nodes:           make(map[string]*Node, len(g.Nodes)),
-		Edges:           make([]*Edge, len(g.Edges)),
+		Edges:           make([]*Edge, 0, len(g.Edges)),
 		Attrs:           copyStringMap(g.Attrs),
+		NodeOrder:       append([]string(nil), g.NodeOrder...),
 		StartNode:       g.StartNode,
 		ExitNode:        g.ExitNode,
 		DippinValidated: g.DippinValidated,
@@ -240,8 +241,18 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 		clone.Nodes[id] = clonedNode
 	}
 
-	// Clone edges (no variable expansion needed for now)
-	copy(clone.Edges, g.Edges)
+	// Deep-clone edges to prevent concurrent subgraph executions from
+	// sharing mutable edge state.
+	for _, e := range g.Edges {
+		clonedEdge := &Edge{
+			From:      e.From,
+			To:        e.To,
+			Label:     e.Label,
+			Condition: e.Condition,
+			Attrs:     copyStringMap(e.Attrs),
+		}
+		clone.Edges = append(clone.Edges, clonedEdge)
+	}
 
 	return clone, nil
 }

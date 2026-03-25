@@ -74,16 +74,23 @@ func loadSubgraphsRecursive(graph *pipeline.Graph, baseDir string, subgraphs map
 		if subgraphs[ref] != nil {
 			continue // already loaded
 		}
-		if visited[ref] {
-			return fmt.Errorf("circular subgraph reference detected: %q is already being loaded (cycle)", ref)
-		}
-		visited[ref] = true
 
 		// Resolve path: try multiple strategies.
 		resolved, err := resolveSubgraphPath(ref, baseDir)
 		if err != nil {
 			return fmt.Errorf("subgraph ref %q from node %q: %w", ref, node.ID, err)
 		}
+
+		// Use absolute path for cycle detection so different relative refs
+		// to the same file are correctly deduplicated.
+		absResolved, err := filepath.Abs(resolved)
+		if err != nil {
+			absResolved = resolved
+		}
+		if visited[absResolved] {
+			return fmt.Errorf("circular subgraph reference detected: %q resolves to %q which is already being loaded (cycle)", ref, absResolved)
+		}
+		visited[absResolved] = true
 
 		subGraph, err := loadPipeline(resolved, "")
 		if err != nil {
