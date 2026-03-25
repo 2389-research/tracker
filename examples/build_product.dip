@@ -436,8 +436,10 @@ workflow BuildProduct
   edges
     Start -> Setup
     Setup -> ReadSpec
-    ReadSpec -> Decompose
-    Decompose -> ApprovePlan
+    ReadSpec -> Decompose  when ctx.outcome = success
+    ReadSpec -> EscalateToHuman  when ctx.outcome = fail
+    Decompose -> ApprovePlan  when ctx.outcome = success
+    Decompose -> EscalateToHuman  when ctx.outcome = fail
     ApprovePlan -> PickNextMilestone  label: "approve"
     ApprovePlan -> Decompose  label: "adjust"  restart: true
     ApprovePlan -> Done  label: "reject"
@@ -475,6 +477,7 @@ workflow BuildProduct
     FinalSpecCheck -> EscalateToHuman  when ctx.outcome = fail
     FinalSpecCheck -> EscalateToHuman
     EscalateToHuman -> Cleanup  label: "accept"
+    EscalateToHuman -> Decompose  label: "retry"  restart: true
     EscalateToHuman -> Done  label: "abandon"
     Cleanup -> FinalCommit
     FinalCommit -> Done
