@@ -19,7 +19,8 @@ type runConfig struct {
 	resumeID     string // run ID to resume (resolved to checkpoint path)
 	noTUI        bool
 	verbose      bool
-	jsonOut      bool // stream events as NDJSON to stdout
+	jsonOut      bool   // stream events as NDJSON to stdout
+	backend      string // agent execution backend: "" (default), "native", or "claude-code"
 }
 
 type commandMode string
@@ -52,8 +53,8 @@ func init() { initVersionFromVCS() }
 type commandDeps struct {
 	loadEnv  func(string) error
 	runSetup func() error
-	run      func(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error
-	runTUI   func(pipelineFile, workdir, checkpoint, format string, verbose bool) error
+	run      func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error
+	runTUI   func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error
 }
 
 type setupResult struct {

@@ -149,9 +149,9 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// Fall back to plain console mode when TUI is disabled or stdin is not a
 	// terminal (e.g. CI, piped input, cron). TUI requires a real TTY.
 	if cfg.noTUI || !isatty.IsTerminal(os.Stdin.Fd()) {
-		return deps.run(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.verbose, cfg.jsonOut)
+		return deps.run(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.backend, cfg.verbose, cfg.jsonOut)
 	}
-	return deps.runTUI(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.verbose)
+	return deps.runTUI(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.backend, cfg.verbose)
 }
 
 // resolveCheckpoint finds the checkpoint file for a given run ID. It looks in

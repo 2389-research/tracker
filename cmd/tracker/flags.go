@@ -112,6 +112,7 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream events as newline-delimited JSON to stdout")
 	fs.StringVar(&cfg.format, "format", "", "Pipeline format override: dip (default) or dot")
+	fs.StringVar(&cfg.backend, "backend", "", "Agent backend override: claude-code")
 
 	// Go's flag package stops parsing at the first non-flag argument.
 	// To support flags in any order (e.g. "tracker pipeline.dot -c cp.json"),
@@ -139,6 +140,11 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	}
 
 	cfg.pipelineFile = positional[0]
+
+	if cfg.backend != "" && cfg.backend != "native" && cfg.backend != "claude-code" {
+		return cfg, fmt.Errorf("invalid backend %q: must be one of: native, claude-code", cfg.backend)
+	}
+
 	return cfg, nil
 }
 
@@ -161,5 +167,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --json                    Stream events as newline-delimited JSON to stdout\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
+	fmt.Fprintf(w, "  --backend string          Agent backend override: claude-code\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

@@ -235,14 +235,14 @@ func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
 			}
 			return nil
 		},
-		run: func(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error {
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
 			runCalled = true
 			if pipelineFile != "pipeline.dot" {
 				t.Fatalf("pipelineFile = %q, want %q", pipelineFile, "pipeline.dot")
 			}
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format string, verbose bool) error {
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
 			t.Fatal("did not expect TUI path")
 			return nil
 		},
