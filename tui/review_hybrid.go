@@ -1,4 +1,4 @@
-// ABOUTME: ReviewHybridContent — scrollable context viewport with radio selection below.
+// ABOUTME: ReviewHybridContent — scrollable context viewport with radio selection + freeform below.
 // ABOUTME: Used when a labeled human gate has substantial context (agent output, errors).
 package tui
 
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -13,12 +14,15 @@ import (
 )
 
 // ReviewHybridContent shows a glamour-rendered scrollable viewport with
-// radio label selection below. Used when an escalation gate has both
-// context content (what failed) and labeled options (accept/retry/abandon).
+// radio label selection and an "other" freeform option below. Used when
+// an escalation gate has both context content (what failed) and labeled
+// options (accept/retry/abandon), plus the ability to provide custom feedback.
 type ReviewHybridContent struct {
 	viewport viewport.Model
 	labels   []string
 	cursor   int
+	onOther  bool // true when textarea is focused
+	textarea textarea.Model
 	replyCh  chan<- string
 	done     bool
 	width    int
@@ -29,7 +33,7 @@ type ReviewHybridContent struct {
 func (r *ReviewHybridContent) IsFullscreen() bool { return true }
 
 // NewReviewHybridContent creates a split view: scrollable context on top,
-// radio options on bottom.
+// radio options + freeform textarea on bottom.
 func NewReviewHybridContent(label, context string, labels []string, defaultLabel string, replyCh chan<- string, width, height int) *ReviewHybridContent {
 	if width < 40 {
 		width = 80
@@ -38,16 +42,34 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 		height = 24
 	}
 
-	// Render context via glamour.
+	// Render full content via glamour — both label and context.
 	vpWidth := width - 4
-	rendered := renderReviewHybridMarkdown(context, vpWidth)
-	if label != "" {
-		header := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Render(label)
-		rendered = header + "\n\n" + rendered
+	var md string
+	if label != "" && context != "" {
+		md = label + "\n\n---\n\n" + context
+	} else if label != "" {
+		md = label
+	} else {
+		md = context
 	}
+	rendered := renderReviewHybridMarkdown(md, vpWidth)
 
-	// Radio options take ~(len(labels)+3) lines. Viewport gets the rest.
-	radioHeight := len(labels) + 3 // labels + hints + divider
+	// Textarea for "other" freeform input.
+	ta := textarea.New()
+	ta.Placeholder = "Type specific feedback or instructions..."
+	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	ta.SetWidth(width - 6)
+	ta.SetHeight(3)
+	ta.MaxHeight = 6
+	ta.CharLimit = 0
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Base = lipgloss.NewStyle().BorderForeground(ColorLabel)
+	ta.BlurredStyle.Base = ta.FocusedStyle.Base
+	ta.Blur()
+
+	// Radio options + other + hints + divider + textarea (collapsed).
+	radioHeight := len(labels) + 5 // labels + other + hint + divider + blank
 	vpHeight := height - radioHeight - 1
 	if vpHeight < 5 {
 		vpHeight = 5
@@ -71,6 +93,7 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 		viewport: vp,
 		labels:   labels,
 		cursor:   cursor,
+		textarea: ta,
 		replyCh:  replyCh,
 		width:    width,
 		height:   height,
@@ -81,16 +104,24 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 func (r *ReviewHybridContent) SetSize(w, h int) {
 	r.width = w
 	r.height = h
-	radioHeight := len(r.labels) + 4
+	radioHeight := len(r.labels) + 5
 	vpHeight := h - radioHeight - 1
+	if r.onOther {
+		vpHeight -= 4 // textarea takes extra space
+	}
 	if vpHeight < 5 {
 		vpHeight = 5
 	}
 	r.viewport.Width = w - 2
 	r.viewport.Height = vpHeight
+	r.textarea.SetWidth(w - 6)
 }
 
-func (r *ReviewHybridContent) totalOptions() int { return len(r.labels) }
+// totalOptions returns labels + 1 for the "other" option.
+func (r *ReviewHybridContent) totalOptions() int { return len(r.labels) + 1 }
+
+// isOnOther returns true if cursor is on the "other" option.
+func (r *ReviewHybridContent) isOnOther() bool { return r.cursor >= len(r.labels) }
 
 // Update handles navigation and selection.
 func (r *ReviewHybridContent) Update(msg tea.Msg) tea.Cmd {
@@ -99,14 +130,54 @@ func (r *ReviewHybridContent) Update(msg tea.Msg) tea.Cmd {
 	}
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
+		if r.onOther {
+			var cmd tea.Cmd
+			r.textarea, cmd = r.textarea.Update(msg)
+			return cmd
+		}
 		return nil
 	}
+
+	// When textarea is active, handle its keys.
+	if r.onOther {
+		return r.updateOtherMode(km)
+	}
+	return r.updateRadioMode(km)
+}
+
+// updateOtherMode handles keys when the textarea is focused.
+func (r *ReviewHybridContent) updateOtherMode(km tea.KeyMsg) tea.Cmd {
+	switch km.String() {
+	case "ctrl+s":
+		return r.submitOther()
+	case "esc":
+		r.onOther = false
+		r.textarea.Blur()
+		return nil
+	case "up":
+		r.onOther = false
+		r.textarea.Blur()
+		r.cursor = len(r.labels) // stay on "other"
+		return nil
+	}
+	var cmd tea.Cmd
+	r.textarea, cmd = r.textarea.Update(km)
+	return cmd
+}
+
+// updateRadioMode handles keys when navigating the radio list.
+func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 	switch km.String() {
 	case "pgup", "pgdown":
 		var cmd tea.Cmd
-		r.viewport, cmd = r.viewport.Update(msg)
+		r.viewport, cmd = r.viewport.Update(km)
 		return cmd
 	case "ctrl+s", "enter":
+		if r.isOnOther() {
+			r.onOther = true
+			r.textarea.Focus()
+			return nil
+		}
 		if len(r.labels) > 0 {
 			return r.submitLabel(r.labels[r.cursor])
 		}
@@ -138,6 +209,19 @@ func (r *ReviewHybridContent) submitLabel(label string) tea.Cmd {
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
+func (r *ReviewHybridContent) submitOther() tea.Cmd {
+	val := strings.TrimSpace(r.textarea.Value())
+	if val == "" || r.done {
+		return nil
+	}
+	r.done = true
+	if r.replyCh != nil {
+		r.replyCh <- val
+		r.replyCh = nil
+	}
+	return func() tea.Msg { return MsgModalDismiss{} }
+}
+
 // Cancel implements Cancellable.
 func (r *ReviewHybridContent) Cancel() { r.cancel() }
 
@@ -153,14 +237,14 @@ func (r *ReviewHybridContent) cancel() tea.Cmd {
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
-// View renders viewport + divider + radio options.
+// View renders viewport + divider + radio options + other + textarea.
 func (r *ReviewHybridContent) View() string {
 	var sb strings.Builder
 
 	sb.WriteString(r.viewport.View())
 	sb.WriteString("\n")
 
-	// Divider.
+	// Divider with scroll position.
 	sb.WriteString(Styles.Muted.Render(fmt.Sprintf(
 		"─── Review (%d%%) ── PgUp/PgDn scroll ───",
 		int(r.viewport.ScrollPercent()*100))))
@@ -171,7 +255,7 @@ func (r *ReviewHybridContent) View() string {
 	normalStyle := lipgloss.NewStyle()
 
 	for i, label := range r.labels {
-		if i == r.cursor {
+		if i == r.cursor && !r.onOther {
 			sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", label)))
 		} else {
 			sb.WriteString(normalStyle.Render(fmt.Sprintf("  ○ %s", label)))
@@ -179,8 +263,29 @@ func (r *ReviewHybridContent) View() string {
 		sb.WriteString("\n")
 	}
 
+	// "Other" option.
+	if r.isOnOther() && !r.onOther {
+		sb.WriteString(selectedStyle.Render("  ● other (provide feedback)"))
+	} else if r.onOther {
+		sb.WriteString(selectedStyle.Render("  ● other:"))
+	} else {
+		sb.WriteString(normalStyle.Render("  ○ other (provide feedback)"))
+	}
 	sb.WriteString("\n")
-	sb.WriteString(Styles.Muted.Render("↑↓ navigate  enter select  esc cancel  pgup/pgdn scroll"))
+
+	// Textarea (visible when "other" is active).
+	if r.onOther {
+		sb.WriteString("\n")
+		sb.WriteString(r.textarea.View())
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	hint := "↑↓ navigate  enter select  esc cancel  pgup/pgdn scroll"
+	if r.onOther {
+		hint = "type feedback  ctrl+s submit  esc back to options  ↑ back"
+	}
+	sb.WriteString(Styles.Muted.Render(hint))
 
 	return sb.String()
 }
