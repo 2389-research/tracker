@@ -108,6 +108,13 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 			al.flushNode(m.NodeID)
 			al.addLine(m.NodeID, Styles.DimText.Render(m.Data))
 		}
+	case MsgNodeFailed:
+		al.flushNode(m.NodeID)
+		al.addLine(m.NodeID, Styles.Error.Render("FAILED: "+m.Error))
+		delete(al.streams, m.NodeID)
+	case MsgNodeRetrying:
+		al.flushNode(m.NodeID)
+		al.addLine(m.NodeID, Styles.Warn.Render("RETRYING: "+m.Message))
 	case MsgNodeCompleted:
 		al.flushNode(m.NodeID)
 		delete(al.streams, m.NodeID)

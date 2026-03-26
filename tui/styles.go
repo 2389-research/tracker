@@ -57,6 +57,7 @@ type StyleRegistry struct {
 	StatusBar   lipgloss.Style
 	ToolName    lipgloss.Style
 	Error       lipgloss.Style
+	Warn        lipgloss.Style
 	Thinking    lipgloss.Style
 }
 
@@ -91,5 +92,6 @@ var Styles = StyleRegistry{
 	StatusBar:   lipgloss.NewStyle().Background(ColorPanel).Padding(0, 1),
 	ToolName:    lipgloss.NewStyle().Foreground(ColorAmber).Bold(true),
 	Error:       lipgloss.NewStyle().Foreground(ColorRed).Bold(true),
+	Warn:        lipgloss.NewStyle().Foreground(ColorAmber).Bold(true),
 	Thinking:    lipgloss.NewStyle().Foreground(ColorAmber),
 }

@@ -29,6 +29,8 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 	switch cfg.mode {
 	case modeVersion:
 		return executeVersion()
+	case modeDiagnose:
+		return executeDiagnose(cfg)
 	case modeDoctor:
 		return executeDoctor(cfg)
 	case modeSetup:
@@ -54,6 +56,14 @@ func executeVersion() error {
 	fmt.Printf("  built:  %s\n", date)
 	printProviderStatus()
 	return nil
+}
+
+func executeDiagnose(cfg runConfig) error {
+	if cfg.resumeID == "" {
+		// No run ID provided — diagnose the most recent run.
+		return diagnoseMostRecent(cfg.workdir)
+	}
+	return runDiagnose(cfg.workdir, cfg.resumeID)
 }
 
 func executeDoctor(cfg runConfig) error {
