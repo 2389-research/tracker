@@ -160,6 +160,16 @@ func collectNodeFailures(runDir string) map[string]*nodeFailure {
 	return failures
 }
 
+// diagnoseEntry is a parsed activity.jsonl line with fields needed for diagnosis.
+type diagnoseEntry struct {
+	Timestamp string `json:"ts"`
+	Type      string `json:"type"`
+	NodeID    string `json:"node_id"`
+	Error     string `json:"error"`
+	ToolErr   string `json:"tool_error"`
+	Handler   string `json:"handler"`
+}
+
 // enrichFromActivity adds error messages and timing from activity.jsonl.
 func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
 	path := filepath.Join(runDir, "activity.jsonl")
@@ -175,49 +185,45 @@ func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
 		if line == "" {
 			continue
 		}
-
-		var raw struct {
-			Timestamp string `json:"ts"`
-			Type      string `json:"type"`
-			NodeID    string `json:"node_id"`
-			Message   string `json:"message"`
-			Error     string `json:"error"`
-			ToolOut   string `json:"tool_output"`
-			ToolErr   string `json:"tool_error"`
-			Handler   string `json:"handler"`
-		}
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		var entry diagnoseEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
+		enrichFromEntry(entry, failures, stageStarts)
+	}
+}
 
-		ts, _ := time.Parse(time.RFC3339Nano, raw.Timestamp)
+// enrichFromEntry processes a single activity log entry, updating failure
+// records with timing, handler info, and error details.
+func enrichFromEntry(entry diagnoseEntry, failures map[string]*nodeFailure, stageStarts map[string]time.Time) {
+	ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 
-		switch raw.Type {
-		case "stage_started":
-			stageStarts[raw.NodeID] = ts
-		case "stage_failed", "stage_completed":
-			if f, ok := failures[raw.NodeID]; ok {
-				if start, ok := stageStarts[raw.NodeID]; ok && !ts.IsZero() {
-					f.duration = ts.Sub(start)
-				}
-				if raw.Handler != "" {
-					f.handler = raw.Handler
-				}
+	switch entry.Type {
+	case "stage_started":
+		stageStarts[entry.NodeID] = ts
+	case "stage_failed", "stage_completed":
+		if f, ok := failures[entry.NodeID]; ok {
+			if start, ok := stageStarts[entry.NodeID]; ok && !ts.IsZero() {
+				f.duration = ts.Sub(start)
+			}
+			if entry.Handler != "" {
+				f.handler = entry.Handler
 			}
 		}
+	}
 
-		// Collect errors for failed nodes.
-		if raw.NodeID != "" {
-			if f, ok := failures[raw.NodeID]; ok {
-				if raw.Error != "" {
-					f.errors = append(f.errors, raw.Error)
-				}
-				// Tool output can contain the real error info.
-				if raw.ToolErr != "" && f.stderr == "" {
-					f.stderr = raw.ToolErr
-				}
-			}
-		}
+	if entry.NodeID == "" {
+		return
+	}
+	f, ok := failures[entry.NodeID]
+	if !ok {
+		return
+	}
+	if entry.Error != "" {
+		f.errors = append(f.errors, entry.Error)
+	}
+	if entry.ToolErr != "" && f.stderr == "" {
+		f.stderr = entry.ToolErr
 	}
 }
 
@@ -281,44 +287,8 @@ func printDiagnoseSuggestions(failures map[string]*nodeFailure, cp *pipeline.Che
 	fmt.Println("─── Suggestions ───────────────────────────────────────────")
 
 	var suggestions []string
-
 	for _, f := range failures {
-		// Detect circuit breaker escalation.
-		if strings.Contains(f.stdout, "ESCALATE") && strings.Contains(f.stdout, "fix attempts") {
-			suggestions = append(suggestions,
-				fmt.Sprintf("%s: Hit fix attempt limit. The fix_attempts counter persists "+
-					"on disk across restarts — if you retry after escalation, the counter "+
-					"is already maxed. Reset it with: rm .ai/milestones/fix_attempts", f.nodeID))
-		}
-
-		// Detect empty output (silent failures).
-		if f.stdout == "" && f.stderr == "" && len(f.errors) == 0 {
-			suggestions = append(suggestions,
-				fmt.Sprintf("%s: No error details captured. Check the activity.jsonl "+
-					"for this node's events: grep %q activity.jsonl | tail -20", f.nodeID, f.nodeID))
-		}
-
-		// Detect command execution errors.
-		if strings.Contains(f.stderr, "command not found") ||
-			strings.Contains(f.stderr, "No such file or directory") {
-			suggestions = append(suggestions,
-				fmt.Sprintf("%s: Shell command failed — check that the working directory "+
-					"and required tools exist before running", f.nodeID))
-		}
-
-		// Detect build/test failures.
-		if strings.Contains(f.stdout, "FAIL") && strings.Contains(f.stdout, "go test") {
-			suggestions = append(suggestions,
-				fmt.Sprintf("%s: Go test failures — check if .ai/milestones/known_failures "+
-					"should include these tests for this milestone", f.nodeID))
-		}
-
-		// Detect instant failures (< 50ms usually means the node didn't really run).
-		if f.duration > 0 && f.duration < 50*time.Millisecond && f.handler != "tool" {
-			suggestions = append(suggestions,
-				fmt.Sprintf("%s: Completed in %s — suspiciously fast. May indicate "+
-					"a configuration issue or missing handler", f.nodeID, formatElapsed(f.duration)))
-		}
+		suggestions = append(suggestions, suggestionsForFailure(f)...)
 	}
 
 	if len(suggestions) == 0 {
@@ -329,4 +299,37 @@ func printDiagnoseSuggestions(failures map[string]*nodeFailure, cp *pipeline.Che
 		}
 	}
 	fmt.Println()
+}
+
+// suggestionsForFailure generates actionable suggestions for a single node failure.
+func suggestionsForFailure(f *nodeFailure) []string {
+	var out []string
+
+	if strings.Contains(f.stdout, "ESCALATE") && strings.Contains(f.stdout, "fix attempts") {
+		out = append(out, fmt.Sprintf("%s: Hit fix attempt limit. The fix_attempts counter persists "+
+			"on disk across restarts — if you retry after escalation, the counter "+
+			"is already maxed. Reset it with: rm .ai/milestones/fix_attempts", f.nodeID))
+	}
+
+	if f.stdout == "" && f.stderr == "" && len(f.errors) == 0 {
+		out = append(out, fmt.Sprintf("%s: No error details captured. Check the activity.jsonl "+
+			"for this node's events: grep %q activity.jsonl | tail -20", f.nodeID, f.nodeID))
+	}
+
+	if strings.Contains(f.stderr, "command not found") || strings.Contains(f.stderr, "No such file or directory") {
+		out = append(out, fmt.Sprintf("%s: Shell command failed — check that the working directory "+
+			"and required tools exist before running", f.nodeID))
+	}
+
+	if strings.Contains(f.stdout, "FAIL") && strings.Contains(f.stdout, "go test") {
+		out = append(out, fmt.Sprintf("%s: Go test failures — check if .ai/milestones/known_failures "+
+			"should include these tests for this milestone", f.nodeID))
+	}
+
+	if f.duration > 0 && f.duration < 50*time.Millisecond && f.handler != "tool" {
+		out = append(out, fmt.Sprintf("%s: Completed in %s — suspiciously fast. May indicate "+
+			"a configuration issue or missing handler", f.nodeID, formatElapsed(f.duration)))
+	}
+
+	return out
 }

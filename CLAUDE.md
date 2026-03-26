@@ -30,7 +30,8 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ### Edge routing — no unconditional fallbacks to loop targets
 - NEVER add an unconditional edge to the same target as a conditional edge (causes infinite loops)
-- Safe fallbacks go to EscalateToHuman or Done, not to FixX or the same gate
+- Safe fallbacks go to an escalation gate or Done, not to FixX or the same gate
+- In `build_product.dip`, use `EscalateMilestone` for mid-build failures and `EscalateReview` for post-build failures
 - Conditions `outcome=success` + `outcome=fail` are exhaustive — no fallback needed on those
 
 ### Human gate UX
@@ -118,9 +119,20 @@ as SSE event types. The adapter must handle these — they are NOT reflected
 in the HTTP status code.
 
 ### CLI UX commands
+- `tracker workflows` — lists all embedded built-in workflows with display names and goals.
+- `tracker init <name>` — copies a built-in workflow to cwd for customization. Refuses to overwrite.
 - `tracker doctor` — preflight health check (API keys, dippin binary, workdir). Run before first pipeline.
 - `tracker diagnose [runID]` — deep failure analysis (reads status.json + activity.jsonl). Shows tool output, stderr, errors, timing anomalies, actionable suggestions. Without a run ID, analyzes the most recent run.
 - `tracker version` — shows commit hash, build time, and which providers are configured. Uses Go VCS metadata for `go install` builds, GoReleaser ldflags for releases.
+
+### Bare name resolution
+Running `tracker build_product` (no path, no extension) resolves in order:
+1. `build_product.dip` in cwd (local file wins)
+2. `build_product` as a file in cwd
+3. Built-in embedded workflow by name
+4. Error with list of available built-ins
+
+This applies to `tracker validate`, `tracker simulate`, and `tracker run` uniformly via `resolvePipelineSource()` in `cmd/tracker/resolve.go`.
 
 ### Per-milestone circuit breakers
 The `build_product.dip` pipeline uses a `fix_attempts` file on disk to limit

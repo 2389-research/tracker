@@ -77,7 +77,7 @@ func (e *Engine) selectByLabel(edges []*Edge, pctx *PipelineContext, ctxSnap map
 
 // selectBySuggested matches edges by handler-suggested next node IDs.
 func (e *Engine) selectBySuggested(edges []*Edge, pctx *PipelineContext, ctxSnap map[string]string) *Edge {
-	suggested, ok := pctx.Get("suggested_next_nodes")
+	suggested, ok := pctx.Get(ContextKeySuggestedNextNodes)
 	if !ok || suggested == "" {
 		return nil
 	}
@@ -160,7 +160,7 @@ func (e *Engine) emitEdgeSelected(edge *Edge, priority string, ctxSnap map[strin
 // routingContextSnapshot returns a map of the key context values relevant to edge routing.
 func (e *Engine) routingContextSnapshot(pctx *PipelineContext) map[string]string {
 	snap := make(map[string]string)
-	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeyToolStdout, ContextKeyHumanResponse, "suggested_next_nodes"} {
+	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeyToolStdout, ContextKeyHumanResponse, ContextKeySuggestedNextNodes} {
 		if val, ok := pctx.Get(key); ok && val != "" {
 			snap[key] = val
 		}

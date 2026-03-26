@@ -87,7 +87,7 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 	}
 
 	routingHints := make(map[string]string)
-	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, "suggested_next_nodes"} {
+	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeySuggestedNextNodes} {
 		if val, ok := pctx.Get(key); ok && val != "" {
 			routingHints[key] = val
 		}
@@ -240,7 +240,7 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 		s.pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)
 	}
 	if len(outcome.SuggestedNextNodes) > 0 {
-		s.pctx.Set("suggested_next_nodes", strings.Join(outcome.SuggestedNextNodes, ","))
+		s.pctx.Set(ContextKeySuggestedNextNodes, strings.Join(outcome.SuggestedNextNodes, ","))
 	}
 
 	detail := &DecisionDetail{

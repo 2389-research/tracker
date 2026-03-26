@@ -10,35 +10,71 @@ Built by [2389.ai](https://2389.ai).
 # Install
 go install github.com/2389-research/tracker/cmd/tracker@latest
 
+# See what's built in
+tracker workflows
+
+# Run a built-in pipeline by name — no file needed
+tracker build_product
+
+# Or copy it locally to customize
+tracker init build_product
+tracker build_product.dip
+
 # Check your setup (API keys, dippin binary, working directory)
 tracker doctor
 
-# Run a pipeline
-tracker examples/ask_and_execute.dip
+# Configure LLM providers interactively
+tracker setup
 
 # Validate a pipeline without running it
-tracker validate examples/build_product.dip
+tracker validate build_product
 
 # Resume a stopped run
-tracker -r <run-id> examples/build_product.dip
+tracker -r <run-id> build_product.dip
 
-# When something goes wrong — analyze the most recent run
+# When something goes wrong
 tracker diagnose
-
-# Or analyze a specific run
-tracker diagnose <run-id>
 ```
 
 ## Pipeline Examples
 
-### `ask_and_execute.dip`
+Three flagship pipelines are embedded in the binary and available via `tracker workflows`:
+
+### `ask_and_execute`
 Competitive implementation: ask the user what to build, fan out to 3 agents (Claude/Codex/Gemini) in isolated git worktrees, cross-critique the implementations, select the best one, apply it, clean up the rest.
 
-### `build_product.dip`
-Sequential milestone builder: read a SPEC.md, decompose into milestones, implement each with verification loops (opus-powered fix agent with 50 turns), cross-review the complete result, verify full spec compliance.
+### `build_product`
+Sequential milestone builder: read a SPEC.md, decompose into milestones, implement each with verification loops (opus-powered fix agent with 50 turns), cross-review the complete result, verify full spec compliance. Context-specific escalation gates let you override flaky tests or skip milestones without aborting the build.
 
-### `build_product_with_superspec.dip`
+```mermaid
+graph LR
+    ReadSpec --> Decompose --> ApprovePlan
+    ApprovePlan -->|approve| PickNext
+    PickNext -->|milestone N| Implement --> Test
+    Test -->|pass| Verify --> MarkDone --> PickNext
+    Test -->|fail| Fix --> Test
+    Test -->|escalate| EscalateMilestone
+    EscalateMilestone -->|mark done| MarkDone
+    EscalateMilestone -->|retry| Implement
+    PickNext -->|all done| CrossReview --> FinalBuild --> FinalSpec --> Cleanup --> Done
+```
+
+### `build_product_with_superspec`
 Parallel stream execution for large structured specs: reads the spec's work streams and dependency graph, executes independent streams in parallel (with git worktree isolation), enforces quality gates between phases, cross-reviews with 3 specialized reviewers (architect/QA/product), and audits traceability.
+
+## Built-in Workflows
+
+Pipelines are embedded in the binary so `brew` and `go install` users can run them without cloning the repo:
+
+```bash
+tracker workflows              # List all built-in workflows
+tracker build_product          # Run directly by name
+tracker validate build_product # Validate works too
+tracker simulate build_product # Simulate too
+tracker init build_product     # Copy to ./build_product.dip for editing
+```
+
+Local `.dip` files always take precedence over built-ins. After `tracker init build_product`, running `tracker build_product` uses your local copy.
 
 ## Dippin Language
 
@@ -174,6 +210,29 @@ export GEMINI_API_KEY=...
 
 Non-retryable provider errors (quota exceeded, auth failure, model not found) immediately fail the pipeline with a clear message instead of silently retrying.
 
+## Architecture
+
+```mermaid
+graph TB
+    subgraph "Layer 3: Pipeline Engine"
+        Engine["Graph Execution<br/>Edge Routing<br/>Checkpoints<br/>Decision Audit"]
+        Handlers["Handlers: codergen, tool,<br/>human, parallel, fan_in,<br/>subgraph, conditional"]
+        Adapter["Dippin Adapter<br/>IR → Graph"]
+        TUI["TUI: node list,<br/>activity log, modals"]
+    end
+    subgraph "Layer 2: Agent Session"
+        Session["Tool Execution<br/>Context Compaction<br/>Event Streaming"]
+    end
+    subgraph "Layer 1: LLM Client"
+        Anthropic & OpenAI & Gemini
+    end
+    Engine --> Handlers
+    Engine --> Adapter
+    Engine --> TUI
+    Handlers --> Session
+    Session --> Anthropic & OpenAI & Gemini
+```
+
 ## TUI
 
 The terminal UI shows:
@@ -263,18 +322,31 @@ tracker audit <run-id>
 | TestMilestone instantly escalates | Stale `fix_attempts` counter | `rm .ai/milestones/fix_attempts` |
 | Node fails with no visible error | Tool stderr not surfaced | `tracker diagnose` shows full output |
 | Human gate shows raw markdown | Old version before glamour fix | Update to v0.9.2+ |
-| Pipeline loops forever | Unconditional fallback edge | Ensure fallbacks go to EscalateToHuman, not back to the same node |
+| Pipeline loops forever | Unconditional fallback to loop target | Ensure fallbacks go to an exit node (Done, escalation gate), not back into the loop |
 
-## Architecture
+## CLI Reference
 
 ```
-Layer 1: LLM Client (anthropic, openai, gemini providers)
-Layer 2: Agent Session (tool execution, context compaction, event streaming)
-Layer 3: Pipeline Engine (graph execution, edge routing, checkpoints, decision audit)
-    ├── Handlers: codergen, tool, human, parallel, fan_in, subgraph, conditional, manager_loop
-    ├── Dippin Adapter: converts IR to Graph, synthesizes implicit edges
-    └── TUI: bubbletea app with node list, activity log, modal overlays
+tracker [flags] <pipeline>       Run a pipeline (file path or built-in name)
+tracker workflows                List built-in workflows
+tracker init <workflow>          Copy a built-in to current directory
+tracker setup                    Interactive provider configuration
+tracker validate <pipeline>      Check pipeline structure
+tracker simulate <pipeline>      Dry-run execution plan
+tracker doctor                   Preflight health check
+tracker diagnose [runID]         Analyze failures in a run
+tracker audit <runID>            Full audit report for a run
+tracker list                     List recent pipeline runs
+tracker version                  Show version information
 ```
+
+**Flags:**
+- `-w, --workdir` — working directory (default: current)
+- `-r, --resume` — resume a previous run by ID
+- `--format` — pipeline format override: `dip` (default) or `dot` (deprecated)
+- `--json` — stream events as NDJSON to stdout
+- `--no-tui` — disable TUI dashboard, use plain console
+- `--verbose` — show raw provider stream events
 
 ## Development
 
@@ -285,10 +357,12 @@ go test ./... -short
 # Validate all example pipelines
 for f in examples/*.dip; do tracker validate "$f"; done
 
+# Run dippin simulation tests
+for f in examples/*.dip; do dippin test "$f"; done
+
 # Check with dippin-lang tools
-dippin check examples/build_product_with_superspec.dip
-dippin lint examples/build_product_with_superspec.dip
-dippin simulate -all-paths examples/build_product_with_superspec.dip
+dippin doctor examples/build_product.dip
+dippin simulate -all-paths examples/build_product.dip
 ```
 
 ## License
