@@ -90,27 +90,34 @@ tracker doctor</code></pre>
       <strong>human gates</strong>. The engine walks the graph, executes each node, evaluates
       edge conditions, and routes to the next node. Checkpoints enable resume on failure.
     </p>
-    <div class="diagram">
+    <div class="diagram" style="min-height: 500px;">
       <div class="mermaid">
-graph LR
-    S([Start]) --> Setup["Setup<br/>Workspace"]
-    Setup --> Read["Read &<br/>Analyze Spec"]
-    Read --> Plan["Decompose<br/>into Milestones"]
-    Plan --> Approve{{"Human:<br/>Approve Plan?"}}
-    Approve -->|approve| Loop["Pick Next<br/>Milestone"]
+graph TB
+    S([Start]) --> Setup["Setup Workspace"]
+    Setup --> Read["Read & Analyze Spec"]
+    Read --> Plan["Decompose into Milestones"]
+    Plan --> Approve{{"Approve Plan?"}}
     Approve -->|reject| D([Done])
-    Loop -->|milestone N| Impl["Implement"]
-    Impl --> Test["Test"]
-    Test -->|pass| Verify["Verify"]
-    Verify -->|pass| Mark["Mark Done"]
-    Mark --> Loop
-    Test -->|fail| Fix["Fix"]
-    Fix --> Test
-    Test -->|escalate| Esc{{"Human:<br/>Milestone Stuck"}}
+    Approve -->|approve| Loop["Pick Next Milestone"]
+
+    subgraph build ["Build Loop"]
+      Loop -->|"milestone N"| Impl["Implement"]
+      Impl --> Test["Test Milestone"]
+      Test -->|pass| Verify["Verify Completion"]
+      Verify -->|pass| Mark["Mark Done"]
+      Mark --> Loop
+      Test -->|fail| Fix["Fix Issues"]
+      Fix --> Test
+    end
+
+    Test -->|escalate| Esc{{"Milestone Stuck"}}
     Esc -->|mark done| Mark
     Esc -->|retry| Impl
-    Loop -->|all done| Review["Cross-Review"]
-    Review --> Final["Final Build"] --> D
+    Esc -->|accept| Cleanup
+
+    Loop -->|all done| Review["Cross-Review<br/>(3 models)"]
+    Review --> Final["Final Build & Test"]
+    Final --> Cleanup["Cleanup"] --> D
       </div>
     </div>
     <p style="text-align:center; color: var(--text-muted); font-size: 0.85rem;">
