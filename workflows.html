@@ -131,21 +131,26 @@ tracker build_product.dip</code></pre>
 
     <div class="diagram">
       <div class="mermaid">
-graph LR
-    Ask{{"What would<br/>you like done?"}} --> Explore["Explore<br/>Codebase"]
-    Explore --> Spec["Write<br/>Spec"] --> Approve{{"Approve<br/>Spec?"}}
-    Approve -->|approve| WT["Create<br/>Worktrees"]
-    WT --> P["Parallel Fan-Out"]
-    P --> C["Claude<br/>Implementation"]
-    P --> O["OpenAI<br/>Implementation"]
-    P --> G["Gemini<br/>Implementation"]
-    C --> J["Fan-In"]
-    O --> J
-    G --> J
-    J --> Crit["Cross-<br/>Critique"]
-    Crit --> Pick["Pick<br/>Best"]
-    Pick --> Apply["Apply &<br/>Commit"]
-    Apply --> Clean["Clean<br/>Worktrees"]
+graph TB
+    Ask{{"What would you like done?"}} --> Explore["Explore Codebase"]
+    Explore --> Spec["Write Spec"]
+    Spec --> Approve{{"Approve Spec?"}}
+    Approve -->|approve| WT["Create Git Worktrees"]
+
+    subgraph compete ["Competitive Implementation"]
+      WT --> P["Parallel Fan-Out"]
+      P --> C["Claude"]
+      P --> O["OpenAI"]
+      P --> G["Gemini"]
+      C --> J["Fan-In Join"]
+      O --> J
+      G --> J
+    end
+
+    J --> Crit["Cross-Critique"]
+    Crit --> Pick["Pick Best"]
+    Pick --> Apply["Apply & Commit"]
+    Apply --> Clean["Clean Worktrees"]
     Clean --> Done([Done])
       </div>
     </div>

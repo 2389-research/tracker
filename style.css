@@ -489,7 +489,15 @@ tbody tr:hover td {
 }
 
 .diagram .mermaid {
-  display: inline-block;
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.diagram .mermaid svg {
+  max-width: 100%;
+  height: auto !important;
+  min-height: 500px;
 }
 
 /* ─── Section Divider ───────────────────────────────────── */
