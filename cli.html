@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI Reference — Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-brand">
+    <div class="logo-icon">T</div>
+    <span>tracker</span> <span class="accent">by 2389.ai</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="index.html">Home</a></li>
+    <li><a href="workflows.html">Workflows</a></li>
+    <li><a href="architecture.html">Architecture</a></li>
+    <li><a href="cli.html" class="active">CLI</a></li>
+    <li><a href="https://github.com/2389-research/tracker" target="_blank">GitHub</a></li>
+  </ul>
+</nav>
+
+<main>
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>CLI Reference</h1>
+    <p class="subtitle">Every command, flag, and resolution rule. Install and operate tracker from the terminal.</p>
+  </section>
+
+  <!-- ═══ Install ═══ -->
+  <section class="glass">
+    <h2><span class="accent">Install</span></h2>
+    <pre data-lang="bash"><code><span class="comment"># Go install (binary includes embedded workflows)</span>
+<span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
+
+<span class="comment"># Or build from source</span>
+<span class="keyword">git clone</span> https://github.com/2389-research/tracker
+<span class="keyword">cd</span> tracker && <span class="keyword">make</span> install</code></pre>
+  </section>
+
+  <!-- ═══ Commands ═══ -->
+  <section class="glass">
+    <h2>Commands</h2>
+
+    <h3 style="margin-top: 1.5rem;">Running Pipelines</h3>
+
+    <div class="cli-cmd">
+      <code>tracker &lt;pipeline&gt;</code>
+      <div class="desc">Run a pipeline. Accepts a file path (<code>build_product.dip</code>), bare name (<code>build_product</code>), or path with slash. Opens TUI dashboard by default.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker -r &lt;id&gt; &lt;pipeline&gt;</code>
+      <div class="desc">Resume a previous run by ID. Prefix matching works &mdash; <code>-r 7813b</code> is enough if unambiguous.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker --no-tui &lt;pipeline&gt;</code>
+      <div class="desc">Run in console mode (no dashboard). Human gates use inline prompts. Auto-selected when stdin is not a TTY.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker --json &lt;pipeline&gt;</code>
+      <div class="desc">Stream events as newline-delimited JSON to stdout. Implies <code>--no-tui</code>. For CI/programmatic consumption.</div>
+    </div>
+
+    <h3 style="margin-top: 2rem;">Workflow Management</h3>
+
+    <div class="cli-cmd">
+      <code>tracker workflows</code>
+      <div class="desc">List all embedded built-in workflows with display names and goals.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker init &lt;name&gt;</code>
+      <div class="desc">Copy a built-in workflow to <code>./name.dip</code> in the current directory. Refuses to overwrite existing files.</div>
+    </div>
+
+    <h3 style="margin-top: 2rem;">Validation &amp; Simulation</h3>
+
+    <div class="cli-cmd">
+      <code>tracker validate &lt;pipeline&gt;</code>
+      <div class="desc">Check pipeline structure &mdash; parsing, structural validation, semantic validation, lint. Exits 1 on errors. Supports bare names.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker simulate &lt;pipeline&gt;</code>
+      <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes. No LLM calls. Supports bare names.</div>
+    </div>
+
+    <h3 style="margin-top: 2rem;">Diagnostics</h3>
+
+    <div class="cli-cmd">
+      <code>tracker doctor</code>
+      <div class="desc">Preflight health check. Verifies API keys (masked), dippin binary, working directory access. Run before your first pipeline.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker diagnose [runID]</code>
+      <div class="desc">Deep failure analysis. Reads status.json + activity.jsonl. Shows tool output, stderr, errors, timing anomalies, actionable suggestions. Without ID, analyzes the most recent run.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker audit &lt;runID&gt;</code>
+      <div class="desc">Full audit report: timeline, retries, errors, recommendations. For post-hoc analysis of any run.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker list</code>
+      <div class="desc">List recent pipeline runs with timestamps, status, and node count.</div>
+    </div>
+
+    <h3 style="margin-top: 2rem;">Setup</h3>
+
+    <div class="cli-cmd">
+      <code>tracker setup</code>
+      <div class="desc">Interactive provider configuration wizard. Saves keys to <code>~/.config/2389/tracker/.env</code>.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker version</code>
+      <div class="desc">Show version, commit hash, build time, and configured providers.</div>
+    </div>
+  </section>
+
+  <!-- ═══ Flags ═══ -->
+  <section class="glass">
+    <h2>Flags</h2>
+    <p>Flags can appear before or after the pipeline argument.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>-w, --workdir</code></td><td>Working directory for the pipeline run</td><td>Current directory</td></tr>
+          <tr><td><code>-r, --resume</code></td><td>Resume a previous run by ID (prefix match)</td><td>&mdash;</td></tr>
+          <tr><td><code>--format</code></td><td>Pipeline format override: <code>dip</code> or <code>dot</code></td><td>Auto-detect from extension</td></tr>
+          <tr><td><code>--json</code></td><td>Stream events as NDJSON to stdout</td><td>Off</td></tr>
+          <tr><td><code>--no-tui</code></td><td>Disable TUI dashboard, use console mode</td><td>TUI on (if TTY)</td></tr>
+          <tr><td><code>--verbose</code></td><td>Show raw provider stream events</td><td>Off</td></tr>
+          <tr><td><code>--version</code></td><td>Show version info</td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ Name Resolution ═══ -->
+  <section class="glass">
+    <h2>Name <span class="accent">resolution</span></h2>
+    <p class="lead">
+      When you run <code>tracker build_product</code> (bare name, no path, no extension), the resolver
+      checks in this order:
+    </p>
+    <ol class="steps">
+      <li>
+        <h4>Explicit file path</h4>
+        <p>If the name contains <code>/</code> or ends in <code>.dip</code>/<code>.dot</code>, treat as a filesystem path. No further resolution.</p>
+      </li>
+      <li>
+        <h4>Local .dip file</h4>
+        <p>Check if <code>build_product.dip</code> exists in the current directory. <strong>Local files always win.</strong></p>
+      </li>
+      <li>
+        <h4>Bare file</h4>
+        <p>Check if <code>build_product</code> exists as a file in the current directory.</p>
+      </li>
+      <li>
+        <h4>Embedded workflow</h4>
+        <p>Look up <code>build_product</code> in the built-in workflow catalog. If found, load from <code>go:embed</code>.</p>
+      </li>
+      <li>
+        <h4>Error</h4>
+        <p>Print "unknown pipeline" with a list of available built-in workflows.</p>
+      </li>
+    </ol>
+    <p>This applies uniformly to <code>tracker run</code>, <code>tracker validate</code>, and <code>tracker simulate</code>.</p>
+  </section>
+
+  <!-- ═══ Env Vars ═══ -->
+  <section class="glass">
+    <h2>Environment <span class="accent">variables</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Variable</th><th>Provider</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Anthropic</td><td>Required for <code>claude-*</code> models</td></tr>
+          <tr><td><code>ANTHROPIC_BASE_URL</code></td><td>Anthropic</td><td>Custom endpoint (proxies, etc.)</td></tr>
+          <tr><td><code>OPENAI_API_KEY</code></td><td>OpenAI</td><td>Required for <code>gpt-*</code>, <code>o*</code> models</td></tr>
+          <tr><td><code>OPENAI_BASE_URL</code></td><td>OpenAI</td><td>Custom endpoint</td></tr>
+          <tr><td><code>GEMINI_API_KEY</code></td><td>Gemini</td><td>Required for <code>gemini-*</code> models</td></tr>
+          <tr><td><code>GOOGLE_API_KEY</code></td><td>Gemini</td><td>Alternative to GEMINI_API_KEY</td></tr>
+          <tr><td><code>GEMINI_BASE_URL</code></td><td>Gemini</td><td>Custom endpoint</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Keys are loaded from three sources in order: shell environment (highest priority),
+      <code>~/.config/2389/tracker/.env</code> (XDG config), then <code>.env</code> in the working directory.
+      Shell env vars are never overwritten.
+    </p>
+  </section>
+
+  <!-- ═══ Troubleshooting ═══ -->
+  <section class="glass">
+    <h2>Troubleshooting</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>"no LLM providers configured"</td>
+            <td>Missing API keys</td>
+            <td><code>tracker setup</code> or export env vars</td>
+          </tr>
+          <tr>
+            <td>TestMilestone instantly escalates</td>
+            <td>Stale fix_attempts counter</td>
+            <td><code>rm .ai/milestones/fix_attempts</code></td>
+          </tr>
+          <tr>
+            <td>Node fails with no visible error</td>
+            <td>Tool stderr not surfaced</td>
+            <td><code>tracker diagnose</code> shows full output</td>
+          </tr>
+          <tr>
+            <td>Human gate shows raw markdown</td>
+            <td>Old version before glamour fix</td>
+            <td>Update to v0.9.2+</td>
+          </tr>
+          <tr>
+            <td>Pipeline loops forever</td>
+            <td>Unconditional fallback to loop target</td>
+            <td>Route fallbacks to escalation gates or Done</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
+</footer>
+
+</body>
+</html>

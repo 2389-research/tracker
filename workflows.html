@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Built-in Workflows — Tracker</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ theme: 'dark', themeVariables: { primaryColor: '#9a3412', primaryTextColor: '#fafaf9', primaryBorderColor: '#fb923c', lineColor: '#78716c', secondaryColor: '#1c1917', tertiaryColor: '#292524', background: '#0c0a09', mainBkg: '#1c1917', nodeBorder: '#fb923c', clusterBkg: '#1c1917', titleColor: '#fdba74', edgeLabelBackground: '#1c1917' }});</script>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-brand">
+    <div class="logo-icon">T</div>
+    <span>tracker</span> <span class="accent">by 2389.ai</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="index.html">Home</a></li>
+    <li><a href="workflows.html" class="active">Workflows</a></li>
+    <li><a href="architecture.html">Architecture</a></li>
+    <li><a href="cli.html">CLI</a></li>
+    <li><a href="https://github.com/2389-research/tracker" target="_blank">GitHub</a></li>
+  </ul>
+</nav>
+
+<main>
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>Built-in Workflows</h1>
+    <p class="subtitle">Three flagship pipelines embedded in the binary. Run by name, customize with <code>tracker init</code>.</p>
+  </section>
+
+  <!-- ═══ build_product ═══ -->
+  <section class="glass" id="build-product">
+    <span class="badge">Milestone Builder</span>
+    <h2 style="margin-top: 0.75rem;"><code>build_product</code></h2>
+    <p class="lead">
+      Read a SPEC.md, decompose into milestones, implement each with verification loops,
+      cross-review the complete result with three models, verify full spec compliance.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph TB
+    Start([Start]) --> Setup["Setup Workspace"]
+    Setup --> ReadSpec["Read &amp; Analyze Spec<br/><i>opus, reasoning: high</i>"]
+    ReadSpec -->|success| Decompose["Decompose into<br/>Milestones"]
+    ReadSpec -->|fail| ER{{"EscalateReview"}}
+    Decompose -->|success| Approve{{"Human:<br/>Approve Plan"}}
+    Decompose -->|fail| ER
+    Approve -->|approve| Pick["Pick Next<br/>Milestone"]
+    Approve -->|adjust| Decompose
+    Approve -->|reject| Done([Done])
+
+    subgraph loop ["Build Loop"]
+      Pick -->|milestone N| Impl["Implement<br/><i>opus, 50 turns</i>"]
+      Impl --> Test["Test Milestone<br/><i>runs tests + verify cmd</i>"]
+      Test -->|pass| Verify["Verify<br/>Completion"]
+      Verify -->|pass| Mark["Mark Done"]
+      Mark --> Pick
+      Test -->|fail| Fix["Fix Issues<br/><i>opus, 50 turns</i>"]
+      Fix --> Test
+      Test -->|escalate| EM{{"EscalateMilestone"}}
+      EM -->|mark done| Mark
+      EM -->|retry| Impl
+    end
+
+    Pick -->|all done| Review
+
+    subgraph xreview ["Cross-Review"]
+      Review["Parallel Fan-Out"] --> Claude["Claude Review<br/><i>opus</i>"]
+      Review --> Codex["Codex Review<br/><i>gpt-5.4</i>"]
+      Review --> Gemini["Gemini Review<br/><i>gemini-2.5-pro</i>"]
+      Claude --> Join["Fan-In Join"]
+      Codex --> Join
+      Gemini --> Join
+      Join --> Synth["Synthesize<br/>Reviews"]
+    end
+
+    Synth -->|pass| FinalBuild["Final Build<br/>&amp; Test"]
+    Synth -->|fail| ApplyFix["Apply Review<br/>Fixes"] --> FinalBuild
+    FinalBuild --> FinalSpec["Final Spec<br/>Compliance"]
+    FinalSpec -->|pass| Cleanup --> FinalCommit --> Done
+    FinalBuild -->|fail| ER
+    FinalSpec -->|fail| ER
+    ER -->|accept| Cleanup
+    ER -->|retry| Decompose
+    EM -->|accept| Cleanup
+      </div>
+    </div>
+
+    <h3>Key Design Decisions</h3>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Split Escalation Gates</h4>
+        <p><strong>EscalateMilestone</strong> (mid-build): mark done, retry, accept, abandon. Defaults to "mark done" so you can override flaky tests without aborting the build.</p>
+        <p><strong>EscalateReview</strong> (post-build): accept, retry, abandon. Defaults to "accept" for shipping.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Tests Run Before Counter</h4>
+        <p>TestMilestone runs the test suite <em>before</em> checking the attempt counter. If a milestone was genuinely fixed on attempt 4, it succeeds instead of escalating.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Per-Milestone Circuit Breaker</h4>
+        <p>A <code>fix_attempts</code> file on disk limits retries per milestone to 3. Persists across pipeline restarts. Reset by MarkMilestoneDone.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Three-Model Cross-Review</h4>
+        <p>Claude, Codex, and Gemini independently review the complete implementation. Reviews are synthesized to find consensus vs disputed findings.</p>
+      </div>
+    </div>
+
+    <pre data-lang="bash" style="margin-top: 1.5rem;"><code><span class="comment"># Run it</span>
+tracker build_product
+
+<span class="comment"># Copy and customize</span>
+tracker init build_product
+<span class="comment"># edit build_product.dip, then:</span>
+tracker build_product.dip</code></pre>
+  </section>
+
+  <!-- ═══ ask_and_execute ═══ -->
+  <section class="glass" id="ask-and-execute">
+    <span class="badge">Competitive Fan-Out</span>
+    <h2 style="margin-top: 0.75rem;"><code>ask_and_execute</code></h2>
+    <p class="lead">
+      Ask the user what to build, explore and spec it, fan out to 3 isolated implementations
+      via git worktrees, cross-critique, select the best, apply it, clean up the rest.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph LR
+    Ask{{"What would<br/>you like done?"}} --> Explore["Explore<br/>Codebase"]
+    Explore --> Spec["Write<br/>Spec"] --> Approve{{"Approve<br/>Spec?"}}
+    Approve -->|approve| WT["Create<br/>Worktrees"]
+    WT --> P["Parallel Fan-Out"]
+    P --> C["Claude<br/>Implementation"]
+    P --> O["OpenAI<br/>Implementation"]
+    P --> G["Gemini<br/>Implementation"]
+    C --> J["Fan-In"]
+    O --> J
+    G --> J
+    J --> Crit["Cross-<br/>Critique"]
+    Crit --> Pick["Pick<br/>Best"]
+    Pick --> Apply["Apply &<br/>Commit"]
+    Apply --> Clean["Clean<br/>Worktrees"]
+    Clean --> Done([Done])
+      </div>
+    </div>
+
+    <h3>How It Works</h3>
+    <ol class="steps">
+      <li>
+        <h4>Understand</h4>
+        <p>Human describes the task. An exploration agent maps the codebase. A spec agent produces a detailed implementation plan.</p>
+      </li>
+      <li>
+        <h4>Implement in Isolation</h4>
+        <p>Three agents (Claude, OpenAI, Gemini) each implement the spec in their own git worktree. Full isolation, no interference.</p>
+      </li>
+      <li>
+        <h4>Cross-Critique &amp; Select</h4>
+        <p>Each implementation is reviewed by all three models. A judge selects the best one based on aggregate scores.</p>
+      </li>
+      <li>
+        <h4>Apply &amp; Clean</h4>
+        <p>The winning implementation is merged to main. Losing worktrees are deleted.</p>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ═══ build_product_with_superspec ═══ -->
+  <section class="glass" id="superspec">
+    <span class="badge">Parallel Streams</span>
+    <h2 style="margin-top: 0.75rem;"><code>build_product_with_superspec</code></h2>
+    <p class="lead">
+      For large structured specs with parallel work streams and dependency graphs. Executes
+      independent streams concurrently, enforces quality gates between phases, cross-reviews,
+      and audits full traceability.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph TB
+    Analyze["Analyze Spec<br/>Structure"] --> Plan["Build Execution<br/>Plan"]
+    Plan --> Approve{{"Approve?"}}
+    Approve -->|approve| P1["Phase 1:<br/>Parallel Streams"]
+    P1 --> G1["Quality<br/>Gate 1"]
+    G1 -->|pass| P2["Phase 2:<br/>Dependent Streams"]
+    G1 -->|fail| Fix1["Fix Phase 1"]
+    Fix1 --> G1
+    P2 --> G2["Quality<br/>Gate 2"]
+    G2 -->|pass| Review["Cross-Review<br/>(3 models)"]
+    Review --> Final["Final Gates<br/>&amp; Traceability"]
+    Final --> Done([Done])
+      </div>
+    </div>
+
+    <h3>Designed For</h3>
+    <div class="grid-3" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Large Specs</h4>
+        <p>Multi-stream specs with explicit dependency graphs between work streams.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Mechanical Quality Gates</h4>
+        <p>Build + test + lint + coverage + complexity checked at each phase boundary. Not LLM-judged.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Traceability Audit</h4>
+        <p>Final gate verifies every spec requirement maps to implementation and test coverage.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ═══ Testing ═══ -->
+  <section class="glass">
+    <h2>Pipeline <span class="accent">testing</span></h2>
+    <p class="lead">
+      Every edge from every gate is tested with dippin simulation tests. Scenario overrides
+      inject specific conditions; assertions verify the exact routing path.
+    </p>
+    <pre data-lang="json"><code>{
+  <span class="string">"name"</span>: <span class="string">"milestone escalation — mark done continues build"</span>,
+  <span class="string">"scenario"</span>: {
+    <span class="string">"TestMilestone.tool_stdout"</span>: <span class="string">"escalate"</span>,
+    <span class="string">"TestMilestone.outcome"</span>: <span class="string">"fail"</span>
+  },
+  <span class="string">"expect"</span>: {
+    <span class="string">"immediately_after"</span>: {<span class="string">"EscalateMilestone"</span>: <span class="string">"MarkMilestoneDone"</span>}
+  }
+}</code></pre>
+    <pre data-lang="bash"><code><span class="comment"># Run all pipeline tests</span>
+dippin test examples/build_product.dip
+<span class="comment"># 23 tests: 23 passed, 0 failed</span></code></pre>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
+</footer>
+
+</body>
+</html>

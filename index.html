@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tracker — Multi-Agent Pipeline Orchestration</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ theme: 'dark', themeVariables: { primaryColor: '#9a3412', primaryTextColor: '#fafaf9', primaryBorderColor: '#fb923c', lineColor: '#78716c', secondaryColor: '#1c1917', tertiaryColor: '#292524', background: '#0c0a09', mainBkg: '#1c1917', nodeBorder: '#fb923c', clusterBkg: '#1c1917', titleColor: '#fdba74', edgeLabelBackground: '#1c1917' }});</script>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-brand">
+    <div class="logo-icon">T</div>
+    <span>tracker</span> <span class="accent">by 2389.ai</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="index.html" class="active">Home</a></li>
+    <li><a href="workflows.html">Workflows</a></li>
+    <li><a href="architecture.html">Architecture</a></li>
+    <li><a href="cli.html">CLI</a></li>
+    <li><a href="https://github.com/2389-research/tracker" target="_blank">GitHub</a></li>
+  </ul>
+</nav>
+
+<main>
+
+  <!-- ═══ Hero ═══ -->
+  <section class="hero glass">
+    <h1>Wire it up. Let it rip.</h1>
+    <p class="subtitle">
+      Pipeline orchestration for multi-agent LLM workflows. Define pipelines in
+      <code>.dip</code> files, execute with parallel agents, watch progress in a TUI dashboard.
+    </p>
+    <div class="hero-actions">
+      <a href="https://github.com/2389-research/tracker" class="btn btn-primary">View on GitHub</a>
+      <a href="cli.html" class="btn btn-ghost">CLI Reference</a>
+    </div>
+  </section>
+
+  <!-- ═══ Quick Start ═══ -->
+  <section class="glass">
+    <h2>Get running in <span class="accent">60 seconds</span></h2>
+    <pre data-lang="bash"><code><span class="comment"># Install</span>
+<span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
+
+<span class="comment"># See what's built in</span>
+tracker workflows
+
+<span class="comment"># Run a pipeline by name — no file needed</span>
+tracker build_product
+
+<span class="comment"># Check your LLM providers</span>
+tracker doctor</code></pre>
+    <p>Three flagship pipelines are <strong>embedded in the binary</strong>. No cloning, no examples directory. <code>go install</code> and go.</p>
+  </section>
+
+  <!-- ═══ Stats ═══ -->
+  <div class="glass" style="padding: 2rem;">
+    <div class="stat-row">
+      <div class="stat">
+        <div class="number">3</div>
+        <div class="label">Built-in Workflows</div>
+      </div>
+      <div class="stat">
+        <div class="number">3</div>
+        <div class="label">LLM Providers</div>
+      </div>
+      <div class="stat">
+        <div class="number">8</div>
+        <div class="label">Node Types</div>
+      </div>
+      <div class="stat">
+        <div class="number">14</div>
+        <div class="label">Test Packages</div>
+      </div>
+      <div class="stat">
+        <div class="number">23</div>
+        <div class="label">Pipeline Tests</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Core Concepts ═══ -->
+  <section class="glass">
+    <h2>How it <span class="accent">works</span></h2>
+    <p class="lead">
+      Pipelines are directed graphs of <strong>agents</strong>, <strong>tools</strong>, and
+      <strong>human gates</strong>. The engine walks the graph, executes each node, evaluates
+      edge conditions, and routes to the next node. Checkpoints enable resume on failure.
+    </p>
+    <div class="diagram">
+      <div class="mermaid">
+graph LR
+    S([Start]) --> Setup["Setup<br/>Workspace"]
+    Setup --> Read["Read &<br/>Analyze Spec"]
+    Read --> Plan["Decompose<br/>into Milestones"]
+    Plan --> Approve{{"Human:<br/>Approve Plan?"}}
+    Approve -->|approve| Loop["Pick Next<br/>Milestone"]
+    Approve -->|reject| D([Done])
+    Loop -->|milestone N| Impl["Implement"]
+    Impl --> Test["Test"]
+    Test -->|pass| Verify["Verify"]
+    Verify -->|pass| Mark["Mark Done"]
+    Mark --> Loop
+    Test -->|fail| Fix["Fix"]
+    Fix --> Test
+    Test -->|escalate| Esc{{"Human:<br/>Milestone Stuck"}}
+    Esc -->|mark done| Mark
+    Esc -->|retry| Impl
+    Loop -->|all done| Review["Cross-Review"]
+    Review --> Final["Final Build"] --> D
+      </div>
+    </div>
+    <p style="text-align:center; color: var(--text-muted); font-size: 0.85rem;">
+      The <code>build_product</code> pipeline — milestone builder with verification loops and split escalation gates.
+    </p>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ═══ Features Grid ═══ -->
+  <h2 style="text-align:center; margin-bottom: 1.5rem;">Key <span class="accent">features</span></h2>
+  <div class="grid-3">
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F4CB;</div>
+      <h3>Dippin Language</h3>
+      <p>Define pipelines in <code>.dip</code> files — human-readable, version-controlled, lintable. Conditional edges, variable interpolation, per-node models.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F916;</div>
+      <h3>Multi-Provider</h3>
+      <p>Anthropic, OpenAI, and Gemini in one pipeline. Cross-review with three models. Infra-level retries for transient errors.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F3AE;</div>
+      <h3>TUI Dashboard</h3>
+      <p>Real-time node status, activity streaming, modal human gates. See every LLM turn, tool call, and decision as it happens.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F500;</div>
+      <h3>Parallel Execution</h3>
+      <p>Fan-out to concurrent branches with git worktree isolation. Fan-in joins results. The engine has no special-case parallel code.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F6E1;</div>
+      <h3>Human-in-the-Loop</h3>
+      <p>Choice, freeform, and hybrid gates. Review modals with glamour-rendered markdown. Split escalation gates for context-specific decisions.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F4BE;</div>
+      <h3>Checkpoint Resume</h3>
+      <p>Every node completion is checkpointed. Resume from where you stopped — the engine replays completed nodes and picks up at the failure point.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F50D;</div>
+      <h3>Decision Audit Trail</h3>
+      <p>Every edge selection, condition evaluation, and context snapshot logged to <code>activity.jsonl</code>. Full post-hoc routing reconstruction.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F3D7;</div>
+      <h3>Embedded Workflows</h3>
+      <p>Three flagship pipelines baked into the binary. <code>tracker build_product</code> works anywhere, for anyone, without cloning the repo.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F9EA;</div>
+      <h3>Simulation Testing</h3>
+      <p>23 dippin tests verify every edge of <code>build_product.dip</code>. <code>preferred_label</code>, <code>immediately_after</code>, <code>path_contains</code> assertions.</p>
+    </div>
+
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ═══ Providers ═══ -->
+  <section class="glass">
+    <h2>Three <span class="accent">providers</span>, one pipeline</h2>
+    <p class="lead">Mix models freely. Use Opus for deep analysis, Sonnet for fast iteration, GPT for cross-review, Gemini for alternative perspectives.</p>
+    <div class="grid-3" style="margin-top: 1.5rem;">
+      <div class="glass glass-sm" style="text-align:center;">
+        <h3 style="color: var(--orange-300);">Anthropic</h3>
+        <p style="margin:0;"><code>claude-opus-4-6</code><br><code>claude-sonnet-4-6</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align:center;">
+        <h3 style="color: var(--orange-300);">OpenAI</h3>
+        <p style="margin:0;"><code>gpt-5.4</code><br><code>o3</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align:center;">
+        <h3 style="color: var(--orange-300);">Gemini</h3>
+        <p style="margin:0;"><code>gemini-2.5-pro</code><br><code>gemini-2.5-flash</code></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Dippin Example ═══ -->
+  <section class="glass">
+    <h2>Pipeline as <span class="accent">code</span></h2>
+    <pre data-lang="dip"><code><span class="keyword">workflow</span> MyPipeline
+  <span class="keyword">goal:</span> <span class="string">"Build something great"</span>
+  <span class="keyword">start:</span> Begin
+  <span class="keyword">exit:</span> Done
+
+  <span class="keyword">defaults</span>
+    model: claude-sonnet-4-6
+    provider: anthropic
+
+  <span class="keyword">agent</span> Begin
+    label: Start
+
+  <span class="keyword">human</span> AskUser
+    label: <span class="string">"What should we build?"</span>
+    mode: freeform
+
+  <span class="keyword">agent</span> Implement
+    label: <span class="string">"Build It"</span>
+    model: claude-opus-4-6
+    prompt:
+      The user wants: ${ctx.human_response}
+      Implement it following the project's conventions.
+
+  <span class="keyword">agent</span> Done
+    label: Done
+
+  <span class="keyword">edges</span>
+    Begin -> AskUser
+    AskUser -> Implement
+    Implement -> Done</code></pre>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ═══ CTA ═══ -->
+  <section class="glass" style="text-align: center; padding: 3.5rem;">
+    <h2>Ready to <span class="accent">build</span>?</h2>
+    <p class="lead" style="margin-bottom: 2rem;">Install tracker, write a SPEC.md, and let the agents handle the rest.</p>
+    <div class="hero-actions">
+      <a href="workflows.html" class="btn btn-primary">Explore Workflows</a>
+      <a href="architecture.html" class="btn btn-ghost">See Architecture</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
+</footer>
+
+</body>
+</html>
