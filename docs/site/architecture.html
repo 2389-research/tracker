@@ -37,58 +37,13 @@
     <div class="diagram">
       <div class="mermaid">
 graph TB
-    subgraph CLI ["CLI (cmd/tracker)"]
-        Flags["Flag Parsing<br/>&amp; Routing"]
-        Resolve["Name Resolution<br/><i>filesystem → embedded</i>"]
-        Embed["Embedded<br/>Workflows"]
-        TUIApp["TUI App<br/><i>bubbletea</i>"]
-    end
+    CLI["CLI\ncmd/tracker\nflags, name resolution, TUI, embedded workflows"]
+    Engine["Pipeline Engine\npipeline/\ngraph model, run loop, edge selection, checkpoints, audit trail"]
+    Handlers["Handlers\npipeline/handlers\ncodergen · tool · human · parallel · fan_in · subgraph"]
+    Agent["Agent Session\nagent/\nturn loop, tool registry, context compaction"]
+    LLM["LLM Client\nllm/\nAnthropic · OpenAI · Gemini\nretry middleware, token tracking"]
 
-    subgraph Engine ["Pipeline Engine (pipeline/)"]
-        Graph["Graph Model<br/><i>nodes, edges, attrs</i>"]
-        Run["Engine Run Loop<br/><i>execute → route → advance</i>"]
-        Edges["Edge Selection<br/><i>suggested → condition → label → default</i>"]
-        CP["Checkpoint<br/>&amp; Resume"]
-        Audit["Decision<br/>Audit Trail"]
-    end
-
-    subgraph Handlers ["Handlers (pipeline/handlers)"]
-        H1["codergen<br/><i>LLM agent</i>"]
-        H2["tool<br/><i>shell exec</i>"]
-        H3["wait.human<br/><i>gate modal</i>"]
-        H4["parallel<br/><i>fan-out</i>"]
-        H5["subgraph<br/><i>child pipeline</i>"]
-    end
-
-    subgraph Agent ["Agent Session (agent/)"]
-        Session["Turn Loop<br/><i>think → act → observe</i>"]
-        Tools["Tool Registry<br/><i>bash, read, write, etc.</i>"]
-        Compact["Context<br/>Compaction"]
-    end
-
-    subgraph LLM ["LLM Client (llm/)"]
-        Client["Multi-Provider<br/>Client"]
-        MW["Middleware<br/><i>retry, tokens</i>"]
-        Anth["Anthropic<br/><i>Messages API</i>"]
-        OAI["OpenAI<br/><i>Responses API</i>"]
-        Gem["Gemini<br/><i>generateContent</i>"]
-    end
-
-    CLI --> Engine
-    Engine --> Handlers
-    Handlers --> Agent
-    Agent --> LLM
-    Flags --> Resolve
-    Resolve --> Embed
-    TUIApp --> Run
-    Run --> Edges
-    Run --> CP
-    Run --> Audit
-    H1 --> Session
-    Session --> Tools
-    Session --> Compact
-    Client --> MW
-    MW --> Anth & OAI & Gem
+    CLI --> Engine --> Handlers --> Agent --> LLM
       </div>
     </div>
   </section>
