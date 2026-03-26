@@ -323,6 +323,7 @@ tracker audit <run-id>
 | Node fails with no visible error | Tool stderr not surfaced | `tracker diagnose` shows full output |
 | Human gate shows raw markdown | Old version before glamour fix | Update to v0.9.2+ |
 | Pipeline loops forever | Unconditional fallback to loop target | Ensure fallbacks go to an exit node (Done, escalation gate), not back into the loop |
+| Tool retries same error 5 times | Deterministic command bug | `tracker diagnose` flags identical retries — fix the command in the .dip file |
 
 ## CLI Reference
 

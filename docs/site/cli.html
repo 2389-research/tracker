@@ -239,6 +239,88 @@
             <td>Unconditional fallback to loop target</td>
             <td>Route fallbacks to escalation gates or Done</td>
           </tr>
+          <tr>
+            <td>Tool retries same error 5 times</td>
+            <td>Deterministic command bug</td>
+            <td><code>tracker diagnose</code> flags it &mdash; fix the command in the .dip file</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ Diagnose Deep Dive ═══ -->
+  <section class="glass">
+    <h2>Diagnose <span class="accent">intelligence</span></h2>
+    <p class="lead">
+      <code>tracker diagnose</code> doesn't just dump errors &mdash; it analyzes failure patterns
+      and generates actionable suggestions.
+    </p>
+
+    <h3 style="margin-top: 1.5rem;">Deterministic Failure Detection</h3>
+    <p>
+      When a tool node fails multiple retries with <strong>identical errors</strong>, diagnose
+      recognizes it as a deterministic bug in the command &mdash; not a transient issue that
+      retrying might fix. This saves users from wading through 5 identical stack traces to
+      realize the command itself is wrong.
+    </p>
+
+    <pre data-lang="output"><code>  ✗ T1Init
+    Handler:  tool
+    Duration: 3.2s
+    Attempts: 5 failures (all identical — deterministic)
+    Output:
+      The workspace name "." is invalid.
+      Workspace names must start with a letter.
+
+─── Suggestions ───────────────────────────────────────────
+  → T1Init: Failed 5 times with identical errors — this is a
+    deterministic bug in the command, not a transient failure.
+    Retrying won't help. Fix the tool command in the .dip file
+    and re-run.</code></pre>
+
+    <h3 style="margin-top: 1.5rem;">All Detection Patterns</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Pattern</th><th>Detection</th><th>Suggestion</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Identical retries</td>
+            <td>Same error signature across 2+ failures</td>
+            <td>Deterministic bug &mdash; fix the command</td>
+          </tr>
+          <tr>
+            <td>Varying retries</td>
+            <td>3+ failures with different errors</td>
+            <td>Flaky command or environment issue</td>
+          </tr>
+          <tr>
+            <td>Escalation hit</td>
+            <td><code>ESCALATE</code> + <code>fix attempts</code> in output</td>
+            <td>Reset counter: <code>rm .ai/milestones/fix_attempts</code></td>
+          </tr>
+          <tr>
+            <td>Silent failure</td>
+            <td>No stdout, stderr, or errors captured</td>
+            <td>Check activity.jsonl manually</td>
+          </tr>
+          <tr>
+            <td>Missing command/file</td>
+            <td><code>command not found</code> or <code>No such file</code></td>
+            <td>Check working directory and tool availability</td>
+          </tr>
+          <tr>
+            <td>Go test failures</td>
+            <td><code>FAIL</code> + <code>go test</code> in output</td>
+            <td>Check known_failures exclusion list</td>
+          </tr>
+          <tr>
+            <td>Suspiciously fast</td>
+            <td>&lt;50ms for non-tool nodes</td>
+            <td>Configuration issue or missing handler</td>
+          </tr>
         </tbody>
       </table>
     </div>

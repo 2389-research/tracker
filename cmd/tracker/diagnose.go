@@ -17,13 +17,15 @@ import (
 
 // nodeFailure captures everything known about a failed node.
 type nodeFailure struct {
-	nodeID   string
-	outcome  string
-	stdout   string
-	stderr   string
-	errors   []string // errors from activity log
-	duration time.Duration
-	handler  string
+	nodeID           string
+	outcome          string
+	stdout           string
+	stderr           string
+	errors           []string // errors from activity log
+	duration         time.Duration
+	handler          string
+	retryCount       int  // how many stage_failed events for this node
+	identicalRetries bool // true if all failures had the same error
 }
 
 // diagnoseMostRecent finds and diagnoses the most recent run.
@@ -170,7 +172,7 @@ type diagnoseEntry struct {
 	Handler   string `json:"handler"`
 }
 
-// enrichFromActivity adds error messages and timing from activity.jsonl.
+// enrichFromActivity adds error messages, timing, and retry analysis from activity.jsonl.
 func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
 	path := filepath.Join(runDir, "activity.jsonl")
 	data, err := os.ReadFile(path)
@@ -179,6 +181,8 @@ func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
 	}
 
 	stageStarts := make(map[string]time.Time)
+	// Track per-node failure signatures to detect deterministic retries.
+	failSignatures := make(map[string][]string) // nodeID → list of error signatures per failure
 
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -189,27 +193,50 @@ func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		enrichFromEntry(entry, failures, stageStarts)
+		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
+
+	// Analyze retry patterns.
+	for nodeID, sigs := range failSignatures {
+		f, ok := failures[nodeID]
+		if !ok {
+			continue
+		}
+		f.retryCount = len(sigs)
+		if len(sigs) >= 2 {
+			f.identicalRetries = allIdentical(sigs)
+		}
+	}
+}
+
+// allIdentical returns true if all strings in the slice are equal.
+// Returns false for slices with fewer than 2 elements.
+func allIdentical(ss []string) bool {
+	if len(ss) < 2 {
+		return false
+	}
+	for i := 1; i < len(ss); i++ {
+		if ss[i] != ss[0] {
+			return false
+		}
+	}
+	return true
 }
 
 // enrichFromEntry processes a single activity log entry, updating failure
 // records with timing, handler info, and error details.
-func enrichFromEntry(entry diagnoseEntry, failures map[string]*nodeFailure, stageStarts map[string]time.Time) {
+func enrichFromEntry(entry diagnoseEntry, failures map[string]*nodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
 	ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 
 	switch entry.Type {
 	case "stage_started":
 		stageStarts[entry.NodeID] = ts
-	case "stage_failed", "stage_completed":
-		if f, ok := failures[entry.NodeID]; ok {
-			if start, ok := stageStarts[entry.NodeID]; ok && !ts.IsZero() {
-				f.duration = ts.Sub(start)
-			}
-			if entry.Handler != "" {
-				f.handler = entry.Handler
-			}
-		}
+	case "stage_failed":
+		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
+		sig := entry.Error + "|" + entry.ToolErr
+		failSignatures[entry.NodeID] = append(failSignatures[entry.NodeID], sig)
+	case "stage_completed":
+		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
 	}
 
 	if entry.NodeID == "" {
@@ -227,6 +254,19 @@ func enrichFromEntry(entry diagnoseEntry, failures map[string]*nodeFailure, stag
 	}
 }
 
+// updateFailureTiming sets duration and handler on a failure from a stage event.
+func updateFailureTiming(f *nodeFailure, stageStarts map[string]time.Time, entry diagnoseEntry, ts time.Time) {
+	if f == nil {
+		return
+	}
+	if start, ok := stageStarts[entry.NodeID]; ok && !ts.IsZero() {
+		f.duration = ts.Sub(start)
+	}
+	if entry.Handler != "" {
+		f.handler = entry.Handler
+	}
+}
+
 func printNodeDiagnosis(f *nodeFailure) {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorHot)
 	labelStyle := lipgloss.NewStyle().Foreground(colorSky).Bold(true)
@@ -239,32 +279,18 @@ func printNodeDiagnosis(f *nodeFailure) {
 	if f.duration > 0 {
 		fmt.Printf("    %s %s\n", labelStyle.Render("Duration:"), formatElapsed(f.duration))
 	}
-
-	// Show stdout (often contains the actual failure reason).
-	if f.stdout != "" {
-		fmt.Printf("    %s\n", labelStyle.Render("Output:"))
-		for _, line := range strings.Split(f.stdout, "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				fmt.Printf("      %s\n", line)
-			}
+	if f.retryCount >= 2 {
+		retryInfo := fmt.Sprintf("%d failures", f.retryCount)
+		if f.identicalRetries {
+			retryInfo += " (all identical — deterministic)"
 		}
+		fmt.Printf("    %s %s\n", labelStyle.Render("Attempts:"), retryInfo)
 	}
 
-	// Show stderr.
-	if f.stderr != "" {
-		fmt.Printf("    %s\n", labelStyle.Render("Stderr:"))
-		for _, line := range strings.Split(f.stderr, "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				fmt.Printf("      %s\n", line)
-			}
-		}
-	}
+	printIndentedBlock(labelStyle, "Output:", f.stdout)
+	printIndentedBlock(labelStyle, "Stderr:", f.stderr)
 
-	// Show collected errors from activity log.
 	if len(f.errors) > 0 {
-		// Deduplicate.
 		seen := make(map[string]bool)
 		fmt.Printf("    %s\n", labelStyle.Render("Errors:"))
 		for _, e := range f.errors {
@@ -281,6 +307,20 @@ func printNodeDiagnosis(f *nodeFailure) {
 	}
 
 	fmt.Println()
+}
+
+// printIndentedBlock prints a labeled multi-line block with 6-space indent.
+func printIndentedBlock(labelStyle lipgloss.Style, label, content string) {
+	if content == "" {
+		return
+	}
+	fmt.Printf("    %s\n", labelStyle.Render(label))
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			fmt.Printf("      %s\n", line)
+		}
+	}
 }
 
 func printDiagnoseSuggestions(failures map[string]*nodeFailure, cp *pipeline.Checkpoint) {
@@ -304,32 +344,49 @@ func printDiagnoseSuggestions(failures map[string]*nodeFailure, cp *pipeline.Che
 // suggestionsForFailure generates actionable suggestions for a single node failure.
 func suggestionsForFailure(f *nodeFailure) []string {
 	var out []string
+	out = append(out, suggestRetryPattern(f)...)
+	out = append(out, suggestOutputPatterns(f)...)
+	return out
+}
+
+// suggestRetryPattern detects deterministic vs flaky retry failures.
+func suggestRetryPattern(f *nodeFailure) []string {
+	if f.identicalRetries && f.retryCount >= 2 {
+		return []string{fmt.Sprintf("%s: Failed %d times with identical errors — this is a "+
+			"deterministic bug in the command, not a transient failure. Retrying won't help. "+
+			"Fix the tool command in the .dip file and re-run.", f.nodeID, f.retryCount)}
+	}
+	if f.retryCount >= 3 {
+		return []string{fmt.Sprintf("%s: Failed %d times with varying errors — may be a flaky "+
+			"command or environment issue.", f.nodeID, f.retryCount)}
+	}
+	return nil
+}
+
+// suggestOutputPatterns checks stdout/stderr for known failure signatures.
+func suggestOutputPatterns(f *nodeFailure) []string {
+	var out []string
 
 	if strings.Contains(f.stdout, "ESCALATE") && strings.Contains(f.stdout, "fix attempts") {
 		out = append(out, fmt.Sprintf("%s: Hit fix attempt limit. The fix_attempts counter persists "+
 			"on disk across restarts — if you retry after escalation, the counter "+
 			"is already maxed. Reset it with: rm .ai/milestones/fix_attempts", f.nodeID))
 	}
-
 	if f.stdout == "" && f.stderr == "" && len(f.errors) == 0 {
 		out = append(out, fmt.Sprintf("%s: No error details captured. Check the activity.jsonl "+
 			"for this node's events: grep %q activity.jsonl | tail -20", f.nodeID, f.nodeID))
 	}
-
 	if strings.Contains(f.stderr, "command not found") || strings.Contains(f.stderr, "No such file or directory") {
 		out = append(out, fmt.Sprintf("%s: Shell command failed — check that the working directory "+
 			"and required tools exist before running", f.nodeID))
 	}
-
 	if strings.Contains(f.stdout, "FAIL") && strings.Contains(f.stdout, "go test") {
 		out = append(out, fmt.Sprintf("%s: Go test failures — check if .ai/milestones/known_failures "+
 			"should include these tests for this milestone", f.nodeID))
 	}
-
 	if f.duration > 0 && f.duration < 50*time.Millisecond && f.handler != "tool" {
 		out = append(out, fmt.Sprintf("%s: Completed in %s — suspiciously fast. May indicate "+
 			"a configuration issue or missing handler", f.nodeID, formatElapsed(f.duration)))
 	}
-
 	return out
 }
