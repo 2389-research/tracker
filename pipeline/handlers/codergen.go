@@ -19,11 +19,13 @@ import (
 // CodergenHandler invokes an agent session with the prompt from node attributes,
 // captures the response text, and maps it to a pipeline outcome.
 type CodergenHandler struct {
-	client       agent.Completer
-	env          exec.ExecutionEnvironment
-	workingDir   string
-	eventHandler agent.EventHandler
-	graphAttrs   map[string]string
+	client             agent.Completer
+	env                exec.ExecutionEnvironment
+	workingDir         string
+	eventHandler       agent.EventHandler
+	graphAttrs         map[string]string
+	nativeBackend      pipeline.AgentBackend // always available
+	defaultBackendName string                // from --backend flag, "" means native
 }
 
 // NewCodergenHandler creates a CodergenHandler that will use the given LLM client
@@ -62,24 +64,79 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, err
 	}
 
-	config := h.buildConfig(node)
-	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
-		config.WorkingDir = wd
-	}
+	runCfg := h.buildRunConfig(node, prompt)
+	backend := h.selectBackend(node)
 
-	collector, sess, err := h.createSession(node, config)
-	if err != nil {
-		return pipeline.Outcome{}, err
+	var collector transcriptCollector
+	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
+	multiHandler := agent.MultiHandler(&collector, scopedHandler)
+	emitCallback := func(evt agent.Event) {
+		multiHandler.HandleEvent(evt)
 	}
 
 	artifactRoot := h.resolveArtifactRoot(pctx)
 
-	sessResult, runErr := sess.Run(ctx, prompt)
+	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
 	if runErr != nil {
-		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, collector)
+		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
 	}
 
-	return h.buildSuccessOutcome(node, prompt, artifactRoot, sessResult, collector)
+	return h.buildSuccessOutcome(node, prompt, artifactRoot, sessResult, &collector)
+}
+
+// selectBackend chooses the appropriate AgentBackend based on node attributes
+// and global default settings.
+func (h *CodergenHandler) selectBackend(node *pipeline.Node) pipeline.AgentBackend {
+	// Check node-level backend attr
+	if backend := node.Attrs["backend"]; backend != "" {
+		switch backend {
+		case "claude-code":
+			// Will be added in Task 5
+			// For now, fall through to native
+		case "native", "codergen":
+			return h.ensureNativeBackend()
+		}
+	}
+	// Check global --backend flag
+	if h.defaultBackendName == "claude-code" {
+		// Will be added in Task 5
+		// For now, fall through to native
+	}
+	return h.ensureNativeBackend()
+}
+
+// ensureNativeBackend returns the native backend, lazily creating it if needed.
+// This handles both registry-constructed handlers (where nativeBackend is set)
+// and directly-constructed handlers in tests.
+func (h *CodergenHandler) ensureNativeBackend() pipeline.AgentBackend {
+	if h.nativeBackend == nil {
+		h.nativeBackend = NewNativeBackend(h.client, h.env)
+	}
+	return h.nativeBackend
+}
+
+// buildRunConfig constructs an AgentRunConfig from node attributes for use with
+// any AgentBackend implementation. The full SessionConfig is passed via Extra
+// so the native backend can use it directly without losing fields.
+func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string) pipeline.AgentRunConfig {
+	sessionCfg := h.buildConfig(node)
+	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
+		sessionCfg.WorkingDir = wd
+	}
+
+	cfg := pipeline.AgentRunConfig{
+		Prompt:       prompt,
+		SystemPrompt: sessionCfg.SystemPrompt,
+		Model:        sessionCfg.Model,
+		Provider:     sessionCfg.Provider,
+		WorkingDir:   sessionCfg.WorkingDir,
+		MaxTurns:     sessionCfg.MaxTurns,
+		Extra:        &sessionCfg,
+	}
+	if sessionCfg.CommandTimeout > 0 {
+		cfg.Timeout = sessionCfg.CommandTimeout
+	}
+	return cfg
 }
 
 // resolvePrompt extracts, expands variables, and applies fidelity context to the node prompt.
@@ -89,22 +146,6 @@ func (h *CodergenHandler) resolvePrompt(node *pipeline.Node, pctx *pipeline.Pipe
 		artifactDir = dir
 	}
 	return ResolvePrompt(node, pctx, h.graphAttrs, artifactDir)
-}
-
-// createSession builds the agent session with a transcript collector and scoped event handler.
-func (h *CodergenHandler) createSession(node *pipeline.Node, config agent.SessionConfig) (*transcriptCollector, *agent.Session, error) {
-	var collector transcriptCollector
-	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
-	handler := agent.MultiHandler(&collector, scopedHandler)
-	opts := []agent.SessionOption{agent.WithEventHandler(handler)}
-	if h.env != nil {
-		opts = append(opts, agent.WithEnvironment(h.env))
-	}
-	sess, err := agent.NewSession(h.client, config, opts...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("node %q failed to create session: %w", node.ID, err)
-	}
-	return &collector, sess, nil
 }
 
 // resolveArtifactRoot returns the artifact directory from pipeline context or working dir.

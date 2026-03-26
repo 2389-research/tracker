@@ -31,6 +31,7 @@ type registryConfig struct {
 	agentEvents    agent.EventHandler
 	pipelineEvents pipeline.PipelineEventHandler
 	subgraphs      map[string]*pipeline.Graph
+	defaultBackend string
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -88,6 +89,14 @@ func WithAgentEventHandler(handler agent.EventHandler) RegistryOption {
 func WithPipelineEventHandler(handler pipeline.PipelineEventHandler) RegistryOption {
 	return func(c *registryConfig) {
 		c.pipelineEvents = handler
+	}
+}
+
+// WithDefaultBackend sets the default backend name (e.g., "native", "claude-code")
+// for codergen nodes that don't specify one explicitly.
+func WithDefaultBackend(name string) RegistryOption {
+	return func(c *registryConfig) {
+		c.defaultBackend = name
 	}
 }
 
@@ -163,6 +172,8 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir, WithGraphAttrs(graph.Attrs))
 		handler.env = cfg.execEnv
 		handler.eventHandler = cfg.agentEvents
+		handler.nativeBackend = NewNativeBackend(cfg.llmClient, cfg.execEnv)
+		handler.defaultBackendName = cfg.defaultBackend
 		registry.Register(handler)
 	} else if cfg.codergenFunc != nil {
 		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})

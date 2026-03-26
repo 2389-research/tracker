@@ -27,23 +27,30 @@ func NewNativeBackend(client agent.Completer, env exec.ExecutionEnvironment) *Na
 
 // Run builds a SessionConfig from the AgentRunConfig, creates an agent.Session,
 // and executes the agentic loop. Events are forwarded to the emit callback.
+// If cfg.Extra contains an *agent.SessionConfig (set by CodergenHandler), it is
+// used directly to preserve all config fields (reasoning effort, caching, etc.).
 func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
-	sessionCfg := agent.DefaultConfig()
+	var sessionCfg agent.SessionConfig
 
-	if cfg.Model != "" {
-		sessionCfg.Model = cfg.Model
-	}
-	if cfg.Provider != "" {
-		sessionCfg.Provider = cfg.Provider
-	}
-	if cfg.MaxTurns > 0 {
-		sessionCfg.MaxTurns = cfg.MaxTurns
-	}
-	if cfg.SystemPrompt != "" {
-		sessionCfg.SystemPrompt = cfg.SystemPrompt
-	}
-	if cfg.WorkingDir != "" {
-		sessionCfg.WorkingDir = cfg.WorkingDir
+	if sc, ok := cfg.Extra.(*agent.SessionConfig); ok && sc != nil {
+		sessionCfg = *sc
+	} else {
+		sessionCfg = agent.DefaultConfig()
+		if cfg.Model != "" {
+			sessionCfg.Model = cfg.Model
+		}
+		if cfg.Provider != "" {
+			sessionCfg.Provider = cfg.Provider
+		}
+		if cfg.MaxTurns > 0 {
+			sessionCfg.MaxTurns = cfg.MaxTurns
+		}
+		if cfg.SystemPrompt != "" {
+			sessionCfg.SystemPrompt = cfg.SystemPrompt
+		}
+		if cfg.WorkingDir != "" {
+			sessionCfg.WorkingDir = cfg.WorkingDir
+		}
 	}
 
 	handler := agent.EventHandlerFunc(func(evt agent.Event) {
