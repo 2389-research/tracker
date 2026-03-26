@@ -50,6 +50,12 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 	case string(modeAudit):
 		cfg.mode = modeAudit
 		return modeAudit, true
+	case string(modeWorkflows):
+		cfg.mode = modeWorkflows
+		return modeWorkflows, true
+	case string(modeInit):
+		cfg.mode = modeInit
+		return modeInit, true
 	}
 	return "", false
 }
@@ -57,7 +63,12 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 // parseFlagsForMode handles flag parsing for non-run subcommands.
 func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConfig, error) {
 	switch mode {
-	case modeVersion, modeSetup, modeDoctor:
+	case modeVersion, modeSetup, modeDoctor, modeWorkflows:
+		return *cfg, nil
+	case modeInit:
+		if len(args) > 2 {
+			cfg.pipelineFile = args[2]
+		}
 		return *cfg, nil
 	case modeValidate:
 		if len(args) > 2 {
@@ -152,6 +163,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
 	fmt.Fprintf(w, "  tracker doctor                Preflight health check\n")
+	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
+	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")
 	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")
 	fmt.Fprintf(w, "  tracker version               Show version information\n\n")
 	fmt.Fprintf(w, "Flags:\n")

@@ -13,7 +13,19 @@ import (
 // runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
 // Auto-detects format based on file extension unless formatOverride is set.
 func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
-	graph, err := loadPipeline(pipelineFile, formatOverride)
+	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
+	if err != nil {
+		return err
+	}
+
+	var graph *pipeline.Graph
+	if isEmbedded {
+		graph, err = loadEmbeddedPipeline(info)
+		pipelineFile = info.Name
+	} else {
+		graph, err = loadPipeline(resolved, formatOverride)
+		pipelineFile = resolved
+	}
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}

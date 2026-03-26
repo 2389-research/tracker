@@ -41,6 +41,10 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 		return executeSimulate(cfg)
 	case modeAudit:
 		return executeAudit(cfg)
+	case modeWorkflows:
+		return executeWorkflows()
+	case modeInit:
+		return executeInit(cfg)
 	default:
 		return executeRun(cfg, deps)
 	}
@@ -101,6 +105,70 @@ func printProviderStatus() {
 	} else {
 		fmt.Println("  providers: none (run `tracker setup`)")
 	}
+}
+
+func executeWorkflows() error {
+	workflows := listBuiltinWorkflows()
+	if len(workflows) == 0 {
+		fmt.Println("No built-in workflows available.")
+		return nil
+	}
+
+	fmt.Println("\nBuilt-in workflows:")
+	fmt.Println()
+	fmt.Printf("  %-35s  %s\n", "NAME", "DESCRIPTION")
+	fmt.Printf("  %-35s  %s\n", "────", "───────────")
+	for _, wf := range workflows {
+		goal := wf.Goal
+		if len(goal) > 80 {
+			goal = goal[:77] + "..."
+		}
+		fmt.Printf("  %-35s  %s\n", wf.Name+" ("+wf.DisplayName+")", goal)
+	}
+	fmt.Println()
+	fmt.Println("  Run directly:     tracker <workflow_name>")
+	fmt.Println("  Copy to edit:     tracker init <workflow_name>")
+	fmt.Println("  Validate:         tracker validate <workflow_name>")
+	fmt.Println()
+	return nil
+}
+
+func executeInit(cfg runConfig) error {
+	if cfg.pipelineFile == "" {
+		workflows := listBuiltinWorkflows()
+		fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nAvailable workflows:\n")
+		for _, wf := range workflows {
+			fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
+		}
+		return fmt.Errorf("workflow name required")
+	}
+
+	info, ok := lookupBuiltinWorkflow(cfg.pipelineFile)
+	if !ok {
+		workflows := listBuiltinWorkflows()
+		var names []string
+		for _, wf := range workflows {
+			names = append(names, wf.Name)
+		}
+		return fmt.Errorf("unknown workflow %q (available: %s)", cfg.pipelineFile, strings.Join(names, ", "))
+	}
+
+	outFile := info.Name + ".dip"
+	if _, err := os.Stat(outFile); err == nil {
+		return fmt.Errorf("%s already exists — remove it first or edit it directly", outFile)
+	}
+
+	data, err := embeddedWorkflows.ReadFile(info.File)
+	if err != nil {
+		return fmt.Errorf("read embedded workflow: %w", err)
+	}
+
+	if err := os.WriteFile(outFile, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", outFile, err)
+	}
+
+	fmt.Printf("Created %s — edit it, then run with: tracker %s\n", outFile, outFile)
+	return nil
 }
 
 func executeValidate(cfg runConfig) error {

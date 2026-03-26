@@ -175,16 +175,33 @@ func buildPlainEventHandlers(
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
-// loadAndValidatePipeline loads, validates, and resolves subgraphs for a pipeline file.
+// loadAndValidatePipeline loads, validates, and resolves subgraphs for a pipeline.
+// Supports filesystem paths and bare workflow names via resolvePipelineSource.
 func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[string]*pipeline.Graph, error) {
-	graph, err := loadPipeline(pipelineFile, format)
+	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var graph *pipeline.Graph
+	if isEmbedded {
+		graph, err = loadEmbeddedPipeline(info)
+	} else {
+		graph, err = loadPipeline(resolved, format)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("load pipeline: %w", err)
 	}
 	if err := pipeline.Validate(graph); err != nil {
 		return nil, nil, fmt.Errorf("validate pipeline: %w", err)
 	}
-	subgraphs, err := loadSubgraphs(graph, pipelineFile)
+
+	// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
+	parentFile := resolved
+	if isEmbedded {
+		parentFile = info.File
+	}
+	subgraphs, err := loadSubgraphs(graph, parentFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load subgraphs: %w", err)
 	}
