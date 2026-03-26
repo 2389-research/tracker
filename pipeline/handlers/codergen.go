@@ -84,31 +84,11 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 // resolvePrompt extracts, expands variables, and applies fidelity context to the node prompt.
 func (h *CodergenHandler) resolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext) (string, error) {
-	prompt := node.Attrs["prompt"]
-	if prompt == "" {
-		return "", fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
+	artifactDir := h.workingDir
+	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
+		artifactDir = dir
 	}
-
-	prompt, err := pipeline.ExpandVariables(prompt, pctx, nil, h.graphAttrs, false)
-	if err != nil {
-		return "", fmt.Errorf("node %q variable expansion failed: %w", node.ID, err)
-	}
-
-	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
-
-	fidelity := pipeline.ResolveFidelity(node, h.graphAttrs)
-	if fidelity != pipeline.FidelityFull {
-		artifactDir := h.workingDir
-		if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
-			artifactDir = dir
-		}
-		compacted := pipeline.CompactContext(pctx, nil, fidelity, artifactDir, "")
-		prompt = prependContextSummary(prompt, compacted, fidelity)
-	} else {
-		prompt = pipeline.InjectPipelineContext(prompt, pctx)
-	}
-
-	return prompt, nil
+	return ResolvePrompt(node, pctx, h.graphAttrs, artifactDir)
 }
 
 // createSession builds the agent session with a transcript collector and scoped event handler.
