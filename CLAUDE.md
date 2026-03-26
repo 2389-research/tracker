@@ -35,9 +35,17 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ### Human gate UX
 - Freeform gates with labeled edges use the hybrid radio+freeform modal (HybridContent), NOT plain FreeformContent
-- Long prompts (20+ lines) use the split-pane ReviewContent with glamour-rendered viewport, NOT inline freeform
+- Labeled gates with long context (>200 chars or >5 lines after `---`) use ReviewHybridContent — fullscreen glamour viewport + radio labels + freeform "other" option
+- Long prompts (20+ lines) without labels use the split-pane ReviewContent with glamour-rendered viewport
+- Both HybridContent and ReviewHybridContent have an "other" option with a textarea for custom freeform input
+- The full prompt (label + context) must go through glamour — never render markdown with plain lipgloss
 - All modal content types must implement Cancellable — Ctrl+C calls Cancel() to close reply channels and prevent goroutine hangs
 - Never block a pipeline handler goroutine on a channel send/receive without a cancellation path
+
+### Error surfacing
+- Node failures (MsgNodeFailed) and retries (MsgNodeRetrying) must be shown inline in the activity log, not just in the sidebar icon
+- Tool node stderr/stdout must be visible to the user — the `tracker diagnose` command reads status.json and activity.jsonl for this
+- The "no providers configured" error must include actionable setup instructions, not just the raw error message
 
 ### TUI stability
 - The activity log is append-only with line-level styling — no glamour markdown rendering
@@ -108,3 +116,15 @@ design (e.g., attempt counter file).
 The Responses API returns HTTP 200 and sends `error` / `response.failed`
 as SSE event types. The adapter must handle these — they are NOT reflected
 in the HTTP status code.
+
+### CLI UX commands
+- `tracker doctor` — preflight health check (API keys, dippin binary, workdir). Run before first pipeline.
+- `tracker diagnose [runID]` — deep failure analysis (reads status.json + activity.jsonl). Shows tool output, stderr, errors, timing anomalies, actionable suggestions. Without a run ID, analyzes the most recent run.
+- `tracker version` — shows commit hash, build time, and which providers are configured. Uses Go VCS metadata for `go install` builds, GoReleaser ldflags for releases.
+
+### Per-milestone circuit breakers
+The `build_product.dip` pipeline uses a `fix_attempts` file on disk to limit
+retries per milestone. This counter persists across pipeline restarts — if a
+human says "retry" after escalation, the counter is already maxed. The counter
+is only reset in `MarkMilestoneDone`. This is a design tradeoff, not a bug,
+but users need to know about it (`tracker diagnose` surfaces this).

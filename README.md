@@ -10,6 +10,9 @@ Built by [2389.ai](https://2389.ai).
 # Install
 go install github.com/2389-research/tracker/cmd/tracker@latest
 
+# Check your setup (API keys, dippin binary, working directory)
+tracker doctor
+
 # Run a pipeline
 tracker examples/ask_and_execute.dip
 
@@ -18,6 +21,12 @@ tracker validate examples/build_product.dip
 
 # Resume a stopped run
 tracker -r <run-id> examples/build_product.dip
+
+# When something goes wrong — analyze the most recent run
+tracker diagnose
+
+# Or analyze a specific run
+tracker diagnose <run-id>
 ```
 
 ## Pipeline Examples
@@ -124,9 +133,9 @@ Three gate modes:
 
 - **Choice mode** (default): presents outgoing edge labels as a radio list. Arrow keys navigate, Enter selects.
 - **Freeform mode** (`mode: freeform`): captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`.
-- **Hybrid mode** (automatic): when a freeform gate has labeled outgoing edges, the TUI presents a radio list of labels plus an "other" option for custom feedback. Selecting a label submits it directly; selecting "other" opens a textarea.
+- **Hybrid mode** (automatic): when a freeform gate has labeled outgoing edges, the TUI presents a radio list of labels plus an "other" option for custom feedback. Selecting a label submits it directly; selecting "other" opens a textarea for specific instructions.
 
-Long prompts (20+ lines, e.g., plan approval) automatically use a split-pane **review view**: scrollable glamour-rendered viewport on top, textarea on bottom. PgUp/PgDn scroll the plan.
+Long prompts with labels (e.g., escalation gates with agent output) automatically use a fullscreen **review hybrid view**: glamour-rendered scrollable viewport on top (PgUp/PgDn to scroll), radio label selection in the middle, and an "other" freeform option at the bottom for custom retry instructions. Long prompts without labels use a **split-pane review**: scrollable viewport on top, textarea on bottom.
 
 ```dip
 human ApproveSpec
@@ -143,18 +152,34 @@ Submit with **Ctrl+S**. Enter inserts newlines. Esc cancels (empty) or submits (
 
 ### Providers
 
-Tracker supports three LLM providers: `anthropic`, `openai`, `gemini`. Configure API keys via `tracker setup` or in `~/.config/tracker/.env`.
+Tracker supports three LLM providers: `anthropic`, `openai`, `gemini`. Set up with:
+
+```bash
+# Interactive setup wizard
+tracker setup
+
+# Verify your configuration
+tracker doctor
+```
+
+Keys are stored in `~/.config/2389/tracker/.env`. You can also export them directly:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=...
+```
 
 **Important**: Use `gemini` (not `google`) as the provider name in `.dip` files.
 
-Non-retryable provider errors (quota exceeded, auth failure, model not found) immediately fail the pipeline instead of silently retrying.
+Non-retryable provider errors (quota exceeded, auth failure, model not found) immediately fail the pipeline with a clear message instead of silently retrying.
 
 ## TUI
 
 The terminal UI shows:
 
 - **Pipeline panel**: node list in topological execution order (Kahn's algorithm) with status lamps, thinking spinners, and tool execution indicators
-- **Activity log**: per-node streaming with line-level formatting (headers, code blocks, bullets), node change separators, and multi-node activity indicators for parallel execution
+- **Activity log**: per-node streaming with line-level formatting (headers, code blocks, bullets), node change separators, multi-node activity indicators for parallel execution, and inline `FAILED:`/`RETRYING:` messages when nodes fail or retry
 - **Subgraph nodes**: dynamically inserted and indented under their parent
 
 ### Status Icons
@@ -199,6 +224,46 @@ grep 'decision_condition' .tracker/runs/<id>/activity.jsonl | python3 -m json.to
 # See node outcomes with token counts
 grep 'decision_outcome' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
 ```
+
+## Troubleshooting
+
+When a pipeline run doesn't go as expected, tracker gives you tools to understand what happened:
+
+### `tracker diagnose`
+
+Analyzes a run's failures and surfaces the information you need — tool stdout/stderr, error messages, timing anomalies — without manually grepping through JSONL files.
+
+```bash
+# Diagnose the most recent run
+tracker diagnose
+
+# Diagnose a specific run (prefix matching works)
+tracker diagnose 7813b
+```
+
+The output shows each failed node with its output, stderr, errors, and actionable suggestions. For example, it will tell you if a tool node failed because of a stale counter file, or if a node completed suspiciously fast (suggesting a configuration issue).
+
+### `tracker audit`
+
+For a broader view of a run's timeline, retries, and recommendations:
+
+```bash
+# List all runs
+tracker list
+
+# Full audit report for a specific run
+tracker audit <run-id>
+```
+
+### Common issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| "no LLM providers configured" | Missing API keys | `tracker setup` or export env vars |
+| TestMilestone instantly escalates | Stale `fix_attempts` counter | `rm .ai/milestones/fix_attempts` |
+| Node fails with no visible error | Tool stderr not surfaced | `tracker diagnose` shows full output |
+| Human gate shows raw markdown | Old version before glamour fix | Update to v0.9.2+ |
+| Pipeline loops forever | Unconditional fallback edge | Ensure fallbacks go to EscalateToHuman, not back to the same node |
 
 ## Architecture
 
