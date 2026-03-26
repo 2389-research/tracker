@@ -1,6 +1,6 @@
-# Claude Code Backend for Tracker Pipeline Nodes (v2)
+# Claude Code Backend for Tracker Pipeline Nodes (v3)
 
-Revised after pedantic review by Steve Yegge, Dependency Hawk, Go Purist, HN Commenter, and Spec Lawyer.
+Revised after expert panel review (Systems Architect, Go Engineer, Reliability Engineer, Security Reviewer, DX Expert, Spec Auditor, Steve Yegge).
 
 ## Problem
 
@@ -14,33 +14,37 @@ Claude Code in pipeline nodes gives you:
 - **Same tool developers use** — no behavior gap between interactive and pipeline execution
 - **Ecosystem access** — skills, hooks, plugins from Claude Code's growing ecosystem
 
-The ongoing cost (subprocess management, NDJSON parsing, event adapter maintenance) is justified only if we build it as a **backend platform** — not a one-off second handler.
+## Key Design Decisions
 
-## Key Design Decisions (from review feedback)
-
-1. **No third-party SDK.** Write an internal ~300 line wrapper. The NDJSON protocol is `exec.Command` + `json.Decoder`. We own every line.
-2. **Backend platform, not second handler.** Extract an `AgentBackend` interface. Codergen and Claude Code both implement it. Adding backend #3 (Cursor, Aider, whatever) is config, not code.
-3. **Registry aliasing, not name override.** Add `Alias(from, to)` to `HandlerRegistry` for the global override. Handlers keep their real identity.
+1. **No third-party SDK.** Write an internal ~400 line wrapper. The NDJSON protocol is `exec.Command` + `json.Decoder`. We own every line.
+2. **Backend platform, not second handler.** Extract an `AgentBackend` interface. Codergen and Claude Code both implement it. Adding backend #3 is config, not code.
+3. **Use existing types.** The backend emits `agent.Event` directly and returns `agent.SessionResult`. No new event/result types — avoids round-trip translation and data loss.
 4. **No build tags.** The wrapper has zero external deps. Always compile it in.
-5. **Concrete error mapping.** Define exact exit code → outcome rules. No hand-waving.
+5. **Separate `backend` attr from `provider`.** The .dip `backend:` field selects the execution engine. The `provider:` field selects the LLM API. They are orthogonal.
+6. **SIGTERM then SIGKILL.** Graceful shutdown for long-running sessions with MCP server connections.
+7. **.dip files are trusted input.** MCP server commands and tool lists execute with the process user's privileges. This is the same trust model as the existing `tool_command` handler.
+
+## Prerequisites
+
+**Dippin-lang upstream change required.** The dippin IR's `AgentConfig` struct needs either:
+- New fields: `Backend`, `MCPServers`, `AllowedTools`, `DisallowedTools`, `MaxBudgetUSD`, `PermissionMode`
+- Or a generic `Params map[string]string` on `AgentConfig`
+
+This is a change to `github.com/2389-research/dippin-lang`. Must be released before the .dip per-node activation path works. The `--backend` CLI flag works without this change.
 
 ## Architecture
 
-### The Backend Platform
+### The Backend Interface
 
 ```go
 // pipeline/backend.go
 
 // AgentBackend executes an agent session and streams events.
-// Each backend (native, claude-code, future) implements this.
 type AgentBackend interface {
-    // Run executes an agent session with the given prompt and config.
-    // Events are emitted via the callback as they stream in.
-    // Returns the final transcript text when complete.
-    Run(ctx context.Context, cfg AgentRunConfig, emit func(AgentEvent)) (AgentResult, error)
+    Run(ctx context.Context, cfg AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error)
 }
 
-// AgentRunConfig carries everything a backend needs to run a session.
+// AgentRunConfig carries common config all backends need.
 type AgentRunConfig struct {
     Prompt       string
     SystemPrompt string
@@ -50,13 +54,28 @@ type AgentRunConfig struct {
     MaxTurns     int
     Timeout      time.Duration
 
-    // Claude Code specific (ignored by native backend)
+    // Backend-specific config. Each backend type-asserts its own config.
+    // Native backend ignores this. Claude Code backend expects *ClaudeCodeConfig.
+    Extra any
+}
+
+// ClaudeCodeConfig holds Claude-Code-specific settings.
+type ClaudeCodeConfig struct {
     MCPServers      []MCPServerConfig
     AllowedTools    []string
     DisallowedTools []string
     MaxBudgetUSD    float64
-    PermissionMode  string // "plan", "autoEdit", "fullAuto"
+    PermissionMode  PermissionMode
 }
+
+// PermissionMode controls Claude Code's tool approval behavior.
+type PermissionMode string
+
+const (
+    PermissionPlan     PermissionMode = "plan"
+    PermissionAutoEdit PermissionMode = "autoEdit"
+    PermissionFullAuto PermissionMode = "fullAuto"
+)
 
 // MCPServerConfig defines an MCP server to attach to a session.
 type MCPServerConfig struct {
@@ -64,47 +83,21 @@ type MCPServerConfig struct {
     Command string
     Args    []string
 }
-
-// AgentEvent is the union of events backends can emit.
-// Maps 1:1 to existing agent.Event types.
-type AgentEvent struct {
-    Type      AgentEventType
-    Text      string
-    ToolName  string
-    ToolInput string
-    ToolOutput string
-    ToolError  string
-    Provider  string
-    Model     string
-    Usage     TokenUsage
-    Err       error
-}
-
-// AgentResult is the final output of a backend run.
-type AgentResult struct {
-    Transcript string
-    Turns      int
-    ToolCalls  map[string]int
-    Usage      TokenUsage
-}
-
-// TokenUsage tracks token consumption.
-type TokenUsage struct {
-    InputTokens   int
-    OutputTokens  int
-    EstimatedCost float64
-}
 ```
+
+Key choices:
+- `emit func(agent.Event)` — uses the existing event type. No new `AgentEvent`.
+- Returns `agent.SessionResult` — uses the existing result type. Claude Code populates what it can (turns, tool calls, usage), leaves the rest zero-valued.
+- `Extra any` — backend-specific config. Clean extension point that doesn't pollute the common struct.
 
 ### New Files
 
 | File | Purpose |
 |------|---------|
-| `pipeline/backend.go` | `AgentBackend` interface, `AgentRunConfig`, `AgentEvent`, `AgentResult` |
+| `pipeline/backend.go` | `AgentBackend` interface, `AgentRunConfig`, `ClaudeCodeConfig`, `MCPServerConfig` |
 | `pipeline/handlers/backend_native.go` | Native backend — wraps existing `agent.Session` |
 | `pipeline/handlers/backend_claudecode.go` | Claude Code backend — spawns `claude` CLI, parses NDJSON |
-| `pipeline/handlers/backend_claudecode_test.go` | Tests for Claude Code backend |
-| `pipeline/handlers/codergen.go` | Refactored — delegates to whichever `AgentBackend` is configured |
+| `pipeline/handlers/backend_claudecode_test.go` | Tests |
 | `pipeline/handlers/prompt.go` | Shared `ResolvePrompt` extracted from codergen |
 
 ### How It Fits Together
@@ -117,63 +110,40 @@ type TokenUsage struct {
                               ├─ Build AgentRunConfig from attrs
                               │
                               ├─ Select backend:
-                              │   ├─ node has provider="claude-code" → ClaudeCodeBackend
+                              │   ├─ node has backend="claude-code" → ClaudeCodeBackend
                               │   ├─ --backend claude-code flag set  → ClaudeCodeBackend
                               │   └─ otherwise                       → NativeBackend
                               │
                               ├─ backend.Run(ctx, config, emitFunc)
-                              │   └─ streams AgentEvents → TUI
+                              │   └─ streams agent.Events → TUI
                               │
-                              └─ Build Outcome from AgentResult
+                              └─ Build Outcome from agent.SessionResult
 ```
 
-Key insight: **one handler (`codergen`), multiple backends.** The handler does prompt resolution, config building, artifact writing, auto-status parsing. The backend just runs the agent session. This means:
-- No registry aliasing needed — it's always `codergen`
-- No handler name tricks — backend selection happens inside the handler
-- Adding a third backend = implementing one interface, zero handler changes
+One handler (`codergen`), multiple backends. The handler does prompt resolution, config building, artifact writing, auto-status parsing. The backend just runs the session.
 
-### Native Backend (wraps existing agent.Session)
+### Backend Injection
+
+`CodergenHandler` receives backends at construction time:
 
 ```go
-// backend_native.go — wraps the existing agent loop
-
-type NativeBackend struct {
-    client    *llm.Client
-    workdir   string
-}
-
-func (b *NativeBackend) Run(ctx context.Context, cfg AgentRunConfig, emit func(AgentEvent)) (AgentResult, error) {
-    // Build agent.SessionConfig from cfg (same as current codergen logic)
-    // Create agent.Session
-    // Run session, translating agent.Event → AgentEvent via emit()
-    // Return AgentResult with transcript and stats
+type CodergenHandler struct {
+    nativeBackend    AgentBackend  // always available
+    claudeCodeBackend AgentBackend // nil if claude CLI not found (lazy init OK)
+    defaultBackend   string        // from --backend flag, "" means native
+    // ... existing fields
 }
 ```
 
-This is a refactoring of the existing codergen handler's session management. No behavior change.
+`ClaudeCodeBackend` is constructed lazily on first use. CLI path resolution and version check happen at that point, not at handler construction (avoids Node.js startup latency on every pipeline run).
 
-### Claude Code Backend (internal, no SDK dependency)
+### Native Backend
 
-```go
-// backend_claudecode.go — spawns claude CLI, parses NDJSON
+Wraps existing `agent.Session`. Pure refactoring — extract the session creation + run logic from codergen's `Execute()` into `NativeBackend.Run()`. No behavior change. The `agent.Event` objects from the session pass through directly to the `emit` callback.
 
-type ClaudeCodeBackend struct {
-    cliPath string // resolved path to claude binary
-}
+### Claude Code Backend (~400 lines, zero external deps)
 
-func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg AgentRunConfig, emit func(AgentEvent)) (AgentResult, error) {
-    // 1. Build CLI args from config
-    // 2. Spawn claude subprocess with process group isolation
-    // 3. Stream NDJSON from stdout via json.Decoder
-    // 4. Switch on message type, emit AgentEvents
-    // 5. On context cancellation: SIGKILL process group
-    // 6. Return AgentResult
-}
-```
-
-~300 lines. Zero external dependencies.
-
-### CLI Args Construction
+#### CLI Invocation
 
 ```
 claude -p "<prompt>"
@@ -185,75 +155,98 @@ claude -p "<prompt>"
   [--allowedTools <csv>]
   [--disallowedTools <csv>]
   [--budget <usd>]
-  [--mcpServers '{"name": {"command": "cmd", "args": ["a1"]}}']
+  [--mcpServers '<json>']
 ```
 
-### NDJSON Message Types We Handle
+**CRITICAL: Use `exec.Command` with discrete arguments. NEVER pass prompt through `sh -c`.** The prompt may contain shell metacharacters from prior node outputs.
 
-Based on the Claude Code CLI's stream-json output:
+#### Subprocess Environment
 
-| NDJSON `type` field | Our AgentEvent | TUI Effect |
-|---------------------|----------------|------------|
-| `system` | Emit `Preparing` (provider, model) | Model info in header |
-| `assistant` with `text` content | Emit `TextDelta` | Text streams in log |
-| `assistant` with `thinking` content | Emit `ReasoningDelta` | Reasoning in muted style |
-| `assistant` with `tool_use` content | Emit `ToolCallStart` | Tool indicator |
-| `user` with `tool_result` content | Emit `ToolCallEnd` | Tool result |
-| `result` | Extract usage, build AgentResult | Summary stats |
-| Unknown type | Log warning, skip | No TUI effect |
+Construct a **minimal `cmd.Env`** containing only:
+- `PATH`, `HOME`, `TERM`
+- `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
+- Any env vars explicitly declared in node attrs
 
-Unknown message types are logged and skipped — not crashes. This is the key defense against CLI protocol changes.
+Do NOT inherit the full parent environment. This prevents credential leakage.
 
-### Subprocess Lifecycle
+#### NDJSON Message → agent.Event Mapping
+
+| NDJSON `type` | Content | agent.Event emitted | TUI effect |
+|---------------|---------|---------------------|------------|
+| `system` | — | Synthetic `EventLLMRequestPreparing` (provider, model) | Model info in header |
+| `assistant` | `text` block | `EventTextDelta` | Text streams in log |
+| `assistant` | `thinking` block | `EventReasoningDelta` | Reasoning in muted style |
+| `assistant` | `tool_use` block | `EventToolCallStart` (name + input) | Tool indicator |
+| `user` | `tool_result` block | `EventToolCallEnd` (output + error) | Tool result |
+| `result` | — | Extract usage, build `SessionResult` | Summary stats |
+| Unknown type | — | Log warning, skip | No TUI effect |
+
+Claude Code backend constructs `agent.Event` values directly. The existing `transcriptCollector` and TUI adapter work unchanged.
+
+#### Token Counting
+
+The `result` message includes `input_tokens`, `output_tokens`, and optionally `cost_usd`. Populate `agent.SessionResult.Usage` from these. If usage data is missing, fields remain zero-valued and the TUI shows "—" (not misleading zeros).
+
+#### Subprocess Lifecycle
 
 **Startup:**
-- Resolve `claude` binary via `exec.LookPath`
-- Validate minimum CLI version via `claude --version` (fail fast with clear error)
-- Set `Setpgid: true` for process group isolation (same pattern as `agent/exec/local.go`)
+- Lazy-resolve `claude` binary via `exec.LookPath` on first `Run()` call
+- Validate minimum CLI version (pin as constant: `MinClaudeCodeVersion = "1.0.0"`)
+- Parse version with semver, fail fast with clear error
+- Set `Setpgid: true` for process group isolation
 
-**Streaming:**
-- `json.NewDecoder(stdout)` in a goroutine
-- Each decoded message dispatched via `emit()` callback
-- Stderr captured for error diagnostics
+**Streaming (goroutine contract):**
+1. Decode goroutine reads `json.NewDecoder(stdout)` until `io.EOF` or context cancellation
+2. Each decoded message switches on `type`, emits `agent.Event` via `emit()` callback
+3. JSON parse errors: log warning, skip to next line (do not terminate session)
+4. `emit()` is wrapped in `recover()` to prevent goroutine death on callback panic
+5. Goroutine signals completion via `sync.WaitGroup`
+6. Main goroutine waits for decode goroutine to finish *before* calling `cmd.Wait()`
+7. Stderr captured in `bytes.Buffer` (read after process exits)
+8. Set `cmd.WaitDelay = 5 * time.Second` to handle inherited pipe handles
 
-**Cancellation (ctrl-c):**
-- Context cancellation triggers `syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)` (process group kill)
-- Same proven pattern from `agent/exec/local.go:98-130`
-- Claude Code CLI's own signal handlers and MCP server cleanup are bypassed — we kill the whole group
-
-**Concurrent sessions:**
-- Each `Run()` call is independent (own subprocess, own stdin/stdout)
-- Two parallel nodes running claude-code will have separate working directories or use the same workdir
-- **Constraint: parallel claude-code nodes sharing a workdir may clobber files.** This is the same constraint as two developers editing the same repo. Document it, don't try to solve it.
+**Cancellation (two-phase shutdown):**
+1. Context cancellation sends `SIGTERM` to process group (`syscall.Kill(-pid, SIGTERM)`)
+2. Wait up to 5 seconds for graceful exit (MCP servers close connections)
+3. If still running, escalate to `SIGKILL` (`syscall.Kill(-pid, SIGKILL)`)
 
 **Orphan prevention:**
-- Process group kill ensures child processes (MCP servers) die with the parent
+- Process group kill ensures MCP server child processes die with the parent
 - `cmd.Wait()` called in defer to reap zombies
+- `WaitDelay` prevents hang if children keep pipes open
 
-### Error Handling
+#### Error Handling
 
-| Condition | Exit code | Outcome | Rationale |
-|-----------|-----------|---------|-----------|
-| CLI not on PATH | — | Fatal error (handler returns error) | Can't proceed |
-| CLI version too old | — | Fatal error | Protocol mismatch risk |
-| Auth missing (no CLAUDE_API_KEY / CLAUDE_CODE_OAUTH_TOKEN) | 1 + stderr contains "auth" | `OutcomeFail` with clear error | Non-retryable config issue |
-| Rate limited | 1 + stderr contains "rate" or "429" | `OutcomeRetry` | Transient |
-| Network error | 1 + stderr contains "network" or "ECONNREFUSED" | `OutcomeRetry` | Transient |
-| Budget exceeded | 1 + stderr contains "budget" | `OutcomeFail` | Intentional limit |
-| Context cancelled | -1 (killed) | Propagate ctx.Err() | Pipeline handles |
-| OOM killed | 137 | `OutcomeFail` | Non-retryable |
-| Other non-zero exit | varies | `OutcomeFail` | Unknown = don't retry |
-| Successful completion | 0 | Parse auto_status or `OutcomeSuccess` | Normal path |
+Classification priority (first match wins, case-insensitive):
 
-Error classification: parse stderr for known patterns. This is imperfect but pragmatic — the CLI doesn't define structured error codes.
+| Priority | Stderr pattern | Exit code | Outcome | Rationale |
+|----------|---------------|-----------|---------|-----------|
+| 1 | Context cancelled | -1 (killed) | Propagate `ctx.Err()` | Pipeline handles |
+| 2 | `"authentication"` or `"unauthorized"` or `"invalid api key"` | any | `OutcomeFail` | Non-retryable config |
+| 3 | `"rate limit"` or `"429"` or `"throttl"` | any | `OutcomeRetry` | Transient |
+| 4 | `"budget"` or `"spending limit"` | any | `OutcomeFail` | Intentional limit |
+| 5 | `"ECONNREFUSED"` or `"network"` or `"connection"` | any | `OutcomeRetry` | Transient |
+| 6 | Exit 137 | 137 | `OutcomeFail` | OOM kill, non-retryable |
+| 7 | Exit 0 | 0 | Parse auto_status or `OutcomeSuccess` | Normal |
+| 8 | Any other non-zero | varies | `OutcomeFail` | Unknown = don't retry |
 
-### Token Counting
+When classification falls through to #8, log the full stderr at WARN level so operators can add new patterns.
 
-The Claude Code CLI's `result` message includes a `usage` field with `input_tokens`, `output_tokens`, and `cost_usd` (when available). We parse what's there and pass it through.
+### Prompt Resolution (Shared)
 
-**If usage data is missing:** The TUI header shows "—" for tokens/cost instead of 0. The `AgentResult.Usage` fields remain zero-valued. This is an honest representation of "we don't have this data" rather than a misleading zero.
+Extract from codergen into `pipeline/handlers/prompt.go`:
 
-**Behavioral difference from native backend:** The native backend tracks per-turn token usage via `llm.TokenTracker`. The Claude Code backend provides session-level totals only. The `TokenTracker` accumulates these the same way — just fewer data points.
+```go
+func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
+    graphAttrs map[string]string, artifactDir string) (string, error)
+```
+
+Four params (added `artifactDir` for fidelity/compaction path). Handles:
+- Graph variable expansion (`$goal`, `$target_name`)
+- Fidelity resolution + context compaction
+- Pipeline context injection (prior node outputs)
+
+Both backends call it. The codergen handler refactoring is a pure extraction — no behavior change.
 
 ## Activation
 
@@ -261,21 +254,18 @@ The Claude Code CLI's `result` message includes a `usage` field with `input_toke
 
 ```dip
 agent BuildFeature {
-  provider: "claude-code"
+  backend: "claude-code"
+  provider: "anthropic"
   model: "claude-sonnet-4-6"
   prompt: "Build the feature described in $goal"
   max_turns: 30
+  permission_mode: "fullAuto"
   mcp_servers: "postgres=npx @modelcontextprotocol/server-postgres $DATABASE_URL"
   allowed_tools: "Read,Write,Edit,Bash,mcp__postgres__query"
-  permission_mode: "fullAuto"
 }
 ```
 
-**Dippin adapter change** (`pipeline/dippin_adapter.go:extractAgentAttrs`):
-
-No change needed. `cfg.Provider` already maps to `attrs["llm_provider"]`. The codergen handler reads `llm_provider` and selects the backend accordingly. No `type` override needed since we're not adding a new handler — just a new backend within the existing handler.
-
-New attrs (`mcp_servers`, `allowed_tools`, `disallowed_tools`, `max_budget_usd`, `permission_mode`) pass through as raw string attrs via the dippin IR's `Params` map.
+`backend:` and `provider:` are separate fields. `backend` selects execution engine, `provider` selects LLM API. Requires the dippin-lang prerequisite (see Prerequisites section).
 
 ### Path 2: Global CLI override
 
@@ -283,116 +273,107 @@ New attrs (`mcp_servers`, `allowed_tools`, `disallowed_tools`, `max_budget_usd`,
 tracker --backend claude-code pipeline.dip
 ```
 
-**CLI changes:**
-- Add `backend string` field to `runConfig`
-- Add `fs.StringVar(&cfg.backend, "backend", "", "Agent backend: claude-code (default: native)")` to parseFlags
-- Pass `cfg.backend` to registry construction
-- Registry passes it to `CodergenHandler` at construction time
-- No interaction with `--format` or `--resume` — backend is orthogonal
+Works without any dippin-lang changes. All codergen nodes run via Claude Code. The node's `llm_model` is passed through to `WithModel()`.
 
-**Backend selection precedence:**
-1. Node-level `llm_provider: "claude-code"` → ClaudeCodeBackend (always wins)
-2. Node-level `llm_provider: "native"` or `llm_provider: "codergen"` → NativeBackend (explicit override, even with --backend flag)
-3. `--backend claude-code` flag → ClaudeCodeBackend (default for unspecified nodes)
-4. No flag, no node-level override → NativeBackend
+### Backend selection precedence
+
+1. Node-level `backend: "claude-code"` → ClaudeCodeBackend (always wins)
+2. Node-level `backend: "native"` → NativeBackend (explicit override, even with --backend flag)
+3. `--backend claude-code` flag → ClaudeCodeBackend (default for nodes with no explicit backend)
+4. No flag, no node-level backend → NativeBackend
+
+### Permission Mode
+
+Default: `PermissionFullAuto` (pipeline nodes run headless — interactive approval hangs the process).
+
+To restrict: set `permission_mode: "autoEdit"` (blocks shell commands) or `permission_mode: "plan"` (blocks everything, requires approval — only for human-supervised nodes).
+
+Invalid values are rejected at config parse time with a clear error.
 
 ### MCP Server Parsing
 
 Format: one server per line, `name=command arg1 arg2`
 
-```
-mcp_servers: """
-postgres=npx @modelcontextprotocol/server-postgres $DATABASE_URL
-github=npx @modelcontextprotocol/server-github
-"""
-```
-
 Parsing rules:
 - Split on newlines, trim whitespace, skip empty lines
-- Split each line on first `=` only (command may contain `=`)
-- If no `=` found → error: "malformed mcp_servers entry: %q"
-- If name is empty → error
-- If command is empty → error
-- Shell-split the command portion (respecting quotes) for `Args`
+- Split each line on first `=` only (command portion may contain `=`)
+- If no `=` → error: `"malformed mcp_servers entry: %q"`
+- If name empty or command empty → error
+- Command portion split on whitespace for `Args` (no shell expansion, no quote handling in v1)
 - Duplicate names → error
-- MCP server process failure at startup → `OutcomeFail` with error describing which server failed
+- Commands are NOT shell-expanded. They are passed directly to the Claude Code CLI's `--mcpServers` JSON.
 
-### `allowed_tools` / `disallowed_tools` Interaction
+### `allowed_tools` / `disallowed_tools`
 
-- Both empty → Claude Code uses its defaults
-- Only `allowed_tools` set → allowlist only
-- Only `disallowed_tools` set → denylist only
-- Both set → error: "cannot set both allowed_tools and disallowed_tools"
+- Both empty → Claude Code defaults
+- Only one set → that list applies
+- Both set → error: `"cannot set both allowed_tools and disallowed_tools"`
+- Tool names are passed through as-is (no validation against Claude Code's tool list in v1)
 
-### `reasoning_effort` Handling
-
-Not passed to Claude Code. The native backend maps it to the API parameter. For Claude Code, Claude's own reasoning behavior applies. If users need to influence reasoning, they include instructions in their `system_prompt`. This is a documented behavioral difference, not a bug.
-
-## Prompt Resolution (Shared)
-
-Extract from codergen into `pipeline/handlers/prompt.go`:
-
-```go
-func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
-    graphAttrs map[string]string) (string, error)
-```
-
-Three params (dropped `artifactDir` and `runID` — not used in prompt resolution). Handles:
-- Graph variable expansion (`$goal`, `$target_name`)
-- Fidelity resolution + context compaction
-- Pipeline context injection (prior node outputs)
-
-Both backends call it. The codergen handler refactoring is a pure extraction — no behavior change.
-
-## Observability Differences
-
-Honest about what's degraded:
+## Observability
 
 | Metric | Native Backend | Claude Code Backend |
 |--------|---------------|-------------------|
 | Per-turn tokens | Yes | Session totals only |
 | Cost estimate | Per-turn | Session total (if CLI provides) |
-| Files modified/created | Tracked by agent session | Not tracked (CLI manages files) |
+| Files modified/created | Tracked | Not tracked (CLI manages files) |
 | Cache hits/misses | Tracked | N/A |
-| Compactions | Tracked | N/A (CLI manages context) |
-| Tool calls by name | Tracked per-event | Tracked per-event (parity) |
-| Thinking/reasoning | Streamed | Streamed (parity) |
+| Compactions | Tracked | N/A |
+| Tool calls by name | Per-event | Per-event (parity) |
 | Text streaming | Token-level | Token-level (parity) |
 
-The TUI shows "—" for unavailable metrics, not misleading zeros.
+Zero-valued `SessionResult` fields display as "—" in the TUI, not misleading zeros.
+
+### Pipeline-Level Budget
+
+The engine tracks cumulative `EstimatedCost` from `SessionResult.Usage` across all nodes. If a pipeline-level budget is configured (via graph attr `max_budget_usd`), the engine halts execution when the total exceeds the threshold. This applies to both backends.
+
+## Behavioral Differences from Native Backend
+
+| Feature | Native | Claude Code | Rationale |
+|---------|--------|-------------|-----------|
+| `reasoning_effort` | API parameter | Not supported — log warning if set | Claude Code manages reasoning |
+| `cache_tool_results` | Per-session cache | N/A | Claude Code manages caching |
+| `context_compaction` | Tracker compacts | N/A | Claude Code has built-in compaction |
+| Path containment | `safePath()` enforcement | No containment | Claude Code manages file access |
+| Concurrent file edits | Tracker controls | No coordination | Same as two developers on one repo |
 
 ## Platform Constraints
 
-- **Linux/macOS only.** The subprocess management uses `Setpgid` (POSIX). Windows support is out of scope, same as the existing tool handler.
-- **Claude Code CLI required.** `npm install -g @anthropic-ai/claude-code`. Validated at handler construction time, not first use.
-- **Auth required.** `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. Validated before first session.
-- **Parallel file conflicts.** Two claude-code nodes sharing a workdir may clobber files. Document as a constraint, same as two developers on one repo.
+- **Linux/macOS only.** Subprocess management uses `Setpgid` (POSIX).
+- **Claude Code CLI required** for claude-code backend. `npm install -g @anthropic-ai/claude-code`.
+- **Min CLI version:** Pinned as constant, validated lazily on first use.
+- **Auth required.** `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. Validated before first session, clear error if missing.
+- **Parallel file conflicts.** Two claude-code nodes sharing a workdir may clobber files. Document as constraint.
 
 ## Testing Strategy
 
 ### Unit Tests (always run)
-- `AgentRunConfig` building from node attrs
+- `AgentRunConfig` building from node attrs (table-driven)
 - MCP server string parsing (happy path + all error cases)
-- NDJSON message parsing (mock JSON lines → AgentEvent)
-- Error classification (stderr patterns → outcome mapping)
+- NDJSON message parsing (mock JSON lines → `agent.Event`)
+- Error classification (stderr × exit code → outcome, with priority tests)
 - `ResolvePrompt` parity with current codergen behavior
-- Backend selection precedence (node-level > flag > default)
+- Backend selection precedence (node > flag > default)
+- Permission mode validation
 
 ### Integration Tests (`//go:build integration`)
 - Requires Claude Code CLI installed
-- One-shot prompt → verify AgentResult
-- Tool use → verify ToolCallStart/End events
-- Budget cap → verify OutcomeFail
-- Cancellation → verify process group killed
-- Invalid auth → verify clear error
+- One-shot prompt → verify `SessionResult`
+- Tool use → verify `EventToolCallStart`/`End`
+- Cancellation → verify process group killed, no orphans
+- Invalid auth → verify clear error before execution
+- Version check → verify rejection of old CLI
 
 ## Migration
 
-No breaking changes. The refactoring of codergen to use `AgentBackend` is internal. External behavior is identical. The platform abstraction exists for future backends but adds zero overhead to the current path.
+No breaking changes. The refactoring of codergen to use `AgentBackend` is internal. External behavior is identical. The `--backend` flag is additive. The .dip `backend:` attr requires the dippin-lang prerequisite.
 
 ## Out of Scope (Future)
 
 - MCP servers at pipeline level (shared across nodes) — currently per-node
 - Subagent spawning within Claude Code sessions
-- Session resume across pipeline checkpoints
+- Session resume across pipeline checkpoints (document resume hazard in user docs)
 - Additional backends (Cursor, Aider, etc.) — the platform makes this cheap
+- Typed attrs system (replaces `map[string]string` parsing) — would benefit all handlers
+- Pipeline-level concurrency limiter for claude-code nodes
