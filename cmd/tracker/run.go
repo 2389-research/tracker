@@ -38,7 +38,7 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 	// Create LLM client from environment variables.
 	llmClient, err := buildLLMClient(tokenTracker)
 	if err != nil {
-		return fmt.Errorf("create LLM client: %w", err)
+		return formatLLMClientError(err)
 	}
 	defer llmClient.Close()
 
@@ -203,7 +203,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 	tokenTracker := llm.NewTokenTracker()
 	llmClient, err := buildLLMClient(tokenTracker)
 	if err != nil {
-		return fmt.Errorf("create LLM client: %w", err)
+		return formatLLMClientError(err)
 	}
 	defer llmClient.Close()
 

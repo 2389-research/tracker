@@ -29,6 +29,8 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 	switch cfg.mode {
 	case modeVersion:
 		return executeVersion()
+	case modeDoctor:
+		return executeDoctor(cfg)
 	case modeSetup:
 		return deps.runSetup()
 	case modeValidate:
@@ -43,10 +45,52 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 }
 
 func executeVersion() error {
+	// Load env so provider status reflects .env files.
+	wd, _ := os.Getwd()
+	_ = loadEnvFiles(wd)
+
 	fmt.Printf("tracker %s\n", version)
 	fmt.Printf("  commit: %s\n", commit)
 	fmt.Printf("  built:  %s\n", date)
+	printProviderStatus()
 	return nil
+}
+
+func executeDoctor(cfg runConfig) error {
+	_ = loadEnvFiles(cfg.workdir)
+	return runDoctor(cfg.workdir)
+}
+
+// printProviderStatus shows which LLM providers have API keys configured.
+func printProviderStatus() {
+	providers := []struct {
+		name string
+		envs []string
+	}{
+		{"anthropic", []string{"ANTHROPIC_API_KEY"}},
+		{"openai", []string{"OPENAI_API_KEY"}},
+		{"gemini", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
+	}
+	var ready, missing []string
+	for _, p := range providers {
+		found := false
+		for _, e := range p.envs {
+			if os.Getenv(e) != "" {
+				found = true
+				break
+			}
+		}
+		if found {
+			ready = append(ready, p.name)
+		} else {
+			missing = append(missing, p.name)
+		}
+	}
+	if len(ready) > 0 {
+		fmt.Printf("  providers: %s\n", strings.Join(ready, ", "))
+	} else {
+		fmt.Println("  providers: none (run `tracker setup`)")
+	}
 }
 
 func executeValidate(cfg runConfig) error {

@@ -32,6 +32,9 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 	case "list":
 		cfg.mode = modeAudit
 		return modeAudit, true
+	case string(modeDoctor):
+		cfg.mode = modeDoctor
+		return modeDoctor, true
 	case string(modeSetup):
 		cfg.mode = modeSetup
 		return modeSetup, true
@@ -51,7 +54,7 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 // parseFlagsForMode handles flag parsing for non-run subcommands.
 func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConfig, error) {
 	switch mode {
-	case modeVersion, modeSetup:
+	case modeVersion, modeSetup, modeDoctor:
 		return *cfg, nil
 	case modeValidate:
 		if len(args) > 2 {
@@ -144,6 +147,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker validate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
+	fmt.Fprintf(w, "  tracker doctor                Preflight health check\n")
 	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")
 	fmt.Fprintf(w, "  tracker version               Show version information\n\n")
 	fmt.Fprintf(w, "Flags:\n")

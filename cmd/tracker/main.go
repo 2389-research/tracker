@@ -30,6 +30,7 @@ const (
 	modeAudit    commandMode = "audit"
 	modeSimulate commandMode = "simulate"
 	modeValidate commandMode = "validate"
+	modeDoctor   commandMode = "doctor"
 	modeVersion  commandMode = "version"
 )
 
