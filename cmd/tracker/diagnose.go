@@ -233,7 +233,7 @@ func enrichFromEntry(entry diagnoseEntry, failures map[string]*nodeFailure, stag
 		stageStarts[entry.NodeID] = ts
 	case "stage_failed":
 		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
-		sig := entry.Error + "|" + entry.ToolErr
+		sig := entry.Error + "\x00" + entry.ToolErr
 		failSignatures[entry.NodeID] = append(failSignatures[entry.NodeID], sig)
 	case "stage_completed":
 		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
@@ -277,7 +277,11 @@ func printNodeDiagnosis(f *nodeFailure) {
 		fmt.Printf("    %s %s\n", labelStyle.Render("Handler:"), f.handler)
 	}
 	if f.duration > 0 {
-		fmt.Printf("    %s %s\n", labelStyle.Render("Duration:"), formatElapsed(f.duration))
+		durationLabel := "Duration:"
+		if f.retryCount >= 2 {
+			durationLabel = "Duration (last):"
+		}
+		fmt.Printf("    %s %s\n", labelStyle.Render(durationLabel), formatElapsed(f.duration))
 	}
 	if f.retryCount >= 2 {
 		retryInfo := fmt.Sprintf("%d failures", f.retryCount)
