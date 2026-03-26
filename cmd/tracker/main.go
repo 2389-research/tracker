@@ -36,11 +36,16 @@ const (
 var errUsage = errors.New("usage")
 
 // Build-time variables set via -ldflags.
+// When installed locally via `go install`, initVersionFromVCS populates
+// commit and date from Go's embedded VCS info so `tracker version`
+// shows something useful even without goreleaser ldflags.
 var (
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
 )
+
+func init() { initVersionFromVCS() }
 
 type commandDeps struct {
 	loadEnv  func(string) error
