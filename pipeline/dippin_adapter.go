@@ -220,6 +220,41 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.GoalGate {
 		attrs["goal_gate"] = "true"
 	}
+
+	// Pass through backend-selection and Claude Code-specific attrs.
+	// NOTE: cfg.Params is a placeholder for a future field on ir.AgentConfig.
+	// When dippin-lang upstream adds Params map[string]string to AgentConfig,
+	// replace nil below with cfg.Params.
+	extractAgentBackendAttrs(nil, attrs)
+}
+
+// extractAgentBackendAttrs maps backend-selection and Claude-Code-specific keys
+// from a generic params map into node attrs consumed by CodergenHandler and
+// ClaudeCodeBackend. The recognized keys are:
+//
+//   - backend         → attrs["backend"]          (e.g. "claude-code", "native")
+//   - mcp_servers     → attrs["mcp_servers"]       (newline-separated name=cmd pairs)
+//   - allowed_tools   → attrs["allowed_tools"]     (comma-separated tool names)
+//   - disallowed_tools→ attrs["disallowed_tools"]  (comma-separated tool names)
+//   - max_budget_usd  → attrs["max_budget_usd"]    (float string, e.g. "1.50")
+//   - permission_mode → attrs["permission_mode"]   (plan|autoEdit|fullAuto)
+//
+// Unrecognized keys are silently ignored.
+// A nil or empty params map is a no-op.
+func extractAgentBackendAttrs(params map[string]string, attrs map[string]string) {
+	keys := []string{
+		"backend",
+		"mcp_servers",
+		"allowed_tools",
+		"disallowed_tools",
+		"max_budget_usd",
+		"permission_mode",
+	}
+	for _, k := range keys {
+		if v, ok := params[k]; ok && v != "" {
+			attrs[k] = v
+		}
+	}
 }
 
 func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {

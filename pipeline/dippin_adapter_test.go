@@ -782,6 +782,136 @@ func TestFromDippinIR_Errors(t *testing.T) {
 	}
 }
 
+// TestExtractAgentBackendAttrs verifies that extractAgentBackendAttrs correctly
+// maps backend-selection and Claude Code keys from a params map into node attrs.
+// This helper is called from extractAgentAttrs; once dippin-lang upstream adds
+// Params map[string]string to ir.AgentConfig, the params will flow from .dip files.
+func TestExtractAgentBackendAttrs(t *testing.T) {
+	t.Run("all keys present", func(t *testing.T) {
+		params := map[string]string{
+			"backend":          "claude-code",
+			"mcp_servers":      "fs=/usr/bin/mcp-fs\ngit=/usr/bin/mcp-git arg1",
+			"allowed_tools":    "Read,Write,Bash",
+			"disallowed_tools": "WebSearch",
+			"max_budget_usd":   "2.50",
+			"permission_mode":  "autoEdit",
+		}
+		attrs := make(map[string]string)
+		extractAgentBackendAttrs(params, attrs)
+
+		expected := map[string]string{
+			"backend":          "claude-code",
+			"mcp_servers":      "fs=/usr/bin/mcp-fs\ngit=/usr/bin/mcp-git arg1",
+			"allowed_tools":    "Read,Write,Bash",
+			"disallowed_tools": "WebSearch",
+			"max_budget_usd":   "2.50",
+			"permission_mode":  "autoEdit",
+		}
+		for k, want := range expected {
+			if got := attrs[k]; got != want {
+				t.Errorf("attrs[%q] = %q, want %q", k, got, want)
+			}
+		}
+	})
+
+	t.Run("nil params is no-op", func(t *testing.T) {
+		attrs := make(map[string]string)
+		extractAgentBackendAttrs(nil, attrs)
+		if len(attrs) != 0 {
+			t.Errorf("expected empty attrs, got %v", attrs)
+		}
+	})
+
+	t.Run("empty params is no-op", func(t *testing.T) {
+		attrs := make(map[string]string)
+		extractAgentBackendAttrs(map[string]string{}, attrs)
+		if len(attrs) != 0 {
+			t.Errorf("expected empty attrs, got %v", attrs)
+		}
+	})
+
+	t.Run("empty string values are skipped", func(t *testing.T) {
+		params := map[string]string{
+			"backend":         "",
+			"permission_mode": "fullAuto",
+		}
+		attrs := make(map[string]string)
+		extractAgentBackendAttrs(params, attrs)
+
+		if _, ok := attrs["backend"]; ok {
+			t.Errorf("expected backend attr to be absent for empty value")
+		}
+		if got := attrs["permission_mode"]; got != "fullAuto" {
+			t.Errorf("attrs[permission_mode] = %q, want %q", got, "fullAuto")
+		}
+	})
+
+	t.Run("unrecognized keys are ignored", func(t *testing.T) {
+		params := map[string]string{
+			"unknown_key": "value",
+			"backend":     "native",
+		}
+		attrs := make(map[string]string)
+		extractAgentBackendAttrs(params, attrs)
+
+		if _, ok := attrs["unknown_key"]; ok {
+			t.Errorf("expected unknown_key to be absent from attrs")
+		}
+		if got := attrs["backend"]; got != "native" {
+			t.Errorf("attrs[backend] = %q, want %q", got, "native")
+		}
+	})
+
+	t.Run("partial keys pass through independently", func(t *testing.T) {
+		params := map[string]string{
+			"backend":        "claude-code",
+			"max_budget_usd": "5.00",
+		}
+		attrs := make(map[string]string)
+		extractAgentBackendAttrs(params, attrs)
+
+		if got := attrs["backend"]; got != "claude-code" {
+			t.Errorf("attrs[backend] = %q, want %q", got, "claude-code")
+		}
+		if got := attrs["max_budget_usd"]; got != "5.00" {
+			t.Errorf("attrs[max_budget_usd] = %q, want %q", got, "5.00")
+		}
+		if _, ok := attrs["mcp_servers"]; ok {
+			t.Errorf("expected mcp_servers to be absent")
+		}
+	})
+}
+
+// TestFromDippinIR_AgentBackendAttrsViaParams verifies that when a node's
+// AgentConfig has backend-specific params, they flow through to Graph node attrs.
+// This test uses extractAgentBackendAttrs directly to simulate the passthrough
+// that will occur once dippin-lang upstream adds Params to ir.AgentConfig.
+func TestFromDippinIR_AgentBackendAttrsViaParams(t *testing.T) {
+	// Simulate what the adapter will do once cfg.Params is available upstream:
+	// build the attrs map as if the IR had provided these values.
+	attrs := make(map[string]string)
+	simulatedParams := map[string]string{
+		"backend":         "claude-code",
+		"allowed_tools":   "Read,Write",
+		"permission_mode": "fullAuto",
+		"max_budget_usd":  "1.00",
+	}
+	extractAgentBackendAttrs(simulatedParams, attrs)
+
+	if got := attrs["backend"]; got != "claude-code" {
+		t.Errorf("attrs[backend] = %q, want claude-code", got)
+	}
+	if got := attrs["allowed_tools"]; got != "Read,Write" {
+		t.Errorf("attrs[allowed_tools] = %q, want Read,Write", got)
+	}
+	if got := attrs["permission_mode"]; got != "fullAuto" {
+		t.Errorf("attrs[permission_mode] = %q, want fullAuto", got)
+	}
+	if got := attrs["max_budget_usd"]; got != "1.00" {
+		t.Errorf("attrs[max_budget_usd] = %q, want 1.00", got)
+	}
+}
+
 // Helper function to check if a string contains a substring.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
