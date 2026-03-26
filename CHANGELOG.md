@@ -5,12 +5,19 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-03-26
+
+### Fixed
+
+- **Signature collision in retry detection**: Failure signatures now use null byte separator instead of pipe, preventing false "identical" matches when error strings contain `|`.
+- **Duration label clarity**: Shows "Duration (last):" instead of "Duration:" when a node had multiple retries, so users know the value is the last attempt's duration, not total.
+
 ## [0.10.2] - 2026-03-26
 
 ### Added
 
 - **Deterministic failure detection in `tracker diagnose`**: When a tool node fails multiple times with identical errors, diagnose now flags it as a deterministic bug — "Failed 5 times with identical errors — this is a deterministic bug in the command, not a transient failure. Retrying won't help. Fix the tool command in the .dip file and re-run." Distinguishes deterministic failures (same error every time) from flaky failures (varying errors across retries).
-- **Retry count in diagnose output**: Failed nodes now show "Retries: N attempts (all identical — deterministic failure)" or "Retries: N attempts" in the diagnosis, so the retry pattern is visible at a glance without reading suggestions.
+- **Retry count in diagnose output**: Failed nodes now show "Attempts: N failures (all identical — deterministic)" in the diagnosis, so the retry pattern is visible at a glance without reading suggestions.
 
 ## [0.10.1] - 2026-03-26
 
