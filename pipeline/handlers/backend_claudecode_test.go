@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/pipeline"
 )
+
+func now() time.Time { return time.Now() }
 
 func TestClassifyError(t *testing.T) {
 	tests := []struct {
@@ -441,9 +444,12 @@ func TestBuildMCPServersJSON(t *testing.T) {
 
 func TestBuildResultNilLastResult(t *testing.T) {
 	state := &runState{toolUseIDs: make(map[string]string)}
-	result := buildResult(state)
-	if result.Turns != 0 {
-		t.Errorf("expected 0 turns, got %d", result.Turns)
+	_, err := buildResult(state)
+	if err == nil {
+		t.Fatal("expected error when lastResult is nil")
+	}
+	if !strings.Contains(err.Error(), "no result message") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
@@ -452,7 +458,10 @@ func TestBuildResultWithLastResult(t *testing.T) {
 		toolUseIDs: make(map[string]string),
 		lastResult: &agent.SessionResult{Turns: 3},
 	}
-	result := buildResult(state)
+	result, err := buildResult(state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result.Turns != 3 {
 		t.Errorf("expected 3 turns, got %d", result.Turns)
 	}
@@ -657,6 +666,92 @@ func TestBuildClaudeCodeConfigBothToolLists(t *testing.T) {
 	_, err := h.buildClaudeCodeConfig(node)
 	if err == nil {
 		t.Fatal("expected error when both allowed and disallowed tools are set")
+	}
+}
+
+func TestStoreResultAggregatesToolCalls(t *testing.T) {
+	state := &runState{
+		toolUseIDs: map[string]string{
+			"tu_1": "Read",
+			"tu_2": "Write",
+			"tu_3": "Read",
+			"tu_4": "Bash",
+			"tu_5": "Read",
+		},
+	}
+	msg := ndjsonMessage{
+		Type:  "result",
+		Turns: 3,
+		Usage: &ndjsonUsage{InputTokens: 100, OutputTokens: 50, CostUSD: 0.01},
+	}
+	storeResult(msg, state)
+
+	if state.lastResult == nil {
+		t.Fatal("expected lastResult to be populated")
+	}
+	if state.lastResult.ToolCalls["Read"] != 3 {
+		t.Errorf("expected Read=3, got %d", state.lastResult.ToolCalls["Read"])
+	}
+	if state.lastResult.ToolCalls["Write"] != 1 {
+		t.Errorf("expected Write=1, got %d", state.lastResult.ToolCalls["Write"])
+	}
+	if state.lastResult.ToolCalls["Bash"] != 1 {
+		t.Errorf("expected Bash=1, got %d", state.lastResult.ToolCalls["Bash"])
+	}
+}
+
+func TestStoreResultNoUsage(t *testing.T) {
+	state := &runState{toolUseIDs: make(map[string]string)}
+	msg := ndjsonMessage{Type: "result", Turns: 2}
+	storeResult(msg, state)
+
+	if state.lastResult == nil {
+		t.Fatal("expected lastResult to be populated")
+	}
+	if state.lastResult.Usage.InputTokens != 0 {
+		t.Errorf("expected 0 input tokens, got %d", state.lastResult.Usage.InputTokens)
+	}
+}
+
+func TestParseMessageUnmarshalFailureTracked(t *testing.T) {
+	state := &runState{toolUseIDs: make(map[string]string)}
+	// Invalid JSON that decoded fine but won't unmarshal into ndjsonMessage
+	// Actually, any valid JSON will unmarshal into the struct. Use truly invalid JSON.
+	events := parseMessage(json.RawMessage(`{invalid json`), state)
+
+	if len(events) != 0 {
+		t.Errorf("expected 0 events, got %d", len(events))
+	}
+	if state.decodeErrors != 1 {
+		t.Errorf("expected 1 decode error, got %d", state.decodeErrors)
+	}
+}
+
+func TestParseMessageUnknownAssistantContentType(t *testing.T) {
+	msg := `{"type":"assistant","content":[{"type":"image","text":"data"}]}`
+	state := &runState{toolUseIDs: make(map[string]string)}
+	events := parseMessage(json.RawMessage(msg), state)
+
+	// Unknown content types are logged but produce no events
+	if len(events) != 0 {
+		t.Errorf("expected 0 events for unknown content type, got %d", len(events))
+	}
+}
+
+func TestParseUserContentSkipsNonToolResult(t *testing.T) {
+	state := &runState{toolUseIDs: make(map[string]string)}
+	content := []ndjsonContent{
+		{Type: "text", Text: "hello"},
+		{Type: "tool_result", ToolUseID: "tu_1", Content: "output"},
+	}
+	events := parseUserContent(content, now(), state)
+
+	// Only the tool_result should produce an event
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != agent.EventToolCallEnd {
+		t.Errorf("expected EventToolCallEnd, got %s", events[0].Type)
 	}
 }
 

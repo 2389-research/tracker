@@ -782,133 +782,219 @@ func TestFromDippinIR_Errors(t *testing.T) {
 	}
 }
 
-// TestExtractAgentBackendAttrs verifies that extractAgentBackendAttrs correctly
-// maps backend-selection and Claude Code keys from a params map into node attrs.
-// This helper is called from extractAgentAttrs; once dippin-lang upstream adds
-// Params map[string]string to ir.AgentConfig, the params will flow from .dip files.
-func TestExtractAgentBackendAttrs(t *testing.T) {
-	t.Run("all keys present", func(t *testing.T) {
-		params := map[string]string{
-			"backend":          "claude-code",
-			"mcp_servers":      "fs=/usr/bin/mcp-fs\ngit=/usr/bin/mcp-git arg1",
-			"allowed_tools":    "Read,Write,Bash",
-			"disallowed_tools": "WebSearch",
-			"max_budget_usd":   "2.50",
-			"permission_mode":  "autoEdit",
-		}
-		attrs := make(map[string]string)
-		extractAgentBackendAttrs(params, attrs)
+// TestSynthesizeImplicitEdges_ParallelFanIn verifies that implicit edges are
+// synthesized for parallel fan-out targets and fan-in sources when they are
+// not already present as explicit edges.
+func TestSynthesizeImplicitEdges_ParallelFanIn(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ParallelFanInTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "dispatch",
+				Kind: ir.NodeParallel,
+				Config: ir.ParallelConfig{
+					Targets: []string{"branch_a", "branch_b"},
+				},
+			},
+			{ID: "branch_a", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "task A"}},
+			{ID: "branch_b", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "task B"}},
+			{
+				ID:   "join",
+				Kind: ir.NodeFanIn,
+				Config: ir.FanInConfig{
+					Sources: []string{"branch_a", "branch_b"},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "dispatch"},
+			{From: "join", To: "exit"},
+		},
+	}
 
-		expected := map[string]string{
-			"backend":          "claude-code",
-			"mcp_servers":      "fs=/usr/bin/mcp-fs\ngit=/usr/bin/mcp-git arg1",
-			"allowed_tools":    "Read,Write,Bash",
-			"disallowed_tools": "WebSearch",
-			"max_budget_usd":   "2.50",
-			"permission_mode":  "autoEdit",
-		}
-		for k, want := range expected {
-			if got := attrs[k]; got != want {
-				t.Errorf("attrs[%q] = %q, want %q", k, got, want)
-			}
-		}
-	})
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
 
-	t.Run("nil params is no-op", func(t *testing.T) {
-		attrs := make(map[string]string)
-		extractAgentBackendAttrs(nil, attrs)
-		if len(attrs) != 0 {
-			t.Errorf("expected empty attrs, got %v", attrs)
-		}
-	})
+	// Verify implicit edges were synthesized.
+	edgeSet := make(map[[2]string]bool)
+	for _, e := range graph.Edges {
+		edgeSet[[2]string{e.From, e.To}] = true
+	}
 
-	t.Run("empty params is no-op", func(t *testing.T) {
-		attrs := make(map[string]string)
-		extractAgentBackendAttrs(map[string]string{}, attrs)
-		if len(attrs) != 0 {
-			t.Errorf("expected empty attrs, got %v", attrs)
-		}
-	})
+	// Parallel -> targets
+	if !edgeSet[[2]string{"dispatch", "branch_a"}] {
+		t.Error("missing implicit edge: dispatch -> branch_a")
+	}
+	if !edgeSet[[2]string{"dispatch", "branch_b"}] {
+		t.Error("missing implicit edge: dispatch -> branch_b")
+	}
+	// Targets -> fan-in
+	if !edgeSet[[2]string{"branch_a", "join"}] {
+		t.Error("missing implicit edge: branch_a -> join")
+	}
+	if !edgeSet[[2]string{"branch_b", "join"}] {
+		t.Error("missing implicit edge: branch_b -> join")
+	}
+	// Parallel -> join (for parallel_join attr)
+	if !edgeSet[[2]string{"dispatch", "join"}] {
+		t.Error("missing implicit edge: dispatch -> join")
+	}
 
-	t.Run("empty string values are skipped", func(t *testing.T) {
-		params := map[string]string{
-			"backend":         "",
-			"permission_mode": "fullAuto",
-		}
-		attrs := make(map[string]string)
-		extractAgentBackendAttrs(params, attrs)
-
-		if _, ok := attrs["backend"]; ok {
-			t.Errorf("expected backend attr to be absent for empty value")
-		}
-		if got := attrs["permission_mode"]; got != "fullAuto" {
-			t.Errorf("attrs[permission_mode] = %q, want %q", got, "fullAuto")
-		}
-	})
-
-	t.Run("unrecognized keys are ignored", func(t *testing.T) {
-		params := map[string]string{
-			"unknown_key": "value",
-			"backend":     "native",
-		}
-		attrs := make(map[string]string)
-		extractAgentBackendAttrs(params, attrs)
-
-		if _, ok := attrs["unknown_key"]; ok {
-			t.Errorf("expected unknown_key to be absent from attrs")
-		}
-		if got := attrs["backend"]; got != "native" {
-			t.Errorf("attrs[backend] = %q, want %q", got, "native")
-		}
-	})
-
-	t.Run("partial keys pass through independently", func(t *testing.T) {
-		params := map[string]string{
-			"backend":        "claude-code",
-			"max_budget_usd": "5.00",
-		}
-		attrs := make(map[string]string)
-		extractAgentBackendAttrs(params, attrs)
-
-		if got := attrs["backend"]; got != "claude-code" {
-			t.Errorf("attrs[backend] = %q, want %q", got, "claude-code")
-		}
-		if got := attrs["max_budget_usd"]; got != "5.00" {
-			t.Errorf("attrs[max_budget_usd] = %q, want %q", got, "5.00")
-		}
-		if _, ok := attrs["mcp_servers"]; ok {
-			t.Errorf("expected mcp_servers to be absent")
-		}
-	})
+	// Verify parallel_join attr was set.
+	dispatchNode := graph.Nodes["dispatch"]
+	if dispatchNode.Attrs["parallel_join"] != "join" {
+		t.Errorf("parallel_join = %q, want %q", dispatchNode.Attrs["parallel_join"], "join")
+	}
 }
 
-// TestFromDippinIR_AgentBackendAttrsViaParams verifies that when a node's
-// AgentConfig has backend-specific params, they flow through to Graph node attrs.
-// This test uses extractAgentBackendAttrs directly to simulate the passthrough
-// that will occur once dippin-lang upstream adds Params to ir.AgentConfig.
-func TestFromDippinIR_AgentBackendAttrsViaParams(t *testing.T) {
-	// Simulate what the adapter will do once cfg.Params is available upstream:
-	// build the attrs map as if the IR had provided these values.
-	attrs := make(map[string]string)
-	simulatedParams := map[string]string{
-		"backend":         "claude-code",
-		"allowed_tools":   "Read,Write",
-		"permission_mode": "fullAuto",
-		"max_budget_usd":  "1.00",
+// TestSynthesizeImplicitEdges_NoDuplicates verifies that synthesizeImplicitEdges
+// does not create duplicate edges when explicit edges already exist.
+func TestSynthesizeImplicitEdges_NoDuplicates(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "NoDupTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "dispatch",
+				Kind: ir.NodeParallel,
+				Config: ir.ParallelConfig{
+					Targets: []string{"branch_a"},
+				},
+			},
+			{ID: "branch_a", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "A"}},
+			{
+				ID:   "join",
+				Kind: ir.NodeFanIn,
+				Config: ir.FanInConfig{
+					Sources: []string{"branch_a"},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "dispatch"},
+			// Explicit edges that overlap with what synthesize would create.
+			{From: "dispatch", To: "branch_a"},
+			{From: "branch_a", To: "join"},
+			{From: "join", To: "exit"},
+		},
 	}
-	extractAgentBackendAttrs(simulatedParams, attrs)
 
-	if got := attrs["backend"]; got != "claude-code" {
-		t.Errorf("attrs[backend] = %q, want claude-code", got)
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
 	}
-	if got := attrs["allowed_tools"]; got != "Read,Write" {
-		t.Errorf("attrs[allowed_tools] = %q, want Read,Write", got)
+
+	// Count edges from dispatch -> branch_a — should be exactly 1.
+	count := 0
+	for _, e := range graph.Edges {
+		if e.From == "dispatch" && e.To == "branch_a" {
+			count++
+		}
 	}
-	if got := attrs["permission_mode"]; got != "fullAuto" {
-		t.Errorf("attrs[permission_mode] = %q, want fullAuto", got)
+	if count != 1 {
+		t.Errorf("expected 1 edge dispatch->branch_a, got %d", count)
 	}
-	if got := attrs["max_budget_usd"]; got != "1.00" {
-		t.Errorf("attrs[max_budget_usd] = %q, want 1.00", got)
+}
+
+// TestEnsureStartExitNodes_OverridesShape verifies that ensureStartExitNodes
+// corrects the shape and handler of start/exit nodes regardless of their
+// original kind.
+func TestEnsureStartExitNodes_OverridesShape(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ShapeOverrideTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "begin"}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "end"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	startNode := graph.Nodes["start"]
+	if startNode.Shape != "Mdiamond" {
+		t.Errorf("start shape = %q, want Mdiamond", startNode.Shape)
+	}
+	if startNode.Handler != "start" {
+		t.Errorf("start handler = %q, want 'start'", startNode.Handler)
+	}
+
+	exitNode := graph.Nodes["exit"]
+	if exitNode.Shape != "Msquare" {
+		t.Errorf("exit shape = %q, want Msquare", exitNode.Shape)
+	}
+	if exitNode.Handler != "exit" {
+		t.Errorf("exit handler = %q, want 'exit'", exitNode.Handler)
+	}
+}
+
+// TestExtractAgentBackendAttrs_SimulatedIRParams verifies that agent backend
+// attributes (model, provider, reasoning_effort, system_prompt) are correctly
+// extracted from IR AgentConfig into graph node attrs, simulating the params
+// that CodergenHandler reads at runtime.
+func TestExtractAgentBackendAttrs_SimulatedIRParams(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "BackendAttrsTest",
+		Start: "start",
+		Exit:  "agent",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:    "agent",
+				Kind:  ir.NodeAgent,
+				Label: "Backend Agent",
+				Config: ir.AgentConfig{
+					Prompt:          "Build the feature",
+					Model:           "claude-opus-4",
+					Provider:        "anthropic",
+					SystemPrompt:    "You are a senior engineer",
+					ReasoningEffort: "high",
+					MaxTurns:        100,
+				},
+			},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "agent"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	node := graph.Nodes["agent"]
+	tests := []struct {
+		key   string
+		value string
+	}{
+		{"prompt", "Build the feature"},
+		{"llm_model", "claude-opus-4"},
+		{"llm_provider", "anthropic"},
+		{"system_prompt", "You are a senior engineer"},
+		{"reasoning_effort", "high"},
+		{"max_turns", "100"},
+	}
+	for _, tt := range tests {
+		if node.Attrs[tt.key] != tt.value {
+			t.Errorf("attrs[%q] = %q, want %q", tt.key, node.Attrs[tt.key], tt.value)
+		}
 	}
 }
 

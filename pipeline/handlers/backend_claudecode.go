@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -29,8 +30,9 @@ type ClaudeCodeBackend struct {
 // runState holds per-invocation mutable state so that ClaudeCodeBackend itself
 // is safe for concurrent use.
 type runState struct {
-	toolUseIDs map[string]string
-	lastResult *agent.SessionResult
+	toolUseIDs   map[string]string
+	lastResult   *agent.SessionResult
+	decodeErrors int // NDJSON lines that failed json.Decode or json.Unmarshal
 }
 
 // NewClaudeCodeBackend creates a ClaudeCodeBackend, resolving the claude binary path.
@@ -106,28 +108,39 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		decoder := json.NewDecoder(stdout)
-		for decoder.More() {
-			var raw json.RawMessage
-			if err := decoder.Decode(&raw); err != nil {
-				log.Printf("[claude-code] warning: failed to decode NDJSON line: %v", err)
-				continue
-			}
-			events := parseMessage(raw, state)
-			for _, evt := range events {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							log.Printf("[claude-code] panic in event handler: %v", r)
-						}
-					}()
-					emit(evt)
-				}()
-			}
-		}
+		decodeNDJSON(stdout, state, emit)
 	}()
 
 	wg.Wait()
+	return collectResult(cmd, state, &stderr)
+}
+
+// decodeNDJSON reads NDJSON from stdout, parses messages, and emits events.
+func decodeNDJSON(stdout io.Reader, state *runState, emit func(agent.Event)) {
+	decoder := json.NewDecoder(stdout)
+	for decoder.More() {
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			state.decodeErrors++
+			log.Printf("[claude-code] warning: failed to decode NDJSON line: %v", err)
+			continue
+		}
+		events := parseMessage(raw, state)
+		for _, evt := range events {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[claude-code] panic in event handler: %v", r)
+					}
+				}()
+				emit(evt)
+			}()
+		}
+	}
+}
+
+// collectResult waits for the subprocess to exit and returns the accumulated result.
+func collectResult(cmd *exec.Cmd, state *runState, stderr *bytes.Buffer) (agent.SessionResult, error) {
 	waitErr := cmd.Wait()
 
 	exitCode := 0
@@ -135,26 +148,37 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return buildResult(state), fmt.Errorf("claude CLI wait error: %w", waitErr)
+			r, _ := buildResult(state)
+			return r, fmt.Errorf("claude CLI wait error: %w", waitErr)
 		}
 	}
 
 	outcome := classifyError(stderr.String(), exitCode)
 	if outcome != pipeline.OutcomeSuccess {
-		return buildResult(state), fmt.Errorf("claude CLI failed (exit %d, outcome=%s): %s",
+		r, _ := buildResult(state)
+		return r, fmt.Errorf("claude CLI failed (exit %d, outcome=%s): %s",
 			exitCode, outcome, strings.TrimSpace(stderr.String()))
 	}
 
-	return buildResult(state), nil
+	result, err := buildResult(state)
+	if err != nil {
+		return result, err
+	}
+
+	if state.decodeErrors > 0 && state.lastResult == nil {
+		return result, fmt.Errorf("claude CLI produced %d NDJSON decode errors and no result message", state.decodeErrors)
+	}
+
+	return result, nil
 }
 
-// buildResult returns the SessionResult accumulated from NDJSON parsing, or a
-// zero-value result if no "result" message was received.
-func buildResult(state *runState) agent.SessionResult {
+// buildResult returns the SessionResult accumulated from NDJSON parsing.
+// Returns an error if the subprocess produced no "result" message.
+func buildResult(state *runState) (agent.SessionResult, error) {
 	if state.lastResult != nil {
-		return *state.lastResult
+		return *state.lastResult, nil
 	}
-	return agent.SessionResult{}
+	return agent.SessionResult{}, fmt.Errorf("claude CLI exited successfully but produced no result message")
 }
 
 // buildArgs constructs the CLI arguments for the claude command from the run config.
@@ -270,6 +294,7 @@ type ndjsonUsage struct {
 func parseMessage(raw json.RawMessage, state *runState) []agent.Event {
 	var msg ndjsonMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
+		state.decodeErrors++
 		log.Printf("[claude-code] warning: failed to unmarshal NDJSON message: %v", err)
 		return nil
 	}
@@ -371,8 +396,13 @@ func parseUserContent(content []ndjsonContent, now time.Time, state *runState) [
 // storeResult saves the result message data into lastResult for later retrieval.
 func storeResult(msg ndjsonMessage, state *runState) {
 	result := &agent.SessionResult{
-		Turns:     msg.Turns,
-		ToolCalls: make(map[string]int),
+		Turns: msg.Turns,
+	}
+
+	// Aggregate tool use IDs into tool call counts.
+	result.ToolCalls = make(map[string]int, len(state.toolUseIDs))
+	for _, name := range state.toolUseIDs {
+		result.ToolCalls[name]++
 	}
 
 	if msg.Usage != nil {

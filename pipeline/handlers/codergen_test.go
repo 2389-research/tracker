@@ -541,6 +541,108 @@ func TestBuildConfig_CacheToolResults_DefaultFalse(t *testing.T) {
 	}
 }
 
+func TestParseClaudeCodeToolAttrsAllowed(t *testing.T) {
+	node := &pipeline.Node{
+		ID: "test",
+		Attrs: map[string]string{
+			"allowed_tools": "Read,Write",
+		},
+	}
+	ccCfg := &pipeline.ClaudeCodeConfig{}
+	if err := parseClaudeCodeToolAttrs(node, ccCfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ccCfg.AllowedTools) != 2 {
+		t.Errorf("expected 2 allowed tools, got %d", len(ccCfg.AllowedTools))
+	}
+}
+
+func TestParseClaudeCodeToolAttrsBothFails(t *testing.T) {
+	node := &pipeline.Node{
+		ID: "test",
+		Attrs: map[string]string{
+			"allowed_tools":    "Read,Write",
+			"disallowed_tools": "Bash",
+		},
+	}
+	ccCfg := &pipeline.ClaudeCodeConfig{}
+	err := parseClaudeCodeToolAttrs(node, ccCfg)
+	if err == nil {
+		t.Fatal("expected error when both allowed and disallowed tools are set")
+	}
+}
+
+func TestParseClaudeCodeBudgetAttrs(t *testing.T) {
+	node := &pipeline.Node{
+		ID: "test",
+		Attrs: map[string]string{
+			"max_budget_usd":  "5.50",
+			"permission_mode": "plan",
+		},
+	}
+	ccCfg := &pipeline.ClaudeCodeConfig{}
+	if err := parseClaudeCodeBudgetAttrs(node, ccCfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ccCfg.MaxBudgetUSD != 5.50 {
+		t.Errorf("expected budget 5.50, got %f", ccCfg.MaxBudgetUSD)
+	}
+	if ccCfg.PermissionMode != pipeline.PermissionPlan {
+		t.Errorf("expected plan mode, got %q", ccCfg.PermissionMode)
+	}
+}
+
+func TestParseClaudeCodeBudgetAttrsInvalid(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"max_budget_usd": "not-a-number"},
+	}
+	ccCfg := &pipeline.ClaudeCodeConfig{}
+	if err := parseClaudeCodeBudgetAttrs(node, ccCfg); err == nil {
+		t.Fatal("expected error for invalid budget")
+	}
+}
+
+func TestParseClaudeCodeBudgetAttrsInvalidPermission(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"permission_mode": "yolo"},
+	}
+	ccCfg := &pipeline.ClaudeCodeConfig{}
+	if err := parseClaudeCodeBudgetAttrs(node, ccCfg); err == nil {
+		t.Fatal("expected error for invalid permission mode")
+	}
+}
+
+// TestBuildClaudeCodeConfig is in backend_claudecode_test.go (more comprehensive version).
+
+func TestWithRegistryOptions(t *testing.T) {
+	// Test that With* option functions set config fields correctly.
+	cfg := &registryConfig{}
+
+	WithLLMClient(nil, "/tmp")(cfg)
+	if cfg.workingDir != "/tmp" {
+		t.Errorf("expected workingDir /tmp, got %q", cfg.workingDir)
+	}
+
+	WithDefaultBackend("claude-code")(cfg)
+	if cfg.defaultBackend != "claude-code" {
+		t.Errorf("expected defaultBackend claude-code, got %q", cfg.defaultBackend)
+	}
+
+	WithSubgraphs(map[string]*pipeline.Graph{"sub": nil})(cfg)
+	if len(cfg.subgraphs) != 1 {
+		t.Errorf("expected 1 subgraph, got %d", len(cfg.subgraphs))
+	}
+
+	WithInterviewer(nil, nil)(cfg)
+	// Just verifying it doesn't panic.
+
+	WithAgentEventHandler(nil)(cfg)
+	WithPipelineEventHandler(nil)(cfg)
+	WithExecEnvironment(nil)(cfg)
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if !strings.Contains(s, sub) {

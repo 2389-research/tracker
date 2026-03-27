@@ -60,7 +60,7 @@ func (c *transcriptCollector) transcript() string {
 }
 
 // buildSessionStats converts an agent.SessionResult into a pipeline.SessionStats
-// for inclusion in the trace entry. Returns nil if sessResult is nil.
+// for inclusion in the trace entry.
 func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 	toolCalls := make(map[string]int, len(r.ToolCalls))
 	for k, v := range r.ToolCalls {
