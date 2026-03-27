@@ -47,6 +47,18 @@ func (t *TokenTracker) WrapComplete(next CompleteHandler) CompleteHandler {
 	}
 }
 
+// AddUsage manually adds token usage for a provider. Used by backends that
+// bypass the LLM client middleware (e.g., claude-code subprocess backend).
+func (t *TokenTracker) AddUsage(provider string, usage Usage) {
+	if provider == "" {
+		return
+	}
+	t.mu.Lock()
+	existing := t.usage[provider]
+	t.usage[provider] = existing.Add(usage)
+	t.mu.Unlock()
+}
+
 // ProviderUsage returns the accumulated usage for a specific provider.
 // Returns a zero Usage if the provider has not been seen.
 func (t *TokenTracker) ProviderUsage(provider string) Usage {

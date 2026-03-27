@@ -25,12 +25,12 @@ type CodergenHandler struct {
 	workingDir         string
 	eventHandler       agent.EventHandler
 	graphAttrs         map[string]string
-	nativeBackend      pipeline.AgentBackend // always available
-	claudeCodeBackend  pipeline.AgentBackend // lazy-init on first claude-code request
-	defaultBackendName string                // from --backend flag, "" means native
+	tokenTracker       *llm.TokenTracker     // for reporting claude-code usage
+	nativeBackend      pipeline.AgentBackend  // always available
+	claudeCodeBackend  pipeline.AgentBackend  // lazy-init on first claude-code request
+	defaultBackendName string                 // from --backend flag, "" means native
 	nativeOnce         sync.Once
-	claudeOnce         sync.Once
-	claudeInitErr      error // cached error from lazy claude-code init
+	claudeMu           sync.Mutex // protects claudeCodeBackend lazy init (retryable)
 }
 
 // NewCodergenHandler creates a CodergenHandler that will use the given LLM client
@@ -88,6 +88,14 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	artifactRoot := h.resolveArtifactRoot(pctx)
 
 	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
+
+	// Report token usage from backends that bypass the LLM client middleware
+	// (e.g., claude-code subprocess). Native backend usage flows through the
+	// TokenTracker middleware automatically.
+	if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
+		h.tokenTracker.AddUsage("claude-code", sessResult.Usage)
+	}
+
 	if runErr != nil {
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
 	}
@@ -117,17 +125,21 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 }
 
 // ensureClaudeCodeBackend returns the claude-code backend, lazily creating it
-// on first use. Thread-safe via sync.Once for parallel node execution.
+// on first use. Thread-safe via mutex. Retries on failure (unlike sync.Once)
+// so installing claude mid-run can recover without restarting tracker.
 func (h *CodergenHandler) ensureClaudeCodeBackend() (pipeline.AgentBackend, error) {
-	h.claudeOnce.Do(func() {
-		b, err := NewClaudeCodeBackend()
-		if err != nil {
-			h.claudeInitErr = fmt.Errorf("claude-code backend: %w", err)
-			return
-		}
-		h.claudeCodeBackend = b
-	})
-	return h.claudeCodeBackend, h.claudeInitErr
+	h.claudeMu.Lock()
+	defer h.claudeMu.Unlock()
+
+	if h.claudeCodeBackend != nil {
+		return h.claudeCodeBackend, nil
+	}
+	b, err := NewClaudeCodeBackend()
+	if err != nil {
+		return nil, fmt.Errorf("claude-code backend: %w", err)
+	}
+	h.claudeCodeBackend = b
+	return b, nil
 }
 
 // ensureNativeBackend returns the native backend, lazily creating it if needed.

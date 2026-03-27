@@ -88,6 +88,7 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		handlers.WithPipelineEventHandler(pipelineEventHandler),
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
+		handlers.WithTokenTracker(tokenTracker),
 	)
 
 	if checkpoint != "" {
@@ -306,6 +307,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		handlers.WithPipelineEventHandler(pipelineCombo),
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
+		handlers.WithTokenTracker(tokenTracker),
 	)
 
 	var engineOpts []pipeline.EngineOption

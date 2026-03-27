@@ -7,6 +7,7 @@ import (
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -32,6 +33,7 @@ type registryConfig struct {
 	pipelineEvents pipeline.PipelineEventHandler
 	subgraphs      map[string]*pipeline.Graph
 	defaultBackend string
+	tokenTracker   *llm.TokenTracker
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -97,6 +99,13 @@ func WithPipelineEventHandler(handler pipeline.PipelineEventHandler) RegistryOpt
 func WithDefaultBackend(name string) RegistryOption {
 	return func(c *registryConfig) {
 		c.defaultBackend = name
+	}
+}
+
+// WithTokenTracker provides a token tracker for backends that bypass the LLM client.
+func WithTokenTracker(tracker *llm.TokenTracker) RegistryOption {
+	return func(c *registryConfig) {
+		c.tokenTracker = tracker
 	}
 }
 
@@ -174,6 +183,7 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 		handler.eventHandler = cfg.agentEvents
 		handler.nativeBackend = NewNativeBackend(cfg.llmClient, cfg.execEnv)
 		handler.defaultBackendName = cfg.defaultBackend
+		handler.tokenTracker = cfg.tokenTracker
 		registry.Register(handler)
 	} else if cfg.codergenFunc != nil {
 		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})

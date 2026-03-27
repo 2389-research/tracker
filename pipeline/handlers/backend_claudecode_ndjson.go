@@ -41,7 +41,8 @@ type ndjsonContent struct {
 	Text      string          `json:"text,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
+	ID        string          `json:"id,omitempty"`        // tool_use ID (assistant messages)
+	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_use ID (user/tool_result messages)
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
 }
@@ -149,7 +150,12 @@ func parseAssistantContent(content []ndjsonContent, now time.Time, state *runSta
 				Text:      c.Text,
 			})
 		case "tool_use":
-			state.toolUseIDs[c.ToolUseID] = c.Name
+			// Claude Code uses "id" for tool_use blocks in assistant messages.
+			toolID := c.ID
+			if toolID == "" {
+				toolID = c.ToolUseID // fallback
+			}
+			state.toolUseIDs[toolID] = c.Name
 			events = append(events, agent.Event{
 				Type:      agent.EventToolCallStart,
 				Timestamp: now,
