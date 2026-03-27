@@ -304,7 +304,10 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
-	if strings.TrimSpace(responseText) == "" && sessResult.TotalToolCalls() == 0 {
+	// Guard against truly empty responses. A session with turns > 0 or tool
+	// calls > 0 did real work even if it produced no text output (common with
+	// the claude-code backend where agents use tools without narrating).
+	if strings.TrimSpace(responseText) == "" && sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0 {
 		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
 			ContextUpdates: map[string]string{
