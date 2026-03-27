@@ -6,7 +6,7 @@
   <title>Built-in Workflows — Tracker</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#431407', primaryTextColor: '#fff7ed', primaryBorderColor: '#fb923c', lineColor: '#a8a29e', secondaryColor: '#292524', tertiaryColor: '#1c1917', background: 'transparent', mainBkg: '#431407', nodeBorder: '#fb923c', clusterBkg: '#1c191766', clusterBorder: '#fb923c44', titleColor: '#fdba74', edgeLabelBackground: '#292524', nodeTextColor: '#fff7ed', actorTextColor: '#fff7ed', signalTextColor: '#fff7ed', labelTextColor: '#fde68a' }});</script>
+  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#fff7ed', primaryTextColor: '#1c1917', primaryBorderColor: '#ea580c', lineColor: '#a8a29e', secondaryColor: '#ffedd5', tertiaryColor: '#fef7f0', background: 'transparent', mainBkg: '#fff7ed', nodeBorder: '#ea580c', clusterBkg: '#ffedd566', clusterBorder: '#ea580c44', titleColor: '#9a3412', edgeLabelBackground: '#fef7f0', nodeTextColor: '#1c1917', actorTextColor: '#1c1917', signalTextColor: '#1c1917', labelTextColor: '#9a3412' }});</script>
 </head>
 <body>
 
@@ -20,6 +20,7 @@
     <li><a href="workflows.html" class="active">Workflows</a></li>
     <li><a href="architecture.html">Architecture</a></li>
     <li><a href="cli.html">CLI</a></li>
+    <li><a href="changelog.html">Changelog</a></li>
     <li><a href="https://github.com/2389-research/tracker" target="_blank">GitHub</a></li>
   </ul>
 </nav>
@@ -108,6 +109,14 @@ graph TB
       <div class="glass glass-sm">
         <h4>Three-Model Cross-Review</h4>
         <p>Claude, Codex, and Gemini independently review the complete implementation. Reviews are synthesized to find consensus vs disputed findings.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Defensive Shell Scripts</h4>
+        <p>Tool nodes never <code>eval</code> LLM-generated content. Milestone headers are matched flexibly (handles <code>##</code>, <code>###</code>, with or without colons). Empty-file guards fail loudly. Known-failures strips comments before building patterns.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Autopilot Compatible</h4>
+        <p>Run with <code>--autopilot mid</code> for fully autonomous execution. All human gates (ApprovePlan, EscalateMilestone, EscalateReview) have default edges and descriptive prompts that the LLM judge can reason about.</p>
       </div>
     </div>
 
