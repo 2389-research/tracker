@@ -16,6 +16,21 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+)
+
+// Maximum sizes to prevent resource exhaustion from malicious/corrupted releases.
+const (
+	maxTarballSize   = 500 << 20 // 500 MB
+	maxBinarySize    = 200 << 20 // 200 MB
+	maxChecksumsSize = 1 << 20   // 1 MB
+)
+
+// HTTP clients for update operations. The API client has a short timeout
+// (for metadata requests), the download client has a longer one (for binaries).
+var (
+	updateAPIClient = &http.Client{Timeout: 30 * time.Second}
+	updateDLClient  = &http.Client{Timeout: 5 * time.Minute}
 )
 
 // githubRelease represents the relevant fields from GitHub's release API.
@@ -29,8 +44,11 @@ type githubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-func executeUpdate(checkOnly bool) error {
+func executeUpdate() error {
 	current := version
+	if current == "dev" {
+		return fmt.Errorf("cannot self-update a dev build; install a release version first")
+	}
 
 	fmt.Printf("Current version: %s\n", current)
 	fmt.Println("Checking for updates...")
@@ -41,17 +59,12 @@ func executeUpdate(checkOnly bool) error {
 	}
 
 	latest := release.TagName
-	if latest == current || latest == "v"+current {
+	if versionsEqual(current, latest) {
 		fmt.Printf("Already up to date: %s\n", current)
 		return nil
 	}
 
 	fmt.Printf("Update available: %s → %s\n", current, latest)
-
-	if checkOnly {
-		fmt.Println("Run `tracker update` to install.")
-		return nil
-	}
 
 	method := detectInstallMethod()
 	switch method {
@@ -61,23 +74,42 @@ func executeUpdate(checkOnly bool) error {
 		return nil
 	case "go-install":
 		fmt.Printf("Run: go install github.com/2389-research/tracker/cmd/tracker@%s\n", latest)
-		fmt.Println("Or use --force to self-replace the binary directly.")
 		return nil
+	case "unknown":
+		return fmt.Errorf("could not determine binary location; download manually from GitHub releases")
 	}
 
 	return selfReplace(release)
 }
 
+// versionsEqual compares two version strings, ignoring the optional "v" prefix.
+func versionsEqual(a, b string) bool {
+	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
+}
+
 // fetchLatestRelease queries the GitHub API for the latest release.
 func fetchLatestRelease() (*githubRelease, error) {
-	resp, err := http.Get("https://api.github.com/repos/2389-research/tracker/releases/latest")
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/2389-research/tracker/releases/latest", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "tracker/"+version)
+
+	resp, err := updateAPIClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	switch resp.StatusCode {
+	case 200:
+		// ok
+	case 403:
+		return nil, fmt.Errorf("GitHub API rate limited (HTTP 403); try again later or set GITHUB_TOKEN")
+	case 404:
+		return nil, fmt.Errorf("GitHub release not found (HTTP 404); check network/proxy settings")
+	default:
+		return nil, fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
 	}
 
 	var release githubRelease
@@ -91,23 +123,27 @@ func fetchLatestRelease() (*githubRelease, error) {
 func detectInstallMethod() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return "binary"
+		return "unknown"
 	}
 	resolved, err := filepath.EvalSymlinks(exe)
 	if err != nil {
 		resolved = exe
 	}
+	return classifyInstallPath(resolved, os.Getenv("GOBIN"), os.Getenv("GOPATH"))
+}
 
-	// Homebrew detection
-	if strings.Contains(resolved, "/Cellar/") || strings.Contains(resolved, "/homebrew/") {
+// classifyInstallPath determines install method from the resolved binary path.
+func classifyInstallPath(resolved, gobin, gopath string) string {
+	// Homebrew detection — match known Homebrew prefixes
+	if strings.Contains(resolved, "/Cellar/") || strings.HasPrefix(resolved, "/opt/homebrew/") {
 		return "homebrew"
 	}
 
 	// go install detection
-	if gobin := os.Getenv("GOBIN"); gobin != "" && strings.HasPrefix(resolved, gobin) {
+	if gobin != "" && strings.HasPrefix(resolved, gobin) {
 		return "go-install"
 	}
-	if gopath := os.Getenv("GOPATH"); gopath != "" && strings.Contains(resolved, filepath.Join(gopath, "bin")) {
+	if gopath != "" && strings.Contains(resolved, filepath.Join(gopath, "bin")) {
 		return "go-install"
 	}
 	// Default GOPATH
@@ -139,9 +175,12 @@ func selfReplace(release *githubRelease) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpBin)
 
-	return atomicSwap(exe, tmpBin, release.TagName)
+	err = atomicSwap(exe, tmpBin, release.TagName)
+	if err != nil {
+		os.Remove(tmpBin) // clean up on swap failure
+	}
+	return err
 }
 
 // downloadAndPrepare downloads, verifies, extracts, and tests the new binary.
@@ -165,6 +204,8 @@ func downloadAndPrepare(release *githubRelease, dir string) (string, error) {
 			return "", fmt.Errorf("checksum: %w", err)
 		}
 		fmt.Println("OK")
+	} else {
+		fmt.Println("Warning: no checksums.txt in release — skipping integrity verification")
 	}
 
 	tmpBin, err := extractBinaryFromTar(tmpTar, dir)
@@ -208,15 +249,19 @@ func findAsset(release *githubRelease) (name, url, checksumsURL string) {
 // atomicSwap replaces the current binary with the new one, keeping a .bak.
 func atomicSwap(exe, tmpBin, tagName string) error {
 	bakPath := exe + ".bak"
-	os.Remove(bakPath)
+	if err := os.Remove(bakPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove old backup %s: %w", bakPath, err)
+	}
 
 	if err := os.Rename(exe, bakPath); err != nil {
 		return fmt.Errorf("backup current binary: %w", err)
 	}
 
 	if err := os.Rename(tmpBin, exe); err != nil {
-		os.Rename(bakPath, exe) // rollback
-		return fmt.Errorf("install new binary: %w", err)
+		if rbErr := os.Rename(bakPath, exe); rbErr != nil {
+			return fmt.Errorf("install new binary: %w\nROLLBACK ALSO FAILED: %v\nYour previous binary is at: %s", err, rbErr, bakPath)
+		}
+		return fmt.Errorf("install new binary (rolled back): %w", err)
 	}
 
 	fmt.Printf("Updated to %s\n", tagName)
@@ -238,7 +283,13 @@ func checkWritePermission(dir string) error {
 
 // downloadToTemp downloads a URL to a temp file in the given directory.
 func downloadToTemp(dir, url string) (string, error) {
-	resp, err := http.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "tracker/"+version)
+
+	resp, err := updateDLClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -254,22 +305,39 @@ func downloadToTemp(dir, url string) (string, error) {
 	}
 	defer f.Close()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	n, err := io.Copy(f, io.LimitReader(resp.Body, maxTarballSize+1))
+	if err != nil {
 		os.Remove(f.Name())
 		return "", err
+	}
+	if n > maxTarballSize {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("download too large (%d bytes, max %d)", n, maxTarballSize)
 	}
 	return f.Name(), nil
 }
 
 // verifyChecksum downloads checksums.txt and verifies the file's SHA256.
+// Note: checksums are fetched from the same GitHub release as the binary.
+// This guards against download corruption, not supply chain compromise.
 func verifyChecksum(filePath, assetName, checksumsURL string) error {
-	resp, err := http.Get(checksumsURL)
+	req, err := http.NewRequest("GET", checksumsURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "tracker/"+version)
+
+	resp, err := updateDLClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("fetch checksums: HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsSize))
 	if err != nil {
 		return err
 	}
@@ -307,6 +375,7 @@ func verifyChecksum(filePath, assetName, checksumsURL string) error {
 }
 
 // extractBinaryFromTar extracts the "tracker" binary from a .tar.gz file.
+// Output path is hardcoded (not derived from tar entry names) to prevent path traversal.
 func extractBinaryFromTar(tarPath, destDir string) (string, error) {
 	f, err := os.Open(tarPath)
 	if err != nil {
@@ -330,7 +399,9 @@ func extractBinaryFromTar(tarPath, destDir string) (string, error) {
 			return "", err
 		}
 
-		// Look for the tracker binary (may be at root or in a subdirectory)
+		// Look for the tracker binary (may be at root or in a subdirectory).
+		// We use filepath.Base to ignore directory components — the output
+		// path is always destDir/.tracker-new regardless of archive layout.
 		base := filepath.Base(hdr.Name)
 		if base == "tracker" && hdr.Typeflag == tar.TypeReg {
 			tmpBin := filepath.Join(destDir, ".tracker-new")
@@ -338,12 +409,17 @@ func extractBinaryFromTar(tarPath, destDir string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
+			n, err := io.Copy(out, io.LimitReader(tr, maxBinarySize+1))
+			if err != nil {
 				out.Close()
 				os.Remove(tmpBin)
 				return "", err
 			}
 			out.Close()
+			if n > maxBinarySize {
+				os.Remove(tmpBin)
+				return "", fmt.Errorf("extracted binary too large (%d bytes, max %d)", n, maxBinarySize)
+			}
 			return tmpBin, nil
 		}
 	}

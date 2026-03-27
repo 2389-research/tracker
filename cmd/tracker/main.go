@@ -93,6 +93,12 @@ func main() {
 	}
 
 	err = executeCommand(cfg, commandDeps{})
+
+	// Print update hint after command completes (avoids racing with TUI/output).
+	if cfg.mode == modeRun {
+		printUpdateHint()
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
