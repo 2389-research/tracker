@@ -229,6 +229,22 @@ graph TB
     </div>
   </section>
 
+  <!-- ═══ Backend Agnostic ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <h3>Backend Agnostic <span class="badge">v0.12.0</span></h3>
+    <p>
+      All three built-in workflows work with both the <strong>native</strong> and <strong>claude-code</strong> backends.
+      No changes needed &mdash; just add <code>--backend claude-code</code> to give agents file editing, terminal access,
+      and MCP tool servers. Mix backends per-node by adding <code>backend: claude-code</code> to individual agent definitions
+      in your customized <code>.dip</code> file.
+    </p>
+    <pre data-lang="bash"><code><span class="comment"># Same pipeline, supercharged agents</span>
+tracker <span class="flag">--backend</span> claude-code build_product
+
+<span class="comment"># Or combine with autopilot for fully autonomous + file editing</span>
+tracker <span class="flag">--backend</span> claude-code <span class="flag">--autopilot</span> mid build_product</code></pre>
+  </section>
+
   <div class="divider"></div>
 
   <!-- ═══ Testing ═══ -->

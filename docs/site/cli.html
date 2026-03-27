@@ -156,6 +156,7 @@
           <tr><td><code>--verbose</code></td><td>Show raw provider stream events</td><td>Off</td></tr>
           <tr><td><code>--autopilot</code></td><td>LLM judge persona: <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code></td><td>Off (human gates)</td></tr>
           <tr><td><code>--auto-approve</code></td><td>Deterministic auto-approve (no LLM)</td><td>Off</td></tr>
+          <tr><td><code>--backend</code></td><td>Agent backend: <code>native</code> or <code>claude-code</code> <span class="badge">v0.12.0</span></td><td><code>native</code></td></tr>
           <tr><td><code>--version</code></td><td>Show version info</td><td>&mdash;</td></tr>
         </tbody>
       </table>
@@ -302,6 +303,81 @@ tracker <span class="flag">--auto-approve</span> build_product</code></pre>
       <h4>Design Note</h4>
       <p>The autopilot reuses the pipeline's existing LLM client &mdash; no separate configuration. It defaults to Sonnet for cheap, fast gate decisions. All decisions are logged to the activity log for post-hoc review via <code>tracker diagnose</code>.</p>
     </div>
+  </section>
+
+  <!-- ═══ Backends ═══ -->
+  <section class="glass">
+    <h2>Agent <span class="accent">backends</span> <span class="badge">v0.12.0</span></h2>
+    <p class="lead">
+      Your agents already work great. Claude Code gives them superpowers when they need it &mdash;
+      file editing, terminal access, and MCP tool servers, with zero changes to your pipeline logic.
+    </p>
+
+    <h3 style="margin-top: 1.5rem;">Side-by-Side Comparison</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th></th><th>Native (default)</th><th>Claude Code</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>How it works</strong></td><td>Wraps <code>agent.Session</code> &mdash; tracker's built-in turn loop</td><td>Spawns <code>claude</code> CLI as a subprocess, parses NDJSON output</td></tr>
+          <tr><td><strong>Providers</strong></td><td>Anthropic, OpenAI, Gemini</td><td>Anthropic (via Claude CLI)</td></tr>
+          <tr><td><strong>Tool access</strong></td><td>Tracker's registered tool set</td><td>File editing, terminal, MCP servers</td></tr>
+          <tr><td><strong>Best for</strong></td><td>Standard LLM calls, multi-provider pipelines, cross-review</td><td>Implementation nodes that need to edit files and run commands</td></tr>
+          <tr><td><strong>Environment</strong></td><td>Full process environment</td><td>Minimal allowlist + <code>SSH_AUTH_SOCK</code></td></tr>
+          <tr><td><strong>Error mapping</strong></td><td>Provider HTTP status + SSE events</td><td>Claude CLI exit codes &rarr; pipeline outcomes</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top: 1.5rem;">When to Use Which</h3>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Use Native When</h4>
+        <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+          <li>Your agents make standard LLM calls (analysis, planning, review)</li>
+          <li>You need multi-provider pipelines (Claude + GPT + Gemini)</li>
+          <li>Cross-review nodes that compare outputs from different models</li>
+          <li>You want the fastest possible execution</li>
+        </ul>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Use Claude Code When</h4>
+        <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+          <li>Agents need to <strong>edit files</strong> on disk (implementation, fix nodes)</li>
+          <li>Agents need <strong>terminal access</strong> (run tests, build commands)</li>
+          <li>You want <strong>MCP tool servers</strong> available to agents</li>
+          <li>You want Claude's built-in code intelligence</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 1.5rem;">Usage</h3>
+    <pre data-lang="bash"><code><span class="comment"># Global: every agent node uses Claude Code</span>
+tracker <span class="flag">--backend</span> claude-code build_product
+
+<span class="comment"># The killer combo: autonomous + Claude Code</span>
+tracker <span class="flag">--backend</span> claude-code <span class="flag">--autopilot</span> mid build_product
+
+<span class="comment"># Native is the default — no flag needed</span>
+tracker build_product</code></pre>
+
+    <h3 style="margin-top: 1.5rem;">Per-Node Selection in <code>.dip</code></h3>
+    <p>Mix backends within a single pipeline. Use Claude Code for implementation, native for everything else.</p>
+    <pre data-lang="dip"><code><span class="keyword">agent</span> Implement
+  label: <span class="string">"Build the feature"</span>
+  model: claude-sonnet-4-6
+  backend: claude-code
+  prompt: |
+    Implement milestone ${ctx.current_milestone} following SPEC.md.
+
+<span class="keyword">agent</span> Review
+  label: <span class="string">"Review the implementation"</span>
+  model: gpt-5.4
+  provider: openai
+  <span class="comment"># No backend attr — uses native (default)</span>
+  prompt: |
+    Review the implementation for correctness and style.</code></pre>
   </section>
 
   <!-- ═══ Troubleshooting ═══ -->

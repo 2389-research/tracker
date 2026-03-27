@@ -23,6 +23,9 @@ tracker build_product.dip
 # Run fully autonomous with an LLM judge
 tracker --autopilot mid build_product
 
+# Use Claude Code backend for file editing + terminal (coming v0.12.0)
+tracker --backend claude-code build_product
+
 # Check your setup (API keys, dippin binary, working directory)
 tracker doctor
 
@@ -353,6 +356,7 @@ tracker version                  Show version information
 - `--json` — stream events as NDJSON to stdout
 - `--no-tui` — disable TUI dashboard, use plain console
 - `--verbose` — show raw provider stream events
+- `--backend` — agent backend: `native` (default) or `claude-code` (coming v0.12.0)
 
 ## Development
 
