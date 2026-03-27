@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Changelog — Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-brand">
+    <div class="logo-icon">T</div>
+    <span>tracker</span> <span class="accent">by 2389.ai</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="index.html">Home</a></li>
+    <li><a href="workflows.html">Workflows</a></li>
+    <li><a href="architecture.html">Architecture</a></li>
+    <li><a href="cli.html">CLI</a></li>
+    <li><a href="changelog.html" class="active">Changelog</a></li>
+    <li><a href="https://github.com/2389-research/tracker" target="_blank">GitHub</a></li>
+  </ul>
+</nav>
+
+<main>
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>Changelog</h1>
+    <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">GitHub Releases</a></p>
+  </section>
+
+  <!-- ═══ v0.11.1 ═══ -->
+  <section class="glass">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.11.1</h2>
+      <span class="badge">2026-03-27</span>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>Provider errors now hard-fail per CLAUDE.md (only parse failures retry)</li>
+      <li>AskFreeform logs warning instead of silently swallowing errors</li>
+      <li>Default model picks cheapest from configured provider (not hardcoded to Anthropic)</li>
+      <li>Autopilot forces <code>--no-tui</code></li>
+      <li><code>matchChoice</code> uses longest-match to prevent "a" matching before "abandon"</li>
+      <li><code>decide()</code> returns errors instead of silently falling back</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.11.0 ═══ -->
+  <section class="glass">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.11.0</h2>
+      <span class="badge">2026-03-26</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>--autopilot &lt;persona&gt;</code></strong>: Replace human gates with LLM-backed decisions (lax / mid / hard / mentor)</li>
+      <li><strong><code>--auto-approve</code></strong>: Deterministic auto-approval for CI and testing</li>
+      <li>dippin-lang upgraded to v0.10.0</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.10.x ═══ -->
+  <section class="glass">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.10.x</h2>
+      <span class="badge">2026-03-26</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Embedded built-in workflows</strong>: 3 flagship pipelines in the binary (<code>tracker build_product</code>)</li>
+      <li><strong><code>tracker workflows</code></strong> and <strong><code>tracker init</code></strong> commands</li>
+      <li><strong>Bare name resolution</strong>: filesystem &rarr; embedded &rarr; error</li>
+      <li><strong>Deterministic failure detection</strong> in <code>tracker diagnose</code></li>
+      <li>23 dippin simulation tests for build_product.dip</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>Split <code>EscalateToHuman</code> into <code>EscalateMilestone</code> + <code>EscalateReview</code></li>
+      <li>Escalation gates have <code>prompt:</code> blocks with rich context</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>TestMilestone early-exit bug (attempt counter fired before tests)</li>
+      <li><code>ContextKeySuggestedNextNodes</code> constant (6 string literals eliminated)</li>
+      <li>Complexity violations in diagnose.go</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.9.x ═══ -->
+  <section class="glass">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.9.x</h2>
+      <span class="badge">2026-03-25</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker diagnose</code></strong>: Deep failure analysis with tool output, timing, suggestions</li>
+      <li><strong><code>tracker doctor</code></strong>: Preflight health check</li>
+      <li>Provider status in <code>tracker version</code></li>
+      <li>Freeform "other" option in review hybrid gates</li>
+      <li>Runtime error surfacing in TUI activity log</li>
+      <li>Subgraph loading with cycle detection</li>
+      <li>Hybrid radio+freeform gates</li>
+      <li>Decision audit trail in activity.jsonl</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.8.0 ═══ -->
+  <section class="glass">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.8.0</h2>
+      <span class="badge">2026-03-25</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+      <li>Decision audit trail (edge selection, condition evaluation, node outcomes)</li>
+      <li>Checkpoint resume with edge replay</li>
+      <li>Per-node working directory for git worktree isolation</li>
+      <li>Conditional edge evaluation with <code>ctx.</code> namespace</li>
+    </ul>
+  </section>
+
+  <div class="glass" style="text-align: center; padding: 2rem;">
+    <p>Full changelog: <a href="https://github.com/2389-research/tracker/blob/main/CHANGELOG.md">CHANGELOG.md on GitHub</a></p>
+  </div>
+
+</main>
+
+<footer class="footer">
+  <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
+</footer>
+
+</body>
+</html>
