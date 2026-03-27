@@ -105,6 +105,8 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 			return h.ensureClaudeCodeBackend()
 		case "native", "codergen":
 			return h.ensureNativeBackend(), nil
+		default:
+			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code)", backend, node.ID)
 		}
 	}
 	// Check global --backend flag

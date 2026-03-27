@@ -221,11 +221,17 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 		attrs["goal_gate"] = "true"
 	}
 
-	// Pass through backend-selection and Claude Code-specific attrs.
-	// NOTE: cfg.Params is a placeholder for a future field on ir.AgentConfig.
-	// When dippin-lang upstream adds Params map[string]string to AgentConfig,
-	// replace nil below with cfg.Params.
+	// PLACEHOLDER: Backend attrs (backend, mcp_servers, permission_mode, etc.)
+	// cannot be passed through from .dip files yet because ir.AgentConfig does
+	// not have a Params map. The call below is intentionally a no-op (nil map).
+	// When dippin-lang adds Params map[string]string to AgentConfig, replace
+	// nil with cfg.Params. Until then, backend selection must use --backend
+	// flag or node-level attrs set via DOT format.
 	extractAgentBackendAttrs(nil, attrs)
+
+	// Warn if the prompt or other fields contain backend-related keywords that
+	// a user might expect to be forwarded but currently cannot be.
+	warnUnpassableBackendKeys(cfg, attrs)
 }
 
 // extractAgentBackendAttrs maps backend-selection and Claude-Code-specific keys
@@ -255,6 +261,20 @@ func extractAgentBackendAttrs(params map[string]string, attrs map[string]string)
 			attrs[k] = v
 		}
 	}
+}
+
+// warnUnpassableBackendKeys logs a warning if a .dip file appears to contain
+// backend-related keys that cannot be passed through the current IR. This helps
+// users discover that they need --backend flag or DOT-format attrs instead.
+//
+// Currently ir.AgentConfig has no Params field, so this is a no-op placeholder.
+// When dippin-lang adds Params, this function should inspect cfg.Params for
+// backend keys and log warnings for any that are present but not forwarded.
+func warnUnpassableBackendKeys(_ ir.AgentConfig, _ map[string]string) {
+	// No-op until ir.AgentConfig gains a Params field.
+	// When it does, check for keys: backend, mcp_servers, allowed_tools,
+	// disallowed_tools, max_budget_usd, permission_mode and warn:
+	//   log.Printf("[dippin-adapter] warning: .dip file contains backend key %q but IR passthrough is not yet supported", k)
 }
 
 func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {

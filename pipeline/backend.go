@@ -47,9 +47,11 @@ const (
 )
 
 // Valid returns true if the permission mode is a recognized value.
+// Empty string is not valid — callers should default to PermissionFullAuto
+// before validation (see buildClaudeCodeConfig).
 func (m PermissionMode) Valid() bool {
 	switch m {
-	case PermissionPlan, PermissionAutoEdit, PermissionFullAuto, "":
+	case PermissionPlan, PermissionAutoEdit, PermissionFullAuto:
 		return true
 	}
 	return false

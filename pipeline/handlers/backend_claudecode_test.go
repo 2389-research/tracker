@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/agent"
@@ -34,6 +35,8 @@ func TestClassifyError(t *testing.T) {
 		{"first-rate failure should not match rate limit", "first-rate failure in processing", 1, pipeline.OutcomeFail},
 		{"case insensitive auth", "AUTHENTICATION ERROR", 1, pipeline.OutcomeFail},
 		{"case insensitive rate", "RATE LIMIT HIT", 1, pipeline.OutcomeRetry},
+		{"unthrottled should not match", "service is unthrottled now", 1, pipeline.OutcomeFail},
+		{"throttling matches", "request throttling in effect", 1, pipeline.OutcomeRetry},
 	}
 
 	for _, tt := range tests {
@@ -395,7 +398,10 @@ func TestBuildMCPServersJSON(t *testing.T) {
 		{Name: "git", Command: "uvx", Args: []string{"mcp-git"}},
 	}
 
-	result := buildMCPServersJSON(servers)
+	result, err := buildMCPServersJSON(servers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Verify it's valid JSON
 	var parsed map[string]any
@@ -449,6 +455,208 @@ func TestBuildResultWithLastResult(t *testing.T) {
 	result := buildResult(state)
 	if result.Turns != 3 {
 		t.Errorf("expected 3 turns, got %d", result.Turns)
+	}
+}
+
+func TestBuildEnvIncludesSSH(t *testing.T) {
+	// Set SSH vars for this test.
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/ssh-test.sock")
+	t.Setenv("SSH_AGENT_PID", "12345")
+
+	env := buildEnv()
+
+	hasAuthSock := false
+	hasAgentPID := false
+	for _, e := range env {
+		if e == "SSH_AUTH_SOCK=/tmp/ssh-test.sock" {
+			hasAuthSock = true
+		}
+		if e == "SSH_AGENT_PID=12345" {
+			hasAgentPID = true
+		}
+	}
+	if !hasAuthSock {
+		t.Error("expected SSH_AUTH_SOCK in env")
+	}
+	if !hasAgentPID {
+		t.Error("expected SSH_AGENT_PID in env")
+	}
+}
+
+func TestContainsThrottle(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"request throttled", true},
+		{"throttling in effect", true},
+		{"service is unthrottled", false},
+		{"no issues here", false},
+		{"THROTTLED", false}, // containsThrottle expects lowered input
+	}
+	for _, tt := range tests {
+		if got := containsThrottle(tt.input); got != tt.want {
+			t.Errorf("containsThrottle(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestSelectBackendUnknown(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"backend": "unknown-backend"},
+	}
+	_, err := h.selectBackend(node)
+	if err == nil {
+		t.Fatal("expected error for unknown backend")
+	}
+	if got := err.Error(); !strings.Contains(got, "unknown backend") {
+		t.Errorf("expected 'unknown backend' in error, got: %s", got)
+	}
+}
+
+func TestSelectBackendNativeDefault(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{},
+	}
+	backend, err := h.selectBackend(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := backend.(*NativeBackend); !ok {
+		t.Errorf("expected NativeBackend, got %T", backend)
+	}
+}
+
+func TestSelectBackendNativeExplicit(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"backend": "native"},
+	}
+	backend, err := h.selectBackend(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := backend.(*NativeBackend); !ok {
+		t.Errorf("expected NativeBackend, got %T", backend)
+	}
+}
+
+func TestSelectBackendCodergenAlias(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"backend": "codergen"},
+	}
+	backend, err := h.selectBackend(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := backend.(*NativeBackend); !ok {
+		t.Errorf("expected NativeBackend, got %T", backend)
+	}
+}
+
+func TestBuildClaudeCodeConfig(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID: "test",
+		Attrs: map[string]string{
+			"max_budget_usd":  "2.50",
+			"permission_mode": "plan",
+			"allowed_tools":   "Read,Write",
+		},
+	}
+	cfg, err := h.buildClaudeCodeConfig(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxBudgetUSD != 2.50 {
+		t.Errorf("expected budget 2.50, got %f", cfg.MaxBudgetUSD)
+	}
+	if cfg.PermissionMode != pipeline.PermissionPlan {
+		t.Errorf("expected plan mode, got %q", cfg.PermissionMode)
+	}
+	if len(cfg.AllowedTools) != 2 {
+		t.Errorf("expected 2 allowed tools, got %d", len(cfg.AllowedTools))
+	}
+}
+
+func TestBuildClaudeCodeConfigDefaults(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{},
+	}
+	cfg, err := h.buildClaudeCodeConfig(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PermissionMode != pipeline.PermissionFullAuto {
+		t.Errorf("expected fullAuto default, got %q", cfg.PermissionMode)
+	}
+}
+
+func TestBuildClaudeCodeConfigInvalidBudget(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"max_budget_usd": "not-a-number"},
+	}
+	_, err := h.buildClaudeCodeConfig(node)
+	if err == nil {
+		t.Fatal("expected error for invalid budget")
+	}
+}
+
+func TestBuildClaudeCodeConfigInvalidPermission(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{"permission_mode": "yolo"},
+	}
+	_, err := h.buildClaudeCodeConfig(node)
+	if err == nil {
+		t.Fatal("expected error for invalid permission mode")
+	}
+}
+
+func TestBuildClaudeCodeConfigMCPServers(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID: "test",
+		Attrs: map[string]string{
+			"mcp_servers": "pg=npx @mcp/postgres connstr",
+		},
+	}
+	cfg, err := h.buildClaudeCodeConfig(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.MCPServers) != 1 {
+		t.Fatalf("expected 1 MCP server, got %d", len(cfg.MCPServers))
+	}
+	if cfg.MCPServers[0].Name != "pg" {
+		t.Errorf("expected server name 'pg', got %q", cfg.MCPServers[0].Name)
+	}
+}
+
+func TestBuildClaudeCodeConfigBothToolLists(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID: "test",
+		Attrs: map[string]string{
+			"allowed_tools":    "Read",
+			"disallowed_tools": "Write",
+		},
+	}
+	_, err := h.buildClaudeCodeConfig(node)
+	if err == nil {
+		t.Fatal("expected error when both allowed and disallowed tools are set")
 	}
 }
 

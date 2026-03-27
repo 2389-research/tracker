@@ -203,7 +203,11 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	}
 
 	if len(ccCfg.MCPServers) > 0 {
-		args = append(args, "--mcpServers", buildMCPServersJSON(ccCfg.MCPServers))
+		mcpJSON, err := buildMCPServersJSON(ccCfg.MCPServers)
+		if err != nil {
+			return nil, fmt.Errorf("mcp_servers: %w", err)
+		}
+		args = append(args, "--mcpServers", mcpJSON)
 	}
 
 	return args, nil
@@ -223,11 +227,11 @@ func buildEnv() []string {
 		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+token)
 	}
 
-	// Pass through env vars needed for basic operation. Credentials
-	// (SSH_AUTH_SOCK) and network config (proxy vars) are intentionally
-	// excluded — pass them via node-level env attrs if needed.
+	// Pass through env vars needed for basic operation and SSH agent
+	// forwarding (required for git operations over SSH).
 	for _, name := range []string{
 		"USER", "TMPDIR", "LANG",
+		"SSH_AUTH_SOCK", "SSH_AGENT_PID",
 	} {
 		if val := os.Getenv(name); val != "" {
 			env = append(env, name+"="+val)
@@ -400,7 +404,7 @@ func classifyError(stderr string, exitCode int) string {
 
 	case strings.Contains(lower, "rate limit") ||
 		strings.Contains(lower, "429") ||
-		strings.Contains(lower, "throttl"):
+		containsThrottle(lower):
 		return pipeline.OutcomeRetry
 
 	case strings.Contains(lower, "budget") ||
@@ -419,9 +423,27 @@ func classifyError(stderr string, exitCode int) string {
 	return pipeline.OutcomeFail
 }
 
+// containsThrottle returns true if lower contains "throttled" or "throttling"
+// but not when preceded by "un" (e.g. "unthrottled" is not a throttle error).
+func containsThrottle(lower string) bool {
+	for _, word := range []string{"throttled", "throttling"} {
+		idx := strings.Index(lower, word)
+		if idx < 0 {
+			continue
+		}
+		// Reject if preceded by "un" (e.g. "unthrottled").
+		if idx >= 2 && lower[idx-2:idx] == "un" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // buildMCPServersJSON converts MCPServerConfig slice to the JSON format expected
-// by claude CLI's --mcpServers flag.
-func buildMCPServersJSON(servers []pipeline.MCPServerConfig) string {
+// by claude CLI's --mcpServers flag. Returns an error if serialization fails
+// rather than falling back to empty JSON, so callers can surface the problem.
+func buildMCPServersJSON(servers []pipeline.MCPServerConfig) (string, error) {
 	type mcpEntry struct {
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
@@ -437,8 +459,7 @@ func buildMCPServersJSON(servers []pipeline.MCPServerConfig) string {
 
 	data, err := json.Marshal(m)
 	if err != nil {
-		log.Printf("[claude-code] warning: failed to marshal MCP servers: %v", err)
-		return "{}"
+		return "", fmt.Errorf("failed to marshal MCP servers to JSON: %w", err)
 	}
-	return string(data)
+	return string(data), nil
 }

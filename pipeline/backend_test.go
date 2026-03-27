@@ -14,9 +14,10 @@ func TestPermissionModeValidation(t *testing.T) {
 	if PermissionMode("bogus").Valid() {
 		t.Error("expected 'bogus' to be invalid")
 	}
-	// Empty string is valid (means "use default")
-	if !PermissionMode("").Valid() {
-		t.Error("expected empty string to be valid")
+	// Empty string is not valid — callers must explicitly set a mode
+	// (buildClaudeCodeConfig defaults to PermissionFullAuto).
+	if PermissionMode("").Valid() {
+		t.Error("expected empty string to be invalid")
 	}
 }
 
