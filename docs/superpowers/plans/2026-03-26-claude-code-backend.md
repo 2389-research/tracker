@@ -4,7 +4,7 @@
 
 **Goal:** Add an AgentBackend abstraction to tracker's pipeline engine, with a Claude Code backend that delegates agent nodes to the Claude Code CLI.
 
-**Architecture:** One handler (`codergen`), multiple backends. The `AgentBackend` interface emits `agent.Event` directly and returns `agent.SessionResult`. The Claude Code backend is a ~400 line internal package that spawns `claude` as a subprocess and parses NDJSON. No external SDK dependency.
+**Architecture:** One handler (`codergen`), multiple backends. The `AgentBackend` interface emits `agent.Event` directly and returns `agent.SessionResult`. The Claude Code backend is a ~400-line internal package that spawns `claude` as a subprocess and parses NDJSON. No external SDK dependency.
 
 **Tech Stack:** Go, exec.Command, json.Decoder, existing agent/pipeline packages
 
@@ -612,7 +612,7 @@ git commit -m "feat: claude-code backend complete — integration tested"
 
 ## Task Dependency Graph
 
-```
+```text
 Task 1 (interface + config types)
     ↓
 Task 2 (extract ResolvePrompt) ──→ Task 4 (refactor codergen)

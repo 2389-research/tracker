@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/2389-research/tracker/agent"
@@ -27,6 +28,9 @@ type CodergenHandler struct {
 	nativeBackend      pipeline.AgentBackend // always available
 	claudeCodeBackend  pipeline.AgentBackend // lazy-init on first claude-code request
 	defaultBackendName string                // from --backend flag, "" means native
+	nativeOnce         sync.Once
+	claudeOnce         sync.Once
+	claudeInitErr      error // cached error from lazy claude-code init
 }
 
 // NewCodergenHandler creates a CodergenHandler that will use the given LLM client
@@ -111,26 +115,27 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 }
 
 // ensureClaudeCodeBackend returns the claude-code backend, lazily creating it
-// on first use. Returns an error if the claude CLI is not installed.
+// on first use. Thread-safe via sync.Once for parallel node execution.
 func (h *CodergenHandler) ensureClaudeCodeBackend() (pipeline.AgentBackend, error) {
-	if h.claudeCodeBackend != nil {
-		return h.claudeCodeBackend, nil
-	}
-	b, err := NewClaudeCodeBackend()
-	if err != nil {
-		return nil, fmt.Errorf("claude-code backend: %w", err)
-	}
-	h.claudeCodeBackend = b
-	return b, nil
+	h.claudeOnce.Do(func() {
+		b, err := NewClaudeCodeBackend()
+		if err != nil {
+			h.claudeInitErr = fmt.Errorf("claude-code backend: %w", err)
+			return
+		}
+		h.claudeCodeBackend = b
+	})
+	return h.claudeCodeBackend, h.claudeInitErr
 }
 
 // ensureNativeBackend returns the native backend, lazily creating it if needed.
-// This handles both registry-constructed handlers (where nativeBackend is set)
-// and directly-constructed handlers in tests.
+// Thread-safe via sync.Once for parallel node execution.
 func (h *CodergenHandler) ensureNativeBackend() pipeline.AgentBackend {
-	if h.nativeBackend == nil {
-		h.nativeBackend = NewNativeBackend(h.client, h.env)
-	}
+	h.nativeOnce.Do(func() {
+		if h.nativeBackend == nil {
+			h.nativeBackend = NewNativeBackend(h.client, h.env)
+		}
+	})
 	return h.nativeBackend
 }
 
