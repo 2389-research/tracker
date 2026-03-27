@@ -239,30 +239,12 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 }
 
 // buildEnv constructs a minimal environment for the claude subprocess.
+// buildEnv returns the full parent environment. Claude Code needs access to
+// its config directory for auth tokens (Claude Max/OAuth), API keys, SSH agent,
+// and other system state. A minimal allowlist caused auth failures because
+// XDG_CONFIG_HOME and Claude's config path were stripped.
 func buildEnv() []string {
-	env := []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-		"TERM=" + os.Getenv("TERM"),
-	}
-	if key := os.Getenv("CLAUDE_API_KEY"); key != "" {
-		env = append(env, "CLAUDE_API_KEY="+key)
-	}
-	if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
-		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+token)
-	}
-
-	// Pass through env vars needed for basic operation and SSH agent
-	// forwarding (required for git operations over SSH).
-	for _, name := range []string{
-		"USER", "TMPDIR", "LANG",
-		"SSH_AUTH_SOCK", "SSH_AGENT_PID",
-	} {
-		if val := os.Getenv(name); val != "" {
-			env = append(env, name+"="+val)
-		}
-	}
-	return env
+	return os.Environ()
 }
 
 // NDJSON types, parseMessage, and storeResult are in backend_claudecode_ndjson.go
