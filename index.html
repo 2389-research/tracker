@@ -52,6 +52,9 @@ tracker workflows
 <span class="comment"># Run a pipeline by name — no file needed</span>
 tracker build_product
 
+<span class="comment"># Supercharge agents with Claude Code (coming v0.12.0)</span>
+tracker <span class="flag">--backend</span> claude-code build_product
+
 <span class="comment"># Check your LLM providers</span>
 tracker doctor</code></pre>
     <p>Three flagship pipelines are <strong>embedded in the binary</strong>. No cloning, no examples directory. <code>go install</code> and go.</p>
@@ -67,6 +70,10 @@ tracker doctor</code></pre>
       <div class="stat">
         <div class="number">3</div>
         <div class="label">LLM Providers</div>
+      </div>
+      <div class="stat">
+        <div class="number">2</div>
+        <div class="label">Agent Backends</div>
       </div>
       <div class="stat">
         <div class="number">8</div>
@@ -129,7 +136,7 @@ graph TB
   <div class="divider"></div>
 
   <!-- ═══ Features Grid ═══ -->
-  <h2 style="text-align:center; margin-bottom: 1.5rem;">Key <span class="accent">features</span></h2>
+  <h2 style="text-align:center; margin-bottom: 1.5rem;">11 key <span class="accent">features</span></h2>
   <div class="grid-3">
 
     <div class="glass feature-card">
@@ -190,6 +197,12 @@ graph TB
       <div class="icon">&#x1F680;</div>
       <h3>Autopilot Mode</h3>
       <p>Replace human gates with LLM judges. Four personas: <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code>. Run fully autonomous overnight or in CI.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F50C;</div>
+      <h3>Pluggable Backends</h3>
+      <p>Your agents already work great. Switch to <code>claude-code</code> when they need file editing, terminal access, and MCP tools. Per-node or global <code>--backend</code> flag.</p>
     </div>
 
   </div>

@@ -30,7 +30,22 @@
     <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">GitHub Releases</a></p>
   </section>
 
-  <!-- ═══ v0.11.1 ═══ -->
+  <!-- ═══ v0.12.0 preview ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.12.0</h2>
+      <span class="badge">coming soon</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Claude Code backend</strong>: Pluggable agent backend abstraction. <code>--backend claude-code</code> spawns the <code>claude</code> CLI as a subprocess and parses NDJSON output, giving agents file editing, terminal access, and MCP tool servers. Per-node via <code>backend: claude-code</code> in <code>.dip</code> files, or global via the CLI flag.</li>
+      <li><strong><code>AgentBackend</code> interface</strong>: Minimal contract in <code>pipeline/backend.go</code> &mdash; one method to execute a node and return an event stream. NativeBackend wraps <code>agent.Session</code> (existing behavior), ClaudeCodeBackend wraps the subprocess.</li>
+      <li><strong>Environment scoping</strong>: Claude Code backend passes a minimal environment allowlist with <code>SSH_AUTH_SOCK</code> for git operations.</li>
+      <li><strong>Exit code mapping</strong>: Claude CLI exit codes are classified into pipeline outcomes (success, fail, escalate).</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.11.2 ═══ -->
   <section class="glass">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
       <h2 style="margin: 0;">v0.11.2</h2>
