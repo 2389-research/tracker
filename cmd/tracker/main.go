@@ -37,6 +37,7 @@ const (
 	modeVersion   commandMode = "version"
 	modeWorkflows commandMode = "workflows"
 	modeInit      commandMode = "init"
+	modeUpdate    commandMode = "update"
 )
 
 var errUsage = errors.New("usage")
@@ -84,6 +85,11 @@ func main() {
 			os.Exit(1)
 		}
 		cfg.workdir = wd
+	}
+
+	// Non-blocking update check (24h cache, background goroutine)
+	if cfg.mode == modeRun {
+		maybeCheckForUpdate()
 	}
 
 	err = executeCommand(cfg, commandDeps{})

@@ -46,6 +46,8 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 		return executeWorkflows()
 	case modeInit:
 		return executeInit(cfg)
+	case modeUpdate:
+		return executeUpdate(false)
 	default:
 		return executeRun(cfg, deps)
 	}
