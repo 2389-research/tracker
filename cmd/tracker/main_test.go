@@ -14,16 +14,43 @@ import (
 )
 
 func TestChooseInterviewerReturnsBubbleteaWhenTerminal(t *testing.T) {
-	iv := chooseInterviewer(true)
+	iv := chooseInterviewer(true, runConfig{}, nil)
 	if _, ok := iv.(*tui.BubbleteaInterviewer); !ok {
 		t.Errorf("expected *tui.BubbleteaInterviewer when terminal, got %T", iv)
 	}
 }
 
 func TestChooseInterviewerReturnsConsoleWhenNotTerminal(t *testing.T) {
-	iv := chooseInterviewer(false)
+	iv := chooseInterviewer(false, runConfig{}, nil)
 	if _, ok := iv.(*handlers.ConsoleInterviewer); !ok {
 		t.Errorf("expected *handlers.ConsoleInterviewer when not terminal, got %T", iv)
+	}
+}
+
+func TestChooseInterviewerAutoApprove(t *testing.T) {
+	iv := chooseInterviewer(true, runConfig{autoApprove: true}, nil)
+	if _, ok := iv.(*handlers.AutoApproveFreeformInterviewer); !ok {
+		t.Errorf("expected *handlers.AutoApproveFreeformInterviewer, got %T", iv)
+	}
+}
+
+func TestParseFlagsAutopilot(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--autopilot", "hard", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.autopilot != "hard" {
+		t.Fatalf("autopilot = %q, want %q", cfg.autopilot, "hard")
+	}
+}
+
+func TestParseFlagsAutoApprove(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--auto-approve", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if !cfg.autoApprove {
+		t.Fatal("expected autoApprove to be true")
 	}
 }
 

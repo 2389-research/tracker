@@ -123,6 +123,8 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream events as newline-delimited JSON to stdout")
 	fs.StringVar(&cfg.format, "format", "", "Pipeline format override: dip (default) or dot")
+	fs.StringVar(&cfg.autopilot, "autopilot", "", "Replace human gates with LLM judge (lax/mid/hard/mentor)")
+	fs.BoolVar(&cfg.autoApprove, "auto-approve", false, "Auto-approve all human gates (no LLM, deterministic)")
 
 	// Go's flag package stops parsing at the first non-flag argument.
 	// To support flags in any order (e.g. "tracker pipeline.dot -c cp.json"),
@@ -174,5 +176,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --json                    Stream events as newline-delimited JSON to stdout\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
+	fmt.Fprintf(w, "  --autopilot <persona>     Replace human gates with LLM judge (lax/mid/hard/mentor)\n")
+	fmt.Fprintf(w, "  --auto-approve            Auto-approve all human gates (deterministic, no LLM)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

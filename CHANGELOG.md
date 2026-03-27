@@ -5,6 +5,18 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-03-26
+
+### Added
+
+- **`--autopilot <persona>`**: Replace all human gates with LLM-backed decisions. Four personas encode different risk tolerances:
+  - **lax**: Bias toward forward progress. Approves plans, marks done on escalation, accepts reviews.
+  - **mid**: Balanced engineering judgment. The default persona if none specified.
+  - **hard**: High quality bar. Pushes back on gaps, demands fixes, retries before accepting.
+  - **mentor**: Approves forward progress but writes detailed constructive feedback.
+- **`--auto-approve`**: Deterministic auto-approval of all human gates. No LLM calls — always picks the default or first option. For testing pipeline flow and CI.
+- Uses the pipeline's existing LLM client with low temperature (0.1) for consistent decisions. Structured JSON output with fallback-to-default on error.
+
 ## [0.10.3] - 2026-03-26
 
 ### Fixed

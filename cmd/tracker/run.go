@@ -24,6 +24,10 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+// activeRunConfig holds the current run configuration for autopilot support.
+// Set by executeRun before calling run/runTUI.
+var activeRunConfig runConfig
+
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error {
@@ -45,9 +49,8 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 	// Create execution environment for tool handlers.
 	execEnv := exec.NewLocalEnvironment(workdir)
 
-	// Choose interviewer based on whether stdin is a terminal.
-	// BubbleteaInterviewer requires a TTY; ConsoleInterviewer works with plain stdin.
-	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()))
+	// Choose interviewer: autopilot > auto-approve > terminal detection.
+	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeRunConfig, llmClient)
 
 	// Build engine options.
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
@@ -397,10 +400,20 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 	return client, nil
 }
 
-// chooseInterviewer returns a BubbleteaInterviewer when stdin is a terminal
-// (nice arrow-key UI), or a ConsoleInterviewer for non-TTY contexts (piped
-// input, background processes, CI).
-func chooseInterviewer(isTerminal bool) handlers.FreeformInterviewer {
+// chooseInterviewer selects the interviewer implementation based on config.
+// Priority: --auto-approve > --autopilot > terminal detection.
+func chooseInterviewer(isTerminal bool, cfg runConfig, llmClient *llm.Client) handlers.FreeformInterviewer {
+	if cfg.autoApprove {
+		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	if cfg.autopilot != "" {
+		persona, err := handlers.ParsePersona(cfg.autopilot)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v, falling back to auto-approve\n", err)
+			return &handlers.AutoApproveFreeformInterviewer{}
+		}
+		return handlers.NewAutopilotInterviewer(llmClient, persona)
+	}
 	if isTerminal {
 		return tui.NewMode1Interviewer()
 	}

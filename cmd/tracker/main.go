@@ -19,7 +19,9 @@ type runConfig struct {
 	resumeID     string // run ID to resume (resolved to checkpoint path)
 	noTUI        bool
 	verbose      bool
-	jsonOut      bool // stream events as NDJSON to stdout
+	jsonOut      bool   // stream events as NDJSON to stdout
+	autopilot    string // persona name (lax/mid/hard/mentor) or empty
+	autoApprove  bool   // deterministic auto-approve, no LLM
 }
 
 type commandMode string

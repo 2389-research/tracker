@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/tracker/pipeline/handlers"
 	"github.com/joho/godotenv"
 	"github.com/mattn/go-isatty"
 )
@@ -195,6 +196,18 @@ func executeAudit(cfg runConfig) error {
 func executeRun(cfg runConfig, deps commandDeps) error {
 	if err := deps.loadEnv(cfg.workdir); err != nil {
 		return err
+	}
+
+	// Store config for autopilot interviewer selection.
+	activeRunConfig = cfg
+
+	if cfg.autopilot != "" {
+		if _, err := handlers.ParsePersona(cfg.autopilot); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Running in autopilot mode (persona: %s) — human gates answered by LLM\n", cfg.autopilot)
+	} else if cfg.autoApprove {
+		fmt.Fprintln(os.Stderr, "Running in auto-approve mode — all human gates auto-approved")
 	}
 
 	printStartupBanner()

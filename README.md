@@ -20,6 +20,9 @@ tracker build_product
 tracker init build_product
 tracker build_product.dip
 
+# Run fully autonomous with an LLM judge
+tracker --autopilot mid build_product
+
 # Check your setup (API keys, dippin binary, working directory)
 tracker doctor
 
