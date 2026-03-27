@@ -53,6 +53,9 @@ func NewAppModel(store *StateStore, pipelineName, runID string) *AppModel {
 	}
 }
 
+// Header returns the header component for configuration.
+func (a *AppModel) Header() *Header { return a.header }
+
 // Init returns the initial batch of tick commands.
 func (a AppModel) Init() tea.Cmd {
 	return tea.Batch(thinkingTickCmd(), headerTickCmd())

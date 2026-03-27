@@ -249,6 +249,12 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	store := tui.NewStateStore(tokenTracker)
 	appModel := tui.NewAppModel(store, pipelineName, "")
 	appModel.SetVerboseTrace(verbose)
+	if backend != "" && backend != "native" {
+		appModel.Header().SetBackend(backend)
+	}
+	if activeAutopilotCfg.persona != "" {
+		appModel.Header().SetAutopilot(activeAutopilotCfg.persona)
+	}
 	nodeList := buildNodeList(graph)
 	appModel.SetInitialNodes(nodeList)
 

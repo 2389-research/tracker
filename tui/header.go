@@ -15,6 +15,8 @@ type Header struct {
 	store        *StateStore
 	pipelineName string
 	runID        string
+	backend      string // "claude-code", "native", or ""
+	autopilot    string // persona name or ""
 	startedAt    time.Time
 	width        int
 }
@@ -28,6 +30,12 @@ func NewHeader(store *StateStore, pipelineName, runID string) *Header {
 		startedAt:    time.Now(),
 	}
 }
+
+// SetBackend sets the backend tag displayed in the header.
+func (h *Header) SetBackend(backend string) { h.backend = backend }
+
+// SetAutopilot sets the autopilot persona tag displayed in the header.
+func (h *Header) SetAutopilot(persona string) { h.autopilot = persona }
 
 // Update handles tick messages for the header.
 func (h *Header) Update(msg tea.Msg) tea.Cmd {
@@ -46,6 +54,21 @@ func (h *Header) View() string {
 	elapsed := time.Since(h.startedAt).Truncate(time.Second)
 
 	left := Styles.Header.Render(h.pipelineName) + "  " + Styles.Muted.Render(h.runID)
+
+	// Mode tags (backend, autopilot persona)
+	tagStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("0")).
+		Background(lipgloss.Color("208")).
+		Padding(0, 1).
+		Bold(true)
+	if h.backend != "" && h.backend != "native" {
+		left += "  " + tagStyle.Render(h.backend)
+	}
+	if h.autopilot != "" {
+		apStyle := tagStyle.Background(lipgloss.Color("63"))
+		left += "  " + apStyle.Render("autopilot:"+h.autopilot)
+	}
+
 	right := Styles.Muted.Render(formatDuration(elapsed))
 
 	if h.store != nil && h.store.Tokens != nil {
