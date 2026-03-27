@@ -23,8 +23,12 @@ func synthesizeImplicitEdges(g *Graph, workflow *ir.Workflow) {
 		switch cfg := irNode.Config.(type) {
 		case ir.ParallelConfig:
 			synthesizeParallelEdges(g, irNode, cfg, fanInBySource, existingEdges)
+		case *ir.ParallelConfig:
+			synthesizeParallelEdges(g, irNode, *cfg, fanInBySource, existingEdges)
 		case ir.FanInConfig:
 			synthesizeFanInEdges(g, irNode, cfg, existingEdges)
+		case *ir.FanInConfig:
+			synthesizeFanInEdges(g, irNode, *cfg, existingEdges)
 		}
 	}
 }
@@ -33,7 +37,12 @@ func synthesizeImplicitEdges(g *Graph, workflow *ir.Workflow) {
 func buildFanInSourceMap(workflow *ir.Workflow) map[string]string {
 	fanInBySource := make(map[string]string)
 	for _, irNode := range workflow.Nodes {
-		if cfg, ok := irNode.Config.(ir.FanInConfig); ok {
+		switch cfg := irNode.Config.(type) {
+		case ir.FanInConfig:
+			for _, source := range cfg.Sources {
+				fanInBySource[source] = irNode.ID
+			}
+		case *ir.FanInConfig:
 			for _, source := range cfg.Sources {
 				fanInBySource[source] = irNode.ID
 			}
@@ -86,14 +95,10 @@ func ensureStartExitNodes(g *Graph) error {
 		return fmt.Errorf("exit node %q not found in graph", g.ExitNode)
 	}
 	startNode := g.Nodes[g.StartNode]
-	if startNode.Shape != "Mdiamond" {
-		startNode.Shape = "Mdiamond"
-		startNode.Handler = "start"
-	}
+	startNode.Shape = "Mdiamond"
+	startNode.Handler = "start"
 	exitNode := g.Nodes[g.ExitNode]
-	if exitNode.Shape != "Msquare" {
-		exitNode.Shape = "Msquare"
-		exitNode.Handler = "exit"
-	}
+	exitNode.Shape = "Msquare"
+	exitNode.Handler = "exit"
 	return nil
 }

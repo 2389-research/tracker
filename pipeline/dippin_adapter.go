@@ -227,6 +227,7 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	// When dippin-lang adds Params map[string]string to AgentConfig, replace
 	// nil with cfg.Params. Until then, backend selection must use --backend
 	// flag or node-level attrs set via DOT format.
+	// TODO(dippin-lang): Replace nil with cfg.Params once available.
 	extractAgentBackendAttrs(nil, attrs)
 
 	// Warn if the prompt or other fields contain backend-related keywords that
