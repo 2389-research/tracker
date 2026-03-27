@@ -5,6 +5,23 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-03-27
+
+### Fixed
+
+- **PickNextMilestone silent skip**: Flexible milestone header matching now handles `## Milestone 1: Title`, `### Milestone 1 — Setup`, and other LLM formatting variations. Fails loudly if no milestones found or extraction produces an empty file.
+- **Removed `eval` of LLM-generated verify commands**: TestMilestone no longer evals commands extracted from milestone specs — this was arbitrary code execution from free-form LLM text. Verification is now the Implement agent's responsibility.
+- **TestMilestone known_failures parsing**: Strip comments and blank lines, use `go test -skip` instead of unsupported `(?!` negative lookahead.
+- **PickBest winner parsing hardened**: Uses `grep -ioE 'claude|codex|gemini'` regardless of markdown formatting.
+
+## [0.11.1] - 2026-03-27
+
+### Fixed
+
+- Provider errors hard-fail per CLAUDE.md (autopilot review fixes)
+- Default autopilot model picks cheapest from configured provider
+- Autopilot forces `--no-tui`, `matchChoice` uses longest-match, `decide()` returns errors
+
 ## [0.11.0] - 2026-03-26
 
 ### Added

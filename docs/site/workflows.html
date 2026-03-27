@@ -110,6 +110,14 @@ graph TB
         <h4>Three-Model Cross-Review</h4>
         <p>Claude, Codex, and Gemini independently review the complete implementation. Reviews are synthesized to find consensus vs disputed findings.</p>
       </div>
+      <div class="glass glass-sm">
+        <h4>Defensive Shell Scripts</h4>
+        <p>Tool nodes never <code>eval</code> LLM-generated content. Milestone headers are matched flexibly (handles <code>##</code>, <code>###</code>, with or without colons). Empty-file guards fail loudly. Known-failures strips comments before building patterns.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Autopilot Compatible</h4>
+        <p>Run with <code>--autopilot mid</code> for fully autonomous execution. All human gates (ApprovePlan, EscalateMilestone, EscalateReview) have default edges and descriptive prompts that the LLM judge can reason about.</p>
+      </div>
     </div>
 
     <pre data-lang="bash" style="margin-top: 1.5rem;"><code><span class="comment"># Run it</span>

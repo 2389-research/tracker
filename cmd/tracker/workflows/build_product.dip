@@ -114,8 +114,15 @@ workflow BuildProduct
       # Count completed milestones
       DONE_COUNT=$(ls "$DONE_DIR" 2>/dev/null | wc -l | tr -d ' ')
 
-      # Extract total milestone count (## Milestone N headers)
-      TOTAL=$(grep -c '^## Milestone' "$PLAN" || echo 0)
+      # Extract total milestone count — flexible: matches "## Milestone" with any suffix.
+      # Handles "## Milestone 1", "## Milestone 1: Title", "## Milestone 1 — Setup", etc.
+      TOTAL=$(grep -ciE '^#{1,3}\s*milestone\s' "$PLAN" || echo 0)
+
+      if [ "$TOTAL" -eq 0 ]; then
+        echo "ERROR: no milestone headers found in $PLAN"
+        echo "Expected format: ## Milestone N: Title"
+        exit 1
+      fi
 
       if [ "$DONE_COUNT" -ge "$TOTAL" ]; then
         echo "ALL_MILESTONES_COMPLETE"
@@ -126,9 +133,18 @@ workflow BuildProduct
       NEXT=$((DONE_COUNT + 1))
       echo "milestone $NEXT of $TOTAL"
 
-      # Extract this milestone's section from the plan
-      awk "/^## Milestone $NEXT/,/^## Milestone $((NEXT+1))/" "$PLAN" | \
-        sed '/^## Milestone '"$((NEXT+1))"'/d' > .ai/milestones/current.md
+      # Extract this milestone's section — match ## Milestone N with any suffix,
+      # stop at the next ## Milestone header or end of file.
+      awk "/^#+ *[Mm]ilestone *$NEXT[^0-9]/,/^#+ *[Mm]ilestone *$((NEXT+1))[^0-9]/" "$PLAN" | \
+        sed '/^#\{1,3\} *[Mm]ilestone *'"$((NEXT+1))"'/d' > .ai/milestones/current.md
+
+      # Guard: fail loudly if extraction produced an empty file
+      if [ ! -s .ai/milestones/current.md ]; then
+        echo "ERROR: failed to extract milestone $NEXT from $PLAN"
+        echo "Check that milestone headers match: ## Milestone N: ..."
+        cat "$PLAN" | head -30
+        exit 1
+      fi
 
       printf "milestone-$NEXT"
 
@@ -149,7 +165,8 @@ workflow BuildProduct
       - Follow the codebase's existing patterns and conventions.
       - Do NOT create documentation files unless the milestone requires them.
       - Do NOT refactor code outside the milestone's scope.
-      - Run the verify command from the milestone if one is specified.
+      - Run the verify command from the milestone if one is specified. This is YOUR
+        responsibility — the test runner does NOT eval verify commands from the spec.
       - Commit your work with a conventional commit message referencing the milestone.
 
   tool TestMilestone
@@ -196,14 +213,10 @@ workflow BuildProduct
         echo "no known build system — skipping tests"
       fi
 
-      # Run milestone-specific verify command if present
-      if [ "$TEST_EXIT" -eq 0 ]; then
-        VERIFY_CMD=$(grep 'Verify command' .ai/milestones/current.md | sed 's/.*: //' || true)
-        if [ -n "$VERIFY_CMD" ] && [ "$VERIFY_CMD" != "manual review" ]; then
-          echo "--- milestone verify ---"
-          eval "$VERIFY_CMD" 2>&1 || TEST_EXIT=$?
-        fi
-      fi
+      # Note: milestone-specific verification is handled by the Implement agent
+      # (which runs the verify command as part of its session) and the VerifyMilestone
+      # agent (which checks completion criteria). We do NOT eval LLM-generated
+      # commands here — that would be arbitrary code execution from free-form text.
 
       # Tests passed — reset counter and succeed
       if [ "$TEST_EXIT" -eq 0 ]; then

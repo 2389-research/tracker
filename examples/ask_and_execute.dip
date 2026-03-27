@@ -297,8 +297,8 @@ workflow AskAndExecute
       set -eu
       MAIN=$(git rev-parse --abbrev-ref HEAD)
 
-      # Extract winner name from selection.md
-      WINNER=$(grep -A1 '## Winner' .ai/decisions/selection.md | tail -1 | tr -d ' \n' | tr '[:upper:]' '[:lower:]')
+      # Extract winner name from selection.md — handles ## Winner, ### Winner, **Winner**, etc.
+      WINNER=$(grep -iA1 'winner' .ai/decisions/selection.md | grep -ioE 'claude|codex|gemini' | head -1 | tr '[:upper:]' '[:lower:]')
 
       # Validate
       if [ -z "$WINNER" ] || ! echo "claude codex gemini" | grep -qw "$WINNER"; then

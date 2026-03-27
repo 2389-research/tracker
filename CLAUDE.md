@@ -140,9 +140,18 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - `--auto-approve` is deterministic (no LLM) — always picks default/first option
 - The `AutopilotInterviewer` in `pipeline/handlers/autopilot.go` implements `LabeledFreeformInterviewer`
 - Uses structured JSON output: `{"choice": "...", "reasoning": "..."}`
-- Falls back to default edge on LLM error (with warning to stderr)
+- Provider errors hard-fail per CLAUDE.md (only parse failures fall back to default)
 - The autopilot reuses the pipeline's LLM client — no separate config needed
-- `activeRunConfig` in `cmd/tracker/run.go` threads the config to `chooseInterviewer`
+- Default model picks cheapest from configured provider via `Client.DefaultProvider()`
+- `autopilotCfg` in `cmd/tracker/run.go` threads the config to `chooseInterviewer`
+
+### Tool node safety — LLM output as shell input
+- NEVER `eval` content extracted from LLM-written files (arbitrary command execution)
+- Always strip comments (`grep -v '^#'`) and blank lines from LLM-generated lists before using as patterns
+- Use flexible regex for markdown headers LLMs write (they vary: `##`, `###`, with/without colons)
+- Add empty-file guards after extracting content from LLM-written files — fail loudly, don't proceed with empty data
+- Use `go test -skip` (Go 1.24+) instead of `(?!` negative lookahead which Go's regexp doesn't support
+- The Decompose prompt explicitly instructs the agent on expected file formats
 
 ### Per-milestone circuit breakers
 The `build_product.dip` pipeline uses a `fix_attempts` file on disk to limit
