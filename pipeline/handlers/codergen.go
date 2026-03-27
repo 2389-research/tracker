@@ -25,6 +25,7 @@ type CodergenHandler struct {
 	eventHandler       agent.EventHandler
 	graphAttrs         map[string]string
 	nativeBackend      pipeline.AgentBackend // always available
+	claudeCodeBackend  pipeline.AgentBackend // lazy-init on first claude-code request
 	defaultBackendName string                // from --backend flag, "" means native
 }
 
@@ -64,8 +65,11 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, err
 	}
 
-	runCfg := h.buildRunConfig(node, prompt)
-	backend := h.selectBackend(node)
+	backend, backendErr := h.selectBackend(node)
+	if backendErr != nil {
+		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
+	}
+	runCfg := h.buildRunConfig(node, prompt, backend)
 
 	var collector transcriptCollector
 	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
@@ -86,23 +90,35 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 // selectBackend chooses the appropriate AgentBackend based on node attributes
 // and global default settings.
-func (h *CodergenHandler) selectBackend(node *pipeline.Node) pipeline.AgentBackend {
+func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
 	// Check node-level backend attr
 	if backend := node.Attrs["backend"]; backend != "" {
 		switch backend {
 		case "claude-code":
-			// Will be added in Task 5
-			// For now, fall through to native
+			return h.ensureClaudeCodeBackend()
 		case "native", "codergen":
-			return h.ensureNativeBackend()
+			return h.ensureNativeBackend(), nil
 		}
 	}
 	// Check global --backend flag
 	if h.defaultBackendName == "claude-code" {
-		// Will be added in Task 5
-		// For now, fall through to native
+		return h.ensureClaudeCodeBackend()
 	}
-	return h.ensureNativeBackend()
+	return h.ensureNativeBackend(), nil
+}
+
+// ensureClaudeCodeBackend returns the claude-code backend, lazily creating it
+// on first use. Returns an error if the claude CLI is not installed.
+func (h *CodergenHandler) ensureClaudeCodeBackend() (pipeline.AgentBackend, error) {
+	if h.claudeCodeBackend != nil {
+		return h.claudeCodeBackend, nil
+	}
+	b, err := NewClaudeCodeBackend()
+	if err != nil {
+		return nil, fmt.Errorf("claude-code backend: %w", err)
+	}
+	h.claudeCodeBackend = b
+	return b, nil
 }
 
 // ensureNativeBackend returns the native backend, lazily creating it if needed.
@@ -117,8 +133,10 @@ func (h *CodergenHandler) ensureNativeBackend() pipeline.AgentBackend {
 
 // buildRunConfig constructs an AgentRunConfig from node attributes for use with
 // any AgentBackend implementation. The full SessionConfig is passed via Extra
-// so the native backend can use it directly without losing fields.
-func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string) pipeline.AgentRunConfig {
+// so the native backend can use it directly without losing fields. When the
+// selected backend is claude-code, a *ClaudeCodeConfig is built from node attrs
+// and placed in Extra instead.
+func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend) pipeline.AgentRunConfig {
 	sessionCfg := h.buildConfig(node)
 	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
 		sessionCfg.WorkingDir = wd
@@ -131,12 +149,51 @@ func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string) pip
 		Provider:     sessionCfg.Provider,
 		WorkingDir:   sessionCfg.WorkingDir,
 		MaxTurns:     sessionCfg.MaxTurns,
-		Extra:        &sessionCfg,
 	}
 	if sessionCfg.CommandTimeout > 0 {
 		cfg.Timeout = sessionCfg.CommandTimeout
 	}
+
+	// Build backend-specific Extra config.
+	if _, ok := backend.(*ClaudeCodeBackend); ok {
+		cfg.Extra = h.buildClaudeCodeConfig(node)
+	} else {
+		cfg.Extra = &sessionCfg
+	}
 	return cfg
+}
+
+// buildClaudeCodeConfig constructs a ClaudeCodeConfig from node attributes for
+// the claude-code backend.
+func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) *pipeline.ClaudeCodeConfig {
+	ccCfg := &pipeline.ClaudeCodeConfig{}
+
+	if raw, ok := node.Attrs["mcp_servers"]; ok && raw != "" {
+		servers, err := pipeline.ParseMCPServers(raw)
+		if err == nil {
+			ccCfg.MCPServers = servers
+		}
+	}
+
+	if raw, ok := node.Attrs["allowed_tools"]; ok && raw != "" {
+		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
+	}
+
+	if raw, ok := node.Attrs["disallowed_tools"]; ok && raw != "" {
+		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
+	}
+
+	if raw, ok := node.Attrs["max_budget_usd"]; ok && raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil && v > 0 {
+			ccCfg.MaxBudgetUSD = v
+		}
+	}
+
+	if raw, ok := node.Attrs["permission_mode"]; ok && raw != "" {
+		ccCfg.PermissionMode = pipeline.PermissionMode(raw)
+	}
+
+	return ccCfg
 }
 
 // resolvePrompt extracts, expands variables, and applies fidelity context to the node prompt.
