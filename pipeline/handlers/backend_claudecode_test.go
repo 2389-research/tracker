@@ -359,14 +359,17 @@ func TestParseNDJSONSystemMessage(t *testing.T) {
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (preparing + turn start), got %d", len(events))
 	}
 	if events[0].Type != agent.EventLLMRequestPreparing {
 		t.Errorf("expected EventLLMRequestPreparing, got %s", events[0].Type)
 	}
 	if events[0].Provider != "claude-code" {
 		t.Errorf("expected provider 'claude-code', got %q", events[0].Provider)
+	}
+	if events[1].Type != agent.EventTurnStart {
+		t.Errorf("expected EventTurnStart, got %s", events[1].Type)
 	}
 }
 

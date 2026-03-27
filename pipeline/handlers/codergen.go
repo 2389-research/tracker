@@ -69,7 +69,10 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if backendErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
 	}
-	runCfg := h.buildRunConfig(node, prompt, backend)
+	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend)
+	if cfgErr != nil {
+		return pipeline.Outcome{}, fmt.Errorf("node %q config: %w", node.ID, cfgErr)
+	}
 
 	var collector transcriptCollector
 	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
@@ -136,7 +139,7 @@ func (h *CodergenHandler) ensureNativeBackend() pipeline.AgentBackend {
 // so the native backend can use it directly without losing fields. When the
 // selected backend is claude-code, a *ClaudeCodeConfig is built from node attrs
 // and placed in Extra instead.
-func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend) pipeline.AgentRunConfig {
+func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend) (pipeline.AgentRunConfig, error) {
 	sessionCfg := h.buildConfig(node)
 	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
 		sessionCfg.WorkingDir = wd
@@ -156,23 +159,32 @@ func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, bac
 
 	// Build backend-specific Extra config.
 	if _, ok := backend.(*ClaudeCodeBackend); ok {
-		cfg.Extra = h.buildClaudeCodeConfig(node)
+		ccCfg, err := h.buildClaudeCodeConfig(node)
+		if err != nil {
+			return pipeline.AgentRunConfig{}, err
+		}
+		cfg.Extra = ccCfg
 	} else {
 		cfg.Extra = &sessionCfg
 	}
-	return cfg
+	return cfg, nil
 }
 
 // buildClaudeCodeConfig constructs a ClaudeCodeConfig from node attributes for
-// the claude-code backend.
-func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) *pipeline.ClaudeCodeConfig {
-	ccCfg := &pipeline.ClaudeCodeConfig{}
+// the claude-code backend. Returns an error if any attr is malformed.
+func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) (*pipeline.ClaudeCodeConfig, error) {
+	ccCfg := &pipeline.ClaudeCodeConfig{
+		// Default to fullAuto for headless pipeline use. Without this,
+		// the Claude CLI may prompt for interactive approval and hang.
+		PermissionMode: pipeline.PermissionFullAuto,
+	}
 
 	if raw, ok := node.Attrs["mcp_servers"]; ok && raw != "" {
 		servers, err := pipeline.ParseMCPServers(raw)
-		if err == nil {
-			ccCfg.MCPServers = servers
+		if err != nil {
+			return nil, fmt.Errorf("node %q: %w", node.ID, err)
 		}
+		ccCfg.MCPServers = servers
 	}
 
 	if raw, ok := node.Attrs["allowed_tools"]; ok && raw != "" {
@@ -183,17 +195,29 @@ func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) *pipeline.C
 		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
 	}
 
+	if err := pipeline.ValidateToolLists(ccCfg.AllowedTools, ccCfg.DisallowedTools); err != nil {
+		return nil, fmt.Errorf("node %q: %w", node.ID, err)
+	}
+
 	if raw, ok := node.Attrs["max_budget_usd"]; ok && raw != "" {
-		if v, err := strconv.ParseFloat(raw, 64); err == nil && v > 0 {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return nil, fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
+		}
+		if v > 0 {
 			ccCfg.MaxBudgetUSD = v
 		}
 	}
 
 	if raw, ok := node.Attrs["permission_mode"]; ok && raw != "" {
-		ccCfg.PermissionMode = pipeline.PermissionMode(raw)
+		mode := pipeline.PermissionMode(raw)
+		if !mode.Valid() {
+			return nil, fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, autoEdit, fullAuto)", node.ID, raw)
+		}
+		ccCfg.PermissionMode = mode
 	}
 
-	return ccCfg
+	return ccCfg, nil
 }
 
 // resolvePrompt extracts, expands variables, and applies fidelity context to the node prompt.

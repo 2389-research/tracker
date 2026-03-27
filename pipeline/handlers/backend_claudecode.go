@@ -223,10 +223,11 @@ func buildEnv() []string {
 		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+token)
 	}
 
-	// Pass through commonly needed env vars if set.
+	// Pass through env vars needed for basic operation. Credentials
+	// (SSH_AUTH_SOCK) and network config (proxy vars) are intentionally
+	// excluded — pass them via node-level env attrs if needed.
 	for _, name := range []string{
-		"USER", "TMPDIR", "LANG", "SSH_AUTH_SOCK",
-		"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+		"USER", "TMPDIR", "LANG",
 	} {
 		if val := os.Getenv(name); val != "" {
 			env = append(env, name+"="+val)
@@ -273,13 +274,19 @@ func parseMessage(raw json.RawMessage, state *runState) []agent.Event {
 
 	switch msg.Type {
 	case "system":
-		// Emit EventLLMRequestPreparing so the TUI shows the model name
-		// and a thinking indicator when a claude-code session starts.
-		return []agent.Event{{
-			Type:      agent.EventLLMRequestPreparing,
-			Timestamp: now,
-			Provider:  "claude-code",
-		}}
+		// Emit preparing + turn start so the TUI transitions from
+		// "waiting for provider" to "thinking" immediately.
+		return []agent.Event{
+			{
+				Type:      agent.EventLLMRequestPreparing,
+				Timestamp: now,
+				Provider:  "claude-code",
+			},
+			{
+				Type:      agent.EventTurnStart,
+				Timestamp: now,
+			},
+		}
 
 	case "assistant":
 		return parseAssistantContent(msg.Content, now, state)
