@@ -36,9 +36,18 @@
     <pre data-lang="bash"><code><span class="comment"># Go install (binary includes embedded workflows)</span>
 <span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
 
+<span class="comment"># Homebrew</span>
+<span class="keyword">brew install</span> 2389-research/tap/tracker
+
 <span class="comment"># Or build from source</span>
 <span class="keyword">git clone</span> https://github.com/2389-research/tracker
-<span class="keyword">cd</span> tracker && <span class="keyword">make</span> install</code></pre>
+<span class="keyword">cd</span> tracker && <span class="keyword">make</span> install
+
+<span class="comment"># Verify installation</span>
+tracker doctor
+
+<span class="comment"># Stay current (checks automatically, or run manually)</span>
+tracker update</code></pre>
   </section>
 
   <!-- ═══ Commands ═══ -->
@@ -504,6 +513,36 @@ tracker build_product</code></pre>
         </tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ═══ Quick Reference ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <h2>Quick <span class="accent">reference</span></h2>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">The commands you'll use most, at a glance.</p>
+    <pre data-lang="bash"><code><span class="comment"># First time</span>
+tracker doctor                          <span class="comment"># check API keys + tools</span>
+tracker setup                           <span class="comment"># configure providers interactively</span>
+
+<span class="comment"># Run pipelines</span>
+tracker build_product                   <span class="comment"># built-in workflow, no file needed</span>
+tracker my_pipeline.dip                 <span class="comment"># local file</span>
+tracker --autopilot mid build_product   <span class="comment"># fully autonomous</span>
+tracker --backend claude-code my.dip    <span class="comment"># agents use claude CLI</span>
+
+<span class="comment"># After a run</span>
+tracker diagnose                        <span class="comment"># analyze most recent failure</span>
+tracker audit &lt;runID&gt;                   <span class="comment"># full audit trail</span>
+tracker list                            <span class="comment"># recent runs</span>
+
+<span class="comment"># Manage pipelines</span>
+tracker workflows                       <span class="comment"># list built-in workflows</span>
+tracker init build_product              <span class="comment"># copy to cwd for editing</span>
+tracker validate my.dip                 <span class="comment"># lint + structure check</span>
+tracker simulate my.dip                 <span class="comment"># dry-run all paths</span>
+
+<span class="comment"># Maintenance</span>
+tracker update                          <span class="comment"># self-update to latest release</span>
+tracker version                         <span class="comment"># version + configured providers</span></code></pre>
   </section>
 
 </main>
