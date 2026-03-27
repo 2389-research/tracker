@@ -129,6 +129,9 @@ func (a AppModel) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		content := buildFreeformContent(m, a.lay.width, a.lay.height)
 		a.modal.Show(content)
 		return a, nil, true
+	case MsgGateAutopilot:
+		a.modal.Show(NewAutopilotContent(m.Prompt, m.Decision, m.ReplyCh))
+		return a, nil, true
 	case MsgModalDismiss:
 		a.modal.Hide()
 		return a, nil, true

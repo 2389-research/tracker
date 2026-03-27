@@ -221,6 +221,74 @@ func (c *ChoiceContent) View() string {
 	return sb.String()
 }
 
+// ── AutopilotContent ─────────────────────────────────────────────────────────
+
+// AutopilotContent shows the autopilot's gate decision briefly before auto-closing.
+// Read-only — the user can press Enter to dismiss early.
+type AutopilotContent struct {
+	prompt   string
+	decision string
+	replyCh  chan<- string
+	closed   bool
+}
+
+// NewAutopilotContent creates a display-only modal showing the autopilot decision.
+func NewAutopilotContent(prompt, decision string, replyCh chan<- string) *AutopilotContent {
+	return &AutopilotContent{
+		prompt:   prompt,
+		decision: decision,
+		replyCh:  replyCh,
+	}
+}
+
+func (a *AutopilotContent) Update(msg tea.Msg) tea.Cmd {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg.Type == tea.KeyEnter || keyMsg.Type == tea.KeyEsc {
+			if !a.closed {
+				a.closed = true
+				select {
+				case a.replyCh <- a.decision:
+				default:
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (a *AutopilotContent) View() string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208"))
+	decisionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
+	hintStyle := lipgloss.NewStyle().Faint(true)
+
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("AUTOPILOT"))
+	sb.WriteString("\n\n")
+
+	// Truncate prompt for display
+	prompt := a.prompt
+	lines := strings.Split(prompt, "\n")
+	if len(lines) > 3 {
+		prompt = strings.Join(lines[:3], "\n") + "\n..."
+	}
+	if len(prompt) > 200 {
+		prompt = prompt[:197] + "..."
+	}
+	sb.WriteString(prompt)
+	sb.WriteString("\n\n")
+	sb.WriteString(fmt.Sprintf("→ %s", decisionStyle.Render(a.decision)))
+	sb.WriteString("\n\n")
+	sb.WriteString(hintStyle.Render("auto-closing in 2s · enter to dismiss"))
+	return sb.String()
+}
+
+func (a *AutopilotContent) Cancel() {
+	if !a.closed {
+		a.closed = true
+		close(a.replyCh)
+	}
+}
+
 // ── FreeformContent ──────────────────────────────────────────────────────────
 
 // FreeformContent captures free-text input using a wrapping textarea.

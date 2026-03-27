@@ -203,6 +203,10 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
 
+	if cfg.backend != "" && cfg.backend != "native" {
+		fmt.Fprintf(os.Stderr, "Agent backend: %s\n", cfg.backend)
+	}
+
 	if cfg.autopilot != "" {
 		if _, err := handlers.ParsePersona(cfg.autopilot); err != nil {
 			return err
@@ -224,8 +228,9 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		checkpoint = cp
 	}
 
-	// JSON streaming and autopilot modes force non-TUI.
-	if cfg.jsonOut || cfg.autopilot != "" || cfg.autoApprove {
+	// JSON streaming and auto-approve force non-TUI.
+	// Autopilot can run inside the TUI — gates flash the decision briefly.
+	if cfg.jsonOut || cfg.autoApprove {
 		cfg.noTUI = true
 	}
 

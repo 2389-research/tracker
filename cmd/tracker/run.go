@@ -272,10 +272,16 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
 	}))
 
-	// Mode 2 interviewer.
-	interviewer := tui.NewBubbleteaInterviewer(func(msg tea.Msg) {
-		prog.Send(msg)
-	})
+	// Mode 2 interviewer — use autopilot wrapper if persona is active.
+	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
+	var interviewer handlers.LabeledFreeformInterviewer
+	if activeAutopilotCfg.persona != "" {
+		persona, _ := handlers.ParsePersona(activeAutopilotCfg.persona)
+		autopilot := handlers.NewAutopilotInterviewer(llmClient, persona)
+		interviewer = tui.NewAutopilotTUIInterviewer(autopilot, sendFn)
+	} else {
+		interviewer = tui.NewBubbleteaInterviewer(sendFn)
+	}
 
 	// Pipeline event handler that adapts and sends to TUI.
 	pipelineHandler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
