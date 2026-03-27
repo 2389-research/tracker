@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture — Tracker</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#431407', primaryTextColor: '#fff7ed', primaryBorderColor: '#fb923c', lineColor: '#a8a29e', secondaryColor: '#292524', tertiaryColor: '#1c1917', background: 'transparent', mainBkg: '#431407', nodeBorder: '#fb923c', clusterBkg: '#1c191766', clusterBorder: '#fb923c44', titleColor: '#fdba74', edgeLabelBackground: '#292524', nodeTextColor: '#fff7ed', actorTextColor: '#fff7ed', signalTextColor: '#fff7ed', labelTextColor: '#fde68a' }});</script>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-brand">
+    <div class="logo-icon">T</div>
+    <span>tracker</span> <span class="accent">by 2389.ai</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="index.html">Home</a></li>
+    <li><a href="workflows.html">Workflows</a></li>
+    <li><a href="architecture.html" class="active">Architecture</a></li>
+    <li><a href="cli.html">CLI</a></li>
+    <li><a href="https://github.com/2389-research/tracker" target="_blank">GitHub</a></li>
+  </ul>
+</nav>
+
+<main>
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>Architecture</h1>
+    <p class="subtitle">Three layers, clean boundaries, no magic. The engine doesn't know about parallel execution. The LLM client doesn't know about pipelines.</p>
+  </section>
+
+  <!-- ═══ Layer Diagram ═══ -->
+  <section class="glass">
+    <h2>System <span class="accent">layers</span></h2>
+    <div class="diagram">
+      <div class="mermaid">
+graph TB
+    CLI["CLI\ncmd/tracker\nflags, name resolution, TUI, embedded workflows"]
+    Engine["Pipeline Engine\npipeline/\ngraph model, run loop, edge selection, checkpoints, audit trail"]
+    Handlers["Handlers\npipeline/handlers\ncodergen · tool · human · parallel · fan_in · subgraph"]
+    Agent["Agent Session\nagent/\nturn loop, tool registry, context compaction"]
+    LLM["LLM Client\nllm/\nAnthropic · OpenAI · Gemini\nretry middleware, token tracking"]
+
+    CLI --> Engine --> Handlers --> Agent --> LLM
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Engine ═══ -->
+  <section class="glass">
+    <h2>The engine <span class="accent">run loop</span></h2>
+    <p class="lead">
+      The engine treats every node the same: execute the handler, evaluate outgoing edges,
+      advance to the next node. There is no special-case code for parallel execution, subgraphs,
+      or human gates &mdash; handlers encapsulate all node-type-specific behavior.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph LR
+    A["Clear routing<br/>context"] --> B["Execute<br/>handler"]
+    B --> C["Set outcome<br/>in context"]
+    C --> D["Select<br/>outgoing edge"]
+    D --> E["Checkpoint"]
+    E --> F["Advance to<br/>next node"]
+    F --> A
+      </div>
+    </div>
+
+    <h3>Edge Selection Priority</h3>
+    <p>When a node completes, the engine selects the next edge in this order:</p>
+    <ol class="steps">
+      <li>
+        <h4>Suggested Next Nodes</h4>
+        <p>If the handler set <code>suggested_next_nodes</code> (e.g., the parallel handler pointing to a fan-in), take that edge. Used for structural routing.</p>
+      </li>
+      <li>
+        <h4>Conditional Match</h4>
+        <p>Evaluate conditions in declaration order. First match wins. Supports <code>=</code>, <code>!=</code>, <code>contains</code>, <code>not contains</code>, <code>startswith</code>, <code>endswith</code>, <code>in</code>, and logical <code>and</code>/<code>or</code>/<code>not</code>.</p>
+      </li>
+      <li>
+        <h4>Label Match</h4>
+        <p>If the outcome includes a <code>preferred_label</code> (from a human gate), match it against edge labels.</p>
+      </li>
+      <li>
+        <h4>Default Edge</h4>
+        <p>First unconditional edge. This is the safety net &mdash; and the source of infinite loops if pointed at a loop target.</p>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ═══ Adapter ═══ -->
+  <section class="glass">
+    <h2>The dippin <span class="accent">adapter</span></h2>
+    <p class="lead">
+      <code>pipeline/dippin_adapter.go</code> is the bridge between dippin-lang's IR and tracker's Graph model.
+      Every naming mismatch lives here.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Dippin IR</th><th>Tracker Graph</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>model</code></td><td><code>llm_model</code></td><td>Attribute rename</td></tr>
+          <tr><td><code>provider</code></td><td><code>llm_provider</code></td><td>Attribute rename</td></tr>
+          <tr><td><code>google</code></td><td><code>gemini</code></td><td>Provider name normalization</td></tr>
+          <tr><td><code>ctx.outcome</code></td><td><code>outcome</code></td><td>Namespace prefix stripped at evaluation</td></tr>
+          <tr><td><code>ParallelConfig.Targets</code></td><td>Implicit edges</td><td>Adapter synthesizes edges from parallel targets</td></tr>
+          <tr><td><code>FanInConfig.Sources</code></td><td>Implicit edges</td><td>Adapter synthesizes edges from fan-in sources</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ LLM Client ═══ -->
+  <section class="glass">
+    <h2>LLM client <span class="accent">middleware</span></h2>
+    <p class="lead">
+      The client is provider-agnostic. Middleware wraps every request for cross-cutting concerns.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph LR
+    Req["Request"] --> Retry["Retry<br/>Middleware<br/><i>502, 503, 429</i>"]
+    Retry --> Token["Token<br/>Tracker"]
+    Token --> Provider["Provider<br/>Adapter"]
+    Provider --> API["Provider API"]
+    API --> SSE["SSE Stream"]
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 1.5rem;">
+      <div class="glass glass-sm">
+        <h4>Infra-Level Retry</h4>
+        <p>Handles transient provider errors (502, 503, 429, timeouts) transparently. Max 3 retries, 2s base delay with exponential backoff. Pipeline-level retries are reserved for actual node logic failures.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>SSE Error Handling</h4>
+        <p>OpenAI's Responses API returns HTTP 200 and sends <code>error</code> / <code>response.failed</code> as SSE events. The adapter parses these &mdash; they are NOT reflected in the HTTP status code.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ TUI ═══ -->
+  <section class="glass">
+    <h2>TUI <span class="accent">model</span></h2>
+    <p class="lead">
+      Built with <a href="https://github.com/charmbracelet/bubbletea">bubbletea</a>.
+      The pipeline runs in a background goroutine; the TUI receives events via <code>tea.Msg</code>.
+    </p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Pipeline Panel</h4>
+        <p>Node list in topological order (Kahn's algorithm). Status lamps, thinking spinners, tool execution indicators. Subgraph nodes dynamically inserted and indented.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Activity Log</h4>
+        <p>Append-only, line-level styled. No glamour rendering (too expensive for streaming). Per-node streams with separators on node change. Counts terminal rows, not entries.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Modal Overlays</h4>
+        <p>Human gates open modal overlays: choice radio, freeform textarea, hybrid radio+freeform, or fullscreen review with glamour viewport. All implement Cancellable.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Event Flow</h4>
+        <p>Engine emits pipeline events &rarr; adapted to <code>tea.Msg</code> &rarr; sent to program &rarr; state store updates &rarr; view re-renders. No polling.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Checkpoint ═══ -->
+  <section class="glass">
+    <h2>Checkpoint <span class="accent">resume</span></h2>
+    <p class="lead">
+      Every node completion saves a checkpoint with completed nodes, context snapshot, and
+      edge selections. Resume replays the checkpoint and picks up at the failure point.
+    </p>
+    <div class="glass glass-sm" style="margin-top: 1rem; border-left: 3px solid var(--orange-600);">
+      <h4>Known Limitation</h4>
+      <p>The restart counter is global across the entire run. A fix loop on milestone 1 consumes restart budget that milestone 10 needs. The <code>build_product</code> pipeline works around this with per-milestone circuit breakers (<code>fix_attempts</code> file on disk).</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
+</footer>
+
+</body>
+</html>

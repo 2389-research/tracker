@@ -147,6 +147,16 @@ func resolveSubgraphPath(ref, baseDir string) (string, error) {
 		candidates[0], candidates[1], candidates[2], candidates[3])
 }
 
+// loadEmbeddedPipeline reads a .dip file from the embedded workflows FS
+// and parses it through the standard dippin pipeline loader.
+func loadEmbeddedPipeline(info WorkflowInfo) (*pipeline.Graph, error) {
+	data, err := embeddedWorkflows.ReadFile(info.File)
+	if err != nil {
+		return nil, fmt.Errorf("read embedded workflow %s: %w", info.Name, err)
+	}
+	return loadDippinPipeline(string(data), info.File)
+}
+
 // loadDippinPipeline parses a .dip file using dippin-lang parser,
 // runs Dippin's built-in validator and linter, then converts to Tracker's
 // Graph representation. Validation errors are fatal; lint warnings are

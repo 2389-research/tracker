@@ -14,7 +14,19 @@ import (
 // Returns an error if validation finds structural problems.
 // Auto-detects format based on file extension unless formatOverride is set.
 func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
-	graph, err := loadPipeline(pipelineFile, formatOverride)
+	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
+	if err != nil {
+		return err
+	}
+
+	var graph *pipeline.Graph
+	if isEmbedded {
+		graph, err = loadEmbeddedPipeline(info)
+		pipelineFile = info.Name // use bare name for display
+	} else {
+		graph, err = loadPipeline(resolved, formatOverride)
+		pipelineFile = resolved
+	}
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}

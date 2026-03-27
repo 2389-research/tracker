@@ -50,6 +50,12 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 	case string(modeAudit):
 		cfg.mode = modeAudit
 		return modeAudit, true
+	case string(modeWorkflows):
+		cfg.mode = modeWorkflows
+		return modeWorkflows, true
+	case string(modeInit):
+		cfg.mode = modeInit
+		return modeInit, true
 	}
 	return "", false
 }
@@ -57,7 +63,12 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 // parseFlagsForMode handles flag parsing for non-run subcommands.
 func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConfig, error) {
 	switch mode {
-	case modeVersion, modeSetup, modeDoctor:
+	case modeVersion, modeSetup, modeDoctor, modeWorkflows:
+		return *cfg, nil
+	case modeInit:
+		if len(args) > 2 {
+			cfg.pipelineFile = args[2]
+		}
 		return *cfg, nil
 	case modeValidate:
 		if len(args) > 2 {
@@ -113,6 +124,8 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream events as newline-delimited JSON to stdout")
 	fs.StringVar(&cfg.format, "format", "", "Pipeline format override: dip (default) or dot")
 	fs.StringVar(&cfg.backend, "backend", "", "Agent backend override: claude-code")
+	fs.StringVar(&cfg.autopilot, "autopilot", "", "Replace human gates with LLM judge (lax/mid/hard/mentor)")
+	fs.BoolVar(&cfg.autoApprove, "auto-approve", false, "Auto-approve all human gates (no LLM, deterministic)")
 
 	// Go's flag package stops parsing at the first non-flag argument.
 	// To support flags in any order (e.g. "tracker pipeline.dot -c cp.json"),
@@ -158,6 +171,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
 	fmt.Fprintf(w, "  tracker doctor                Preflight health check\n")
+	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
+	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")
 	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")
 	fmt.Fprintf(w, "  tracker version               Show version information\n\n")
 	fmt.Fprintf(w, "Flags:\n")
@@ -168,5 +183,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
 	fmt.Fprintf(w, "  --backend string          Agent backend override: claude-code\n")
+	fmt.Fprintf(w, "  --autopilot <persona>     Replace human gates with LLM judge (lax/mid/hard/mentor)\n")
+	fmt.Fprintf(w, "  --auto-approve            Auto-approve all human gates (deterministic, no LLM)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

@@ -85,7 +85,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	outcome := pipeline.Outcome{Status: status}
 	if joinID := node.Attrs["parallel_join"]; joinID != "" {
-		outcome.ContextUpdates = map[string]string{"suggested_next_nodes": joinID}
+		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
 	}
 	return outcome, nil
 }

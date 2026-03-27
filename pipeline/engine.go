@@ -190,7 +190,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 
 	s.pctx.Set(ContextKeyOutcome, "")
 	s.pctx.Set(ContextKeyPreferredLabel, "")
-	s.pctx.Set("suggested_next_nodes", "")
+	s.pctx.Set(ContextKeySuggestedNextNodes, "")
 
 	execNode := e.prepareExecNode(node, s)
 

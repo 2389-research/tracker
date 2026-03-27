@@ -1,0 +1,1020 @@
+workflow BuildProductWithSuperspec
+  goal: "Read a structured product spec with parallel work streams, execute streams respecting dependencies, enforce quality gates mechanically, cross-review the complete result, and verify full traceability."
+  start: Start
+  exit: Done
+
+  defaults
+    max_retries: 3
+    max_restarts: 20
+    fidelity: full
+    model: claude-sonnet-4-6
+    provider: anthropic
+
+  agent Start
+    label: Start
+    prompt: Initialize pipeline.
+
+  agent Done
+    label: Done
+    prompt: Pipeline complete.
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 1: Read, Plan, Scaffold
+  # ═══════════════════════════════════════════════════════════════
+
+  tool Setup
+    label: "Setup Build Environment"
+    timeout: 15s
+    command:
+      set -eu
+      mkdir -p .ai/streams .ai/decisions .ai/worktrees .ai/gates
+      echo '.ai/' >> .gitignore 2>/dev/null || true
+      sort -u .gitignore -o .gitignore
+      if [ ! -f SPEC.md ]; then
+        echo "ERROR: SPEC.md not found in repo root"
+        exit 1
+      fi
+      printf 'setup-ready'
+
+  agent AnalyzeSpec
+    label: "Analyze Spec Structure"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Read SPEC.md thoroughly. Produce a structured analysis to .ai/decisions/spec-analysis.md:
+
+      ## Product summary
+      2-3 sentences.
+
+      ## Functional requirements inventory
+      List every FR-N with its acceptance criteria (copy verbatim).
+
+      ## Quality gates inventory
+      List every QG-N with its concrete thresholds.
+
+      ## Non-functional requirements
+      List every NFR-N.
+
+      ## Engineering constraints
+      List every EC-N.
+
+      ## Work streams
+      List every stream from the spec's suggested breakdown.
+      For each: name, scope, dependencies on other streams.
+
+      ## Dependency graph
+      Which streams can run in parallel. Which must wait for others.
+
+      ## Technology decisions
+      Language, frameworks, infrastructure implied or prescribed by the spec.
+
+  agent BuildPlan
+    label: "Build Execution Plan"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Based on the spec analysis at .ai/decisions/spec-analysis.md, produce an
+      execution plan to .ai/decisions/execution-plan.md.
+
+      For each work stream, define:
+
+      ## Stream [letter]: [name]
+      **Depends on**: [stream letters, or "none"]
+      **Phase**: [1 = foundation, 2 = core, 3 = surface, 4 = quality]
+      **FRs covered**: [FR-N list]
+      **QGs applicable**: [QG-N list]
+      **Files to create/modify**: [explicit list]
+      **Milestones**:
+        1. [first deliverable] — done when: [criteria]
+        2. [second deliverable] — done when: [criteria]
+      **Verify commands**: [shell commands that prove this stream works]
+
+      Assign streams to phases:
+      - Phase 1 (foundation): streams with no dependencies
+      - Phase 2 (core): streams depending only on phase 1
+      - Phase 3 (surface): streams depending on phase 2
+      - Phase 4 (quality): evaluation, docs, compliance
+
+      Also create the initial traceability scaffold:
+      Write docs/traceability.yaml with every FR-N, QG-N, NFR-N, EC-N listed
+      with status: pending, impl_ref: null, test_ref: null.
+
+  human ApprovePlan
+    label: "Review execution plan. Approve, adjust, or reject."
+    mode: freeform
+    default: approve
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 2: Foundation Streams (parallel)
+  #   Stream A: Ingestion + normalization
+  #   Stream B: Extraction
+  # ═══════════════════════════════════════════════════════════════
+
+  tool SetupPhase1Worktrees
+    label: "Setup Phase 1 Worktrees"
+    timeout: 15s
+    command:
+      set -eu
+      for STREAM in stream-a stream-b; do
+        BRANCH="build/$STREAM"
+        WTDIR=".ai/worktrees/$STREAM"
+        git worktree remove --force "$WTDIR" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+        git worktree add "$WTDIR" -b "$BRANCH" HEAD
+      done
+      printf 'phase1-worktrees-ready'
+
+  parallel Phase1Parallel -> StreamA, StreamB
+
+  agent StreamA
+    label: "Stream A: Ingestion & Normalization"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    working_dir: .ai/worktrees/stream-a
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream A of the product spec. Read:
+      - SPEC.md (full context)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Feed ingestion, article parsing, normalization, deduplication,
+      correlation IDs, stuck recovery, retry logic.
+
+      Cover: FR-1 (Feed Curation infrastructure), FR-2 (Article Ingestion).
+
+      RULES:
+      - Implement exactly what your milestones specify.
+      - Follow all engineering constraints (EC-1 through EC-5).
+      - Write tests for every public function. Target 95% coverage on core logic.
+      - Respect complexity limits (cyclomatic <= 10, cognitive <= 15).
+      - Update docs/traceability.yaml: set impl_ref and test_ref for your FRs.
+      - Commit with conventional messages referencing stream and FR IDs.
+
+  agent StreamB
+    label: "Stream B: Entity & Event Extraction"
+    model: gpt-5.4
+    provider: openai
+    working_dir: .ai/worktrees/stream-b
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream B of the product spec. Read:
+      - SPEC.md (full context)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Entity extraction, event candidate extraction, temporal parsing,
+      location extraction, synopsis generation per article.
+
+      Cover: FR-3 (Entity and Event Extraction).
+
+      RULES:
+      - Implement exactly what your milestones specify.
+      - Follow all engineering constraints (EC-1 through EC-5).
+      - Write tests for every public function. Target 95% coverage on core logic.
+      - Respect complexity limits (cyclomatic <= 10, cognitive <= 15).
+      - Update docs/traceability.yaml: set impl_ref and test_ref for your FRs.
+      - Commit with conventional messages referencing stream and FR IDs.
+
+  fan_in Phase1Join <- StreamA, StreamB
+
+  tool MergePhase1
+    label: "Merge Phase 1 & Run Gates"
+    timeout: 120s
+    command:
+      set -eu
+      MAIN=$(git rev-parse --abbrev-ref HEAD)
+      for STREAM in stream-a stream-b; do
+        BRANCH="build/$STREAM"
+        git merge "$BRANCH" --no-edit -m "feat: merge $STREAM (phase 1)" || {
+          echo "MERGE CONFLICT in $STREAM"
+          git merge --abort
+          exit 1
+        }
+        git worktree remove --force ".ai/worktrees/$STREAM" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+      done
+      rm -rf .ai/worktrees/stream-a .ai/worktrees/stream-b
+      printf 'phase1-merged'
+
+  tool GatePhase1
+    label: "Quality Gates: Phase 1"
+    timeout: 300s
+    command:
+      set -eu
+      REPORT=".ai/gates/phase1.txt"
+      PASS=true
+
+      echo "=== Phase 1 Quality Gates ===" > "$REPORT"
+
+      # QG-2: Static quality
+      if [ -f pyproject.toml ]; then
+        echo "--- Lint ---" >> "$REPORT"
+        uv run ruff check . >> "$REPORT" 2>&1 || PASS=false
+        echo "--- Type check ---" >> "$REPORT"
+        uv run pyright . >> "$REPORT" 2>&1 || PASS=false
+      elif [ -f go.mod ]; then
+        echo "--- Vet ---" >> "$REPORT"
+        go vet ./... >> "$REPORT" 2>&1 || PASS=false
+      fi
+
+      # QG-3: Test coverage
+      if [ -f go.mod ]; then
+        echo "--- Tests ---" >> "$REPORT"
+        go test ./... -coverprofile=.ai/gates/phase1-coverage.out >> "$REPORT" 2>&1 || PASS=false
+        echo "--- Coverage ---" >> "$REPORT"
+        go tool cover -func=.ai/gates/phase1-coverage.out | tail -1 >> "$REPORT"
+      elif [ -f pyproject.toml ]; then
+        echo "--- Tests ---" >> "$REPORT"
+        uv run pytest --cov --cov-report=term-missing >> "$REPORT" 2>&1 || PASS=false
+      fi
+
+      # QG-5: Complexity (if gocyclo or similar available)
+      if command -v gocyclo >/dev/null 2>&1 && [ -f go.mod ]; then
+        echo "--- Complexity ---" >> "$REPORT"
+        COMPLEX=$(gocyclo -over 10 . 2>/dev/null | wc -l | tr -d ' ')
+        echo "Functions over cyclomatic 10: $COMPLEX" >> "$REPORT"
+        if [ "$COMPLEX" -gt 0 ]; then
+          gocyclo -over 10 . >> "$REPORT" 2>&1
+          echo "WARNING: complexity violations" >> "$REPORT"
+        fi
+      fi
+
+      cat "$REPORT"
+      if [ "$PASS" = "false" ]; then
+        printf 'phase1-gates-FAIL'
+        exit 1
+      fi
+      printf 'phase1-gates-PASS'
+
+  agent FixPhase1
+    label: "Fix Phase 1 Gate Failures"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      Phase 1 quality gates failed. Read the gate report at .ai/gates/phase1.txt.
+      Fix ONLY the specific failures. Do not expand scope.
+      Commit fixes with "fix(phase1): [what was fixed]"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 3: Core Streams (parallel where possible)
+  #   Stream C: Event engine (depends on B)
+  #   Stream E: Ranking (independent)
+  # ═══════════════════════════════════════════════════════════════
+
+  tool SetupPhase2Worktrees
+    label: "Setup Phase 2 Worktrees"
+    timeout: 15s
+    command:
+      set -eu
+      for STREAM in stream-c stream-e; do
+        BRANCH="build/$STREAM"
+        WTDIR=".ai/worktrees/$STREAM"
+        git worktree remove --force "$WTDIR" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+        git worktree add "$WTDIR" -b "$BRANCH" HEAD
+      done
+      printf 'phase2-worktrees-ready'
+
+  parallel Phase2Parallel -> StreamC, StreamE
+
+  agent StreamC
+    label: "Stream C: Event Engine"
+    model: claude-opus-4-6
+    provider: anthropic
+    working_dir: .ai/worktrees/stream-c
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream C of the product spec. Read:
+      - SPEC.md (full context, especially sections 5.1-5.3 and FR-4)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Event candidate retrieval, multi-signal event assignment
+      (entity overlap + temporal proximity + semantic similarity + LLM judgment),
+      fixed founding identity anchors, singleton handling, explainability payloads.
+
+      Cover: FR-4 (Event Formation), FR-6 (Singleton Handling), FR-9 (Explainability for events).
+
+      CRITICAL CONSTRAINTS:
+      - EC-1: No threshold-only grouping. Multi-signal decision function required.
+      - EC-2: No drifting centroids. Fixed founding identity.
+      - EC-5: Every grouping decision must be explainable.
+      - Event identity must be order-invariant (NFR-2).
+
+      Write property tests for order invariance and idempotence.
+      Create initial gold dataset stubs for event-level evaluation.
+      Update docs/traceability.yaml for your FRs.
+      Commit with conventional messages referencing stream and FR IDs.
+
+  agent StreamE
+    label: "Stream E: Ranking & Materialization"
+    model: gpt-5.4
+    provider: openai
+    working_dir: .ai/worktrees/stream-e
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream E of the product spec. Read:
+      - SPEC.md (full context, especially FR-7)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Front page ranking by independent source count, freshness,
+      growth rate, activity. Diversity interleaving. Independence group handling
+      to prevent syndication inflation.
+
+      Cover: FR-7 (Front Page Ranking).
+
+      Write tests for ranking stability and diversity properties.
+      Update docs/traceability.yaml for your FRs.
+      Commit with conventional messages referencing stream and FR IDs.
+
+  fan_in Phase2Join <- StreamC, StreamE
+
+  tool MergePhase2
+    label: "Merge Phase 2 & Run Gates"
+    timeout: 120s
+    command:
+      set -eu
+      for STREAM in stream-c stream-e; do
+        BRANCH="build/$STREAM"
+        git merge "$BRANCH" --no-edit -m "feat: merge $STREAM (phase 2)" || {
+          echo "MERGE CONFLICT in $STREAM"
+          git merge --abort
+          exit 1
+        }
+        git worktree remove --force ".ai/worktrees/$STREAM" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+      done
+      rm -rf .ai/worktrees/stream-c .ai/worktrees/stream-e
+      printf 'phase2-merged'
+
+  tool GatePhase2
+    label: "Quality Gates: Phase 2"
+    timeout: 300s
+    command:
+      set -eu
+      REPORT=".ai/gates/phase2.txt"
+      PASS=true
+      echo "=== Phase 2 Quality Gates ===" > "$REPORT"
+
+      # Build + test
+      if [ -f go.mod ]; then
+        go build ./... >> "$REPORT" 2>&1 || PASS=false
+        go test ./... -coverprofile=.ai/gates/phase2-coverage.out >> "$REPORT" 2>&1 || PASS=false
+        go tool cover -func=.ai/gates/phase2-coverage.out | tail -1 >> "$REPORT"
+      elif [ -f pyproject.toml ]; then
+        uv run pytest --cov --cov-report=term-missing >> "$REPORT" 2>&1 || PASS=false
+      fi
+
+      # QG-7: Data quality gates (if gold dataset exists)
+      if [ -d tests/gold ] || [ -d tests/golden ]; then
+        echo "--- Gold Dataset Evaluation ---" >> "$REPORT"
+        if [ -f go.mod ]; then
+          go test ./... -run 'Gold|Eval' -v >> "$REPORT" 2>&1 || true
+        elif [ -f pyproject.toml ]; then
+          uv run pytest -k 'gold or eval' -v >> "$REPORT" 2>&1 || true
+        fi
+      fi
+
+      cat "$REPORT"
+      if [ "$PASS" = "false" ]; then
+        printf 'phase2-gates-FAIL'
+        exit 1
+      fi
+      printf 'phase2-gates-PASS'
+
+  agent FixPhase2
+    label: "Fix Phase 2 Gate Failures"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      Phase 2 quality gates failed. Read .ai/gates/phase2.txt.
+      Fix ONLY the specific failures. Commit with "fix(phase2): [what]"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 4: Story Engine (depends on Event Engine)
+  #   Stream D: Story assembly, angles, narrative tracking
+  # ═══════════════════════════════════════════════════════════════
+
+  agent StreamD
+    label: "Stream D: Story Engine"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream D of the product spec. Read:
+      - SPEC.md (full context, especially sections 5.2 and FR-5)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Event-to-story linking via entity graphs, narrative continuity,
+      LLM/classifier judgment, angle/substory detection, story summaries,
+      editorial override capability.
+
+      Cover: FR-5 (Story Assembly), FR-9 (Explainability for stories).
+
+      CRITICAL CONSTRAINTS:
+      - EC-1: Story layer must NOT be "clusters of clusters by cosine threshold."
+      - Stories are built from explicitly linked events.
+      - Story identity is relational (entity overlap, timeline continuity, LLM adjudication).
+      - One story must be able to contain heterogeneous event types.
+
+      Create gold dataset entries for story-level evaluation.
+      Write property tests for story continuity.
+      Update docs/traceability.yaml for your FRs.
+      Commit with conventional messages referencing stream and FR IDs.
+
+  tool GateStreamD
+    label: "Quality Gates: Stream D"
+    timeout: 300s
+    command:
+      set -eu
+      REPORT=".ai/gates/stream-d.txt"
+      PASS=true
+      echo "=== Stream D Quality Gates ===" > "$REPORT"
+
+      if [ -f go.mod ]; then
+        go build ./... >> "$REPORT" 2>&1 || PASS=false
+        go test ./... >> "$REPORT" 2>&1 || PASS=false
+      elif [ -f pyproject.toml ]; then
+        uv run pytest >> "$REPORT" 2>&1 || PASS=false
+      fi
+
+      cat "$REPORT"
+      if [ "$PASS" = "false" ]; then
+        printf 'streamD-gates-FAIL'
+        exit 1
+      fi
+      printf 'streamD-gates-PASS'
+
+  agent FixStreamD
+    label: "Fix Stream D Gate Failures"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      Stream D quality gates failed. Read .ai/gates/stream-d.txt.
+      Fix ONLY the specific failures. Commit with "fix(stream-d): [what]"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 5: Surface Streams (parallel)
+  #   Stream F: UI/API
+  #   Stream G: Ops + observability
+  # ═══════════════════════════════════════════════════════════════
+
+  tool SetupPhase4Worktrees
+    label: "Setup Phase 4 Worktrees"
+    timeout: 15s
+    command:
+      set -eu
+      for STREAM in stream-f stream-g; do
+        BRANCH="build/$STREAM"
+        WTDIR=".ai/worktrees/$STREAM"
+        git worktree remove --force "$WTDIR" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+        git worktree add "$WTDIR" -b "$BRANCH" HEAD
+      done
+      printf 'phase4-worktrees-ready'
+
+  parallel Phase4Parallel -> StreamF, StreamG
+
+  agent StreamF
+    label: "Stream F: UI & API"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    working_dir: .ai/worktrees/stream-f
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream F of the product spec. Read:
+      - SPEC.md (full context, especially sections 11 and FR-8)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Front page, story page (progressive depth: story → angles →
+      events → article timeline), event page, feed directory, filters.
+
+      Cover: FR-1 (Feed Curation UI), FR-8 (Story Tracker UX), Section 11 UI requirements.
+
+      The story tracker is the PRIMARY design target. Build progressive depth
+      that works: broad story → sub-angles → individual events → article timeline.
+      The daily reader gets the top level for free.
+
+      Write E2E test stubs for the QG-9 demo scenarios.
+      Update docs/traceability.yaml for your FRs.
+      Commit with conventional messages referencing stream and FR IDs.
+
+  agent StreamG
+    label: "Stream G: Ops & Observability"
+    model: gpt-5.4
+    provider: openai
+    working_dir: .ai/worktrees/stream-g
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream G of the product spec. Read:
+      - SPEC.md (full context, especially FR-10 and NFR-3)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Operator dashboard (ingestion health, parser failures, dedup stats,
+      event/story metrics, singleton rate, merge/split review queue, gold-set results,
+      model drift indicators, feed coverage anomalies), structured logging, metrics,
+      trace/correlation IDs, stuck recovery monitoring.
+
+      Cover: FR-10 (Operator Dashboard), NFR-3 (Observability), NFR-4 (Performance monitoring).
+
+      EC-4: No silent failure paths. Every deferral/abstention/fallback is logged.
+
+      Update docs/traceability.yaml for your FRs.
+      Commit with conventional messages referencing stream and FR IDs.
+
+  fan_in Phase4Join <- StreamF, StreamG
+
+  tool MergePhase4
+    label: "Merge Phase 4 & Run Gates"
+    timeout: 120s
+    command:
+      set -eu
+      for STREAM in stream-f stream-g; do
+        BRANCH="build/$STREAM"
+        git merge "$BRANCH" --no-edit -m "feat: merge $STREAM (phase 4)" || {
+          echo "MERGE CONFLICT in $STREAM"
+          git merge --abort
+          exit 1
+        }
+        git worktree remove --force ".ai/worktrees/$STREAM" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+      done
+      rm -rf .ai/worktrees/stream-f .ai/worktrees/stream-g
+      printf 'phase4-merged'
+
+  tool GatePhase4
+    label: "Quality Gates: Phase 4"
+    timeout: 300s
+    command:
+      set -eu
+      REPORT=".ai/gates/phase4.txt"
+      PASS=true
+      echo "=== Phase 4 Quality Gates ===" > "$REPORT"
+
+      if [ -f go.mod ]; then
+        go build ./... >> "$REPORT" 2>&1 || PASS=false
+        go test ./... >> "$REPORT" 2>&1 || PASS=false
+      elif [ -f pyproject.toml ]; then
+        uv run pytest >> "$REPORT" 2>&1 || PASS=false
+      fi
+
+      cat "$REPORT"
+      if [ "$PASS" = "false" ]; then
+        printf 'phase4-gates-FAIL'
+        exit 1
+      fi
+      printf 'phase4-gates-PASS'
+
+  agent FixPhase4
+    label: "Fix Phase 4 Gate Failures"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      Phase 4 quality gates failed. Read .ai/gates/phase4.txt.
+      Fix ONLY the specific failures. Commit with "fix(phase4): [what]"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 6: Quality & Docs Streams (parallel)
+  #   Stream H: Evaluation & QA
+  #   Stream I: Docs & compliance
+  # ═══════════════════════════════════════════════════════════════
+
+  tool SetupPhase5Worktrees
+    label: "Setup Phase 5 Worktrees"
+    timeout: 15s
+    command:
+      set -eu
+      for STREAM in stream-h stream-i; do
+        BRANCH="build/$STREAM"
+        WTDIR=".ai/worktrees/$STREAM"
+        git worktree remove --force "$WTDIR" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+        git worktree add "$WTDIR" -b "$BRANCH" HEAD
+      done
+      printf 'phase5-worktrees-ready'
+
+  parallel Phase5Parallel -> StreamH, StreamI
+
+  agent StreamH
+    label: "Stream H: Evaluation & QA"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    working_dir: .ai/worktrees/stream-h
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream H of the product spec. Read:
+      - SPEC.md (full context, especially sections 12-14)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+
+      Your scope: Gold dataset creation and management, CI quality gate enforcement,
+      evaluation harness, regression corpus ("museum of shame"), property test suite,
+      mutation testing setup for core grouping logic.
+
+      Cover: QG-3 (Test Coverage), QG-4 (Mutation Testing), QG-7 (Data Quality Gates),
+      Section 12 (Evaluation Framework), Section 14 (Testing Strategy).
+
+      Create gold datasets with HARD NEGATIVES as specified:
+      - same actor, different event
+      - same country, different incident
+      - same topic, different story
+      - related event, same story but not same event
+      - delayed second coverage outside typical time window
+
+      Update docs/traceability.yaml for your QGs.
+      Commit with conventional messages referencing stream and QG IDs.
+
+  agent StreamI
+    label: "Stream I: Docs & Compliance"
+    model: gpt-5.4
+    provider: openai
+    working_dir: .ai/worktrees/stream-i
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are building Stream I of the product spec. Read:
+      - SPEC.md (full context, especially QG-1 and QG-10)
+      - .ai/decisions/execution-plan.md (your stream's milestones)
+      - docs/traceability.yaml (current state — complete any gaps)
+
+      Your scope: Architecture doc, data model doc, API doc, operator runbook,
+      evaluation methodology doc, prompt/model registry, ADRs for major decisions,
+      known limitations doc, traceability matrix completion.
+
+      Cover: QG-1 (Spec Traceability), QG-10 (Documentation Gates).
+
+      CRITICAL: The traceability file must link every FR-N, QG-N, NFR-N, EC-N to:
+      - at least one implementation reference (file:function or file:class)
+      - at least one test reference (test file:test name)
+      - an acceptance note
+
+      Verify completeness against SPEC.md. Flag any requirement without an impl_ref.
+      Commit with conventional messages referencing stream and QG IDs.
+
+  fan_in Phase5Join <- StreamH, StreamI
+
+  tool MergePhase5
+    label: "Merge Phase 5 & Run Gates"
+    timeout: 120s
+    command:
+      set -eu
+      for STREAM in stream-h stream-i; do
+        BRANCH="build/$STREAM"
+        git merge "$BRANCH" --no-edit -m "feat: merge $STREAM (phase 5)" || {
+          echo "MERGE CONFLICT in $STREAM"
+          git merge --abort
+          exit 1
+        }
+        git worktree remove --force ".ai/worktrees/$STREAM" 2>/dev/null || true
+        git branch -D "$BRANCH" 2>/dev/null || true
+      done
+      rm -rf .ai/worktrees/stream-h .ai/worktrees/stream-i
+      printf 'phase5-merged'
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 7: Cross-Review
+  # Three reviewers with different perspectives review the COMPLETE product.
+  # ═══════════════════════════════════════════════════════════════
+
+  parallel ReviewParallel -> ReviewArchitect, ReviewQA, ReviewProduct
+
+  agent ReviewArchitect
+    label: "Architect Review"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    prompt:
+      Review the COMPLETE implementation against SPEC.md.
+
+      Focus on ARCHITECTURAL compliance:
+      - EC-1: Is the story layer built from explicit event links, NOT threshold clustering?
+      - EC-2: Are event identities fixed, NOT drifting EMAs?
+      - EC-3: Are operator overrides stored and inspectable?
+      - EC-5: Can every grouping decision be explained?
+      - Section 10 architecture: Does the implementation follow the prescribed pipeline stages?
+      - Are event and story layers properly separated?
+      - Is the domain model (Section 7) faithfully represented?
+
+      Read docs/traceability.yaml and check for gaps.
+
+      Write findings to .ai/decisions/review-architect.md.
+      Rate each FR/EC as PASS, PARTIAL, or FAIL with specific evidence.
+
+  agent ReviewQA
+    label: "QA Review"
+    model: gpt-5.4
+    provider: openai
+    reasoning_effort: high
+    prompt:
+      Review the COMPLETE implementation against SPEC.md.
+
+      Focus on QUALITY AND TESTING compliance:
+      - QG-2: Are linting/formatting/type checks enforced?
+      - QG-3: Does coverage meet thresholds (85% overall, 95% core)?
+      - QG-4: Is mutation testing set up for core logic?
+      - QG-5: Are complexity limits respected?
+      - QG-7: Do gold dataset evaluations pass thresholds?
+      - QG-8: Are LLM outputs validated, prompts pinned, retries tested?
+      - Section 14: Does the testing strategy cover all required categories?
+      - Is there a regression corpus?
+
+      Write findings to .ai/decisions/review-qa.md.
+      Rate each QG as PASS, PARTIAL, or FAIL with specific evidence.
+
+  agent ReviewProduct
+    label: "Product Review"
+    model: gemini-2.5-pro
+    provider: gemini
+    reasoning_effort: high
+    prompt:
+      Review the COMPLETE implementation against SPEC.md.
+
+      Focus on PRODUCT AND UX compliance:
+      - FR-8: Does the story tracker actually work for the story tracker user?
+      - QG-9: Do the 6 demo scenarios work end-to-end?
+      - Section 3: Are all 4 core product promises met?
+      - Section 4: Is each user persona adequately served?
+      - Section 19: Does each success criterion hold?
+      - Is editorial transparency actually implemented, not just data-modeled?
+      - Can a user actually say "show me the story, its branches, how it evolved"?
+
+      Write findings to .ai/decisions/review-product.md.
+      Rate each success criterion as PASS, PARTIAL, or FAIL with specific evidence.
+
+  fan_in ReviewJoin <- ReviewArchitect, ReviewQA, ReviewProduct
+
+  agent SynthesizeReviews
+    label: "Synthesize Cross-Reviews"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Read all three reviews:
+      - .ai/decisions/review-architect.md
+      - .ai/decisions/review-qa.md
+      - .ai/decisions/review-product.md
+
+      Synthesize into .ai/decisions/review-synthesis.md:
+
+      ## Consensus (all reviewers agree)
+      ## Disputed (reviewers disagree)
+      ## Blocking issues (FAIL ratings — must fix before ship)
+      ## Non-blocking issues (PARTIAL ratings — should fix, not blocking)
+      ## Improvements (suggestions only)
+
+      If ANY FR, QG, or EC has a FAIL rating from ANY reviewer: STATUS:fail
+      If all are PASS or PARTIAL: STATUS:success
+
+  agent ApplyReviewFixes
+    label: "Apply Review Fixes"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      Read the review synthesis at .ai/decisions/review-synthesis.md.
+      Fix ALL blocking issues. Address non-blocking issues where the fix is clear.
+      Do NOT address mere suggestions.
+      Update docs/traceability.yaml if any impl_ref or test_ref changed.
+      Commit with "fix: address cross-review findings"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Phase 8: Final Verification
+  # Mechanical gate enforcement + traceability check + human sign-off
+  # ═══════════════════════════════════════════════════════════════
+
+  tool FinalGates
+    label: "Enforce ALL Quality Gates"
+    timeout: 600s
+    command:
+      set -eu
+      REPORT=".ai/gates/final.txt"
+      PASS=true
+      echo "=== FINAL QUALITY GATES ===" > "$REPORT"
+
+      # QG-2: Static quality
+      if [ -f go.mod ]; then
+        echo "--- Build ---" >> "$REPORT"
+        go build ./... >> "$REPORT" 2>&1 || PASS=false
+        echo "--- Vet ---" >> "$REPORT"
+        go vet ./... >> "$REPORT" 2>&1 || PASS=false
+        echo "--- Tests + Coverage ---" >> "$REPORT"
+        go test ./... -coverprofile=.ai/gates/final-coverage.out -count=1 >> "$REPORT" 2>&1 || PASS=false
+        echo "--- Coverage Summary ---" >> "$REPORT"
+        go tool cover -func=.ai/gates/final-coverage.out | tail -1 >> "$REPORT"
+      elif [ -f pyproject.toml ]; then
+        echo "--- Lint ---" >> "$REPORT"
+        uv run ruff check . >> "$REPORT" 2>&1 || PASS=false
+        echo "--- Type Check ---" >> "$REPORT"
+        uv run pyright . >> "$REPORT" 2>&1 || PASS=false
+        echo "--- Tests + Coverage ---" >> "$REPORT"
+        uv run pytest --cov --cov-report=term-missing >> "$REPORT" 2>&1 || PASS=false
+      fi
+
+      # QG-7: Gold dataset evaluation
+      if [ -f go.mod ]; then
+        echo "--- Gold Dataset ---" >> "$REPORT"
+        go test ./... -run 'Gold|Eval|Regression' -v >> "$REPORT" 2>&1 || true
+      elif [ -f pyproject.toml ]; then
+        echo "--- Gold Dataset ---" >> "$REPORT"
+        uv run pytest -k 'gold or eval or regression' -v >> "$REPORT" 2>&1 || true
+      fi
+
+      # QG-1: Traceability completeness
+      echo "--- Traceability ---" >> "$REPORT"
+      if [ -f docs/traceability.yaml ]; then
+        PENDING=$(grep -c 'status: pending' docs/traceability.yaml || echo 0)
+        NULL_IMPL=$(grep -c 'impl_ref: null' docs/traceability.yaml || echo 0)
+        NULL_TEST=$(grep -c 'test_ref: null' docs/traceability.yaml || echo 0)
+        echo "Pending requirements: $PENDING" >> "$REPORT"
+        echo "Missing impl_ref: $NULL_IMPL" >> "$REPORT"
+        echo "Missing test_ref: $NULL_TEST" >> "$REPORT"
+        if [ "$PENDING" -gt 0 ] || [ "$NULL_IMPL" -gt 0 ]; then
+          echo "TRACEABILITY INCOMPLETE" >> "$REPORT"
+          PASS=false
+        fi
+      else
+        echo "docs/traceability.yaml NOT FOUND" >> "$REPORT"
+        PASS=false
+      fi
+
+      # Clean worktree check
+      echo "--- Worktree Check ---" >> "$REPORT"
+      WORKTREES=$(git worktree list --porcelain | grep -c 'worktree' || echo 1)
+      if [ "$WORKTREES" -gt 1 ]; then
+        echo "LEFTOVER WORKTREES" >> "$REPORT"
+        git worktree list >> "$REPORT"
+        PASS=false
+      fi
+      BUILD_BRANCHES=$(git branch | grep 'build/' | wc -l | tr -d ' ')
+      if [ "$BUILD_BRANCHES" -gt 0 ]; then
+        echo "LEFTOVER BUILD BRANCHES" >> "$REPORT"
+        git branch | grep 'build/' >> "$REPORT"
+        PASS=false
+      fi
+
+      cat "$REPORT"
+      if [ "$PASS" = "false" ]; then
+        printf 'final-gates-FAIL'
+        exit 1
+      fi
+      printf 'final-gates-PASS'
+
+  agent TraceabilityAudit
+    label: "Traceability Audit"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    fallback_target: EscalateToHuman
+    auto_status: true
+    prompt:
+      This is the final compliance check. Read:
+      - SPEC.md (every requirement)
+      - docs/traceability.yaml (every entry)
+      - .ai/gates/final.txt (gate results)
+
+      For EVERY requirement in the spec (FR-N, QG-N, NFR-N, EC-N):
+      1. Is it in the traceability file?
+      2. Does it have an impl_ref pointing to real code?
+      3. Does it have a test_ref pointing to a real test?
+      4. Does the acceptance note match the spec's acceptance criteria?
+
+      Also verify Section 18 (Release Readiness Checklist) — every item.
+      Also verify Section 17 (Definition of Done) applies to every feature.
+
+      Write .ai/decisions/final-compliance.md with a per-requirement verdict.
+
+      If everything traces cleanly: STATUS:success
+      If any requirement is unlinked or unimplemented: STATUS:fail with the list.
+
+  human EscalateToHuman
+    label: "Build needs human intervention. Review and decide."
+    mode: freeform
+
+  tool Cleanup
+    label: "Clean Build Artifacts"
+    timeout: 15s
+    command:
+      set -eu
+      rm -rf .ai/worktrees .ai/streams .ai/gates
+      # Preserve decision log
+      echo "=== Preserved ==="
+      ls .ai/decisions/
+      printf 'cleanup-done'
+
+  agent FinalCommit
+    label: "Final Commit"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      Ensure everything is committed. If there are uncommitted changes from
+      cleanup or final fixes, commit them. Include the commit hash.
+      This is the ship commit.
+
+  # ═══════════════════════════════════════════════════════════════
+  # Edges
+  # ═══════════════════════════════════════════════════════════════
+
+  edges
+    Start -> Setup
+    Setup -> AnalyzeSpec
+    AnalyzeSpec -> BuildPlan
+    BuildPlan -> ApprovePlan
+    ApprovePlan -> SetupPhase1Worktrees  label: "approve"
+    ApprovePlan -> BuildPlan  label: "adjust"  restart: true
+    ApprovePlan -> Done  label: "reject"
+
+    # Phase 1: Foundation (A + B parallel)
+    SetupPhase1Worktrees -> Phase1Parallel
+    StreamA -> Phase1Join
+    StreamB -> Phase1Join
+    Phase1Join -> MergePhase1
+    MergePhase1 -> GatePhase1  when ctx.outcome = success
+    MergePhase1 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase1 -> EscalateToHuman
+    GatePhase1 -> SetupPhase2Worktrees  when ctx.outcome = success
+    GatePhase1 -> FixPhase1  when ctx.outcome = fail
+    GatePhase1 -> EscalateToHuman
+    FixPhase1 -> GatePhase1  restart: true
+
+    # Phase 2: Core (C + E parallel)
+    SetupPhase2Worktrees -> Phase2Parallel
+    StreamC -> Phase2Join
+    StreamE -> Phase2Join
+    Phase2Join -> MergePhase2
+    MergePhase2 -> GatePhase2  when ctx.outcome = success
+    MergePhase2 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase2 -> EscalateToHuman
+    GatePhase2 -> StreamD  when ctx.outcome = success
+    GatePhase2 -> FixPhase2  when ctx.outcome = fail
+    GatePhase2 -> EscalateToHuman
+    FixPhase2 -> GatePhase2  restart: true
+
+    # Phase 3: Story engine (D sequential, depends on C)
+    StreamD -> GateStreamD
+    GateStreamD -> SetupPhase4Worktrees  when ctx.outcome = success
+    GateStreamD -> FixStreamD  when ctx.outcome = fail
+    GateStreamD -> EscalateToHuman
+    FixStreamD -> GateStreamD  restart: true
+
+    # Phase 4: Surface (F + G parallel)
+    SetupPhase4Worktrees -> Phase4Parallel
+    StreamF -> Phase4Join
+    StreamG -> Phase4Join
+    Phase4Join -> MergePhase4
+    MergePhase4 -> GatePhase4  when ctx.outcome = success
+    MergePhase4 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase4 -> EscalateToHuman
+    GatePhase4 -> SetupPhase5Worktrees  when ctx.outcome = success
+    GatePhase4 -> FixPhase4  when ctx.outcome = fail
+    GatePhase4 -> EscalateToHuman
+    FixPhase4 -> GatePhase4  restart: true
+
+    # Phase 5: Quality & Docs (H + I parallel)
+    SetupPhase5Worktrees -> Phase5Parallel
+    StreamH -> Phase5Join
+    StreamI -> Phase5Join
+    Phase5Join -> MergePhase5
+    MergePhase5 -> ReviewParallel  when ctx.outcome = success
+    MergePhase5 -> EscalateToHuman  when ctx.outcome = fail
+    MergePhase5 -> EscalateToHuman
+
+    # Phase 6: Cross-review
+    ReviewArchitect -> ReviewJoin
+    ReviewQA -> ReviewJoin
+    ReviewProduct -> ReviewJoin
+    ReviewJoin -> SynthesizeReviews
+    SynthesizeReviews -> FinalGates  when ctx.outcome = success
+    SynthesizeReviews -> ApplyReviewFixes  when ctx.outcome = fail
+    SynthesizeReviews -> Done
+    ApplyReviewFixes -> FinalGates
+
+    # Phase 7: Final verification
+    FinalGates -> TraceabilityAudit  when ctx.outcome = success
+    FinalGates -> EscalateToHuman  when ctx.outcome = fail
+    FinalGates -> EscalateToHuman
+    TraceabilityAudit -> Cleanup  when ctx.outcome = success
+    TraceabilityAudit -> EscalateToHuman  when ctx.outcome = fail
+    TraceabilityAudit -> EscalateToHuman
+    EscalateToHuman -> Cleanup  label: "accept"
+    EscalateToHuman -> Done  label: "abandon"
+    Cleanup -> FinalCommit
+    FinalCommit -> Done

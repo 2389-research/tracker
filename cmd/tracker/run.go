@@ -24,6 +24,16 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+// autopilotCfg holds just the autopilot settings needed by chooseInterviewer.
+// Set by executeRun before calling run/runTUI, because commandDeps.run has a
+// fixed signature that can't be extended without breaking tests.
+type autopilotCfg struct {
+	persona     string // lax/mid/hard/mentor or empty
+	autoApprove bool
+}
+
+var activeAutopilotCfg autopilotCfg
+
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
@@ -45,9 +55,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	// Create execution environment for tool handlers.
 	execEnv := exec.NewLocalEnvironment(workdir)
 
-	// Choose interviewer based on whether stdin is a terminal.
-	// BubbleteaInterviewer requires a TTY; ConsoleInterviewer works with plain stdin.
-	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()))
+	// Choose interviewer: autopilot > auto-approve > terminal detection.
+	// activeAutopilotCfg is set by executeRun before calling run().
+	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient)
 
 	// Build engine options.
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
@@ -176,16 +186,33 @@ func buildPlainEventHandlers(
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
-// loadAndValidatePipeline loads, validates, and resolves subgraphs for a pipeline file.
+// loadAndValidatePipeline loads, validates, and resolves subgraphs for a pipeline.
+// Supports filesystem paths and bare workflow names via resolvePipelineSource.
 func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[string]*pipeline.Graph, error) {
-	graph, err := loadPipeline(pipelineFile, format)
+	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var graph *pipeline.Graph
+	if isEmbedded {
+		graph, err = loadEmbeddedPipeline(info)
+	} else {
+		graph, err = loadPipeline(resolved, format)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("load pipeline: %w", err)
 	}
 	if err := pipeline.Validate(graph); err != nil {
 		return nil, nil, fmt.Errorf("validate pipeline: %w", err)
 	}
-	subgraphs, err := loadSubgraphs(graph, pipelineFile)
+
+	// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
+	parentFile := resolved
+	if isEmbedded {
+		parentFile = info.File
+	}
+	subgraphs, err := loadSubgraphs(graph, parentFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load subgraphs: %w", err)
 	}
@@ -382,10 +409,20 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 	return client, nil
 }
 
-// chooseInterviewer returns a BubbleteaInterviewer when stdin is a terminal
-// (nice arrow-key UI), or a ConsoleInterviewer for non-TTY contexts (piped
-// input, background processes, CI).
-func chooseInterviewer(isTerminal bool) handlers.FreeformInterviewer {
+// chooseInterviewer selects the interviewer implementation based on config.
+// Priority: --auto-approve > --autopilot > terminal detection.
+func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client) handlers.FreeformInterviewer {
+	if cfg.autoApprove {
+		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	if cfg.persona != "" {
+		persona, err := handlers.ParsePersona(cfg.persona)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v, falling back to auto-approve\n", err)
+			return &handlers.AutoApproveFreeformInterviewer{}
+		}
+		return handlers.NewAutopilotInterviewer(llmClient, persona)
+	}
 	if isTerminal {
 		return tui.NewMode1Interviewer()
 	}

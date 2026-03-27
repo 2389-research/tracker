@@ -8,13 +8,14 @@ import (
 
 // Built-in context keys used by the engine and handlers.
 const (
-	ContextKeyOutcome        = "outcome"
-	ContextKeyPreferredLabel = "preferred_label"
-	ContextKeyGoal           = "graph.goal"
-	ContextKeyLastResponse   = "last_response"
-	ContextKeyHumanResponse  = "human_response"
-	ContextKeyToolStdout     = "tool_stdout"
-	ContextKeyToolStderr     = "tool_stderr"
+	ContextKeyOutcome            = "outcome"
+	ContextKeyPreferredLabel     = "preferred_label"
+	ContextKeyGoal               = "graph.goal"
+	ContextKeyLastResponse       = "last_response"
+	ContextKeyHumanResponse      = "human_response"
+	ContextKeyToolStdout         = "tool_stdout"
+	ContextKeyToolStderr         = "tool_stderr"
+	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 )
 
 // Internal context keys used by the engine for bookkeeping.
