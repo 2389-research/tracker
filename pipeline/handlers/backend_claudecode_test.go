@@ -755,6 +755,56 @@ func TestParseUserContentSkipsNonToolResult(t *testing.T) {
 	}
 }
 
+func TestContentStringJSONString(t *testing.T) {
+	c := &ndjsonContent{Content: json.RawMessage(`"hello world"`)}
+	got := c.contentString()
+	if got != "hello world" {
+		t.Errorf("expected 'hello world', got %q", got)
+	}
+}
+
+func TestContentStringJSONArray(t *testing.T) {
+	c := &ndjsonContent{Content: json.RawMessage(`[{"type":"text","text":"part one"},{"type":"text","text":"part two"}]`)}
+	got := c.contentString()
+	if got != "part one\npart two" {
+		t.Errorf("expected 'part one\\npart two', got %q", got)
+	}
+}
+
+func TestContentStringArraySkipsEmptyText(t *testing.T) {
+	c := &ndjsonContent{Content: json.RawMessage(`[{"type":"text","text":"only"},{"type":"image","text":""}]`)}
+	got := c.contentString()
+	if got != "only" {
+		t.Errorf("expected 'only', got %q", got)
+	}
+}
+
+func TestContentStringEmpty(t *testing.T) {
+	c := &ndjsonContent{}
+	got := c.contentString()
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestContentStringNull(t *testing.T) {
+	c := &ndjsonContent{Content: json.RawMessage(`null`)}
+	// JSON null unmarshals into a Go string as "" successfully.
+	got := c.contentString()
+	if got != "" {
+		t.Errorf("expected empty string for null, got %q", got)
+	}
+}
+
+func TestContentStringInvalidJSON(t *testing.T) {
+	c := &ndjsonContent{Content: json.RawMessage(`{not valid}`)}
+	got := c.contentString()
+	// Falls through to raw string return.
+	if got != "{not valid}" {
+		t.Errorf("expected raw fallback, got %q", got)
+	}
+}
+
 // assertContainsFlag checks that args contains flag followed by value.
 func assertContainsFlag(t *testing.T, args []string, flag, value string) {
 	t.Helper()

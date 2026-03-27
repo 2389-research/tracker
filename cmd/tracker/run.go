@@ -249,12 +249,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	store := tui.NewStateStore(tokenTracker)
 	appModel := tui.NewAppModel(store, pipelineName, "")
 	appModel.SetVerboseTrace(verbose)
-	if backend != "" && backend != "native" {
-		appModel.Header().SetBackend(backend)
-	}
-	if activeAutopilotCfg.persona != "" {
-		appModel.Header().SetAutopilot(activeAutopilotCfg.persona)
-	}
+	configureTUIHeader(appModel, backend, activeAutopilotCfg)
 	nodeList := buildNodeList(graph)
 	appModel.SetInitialNodes(nodeList)
 
@@ -280,14 +275,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	// Mode 2 interviewer — use autopilot wrapper if persona is active.
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
-	var interviewer handlers.LabeledFreeformInterviewer
-	if activeAutopilotCfg.persona != "" {
-		persona, _ := handlers.ParsePersona(activeAutopilotCfg.persona)
-		autopilot := handlers.NewAutopilotInterviewer(llmClient, persona)
-		interviewer = tui.NewAutopilotTUIInterviewer(autopilot, sendFn)
-	} else {
-		interviewer = tui.NewBubbleteaInterviewer(sendFn)
-	}
+	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient)
 
 	// Pipeline event handler that adapts and sends to TUI.
 	pipelineHandler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
@@ -441,4 +429,25 @@ func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client)
 		return tui.NewMode1Interviewer()
 	}
 	return handlers.NewConsoleInterviewer()
+}
+
+// configureTUIHeader sets backend and autopilot tags on the TUI header bar.
+func configureTUIHeader(app *tui.AppModel, backend string, cfg autopilotCfg) {
+	if backend != "" && backend != "native" {
+		app.Header().SetBackend(backend)
+	}
+	if cfg.persona != "" {
+		app.Header().SetAutopilot(cfg.persona)
+	}
+}
+
+// chooseTUIInterviewer selects the Mode 2 (persistent TUI) interviewer.
+// If autopilot is active, wraps it so decisions flash in the TUI modal.
+func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client) handlers.LabeledFreeformInterviewer {
+	if cfg.persona != "" {
+		persona, _ := handlers.ParsePersona(cfg.persona)
+		autopilot := handlers.NewAutopilotInterviewer(llmClient, persona)
+		return tui.NewAutopilotTUIInterviewer(autopilot, send)
+	}
+	return tui.NewBubbleteaInterviewer(send)
 }

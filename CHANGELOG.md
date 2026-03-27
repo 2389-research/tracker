@@ -5,6 +5,20 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-03-27
+
+### Fixed
+
+- **Claude Code subprocess killed after 10 seconds**: `exec.CommandContext` + `WaitDelay` created a race where Go's process management sent SIGKILL to the Claude Code subprocess after exactly 10 seconds, despite no context cancellation. Switched to plain `exec.Command`.
+- **Claude Code auth failure from stripped environment**: The minimal env allowlist prevented Claude Code from finding its OAuth token / config directory. Now passes the full parent environment.
+- **NDJSON unmarshal error on subagent results**: Claude Code's subagent tool results return `content` as an array of blocks, not a string. The parser now handles both formats.
+
+### Added
+
+- **Autopilot runs inside the TUI**: `--autopilot` no longer forces `--no-tui`. Gate decisions flash in a modal for 2 seconds showing "AUTOPILOT" header, the prompt, and the chosen option in green. Press Enter to dismiss early.
+- **Backend and autopilot tags in TUI header**: Orange tag for `claude-code`, purple tag for autopilot persona — always visible next to the pipeline name.
+- **"Agent backend:" startup message**: Prints the active backend before the TUI starts (visible in `--no-tui` mode).
+
 ## [0.12.0] - 2026-03-27
 
 ### Added

@@ -529,6 +529,9 @@ tracker my_pipeline.dip                 <span class="comment"># local file</span
 tracker --autopilot mid build_product   <span class="comment"># fully autonomous</span>
 tracker --backend claude-code my.dip    <span class="comment"># agents use claude CLI</span>
 
+<span class="comment"># Full YOLO — Claude Code agents, autopilot gates, TUI dashboard</span>
+tracker --backend claude-code --autopilot lax build_product
+
 <span class="comment"># After a run</span>
 tracker diagnose                        <span class="comment"># analyze most recent failure</span>
 tracker audit &lt;runID&gt;                   <span class="comment"># full audit trail</span>
