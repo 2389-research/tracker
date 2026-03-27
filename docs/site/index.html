@@ -52,8 +52,11 @@ tracker workflows
 <span class="comment"># Run a pipeline by name — no file needed</span>
 tracker build_product
 
-<span class="comment"># Supercharge agents with Claude Code (coming v0.12.0)</span>
+<span class="comment"># Supercharge agents with Claude Code</span>
 tracker <span class="flag">--backend</span> claude-code build_product
+
+<span class="comment"># Run fully autonomous overnight</span>
+tracker <span class="flag">--autopilot</span> mid build_product
 
 <span class="comment"># Check your LLM providers</span>
 tracker doctor</code></pre>
@@ -84,7 +87,7 @@ tracker doctor</code></pre>
         <div class="label">Test Packages</div>
       </div>
       <div class="stat">
-        <div class="number">23</div>
+        <div class="number">32</div>
         <div class="label">Pipeline Tests</div>
       </div>
     </div>
@@ -262,6 +265,33 @@ graph TB
     Begin -> AskUser
     AskUser -> Implement
     Implement -> Done</code></pre>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ═══ Install ═══ -->
+  <section class="glass">
+    <h2>Install <span class="accent">tracker</span></h2>
+    <div class="grid-3" style="margin-top: 1.5rem;">
+      <div class="glass glass-sm">
+        <h4 style="margin-bottom: 0.5rem;">Go</h4>
+        <pre style="margin: 0; font-size: 0.85rem;"><code>go install github.com/2389-research/tracker/cmd/tracker@latest</code></pre>
+      </div>
+      <div class="glass glass-sm">
+        <h4 style="margin-bottom: 0.5rem;">Homebrew</h4>
+        <pre style="margin: 0; font-size: 0.85rem;"><code>brew install 2389-research/tap/tracker</code></pre>
+      </div>
+      <div class="glass glass-sm">
+        <h4 style="margin-bottom: 0.5rem;">Binary</h4>
+        <pre style="margin: 0; font-size: 0.85rem;"><code># Download from GitHub Releases
+# tracker update keeps it current</code></pre>
+      </div>
+    </div>
+    <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
+      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.12.0">v0.12.0</a> &middot;
+      After install, run <code>tracker doctor</code> to verify your setup &middot;
+      <code>tracker update</code> keeps you current
+    </p>
   </section>
 
   <div class="divider"></div>
