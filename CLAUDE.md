@@ -123,6 +123,7 @@ in the HTTP status code.
 - `tracker init <name>` — copies a built-in workflow to cwd for customization. Refuses to overwrite.
 - `tracker doctor` — preflight health check (API keys, dippin binary, workdir). Run before first pipeline.
 - `tracker diagnose [runID]` — deep failure analysis (reads status.json + activity.jsonl). Shows tool output, stderr, errors, timing anomalies, actionable suggestions. Without a run ID, analyzes the most recent run.
+- `tracker update` — self-update to latest GitHub release. Detects install method (Homebrew/go install/binary), verifies SHA256 checksum, smoke-tests new binary, atomic swap with .bak rollback. Non-blocking update check runs on every `tracker run` (24h cache).
 - `tracker version` — shows commit hash, build time, and which providers are configured. Uses Go VCS metadata for `go install` builds, GoReleaser ldflags for releases.
 
 ### Bare name resolution

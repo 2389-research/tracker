@@ -40,8 +40,9 @@
     <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
       <li><strong><code>tracker update</code></strong>: Self-update command downloads the latest GitHub release, verifies SHA256 checksum, extracts the binary, smoke-tests it, and atomically replaces the current binary with <code>.bak</code> rollback. Detects Homebrew, <code>go install</code>, and direct binary installs.</li>
       <li><strong>Non-blocking update check</strong>: On every <code>tracker run</code>, a background goroutine checks for new releases (24h cache). Prints a one-line hint if an update is available. Disabled with <code>CI</code> or <code>TRACKER_NO_UPDATE_CHECK</code> env vars.</li>
-      <li><strong>Claude Code backend</strong> (preview): Pluggable agent backend abstraction. <code>--backend claude-code</code> spawns the <code>claude</code> CLI as a subprocess and parses NDJSON output, giving agents file editing, terminal access, and MCP tool servers. Per-node via <code>backend: claude-code</code> in <code>.dip</code> files, or global via the CLI flag.</li>
+      <li><strong>Claude Code backend</strong>: Pluggable agent backend abstraction. <code>--backend claude-code</code> spawns the <code>claude</code> CLI as a subprocess and parses NDJSON output, giving agents file editing, terminal access, and MCP tool servers. Per-node via <code>backend: claude-code</code> in <code>.dip</code> files, or global via the CLI flag.</li>
       <li><strong><code>AgentBackend</code> interface</strong>: Minimal contract in <code>pipeline/backend.go</code> &mdash; one method to execute a node and return an event stream. NativeBackend wraps <code>agent.Session</code> (existing behavior), ClaudeCodeBackend wraps the subprocess.</li>
+      <li><strong>dippin-lang v0.12.0</strong>: Upgraded from v0.10.0 &mdash; picks up <code>preferred_label</code> on freeform gates, <code>immediately_after</code> assertions, tool command lint rules, subgraph validation, and <code>dippin test --coverage</code>.</li>
     </ul>
   </section>
 

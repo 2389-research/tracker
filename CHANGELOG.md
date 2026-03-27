@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Claude Code backend**: Pluggable `AgentBackend` interface with `--backend claude-code` flag. Spawns the `claude` CLI as a subprocess, parses NDJSON output, and maps exit codes to pipeline outcomes. Per-node via `backend: claude-code` in `.dip` files, or global via CLI flag. Includes environment scoping, token tracking, and retryable init.
 - **`tracker update`**: Self-update command downloads the latest GitHub release, verifies SHA256 checksum, extracts the binary, smoke-tests it, and atomically replaces the current binary with a `.bak` rollback. Detects install method (Homebrew → advises `brew upgrade`, go install → advises `go install @latest`, binary → self-replaces).
 - **Non-blocking update check**: On every `tracker run`, a background goroutine checks for new releases (24h file-based cache). Prints a one-line hint to stderr if an update is available. Disabled in CI (`CI` env) or with `TRACKER_NO_UPDATE_CHECK`.
+
+### Changed
+
+- Upgraded dippin-lang dependency v0.10.0 → v0.12.0 (preferred_label fix, immediately_after assertions, tool command lint, subgraph validation, test coverage)
+- Tightened 5 dippin test assertions with `immediately_after` for stricter edge verification
 
 ## [0.11.2] - 2026-03-27
 
