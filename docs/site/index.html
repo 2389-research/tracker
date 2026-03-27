@@ -272,25 +272,24 @@ graph TB
   <!-- ═══ Install ═══ -->
   <section class="glass">
     <h2>Install <span class="accent">tracker</span></h2>
-    <div class="grid-3" style="margin-top: 1.5rem;">
-      <div class="glass glass-sm">
-        <h4 style="margin-bottom: 0.5rem;">Go</h4>
-        <pre style="margin: 0; font-size: 0.85rem;"><code>go install github.com/2389-research/tracker/cmd/tracker@latest</code></pre>
-      </div>
-      <div class="glass glass-sm">
-        <h4 style="margin-bottom: 0.5rem;">Homebrew</h4>
-        <pre style="margin: 0; font-size: 0.85rem;"><code>brew install 2389-research/tap/tracker</code></pre>
-      </div>
-      <div class="glass glass-sm">
-        <h4 style="margin-bottom: 0.5rem;">Binary</h4>
-        <pre style="margin: 0; font-size: 0.85rem;"><code># Download from GitHub Releases
-# tracker update keeps it current</code></pre>
-      </div>
-    </div>
+    <pre data-lang="bash"><code><span class="comment"># Option 1: Go (includes embedded workflows)</span>
+<span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
+
+<span class="comment"># Option 2: Homebrew</span>
+<span class="keyword">brew install</span> 2389-research/tap/tracker
+
+<span class="comment"># Option 3: Download binary from GitHub Releases</span>
+<span class="comment"># https://github.com/2389-research/tracker/releases</span>
+
+<span class="comment"># Verify your setup</span>
+tracker doctor
+
+<span class="comment"># Stay current — checks automatically, or run manually</span>
+tracker update</code></pre>
     <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
       Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.12.0">v0.12.0</a> &middot;
-      After install, run <code>tracker doctor</code> to verify your setup &middot;
-      <code>tracker update</code> keeps you current
+      <a href="changelog.html">Changelog</a> &middot;
+      <a href="cli.html">Full CLI reference</a>
     </p>
   </section>
 
