@@ -244,7 +244,7 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 //   - allowed_tools   → attrs["allowed_tools"]     (comma-separated tool names)
 //   - disallowed_tools→ attrs["disallowed_tools"]  (comma-separated tool names)
 //   - max_budget_usd  → attrs["max_budget_usd"]    (float string, e.g. "1.50")
-//   - permission_mode → attrs["permission_mode"]   (plan|autoEdit|fullAuto)
+//   - permission_mode → attrs["permission_mode"]   (plan|acceptEdits|bypassPermissions)
 //
 // Unrecognized keys are silently ignored.
 // A nil or empty params map is a no-op.

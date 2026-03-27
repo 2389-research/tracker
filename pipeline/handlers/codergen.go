@@ -181,9 +181,9 @@ func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, bac
 // the claude-code backend. Returns an error if any attr is malformed.
 func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) (*pipeline.ClaudeCodeConfig, error) {
 	ccCfg := &pipeline.ClaudeCodeConfig{
-		// Default to fullAuto for headless pipeline use. Without this,
+		// Default to bypassPermissions for headless pipeline use. Without this,
 		// the Claude CLI may prompt for interactive approval and hang.
-		PermissionMode: pipeline.PermissionFullAuto,
+		PermissionMode: pipeline.PermissionBypassPermissions,
 	}
 
 	if err := parseClaudeCodeToolAttrs(node, ccCfg); err != nil {
@@ -230,7 +230,7 @@ func parseClaudeCodeBudgetAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeC
 	if raw, ok := node.Attrs["permission_mode"]; ok && raw != "" {
 		mode := pipeline.PermissionMode(raw)
 		if !mode.Valid() {
-			return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, autoEdit, fullAuto)", node.ID, raw)
+			return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, acceptEdits, bypassPermissions, default, dontAsk, auto)", node.ID, raw)
 		}
 		ccCfg.PermissionMode = mode
 	}

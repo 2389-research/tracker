@@ -5,7 +5,7 @@ package pipeline
 import "testing"
 
 func TestPermissionModeValidation(t *testing.T) {
-	valid := []PermissionMode{PermissionPlan, PermissionAutoEdit, PermissionFullAuto}
+	valid := []PermissionMode{PermissionPlan, PermissionAcceptEdits, PermissionBypassPermissions}
 	for _, m := range valid {
 		if !m.Valid() {
 			t.Errorf("expected %q to be valid", m)
@@ -15,7 +15,7 @@ func TestPermissionModeValidation(t *testing.T) {
 		t.Error("expected 'bogus' to be invalid")
 	}
 	// Empty string is not valid — callers must explicitly set a mode
-	// (buildClaudeCodeConfig defaults to PermissionFullAuto).
+	// (buildClaudeCodeConfig defaults to PermissionBypassPermissions).
 	if PermissionMode("").Valid() {
 		t.Error("expected empty string to be invalid")
 	}

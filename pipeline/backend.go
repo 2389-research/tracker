@@ -41,17 +41,21 @@ type ClaudeCodeConfig struct {
 type PermissionMode string
 
 const (
-	PermissionPlan     PermissionMode = "plan"
-	PermissionAutoEdit PermissionMode = "autoEdit"
-	PermissionFullAuto PermissionMode = "fullAuto"
+	PermissionPlan              PermissionMode = "plan"
+	PermissionAcceptEdits       PermissionMode = "acceptEdits"
+	PermissionBypassPermissions PermissionMode = "bypassPermissions"
+	PermissionDefault           PermissionMode = "default"
+	PermissionDontAsk           PermissionMode = "dontAsk"
+	PermissionAuto              PermissionMode = "auto"
 )
 
-// Valid returns true if the permission mode is a recognized value.
-// Empty string is not valid — callers should default to PermissionFullAuto
+// Valid returns true if the permission mode is a recognized Claude Code value.
+// Empty string is not valid — callers should default to PermissionBypassPermissions
 // before validation (see buildClaudeCodeConfig).
 func (m PermissionMode) Valid() bool {
 	switch m {
-	case PermissionPlan, PermissionAutoEdit, PermissionFullAuto:
+	case PermissionPlan, PermissionAcceptEdits, PermissionBypassPermissions,
+		PermissionDefault, PermissionDontAsk, PermissionAuto:
 		return true
 	}
 	return false

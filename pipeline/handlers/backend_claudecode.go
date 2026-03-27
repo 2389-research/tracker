@@ -185,6 +185,8 @@ func buildResult(state *runState) (agent.SessionResult, error) {
 // Returns an error if ClaudeCodeConfig contains invalid values.
 func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	args := []string{
+		"--print",
+		"--verbose",
 		"-p", cfg.Prompt,
 		"--output-format", "stream-json",
 	}
@@ -265,10 +267,26 @@ func buildEnv() []string {
 }
 
 // ndjsonMessage represents a single NDJSON line from claude CLI output.
+// The schema varies by type:
+//   - "assistant": content is in Message.Content
+//   - "result": turns in NumTurns, cost in TotalCostUSD, usage at top level
+//   - "system": informational, parsed for subtype
 type ndjsonMessage struct {
-	Type    string          `json:"type"`
+	Type         string           `json:"type"`
+	Subtype      string           `json:"subtype,omitempty"`
+	Message      *ndjsonInner     `json:"message,omitempty"`  // for "assistant" type
+	Content      []ndjsonContent  `json:"content,omitempty"`  // for "user" type (tool results)
+	NumTurns     int              `json:"num_turns,omitempty"` // for "result" type
+	Turns        int              `json:"turns,omitempty"`     // fallback field name
+	TotalCostUSD float64          `json:"total_cost_usd,omitempty"`
+	Result       string           `json:"result,omitempty"` // text result for "result" type
+	Usage        *ndjsonUsage     `json:"usage,omitempty"`
+	IsError      bool             `json:"is_error,omitempty"`
+}
+
+// ndjsonInner wraps the nested message object in "assistant" type messages.
+type ndjsonInner struct {
 	Content []ndjsonContent `json:"content,omitempty"`
-	Turns   int             `json:"turns,omitempty"`
 	Usage   *ndjsonUsage    `json:"usage,omitempty"`
 }
 
@@ -303,22 +321,29 @@ func parseMessage(raw json.RawMessage, state *runState) []agent.Event {
 
 	switch msg.Type {
 	case "system":
-		// Emit preparing + turn start so the TUI transitions from
-		// "waiting for provider" to "thinking" immediately.
-		return []agent.Event{
-			{
-				Type:      agent.EventLLMRequestPreparing,
-				Timestamp: now,
-				Provider:  "claude-code",
-			},
-			{
-				Type:      agent.EventTurnStart,
-				Timestamp: now,
-			},
+		// Only emit turn start on the init message, not on hooks.
+		if msg.Subtype == "init" {
+			return []agent.Event{
+				{
+					Type:      agent.EventLLMRequestPreparing,
+					Timestamp: now,
+					Provider:  "claude-code",
+				},
+				{
+					Type:      agent.EventTurnStart,
+					Timestamp: now,
+				},
+			}
 		}
+		return nil
 
 	case "assistant":
-		return parseAssistantContent(msg.Content, now, state)
+		// Content is nested in msg.Message.Content for assistant messages.
+		var content []ndjsonContent
+		if msg.Message != nil {
+			content = msg.Message.Content
+		}
+		return parseAssistantContent(content, now, state)
 
 	case "user":
 		return parseUserContent(msg.Content, now, state)
@@ -395,8 +420,13 @@ func parseUserContent(content []ndjsonContent, now time.Time, state *runState) [
 
 // storeResult saves the result message data into lastResult for later retrieval.
 func storeResult(msg ndjsonMessage, state *runState) {
+	// NumTurns is the real field name; Turns is a fallback.
+	turns := msg.NumTurns
+	if turns == 0 {
+		turns = msg.Turns
+	}
 	result := &agent.SessionResult{
-		Turns: msg.Turns,
+		Turns: turns,
 	}
 
 	// Aggregate tool use IDs into tool call counts.
@@ -405,12 +435,13 @@ func storeResult(msg ndjsonMessage, state *runState) {
 		result.ToolCalls[name]++
 	}
 
+	// Usage may be at top level or nested. TotalCostUSD is at top level.
 	if msg.Usage != nil {
 		result.Usage = llm.Usage{
 			InputTokens:   msg.Usage.InputTokens,
 			OutputTokens:  msg.Usage.OutputTokens,
 			TotalTokens:   msg.Usage.InputTokens + msg.Usage.OutputTokens,
-			EstimatedCost: msg.Usage.CostUSD,
+			EstimatedCost: msg.TotalCostUSD,
 		}
 	}
 

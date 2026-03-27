@@ -58,7 +58,7 @@ func TestBuildArgs(t *testing.T) {
 		Model:    "claude-sonnet-4-5",
 		MaxTurns: 10,
 		Extra: &pipeline.ClaudeCodeConfig{
-			PermissionMode: pipeline.PermissionFullAuto,
+			PermissionMode: pipeline.PermissionBypassPermissions,
 		},
 	}
 
@@ -72,7 +72,7 @@ func TestBuildArgs(t *testing.T) {
 	assertContainsFlag(t, args, "--output-format", "stream-json")
 	assertContainsFlag(t, args, "--model", "claude-sonnet-4-5")
 	assertContainsFlag(t, args, "--max-turns", "10")
-	assertContainsFlag(t, args, "--permission-mode", "fullAuto")
+	assertContainsFlag(t, args, "--permission-mode", "bypassPermissions")
 }
 
 func TestBuildArgsWithOptionals(t *testing.T) {
@@ -212,7 +212,7 @@ func TestBuildEnv(t *testing.T) {
 }
 
 func TestParseNDJSONTextMessage(t *testing.T) {
-	msg := `{"type":"assistant","content":[{"type":"text","text":"Hello world"}]}`
+	msg := `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
@@ -228,7 +228,7 @@ func TestParseNDJSONTextMessage(t *testing.T) {
 }
 
 func TestParseNDJSONReasoningMessage(t *testing.T) {
-	msg := `{"type":"assistant","content":[{"type":"thinking","text":"Let me think..."}]}`
+	msg := `{"type":"assistant","message":{"content":[{"type":"thinking","text":"Let me think..."}]}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
@@ -246,7 +246,7 @@ func TestParseNDJSONReasoningMessage(t *testing.T) {
 
 func TestParseNDJSONToolUseMessage(t *testing.T) {
 	// Claude Code CLI sends input as a JSON object, not a string.
-	msg := `{"type":"assistant","content":[{"type":"tool_use","name":"Read","input":{"path":"foo.go"},"tool_use_id":"tu_123"}]}`
+	msg := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"path":"foo.go"},"tool_use_id":"tu_123"}]}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
@@ -271,7 +271,7 @@ func TestParseNDJSONToolUseMessage(t *testing.T) {
 
 func TestParseNDJSONToolUseObjectInput(t *testing.T) {
 	// Input as a JSON object (not a string)
-	msg := `{"type":"assistant","content":[{"type":"tool_use","name":"Read","input":{"path":"foo.go"},"tool_use_id":"tu_789"}]}`
+	msg := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"path":"foo.go"},"tool_use_id":"tu_789"}]}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
@@ -323,7 +323,7 @@ func TestParseNDJSONToolResultError(t *testing.T) {
 }
 
 func TestParseNDJSONResultMessage(t *testing.T) {
-	msg := `{"type":"result","turns":5,"usage":{"input_tokens":1000,"output_tokens":500,"cost_usd":0.05}}`
+	msg := `{"type":"result","num_turns":5,"total_cost_usd":0.05,"usage":{"input_tokens":1000,"output_tokens":500}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
@@ -361,7 +361,7 @@ func TestParseNDJSONUnknownType(t *testing.T) {
 }
 
 func TestParseNDJSONSystemMessage(t *testing.T) {
-	msg := `{"type":"system","content":[{"type":"text","text":"Claude Code v1.2.3"}]}`
+	msg := `{"type":"system","subtype":"init","cwd":"/tmp"}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
@@ -380,7 +380,7 @@ func TestParseNDJSONSystemMessage(t *testing.T) {
 }
 
 func TestParseNDJSONMultiContent(t *testing.T) {
-	msg := `{"type":"assistant","content":[{"type":"text","text":"first"},{"type":"text","text":"second"}]}`
+	msg := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"},{"type":"text","text":"second"}]}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
@@ -605,8 +605,8 @@ func TestBuildClaudeCodeConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.PermissionMode != pipeline.PermissionFullAuto {
-		t.Errorf("expected fullAuto default, got %q", cfg.PermissionMode)
+	if cfg.PermissionMode != pipeline.PermissionBypassPermissions {
+		t.Errorf("expected bypassPermissions default, got %q", cfg.PermissionMode)
 	}
 }
 
@@ -728,7 +728,7 @@ func TestParseMessageUnmarshalFailureTracked(t *testing.T) {
 }
 
 func TestParseMessageUnknownAssistantContentType(t *testing.T) {
-	msg := `{"type":"assistant","content":[{"type":"image","text":"data"}]}`
+	msg := `{"type":"assistant","message":{"content":[{"type":"image","text":"data"}]}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
 	events := parseMessage(json.RawMessage(msg), state)
 
