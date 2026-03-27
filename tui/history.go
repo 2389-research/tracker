@@ -1,16 +1,25 @@
-// ABOUTME: HistoryTrail component — reverse-chronological list of node visits.
-// ABOUTME: Shows the execution path through the pipeline as a compact trail.
+// ABOUTME: HistoryTrail bubbletea component — reverse-chronological node visit log.
+// ABOUTME: Shows the execution path through the pipeline as a compact scrollable trail.
 package tui
 
 import (
 	"fmt"
 	"strings"
-	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// HistoryTrail renders a compact reverse-chronological trail of node visits.
+// trailEntry is a deduplicated visit in the trail.
+type trailEntry struct {
+	nodeID string
+	label  string
+	count  int
+}
+
+// HistoryTrail is a bubbletea model that renders a compact reverse-chronological
+// trail of node visits. Consecutive visits to the same node are deduplicated
+// with a count (e.g., "TestMilestone ×3").
 type HistoryTrail struct {
 	store  *StateStore
 	height int
@@ -28,8 +37,16 @@ func (h *HistoryTrail) SetSize(w, height int) {
 	h.height = height
 }
 
-// View renders the trail as a compact reverse-chronological list.
-func (h *HistoryTrail) View() string {
+// Init implements tea.Model.
+func (h HistoryTrail) Init() tea.Cmd { return nil }
+
+// Update implements tea.Model. The trail is read-only — state comes from the store.
+func (h HistoryTrail) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	return h, nil
+}
+
+// View implements tea.Model.
+func (h HistoryTrail) View() string {
 	path := h.store.VisitPath()
 	if len(path) == 0 {
 		return ""
@@ -39,28 +56,13 @@ func (h *HistoryTrail) View() string {
 	sb.WriteString(Styles.ZoneLabel.Render("TRAIL"))
 	sb.WriteString("\n")
 
-	// Build trail entries in reverse order, deduplicating consecutive repeats
-	type entry struct {
-		nodeID string
-		count  int
-	}
-	var trail []entry
-	for i := len(path) - 1; i >= 0; i-- {
-		id := path[i]
-		if len(trail) > 0 && trail[len(trail)-1].nodeID == id {
-			trail[len(trail)-1].count++
-			continue
-		}
-		trail = append(trail, entry{nodeID: id, count: 1})
-	}
+	trail := h.buildTrail(path)
 
-	// Render entries, newest first, clipped to available height
-	maxLines := h.height - 1 // account for header
+	maxLines := h.height - 1
 	if maxLines < 1 {
 		maxLines = 1
 	}
 
-	dimStyle := Styles.DimText
 	countStyle := lipgloss.NewStyle().Foreground(ColorAmber)
 
 	for i, e := range trail {
@@ -70,13 +72,13 @@ func (h *HistoryTrail) View() string {
 		status := h.store.NodeStatus(e.nodeID)
 		lamp, style := StatusLamp(status)
 
-		label := h.resolveLabel(e.nodeID)
+		label := e.label
 		maxLabel := h.width - 6
 		if maxLabel > 0 && len(label) > maxLabel {
 			label = label[:maxLabel-1] + "…"
 		}
 
-		line := dimStyle.Render("  ") + style.Render(lamp) + " " + label
+		line := "  " + style.Render(lamp) + " " + label
 		if e.count > 1 {
 			line += " " + countStyle.Render(fmt.Sprintf("×%d", e.count))
 		}
@@ -85,6 +87,24 @@ func (h *HistoryTrail) View() string {
 	}
 
 	return sb.String()
+}
+
+// buildTrail creates deduplicated entries in reverse chronological order.
+func (h *HistoryTrail) buildTrail(path []string) []trailEntry {
+	var trail []trailEntry
+	for i := len(path) - 1; i >= 0; i-- {
+		id := path[i]
+		if len(trail) > 0 && trail[len(trail)-1].nodeID == id {
+			trail[len(trail)-1].count++
+			continue
+		}
+		trail = append(trail, trailEntry{
+			nodeID: id,
+			label:  h.resolveLabel(id),
+			count:  1,
+		})
+	}
+	return trail
 }
 
 // resolveLabel finds the display label for a node ID.
@@ -98,9 +118,4 @@ func (h *HistoryTrail) resolveLabel(nodeID string) string {
 		}
 	}
 	return nodeID
-}
-
-// Elapsed returns the time since the first node visit.
-func (h *HistoryTrail) Elapsed() time.Duration {
-	return 0
 }

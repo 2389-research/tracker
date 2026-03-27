@@ -246,16 +246,9 @@ func (s *StateStore) Apply(msg interface{}) {
 		if IsSubgraphNode(m.NodeID) {
 			s.ensureSubgraphNode(m.NodeID)
 		}
-		// When a new node starts, demote stale failures to "done" —
-		// the pipeline has moved on, the old failure is no longer relevant.
-		for id, info := range s.nodeState {
-			if id != m.NodeID && info.status == NodeFailed {
-				info.status = NodeDone
-				info.errMsg = ""
-			}
-		}
 		ni := s.ensure(m.NodeID)
 		ni.status = NodeRunning
+		ni.errMsg = ""
 		ni.retryMsg = ""
 		s.visitPath = append(s.visitPath, m.NodeID)
 	case MsgNodeCompleted:
