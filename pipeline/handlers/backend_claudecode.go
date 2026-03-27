@@ -24,11 +24,12 @@ import (
 // as a subprocess and parsing its NDJSON stream output.
 type ClaudeCodeBackend struct {
 	claudePath string // resolved path to claude binary
+}
 
-	// toolUseIDs maps tool_use_id to tool name for correlating tool results.
+// runState holds per-invocation mutable state so that ClaudeCodeBackend itself
+// is safe for concurrent use.
+type runState struct {
 	toolUseIDs map[string]string
-
-	// lastResult is populated when a "result" NDJSON message is received.
 	lastResult *agent.SessionResult
 }
 
@@ -45,7 +46,7 @@ func NewClaudeCodeBackend() (*ClaudeCodeBackend, error) {
 func resolveClaudePath() (string, error) {
 	path, err := exec.LookPath("claude")
 	if err != nil {
-		return "", fmt.Errorf("claude CLI not found in PATH: %w", err)
+		return "", fmt.Errorf("claude CLI not found in PATH — install with: npm install -g @anthropic-ai/claude-code")
 	}
 
 	cmd := exec.Command(path, "--version")
@@ -60,11 +61,22 @@ func resolveClaudePath() (string, error) {
 // objects via the emit callback. It returns a SessionResult built from the
 // NDJSON "result" message and any error from the subprocess.
 func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
-	// Reset per-run state.
-	b.toolUseIDs = make(map[string]string)
-	b.lastResult = nil
+	// Per-run state: local to this invocation, safe for concurrent use.
+	state := &runState{
+		toolUseIDs: make(map[string]string),
+	}
 
-	args := b.buildArgs(cfg)
+	args, err := buildArgs(cfg)
+	if err != nil {
+		return agent.SessionResult{}, fmt.Errorf("invalid claude-code config: %w", err)
+	}
+
+	// Apply timeout from config if set.
+	if cfg.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+	}
 
 	cmd := exec.CommandContext(ctx, b.claudePath, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -101,10 +113,14 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 				log.Printf("[claude-code] warning: failed to decode NDJSON line: %v", err)
 				continue
 			}
-			events := b.parseMessage(raw)
+			events := parseMessage(raw, state)
 			for _, evt := range events {
 				func() {
-					defer func() { recover() }()
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[claude-code] panic in event handler: %v", r)
+						}
+					}()
 					emit(evt)
 				}()
 			}
@@ -119,30 +135,31 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return b.buildResult(), fmt.Errorf("claude CLI wait error: %w", waitErr)
+			return buildResult(state), fmt.Errorf("claude CLI wait error: %w", waitErr)
 		}
 	}
 
 	outcome := classifyError(stderr.String(), exitCode)
 	if outcome != pipeline.OutcomeSuccess {
-		return b.buildResult(), fmt.Errorf("claude CLI failed (exit %d, outcome=%s): %s",
+		return buildResult(state), fmt.Errorf("claude CLI failed (exit %d, outcome=%s): %s",
 			exitCode, outcome, strings.TrimSpace(stderr.String()))
 	}
 
-	return b.buildResult(), nil
+	return buildResult(state), nil
 }
 
 // buildResult returns the SessionResult accumulated from NDJSON parsing, or a
 // zero-value result if no "result" message was received.
-func (b *ClaudeCodeBackend) buildResult() agent.SessionResult {
-	if b.lastResult != nil {
-		return *b.lastResult
+func buildResult(state *runState) agent.SessionResult {
+	if state.lastResult != nil {
+		return *state.lastResult
 	}
 	return agent.SessionResult{}
 }
 
 // buildArgs constructs the CLI arguments for the claude command from the run config.
-func (b *ClaudeCodeBackend) buildArgs(cfg pipeline.AgentRunConfig) []string {
+// Returns an error if ClaudeCodeConfig contains invalid values.
+func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	args := []string{
 		"-p", cfg.Prompt,
 		"--output-format", "stream-json",
@@ -156,17 +173,21 @@ func (b *ClaudeCodeBackend) buildArgs(cfg pipeline.AgentRunConfig) []string {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", cfg.MaxTurns))
 	}
 
+	// System prompt is independent of ClaudeCodeConfig.
+	if cfg.SystemPrompt != "" {
+		args = append(args, "--system-prompt", cfg.SystemPrompt)
+	}
+
 	ccCfg, _ := cfg.Extra.(*pipeline.ClaudeCodeConfig)
 	if ccCfg == nil {
-		return args
+		return args, nil
 	}
 
 	if ccCfg.PermissionMode != "" {
+		if !ccCfg.PermissionMode.Valid() {
+			return nil, fmt.Errorf("invalid permission mode: %q", ccCfg.PermissionMode)
+		}
 		args = append(args, "--permission-mode", string(ccCfg.PermissionMode))
-	}
-
-	if cfg.SystemPrompt != "" {
-		args = append(args, "--system-prompt", cfg.SystemPrompt)
 	}
 
 	if len(ccCfg.AllowedTools) > 0 {
@@ -185,7 +206,7 @@ func (b *ClaudeCodeBackend) buildArgs(cfg pipeline.AgentRunConfig) []string {
 		args = append(args, "--mcpServers", buildMCPServersJSON(ccCfg.MCPServers))
 	}
 
-	return args
+	return args, nil
 }
 
 // buildEnv constructs a minimal environment for the claude subprocess.
@@ -201,6 +222,16 @@ func buildEnv() []string {
 	if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
 		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+token)
 	}
+
+	// Pass through commonly needed env vars if set.
+	for _, name := range []string{
+		"USER", "TMPDIR", "LANG", "SSH_AUTH_SOCK",
+		"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+	} {
+		if val := os.Getenv(name); val != "" {
+			env = append(env, name+"="+val)
+		}
+	}
 	return env
 }
 
@@ -214,13 +245,13 @@ type ndjsonMessage struct {
 
 // ndjsonContent represents a content block within an NDJSON message.
 type ndjsonContent struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     string `json:"input,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 // ndjsonUsage represents token usage from a result message.
@@ -231,7 +262,7 @@ type ndjsonUsage struct {
 }
 
 // parseMessage converts a raw NDJSON message into zero or more agent.Event objects.
-func (b *ClaudeCodeBackend) parseMessage(raw json.RawMessage) []agent.Event {
+func parseMessage(raw json.RawMessage, state *runState) []agent.Event {
 	var msg ndjsonMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		log.Printf("[claude-code] warning: failed to unmarshal NDJSON message: %v", err)
@@ -242,19 +273,22 @@ func (b *ClaudeCodeBackend) parseMessage(raw json.RawMessage) []agent.Event {
 
 	switch msg.Type {
 	case "system":
+		// Emit EventLLMRequestPreparing so the TUI shows the model name
+		// and a thinking indicator when a claude-code session starts.
 		return []agent.Event{{
-			Type:      agent.EventSessionStart,
+			Type:      agent.EventLLMRequestPreparing,
 			Timestamp: now,
+			Provider:  "claude-code",
 		}}
 
 	case "assistant":
-		return b.parseAssistantContent(msg.Content, now)
+		return parseAssistantContent(msg.Content, now, state)
 
 	case "user":
-		return b.parseUserContent(msg.Content, now)
+		return parseUserContent(msg.Content, now, state)
 
 	case "result":
-		b.storeResult(msg)
+		storeResult(msg, state)
 		return nil
 
 	default:
@@ -264,7 +298,7 @@ func (b *ClaudeCodeBackend) parseMessage(raw json.RawMessage) []agent.Event {
 }
 
 // parseAssistantContent processes content blocks from an assistant message.
-func (b *ClaudeCodeBackend) parseAssistantContent(content []ndjsonContent, now time.Time) []agent.Event {
+func parseAssistantContent(content []ndjsonContent, now time.Time, state *runState) []agent.Event {
 	var events []agent.Event
 	for _, c := range content {
 		switch c.Type {
@@ -283,14 +317,12 @@ func (b *ClaudeCodeBackend) parseAssistantContent(content []ndjsonContent, now t
 			})
 
 		case "tool_use":
-			if b.toolUseIDs != nil {
-				b.toolUseIDs[c.ToolUseID] = c.Name
-			}
+			state.toolUseIDs[c.ToolUseID] = c.Name
 			events = append(events, agent.Event{
 				Type:      agent.EventToolCallStart,
 				Timestamp: now,
 				ToolName:  c.Name,
-				ToolInput: c.Input,
+				ToolInput: string(c.Input),
 			})
 
 		default:
@@ -301,17 +333,14 @@ func (b *ClaudeCodeBackend) parseAssistantContent(content []ndjsonContent, now t
 }
 
 // parseUserContent processes content blocks from a user message (tool results).
-func (b *ClaudeCodeBackend) parseUserContent(content []ndjsonContent, now time.Time) []agent.Event {
+func parseUserContent(content []ndjsonContent, now time.Time, state *runState) []agent.Event {
 	var events []agent.Event
 	for _, c := range content {
 		if c.Type != "tool_result" {
 			continue
 		}
 
-		toolName := ""
-		if b.toolUseIDs != nil {
-			toolName = b.toolUseIDs[c.ToolUseID]
-		}
+		toolName := state.toolUseIDs[c.ToolUseID]
 
 		evt := agent.Event{
 			Type:      agent.EventToolCallEnd,
@@ -329,7 +358,7 @@ func (b *ClaudeCodeBackend) parseUserContent(content []ndjsonContent, now time.T
 }
 
 // storeResult saves the result message data into lastResult for later retrieval.
-func (b *ClaudeCodeBackend) storeResult(msg ndjsonMessage) {
+func storeResult(msg ndjsonMessage, state *runState) {
 	result := &agent.SessionResult{
 		Turns:     msg.Turns,
 		ToolCalls: make(map[string]int),
@@ -344,7 +373,7 @@ func (b *ClaudeCodeBackend) storeResult(msg ndjsonMessage) {
 		}
 	}
 
-	b.lastResult = result
+	state.lastResult = result
 }
 
 // classifyError maps stderr content and exit codes to pipeline outcome strings.
