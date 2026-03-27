@@ -38,6 +38,7 @@ const (
 	modeVersion   commandMode = "version"
 	modeWorkflows commandMode = "workflows"
 	modeInit      commandMode = "init"
+	modeUpdate    commandMode = "update"
 )
 
 var errUsage = errors.New("usage")
@@ -87,7 +88,18 @@ func main() {
 		cfg.workdir = wd
 	}
 
+	// Non-blocking update check (24h cache, background goroutine)
+	if cfg.mode == modeRun {
+		maybeCheckForUpdate()
+	}
+
 	err = executeCommand(cfg, commandDeps{})
+
+	// Print update hint after command completes (avoids racing with TUI/output).
+	if cfg.mode == modeRun {
+		printUpdateHint()
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

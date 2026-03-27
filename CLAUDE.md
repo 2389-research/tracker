@@ -153,6 +153,17 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - Use `go test -skip` (Go 1.24+) instead of `(?!` negative lookahead which Go's regexp doesn't support
 - The Decompose prompt explicitly instructs the agent on expected file formats
 
+### Claude Code backend (v0.12.0)
+- `AgentBackend` interface in `pipeline/backend.go` — minimal contract: one method to execute a node, returns `agent.Event` stream
+- `CodergenHandler` delegates to backends via `selectBackend()`, doesn't execute LLM calls directly
+- `ClaudeCodeBackend` spawns `claude` as a subprocess, parses NDJSON stdout into `agent.Event` values
+- `NativeBackend` wraps `agent.Session` — the existing turn loop with tool registry and context compaction (default)
+- Per-node selection via `backend: claude-code` attribute in `.dip` files; global via `--backend claude-code` CLI flag
+- Environment scoping: Claude Code backend passes a minimal allowlist of env vars; `SSH_AUTH_SOCK` is explicitly passed through for git operations
+- Error classification: Claude CLI exit codes are mapped to pipeline outcomes (success, fail, escalate)
+- The engine and TUI see the same `agent.Event` stream regardless of backend — no special-case code needed
+- All three built-in workflows are backend-agnostic: they work with both native and claude-code
+
 ### Per-milestone circuit breakers
 The `build_product.dip` pipeline uses a `fix_attempts` file on disk to limit
 retries per milestone. This counter persists across pipeline restarts — if a

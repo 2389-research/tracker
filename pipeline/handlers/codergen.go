@@ -26,9 +26,9 @@ type CodergenHandler struct {
 	eventHandler       agent.EventHandler
 	graphAttrs         map[string]string
 	tokenTracker       *llm.TokenTracker     // for reporting claude-code usage
-	nativeBackend      pipeline.AgentBackend  // always available
-	claudeCodeBackend  pipeline.AgentBackend  // lazy-init on first claude-code request
-	defaultBackendName string                 // from --backend flag, "" means native
+	nativeBackend      pipeline.AgentBackend // always available
+	claudeCodeBackend  pipeline.AgentBackend // lazy-init on first claude-code request
+	defaultBackendName string                // from --backend flag, "" means native
 	nativeOnce         sync.Once
 	claudeMu           sync.Mutex // protects claudeCodeBackend lazy init (retryable)
 }

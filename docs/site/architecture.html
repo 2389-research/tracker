@@ -173,6 +173,51 @@ graph LR
     </div>
   </section>
 
+  <!-- ═══ Backend Abstraction ═══ -->
+  <section class="glass">
+    <h2>Agent <span class="accent">backends</span> <span class="badge">v0.12.0</span></h2>
+    <p class="lead">
+      Your agents already work great with the native backend. The backend abstraction lets you swap
+      in Claude Code when agents need file editing, terminal access, and MCP tool servers &mdash; without
+      changing any pipeline logic.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph TB
+    CH["CodergenHandler"] --> SB["selectBackend()"]
+    SB -->|"default"| NB["NativeBackend\nagent.Session\n(existing behavior)"]
+    SB -->|"backend: claude-code"| CC["ClaudeCodeBackend\nsubprocess + NDJSON"]
+    NB --> Events["agent.Event stream"]
+    CC --> Events
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 1.5rem;">
+      <div class="glass glass-sm">
+        <h4>Engine Doesn't Know</h4>
+        <p>The pipeline engine sees the same <code>agent.Event</code> stream regardless of backend. CodergenHandler encapsulates backend selection &mdash; the engine just executes handlers and routes edges.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Per-Node or Global</h4>
+        <p>Set <code>backend: claude-code</code> on individual nodes in <code>.dip</code> files for surgical precision, or use <code>--backend claude-code</code> on the CLI to switch every agent node at once.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Native Backend</h4>
+        <p>Wraps <code>agent.Session</code> &mdash; the existing turn loop with tool registry and context compaction. This is the default and works with all three LLM providers.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Claude Code Backend</h4>
+        <p>Spawns <code>claude</code> as a subprocess and parses its NDJSON output stream. Gets file editing, terminal execution, and MCP tool servers for free. Environment is scoped to a minimal allowlist with <code>SSH_AUTH_SOCK</code> passed through.</p>
+      </div>
+    </div>
+
+    <div class="glass glass-sm" style="margin-top: 1rem; border-left: 3px solid var(--orange-600);">
+      <h4>Design Note</h4>
+      <p>The <code>AgentBackend</code> interface in <code>pipeline/backend.go</code> is intentionally minimal &mdash; one method to execute a node and return an event stream. Claude CLI exit codes are mapped to pipeline outcomes (success, fail, escalate). The killer combo: <code>tracker --backend claude-code --autopilot mid build_product</code> runs fully autonomous with file editing superpowers.</p>
+    </div>
+  </section>
+
   <!-- ═══ Checkpoint ═══ -->
   <section class="glass">
     <h2>Checkpoint <span class="accent">resume</span></h2>

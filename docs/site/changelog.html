@@ -30,7 +30,22 @@
     <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">GitHub Releases</a></p>
   </section>
 
-  <!-- ═══ v0.11.1 ═══ -->
+  <!-- ═══ v0.12.0 ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.12.0</h2>
+      <span class="badge">2026-03-27</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker update</code></strong>: Self-update command downloads the latest GitHub release, verifies SHA256 checksum, extracts the binary, smoke-tests it, and atomically replaces the current binary with <code>.bak</code> rollback. Detects Homebrew, <code>go install</code>, and direct binary installs.</li>
+      <li><strong>Non-blocking update check</strong>: On every <code>tracker run</code>, a background goroutine checks for new releases (24h cache). Prints a one-line hint if an update is available. Disabled with <code>CI</code> or <code>TRACKER_NO_UPDATE_CHECK</code> env vars.</li>
+      <li><strong>Claude Code backend</strong> (preview): Pluggable agent backend abstraction. <code>--backend claude-code</code> spawns the <code>claude</code> CLI as a subprocess and parses NDJSON output, giving agents file editing, terminal access, and MCP tool servers. Per-node via <code>backend: claude-code</code> in <code>.dip</code> files, or global via the CLI flag.</li>
+      <li><strong><code>AgentBackend</code> interface</strong>: Minimal contract in <code>pipeline/backend.go</code> &mdash; one method to execute a node and return an event stream. NativeBackend wraps <code>agent.Session</code> (existing behavior), ClaudeCodeBackend wraps the subprocess.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.11.2 ═══ -->
   <section class="glass">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
       <h2 style="margin: 0;">v0.11.2</h2>

@@ -15,6 +15,7 @@
       "expect": {
         "status": "success",
         "path_contains": ["Implement", "TestMilestone", "VerifyMilestone", "MarkMilestoneDone", "PickNextMilestone"],
+        "immediately_after": {"Implement": "TestMilestone", "TestMilestone": "VerifyMilestone", "VerifyMilestone": "MarkMilestoneDone", "MarkMilestoneDone": "PickNextMilestone"},
         "not_visited": ["FixMilestone", "EscalateMilestone"]
       }
     },
@@ -23,6 +24,7 @@
       "scenario": {"TestMilestone.outcome": "fail"},
       "expect": {
         "path_contains": ["TestMilestone", "FixMilestone", "TestMilestone"],
+        "immediately_after": {"TestMilestone": "FixMilestone", "FixMilestone": "TestMilestone"},
         "not_visited": ["EscalateMilestone"]
       }
     },
@@ -107,7 +109,7 @@
       "name": "review escalation default — accept ships it",
       "scenario": {"ReadSpec.outcome": "fail"},
       "expect": {
-        "immediately_after": {"EscalateReview": "Cleanup"},
+        "immediately_after": {"EscalateReview": "Cleanup", "Cleanup": "FinalCommit", "FinalCommit": "Done"},
         "path_contains": ["EscalateReview", "Cleanup", "FinalCommit", "Done"]
       }
     },
@@ -130,7 +132,7 @@
       "name": "cross-review finds issues — apply fixes then final build",
       "scenario": {"tool_stdout": "all-done", "SynthesizeReviews.outcome": "fail"},
       "expect": {
-        "immediately_after": {"SynthesizeReviews": "ApplyReviewFixes"},
+        "immediately_after": {"SynthesizeReviews": "ApplyReviewFixes", "ApplyReviewFixes": "FinalBuild"},
         "path_contains": ["ApplyReviewFixes", "FinalBuild"],
         "not_visited": ["EscalateMilestone", "EscalateReview"]
       }
@@ -171,7 +173,8 @@
       "scenario": {"TestMilestone.outcome": "fail", "FixMilestone.outcome": "success"},
       "expect": {
         "visited": ["FixMilestone", "TestMilestone"],
-        "path_contains": ["TestMilestone", "FixMilestone", "TestMilestone"]
+        "path_contains": ["TestMilestone", "FixMilestone", "TestMilestone"],
+        "immediately_after": {"TestMilestone": "FixMilestone", "FixMilestone": "TestMilestone"}
       }
     },
     {
