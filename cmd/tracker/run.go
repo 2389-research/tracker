@@ -24,9 +24,15 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// activeRunConfig holds the current run configuration for autopilot support.
-// Set by executeRun before calling run/runTUI.
-var activeRunConfig runConfig
+// autopilotCfg holds just the autopilot settings needed by chooseInterviewer.
+// Set by executeRun before calling run/runTUI, because commandDeps.run has a
+// fixed signature that can't be extended without breaking tests.
+type autopilotCfg struct {
+	persona     string // lax/mid/hard/mentor or empty
+	autoApprove bool
+}
+
+var activeAutopilotCfg autopilotCfg
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
@@ -50,7 +56,8 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 	execEnv := exec.NewLocalEnvironment(workdir)
 
 	// Choose interviewer: autopilot > auto-approve > terminal detection.
-	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeRunConfig, llmClient)
+	// activeAutopilotCfg is set by executeRun before calling run().
+	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient)
 
 	// Build engine options.
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
@@ -402,12 +409,12 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 
 // chooseInterviewer selects the interviewer implementation based on config.
 // Priority: --auto-approve > --autopilot > terminal detection.
-func chooseInterviewer(isTerminal bool, cfg runConfig, llmClient *llm.Client) handlers.FreeformInterviewer {
+func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client) handlers.FreeformInterviewer {
 	if cfg.autoApprove {
 		return &handlers.AutoApproveFreeformInterviewer{}
 	}
-	if cfg.autopilot != "" {
-		persona, err := handlers.ParsePersona(cfg.autopilot)
+	if cfg.persona != "" {
+		persona, err := handlers.ParsePersona(cfg.persona)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %v, falling back to auto-approve\n", err)
 			return &handlers.AutoApproveFreeformInterviewer{}

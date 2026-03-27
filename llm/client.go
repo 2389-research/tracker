@@ -175,6 +175,11 @@ func tryBuildProvider(name string, constructor func(string) (ProviderAdapter, er
 	return WithProvider(adapter), nil
 }
 
+// DefaultProvider returns the name of the default provider, or empty string.
+func (c *Client) DefaultProvider() string {
+	return c.defaultProvider
+}
+
 // resolveProvider determines which provider adapter to use for a request.
 func (c *Client) resolveProvider(req *Request) (ProviderAdapter, error) {
 	name := req.Provider

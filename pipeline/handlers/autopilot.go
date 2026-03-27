@@ -116,7 +116,8 @@ func (a *AutopilotInterviewer) Ask(prompt string, choices []string, defaultChoic
 func (a *AutopilotInterviewer) AskFreeform(prompt string) (string, error) {
 	decision, err := a.callLLM(prompt, nil, "")
 	if err != nil {
-		return "auto-approved", nil // fallback for freeform
+		fmt.Fprintf(os.Stderr, "WARNING: autopilot freeform LLM call failed (%v), using 'auto-approved'\n", err)
+		return "auto-approved", nil
 	}
 	if decision.Reasoning != "" {
 		return decision.Reasoning, nil
@@ -167,39 +168,52 @@ func (a *AutopilotInterviewer) callLLM(prompt string, options []string, defaultO
 	temp := 0.1
 	req.Temperature = &temp
 
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		if attempt > 0 {
-			time.Sleep(time.Second)
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		resp, err := a.client.Complete(ctx, req)
-		cancel()
-
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		decision, err := parseDecision(resp.Message.Text())
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return decision, nil
+	// Provider errors (quota, auth, model not found) must hard-fail per CLAUDE.md.
+	// The infra retry middleware already handles transient errors (502, 503, 429).
+	// We only retry on parse failures (LLM returned non-JSON).
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	resp, err := a.client.Complete(ctx, req)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("autopilot LLM call: %w", err)
 	}
 
-	return nil, fmt.Errorf("autopilot failed after 2 attempts: %w", lastErr)
+	decision, parseErr := parseDecision(resp.Message.Text())
+	if parseErr != nil {
+		// Retry once on parse failure — LLM may produce valid JSON on second try.
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+		resp2, err2 := a.client.Complete(ctx2, req)
+		cancel2()
+		if err2 != nil {
+			return nil, fmt.Errorf("autopilot retry: %w", err2)
+		}
+		decision, parseErr = parseDecision(resp2.Message.Text())
+		if parseErr != nil {
+			return nil, fmt.Errorf("autopilot: %w", parseErr)
+		}
+	}
+	return decision, nil
+}
+
+// autopilotModelDefaults maps provider names to cheap, fast models for gate decisions.
+var autopilotModelDefaults = map[string]string{
+	"anthropic": "claude-sonnet-4-6",
+	"openai":    "gpt-4.1-mini",
+	"gemini":    "gemini-2.5-flash",
 }
 
 // resolveModel picks the model to use for gate decisions.
+// If no explicit model is set, picks the cheapest model from the default provider.
 func (a *AutopilotInterviewer) resolveModel() string {
 	if a.model != "" {
 		return a.model
 	}
-	// Default to a cheap, fast model. The client will route to
-	// whatever provider is configured for this model.
+	// Use the client's default provider to pick an appropriate model.
+	if defaultProvider := a.client.DefaultProvider(); defaultProvider != "" {
+		if model, ok := autopilotModelDefaults[defaultProvider]; ok {
+			return model
+		}
+	}
 	return "claude-sonnet-4-6"
 }
 

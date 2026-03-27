@@ -14,21 +14,21 @@ import (
 )
 
 func TestChooseInterviewerReturnsBubbleteaWhenTerminal(t *testing.T) {
-	iv := chooseInterviewer(true, runConfig{}, nil)
+	iv := chooseInterviewer(true, autopilotCfg{}, nil)
 	if _, ok := iv.(*tui.BubbleteaInterviewer); !ok {
 		t.Errorf("expected *tui.BubbleteaInterviewer when terminal, got %T", iv)
 	}
 }
 
 func TestChooseInterviewerReturnsConsoleWhenNotTerminal(t *testing.T) {
-	iv := chooseInterviewer(false, runConfig{}, nil)
+	iv := chooseInterviewer(false, autopilotCfg{}, nil)
 	if _, ok := iv.(*handlers.ConsoleInterviewer); !ok {
 		t.Errorf("expected *handlers.ConsoleInterviewer when not terminal, got %T", iv)
 	}
 }
 
 func TestChooseInterviewerAutoApprove(t *testing.T) {
-	iv := chooseInterviewer(true, runConfig{autoApprove: true}, nil)
+	iv := chooseInterviewer(true, autopilotCfg{autoApprove: true}, nil)
 	if _, ok := iv.(*handlers.AutoApproveFreeformInterviewer); !ok {
 		t.Errorf("expected *handlers.AutoApproveFreeformInterviewer, got %T", iv)
 	}

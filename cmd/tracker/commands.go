@@ -198,8 +198,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		return err
 	}
 
-	// Store config for autopilot interviewer selection.
-	activeRunConfig = cfg
+	// Store autopilot config for chooseInterviewer (called from run/runTUI).
+	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
 
 	if cfg.autopilot != "" {
 		if _, err := handlers.ParsePersona(cfg.autopilot); err != nil {
@@ -222,8 +222,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		checkpoint = cp
 	}
 
-	// JSON streaming mode forces non-TUI.
-	if cfg.jsonOut {
+	// JSON streaming and autopilot modes force non-TUI.
+	if cfg.jsonOut || cfg.autopilot != "" || cfg.autoApprove {
 		cfg.noTUI = true
 	}
 

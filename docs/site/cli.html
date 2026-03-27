@@ -90,6 +90,18 @@
       <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes. No LLM calls. Supports bare names.</div>
     </div>
 
+    <h3 style="margin-top: 2rem;">Autopilot</h3>
+
+    <div class="cli-cmd">
+      <code>tracker --autopilot &lt;persona&gt; &lt;pipeline&gt;</code>
+      <div class="desc">Replace all human gates with LLM-backed decisions. Personas: <code>lax</code>, <code>mid</code> (default), <code>hard</code>, <code>mentor</code>.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker --auto-approve &lt;pipeline&gt;</code>
+      <div class="desc">Deterministic auto-approval of all human gates. No LLM calls &mdash; always picks the default or first option. For CI and testing.</div>
+    </div>
+
     <h3 style="margin-top: 2rem;">Diagnostics</h3>
 
     <div class="cli-cmd">
@@ -141,6 +153,8 @@
           <tr><td><code>--json</code></td><td>Stream events as NDJSON to stdout</td><td>Off</td></tr>
           <tr><td><code>--no-tui</code></td><td>Disable TUI dashboard, use console mode</td><td>TUI on (if TTY)</td></tr>
           <tr><td><code>--verbose</code></td><td>Show raw provider stream events</td><td>Off</td></tr>
+          <tr><td><code>--autopilot</code></td><td>LLM judge persona: <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code></td><td>Off (human gates)</td></tr>
+          <tr><td><code>--auto-approve</code></td><td>Deterministic auto-approve (no LLM)</td><td>Off</td></tr>
           <tr><td><code>--version</code></td><td>Show version info</td><td>&mdash;</td></tr>
         </tbody>
       </table>
@@ -203,6 +217,90 @@
       <code>~/.config/2389/tracker/.env</code> (XDG config), then <code>.env</code> in the working directory.
       Shell env vars are never overwritten.
     </p>
+  </section>
+
+  <!-- ═══ Autopilot ═══ -->
+  <section class="glass">
+    <h2>Autopilot <span class="accent">mode</span></h2>
+    <p class="lead">
+      Run pipelines fully autonomous. Human gates are answered by an LLM judge
+      with a configurable decision-making persona.
+    </p>
+
+    <pre data-lang="bash"><code><span class="comment"># Balanced judgment (default persona)</span>
+tracker <span class="flag">--autopilot</span> mid build_product
+
+<span class="comment"># Move fast, approve everything reasonable</span>
+tracker <span class="flag">--autopilot</span> lax build_product
+
+<span class="comment"># High quality bar — pushes back on gaps</span>
+tracker <span class="flag">--autopilot</span> hard build_product
+
+<span class="comment"># Approves but writes detailed feedback</span>
+tracker <span class="flag">--autopilot</span> mentor build_product
+
+<span class="comment"># Deterministic auto-approve — no LLM, for CI</span>
+tracker <span class="flag">--auto-approve</span> build_product</code></pre>
+
+    <h3 style="margin-top: 1.5rem;">Personas</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Persona</th><th>Approval Bias</th><th>Reasoning Style</th><th>Best For</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>lax</code></td>
+            <td>Strong approve</td>
+            <td>Brief: "Looks fine, moving on"</td>
+            <td>Demos, prototypes, overnight runs</td>
+          </tr>
+          <tr>
+            <td><code>mid</code></td>
+            <td>Balanced</td>
+            <td>Concise: one paragraph</td>
+            <td>General-purpose unattended runs</td>
+          </tr>
+          <tr>
+            <td><code>hard</code></td>
+            <td>Prefers retry/adjust</td>
+            <td>Detailed: cites specific gaps</td>
+            <td>Pre-release quality sweeps</td>
+          </tr>
+          <tr>
+            <td><code>mentor</code></td>
+            <td>Approve with notes</td>
+            <td>Verbose: 3-5 sentences of feedback</td>
+            <td>Learning, review artifacts</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top: 1.5rem;">How It Works</h3>
+    <ol class="steps">
+      <li>
+        <h4>Gate Reached</h4>
+        <p>Pipeline hits a human gate (ApprovePlan, EscalateMilestone, etc.)</p>
+      </li>
+      <li>
+        <h4>LLM Consulted</h4>
+        <p>The autopilot sends the gate's prompt, context, and available options to the LLM with the persona's system prompt.</p>
+      </li>
+      <li>
+        <h4>Structured Response</h4>
+        <p>LLM returns <code>{"choice": "approve", "reasoning": "..."}</code>. Choice is matched against edge labels.</p>
+      </li>
+      <li>
+        <h4>Fallback on Error</h4>
+        <p>If the LLM fails or returns an unmatchable choice, the default edge is taken with a warning.</p>
+      </li>
+    </ol>
+
+    <div class="glass glass-sm" style="border-left: 3px solid var(--orange-600); margin-top: 1rem;">
+      <h4>Design Note</h4>
+      <p>The autopilot reuses the pipeline's existing LLM client &mdash; no separate configuration. It defaults to Sonnet for cheap, fast gate decisions. All decisions are logged to the activity log for post-hoc review via <code>tracker diagnose</code>.</p>
+    </div>
   </section>
 
   <!-- ═══ Troubleshooting ═══ -->

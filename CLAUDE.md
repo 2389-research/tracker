@@ -134,6 +134,16 @@ Running `tracker build_product` (no path, no extension) resolves in order:
 
 This applies to `tracker validate`, `tracker simulate`, and `tracker run` uniformly via `resolvePipelineSource()` in `cmd/tracker/resolve.go`.
 
+### Autopilot mode
+- `--autopilot <persona>` replaces all human gates with LLM-backed decisions
+- Four personas: `lax` (forward progress), `mid` (balanced, default), `hard` (high bar), `mentor` (approve with feedback)
+- `--auto-approve` is deterministic (no LLM) — always picks default/first option
+- The `AutopilotInterviewer` in `pipeline/handlers/autopilot.go` implements `LabeledFreeformInterviewer`
+- Uses structured JSON output: `{"choice": "...", "reasoning": "..."}`
+- Falls back to default edge on LLM error (with warning to stderr)
+- The autopilot reuses the pipeline's LLM client — no separate config needed
+- `activeRunConfig` in `cmd/tracker/run.go` threads the config to `chooseInterviewer`
+
 ### Per-milestone circuit breakers
 The `build_product.dip` pipeline uses a `fix_attempts` file on disk to limit
 retries per milestone. This counter persists across pipeline restarts — if a
