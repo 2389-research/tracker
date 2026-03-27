@@ -136,6 +136,11 @@
       <code>tracker version</code>
       <div class="desc">Show version, commit hash, build time, and configured providers.</div>
     </div>
+
+    <div class="cli-cmd">
+      <code>tracker update</code>
+      <div class="desc">Self-update to latest release. Downloads from GitHub, verifies SHA256 checksum, smoke-tests the binary, and atomically replaces with <code>.bak</code> rollback. Detects Homebrew and <code>go install</code> and advises accordingly.</div>
+    </div>
   </section>
 
   <!-- ═══ Flags ═══ -->
