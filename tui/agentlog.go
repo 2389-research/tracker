@@ -87,7 +87,10 @@ func (al *AgentLog) stream(nodeID string) *nodeStream {
 	return s
 }
 
-// Update processes messages and updates the log.
+// Init implements tea.Model.
+func (al *AgentLog) Init() tea.Cmd { return nil }
+
+// Update implements tea.Model.
 func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	switch m := msg.(type) {
 	case MsgTextChunk:

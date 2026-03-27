@@ -40,7 +40,10 @@ func (nl *NodeList) SetSize(w, h int) {
 	nl.height = h
 }
 
-// Update handles messages for the NodeList component.
+// Init implements tea.Model.
+func (nl *NodeList) Init() tea.Cmd { return nil }
+
+// Update implements tea.Model.
 func (nl *NodeList) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
