@@ -5,6 +5,7 @@ package handlers
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/agent"
@@ -43,8 +44,36 @@ type ndjsonContent struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	ID        string          `json:"id,omitempty"`          // tool_use ID (assistant messages)
 	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_use ID (user/tool_result messages)
-	Content   string          `json:"content,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`     // string or array (subagent results)
 	IsError   bool            `json:"is_error,omitempty"`
+}
+
+// contentString extracts the text from a content field that may be
+// a JSON string or an array of content blocks.
+func (c *ndjsonContent) contentString() string {
+	if len(c.Content) == 0 {
+		return ""
+	}
+	// Try string first (most common)
+	var s string
+	if json.Unmarshal(c.Content, &s) == nil {
+		return s
+	}
+	// Try array of content blocks
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(c.Content, &blocks) == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return string(c.Content)
 }
 
 // ndjsonUsage represents token usage from a result message.
@@ -183,9 +212,9 @@ func parseUserContent(content []ndjsonContent, now time.Time, state *runState) [
 			ToolName:  toolName,
 		}
 		if c.IsError {
-			evt.ToolError = c.Content
+			evt.ToolError = c.contentString()
 		} else {
-			evt.ToolOutput = c.Content
+			evt.ToolOutput = c.contentString()
 		}
 		events = append(events, evt)
 	}

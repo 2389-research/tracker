@@ -13,8 +13,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
-	"time"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/pipeline"
@@ -79,12 +77,7 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, b.claudePath, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-	}
-	cmd.WaitDelay = 5 * time.Second
+	cmd := exec.Command(b.claudePath, args...)
 	cmd.Env = buildEnv()
 
 	if cfg.WorkingDir != "" {
@@ -146,6 +139,7 @@ func collectResult(cmd *exec.Cmd, state *runState, stderr *bytes.Buffer) (agent.
 	if waitErr != nil {
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
+			log.Printf("[claude-code] exit error: code=%d, state=%v, err=%v", exitCode, exitErr.ProcessState, exitErr)
 		} else {
 			r, _ := buildResult(state)
 			return r, fmt.Errorf("claude CLI wait error: %w", waitErr)

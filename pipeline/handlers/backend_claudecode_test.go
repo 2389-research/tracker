@@ -742,7 +742,7 @@ func TestParseUserContentSkipsNonToolResult(t *testing.T) {
 	state := &runState{toolUseIDs: make(map[string]string)}
 	content := []ndjsonContent{
 		{Type: "text", Text: "hello"},
-		{Type: "tool_result", ToolUseID: "tu_1", Content: "output"},
+		{Type: "tool_result", ToolUseID: "tu_1", Content: json.RawMessage(`"output"`)},
 	}
 	events := parseUserContent(content, now(), state)
 
