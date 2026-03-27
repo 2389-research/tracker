@@ -330,11 +330,11 @@ strong { color: var(--text-primary); font-weight: 600; }
 code {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.875em;
-  background: var(--bg-code);
+  background: #ffedd5;
   padding: 0.15em 0.45em;
   border-radius: 5px;
-  color: var(--orange-700);
-  border: 1px solid rgba(234, 88, 12, 0.15);
+  color: #9a3412;
+  border: 1px solid rgba(234, 88, 12, 0.12);
 }
 
 pre {
@@ -564,7 +564,8 @@ tbody tr:hover td {
 .cli-cmd code {
   white-space: nowrap;
   font-size: 0.85rem;
-  background: var(--bg-code);
+  background: #ffedd5;
+  color: #9a3412;
   flex-shrink: 0;
 }
 
