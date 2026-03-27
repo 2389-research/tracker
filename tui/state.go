@@ -55,6 +55,7 @@ type nodeInfo struct {
 type StateStore struct {
 	nodes        []NodeEntry
 	nodeState    map[string]*nodeInfo
+	visitPath    []string // ordered list of visited node IDs (with repeats for loops)
 	pipelineDone bool
 	pipelineErr  string
 	Tokens       *llm.TokenTracker
@@ -80,6 +81,19 @@ func (s *StateStore) SetNodes(entries []NodeEntry) {
 
 // Nodes returns the ordered node list.
 func (s *StateStore) Nodes() []NodeEntry { return s.nodes }
+
+// VisitPath returns the ordered list of visited node IDs (includes repeats for loops).
+func (s *StateStore) VisitPath() []string { return s.visitPath }
+
+// IsOnCurrentPath returns true if the node was visited in the execution so far.
+func (s *StateStore) IsOnCurrentPath(nodeID string) bool {
+	for _, id := range s.visitPath {
+		if id == nodeID {
+			return true
+		}
+	}
+	return false
+}
 
 // NodeStatus returns the current state of a node.
 func (s *StateStore) NodeStatus(id string) NodeState {
@@ -232,9 +246,18 @@ func (s *StateStore) Apply(msg interface{}) {
 		if IsSubgraphNode(m.NodeID) {
 			s.ensureSubgraphNode(m.NodeID)
 		}
+		// When a new node starts, demote stale failures to "done" —
+		// the pipeline has moved on, the old failure is no longer relevant.
+		for id, info := range s.nodeState {
+			if id != m.NodeID && info.status == NodeFailed {
+				info.status = NodeDone
+				info.errMsg = ""
+			}
+		}
 		ni := s.ensure(m.NodeID)
 		ni.status = NodeRunning
 		ni.retryMsg = ""
+		s.visitPath = append(s.visitPath, m.NodeID)
 	case MsgNodeCompleted:
 		s.ensure(m.NodeID).status = NodeDone
 	case MsgNodeFailed:

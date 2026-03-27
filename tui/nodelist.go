@@ -10,12 +10,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// indexedLine pairs a rendered line with the node index it belongs to.
+type indexedLine struct {
+	line    string
+	nodeIdx int // which node this line belongs to (-1 for connectors)
+}
+
 // NodeList renders a signal lamp panel of pipeline nodes.
 type NodeList struct {
 	store    *StateStore
 	thinking *ThinkingTracker
 	height   int
 	width    int
+	scroll   int // scroll offset (first visible node index)
 }
 
 // NewNodeList creates a NodeList that reads from the given state store and thinking tracker.
@@ -51,16 +58,33 @@ func (nl *NodeList) View() string {
 		return sb.String()
 	}
 
-	var lines []string
-	for _, node := range nodes {
-		lines = append(lines, nl.renderNodeLine(node))
+	// Build lines with connectors between visited nodes.
+	var all []indexedLine
+	for i, node := range nodes {
+		if i > 0 {
+			connector := nl.renderConnector(nodes[i-1].ID, node.ID)
+			if connector != "" {
+				all = append(all, indexedLine{connector, -1})
+			}
+		}
+		all = append(all, indexedLine{nl.renderNodeLine(node), i})
 	}
 
-	if nl.height > 0 && len(lines) > nl.height {
-		lines = lines[:nl.height]
+	// Auto-scroll to keep the running node visible.
+	nl.autoScroll(nodes, all)
+
+	// Apply scroll window.
+	visible := all
+	if nl.height > 0 && len(visible) > nl.height {
+		end := nl.scroll + nl.height
+		if end > len(visible) {
+			end = len(visible)
+		}
+		visible = visible[nl.scroll:end]
 	}
-	for _, l := range lines {
-		sb.WriteString(l)
+
+	for _, l := range visible {
+		sb.WriteString(l.line)
 		sb.WriteString("\n")
 	}
 
@@ -94,6 +118,51 @@ func (nl *NodeList) renderNodeLine(node NodeEntry) string {
 	line := indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
 	line += nl.nodeStatusSuffix(node.ID, status)
 	return line
+}
+
+// autoScroll adjusts the scroll offset to keep the running node visible.
+func (nl *NodeList) autoScroll(nodes []NodeEntry, lines []indexedLine) {
+	if nl.height <= 0 {
+		return
+	}
+	// Find the line index of the running node.
+	runningLine := -1
+	for i, l := range lines {
+		if l.nodeIdx >= 0 && l.nodeIdx < len(nodes) {
+			status := nl.store.NodeStatus(nodes[l.nodeIdx].ID)
+			if status == NodeRunning {
+				runningLine = i
+				break
+			}
+		}
+	}
+	if runningLine < 0 {
+		return
+	}
+	// Ensure running node is within the visible window.
+	if runningLine < nl.scroll {
+		nl.scroll = runningLine
+	}
+	if runningLine >= nl.scroll+nl.height {
+		nl.scroll = runningLine - nl.height + 1
+	}
+	if nl.scroll < 0 {
+		nl.scroll = 0
+	}
+}
+
+// renderConnector draws a vertical connector line between two nodes if both are on the visit path.
+func (nl *NodeList) renderConnector(prevID, nextID string) string {
+	prevOnPath := nl.store.IsOnCurrentPath(prevID)
+	nextOnPath := nl.store.IsOnCurrentPath(nextID)
+	if !prevOnPath && !nextOnPath {
+		return ""
+	}
+	connStyle := Styles.DimText
+	if prevOnPath && nextOnPath {
+		connStyle = lipgloss.NewStyle().Foreground(ColorDone)
+	}
+	return connStyle.Render("│")
 }
 
 // resolveLamp returns the lamp icon and style for a node, overriding for active phases.

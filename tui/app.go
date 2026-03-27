@@ -32,6 +32,7 @@ type AppModel struct {
 	header   *Header
 	statusB  *StatusBar
 	nodeList *NodeList
+	history  *HistoryTrail
 	agentLog *AgentLog
 	modal    *Modal
 	thinking *ThinkingTracker
@@ -46,6 +47,7 @@ func NewAppModel(store *StateStore, pipelineName, runID string) *AppModel {
 		header:   NewHeader(store, pipelineName, runID),
 		statusB:  NewStatusBar(store),
 		nodeList: NewNodeList(store, thinking, 10),
+		history:  NewHistoryTrail(store),
 		agentLog: NewAgentLog(store, thinking, 10),
 		modal:    NewModal(80, 24),
 		thinking: thinking,
@@ -205,15 +207,22 @@ func (a AppModel) View() string {
 		logWidth = 1
 	}
 
-	// Render node list panel.
+	// Render sidebar: node list (top) + history trail (bottom).
+	nodeHeight := contentHeight * 3 / 5
+	histHeight := contentHeight - nodeHeight
+	a.nodeList.SetSize(nodeWidth, nodeHeight-1)
+	a.history.SetSize(nodeWidth, histHeight)
+
 	nodeView := a.nodeList.View()
+	histView := a.history.View()
+	sidebar := lipgloss.JoinVertical(lipgloss.Left, nodeView, histView)
 	nodePanel := lipgloss.NewStyle().
 		Width(nodeWidth).
 		MaxWidth(nodeWidth).
 		Height(contentHeight).
 		MaxHeight(contentHeight).
 		PaddingRight(1).
-		Render(nodeView)
+		Render(sidebar)
 
 	// Thin vertical separator between panels.
 	sepStyle := lipgloss.NewStyle().Foreground(ColorBezel)
