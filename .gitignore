@@ -16,3 +16,4 @@ bin/
 .scratch/
 coverage.out
 *.bak
+.claude/settings.local.json

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/2389-research/tracker/agent"
@@ -19,11 +20,17 @@ import (
 // CodergenHandler invokes an agent session with the prompt from node attributes,
 // captures the response text, and maps it to a pipeline outcome.
 type CodergenHandler struct {
-	client       agent.Completer
-	env          exec.ExecutionEnvironment
-	workingDir   string
-	eventHandler agent.EventHandler
-	graphAttrs   map[string]string
+	client             agent.Completer
+	env                exec.ExecutionEnvironment
+	workingDir         string
+	eventHandler       agent.EventHandler
+	graphAttrs         map[string]string
+	tokenTracker       *llm.TokenTracker     // for reporting claude-code usage
+	nativeBackend      pipeline.AgentBackend // always available
+	claudeCodeBackend  pipeline.AgentBackend // lazy-init on first claude-code request
+	defaultBackendName string                // from --backend flag, "" means native
+	nativeOnce         sync.Once
+	claudeMu           sync.Mutex // protects claudeCodeBackend lazy init (retryable)
 }
 
 // NewCodergenHandler creates a CodergenHandler that will use the given LLM client
@@ -62,69 +69,193 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, err
 	}
 
-	config := h.buildConfig(node)
-	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
-		config.WorkingDir = wd
+	backend, backendErr := h.selectBackend(node)
+	if backendErr != nil {
+		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
+	}
+	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend)
+	if cfgErr != nil {
+		return pipeline.Outcome{}, fmt.Errorf("node %q config: %w", node.ID, cfgErr)
 	}
 
-	collector, sess, err := h.createSession(node, config)
-	if err != nil {
-		return pipeline.Outcome{}, err
+	var collector transcriptCollector
+	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
+	multiHandler := agent.MultiHandler(&collector, scopedHandler)
+	emitCallback := func(evt agent.Event) {
+		multiHandler.HandleEvent(evt)
 	}
 
 	artifactRoot := h.resolveArtifactRoot(pctx)
 
-	sessResult, runErr := sess.Run(ctx, prompt)
-	if runErr != nil {
-		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, collector)
+	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
+
+	// Report token usage from backends that bypass the LLM client middleware
+	// (e.g., claude-code subprocess). Native backend usage flows through the
+	// TokenTracker middleware automatically.
+	if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
+		h.tokenTracker.AddUsage("claude-code", sessResult.Usage)
 	}
 
-	return h.buildSuccessOutcome(node, prompt, artifactRoot, sessResult, collector)
+	if runErr != nil {
+		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
+	}
+
+	return h.buildSuccessOutcome(node, prompt, artifactRoot, sessResult, &collector)
+}
+
+// selectBackend chooses the appropriate AgentBackend based on node attributes
+// and global default settings.
+func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
+	// Check node-level backend attr
+	if backend := node.Attrs["backend"]; backend != "" {
+		switch backend {
+		case "claude-code":
+			return h.ensureClaudeCodeBackend()
+		case "native", "codergen":
+			return h.ensureNativeBackend(), nil
+		default:
+			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code)", backend, node.ID)
+		}
+	}
+	// Check global --backend flag
+	if h.defaultBackendName == "claude-code" {
+		return h.ensureClaudeCodeBackend()
+	}
+	return h.ensureNativeBackend(), nil
+}
+
+// ensureClaudeCodeBackend returns the claude-code backend, lazily creating it
+// on first use. Thread-safe via mutex. Retries on failure (unlike sync.Once)
+// so installing claude mid-run can recover without restarting tracker.
+func (h *CodergenHandler) ensureClaudeCodeBackend() (pipeline.AgentBackend, error) {
+	h.claudeMu.Lock()
+	defer h.claudeMu.Unlock()
+
+	if h.claudeCodeBackend != nil {
+		return h.claudeCodeBackend, nil
+	}
+	b, err := NewClaudeCodeBackend()
+	if err != nil {
+		return nil, fmt.Errorf("claude-code backend: %w", err)
+	}
+	h.claudeCodeBackend = b
+	return b, nil
+}
+
+// ensureNativeBackend returns the native backend, lazily creating it if needed.
+// Thread-safe via sync.Once for parallel node execution.
+func (h *CodergenHandler) ensureNativeBackend() pipeline.AgentBackend {
+	h.nativeOnce.Do(func() {
+		if h.nativeBackend == nil {
+			h.nativeBackend = NewNativeBackend(h.client, h.env)
+		}
+	})
+	return h.nativeBackend
+}
+
+// buildRunConfig constructs an AgentRunConfig from node attributes for use with
+// any AgentBackend implementation. The full SessionConfig is passed via Extra
+// so the native backend can use it directly without losing fields. When the
+// selected backend is claude-code, a *ClaudeCodeConfig is built from node attrs
+// and placed in Extra instead.
+func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend) (pipeline.AgentRunConfig, error) {
+	sessionCfg := h.buildConfig(node)
+	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
+		sessionCfg.WorkingDir = wd
+	}
+
+	cfg := pipeline.AgentRunConfig{
+		Prompt:       prompt,
+		SystemPrompt: sessionCfg.SystemPrompt,
+		Model:        sessionCfg.Model,
+		Provider:     sessionCfg.Provider,
+		WorkingDir:   sessionCfg.WorkingDir,
+		MaxTurns:     sessionCfg.MaxTurns,
+	}
+	if sessionCfg.CommandTimeout > 0 {
+		cfg.Timeout = sessionCfg.CommandTimeout
+	}
+
+	// Build backend-specific Extra config.
+	if _, ok := backend.(*ClaudeCodeBackend); ok {
+		ccCfg, err := h.buildClaudeCodeConfig(node)
+		if err != nil {
+			return pipeline.AgentRunConfig{}, err
+		}
+		cfg.Extra = ccCfg
+	} else {
+		cfg.Extra = &sessionCfg
+	}
+	return cfg, nil
+}
+
+// buildClaudeCodeConfig constructs a ClaudeCodeConfig from node attributes for
+// the claude-code backend. Returns an error if any attr is malformed.
+func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) (*pipeline.ClaudeCodeConfig, error) {
+	ccCfg := &pipeline.ClaudeCodeConfig{
+		// Default to bypassPermissions for headless pipeline use. Without this,
+		// the Claude CLI may prompt for interactive approval and hang.
+		PermissionMode: pipeline.PermissionBypassPermissions,
+	}
+
+	if err := parseClaudeCodeToolAttrs(node, ccCfg); err != nil {
+		return nil, err
+	}
+	if err := parseClaudeCodeBudgetAttrs(node, ccCfg); err != nil {
+		return nil, err
+	}
+	return ccCfg, nil
+}
+
+// parseClaudeCodeToolAttrs parses MCP servers, allowed/disallowed tools.
+func parseClaudeCodeToolAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	if raw, ok := node.Attrs["mcp_servers"]; ok && raw != "" {
+		servers, err := pipeline.ParseMCPServers(raw)
+		if err != nil {
+			return fmt.Errorf("node %q: %w", node.ID, err)
+		}
+		ccCfg.MCPServers = servers
+	}
+	if raw, ok := node.Attrs["allowed_tools"]; ok && raw != "" {
+		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
+	}
+	if raw, ok := node.Attrs["disallowed_tools"]; ok && raw != "" {
+		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
+	}
+	if err := pipeline.ValidateToolLists(ccCfg.AllowedTools, ccCfg.DisallowedTools); err != nil {
+		return fmt.Errorf("node %q: %w", node.ID, err)
+	}
+	return nil
+}
+
+// parseClaudeCodeBudgetAttrs parses max_budget_usd and permission_mode.
+func parseClaudeCodeBudgetAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	if raw, ok := node.Attrs["max_budget_usd"]; ok && raw != "" {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
+		}
+		if v > 0 {
+			ccCfg.MaxBudgetUSD = v
+		}
+	}
+	if raw, ok := node.Attrs["permission_mode"]; ok && raw != "" {
+		mode := pipeline.PermissionMode(raw)
+		if !mode.Valid() {
+			return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, acceptEdits, bypassPermissions, default, dontAsk, auto)", node.ID, raw)
+		}
+		ccCfg.PermissionMode = mode
+	}
+	return nil
 }
 
 // resolvePrompt extracts, expands variables, and applies fidelity context to the node prompt.
 func (h *CodergenHandler) resolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext) (string, error) {
-	prompt := node.Attrs["prompt"]
-	if prompt == "" {
-		return "", fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
+	artifactDir := h.workingDir
+	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
+		artifactDir = dir
 	}
-
-	prompt, err := pipeline.ExpandVariables(prompt, pctx, nil, h.graphAttrs, false)
-	if err != nil {
-		return "", fmt.Errorf("node %q variable expansion failed: %w", node.ID, err)
-	}
-
-	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
-
-	fidelity := pipeline.ResolveFidelity(node, h.graphAttrs)
-	if fidelity != pipeline.FidelityFull {
-		artifactDir := h.workingDir
-		if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
-			artifactDir = dir
-		}
-		compacted := pipeline.CompactContext(pctx, nil, fidelity, artifactDir, "")
-		prompt = prependContextSummary(prompt, compacted, fidelity)
-	} else {
-		prompt = pipeline.InjectPipelineContext(prompt, pctx)
-	}
-
-	return prompt, nil
-}
-
-// createSession builds the agent session with a transcript collector and scoped event handler.
-func (h *CodergenHandler) createSession(node *pipeline.Node, config agent.SessionConfig) (*transcriptCollector, *agent.Session, error) {
-	var collector transcriptCollector
-	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
-	handler := agent.MultiHandler(&collector, scopedHandler)
-	opts := []agent.SessionOption{agent.WithEventHandler(handler)}
-	if h.env != nil {
-		opts = append(opts, agent.WithEnvironment(h.env))
-	}
-	sess, err := agent.NewSession(h.client, config, opts...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("node %q failed to create session: %w", node.ID, err)
-	}
-	return &collector, sess, nil
+	return ResolvePrompt(node, pctx, h.graphAttrs, artifactDir)
 }
 
 // resolveArtifactRoot returns the artifact directory from pipeline context or working dir.
@@ -173,7 +304,10 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
-	if strings.TrimSpace(responseText) == "" && sessResult.TotalToolCalls() == 0 {
+	// Guard against truly empty responses. A session with turns > 0 or tool
+	// calls > 0 did real work even if it produced no text output (common with
+	// the claude-code backend where agents use tools without narrating).
+	if strings.TrimSpace(responseText) == "" && sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0 {
 		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
 			ContextUpdates: map[string]string{
@@ -349,71 +483,4 @@ func prependContextSummary(prompt string, compacted map[string]string, fidelity 
 	return strings.Join(sections, "\n\n") + "\n\n---\n\n" + prompt
 }
 
-// transcriptCollector preserves an ordered plain-text transcript of a session
-// while also keeping the concatenated assistant text for status parsing.
-type transcriptCollector struct {
-	lines     []string
-	textParts []string
-}
-
-func (c *transcriptCollector) HandleEvent(evt agent.Event) {
-	switch evt.Type {
-	case agent.EventTurnStart:
-		c.lines = append(c.lines, fmt.Sprintf("TURN %d", evt.Turn))
-	case agent.EventToolCallStart:
-		c.lines = append(c.lines, fmt.Sprintf("TOOL CALL: %s", evt.ToolName))
-		if evt.ToolInput != "" {
-			c.lines = append(c.lines, "INPUT:")
-			c.lines = append(c.lines, evt.ToolInput)
-		}
-	case agent.EventToolCallEnd:
-		c.lines = append(c.lines, fmt.Sprintf("TOOL RESULT: %s", evt.ToolName))
-		if evt.ToolOutput != "" {
-			c.lines = append(c.lines, "OUTPUT:")
-			c.lines = append(c.lines, evt.ToolOutput)
-		}
-		if evt.ToolError != "" {
-			c.lines = append(c.lines, "ERROR:")
-			c.lines = append(c.lines, evt.ToolError)
-		}
-	case agent.EventTextDelta:
-		if evt.Text != "" {
-			c.textParts = append(c.textParts, evt.Text)
-			c.lines = append(c.lines, "TEXT:")
-			c.lines = append(c.lines, evt.Text)
-		}
-	case agent.EventError:
-		if evt.Err != nil {
-			c.lines = append(c.lines, "ERROR:")
-			c.lines = append(c.lines, evt.Err.Error())
-		}
-	}
-}
-
-func (c *transcriptCollector) text() string {
-	return strings.Join(c.textParts, "")
-}
-
-func (c *transcriptCollector) transcript() string {
-	return strings.Join(c.lines, "\n")
-}
-
-// buildSessionStats converts an agent.SessionResult into a pipeline.SessionStats
-// for inclusion in the trace entry. Returns nil if sessResult is nil.
-func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
-	toolCalls := make(map[string]int, len(r.ToolCalls))
-	for k, v := range r.ToolCalls {
-		toolCalls[k] = v
-	}
-	return &pipeline.SessionStats{
-		Turns:          r.Turns,
-		ToolCalls:      toolCalls,
-		TotalToolCalls: r.TotalToolCalls(),
-		FilesModified:  r.FilesModified,
-		FilesCreated:   r.FilesCreated,
-		Compactions:    r.CompactionsApplied,
-		LongestTurn:    r.LongestTurn,
-		CacheHits:      r.ToolCacheHits,
-		CacheMisses:    r.ToolCacheMisses,
-	}
-}
+// transcriptCollector and buildSessionStats are in transcript.go

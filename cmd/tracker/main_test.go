@@ -262,14 +262,14 @@ func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
 			}
 			return nil
 		},
-		run: func(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error {
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
 			runCalled = true
 			if pipelineFile != "pipeline.dot" {
 				t.Fatalf("pipelineFile = %q, want %q", pipelineFile, "pipeline.dot")
 			}
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format string, verbose bool) error {
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
 			t.Fatal("did not expect TUI path")
 			return nil
 		},
@@ -759,4 +759,58 @@ func unsetEnvForTest(t *testing.T, key string) {
 			t.Fatalf("restore env %s: %v", key, err)
 		}
 	})
+}
+
+func TestParseFlagsBackend(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--backend", "claude-code", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.backend != "claude-code" {
+		t.Fatalf("backend = %q, want %q", cfg.backend, "claude-code")
+	}
+}
+
+func TestParseFlagsBackendNative(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--backend", "native", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.backend != "native" {
+		t.Fatalf("backend = %q, want %q", cfg.backend, "native")
+	}
+}
+
+func TestParseFlagsBackendInvalid(t *testing.T) {
+	_, err := parseFlags([]string{"tracker", "--backend", "foobar", "pipeline.dip"})
+	if err == nil {
+		t.Fatal("expected error for invalid backend")
+	}
+}
+
+func TestExecuteCommandRunPassesBackend(t *testing.T) {
+	var gotBackend string
+	err := executeCommand(runConfig{
+		mode:         modeRun,
+		pipelineFile: "pipeline.dip",
+		workdir:      "/tmp",
+		noTUI:        true,
+		backend:      "claude-code",
+	}, commandDeps{
+		loadEnv: func(string) error { return nil },
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+			gotBackend = backend
+			return nil
+		},
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+			t.Fatal("unexpected TUI path")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeCommand error: %v", err)
+	}
+	if gotBackend != "claude-code" {
+		t.Fatalf("backend = %q, want %q", gotBackend, "claude-code")
+	}
 }

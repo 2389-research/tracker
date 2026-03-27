@@ -220,6 +220,62 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.GoalGate {
 		attrs["goal_gate"] = "true"
 	}
+
+	// PLACEHOLDER: Backend attrs (backend, mcp_servers, permission_mode, etc.)
+	// cannot be passed through from .dip files yet because ir.AgentConfig does
+	// not have a Params map. The call below is intentionally a no-op (nil map).
+	// When dippin-lang adds Params map[string]string to AgentConfig, replace
+	// nil with cfg.Params. Until then, backend selection must use --backend
+	// flag or node-level attrs set via DOT format.
+	// TODO(dippin-lang): Replace nil with cfg.Params once available.
+	extractAgentBackendAttrs(nil, attrs)
+
+	// Warn if the prompt or other fields contain backend-related keywords that
+	// a user might expect to be forwarded but currently cannot be.
+	warnUnpassableBackendKeys(cfg, attrs)
+}
+
+// extractAgentBackendAttrs maps backend-selection and Claude-Code-specific keys
+// from a generic params map into node attrs consumed by CodergenHandler and
+// ClaudeCodeBackend. The recognized keys are:
+//
+//   - backend         → attrs["backend"]          (e.g. "claude-code", "native")
+//   - mcp_servers     → attrs["mcp_servers"]       (newline-separated name=cmd pairs)
+//   - allowed_tools   → attrs["allowed_tools"]     (comma-separated tool names)
+//   - disallowed_tools→ attrs["disallowed_tools"]  (comma-separated tool names)
+//   - max_budget_usd  → attrs["max_budget_usd"]    (float string, e.g. "1.50")
+//   - permission_mode → attrs["permission_mode"]   (plan|acceptEdits|bypassPermissions)
+//
+// Unrecognized keys are silently ignored.
+// A nil or empty params map is a no-op.
+func extractAgentBackendAttrs(params map[string]string, attrs map[string]string) {
+	keys := []string{
+		"backend",
+		"mcp_servers",
+		"allowed_tools",
+		"disallowed_tools",
+		"max_budget_usd",
+		"permission_mode",
+	}
+	for _, k := range keys {
+		if v, ok := params[k]; ok && v != "" {
+			attrs[k] = v
+		}
+	}
+}
+
+// warnUnpassableBackendKeys logs a warning if a .dip file appears to contain
+// backend-related keys that cannot be passed through the current IR. This helps
+// users discover that they need --backend flag or DOT-format attrs instead.
+//
+// Currently ir.AgentConfig has no Params field, so this is a no-op placeholder.
+// When dippin-lang adds Params, this function should inspect cfg.Params for
+// backend keys and log warnings for any that are present but not forwarded.
+func warnUnpassableBackendKeys(_ ir.AgentConfig, _ map[string]string) {
+	// No-op until ir.AgentConfig gains a Params field.
+	// When it does, check for keys: backend, mcp_servers, allowed_tools,
+	// disallowed_tools, max_budget_usd, permission_mode and warn:
+	//   log.Printf("[dippin-adapter] warning: .dip file contains backend key %q but IR passthrough is not yet supported", k)
 }
 
 func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {
@@ -407,91 +463,4 @@ func serializeSelector(sel ir.StyleSelector) string {
 
 // synthesizeImplicitEdges creates edges for parallel fan-out targets and fan-in sources.
 // The dippin IR stores these in ParallelConfig.Targets and FanInConfig.Sources
-// rather than as explicit edges, but tracker's Graph.OutgoingEdges requires
-// real Edge entries to traverse the graph.
-func synthesizeImplicitEdges(g *Graph, workflow *ir.Workflow) {
-	existingEdges := make(map[[2]string]bool)
-	for _, e := range g.Edges {
-		existingEdges[[2]string{e.From, e.To}] = true
-	}
-
-	fanInBySource := buildFanInSourceMap(workflow)
-
-	for _, irNode := range workflow.Nodes {
-		switch cfg := irNode.Config.(type) {
-		case ir.ParallelConfig:
-			synthesizeParallelEdges(g, irNode, cfg, fanInBySource, existingEdges)
-		case ir.FanInConfig:
-			synthesizeFanInEdges(g, irNode, cfg, existingEdges)
-		}
-	}
-}
-
-// buildFanInSourceMap builds a lookup of source node ID -> fan-in node ID.
-func buildFanInSourceMap(workflow *ir.Workflow) map[string]string {
-	fanInBySource := make(map[string]string)
-	for _, irNode := range workflow.Nodes {
-		if cfg, ok := irNode.Config.(ir.FanInConfig); ok {
-			for _, source := range cfg.Sources {
-				fanInBySource[source] = irNode.ID
-			}
-		}
-	}
-	return fanInBySource
-}
-
-// synthesizeParallelEdges adds edges from a parallel node to its branch targets and fan-in join.
-func synthesizeParallelEdges(g *Graph, irNode *ir.Node, cfg ir.ParallelConfig, fanInBySource map[string]string, existingEdges map[[2]string]bool) {
-	for _, target := range cfg.Targets {
-		key := [2]string{irNode.ID, target}
-		if !existingEdges[key] {
-			g.AddEdge(&Edge{From: irNode.ID, To: target})
-			existingEdges[key] = true
-		}
-	}
-	if len(cfg.Targets) > 0 {
-		if joinID, ok := fanInBySource[cfg.Targets[0]]; ok {
-			key := [2]string{irNode.ID, joinID}
-			if !existingEdges[key] {
-				g.AddEdge(&Edge{From: irNode.ID, To: joinID})
-				existingEdges[key] = true
-			}
-			if node, ok := g.Nodes[irNode.ID]; ok {
-				node.Attrs["parallel_join"] = joinID
-			}
-		}
-	}
-}
-
-// synthesizeFanInEdges adds edges from fan-in sources to the fan-in node.
-func synthesizeFanInEdges(g *Graph, irNode *ir.Node, cfg ir.FanInConfig, existingEdges map[[2]string]bool) {
-	for _, source := range cfg.Sources {
-		key := [2]string{source, irNode.ID}
-		if !existingEdges[key] {
-			g.AddEdge(&Edge{From: source, To: irNode.ID})
-			existingEdges[key] = true
-		}
-	}
-}
-
-// ensureStartExitNodes verifies that the start and exit nodes exist in the graph
-// and have the correct shape/handler attributes.
-func ensureStartExitNodes(g *Graph) error {
-	if _, ok := g.Nodes[g.StartNode]; !ok {
-		return fmt.Errorf("start node %q not found in graph", g.StartNode)
-	}
-	if _, ok := g.Nodes[g.ExitNode]; !ok {
-		return fmt.Errorf("exit node %q not found in graph", g.ExitNode)
-	}
-	startNode := g.Nodes[g.StartNode]
-	if startNode.Shape != "Mdiamond" {
-		startNode.Shape = "Mdiamond"
-		startNode.Handler = "start"
-	}
-	exitNode := g.Nodes[g.ExitNode]
-	if exitNode.Shape != "Msquare" {
-		exitNode.Shape = "Msquare"
-		exitNode.Handler = "exit"
-	}
-	return nil
-}
+// Implicit edge synthesis and start/exit node validation are in dippin_adapter_edges.go

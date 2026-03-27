@@ -782,6 +782,222 @@ func TestFromDippinIR_Errors(t *testing.T) {
 	}
 }
 
+// TestSynthesizeImplicitEdges_ParallelFanIn verifies that implicit edges are
+// synthesized for parallel fan-out targets and fan-in sources when they are
+// not already present as explicit edges.
+func TestSynthesizeImplicitEdges_ParallelFanIn(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ParallelFanInTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "dispatch",
+				Kind: ir.NodeParallel,
+				Config: ir.ParallelConfig{
+					Targets: []string{"branch_a", "branch_b"},
+				},
+			},
+			{ID: "branch_a", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "task A"}},
+			{ID: "branch_b", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "task B"}},
+			{
+				ID:   "join",
+				Kind: ir.NodeFanIn,
+				Config: ir.FanInConfig{
+					Sources: []string{"branch_a", "branch_b"},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "dispatch"},
+			{From: "join", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	// Verify implicit edges were synthesized.
+	edgeSet := make(map[[2]string]bool)
+	for _, e := range graph.Edges {
+		edgeSet[[2]string{e.From, e.To}] = true
+	}
+
+	// Parallel -> targets
+	if !edgeSet[[2]string{"dispatch", "branch_a"}] {
+		t.Error("missing implicit edge: dispatch -> branch_a")
+	}
+	if !edgeSet[[2]string{"dispatch", "branch_b"}] {
+		t.Error("missing implicit edge: dispatch -> branch_b")
+	}
+	// Targets -> fan-in
+	if !edgeSet[[2]string{"branch_a", "join"}] {
+		t.Error("missing implicit edge: branch_a -> join")
+	}
+	if !edgeSet[[2]string{"branch_b", "join"}] {
+		t.Error("missing implicit edge: branch_b -> join")
+	}
+	// Parallel -> join (for parallel_join attr)
+	if !edgeSet[[2]string{"dispatch", "join"}] {
+		t.Error("missing implicit edge: dispatch -> join")
+	}
+
+	// Verify parallel_join attr was set.
+	dispatchNode := graph.Nodes["dispatch"]
+	if dispatchNode.Attrs["parallel_join"] != "join" {
+		t.Errorf("parallel_join = %q, want %q", dispatchNode.Attrs["parallel_join"], "join")
+	}
+}
+
+// TestSynthesizeImplicitEdges_NoDuplicates verifies that synthesizeImplicitEdges
+// does not create duplicate edges when explicit edges already exist.
+func TestSynthesizeImplicitEdges_NoDuplicates(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "NoDupTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "dispatch",
+				Kind: ir.NodeParallel,
+				Config: ir.ParallelConfig{
+					Targets: []string{"branch_a"},
+				},
+			},
+			{ID: "branch_a", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "A"}},
+			{
+				ID:   "join",
+				Kind: ir.NodeFanIn,
+				Config: ir.FanInConfig{
+					Sources: []string{"branch_a"},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "dispatch"},
+			// Explicit edges that overlap with what synthesize would create.
+			{From: "dispatch", To: "branch_a"},
+			{From: "branch_a", To: "join"},
+			{From: "join", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	// Count edges from dispatch -> branch_a — should be exactly 1.
+	count := 0
+	for _, e := range graph.Edges {
+		if e.From == "dispatch" && e.To == "branch_a" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 edge dispatch->branch_a, got %d", count)
+	}
+}
+
+// TestEnsureStartExitNodes_OverridesShape verifies that ensureStartExitNodes
+// corrects the shape and handler of start/exit nodes regardless of their
+// original kind.
+func TestEnsureStartExitNodes_OverridesShape(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ShapeOverrideTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "begin"}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "end"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	startNode := graph.Nodes["start"]
+	if startNode.Shape != "Mdiamond" {
+		t.Errorf("start shape = %q, want Mdiamond", startNode.Shape)
+	}
+	if startNode.Handler != "start" {
+		t.Errorf("start handler = %q, want 'start'", startNode.Handler)
+	}
+
+	exitNode := graph.Nodes["exit"]
+	if exitNode.Shape != "Msquare" {
+		t.Errorf("exit shape = %q, want Msquare", exitNode.Shape)
+	}
+	if exitNode.Handler != "exit" {
+		t.Errorf("exit handler = %q, want 'exit'", exitNode.Handler)
+	}
+}
+
+// TestExtractAgentBackendAttrs_SimulatedIRParams verifies that agent backend
+// attributes (model, provider, reasoning_effort, system_prompt) are correctly
+// extracted from IR AgentConfig into graph node attrs, simulating the params
+// that CodergenHandler reads at runtime.
+func TestExtractAgentBackendAttrs_SimulatedIRParams(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "BackendAttrsTest",
+		Start: "start",
+		Exit:  "agent",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:    "agent",
+				Kind:  ir.NodeAgent,
+				Label: "Backend Agent",
+				Config: ir.AgentConfig{
+					Prompt:          "Build the feature",
+					Model:           "claude-opus-4",
+					Provider:        "anthropic",
+					SystemPrompt:    "You are a senior engineer",
+					ReasoningEffort: "high",
+					MaxTurns:        100,
+				},
+			},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "agent"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	node := graph.Nodes["agent"]
+	tests := []struct {
+		key   string
+		value string
+	}{
+		{"prompt", "Build the feature"},
+		{"llm_model", "claude-opus-4"},
+		{"llm_provider", "anthropic"},
+		{"system_prompt", "You are a senior engineer"},
+		{"reasoning_effort", "high"},
+		{"max_turns", "100"},
+	}
+	for _, tt := range tests {
+		if node.Attrs[tt.key] != tt.value {
+			t.Errorf("attrs[%q] = %q, want %q", tt.key, node.Attrs[tt.key], tt.value)
+		}
+	}
+}
+
 // Helper function to check if a string contains a substring.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))

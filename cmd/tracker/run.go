@@ -36,7 +36,7 @@ var activeAutopilotCfg autopilotCfg
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
-func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error {
+func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
 	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
@@ -87,6 +87,8 @@ func run(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut
 		handlers.WithAgentEventHandler(agentEventHandler),
 		handlers.WithPipelineEventHandler(pipelineEventHandler),
 		handlers.WithSubgraphs(subgraphs),
+		handlers.WithDefaultBackend(backend),
+		handlers.WithTokenTracker(tokenTracker),
 	)
 
 	if checkpoint != "" {
@@ -221,7 +223,7 @@ func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[
 	return graph, subgraphs, nil
 }
 
-func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) error {
+func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
 	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
@@ -304,6 +306,8 @@ func runTUI(pipelineFile, workdir, checkpoint, format string, verbose bool) erro
 		})),
 		handlers.WithPipelineEventHandler(pipelineCombo),
 		handlers.WithSubgraphs(subgraphs),
+		handlers.WithDefaultBackend(backend),
+		handlers.WithTokenTracker(tokenTracker),
 	)
 
 	var engineOpts []pipeline.EngineOption

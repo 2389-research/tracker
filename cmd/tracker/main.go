@@ -20,6 +20,7 @@ type runConfig struct {
 	noTUI        bool
 	verbose      bool
 	jsonOut      bool   // stream events as NDJSON to stdout
+	backend      string // agent execution backend: "" (default), "native", or "claude-code"
 	autopilot    string // persona name (lax/mid/hard/mentor) or empty
 	autoApprove  bool   // deterministic auto-approve, no LLM
 }
@@ -57,8 +58,8 @@ func init() { initVersionFromVCS() }
 type commandDeps struct {
 	loadEnv  func(string) error
 	runSetup func() error
-	run      func(pipelineFile, workdir, checkpoint, format string, verbose bool, jsonOut bool) error
-	runTUI   func(pipelineFile, workdir, checkpoint, format string, verbose bool) error
+	run      func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error
+	runTUI   func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error
 }
 
 type setupResult struct {
