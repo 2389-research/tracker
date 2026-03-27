@@ -83,7 +83,9 @@ workflow BuildProduct
 
       If the spec or codebase has tests that are expected to fail until a later
       milestone wires things up, write those test names (one per line) to
-      .ai/milestones/known_failures. The test runner will skip these. Remove
+      .ai/milestones/known_failures. ONLY write test function names, one per
+      line. No comments, no blank lines, no headers — just bare test names like
+      TestFooBar. The test runner uses these as a regex skip pattern. Remove
       test names from this file in the milestone where they should start passing.
 
   human ApprovePlan
@@ -169,17 +171,18 @@ workflow BuildProduct
       TEST_EXIT=0
 
       # Run the project's test suite.
+      # Build the skip pattern from known_failures, stripping comments and blanks.
       SKIP_PATTERN=""
       if [ -f .ai/milestones/known_failures ]; then
-        SKIP_PATTERN=$(paste -sd'|' .ai/milestones/known_failures)
+        SKIP_PATTERN=$(grep -v '^#' .ai/milestones/known_failures | grep -v '^$' | paste -sd'|')
       fi
 
       if [ -f go.mod ]; then
         go build ./... 2>&1
         if [ -n "$SKIP_PATTERN" ]; then
           echo "--- skipping known failures: $SKIP_PATTERN ---"
-          go test ./... 2>&1 | grep -v -E "$SKIP_PATTERN" || true
-          go test ./... -run "^(?!($SKIP_PATTERN))" 2>&1 || TEST_EXIT=$?
+          # Use -skip (Go 1.24+) which supports simple regex without lookahead.
+          go test ./... -skip "$SKIP_PATTERN" 2>&1 || TEST_EXIT=$?
         else
           go test ./... 2>&1 || TEST_EXIT=$?
         fi
