@@ -134,14 +134,13 @@ func (a *AutopilotInterviewer) AskFreeformWithLabels(prompt string, labels []str
 func (a *AutopilotInterviewer) decide(prompt string, options []string, defaultOption string) (string, error) {
 	decision, err := a.callLLM(prompt, options, defaultOption)
 	if err != nil {
-		// Fallback: use default or first option
-		fmt.Fprintf(os.Stderr, "WARNING: autopilot LLM call failed (%v), using default edge\n", err)
-		return a.fallback(options, defaultOption), nil
+		return "", fmt.Errorf("autopilot gate decision failed: %w", err)
 	}
 
 	// Match the choice against available options (case-insensitive)
 	choice := matchChoice(decision.Choice, options)
 	if choice == "" {
+		// Unmatchable choice is a parse issue, not a provider error — fall back.
 		fmt.Fprintf(os.Stderr, "WARNING: autopilot chose %q which doesn't match any option, using default\n", decision.Choice)
 		return a.fallback(options, defaultOption), nil
 	}
@@ -283,6 +282,7 @@ func parseDecision(text string) (*autopilotDecision, error) {
 }
 
 // matchChoice finds the best match for a choice string against available options.
+// Prefers exact match, then longest prefix/contains match to avoid ambiguity.
 func matchChoice(choice string, options []string) string {
 	normalized := strings.ToLower(strings.TrimSpace(choice))
 
@@ -293,15 +293,15 @@ func matchChoice(choice string, options []string) string {
 		}
 	}
 
-	// Substring match: if the choice contains an option or vice versa
+	// Longest option that the choice contains (avoids "a" matching before "abandon")
+	var bestMatch string
 	for _, opt := range options {
-		if strings.Contains(normalized, strings.ToLower(opt)) ||
-			strings.Contains(strings.ToLower(opt), normalized) {
-			return opt
+		lower := strings.ToLower(opt)
+		if strings.Contains(normalized, lower) && len(opt) > len(bestMatch) {
+			bestMatch = opt
 		}
 	}
-
-	return ""
+	return bestMatch
 }
 
 // fallback returns the default option, or the first option, or empty string.

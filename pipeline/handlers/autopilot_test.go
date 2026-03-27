@@ -116,6 +116,14 @@ func TestMatchChoiceSubstring(t *testing.T) {
 	}
 }
 
+func TestMatchChoiceLongestWins(t *testing.T) {
+	// "abandon" should match "abandon", not "a" — longest match wins
+	options := []string{"a", "abandon", "accept"}
+	if got := matchChoice("abandon", options); got != "abandon" {
+		t.Errorf("matchChoice longest = %q, want %q", got, "abandon")
+	}
+}
+
 func TestMatchChoiceNoMatch(t *testing.T) {
 	options := []string{"approve", "adjust", "reject"}
 	if got := matchChoice("something else entirely", options); got != "" {
