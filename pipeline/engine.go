@@ -253,12 +253,56 @@ func (e *Engine) processExitNode(s *runState, currentNodeID string, outcomeStatu
 	return loopResult{action: loopContinue, nextNodeID: target}
 }
 
+// hasAnyConditionalEdge returns true if any outgoing edge has a condition.
+// When a node has conditional edges, the pipeline author has intentionally
+// designed routing for different outcomes. When all edges are unconditional,
+// a failure outcome would blindly continue — which is almost always a bug.
+func hasAnyConditionalEdge(edges []*Edge) bool {
+	for _, edge := range edges {
+		if edge.Condition != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // advanceToNextNode selects the next edge and advances, handling loop-backs.
+// If the node's outcome was "fail" and no edge explicitly handles failure
+// (via a condition like "ctx.outcome = fail"), the pipeline fails rather
+// than silently continuing through an unconditional edge.
 func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry *TraceEntry) loopResult {
 	edges := e.graph.OutgoingEdges(currentNodeID)
 	if len(edges) == 0 {
 		s.trace.AddEntry(*traceEntry)
 		return loopResult{action: loopReturn, err: fmt.Errorf("no outgoing edges from non-exit node %q", currentNodeID)}
+	}
+
+	// Strict failure mode: if the node failed and the only outgoing edges are
+	// unconditional, fail the pipeline rather than silently continuing.
+	// Enabled by default — pipelines that intentionally continue after failure
+	// should add explicit "when ctx.outcome = fail" edges.
+	if outcome, _ := s.pctx.Get(ContextKeyOutcome); outcome == OutcomeFail {
+		if !hasAnyConditionalEdge(edges) {
+			e.emit(PipelineEvent{
+				Type:      EventStageFailed,
+				Timestamp: time.Now(),
+				NodeID:    currentNodeID,
+				Message:   fmt.Sprintf("node %q failed with no failure edge — stopping pipeline", currentNodeID),
+			})
+			s.trace.AddEntry(*traceEntry)
+			s.trace.EndTime = time.Now()
+			return loopResult{
+				action: loopReturn,
+				result: &EngineResult{
+					RunID:          s.runID,
+					Status:         OutcomeFail,
+					CompletedNodes: s.cp.CompletedNodes,
+					Context:        s.pctx.Snapshot(),
+					Trace:          s.trace,
+				},
+				err: fmt.Errorf("node %q failed with no conditional edges to handle failure", currentNodeID),
+			}
+		}
 	}
 
 	next, err := e.selectEdge(edges, s.pctx)

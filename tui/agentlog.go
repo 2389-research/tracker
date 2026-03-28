@@ -21,10 +21,47 @@ type nodeStream struct {
 	inCodeBlock bool
 }
 
+// LineKind tags log lines for verbosity filtering.
+type LineKind int
+
+const (
+	LineGeneral   LineKind = iota // text output, headers, etc.
+	LineTool                      // tool call start/end
+	LineError                     // errors, failures
+	LineReasoning                 // reasoning/thinking output
+)
+
 // styledLine is one rendered line in the log, tagged with its source node.
 type styledLine struct {
 	nodeID string
 	text   string
+	kind   LineKind
+}
+
+// Verbosity levels for log filtering.
+type Verbosity int
+
+const (
+	VerbosityAll Verbosity = iota
+	VerbosityTools
+	VerbosityErrors
+	VerbosityReasoning
+)
+
+// VerbosityLabel returns the display name for a verbosity level.
+func (v Verbosity) Label() string {
+	switch v {
+	case VerbosityAll:
+		return "all"
+	case VerbosityTools:
+		return "tools"
+	case VerbosityErrors:
+		return "errors"
+	case VerbosityReasoning:
+		return "reasoning"
+	default:
+		return "all"
+	}
 }
 
 // AgentLog renders a streaming activity log. Each pipeline node gets its own
@@ -47,17 +84,48 @@ type AgentLog struct {
 	// its source node so we can insert separators when the source changes.
 	lines    []styledLine
 	lastNode string // node ID of the last line appended (for separator logic)
+
+	// Verbosity filter (view-level only — lines always stored).
+	verbosity     Verbosity
+	filteredCache []int // cached indices into lines matching current filter
+	filterDirty   bool  // true when filter cache needs rebuild
+
+	// Node focus for drill-down.
+	focusNodeID string
+
+	// Search state.
+	search *SearchBar
 }
 
 // NewAgentLog creates an AgentLog with the given state, thinking tracker, and viewport height.
 func NewAgentLog(store *StateStore, thinking *ThinkingTracker, height int) *AgentLog {
 	return &AgentLog{
-		store:    store,
-		thinking: thinking,
-		scroll:   NewScrollView(height),
-		height:   height,
-		streams:  make(map[string]*nodeStream),
+		store:       store,
+		thinking:    thinking,
+		scroll:      NewScrollView(height),
+		height:      height,
+		streams:     make(map[string]*nodeStream),
+		search:      NewSearchBar(),
+		filterDirty: true,
 	}
+}
+
+// Search returns the search bar for external access (key routing).
+func (al *AgentLog) Search() *SearchBar { return al.search }
+
+// Verbosity returns the current verbosity level.
+func (al *AgentLog) Verbosity() Verbosity { return al.verbosity }
+
+// CycleVerbosity advances to the next verbosity level.
+func (al *AgentLog) CycleVerbosity() {
+	al.verbosity = (al.verbosity + 1) % 4
+	al.filterDirty = true
+}
+
+// SetFocusNodeID sets the node ID to filter by (empty = show all).
+func (al *AgentLog) SetFocusNodeID(nodeID string) {
+	al.focusNodeID = nodeID
+	al.filterDirty = true
 }
 
 // SetSize updates both width and height for the agent log viewport.
@@ -99,13 +167,13 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 		al.appendReasoning(m.NodeID, m.Text)
 	case MsgToolCallStart:
 		al.flushNode(m.NodeID)
-		al.addLine(m.NodeID, toolStyle(m.ToolName).Render(formatToolDisplay(m.ToolName, m.ToolInput)))
+		al.addTaggedLine(m.NodeID, toolStyle(m.ToolName).Render(formatToolDisplay(m.ToolName, m.ToolInput)), LineTool)
 	case MsgToolCallEnd:
 		al.flushNode(m.NodeID)
 		al.appendToolEnd(m)
 	case MsgAgentError:
 		al.flushNode(m.NodeID)
-		al.addLine(m.NodeID, Styles.Error.Render("ERROR: "+m.Error))
+		al.addTaggedLine(m.NodeID, Styles.Error.Render("ERROR: "+m.Error), LineError)
 	case MsgLLMProviderRaw:
 		if al.verboseTrace {
 			al.flushNode(m.NodeID)
@@ -113,16 +181,22 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 		}
 	case MsgNodeFailed:
 		al.flushNode(m.NodeID)
-		al.addLine(m.NodeID, Styles.Error.Render("FAILED: "+m.Error))
+		al.addTaggedLine(m.NodeID, Styles.Error.Render("FAILED: "+m.Error), LineError)
 		delete(al.streams, m.NodeID)
 	case MsgNodeRetrying:
 		al.flushNode(m.NodeID)
-		al.addLine(m.NodeID, Styles.Warn.Render("RETRYING: "+m.Message))
+		al.addTaggedLine(m.NodeID, Styles.Warn.Render("RETRYING: "+m.Message), LineError)
 	case MsgNodeCompleted:
 		al.flushNode(m.NodeID)
 		delete(al.streams, m.NodeID)
 	case MsgToggleExpand:
 		al.expanded = !al.expanded
+	case MsgCycleVerbosity:
+		al.CycleVerbosity()
+	case MsgFocusNode:
+		al.SetFocusNodeID(m.NodeID)
+	case MsgClearFocus:
+		al.SetFocusNodeID("")
 	}
 	return nil
 }
@@ -148,7 +222,7 @@ func (al *AgentLog) appendReasoning(nodeID, text string) {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line != "" {
-			al.addLine(nodeID, Styles.Muted.Render(line))
+			al.addTaggedLine(nodeID, Styles.Muted.Render(line), LineReasoning)
 		}
 	}
 }
@@ -156,28 +230,33 @@ func (al *AgentLog) appendReasoning(nodeID, text string) {
 // appendToolEnd adds collapsed or expanded tool output.
 func (al *AgentLog) appendToolEnd(m MsgToolCallEnd) {
 	if m.Error != "" {
-		al.addLine(m.NodeID, Styles.Error.Render("  ✗ "+m.ToolName+": "+m.Error))
+		al.addTaggedLine(m.NodeID, Styles.Error.Render("  ✗ "+m.ToolName+": "+m.Error), LineError)
 		return
 	}
 	if m.Output == "" {
-		al.addLine(m.NodeID, Styles.Muted.Render("  ✓ "+m.ToolName))
+		al.addTaggedLine(m.NodeID, Styles.Muted.Render("  ✓ "+m.ToolName), LineTool)
 		return
 	}
 	lines := strings.Split(m.Output, "\n")
 	if !al.expanded && len(lines) > defaultMaxCollapsedLines {
-		al.addLine(m.NodeID,
-			Styles.Muted.Render(fmt.Sprintf("  ✓ %s (%d lines, ctrl+o to expand)", m.ToolName, len(lines))))
+		al.addTaggedLine(m.NodeID,
+			Styles.Muted.Render(fmt.Sprintf("  ✓ %s (%d lines, ctrl+o to expand)", m.ToolName, len(lines))), LineTool)
 		return
 	}
 	for _, line := range lines {
-		al.addLine(m.NodeID, Styles.DimText.Render(line))
+		al.addTaggedLine(m.NodeID, Styles.DimText.Render(line), LineTool)
 	}
 }
 
-// addLine appends a styled line to the unified log.
+// addLine appends a styled line to the unified log with LineGeneral kind.
 // Inserts a node separator when the source node changes.
 // Trims oldest entries when the log exceeds maxLogLines.
 func (al *AgentLog) addLine(nodeID, text string) {
+	al.addTaggedLine(nodeID, text, LineGeneral)
+}
+
+// addTaggedLine appends a styled line with a specific LineKind tag.
+func (al *AgentLog) addTaggedLine(nodeID, text string, kind LineKind) {
 	if nodeID != "" && nodeID != al.lastNode && al.lastNode != "" {
 		al.lines = append(al.lines, styledLine{
 			nodeID: "",
@@ -185,7 +264,8 @@ func (al *AgentLog) addLine(nodeID, text string) {
 		})
 	}
 	al.lastNode = nodeID
-	al.lines = append(al.lines, styledLine{nodeID: nodeID, text: text})
+	al.lines = append(al.lines, styledLine{nodeID: nodeID, text: text, kind: kind})
+	al.filterDirty = true
 
 	// Cap the line buffer to prevent unbounded memory growth.
 	if len(al.lines) > maxLogLines {
@@ -283,10 +363,10 @@ func (al *AgentLog) activeNodeIndicators() string {
 		if toolName := al.thinking.ToolName(entry.ID); toolName != "" {
 			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
 			indicators = append(indicators,
-				toolStyle(toolName).Render(fmt.Sprintf("⚡ %s: %s (%.1fs)", nodeLabel, toolName, elapsed)))
+				toolStyle(toolName).Render(fmt.Sprintf("» %s: %s (%.1fs)", nodeLabel, toolName, elapsed)))
 		} else if al.store.IsWaiting(entry.ID) {
 			indicators = append(indicators,
-				Styles.Muted.Render(fmt.Sprintf("⏳ %s: waiting for provider...", nodeLabel)))
+				Styles.Muted.Render(fmt.Sprintf(":: %s: waiting for provider...", nodeLabel)))
 		} else if al.thinking.IsThinking(entry.ID) {
 			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
 			indicators = append(indicators,
@@ -298,6 +378,44 @@ func (al *AgentLog) activeNodeIndicators() string {
 		return " "
 	}
 	return strings.Join(indicators, "\n")
+}
+
+// rebuildFilter rebuilds the cached filtered indices based on verbosity and focus.
+func (al *AgentLog) rebuildFilter() {
+	if !al.filterDirty {
+		return
+	}
+	al.filterDirty = false
+	al.filteredCache = al.filteredCache[:0]
+
+	for i, line := range al.lines {
+		// Always include separator lines (empty nodeID) — they provide
+		// structural context between nodes regardless of filter state.
+		isSeparator := line.nodeID == "" && line.kind == LineGeneral
+
+		// Node focus filter.
+		if !isSeparator && al.focusNodeID != "" && line.nodeID != "" && line.nodeID != al.focusNodeID {
+			continue
+		}
+		// Verbosity filter (separators pass through).
+		if !isSeparator && al.verbosity != VerbosityAll {
+			switch al.verbosity {
+			case VerbosityTools:
+				if line.kind != LineTool {
+					continue
+				}
+			case VerbosityErrors:
+				if line.kind != LineError {
+					continue
+				}
+			case VerbosityReasoning:
+				if line.kind != LineReasoning {
+					continue
+				}
+			}
+		}
+		al.filteredCache = append(al.filteredCache, i)
+	}
 }
 
 // View renders the agent log viewport. The indicator is always rendered at the
@@ -327,19 +445,35 @@ func (al *AgentLog) View() string {
 		}
 	}
 
+	// Account for search bar at the bottom.
+	searchBarRows := 0
+	if al.search.Active() {
+		searchBarRows = 1
+	}
+
 	// 2. Calculate how many rows are available for styled content.
-	// height = header(1) + content + partials + indicator
-	contentBudget := al.height - 1 - bottomRows
+	// height = header(1) + content + partials + indicator + searchbar
+	contentBudget := al.height - 1 - bottomRows - searchBarRows
 	if contentBudget < 1 {
 		contentBudget = 1
 	}
 
-	// 3. Walk backwards through styled lines, counting actual terminal rows.
-	totalLines := len(al.lines)
+	// 3. Rebuild filter cache if needed and walk filtered lines.
+	al.rebuildFilter()
+	filtered := al.filteredCache
+	totalFiltered := len(filtered)
+
+	// Update search matches against the filtered view (not full line buffer).
+	searchTerm := al.search.Term()
+	if al.search.Active() {
+		al.search.UpdateMatchesFiltered(al.lines, filtered)
+	}
+
 	usedRows := 0
-	start := totalLines
+	start := totalFiltered
 	for start > 0 {
-		rows := termLines(al.lines[start-1].text, width)
+		idx := filtered[start-1]
+		rows := termLines(al.lines[idx].text, width)
 		if usedRows+rows > contentBudget {
 			break
 		}
@@ -347,17 +481,26 @@ func (al *AgentLog) View() string {
 		start--
 	}
 
-	// 4. Render: header, then content, then partials, then indicator.
+	// 4. Render: header, then content, then partials, then indicator, then search.
 	var sb strings.Builder
-	sb.WriteString(Styles.ZoneLabel.Render("ACTIVITY LOG"))
+	headerLabel := "ACTIVITY LOG"
+	if al.focusNodeID != "" {
+		headerLabel += " [" + al.focusNodeID + "]"
+	}
+	sb.WriteString(Styles.ZoneLabel.Render(headerLabel))
 	sb.WriteString("\n")
 
-	if totalLines == 0 && len(partials) == 0 && indicator == " " {
+	if totalFiltered == 0 && len(partials) == 0 && indicator == " " {
 		sb.WriteString(Styles.DimText.Render("awaiting activity..."))
 		sb.WriteString("\n")
 	} else {
-		for i := start; i < totalLines; i++ {
-			sb.WriteString(al.lines[i].text)
+		for i := start; i < totalFiltered; i++ {
+			idx := filtered[i]
+			text := al.lines[idx].text
+			if searchTerm != "" {
+				text = HighlightLine(text, searchTerm)
+			}
+			sb.WriteString(text)
 			sb.WriteString("\n")
 		}
 	}
@@ -368,6 +511,23 @@ func (al *AgentLog) View() string {
 	}
 
 	sb.WriteString(indicatorRendered)
+
+	if al.search.Active() {
+		sb.WriteString(al.search.View())
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// VisibleText returns the plain text of the visible log (for clipboard copy).
+func (al *AgentLog) VisibleText() string {
+	al.rebuildFilter()
+	var sb strings.Builder
+	for _, idx := range al.filteredCache {
+		sb.WriteString(stripAnsi(al.lines[idx].text))
+		sb.WriteString("\n")
+	}
 	return sb.String()
 }
 

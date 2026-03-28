@@ -34,10 +34,18 @@ const (
 	PhaseRouting
 )
 
+// NodeFlags carries metadata about a node's role in the pipeline.
+type NodeFlags struct {
+	IsParallelDispatcher bool // node dispatches parallel branches
+	IsParallelBranch     bool // node is a branch of a parallel dispatch
+	IsFanIn              bool // node joins parallel branches
+}
+
 // NodeEntry identifies a node in the pipeline with its display label.
 type NodeEntry struct {
 	ID    string
 	Label string
+	Flags NodeFlags
 }
 
 // nodeInfo holds per-node mutable state.
@@ -46,9 +54,13 @@ type nodeInfo struct {
 	errMsg       string
 	thinking     bool
 	retryMsg     string
-	waiting      bool      // true when waiting for provider to respond (before thinking starts)
-	phase        NodePhase // current activity phase
-	phaseStarted time.Time // when current phase started (for elapsed time tracking)
+	waiting      bool          // true when waiting for provider to respond (before thinking starts)
+	phase        NodePhase     // current activity phase
+	phaseStarted time.Time     // when current phase started (for elapsed time tracking)
+	cost         float64       // accumulated cost for this node
+	tokens       int           // accumulated tokens for this node
+	startedAt    time.Time     // when node execution started (for duration tracking)
+	duration     time.Duration // elapsed time from start to completion
 }
 
 // StateStore is the central state container for the TUI.
@@ -59,13 +71,15 @@ type StateStore struct {
 	pipelineDone bool
 	pipelineErr  string
 	Tokens       *llm.TokenTracker
+	startUsage   map[string]llm.Usage // usage snapshot at node start (for delta calculation)
 }
 
 // NewStateStore creates a StateStore with an optional TokenTracker.
 func NewStateStore(tokens *llm.TokenTracker) *StateStore {
 	return &StateStore{
-		nodeState: make(map[string]*nodeInfo),
-		Tokens:    tokens,
+		nodeState:  make(map[string]*nodeInfo),
+		Tokens:     tokens,
+		startUsage: make(map[string]llm.Usage),
 	}
 }
 
@@ -147,6 +161,30 @@ func (s *StateStore) GetPhase(id string) NodePhase {
 func (s *StateStore) PhaseElapsed(id string) time.Duration {
 	if ni, ok := s.nodeState[id]; ok && ni.phase != PhaseIdle && !ni.phaseStarted.IsZero() {
 		return time.Since(ni.phaseStarted)
+	}
+	return 0
+}
+
+// NodeDuration returns the elapsed time for a completed node.
+func (s *StateStore) NodeDuration(id string) time.Duration {
+	if ni, ok := s.nodeState[id]; ok && !ni.startedAt.IsZero() && ni.status == NodeDone {
+		return ni.duration
+	}
+	return 0
+}
+
+// NodeCost returns the accumulated cost for a node (0 if unknown).
+func (s *StateStore) NodeCost(id string) float64 {
+	if ni, ok := s.nodeState[id]; ok {
+		return ni.cost
+	}
+	return 0
+}
+
+// NodeTokens returns the accumulated token count for a node.
+func (s *StateStore) NodeTokens(id string) int {
+	if ni, ok := s.nodeState[id]; ok {
+		return ni.tokens
 	}
 	return 0
 }
@@ -250,9 +288,30 @@ func (s *StateStore) Apply(msg interface{}) {
 		ni.status = NodeRunning
 		ni.errMsg = ""
 		ni.retryMsg = ""
+		ni.startedAt = time.Now()
 		s.visitPath = append(s.visitPath, m.NodeID)
+		// Snapshot current total usage for per-node delta calculation.
+		// Note: for parallel nodes, deltas may include sibling usage since
+		// TokenTracker is global. This is a known limitation — per-node cost
+		// is most accurate for sequential execution.
+		if s.Tokens != nil {
+			s.startUsage[m.NodeID] = s.Tokens.TotalUsage()
+		}
 	case MsgNodeCompleted:
-		s.ensure(m.NodeID).status = NodeDone
+		ni := s.ensure(m.NodeID)
+		ni.status = NodeDone
+		if !ni.startedAt.IsZero() {
+			ni.duration = time.Since(ni.startedAt)
+		}
+		// Compute per-node cost/token delta.
+		if s.Tokens != nil {
+			end := s.Tokens.TotalUsage()
+			if start, ok := s.startUsage[m.NodeID]; ok {
+				ni.cost = end.EstimatedCost - start.EstimatedCost
+				ni.tokens = end.TotalTokens - start.TotalTokens
+				delete(s.startUsage, m.NodeID)
+			}
+		}
 	case MsgNodeFailed:
 		ni := s.ensure(m.NodeID)
 		ni.status = NodeFailed

@@ -219,7 +219,14 @@ func printTotalTokens(tracker *llm.TokenTracker) {
 	tokenLine := fmt.Sprintf("  Tokens:       %s in / %s out",
 		formatNumber(total.InputTokens), formatNumber(total.OutputTokens))
 	if total.EstimatedCost > 0 {
-		tokenLine += fmt.Sprintf("  ($%.2f)", total.EstimatedCost)
+		// When all usage is from claude-code (Max subscription), label as
+		// usage estimate since Max is flat-rate, not pay-per-token.
+		providers := tracker.Providers()
+		if len(providers) == 1 && providers[0] == "claude-code" {
+			tokenLine += fmt.Sprintf("  (~$%.2f usage)", total.EstimatedCost)
+		} else {
+			tokenLine += fmt.Sprintf("  ($%.2f)", total.EstimatedCost)
+		}
 	}
 	fmt.Println(tokenLine)
 }
@@ -283,7 +290,11 @@ func printTokensByProvider(tracker *llm.TokenTracker) {
 	total := tracker.TotalUsage()
 	fmt.Printf("  %-12s  %10s  %10s\n", "TOTAL", formatNumber(total.InputTokens), formatNumber(total.OutputTokens))
 	if total.EstimatedCost > 0 {
-		fmt.Printf("  Cost: $%.4f\n", total.EstimatedCost)
+		if len(providers) == 1 && providers[0] == "claude-code" {
+			fmt.Printf("  Est. usage: ~$%.4f (Max subscription — no actual charge)\n", total.EstimatedCost)
+		} else {
+			fmt.Printf("  Cost: $%.4f\n", total.EstimatedCost)
+		}
 	}
 }
 

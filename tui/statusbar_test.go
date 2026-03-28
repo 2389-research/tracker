@@ -11,7 +11,7 @@ func TestStatusBarProgress(t *testing.T) {
 	store := NewStateStore(nil)
 	store.SetNodes([]NodeEntry{{ID: "n1"}, {ID: "n2"}, {ID: "n3"}})
 	store.Apply(MsgNodeCompleted{NodeID: "n1"})
-	sb := NewStatusBar(store)
+	sb := NewStatusBar(store, nil)
 	view := sb.View()
 	if !strings.Contains(view, "1/3") {
 		t.Errorf("expected '1/3' progress, got: %s", view)
@@ -24,7 +24,7 @@ func TestStatusBarTrackDiagram(t *testing.T) {
 	store.Apply(MsgNodeStarted{NodeID: "n1"})
 	store.Apply(MsgNodeCompleted{NodeID: "n1"})
 	store.Apply(MsgNodeFailed{NodeID: "n2"})
-	sb := NewStatusBar(store)
+	sb := NewStatusBar(store, nil)
 	view := sb.View()
 	if !strings.Contains(view, LampDone) {
 		t.Errorf("expected done lamp in track diagram, got: %s", view)
@@ -36,9 +36,9 @@ func TestStatusBarTrackDiagram(t *testing.T) {
 
 func TestStatusBarKeybindingHints(t *testing.T) {
 	store := NewStateStore(nil)
-	sb := NewStatusBar(store)
+	sb := NewStatusBar(store, nil)
 	view := sb.View()
-	if !strings.Contains(view, "ctrl+o") {
+	if !strings.Contains(view, "quit") {
 		t.Errorf("expected keybinding hint, got: %s", view)
 	}
 }

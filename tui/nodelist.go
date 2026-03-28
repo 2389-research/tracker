@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,19 +19,21 @@ type indexedLine struct {
 
 // NodeList renders a signal lamp panel of pipeline nodes.
 type NodeList struct {
-	store    *StateStore
-	thinking *ThinkingTracker
-	height   int
-	width    int
-	scroll   int // scroll offset (first visible node index)
+	store       *StateStore
+	thinking    *ThinkingTracker
+	height      int
+	width       int
+	scroll      int // scroll offset (first visible node index)
+	selectedIdx int // cursor position for drill-down navigation (-1 = no selection)
 }
 
 // NewNodeList creates a NodeList that reads from the given state store and thinking tracker.
 func NewNodeList(store *StateStore, thinking *ThinkingTracker, height int) *NodeList {
 	return &NodeList{
-		store:    store,
-		thinking: thinking,
-		height:   height,
+		store:       store,
+		thinking:    thinking,
+		height:      height,
+		selectedIdx: -1,
 	}
 }
 
@@ -42,6 +45,41 @@ func (nl *NodeList) SetSize(w, h int) {
 
 // Init implements tea.Model.
 func (nl *NodeList) Init() tea.Cmd { return nil }
+
+// SelectedNodeID returns the ID of the currently selected node, or "".
+func (nl *NodeList) SelectedNodeID() string {
+	nodes := nl.store.Nodes()
+	if nl.selectedIdx >= 0 && nl.selectedIdx < len(nodes) {
+		return nodes[nl.selectedIdx].ID
+	}
+	return ""
+}
+
+// MoveUp moves the selection cursor up.
+func (nl *NodeList) MoveUp() {
+	nodes := nl.store.Nodes()
+	if len(nodes) == 0 {
+		return
+	}
+	if nl.selectedIdx <= 0 {
+		nl.selectedIdx = 0
+	} else {
+		nl.selectedIdx--
+	}
+}
+
+// MoveDown moves the selection cursor down.
+func (nl *NodeList) MoveDown() {
+	nodes := nl.store.Nodes()
+	if len(nodes) == 0 {
+		return
+	}
+	if nl.selectedIdx < 0 {
+		nl.selectedIdx = 0
+	} else if nl.selectedIdx < len(nodes)-1 {
+		nl.selectedIdx++
+	}
+}
 
 // Update implements tea.Model.
 func (nl *NodeList) Update(msg tea.Msg) tea.Cmd {
@@ -70,7 +108,7 @@ func (nl *NodeList) View() string {
 				all = append(all, indexedLine{connector, -1})
 			}
 		}
-		all = append(all, indexedLine{nl.renderNodeLine(node), i})
+		all = append(all, indexedLine{nl.renderNodeLineAt(node, i), i})
 	}
 
 	// Auto-scroll to keep the running node visible.
@@ -96,6 +134,11 @@ func (nl *NodeList) View() string {
 
 // renderNodeLine builds the display line for a single node entry.
 func (nl *NodeList) renderNodeLine(node NodeEntry) string {
+	return nl.renderNodeLineAt(node, -1)
+}
+
+// renderNodeLineAt builds the display line, highlighting if nodeIdx matches selectedIdx.
+func (nl *NodeList) renderNodeLineAt(node NodeEntry, nodeIdx int) string {
 	status := nl.store.NodeStatus(node.ID)
 	lamp, style := nl.resolveLamp(node.ID, status)
 
@@ -113,41 +156,82 @@ func (nl *NodeList) renderNodeLine(node NodeEntry) string {
 		}
 	}
 
-	maxLabel := nl.width - 4 - len(indent)
+	// Reserve space for cost suffix.
+	// Skip cost on parallel dispatchers and fan-in joiners — their delta
+	// snapshots overlap with children and produce misleading numbers.
+	costSuffix := ""
+	if status == NodeDone && !isParallelDispatcher(node) {
+		cost := nl.store.NodeCost(node.ID)
+		if cost > 0.001 {
+			// Mark parallel branch children as approximate (concurrent overlap).
+			prefix := "$"
+			if isParallelBranch(node) {
+				prefix = "~"
+			}
+			costSuffix = " " + Styles.CostBadge.Render(fmt.Sprintf("%s%.2f", prefix, cost))
+		}
+	}
+
+	maxLabel := nl.width - 4 - len(indent) - lipgloss.Width(costSuffix)
 	if maxLabel > 0 && len(label) > maxLabel {
 		label = label[:maxLabel-1] + "…"
 	}
 
-	line := indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
+	// Selection indicator — only shown when user has activated selection (selectedIdx >= 0).
+	selector := ""
+	if nl.selectedIdx >= 0 {
+		if nodeIdx == nl.selectedIdx {
+			selector = lipgloss.NewStyle().Foreground(ColorAmber).Bold(true).Render("▸") + " "
+		} else {
+			selector = "  "
+		}
+	}
+
+	line := selector + indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
+	line += costSuffix
 	line += nl.nodeStatusSuffix(node.ID, status)
 	return line
 }
 
-// autoScroll adjusts the scroll offset to keep the running node visible.
+// autoScroll adjusts the scroll offset to keep the target node visible.
+// Prioritizes the selected node (user navigation), falls back to running node.
 func (nl *NodeList) autoScroll(nodes []NodeEntry, lines []indexedLine) {
 	if nl.height <= 0 {
 		return
 	}
-	// Find the line index of the running node.
-	runningLine := -1
-	for i, l := range lines {
-		if l.nodeIdx >= 0 && l.nodeIdx < len(nodes) {
-			status := nl.store.NodeStatus(nodes[l.nodeIdx].ID)
-			if status == NodeRunning {
-				runningLine = i
+
+	targetLine := -1
+
+	// If user is navigating, scroll to selected node.
+	if nl.selectedIdx >= 0 {
+		for i, l := range lines {
+			if l.nodeIdx == nl.selectedIdx {
+				targetLine = i
 				break
 			}
 		}
 	}
-	if runningLine < 0 {
+
+	// Otherwise scroll to running node.
+	if targetLine < 0 {
+		for i, l := range lines {
+			if l.nodeIdx >= 0 && l.nodeIdx < len(nodes) {
+				if nl.store.NodeStatus(nodes[l.nodeIdx].ID) == NodeRunning {
+					targetLine = i
+					break
+				}
+			}
+		}
+	}
+
+	if targetLine < 0 {
 		return
 	}
-	// Ensure running node is within the visible window.
-	if runningLine < nl.scroll {
-		nl.scroll = runningLine
+	if targetLine < nl.scroll {
+		nl.scroll = targetLine
 	}
-	if runningLine >= nl.scroll+nl.height {
-		nl.scroll = runningLine - nl.height + 1
+	if targetLine >= nl.scroll+nl.height {
+		nl.scroll = targetLine - nl.height + 1
 	}
 	if nl.scroll < 0 {
 		nl.scroll = 0
@@ -165,7 +249,22 @@ func (nl *NodeList) renderConnector(prevID, nextID string) string {
 	if prevOnPath && nextOnPath {
 		connStyle = lipgloss.NewStyle().Foreground(ColorDone)
 	}
-	return connStyle.Render("│")
+	// Match the selection indent so connectors align with lamp icons.
+	prefix := ""
+	if nl.selectedIdx >= 0 {
+		prefix = "  "
+	}
+	return prefix + connStyle.Render("│")
+}
+
+// isParallelDispatcher returns true if the node dispatches parallel branches.
+func isParallelDispatcher(node NodeEntry) bool {
+	return node.Flags.IsParallelDispatcher
+}
+
+// isParallelBranch returns true if the node runs as a parallel branch.
+func isParallelBranch(node NodeEntry) bool {
+	return node.Flags.IsParallelBranch
 }
 
 // resolveLamp returns the lamp icon and style for a node, overriding for active phases.
@@ -175,7 +274,7 @@ func (nl *NodeList) resolveLamp(nodeID string, status NodeState) (string, lipglo
 		return lamp, style
 	}
 	if nl.thinking.IsToolRunning(nodeID) {
-		return "⚡", lipgloss.NewStyle().Foreground(ColorBash).Bold(true)
+		return "»", lipgloss.NewStyle().Foreground(ColorBash).Bold(true)
 	}
 	if nl.thinking.IsThinking(nodeID) {
 		if frame := nl.thinking.Frame(nodeID); frame != "" {

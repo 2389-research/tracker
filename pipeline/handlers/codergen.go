@@ -104,9 +104,11 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 }
 
 // selectBackend chooses the appropriate AgentBackend based on node attributes
-// and global default settings.
+// and global default settings. When --backend claude-code is set, ALL nodes
+// go through the claude CLI — non-Anthropic provider/model attrs are stripped
+// so the CLI uses its default model under the user's subscription.
 func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
-	// Check node-level backend attr
+	// Check node-level backend attr (explicit override always wins).
 	if backend := node.Attrs["backend"]; backend != "" {
 		switch backend {
 		case "claude-code":
@@ -117,7 +119,7 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code)", backend, node.ID)
 		}
 	}
-	// Check global --backend flag
+	// Global --backend flag applies to all nodes.
 	if h.defaultBackendName == "claude-code" {
 		return h.ensureClaudeCodeBackend()
 	}

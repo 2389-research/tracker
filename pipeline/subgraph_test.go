@@ -155,7 +155,8 @@ func TestSubgraphHandler_SubgraphFailure(t *testing.T) {
 	subGraph.AddNode(&Node{ID: "sub_bad", Shape: "box", Label: "Bad", Attrs: map[string]string{"goal_gate": "true"}})
 	subGraph.AddNode(&Node{ID: "sub_end", Shape: "Msquare", Label: "SubEnd"})
 	subGraph.AddEdge(&Edge{From: "sub_s", To: "sub_bad"})
-	subGraph.AddEdge(&Edge{From: "sub_bad", To: "sub_end"})
+	subGraph.AddEdge(&Edge{From: "sub_bad", To: "sub_end", Condition: "ctx.outcome = success"})
+	subGraph.AddEdge(&Edge{From: "sub_bad", To: "sub_end", Condition: "ctx.outcome = fail"})
 
 	reg := newTestRegistry()
 	// Override codergen to return fail.

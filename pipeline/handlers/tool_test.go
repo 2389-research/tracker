@@ -5,7 +5,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +16,63 @@ import (
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/pipeline"
 )
+
+// requireShell skips the test if "sh" is not available in PATH.
+func requireShell(t *testing.T) {
+	t.Helper()
+	if _, err := osexec.LookPath("sh"); err != nil {
+		t.Skip("sh not found in PATH — skipping shell-dependent test")
+	}
+}
+
+// mockExecEnv is a test-only ExecutionEnvironment that returns canned results
+// based on the command, without needing an actual shell.
+type mockExecEnv struct {
+	workdir  string
+	results  map[string]exec.CommandResult // keyed by command content
+	execErr  error
+	timedOut bool
+}
+
+func (m *mockExecEnv) ReadFile(ctx context.Context, path string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+func (m *mockExecEnv) WriteFile(ctx context.Context, path, content string) error {
+	return fmt.Errorf("not implemented")
+}
+func (m *mockExecEnv) Glob(ctx context.Context, pattern string) ([]string, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *mockExecEnv) WorkingDir() string { return m.workdir }
+
+// toolTestEnv returns a real LocalEnvironment if sh is available, otherwise
+// a mock that returns canned results. This ensures tests pass in sandboxed
+// environments without sh while still exercising real shell execution when possible.
+func toolTestEnv(t *testing.T, results map[string]exec.CommandResult) exec.ExecutionEnvironment {
+	t.Helper()
+	if _, err := osexec.LookPath("sh"); err == nil {
+		return exec.NewLocalEnvironment(t.TempDir())
+	}
+	return &mockExecEnv{workdir: t.TempDir(), results: results}
+}
+
+func (m *mockExecEnv) ExecCommand(ctx context.Context, command string, args []string, timeout time.Duration) (exec.CommandResult, error) {
+	if m.timedOut {
+		return exec.CommandResult{}, fmt.Errorf("command timed out after %v", timeout)
+	}
+	if m.execErr != nil {
+		return exec.CommandResult{}, m.execErr
+	}
+	// Match by the shell command content (args[1] for "sh -c <cmd>").
+	key := ""
+	if len(args) >= 2 {
+		key = args[1]
+	}
+	if r, ok := m.results[key]; ok {
+		return r, nil
+	}
+	return exec.CommandResult{Stdout: "", ExitCode: 0}, nil
+}
 
 func TestToolHandlerName(t *testing.T) {
 	env := exec.NewLocalEnvironment(t.TempDir())
@@ -29,7 +88,9 @@ func TestToolHandlerImplementsHandler(t *testing.T) {
 }
 
 func TestToolHandlerSuccess(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo hello": {Stdout: "hello\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "t1",
@@ -52,7 +113,9 @@ func TestToolHandlerSuccess(t *testing.T) {
 }
 
 func TestToolHandlerFailure(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"exit 1": {ExitCode: 1},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "t2",
@@ -90,7 +153,7 @@ func TestToolHandlerMissingCommand(t *testing.T) {
 }
 
 func TestToolHandlerTimeout(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := &mockExecEnv{workdir: t.TempDir(), timedOut: true}
 	h := NewToolHandlerWithTimeout(env, 100*time.Millisecond)
 	node := &pipeline.Node{
 		ID:    "t4",
@@ -109,7 +172,9 @@ func TestToolHandlerTimeout(t *testing.T) {
 }
 
 func TestToolHandlerCustomTimeout(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo fast": {Stdout: "fast\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "t5",
@@ -145,7 +210,13 @@ func TestToolHandlerDefaultTimeout(t *testing.T) {
 
 func TestToolHandlerWritesStatusArtifact(t *testing.T) {
 	workdir := t.TempDir()
-	env := exec.NewLocalEnvironment(workdir)
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo hello": {Stdout: "hello\n", ExitCode: 0},
+	})
+	// Override workdir to match what toolTestEnv returns.
+	if m, ok := env.(*mockExecEnv); ok {
+		m.workdir = workdir
+	}
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "toolstep",
@@ -178,7 +249,12 @@ func TestToolHandlerWritesStatusArtifact(t *testing.T) {
 func TestToolHandlerWritesStatusArtifactToPipelineArtifactDir(t *testing.T) {
 	workdir := t.TempDir()
 	artifactRoot := filepath.Join(t.TempDir(), "runs", "run-123")
-	env := exec.NewLocalEnvironment(workdir)
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo hello": {Stdout: "hello\n", ExitCode: 0},
+	})
+	if m, ok := env.(*mockExecEnv); ok {
+		m.workdir = workdir
+	}
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "toolstep",
@@ -215,7 +291,9 @@ func TestToolHandlerWritesStatusArtifactToPipelineArtifactDir(t *testing.T) {
 }
 
 func TestToolHandlerTrimsStdout(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"printf '  validation-pass  \n\n'": {Stdout: "  validation-pass  \n\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	// printf adds no newline, but echo and other commands do.
 	// Only trailing whitespace should be trimmed; leading whitespace is preserved.

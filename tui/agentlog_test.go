@@ -126,13 +126,13 @@ func TestAgentLogToolRunningIndicator(t *testing.T) {
 	tr.StartTool("n1", "bash")
 	al.Update(MsgToolCallStart{NodeID: "n1", ToolName: "bash", ToolInput: `{"command":"ls"}`})
 	view := al.View()
-	if !strings.Contains(view, "⚡") || !strings.Contains(view, "bash") {
-		t.Errorf("expected tool running indicator with ⚡ and tool name, got: %s", view)
+	if !strings.Contains(view, "»") || !strings.Contains(view, "bash") {
+		t.Errorf("expected tool running indicator with > and tool name, got: %s", view)
 	}
 	tr.StopTool("n1")
 	al.Update(MsgToolCallEnd{NodeID: "n1", ToolName: "bash", Output: "file.go"})
 	view = al.View()
-	if strings.Contains(view, "⚡") {
+	if strings.Contains(view, "»") {
 		t.Error("tool running indicator should disappear after tool ends")
 	}
 }
@@ -148,7 +148,7 @@ func TestAgentLogThinkingOverToolIndicator(t *testing.T) {
 	tr.StartTool("n1", "read")
 	al.Update(MsgToolCallStart{NodeID: "n1", ToolName: "read", ToolInput: `{"path":"main.go"}`})
 	view := al.View()
-	if !strings.Contains(view, "⚡") {
+	if !strings.Contains(view, "»") {
 		t.Errorf("tool indicator should take priority over thinking, got: %s", view)
 	}
 }

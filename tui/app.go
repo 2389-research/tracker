@@ -4,7 +4,10 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -18,10 +21,14 @@ const (
 	minContentHeight  = 4 // minimum rows for the main content area
 )
 
-// layout holds mutable terminal dimensions shared via pointer.
+// layout holds mutable terminal dimensions and mode flags shared via pointer.
+// All fields that are value types on AppModel must live here to survive
+// bubbletea's value-receiver copy semantics.
 type layout struct {
-	width  int
-	height int
+	width       int
+	height      int
+	zenMode     bool   // hide sidebar, agent log gets full width
+	focusedNode string // node ID for drill-down (empty = no focus)
 }
 
 // AppModel is the root Bubbletea model composing all TUI components.
@@ -42,13 +49,14 @@ type AppModel struct {
 // NewAppModel creates a fully-wired App with all child components.
 func NewAppModel(store *StateStore, pipelineName, runID string) *AppModel {
 	thinking := NewThinkingTracker()
+	al := NewAgentLog(store, thinking, 10)
 	return &AppModel{
 		store:    store,
 		header:   NewHeader(store, pipelineName, runID),
-		statusB:  NewStatusBar(store),
+		statusB:  NewStatusBar(store, al),
 		nodeList: NewNodeList(store, thinking, 10),
 		history:  NewHistoryTrail(store),
-		agentLog: NewAgentLog(store, thinking, 10),
+		agentLog: al,
 		modal:    NewModal(80, 24),
 		thinking: thinking,
 		lay:      &layout{},
@@ -75,6 +83,18 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.lay.width = ws.Width
 		a.lay.height = ws.Height
 		a.relayout()
+		return a, nil
+	}
+
+	// Handle flash messages.
+	switch msg.(type) {
+	case MsgStatusFlash:
+		a.statusB.SetFlash(msg.(MsgStatusFlash).Text)
+		return a, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return MsgStatusFlashClear{}
+		})
+	case MsgStatusFlashClear:
+		a.statusB.ClearFlash()
 		return a, nil
 	}
 
@@ -113,12 +133,83 @@ func (a AppModel) handleKeyMsg(km tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd := a.modal.Update(km)
 		return a, cmd
 	}
-	switch {
-	case km.Type == tea.KeyRunes && string(km.Runes) == "q":
-		return a, tea.Quit
-	case km.Type == tea.KeyCtrlO:
+
+	// Search bar intercepts keys when active.
+	if a.agentLog.Search().Active() {
+		return a.handleSearchKey(km)
+	}
+
+	return a.handleDashboardKey(km)
+}
+
+// handleSearchKey routes keys while the search bar is active.
+func (a AppModel) handleSearchKey(km tea.KeyMsg) (tea.Model, tea.Cmd) {
+	cmd, consumed := a.agentLog.Search().Update(km)
+	if consumed {
+		return a, cmd
+	}
+	return a, nil
+}
+
+// handleDashboardKey handles all dashboard-level keyboard shortcuts.
+func (a AppModel) handleDashboardKey(km tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Rune-based shortcuts.
+	if km.Type == tea.KeyRunes {
+		return a.handleDashboardRune(string(km.Runes))
+	}
+	// Special keys.
+	switch km.Type {
+	case tea.KeyCtrlO:
 		a.agentLog.Update(MsgToggleExpand{})
 		return a, nil
+	case tea.KeyUp:
+		a.nodeList.MoveUp()
+		return a, nil
+	case tea.KeyDown:
+		a.nodeList.MoveDown()
+		return a, nil
+	case tea.KeyEnter:
+		if nodeID := a.nodeList.SelectedNodeID(); nodeID != "" {
+			a.lay.focusedNode = nodeID
+			a.agentLog.Update(MsgFocusNode{NodeID: nodeID})
+		}
+		return a, nil
+	case tea.KeyEscape:
+		if a.lay.focusedNode != "" {
+			a.lay.focusedNode = ""
+			a.agentLog.Update(MsgClearFocus{})
+		}
+		return a, nil
+	}
+	return a, nil
+}
+
+// handleDashboardRune handles single-character shortcuts.
+func (a AppModel) handleDashboardRune(r string) (tea.Model, tea.Cmd) {
+	switch r {
+	case "q":
+		return a, tea.Quit
+	case "v":
+		a.agentLog.Update(MsgCycleVerbosity{})
+		return a, nil
+	case "z":
+		a.lay.zenMode = !a.lay.zenMode
+		a.relayout()
+		return a, nil
+	case "?":
+		a.modal.Show(NewHelpContent())
+		return a, nil
+	case "/":
+		a.agentLog.Search().Activate()
+		return a, nil
+	case "n":
+		a.agentLog.Search().NextMatch()
+		return a, nil
+	case "N":
+		a.agentLog.Search().PrevMatch()
+		return a, nil
+	case "y":
+		return a, a.copyToClipboard()
 	}
 	return a, nil
 }
@@ -198,52 +289,67 @@ func (a AppModel) View() string {
 		contentHeight = minContentHeight
 	}
 
-	nodeWidth := a.lay.width / nodeListWidthFrac
-	if nodeWidth < 1 {
-		nodeWidth = 1
+	var content string
+
+	if a.lay.zenMode {
+		// Zen mode: agent log gets full width, no sidebar.
+		logWidth := a.lay.width
+		a.agentLog.SetSize(logWidth, contentHeight)
+		logView := a.agentLog.View()
+		content = lipgloss.NewStyle().
+			Width(logWidth).
+			MaxWidth(logWidth).
+			Height(contentHeight).
+			MaxHeight(contentHeight).
+			Render(logView)
+	} else {
+		nodeWidth := a.lay.width / nodeListWidthFrac
+		if nodeWidth < 1 {
+			nodeWidth = 1
+		}
+		logWidth := a.lay.width - nodeWidth
+		if logWidth < 1 {
+			logWidth = 1
+		}
+
+		// Render sidebar: node list (top) + history trail (bottom).
+		nodeHeight := contentHeight * 3 / 5
+		histHeight := contentHeight - nodeHeight
+		a.nodeList.SetSize(nodeWidth, nodeHeight-1)
+		a.history.SetSize(nodeWidth, histHeight)
+
+		nodeView := a.nodeList.View()
+		histView := a.history.View()
+		sidebar := lipgloss.JoinVertical(lipgloss.Left, nodeView, histView)
+		nodePanel := lipgloss.NewStyle().
+			Width(nodeWidth).
+			MaxWidth(nodeWidth).
+			Height(contentHeight).
+			MaxHeight(contentHeight).
+			PaddingRight(1).
+			Render(sidebar)
+
+		// Thin vertical separator between panels.
+		sepStyle := lipgloss.NewStyle().Foreground(ColorBezel)
+		var sepLines []string
+		for i := 0; i < contentHeight; i++ {
+			sepLines = append(sepLines, sepStyle.Render("│"))
+		}
+		separator := strings.Join(sepLines, "\n")
+
+		// Render agent log panel.
+		logView := a.agentLog.View()
+		logPanel := lipgloss.NewStyle().
+			Width(logWidth - 1).
+			MaxWidth(logWidth - 1).
+			Height(contentHeight).
+			MaxHeight(contentHeight).
+			PaddingLeft(1).
+			Render(logView)
+
+		// Join content panels horizontally.
+		content = lipgloss.JoinHorizontal(lipgloss.Top, nodePanel, separator, logPanel)
 	}
-	logWidth := a.lay.width - nodeWidth
-	if logWidth < 1 {
-		logWidth = 1
-	}
-
-	// Render sidebar: node list (top) + history trail (bottom).
-	nodeHeight := contentHeight * 3 / 5
-	histHeight := contentHeight - nodeHeight
-	a.nodeList.SetSize(nodeWidth, nodeHeight-1)
-	a.history.SetSize(nodeWidth, histHeight)
-
-	nodeView := a.nodeList.View()
-	histView := a.history.View()
-	sidebar := lipgloss.JoinVertical(lipgloss.Left, nodeView, histView)
-	nodePanel := lipgloss.NewStyle().
-		Width(nodeWidth).
-		MaxWidth(nodeWidth).
-		Height(contentHeight).
-		MaxHeight(contentHeight).
-		PaddingRight(1).
-		Render(sidebar)
-
-	// Thin vertical separator between panels.
-	sepStyle := lipgloss.NewStyle().Foreground(ColorBezel)
-	var sepLines []string
-	for i := 0; i < contentHeight; i++ {
-		sepLines = append(sepLines, sepStyle.Render("│"))
-	}
-	separator := strings.Join(sepLines, "\n")
-
-	// Render agent log panel.
-	logView := a.agentLog.View()
-	logPanel := lipgloss.NewStyle().
-		Width(logWidth - 1).
-		MaxWidth(logWidth - 1).
-		Height(contentHeight).
-		MaxHeight(contentHeight).
-		PaddingLeft(1).
-		Render(logView)
-
-	// Join content panels horizontally.
-	content := lipgloss.JoinHorizontal(lipgloss.Top, nodePanel, separator, logPanel)
 
 	// Render status bar.
 	statusView := a.statusB.View()
@@ -270,11 +376,14 @@ func (a *AppModel) relayout() {
 		contentHeight = minContentHeight
 	}
 
-	nodeWidth := a.lay.width / nodeListWidthFrac
-	logWidth := a.lay.width - nodeWidth - 1 // -1 for separator column
-
-	a.nodeList.SetSize(nodeWidth, contentHeight)
-	a.agentLog.SetSize(logWidth, contentHeight)
+	if a.lay.zenMode {
+		a.agentLog.SetSize(a.lay.width, contentHeight)
+	} else {
+		nodeWidth := a.lay.width / nodeListWidthFrac
+		logWidth := a.lay.width - nodeWidth - 1 // -1 for separator column
+		a.nodeList.SetSize(nodeWidth, contentHeight)
+		a.agentLog.SetSize(logWidth, contentHeight)
+	}
 }
 
 // ActiveNode returns the ID of the first running node, for focusing the log.
@@ -348,6 +457,27 @@ func truncateContext(s string, maxLines int) string {
 		return s
 	}
 	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (%d more lines in activity log)", len(lines)-maxLines)
+}
+
+// copyToClipboard copies the visible agent log text to the system clipboard.
+func (a AppModel) copyToClipboard() tea.Cmd {
+	text := a.agentLog.VisibleText()
+	return func() tea.Msg {
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("pbcopy")
+		case "linux":
+			cmd = exec.Command("xclip", "-selection", "clipboard")
+		default:
+			return MsgStatusFlash{Text: "Clipboard not supported"}
+		}
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err != nil {
+			return MsgStatusFlash{Text: fmt.Sprintf("Copy failed: %s", err)}
+		}
+		return MsgStatusFlash{Text: "Copied!"}
+	}
 }
 
 // String implements fmt.Stringer for debug purposes.

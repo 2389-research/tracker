@@ -14,23 +14,40 @@ import (
 )
 
 func TestChooseInterviewerReturnsBubbleteaWhenTerminal(t *testing.T) {
-	iv := chooseInterviewer(true, autopilotCfg{}, nil)
+	iv := chooseInterviewer(true, autopilotCfg{}, nil, "")
 	if _, ok := iv.(*tui.BubbleteaInterviewer); !ok {
 		t.Errorf("expected *tui.BubbleteaInterviewer when terminal, got %T", iv)
 	}
 }
 
 func TestChooseInterviewerReturnsConsoleWhenNotTerminal(t *testing.T) {
-	iv := chooseInterviewer(false, autopilotCfg{}, nil)
+	iv := chooseInterviewer(false, autopilotCfg{}, nil, "")
 	if _, ok := iv.(*handlers.ConsoleInterviewer); !ok {
 		t.Errorf("expected *handlers.ConsoleInterviewer when not terminal, got %T", iv)
 	}
 }
 
 func TestChooseInterviewerAutoApprove(t *testing.T) {
-	iv := chooseInterviewer(true, autopilotCfg{autoApprove: true}, nil)
+	iv := chooseInterviewer(true, autopilotCfg{autoApprove: true}, nil, "")
 	if _, ok := iv.(*handlers.AutoApproveFreeformInterviewer); !ok {
 		t.Errorf("expected *handlers.AutoApproveFreeformInterviewer, got %T", iv)
+	}
+}
+
+func TestChooseInterviewerAutopilotNoClientFallsBack(t *testing.T) {
+	// When backend is not claude-code and llmClient is nil, should fall back to auto-approve.
+	iv := chooseInterviewer(true, autopilotCfg{persona: "lax"}, nil, "")
+	if _, ok := iv.(*handlers.AutoApproveFreeformInterviewer); !ok {
+		t.Errorf("expected auto-approve fallback with nil client, got %T", iv)
+	}
+}
+
+func TestChooseInterviewerClaudeCodeBackend(t *testing.T) {
+	// When backend is claude-code and autopilot is active, should try claude-code autopilot.
+	// Will fall back since claude binary may not be in test PATH, but shouldn't panic.
+	iv := chooseInterviewer(true, autopilotCfg{persona: "lax"}, nil, "claude-code")
+	if iv == nil {
+		t.Error("expected non-nil interviewer")
 	}
 }
 

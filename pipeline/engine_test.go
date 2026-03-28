@@ -38,6 +38,22 @@ func newTestRegistry() *HandlerRegistry {
 	return reg
 }
 
+// newTestRegistryWithOutcomes creates a registry where each node returns
+// the specified outcome. Nodes not in the map return success.
+func newTestRegistryWithOutcomes(outcomes map[string]Outcome) *HandlerRegistry {
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if o, ok := outcomes[node.ID]; ok {
+				return o, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		}})
+	}
+	return reg
+}
+
 func TestEngineSimplePipeline(t *testing.T) {
 	dot, err := os.ReadFile("testdata/simple.dot")
 	if err != nil {
@@ -381,7 +397,8 @@ func TestEngineGoalGate(t *testing.T) {
 	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
 
 	g.AddEdge(&Edge{From: "s", To: "critical"})
-	g.AddEdge(&Edge{From: "critical", To: "end"})
+	g.AddEdge(&Edge{From: "critical", To: "end", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "critical", To: "end", Condition: "ctx.outcome = fail"})
 
 	reg := newTestRegistry()
 	reg.Register(&testHandler{
@@ -863,7 +880,7 @@ func TestEngineConditionalEdgeMatchesFail(t *testing.T) {
 	g.AddEdge(&Edge{From: "check", To: "ok_step", Condition: "outcome=success"})
 	g.AddEdge(&Edge{From: "check", To: "nok_step", Condition: "outcome=fail"})
 	g.AddEdge(&Edge{From: "ok_step", To: "end"})
-	g.AddEdge(&Edge{From: "nok_step", To: "end"})
+	g.AddEdge(&Edge{From: "nok_step", To: "end", Condition: "ctx.outcome = fail"})
 
 	reg := newTestRegistry()
 	reg.Register(&testHandler{
@@ -920,6 +937,88 @@ func TestEngineConditionalEdgeDiagnosticOnMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "custom_key=alpha") {
 		t.Errorf("expected condition text in diagnostic, got: %v", err)
+	}
+}
+
+func TestEngineStrictFailureEdgeStopsPipeline(t *testing.T) {
+	// When a node fails and all outgoing edges are unconditional,
+	// the pipeline should stop instead of silently continuing.
+	g := NewGraph("strict_fail")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "setup", Shape: "box", Label: "Setup", Handler: "codergen"})
+	g.AddNode(&Node{ID: "next", Shape: "box", Label: "Next", Handler: "codergen"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "Done"})
+	g.StartNode = "s"
+	g.ExitNode = "end"
+	g.AddEdge(&Edge{From: "s", To: "setup"})
+	g.AddEdge(&Edge{From: "setup", To: "next"}) // unconditional — no failure handling
+	g.AddEdge(&Edge{From: "next", To: "end"})
+
+	reg := newTestRegistryWithOutcomes(map[string]Outcome{
+		"s":     {Status: OutcomeSuccess},
+		"setup": {Status: OutcomeFail}, // Setup fails
+		"next":  {Status: OutcomeSuccess},
+	})
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+
+	if err == nil {
+		t.Fatal("expected error when node fails with no conditional edges")
+	}
+	if !strings.Contains(err.Error(), "setup") {
+		t.Errorf("expected error to mention 'setup', got: %v", err)
+	}
+	if result.Status != OutcomeFail {
+		t.Errorf("expected fail status, got %q", result.Status)
+	}
+	// "next" should NOT have been reached.
+	for _, id := range result.CompletedNodes {
+		if id == "next" {
+			t.Error("'next' should not have been reached after setup failure")
+		}
+	}
+}
+
+func TestEngineStrictFailureEdgeAllowsConditionalRouting(t *testing.T) {
+	// When a node fails but has conditional edges, the pipeline should
+	// continue via the matching edge (not stop).
+	g := NewGraph("strict_fail_conditional")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "check", Shape: "box", Label: "Check", Handler: "codergen"})
+	g.AddNode(&Node{ID: "ok", Shape: "box", Label: "OK", Handler: "codergen"})
+	g.AddNode(&Node{ID: "nok", Shape: "box", Label: "NOK", Handler: "codergen"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "Done"})
+	g.StartNode = "s"
+	g.ExitNode = "end"
+	g.AddEdge(&Edge{From: "s", To: "check"})
+	g.AddEdge(&Edge{From: "check", To: "ok", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "check", To: "nok", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "ok", To: "end"})
+	g.AddEdge(&Edge{From: "nok", To: "end", Condition: "ctx.outcome = success"})
+
+	reg := newTestRegistryWithOutcomes(map[string]Outcome{
+		"s":     {Status: OutcomeSuccess},
+		"check": {Status: OutcomeFail}, // fails, routes to nok via condition
+		"nok":   {Status: OutcomeSuccess},
+	})
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+	// "nok" should have been reached.
+	found := false
+	for _, id := range result.CompletedNodes {
+		if id == "nok" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected 'nok' to be reached via conditional failure edge")
 	}
 }
 

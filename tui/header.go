@@ -78,8 +78,13 @@ func (h *Header) View() string {
 			right = Styles.Readout.Render(tokenStr) + "  " + right
 		}
 		if usage.EstimatedCost > 0 {
-			costStr := fmt.Sprintf("$%.2f", usage.EstimatedCost)
-			right = lipgloss.NewStyle().Foreground(ColorAmber).Render(costStr) + "  " + right
+			costLabel := fmt.Sprintf("$%.2f", usage.EstimatedCost)
+			// When running through claude-code (Max subscription), show as
+			// usage estimate rather than actual cost since Max is flat-rate.
+			if h.isClaudeCodeOnly() {
+				costLabel = fmt.Sprintf("~$%.2f usage", usage.EstimatedCost)
+			}
+			right = lipgloss.NewStyle().Foreground(ColorAmber).Render(costLabel) + "  " + right
 		}
 	}
 
@@ -88,6 +93,15 @@ func (h *Header) View() string {
 		gap = 1
 	}
 	return left + fmt.Sprintf("%*s", gap, "") + right
+}
+
+// isClaudeCodeOnly returns true if all token usage is from the claude-code provider.
+func (h *Header) isClaudeCodeOnly() bool {
+	if h.store == nil || h.store.Tokens == nil {
+		return false
+	}
+	providers := h.store.Tokens.Providers()
+	return len(providers) == 1 && providers[0] == "claude-code"
 }
 
 // formatTokenCount formats a token count for display.

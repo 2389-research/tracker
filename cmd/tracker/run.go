@@ -46,18 +46,25 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	tokenTracker := llm.NewTokenTracker()
 
 	// Create LLM client from environment variables.
+	// When --backend claude-code, the native client is optional — node execution
+	// routes through the claude CLI subprocess and autopilot can too.
 	llmClient, err := buildLLMClient(tokenTracker)
-	if err != nil {
+	if err != nil && backend != "claude-code" {
 		return formatLLMClientError(err)
 	}
-	defer llmClient.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using claude-code for all LLM calls\n", err)
+	}
+	if llmClient != nil {
+		defer llmClient.Close()
+	}
 
 	// Create execution environment for tool handlers.
 	execEnv := exec.NewLocalEnvironment(workdir)
 
 	// Choose interviewer: autopilot > auto-approve > terminal detection.
 	// activeAutopilotCfg is set by executeRun before calling run().
-	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient)
+	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient, backend)
 
 	// Build engine options.
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
@@ -69,9 +76,11 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	defer activityLog.Close()
 
 	// Wire LLM trace events to the activity log for complete audit trail.
-	llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
-	}))
+	if llmClient != nil {
+		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+		}))
+	}
 
 	// Wire up event handlers based on output mode.
 	agentEventHandler, pipelineEventHandler := buildConsoleEventHandlers(
@@ -148,7 +157,9 @@ func buildJSONEventHandlers(
 	logAgentEvent func(agent.Event),
 ) (agent.EventHandler, pipeline.PipelineEventHandler) {
 	stream := newJSONStream(os.Stdout)
-	llmClient.AddTraceObserver(stream.traceObserver())
+	if llmClient != nil {
+		llmClient.AddTraceObserver(stream.traceObserver())
+	}
 	agentHandler := agent.EventHandlerFunc(func(evt agent.Event) {
 		logAgentEvent(evt)
 		stream.agentHandler().HandleEvent(evt)
@@ -164,7 +175,9 @@ func buildPlainEventHandlers(
 	verbose bool,
 	logAgentEvent func(agent.Event),
 ) (agent.EventHandler, pipeline.PipelineEventHandler) {
-	llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
+	if llmClient != nil {
+		llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
+	}
 	agentHandler := agent.EventHandlerFunc(func(evt agent.Event) {
 		logAgentEvent(evt)
 		line := agent.FormatEventLine(evt)
@@ -231,10 +244,15 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	tokenTracker := llm.NewTokenTracker()
 	llmClient, err := buildLLMClient(tokenTracker)
-	if err != nil {
+	if err != nil && backend != "claude-code" {
 		return formatLLMClientError(err)
 	}
-	defer llmClient.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using claude-code for all LLM calls\n", err)
+	}
+	if llmClient != nil {
+		defer llmClient.Close()
+	}
 
 	execEnv := exec.NewLocalEnvironment(workdir)
 
@@ -266,16 +284,18 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	defer activityLog.Close()
 
 	// Wire LLM trace events to both TUI and activity log.
-	llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-		for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
-			prog.Send(m)
-		}
-		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
-	}))
+	if llmClient != nil {
+		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+			for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
+				prog.Send(m)
+			}
+			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+		}))
+	}
 
 	// Mode 2 interviewer — use autopilot wrapper if persona is active.
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
-	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient)
+	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
 
 	// Pipeline event handler that adapts and sends to TUI.
 	pipelineHandler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
@@ -339,13 +359,28 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	}()
 
 	_, err = prog.Run()
-	cancel()
+	cancel() // Signal pipeline goroutine to stop.
 	if err != nil {
 		return fmt.Errorf("TUI program: %w", err)
 	}
 
-	outcome := <-outcomeCh
+	// Wait for pipeline goroutine to finish, with a timeout so we don't
+	// hang forever if a subprocess ignores context cancellation.
+	var outcome pipelineOutcome
+	select {
+	case outcome = <-outcomeCh:
+	case <-time.After(5 * time.Second):
+		outcome = pipelineOutcome{err: fmt.Errorf("pipeline did not exit within 5s after TUI closed")}
+	}
 	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
+
+	// Desktop notification on pipeline completion.
+	status := "completed"
+	if outcome.err != nil {
+		status = "failed"
+	}
+	tui.SendNotification("Tracker: "+pipelineName, "Pipeline "+status)
+
 	return outcome.err
 }
 
@@ -413,7 +448,9 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 
 // chooseInterviewer selects the interviewer implementation based on config.
 // Priority: --auto-approve > --autopilot > terminal detection.
-func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client) handlers.FreeformInterviewer {
+// When backend is claude-code and autopilot is active, routes gate decisions
+// through the claude CLI subprocess instead of the native LLM client.
+func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.FreeformInterviewer {
 	if cfg.autoApprove {
 		return &handlers.AutoApproveFreeformInterviewer{}
 	}
@@ -421,6 +458,19 @@ func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client)
 		persona, err := handlers.ParsePersona(cfg.persona)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %v, falling back to auto-approve\n", err)
+			return &handlers.AutoApproveFreeformInterviewer{}
+		}
+		// Use claude-code autopilot when backend is claude-code (avoids API key requirement).
+		if backend == "claude-code" {
+			ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(persona)
+			if ccErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
+			} else {
+				return ccAutopilot
+			}
+		}
+		if llmClient == nil {
+			fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to auto-approve\n")
 			return &handlers.AutoApproveFreeformInterviewer{}
 		}
 		return handlers.NewAutopilotInterviewer(llmClient, persona)
@@ -443,11 +493,23 @@ func configureTUIHeader(app *tui.AppModel, backend string, cfg autopilotCfg) {
 
 // chooseTUIInterviewer selects the Mode 2 (persistent TUI) interviewer.
 // If autopilot is active, wraps it so decisions flash in the TUI modal.
-func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client) handlers.LabeledFreeformInterviewer {
+// When backend is claude-code, routes autopilot through the claude subprocess.
+func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
 	if cfg.persona != "" {
 		persona, _ := handlers.ParsePersona(cfg.persona)
-		autopilot := handlers.NewAutopilotInterviewer(llmClient, persona)
-		return tui.NewAutopilotTUIInterviewer(autopilot, send)
+		// Use claude-code autopilot when backend is claude-code.
+		if backend == "claude-code" {
+			ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(persona)
+			if ccErr == nil {
+				return tui.NewAutopilotTUIInterviewer(ccAutopilot, send)
+			}
+			fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
+		}
+		if llmClient != nil {
+			autopilot := handlers.NewAutopilotInterviewer(llmClient, persona)
+			return tui.NewAutopilotTUIInterviewer(autopilot, send)
+		}
+		fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to interactive\n")
 	}
 	return tui.NewBubbleteaInterviewer(send)
 }

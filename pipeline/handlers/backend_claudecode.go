@@ -184,7 +184,7 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 		"--output-format", "stream-json",
 	}
 
-	if cfg.Model != "" {
+	if cfg.Model != "" && isClaudeModel(cfg.Model) {
 		args = append(args, "--model", cfg.Model)
 	}
 
@@ -232,13 +232,52 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	return args, nil
 }
 
-// buildEnv constructs a minimal environment for the claude subprocess.
-// buildEnv returns the full parent environment. Claude Code needs access to
-// its config directory for auth tokens (Claude Max/OAuth), API keys, SSH agent,
-// and other system state. A minimal allowlist caused auth failures because
-// XDG_CONFIG_HOME and Claude's config path were stripped.
+// providerKeyPrefixes are environment variable prefixes that should be stripped
+// from the claude subprocess environment. When these keys are present, the
+// claude CLI uses them for API auth instead of the user's Max/Pro subscription
+// OAuth token. Stripping them ensures the subprocess uses subscription auth.
+// Users who need API key auth can set TRACKER_PASS_API_KEYS=1 to override.
+var providerKeyPrefixes = []string{
+	"ANTHROPIC_API_KEY=",
+	"OPENAI_API_KEY=",
+	"GEMINI_API_KEY=",
+	"GOOGLE_API_KEY=",
+}
+
+// buildEnv constructs the environment for the claude subprocess.
+// Strips LLM provider API keys so the claude CLI uses subscription auth
+// (Max/Pro OAuth) instead of consuming API credits. The full parent
+// environment is passed through otherwise — Claude Code needs access to
+// its config directory, SSH agent, and other system state.
 func buildEnv() []string {
-	return os.Environ()
+	if os.Getenv("TRACKER_PASS_API_KEYS") != "" {
+		return os.Environ()
+	}
+
+	env := os.Environ()
+	clean := make([]string, 0, len(env))
+	for _, e := range env {
+		stripped := false
+		for _, prefix := range providerKeyPrefixes {
+			if strings.HasPrefix(e, prefix) {
+				stripped = true
+				break
+			}
+		}
+		if !stripped {
+			clean = append(clean, e)
+		}
+	}
+	return clean
+}
+
+// isClaudeModel returns true if the model name is an Anthropic model that the
+// claude CLI understands. Non-Anthropic models (gpt-*, gemini-*) are stripped
+// so the CLI uses its default model under the user's subscription.
+func isClaudeModel(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.HasPrefix(lower, "claude") ||
+		strings.HasPrefix(lower, "anthropic")
 }
 
 // NDJSON types, parseMessage, and storeResult are in backend_claudecode_ndjson.go
@@ -256,26 +295,37 @@ func classifyError(stderr string, exitCode int) string {
 	case strings.Contains(lower, "authentication") ||
 		strings.Contains(lower, "unauthorized") ||
 		strings.Contains(lower, "invalid api key"):
+		log.Printf("[claude-code] auth error (exit %d): %s", exitCode, strings.TrimSpace(stderr))
+		return pipeline.OutcomeFail
+
+	case strings.Contains(lower, "credit balance") ||
+		strings.Contains(lower, "too low to access"):
+		log.Printf("[claude-code] API credit balance exhausted — claude CLI may be using ANTHROPIC_API_KEY instead of Max subscription. Unset ANTHROPIC_API_KEY to use subscription auth. stderr: %s", strings.TrimSpace(stderr))
 		return pipeline.OutcomeFail
 
 	case strings.Contains(lower, "rate limit") ||
 		strings.Contains(lower, "429") ||
 		containsThrottle(lower):
+		log.Printf("[claude-code] rate limited (exit %d), will retry", exitCode)
 		return pipeline.OutcomeRetry
 
 	case strings.Contains(lower, "budget") ||
 		strings.Contains(lower, "spending limit"):
+		log.Printf("[claude-code] budget/spending limit hit (exit %d): %s", exitCode, strings.TrimSpace(stderr))
 		return pipeline.OutcomeFail
 
 	case strings.Contains(lower, "econnrefused") ||
 		strings.Contains(lower, "network") ||
 		strings.Contains(lower, "connection"):
+		log.Printf("[claude-code] network error (exit %d), will retry", exitCode)
 		return pipeline.OutcomeRetry
 
 	case exitCode == 137:
+		log.Printf("[claude-code] process killed (exit 137)")
 		return pipeline.OutcomeFail
 	}
 
+	log.Printf("[claude-code] unclassified error (exit %d): %s", exitCode, strings.TrimSpace(stderr))
 	return pipeline.OutcomeFail
 }
 

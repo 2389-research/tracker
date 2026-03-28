@@ -84,3 +84,19 @@ type MsgHeaderTick struct{}
 type MsgToggleExpand struct{}
 type MsgModalDismiss struct{}
 type MsgPipelineDone struct{ Err error }
+
+// Verbosity cycling for the agent log filter.
+type MsgCycleVerbosity struct{}
+
+// Search activation and control.
+type MsgSearchActivate struct{}
+type MsgSearchDeactivate struct{}
+type MsgSearchUpdate struct{ Term string }
+
+// Node drill-down focus.
+type MsgFocusNode struct{ NodeID string }
+type MsgClearFocus struct{}
+
+// Status bar flash messages (e.g., "Copied!").
+type MsgStatusFlash struct{ Text string }
+type MsgStatusFlashClear struct{}

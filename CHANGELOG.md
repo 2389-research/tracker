@@ -5,6 +5,43 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-03-28
+
+### Added
+
+- **TUI: Progress bar with ETA**: Amber ASCII bar (`━━━──────`) in the status bar shows completed/total nodes. ETA appears after 2+ real LLM nodes complete, based on rolling average of node durations.
+- **TUI: Desktop notification**: Fires OS-native notification on pipeline completion (macOS `osascript`, Linux `notify-send`). Disable with `TRACKER_NO_NOTIFY=1`.
+- **TUI: Log verbosity cycling (`v`)**: Cycle through All → Tools → Errors → Reasoning. View-level filter only — all lines always stored (append-only per CLAUDE.md).
+- **TUI: Zen mode (`z`)**: Hide sidebar, agent log gets full terminal width. Status bar and modal gates still work.
+- **TUI: Help overlay (`?`)**: Modal showing all keyboard shortcuts in a styled two-column table.
+- **TUI: Agent log search (`/`)**: Inline search bar with real-time highlighting. `n`/`N` jump between matches. Search intersects with verbosity filter.
+- **TUI: Per-node cost tracking**: Shows cost badge on completed nodes in the sidebar. Uses delta snapshots from `TokenTracker`. Parallel branches show `~` prefix (approximate). Max subscription shows "usage" not "cost".
+- **TUI: Node drill-down (`Enter`)**: Arrow keys navigate the node list, Enter focuses the log on that node, Esc returns to full view.
+- **TUI: Copy to clipboard (`y`)**: Copies visible (filtered) log text. Uses `pbcopy`/`xclip`. Error message includes diagnostic on failure.
+- **TUI: Status bar flash**: "Copied!" confirmation that auto-clears after 2 seconds.
+- **Claude-code autopilot**: New `ClaudeCodeAutopilotInterviewer` routes autopilot gate decisions through the `claude` CLI subprocess instead of direct API calls. No API key needed for `--autopilot` with `--backend claude-code`.
+- **`--auto-approve` works with TUI**: No longer forces `--no-tui`. Gates auto-dismiss in the dashboard.
+
+### Changed
+
+- **Claude-code env: API keys stripped**: `buildEnv()` strips `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` from the subprocess environment so the `claude` CLI uses Max/Pro subscription auth instead of consuming API credits. Override with `TRACKER_PASS_API_KEYS=1`.
+- **Lazy LLM client**: `buildLLMClient()` failure is non-fatal with `--backend claude-code`. The native client is only required when something actually needs it (native backend nodes, native autopilot).
+- **Claude-code backend handles all providers**: With `--backend claude-code`, nodes with `provider: openai` or `provider: gemini` also route through the claude CLI. Non-Anthropic model names are stripped so the CLI uses its default.
+- **Max subscription cost labeling**: Header, sidebar, and exit summary show "~$X.XX usage" instead of "$X.XX" when all usage is from `claude-code` provider. Exit summary adds "(Max subscription — no actual charge)".
+- **Strict failure edges**: When a node's outcome is "fail" and all outgoing edges are unconditional, the pipeline now stops instead of silently continuing. Pipelines that intentionally handle failure must use explicit `when ctx.outcome = fail` edges.
+- **Status bar hints**: Updated to show all new shortcuts (`v filter  z zen  / search  ? help  q quit`).
+
+### Fixed
+
+- **TUI: Sidebar connector alignment**: Connectors (`│`) now align with node lamps when selection mode is active.
+- **TUI: Scroll follows selection**: Up/Down navigation scrolls the node list viewport to keep the selected node visible.
+- **Search: `formatMatchStatus` bug**: Rune arithmetic broke for 10+ matches. Now uses `fmt.Sprintf`.
+- **Search: Match consistency with filters**: Search matches against the filtered view, not the full line buffer.
+- **Verbosity: Separators preserved**: Node separator lines pass through all verbosity filters for structural context.
+- **Zen mode: `relayout()` fix**: Terminal resize in zen mode now gives the agent log full width.
+- **Exit hang**: `runTUI()` waits at most 5 seconds for the pipeline goroutine after the TUI closes.
+- **Notification zombie**: `SendNotification` uses `cmd.Run()` in a goroutine instead of `cmd.Start()` without `Wait()`.
+
 ## [0.12.1] - 2026-03-27
 
 ### Fixed

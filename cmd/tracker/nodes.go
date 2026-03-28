@@ -3,6 +3,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/tui"
 )
@@ -30,7 +32,7 @@ func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
 		if label == "" {
 			label = node.ID
 		}
-		entry := tui.NodeEntry{ID: node.ID, Label: label}
+		entry := tui.NodeEntry{ID: node.ID, Label: label, Flags: nodeFlags(node, graph)}
 		if nodeID == graph.ExitNode {
 			exitEntry = &entry
 			continue
@@ -42,6 +44,41 @@ func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
 	}
 
 	return entries
+}
+
+// nodeFlags determines the parallel execution role of a node from its attrs.
+func nodeFlags(node *pipeline.Node, graph *pipeline.Graph) tui.NodeFlags {
+	flags := tui.NodeFlags{}
+	if _, ok := node.Attrs["parallel_targets"]; ok {
+		flags.IsParallelDispatcher = true
+	}
+	if _, ok := node.Attrs["fan_in_sources"]; ok {
+		flags.IsFanIn = true
+	}
+	// A node is a parallel branch if any other node lists it as a parallel target.
+	for _, other := range graph.Nodes {
+		if targets, ok := other.Attrs["parallel_targets"]; ok {
+			for _, t := range splitTargets(targets) {
+				if t == node.ID {
+					flags.IsParallelBranch = true
+					return flags
+				}
+			}
+		}
+	}
+	return flags
+}
+
+// splitTargets splits a comma-separated list of target node IDs.
+func splitTargets(s string) []string {
+	var result []string
+	for _, t := range strings.Split(s, ",") {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // topoSortNodes returns node IDs in topological order using Kahn's algorithm.

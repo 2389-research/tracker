@@ -228,9 +228,10 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		checkpoint = cp
 	}
 
-	// JSON streaming and auto-approve force non-TUI.
-	// Autopilot can run inside the TUI — gates flash the decision briefly.
-	if cfg.jsonOut || cfg.autoApprove {
+	// JSON streaming forces non-TUI (structured output to stdout).
+	// Auto-approve and autopilot both work inside the TUI — gates
+	// auto-dismiss without user input.
+	if cfg.jsonOut {
 		cfg.noTUI = true
 	}
 

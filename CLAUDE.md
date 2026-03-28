@@ -48,6 +48,16 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Tool node stderr/stdout must be visible to the user — the `tracker diagnose` command reads status.json and activity.jsonl for this
 - The "no providers configured" error must include actionable setup instructions, not just the raw error message
 
+### TUI keyboard shortcuts (v0.13.0)
+- `v` — cycle log verbosity (all/tools/errors/reasoning)
+- `z` — toggle zen mode (full-width agent log, sidebar hidden)
+- `/` — search agent log (n/N for next/prev match, Esc to exit)
+- `?` — help overlay with all shortcuts
+- `Enter` — drill down into selected node (arrow keys navigate, Esc to exit)
+- `y` — copy visible log to clipboard
+- `Ctrl+O` — expand/collapse tool output
+- `q` — quit
+
 ### TUI stability
 - The activity log is append-only with line-level styling — no glamour markdown rendering
 - Each line is styled once on newline and never re-rendered
@@ -142,7 +152,8 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - The `AutopilotInterviewer` in `pipeline/handlers/autopilot.go` implements `LabeledFreeformInterviewer`
 - Uses structured JSON output: `{"choice": "...", "reasoning": "..."}`
 - Provider errors hard-fail per CLAUDE.md (only parse failures fall back to default)
-- The autopilot reuses the pipeline's LLM client — no separate config needed
+- Two autopilot implementations: `AutopilotInterviewer` (native API) and `ClaudeCodeAutopilotInterviewer` (claude CLI subprocess)
+- When `--backend claude-code`, autopilot routes through the claude subprocess — no API key needed
 - Default model picks cheapest from configured provider via `Client.DefaultProvider()`
 - `autopilotCfg` in `cmd/tracker/run.go` threads the config to `chooseInterviewer`
 
@@ -154,16 +165,24 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - Use `go test -skip` (Go 1.24+) instead of `(?!` negative lookahead which Go's regexp doesn't support
 - The Decompose prompt explicitly instructs the agent on expected file formats
 
-### Claude Code backend (v0.12.0)
+### Claude Code backend (v0.12.0, updated v0.13.0)
 - `AgentBackend` interface in `pipeline/backend.go` — minimal contract: one method to execute a node, returns `agent.Event` stream
 - `CodergenHandler` delegates to backends via `selectBackend()`, doesn't execute LLM calls directly
 - `ClaudeCodeBackend` spawns `claude` as a subprocess, parses NDJSON stdout into `agent.Event` values
 - `NativeBackend` wraps `agent.Session` — the existing turn loop with tool registry and context compaction (default)
 - Per-node selection via `backend: claude-code` attribute in `.dip` files; global via `--backend claude-code` CLI flag
-- Environment scoping: Claude Code backend passes a minimal allowlist of env vars; `SSH_AUTH_SOCK` is explicitly passed through for git operations
-- Error classification: Claude CLI exit codes are mapped to pipeline outcomes (success, fail, escalate)
+- Environment scoping: API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) are **stripped** from the subprocess env so the claude CLI uses subscription auth (Max/Pro OAuth). Override with `TRACKER_PASS_API_KEYS=1`.
+- With `--backend claude-code`, ALL nodes route through the claude CLI — non-Anthropic model names are stripped so the CLI uses its default
+- `buildLLMClient()` is lazy: failure is non-fatal with `--backend claude-code` (native client only needed for native backend nodes)
+- Error classification: Claude CLI exit codes are mapped to pipeline outcomes (success, fail, escalate); credit balance errors logged with actionable guidance
 - The engine and TUI see the same `agent.Event` stream regardless of backend — no special-case code needed
 - All three built-in workflows are backend-agnostic: they work with both native and claude-code
+
+### Strict failure edges (v0.13.0)
+- When a node's outcome is "fail" and all outgoing edges are unconditional, the pipeline stops
+- This prevents tool nodes (Setup, Build) from silently continuing after failure
+- Pipelines that intentionally handle failure must use `when ctx.outcome = fail` edges
+- Nodes with ANY conditional edges are assumed to have intentional routing
 
 ### Per-milestone circuit breakers
 The `build_product.dip` pipeline uses a `fix_attempts` file on disk to limit

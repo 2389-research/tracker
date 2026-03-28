@@ -105,7 +105,8 @@ func TestParityGoalGateReroutesAtExitViaGraphRetryTarget(t *testing.T) {
 	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
 
 	g.AddEdge(&Edge{From: "start", To: "work"})
-	g.AddEdge(&Edge{From: "work", To: "done"})
+	g.AddEdge(&Edge{From: "work", To: "done", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "work", To: "done", Condition: "ctx.outcome = fail"})
 	g.AddEdge(&Edge{From: "repair", To: "work"})
 
 	reg := newTestRegistry()

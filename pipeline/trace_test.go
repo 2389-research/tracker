@@ -312,7 +312,8 @@ func TestEngineTraceRecordsErrors(t *testing.T) {
 	g2.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
 
 	g2.AddEdge(&Edge{From: "s", To: "failing"})
-	g2.AddEdge(&Edge{From: "failing", To: "end"})
+	g2.AddEdge(&Edge{From: "failing", To: "end", Condition: "ctx.outcome = success"})
+	g2.AddEdge(&Edge{From: "failing", To: "end", Condition: "ctx.outcome = fail"})
 
 	reg2 := newTestRegistry()
 	reg2.Register(&testHandler{
