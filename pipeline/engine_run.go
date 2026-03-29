@@ -249,8 +249,8 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 		ContextSnapshot: e.routingContextSnapshot(s.pctx),
 	}
 	if outcome.Stats != nil {
-		detail.TokenInput = outcome.Stats.CacheHits
-		detail.TokenOutput = outcome.Stats.CacheMisses
+		detail.TokenInput = outcome.Stats.InputTokens
+		detail.TokenOutput = outcome.Stats.OutputTokens
 	}
 	e.emit(PipelineEvent{
 		Type:      EventDecisionOutcome,
