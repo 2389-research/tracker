@@ -20,6 +20,10 @@ type SessionStats struct {
 	LongestTurn    time.Duration
 	CacheHits      int
 	CacheMisses    int
+	InputTokens    int     `json:"input_tokens"`
+	OutputTokens   int     `json:"output_tokens"`
+	TotalTokens    int     `json:"total_tokens"`
+	CostUSD        float64 `json:"cost_usd"`
 }
 
 // TraceEntry records the execution of a single pipeline node.
@@ -45,6 +49,37 @@ type Trace struct {
 // AddEntry appends a trace entry to the trace log.
 func (tr *Trace) AddEntry(entry TraceEntry) {
 	tr.Entries = append(tr.Entries, entry)
+}
+
+// UsageSummary aggregates token usage and cost across all pipeline nodes.
+type UsageSummary struct {
+	TotalInputTokens  int     `json:"total_input_tokens"`
+	TotalOutputTokens int     `json:"total_output_tokens"`
+	TotalTokens       int     `json:"total_tokens"`
+	TotalCostUSD      float64 `json:"total_cost_usd"`
+	SessionCount      int     `json:"session_count"`
+}
+
+// AggregateUsage sums token usage and cost from all trace entries with session stats.
+func (tr *Trace) AggregateUsage() *UsageSummary {
+	if tr == nil {
+		return nil
+	}
+	s := &UsageSummary{}
+	for _, e := range tr.Entries {
+		if e.Stats == nil {
+			continue
+		}
+		s.TotalInputTokens += e.Stats.InputTokens
+		s.TotalOutputTokens += e.Stats.OutputTokens
+		s.TotalTokens += e.Stats.TotalTokens
+		s.TotalCostUSD += e.Stats.CostUSD
+		s.SessionCount++
+	}
+	if s.SessionCount == 0 {
+		return nil
+	}
+	return s
 }
 
 // Summary returns a human-readable summary of the trace.

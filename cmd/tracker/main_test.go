@@ -590,6 +590,10 @@ func TestAggregateSessionStatsMultipleNodes(t *testing.T) {
 				FilesCreated:   []string{"a.go", "b.go"},
 				FilesModified:  []string{"main.go"},
 				Compactions:    1,
+				InputTokens:    5000,
+				OutputTokens:   2000,
+				TotalTokens:    7000,
+				CostUSD:        0.10,
 			},
 		},
 		{
@@ -601,6 +605,10 @@ func TestAggregateSessionStatsMultipleNodes(t *testing.T) {
 				FilesCreated:   []string{"c.go", "a.go"}, // a.go is a duplicate
 				FilesModified:  []string{"main.go", "util.go"},
 				Compactions:    2,
+				InputTokens:    3000,
+				OutputTokens:   1000,
+				TotalTokens:    4000,
+				CostUSD:        0.06,
 			},
 		},
 		{NodeID: "end", HandlerName: "exit", Status: "success"},
@@ -633,6 +641,19 @@ func TestAggregateSessionStatsMultipleNodes(t *testing.T) {
 	// main.go appears in both modified lists, should appear once
 	if len(agg.FilesModified) != 2 {
 		t.Errorf("expected 2 unique modified files, got %d: %v", len(agg.FilesModified), agg.FilesModified)
+	}
+	// Token aggregation
+	if agg.TotalInputTokens != 8000 {
+		t.Errorf("expected TotalInputTokens=8000, got %d", agg.TotalInputTokens)
+	}
+	if agg.TotalOutputTokens != 3000 {
+		t.Errorf("expected TotalOutputTokens=3000, got %d", agg.TotalOutputTokens)
+	}
+	if agg.TotalTokens != 11000 {
+		t.Errorf("expected TotalTokens=11000, got %d", agg.TotalTokens)
+	}
+	if agg.TotalCostUSD != 0.16 {
+		t.Errorf("expected TotalCostUSD=0.16, got %f", agg.TotalCostUSD)
 	}
 }
 

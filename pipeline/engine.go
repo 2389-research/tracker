@@ -18,6 +18,7 @@ type EngineResult struct {
 	CompletedNodes []string
 	Context        map[string]string
 	Trace          *Trace
+	Usage          *UsageSummary
 }
 
 // Engine executes a pipeline graph by traversing nodes, dispatching handlers,
@@ -156,6 +157,7 @@ done:
 		CompletedNodes: s.cp.CompletedNodes,
 		Context:        s.pctx.Snapshot(),
 		Trace:          s.trace,
+		Usage:          s.trace.AggregateUsage(),
 	}, nil
 }
 
@@ -206,6 +208,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 				CompletedNodes: s.cp.CompletedNodes,
 				Context:        s.pctx.Snapshot(),
 				Trace:          s.trace,
+				Usage:          s.trace.AggregateUsage(),
 			},
 			err: fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
 		}
@@ -299,6 +302,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 					CompletedNodes: s.cp.CompletedNodes,
 					Context:        s.pctx.Snapshot(),
 					Trace:          s.trace,
+					Usage:          s.trace.AggregateUsage(),
 				},
 				err: fmt.Errorf("node %q failed with no conditional edges to handle failure", currentNodeID),
 			}
@@ -349,6 +353,7 @@ func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) 
 		CompletedNodes: s.cp.CompletedNodes,
 		Context:        s.pctx.Snapshot(),
 		Trace:          s.trace,
+		Usage:          s.trace.AggregateUsage(),
 	}, fmt.Errorf("pipeline cancelled: %w", err)
 }
 

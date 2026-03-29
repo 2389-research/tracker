@@ -14,12 +14,16 @@ import (
 
 // aggregatedStats holds totals computed from all trace entries with SessionStats.
 type aggregatedStats struct {
-	TotalTurns      int
-	TotalToolCalls  int
-	ToolCallsByName map[string]int
-	FilesCreated    []string
-	FilesModified   []string
-	Compactions     int
+	TotalTurns        int
+	TotalToolCalls    int
+	ToolCallsByName   map[string]int
+	FilesCreated      []string
+	FilesModified     []string
+	Compactions       int
+	TotalInputTokens  int
+	TotalOutputTokens int
+	TotalTokens       int
+	TotalCostUSD      float64
 }
 
 // aggregateSessionStats walks trace entries and sums up agent session metrics.
@@ -38,6 +42,10 @@ func aggregateSessionStats(entries []pipeline.TraceEntry) aggregatedStats {
 		agg.TotalTurns += s.Turns
 		agg.TotalToolCalls += s.TotalToolCalls
 		agg.Compactions += s.Compactions
+		agg.TotalInputTokens += s.InputTokens
+		agg.TotalOutputTokens += s.OutputTokens
+		agg.TotalTokens += s.TotalTokens
+		agg.TotalCostUSD += s.CostUSD
 		for name, count := range s.ToolCalls {
 			agg.ToolCallsByName[name] += count
 		}

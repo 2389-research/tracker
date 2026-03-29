@@ -282,6 +282,7 @@ func (e *Engine) handleRetry(ctx context.Context, s *runState, currentNodeID str
 					CompletedNodes: s.cp.CompletedNodes,
 					Context:        s.pctx.Snapshot(),
 					Trace:          s.trace,
+					Usage:          s.trace.AggregateUsage(),
 				}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
 			}
 		}
@@ -328,6 +329,7 @@ func (e *Engine) handleRetry(ctx context.Context, s *runState, currentNodeID str
 	s.trace.EndTime = time.Now()
 	result := e.failResult(s.runID, s.cp, s.pctx)
 	result.Trace = s.trace
+	result.Usage = s.trace.AggregateUsage()
 	return "", false, result, nil
 }
 
@@ -385,6 +387,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s.runID, s.cp, s.pctx)
 		result.Trace = s.trace
+		result.Usage = s.trace.AggregateUsage()
 		return false, "", result
 	}
 	if outcomeStatus == OutcomeFail {
@@ -392,6 +395,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s.runID, s.cp, s.pctx)
 		result.Trace = s.trace
+		result.Usage = s.trace.AggregateUsage()
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)
@@ -417,6 +421,7 @@ func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *Trace
 			CompletedNodes: s.cp.CompletedNodes,
 			Context:        s.pctx.Snapshot(),
 			Trace:          s.trace,
+			Usage:          s.trace.AggregateUsage(),
 		}, fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
 	}
 

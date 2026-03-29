@@ -76,5 +76,9 @@ func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 		LongestTurn:    r.LongestTurn,
 		CacheHits:      r.ToolCacheHits,
 		CacheMisses:    r.ToolCacheMisses,
+		InputTokens:    r.Usage.InputTokens,
+		OutputTokens:   r.Usage.OutputTokens,
+		TotalTokens:    r.Usage.TotalTokens,
+		CostUSD:        r.Usage.EstimatedCost,
 	}
 }

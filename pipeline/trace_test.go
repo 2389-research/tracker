@@ -531,6 +531,105 @@ func TestEngineTracePropagatesStats(t *testing.T) {
 	}
 }
 
+func TestSessionStatsIncludesTokenUsage(t *testing.T) {
+	stats := &SessionStats{
+		Turns:          5,
+		TotalToolCalls: 10,
+		InputTokens:    1500,
+		OutputTokens:   800,
+		TotalTokens:    2300,
+		CostUSD:        0.042,
+	}
+
+	if stats.InputTokens != 1500 {
+		t.Errorf("expected InputTokens=1500, got %d", stats.InputTokens)
+	}
+	if stats.OutputTokens != 800 {
+		t.Errorf("expected OutputTokens=800, got %d", stats.OutputTokens)
+	}
+	if stats.TotalTokens != 2300 {
+		t.Errorf("expected TotalTokens=2300, got %d", stats.TotalTokens)
+	}
+	if stats.CostUSD != 0.042 {
+		t.Errorf("expected CostUSD=0.042, got %f", stats.CostUSD)
+	}
+}
+
+func TestTraceAggregateUsage(t *testing.T) {
+	t.Run("normal aggregation", func(t *testing.T) {
+		tr := &Trace{
+			RunID:     "agg-test",
+			StartTime: time.Now(),
+			Entries: []TraceEntry{
+				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{
+					NodeID: "impl1", HandlerName: "codergen", Status: OutcomeSuccess,
+					Stats: &SessionStats{
+						Turns:        10,
+						InputTokens:  5000,
+						OutputTokens: 2000,
+						TotalTokens:  7000,
+						CostUSD:      0.10,
+					},
+				},
+				{
+					NodeID: "impl2", HandlerName: "codergen", Status: OutcomeSuccess,
+					Stats: &SessionStats{
+						Turns:        5,
+						InputTokens:  3000,
+						OutputTokens: 1000,
+						TotalTokens:  4000,
+						CostUSD:      0.06,
+					},
+				},
+				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+			},
+		}
+
+		usage := tr.AggregateUsage()
+		if usage == nil {
+			t.Fatal("expected non-nil UsageSummary")
+		}
+		if usage.TotalInputTokens != 8000 {
+			t.Errorf("expected TotalInputTokens=8000, got %d", usage.TotalInputTokens)
+		}
+		if usage.TotalOutputTokens != 3000 {
+			t.Errorf("expected TotalOutputTokens=3000, got %d", usage.TotalOutputTokens)
+		}
+		if usage.TotalTokens != 11000 {
+			t.Errorf("expected TotalTokens=11000, got %d", usage.TotalTokens)
+		}
+		if usage.TotalCostUSD != 0.16 {
+			t.Errorf("expected TotalCostUSD=0.16, got %f", usage.TotalCostUSD)
+		}
+		if usage.SessionCount != 2 {
+			t.Errorf("expected SessionCount=2, got %d", usage.SessionCount)
+		}
+	})
+
+	t.Run("nil trace", func(t *testing.T) {
+		var tr *Trace
+		usage := tr.AggregateUsage()
+		if usage != nil {
+			t.Errorf("expected nil for nil trace, got %+v", usage)
+		}
+	})
+
+	t.Run("no sessions with stats", func(t *testing.T) {
+		tr := &Trace{
+			RunID: "no-sessions",
+			Entries: []TraceEntry{
+				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+			},
+		}
+		usage := tr.AggregateUsage()
+		if usage != nil {
+			t.Errorf("expected nil for trace without session stats, got %+v", usage)
+		}
+	})
+}
+
 func TestEngineTraceRecordsHandlerErrors(t *testing.T) {
 	g := NewGraph("trace_handler_err_test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
