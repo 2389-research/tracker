@@ -905,9 +905,8 @@ func TestSynthesizeImplicitEdges_NoDuplicates(t *testing.T) {
 	}
 }
 
-// TestEnsureStartExitNodes_OverridesShape verifies that ensureStartExitNodes
-// corrects the shape and handler of start/exit nodes regardless of their
-// original kind.
+// TestEnsureStartExitNodes_OverridesShape verifies that agent nodes designated
+// as start/exit preserve their codergen handler (not overwritten to start/exit).
 func TestEnsureStartExitNodes_OverridesShape(t *testing.T) {
 	workflow := &ir.Workflow{
 		Name:  "ShapeOverrideTest",
@@ -927,20 +926,78 @@ func TestEnsureStartExitNodes_OverridesShape(t *testing.T) {
 		t.Fatalf("FromDippinIR failed: %v", err)
 	}
 
+	// Agent nodes designated as start/exit preserve their codergen handler
 	startNode := graph.Nodes["start"]
-	if startNode.Shape != "Mdiamond" {
-		t.Errorf("start shape = %q, want Mdiamond", startNode.Shape)
-	}
-	if startNode.Handler != "start" {
-		t.Errorf("start handler = %q, want 'start'", startNode.Handler)
+	if startNode.Handler != "codergen" {
+		t.Errorf("start handler = %q, want codergen (agent handler preserved)", startNode.Handler)
 	}
 
 	exitNode := graph.Nodes["exit"]
-	if exitNode.Shape != "Msquare" {
-		t.Errorf("exit shape = %q, want Msquare", exitNode.Shape)
+	if exitNode.Handler != "codergen" {
+		t.Errorf("exit handler = %q, want codergen (agent handler preserved)", exitNode.Handler)
 	}
-	if exitNode.Handler != "exit" {
-		t.Errorf("exit handler = %q, want 'exit'", exitNode.Handler)
+}
+
+// TestEnsureStartExitNodes_PreservesAgentHandler verifies that agent nodes
+// designated as start/exit retain their codergen handler.
+func TestEnsureStartExitNodes_PreservesAgentHandler(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "PreserveHandlerTest",
+		Start: "Think",
+		Exit:  "Done",
+		Nodes: []*ir.Node{
+			{ID: "Think", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "What is 2+2?"}},
+			{ID: "Done", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "Say done."}},
+		},
+		Edges: []*ir.Edge{
+			{From: "Think", To: "Done"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	startNode := graph.Nodes["Think"]
+	if startNode.Handler != "codergen" {
+		t.Errorf("start agent handler = %q, want codergen", startNode.Handler)
+	}
+
+	exitNode := graph.Nodes["Done"]
+	if exitNode.Handler != "codergen" {
+		t.Errorf("exit agent handler = %q, want codergen", exitNode.Handler)
+	}
+}
+
+// TestEnsureStartExitNodes_SetsHandlerWhenNoPrompt verifies that nodes without
+// a prompt attribute get the start/exit handler and shape assigned.
+func TestEnsureStartExitNodes_SetsHandlerWhenNoPrompt(t *testing.T) {
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "begin",
+		ExitNode:  "end",
+	}
+	g.Nodes["begin"] = &Node{ID: "begin", Shape: "box", Handler: ""}
+	g.Nodes["end"] = &Node{ID: "end", Shape: "box", Handler: ""}
+	g.Edges = []*Edge{{From: "begin", To: "end"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	if g.Nodes["begin"].Handler != "start" {
+		t.Errorf("begin handler = %q, want start", g.Nodes["begin"].Handler)
+	}
+	if g.Nodes["begin"].Shape != "Mdiamond" {
+		t.Errorf("begin shape = %q, want Mdiamond", g.Nodes["begin"].Shape)
+	}
+	if g.Nodes["end"].Handler != "exit" {
+		t.Errorf("end handler = %q, want exit", g.Nodes["end"].Handler)
+	}
+	if g.Nodes["end"].Shape != "Msquare" {
+		t.Errorf("end shape = %q, want Msquare", g.Nodes["end"].Shape)
 	}
 }
 

@@ -95,10 +95,14 @@ func ensureStartExitNodes(g *Graph) error {
 		return fmt.Errorf("exit node %q not found in graph", g.ExitNode)
 	}
 	startNode := g.Nodes[g.StartNode]
-	startNode.Shape = "Mdiamond"
-	startNode.Handler = "start"
+	if startNode.Attrs["prompt"] == "" {
+		startNode.Shape = "Mdiamond"
+		startNode.Handler = "start"
+	}
 	exitNode := g.Nodes[g.ExitNode]
-	exitNode.Shape = "Msquare"
-	exitNode.Handler = "exit"
+	if exitNode.Attrs["prompt"] == "" {
+		exitNode.Shape = "Msquare"
+		exitNode.Handler = "exit"
+	}
 	return nil
 }
