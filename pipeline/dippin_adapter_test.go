@@ -905,39 +905,6 @@ func TestSynthesizeImplicitEdges_NoDuplicates(t *testing.T) {
 	}
 }
 
-// TestEnsureStartExitNodes_OverridesShape verifies that agent nodes designated
-// as start/exit preserve their codergen handler (not overwritten to start/exit).
-func TestEnsureStartExitNodes_OverridesShape(t *testing.T) {
-	workflow := &ir.Workflow{
-		Name:  "ShapeOverrideTest",
-		Start: "start",
-		Exit:  "exit",
-		Nodes: []*ir.Node{
-			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "begin"}},
-			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "end"}},
-		},
-		Edges: []*ir.Edge{
-			{From: "start", To: "exit"},
-		},
-	}
-
-	graph, err := FromDippinIR(workflow)
-	if err != nil {
-		t.Fatalf("FromDippinIR failed: %v", err)
-	}
-
-	// Agent nodes designated as start/exit preserve their codergen handler
-	startNode := graph.Nodes["start"]
-	if startNode.Handler != "codergen" {
-		t.Errorf("start handler = %q, want codergen (agent handler preserved)", startNode.Handler)
-	}
-
-	exitNode := graph.Nodes["exit"]
-	if exitNode.Handler != "codergen" {
-		t.Errorf("exit handler = %q, want codergen (agent handler preserved)", exitNode.Handler)
-	}
-}
-
 // TestEnsureStartExitNodes_PreservesAgentHandler verifies that agent nodes
 // designated as start/exit retain their codergen handler.
 func TestEnsureStartExitNodes_PreservesAgentHandler(t *testing.T) {
@@ -970,6 +937,40 @@ func TestEnsureStartExitNodes_PreservesAgentHandler(t *testing.T) {
 	}
 }
 
+// TestEnsureStartExitNodes_MixedAgentAndSynthetic verifies the mixed case:
+// agent start node preserves codergen, synthetic exit node gets exit handler.
+func TestEnsureStartExitNodes_MixedAgentAndSynthetic(t *testing.T) {
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "agent_start",
+		ExitNode:  "synthetic_end",
+	}
+	g.Nodes["agent_start"] = &Node{
+		ID: "agent_start", Shape: "box", Handler: "codergen",
+		Attrs: map[string]string{"prompt": "Do something."},
+	}
+	g.Nodes["synthetic_end"] = &Node{
+		ID: "synthetic_end", Shape: "box", Handler: "",
+		Attrs: make(map[string]string),
+	}
+	g.Edges = []*Edge{{From: "agent_start", To: "synthetic_end"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	if g.Nodes["agent_start"].Handler != "codergen" {
+		t.Errorf("agent start handler = %q, want codergen", g.Nodes["agent_start"].Handler)
+	}
+	if g.Nodes["synthetic_end"].Handler != "exit" {
+		t.Errorf("synthetic exit handler = %q, want exit", g.Nodes["synthetic_end"].Handler)
+	}
+	if g.Nodes["synthetic_end"].Shape != "Msquare" {
+		t.Errorf("synthetic exit shape = %q, want Msquare", g.Nodes["synthetic_end"].Shape)
+	}
+}
+
 // TestEnsureStartExitNodes_SetsHandlerWhenNoPrompt verifies that nodes without
 // a prompt attribute get the start/exit handler and shape assigned.
 func TestEnsureStartExitNodes_SetsHandlerWhenNoPrompt(t *testing.T) {
@@ -978,8 +979,8 @@ func TestEnsureStartExitNodes_SetsHandlerWhenNoPrompt(t *testing.T) {
 		StartNode: "begin",
 		ExitNode:  "end",
 	}
-	g.Nodes["begin"] = &Node{ID: "begin", Shape: "box", Handler: ""}
-	g.Nodes["end"] = &Node{ID: "end", Shape: "box", Handler: ""}
+	g.Nodes["begin"] = &Node{ID: "begin", Shape: "box", Handler: "", Attrs: make(map[string]string)}
+	g.Nodes["end"] = &Node{ID: "end", Shape: "box", Handler: "", Attrs: make(map[string]string)}
 	g.Edges = []*Edge{{From: "begin", To: "end"}}
 
 	err := ensureStartExitNodes(g)

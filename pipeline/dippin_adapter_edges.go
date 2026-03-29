@@ -85,8 +85,9 @@ func synthesizeFanInEdges(g *Graph, irNode *ir.Node, cfg ir.FanInConfig, existin
 	}
 }
 
-// ensureStartExitNodes verifies that the start and exit nodes exist in the graph
-// and have the correct shape/handler attributes.
+// ensureStartExitNodes verifies that the start and exit nodes exist in the graph.
+// Nodes with a prompt attribute (real agent nodes) keep their existing handler;
+// nodes without a prompt get the start/exit passthrough handler and shape.
 func ensureStartExitNodes(g *Graph) error {
 	if _, ok := g.Nodes[g.StartNode]; !ok {
 		return fmt.Errorf("start node %q not found in graph", g.StartNode)
