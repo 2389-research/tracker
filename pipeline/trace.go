@@ -11,19 +11,22 @@ import (
 // SessionStats captures agent session metrics for a pipeline node.
 // Only populated for codergen (LLM agent) nodes.
 type SessionStats struct {
-	Turns          int            `json:"turns"`
-	ToolCalls      map[string]int `json:"tool_calls,omitempty"`
-	TotalToolCalls int            `json:"total_tool_calls"`
-	FilesModified  []string       `json:"files_modified,omitempty"`
-	FilesCreated   []string       `json:"files_created,omitempty"`
-	Compactions    int            `json:"compactions"`
-	LongestTurn    time.Duration  `json:"longest_turn"`
-	CacheHits      int            `json:"cache_hits"`
-	CacheMisses    int            `json:"cache_misses"`
-	InputTokens    int            `json:"input_tokens"`
-	OutputTokens   int            `json:"output_tokens"`
-	TotalTokens    int            `json:"total_tokens"`
-	CostUSD        float64        `json:"cost_usd"`
+	Turns            int            `json:"turns"`
+	ToolCalls        map[string]int `json:"tool_calls,omitempty"`
+	TotalToolCalls   int            `json:"total_tool_calls"`
+	FilesModified    []string       `json:"files_modified,omitempty"`
+	FilesCreated     []string       `json:"files_created,omitempty"`
+	Compactions      int            `json:"compactions"`
+	LongestTurn      time.Duration  `json:"longest_turn"`
+	CacheHits        int            `json:"cache_hits"`
+	CacheMisses      int            `json:"cache_misses"`
+	InputTokens      int            `json:"input_tokens"`
+	OutputTokens     int            `json:"output_tokens"`
+	TotalTokens      int            `json:"total_tokens"`
+	CostUSD          float64        `json:"cost_usd"`
+	ReasoningTokens  int            `json:"reasoning_tokens"`
+	CacheReadTokens  int            `json:"cache_read_tokens"`
+	CacheWriteTokens int            `json:"cache_write_tokens"`
 }
 
 // TraceEntry records the execution of a single pipeline node.
@@ -53,11 +56,14 @@ func (tr *Trace) AddEntry(entry TraceEntry) {
 
 // UsageSummary aggregates token usage and cost across all pipeline nodes.
 type UsageSummary struct {
-	TotalInputTokens  int     `json:"total_input_tokens"`
-	TotalOutputTokens int     `json:"total_output_tokens"`
-	TotalTokens       int     `json:"total_tokens"`
-	TotalCostUSD      float64 `json:"total_cost_usd"`
-	SessionCount      int     `json:"session_count"`
+	TotalInputTokens      int     `json:"total_input_tokens"`
+	TotalOutputTokens     int     `json:"total_output_tokens"`
+	TotalTokens           int     `json:"total_tokens"`
+	TotalCostUSD          float64 `json:"total_cost_usd"`
+	TotalReasoningTokens  int     `json:"total_reasoning_tokens"`
+	TotalCacheReadTokens  int     `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int     `json:"total_cache_write_tokens"`
+	SessionCount          int     `json:"session_count"`
 }
 
 // AggregateUsage sums token usage and cost from all trace entries with session stats.
@@ -74,6 +80,9 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 		s.TotalOutputTokens += e.Stats.OutputTokens
 		s.TotalTokens += e.Stats.TotalTokens
 		s.TotalCostUSD += e.Stats.CostUSD
+		s.TotalReasoningTokens += e.Stats.ReasoningTokens
+		s.TotalCacheReadTokens += e.Stats.CacheReadTokens
+		s.TotalCacheWriteTokens += e.Stats.CacheWriteTokens
 		s.SessionCount++
 	}
 	if s.SessionCount == 0 {

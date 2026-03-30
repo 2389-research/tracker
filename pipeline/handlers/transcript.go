@@ -59,6 +59,14 @@ func (c *transcriptCollector) transcript() string {
 	return strings.Join(c.lines, "\n")
 }
 
+// derefInt safely dereferences an optional int pointer, returning 0 for nil.
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 // buildSessionStats converts an agent.SessionResult into a pipeline.SessionStats
 // for inclusion in the trace entry.
 func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
@@ -67,18 +75,21 @@ func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 		toolCalls[k] = v
 	}
 	return &pipeline.SessionStats{
-		Turns:          r.Turns,
-		ToolCalls:      toolCalls,
-		TotalToolCalls: r.TotalToolCalls(),
-		FilesModified:  append([]string(nil), r.FilesModified...),
-		FilesCreated:   append([]string(nil), r.FilesCreated...),
-		Compactions:    r.CompactionsApplied,
-		LongestTurn:    r.LongestTurn,
-		CacheHits:      r.ToolCacheHits,
-		CacheMisses:    r.ToolCacheMisses,
-		InputTokens:    r.Usage.InputTokens,
-		OutputTokens:   r.Usage.OutputTokens,
-		TotalTokens:    r.Usage.TotalTokens,
-		CostUSD:        r.Usage.EstimatedCost,
+		Turns:            r.Turns,
+		ToolCalls:        toolCalls,
+		TotalToolCalls:   r.TotalToolCalls(),
+		FilesModified:    append([]string(nil), r.FilesModified...),
+		FilesCreated:     append([]string(nil), r.FilesCreated...),
+		Compactions:      r.CompactionsApplied,
+		LongestTurn:      r.LongestTurn,
+		CacheHits:        r.ToolCacheHits,
+		CacheMisses:      r.ToolCacheMisses,
+		InputTokens:      r.Usage.InputTokens,
+		OutputTokens:     r.Usage.OutputTokens,
+		TotalTokens:      r.Usage.TotalTokens,
+		CostUSD:          r.Usage.EstimatedCost,
+		ReasoningTokens:  derefInt(r.Usage.ReasoningTokens),
+		CacheReadTokens:  derefInt(r.Usage.CacheReadTokens),
+		CacheWriteTokens: derefInt(r.Usage.CacheWriteTokens),
 	}
 }

@@ -23,10 +23,13 @@ func TestBuildSessionStatsIncludesTokenUsage(t *testing.T) {
 		ToolCacheHits:      8,
 		ToolCacheMisses:    3,
 		Usage: llm.Usage{
-			InputTokens:   4200,
-			OutputTokens:  1800,
-			TotalTokens:   6000,
-			EstimatedCost: 0.075,
+			InputTokens:      4200,
+			OutputTokens:     1800,
+			TotalTokens:      6000,
+			EstimatedCost:    0.075,
+			ReasoningTokens:  intPtr(200),
+			CacheReadTokens:  intPtr(500),
+			CacheWriteTokens: intPtr(100),
 		},
 	}
 
@@ -55,6 +58,15 @@ func TestBuildSessionStatsIncludesTokenUsage(t *testing.T) {
 	}
 	if stats.CostUSD != 0.075 {
 		t.Errorf("expected CostUSD=0.075, got %f", stats.CostUSD)
+	}
+	if stats.ReasoningTokens != 200 {
+		t.Errorf("expected ReasoningTokens=200, got %d", stats.ReasoningTokens)
+	}
+	if stats.CacheReadTokens != 500 {
+		t.Errorf("expected CacheReadTokens=500, got %d", stats.CacheReadTokens)
+	}
+	if stats.CacheWriteTokens != 100 {
+		t.Errorf("expected CacheWriteTokens=100, got %d", stats.CacheWriteTokens)
 	}
 }
 
