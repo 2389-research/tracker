@@ -225,6 +225,10 @@ func (a AppModel) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		content := buildFreeformContent(m, a.lay.width, a.lay.height)
 		a.modal.Show(content)
 		return a, nil, true
+	case MsgGateInterview:
+		content := NewInterviewContent(m.Questions, m.Previous, m.ReplyCh, a.lay.width, a.lay.height)
+		a.modal.Show(content)
+		return a, nil, true
 	case MsgGateAutopilot:
 		a.modal.Show(NewAutopilotContent(m.Prompt, m.Decision, m.ReplyCh))
 		return a, nil, true
