@@ -37,6 +37,14 @@ type LabeledFreeformInterviewer interface {
 	AskFreeformWithLabels(prompt string, labels []string, defaultLabel string) (string, error)
 }
 
+// InterviewInterviewer extends FreeformInterviewer with structured interview support.
+// Used by human gate nodes with mode="interview" to present parsed questions
+// as individual form fields with inline options.
+type InterviewInterviewer interface {
+	FreeformInterviewer
+	AskInterview(questions []Question, previousAnswers *InterviewResult) (*InterviewResult, error)
+}
+
 // AutoApproveInterviewer always returns the default choice, or the first choice
 // if no default is specified. Useful for testing and non-interactive pipelines.
 type AutoApproveInterviewer struct{}
@@ -214,6 +222,9 @@ func (h *HumanHandler) Name() string { return "wait.human" }
 func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	prompt := h.resolveHumanPrompt(node, pctx)
 
+	if node.Attrs["mode"] == "interview" {
+		return h.executeInterview(ctx, node, pctx)
+	}
 	if node.Attrs["mode"] == "freeform" {
 		return h.executeFreeform(node, prompt)
 	}
@@ -298,6 +309,75 @@ func matchFreeformLabel(graph *pipeline.Graph, node *pipeline.Node, response str
 		}
 	}
 	return ""
+}
+
+// executeInterview handles interview mode: parses questions from context and presents
+// them as structured form fields via an InterviewInterviewer.
+func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	ii, ok := h.interviewer.(InterviewInterviewer)
+	if !ok {
+		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=interview but interviewer does not support interviews", node.ID)
+	}
+
+	// Read config from node attrs (with defaults per spec)
+	questionsKey := node.Attrs["questions_key"]
+	if questionsKey == "" {
+		questionsKey = "interview_questions"
+	}
+	answersKey := node.Attrs["answers_key"]
+	if answersKey == "" {
+		answersKey = "interview_answers"
+	}
+
+	// Read upstream markdown from context
+	markdown, _ := pctx.Get(questionsKey)
+	if markdown == "" {
+		markdown, _ = pctx.Get(pipeline.ContextKeyLastResponse)
+	}
+
+	// Parse questions
+	questions := ParseQuestions(markdown)
+
+	// 0 questions or malformed → fall back to freeform with prompt
+	if len(questions) == 0 {
+		prompt := node.Attrs["prompt"]
+		if prompt == "" {
+			prompt = node.Label
+		}
+		if prompt == "" {
+			prompt = "No questions were generated. Please provide any input."
+		}
+		if markdown != "" {
+			prompt = prompt + "\n\n---\n" + markdown
+		}
+		return h.executeFreeform(node, prompt)
+	}
+
+	// Check for previous answers (retry pre-fill)
+	var previous *InterviewResult
+	if prevJSON, ok := pctx.Get(answersKey); ok && prevJSON != "" {
+		if prev, err := DeserializeInterviewResult(prevJSON); err == nil {
+			previous = &prev
+		}
+	}
+
+	// Present interview
+	result, err := ii.AskInterview(questions, previous)
+	if err != nil {
+		return pipeline.Outcome{}, fmt.Errorf("interview failed for node %q: %w", node.ID, err)
+	}
+
+	// Store answers
+	jsonStr := SerializeInterviewResult(*result)
+	summary := BuildMarkdownSummary(*result)
+
+	return pipeline.Outcome{
+		Status: pipeline.OutcomeSuccess,
+		ContextUpdates: map[string]string{
+			answersKey:                       jsonStr,
+			pipeline.ContextKeyHumanResponse: summary,
+		},
+	}, nil
 }
 
 // executeChoice handles choice mode: presents outgoing edge labels as options.
