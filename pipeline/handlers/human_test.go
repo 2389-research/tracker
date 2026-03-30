@@ -276,6 +276,38 @@ func TestHumanHandlerFreeformFallsBackToChoiceMode(t *testing.T) {
 	}
 }
 
+func TestAutoApproveFreeformInterviewer_AskInterview(t *testing.T) {
+	ai := &AutoApproveFreeformInterviewer{}
+	questions := []Question{
+		{Index: 1, Text: "Auth model?", Options: []string{"API key", "OAuth", "JWT"}},
+		{Index: 2, Text: "Need real-time?", IsYesNo: true},
+		{Index: 3, Text: "Describe integrations"},
+	}
+	result, err := ai.AskInterview(questions, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Questions) != 3 {
+		t.Fatalf("expected 3 answers, got %d", len(result.Questions))
+	}
+	// First option selected for select question
+	if result.Questions[0].Answer != "API key" {
+		t.Errorf("expected 'API key', got %q", result.Questions[0].Answer)
+	}
+	// Yes for yes/no
+	if result.Questions[1].Answer != "yes" {
+		t.Errorf("expected 'yes', got %q", result.Questions[1].Answer)
+	}
+	// Auto-approved for open-ended
+	if result.Questions[2].Answer != "auto-approved" {
+		t.Errorf("expected 'auto-approved', got %q", result.Questions[2].Answer)
+	}
+	// Not canceled or incomplete
+	if result.Canceled || result.Incomplete {
+		t.Error("expected non-canceled, non-incomplete result")
+	}
+}
+
 func TestAutoApproveInterviewerFreeform(t *testing.T) {
 	interviewer := &AutoApproveFreeformInterviewer{}
 	resp, err := interviewer.AskFreeform("What do you want?")
