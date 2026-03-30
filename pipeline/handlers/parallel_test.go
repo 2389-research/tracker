@@ -412,6 +412,140 @@ func TestParallelHandlerBranchOverridesPreserveOriginal(t *testing.T) {
 	}
 }
 
+func TestParallelHandlerAggregatesBranchStats(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_stats")
+	registry := pipeline.NewHandlerRegistry()
+
+	stub := &stubHandler{
+		name: "stub_stats",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			stats := &pipeline.SessionStats{
+				Turns:          3,
+				TotalToolCalls: 5,
+				InputTokens:    1000,
+				OutputTokens:   500,
+				TotalTokens:    1500,
+				CostUSD:        0.05,
+				Compactions:    1,
+				CacheHits:      10,
+				CacheMisses:    2,
+				LongestTurn:    100 * time.Millisecond,
+				FilesModified:  []string{node.ID + "/main.go"},
+				FilesCreated:   []string{node.ID + "/new.go"},
+				ToolCalls:      map[string]int{"read": 3, "write": 2},
+			}
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: stats}, nil
+		},
+	}
+	registry.Register(stub)
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+	if outcome.Stats == nil {
+		t.Fatal("expected aggregated stats on outcome, got nil")
+	}
+
+	s := outcome.Stats
+	// Two branches, each with 3 turns → 6 total
+	if s.Turns != 6 {
+		t.Errorf("Turns = %d, want 6", s.Turns)
+	}
+	if s.TotalToolCalls != 10 {
+		t.Errorf("TotalToolCalls = %d, want 10", s.TotalToolCalls)
+	}
+	if s.InputTokens != 2000 {
+		t.Errorf("InputTokens = %d, want 2000", s.InputTokens)
+	}
+	if s.OutputTokens != 1000 {
+		t.Errorf("OutputTokens = %d, want 1000", s.OutputTokens)
+	}
+	if s.TotalTokens != 3000 {
+		t.Errorf("TotalTokens = %d, want 3000", s.TotalTokens)
+	}
+	if s.CostUSD != 0.10 {
+		t.Errorf("CostUSD = %f, want 0.10", s.CostUSD)
+	}
+	if s.Compactions != 2 {
+		t.Errorf("Compactions = %d, want 2", s.Compactions)
+	}
+	if s.CacheHits != 20 {
+		t.Errorf("CacheHits = %d, want 20", s.CacheHits)
+	}
+	if s.CacheMisses != 4 {
+		t.Errorf("CacheMisses = %d, want 4", s.CacheMisses)
+	}
+	if s.LongestTurn != 100*time.Millisecond {
+		t.Errorf("LongestTurn = %v, want 100ms", s.LongestTurn)
+	}
+	if len(s.FilesModified) != 2 {
+		t.Errorf("FilesModified count = %d, want 2", len(s.FilesModified))
+	}
+	if len(s.FilesCreated) != 2 {
+		t.Errorf("FilesCreated count = %d, want 2", len(s.FilesCreated))
+	}
+	if s.ToolCalls["read"] != 6 {
+		t.Errorf("ToolCalls[read] = %d, want 6", s.ToolCalls["read"])
+	}
+	if s.ToolCalls["write"] != 4 {
+		t.Errorf("ToolCalls[write] = %d, want 4", s.ToolCalls["write"])
+	}
+}
+
+func TestParallelHandlerNilStatsWhenNoBranchStats(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a"}, "stub_nostats")
+	registry := pipeline.NewHandlerRegistry()
+
+	stub := &stubHandler{
+		name:    "stub_nostats",
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
+	}
+	registry.Register(stub)
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Stats != nil {
+		t.Errorf("expected nil stats when no branches have stats, got %+v", outcome.Stats)
+	}
+}
+
+func TestParallelHandlerStatsInJSON(t *testing.T) {
+	// Verify ParallelResult JSON round-trips the Stats field
+	pr := ParallelResult{
+		NodeID: "test",
+		Status: pipeline.OutcomeSuccess,
+		Stats:  &pipeline.SessionStats{InputTokens: 500, CostUSD: 0.01},
+	}
+	data, err := json.Marshal(pr)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var decoded ParallelResult
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if decoded.Stats == nil {
+		t.Fatal("expected Stats to survive JSON round-trip")
+	}
+	if decoded.Stats.InputTokens != 500 {
+		t.Errorf("InputTokens = %d, want 500", decoded.Stats.InputTokens)
+	}
+}
+
 func TestParallelHandlerPreservesInternalArtifactDir(t *testing.T) {
 	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_internal")
 	registry := pipeline.NewHandlerRegistry()

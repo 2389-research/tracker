@@ -16,10 +16,11 @@ import (
 
 // ParallelResult captures the outcome of a single branch executed during fan-out.
 type ParallelResult struct {
-	NodeID         string            `json:"node_id"`
-	Status         string            `json:"status"`
-	ContextUpdates map[string]string `json:"context_updates,omitempty"`
-	Error          string            `json:"error,omitempty"`
+	NodeID         string                 `json:"node_id"`
+	Status         string                 `json:"status"`
+	ContextUpdates map[string]string      `json:"context_updates,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+	Stats          *pipeline.SessionStats `json:"stats,omitempty"`
 }
 
 // ParallelHandler implements fan-out execution: for each outgoing edge from
@@ -83,7 +84,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Message:   fmt.Sprintf("fan-in complete, aggregate status: %s", status),
 	})
 
-	outcome := pipeline.Outcome{Status: status}
+	outcome := pipeline.Outcome{Status: status, Stats: aggregateBranchStats(collected)}
 	if joinID := node.Attrs["parallel_join"]; joinID != "" {
 		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
 	}
@@ -181,7 +182,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 	outcome, err := h.registry.Execute(ctx, tn, branchCtx)
 
-	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: outcome.ContextUpdates}
+	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: outcome.ContextUpdates, Stats: outcome.Stats}
 	if err != nil {
 		pr.Status = pipeline.OutcomeFail
 		pr.Error = err.Error()
@@ -208,6 +209,40 @@ func aggregateStatus(results []ParallelResult) string {
 		}
 	}
 	return pipeline.OutcomeFail
+}
+
+// aggregateBranchStats sums SessionStats from all parallel branch results.
+// Returns nil if no branches produced stats.
+func aggregateBranchStats(results []ParallelResult) *pipeline.SessionStats {
+	var agg *pipeline.SessionStats
+	for _, r := range results {
+		if r.Stats == nil {
+			continue
+		}
+		if agg == nil {
+			agg = &pipeline.SessionStats{
+				ToolCalls: make(map[string]int),
+			}
+		}
+		agg.Turns += r.Stats.Turns
+		agg.TotalToolCalls += r.Stats.TotalToolCalls
+		agg.InputTokens += r.Stats.InputTokens
+		agg.OutputTokens += r.Stats.OutputTokens
+		agg.TotalTokens += r.Stats.TotalTokens
+		agg.CostUSD += r.Stats.CostUSD
+		agg.Compactions += r.Stats.Compactions
+		agg.CacheHits += r.Stats.CacheHits
+		agg.CacheMisses += r.Stats.CacheMisses
+		if r.Stats.LongestTurn > agg.LongestTurn {
+			agg.LongestTurn = r.Stats.LongestTurn
+		}
+		agg.FilesModified = append(agg.FilesModified, r.Stats.FilesModified...)
+		agg.FilesCreated = append(agg.FilesCreated, r.Stats.FilesCreated...)
+		for name, count := range r.Stats.ToolCalls {
+			agg.ToolCalls[name] += count
+		}
+	}
+	return agg
 }
 
 // branchOverride holds per-branch attr overrides parsed from the parallel node.
