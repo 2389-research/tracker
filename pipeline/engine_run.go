@@ -276,6 +276,7 @@ func (e *Engine) handleRetry(ctx context.Context, s *runState, currentNodeID str
 			case <-time.After(backoff):
 			case <-ctx.Done():
 				e.saveCheckpoint(s.cp, s.pctx, s.runID)
+				s.trace.EndTime = time.Now()
 				return "", false, &EngineResult{
 					RunID:          s.runID,
 					Status:         OutcomeFail,

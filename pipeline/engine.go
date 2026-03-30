@@ -340,6 +340,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 // cancelledResult builds the result when the context is cancelled.
 func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) {
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	s.trace.EndTime = time.Now()
 	e.emit(PipelineEvent{
 		Type:      EventPipelineFailed,
 		Timestamp: time.Now(),
