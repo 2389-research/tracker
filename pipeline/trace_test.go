@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+func floatNear(a, b, epsilon float64) bool {
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff < epsilon
+}
+
 func TestTraceEntryCreation(t *testing.T) {
 	now := time.Now()
 	entry := TraceEntry{
@@ -550,7 +558,7 @@ func TestSessionStatsIncludesTokenUsage(t *testing.T) {
 	if stats.TotalTokens != 2300 {
 		t.Errorf("expected TotalTokens=2300, got %d", stats.TotalTokens)
 	}
-	if stats.CostUSD != 0.042 {
+	if !floatNear(stats.CostUSD, 0.042, 1e-9) {
 		t.Errorf("expected CostUSD=0.042, got %f", stats.CostUSD)
 	}
 }
@@ -599,7 +607,7 @@ func TestTraceAggregateUsage(t *testing.T) {
 		if usage.TotalTokens != 11000 {
 			t.Errorf("expected TotalTokens=11000, got %d", usage.TotalTokens)
 		}
-		if usage.TotalCostUSD != 0.16 {
+		if !floatNear(usage.TotalCostUSD, 0.16, 1e-9) {
 			t.Errorf("expected TotalCostUSD=0.16, got %f", usage.TotalCostUSD)
 		}
 		if usage.SessionCount != 2 {

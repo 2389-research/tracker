@@ -10,6 +10,14 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
+func floatNear(a, b, epsilon float64) bool {
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff < epsilon
+}
+
 func TestBuildSessionStatsIncludesTokenUsage(t *testing.T) {
 	r := agent.SessionResult{
 		SessionID:          "test-session",
@@ -56,7 +64,7 @@ func TestBuildSessionStatsIncludesTokenUsage(t *testing.T) {
 	if stats.TotalTokens != 6000 {
 		t.Errorf("expected TotalTokens=6000, got %d", stats.TotalTokens)
 	}
-	if stats.CostUSD != 0.075 {
+	if !floatNear(stats.CostUSD, 0.075, 1e-9) {
 		t.Errorf("expected CostUSD=0.075, got %f", stats.CostUSD)
 	}
 	if stats.ReasoningTokens != 200 {
@@ -88,7 +96,7 @@ func TestBuildSessionStatsZeroUsage(t *testing.T) {
 	if stats.TotalTokens != 0 {
 		t.Errorf("expected TotalTokens=0, got %d", stats.TotalTokens)
 	}
-	if stats.CostUSD != 0 {
+	if !floatNear(stats.CostUSD, 0, 1e-9) {
 		t.Errorf("expected CostUSD=0, got %f", stats.CostUSD)
 	}
 }

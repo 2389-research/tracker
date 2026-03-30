@@ -13,6 +13,14 @@ import (
 	"github.com/2389-research/tracker/tui"
 )
 
+func floatNear(a, b, epsilon float64) bool {
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff < epsilon
+}
+
 func TestChooseInterviewerReturnsBubbleteaWhenTerminal(t *testing.T) {
 	iv := chooseInterviewer(true, autopilotCfg{}, nil, "")
 	if _, ok := iv.(*tui.BubbleteaInterviewer); !ok {
@@ -652,7 +660,7 @@ func TestAggregateSessionStatsMultipleNodes(t *testing.T) {
 	if agg.TotalTokens != 11000 {
 		t.Errorf("expected TotalTokens=11000, got %d", agg.TotalTokens)
 	}
-	if agg.TotalCostUSD != 0.16 {
+	if !floatNear(agg.TotalCostUSD, 0.16, 1e-9) {
 		t.Errorf("expected TotalCostUSD=0.16, got %f", agg.TotalCostUSD)
 	}
 }
