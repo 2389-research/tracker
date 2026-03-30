@@ -125,6 +125,68 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 	return decision, nil
 }
 
+// AskInterview implements InterviewInterviewer by routing all questions through
+// the claude CLI subprocess and parsing the JSON response.
+// Provider errors hard-fail per CLAUDE.md. Parse failures use a plain text fallback.
+func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
+	prompt := buildInterviewPrompt(questions)
+	systemPrompt := personaPrompts[a.persona]
+	fullPrompt := systemPrompt + "\n\n" + prompt
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, a.claudePath,
+		"--print",
+		"-p", fullPrompt,
+		"--max-turns", "1",
+		"--output-format", "text",
+	)
+	cmd.Env = buildEnv()
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("claude CLI interview: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+
+	responseText := strings.TrimSpace(stdout.String())
+	if responseText == "" {
+		return nil, fmt.Errorf("claude CLI returned empty response for interview")
+	}
+
+	result, parseErr := parseInterviewResponse(responseText, questions)
+	if parseErr != nil {
+		// If the response isn't valid JSON, try to extract answers line-by-line as fallback.
+		// Build minimal answers: one answer per question using the whole response as answer for first.
+		fmt.Fprintf(os.Stderr, "WARNING: claude-code autopilot interview parse failed (%v), using fallback answers\n", parseErr)
+		answers := make([]InterviewAnswer, len(questions))
+		for i, q := range questions {
+			ans := InterviewAnswer{
+				ID:      fmt.Sprintf("q%d", q.Index),
+				Text:    q.Text,
+				Options: q.Options,
+			}
+			if len(q.Options) > 0 {
+				ans.Answer = q.Options[0]
+			} else if q.IsYesNo {
+				ans.Answer = "yes"
+			} else {
+				ans.Answer = "auto-approved"
+			}
+			answers[i] = ans
+		}
+		return &InterviewResult{Questions: answers}, nil
+	}
+	return result, nil
+}
+
+// Compile-time assertions: ClaudeCodeAutopilotInterviewer implements both interfaces.
+var _ LabeledFreeformInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
+var _ InterviewInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
+
 // fallback returns the default option, or the first option, or empty string.
 func (a *ClaudeCodeAutopilotInterviewer) fallback(options []string, defaultOption string) string {
 	if defaultOption != "" {

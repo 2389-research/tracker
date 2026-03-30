@@ -13,6 +13,7 @@ import (
 var _ handlers.Interviewer = (*AutopilotTUIInterviewer)(nil)
 var _ handlers.FreeformInterviewer = (*AutopilotTUIInterviewer)(nil)
 var _ handlers.LabeledFreeformInterviewer = (*AutopilotTUIInterviewer)(nil)
+var _ handlers.InterviewInterviewer = (*AutopilotTUIInterviewer)(nil)
 
 // MsgGateAutopilot tells the TUI to show the autopilot decision in the modal
 // for a brief moment, then auto-close by sending the reply.
@@ -64,6 +65,22 @@ func (a *AutopilotTUIInterviewer) AskFreeformWithLabels(prompt string, labels []
 	}
 	a.flashDecision(prompt, decision, "", labels, defaultLabel)
 	return decision, nil
+}
+
+// AskInterview delegates interview questions to the inner autopilot (if it supports
+// interviews), then flashes a brief summary in the TUI.
+func (a *AutopilotTUIInterviewer) AskInterview(questions []handlers.Question, prev *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+	ii, ok := a.autopilot.(handlers.InterviewInterviewer)
+	if !ok {
+		return nil, fmt.Errorf("inner autopilot does not support interviews")
+	}
+	result, err := ii.AskInterview(questions, prev)
+	if err != nil {
+		return nil, err
+	}
+	summary := fmt.Sprintf("Autopilot answered %d questions", len(result.Questions))
+	a.flashDecision("", summary, "", nil, "")
+	return result, nil
 }
 
 // flashDecision sends the decision to the TUI for brief display, then
