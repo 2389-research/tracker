@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -1053,6 +1054,32 @@ func TestExtractAgentBackendAttrs_SimulatedIRParams(t *testing.T) {
 		if node.Attrs[tt.key] != tt.value {
 			t.Errorf("attrs[%q] = %q, want %q", tt.key, node.Attrs[tt.key], tt.value)
 		}
+	}
+}
+
+func TestEnsureStartExitNodes_ErrorMissingNodes(t *testing.T) {
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "missing_start",
+		ExitNode:  "missing_exit",
+	}
+
+	err := ensureStartExitNodes(g)
+	if err == nil {
+		t.Fatal("expected error for missing start node, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing_start") {
+		t.Errorf("error should mention missing_start, got: %v", err)
+	}
+
+	// Add start but not exit — should error on exit.
+	g.Nodes["missing_start"] = &Node{ID: "missing_start", Attrs: make(map[string]string)}
+	err = ensureStartExitNodes(g)
+	if err == nil {
+		t.Fatal("expected error for missing exit node, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing_exit") {
+		t.Errorf("error should mention missing_exit, got: %v", err)
 	}
 }
 
