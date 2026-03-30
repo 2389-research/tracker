@@ -651,6 +651,69 @@ func TestHumanHandler_InterviewMode_Canceled(t *testing.T) {
 	}
 }
 
+func TestConsoleInterviewer_AskInterview(t *testing.T) {
+	// Input: select "OAuth", yes/no "y", freeform "Salesforce sync"
+	input := "OAuth\ny\nSalesforce sync\n"
+	var output bytes.Buffer
+	ci := &ConsoleInterviewer{Reader: strings.NewReader(input), Writer: &output}
+
+	questions := []Question{
+		{Index: 1, Text: "Auth model?", Options: []string{"API key", "OAuth", "JWT"}},
+		{Index: 2, Text: "Need real-time?", IsYesNo: true},
+		{Index: 3, Text: "Describe integrations"},
+	}
+	result, err := ci.AskInterview(questions, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Questions) != 3 {
+		t.Fatalf("expected 3 answers, got %d", len(result.Questions))
+	}
+	if result.Questions[0].Answer != "OAuth" {
+		t.Errorf("expected 'OAuth', got %q", result.Questions[0].Answer)
+	}
+	if result.Questions[1].Answer != "yes" {
+		t.Errorf("expected 'yes', got %q", result.Questions[1].Answer)
+	}
+	if result.Questions[2].Answer != "Salesforce sync" {
+		t.Errorf("expected 'Salesforce sync', got %q", result.Questions[2].Answer)
+	}
+}
+
+func TestConsoleInterviewer_AskInterview_ByNumber(t *testing.T) {
+	input := "2\n"
+	var output bytes.Buffer
+	ci := &ConsoleInterviewer{Reader: strings.NewReader(input), Writer: &output}
+
+	questions := []Question{
+		{Index: 1, Text: "Auth?", Options: []string{"API key", "OAuth", "JWT"}},
+	}
+	result, err := ci.AskInterview(questions, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Questions[0].Answer != "OAuth" {
+		t.Errorf("expected 'OAuth', got %q", result.Questions[0].Answer)
+	}
+}
+
+func TestConsoleInterviewer_AskInterview_Skip(t *testing.T) {
+	input := "\n" // blank = skip
+	var output bytes.Buffer
+	ci := &ConsoleInterviewer{Reader: strings.NewReader(input), Writer: &output}
+
+	questions := []Question{
+		{Index: 1, Text: "Auth?", Options: []string{"API key", "OAuth"}},
+	}
+	result, err := ci.AskInterview(questions, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Questions[0].Answer != "" {
+		t.Errorf("expected empty (skipped), got %q", result.Questions[0].Answer)
+	}
+}
+
 func TestHumanHandler_InterviewMode_CustomKeys(t *testing.T) {
 	graph := pipeline.NewGraph("test")
 	graph.AddNode(&pipeline.Node{
