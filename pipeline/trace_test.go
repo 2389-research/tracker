@@ -665,3 +665,44 @@ func TestEngineTraceRecordsHandlerErrors(t *testing.T) {
 	// is returned. This is acceptable — the error path is captured via
 	// events. The trace is for successful (or soft-fail) pipeline runs.
 }
+
+func TestEngineResultUsageFromTraceStats(t *testing.T) {
+	g := NewGraph("usage_from_trace")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start", Attrs: make(map[string]string)})
+	g.AddNode(&Node{ID: "work", Shape: "box", Label: "Work", Attrs: make(map[string]string)})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare", Label: "End", Attrs: make(map[string]string)})
+	g.AddEdge(&Edge{From: "s", To: "work"})
+	g.AddEdge(&Edge{From: "work", To: "e"})
+
+	registry := newTestRegistry()
+	registry.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(_ context.Context, _ *Node, _ *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status: OutcomeSuccess,
+				Stats: &SessionStats{
+					Turns:        5,
+					InputTokens:  2000,
+					OutputTokens: 800,
+					TotalTokens:  2800,
+					CostUSD:      0.01,
+				},
+			}, nil
+		},
+	})
+
+	engine := NewEngine(g, registry)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine.Run failed: %v", err)
+	}
+	if result.Usage == nil {
+		t.Fatal("result.Usage is nil — token data not aggregated")
+	}
+	if result.Usage.TotalInputTokens != 2000 {
+		t.Errorf("TotalInputTokens = %d, want 2000", result.Usage.TotalInputTokens)
+	}
+	if result.Usage.SessionCount != 1 {
+		t.Errorf("SessionCount = %d, want 1", result.Usage.SessionCount)
+	}
+}
