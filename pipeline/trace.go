@@ -11,39 +11,39 @@ import (
 // SessionStats captures agent session metrics for a pipeline node.
 // Only populated for codergen (LLM agent) nodes.
 type SessionStats struct {
-	Turns          int
-	ToolCalls      map[string]int
-	TotalToolCalls int
-	FilesModified  []string
-	FilesCreated   []string
-	Compactions    int
-	LongestTurn    time.Duration
-	CacheHits      int
-	CacheMisses    int
-	InputTokens    int     `json:"input_tokens"`
-	OutputTokens   int     `json:"output_tokens"`
-	TotalTokens    int     `json:"total_tokens"`
-	CostUSD        float64 `json:"cost_usd"`
+	Turns          int            `json:"turns"`
+	ToolCalls      map[string]int `json:"tool_calls,omitempty"`
+	TotalToolCalls int            `json:"total_tool_calls"`
+	FilesModified  []string       `json:"files_modified,omitempty"`
+	FilesCreated   []string       `json:"files_created,omitempty"`
+	Compactions    int            `json:"compactions"`
+	LongestTurn    time.Duration  `json:"longest_turn"`
+	CacheHits      int            `json:"cache_hits"`
+	CacheMisses    int            `json:"cache_misses"`
+	InputTokens    int            `json:"input_tokens"`
+	OutputTokens   int            `json:"output_tokens"`
+	TotalTokens    int            `json:"total_tokens"`
+	CostUSD        float64        `json:"cost_usd"`
 }
 
 // TraceEntry records the execution of a single pipeline node.
 type TraceEntry struct {
-	Timestamp   time.Time
-	NodeID      string
-	HandlerName string
-	Status      string
-	Duration    time.Duration
-	EdgeTo      string
-	Error       string
-	Stats       *SessionStats // nil for non-agent nodes
+	Timestamp   time.Time     `json:"timestamp"`
+	NodeID      string        `json:"node_id"`
+	HandlerName string        `json:"handler_name"`
+	Status      string        `json:"status"`
+	Duration    time.Duration `json:"duration"`
+	EdgeTo      string        `json:"edge_to,omitempty"`
+	Error       string        `json:"error,omitempty"`
+	Stats       *SessionStats `json:"stats,omitempty"`
 }
 
 // Trace captures the full execution history of a pipeline run.
 type Trace struct {
-	RunID     string
-	Entries   []TraceEntry
-	StartTime time.Time
-	EndTime   time.Time
+	RunID     string       `json:"run_id"`
+	Entries   []TraceEntry `json:"entries"`
+	StartTime time.Time    `json:"start_time"`
+	EndTime   time.Time    `json:"end_time"`
 }
 
 // AddEntry appends a trace entry to the trace log.
