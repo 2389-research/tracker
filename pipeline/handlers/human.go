@@ -72,6 +72,30 @@ func (a *AutoApproveFreeformInterviewer) AskFreeform(prompt string) (string, err
 	return "auto-approved", nil
 }
 
+// AskInterview auto-approves all questions: picks the first option for select
+// questions, "yes" for yes/no questions, and "auto-approved" for open-ended ones.
+func (a *AutoApproveFreeformInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
+	answers := make([]InterviewAnswer, len(questions))
+	for i, q := range questions {
+		ans := InterviewAnswer{
+			ID:   fmt.Sprintf("q%d", q.Index),
+			Text: q.Text,
+		}
+		if len(q.Options) > 0 {
+			ans.Answer = q.Options[0]
+		} else if q.IsYesNo {
+			ans.Answer = "yes"
+		} else {
+			ans.Answer = "auto-approved"
+		}
+		answers[i] = ans
+	}
+	return &InterviewResult{Questions: answers}, nil
+}
+
+// Compile-time assertion: AutoApproveFreeformInterviewer implements InterviewInterviewer.
+var _ InterviewInterviewer = (*AutoApproveFreeformInterviewer)(nil)
+
 // CallbackInterviewer delegates question handling to a callback.
 type CallbackInterviewer struct {
 	AskFunc func(prompt string, choices []string, defaultChoice string) (string, error)
