@@ -127,7 +127,11 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 
 // AskInterview implements InterviewInterviewer by routing all questions through
 // the claude CLI subprocess and parsing the JSON response.
-// Provider errors hard-fail per CLAUDE.md. Parse failures use a plain text fallback.
+// Provider errors hard-fail per CLAUDE.md. Parse failures use a synthetic fallback
+// (first option / yes / "auto-approved") because the claude CLI often returns plain
+// text instead of JSON. This differs from AutopilotInterviewer.AskInterview which
+// hard-fails on double parse failure — the asymmetry is intentional because the CLI
+// subprocess is less reliable at structured output.
 func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
 	prompt := buildInterviewPrompt(questions)
 	systemPrompt := personaPrompts[a.persona]

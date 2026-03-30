@@ -4,6 +4,7 @@ package tui
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -180,20 +181,12 @@ func TestInterviewContentCancel(t *testing.T) {
 	ic := NewInterviewContent(questions, nil, ch, 80, 24)
 
 	ic.fields[0].selectCursor = 0 // OAuth
-	// Esc at top level cancels
+	// Esc at cursor=0 cancels (closes channel)
 	ic.Update(tea.KeyMsg{Type: tea.KeyEscape})
 
-	select {
-	case got := <-ch:
-		var result handlers.InterviewResult
-		if err := json.Unmarshal([]byte(got), &result); err != nil {
-			t.Fatalf("failed to unmarshal result: %v", err)
-		}
-		if !result.Canceled {
-			t.Error("expected Canceled=true")
-		}
-	default:
-		t.Error("expected value on reply channel after cancel")
+	_, ok := <-ch
+	if ok {
+		t.Error("expected channel to be closed on cancel")
 	}
 }
 
@@ -206,17 +199,9 @@ func TestInterviewContentCancelMethod(t *testing.T) {
 
 	ic.Cancel()
 
-	select {
-	case got := <-ch:
-		var result handlers.InterviewResult
-		if err := json.Unmarshal([]byte(got), &result); err != nil {
-			t.Fatalf("failed to unmarshal result: %v", err)
-		}
-		if !result.Canceled {
-			t.Error("expected Canceled=true from Cancel()")
-		}
-	default:
-		t.Error("expected value on reply channel after Cancel()")
+	_, ok := <-ch
+	if ok {
+		t.Error("expected channel to be closed by Cancel()")
 	}
 }
 
@@ -307,21 +292,8 @@ func TestInterviewContentViewNotEmpty(t *testing.T) {
 	}
 	// Should contain question text
 	for _, q := range questions {
-		if !contains(view, q.Text) {
+		if !strings.Contains(view, q.Text) {
 			t.Errorf("expected view to contain %q", q.Text)
 		}
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

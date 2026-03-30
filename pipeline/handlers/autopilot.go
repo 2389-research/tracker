@@ -363,6 +363,13 @@ func (a *AutopilotInterviewer) AskInterview(questions []Question, prev *Intervie
 
 // buildInterviewPrompt formats all questions into a single LLM prompt requesting
 // a JSON response with answers for each question.
+//
+// NOTE: Question text comes from upstream agent output and is embedded verbatim.
+// A compromised upstream agent could craft question text that attempts to
+// manipulate the autopilot's decision (prompt injection). This is an inherent
+// limitation of using LLM output as LLM input. For option-constrained questions,
+// the risk is mitigated by matchChoice validation. For open-ended questions,
+// no validation is applied to the answer content.
 func buildInterviewPrompt(questions []Question) string {
 	var b strings.Builder
 	b.WriteString("Answer each of the following questions. For questions with options in parentheses, pick one of the listed options.\n")

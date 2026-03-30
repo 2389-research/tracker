@@ -21,11 +21,17 @@ var (
 	reImperative = regexp.MustCompile(`(?i)^\s*[-*]?\s*(describe|explain|list|specify|provide|choose|select|confirm|rate|rank)\b`)
 	reOptions    = regexp.MustCompile(`\(([^)]+)\)\s*$`)
 	reFence      = regexp.MustCompile("^\\s*```")
+	reEmphasis   = regexp.MustCompile(`\*{1,2}([^*]+)\*{1,2}`)
+	reUnderline  = regexp.MustCompile(`_{1,2}([^_]+)_{1,2}`)
 )
+
+// maxQuestions is the upper bound on questions parsed from a single markdown
+// document. This prevents unbounded allocation from adversarial agent output.
+const maxQuestions = 100
 
 // ParseQuestions extracts questions from upstream agent markdown output.
 // It returns a slice of Question structs with 1-based indices.
-// Content inside fenced code blocks is skipped.
+// Content inside fenced code blocks is skipped. At most maxQuestions are returned.
 func ParseQuestions(markdown string) []Question {
 	if markdown == "" {
 		return nil
@@ -51,6 +57,9 @@ func ParseQuestions(markdown string) []Question {
 			continue
 		}
 
+		// Strip markdown emphasis from question text for clean labels.
+		text = stripEmphasis(text)
+
 		// Extract trailing options parenthetical
 		var options []string
 		if m := reOptions.FindStringSubmatch(text); m != nil {
@@ -66,6 +75,10 @@ func ParseQuestions(markdown string) []Question {
 			Options: options,
 			IsYesNo: isYesNoQuestion(options, text),
 		})
+
+		if index >= maxQuestions {
+			break
+		}
 	}
 
 	return questions
@@ -127,6 +140,14 @@ func splitOptions(raw string) []string {
 		}
 	}
 	return out
+}
+
+// stripEmphasis removes markdown bold/italic markers from text,
+// preserving code spans (backtick-wrapped content).
+func stripEmphasis(text string) string {
+	text = reEmphasis.ReplaceAllString(text, "$1")
+	text = reUnderline.ReplaceAllString(text, "$1")
+	return text
 }
 
 // isYesNoQuestion returns true when the options are exactly [yes, no]
