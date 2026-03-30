@@ -152,7 +152,7 @@ func TestBuildMarkdownSummary(t *testing.T) {
 	}
 
 	// Footer count
-	if !strings.Contains(out, "2 questions answered") {
+	if !strings.Contains(out, "2 of 2 questions answered") {
 		t.Errorf("missing footer count, got:\n%s", out)
 	}
 }
@@ -206,8 +206,8 @@ func TestBuildMarkdownSummary_Empty(t *testing.T) {
 		t.Errorf("missing header for empty result, got:\n%s", out)
 	}
 	// Zero count footer
-	if !strings.Contains(out, "0 questions answered") {
-		t.Errorf("expected '0 questions answered', got:\n%s", out)
+	if !strings.Contains(out, "0 of 0 questions answered") {
+		t.Errorf("expected '0 of 0 questions answered', got:\n%s", out)
 	}
 }
 

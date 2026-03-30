@@ -64,7 +64,7 @@ func DeserializeInterviewResult(s string) (InterviewResult, error) {
 //	Salesforce nightly sync...
 //
 //	---
-//	*2 questions answered*
+//	*2 of 2 questions answered*
 func BuildMarkdownSummary(r InterviewResult) string {
 	var b strings.Builder
 
@@ -83,7 +83,13 @@ func BuildMarkdownSummary(r InterviewResult) string {
 	}
 
 	b.WriteString("\n---\n")
-	b.WriteString(fmt.Sprintf("*%d questions answered*", len(r.Questions)))
+	answered := 0
+	for _, q := range r.Questions {
+		if q.Answer != "" {
+			answered++
+		}
+	}
+	b.WriteString(fmt.Sprintf("*%d of %d questions answered*", answered, len(r.Questions)))
 
 	if r.Canceled {
 		b.WriteString("\n*Interview was canceled.*")
