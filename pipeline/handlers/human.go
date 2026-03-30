@@ -220,6 +220,91 @@ func (c *ConsoleInterviewer) AskFreeform(prompt string) (string, error) {
 	return input, nil
 }
 
+// AskInterview presents structured interview questions to the user via the console.
+// For each question it prints the question text and, if applicable, numbered options.
+// The user can respond by name (case-insensitive) or numeric index. A blank response
+// skips the question. Previous answers are shown as a hint when provided.
+func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
+	answers := make([]InterviewAnswer, len(questions))
+	for i, q := range questions {
+		ans := InterviewAnswer{
+			ID:   fmt.Sprintf("q%d", q.Index),
+			Text: q.Text,
+		}
+
+		// Print the question
+		fmt.Fprintf(c.Writer, "\nQ%d: %s\n", q.Index, q.Text)
+
+		if len(q.Options) > 0 {
+			// Print numbered options
+			for j, opt := range q.Options {
+				fmt.Fprintf(c.Writer, "  %d) %s\n", j+1, opt)
+			}
+			fmt.Fprintf(c.Writer, "  %d) Other\n", len(q.Options)+1)
+
+			// Pre-fill hint
+			if prev != nil && i < len(prev.Questions) && prev.Questions[i].Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prev.Questions[i].Answer)
+			}
+			fmt.Fprintf(c.Writer, "Enter choice (name or number, blank to skip): ")
+
+			line, err := c.readLine()
+			if err == nil {
+				input := strings.TrimSpace(line)
+				if input != "" {
+					// Match by name (case-insensitive) or number
+					matched := false
+					for _, opt := range q.Options {
+						if strings.EqualFold(input, opt) {
+							ans.Answer = opt
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						var idx int
+						if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx >= 1 && idx <= len(q.Options) {
+							ans.Answer = q.Options[idx-1]
+						} else {
+							// Treat as "Other" freeform
+							ans.Answer = input
+						}
+					}
+				}
+			}
+		} else if q.IsYesNo {
+			if prev != nil && i < len(prev.Questions) && prev.Questions[i].Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prev.Questions[i].Answer)
+			}
+			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
+			line, err := c.readLine()
+			if err == nil {
+				input := strings.TrimSpace(strings.ToLower(line))
+				if input == "y" || input == "yes" {
+					ans.Answer = "yes"
+				} else if input == "n" || input == "no" {
+					ans.Answer = "no"
+				}
+			}
+		} else {
+			if prev != nil && i < len(prev.Questions) && prev.Questions[i].Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prev.Questions[i].Answer)
+			}
+			fmt.Fprintf(c.Writer, "> ")
+			line, err := c.readLine()
+			if err == nil {
+				ans.Answer = strings.TrimSpace(line)
+			}
+		}
+
+		answers[i] = ans
+	}
+	return &InterviewResult{Questions: answers}, nil
+}
+
+// Compile-time assertion: ConsoleInterviewer implements InterviewInterviewer.
+var _ InterviewInterviewer = (*ConsoleInterviewer)(nil)
+
 // HumanHandler implements the pipeline.Handler interface for human gate nodes
 // (hexagon shape). It collects outgoing edge labels as choices, presents them
 // via the configured Interviewer, and returns the selected label as the
