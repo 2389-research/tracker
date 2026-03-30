@@ -285,6 +285,15 @@ func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {
 	if cfg.Default != "" {
 		attrs["default_choice"] = cfg.Default
 	}
+	if cfg.QuestionsKey != "" {
+		attrs["questions_key"] = cfg.QuestionsKey
+	}
+	if cfg.AnswersKey != "" {
+		attrs["answers_key"] = cfg.AnswersKey
+	}
+	if cfg.Prompt != "" {
+		attrs["prompt"] = cfg.Prompt
+	}
 }
 
 func extractToolAttrs(cfg ir.ToolConfig, attrs map[string]string) {
