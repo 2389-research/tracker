@@ -327,9 +327,7 @@ func (e *Engine) handleRetry(ctx context.Context, s *runState, currentNodeID str
 		Message:   fmt.Sprintf("retries exhausted for node %q", currentNodeID),
 	})
 	s.trace.EndTime = time.Now()
-	result := e.failResult(s.runID, s.cp, s.pctx)
-	result.Trace = s.trace
-	result.Usage = s.trace.AggregateUsage()
+	result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 	return "", false, result, nil
 }
 
@@ -385,17 +383,13 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 	if unsatisfied {
 		s.trace.AddEntry(*traceEntry)
 		s.trace.EndTime = time.Now()
-		result := e.failResult(s.runID, s.cp, s.pctx)
-		result.Trace = s.trace
-		result.Usage = s.trace.AggregateUsage()
+		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 		return false, "", result
 	}
 	if outcomeStatus == OutcomeFail {
 		s.trace.AddEntry(*traceEntry)
 		s.trace.EndTime = time.Now()
-		result := e.failResult(s.runID, s.cp, s.pctx)
-		result.Trace = s.trace
-		result.Usage = s.trace.AggregateUsage()
+		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)

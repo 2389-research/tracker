@@ -363,7 +363,7 @@ func (e *Engine) emit(evt PipelineEvent) {
 }
 
 // failResult builds an EngineResult with fail status.
-func (e *Engine) failResult(runID string, cp *Checkpoint, pctx *PipelineContext) *EngineResult {
+func (e *Engine) failResult(runID string, cp *Checkpoint, pctx *PipelineContext, trace *Trace) *EngineResult {
 	e.emit(PipelineEvent{
 		Type:      EventPipelineFailed,
 		Timestamp: time.Now(),
@@ -375,6 +375,8 @@ func (e *Engine) failResult(runID string, cp *Checkpoint, pctx *PipelineContext)
 		Status:         OutcomeFail,
 		CompletedNodes: cp.CompletedNodes,
 		Context:        pctx.Snapshot(),
+		Trace:          trace,
+		Usage:          trace.AggregateUsage(),
 	}
 }
 
