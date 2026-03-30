@@ -14,6 +14,7 @@ import (
 var _ handlers.Interviewer = (*BubbleteaInterviewer)(nil)
 var _ handlers.FreeformInterviewer = (*BubbleteaInterviewer)(nil)
 var _ handlers.LabeledFreeformInterviewer = (*BubbleteaInterviewer)(nil)
+var _ handlers.InterviewInterviewer = (*BubbleteaInterviewer)(nil)
 
 // SendFunc is a function that sends a Bubbletea message to a running program.
 // In Mode 2, this is typically tea.Program.Send.
@@ -62,6 +63,14 @@ func (b *BubbleteaInterviewer) AskFreeformWithLabels(prompt string, labels []str
 	}
 	// Mode 1 fallback: just use regular freeform.
 	return b.askMode1Freeform(prompt)
+}
+
+// AskInterview presents a multi-field interview form and returns the structured result.
+func (b *BubbleteaInterviewer) AskInterview(questions []handlers.Question, prev *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+	if b.send != nil {
+		return b.askMode2Interview(questions, prev)
+	}
+	return b.askMode1Interview(questions, prev)
 }
 
 // ── Mode 2: delegate to persistent TUI program ──────────────────────────────
@@ -209,4 +218,67 @@ func (b *BubbleteaInterviewer) askMode1Freeform(prompt string) (string, error) {
 		return "", fmt.Errorf("gate cancelled by user")
 	}
 	return fr.result, nil
+}
+
+// ── Interview: Mode 2 and Mode 1 ────────────────────────────────────────────
+
+func (b *BubbleteaInterviewer) askMode2Interview(questions []handlers.Question, prev *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+	ch := make(chan string, 1)
+	b.send(MsgGateInterview{Questions: questions, Previous: prev, ReplyCh: ch})
+	reply, ok := <-ch
+	if !ok {
+		return &handlers.InterviewResult{Canceled: true}, nil
+	}
+	result, err := handlers.DeserializeInterviewResult(reply)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize interview reply: %w", err)
+	}
+	return &result, nil
+}
+
+// interviewRunner wraps InterviewContent in a tea.Model for inline Mode 1 programs.
+type interviewRunner struct {
+	content   *InterviewContent
+	replyCh   chan string
+	result    string
+	cancelled bool
+}
+
+func (r interviewRunner) Init() tea.Cmd { return nil }
+
+func (r interviewRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmd := r.content.Update(msg)
+	select {
+	case val, ok := <-r.replyCh:
+		if !ok {
+			r.cancelled = true
+			return r, tea.Quit
+		}
+		r.result = val
+		return r, tea.Quit
+	default:
+	}
+	return r, cmd
+}
+
+func (r interviewRunner) View() string { return r.content.View() }
+
+func (b *BubbleteaInterviewer) askMode1Interview(questions []handlers.Question, prev *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+	ch := make(chan string, 1)
+	content := NewInterviewContent(questions, prev, ch, 80, 24)
+	runner := interviewRunner{content: content, replyCh: ch}
+	p := tea.NewProgram(runner)
+	finalModel, err := p.Run()
+	if err != nil {
+		return nil, fmt.Errorf("TUI interview failed: %w", err)
+	}
+	ir := finalModel.(interviewRunner)
+	if ir.cancelled || ir.result == "" {
+		return &handlers.InterviewResult{Canceled: true}, nil
+	}
+	result, err := handlers.DeserializeInterviewResult(ir.result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize interview result: %w", err)
+	}
+	return &result, nil
 }
