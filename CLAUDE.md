@@ -21,6 +21,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - The adapter maps IR field names to tracker convention: `model` → `llm_model`, `provider` → `llm_provider`
 - Provider name is `gemini` not `google`
 - Variable expansion is single-pass — never re-scan resolved values
+- `ensureStartExitNodes` only assigns passthrough start/exit handlers to nodes without a `prompt` attribute. Agent nodes with prompts keep their codergen handler and execute real LLM calls.
 
 ### Parallel execution
 - The parallel handler dispatches branches from `parallel_targets` attr, NOT from outgoing graph edges
@@ -122,6 +123,21 @@ stored per-node for deterministic replay. But the restart counter is global
 across the entire run — a fix loop on milestone 1 consumes restart budget
 that milestone 10 needs. Use per-milestone circuit breakers in the pipeline
 design (e.g., attempt counter file).
+
+### Token usage flows through three layers
+The `llm.Usage` struct tracks per-API-call tokens. `agent.SessionResult.Usage`
+accumulates across turns within a session. `buildSessionStats()` in
+`pipeline/handlers/transcript.go` copies usage into `pipeline.SessionStats`
+on each trace entry. `Trace.AggregateUsage()` sums all trace entries into
+`UsageSummary`, which lands on `EngineResult.Usage`.
+
+For parallel execution, the parallel handler aggregates branch `SessionStats`
+into its own outcome so the trace entry for the parallel node carries the
+combined usage of all branches.
+
+The CLI summary in `cmd/tracker/summary.go` uses `llm.TokenTracker` for
+per-provider breakdowns (middleware-level) and `EngineResult.Usage` for
+trace-level aggregation. These are independent data sources.
 
 ### OpenAI returns errors inside 200 SSE streams
 The Responses API returns HTTP 200 and sends `error` / `response.failed`
