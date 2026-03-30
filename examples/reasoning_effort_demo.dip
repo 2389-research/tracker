@@ -5,45 +5,43 @@ workflow ReasoningEffortDemo
   goal: "Demonstrate reasoning_effort configuration in Dippin workflows"
   start: Start
   exit: Exit
-  
+
   defaults
     max_retries: 2
     fidelity: summary:medium
-  
+
   agent Start
     label: Start
-    prompt: Starting reasoning effort demonstration workflow.
-  
+
   agent Exit
     label: Exit
-    prompt: Workflow complete.
-  
+
   agent SimpleTask
     label: "Simple Task"
     reasoning_effort: low
     prompt:
       You are solving a simple arithmetic problem.
       What is 2 + 2?
-      
+
       Provide just the answer.
-  
+
   agent ComplexTask
     label: "Complex Task"
     reasoning_effort: high
     prompt:
       You are solving a complex problem that requires deep thinking.
-      
+
       A farmer has 15 sheep. All but 8 die. How many sheep are left?
-      
+
       Think through this carefully and explain your reasoning.
-  
+
   agent MediumTask
     label: "Medium Task"
     reasoning_effort: medium
     prompt:
       Explain the difference between a compiler and an interpreter.
       Provide a clear, concise explanation.
-  
+
   edges
     Start -> SimpleTask
     SimpleTask -> ComplexTask
