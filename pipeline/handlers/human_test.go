@@ -354,3 +354,312 @@ func TestManagerLoopHandlerIsRegistered(t *testing.T) {
 		t.Fatal("expected stack.manager_loop to be registered")
 	}
 }
+
+// --- Interview mode tests ---
+
+// mockInterviewInterviewer is a mock that implements InterviewInterviewer.
+// It embeds AutoApproveFreeformInterviewer so the freeform fallback path works.
+type mockInterviewInterviewer struct {
+	AutoApproveFreeformInterviewer
+	questionsReceived []Question
+	previousReceived  *InterviewResult
+	result            *InterviewResult
+	err               error
+}
+
+func (m *mockInterviewInterviewer) AskInterview(qs []Question, prev *InterviewResult) (*InterviewResult, error) {
+	m.questionsReceived = qs
+	m.previousReceived = prev
+	return m.result, m.err
+}
+
+func TestHumanHandler_InterviewMode_HappyPath(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. What auth model? (API key, OAuth)\n2. Describe integrations.")
+
+	expected := &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "What auth model?", Options: []string{"API key", "OAuth"}, Answer: "OAuth"},
+			{ID: "q2", Text: "Describe integrations.", Answer: "Salesforce nightly sync"},
+		},
+	}
+	mock := &mockInterviewInterviewer{result: expected}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+
+	// interview_answers key should contain JSON
+	jsonStr, ok := outcome.ContextUpdates["interview_answers"]
+	if !ok || jsonStr == "" {
+		t.Fatal("expected interview_answers in context updates")
+	}
+	got, err := DeserializeInterviewResult(jsonStr)
+	if err != nil {
+		t.Fatalf("failed to deserialize interview_answers: %v", err)
+	}
+	if len(got.Questions) != 2 {
+		t.Errorf("expected 2 questions in result, got %d", len(got.Questions))
+	}
+
+	// human_response key should contain markdown summary
+	summary, ok := outcome.ContextUpdates[pipeline.ContextKeyHumanResponse]
+	if !ok || summary == "" {
+		t.Fatal("expected human_response in context updates")
+	}
+	if !strings.Contains(summary, "## Interview Answers") {
+		t.Errorf("expected markdown summary header, got %q", summary)
+	}
+
+	// Questions should have been passed to the mock
+	if len(mock.questionsReceived) != 2 {
+		t.Errorf("expected 2 questions passed to AskInterview, got %d", len(mock.questionsReceived))
+	}
+}
+
+func TestHumanHandler_InterviewMode_ZeroQuestions(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Please clarify",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	// Text that does not parse as any questions
+	pctx.Set("interview_questions", "No further questions needed.")
+
+	mock := &mockInterviewInterviewer{}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+	// Falls back to freeform — human_response should be set (auto-approved)
+	resp, ok := outcome.ContextUpdates[pipeline.ContextKeyHumanResponse]
+	if !ok || resp == "" {
+		t.Fatal("expected human_response in context updates from freeform fallback")
+	}
+	// AskInterview should NOT have been called
+	if mock.questionsReceived != nil {
+		t.Error("expected AskInterview not to be called on zero-questions fallback")
+	}
+}
+
+func TestHumanHandler_InterviewMode_MissingQuestionsKey(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{"mode": "interview", "questions_key": "custom_key"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	// custom_key not set; last_response has valid questions
+	pctx.Set(pipeline.ContextKeyLastResponse, "1. What scale? (low, high)\n2. Describe deployment.")
+
+	expected := &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "What scale?", Options: []string{"low", "high"}, Answer: "high"},
+		},
+	}
+	mock := &mockInterviewInterviewer{result: expected}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+	// Should have parsed questions from last_response and called AskInterview
+	if len(mock.questionsReceived) == 0 {
+		t.Error("expected questions to be parsed from last_response fallback")
+	}
+}
+
+func TestHumanHandler_InterviewMode_RetryPreFill(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. What auth model? (API key, OAuth)")
+
+	// Store previous answers
+	prev := InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "What auth model?", Options: []string{"API key", "OAuth"}, Answer: "API key"},
+		},
+	}
+	pctx.Set("interview_answers", SerializeInterviewResult(prev))
+
+	final := &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "What auth model?", Options: []string{"API key", "OAuth"}, Answer: "OAuth"},
+		},
+	}
+	mock := &mockInterviewInterviewer{result: final}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Previous answers should have been passed for pre-fill
+	if mock.previousReceived == nil {
+		t.Fatal("expected previousReceived to be non-nil")
+	}
+	if len(mock.previousReceived.Questions) != 1 || mock.previousReceived.Questions[0].Answer != "API key" {
+		t.Errorf("unexpected previousReceived: %+v", mock.previousReceived)
+	}
+}
+
+func TestHumanHandler_InterviewMode_NotInterviewInterviewer(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. What auth model?")
+
+	// AutoApproveInterviewer does NOT implement InterviewInterviewer
+	h := NewHumanHandler(&AutoApproveInterviewer{}, graph)
+	node := graph.Nodes["gate"]
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected error when interviewer does not support interviews")
+	}
+	if !strings.Contains(err.Error(), "does not support interviews") {
+		t.Errorf("expected 'does not support interviews' in error, got %q", err.Error())
+	}
+}
+
+func TestHumanHandler_InterviewMode_Canceled(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. What auth model? (API key, OAuth)\n2. Scale?")
+
+	canceled := &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "What auth model?", Answer: "API key"},
+		},
+		Canceled: true,
+	}
+	mock := &mockInterviewInterviewer{result: canceled}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error (canceled should not error): %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success even on cancel, got %q", outcome.Status)
+	}
+	// Partial answers should still be stored
+	jsonStr, ok := outcome.ContextUpdates["interview_answers"]
+	if !ok || jsonStr == "" {
+		t.Fatal("expected interview_answers to be stored even when canceled")
+	}
+	result, err := DeserializeInterviewResult(jsonStr)
+	if err != nil {
+		t.Fatalf("failed to deserialize: %v", err)
+	}
+	if !result.Canceled {
+		t.Error("expected Canceled=true in stored result")
+	}
+}
+
+func TestHumanHandler_InterviewMode_CustomKeys(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{
+			"mode":          "interview",
+			"questions_key": "my_qs",
+			"answers_key":   "my_ans",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("my_qs", "1. What deployment target? (k8s, VM)")
+
+	expected := &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "What deployment target?", Options: []string{"k8s", "VM"}, Answer: "k8s"},
+		},
+	}
+	mock := &mockInterviewInterviewer{result: expected}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+
+	// Answers must be written under "my_ans"
+	_, ok := outcome.ContextUpdates["my_ans"]
+	if !ok {
+		t.Error("expected answers written to 'my_ans' key")
+	}
+	// Default key should NOT be set
+	if _, ok := outcome.ContextUpdates["interview_answers"]; ok {
+		t.Error("expected default 'interview_answers' key NOT to be set when custom answers_key is specified")
+	}
+}
