@@ -91,9 +91,11 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	// Report token usage from backends that bypass the LLM client middleware
 	// (e.g., claude-code subprocess). Native backend usage flows through the
-	// TokenTracker middleware automatically.
-	if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
-		h.tokenTracker.AddUsage("claude-code", sessResult.Usage)
+	// TokenTracker middleware automatically — skip to avoid double-counting.
+	if _, isClaudeCode := backend.(*ClaudeCodeBackend); isClaudeCode {
+		if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
+			h.tokenTracker.AddUsage("claude-code", sessResult.Usage)
+		}
 	}
 
 	if runErr != nil {
