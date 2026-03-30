@@ -90,6 +90,8 @@ func (m *Modal) propagateSize() {
 		c.SetSize(m.width, m.height)
 	case *ReviewHybridContent:
 		c.SetSize(m.width, m.height)
+	case *InterviewContent:
+		c.SetSize(m.width, m.height)
 	}
 }
 
