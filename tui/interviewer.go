@@ -247,7 +247,7 @@ type interviewRunner struct {
 func (r interviewRunner) Init() tea.Cmd { return nil }
 
 func (r interviewRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	cmd := r.content.Update(msg)
+	r.content.Update(msg)
 	select {
 	case val, ok := <-r.replyCh:
 		if !ok {
@@ -258,7 +258,7 @@ func (r interviewRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, tea.Quit
 	default:
 	}
-	return r, cmd
+	return r, nil
 }
 
 func (r interviewRunner) View() string { return r.content.View() }

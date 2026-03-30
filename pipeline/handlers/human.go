@@ -225,12 +225,21 @@ func (c *ConsoleInterviewer) AskFreeform(prompt string) (string, error) {
 // The user can respond by name (case-insensitive) or numeric index. A blank response
 // skips the question. Previous answers are shown as a hint when provided.
 func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
+	// Build ID-based lookup for previous answers.
+	prevByID := make(map[string]InterviewAnswer)
+	if prev != nil {
+		for _, a := range prev.Questions {
+			prevByID[a.ID] = a
+		}
+	}
+
 	answers := make([]InterviewAnswer, len(questions))
 	for i, q := range questions {
 		ans := InterviewAnswer{
 			ID:   fmt.Sprintf("q%d", q.Index),
 			Text: q.Text,
 		}
+		prevAns := prevByID[ans.ID]
 
 		// Print the question
 		fmt.Fprintf(c.Writer, "\nQ%d: %s\n", q.Index, q.Text)
@@ -243,8 +252,8 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 			fmt.Fprintf(c.Writer, "  %d) Other\n", len(q.Options)+1)
 
 			// Pre-fill hint
-			if prev != nil && i < len(prev.Questions) && prev.Questions[i].Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prev.Questions[i].Answer)
+			if prevAns.Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
 			}
 			fmt.Fprintf(c.Writer, "Enter choice (name or number, blank to skip): ")
 
@@ -273,8 +282,8 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 				}
 			}
 		} else if q.IsYesNo {
-			if prev != nil && i < len(prev.Questions) && prev.Questions[i].Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prev.Questions[i].Answer)
+			if prevAns.Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
 			}
 			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
 			line, err := c.readLine()
@@ -287,8 +296,8 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 				}
 			}
 		} else {
-			if prev != nil && i < len(prev.Questions) && prev.Questions[i].Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prev.Questions[i].Answer)
+			if prevAns.Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
 			}
 			fmt.Fprintf(c.Writer, "> ")
 			line, err := c.readLine()
@@ -428,14 +437,14 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=interview but interviewer does not support interviews", node.ID)
 	}
 
-	// Read config from node attrs (with defaults per spec)
+	// Read config from node attrs (with defaults from pipeline constants)
 	questionsKey := node.Attrs["questions_key"]
 	if questionsKey == "" {
-		questionsKey = "interview_questions"
+		questionsKey = pipeline.ContextKeyInterviewQuestions
 	}
 	answersKey := node.Attrs["answers_key"]
 	if answersKey == "" {
-		answersKey = "interview_answers"
+		answersKey = pipeline.ContextKeyInterviewAnswers
 	}
 
 	// Read upstream markdown from context

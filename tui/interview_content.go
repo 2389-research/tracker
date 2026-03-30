@@ -214,7 +214,14 @@ func (ic *InterviewContent) collectAnswers() handlers.InterviewResult {
 
 		answers[i] = ans
 	}
-	return handlers.InterviewResult{Questions: answers}
+	result := handlers.InterviewResult{Questions: answers}
+	for _, a := range answers {
+		if a.Answer == "" {
+			result.Incomplete = true
+			break
+		}
+	}
+	return result
 }
 
 // Update handles keyboard input for the interview form.
@@ -336,6 +343,10 @@ func (ic *InterviewContent) updateSelectField(km tea.KeyMsg, f *interviewField) 
 		// Confirm selection and move to next question.
 		return ic.moveCursor(1)
 	case tea.KeyEscape:
+		// Move to previous question; cancel only if at the first question.
+		if ic.cursor > 0 {
+			return ic.moveCursor(-1)
+		}
 		return ic.cancel()
 	}
 
@@ -374,6 +385,9 @@ func (ic *InterviewContent) updateConfirmField(km tea.KeyMsg, f *interviewField)
 		}
 		return nil
 	case tea.KeyEscape:
+		if ic.cursor > 0 {
+			return ic.moveCursor(-1)
+		}
 		return ic.cancel()
 	}
 
@@ -412,6 +426,9 @@ func (ic *InterviewContent) updateTextField(km tea.KeyMsg, f *interviewField) te
 		f.textInput.Focus()
 		return nil
 	case tea.KeyEscape:
+		if ic.cursor > 0 {
+			return ic.moveCursor(-1)
+		}
 		return ic.cancel()
 	}
 
@@ -485,19 +502,20 @@ func (ic *InterviewContent) submit() tea.Cmd {
 	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
-// Cancel implements Cancellable. Sends partial results with Canceled=true.
+// Cancel implements Cancellable. Closes the reply channel to signal cancellation,
+// consistent with all other ModalContent types (ChoiceContent, FreeformContent, etc.).
 func (ic *InterviewContent) Cancel() { ic.cancelForm() }
 
-// cancelForm sends partial results with Canceled flag and closes the channel.
+// cancelForm closes the reply channel to signal cancellation.
+// The receiver (askMode2Interview) detects the closed channel via the ok flag
+// and returns InterviewResult{Canceled: true}.
 func (ic *InterviewContent) cancelForm() tea.Cmd {
 	if ic.done {
 		return nil
 	}
 	ic.done = true
-	result := ic.collectAnswers()
-	result.Canceled = true
 	if ic.replyCh != nil {
-		ic.replyCh <- handlers.SerializeInterviewResult(result)
+		close(ic.replyCh)
 		ic.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
@@ -571,6 +589,9 @@ func (ic *InterviewContent) View() string {
 				sb.WriteString("\n")
 				sb.WriteString(f.elaboration.View())
 				sb.WriteString("\n")
+			} else if isFocused && !ic.inTextarea {
+				sb.WriteString(Styles.Muted.Render("  Tab → Add details (optional)"))
+				sb.WriteString("\n")
 			}
 
 		} else if f.question.IsYesNo {
@@ -596,6 +617,9 @@ func (ic *InterviewContent) View() string {
 				sb.WriteString("\n")
 				sb.WriteString(f.elaboration.View())
 				sb.WriteString("\n")
+			} else if isFocused && !ic.inTextarea {
+				sb.WriteString(Styles.Muted.Render("  Tab → Add details (optional)"))
+				sb.WriteString("\n")
 			}
 
 		} else {
@@ -619,7 +643,7 @@ func (ic *InterviewContent) View() string {
 	// Status line.
 	totalPages := ic.totalPages()
 	pageInfo := fmt.Sprintf("Page %d/%d", ic.page+1, totalPages)
-	hint := fmt.Sprintf("%s — ↑↓ navigate, Ctrl+S submit, Esc cancel", pageInfo)
+	hint := fmt.Sprintf("%s — ↑↓ navigate, Tab elaborate, Ctrl+S submit, Esc back/cancel", pageInfo)
 	if ic.inTextarea {
 		hint = fmt.Sprintf("%s — type answer, Esc back to navigation, Ctrl+S submit", pageInfo)
 	}

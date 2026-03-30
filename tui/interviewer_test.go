@@ -4,7 +4,6 @@ package tui
 
 import (
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -39,8 +38,8 @@ func TestInterviewerMode2SendsGateChoice(t *testing.T) {
 }
 
 func TestInterviewerMode2SendsGateInterview(t *testing.T) {
-	var sent tea.Msg
-	bi := NewBubbleteaInterviewer(func(msg tea.Msg) { sent = msg })
+	msgCh := make(chan tea.Msg, 1)
+	bi := NewBubbleteaInterviewer(func(msg tea.Msg) { msgCh <- msg })
 
 	questions := []handlers.Question{
 		{Index: 1, Text: "Test?", Options: []string{"a", "b"}},
@@ -55,13 +54,11 @@ func TestInterviewerMode2SendsGateInterview(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait a moment for the message to be sent
-	time.Sleep(10 * time.Millisecond)
-
-	// Verify the message was sent
-	msg, ok := sent.(MsgGateInterview)
+	// Block until the message is sent (no sleep needed)
+	sentMsg := <-msgCh
+	msg, ok := sentMsg.(MsgGateInterview)
 	if !ok {
-		t.Fatalf("expected MsgGateInterview, got %T", sent)
+		t.Fatalf("expected MsgGateInterview, got %T", sentMsg)
 	}
 	if len(msg.Questions) != 1 {
 		t.Fatalf("expected 1 question, got %d", len(msg.Questions))
