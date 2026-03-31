@@ -546,6 +546,79 @@ func TestParallelHandlerStatsInJSON(t *testing.T) {
 	}
 }
 
+func TestParallelHandlerCapturesSideEffectWrites(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a"}, "stub_sideeffect")
+	registry := pipeline.NewHandlerRegistry()
+
+	// Handler writes via pctx.Set() only — does NOT return ContextUpdates.
+	stub := &stubHandler{
+		name: "stub_sideeffect",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			pctx.Set("side_key", "side_value")
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	}
+	registry.Register(stub)
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, _ := pctx.Get("parallel.results")
+	var results []ParallelResult
+	if err := json.Unmarshal([]byte(raw), &results); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ContextUpdates["side_key"] != "side_value" {
+		t.Errorf("side-effect write not captured: got %v", results[0].ContextUpdates)
+	}
+}
+
+func TestParallelHandlerExplicitOverridesSideEffects(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a"}, "stub_both")
+	registry := pipeline.NewHandlerRegistry()
+
+	// Handler writes via both pctx.Set() and ContextUpdates for the same key.
+	stub := &stubHandler{
+		name: "stub_both",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			pctx.Set("key", "from_set")
+			return pipeline.Outcome{
+				Status:         pipeline.OutcomeSuccess,
+				ContextUpdates: map[string]string{"key": "from_outcome"},
+			}, nil
+		},
+	}
+	registry.Register(stub)
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, _ := pctx.Get("parallel.results")
+	var results []ParallelResult
+	if err := json.Unmarshal([]byte(raw), &results); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Explicit ContextUpdates should win over side-effect writes.
+	if results[0].ContextUpdates["key"] != "from_outcome" {
+		t.Errorf("expected explicit ContextUpdates to win, got %q", results[0].ContextUpdates["key"])
+	}
+}
+
 func TestParallelHandlerPreservesInternalArtifactDir(t *testing.T) {
 	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_internal")
 	registry := pipeline.NewHandlerRegistry()

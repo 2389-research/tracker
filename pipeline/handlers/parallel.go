@@ -182,7 +182,15 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 	outcome, err := h.registry.Execute(ctx, tn, branchCtx)
 
-	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: outcome.ContextUpdates, Stats: outcome.Stats}
+	// Auto-capture any pctx.Set() calls the handler made directly,
+	// not just values returned via Outcome.ContextUpdates. This prevents
+	// silent data loss when handlers write to the context as a side effect.
+	mergedUpdates := branchCtx.DiffFrom(snapshot)
+	for k, v := range outcome.ContextUpdates {
+		mergedUpdates[k] = v // explicit ContextUpdates take priority
+	}
+
+	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
 	if err != nil {
 		pr.Status = pipeline.OutcomeFail
 		pr.Error = err.Error()
