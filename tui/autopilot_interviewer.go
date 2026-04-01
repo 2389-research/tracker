@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/2389-research/tracker/pipeline/handlers"
@@ -86,8 +87,16 @@ func (a *AutopilotTUIInterviewer) AskInterview(questions []handlers.Question, pr
 // flashDecision sends the decision to the TUI for brief display, then
 // auto-closes after a short delay. The pipeline handler already has the
 // decision — this is purely visual feedback.
+//
+// Channel safety: ch is buffered(1), so the non-blocking send (select with
+// default) in the goroutine is safe — the main goroutine is the only reader
+// and blocks on <-ch. When the main goroutine receives from ch (either from
+// the timer goroutine or a user action), it calls close(done) to signal the
+// goroutine to exit. The goroutine's select on <-done ensures it never
+// outlives the caller.
 func (a *AutopilotTUIInterviewer) flashDecision(prompt, decision, reasoning string, labels []string, defaultLabel string) {
 	ch := make(chan string, 1)
+	done := make(chan struct{})
 	a.send(MsgGateAutopilot{
 		Prompt:    prompt,
 		Decision:  decision,
@@ -97,16 +106,26 @@ func (a *AutopilotTUIInterviewer) flashDecision(prompt, decision, reasoning stri
 		ReplyCh:   ch,
 	})
 	// Give the TUI time to render the decision, then auto-close.
-	// Use a goroutine so we don't block the pipeline handler.
 	go func() {
-		time.Sleep(2 * time.Second)
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "autopilot flash goroutine recovered: %v\n", r)
+			}
+		}()
 		select {
-		case ch <- decision:
-		default:
+		case <-time.After(2 * time.Second):
+			select {
+			case ch <- decision:
+			default:
+			}
+		case <-done:
+			// Caller unblocked (user pressed Enter or Ctrl+C) — exit immediately.
+			return
 		}
 	}()
 	// Wait for the reply (either from timer or user pressing Enter).
 	<-ch
+	close(done) // Signal the goroutine to exit.
 	// Dismiss the modal.
 	a.send(MsgModalDismiss{})
 	// Small gap so the dismiss renders before the next node starts.

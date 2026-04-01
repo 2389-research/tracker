@@ -234,6 +234,7 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 	}
 
 	answers := make([]InterviewAnswer, len(questions))
+	canceled := false
 	for i, q := range questions {
 		ans := InterviewAnswer{
 			ID:   fmt.Sprintf("q%d", q.Index),
@@ -258,26 +259,36 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 			fmt.Fprintf(c.Writer, "Enter choice (name or number, blank to skip): ")
 
 			line, err := c.readLine()
-			if err == nil {
-				input := strings.TrimSpace(line)
-				if input != "" {
-					// Match by name (case-insensitive) or number
-					matched := false
-					for _, opt := range q.Options {
-						if strings.EqualFold(input, opt) {
-							ans.Answer = opt
-							matched = true
-							break
-						}
+			if err != nil {
+				canceled = true
+				answers[i] = ans
+				// Fill remaining questions with empty answers.
+				for j := i + 1; j < len(questions); j++ {
+					answers[j] = InterviewAnswer{
+						ID:   fmt.Sprintf("q%d", questions[j].Index),
+						Text: questions[j].Text,
 					}
-					if !matched {
-						var idx int
-						if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx >= 1 && idx <= len(q.Options) {
-							ans.Answer = q.Options[idx-1]
-						} else {
-							// Treat as "Other" freeform
-							ans.Answer = input
-						}
+				}
+				break
+			}
+			input := strings.TrimSpace(line)
+			if input != "" {
+				// Match by name (case-insensitive) or number
+				matched := false
+				for _, opt := range q.Options {
+					if strings.EqualFold(input, opt) {
+						ans.Answer = opt
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					var idx int
+					if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx >= 1 && idx <= len(q.Options) {
+						ans.Answer = q.Options[idx-1]
+					} else {
+						// Treat as "Other" freeform
+						ans.Answer = input
 					}
 				}
 			}
@@ -287,13 +298,22 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 			}
 			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
 			line, err := c.readLine()
-			if err == nil {
-				input := strings.TrimSpace(strings.ToLower(line))
-				if input == "y" || input == "yes" {
-					ans.Answer = "yes"
-				} else if input == "n" || input == "no" {
-					ans.Answer = "no"
+			if err != nil {
+				canceled = true
+				answers[i] = ans
+				for j := i + 1; j < len(questions); j++ {
+					answers[j] = InterviewAnswer{
+						ID:   fmt.Sprintf("q%d", questions[j].Index),
+						Text: questions[j].Text,
+					}
 				}
+				break
+			}
+			input := strings.TrimSpace(strings.ToLower(line))
+			if input == "y" || input == "yes" {
+				ans.Answer = "yes"
+			} else if input == "n" || input == "no" {
+				ans.Answer = "no"
 			}
 		} else {
 			if prevAns.Answer != "" {
@@ -301,14 +321,23 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 			}
 			fmt.Fprintf(c.Writer, "> ")
 			line, err := c.readLine()
-			if err == nil {
-				ans.Answer = strings.TrimSpace(line)
+			if err != nil {
+				canceled = true
+				answers[i] = ans
+				for j := i + 1; j < len(questions); j++ {
+					answers[j] = InterviewAnswer{
+						ID:   fmt.Sprintf("q%d", questions[j].Index),
+						Text: questions[j].Text,
+					}
+				}
+				break
 			}
+			ans.Answer = strings.TrimSpace(line)
 		}
 
 		answers[i] = ans
 	}
-	return &InterviewResult{Questions: answers}, nil
+	return &InterviewResult{Questions: answers, Canceled: canceled}, nil
 }
 
 // Compile-time assertion: ConsoleInterviewer implements InterviewInterviewer.
@@ -447,14 +476,17 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 		answersKey = pipeline.ContextKeyInterviewAnswers
 	}
 
-	// Read upstream markdown from context
-	markdown, _ := pctx.Get(questionsKey)
-	if markdown == "" {
-		markdown, _ = pctx.Get(pipeline.ContextKeyLastResponse)
+	// Read upstream agent output from context
+	agentOutput, _ := pctx.Get(questionsKey)
+	if agentOutput == "" {
+		agentOutput, _ = pctx.Get(pipeline.ContextKeyLastResponse)
 	}
 
-	// Parse questions
-	questions := ParseQuestions(markdown)
+	// Try structured JSON first, fall back to markdown heuristic parsing.
+	questions, jsonErr := ParseStructuredQuestions(agentOutput)
+	if jsonErr != nil {
+		questions = ParseQuestions(agentOutput)
+	}
 
 	// 0 questions or malformed → fall back to freeform with prompt
 	if len(questions) == 0 {
@@ -465,8 +497,8 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 		if prompt == "" {
 			prompt = "No questions were generated. Please provide any input."
 		}
-		if markdown != "" {
-			prompt = prompt + "\n\n---\n" + markdown
+		if agentOutput != "" {
+			prompt = prompt + "\n\n---\n" + agentOutput
 		}
 		return h.executeFreeform(node, prompt)
 	}
@@ -489,8 +521,13 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 	jsonStr := SerializeInterviewResult(*result)
 	summary := BuildMarkdownSummary(*result)
 
+	status := pipeline.OutcomeSuccess
+	if result.Canceled {
+		status = pipeline.OutcomeFail
+	}
+
 	return pipeline.Outcome{
-		Status: pipeline.OutcomeSuccess,
+		Status: status,
 		ContextUpdates: map[string]string{
 			answersKey:                       jsonStr,
 			pipeline.ContextKeyHumanResponse: summary,

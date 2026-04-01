@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Interview mode for human gates**: New `mode: interview` on human nodes enables structured multi-field form collection. An upstream agent generates markdown questions; the interview handler parses them into individual fields (select with inline options, yes/no confirm, freeform textarea). Answers are stored as JSON at a configurable context key and as a markdown summary at `human_response`. Supports retry pre-fill, cancellation with partial answers, and 0-question fallback to freeform.
+- **Interview question parser**: `ParseQuestions()` extracts structured questions from agent markdown — numbered items, bulleted questions, imperative prompts. Trailing parentheticals like `(option1, option2)` become select field options. Yes/no patterns auto-detected. Fenced code blocks skipped.
+- **TUI interview modal**: Fullscreen one-question-at-a-time form with progress bar, answered summary, selection feedback (filled dot + checkmark), elaboration textareas (Tab), submit (Ctrl+S), cancel (Esc), and PgUp/PgDn jump navigation. Pre-fills from previous answers on retry.
+- **Interview autopilot support**: `AutopilotInterviewer`, `ClaudeCodeAutopilotInterviewer`, and `AutopilotTUIInterviewer` all implement `AskInterview`. LLM-backed autopilot sends all questions in a single prompt, parses JSON response, retries once on parse failure, hard-fails on double failure.
+- **Console interview support**: `ConsoleInterviewer.AskInterview` presents questions one at a time with option selection by name or number, blank-line skip, and previous-answer hints on retry.
+- **`deep_review` built-in workflow**: Interview-driven codebase review pipeline with 3 structured interview gates (scope, findings, priority), parallel analysis (correctness, security, design), and remediation plan generation. Run with `tracker deep_review`.
+- **`interview-loop.dip` subgraph**: Reusable interview loop pattern (ask → answer → assess → loop) in `examples/subgraphs/`. Parameterized with `topic` and `focus` for embedding via `subgraph` nodes.
+- **Structured JSON question format**: `ParseStructuredQuestions()` parses JSON questions from agent output with validation. Handles code fences, preamble text, and extracts `{"questions": [...]}` objects. Falls back to markdown heuristic parsing. "Other" option variants are auto-filtered since the UI always provides its own.
+- **One-question-at-a-time TUI**: Interview form shows one question with full context, progress bar, answered summary, and remaining count. Selection feedback with filled dot and checkmark. Enter confirms and advances.
+- **`response_format` support**: Agent nodes can set `response_format: json_object` or `response_format: json_schema` with `response_schema:` to force structured output at the LLM API level. Plumbed from `.dip` files through dippin IR → adapter → codergen → agent session → all three providers (Anthropic, OpenAI, Gemini).
+- **Agent `params` map**: Generic key-value pass-through from `.dip` files via `AgentConfig.Params` (dippin-lang v0.16.0). Enables runtime features like `backend: claude-code` without IR schema changes.
+- **Empty API response diagnostics**: Anthropic adapter logs raw response body, HTTP status, stop_reason, model, and request-id when API returns 0 output tokens. Session layer retries completely empty responses with diagnostic event emission.
 - **EngineResult.Usage**: Pipeline runs now expose aggregated token counts and cost via `EngineResult.Usage` (`*UsageSummary`). Downstream consumers can read `TotalInputTokens`, `TotalOutputTokens`, `TotalTokens`, `TotalCostUSD`, and `SessionCount` directly from the result.
 - **Per-node token tracking in SessionStats**: `InputTokens`, `OutputTokens`, `TotalTokens`, `CostUSD`, `ReasoningTokens`, `CacheReadTokens`, `CacheWriteTokens` fields on `SessionStats` in trace entries.
 - **Parallel branch stats aggregation**: Parallel handler now collects and aggregates `SessionStats` from branch outcomes into its own trace entry.
@@ -16,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Interview cancellation returns OutcomeFail**: Canceled interviews now return `fail` status instead of `success`, allowing pipeline edges to route canceled interviews differently from completed ones.
+- **ClaudeCode autopilot hard-fails on parse error**: `ClaudeCodeAutopilotInterviewer.AskInterview` now retries once on JSON parse failure and hard-fails on double failure, matching the native autopilot behavior. Previously silently fell back to first-option defaults.
+- **SerializeInterviewResult enforced**: Panics on marshal failure instead of silently returning empty string, preventing downstream deserialization corruption.
+- **Goroutine leak in autopilot flash**: `flashDecision` goroutine now exits immediately when the caller unblocks via a `done` channel, instead of sleeping for the full 2-second timer. Includes `defer/recover` for panic safety per CLAUDE.md.
+- **Mode 1 tea.Cmd propagation**: All three TUI runner types (choice, freeform, interview) now propagate `tea.Cmd` from `content.Update()` instead of discarding it.
+- **Context leak in retry loop**: `ClaudeCodeAutopilotInterviewer.AskInterview` uses explicit `cancel()` calls instead of `defer cancel()` inside a for loop, preventing context timer goroutine leaks on retry.
+- **Empty API response guard**: Agent sessions that receive completely empty responses (0 content parts, 0 output tokens, no prior tool calls) now retry with a continuation prompt instead of silently succeeding with empty `last_response`. Codergen handler also fails the node when the session produces empty text with zero tool calls.
 - **Start/exit agent nodes preserved**: `ensureStartExitNodes` no longer overwrites the `codergen` handler on agent nodes designated as start or exit. Agent start/exit nodes now execute their LLM prompts instead of being silently replaced with no-op passthroughs. (Closes #42)
 - **DecisionDetail token mapping**: `TokenInput`/`TokenOutput` in pipeline events now correctly map from `InputTokens`/`OutputTokens` instead of `CacheHits`/`CacheMisses`.
 - **Native backend double-counting**: Token usage from the native backend is no longer reported twice to the `TokenTracker`.

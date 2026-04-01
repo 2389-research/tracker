@@ -48,6 +48,7 @@ func (s *Session) doLLMCall(ctx context.Context, turn int) (*llm.Response, error
 		Messages:        s.messages,
 		Tools:           s.registry.Definitions(),
 		ReasoningEffort: s.config.ReasoningEffort,
+		ResponseFormat:  s.buildResponseFormat(),
 		TraceObservers: []llm.TraceObserver{
 			llm.TraceObserverFunc(func(traceEvt llm.TraceEvent) {
 				s.emitLLMTraceEvent(turn, traceEvt)
@@ -64,6 +65,19 @@ func (s *Session) doLLMCall(ctx context.Context, turn int) (*llm.Response, error
 	})
 
 	return s.client.Complete(ctx, req)
+}
+
+// buildResponseFormat creates an llm.ResponseFormat from session config.
+func (s *Session) buildResponseFormat() *llm.ResponseFormat {
+	if s.config.ResponseFormat == "" {
+		return nil
+	}
+	rf := &llm.ResponseFormat{Type: s.config.ResponseFormat}
+	if s.config.ResponseFormat == "json_schema" && s.config.ResponseSchema != "" {
+		rf.JSONSchema = []byte(s.config.ResponseSchema)
+		rf.Strict = true
+	}
+	return rf
 }
 
 // updateUsage updates result usage, context window tracking, and compaction.
@@ -133,6 +147,7 @@ func (s *Session) handleNoToolCalls(resp *llm.Response, turn int, turnStart time
 	}
 
 	text := resp.Text()
+
 	if text != "" {
 		s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
 	}

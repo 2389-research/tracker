@@ -3,6 +3,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -11,8 +13,138 @@ import (
 type Question struct {
 	Index   int      // 1-based ordinal
 	Text    string   // Question text (markdown stripped for labels, code spans preserved)
+	Context string   // Optional context/rationale for the question
 	Options []string // Inline options from trailing parentheticals; empty for open-ended
 	IsYesNo bool     // Detected yes/no pattern
+}
+
+// structuredQuestions is the JSON schema agents should output for interview questions.
+type structuredQuestions struct {
+	Questions []structuredQuestion `json:"questions"`
+}
+
+type structuredQuestion struct {
+	Text    string   `json:"text"`
+	Context string   `json:"context,omitempty"`
+	Options []string `json:"options,omitempty"`
+}
+
+// ParseStructuredQuestions attempts to parse JSON-formatted questions from agent output.
+// Returns parsed questions and nil error on success. Returns nil and an error if the
+// input is not valid structured JSON or fails validation.
+//
+// Expected JSON format:
+//
+//	{"questions": [{"text": "Auth model?", "context": "We found 3 auth patterns", "options": ["API key", "OAuth"]}]}
+//
+// The JSON may be wrapped in markdown code fences (```json ... ```).
+func ParseStructuredQuestions(input string) ([]Question, error) {
+	if input == "" {
+		return nil, fmt.Errorf("empty input")
+	}
+
+	// Strip markdown code fences if present.
+	jsonStr := extractJSON(input)
+	if jsonStr == "" {
+		return nil, fmt.Errorf("no JSON object found in input")
+	}
+
+	var sq structuredQuestions
+	if err := json.Unmarshal([]byte(jsonStr), &sq); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+
+	if len(sq.Questions) == 0 {
+		return nil, fmt.Errorf("questions array is empty")
+	}
+	if len(sq.Questions) > maxQuestions {
+		return nil, fmt.Errorf("too many questions (%d > %d)", len(sq.Questions), maxQuestions)
+	}
+
+	// Validate and convert.
+	questions := make([]Question, 0, len(sq.Questions))
+	for i, sq := range sq.Questions {
+		text := strings.TrimSpace(sq.Text)
+		if text == "" {
+			return nil, fmt.Errorf("question %d has empty text", i+1)
+		}
+		filtered := filterOtherOption(sq.Options)
+		q := Question{
+			Index:   i + 1,
+			Text:    text,
+			Context: strings.TrimSpace(sq.Context),
+			Options: filtered,
+			IsYesNo: isYesNoQuestion(filtered, text),
+		}
+		questions = append(questions, q)
+	}
+
+	return questions, nil
+}
+
+// extractJSON finds the first complete JSON object in text using bracket-depth
+// counting. This correctly handles multiple JSON objects in the text (returns
+// only the first) and ignores braces inside string literals.
+func extractJSON(text string) string {
+	// Try stripping code fences first.
+	stripped := stripCodeFences(text)
+
+	start := strings.Index(stripped, "{")
+	if start == -1 {
+		return ""
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := start; i < len(stripped); i++ {
+		ch := stripped[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				return stripped[start : i+1]
+			}
+		}
+	}
+
+	return ""
+}
+
+// stripCodeFences removes ```json ... ``` wrappers from agent output.
+func stripCodeFences(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			continue // skip fence markers
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 var (
@@ -69,6 +201,7 @@ func ParseQuestions(markdown string) []Question {
 		}
 
 		index++
+		options = filterOtherOption(options)
 		questions = append(questions, Question{
 			Index:   index,
 			Text:    text,
@@ -174,4 +307,43 @@ func isYesNoQuestion(options []string, text string) bool {
 		}
 	}
 	return false
+}
+
+// filterOtherOption removes "other" variants from options since the interview UI
+// always provides its own "Other" escape hatch with a freeform textarea.
+// Matches "other" exactly, or "other" followed by any non-alphanumeric character
+// (space, dash, colon, paren, comma, em-dash, etc.), catching patterns like
+// "other (please specify)", "other: specify", "other - describe", etc.
+func filterOtherOption(options []string) []string {
+	out := make([]string, 0, len(options))
+	for _, opt := range options {
+		lower := strings.ToLower(strings.TrimSpace(opt))
+		if isOtherVariant(lower) {
+			continue
+		}
+		out = append(out, opt)
+	}
+	return out
+}
+
+// isOtherVariant returns true if the lowered, trimmed string is "other" or
+// starts with "other" followed by a non-alphanumeric character.
+func isOtherVariant(lower string) bool {
+	if lower == "other" {
+		return true
+	}
+	if !strings.HasPrefix(lower, "other") {
+		return false
+	}
+	// Check that the character after "other" is non-alphanumeric.
+	rest := lower[len("other"):]
+	if len(rest) == 0 {
+		return true
+	}
+	ch := rest[0]
+	// Alphanumeric: a-z, 0-9 (already lowered)
+	if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') {
+		return false
+	}
+	return true
 }

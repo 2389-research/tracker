@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,6 +207,31 @@ func TestAutopilotTUIInterviewerSendsDismiss(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("expected MsgModalDismiss after reply")
+	}
+}
+
+func TestAutopilotTUIInterviewerAskInterviewNoSupport(t *testing.T) {
+	msgCh := make(chan tea.Msg, 2)
+	mockSend := func(msg tea.Msg) { msgCh <- msg }
+
+	// mockAutopilot does NOT implement InterviewInterviewer.
+	inner := &mockAutopilot{askResult: "ok"}
+	iv := NewAutopilotTUIInterviewer(inner, mockSend)
+
+	_, err := iv.AskInterview(nil, nil)
+	if err == nil {
+		t.Fatal("expected error when inner does not implement InterviewInterviewer")
+	}
+	if !strings.Contains(err.Error(), "does not support interviews") {
+		t.Errorf("expected error to contain 'does not support interviews', got %q", err.Error())
+	}
+
+	// No TUI message should be sent.
+	select {
+	case msg := <-msgCh:
+		t.Errorf("expected no message on error, got %T", msg)
+	default:
+		// expected
 	}
 }
 

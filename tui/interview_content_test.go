@@ -58,6 +58,7 @@ func TestInterviewContentCollectAnswers(t *testing.T) {
 
 	// Set field states manually.
 	ic.fields[0].selectCursor = 1 // SAML
+	ic.fields[0].selected = true
 	yes := true
 	ic.fields[1].confirmed = &yes
 	ic.fields[2].textInput.SetValue("Must support LDAP")
@@ -88,6 +89,7 @@ func TestInterviewContentCollectAnswersOther(t *testing.T) {
 
 	// Select "Other" (index == len(options))
 	ic.fields[0].selectCursor = 2
+	ic.fields[0].selected = true
 	ic.fields[0].isOther = true
 	ic.fields[0].otherInput.SetValue("Custom JWT")
 
@@ -104,6 +106,7 @@ func TestInterviewContentCollectAnswersElaboration(t *testing.T) {
 	ic := NewInterviewContent(questions, nil, nil, 80, 24)
 
 	ic.fields[0].selectCursor = 0 // OAuth
+	ic.fields[0].selected = true
 	ic.fields[0].elaboration.SetValue("Google SSO preferred")
 
 	result := ic.collectAnswers()
@@ -151,6 +154,7 @@ func TestInterviewContentSubmit(t *testing.T) {
 	ic := NewInterviewContent(questions, nil, ch, 80, 24)
 
 	ic.fields[0].selectCursor = 0 // OAuth
+	ic.fields[0].selected = true
 	ic.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 
 	select {
@@ -279,6 +283,68 @@ func TestInterviewContentDoubleSubmitIgnored(t *testing.T) {
 	}
 }
 
+func TestInterviewContentMidInterviewCancel(t *testing.T) {
+	questions := []handlers.Question{
+		{Index: 1, Text: "Auth model?", Options: []string{"OAuth", "SAML", "API key"}},
+		{Index: 2, Text: "Need SSO?", IsYesNo: true},
+		{Index: 3, Text: "Describe requirements"},
+	}
+	ch := make(chan string, 1)
+	ic := NewInterviewContent(questions, nil, ch, 80, 24)
+
+	// Simulate Q1 answered: user selected option index 1 (SAML).
+	ic.fields[0].selectCursor = 1
+	ic.fields[0].selected = true
+
+	// Q2 and Q3 left unanswered. Cancel the form.
+	ic.cancelForm()
+
+	// Channel should be closed (cancel signal).
+	_, ok := <-ch
+	if ok {
+		t.Error("expected channel to be closed on cancel")
+	}
+
+	// Collect answers to verify partial state: Q1 has answer, Q2/Q3 empty.
+	// Create a fresh InterviewContent to inspect collectAnswers on the same fields.
+	// Since cancelForm was already called, we verify the field state directly.
+	if !ic.fields[0].selected {
+		t.Error("expected Q1 to remain selected after cancel")
+	}
+	if ic.fields[0].question.Options[ic.fields[0].selectCursor] != "SAML" {
+		t.Errorf("expected Q1 cursor on 'SAML', got %q", ic.fields[0].question.Options[ic.fields[0].selectCursor])
+	}
+	if ic.fields[1].confirmed != nil {
+		t.Errorf("expected Q2 to be unanswered (nil confirmed), got %v", *ic.fields[1].confirmed)
+	}
+	if ic.fields[2].textInput.Value() != "" {
+		t.Errorf("expected Q3 to be empty, got %q", ic.fields[2].textInput.Value())
+	}
+
+	// Verify that collectAnswers reflects partial state with correct Canceled semantics.
+	// We need a non-done IC to call collectAnswers, but we can verify via field state above.
+	// Build a second IC from the same questions, set same state, and verify collectAnswers.
+	ch2 := make(chan string, 1)
+	ic2 := NewInterviewContent(questions, nil, ch2, 80, 24)
+	ic2.fields[0].selectCursor = 1
+	ic2.fields[0].selected = true
+	// Q2, Q3 unanswered — leave defaults.
+
+	result := ic2.collectAnswers()
+	if result.Questions[0].Answer != "SAML" {
+		t.Errorf("Q1: expected 'SAML', got %q", result.Questions[0].Answer)
+	}
+	if result.Questions[1].Answer != "" {
+		t.Errorf("Q2: expected empty answer, got %q", result.Questions[1].Answer)
+	}
+	if result.Questions[2].Answer != "" {
+		t.Errorf("Q3: expected empty answer, got %q", result.Questions[2].Answer)
+	}
+	if !result.Incomplete {
+		t.Error("expected Incomplete=true for partial answers")
+	}
+}
+
 func TestInterviewContentViewNotEmpty(t *testing.T) {
 	questions := []handlers.Question{
 		{Index: 1, Text: "Auth model?", Options: []string{"OAuth", "SAML"}},
@@ -290,10 +356,15 @@ func TestInterviewContentViewNotEmpty(t *testing.T) {
 	if view == "" {
 		t.Error("expected non-empty view")
 	}
-	// Should contain question text
-	for _, q := range questions {
-		if !strings.Contains(view, q.Text) {
-			t.Errorf("expected view to contain %q", q.Text)
-		}
+	// One-at-a-time: only the current question (Q1) should be visible.
+	if !strings.Contains(view, "Auth model?") {
+		t.Error("expected view to contain current question 'Auth model?'")
+	}
+	// Should show progress and remaining count.
+	if !strings.Contains(view, "0/3 answered") {
+		t.Errorf("expected progress indicator, got: %s", view)
+	}
+	if !strings.Contains(view, "2 questions remaining") {
+		t.Errorf("expected remaining count, got: %s", view)
 	}
 }

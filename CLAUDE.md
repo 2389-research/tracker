@@ -18,6 +18,8 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - The dippin IR uses `ctx.` namespace prefix in conditions (`ctx.outcome = success`)
 - Tracker's context stores bare keys (`outcome`). The condition evaluator strips `ctx.`, `context.`, and handles `internal.*`
 - The adapter must synthesize implicit edges from `ParallelConfig.Targets` and `FanInConfig.Sources`
+- `AgentConfig.ResponseFormat` and `AgentConfig.ResponseSchema` map to node attrs `response_format` and `response_schema` (v0.16.0)
+- `AgentConfig.Params` is a generic pass-through map — typed fields take precedence over Params keys
 - The adapter maps IR field names to tracker convention: `model` → `llm_model`, `provider` → `llm_provider`
 - Provider name is `gemini` not `google`
 - Variable expansion is single-pass — never re-scan resolved values
@@ -43,6 +45,19 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - The full prompt (label + context) must go through glamour — never render markdown with plain lipgloss
 - All modal content types must implement Cancellable — Ctrl+C calls Cancel() to close reply channels and prevent goroutine hangs
 - Never block a pipeline handler goroutine on a channel send/receive without a cancellation path
+
+### Interview mode
+- `mode: interview` on human nodes enables structured multi-field form collection
+- Upstream agent outputs JSON questions: `{"questions": [{"text": "...", "context": "...", "options": [...]}]}`
+- Use `response_format: json_object` on question-generating agents to force JSON output at the API level
+- `ParseStructuredQuestions` validates JSON first; falls back to `ParseQuestions` markdown heuristic parsing
+- Questions with "other" variants in options are filtered — the UI always provides its own "Other" escape hatch
+- One question shown at a time with progress bar, answered summary above, and selection feedback (filled dot + checkmark)
+- Canceled interviews return `OutcomeFail`, not `OutcomeSuccess` — pipeline edges can route on cancellation
+- `questions_key` defaults to `last_response`; `answers_key` defaults to `interview_answers`
+- Zero parsed questions falls back to freeform with the node's `prompt` attribute
+- Enter confirms selection and advances; Ctrl+S submits all; Esc cancels
+- Empty API responses (0 content parts, 0 output tokens, 0 prior tool calls) trigger session-level retry with diagnostic logging
 
 ### Error surfacing
 - Node failures (MsgNodeFailed) and retries (MsgNodeRetrying) must be shown inline in the activity log, not just in the sidebar icon
@@ -110,6 +125,15 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 `pipeline/dippin_adapter.go` converts dippin IR to tracker's Graph model.
 Every naming mismatch between dippin conventions and tracker conventions
 lives here. When dippin-lang adds new IR fields, the adapter needs updating.
+
+### Structured output (`response_format`)
+The `response_format: json_object` attribute on agent nodes forces JSON output
+at the LLM API level. The path: `.dip` file → `AgentConfig.ResponseFormat` →
+adapter → `node.Attrs["response_format"]` → `codergen.applyResponseFormat()` →
+`SessionConfig.ResponseFormat` → `session.buildResponseFormat()` →
+`llm.Request.ResponseFormat` → provider translator (Anthropic: system instruction,
+OpenAI: native json_object, Gemini: responseMimeType). Use this on any agent
+that must produce structured JSON (interview question generators, autopilot, etc.).
 
 ### The engine doesn't know about parallel/fan-in
 The engine treats every node the same: execute handler, select edge, advance.

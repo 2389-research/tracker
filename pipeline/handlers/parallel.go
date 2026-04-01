@@ -245,12 +245,6 @@ func aggregateBranchStats(results []ParallelResult) *pipeline.SessionStats {
 	return agg
 }
 
-// branchOverride holds per-branch attr overrides parsed from the parallel node.
-type branchOverride struct {
-	target string
-	attrs  map[string]string
-}
-
 // parseBranchOverrides extracts branch.N.* attributes from a parallel node
 // and returns a map of target node ID → override attrs.
 // Format: branch.0.target=NodeA, branch.0.llm_model=gpt-4, etc.

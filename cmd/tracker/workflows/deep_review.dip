@@ -1,0 +1,356 @@
+workflow DeepReview
+  goal: "Conduct a thorough codebase review driven by structured interviews — understand intent, scan for issues, interview the developer about findings, then produce an actionable remediation plan."
+  start: Start
+  exit: Done
+
+  defaults
+    max_retries: 2
+    max_restarts: 20
+    model: claude-sonnet-4-6
+    provider: anthropic
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  # ─── Phase 1: Understand Intent ────────────────────────────
+
+  human DescribeGoal
+    label: "What are you trying to review? Describe the codebase area, recent changes, or specific concerns."
+    mode: freeform
+
+  agent ExploreCodebase
+    label: "Explore Codebase"
+    model: claude-sonnet-4-6
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      The developer wants a deep review of: ${ctx.human_response}
+
+      Explore the codebase thoroughly. Map out:
+      - Architecture: packages, layers, key abstractions
+      - Conventions: naming, error handling, test patterns
+      - Dependencies: external packages, API boundaries
+      - Hot spots: files with high complexity or recent churn
+      - Test coverage: which areas have tests, which don't
+
+      Write a structured exploration to .ai/review/exploration.md
+
+  # ─── Phase 2: Scope Interview ──────────────────────────────
+
+  agent GenerateScopeQuestions
+    label: "Generate Scoping Questions"
+    model: claude-opus-4-6
+    response_format: json_object
+    prompt:
+      Read .ai/review/exploration.md to understand what was found.
+
+      The developer wants a review focused on: ${ctx.human_response}
+
+      Generate 3-5 targeted questions to narrow the review scope.
+      Tailor options to what the exploration actually found in this specific codebase.
+
+      Your FINAL output must be ONLY a JSON object — no other text after it:
+
+      {"questions": [
+        {"text": "question text?", "context": "why you are asking — what you found that prompted this", "options": ["option1", "option2", "option3"]},
+        {"text": "open-ended question?", "context": "what you found that makes this relevant"}
+      ]}
+
+      Rules:
+      - Every question needs "text" and "context"
+      - Add "options" for discrete choices; omit for open-ended
+      - "context" explains WHY you are asking based on what you found
+      - 3-5 questions, no more
+      - The JSON must be the LAST thing in your response
+
+  human ScopeInterview
+    label: "Help us focus the review."
+    mode: interview
+    questions_key: last_response
+    answers_key: scope_answers
+    prompt:
+      Please answer these questions so we can focus the review on what matters most to you.
+
+  # ─── Phase 3: Deep Analysis ────────────────────────────────
+
+  parallel AnalyzeParallel -> AnalyzeCorrectness, AnalyzeSecurity, AnalyzeDesign
+
+  agent AnalyzeCorrectness
+    label: "Correctness Analysis"
+    model: claude-opus-4-6
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are reviewing this codebase for correctness issues.
+
+      Developer's goal: ${ctx.human_response}
+      Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
+      Exploration: read .ai/review/exploration.md
+
+      Focus on:
+      - Logic errors and off-by-one mistakes
+      - Race conditions and concurrency bugs
+      - Error handling gaps (swallowed errors, missing nil checks)
+      - Edge cases that would cause panics or data corruption
+      - Contract violations (interface misuse, broken invariants)
+
+      For EACH finding, provide:
+      - File:Line — exact location
+      - Severity — critical / high / medium / low
+      - Description — what's wrong
+      - Evidence — code snippet or reasoning
+      - Fix — concrete suggestion
+
+      Write findings to .ai/review/correctness.md
+      If no issues found, say so explicitly — don't invent problems.
+
+  agent AnalyzeSecurity
+    label: "Security Analysis"
+    model: claude-opus-4-6
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are reviewing this codebase for security vulnerabilities.
+
+      Developer's goal: ${ctx.human_response}
+      Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
+      Exploration: read .ai/review/exploration.md
+
+      Focus on OWASP Top 10 and language-specific issues:
+      - Injection (SQL, command, template)
+      - Broken auth / session management
+      - Sensitive data exposure (secrets in code, logs, errors)
+      - Input validation at trust boundaries
+      - Unsafe deserialization
+      - Dependency vulnerabilities
+      - Path traversal in file operations
+      - Unsafe shell execution with user input
+
+      For EACH finding, provide:
+      - File:Line — exact location
+      - CWE — relevant CWE identifier
+      - Severity — critical / high / medium / low
+      - Description — what's exploitable
+      - PoC — how to trigger it (or why it's hard to trigger)
+      - Fix — concrete remediation
+
+      Write findings to .ai/review/security.md
+      If no issues found, say so explicitly — don't invent problems.
+
+  agent AnalyzeDesign
+    label: "Design Analysis"
+    model: claude-opus-4-6
+    reasoning_effort: high
+    fidelity: full
+    prompt:
+      You are reviewing this codebase for design and maintainability issues.
+
+      Developer's goal: ${ctx.human_response}
+      Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
+      Exploration: read .ai/review/exploration.md
+
+      Focus on:
+      - Unnecessary abstractions or premature generalization
+      - Missing abstractions (copy-paste, shotgun surgery)
+      - Coupling between packages that should be independent
+      - God objects or functions doing too many things
+      - Inconsistent patterns across the codebase
+      - Dead code and unused exports
+      - Test gaps for critical paths
+      - API design issues (confusing signatures, leaky abstractions)
+
+      For EACH finding, provide:
+      - Location — file(s) and area
+      - Impact — how this affects maintainability
+      - Description — what's wrong and why it matters
+      - Suggestion — concrete refactoring approach
+
+      Write findings to .ai/review/design.md
+      If no issues found, say so explicitly — don't invent problems.
+
+  fan_in AnalyzeJoin <- AnalyzeCorrectness, AnalyzeSecurity, AnalyzeDesign
+
+  # ─── Phase 4: Findings Interview ───────────────────────────
+
+  agent SynthesizeFindings
+    label: "Synthesize All Findings"
+    model: claude-opus-4-6
+    reasoning_effort: high
+    prompt:
+      Read all three analysis reports:
+      - .ai/review/correctness.md
+      - .ai/review/security.md
+      - .ai/review/design.md
+
+      Synthesize into a unified findings document at .ai/review/synthesis.md:
+      - Critical/High findings ranked by severity
+      - Medium findings grouped by theme
+      - Low findings
+      - Cross-cutting themes across analyses
+
+      Write the synthesis to the file.
+
+  agent GenerateFindingsQuestions
+    label: "Generate Findings Questions"
+    model: claude-opus-4-6
+    response_format: json_object
+    prompt:
+      Read the synthesis at .ai/review/synthesis.md
+
+      For each significant finding (skip trivial/low ones), generate a
+      triage question for the developer. The developer may not have written
+      this code — frame questions as "how should we handle this?" not
+      "is this intentional?"
+
+      Your FINAL output must be ONLY a JSON object — no other text after it:
+
+      {"questions": [
+        {"text": "short finding summary", "context": "severity and where it was found", "options": ["fix now — real issue", "fix later — low priority", "skip — acceptable risk", "need more context"]},
+        {"text": "another finding", "context": "what analysis found it and why it matters", "options": ["fix now", "fix later", "skip", "need more context"]}
+      ]}
+
+      Rules:
+      - One question per significant finding
+      - "text" is a concise summary of the issue
+      - "context" says where it was found and severity
+      - "options" are action-oriented triage choices
+      - Skip positive findings (things that are fine)
+      - The JSON must be the LAST thing in your response
+
+  human FindingsInterview
+    label: "Triage the findings — what matters?"
+    mode: interview
+    questions_key: last_response
+    answers_key: findings_answers
+    prompt:
+      For each finding, tell us how to handle it.
+
+  # ─── Phase 5: Prioritization Interview ─────────────────────
+
+  agent GeneratePriorityQuestions
+    label: "Generate Priority Questions"
+    model: claude-sonnet-4-6
+    response_format: json_object
+    prompt:
+      The developer triaged the review findings (JSON-formatted interview answers): ${ctx.findings_answers}
+
+      Based on which findings were marked "fix now" or "fix later",
+      generate 3-5 questions to prioritize the remediation work.
+
+      Your FINAL output must be ONLY a JSON object — no other text after it:
+
+      {"questions": [
+        {"text": "question about priorities?", "context": "why this matters for planning", "options": ["option1", "option2", "option3"]}
+      ]}
+
+      Consider asking about:
+      - Timeline (this sprint, next sprint, backlog)
+      - Whether fixes can be done independently or need coordinated refactoring
+      - Who should review
+      - Whether to generate fix code or just the plan
+      - Any in-flight changes that could conflict
+
+      Rules:
+      - 3-5 questions
+      - Tailor to the specific findings that were triaged as needing fixes
+      - The JSON must be the LAST thing in your response
+
+  human PriorityInterview
+    label: "Help us prioritize the remediation work."
+    mode: interview
+    questions_key: last_response
+    answers_key: priority_answers
+    prompt:
+      Let's figure out what to fix first and how.
+
+  # ─── Phase 6: Remediation Plan ─────────────────────────────
+
+  agent WriteRemediationPlan
+    label: "Write Remediation Plan"
+    model: claude-opus-4-6
+    reasoning_effort: high
+    fidelity: full
+    auto_status: true
+    prompt:
+      Read all review artifacts:
+      - .ai/review/exploration.md (codebase understanding)
+      - .ai/review/correctness.md (correctness findings)
+      - .ai/review/security.md (security findings)
+      - .ai/review/design.md (design findings)
+      - .ai/review/synthesis.md (synthesized findings)
+
+      Developer context from three interview rounds (each is JSON-formatted interview answers):
+      - Scope: ${ctx.scope_answers}
+      - Findings triage: ${ctx.findings_answers}
+      - Priorities: ${ctx.priority_answers}
+
+      Write a complete remediation plan to .ai/review/remediation_plan.md:
+
+      ## Executive Summary
+      One paragraph: what was reviewed, key findings count, risk level.
+
+      ## Critical Fixes (Do Now)
+      For each: file, issue, concrete fix with code diff sketch, test to add.
+
+      ## High Priority (This Sprint)
+      Same format as critical.
+
+      ## Medium Priority (Next Sprint)
+      Grouped by theme with concrete next steps.
+
+      ## Deferred / Won't Fix
+      Issues the developer marked as skip or acceptable risk, with rationale.
+
+      ## Architectural Recommendations
+      Cross-cutting improvements that address multiple findings at once.
+
+      ## Verification Checklist
+      How to confirm each fix is correct after implementation.
+
+      STATUS: success
+
+  human ReviewPlan
+    label: "Review the remediation plan. Approve, request changes, or reject."
+    mode: freeform
+    default: approve
+
+  agent ApplyFormat
+    label: "Finalize Deliverables"
+    model: claude-sonnet-4-6
+    reasoning_effort: low
+    prompt:
+      The remediation plan has been approved. Ensure:
+      1. .ai/review/remediation_plan.md is well-formatted and complete
+      2. Create a one-page summary at .ai/review/summary.md with:
+         - Total findings by severity
+         - Top 3 most important fixes
+         - Estimated effort (small/medium/large per fix)
+      3. If the plan mentions specific code changes, verify the file paths
+         still exist and the line numbers are approximately correct
+
+  # ─── Edges ─────────────────────────────────────────────────
+
+  edges
+    Start -> DescribeGoal
+    DescribeGoal -> ExploreCodebase
+    ExploreCodebase -> GenerateScopeQuestions
+    GenerateScopeQuestions -> ScopeInterview
+    ScopeInterview -> AnalyzeParallel
+    AnalyzeCorrectness -> AnalyzeJoin
+    AnalyzeSecurity -> AnalyzeJoin
+    AnalyzeDesign -> AnalyzeJoin
+    AnalyzeJoin -> SynthesizeFindings
+    SynthesizeFindings -> GenerateFindingsQuestions
+    GenerateFindingsQuestions -> FindingsInterview
+    FindingsInterview -> GeneratePriorityQuestions
+    GeneratePriorityQuestions -> PriorityInterview
+    PriorityInterview -> WriteRemediationPlan
+    WriteRemediationPlan -> ReviewPlan
+    ReviewPlan -> ApplyFormat                label: "approve"
+    ReviewPlan -> WriteRemediationPlan       label: "revise"  restart: true
+    ReviewPlan -> Done                       label: "reject"
+    ApplyFormat -> Done
