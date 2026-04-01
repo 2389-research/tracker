@@ -141,7 +141,21 @@ func (ic *InterviewContent) prefill(prev *handlers.InterviewResult) {
 			continue
 		}
 
-		if len(f.question.Options) > 0 {
+		if f.question.IsYesNo {
+			// Confirm field — check before Options so yes/no questions
+			// with residual options route here.
+			switch strings.ToLower(ans.Answer) {
+			case "yes":
+				v := true
+				ic.fields[i].confirmed = &v
+			case "no":
+				v := false
+				ic.fields[i].confirmed = &v
+			}
+			if ans.Elaboration != "" {
+				ic.fields[i].elaboration.SetValue(ans.Elaboration)
+			}
+		} else if len(f.question.Options) > 0 {
 			// Select field: find matching option or set as "Other".
 			matched := false
 			for j, opt := range f.question.Options {
@@ -158,19 +172,6 @@ func (ic *InterviewContent) prefill(prev *handlers.InterviewResult) {
 				ic.fields[i].isOther = true
 				ic.fields[i].selected = true
 				ic.fields[i].otherInput.SetValue(ans.Answer)
-			}
-			if ans.Elaboration != "" {
-				ic.fields[i].elaboration.SetValue(ans.Elaboration)
-			}
-		} else if f.question.IsYesNo {
-			// Confirm field.
-			switch strings.ToLower(ans.Answer) {
-			case "yes":
-				v := true
-				ic.fields[i].confirmed = &v
-			case "no":
-				v := false
-				ic.fields[i].confirmed = &v
 			}
 			if ans.Elaboration != "" {
 				ic.fields[i].elaboration.SetValue(ans.Elaboration)
@@ -192,7 +193,18 @@ func (ic *InterviewContent) collectAnswers() handlers.InterviewResult {
 			Options: f.question.Options,
 		}
 
-		if len(f.question.Options) > 0 {
+		if f.question.IsYesNo {
+			// Confirm field — check before Options so yes/no questions
+			// with residual options route here.
+			if f.confirmed != nil {
+				if *f.confirmed {
+					ans.Answer = "Yes"
+				} else {
+					ans.Answer = "No"
+				}
+			}
+			ans.Elaboration = strings.TrimSpace(f.elaboration.Value())
+		} else if len(f.question.Options) > 0 {
 			// Select field — only report answer if user explicitly confirmed.
 			if !f.selected {
 				ans.Answer = ""
@@ -200,16 +212,6 @@ func (ic *InterviewContent) collectAnswers() handlers.InterviewResult {
 				ans.Answer = strings.TrimSpace(f.otherInput.Value())
 			} else {
 				ans.Answer = f.question.Options[f.selectCursor]
-			}
-			ans.Elaboration = strings.TrimSpace(f.elaboration.Value())
-		} else if f.question.IsYesNo {
-			// Confirm field.
-			if f.confirmed != nil {
-				if *f.confirmed {
-					ans.Answer = "Yes"
-				} else {
-					ans.Answer = "No"
-				}
 			}
 			ans.Elaboration = strings.TrimSpace(f.elaboration.Value())
 		} else {
@@ -316,11 +318,14 @@ func (ic *InterviewContent) updateNavigationMode(km tea.KeyMsg) tea.Cmd {
 	f := &ic.fields[ic.cursor]
 
 	// Field-specific input handling.
-	if len(f.question.Options) > 0 {
-		return ic.updateSelectField(km, f)
-	}
+	// Check IsYesNo before Options so yes/no questions with residual
+	// options (e.g. ["yes","no"] from filterOtherOption) route to the
+	// confirm UI instead of the radio select UI.
 	if f.question.IsYesNo {
 		return ic.updateConfirmField(km, f)
+	}
+	if len(f.question.Options) > 0 {
+		return ic.updateSelectField(km, f)
 	}
 	return ic.updateTextField(km, f)
 }
@@ -588,13 +593,28 @@ func (ic *InterviewContent) View() string {
 	sb.WriteString("\n\n")
 
 	// Summary of previously answered questions (compact, wrapped).
+	// Cap to the last N entries that fit in the viewport to avoid pushing
+	// the current question off-screen.
 	summaryW := ic.width - 6 // indent + margin
 	if summaryW < 20 {
 		summaryW = 20
 	}
 	summaryStyle := confirmedStyle.Width(summaryW)
 	skippedStyle := Styles.Muted.Width(summaryW)
-	for idx := 0; idx < ic.cursor && idx < len(ic.fields); idx++ {
+
+	// Estimate available rows for the summary: total height minus space
+	// for current question, hints, progress bar, remaining preview, and
+	// status line (~15 rows of chrome).
+	availRows := ic.height - 15
+	if availRows < 3 {
+		availRows = 3
+	}
+	summaryStart := 0
+	if ic.cursor > availRows {
+		summaryStart = ic.cursor - availRows
+	}
+
+	for idx := summaryStart; idx < ic.cursor && idx < len(ic.fields); idx++ {
 		f := &ic.fields[idx]
 		answer := ic.fieldAnswerText(f)
 		if answer != "" {
@@ -627,7 +647,34 @@ func (ic *InterviewContent) View() string {
 		}
 		sb.WriteString("\n")
 
-		if len(f.question.Options) > 0 {
+		if f.question.IsYesNo {
+			// Yes/No toggle.
+			yStr := "○ Yes"
+			nStr := "○ No"
+			if f.confirmed != nil {
+				if *f.confirmed {
+					yStr = confirmedStyle.Render("● Yes  ✓")
+					nStr = normalStyle.Render("○ No")
+				} else {
+					yStr = normalStyle.Render("○ Yes")
+					nStr = confirmedStyle.Render("● No  ✓")
+				}
+			}
+			sb.WriteString(fmt.Sprintf("  %s    %s", yStr, nStr))
+			sb.WriteString("\n")
+			// Elaboration textarea.
+			if f.editingElab {
+				sb.WriteString(Styles.Muted.Render("  Add details (optional):"))
+				sb.WriteString("\n")
+				sb.WriteString(f.elaboration.View())
+				sb.WriteString("\n")
+			} else if !ic.inTextarea {
+				sb.WriteString("\n")
+				sb.WriteString(Styles.Muted.Render("  y/n toggle  Enter confirm  Tab elaborate"))
+				sb.WriteString("\n")
+			}
+
+		} else if len(f.question.Options) > 0 {
 			// Radio select field (options wrapped to width).
 			optW := ic.width - 8 // indent (4) + bullet (4) + margin
 			if optW < 20 {
@@ -674,33 +721,6 @@ func (ic *InterviewContent) View() string {
 				sb.WriteString("\n")
 			}
 
-		} else if f.question.IsYesNo {
-			// Yes/No toggle.
-			yStr := "○ Yes"
-			nStr := "○ No"
-			if f.confirmed != nil {
-				if *f.confirmed {
-					yStr = confirmedStyle.Render("● Yes  ✓")
-					nStr = normalStyle.Render("○ No")
-				} else {
-					yStr = normalStyle.Render("○ Yes")
-					nStr = confirmedStyle.Render("● No  ✓")
-				}
-			}
-			sb.WriteString(fmt.Sprintf("  %s    %s", yStr, nStr))
-			sb.WriteString("\n")
-			// Elaboration textarea.
-			if f.editingElab {
-				sb.WriteString(Styles.Muted.Render("  Add details (optional):"))
-				sb.WriteString("\n")
-				sb.WriteString(f.elaboration.View())
-				sb.WriteString("\n")
-			} else if !ic.inTextarea {
-				sb.WriteString("\n")
-				sb.WriteString(Styles.Muted.Render("  y/n toggle  Enter confirm  Tab elaborate"))
-				sb.WriteString("\n")
-			}
-
 		} else {
 			// Text field.
 			if ic.inTextarea {
@@ -743,6 +763,9 @@ func (ic *InterviewContent) View() string {
 
 // fieldAnswered returns true if the field has a non-empty answer.
 func (ic *InterviewContent) fieldAnswered(f *interviewField) bool {
+	if f.question.IsYesNo {
+		return f.confirmed != nil
+	}
 	if len(f.question.Options) > 0 {
 		if !f.selected {
 			return false
@@ -753,23 +776,11 @@ func (ic *InterviewContent) fieldAnswered(f *interviewField) bool {
 		}
 		return true
 	}
-	if f.question.IsYesNo {
-		return f.confirmed != nil
-	}
 	return strings.TrimSpace(f.textInput.Value()) != ""
 }
 
 // fieldAnswerText returns a short summary of the field's answer for the progress list.
 func (ic *InterviewContent) fieldAnswerText(f *interviewField) string {
-	if len(f.question.Options) > 0 {
-		if !f.selected {
-			return ""
-		}
-		if f.isOther || f.selectCursor >= len(f.question.Options) {
-			return strings.TrimSpace(f.otherInput.Value())
-		}
-		return f.question.Options[f.selectCursor]
-	}
 	if f.question.IsYesNo {
 		if f.confirmed == nil {
 			return ""
@@ -778,6 +789,15 @@ func (ic *InterviewContent) fieldAnswerText(f *interviewField) string {
 			return "Yes"
 		}
 		return "No"
+	}
+	if len(f.question.Options) > 0 {
+		if !f.selected {
+			return ""
+		}
+		if f.isOther || f.selectCursor >= len(f.question.Options) {
+			return strings.TrimSpace(f.otherInput.Value())
+		}
+		return f.question.Options[f.selectCursor]
 	}
 	return strings.TrimSpace(f.textInput.Value())
 }

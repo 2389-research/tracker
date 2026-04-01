@@ -326,6 +326,18 @@ func (a *AutopilotInterviewer) fallback(options []string, defaultOption string) 
 func (a *AutopilotInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
 	prompt := buildInterviewPrompt(questions)
 
+	// Include previous answers so the LLM can build on them.
+	if prev != nil && len(prev.Questions) > 0 {
+		var prevSection strings.Builder
+		prevSection.WriteString("\nPreviously answered:\n")
+		for _, ans := range prev.Questions {
+			if ans.Answer != "" {
+				prevSection.WriteString(fmt.Sprintf("- %s: %s\n", ans.Text, ans.Answer))
+			}
+		}
+		prompt += prevSection.String()
+	}
+
 	req := &llm.Request{
 		Model: a.resolveModel(),
 		Messages: []llm.Message{

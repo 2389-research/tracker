@@ -22,13 +22,20 @@ workflow DeepReview
     label: "What are you trying to review? Describe the codebase area, recent changes, or specific concerns."
     mode: freeform
 
+  tool SaveGoal
+    label: "Snapshot the developer's goal"
+    command:
+      mkdir -p .ai/review
+      printf '%s\n' "${ctx.human_response}" > .ai/review/goal.txt
+      echo "Goal saved to .ai/review/goal.txt"
+
   agent ExploreCodebase
     label: "Explore Codebase"
     model: claude-sonnet-4-6
     reasoning_effort: high
     fidelity: full
     prompt:
-      The developer wants a deep review of: ${ctx.human_response}
+      The developer wants a deep review of their codebase (read .ai/review/goal.txt for original goal).
 
       Explore the codebase thoroughly. Map out:
       - Architecture: packages, layers, key abstractions
@@ -48,7 +55,7 @@ workflow DeepReview
     prompt:
       Read .ai/review/exploration.md to understand what was found.
 
-      The developer wants a review focused on: ${ctx.human_response}
+      The developer wants a review focused on their stated goal (read .ai/review/goal.txt).
 
       Generate 3-5 targeted questions to narrow the review scope.
       Tailor options to what the exploration actually found in this specific codebase.
@@ -87,7 +94,7 @@ workflow DeepReview
     prompt:
       You are reviewing this codebase for correctness issues.
 
-      Developer's goal: ${ctx.human_response}
+      Developer's goal: read .ai/review/goal.txt
       Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
       Exploration: read .ai/review/exploration.md
 
@@ -116,7 +123,7 @@ workflow DeepReview
     prompt:
       You are reviewing this codebase for security vulnerabilities.
 
-      Developer's goal: ${ctx.human_response}
+      Developer's goal: read .ai/review/goal.txt
       Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
       Exploration: read .ai/review/exploration.md
 
@@ -149,7 +156,7 @@ workflow DeepReview
     prompt:
       You are reviewing this codebase for design and maintainability issues.
 
-      Developer's goal: ${ctx.human_response}
+      Developer's goal: read .ai/review/goal.txt
       Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
       Exploration: read .ai/review/exploration.md
 
@@ -241,6 +248,9 @@ workflow DeepReview
       Based on which findings were marked "fix now" or "fix later",
       generate 3-5 questions to prioritize the remediation work.
 
+      If no findings were triaged as needing fixes (all skipped or
+      accepted as-is), output: {"questions": []}
+
       Your FINAL output must be ONLY a JSON object — no other text after it:
 
       {"questions": [
@@ -287,6 +297,8 @@ workflow DeepReview
       - Scope: ${ctx.scope_answers}
       - Findings triage: ${ctx.findings_answers}
       - Priorities: ${ctx.priority_answers}
+
+      If this is a revision, incorporate this feedback: ${ctx.human_response}
 
       Write a complete remediation plan to .ai/review/remediation_plan.md:
 
@@ -336,7 +348,8 @@ workflow DeepReview
 
   edges
     Start -> DescribeGoal
-    DescribeGoal -> ExploreCodebase
+    DescribeGoal -> SaveGoal
+    SaveGoal -> ExploreCodebase
     ExploreCodebase -> GenerateScopeQuestions
     GenerateScopeQuestions -> ScopeInterview
     ScopeInterview -> AnalyzeParallel
