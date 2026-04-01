@@ -147,6 +147,7 @@ func (ic *InterviewContent) prefill(prev *handlers.InterviewResult) {
 			for j, opt := range f.question.Options {
 				if strings.EqualFold(opt, ans.Answer) {
 					ic.fields[i].selectCursor = j
+					ic.fields[i].selected = true
 					matched = true
 					break
 				}
@@ -155,6 +156,7 @@ func (ic *InterviewContent) prefill(prev *handlers.InterviewResult) {
 				// Set as "Other"
 				ic.fields[i].selectCursor = len(f.question.Options)
 				ic.fields[i].isOther = true
+				ic.fields[i].selected = true
 				ic.fields[i].otherInput.SetValue(ans.Answer)
 			}
 			if ans.Elaboration != "" {
@@ -520,15 +522,18 @@ func (ic *InterviewContent) submit() tea.Cmd {
 // consistent with all other ModalContent types (ChoiceContent, FreeformContent, etc.).
 func (ic *InterviewContent) Cancel() { ic.cancelForm() }
 
-// cancelForm closes the reply channel to signal cancellation.
-// The receiver (askMode2Interview) detects the closed channel via the ok flag
-// and returns InterviewResult{Canceled: true}.
+// cancelForm collects partial answers, marks the result as canceled, sends it
+// on the reply channel, then closes the channel. This way the handler receives
+// both the Canceled flag and any partial answers the user already entered.
 func (ic *InterviewContent) cancelForm() tea.Cmd {
 	if ic.done {
 		return nil
 	}
 	ic.done = true
 	if ic.replyCh != nil {
+		result := ic.collectAnswers()
+		result.Canceled = true
+		ic.replyCh <- handlers.SerializeInterviewResult(result)
 		close(ic.replyCh)
 		ic.replyCh = nil
 	}
@@ -739,7 +744,14 @@ func (ic *InterviewContent) View() string {
 // fieldAnswered returns true if the field has a non-empty answer.
 func (ic *InterviewContent) fieldAnswered(f *interviewField) bool {
 	if len(f.question.Options) > 0 {
-		return f.selected
+		if !f.selected {
+			return false
+		}
+		// "Other" with empty text is not truly answered.
+		if f.isOther || f.selectCursor >= len(f.question.Options) {
+			return strings.TrimSpace(f.otherInput.Value()) != ""
+		}
+		return true
 	}
 	if f.question.IsYesNo {
 		return f.confirmed != nil

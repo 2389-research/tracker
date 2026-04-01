@@ -185,12 +185,25 @@ func TestInterviewContentCancel(t *testing.T) {
 	ic := NewInterviewContent(questions, nil, ch, 80, 24)
 
 	ic.fields[0].selectCursor = 0 // OAuth
-	// Esc at cursor=0 cancels (closes channel)
+	// Esc at cursor=0 cancels — sends partial answers then closes channel.
 	ic.Update(tea.KeyMsg{Type: tea.KeyEscape})
 
-	_, ok := <-ch
+	val, ok := <-ch
+	if !ok {
+		t.Fatal("expected a value on cancel (partial answers with Canceled flag)")
+	}
+	result, err := handlers.DeserializeInterviewResult(val)
+	if err != nil {
+		t.Fatalf("failed to deserialize cancel result: %v", err)
+	}
+	if !result.Canceled {
+		t.Error("expected Canceled=true in cancel result")
+	}
+
+	// Channel should be closed after the value.
+	_, ok = <-ch
 	if ok {
-		t.Error("expected channel to be closed on cancel")
+		t.Error("expected channel to be closed after cancel value")
 	}
 }
 
@@ -203,9 +216,22 @@ func TestInterviewContentCancelMethod(t *testing.T) {
 
 	ic.Cancel()
 
-	_, ok := <-ch
+	val, ok := <-ch
+	if !ok {
+		t.Fatal("expected a value on Cancel() (partial answers with Canceled flag)")
+	}
+	result, err := handlers.DeserializeInterviewResult(val)
+	if err != nil {
+		t.Fatalf("failed to deserialize cancel result: %v", err)
+	}
+	if !result.Canceled {
+		t.Error("expected Canceled=true from Cancel()")
+	}
+
+	// Channel should be closed after the value.
+	_, ok = <-ch
 	if ok {
-		t.Error("expected channel to be closed by Cancel()")
+		t.Error("expected channel to be closed after Cancel() value")
 	}
 }
 
@@ -299,23 +325,37 @@ func TestInterviewContentMidInterviewCancel(t *testing.T) {
 	// Q2 and Q3 left unanswered. Cancel the form.
 	ic.cancelForm()
 
-	// Channel should be closed (cancel signal).
-	_, ok := <-ch
-	if ok {
-		t.Error("expected channel to be closed on cancel")
+	// Cancel sends partial answers then closes channel.
+	val, ok := <-ch
+	if !ok {
+		t.Fatal("expected a value on cancel (partial answers with Canceled flag)")
+	}
+	result, err := handlers.DeserializeInterviewResult(val)
+	if err != nil {
+		t.Fatalf("failed to deserialize cancel result: %v", err)
+	}
+	if !result.Canceled {
+		t.Error("expected Canceled=true in cancel result")
 	}
 
-	// Collect answers to verify partial state: Q1 has answer, Q2/Q3 empty.
-	// Create a fresh InterviewContent to inspect collectAnswers on the same fields.
-	// Since cancelForm was already called, we verify the field state directly.
-	if !ic.fields[0].selected {
-		t.Error("expected Q1 to remain selected after cancel")
+	// Channel should be closed after the value.
+	_, ok = <-ch
+	if ok {
+		t.Error("expected channel to be closed after cancel value")
 	}
-	if ic.fields[0].question.Options[ic.fields[0].selectCursor] != "SAML" {
-		t.Errorf("expected Q1 cursor on 'SAML', got %q", ic.fields[0].question.Options[ic.fields[0].selectCursor])
+
+	// Verify partial answers: Q1 has answer, Q2/Q3 empty.
+	if len(result.Questions) != 3 {
+		t.Fatalf("expected 3 answers, got %d", len(result.Questions))
 	}
-	if ic.fields[1].confirmed != nil {
-		t.Errorf("expected Q2 to be unanswered (nil confirmed), got %v", *ic.fields[1].confirmed)
+	if result.Questions[0].Answer != "SAML" {
+		t.Errorf("expected Q1 answer 'SAML', got %q", result.Questions[0].Answer)
+	}
+	if result.Questions[1].Answer != "" {
+		t.Errorf("expected Q2 to be unanswered, got %q", result.Questions[1].Answer)
+	}
+	if result.Questions[2].Answer != "" {
+		t.Errorf("expected Q3 to be unanswered, got %q", result.Questions[2].Answer)
 	}
 	if ic.fields[2].textInput.Value() != "" {
 		t.Errorf("expected Q3 to be empty, got %q", ic.fields[2].textInput.Value())
@@ -330,17 +370,17 @@ func TestInterviewContentMidInterviewCancel(t *testing.T) {
 	ic2.fields[0].selected = true
 	// Q2, Q3 unanswered — leave defaults.
 
-	result := ic2.collectAnswers()
-	if result.Questions[0].Answer != "SAML" {
-		t.Errorf("Q1: expected 'SAML', got %q", result.Questions[0].Answer)
+	result2 := ic2.collectAnswers()
+	if result2.Questions[0].Answer != "SAML" {
+		t.Errorf("Q1: expected 'SAML', got %q", result2.Questions[0].Answer)
 	}
-	if result.Questions[1].Answer != "" {
-		t.Errorf("Q2: expected empty answer, got %q", result.Questions[1].Answer)
+	if result2.Questions[1].Answer != "" {
+		t.Errorf("Q2: expected empty answer, got %q", result2.Questions[1].Answer)
 	}
-	if result.Questions[2].Answer != "" {
-		t.Errorf("Q3: expected empty answer, got %q", result.Questions[2].Answer)
+	if result2.Questions[2].Answer != "" {
+		t.Errorf("Q3: expected empty answer, got %q", result2.Questions[2].Answer)
 	}
-	if !result.Incomplete {
+	if !result2.Incomplete {
 		t.Error("expected Incomplete=true for partial answers")
 	}
 }

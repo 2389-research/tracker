@@ -435,51 +435,68 @@ func parseInterviewResponse(text string, questions []Question) (*InterviewResult
 		return nil, fmt.Errorf("interview response contains no answers")
 	}
 
-	// Build a lookup map from question ID (q1, q2, ...) to Question
-	qByID := make(map[string]Question, len(questions))
-	for _, q := range questions {
-		qByID[fmt.Sprintf("q%d", q.Index)] = q
-	}
-
-	answers := make([]InterviewAnswer, 0, len(envelope.Answers))
+	// Build a lookup map from LLM answer ID to the raw answer.
+	answerByID := make(map[string]interviewResponseAnswer, len(envelope.Answers))
 	for _, a := range envelope.Answers {
-		q, ok := qByID[a.ID]
-		if !ok {
-			// Skip answers with unrecognized IDs rather than failing
-			continue
-		}
-		answers = append(answers, InterviewAnswer{
-			ID:          a.ID,
-			Text:        q.Text,
-			Options:     q.Options,
-			Answer:      a.Answer,
-			Elaboration: a.Elaboration,
-		})
+		answerByID[a.ID] = a
 	}
 
-	if len(answers) == 0 {
-		return nil, fmt.Errorf("interview response had no matching answers for %d questions", len(questions))
-	}
-
-	// If the LLM skipped some questions, fill in missing ones with empty answers
-	// and mark the result as incomplete so downstream consumers see all questions.
+	// Build answers in question order (iterate questions, look up LLM answers by ID).
 	incomplete := false
-	if len(answers) < len(questions) {
-		incomplete = true
-		answeredIDs := make(map[string]bool, len(answers))
-		for _, a := range answers {
-			answeredIDs[a.ID] = true
+	answers := make([]InterviewAnswer, len(questions))
+	for i, q := range questions {
+		id := fmt.Sprintf("q%d", q.Index)
+		raw, ok := answerByID[id]
+
+		ans := InterviewAnswer{
+			ID:      id,
+			Text:    q.Text,
+			Options: q.Options,
 		}
-		for _, q := range questions {
-			id := fmt.Sprintf("q%d", q.Index)
-			if !answeredIDs[id] {
-				answers = append(answers, InterviewAnswer{
-					ID:      id,
-					Text:    q.Text,
-					Options: q.Options,
-				})
+
+		if ok {
+			ans.Elaboration = raw.Elaboration
+
+			if len(q.Options) > 0 {
+				// Option-constrained: validate and normalize via matchChoice.
+				matched := matchChoice(raw.Answer, q.Options)
+				if matched != "" {
+					ans.Answer = matched
+				} else {
+					// LLM picked something not in the option list — treat as empty.
+					ans.Answer = ""
+				}
+			} else if q.IsYesNo {
+				// Normalize yes/no answers.
+				switch strings.ToLower(strings.TrimSpace(raw.Answer)) {
+				case "yes", "y", "true":
+					ans.Answer = "yes"
+				case "no", "n", "false":
+					ans.Answer = "no"
+				default:
+					ans.Answer = ""
+				}
+			} else {
+				ans.Answer = raw.Answer
 			}
 		}
+
+		if ans.Answer == "" {
+			incomplete = true
+		}
+		answers[i] = ans
+	}
+
+	// Verify at least one answer was matched from the LLM response.
+	anyMatched := false
+	for _, a := range answers {
+		if a.Answer != "" {
+			anyMatched = true
+			break
+		}
+	}
+	if !anyMatched {
+		return nil, fmt.Errorf("interview response had no matching answers for %d questions", len(questions))
 	}
 
 	return &InterviewResult{Questions: answers, Incomplete: incomplete}, nil
