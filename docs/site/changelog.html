@@ -30,6 +30,56 @@
     <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">All GitHub Releases &rarr;</a></p>
   </section>
 
+  <!-- ═══ v0.14.0 ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.14.0" style="color: inherit; text-decoration: none;">v0.14.0</a></h2>
+      <span class="badge">2026-03-31</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.14.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Interview mode for human gates</strong>: <code>mode: interview</code> enables structured multi-field form collection driven by upstream agent output. One question at a time with progress bar, selection feedback, and pre-fill on retry.</li>
+      <li><strong>Structured JSON question format</strong>: Agents output <code>{"questions": [...]}</code> with text, context, and options. Validated before presenting. Falls back to markdown heuristic parsing.</li>
+      <li><strong><code>response_format</code> support</strong>: Agent nodes can force structured JSON output at the API level via <code>response_format: json_object</code>. All three providers supported (Anthropic, OpenAI, Gemini).</li>
+      <li><strong>Agent <code>params</code> map</strong>: Generic key-value pass-through from <code>.dip</code> files (dippin-lang v0.16.0). Enables <code>backend: claude-code</code> and other runtime features without IR schema changes.</li>
+      <li><strong><code>deep_review</code> built-in workflow</strong>: Interview-driven codebase review with 3 structured interview gates, parallel analysis (correctness/security/design), and remediation plan. Run with <code>tracker deep_review</code>.</li>
+      <li><strong><code>interview-loop.dip</code> subgraph</strong>: Reusable interview loop pattern (ask &rarr; answer &rarr; assess &rarr; loop) in <code>examples/subgraphs/</code>.</li>
+      <li><strong>Empty API response diagnostics</strong>: Session-level retry with diagnostic logging for 0-token API responses. Hard-fails after 2 retries.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Cancel returns OutcomeFail</strong>: Canceled interviews return <code>fail</code> instead of <code>success</code>. Partial answers preserved.</li>
+      <li><strong>Autopilot hard-fails on parse error</strong>: Both <code>AutopilotInterviewer</code> and <code>ClaudeCodeAutopilotInterviewer</code> retry once, then hard-fail. No more silent auto-approve.</li>
+      <li><strong>Goroutine leak in flashDecision</strong>: Fixed with <code>done</code> channel and <code>defer/recover</code>.</li>
+      <li><strong>Mode 1 tea.Cmd propagation</strong>: All three TUI runners now propagate commands from content updates.</li>
+      <li><strong>Context leak in retry loop</strong>: Explicit <code>cancel()</code> instead of <code>defer</code> inside for loop.</li>
+      <li><strong>Empty response guard</strong>: Agent sessions with 0 output tokens and 0 tool calls now fail instead of silently succeeding.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.13.0 ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.13.0" style="color: inherit; text-decoration: none;">v0.13.0</a></h2>
+      <span class="badge">2026-03-28</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.13.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>TUI: Progress bar with ETA</strong>: Amber ASCII bar in status bar shows completed/total nodes.</li>
+      <li><strong>TUI: Log verbosity cycling (<code>v</code>)</strong>: All &rarr; Tools &rarr; Errors &rarr; Reasoning.</li>
+      <li><strong>TUI: Zen mode (<code>z</code>)</strong>: Hide sidebar, full-width agent log.</li>
+      <li><strong>TUI: Help overlay (<code>?</code>)</strong>: All keyboard shortcuts in styled table.</li>
+      <li><strong>TUI: Agent log search (<code>/</code>)</strong>: Inline search with <code>n</code>/<code>N</code> navigation.</li>
+      <li><strong>TUI: Per-node cost tracking</strong>: Cost badges on completed nodes in sidebar.</li>
+      <li><strong>TUI: Node drill-down (<code>Enter</code>)</strong>: Focus log on selected node.</li>
+      <li><strong>TUI: Copy to clipboard (<code>y</code>)</strong>: Copies visible filtered log text.</li>
+      <li><strong>Claude-code autopilot</strong>: Routes gate decisions through <code>claude</code> CLI subprocess.</li>
+      <li><strong>Strict failure edges</strong>: Pipeline stops on uncaught failures instead of silently continuing.</li>
+    </ul>
+  </section>
+
   <!-- ═══ v0.12.1 ═══ -->
   <section class="glass" style="border-left: 3px solid var(--orange-600);">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
