@@ -461,7 +461,28 @@ func parseInterviewResponse(text string, questions []Question) (*InterviewResult
 		return nil, fmt.Errorf("interview response had no matching answers for %d questions", len(questions))
 	}
 
-	return &InterviewResult{Questions: answers}, nil
+	// If the LLM skipped some questions, fill in missing ones with empty answers
+	// and mark the result as incomplete so downstream consumers see all questions.
+	incomplete := false
+	if len(answers) < len(questions) {
+		incomplete = true
+		answeredIDs := make(map[string]bool, len(answers))
+		for _, a := range answers {
+			answeredIDs[a.ID] = true
+		}
+		for _, q := range questions {
+			id := fmt.Sprintf("q%d", q.Index)
+			if !answeredIDs[id] {
+				answers = append(answers, InterviewAnswer{
+					ID:      id,
+					Text:    q.Text,
+					Options: q.Options,
+				})
+			}
+		}
+	}
+
+	return &InterviewResult{Questions: answers, Incomplete: incomplete}, nil
 }
 
 func intPtr(n int) *int { return &n }

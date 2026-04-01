@@ -132,6 +132,7 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 // AutopilotInterviewer behavior. Silent auto-approve on parse failure would violate
 // the "never silently swallow errors" rule.
 func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
+	_ = prev // autopilot starts fresh each time — no retry pre-fill
 	prompt := buildInterviewPrompt(questions)
 	systemPrompt := personaPrompts[a.persona]
 	fullPrompt := systemPrompt + "\n\n" + prompt

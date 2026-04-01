@@ -825,7 +825,7 @@ After all tasks complete:
 
 ## Dependency Graph
 
-```
+```text
 Task 1 (parser) ────────────┐
 Task 2 (serialization) ─────┤
 Task 3 (adapter) ───────────┼── Task 4 (interface + handler) ──┬── Task 5 (auto-approve)

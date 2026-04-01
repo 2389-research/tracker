@@ -286,6 +286,13 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 					var idx int
 					if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx >= 1 && idx <= len(q.Options) {
 						ans.Answer = q.Options[idx-1]
+					} else if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx == len(q.Options)+1 {
+						// User selected "Other" by number — prompt for freeform text.
+						fmt.Fprintf(c.Writer, "Enter your answer: ")
+						otherLine, otherErr := c.readLine()
+						if otherErr == nil {
+							ans.Answer = strings.TrimSpace(otherLine)
+						}
 					} else {
 						// Treat as "Other" freeform
 						ans.Answer = input
