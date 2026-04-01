@@ -25,14 +25,12 @@ type InterviewResult struct {
 }
 
 // SerializeInterviewResult marshals an InterviewResult to a JSON string.
-// Returns an empty string only on marshal failure (which should not happen
-// for well-formed structs).
+// Panics on marshal failure (which cannot happen for this struct type,
+// but we enforce rather than silently returning empty).
 func SerializeInterviewResult(r InterviewResult) string {
 	b, err := json.Marshal(r)
 	if err != nil {
-		// json.Marshal fails only for types that cannot be encoded (e.g., channels,
-		// functions). Our struct is safe, so this path is effectively unreachable.
-		return ""
+		panic(fmt.Sprintf("interview result marshal failed: %v", err))
 	}
 	return string(b)
 }

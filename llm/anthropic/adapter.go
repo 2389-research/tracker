@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -107,6 +108,15 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 
 	resp.Provider = "anthropic"
 	resp.Latency = time.Since(start)
+
+	// Log diagnostic info for empty responses — helps debug silent API failures.
+	if resp.Usage.OutputTokens == 0 && resp.Text() == "" && len(resp.ToolCalls()) == 0 {
+		log.Printf("[anthropic] WARNING: empty response (0 output tokens, no text, no tool calls) — status=%d stop_reason=%s model=%s request_id=%s raw_length=%d",
+			httpResp.StatusCode, resp.FinishReason.Raw, resp.Model, httpResp.Header.Get("Request-Id"), len(respBody))
+		if len(respBody) < 2000 {
+			log.Printf("[anthropic] raw response body: %s", string(respBody))
+		}
+	}
 
 	return resp, nil
 }

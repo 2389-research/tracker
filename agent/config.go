@@ -30,6 +30,8 @@ type SessionConfig struct {
 	ContextCompaction             CompactionMode
 	CompactionThreshold           float64
 	ReasoningEffort               string // OpenAI reasoning effort: "low", "medium", "high"
+	ResponseFormat                string // "json_object" or "json_schema" — forces structured output
+	ResponseSchema                string // JSON schema string when ResponseFormat is "json_schema"
 }
 
 const (

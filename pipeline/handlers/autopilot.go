@@ -118,11 +118,11 @@ func (a *AutopilotInterviewer) Ask(prompt string, choices []string, defaultChoic
 }
 
 // AskFreeform handles pure freeform gates by generating a text response.
+// Provider errors hard-fail per CLAUDE.md — never silently swallow errors.
 func (a *AutopilotInterviewer) AskFreeform(prompt string) (string, error) {
 	decision, err := a.callLLM(prompt, nil, "")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: autopilot freeform LLM call failed (%v), using 'auto-approved'\n", err)
-		return "auto-approved", nil
+		return "", fmt.Errorf("autopilot freeform gate failed: %w", err)
 	}
 	if decision.Reasoning != "" {
 		return decision.Reasoning, nil

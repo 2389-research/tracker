@@ -308,10 +308,13 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
-	// Guard against truly empty responses. A session with turns > 0 or tool
-	// calls > 0 did real work even if it produced no text output (common with
-	// the claude-code backend where agents use tools without narrating).
-	if strings.TrimSpace(responseText) == "" && sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0 {
+	// Guard against truly empty responses. Two cases:
+	// 1. Zero turns, zero tool calls → session never started
+	// 2. Has turns but zero output tokens AND zero text → API returned empty (error swallowed)
+	// Case 2 does NOT apply when tool calls > 0 (agent did real work via tools).
+	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
+	emptyAPIResponse := strings.TrimSpace(responseText) == "" && sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
+	if strings.TrimSpace(responseText) == "" && (emptySession || emptyAPIResponse) {
 		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
 			ContextUpdates: map[string]string{
@@ -361,6 +364,7 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	h.applyModelProvider(&config, node)
 	h.applySessionLimits(&config, node)
 	h.applyReasoningEffort(&config, node)
+	h.applyResponseFormat(&config, node)
 	h.applyCacheAndCompaction(&config, node)
 
 	return config
@@ -406,6 +410,17 @@ func (h *CodergenHandler) applyReasoningEffort(config *agent.SessionConfig, node
 	}
 	if re, ok := node.Attrs["reasoning_effort"]; ok && re != "" {
 		config.ReasoningEffort = re
+	}
+}
+
+// applyResponseFormat sets structured output format from node attrs.
+// Supported values: "json_object" (any valid JSON) or "json_schema" (with response_schema).
+func (h *CodergenHandler) applyResponseFormat(config *agent.SessionConfig, node *pipeline.Node) {
+	if rf, ok := node.Attrs["response_format"]; ok && rf != "" {
+		config.ResponseFormat = rf
+	}
+	if schema, ok := node.Attrs["response_schema"]; ok && schema != "" {
+		config.ResponseSchema = schema
 	}
 }
 

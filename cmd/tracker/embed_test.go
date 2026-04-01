@@ -10,7 +10,7 @@ import (
 )
 
 func TestLookupBuiltinWorkflowKnown(t *testing.T) {
-	for _, name := range []string{"ask_and_execute", "build_product", "build_product_with_superspec"} {
+	for _, name := range []string{"ask_and_execute", "build_product", "build_product_with_superspec", "deep_review"} {
 		info, ok := lookupBuiltinWorkflow(name)
 		if !ok {
 			t.Errorf("lookupBuiltinWorkflow(%q) returned false", name)
@@ -40,8 +40,8 @@ func TestLookupBuiltinWorkflowUnknown(t *testing.T) {
 
 func TestListBuiltinWorkflowsReturnsThree(t *testing.T) {
 	workflows := listBuiltinWorkflows()
-	if len(workflows) != 3 {
-		t.Errorf("listBuiltinWorkflows returned %d workflows, want 3", len(workflows))
+	if len(workflows) != 4 {
+		t.Errorf("listBuiltinWorkflows returned %d workflows, want 4", len(workflows))
 	}
 	// Verify sorted order.
 	for i := 1; i < len(workflows); i++ {
@@ -250,6 +250,7 @@ func TestWorkflowDisplayNames(t *testing.T) {
 		"ask_and_execute":              "AskAndExecute",
 		"build_product":                "BuildProduct",
 		"build_product_with_superspec": "BuildProductWithSuperspec",
+		"deep_review":                  "DeepReview",
 	}
 	for name, wantDisplay := range expected {
 		info, ok := lookupBuiltinWorkflow(name)

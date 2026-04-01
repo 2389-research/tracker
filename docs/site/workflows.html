@@ -29,7 +29,7 @@
 
   <section class="hero glass" style="padding: 3rem 2rem;">
     <h1>Built-in Workflows</h1>
-    <p class="subtitle">Three flagship pipelines embedded in the binary. Run by name, customize with <code>tracker init</code>.</p>
+    <p class="subtitle">Four pipelines embedded in the binary. Run by name, customize with <code>tracker init</code>.</p>
   </section>
 
   <!-- ═══ build_product ═══ -->
@@ -229,11 +229,83 @@ graph TB
     </div>
   </section>
 
+  <!-- ═══ deep_review ═══ -->
+  <section class="glass" id="deep-review">
+    <span class="badge">Interview-Driven</span>
+    <h2 style="margin-top: 0.75rem;"><code>deep_review</code></h2>
+    <p class="lead">
+      Structured codebase review powered by interview mode. Three rounds of targeted questions
+      (scope, findings, priorities) drive parallel analysis and produce an actionable remediation plan.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph TB
+    Ask{{"What to review?"}} --> Explore["Explore<br/>Codebase"]
+    Explore --> GenScope["Generate Scope<br/>Questions"]
+    GenScope --> Scope{{"Interview:<br/>Scope"}}
+
+    subgraph analysis ["Parallel Analysis"]
+      Scope --> P["Fan-Out"]
+      P --> Correct["Correctness<br/><i>opus</i>"]
+      P --> Sec["Security<br/><i>opus</i>"]
+      P --> Design["Design<br/><i>opus</i>"]
+      Correct --> J["Fan-In"]
+      Sec --> J
+      Design --> J
+    end
+
+    J --> Synth["Synthesize<br/>Findings"]
+    Synth --> Findings{{"Interview:<br/>Findings"}}
+    Findings --> GenPri["Generate Priority<br/>Questions"]
+    GenPri --> Priority{{"Interview:<br/>Priorities"}}
+    Priority --> Plan["Write Remediation<br/>Plan"]
+    Plan --> Review{{"Approve Plan?"}}
+    Review -->|approve| Final["Finalize"] --> Done([Done])
+    Review -->|revise| Plan
+      </div>
+    </div>
+
+    <h3>Three Interview Gates</h3>
+    <div class="grid-3" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Scope Interview</h4>
+        <p>After codebase exploration, structured questions narrow the review to what matters: primary concern, target area, deployment context, known incidents.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Findings Interview</h4>
+        <p>After parallel analysis, each finding is presented as a question with options: intentional, known bug, or needs investigation. Your context eliminates false positives.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Priority Interview</h4>
+        <p>Confirmed issues get prioritization questions: timeline, fix approach, dependencies, who reviews. Drives the remediation plan structure.</p>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 1.5rem;">Interview Mode UX</h3>
+    <p>
+      Each interview gate presents a fullscreen form parsed from the agent's markdown questions.
+      Questions with inline options like <code>Auth model? (API key, OAuth, JWT)</code> become select fields.
+      Yes/no questions become toggles. Open-ended questions become text areas.
+      Navigate with arrow keys, Tab for elaboration, Ctrl+S to submit, PgUp/PgDn for pagination.
+      Previous answers pre-fill on retry.
+    </p>
+
+    <pre data-lang="bash" style="margin-top: 1.5rem;"><code><span class="comment"># Review any codebase</span>
+tracker deep_review
+
+<span class="comment"># Fully autonomous review (LLM answers the interviews)</span>
+tracker <span class="flag">--autopilot</span> mid deep_review
+
+<span class="comment"># Copy and customize the review pipeline</span>
+tracker init deep_review</code></pre>
+  </section>
+
   <!-- ═══ Backend Agnostic ═══ -->
   <section class="glass" style="border-left: 3px solid var(--orange-600);">
     <h3>Backend Agnostic <span class="badge">v0.12.0</span></h3>
     <p>
-      All three built-in workflows work with both the <strong>native</strong> and <strong>claude-code</strong> backends.
+      All four built-in workflows work with both the <strong>native</strong> and <strong>claude-code</strong> backends.
       No changes needed &mdash; just add <code>--backend claude-code</code> to give agents file editing, terminal access,
       and MCP tool servers. Mix backends per-node by adding <code>backend: claude-code</code> to individual agent definitions
       in your customized <code>.dip</code> file.

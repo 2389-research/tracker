@@ -124,6 +124,19 @@ func TestMatchChoiceLongestWins(t *testing.T) {
 	}
 }
 
+func TestMatchChoiceAmbiguousSubstring(t *testing.T) {
+	// When one option is a prefix of another, longest-match should win
+	// even when the LLM response contains only the longer option.
+	options := []string{"retry", "retry with escalation"}
+	if got := matchChoice("retry with escalation", options); got != "retry with escalation" {
+		t.Errorf("matchChoice ambiguous = %q, want %q", got, "retry with escalation")
+	}
+	// Short partial should match the short option
+	if got := matchChoice("retry", options); got != "retry" {
+		t.Errorf("matchChoice short = %q, want %q", got, "retry")
+	}
+}
+
 func TestMatchChoiceNoMatch(t *testing.T) {
 	options := []string{"approve", "adjust", "reject"}
 	if got := matchChoice("something else entirely", options); got != "" {

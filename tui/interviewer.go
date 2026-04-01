@@ -130,7 +130,7 @@ type choiceRunner struct {
 func (r choiceRunner) Init() tea.Cmd { return nil }
 
 func (r choiceRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	r.content.Update(msg)
+	cmd := r.content.Update(msg)
 	select {
 	case val, ok := <-r.replyCh:
 		if !ok {
@@ -141,7 +141,7 @@ func (r choiceRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, tea.Quit
 	default:
 	}
-	return r, nil
+	return r, cmd
 }
 
 func (r choiceRunner) View() string { return r.content.View() }
@@ -188,7 +188,7 @@ type freeformRunner struct {
 func (r freeformRunner) Init() tea.Cmd { return nil }
 
 func (r freeformRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	r.content.Update(msg)
+	cmd := r.content.Update(msg)
 	select {
 	case val, ok := <-r.replyCh:
 		if !ok {
@@ -199,7 +199,7 @@ func (r freeformRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, tea.Quit
 	default:
 	}
-	return r, nil
+	return r, cmd
 }
 
 func (r freeformRunner) View() string { return r.content.View() }
@@ -247,7 +247,7 @@ type interviewRunner struct {
 func (r interviewRunner) Init() tea.Cmd { return nil }
 
 func (r interviewRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	r.content.Update(msg)
+	cmd := r.content.Update(msg)
 	select {
 	case val, ok := <-r.replyCh:
 		if !ok {
@@ -258,7 +258,7 @@ func (r interviewRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, tea.Quit
 	default:
 	}
-	return r, nil
+	return r, cmd
 }
 
 func (r interviewRunner) View() string { return r.content.View() }

@@ -337,13 +337,174 @@ func TestParseQuestionsOptionsStripping(t *testing.T) {
 	if len(questions[0].Options) != 3 {
 		t.Errorf("Options len = %d, want 3; got %v", len(questions[0].Options), questions[0].Options)
 	}
+	expected := []string{"alpha", "beta", "gamma"}
 	for i, opt := range questions[0].Options {
-		if opt != opt {
-			_ = i // just ensure no leading/trailing spaces would matter
+		if opt != expected[i] {
+			t.Errorf("Option[%d] = %q, want %q", i, opt, expected[i])
 		}
 		// Check no leading or trailing spaces
 		if len(opt) > 0 && (opt[0] == ' ' || opt[len(opt)-1] == ' ') {
 			t.Errorf("Option[%d] has leading/trailing space: %q", i, opt)
 		}
+	}
+}
+
+// ── Structured JSON parsing tests ──────────────────────────────
+
+func TestParseStructuredQuestionsValid(t *testing.T) {
+	input := `{"questions": [
+		{"text": "Auth model?", "context": "Found 3 auth patterns in codebase", "options": ["API key", "OAuth", "JWT"]},
+		{"text": "Scale expectations?", "options": ["low", "high"]},
+		{"text": "Describe integrations"}
+	]}`
+	questions, err := ParseStructuredQuestions(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(questions) != 3 {
+		t.Fatalf("expected 3 questions, got %d", len(questions))
+	}
+	if questions[0].Text != "Auth model?" {
+		t.Errorf("Q1 text = %q", questions[0].Text)
+	}
+	if questions[0].Context != "Found 3 auth patterns in codebase" {
+		t.Errorf("Q1 context = %q", questions[0].Context)
+	}
+	if len(questions[0].Options) != 3 {
+		t.Errorf("Q1 options = %v", questions[0].Options)
+	}
+	if questions[1].Context != "" {
+		t.Errorf("Q2 context should be empty, got %q", questions[1].Context)
+	}
+	if len(questions[2].Options) != 0 {
+		t.Errorf("Q3 should have no options, got %v", questions[2].Options)
+	}
+}
+
+func TestParseStructuredQuestionsYesNo(t *testing.T) {
+	input := `{"questions": [{"text": "Is this production?", "options": ["yes", "no"]}]}`
+	questions, err := ParseStructuredQuestions(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !questions[0].IsYesNo {
+		t.Error("expected IsYesNo=true for yes/no options")
+	}
+}
+
+func TestParseStructuredQuestionsCodeFenced(t *testing.T) {
+	input := "Here are my questions:\n```json\n" +
+		`{"questions": [{"text": "Auth?", "options": ["API key", "OAuth"]}]}` +
+		"\n```\n"
+	questions, err := ParseStructuredQuestions(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(questions) != 1 {
+		t.Fatalf("expected 1 question, got %d", len(questions))
+	}
+	if questions[0].Text != "Auth?" {
+		t.Errorf("text = %q", questions[0].Text)
+	}
+}
+
+func TestParseStructuredQuestionsWithPreamble(t *testing.T) {
+	input := "Based on my analysis, here are the scoping questions:\n\n" +
+		`{"questions": [{"text": "Primary concern?", "context": "Multiple hot spots found", "options": ["correctness", "security"]}]}` +
+		"\n\nLet me know if you need more detail."
+	questions, err := ParseStructuredQuestions(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(questions) != 1 || questions[0].Text != "Primary concern?" {
+		t.Errorf("unexpected result: %+v", questions)
+	}
+}
+
+func TestParseStructuredQuestionsEmptyInput(t *testing.T) {
+	_, err := ParseStructuredQuestions("")
+	if err == nil {
+		t.Error("expected error for empty input")
+	}
+}
+
+func TestParseStructuredQuestionsNoJSON(t *testing.T) {
+	_, err := ParseStructuredQuestions("Just some plain text without any JSON")
+	if err == nil {
+		t.Error("expected error for non-JSON input")
+	}
+}
+
+func TestParseStructuredQuestionsEmptyArray(t *testing.T) {
+	_, err := ParseStructuredQuestions(`{"questions": []}`)
+	if err == nil {
+		t.Error("expected error for empty questions array")
+	}
+}
+
+func TestParseStructuredQuestionsEmptyText(t *testing.T) {
+	_, err := ParseStructuredQuestions(`{"questions": [{"text": "", "options": ["a"]}]}`)
+	if err == nil {
+		t.Error("expected error for empty question text")
+	}
+}
+
+func TestParseStructuredQuestionsInvalidJSON(t *testing.T) {
+	_, err := ParseStructuredQuestions(`{"questions": [{"text": broken`)
+	if err == nil {
+		t.Error("expected error for malformed JSON")
+	}
+}
+
+func TestParseStructuredQuestionsIndices(t *testing.T) {
+	input := `{"questions": [{"text": "Q1"}, {"text": "Q2"}, {"text": "Q3"}]}`
+	questions, err := ParseStructuredQuestions(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for i, q := range questions {
+		if q.Index != i+1 {
+			t.Errorf("Q%d index = %d, want %d", i+1, q.Index, i+1)
+		}
+	}
+}
+
+// ── filterOtherOption tests ────────────────────────────────
+
+func TestFilterOtherOptionExact(t *testing.T) {
+	got := filterOtherOption([]string{"approve", "other", "reject"})
+	if len(got) != 2 || got[0] != "approve" || got[1] != "reject" {
+		t.Errorf("expected [approve reject], got %v", got)
+	}
+}
+
+func TestFilterOtherOptionVariants(t *testing.T) {
+	for _, variant := range []string{"Other", "OTHER", "other — describe below", "other — describe", "other - specify"} {
+		got := filterOtherOption([]string{"keep", variant})
+		if len(got) != 1 || got[0] != "keep" {
+			t.Errorf("expected %q to be filtered, got %v", variant, got)
+		}
+	}
+}
+
+func TestFilterOtherOptionPreservesNonOther(t *testing.T) {
+	got := filterOtherOption([]string{"Another option", "mother", "no other choice"})
+	if len(got) != 3 {
+		t.Errorf("expected 3 options preserved, got %v", got)
+	}
+}
+
+func TestFilterOtherOptionEmpty(t *testing.T) {
+	got := filterOtherOption(nil)
+	if len(got) != 0 {
+		t.Errorf("expected empty, got %v", got)
+	}
+}
+
+func TestFilterOtherOptionYesNoWithOther(t *testing.T) {
+	// After filtering "other", ["yes", "no"] should detect as yes/no
+	filtered := filterOtherOption([]string{"yes", "no", "other"})
+	if !isYesNoQuestion(filtered, "test?") {
+		t.Error("expected yes/no detection after filtering other")
 	}
 }

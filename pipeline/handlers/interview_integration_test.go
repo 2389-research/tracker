@@ -201,3 +201,78 @@ func TestInterview_Integration_RetryPreFill(t *testing.T) {
 		t.Errorf("expected previous Q1 answer 'data analytics', got %q", mock.capturedPrev.Questions[0].Answer)
 	}
 }
+
+func TestInterview_Integration_StructuredJSON(t *testing.T) {
+	// Build a graph with an interview node.
+	graph := pipeline.NewGraph("test-interview-json")
+	graph.AddNode(&pipeline.Node{
+		ID:    "interview",
+		Shape: "hexagon",
+		Label: "Answer the scoping questions.",
+		Attrs: map[string]string{
+			"mode":          "interview",
+			"questions_key": "interview_questions",
+			"answers_key":   "interview_answers",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "done", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "interview", To: "done"})
+
+	// Set context to a valid structured JSON string (the path ParseStructuredQuestions handles).
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", `{"questions": [
+		{"text": "What auth model?", "context": "Found 3 auth patterns", "options": ["OAuth", "SAML", "API key"]},
+		{"text": "Describe your scaling needs", "context": "Current load is 10k RPM"}
+	]}`)
+
+	// Use AutoApproveFreeformInterviewer (implements InterviewInterviewer).
+	interviewer := &AutoApproveFreeformInterviewer{}
+	handler := NewHumanHandler(interviewer, graph)
+
+	node := graph.Nodes["interview"]
+	outcome, err := handler.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+
+	answersJSON, ok := outcome.ContextUpdates["interview_answers"]
+	if !ok || answersJSON == "" {
+		t.Fatal("expected interview_answers in context updates")
+	}
+
+	result, err := DeserializeInterviewResult(answersJSON)
+	if err != nil {
+		t.Fatalf("failed to deserialize answers: %v", err)
+	}
+
+	// Structured JSON path should yield exactly 2 questions.
+	if len(result.Questions) != 2 {
+		t.Fatalf("expected 2 answers (structured JSON path), got %d", len(result.Questions))
+	}
+
+	// Auto-approve picks first option for select questions.
+	if result.Questions[0].Answer != "OAuth" {
+		t.Errorf("Q1: expected 'OAuth' (first option), got %q", result.Questions[0].Answer)
+	}
+	if result.Questions[0].Text != "What auth model?" {
+		t.Errorf("Q1: expected text 'What auth model?', got %q", result.Questions[0].Text)
+	}
+
+	// Open-ended question (no options): auto-approve returns "auto-approved".
+	if result.Questions[1].Answer != "auto-approved" {
+		t.Errorf("Q2: expected 'auto-approved', got %q", result.Questions[1].Answer)
+	}
+
+	// Verify the markdown summary is set.
+	summary, ok := outcome.ContextUpdates[pipeline.ContextKeyHumanResponse]
+	if !ok || summary == "" {
+		t.Fatal("expected human_response in context updates")
+	}
+	if !strings.Contains(summary, "What auth model?") {
+		t.Error("expected markdown summary to contain question text")
+	}
+}

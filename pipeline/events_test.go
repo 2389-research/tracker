@@ -10,7 +10,7 @@ func TestPipelineEventTypesUnique(t *testing.T) {
 	types := []PipelineEventType{
 		EventPipelineStarted, EventPipelineCompleted, EventPipelineFailed,
 		EventStageStarted, EventStageCompleted, EventStageFailed, EventStageRetrying,
-		EventCheckpointSaved, EventInterviewStarted, EventInterviewCompleted,
+		EventCheckpointSaved,
 		EventParallelStarted, EventParallelCompleted,
 	}
 	seen := make(map[PipelineEventType]bool)

@@ -5,6 +5,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -634,8 +635,8 @@ func TestHumanHandler_InterviewMode_Canceled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error (canceled should not error): %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
-		t.Errorf("expected success even on cancel, got %q", outcome.Status)
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected fail on cancel, got %q", outcome.Status)
 	}
 	// Partial answers should still be stored
 	jsonStr, ok := outcome.ContextUpdates["interview_answers"]
@@ -756,5 +757,82 @@ func TestHumanHandler_InterviewMode_CustomKeys(t *testing.T) {
 	// Default key should NOT be set
 	if _, ok := outcome.ContextUpdates["interview_answers"]; ok {
 		t.Error("expected default 'interview_answers' key NOT to be set when custom answers_key is specified")
+	}
+}
+
+func TestHumanHandler_InterviewMode_CanceledZeroAnswers(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. What auth model?\n2. Scale?")
+
+	// User pressed Esc immediately — zero answers, canceled.
+	canceled := &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "What auth model?"},
+			{ID: "q2", Text: "Scale?"},
+		},
+		Canceled: true,
+	}
+	mock := &mockInterviewInterviewer{result: canceled}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected fail on cancel, got %q", outcome.Status)
+	}
+	// Partial answers (even zero) should be stored
+	jsonStr, ok := outcome.ContextUpdates["interview_answers"]
+	if !ok || jsonStr == "" {
+		t.Fatal("expected interview_answers to be stored even on immediate cancel")
+	}
+	result, err := DeserializeInterviewResult(jsonStr)
+	if err != nil {
+		t.Fatalf("failed to deserialize: %v", err)
+	}
+	if !result.Canceled {
+		t.Error("expected Canceled=true")
+	}
+	// Markdown summary should note zero answers
+	summary := outcome.ContextUpdates[pipeline.ContextKeyHumanResponse]
+	if !strings.Contains(summary, "0 of 2 questions answered") {
+		t.Errorf("expected '0 of 2 questions answered' in summary, got %q", summary)
+	}
+}
+
+func TestHumanHandler_InterviewMode_AskInterviewError(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. What auth model?")
+
+	mock := &mockInterviewInterviewer{err: fmt.Errorf("connection lost")}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected error from AskInterview failure")
+	}
+	if !strings.Contains(err.Error(), "connection lost") {
+		t.Errorf("expected 'connection lost' in error, got %q", err.Error())
 	}
 }

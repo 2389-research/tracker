@@ -17,8 +17,6 @@ const (
 	EventStageRetrying      PipelineEventType = "stage_retrying"
 	EventCheckpointSaved    PipelineEventType = "checkpoint_saved"
 	EventCheckpointFailed   PipelineEventType = "checkpoint_failed"
-	EventInterviewStarted   PipelineEventType = "interview_started"
-	EventInterviewCompleted PipelineEventType = "interview_completed"
 	EventParallelStarted    PipelineEventType = "parallel_started"
 	EventParallelCompleted  PipelineEventType = "parallel_completed"
 	EventLoopRestart        PipelineEventType = "loop_restart"

@@ -19,6 +19,7 @@ type interviewField struct {
 
 	// Select fields (question has Options)
 	selectCursor int            // index into options; len(options) = "Other"
+	selected     bool           // true once user confirms a selection (Enter)
 	isOther      bool           // true when "Other" textarea is focused
 	otherInput   textarea.Model // for custom "Other" text
 
@@ -190,8 +191,10 @@ func (ic *InterviewContent) collectAnswers() handlers.InterviewResult {
 		}
 
 		if len(f.question.Options) > 0 {
-			// Select field.
-			if f.isOther || f.selectCursor >= len(f.question.Options) {
+			// Select field — only report answer if user explicitly confirmed.
+			if !f.selected {
+				ans.Answer = ""
+			} else if f.isOther || f.selectCursor >= len(f.question.Options) {
 				ans.Answer = strings.TrimSpace(f.otherInput.Value())
 			} else {
 				ans.Answer = f.question.Options[f.selectCursor]
@@ -282,6 +285,15 @@ func (ic *InterviewContent) updateTextareaMode(km tea.KeyMsg) tea.Cmd {
 		return ic.submit()
 	}
 
+	// "Other" and open-ended text fields: Enter confirms and advances.
+	// Elaboration fields: Enter inserts newlines (multi-line is useful there).
+	if km.Type == tea.KeyEnter && !f.editingElab {
+		ic.inTextarea = false
+		f.selected = true
+		ic.blurAll(f)
+		return ic.moveCursor(1)
+	}
+
 	// Forward to the active textarea.
 	var cmd tea.Cmd
 	if f.editingElab {
@@ -336,11 +348,13 @@ func (ic *InterviewContent) updateSelectField(km tea.KeyMsg, f *interviewField) 
 		if f.selectCursor >= len(f.question.Options) {
 			// "Other" — activate otherInput textarea.
 			f.isOther = true
+			f.selected = true
 			ic.inTextarea = true
 			f.otherInput.Focus()
 			return nil
 		}
 		// Confirm selection and move to next question.
+		f.selected = true
 		return ic.moveCursor(1)
 	case tea.KeyEscape:
 		// Move to previous question; cancel only if at the first question.
@@ -375,7 +389,7 @@ func (ic *InterviewContent) updateConfirmField(km tea.KeyMsg, f *interviewField)
 	case tea.KeyDown:
 		return ic.moveCursor(1)
 	case tea.KeyEnter:
-		// Toggle or set yes.
+		// Set yes (or toggle) and advance.
 		if f.confirmed == nil {
 			v := true
 			f.confirmed = &v
@@ -383,7 +397,7 @@ func (ic *InterviewContent) updateConfirmField(km tea.KeyMsg, f *interviewField)
 			v := !*f.confirmed
 			f.confirmed = &v
 		}
-		return nil
+		return ic.moveCursor(1)
 	case tea.KeyEscape:
 		if ic.cursor > 0 {
 			return ic.moveCursor(-1)
@@ -395,11 +409,11 @@ func (ic *InterviewContent) updateConfirmField(km tea.KeyMsg, f *interviewField)
 	case "y", "Y":
 		v := true
 		f.confirmed = &v
-		return nil
+		return ic.moveCursor(1)
 	case "n", "N":
 		v := false
 		f.confirmed = &v
-		return nil
+		return ic.moveCursor(1)
 	case "tab":
 		f.editingElab = true
 		ic.inTextarea = true
@@ -526,51 +540,109 @@ func (ic *InterviewContent) cancel() tea.Cmd {
 	return ic.cancelForm()
 }
 
-// View renders the fullscreen interview form.
+// wrapText wraps text to fit within the interview content width with a left indent.
+func (ic *InterviewContent) wrapText(text string, indent int) string {
+	maxW := ic.width - indent - 2 // 2 for margin
+	if maxW < 20 {
+		maxW = 20
+	}
+	return lipgloss.NewStyle().Width(maxW).Render(text)
+}
+
+// View renders the interview form — one question at a time with progress summary.
 func (ic *InterviewContent) View() string {
 	var sb strings.Builder
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout)
-	sb.WriteString(titleStyle.Render("INTERVIEW"))
-	sb.WriteString("\n\n")
-
-	// Determine visible range from pagination.
-	start := ic.page * ic.pageSize
-	end := start + ic.pageSize
-	if end > len(ic.fields) {
-		end = len(ic.fields)
-	}
-
-	accentStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout)
-	normalQStyle := lipgloss.NewStyle().Bold(true)
+	accentStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Width(ic.width - 2)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
+	confirmedStyle := lipgloss.NewStyle().Foreground(ColorGreen)
 	normalStyle := lipgloss.NewStyle()
 
-	for idx := start; idx < end; idx++ {
-		f := &ic.fields[idx]
-		isFocused := idx == ic.cursor
+	// Header with progress.
+	answered := 0
+	for _, f := range ic.fields {
+		if ic.fieldAnswered(&f) {
+			answered++
+		}
+	}
+	sb.WriteString(titleStyle.Render(fmt.Sprintf("INTERVIEW  (%d/%d answered)", answered, len(ic.fields))))
+	sb.WriteString("\n")
 
-		// Question header.
-		qLabel := fmt.Sprintf("Q%d: %s", f.question.Index, f.question.Text)
-		if isFocused {
-			sb.WriteString(accentStyle.Render(qLabel))
+	// Progress bar.
+	barWidth := 40
+	if ic.width > 60 {
+		barWidth = ic.width / 2
+	}
+	filled := 0
+	if len(ic.fields) > 0 {
+		filled = (answered * barWidth) / len(ic.fields)
+	}
+	bar := strings.Repeat("━", filled) + strings.Repeat("─", barWidth-filled)
+	sb.WriteString(confirmedStyle.Render(bar))
+	sb.WriteString("\n\n")
+
+	// Summary of previously answered questions (compact, wrapped).
+	summaryW := ic.width - 6 // indent + margin
+	if summaryW < 20 {
+		summaryW = 20
+	}
+	summaryStyle := confirmedStyle.Width(summaryW)
+	skippedStyle := Styles.Muted.Width(summaryW)
+	for idx := 0; idx < ic.cursor && idx < len(ic.fields); idx++ {
+		f := &ic.fields[idx]
+		answer := ic.fieldAnswerText(f)
+		if answer != "" {
+			sb.WriteString(summaryStyle.Render(fmt.Sprintf("  ✓ Q%d: %s → %s", f.question.Index, f.question.Text, answer)))
 		} else {
-			sb.WriteString(normalQStyle.Render(qLabel))
+			sb.WriteString(skippedStyle.Render(fmt.Sprintf("  · Q%d: %s (skipped)", f.question.Index, f.question.Text)))
+		}
+		sb.WriteString("\n")
+	}
+	if ic.cursor > 0 {
+		sb.WriteString("\n")
+	}
+
+	// Current question — full rendering.
+	if ic.cursor < len(ic.fields) {
+		f := &ic.fields[ic.cursor]
+
+		qLabel := fmt.Sprintf("Q%d of %d: %s", f.question.Index, len(ic.fields), f.question.Text)
+		sb.WriteString(accentStyle.Render(qLabel))
+		sb.WriteString("\n")
+
+		// Question context (wrapped).
+		if f.question.Context != "" {
+			ctxW := ic.width - 6
+			if ctxW < 20 {
+				ctxW = 20
+			}
+			ctxStyle := lipgloss.NewStyle().Faint(true).Italic(true).Width(ctxW)
+			sb.WriteString("  " + ctxStyle.Render(f.question.Context) + "\n")
 		}
 		sb.WriteString("\n")
 
 		if len(f.question.Options) > 0 {
-			// Radio select field.
+			// Radio select field (options wrapped to width).
+			optW := ic.width - 8 // indent (4) + bullet (4) + margin
+			if optW < 20 {
+				optW = 20
+			}
 			for j, opt := range f.question.Options {
-				if isFocused && j == f.selectCursor && !f.isOther {
-					sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", opt)))
+				isHovered := j == f.selectCursor && !f.isOther
+				isChosen := f.selected && j == f.selectCursor && !f.isOther
+				wrapped := lipgloss.NewStyle().Width(optW).Render(opt)
+				if isChosen {
+					sb.WriteString(confirmedStyle.Render(fmt.Sprintf("  ● %s  ✓", wrapped)))
+				} else if isHovered {
+					sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", wrapped)))
 				} else {
-					sb.WriteString(normalStyle.Render(fmt.Sprintf("  ○ %s", opt)))
+					sb.WriteString(normalStyle.Render(fmt.Sprintf("  ○ %s", wrapped)))
 				}
 				sb.WriteString("\n")
 			}
 			// "Other" option.
-			if isFocused && (f.selectCursor >= len(f.question.Options)) && !ic.inTextarea {
+			if f.selectCursor >= len(f.question.Options) && !ic.inTextarea {
 				sb.WriteString(selectedStyle.Render("  ● Other"))
 			} else if f.isOther && ic.inTextarea && !f.editingElab {
 				sb.WriteString(selectedStyle.Render("  ● Other:"))
@@ -579,75 +651,129 @@ func (ic *InterviewContent) View() string {
 			}
 			sb.WriteString("\n")
 			// Show other textarea when active.
-			if f.isOther && ic.inTextarea && isFocused && !f.editingElab {
+			if f.isOther && ic.inTextarea && !f.editingElab {
 				sb.WriteString(f.otherInput.View())
+				sb.WriteString("\n")
+				sb.WriteString(Styles.Muted.Render("  Enter confirm  Esc cancel"))
 				sb.WriteString("\n")
 			}
 			// Elaboration textarea.
-			if isFocused && f.editingElab {
+			if f.editingElab {
 				sb.WriteString(Styles.Muted.Render("  Add details (optional):"))
 				sb.WriteString("\n")
 				sb.WriteString(f.elaboration.View())
 				sb.WriteString("\n")
-			} else if isFocused && !ic.inTextarea {
-				sb.WriteString(Styles.Muted.Render("  Tab → Add details (optional)"))
+			} else if !ic.inTextarea {
+				sb.WriteString("\n")
+				sb.WriteString(Styles.Muted.Render("  ↑↓ select  Enter confirm  Tab elaborate"))
 				sb.WriteString("\n")
 			}
 
 		} else if f.question.IsYesNo {
 			// Yes/No toggle.
-			yStr := "[ ] Yes"
-			nStr := "[ ] No"
+			yStr := "○ Yes"
+			nStr := "○ No"
 			if f.confirmed != nil {
 				if *f.confirmed {
-					yStr = "[Y] Yes"
+					yStr = confirmedStyle.Render("● Yes  ✓")
+					nStr = normalStyle.Render("○ No")
 				} else {
-					nStr = "[N] No"
+					yStr = normalStyle.Render("○ Yes")
+					nStr = confirmedStyle.Render("● No  ✓")
 				}
 			}
-			if isFocused {
-				sb.WriteString(accentStyle.Render(fmt.Sprintf("  %s  %s", yStr, nStr)))
-			} else {
-				sb.WriteString(normalStyle.Render(fmt.Sprintf("  %s  %s", yStr, nStr)))
-			}
+			sb.WriteString(fmt.Sprintf("  %s    %s", yStr, nStr))
 			sb.WriteString("\n")
 			// Elaboration textarea.
-			if isFocused && f.editingElab {
+			if f.editingElab {
 				sb.WriteString(Styles.Muted.Render("  Add details (optional):"))
 				sb.WriteString("\n")
 				sb.WriteString(f.elaboration.View())
 				sb.WriteString("\n")
-			} else if isFocused && !ic.inTextarea {
-				sb.WriteString(Styles.Muted.Render("  Tab → Add details (optional)"))
+			} else if !ic.inTextarea {
+				sb.WriteString("\n")
+				sb.WriteString(Styles.Muted.Render("  y/n toggle  Enter confirm  Tab elaborate"))
 				sb.WriteString("\n")
 			}
 
 		} else {
 			// Text field.
-			if isFocused && ic.inTextarea {
+			if ic.inTextarea {
 				sb.WriteString(f.textInput.View())
+				sb.WriteString("\n")
+				sb.WriteString(Styles.Muted.Render("  Enter confirm  Esc cancel"))
+				sb.WriteString("\n")
 			} else {
 				val := f.textInput.Value()
 				if val == "" {
-					sb.WriteString(Styles.Muted.Render("  (press Enter to type)"))
+					sb.WriteString(Styles.Muted.Render("  (press Enter to type your answer)"))
 				} else {
 					sb.WriteString(normalStyle.Render(fmt.Sprintf("  %s", val)))
 				}
+				sb.WriteString("\n\n")
+				sb.WriteString(Styles.Muted.Render("  Enter to type  Esc back"))
+				sb.WriteString("\n")
 			}
-			sb.WriteString("\n")
 		}
+	}
 
+	// Remaining questions preview.
+	remaining := len(ic.fields) - ic.cursor - 1
+	if remaining > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(Styles.Muted.Render(fmt.Sprintf("  %d question%s remaining", remaining, pluralS(remaining))))
 		sb.WriteString("\n")
 	}
 
+	sb.WriteString("\n")
 	// Status line.
-	totalPages := ic.totalPages()
-	pageInfo := fmt.Sprintf("Page %d/%d", ic.page+1, totalPages)
-	hint := fmt.Sprintf("%s — ↑↓ navigate, Tab elaborate, Ctrl+S submit, Esc back/cancel", pageInfo)
 	if ic.inTextarea {
-		hint = fmt.Sprintf("%s — type answer, Esc back to navigation, Ctrl+S submit", pageInfo)
+		sb.WriteString(Styles.Muted.Render("Esc back to navigation  Ctrl+S submit all"))
+	} else {
+		sb.WriteString(Styles.Muted.Render("↑↓ navigate  Ctrl+S submit all  Esc cancel"))
 	}
-	sb.WriteString(Styles.Muted.Render(hint))
 
 	return sb.String()
+}
+
+// fieldAnswered returns true if the field has a non-empty answer.
+func (ic *InterviewContent) fieldAnswered(f *interviewField) bool {
+	if len(f.question.Options) > 0 {
+		return f.selected
+	}
+	if f.question.IsYesNo {
+		return f.confirmed != nil
+	}
+	return strings.TrimSpace(f.textInput.Value()) != ""
+}
+
+// fieldAnswerText returns a short summary of the field's answer for the progress list.
+func (ic *InterviewContent) fieldAnswerText(f *interviewField) string {
+	if len(f.question.Options) > 0 {
+		if !f.selected {
+			return ""
+		}
+		if f.isOther || f.selectCursor >= len(f.question.Options) {
+			return strings.TrimSpace(f.otherInput.Value())
+		}
+		return f.question.Options[f.selectCursor]
+	}
+	if f.question.IsYesNo {
+		if f.confirmed == nil {
+			return ""
+		}
+		if *f.confirmed {
+			return "Yes"
+		}
+		return "No"
+	}
+	return strings.TrimSpace(f.textInput.Value())
+}
+
+// pluralS returns "s" if n != 1.
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
