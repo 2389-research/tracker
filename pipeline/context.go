@@ -21,7 +21,7 @@ const (
 	// node attributes in .dip files. These are the defaults when the attrs
 	// are not specified.
 	ContextKeyInterviewQuestions = "interview_questions"
-	ContextKeyInterviewAnswers  = "interview_answers"
+	ContextKeyInterviewAnswers   = "interview_answers"
 )
 
 // Internal context keys used by the engine for bookkeeping.

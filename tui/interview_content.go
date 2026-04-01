@@ -37,15 +37,15 @@ type interviewField struct {
 // InterviewContent implements ModalContent, Cancellable, and FullscreenContent
 // for multi-field interview forms shown in the TUI modal.
 type InterviewContent struct {
-	questions []handlers.Question
-	fields    []interviewField
-	cursor    int          // which question is focused (0-indexed into full list)
-	page      int          // current page (0-indexed)
-	pageSize  int          // questions per page (default 10)
-	replyCh   chan<- string // JSON string reply
-	done      bool
-	width     int
-	height    int
+	questions  []handlers.Question
+	fields     []interviewField
+	cursor     int           // which question is focused (0-indexed into full list)
+	page       int           // current page (0-indexed)
+	pageSize   int           // questions per page (default 10)
+	replyCh    chan<- string // JSON string reply
+	done       bool
+	width      int
+	height     int
 	inTextarea bool // true when a textarea has focus (text field, other input, or elaboration)
 }
 

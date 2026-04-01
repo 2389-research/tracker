@@ -17,7 +17,6 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-
 // mockExecEnv is a test-only ExecutionEnvironment that returns canned results
 // based on the command, without needing an actual shell.
 type mockExecEnv struct {

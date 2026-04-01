@@ -269,7 +269,6 @@ func extractAgentBackendAttrs(params map[string]string, attrs map[string]string)
 	}
 }
 
-
 func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {
 	if cfg.Mode != "" {
 		attrs["mode"] = cfg.Mode
