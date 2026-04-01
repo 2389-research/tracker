@@ -81,10 +81,10 @@ func (a *AutoApproveFreeformInterviewer) AskInterview(questions []Question, prev
 			ID:   fmt.Sprintf("q%d", q.Index),
 			Text: q.Text,
 		}
-		if len(q.Options) > 0 {
-			ans.Answer = q.Options[0]
-		} else if q.IsYesNo {
+		if q.IsYesNo {
 			ans.Answer = "yes"
+		} else if len(q.Options) > 0 {
+			ans.Answer = q.Options[0]
 		} else {
 			ans.Answer = "auto-approved"
 		}
@@ -298,6 +298,9 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 						ans.Answer = input
 					}
 				}
+			} else if prevAns.Answer != "" {
+				// Blank input preserves the previous answer on retry.
+				ans.Answer = prevAns.Answer
 			}
 		} else if q.IsYesNo {
 			if prevAns.Answer != "" {
@@ -321,6 +324,9 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 				ans.Answer = "yes"
 			} else if input == "n" || input == "no" {
 				ans.Answer = "no"
+			} else if input == "" && prevAns.Answer != "" {
+				// Blank input preserves the previous answer on retry.
+				ans.Answer = prevAns.Answer
 			}
 		} else {
 			if prevAns.Answer != "" {
@@ -339,7 +345,13 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 				}
 				break
 			}
-			ans.Answer = strings.TrimSpace(line)
+			text := strings.TrimSpace(line)
+			if text != "" {
+				ans.Answer = text
+			} else if prevAns.Answer != "" {
+				// Blank input preserves the previous answer on retry.
+				ans.Answer = prevAns.Answer
+			}
 		}
 
 		answers[i] = ans
@@ -507,7 +519,18 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 		if agentOutput != "" {
 			prompt = prompt + "\n\n---\n" + agentOutput
 		}
-		return h.executeFreeform(node, prompt)
+		outcome, err := h.executeFreeform(node, prompt)
+		if err != nil {
+			return outcome, err
+		}
+		// Also persist the freeform response under answers_key so downstream
+		// nodes that read the interview answers can find it.
+		if outcome.ContextUpdates != nil {
+			if resp, ok := outcome.ContextUpdates[pipeline.ContextKeyHumanResponse]; ok {
+				outcome.ContextUpdates[answersKey] = resp
+			}
+		}
+		return outcome, nil
 	}
 
 	// Check for previous answers (retry pre-fill)

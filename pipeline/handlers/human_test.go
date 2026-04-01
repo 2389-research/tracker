@@ -496,6 +496,10 @@ func TestHumanHandler_InterviewMode_ZeroQuestions(t *testing.T) {
 	if !ok || resp == "" {
 		t.Fatal("expected human_response in context updates from freeform fallback")
 	}
+	// Freeform fallback should also persist under interview_answers key.
+	if _, ok := outcome.ContextUpdates["interview_answers"]; !ok {
+		t.Error("expected freeform fallback to also set interview_answers key")
+	}
 	// AskInterview should NOT have been called
 	if mock.questionsReceived != nil {
 		t.Error("expected AskInterview not to be called on zero-questions fallback")
@@ -712,6 +716,33 @@ func TestConsoleInterviewer_AskInterview_Skip(t *testing.T) {
 	}
 	if result.Questions[0].Answer != "" {
 		t.Errorf("expected empty (skipped), got %q", result.Questions[0].Answer)
+	}
+}
+
+func TestConsoleInterviewer_AskInterview_BlankPreservesPrevious(t *testing.T) {
+	input := "\n\n" // blank for both questions — should preserve previous
+	var output bytes.Buffer
+	ci := &ConsoleInterviewer{Reader: strings.NewReader(input), Writer: &output}
+
+	questions := []Question{
+		{Index: 1, Text: "Auth?", Options: []string{"OAuth", "SAML"}},
+		{Index: 2, Text: "Scale?", IsYesNo: true},
+	}
+	prev := &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "q1", Text: "Auth?", Answer: "OAuth"},
+			{ID: "q2", Text: "Scale?", Answer: "yes"},
+		},
+	}
+	result, err := ci.AskInterview(questions, prev)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Questions[0].Answer != "OAuth" {
+		t.Errorf("expected previous 'OAuth' preserved, got %q", result.Questions[0].Answer)
+	}
+	if result.Questions[1].Answer != "yes" {
+		t.Errorf("expected previous 'yes' preserved, got %q", result.Questions[1].Answer)
 	}
 }
 

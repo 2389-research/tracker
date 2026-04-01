@@ -241,28 +241,28 @@ graph TB
     <div class="diagram">
       <div class="mermaid">
 graph TB
-    Ask{{"What to review?"}} --> Explore["Explore<br/>Codebase"]
-    Explore --> GenScope["Generate Scope<br/>Questions"]
-    GenScope --> Scope{{"Interview:<br/>Scope"}}
+    Ask{{"What to review?"}} --&gt; Explore["Explore<br/>Codebase"]
+    Explore --&gt; GenScope["Generate Scope<br/>Questions"]
+    GenScope --&gt; Scope{{"Interview:<br/>Scope"}}
 
     subgraph analysis ["Parallel Analysis"]
-      Scope --> P["Fan-Out"]
-      P --> Correct["Correctness<br/><i>opus</i>"]
-      P --> Sec["Security<br/><i>opus</i>"]
-      P --> Design["Design<br/><i>opus</i>"]
-      Correct --> J["Fan-In"]
-      Sec --> J
-      Design --> J
+      Scope --&gt; P["Fan-Out"]
+      P --&gt; Correct["Correctness<br/><i>opus</i>"]
+      P --&gt; Sec["Security<br/><i>opus</i>"]
+      P --&gt; Design["Design<br/><i>opus</i>"]
+      Correct --&gt; J["Fan-In"]
+      Sec --&gt; J
+      Design --&gt; J
     end
 
-    J --> Synth["Synthesize<br/>Findings"]
-    Synth --> Findings{{"Interview:<br/>Findings"}}
-    Findings --> GenPri["Generate Priority<br/>Questions"]
-    GenPri --> Priority{{"Interview:<br/>Priorities"}}
-    Priority --> Plan["Write Remediation<br/>Plan"]
-    Plan --> Review{{"Approve Plan?"}}
-    Review -->|approve| Final["Finalize"] --> Done([Done])
-    Review -->|revise| Plan
+    J --&gt; Synth["Synthesize<br/>Findings"]
+    Synth --&gt; Findings{{"Interview:<br/>Findings"}}
+    Findings --&gt; GenPri["Generate Priority<br/>Questions"]
+    GenPri --&gt; Priority{{"Interview:<br/>Priorities"}}
+    Priority --&gt; Plan["Write Remediation<br/>Plan"]
+    Plan --&gt; Review{{"Approve Plan?"}}
+    Review --&gt;|approve| Final["Finalize"] --&gt; Done([Done])
+    Review --&gt;|revise| Plan
       </div>
     </div>
 

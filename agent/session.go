@@ -191,15 +191,23 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 			if done {
 				// Check: if the session produced NOTHING (no text ever, no tool calls ever)
 				// and this response is empty, the API silently failed. Retry instead of stopping.
-				if result.TotalToolCalls() == 0 && len(resp.Message.Content) == 0 && resp.Usage.OutputTokens == 0 && emptyResponseRetries < maxEmptyResponseRetries {
-					emptyResponseRetries++
-					diag := fmt.Sprintf("empty API response (0 output tokens, 0 tool calls) — provider=%s model=%s finish=%s input_tokens=%d raw_len=%d, retrying",
-						resp.Provider, resp.Model, resp.FinishReason.Raw, resp.Usage.InputTokens, len(resp.Raw))
-					s.emit(Event{Type: EventError, SessionID: s.id, Text: diag})
-					s.messages = append(s.messages, llm.UserMessage(
-						"Your previous response was empty. Please provide your response now.",
-					))
-					continue // retry instead of stopping
+				if result.TotalToolCalls() == 0 && len(resp.Message.Content) == 0 && resp.Usage.OutputTokens == 0 {
+					if emptyResponseRetries < maxEmptyResponseRetries {
+						emptyResponseRetries++
+						diag := fmt.Sprintf("empty API response (0 output tokens, 0 tool calls) — provider=%s model=%s finish=%s input_tokens=%d raw_len=%d, retrying",
+							resp.Provider, resp.Model, resp.FinishReason.Raw, resp.Usage.InputTokens, len(resp.Raw))
+						s.emit(Event{Type: EventError, SessionID: s.id, Text: diag})
+						s.messages = append(s.messages, llm.UserMessage(
+							"Your previous response was empty. Please provide your response now.",
+						))
+						continue // retry instead of stopping
+					}
+					// All retries exhausted with empty responses — hard fail.
+					emptyErr := fmt.Errorf("agent session failed: %d consecutive empty API responses", maxEmptyResponseRetries)
+					result.Error = emptyErr
+					result.Duration = time.Since(start)
+					s.emit(Event{Type: EventError, SessionID: s.id, Err: emptyErr})
+					return result, emptyErr
 				}
 				stoppedNaturally = true
 				break

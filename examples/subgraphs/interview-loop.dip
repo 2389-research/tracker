@@ -26,8 +26,9 @@ workflow InterviewLoop
       You are conducting a requirements interview about: ${params.topic}
       Focus areas: ${params.focus}
 
-      Review everything the user has said so far (check ctx for
-      interview_answers from prior rounds) and identify gaps that
+      Previous interview answers (if any): ${ctx.interview_answers}
+
+      Review everything the user has said so far and identify gaps that
       would block good results.
 
       Ask 3-5 pointed questions. Only ask about things genuinely
@@ -66,7 +67,7 @@ workflow InterviewLoop
     auto_status: true
     prompt:
       Review the full conversation — the user's initial input,
-      the interviewer's questions, and the user's answers.
+      the interviewer's questions, and the user's answers: ${ctx.interview_answers}
 
       Decide whether we have enough information to proceed.
 
