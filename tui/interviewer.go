@@ -4,8 +4,10 @@ package tui
 
 import (
 	"fmt"
+	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/term"
 
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
@@ -265,7 +267,11 @@ func (r interviewRunner) View() string { return r.content.View() }
 
 func (b *BubbleteaInterviewer) askMode1Interview(questions []handlers.Question, prev *handlers.InterviewResult) (*handlers.InterviewResult, error) {
 	ch := make(chan string, 1)
-	content := NewInterviewContent(questions, prev, ch, 80, 24)
+	width, height := 80, 24
+	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		width, height = w, h
+	}
+	content := NewInterviewContent(questions, prev, ch, width, height)
 	runner := interviewRunner{content: content, replyCh: ch}
 	p := tea.NewProgram(runner)
 	finalModel, err := p.Run()
