@@ -16,6 +16,12 @@ const (
 	ContextKeyToolStdout         = "tool_stdout"
 	ContextKeyToolStderr         = "tool_stderr"
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
+
+	// Interview mode context keys. Overridable via questions_key/answers_key
+	// node attributes in .dip files. These are the defaults when the attrs
+	// are not specified.
+	ContextKeyInterviewQuestions = "interview_questions"
+	ContextKeyInterviewAnswers   = "interview_answers"
 )
 
 // Internal context keys used by the engine for bookkeeping.

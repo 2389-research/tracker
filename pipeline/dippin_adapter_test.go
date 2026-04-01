@@ -1083,6 +1083,48 @@ func TestEnsureStartExitNodes_ErrorMissingNodes(t *testing.T) {
 	}
 }
 
+// TestExtractHumanAttrs_Interview verifies all interview-mode fields are extracted.
+func TestExtractHumanAttrs_Interview(t *testing.T) {
+	cfg := ir.HumanConfig{
+		Mode:         "interview",
+		QuestionsKey: "my_questions",
+		AnswersKey:   "my_answers",
+		Prompt:       "Answer the questions below",
+	}
+	attrs := map[string]string{}
+	extractHumanAttrs(cfg, attrs)
+
+	if attrs["mode"] != "interview" {
+		t.Errorf("expected mode 'interview', got %q", attrs["mode"])
+	}
+	if attrs["questions_key"] != "my_questions" {
+		t.Errorf("expected questions_key 'my_questions', got %q", attrs["questions_key"])
+	}
+	if attrs["answers_key"] != "my_answers" {
+		t.Errorf("expected answers_key 'my_answers', got %q", attrs["answers_key"])
+	}
+	if attrs["prompt"] != "Answer the questions below" {
+		t.Errorf("expected prompt 'Answer the questions below', got %q", attrs["prompt"])
+	}
+}
+
+// TestExtractHumanAttrs_InterviewDefaults verifies empty interview fields are not set.
+func TestExtractHumanAttrs_InterviewDefaults(t *testing.T) {
+	cfg := ir.HumanConfig{Mode: "interview"}
+	attrs := map[string]string{}
+	extractHumanAttrs(cfg, attrs)
+
+	if _, ok := attrs["questions_key"]; ok {
+		t.Error("empty QuestionsKey should not set attr")
+	}
+	if _, ok := attrs["answers_key"]; ok {
+		t.Error("empty AnswersKey should not set attr")
+	}
+	if _, ok := attrs["prompt"]; ok {
+		t.Error("empty Prompt should not set attr")
+	}
+}
+
 // Helper function to check if a string contains a substring.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))

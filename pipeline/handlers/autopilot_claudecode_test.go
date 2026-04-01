@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -61,18 +62,18 @@ func TestClaudeCodeAutopilotAskFailsWithBadPath(t *testing.T) {
 	}
 }
 
-func TestClaudeCodeAutopilotAskFreeformFailsGracefully(t *testing.T) {
+func TestClaudeCodeAutopilotAskFreeformHardFails(t *testing.T) {
 	ai := &ClaudeCodeAutopilotInterviewer{
 		persona:    PersonaLax,
 		claudePath: "/nonexistent/claude",
 	}
-	// AskFreeform falls back to "auto-approved" on failure.
-	result, err := ai.AskFreeform("describe your plan")
-	if err != nil {
-		t.Fatalf("AskFreeform should not error (falls back), got: %v", err)
+	// AskFreeform must hard-fail on provider/CLI errors per CLAUDE.md.
+	_, err := ai.AskFreeform("describe your plan")
+	if err == nil {
+		t.Fatal("expected error from AskFreeform with nonexistent claude path")
 	}
-	if result != "auto-approved" {
-		t.Errorf("expected 'auto-approved' fallback, got %q", result)
+	if !strings.Contains(err.Error(), "freeform gate failed") {
+		t.Errorf("expected error to contain 'freeform gate failed', got %q", err.Error())
 	}
 }
 

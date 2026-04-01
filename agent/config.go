@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -30,6 +31,8 @@ type SessionConfig struct {
 	ContextCompaction             CompactionMode
 	CompactionThreshold           float64
 	ReasoningEffort               string // OpenAI reasoning effort: "low", "medium", "high"
+	ResponseFormat                string // "json_object" or "json_schema" — forces structured output
+	ResponseSchema                string // JSON schema string when ResponseFormat is "json_schema"
 }
 
 const (
@@ -82,6 +85,19 @@ func (c SessionConfig) Validate() error {
 	for name, limit := range c.ToolOutputLimits {
 		if limit <= 0 {
 			return fmt.Errorf("ToolOutputLimits[%q] must be > 0, got %d", name, limit)
+		}
+	}
+	if c.ResponseFormat != "" {
+		if c.ResponseFormat != "json_object" && c.ResponseFormat != "json_schema" {
+			return fmt.Errorf("ResponseFormat must be \"json_object\" or \"json_schema\", got %q", c.ResponseFormat)
+		}
+		if c.ResponseFormat == "json_schema" {
+			if c.ResponseSchema == "" {
+				return fmt.Errorf("ResponseSchema must be non-empty when ResponseFormat is \"json_schema\"")
+			}
+			if !json.Valid([]byte(c.ResponseSchema)) {
+				return fmt.Errorf("ResponseSchema must be valid JSON, got %q", c.ResponseSchema)
+			}
 		}
 	}
 	return nil

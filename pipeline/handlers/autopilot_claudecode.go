@@ -42,11 +42,11 @@ func (a *ClaudeCodeAutopilotInterviewer) Ask(prompt string, choices []string, de
 }
 
 // AskFreeform handles pure freeform gates by generating a text response.
+// Provider errors hard-fail per CLAUDE.md — never silently swallow errors.
 func (a *ClaudeCodeAutopilotInterviewer) AskFreeform(prompt string) (string, error) {
 	decision, err := a.callClaude(prompt, nil, "")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: claude-code autopilot freeform call failed (%v), using 'auto-approved'\n", err)
-		return "auto-approved", nil
+		return "", fmt.Errorf("claude-code autopilot freeform gate failed: %w", err)
 	}
 	if decision.Reasoning != "" {
 		return decision.Reasoning, nil
@@ -124,6 +124,64 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 
 	return decision, nil
 }
+
+// AskInterview implements InterviewInterviewer by routing all questions through
+// the claude CLI subprocess and parsing the JSON response.
+// Provider errors hard-fail per CLAUDE.md. On parse failure, retries once with
+// explicit JSON instructions. Hard-fails on double parse failure — matching the
+// AutopilotInterviewer behavior. Silent auto-approve on parse failure would violate
+// the "never silently swallow errors" rule.
+func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
+	_ = prev // autopilot starts fresh each time — no retry pre-fill
+	prompt := buildInterviewPrompt(questions)
+	systemPrompt := personaPrompts[a.persona]
+	fullPrompt := systemPrompt + "\n\n" + prompt
+
+	for attempt := 0; attempt < 2; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+
+		cmd := exec.CommandContext(ctx, a.claudePath,
+			"--print",
+			"-p", fullPrompt,
+			"--max-turns", "1",
+			"--output-format", "text",
+		)
+		cmd.Env = buildEnv()
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			cancel()
+			return nil, fmt.Errorf("claude CLI interview: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		}
+		cancel()
+
+		responseText := strings.TrimSpace(stdout.String())
+		if responseText == "" {
+			return nil, fmt.Errorf("claude CLI returned empty response for interview")
+		}
+
+		result, parseErr := parseInterviewResponse(responseText, questions)
+		if parseErr == nil {
+			return result, nil
+		}
+
+		if attempt == 0 {
+			// Retry with explicit JSON instruction appended.
+			fullPrompt += "\n\nIMPORTANT: Your previous response was not valid JSON. You MUST respond with ONLY a JSON object, no other text."
+			continue
+		}
+		return nil, fmt.Errorf("claude CLI interview: failed to parse response after 2 attempts: %w", parseErr)
+	}
+	// unreachable
+	return nil, fmt.Errorf("claude CLI interview: unexpected retry loop exit")
+}
+
+// Compile-time assertions: ClaudeCodeAutopilotInterviewer implements both interfaces.
+var _ LabeledFreeformInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
+var _ InterviewInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
 
 // fallback returns the default option, or the first option, or empty string.
 func (a *ClaudeCodeAutopilotInterviewer) fallback(options []string, defaultOption string) string {

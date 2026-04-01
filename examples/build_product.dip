@@ -12,9 +12,11 @@ workflow BuildProduct
 
   agent Start
     label: Start
+    prompt: Initialize pipeline.
 
   agent Done
     label: Done
+    prompt: Pipeline complete.
 
   # ─── Phase 1: Read & Plan ──────────────────────────────────
 

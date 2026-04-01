@@ -78,3 +78,45 @@ func TestValidate_CacheToolResultsAcceptsBothValues(t *testing.T) {
 		t.Errorf("CacheToolResults=false should be valid: %v", err)
 	}
 }
+
+func TestValidate_ResponseFormat(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// Valid: empty (default)
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("empty ResponseFormat should be valid: %v", err)
+	}
+
+	// Valid: json_object
+	cfg.ResponseFormat = "json_object"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("json_object should be valid: %v", err)
+	}
+
+	// Valid: json_schema with valid schema
+	cfg.ResponseFormat = "json_schema"
+	cfg.ResponseSchema = `{"type": "object"}`
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("json_schema with valid schema should be valid: %v", err)
+	}
+
+	// Invalid: unknown format
+	cfg.ResponseFormat = "xml"
+	cfg.ResponseSchema = ""
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for ResponseFormat=xml")
+	}
+
+	// Invalid: json_schema without schema
+	cfg.ResponseFormat = "json_schema"
+	cfg.ResponseSchema = ""
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for json_schema without ResponseSchema")
+	}
+
+	// Invalid: json_schema with invalid JSON
+	cfg.ResponseSchema = "not json"
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for invalid ResponseSchema JSON")
+	}
+}

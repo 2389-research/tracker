@@ -124,6 +124,19 @@ func TestMatchChoiceLongestWins(t *testing.T) {
 	}
 }
 
+func TestMatchChoiceAmbiguousSubstring(t *testing.T) {
+	// When one option is a prefix of another, longest-match should win
+	// even when the LLM response contains only the longer option.
+	options := []string{"retry", "retry with escalation"}
+	if got := matchChoice("retry with escalation", options); got != "retry with escalation" {
+		t.Errorf("matchChoice ambiguous = %q, want %q", got, "retry with escalation")
+	}
+	// Short partial should match the short option
+	if got := matchChoice("retry", options); got != "retry" {
+		t.Errorf("matchChoice short = %q, want %q", got, "retry")
+	}
+}
+
 func TestMatchChoiceNoMatch(t *testing.T) {
 	options := []string{"approve", "adjust", "reject"}
 	if got := matchChoice("something else entirely", options); got != "" {
@@ -184,5 +197,133 @@ func TestFallbackEmpty(t *testing.T) {
 	got := ai.fallback(nil, "")
 	if got != "" {
 		t.Errorf("fallback empty = %q, want empty", got)
+	}
+}
+
+func TestBuildInterviewPrompt(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Auth model?", Options: []string{"API key", "OAuth"}},
+		{Index: 2, Text: "Describe integrations"},
+	}
+	prompt := buildInterviewPrompt(questions)
+
+	if !strings.Contains(prompt, "Auth model?") {
+		t.Error("expected question text 'Auth model?' in prompt")
+	}
+	if !strings.Contains(prompt, "API key") {
+		t.Error("expected option 'API key' in prompt")
+	}
+	if !strings.Contains(prompt, "OAuth") {
+		t.Error("expected option 'OAuth' in prompt")
+	}
+	if !strings.Contains(prompt, "Describe integrations") {
+		t.Error("expected question text 'Describe integrations' in prompt")
+	}
+	if !strings.Contains(prompt, "JSON") {
+		t.Error("expected JSON format instruction in prompt")
+	}
+	if !strings.Contains(prompt, "answers") {
+		t.Error("expected 'answers' key in JSON format instruction")
+	}
+}
+
+func TestBuildInterviewPromptYesNo(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Do you want retries?", IsYesNo: true},
+	}
+	prompt := buildInterviewPrompt(questions)
+	if !strings.Contains(prompt, "yes, no") {
+		t.Error("expected yes/no options for IsYesNo question")
+	}
+}
+
+func TestParseInterviewResponseValidJSON(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Auth model?", Options: []string{"API key", "OAuth"}},
+		{Index: 2, Text: "Describe integrations"},
+	}
+	jsonStr := `{"answers": [{"id": "q1", "answer": "OAuth"}, {"id": "q2", "answer": "Salesforce nightly sync"}]}`
+	result, err := parseInterviewResponse(jsonStr, questions)
+	if err != nil {
+		t.Fatalf("parseInterviewResponse error: %v", err)
+	}
+	if len(result.Questions) != 2 {
+		t.Fatalf("expected 2 answers, got %d", len(result.Questions))
+	}
+	if result.Questions[0].Answer != "OAuth" {
+		t.Errorf("q1 answer = %q, want %q", result.Questions[0].Answer, "OAuth")
+	}
+	if result.Questions[0].ID != "q1" {
+		t.Errorf("q1 ID = %q, want %q", result.Questions[0].ID, "q1")
+	}
+	if result.Questions[0].Text != "Auth model?" {
+		t.Errorf("q1 text = %q, want %q", result.Questions[0].Text, "Auth model?")
+	}
+	if result.Questions[1].Answer != "Salesforce nightly sync" {
+		t.Errorf("q2 answer = %q, want %q", result.Questions[1].Answer, "Salesforce nightly sync")
+	}
+}
+
+func TestParseInterviewResponseMarkdownFences(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Auth model?", Options: []string{"API key", "OAuth"}},
+		{Index: 2, Text: "Describe integrations"},
+	}
+	jsonStr := `{"answers": [{"id": "q1", "answer": "OAuth"}, {"id": "q2", "answer": "Salesforce"}]}`
+	wrapped := "```json\n" + jsonStr + "\n```"
+	result, err := parseInterviewResponse(wrapped, questions)
+	if err != nil {
+		t.Fatalf("parseInterviewResponse with markdown fences error: %v", err)
+	}
+	if len(result.Questions) != 2 {
+		t.Fatalf("expected 2 answers, got %d", len(result.Questions))
+	}
+	if result.Questions[0].Answer != "OAuth" {
+		t.Errorf("q1 answer = %q, want %q", result.Questions[0].Answer, "OAuth")
+	}
+}
+
+func TestParseInterviewResponseWithElaboration(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Auth model?", Options: []string{"API key", "OAuth"}},
+	}
+	jsonStr := `{"answers": [{"id": "q1", "answer": "OAuth", "elaboration": "Google SSO preferred"}]}`
+	result, err := parseInterviewResponse(jsonStr, questions)
+	if err != nil {
+		t.Fatalf("parseInterviewResponse error: %v", err)
+	}
+	if result.Questions[0].Elaboration != "Google SSO preferred" {
+		t.Errorf("elaboration = %q, want %q", result.Questions[0].Elaboration, "Google SSO preferred")
+	}
+}
+
+func TestParseInterviewResponseNoJSON(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Auth model?"},
+	}
+	_, err := parseInterviewResponse("No JSON here at all", questions)
+	if err == nil {
+		t.Fatal("expected error for non-JSON response")
+	}
+}
+
+func TestParseInterviewResponseEmptyAnswers(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Auth model?"},
+	}
+	_, err := parseInterviewResponse(`{"answers": []}`, questions)
+	if err == nil {
+		t.Fatal("expected error for empty answers array")
+	}
+}
+
+func TestParseInterviewResponseUnknownIDs(t *testing.T) {
+	questions := []Question{
+		{Index: 1, Text: "Auth model?"},
+	}
+	// All answers have unknown IDs — should error since no matches
+	_, err := parseInterviewResponse(`{"answers": [{"id": "x99", "answer": "something"}]}`, questions)
+	if err == nil {
+		t.Fatal("expected error when no answer IDs match questions")
 	}
 }

@@ -77,6 +77,11 @@ type autopilotDecision struct {
 	Reasoning string `json:"reasoning"`
 }
 
+// Compile-time assertions: AutopilotInterviewer implements both LabeledFreeformInterviewer
+// and InterviewInterviewer.
+var _ LabeledFreeformInterviewer = (*AutopilotInterviewer)(nil)
+var _ InterviewInterviewer = (*AutopilotInterviewer)(nil)
+
 // AutopilotInterviewer implements LabeledFreeformInterviewer using an LLM
 // to make gate decisions instead of a human.
 type AutopilotInterviewer struct {
@@ -113,11 +118,11 @@ func (a *AutopilotInterviewer) Ask(prompt string, choices []string, defaultChoic
 }
 
 // AskFreeform handles pure freeform gates by generating a text response.
+// Provider errors hard-fail per CLAUDE.md — never silently swallow errors.
 func (a *AutopilotInterviewer) AskFreeform(prompt string) (string, error) {
 	decision, err := a.callLLM(prompt, nil, "")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: autopilot freeform LLM call failed (%v), using 'auto-approved'\n", err)
-		return "auto-approved", nil
+		return "", fmt.Errorf("autopilot freeform gate failed: %w", err)
 	}
 	if decision.Reasoning != "" {
 		return decision.Reasoning, nil
@@ -313,6 +318,200 @@ func (a *AutopilotInterviewer) fallback(options []string, defaultOption string) 
 		return options[0]
 	}
 	return ""
+}
+
+// AskInterview implements InterviewInterviewer by sending all questions to the
+// LLM in a single prompt and parsing the structured JSON response.
+// Provider errors hard-fail per CLAUDE.md. Only parse failures retry once.
+func (a *AutopilotInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
+	prompt := buildInterviewPrompt(questions)
+
+	// Include previous answers so the LLM can build on them.
+	if prev != nil && len(prev.Questions) > 0 {
+		var prevSection strings.Builder
+		prevSection.WriteString("\nPreviously answered:\n")
+		for _, ans := range prev.Questions {
+			if ans.Answer != "" {
+				prevSection.WriteString(fmt.Sprintf("- %s: %s\n", ans.Text, ans.Answer))
+			}
+		}
+		prompt += prevSection.String()
+	}
+
+	req := &llm.Request{
+		Model: a.resolveModel(),
+		Messages: []llm.Message{
+			llm.SystemMessage(personaPrompts[a.persona]),
+			llm.UserMessage(prompt),
+		},
+		MaxTokens: intPtr(2048),
+	}
+	temp := 0.1
+	req.Temperature = &temp
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	resp, err := a.client.Complete(ctx, req)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("autopilot interview LLM call: %w", err)
+	}
+
+	result, parseErr := parseInterviewResponse(resp.Message.Text(), questions)
+	if parseErr != nil {
+		// Retry once on parse failure — LLM may produce valid JSON on second try.
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+		resp2, err2 := a.client.Complete(ctx2, req)
+		cancel2()
+		if err2 != nil {
+			return nil, fmt.Errorf("autopilot interview retry: %w", err2)
+		}
+		result, parseErr = parseInterviewResponse(resp2.Message.Text(), questions)
+		if parseErr != nil {
+			return nil, fmt.Errorf("autopilot interview: %w", parseErr)
+		}
+	}
+	return result, nil
+}
+
+// buildInterviewPrompt formats all questions into a single LLM prompt requesting
+// a JSON response with answers for each question.
+//
+// NOTE: Question text comes from upstream agent output and is embedded verbatim.
+// A compromised upstream agent could craft question text that attempts to
+// manipulate the autopilot's decision (prompt injection). This is an inherent
+// limitation of using LLM output as LLM input. For option-constrained questions,
+// the risk is mitigated by matchChoice validation. For open-ended questions,
+// no validation is applied to the answer content.
+func buildInterviewPrompt(questions []Question) string {
+	var b strings.Builder
+	b.WriteString("Answer each of the following questions. For questions with options in parentheses, pick one of the listed options.\n")
+	b.WriteString("Respond with valid JSON in this exact format:\n")
+	b.WriteString(`{"answers": [{"id": "q1", "answer": "your answer", "elaboration": "optional details"}, ...]}`)
+	b.WriteString("\n\nQuestions:\n")
+	for _, q := range questions {
+		b.WriteString(fmt.Sprintf("%d. %s", q.Index, q.Text))
+		if len(q.Options) > 0 {
+			b.WriteString(fmt.Sprintf(" (%s)", strings.Join(q.Options, ", ")))
+		} else if q.IsYesNo {
+			b.WriteString(" (yes, no)")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// interviewResponseAnswer is the wire format for a single answer in the LLM response.
+type interviewResponseAnswer struct {
+	ID          string `json:"id"`
+	Answer      string `json:"answer"`
+	Elaboration string `json:"elaboration,omitempty"`
+}
+
+// interviewResponseEnvelope is the top-level wire format from the LLM.
+type interviewResponseEnvelope struct {
+	Answers []interviewResponseAnswer `json:"answers"`
+}
+
+// parseInterviewResponse parses the LLM's JSON response into an InterviewResult.
+// It strips markdown code fences, extracts the JSON object, and maps answers back
+// to InterviewAnswer structs with proper IDs, question text, and options.
+func parseInterviewResponse(text string, questions []Question) (*InterviewResult, error) {
+	text = strings.TrimSpace(text)
+
+	// Strip markdown code fences if present
+	if strings.HasPrefix(text, "```") {
+		lines := strings.Split(text, "\n")
+		var jsonLines []string
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "```") {
+				continue
+			}
+			jsonLines = append(jsonLines, line)
+		}
+		text = strings.Join(jsonLines, "\n")
+	}
+
+	// Find JSON object in the response
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start == -1 || end == -1 || end <= start {
+		return nil, fmt.Errorf("no JSON object found in interview response: %.100s", text)
+	}
+	text = text[start : end+1]
+
+	var envelope interviewResponseEnvelope
+	if err := json.Unmarshal([]byte(text), &envelope); err != nil {
+		return nil, fmt.Errorf("parse interview response: %w", err)
+	}
+	if len(envelope.Answers) == 0 {
+		return nil, fmt.Errorf("interview response contains no answers")
+	}
+
+	// Build a lookup map from LLM answer ID to the raw answer.
+	answerByID := make(map[string]interviewResponseAnswer, len(envelope.Answers))
+	for _, a := range envelope.Answers {
+		answerByID[a.ID] = a
+	}
+
+	// Build answers in question order (iterate questions, look up LLM answers by ID).
+	incomplete := false
+	answers := make([]InterviewAnswer, len(questions))
+	for i, q := range questions {
+		id := fmt.Sprintf("q%d", q.Index)
+		raw, ok := answerByID[id]
+
+		ans := InterviewAnswer{
+			ID:      id,
+			Text:    q.Text,
+			Options: q.Options,
+		}
+
+		if ok {
+			ans.Elaboration = raw.Elaboration
+
+			if len(q.Options) > 0 {
+				// Option-constrained: validate and normalize via matchChoice.
+				matched := matchChoice(raw.Answer, q.Options)
+				if matched != "" {
+					ans.Answer = matched
+				} else {
+					// LLM picked something not in the option list — treat as empty.
+					ans.Answer = ""
+				}
+			} else if q.IsYesNo {
+				// Normalize yes/no answers.
+				switch strings.ToLower(strings.TrimSpace(raw.Answer)) {
+				case "yes", "y", "true":
+					ans.Answer = "yes"
+				case "no", "n", "false":
+					ans.Answer = "no"
+				default:
+					ans.Answer = ""
+				}
+			} else {
+				ans.Answer = raw.Answer
+			}
+		}
+
+		if ans.Answer == "" {
+			incomplete = true
+		}
+		answers[i] = ans
+	}
+
+	// Verify at least one answer was matched from the LLM response.
+	anyMatched := false
+	for _, a := range answers {
+		if a.Answer != "" {
+			anyMatched = true
+			break
+		}
+	}
+	if !anyMatched {
+		return nil, fmt.Errorf("interview response had no matching answers for %d questions", len(questions))
+	}
+
+	return &InterviewResult{Questions: answers, Incomplete: incomplete}, nil
 }
 
 func intPtr(n int) *int { return &n }

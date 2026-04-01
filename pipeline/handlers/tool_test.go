@@ -17,14 +17,6 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// requireShell skips the test if "sh" is not available in PATH.
-func requireShell(t *testing.T) {
-	t.Helper()
-	if _, err := osexec.LookPath("sh"); err != nil {
-		t.Skip("sh not found in PATH — skipping shell-dependent test")
-	}
-}
-
 // mockExecEnv is a test-only ExecutionEnvironment that returns canned results
 // based on the command, without needing an actual shell.
 type mockExecEnv struct {
@@ -209,14 +201,9 @@ func TestToolHandlerDefaultTimeout(t *testing.T) {
 }
 
 func TestToolHandlerWritesStatusArtifact(t *testing.T) {
-	workdir := t.TempDir()
 	env := toolTestEnv(t, map[string]exec.CommandResult{
 		"echo hello": {Stdout: "hello\n", ExitCode: 0},
 	})
-	// Override workdir to match what toolTestEnv returns.
-	if m, ok := env.(*mockExecEnv); ok {
-		m.workdir = workdir
-	}
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "toolstep",
@@ -233,6 +220,7 @@ func TestToolHandlerWritesStatusArtifact(t *testing.T) {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
+	workdir := env.WorkingDir()
 	statusBytes, err := os.ReadFile(filepath.Join(workdir, "toolstep", "status.json"))
 	if err != nil {
 		t.Fatalf("expected status artifact: %v", err)

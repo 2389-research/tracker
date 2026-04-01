@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 func TestInterviewerMode2SendsGateChoice(t *testing.T) {
@@ -32,5 +34,45 @@ func TestInterviewerMode2SendsGateChoice(t *testing.T) {
 	result := <-done
 	if result != "b" {
 		t.Errorf("expected 'b', got %q", result)
+	}
+}
+
+func TestInterviewerMode2SendsGateInterview(t *testing.T) {
+	msgCh := make(chan tea.Msg, 1)
+	bi := NewBubbleteaInterviewer(func(msg tea.Msg) { msgCh <- msg })
+
+	questions := []handlers.Question{
+		{Index: 1, Text: "Test?", Options: []string{"a", "b"}},
+	}
+
+	// Start AskInterview in goroutine (it blocks on channel)
+	done := make(chan struct{})
+	var result *handlers.InterviewResult
+	var askErr error
+	go func() {
+		result, askErr = bi.AskInterview(questions, nil)
+		close(done)
+	}()
+
+	// Block until the message is sent (no sleep needed)
+	sentMsg := <-msgCh
+	msg, ok := sentMsg.(MsgGateInterview)
+	if !ok {
+		t.Fatalf("expected MsgGateInterview, got %T", sentMsg)
+	}
+	if len(msg.Questions) != 1 {
+		t.Fatalf("expected 1 question, got %d", len(msg.Questions))
+	}
+
+	// Simulate reply
+	reply := `{"questions":[{"id":"q1","text":"Test?","answer":"a"}]}`
+	msg.ReplyCh <- reply
+
+	<-done
+	if askErr != nil {
+		t.Fatalf("unexpected error: %v", askErr)
+	}
+	if result.Questions[0].Answer != "a" {
+		t.Errorf("expected answer 'a', got %q", result.Questions[0].Answer)
 	}
 }

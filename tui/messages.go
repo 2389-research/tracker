@@ -2,6 +2,8 @@
 // ABOUTME: Components communicate exclusively through these messages — no string comparisons.
 package tui
 
+import "github.com/2389-research/tracker/pipeline/handlers"
+
 // Pipeline lifecycle messages.
 type MsgNodeStarted struct{ NodeID string }
 type MsgNodeCompleted struct {
@@ -76,6 +78,12 @@ type MsgGateFreeform struct {
 	Labels  []string // outgoing edge labels (e.g., "approve", "adjust", "reject")
 	Default string   // default label (pre-selected)
 	ReplyCh chan<- string
+}
+type MsgGateInterview struct {
+	NodeID    string
+	Questions []handlers.Question
+	Previous  *handlers.InterviewResult
+	ReplyCh   chan<- string // JSON string
 }
 
 // UI tick and interaction messages.

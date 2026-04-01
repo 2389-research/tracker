@@ -44,7 +44,7 @@ tracker diagnose
 
 ## Pipeline Examples
 
-Three flagship pipelines are embedded in the binary and available via `tracker workflows`:
+Four pipelines are embedded in the binary and available via `tracker workflows`:
 
 ### `ask_and_execute`
 Competitive implementation: ask the user what to build, fan out to 3 agents (Claude/Codex/Gemini) in isolated git worktrees, cross-critique the implementations, select the best one, apply it, clean up the rest.
@@ -67,6 +67,22 @@ graph LR
 
 ### `build_product_with_superspec`
 Parallel stream execution for large structured specs: reads the spec's work streams and dependency graph, executes independent streams in parallel (with git worktree isolation), enforces quality gates between phases, cross-reviews with 3 specialized reviewers (architect/QA/product), and audits traceability.
+
+### `deep_review`
+Interview-driven codebase review: describe what you want reviewed, answer structured interview questions to scope the analysis, then three parallel agents analyze correctness, security, and design. A second interview presents findings for your context (is this intentional? known issue?), a third prioritizes remediation, and the pipeline produces an actionable remediation plan.
+
+```mermaid
+graph LR
+    DescribeGoal --> Explore --> ScopeInterview
+    ScopeInterview --> AnalyzeParallel
+    AnalyzeParallel --> Correctness & Security & Design
+    Correctness & Security & Design --> Join
+    Join --> Synthesize --> FindingsInterview
+    FindingsInterview --> PriorityInterview
+    PriorityInterview --> RemediationPlan --> ReviewPlan
+    ReviewPlan -->|approve| Finalize --> Done
+    ReviewPlan -->|revise| RemediationPlan
+```
 
 ## Built-in Workflows
 
@@ -171,11 +187,12 @@ The `working_dir` attribute is validated against path traversal and shell metach
 
 ### Human Gates
 
-Three gate modes:
+Four gate modes:
 
 - **Choice mode** (default): presents outgoing edge labels as a radio list. Arrow keys navigate, Enter selects.
 - **Freeform mode** (`mode: freeform`): captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`.
 - **Hybrid mode** (automatic): when a freeform gate has labeled outgoing edges, the TUI presents a radio list of labels plus an "other" option for custom feedback. Selecting a label submits it directly; selecting "other" opens a textarea for specific instructions.
+- **Interview mode** (`mode: interview`): structured multi-field form driven by upstream agent output. An agent generates markdown questions with inline options; the handler parses them into individual form fields and presents a fullscreen interview form. Answers are stored as JSON and markdown summary.
 
 Long prompts with labels (e.g., escalation gates with agent output) automatically use a fullscreen **review hybrid view**: glamour-rendered scrollable viewport on top (PgUp/PgDn to scroll), radio label selection in the middle, and an "other" freeform option at the bottom for custom retry instructions. Long prompts without labels use a **split-pane review**: scrollable viewport on top, textarea on bottom.
 
@@ -189,6 +206,27 @@ edges
   ApproveSpec -> Revise label: "refine"  restart: true
   ApproveSpec -> Done   label: "reject"
 ```
+
+#### Interview Mode
+
+Interview gates let an agent generate structured questions that the user answers via a form:
+
+```dip
+human ScopeInterview
+  label: "Help us focus the review."
+  mode: interview
+  questions_key: interview_questions
+  answers_key: scope_answers
+```
+
+The upstream agent writes markdown questions to the `questions_key` context variable. The parser extracts:
+- **Numbered/bulleted questions** ending in `?` or imperative prompts ("Describe...", "List...")
+- **Inline options** from trailing parentheticals: `Auth model? (API key, OAuth, JWT)` becomes a select field
+- **Yes/no patterns** detected automatically as confirm toggles
+
+The TUI presents a fullscreen form with per-field navigation (arrow keys), pagination (PgUp/PgDn for 10+ questions), elaboration textareas (Tab), and pre-fill from previous answers on retry. Answers are stored as JSON at `answers_key` and as a markdown summary at `human_response`. If zero questions are parsed, the gate falls back to freeform. Cancellation returns `outcome=fail`.
+
+A reusable interview loop pattern is available in `examples/subgraphs/interview-loop.dip` — embed it via `subgraph` nodes with `topic` and `focus` parameters.
 
 Submit with **Ctrl+S**. Enter inserts newlines. Esc cancels (empty) or submits (with content). Ctrl+C cancels and unblocks the pipeline (no deadlock).
 

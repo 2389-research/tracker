@@ -1,0 +1,90 @@
+workflow InterviewLoop
+  goal: "Collect structured requirements through iterative Q&A with an LLM interviewer."
+  start: Start
+  exit: Done
+
+  defaults
+    model: claude-sonnet-4-6
+    provider: anthropic
+    max_retries: 2
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  # ─── Generate Questions ────────────────────────────────────
+
+  agent Interviewer
+    label: "Generate questions"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    response_format: json_object
+    prompt:
+      You are conducting a requirements interview about: ${params.topic}
+      Focus areas: ${params.focus}
+
+      Previous interview answers (if any): ${ctx.interview_answers}
+
+      Review everything the user has said so far and identify gaps that
+      would block good results.
+
+      Ask 3-5 pointed questions. Only ask about things genuinely
+      unclear from what the user has said. Do NOT re-ask covered topics.
+
+      If the description is already thorough enough, output:
+      {"questions": []}
+
+      IMPORTANT: Output ONLY a JSON object — no markdown, no explanations,
+      no file writes. Your entire response must be valid JSON:
+
+      {"questions": [
+        {"text": "Who are the consumers?", "context": "Need to determine API surface area", "options": ["internal teams", "third-party devs", "end users"]},
+        {"text": "What scale do you expect?", "options": ["hobby <1k/day", "startup 1k-100k/day", "enterprise >100k/day"]},
+        {"text": "Describe any existing constraints or integrations", "context": "Understanding dependencies shapes the architecture"}
+      ]}
+
+      Each question MUST have "text". Add "context" to explain why you're
+      asking. Add "options" for discrete choices. Omit "options" for open-ended.
+
+  # ─── Collect Answers ───────────────────────────────────────
+
+  human Answer
+    label: "Answer the interviewer's questions."
+    mode: interview
+    questions_key: last_response
+    answers_key: interview_answers
+    prompt:
+      If no structured questions were detected, describe your
+      requirements here instead.
+
+  # ─── Assess Completeness ───────────────────────────────────
+
+  agent Assess
+    label: "Enough info to proceed?"
+    auto_status: true
+    prompt:
+      Review the full conversation — the user's initial input,
+      the interviewer's questions, and the user's answers: ${ctx.interview_answers}
+
+      Decide whether we have enough information to proceed.
+
+      If we have enough:
+      STATUS: success
+      Write a concise requirements summary capturing everything learned.
+
+      If critical gaps remain:
+      STATUS: fail
+      Explain what's still missing so the interviewer can ask
+      targeted follow-ups in the next round.
+
+  # ─── Edges ─────────────────────────────────────────────────
+
+  edges
+    Start -> Interviewer
+    Interviewer -> Answer
+    Answer -> Assess
+    Assess -> Done         when ctx.outcome = success  label: ready
+    Assess -> Interviewer  when ctx.outcome = fail     label: need_more  restart: true
