@@ -73,7 +73,7 @@ echo ""
 echo "--- Dippin Lint ---"
 if command -v dippin >/dev/null 2>&1; then
   LINT_FAIL=0
-  for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip; do
+  for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip examples/deep_review.dip; do
     ERRORS=$(dippin check "$f" 2>&1 | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('errors',0))" 2>/dev/null || echo "0")
     if [ "$ERRORS" -gt 0 ]; then
       echo "  $f: $ERRORS errors"
@@ -86,6 +86,15 @@ if command -v dippin >/dev/null 2>&1; then
   pass "dippin lint (core pipelines)"
 else
   warn "dippin CLI not found — skipping .dip lint"
+fi
+
+# 8. Workflow sync (examples/ must match cmd/tracker/workflows/)
+echo ""
+echo "--- Workflow Sync ---"
+if make check-workflows > /dev/null 2>&1; then
+  pass "embedded workflows in sync"
+else
+  fail "examples/*.dip out of sync with cmd/tracker/workflows/ — run 'make sync-workflows'"
 fi
 
 echo ""
