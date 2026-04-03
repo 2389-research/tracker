@@ -1177,3 +1177,65 @@ func TestFromDippinIR_SentinelErrors(t *testing.T) {
 		t.Error("ErrUnknownConfig should be matchable via errors.Is")
 	}
 }
+
+func TestFromDippinIR_NilNodeSkipped(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "nil-node",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			nil, // should be skipped
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+			nil, // should be skipped
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if len(graph.Nodes) != 2 {
+		t.Errorf("len(graph.Nodes) = %d, want 2", len(graph.Nodes))
+	}
+	if len(graph.Edges) != 1 {
+		t.Errorf("len(graph.Edges) = %d, want 1", len(graph.Edges))
+	}
+}
+
+func TestExtractNodeAttrs_NilPointerConfig(t *testing.T) {
+	attrs := map[string]string{}
+
+	var agentCfg *ir.AgentConfig
+	if err := extractNodeAttrs(agentCfg, attrs); err != nil {
+		t.Errorf("nil *AgentConfig: unexpected error: %v", err)
+	}
+
+	var humanCfg *ir.HumanConfig
+	if err := extractNodeAttrs(humanCfg, attrs); err != nil {
+		t.Errorf("nil *HumanConfig: unexpected error: %v", err)
+	}
+
+	var toolCfg *ir.ToolConfig
+	if err := extractNodeAttrs(toolCfg, attrs); err != nil {
+		t.Errorf("nil *ToolConfig: unexpected error: %v", err)
+	}
+
+	var parallelCfg *ir.ParallelConfig
+	if err := extractNodeAttrs(parallelCfg, attrs); err != nil {
+		t.Errorf("nil *ParallelConfig: unexpected error: %v", err)
+	}
+
+	var fanInCfg *ir.FanInConfig
+	if err := extractNodeAttrs(fanInCfg, attrs); err != nil {
+		t.Errorf("nil *FanInConfig: unexpected error: %v", err)
+	}
+
+	var subgraphCfg *ir.SubgraphConfig
+	if err := extractNodeAttrs(subgraphCfg, attrs); err != nil {
+		t.Errorf("nil *SubgraphConfig: unexpected error: %v", err)
+	}
+}

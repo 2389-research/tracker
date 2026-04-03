@@ -60,6 +60,9 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 
 	// Map IR nodes to Graph nodes, preserving declaration order.
 	for _, irNode := range workflow.Nodes {
+		if irNode == nil {
+			continue
+		}
 		gNode, err := convertNode(irNode)
 		if err != nil {
 			return nil, fmt.Errorf("node %s: %w", irNode.ID, err)
@@ -70,6 +73,9 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 
 	// Map IR edges to Graph edges
 	for _, irEdge := range workflow.Edges {
+		if irEdge == nil {
+			continue
+		}
 		gEdge := convertEdge(irEdge)
 		g.AddEdge(gEdge)
 	}
@@ -155,31 +161,49 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 	case ir.AgentConfig:
 		extractAgentAttrs(cfg, attrs)
 	case *ir.AgentConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractAgentAttrs(*cfg, attrs)
 
 	case ir.HumanConfig:
 		extractHumanAttrs(cfg, attrs)
 	case *ir.HumanConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractHumanAttrs(*cfg, attrs)
 
 	case ir.ToolConfig:
 		extractToolAttrs(cfg, attrs)
 	case *ir.ToolConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractToolAttrs(*cfg, attrs)
 
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
 	case *ir.ParallelConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractParallelAttrs(*cfg, attrs)
 
 	case ir.FanInConfig:
 		extractFanInAttrs(cfg, attrs)
 	case *ir.FanInConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractFanInAttrs(*cfg, attrs)
 
 	case ir.SubgraphConfig:
 		extractSubgraphAttrs(cfg, attrs)
 	case *ir.SubgraphConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractSubgraphAttrs(*cfg, attrs)
 
 	default:
