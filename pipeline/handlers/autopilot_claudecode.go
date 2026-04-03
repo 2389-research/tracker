@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -68,7 +68,7 @@ func (a *ClaudeCodeAutopilotInterviewer) decide(prompt string, options []string,
 
 	choice := matchChoice(decision.Choice, options)
 	if choice == "" {
-		fmt.Fprintf(os.Stderr, "WARNING: claude-code autopilot chose %q which doesn't match any option, using default\n", decision.Choice)
+		log.Printf("WARNING: claude-code autopilot chose %q which doesn't match any option, using default", decision.Choice)
 		return a.fallback(options, defaultOption), nil
 	}
 

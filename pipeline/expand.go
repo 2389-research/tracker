@@ -200,14 +200,13 @@ func ParseSubgraphParams(paramsStr string) map[string]string {
 func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 	// Create a shallow copy of the graph
 	clone := &Graph{
-		Name:            g.Name,
-		Nodes:           make(map[string]*Node, len(g.Nodes)),
-		Edges:           make([]*Edge, 0, len(g.Edges)),
-		Attrs:           copyStringMap(g.Attrs),
-		NodeOrder:       append([]string(nil), g.NodeOrder...),
-		StartNode:       g.StartNode,
-		ExitNode:        g.ExitNode,
-		DippinValidated: g.DippinValidated,
+		Name:      g.Name,
+		Nodes:     make(map[string]*Node, len(g.Nodes)),
+		Edges:     make([]*Edge, 0, len(g.Edges)),
+		Attrs:     copyStringMap(g.Attrs),
+		NodeOrder: append([]string(nil), g.NodeOrder...),
+		StartNode: g.StartNode,
+		ExitNode:  g.ExitNode,
 	}
 
 	// Clone and expand variables in all nodes

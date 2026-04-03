@@ -98,11 +98,6 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
 	}
 
-	// Mark that this graph was produced from validated Dippin IR.
-	// Tracker's validateGraph will skip structural checks that
-	// Dippin already covers (DIP001–DIP006).
-	g.DippinValidated = true
-
 	return g, nil
 }
 

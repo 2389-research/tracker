@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"log"
 	"strings"
 	"time"
 
@@ -146,7 +146,7 @@ func (a *AutopilotInterviewer) decide(prompt string, options []string, defaultOp
 	choice := matchChoice(decision.Choice, options)
 	if choice == "" {
 		// Unmatchable choice is a parse issue, not a provider error — fall back.
-		fmt.Fprintf(os.Stderr, "WARNING: autopilot chose %q which doesn't match any option, using default\n", decision.Choice)
+		log.Printf("WARNING: autopilot chose %q which doesn't match any option, using default", decision.Choice)
 		return a.fallback(options, defaultOption), nil
 	}
 
