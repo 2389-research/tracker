@@ -144,8 +144,18 @@ func isGoalGate(node *Node) bool {
 }
 
 // goalGateRetryTarget checks if any completed goal gate node is unsatisfied and
-// returns a retry target if available. Returns (target, shouldRetry, unsatisfied).
-func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, bool, bool) {
+// returns a retry target if available. The retry budget is checked against
+// cp.RetryCounts[goalGateNodeID] and e.maxRetries(node).
+//
+// While retries remain, candidates are checked in order: retry_target,
+// fallback_target, fallback_retry_target (node-level then graph-level).
+// This means fallback_target can serve as a retry destination when no
+// retry_target is configured. When retries are exhausted, fallback_target
+// and fallback_retry_target are used for one-shot escalation routing
+// (guarded by cp.FallbackTaken to prevent infinite loops).
+//
+// Returns (target, goalGateNodeID, shouldRetry, unsatisfied).
+func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, string, bool, bool) {
 	for _, nodeID := range cp.CompletedNodes {
 		node := e.graph.Nodes[nodeID]
 		if node == nil || !isGoalGate(node) {
@@ -155,22 +165,57 @@ func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]str
 		if status == OutcomeSuccess || status == "partial_success" {
 			continue
 		}
+
+		// Check retry budget before allowing another loop.
+		maxR := e.maxRetries(node)
+		if cp.RetryCount(nodeID) >= maxR {
+			// Retries exhausted — look for a fallback/escalation target.
+			// Guard: only take the fallback once per gate to prevent infinite loops.
+			if cp.FallbackTaken[nodeID] {
+				// Fallback already taken — signal unsatisfied without retry.
+				return "", nodeID, false, true
+			}
+			for _, fb := range []string{
+				node.Attrs["fallback_target"],
+				node.Attrs["fallback_retry_target"],
+				e.graph.Attrs["fallback_target"],
+				e.graph.Attrs["fallback_retry_target"],
+			} {
+				if fb == "" {
+					continue
+				}
+				if _, ok := e.graph.Nodes[fb]; ok {
+					// Mark fallback as taken so it won't loop.
+					if cp.FallbackTaken == nil {
+						cp.FallbackTaken = map[string]bool{}
+					}
+					cp.FallbackTaken[nodeID] = true
+					return fb, nodeID, false, true
+				}
+			}
+			// No fallback — signal unsatisfied without retry.
+			return "", nodeID, false, true
+		}
+
+		// Retries remain — find a retry target.
 		for _, target := range []string{
 			node.Attrs["retry_target"],
+			node.Attrs["fallback_target"],
 			node.Attrs["fallback_retry_target"],
 			e.graph.Attrs["retry_target"],
+			e.graph.Attrs["fallback_target"],
 			e.graph.Attrs["fallback_retry_target"],
 		} {
 			if target == "" {
 				continue
 			}
 			if _, ok := e.graph.Nodes[target]; ok {
-				return target, true, true
+				return target, nodeID, true, true
 			}
 		}
-		return "", false, true
+		return "", nodeID, false, true
 	}
-	return "", false, false
+	return "", "", false, false
 }
 
 // nodeOrDefault returns the node from the graph, or a default empty node if not found.

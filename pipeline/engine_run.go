@@ -372,8 +372,36 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 // If result is non-nil, return early with that result.
 // If neither, a retry target was found and currentNodeID should be updated by the caller.
 func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus string, traceEntry *TraceEntry) (bool, string, *EngineResult) {
-	target, retry, unsatisfied := e.goalGateRetryTarget(s.cp, s.nodeOutcomes)
+	target, gateNodeID, retry, unsatisfied := e.goalGateRetryTarget(s.cp, s.nodeOutcomes)
 	if retry {
+		s.cp.IncrementRetry(gateNodeID)
+		gateNode := e.nodeOrDefault(gateNodeID)
+		e.emit(PipelineEvent{
+			Type:      EventStageRetrying,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    gateNodeID,
+			Message: fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
+				gateNodeID, target,
+				s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode)),
+		})
+		traceEntry.EdgeTo = target
+		s.trace.AddEntry(*traceEntry)
+		e.clearDownstream(target, s.cp)
+		s.cp.CurrentNode = target
+		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		return false, target, nil
+	}
+	// Fallback/escalation: target is set but not a retry (one-time redirect).
+	if unsatisfied && target != "" {
+		e.emit(PipelineEvent{
+			Type:      EventStageFailed,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    gateNodeID,
+			Message: fmt.Sprintf("goal-gate retries exhausted for %q after %d attempts, routing to fallback %q",
+				gateNodeID, s.cp.RetryCount(gateNodeID), target),
+		})
 		traceEntry.EdgeTo = target
 		s.trace.AddEntry(*traceEntry)
 		e.clearDownstream(target, s.cp)
@@ -382,6 +410,16 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		return false, target, nil
 	}
 	if unsatisfied {
+		if gateNodeID != "" {
+			e.emit(PipelineEvent{
+				Type:      EventStageFailed,
+				Timestamp: time.Now(),
+				RunID:     s.runID,
+				NodeID:    gateNodeID,
+				Message: fmt.Sprintf("goal-gate retries exhausted for %q after %d attempts",
+					gateNodeID, s.cp.RetryCount(gateNodeID)),
+			})
+		}
 		s.trace.AddEntry(*traceEntry)
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)

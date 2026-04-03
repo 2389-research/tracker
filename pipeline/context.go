@@ -99,6 +99,22 @@ func (c *PipelineContext) SetInternal(key, value string) {
 	c.internal[key] = value
 }
 
+// DiffFrom returns all keys in the current context whose values differ from
+// the given baseline snapshot, including keys that exist in the context but
+// not in baseline. Keys present in baseline but absent here are not reported
+// (PipelineContext has no delete operation).
+func (c *PipelineContext) DiffFrom(baseline map[string]string) map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	diff := make(map[string]string)
+	for k, v := range c.values {
+		if baseVal, exists := baseline[k]; !exists || baseVal != v {
+			diff[k] = v
+		}
+	}
+	return diff
+}
+
 // NewPipelineContextFrom creates a PipelineContext pre-populated with the
 // given values. Used by the parallel handler to give each branch an isolated
 // snapshot of the shared context.
