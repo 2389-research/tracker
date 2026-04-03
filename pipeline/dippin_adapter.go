@@ -101,7 +101,7 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	return g, nil
 }
 
-// NodeKindToShape maps IR NodeKind to DOT shape strings.
+// nodeKindToShapeMap maps IR NodeKind to DOT shape strings.
 // This mapping ensures the Graph produced by FromDippinIR matches
 // the shape convention used by ParseDOT, maintaining handler compatibility.
 var nodeKindToShapeMap = map[ir.NodeKind]string{
@@ -113,9 +113,9 @@ var nodeKindToShapeMap = map[ir.NodeKind]string{
 	ir.NodeSubgraph: "tab",           // → subgraph
 }
 
-// NodeKindToShape returns the DOT shape for a given NodeKind.
+// nodeKindToShape returns the DOT shape for a given NodeKind.
 // Returns ("", false) if the kind is not recognized.
-func NodeKindToShape(kind ir.NodeKind) (string, bool) {
+func nodeKindToShape(kind ir.NodeKind) (string, bool) {
 	shape, ok := nodeKindToShapeMap[kind]
 	return shape, ok
 }
@@ -123,7 +123,7 @@ func NodeKindToShape(kind ir.NodeKind) (string, bool) {
 // convertNode transforms an IR Node to a Graph Node.
 // Extracts configuration from the NodeConfig union into flat string attrs.
 func convertNode(irNode *ir.Node) (*Node, error) {
-	shape, ok := NodeKindToShape(irNode.Kind)
+	shape, ok := nodeKindToShape(irNode.Kind)
 	if !ok {
 		return nil, fmt.Errorf("%s: %w", irNode.Kind, ErrUnknownNodeKind)
 	}

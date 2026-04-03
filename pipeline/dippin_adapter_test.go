@@ -439,7 +439,7 @@ func TestFromDippinIR_SubgraphConfig(t *testing.T) {
 
 	// Params are serialized as comma-separated, order may vary
 	params := node.Attrs["subgraph_params"]
-	if !contains(params, "env=prod") || !contains(params, "timeout=30s") {
+	if !strings.Contains(params, "env=prod") || !strings.Contains(params, "timeout=30s") {
 		t.Errorf("subgraph_params = %q, want to contain env=prod and timeout=30s", params)
 	}
 }
@@ -778,7 +778,7 @@ func TestFromDippinIR_Errors(t *testing.T) {
 			if err == nil {
 				t.Fatalf("FromDippinIR succeeded, want error containing %q", tt.wantErr)
 			}
-			if !contains(err.Error(), tt.wantErr) {
+			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
 			}
 		})
@@ -1125,20 +1125,6 @@ func TestExtractHumanAttrs_InterviewDefaults(t *testing.T) {
 	if _, ok := attrs["prompt"]; ok {
 		t.Error("empty Prompt should not set attr")
 	}
-}
-
-// Helper function to check if a string contains a substring.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestFromDippinIR_SentinelErrors(t *testing.T) {
