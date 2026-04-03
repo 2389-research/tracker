@@ -5,6 +5,7 @@ package tracker
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -196,7 +197,7 @@ func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
 
 	switch format {
 	case "dot":
-		fmt.Fprintln(os.Stderr, "WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
+		log.Println("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
 		graph, err := pipeline.ParseDOT(source)
 		if err != nil {
 			return nil, fmt.Errorf("parse DOT: %w", err)
@@ -212,14 +213,14 @@ func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
 		valResult := validator.Validate(wf)
 		if valResult.HasErrors() {
 			for _, d := range valResult.Diagnostics {
-				fmt.Fprintln(os.Stderr, d.String())
+				log.Println(d.String())
 			}
 			return nil, fmt.Errorf("%d validation error(s)", len(valResult.Errors()))
 		}
 		// Lint warnings (DIP101–DIP115) — print but don't block.
 		lintResult := validator.Lint(wf)
 		for _, d := range lintResult.Diagnostics {
-			fmt.Fprintln(os.Stderr, d.String())
+			log.Println(d.String())
 		}
 		graph, err := pipeline.FromDippinIR(wf)
 		if err != nil {

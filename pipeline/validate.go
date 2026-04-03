@@ -101,15 +101,12 @@ func validateGraph(g *Graph) *ValidationError {
 		return ve
 	}
 
-	// Structural checks covered by Dippin's validator (DIP001–DIP006).
-	// Skip when the graph was produced from already-validated Dippin IR.
-	if !g.DippinValidated {
-		validateStartExit(g, ve)
-		validateEdgeEndpoints(g, ve)
-		validateExitOutgoingEdges(g, ve)
-		validateReachability(g, ve)
-		validateNoCycles(g, ve)
-	}
+	// Structural checks (always run — defense in depth).
+	validateStartExit(g, ve)
+	validateEdgeEndpoints(g, ve)
+	validateExitOutgoingEdges(g, ve)
+	validateReachability(g, ve)
+	validateNoCycles(g, ve)
 
 	// Tracker-specific checks always run.
 	validateShapes(g, ve)

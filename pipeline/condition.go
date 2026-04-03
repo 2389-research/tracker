@@ -13,7 +13,7 @@ package pipeline
 
 import (
 	"fmt"
-	"os"
+	"log"
 	"strings"
 )
 
@@ -113,7 +113,7 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 func resolveAndWarnVar(name string, ctx *PipelineContext) string {
 	val, found := resolveVariable(name, ctx)
 	if !found {
-		fmt.Fprintf(os.Stderr, "warning: unresolved condition variable %q (defaulting to empty string)\n", name)
+		log.Printf("warning: unresolved condition variable %q (defaulting to empty string)", name)
 	}
 	return val
 }
