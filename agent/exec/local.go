@@ -1,3 +1,5 @@
+//go:build !windows
+
 // ABOUTME: LocalEnvironment implements ExecutionEnvironment for local filesystem and process execution.
 // ABOUTME: Enforces path containment within the working directory to prevent traversal attacks.
 package exec
