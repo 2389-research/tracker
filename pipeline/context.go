@@ -17,6 +17,11 @@ const (
 	ContextKeyToolStderr         = "tool_stderr"
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 
+	// ContextKeyResponsePrefix is prepended to a node ID to form a per-node
+	// response key (e.g. "response.mynode"). Downstream nodes can reference
+	// specific upstream outputs without relying on last_response being current.
+	ContextKeyResponsePrefix = "response."
+
 	// Interview mode context keys. Overridable via questions_key/answers_key
 	// node attributes in .dip files. These are the defaults when the attrs
 	// are not specified.

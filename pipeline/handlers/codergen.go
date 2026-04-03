@@ -284,7 +284,8 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 	outcome := pipeline.Outcome{
 		Status: pipeline.OutcomeRetry,
 		ContextUpdates: map[string]string{
-			pipeline.ContextKeyLastResponse: runErr.Error(),
+			pipeline.ContextKeyLastResponse:             runErr.Error(),
+			pipeline.ContextKeyResponsePrefix + node.ID: runErr.Error(),
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -315,10 +316,12 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
 	emptyAPIResponse := strings.TrimSpace(responseText) == "" && sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
 	if strings.TrimSpace(responseText) == "" && (emptySession || emptyAPIResponse) {
+		msg := fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID)
 		outcome := pipeline.Outcome{
 			Status: pipeline.OutcomeFail,
 			ContextUpdates: map[string]string{
-				pipeline.ContextKeyLastResponse: fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID),
+				pipeline.ContextKeyLastResponse:             msg,
+				pipeline.ContextKeyResponsePrefix + node.ID: msg,
 			},
 			Stats: buildSessionStats(sessResult),
 		}
@@ -336,7 +339,8 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	outcome := pipeline.Outcome{
 		Status: status,
 		ContextUpdates: map[string]string{
-			pipeline.ContextKeyLastResponse: responseText,
+			pipeline.ContextKeyLastResponse:             responseText,
+			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
 		},
 		Stats: buildSessionStats(sessResult),
 	}
