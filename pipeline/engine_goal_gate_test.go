@@ -143,10 +143,10 @@ func TestGoalGateRetryFallsBackToFallbackTarget(t *testing.T) {
 		t.Fatal("expected escalate node to be visited after retries exhausted")
 	}
 
-	// After escalation the pipeline should terminate (work is still unsatisfied
-	// but fallback was already taken, so engine stops with fail).
-	if result.Status != OutcomeFail && result.Status != OutcomeSuccess {
-		t.Fatalf("unexpected status %q, want fail or success", result.Status)
+	// After escalation the pipeline should terminate with failure because the
+	// goal gate itself is still unsatisfied.
+	if result.Status != OutcomeFail {
+		t.Fatalf("status = %q, want %q", result.Status, OutcomeFail)
 	}
 }
 

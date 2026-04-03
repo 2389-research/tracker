@@ -145,8 +145,15 @@ func isGoalGate(node *Node) bool {
 
 // goalGateRetryTarget checks if any completed goal gate node is unsatisfied and
 // returns a retry target if available. The retry budget is checked against
-// cp.RetryCounts[goalGateNodeID] and e.maxRetries(node). When retries are
-// exhausted, it looks for a fallback_target to route to instead.
+// cp.RetryCounts[goalGateNodeID] and e.maxRetries(node).
+//
+// While retries remain, candidates are checked in order: retry_target,
+// fallback_target, fallback_retry_target (node-level then graph-level).
+// This means fallback_target can serve as a retry destination when no
+// retry_target is configured. When retries are exhausted, fallback_target
+// and fallback_retry_target are used for one-shot escalation routing
+// (guarded by cp.FallbackTaken to prevent infinite loops).
+//
 // Returns (target, goalGateNodeID, shouldRetry, unsatisfied).
 func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, string, bool, bool) {
 	for _, nodeID := range cp.CompletedNodes {

@@ -115,8 +115,13 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	if resp.Usage.OutputTokens == 0 && resp.Text() == "" && len(resp.ToolCalls()) == 0 {
 		log.Printf("[anthropic] WARNING: empty response (0 output tokens, no text, no tool calls) — status=%d stop_reason=%s model=%s request_id=%s raw_length=%d",
 			httpResp.StatusCode, resp.FinishReason.Raw, resp.Model, httpResp.Header.Get("Request-Id"), len(respBody))
-		if os.Getenv("TRACKER_DEBUG") != "" && len(respBody) < 2000 {
-			log.Printf("[anthropic] raw response body: %s", string(respBody))
+		if os.Getenv("TRACKER_DEBUG") != "" {
+			// Log truncated body to aid debugging without leaking full payloads.
+			preview := string(respBody)
+			if len(preview) > 200 {
+				preview = preview[:200] + "...(truncated)"
+			}
+			log.Printf("[anthropic] raw response preview (%d bytes): %s", len(respBody), preview)
 		}
 	}
 

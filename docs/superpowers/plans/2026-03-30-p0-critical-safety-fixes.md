@@ -12,6 +12,8 @@
 
 ---
 
+## Tasks
+
 ### Task 1: Commit existing parallel context fix (#20) and goal-gate retry fix (#15)
 
 The branch already has uncommitted, working code for these two fixes. Verify it compiles and passes tests, then commit.
@@ -1390,7 +1392,7 @@ Documents atomic checkpoint writes."
 
 ## Task Dependency Graph
 
-```
+```text
 Task 1 (commit existing work)
   └─ Task 2 (escalation loop fix)
        └─ Task 4 (atomic checkpoints — uses FallbackTaken from Task 2)
