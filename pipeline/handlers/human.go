@@ -450,8 +450,11 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	}
 
 	outcome := pipeline.Outcome{
-		Status:         pipeline.OutcomeSuccess,
-		ContextUpdates: map[string]string{pipeline.ContextKeyHumanResponse: response},
+		Status: pipeline.OutcomeSuccess,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyHumanResponse:            response,
+			pipeline.ContextKeyResponsePrefix + node.ID: response,
+		},
 	}
 
 	if h.graph != nil {
@@ -559,8 +562,9 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 	return pipeline.Outcome{
 		Status: status,
 		ContextUpdates: map[string]string{
-			answersKey:                       jsonStr,
-			pipeline.ContextKeyHumanResponse: summary,
+			answersKey:                                  jsonStr,
+			pipeline.ContextKeyHumanResponse:            summary,
+			pipeline.ContextKeyResponsePrefix + node.ID: summary,
 		},
 	}, nil
 }

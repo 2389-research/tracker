@@ -643,6 +643,24 @@ func TestWithRegistryOptions(t *testing.T) {
 	WithExecEnvironment(nil)(cfg)
 }
 
+func TestCodergenHandler_WritesPerNodeResponse(t *testing.T) {
+	client := &fakeCompleter{responseText: "per-node output"}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{ID: "mynode", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "test"}}
+	pctx := pipeline.NewPipelineContext()
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.ContextUpdates[pipeline.ContextKeyLastResponse] != "per-node output" {
+		t.Errorf("last_response = %q, want %q", outcome.ContextUpdates[pipeline.ContextKeyLastResponse], "per-node output")
+	}
+	perNodeKey := pipeline.ContextKeyResponsePrefix + "mynode"
+	if outcome.ContextUpdates[perNodeKey] != "per-node output" {
+		t.Errorf("%s = %q, want %q", perNodeKey, outcome.ContextUpdates[perNodeKey], "per-node output")
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if !strings.Contains(s, sub) {

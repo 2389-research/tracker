@@ -1,5 +1,14 @@
 // ABOUTME: Evaluates boolean expressions for edge condition gating.
-// ABOUTME: Supports =, !=, contains, startswith, endswith, in, not, &&, and || operators against pipeline context.
+// ABOUTME: Supports =, !=, ==, contains, startswith, endswith, in, not, &&, and || operators against pipeline context.
+
+// Limitations:
+//   - Operator splitting uses strings.Split on "||" and "&&" before clause parsing.
+//     Values containing these literals will be misinterpreted even if quoted.
+//   - No parentheses support for grouping. || is lowest precedence, && is higher.
+//   - Both = and == are accepted for equality. Use = for consistency with .dip convention.
+//   - Quote stripping (surrounding "") is applied only to =, ==, and != comparisons;
+//     contains/startswith/endswith/in do not strip quotes.
+
 package pipeline
 
 import (
@@ -77,19 +86,27 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 	// Try != first since it contains = as a substring.
 	if idx := strings.Index(clause, "!="); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
-		expected := strings.TrimSpace(clause[idx+2:])
+		expected := strings.Trim(strings.TrimSpace(clause[idx+2:]), `"`)
 		actual := resolveAndWarnVar(key, ctx)
 		return actual != expected, nil
 	}
 
-	if idx := strings.Index(clause, "="); idx >= 0 {
+	// Check for == operator (space-delimited to avoid matching == inside values).
+	if idx := strings.Index(clause, " == "); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
-		expected := strings.TrimSpace(clause[idx+1:])
+		expected := strings.Trim(strings.TrimSpace(clause[idx+4:]), `"`)
 		actual := resolveAndWarnVar(key, ctx)
 		return actual == expected, nil
 	}
 
-	return false, fmt.Errorf("invalid condition clause: %q (expected key=value or key!=value)", clause)
+	if idx := strings.Index(clause, "="); idx >= 0 {
+		key := strings.TrimSpace(clause[:idx])
+		expected := strings.Trim(strings.TrimSpace(clause[idx+1:]), `"`)
+		actual := resolveAndWarnVar(key, ctx)
+		return actual == expected, nil
+	}
+
+	return false, fmt.Errorf("invalid condition clause: %q (expected key=value, key==value, key!=value, or word operator like contains/startswith/endswith/in)", clause)
 }
 
 // resolveAndWarnVar resolves a variable and logs a warning if not found.

@@ -192,6 +192,35 @@ func TestHumanHandlerFreeformMode(t *testing.T) {
 	}
 }
 
+func TestHumanHandler_FreeformWritesPerNodeResponse(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "mygate",
+		Shape: "hexagon",
+		Label: "Tell me something",
+		Attrs: map[string]string{"mode": "freeform"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "mygate", To: "next"})
+
+	recorder := &recordingFreeformInterviewer{freeformResponse: "user input here"}
+	h := NewHumanHandler(recorder, graph)
+	node := graph.Nodes["mygate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.ContextUpdates[pipeline.ContextKeyHumanResponse] != "user input here" {
+		t.Errorf("human_response = %q, want %q", outcome.ContextUpdates[pipeline.ContextKeyHumanResponse], "user input here")
+	}
+	perNodeKey := pipeline.ContextKeyResponsePrefix + "mygate"
+	if outcome.ContextUpdates[perNodeKey] != "user input here" {
+		t.Errorf("%s = %q, want %q", perNodeKey, outcome.ContextUpdates[perNodeKey], "user input here")
+	}
+}
+
 func TestHumanHandlerFreeformIncludesLastResponse(t *testing.T) {
 	graph := pipeline.NewGraph("test")
 	graph.AddNode(&pipeline.Node{
