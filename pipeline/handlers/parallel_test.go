@@ -647,3 +647,153 @@ func TestParallelHandlerPreservesInternalArtifactDir(t *testing.T) {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 }
+
+func TestParallelHandlerMaxConcurrency(t *testing.T) {
+	const numBranches = 6
+	const maxConcurrency = 2
+
+	branchIDs := make([]string, numBranches)
+	for i := range branchIDs {
+		branchIDs[i] = fmt.Sprintf("branch_%d", i)
+	}
+
+	g := pipeline.NewGraph("test")
+	parallelNode := &pipeline.Node{
+		ID:      "parallel_node",
+		Shape:   "component",
+		Handler: "parallel",
+		Attrs: map[string]string{
+			"parallel_targets": strings.Join(branchIDs, ","),
+			"max_concurrency":  fmt.Sprintf("%d", maxConcurrency),
+		},
+	}
+	g.AddNode(parallelNode)
+	for _, id := range branchIDs {
+		g.AddNode(&pipeline.Node{ID: id, Shape: "box", Attrs: map[string]string{}})
+		g.Nodes[id].Handler = "stub_semaphore"
+		g.AddEdge(&pipeline.Edge{From: "parallel_node", To: id})
+	}
+
+	var peakConcurrent atomic.Int32
+	var currentConcurrent atomic.Int32
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(&stubHandler{
+		name: "stub_semaphore",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			cur := currentConcurrent.Add(1)
+			defer currentConcurrent.Add(-1)
+
+			// Update peak.
+			for {
+				peak := peakConcurrent.Load()
+				if cur <= peak || peakConcurrent.CompareAndSwap(peak, cur) {
+					break
+				}
+			}
+
+			// Sleep long enough that concurrency is observable.
+			time.Sleep(30 * time.Millisecond)
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), parallelNode, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+
+	peak := peakConcurrent.Load()
+	if peak > maxConcurrency {
+		t.Errorf("peak concurrent branches = %d, want <= %d (max_concurrency)", peak, maxConcurrency)
+	}
+	if peak == 0 {
+		t.Error("no branches ran (peak concurrency = 0)")
+	}
+}
+
+func TestParallelHandlerBranchTimeout(t *testing.T) {
+	const numBranches = 3
+
+	branchIDs := make([]string, numBranches)
+	for i := range branchIDs {
+		branchIDs[i] = fmt.Sprintf("branch_%d", i)
+	}
+
+	g := pipeline.NewGraph("test")
+	parallelNode := &pipeline.Node{
+		ID:      "parallel_node",
+		Shape:   "component",
+		Handler: "parallel",
+		Attrs: map[string]string{
+			"parallel_targets": strings.Join(branchIDs, ","),
+			"branch_timeout":   "50ms",
+		},
+	}
+	g.AddNode(parallelNode)
+	for _, id := range branchIDs {
+		g.AddNode(&pipeline.Node{ID: id, Shape: "box", Attrs: map[string]string{}})
+		g.Nodes[id].Handler = "stub_slow"
+		g.AddEdge(&pipeline.Edge{From: "parallel_node", To: id})
+	}
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(&stubHandler{
+		name: "stub_slow",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			select {
+			case <-time.After(500 * time.Millisecond):
+				return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			case <-ctx.Done():
+				return pipeline.Outcome{Status: pipeline.OutcomeFail}, ctx.Err()
+			}
+		},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	pctx := pipeline.NewPipelineContext()
+
+	start := time.Now()
+	outcome, err := h.Execute(context.Background(), parallelNode, pctx)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// All branches should fail due to timeout.
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected fail (all branches timed out), got %q", outcome.Status)
+	}
+	// Should complete well before the 500ms sleep.
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("expected fast failure due to branch_timeout, took %v", elapsed)
+	}
+}
+
+func TestParallelHandlerBranchTimeoutNoEffect(t *testing.T) {
+	// Verify that when no branch_timeout is set, fast branches still succeed.
+	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_fast")
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(&stubHandler{
+		name:    "stub_fast",
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", outcome.Status)
+	}
+}
