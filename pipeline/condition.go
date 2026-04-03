@@ -1,5 +1,12 @@
 // ABOUTME: Evaluates boolean expressions for edge condition gating.
-// ABOUTME: Supports =, !=, contains, startswith, endswith, in, not, &&, and || operators against pipeline context.
+// ABOUTME: Supports =, !=, ==, contains, startswith, endswith, in, not, &&, and || operators against pipeline context.
+
+// Limitations:
+//   - Operator splitting uses strings.Split on "||" and "&&". Values containing
+//     these literals will be misinterpreted. Use quoted values for safety.
+//   - No parentheses support for grouping. || is lowest precedence, && is higher.
+//   - Both = and == are accepted for equality. Use = for consistency with .dip convention.
+
 package pipeline
 
 import (
@@ -77,14 +84,22 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 	// Try != first since it contains = as a substring.
 	if idx := strings.Index(clause, "!="); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
-		expected := strings.TrimSpace(clause[idx+2:])
+		expected := strings.Trim(strings.TrimSpace(clause[idx+2:]), `"`)
 		actual := resolveAndWarnVar(key, ctx)
 		return actual != expected, nil
 	}
 
+	// Check == before = (== contains = as substring).
+	if idx := strings.Index(clause, "=="); idx >= 0 {
+		key := strings.TrimSpace(clause[:idx])
+		expected := strings.Trim(strings.TrimSpace(clause[idx+2:]), `"`)
+		actual := resolveAndWarnVar(key, ctx)
+		return actual == expected, nil
+	}
+
 	if idx := strings.Index(clause, "="); idx >= 0 {
 		key := strings.TrimSpace(clause[:idx])
-		expected := strings.TrimSpace(clause[idx+1:])
+		expected := strings.Trim(strings.TrimSpace(clause[idx+1:]), `"`)
 		actual := resolveAndWarnVar(key, ctx)
 		return actual == expected, nil
 	}

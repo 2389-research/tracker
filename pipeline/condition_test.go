@@ -483,6 +483,66 @@ func TestConditionBareInternalPrefix(t *testing.T) {
 	}
 }
 
+func TestConditionDoubleEquals(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("outcome", "success")
+	result, err := EvaluateCondition("outcome == success", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected outcome == success to be true")
+	}
+}
+
+func TestConditionDoubleEqualsFailure(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("outcome", "fail")
+	result, err := EvaluateCondition("outcome == success", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result {
+		t.Error("expected outcome == success to be false when outcome is fail")
+	}
+}
+
+func TestConditionQuotedValues(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("name", "hello world")
+	result, err := EvaluateCondition(`name = "hello world"`, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error(`expected name = "hello world" to be true`)
+	}
+}
+
+func TestConditionQuotedNotEquals(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("status", "done")
+	result, err := EvaluateCondition(`status != "pending"`, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error(`expected status != "pending" to be true when status is done`)
+	}
+}
+
+func TestConditionDoubleEqualsWithQuotes(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("outcome", "success")
+	result, err := EvaluateCondition(`outcome == "success"`, ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error(`expected outcome == "success" to be true`)
+	}
+}
+
 func TestConditionANDORPrecedenceAllFalse(t *testing.T) {
 	// When both OR branches are false
 	ctx := NewPipelineContext()
