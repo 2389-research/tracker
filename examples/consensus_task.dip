@@ -21,6 +21,10 @@ workflow ConsensusTask
     prompt:
       Refine the definition-of-done requirements for the current task and identify missing acceptance criteria.
 
+  # ─── Phase 1: Multi-model DoD (parallel) ───────────────────
+
+  parallel DoDParallel -> DefineDoDGemini, DefineDoDGPT, DefineDoDOpus
+
   agent DefineDoDGemini
     label: "Refine DoD (Gemini)"
     model: gemini-3-flash-preview
@@ -45,6 +49,8 @@ workflow ConsensusTask
     prompt:
       Propose a complete DoD draft with risk-based prioritization.
 
+  fan_in DoDJoin <- DefineDoDGemini, DefineDoDGPT, DefineDoDOpus
+
   agent ConsolidateDoD
     label: "Consolidate DoD"
     model: claude-sonnet-4-6
@@ -52,6 +58,10 @@ workflow ConsensusTask
     reasoning_effort: high
     prompt:
       Merge DoD drafts into a single final DoD.
+
+  # ─── Phase 2: Multi-model Planning (parallel) ──────────────
+
+  parallel PlanParallel -> PlanGemini, PlanGPT, PlanOpus
 
   agent PlanGemini
     label: "Plan (Gemini)"
@@ -77,6 +87,8 @@ workflow ConsensusTask
     prompt:
       Create an implementation plan from the consolidated DoD.
 
+  fan_in PlanJoin <- PlanGemini, PlanGPT, PlanOpus
+
   agent DebateConsolidate
     label: "Debate and Consolidate Plans"
     model: claude-opus-4-6
@@ -84,6 +96,8 @@ workflow ConsensusTask
     reasoning_effort: high
     prompt:
       Synthesize the three plans into one final execution plan.
+
+  # ─── Phase 3: Implement & Verify (sequential) ──────────────
 
   agent Implement
     label: Implement
@@ -100,6 +114,10 @@ workflow ConsensusTask
     reasoning_effort: high
     prompt:
       Verify outputs against DoD and summarize evidence.
+
+  # ─── Phase 4: Multi-model Review (parallel) ────────────────
+
+  parallel ReviewParallel -> ReviewGemini, ReviewGPT, ReviewOpus
 
   agent ReviewGemini
     label: "Review (Gemini)"
@@ -125,6 +143,8 @@ workflow ConsensusTask
     prompt:
       Review implementation and verification evidence.
 
+  fan_in ReviewJoin <- ReviewGemini, ReviewGPT, ReviewOpus
+
   agent ReviewConsensus
     label: "Review Consensus"
     model: claude-opus-4-6
@@ -145,23 +165,35 @@ workflow ConsensusTask
 
   edges
     Start -> RefineDoD
-    RefineDoD -> DefineDoDGemini
-    DefineDoDGemini -> DefineDoDGPT
-    DefineDoDGPT -> DefineDoDOpus
-    DefineDoDOpus -> ConsolidateDoD
-    ConsolidateDoD -> PlanGemini
-    PlanGemini -> PlanGPT
-    PlanGPT -> PlanOpus
-    PlanOpus -> DebateConsolidate
+    RefineDoD -> DoDParallel
+    DoDParallel -> DefineDoDGemini
+    DoDParallel -> DefineDoDGPT
+    DoDParallel -> DefineDoDOpus
+    DefineDoDGemini -> DoDJoin
+    DefineDoDGPT -> DoDJoin
+    DefineDoDOpus -> DoDJoin
+    DoDJoin -> ConsolidateDoD
+    ConsolidateDoD -> PlanParallel
+    PlanParallel -> PlanGemini
+    PlanParallel -> PlanGPT
+    PlanParallel -> PlanOpus
+    PlanGemini -> PlanJoin
+    PlanGPT -> PlanJoin
+    PlanOpus -> PlanJoin
+    PlanJoin -> DebateConsolidate
     DebateConsolidate -> Implement
     Implement -> VerifyOutputs
-    VerifyOutputs -> ReviewGemini
-    ReviewGemini -> ReviewGPT
-    ReviewGPT -> ReviewOpus
-    ReviewOpus -> ReviewConsensus
+    VerifyOutputs -> ReviewParallel
+    ReviewParallel -> ReviewGemini
+    ReviewParallel -> ReviewGPT
+    ReviewParallel -> ReviewOpus
+    ReviewGemini -> ReviewJoin
+    ReviewGPT -> ReviewJoin
+    ReviewOpus -> ReviewJoin
+    ReviewJoin -> ReviewConsensus
     ReviewConsensus -> Exit  when ctx.outcome = success  label: pass
     ReviewConsensus -> Postmortem  when ctx.outcome = retry  label: retry
     ReviewConsensus -> Exit
-    Postmortem -> PlanGemini  when ctx.internal.loop_restart_count = 0  label: retry_once  restart: true
+    Postmortem -> PlanParallel  when ctx.internal.loop_restart_count = 0  label: retry_once  restart: true
     Postmortem -> Exit  when ctx.internal.loop_restart_count != 0  label: stop_after_retry
     Postmortem -> Exit  label: "fallback to exit"
