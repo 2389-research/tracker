@@ -166,17 +166,11 @@ workflow ConsensusTask
   edges
     Start -> RefineDoD
     RefineDoD -> DoDParallel
-    DoDParallel -> DefineDoDGemini
-    DoDParallel -> DefineDoDGPT
-    DoDParallel -> DefineDoDOpus
     DefineDoDGemini -> DoDJoin
     DefineDoDGPT -> DoDJoin
     DefineDoDOpus -> DoDJoin
     DoDJoin -> ConsolidateDoD
     ConsolidateDoD -> PlanParallel
-    PlanParallel -> PlanGemini
-    PlanParallel -> PlanGPT
-    PlanParallel -> PlanOpus
     PlanGemini -> PlanJoin
     PlanGPT -> PlanJoin
     PlanOpus -> PlanJoin
@@ -184,9 +178,6 @@ workflow ConsensusTask
     DebateConsolidate -> Implement
     Implement -> VerifyOutputs
     VerifyOutputs -> ReviewParallel
-    ReviewParallel -> ReviewGemini
-    ReviewParallel -> ReviewGPT
-    ReviewParallel -> ReviewOpus
     ReviewGemini -> ReviewJoin
     ReviewGPT -> ReviewJoin
     ReviewOpus -> ReviewJoin

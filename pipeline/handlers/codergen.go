@@ -316,9 +316,14 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
 	emptyAPIResponse := strings.TrimSpace(responseText) == "" && sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
 	if strings.TrimSpace(responseText) == "" && (emptySession || emptyAPIResponse) {
+		status := pipeline.OutcomeFail
 		msg := fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID)
+		if emptyAPIResponse {
+			status = pipeline.OutcomeRetry
+			msg = fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", node.ID)
+		}
 		outcome := pipeline.Outcome{
-			Status: pipeline.OutcomeFail,
+			Status: status,
 			ContextUpdates: map[string]string{
 				pipeline.ContextKeyLastResponse:             msg,
 				pipeline.ContextKeyResponsePrefix + node.ID: msg,
