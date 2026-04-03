@@ -42,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **failResult atomicity**: `failResult()` now accepts a `*Trace` parameter and sets both `Trace` and `Usage` internally, preventing silent data loss.
 - **Built-in pipeline prompts**: Removed trivial placeholder prompts from Start/Done nodes in built-in workflows that were causing unnecessary LLM calls.
 
+### Changed
+
+- **Retry backoff jitter**: `ExponentialBackoff` and `LinearBackoff` now apply ±25% random jitter to prevent thundering herd when multiple pipelines retry simultaneously.
+
+### Deprecated
+
+- **DOT format support**: `ParseDOT` is deprecated. Use `.dip` format with `FromDippinIR` instead. DOT support will be removed in v1.0. Run `tracker doctor` on `.dip` files to validate.
+
 ## [0.13.0] - 2026-03-28
 
 ### Added

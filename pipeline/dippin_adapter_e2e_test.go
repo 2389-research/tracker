@@ -79,6 +79,18 @@ func TestDippinAdapter_E2E_Simple(t *testing.T) {
 		t.Fatalf("len(graph.Edges) = %d, want 2", len(graph.Edges))
 	}
 
+	// Verify edge topology (not just count)
+	edgeSet := make(map[string]bool)
+	for _, e := range graph.Edges {
+		edgeSet[e.From+"->"+e.To] = true
+	}
+	wantEdges := []string{"start->generate", "generate->done"}
+	for _, want := range wantEdges {
+		if !edgeSet[want] {
+			t.Errorf("missing edge %s", want)
+		}
+	}
+
 	// Verify the graph validates
 	if err := Validate(graph); err != nil {
 		t.Errorf("Validate() failed: %v", err)

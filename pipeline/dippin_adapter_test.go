@@ -437,10 +437,11 @@ func TestFromDippinIR_SubgraphConfig(t *testing.T) {
 		t.Errorf("subgraph_ref = %q, want %q", node.Attrs["subgraph_ref"], "subtask.dip")
 	}
 
-	// Params are serialized as comma-separated, order may vary
+	// Params are serialized as sorted comma-separated key=value pairs
 	params := node.Attrs["subgraph_params"]
-	if !strings.Contains(params, "env=prod") || !strings.Contains(params, "timeout=30s") {
-		t.Errorf("subgraph_params = %q, want to contain env=prod and timeout=30s", params)
+	want := "env=prod,timeout=30s"
+	if params != want {
+		t.Errorf("subgraph_params = %q, want %q", params, want)
 	}
 }
 
@@ -1318,5 +1319,51 @@ func TestFromDippinIR_EmptyVersionOmitted(t *testing.T) {
 	}
 	if _, ok := graph.Attrs["version"]; ok {
 		t.Error("empty version should not be set in attrs")
+	}
+}
+
+func TestExtractAgentAttrs_ZeroValueFieldsOmitted(t *testing.T) {
+	attrs := map[string]string{}
+	extractAgentAttrs(ir.AgentConfig{}, attrs)
+	if len(attrs) != 0 {
+		t.Errorf("zero-value AgentConfig produced %d attrs, want 0: %v", len(attrs), attrs)
+	}
+}
+
+func TestExtractHumanAttrs_ZeroValueFieldsOmitted(t *testing.T) {
+	attrs := map[string]string{}
+	extractHumanAttrs(ir.HumanConfig{}, attrs)
+	if len(attrs) != 0 {
+		t.Errorf("zero-value HumanConfig produced %d attrs, want 0: %v", len(attrs), attrs)
+	}
+}
+
+func TestExtractToolAttrs_ZeroValueFieldsOmitted(t *testing.T) {
+	attrs := map[string]string{}
+	extractToolAttrs(ir.ToolConfig{}, attrs)
+	if len(attrs) != 0 {
+		t.Errorf("zero-value ToolConfig produced %d attrs, want 0: %v", len(attrs), attrs)
+	}
+}
+
+func TestConvertEdge_WeightAndRestart(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b", Weight: 5, Restart: true}
+	gEdge := convertEdge(irEdge)
+	if gEdge.Attrs["weight"] != "5" {
+		t.Errorf("weight = %q, want %q", gEdge.Attrs["weight"], "5")
+	}
+	if gEdge.Attrs["restart"] != "true" {
+		t.Errorf("restart = %q, want %q", gEdge.Attrs["restart"], "true")
+	}
+}
+
+func TestConvertEdge_ZeroWeightOmitted(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b"}
+	gEdge := convertEdge(irEdge)
+	if _, ok := gEdge.Attrs["weight"]; ok {
+		t.Error("zero weight should not be in attrs")
+	}
+	if _, ok := gEdge.Attrs["restart"]; ok {
+		t.Error("false restart should not be in attrs")
 	}
 }

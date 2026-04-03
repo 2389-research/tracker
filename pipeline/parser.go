@@ -11,6 +11,9 @@ import (
 
 // ParseDOT parses a DOT-format string into a Graph.
 // Returns an error if the DOT syntax is invalid or the input is empty.
+//
+// Deprecated: Use .dip format with FromDippinIR instead.
+// DOT support will be removed in v1.0.
 func ParseDOT(dot string) (*Graph, error) {
 	if strings.TrimSpace(dot) == "" {
 		return nil, fmt.Errorf("empty DOT input")

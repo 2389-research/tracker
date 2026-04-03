@@ -189,7 +189,7 @@ func TestExponentialBackoff(t *testing.T) {
 		name    string
 		attempt int
 		base    time.Duration
-		want    time.Duration
+		want    time.Duration // base (pre-jitter) expected value
 	}{
 		{"attempt 0", 0, 2 * time.Second, 2 * time.Second},
 		{"attempt 1", 1, 2 * time.Second, 4 * time.Second},
@@ -205,8 +205,14 @@ func TestExponentialBackoff(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ExponentialBackoff(tt.attempt, tt.base)
-			if got != tt.want {
-				t.Errorf("ExponentialBackoff(%d, %v) = %v, want %v", tt.attempt, tt.base, got, tt.want)
+			low := time.Duration(float64(tt.want) * 0.75)
+			high := time.Duration(float64(tt.want) * 1.25)
+			// Capped cases must not exceed maxBackoffDuration.
+			if tt.want >= maxBackoffDuration {
+				high = maxBackoffDuration
+			}
+			if got < low || got > high {
+				t.Errorf("ExponentialBackoff(%d, %v) = %v, want within [%v, %v]", tt.attempt, tt.base, got, low, high)
 			}
 		})
 	}
@@ -217,7 +223,7 @@ func TestLinearBackoff(t *testing.T) {
 		name    string
 		attempt int
 		base    time.Duration
-		want    time.Duration
+		want    time.Duration // base (pre-jitter) expected value
 	}{
 		{"attempt 0", 0, 2 * time.Second, 2 * time.Second},
 		{"attempt 1", 1, 2 * time.Second, 4 * time.Second},
@@ -232,9 +238,52 @@ func TestLinearBackoff(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := LinearBackoff(tt.attempt, tt.base)
-			if got != tt.want {
-				t.Errorf("LinearBackoff(%d, %v) = %v, want %v", tt.attempt, tt.base, got, tt.want)
+			low := time.Duration(float64(tt.want) * 0.75)
+			high := time.Duration(float64(tt.want) * 1.25)
+			if tt.want >= maxBackoffDuration {
+				high = maxBackoffDuration
+			}
+			if got < low || got > high {
+				t.Errorf("LinearBackoff(%d, %v) = %v, want within [%v, %v]", tt.attempt, tt.base, got, low, high)
 			}
 		})
+	}
+}
+
+func TestExponentialBackoffHasJitter(t *testing.T) {
+	base := 2 * time.Second
+	attempt := 2 // base delay = 8s
+	expectedBase := 8 * time.Second
+	seen := make(map[time.Duration]bool)
+	for i := 0; i < 100; i++ {
+		d := ExponentialBackoff(attempt, base)
+		seen[d] = true
+		low := time.Duration(float64(expectedBase) * 0.75)
+		high := time.Duration(float64(expectedBase) * 1.25)
+		if d < low || d > high {
+			t.Fatalf("backoff %v outside [%v, %v]", d, low, high)
+		}
+	}
+	if len(seen) < 2 {
+		t.Errorf("expected jitter variation, got %d unique values", len(seen))
+	}
+}
+
+func TestLinearBackoffHasJitter(t *testing.T) {
+	base := 2 * time.Second
+	attempt := 2 // base delay = 6s
+	expectedBase := 6 * time.Second
+	seen := make(map[time.Duration]bool)
+	for i := 0; i < 100; i++ {
+		d := LinearBackoff(attempt, base)
+		seen[d] = true
+		low := time.Duration(float64(expectedBase) * 0.75)
+		high := time.Duration(float64(expectedBase) * 1.25)
+		if d < low || d > high {
+			t.Fatalf("backoff %v outside [%v, %v]", d, low, high)
+		}
+	}
+	if len(seen) < 2 {
+		t.Errorf("expected jitter variation, got %d unique values", len(seen))
 	}
 }
