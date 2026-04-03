@@ -5,6 +5,7 @@ package pipeline
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestGoalGateRetryTerminatesAtDefaultMax(t *testing.T) {
@@ -128,17 +129,24 @@ func TestGoalGateRetryFallsBackToFallbackTarget(t *testing.T) {
 		},
 	})
 
-	engine := NewEngine(g, reg)
-	result, err := engine.Run(context.Background())
+	// Use a timeout to prevent infinite loops from hanging the test suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// The escalate node routes to done, so pipeline should succeed eventually.
-	// But done is the exit and work is still unsatisfied — so it depends on
-	// whether clearDownstream clears work. Let's check the result.
-	_ = err
-	_ = result
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(ctx)
+	if err != nil {
+		t.Fatalf("engine.Run error: %v", err)
+	}
 
 	if !escalateVisited {
 		t.Fatal("expected escalate node to be visited after retries exhausted")
+	}
+
+	// After escalation the pipeline should terminate (work is still unsatisfied
+	// but fallback was already taken, so engine stops with fail).
+	if result.Status != OutcomeFail && result.Status != OutcomeSuccess {
+		t.Fatalf("unexpected status %q, want fail or success", result.Status)
 	}
 }
 

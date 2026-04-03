@@ -392,6 +392,23 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		return false, target, nil
 	}
+	// Fallback/escalation: target is set but not a retry (one-time redirect).
+	if unsatisfied && target != "" {
+		e.emit(PipelineEvent{
+			Type:      EventStageFailed,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    gateNodeID,
+			Message: fmt.Sprintf("goal-gate retries exhausted for %q after %d attempts, routing to fallback %q",
+				gateNodeID, s.cp.RetryCount(gateNodeID), target),
+		})
+		traceEntry.EdgeTo = target
+		s.trace.AddEntry(*traceEntry)
+		e.clearDownstream(target, s.cp)
+		s.cp.CurrentNode = target
+		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		return false, target, nil
+	}
 	if unsatisfied {
 		if gateNodeID != "" {
 			e.emit(PipelineEvent{

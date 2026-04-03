@@ -187,7 +187,7 @@ This catches the issue at `dippin doctor` time, before the pipeline runs.
 **D. Document the safe alternative**
 
 Add to CLAUDE.md under "Tool node safety":
-```
+```bash
 ### Safe pattern for LLM output in tool commands
 Do NOT interpolate ${ctx.last_response} in tool_command. Instead:
 1. Have the agent node write structured output to a file in $ARTIFACT_DIR

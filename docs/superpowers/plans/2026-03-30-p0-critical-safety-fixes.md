@@ -6,7 +6,7 @@
 
 **Architecture:** Four independent fixes plus one cross-cutting circuit breaker. Each fix is self-contained — commit after each task. The tool_command fix gates both variable expansion systems (`ExpandVariables` and `ExpandGraphVariables`) with a hardcoded tainted-key set rather than runtime taint tracking.
 
-**Tech Stack:** Go 1.24, standard library only. No new dependencies.
+**Tech Stack:** Go 1.25, standard library only. No new dependencies.
 
 **Spec:** `docs/superpowers/specs/2026-03-30-p0-critical-safety-fixes-design.md`
 
