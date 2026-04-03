@@ -174,11 +174,18 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 // sem, if non-nil, is a buffered channel used as a semaphore to cap concurrency.
 // branchTimeout, if > 0, is applied as a per-branch context deadline.
 func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
-	// Acquire semaphore slot before the panic-recovery defer so we hold the slot
-	// for the full duration of the branch and release it on any exit path.
+	// Acquire semaphore slot with context cancellation support.
 	if sem != nil {
-		sem <- struct{}{}
-		defer func() { <-sem }()
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+		case <-ctx.Done():
+			resultsCh <- branchResultMsg{
+				index:  idx,
+				result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("context canceled while waiting for concurrency slot: %v", ctx.Err())},
+			}
+			return
+		}
 	}
 
 	defer wg.Done()

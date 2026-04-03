@@ -20,6 +20,11 @@ var errHumanTimeout = fmt.Errorf("human gate timed out waiting for input")
 
 // withTimeout runs fn in a goroutine and returns its result, or errHumanTimeout
 // if the duration elapses first. A zero timeout means no timeout.
+//
+// Note: on timeout, the goroutine running fn is NOT canceled (the Interviewer
+// interface has no cancellation mechanism). The goroutine may leak until the
+// underlying I/O unblocks. This is an accepted tradeoff to avoid changing the
+// Interviewer interface.
 func withTimeout(timeout time.Duration, fn func() (string, error)) (string, error) {
 	if timeout <= 0 {
 		return fn()
@@ -38,6 +43,28 @@ func withTimeout(timeout time.Duration, fn func() (string, error)) (string, erro
 		return r.val, r.err
 	case <-time.After(timeout):
 		return "", errHumanTimeout
+	}
+}
+
+// withTimeoutOutcome is like withTimeout but for functions returning (Outcome, error).
+func withTimeoutOutcome(timeout time.Duration, fn func() (pipeline.Outcome, error)) (pipeline.Outcome, error) {
+	if timeout <= 0 {
+		return fn()
+	}
+	type result struct {
+		val pipeline.Outcome
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		v, e := fn()
+		ch <- result{v, e}
+	}()
+	select {
+	case r := <-ch:
+		return r.val, r.err
+	case <-time.After(timeout):
+		return pipeline.Outcome{}, errHumanTimeout
 	}
 }
 
@@ -428,7 +455,10 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 	var err error
 
 	if node.Attrs["mode"] == "interview" {
-		outcome, err = h.executeInterview(ctx, node, pctx)
+		timeout := parseHumanTimeout(node)
+		outcome, err = withTimeoutOutcome(timeout, func() (pipeline.Outcome, error) {
+			return h.executeInterview(ctx, node, pctx)
+		})
 	} else if node.Attrs["mode"] == "freeform" {
 		outcome, err = h.executeFreeform(node, prompt)
 	} else {
@@ -447,6 +477,9 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 			}}, nil
 		default:
 			def := node.Attrs["default_choice"]
+			if def == "" {
+				def = node.Attrs["default"]
+			}
 			if def == "" {
 				return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
 					pipeline.ContextKeyHumanResponse: "timed out (no default)",
@@ -664,7 +697,7 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		return h.interviewer.Ask(prompt, choices, node.Attrs["default_choice"])
 	})
 	if err != nil {
-		return pipeline.Outcome{}, fmt.Errorf("human gate interview failed for node %q: %w", node.ID, err)
+		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
 	return pipeline.Outcome{Status: pipeline.OutcomeSuccess, PreferredLabel: selected}, nil
