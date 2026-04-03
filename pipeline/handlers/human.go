@@ -245,7 +245,33 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 		// Print the question
 		fmt.Fprintf(c.Writer, "\nQ%d: %s\n", q.Index, q.Text)
 
-		if len(q.Options) > 0 {
+		if q.IsYesNo {
+			// Yes/no takes priority over options to stay consistent with TUI behavior.
+			if prevAns.Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
+			}
+			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
+			line, err := c.readLine()
+			if err != nil {
+				canceled = true
+				answers[i] = ans
+				for j := i + 1; j < len(questions); j++ {
+					answers[j] = InterviewAnswer{
+						ID:   fmt.Sprintf("q%d", questions[j].Index),
+						Text: questions[j].Text,
+					}
+				}
+				break
+			}
+			input := strings.TrimSpace(strings.ToLower(line))
+			if input == "y" || input == "yes" {
+				ans.Answer = "yes"
+			} else if input == "n" || input == "no" {
+				ans.Answer = "no"
+			} else if input == "" && prevAns.Answer != "" {
+				ans.Answer = prevAns.Answer
+			}
+		} else if len(q.Options) > 0 {
 			// Print numbered options
 			for j, opt := range q.Options {
 				fmt.Fprintf(c.Writer, "  %d) %s\n", j+1, opt)
@@ -299,32 +325,6 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 					}
 				}
 			} else if prevAns.Answer != "" {
-				// Blank input preserves the previous answer on retry.
-				ans.Answer = prevAns.Answer
-			}
-		} else if q.IsYesNo {
-			if prevAns.Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
-			}
-			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
-			line, err := c.readLine()
-			if err != nil {
-				canceled = true
-				answers[i] = ans
-				for j := i + 1; j < len(questions); j++ {
-					answers[j] = InterviewAnswer{
-						ID:   fmt.Sprintf("q%d", questions[j].Index),
-						Text: questions[j].Text,
-					}
-				}
-				break
-			}
-			input := strings.TrimSpace(strings.ToLower(line))
-			if input == "y" || input == "yes" {
-				ans.Answer = "yes"
-			} else if input == "n" || input == "no" {
-				ans.Answer = "no"
-			} else if input == "" && prevAns.Answer != "" {
 				// Blank input preserves the previous answer on retry.
 				ans.Answer = prevAns.Answer
 			}

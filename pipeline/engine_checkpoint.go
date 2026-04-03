@@ -164,8 +164,7 @@ func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]str
 		if cp.RetryCount(nodeID) >= maxR {
 			// Retries exhausted — look for a fallback/escalation target.
 			// Guard: only take the fallback once per gate to prevent infinite loops.
-			fallbackKey := "_fallback_taken:" + nodeID
-			if cp.Context != nil && cp.Context[fallbackKey] == "true" {
+			if cp.FallbackTaken[nodeID] {
 				// Fallback already taken — signal unsatisfied without retry.
 				return "", nodeID, false, true
 			}
@@ -180,10 +179,10 @@ func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]str
 				}
 				if _, ok := e.graph.Nodes[fb]; ok {
 					// Mark fallback as taken so it won't loop.
-					if cp.Context == nil {
-						cp.Context = map[string]string{}
+					if cp.FallbackTaken == nil {
+						cp.FallbackTaken = map[string]bool{}
 					}
-					cp.Context[fallbackKey] = "true"
+					cp.FallbackTaken[nodeID] = true
 					return fb, nodeID, false, true
 				}
 			}
