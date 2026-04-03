@@ -184,3 +184,29 @@ func TestGraphIncomingEdges(t *testing.T) {
 		t.Errorf("expected 2 incoming edges to 'c', got %d", len(edges))
 	}
 }
+
+func TestOutgoingEdgesIndexed(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "a", Shape: "box", Attrs: map[string]string{}})
+	g.AddNode(&Node{ID: "b", Shape: "box", Attrs: map[string]string{}})
+	g.AddNode(&Node{ID: "c", Shape: "box", Attrs: map[string]string{}})
+	g.AddEdge(&Edge{From: "a", To: "b"})
+	g.AddEdge(&Edge{From: "a", To: "c"})
+	g.AddEdge(&Edge{From: "b", To: "c"})
+
+	if len(g.OutgoingEdges("a")) != 2 {
+		t.Errorf("OutgoingEdges(a) = %d, want 2", len(g.OutgoingEdges("a")))
+	}
+	if len(g.OutgoingEdges("b")) != 1 {
+		t.Errorf("OutgoingEdges(b) = %d, want 1", len(g.OutgoingEdges("b")))
+	}
+	if len(g.OutgoingEdges("c")) != 0 {
+		t.Errorf("OutgoingEdges(c) = %d, want 0", len(g.OutgoingEdges("c")))
+	}
+	if len(g.IncomingEdges("c")) != 2 {
+		t.Errorf("IncomingEdges(c) = %d, want 2", len(g.IncomingEdges("c")))
+	}
+	if len(g.IncomingEdges("a")) != 0 {
+		t.Errorf("IncomingEdges(a) = %d, want 0", len(g.IncomingEdges("a")))
+	}
+}

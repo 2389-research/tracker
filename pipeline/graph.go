@@ -36,14 +36,20 @@ type Graph struct {
 	// Used by the TUI to display nodes in a sensible order (declaration order)
 	// rather than BFS order which puts "Done" in the middle.
 	NodeOrder []string
+
+	// Adjacency indexes for O(1) edge lookup. Built by AddEdge.
+	outgoing map[string][]*Edge
+	incoming map[string][]*Edge
 }
 
 // NewGraph creates an empty Graph with the given name.
 func NewGraph(name string) *Graph {
 	return &Graph{
-		Name:  name,
-		Nodes: make(map[string]*Node),
-		Attrs: make(map[string]string),
+		Name:     name,
+		Nodes:    make(map[string]*Node),
+		Attrs:    make(map[string]string),
+		outgoing: make(map[string][]*Edge),
+		incoming: make(map[string][]*Edge),
 	}
 }
 
@@ -94,10 +100,21 @@ func (g *Graph) AddEdge(e *Edge) {
 		e.Attrs = make(map[string]string)
 	}
 	g.Edges = append(g.Edges, e)
+	if g.outgoing == nil {
+		g.outgoing = make(map[string][]*Edge)
+	}
+	if g.incoming == nil {
+		g.incoming = make(map[string][]*Edge)
+	}
+	g.outgoing[e.From] = append(g.outgoing[e.From], e)
+	g.incoming[e.To] = append(g.incoming[e.To], e)
 }
 
 // OutgoingEdges returns all edges originating from the given node ID.
 func (g *Graph) OutgoingEdges(nodeID string) []*Edge {
+	if g.outgoing != nil {
+		return g.outgoing[nodeID]
+	}
 	var result []*Edge
 	for _, e := range g.Edges {
 		if e.From == nodeID {
@@ -109,6 +126,9 @@ func (g *Graph) OutgoingEdges(nodeID string) []*Edge {
 
 // IncomingEdges returns all edges terminating at the given node ID.
 func (g *Graph) IncomingEdges(nodeID string) []*Edge {
+	if g.incoming != nil {
+		return g.incoming[nodeID]
+	}
 	var result []*Edge
 	for _, e := range g.Edges {
 		if e.To == nodeID {
