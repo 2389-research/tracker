@@ -210,3 +210,25 @@ func TestOutgoingEdgesIndexed(t *testing.T) {
 		t.Errorf("IncomingEdges(a) = %d, want 0", len(g.IncomingEdges("a")))
 	}
 }
+
+func TestEdgeLookupFallbackWithoutAddEdge(t *testing.T) {
+	// Graph built with direct Edges assignment (no AddEdge) — indexes are nil,
+	// so OutgoingEdges/IncomingEdges must fall back to linear scan.
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"a": {ID: "a"},
+			"b": {ID: "b"},
+		},
+		Edges: []*Edge{
+			{From: "a", To: "b", Attrs: map[string]string{}},
+		},
+	}
+	out := g.OutgoingEdges("a")
+	if len(out) != 1 {
+		t.Errorf("fallback OutgoingEdges(a) = %d, want 1", len(out))
+	}
+	in := g.IncomingEdges("b")
+	if len(in) != 1 {
+		t.Errorf("fallback IncomingEdges(b) = %d, want 1", len(in))
+	}
+}

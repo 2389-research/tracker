@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/2389-research/dippin-lang/parser"
 	"github.com/2389-research/dippin-lang/validator"
@@ -15,7 +16,7 @@ import (
 
 // detectPipelineFormat returns "dip" or "dot" based on file extension.
 func detectPipelineFormat(filename string) string {
-	ext := filepath.Ext(filename)
+	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
 	case ".dip":
 		return "dip"

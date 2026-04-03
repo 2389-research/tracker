@@ -111,9 +111,16 @@ func (g *Graph) AddEdge(e *Edge) {
 }
 
 // OutgoingEdges returns all edges originating from the given node ID.
+// Returns a copy to prevent callers from mutating internal state.
 func (g *Graph) OutgoingEdges(nodeID string) []*Edge {
 	if g.outgoing != nil {
-		return g.outgoing[nodeID]
+		src := g.outgoing[nodeID]
+		if len(src) == 0 {
+			return nil
+		}
+		out := make([]*Edge, len(src))
+		copy(out, src)
+		return out
 	}
 	var result []*Edge
 	for _, e := range g.Edges {
@@ -125,9 +132,16 @@ func (g *Graph) OutgoingEdges(nodeID string) []*Edge {
 }
 
 // IncomingEdges returns all edges terminating at the given node ID.
+// Returns a copy to prevent callers from mutating internal state.
 func (g *Graph) IncomingEdges(nodeID string) []*Edge {
 	if g.incoming != nil {
-		return g.incoming[nodeID]
+		src := g.incoming[nodeID]
+		if len(src) == 0 {
+			return nil
+		}
+		out := make([]*Edge, len(src))
+		copy(out, src)
+		return out
 	}
 	var result []*Edge
 	for _, e := range g.Edges {
