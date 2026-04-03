@@ -207,6 +207,10 @@ func TestExponentialBackoff(t *testing.T) {
 			got := ExponentialBackoff(tt.attempt, tt.base)
 			low := time.Duration(float64(tt.want) * 0.75)
 			high := time.Duration(float64(tt.want) * 1.25)
+			// Capped cases must not exceed maxBackoffDuration.
+			if tt.want >= maxBackoffDuration {
+				high = maxBackoffDuration
+			}
 			if got < low || got > high {
 				t.Errorf("ExponentialBackoff(%d, %v) = %v, want within [%v, %v]", tt.attempt, tt.base, got, low, high)
 			}
@@ -236,6 +240,9 @@ func TestLinearBackoff(t *testing.T) {
 			got := LinearBackoff(tt.attempt, tt.base)
 			low := time.Duration(float64(tt.want) * 0.75)
 			high := time.Duration(float64(tt.want) * 1.25)
+			if tt.want >= maxBackoffDuration {
+				high = maxBackoffDuration
+			}
 			if got < low || got > high {
 				t.Errorf("LinearBackoff(%d, %v) = %v, want within [%v, %v]", tt.attempt, tt.base, got, low, high)
 			}
