@@ -896,3 +896,85 @@ func TestHumanHandler_InterviewMode_AskInterviewError(t *testing.T) {
 		t.Errorf("expected 'connection lost' in error, got %q", err.Error())
 	}
 }
+
+// blockingInterviewer blocks forever on all methods — used to test timeouts.
+type blockingInterviewer struct{}
+
+func (b *blockingInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
+	select {} // block forever
+}
+
+func (b *blockingInterviewer) AskFreeform(prompt string) (string, error) {
+	select {} // block forever
+}
+
+func (b *blockingInterviewer) AskFreeformWithLabels(prompt string, labels []string, defaultLabel string) (string, error) {
+	select {} // block forever
+}
+
+func (b *blockingInterviewer) AskInterview(questions []Question, previousAnswers *InterviewResult) (*InterviewResult, error) {
+	select {} // block forever
+}
+
+func TestHumanHandler_FreeformTimeout(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Give input",
+		Attrs: map[string]string{
+			"mode":           "freeform",
+			"timeout":        "100ms",
+			"timeout_action": "fail",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	h := NewHumanHandler(&blockingInterviewer{}, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected OutcomeFail on timeout with timeout_action=fail, got %q", outcome.Status)
+	}
+}
+
+func TestHumanHandler_TimeoutUsesDefault(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Approve?",
+		Attrs: map[string]string{
+			"timeout":        "100ms",
+			"default_choice": "approved",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "approved", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "rejected", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "approved", Label: "approved"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "rejected", Label: "rejected"})
+
+	h := NewHumanHandler(&blockingInterviewer{}, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected OutcomeSuccess when default_choice is set, got %q", outcome.Status)
+	}
+	if outcome.PreferredLabel != "approved" {
+		t.Errorf("expected PreferredLabel 'approved', got %q", outcome.PreferredLabel)
+	}
+	if outcome.ContextUpdates[pipeline.ContextKeyHumanResponse] != "approved" {
+		t.Errorf("expected human_response 'approved', got %q", outcome.ContextUpdates[pipeline.ContextKeyHumanResponse])
+	}
+}
