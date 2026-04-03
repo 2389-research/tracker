@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Fidelity represents a context fidelity level for pipeline execution.
@@ -147,13 +148,13 @@ func compactSummaryHigh(ctx *PipelineContext, completedNodes []string, artifactD
 const DefaultTruncateLimit = 500
 
 // truncateAtWordBoundary truncates s to approximately limit characters,
-// cutting at the last word boundary before the limit. Appends "..." when
-// truncation occurs.
+// cutting at the last whitespace boundary (space, newline, tab) before the
+// limit. Appends "..." when truncation occurs.
 func truncateAtWordBoundary(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}
-	cut := strings.LastIndex(s[:limit], " ")
+	cut := strings.LastIndexFunc(s[:limit], unicode.IsSpace)
 	if cut <= 0 {
 		cut = limit
 	}

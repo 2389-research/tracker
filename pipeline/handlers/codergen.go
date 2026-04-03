@@ -479,10 +479,11 @@ func parseAutoStatus(text string) string {
 		if inCodeBlock {
 			continue
 		}
-		if !strings.HasPrefix(trimmed, "STATUS:") {
+		upper := strings.ToUpper(trimmed)
+		if !strings.HasPrefix(upper, "STATUS:") {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "STATUS:")))
+		status := strings.ToLower(strings.TrimSpace(trimmed[len("STATUS:"):]))
 		switch status {
 		case "success":
 			result = pipeline.OutcomeSuccess
