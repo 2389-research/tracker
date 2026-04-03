@@ -669,3 +669,37 @@ func containsAll(s string, subs ...string) bool {
 	}
 	return true
 }
+
+func TestParseAutoStatus_CaseInsensitive(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"STATUS: Success\nDone.", pipeline.OutcomeSuccess},
+		{"STATUS: FAIL\nBroken.", pipeline.OutcomeFail},
+		{"STATUS: Retry\nNeed more.", pipeline.OutcomeRetry},
+		{"STATUS: SUCCESS\nAll good.", pipeline.OutcomeSuccess},
+	}
+	for _, tt := range tests {
+		got := parseAutoStatus(tt.input)
+		if got != tt.want {
+			t.Errorf("parseAutoStatus(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestParseAutoStatus_SkipsCodeBlock(t *testing.T) {
+	input := "Here is how to set status:\n```\nSTATUS:fail\n```\nSTATUS:success\nDone."
+	got := parseAutoStatus(input)
+	if got != pipeline.OutcomeSuccess {
+		t.Errorf("parseAutoStatus with code block = %q, want %q", got, pipeline.OutcomeSuccess)
+	}
+}
+
+func TestParseAutoStatus_OnlyCodeBlockDefaultsToSuccess(t *testing.T) {
+	input := "Some output.\n```\nSTATUS:fail\n```\nNo real status here."
+	got := parseAutoStatus(input)
+	if got != pipeline.OutcomeSuccess {
+		t.Errorf("parseAutoStatus code-block-only = %q, want %q", got, pipeline.OutcomeSuccess)
+	}
+}

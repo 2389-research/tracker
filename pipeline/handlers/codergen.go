@@ -464,18 +464,25 @@ func (h *CodergenHandler) applyCacheAndCompaction(config *agent.SessionConfig, n
 }
 
 // parseAutoStatus scans the response text for STATUS: directives and returns
-// the last one found. In multi-turn agentic sessions, the LLM emits text across
-// many turns, so the STATUS: line appears in the final turn's output — not the
-// first line of the concatenated text. Falls back to success if no valid STATUS
-// line is found.
+// the last one found. Case-insensitive matching. Lines inside code fences
+// (``` blocks) are skipped to avoid matching hallucinated STATUS lines.
+// Falls back to success if no valid STATUS line is found.
 func parseAutoStatus(text string) string {
 	result := pipeline.OutcomeSuccess
+	inCodeBlock := false
 	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "STATUS:") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
 			continue
 		}
-		status := strings.TrimSpace(strings.TrimPrefix(line, "STATUS:"))
+		if inCodeBlock {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "STATUS:") {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "STATUS:")))
 		switch status {
 		case "success":
 			result = pipeline.OutcomeSuccess

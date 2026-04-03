@@ -269,9 +269,44 @@ func TestCompactContextTruncate(t *testing.T) {
 		t.Error("expected outcome in truncate")
 	}
 
-	// Values should be truncated to 500 chars.
-	if len(result["last_response"]) > 500 {
-		t.Errorf("expected last_response truncated to 500, got %d", len(result["last_response"]))
+	// Values should be truncated to at most DefaultTruncateLimit+3 chars (word boundary + "...").
+	if len(result["last_response"]) > DefaultTruncateLimit+3 {
+		t.Errorf("expected last_response truncated to <= %d, got %d", DefaultTruncateLimit+3, len(result["last_response"]))
+	}
+	if !strings.HasSuffix(result["last_response"], "...") {
+		t.Error("expected truncated last_response to end with ...")
+	}
+}
+
+func TestTruncateAtWordBoundary(t *testing.T) {
+	long := strings.Repeat("word ", 200) // 1000 chars
+	result := truncateAtWordBoundary(long, DefaultTruncateLimit)
+	if len(result) > DefaultTruncateLimit+3 { // +3 for "..."
+		t.Errorf("len = %d, want <= %d", len(result), DefaultTruncateLimit+3)
+	}
+	if !strings.HasSuffix(result, "...") {
+		t.Error("expected ... suffix on truncated string")
+	}
+	// Should not cut mid-word
+	beforeEllipsis := strings.TrimSuffix(result, "...")
+	if strings.HasSuffix(beforeEllipsis, "wor") {
+		t.Error("truncated mid-word")
+	}
+}
+
+func TestTruncateAtWordBoundary_ShortString(t *testing.T) {
+	short := "hello world"
+	result := truncateAtWordBoundary(short, DefaultTruncateLimit)
+	if result != short {
+		t.Errorf("short string should not be truncated: got %q", result)
+	}
+}
+
+func TestTruncateAtWordBoundary_NoSpaces(t *testing.T) {
+	noSpaces := strings.Repeat("x", 600)
+	result := truncateAtWordBoundary(noSpaces, DefaultTruncateLimit)
+	if len(result) != DefaultTruncateLimit+3 {
+		t.Errorf("no-space truncation: len = %d, want %d", len(result), DefaultTruncateLimit+3)
 	}
 }
 
