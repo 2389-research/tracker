@@ -1239,3 +1239,98 @@ func TestExtractNodeAttrs_NilPointerConfig(t *testing.T) {
 		t.Errorf("nil *SubgraphConfig: unexpected error: %v", err)
 	}
 }
+
+func TestExtractSubgraphAttrs_DeterministicOrder(t *testing.T) {
+	cfg := ir.SubgraphConfig{
+		Ref: "my-subgraph",
+		Params: map[string]string{
+			"zebra":  "z",
+			"alpha":  "a",
+			"middle": "m",
+		},
+	}
+	attrs := map[string]string{}
+	extractSubgraphAttrs(cfg, attrs)
+	want := "alpha=a,middle=m,zebra=z"
+	if attrs["subgraph_params"] != want {
+		t.Errorf("subgraph_params = %q, want %q", attrs["subgraph_params"], want)
+	}
+
+	// Run 10 times to verify determinism (Go randomizes map iteration).
+	for i := 0; i < 10; i++ {
+		attrs2 := map[string]string{}
+		extractSubgraphAttrs(cfg, attrs2)
+		if attrs2["subgraph_params"] != want {
+			t.Errorf("iteration %d: subgraph_params = %q, want %q", i, attrs2["subgraph_params"], want)
+		}
+	}
+}
+
+func TestSerializeStylesheet_DeterministicOrder(t *testing.T) {
+	rules := []ir.StylesheetRule{
+		{
+			Selector: ir.StyleSelector{Kind: "universal"},
+			Properties: map[string]string{
+				"z_prop": "z",
+				"a_prop": "a",
+			},
+		},
+	}
+	result := serializeStylesheet(rules)
+	// Properties should be sorted: a_prop before z_prop.
+	aIdx := strings.Index(result, "a_prop")
+	zIdx := strings.Index(result, "z_prop")
+	if aIdx < 0 || zIdx < 0 {
+		t.Fatalf("result = %q, missing properties", result)
+	}
+	if aIdx > zIdx {
+		t.Errorf("properties not sorted: a_prop at %d, z_prop at %d in %q", aIdx, zIdx, result)
+	}
+}
+
+func TestFromDippinIR_WorkflowVersionMapped(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:    "versioned",
+		Start:   "start",
+		Exit:    "exit",
+		Version: "1",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if graph.Attrs["version"] != "1" {
+		t.Errorf("graph.Attrs[version] = %q, want %q", graph.Attrs["version"], "1")
+	}
+}
+
+func TestFromDippinIR_EmptyVersionOmitted(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "no-version",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if _, ok := graph.Attrs["version"]; ok {
+		t.Error("empty version should not be set in attrs")
+	}
+}

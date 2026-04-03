@@ -5,6 +5,8 @@ package pipeline
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -53,6 +55,9 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	// Map workflow-level goal to graph attributes (used by prompt expansion, fidelity, context)
 	if workflow.Goal != "" {
 		g.Attrs["goal"] = workflow.Goal
+	}
+	if workflow.Version != "" {
+		g.Attrs["version"] = workflow.Version
 	}
 
 	// Map workflow-level defaults to graph attributes
@@ -361,10 +366,10 @@ func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
 		attrs["subgraph_ref"] = cfg.Ref
 	}
 	if len(cfg.Params) > 0 {
-		// Serialize params as comma-separated key=value pairs
+		// Serialize params as comma-separated key=value pairs (sorted for determinism).
 		var pairs []string
-		for k, v := range cfg.Params {
-			pairs = append(pairs, fmt.Sprintf("%s=%s", k, v))
+		for _, k := range slices.Sorted(maps.Keys(cfg.Params)) {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", k, cfg.Params[k]))
 		}
 		attrs["subgraph_params"] = strings.Join(pairs, ",")
 	}
@@ -470,8 +475,8 @@ func serializeStylesheet(rules []ir.StylesheetRule) string {
 	for _, rule := range rules {
 		selector := serializeSelector(rule.Selector)
 		var props []string
-		for k, v := range rule.Properties {
-			props = append(props, fmt.Sprintf("%s: %s", k, v))
+		for _, k := range slices.Sorted(maps.Keys(rule.Properties)) {
+			props = append(props, fmt.Sprintf("%s: %s", k, rule.Properties[k]))
 		}
 		parts = append(parts, fmt.Sprintf("%s { %s; }", selector, strings.Join(props, "; ")))
 	}
