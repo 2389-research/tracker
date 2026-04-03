@@ -23,6 +23,12 @@ import (
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
+// Pipeline format identifiers.
+const (
+	FormatDip = "dip" // Dippin format (current, default)
+	FormatDOT = "dot" // DOT/Graphviz format (deprecated)
+)
+
 // Config controls pipeline execution. All fields are optional.
 // Zero-value Config uses environment variables for LLM credentials,
 // the current working directory, and auto-generated run directories.

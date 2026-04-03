@@ -43,7 +43,6 @@ func NewGraph(name string) *Graph {
 	return &Graph{
 		Name:  name,
 		Nodes: make(map[string]*Node),
-		Edges: make([]*Edge, 0),
 		Attrs: make(map[string]string),
 	}
 }

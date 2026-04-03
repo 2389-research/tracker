@@ -14,9 +14,6 @@ func TestNewGraph(t *testing.T) {
 	if g.Nodes == nil {
 		t.Error("expected Nodes map to be initialized")
 	}
-	if g.Edges == nil {
-		t.Error("expected Edges slice to be initialized")
-	}
 	if g.Attrs == nil {
 		t.Error("expected Attrs map to be initialized")
 	}

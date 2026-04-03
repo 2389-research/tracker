@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -79,14 +80,18 @@ func formatToolBreakdown(toolCalls map[string]int) string {
 	for name, count := range toolCalls {
 		sorted = append(sorted, toolCount{name, count})
 	}
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[j].count > sorted[i].count ||
-				(sorted[j].count == sorted[i].count && sorted[j].name < sorted[i].name) {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
+	slices.SortFunc(sorted, func(a, b toolCount) int {
+		if a.count != b.count {
+			return b.count - a.count // descending by count
 		}
-	}
+		if a.name < b.name {
+			return -1
+		}
+		if a.name > b.name {
+			return 1
+		}
+		return 0
+	})
 	var parts []string
 	for _, tc := range sorted {
 		parts = append(parts, fmt.Sprintf("%s: %d", tc.name, tc.count))
