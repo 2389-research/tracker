@@ -28,9 +28,11 @@ type CodergenHandler struct {
 	tokenTracker       *llm.TokenTracker     // for reporting claude-code usage
 	nativeBackend      pipeline.AgentBackend // always available
 	claudeCodeBackend  pipeline.AgentBackend // lazy-init on first claude-code request
+	acpBackend         pipeline.AgentBackend // lazy-init on first acp request
 	defaultBackendName string                // from --backend flag, "" means native
 	nativeOnce         sync.Once
 	claudeMu           sync.Mutex // protects claudeCodeBackend lazy init (retryable)
+	acpMu              sync.Mutex // protects acpBackend lazy init (retryable)
 }
 
 // NewCodergenHandler creates a CodergenHandler that will use the given LLM client
@@ -90,11 +92,16 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
 
 	// Report token usage from backends that bypass the LLM client middleware
-	// (e.g., claude-code subprocess). Native backend usage flows through the
-	// TokenTracker middleware automatically — skip to avoid double-counting.
-	if _, isClaudeCode := backend.(*ClaudeCodeBackend); isClaudeCode {
+	// (e.g., claude-code subprocess, ACP agents). Native backend usage flows
+	// through the TokenTracker middleware automatically — skip to avoid double-counting.
+	switch backend.(type) {
+	case *ClaudeCodeBackend:
 		if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
 			h.tokenTracker.AddUsage("claude-code", sessResult.Usage)
+		}
+	case *ACPBackend:
+		if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
+			h.tokenTracker.AddUsage("acp", sessResult.Usage)
 		}
 	}
 
@@ -115,15 +122,20 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 		switch backend {
 		case "claude-code":
 			return h.ensureClaudeCodeBackend()
+		case "acp":
+			return h.ensureACPBackend()
 		case "native", "codergen":
 			return h.ensureNativeBackend(), nil
 		default:
-			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code)", backend, node.ID)
+			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code, acp)", backend, node.ID)
 		}
 	}
 	// Global --backend flag applies to all nodes.
-	if h.defaultBackendName == "claude-code" {
+	switch h.defaultBackendName {
+	case "claude-code":
 		return h.ensureClaudeCodeBackend()
+	case "acp":
+		return h.ensureACPBackend()
 	}
 	return h.ensureNativeBackend(), nil
 }
@@ -157,6 +169,21 @@ func (h *CodergenHandler) ensureNativeBackend() pipeline.AgentBackend {
 	return h.nativeBackend
 }
 
+// ensureACPBackend returns the ACP backend, lazily creating it on first use.
+// Thread-safe via mutex. Retries on failure so installing an ACP agent mid-run
+// can recover without restarting tracker.
+func (h *CodergenHandler) ensureACPBackend() (pipeline.AgentBackend, error) {
+	h.acpMu.Lock()
+	defer h.acpMu.Unlock()
+
+	if h.acpBackend != nil {
+		return h.acpBackend, nil
+	}
+	b := NewACPBackend()
+	h.acpBackend = b
+	return b, nil
+}
+
 // buildRunConfig constructs an AgentRunConfig from node attributes for use with
 // any AgentBackend implementation. The full SessionConfig is passed via Extra
 // so the native backend can use it directly without losing fields. When the
@@ -176,18 +203,25 @@ func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, bac
 		WorkingDir:   sessionCfg.WorkingDir,
 		MaxTurns:     sessionCfg.MaxTurns,
 	}
-	if sessionCfg.CommandTimeout > 0 {
-		cfg.Timeout = sessionCfg.CommandTimeout
-	}
 
 	// Build backend-specific Extra config.
-	if _, ok := backend.(*ClaudeCodeBackend); ok {
+	// CommandTimeout is only applied to native backend (per-tool exec timeout).
+	// External backends (claude-code, ACP) handle tool timeouts internally —
+	// applying it as a subprocess timeout kills the agent prematurely.
+	switch backend.(type) {
+	case *ClaudeCodeBackend:
 		ccCfg, err := h.buildClaudeCodeConfig(node)
 		if err != nil {
 			return pipeline.AgentRunConfig{}, err
 		}
 		cfg.Extra = ccCfg
-	} else {
+	case *ACPBackend:
+		cfg.Extra = buildACPConfig(node)
+	default:
+		// Native backend: apply CommandTimeout as the session-level timeout.
+		if sessionCfg.CommandTimeout > 0 {
+			cfg.Timeout = sessionCfg.CommandTimeout
+		}
 		cfg.Extra = &sessionCfg
 	}
 	return cfg, nil
@@ -251,6 +285,15 @@ func parseClaudeCodeBudgetAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeC
 		ccCfg.PermissionMode = mode
 	}
 	return nil
+}
+
+// buildACPConfig constructs an ACPConfig from node attributes.
+func buildACPConfig(node *pipeline.Node) *pipeline.ACPConfig {
+	cfg := &pipeline.ACPConfig{}
+	if agent, ok := node.Attrs["acp_agent"]; ok && agent != "" {
+		cfg.Agent = agent
+	}
+	return cfg
 }
 
 // resolvePrompt extracts, expands variables, and applies fidelity context to the node prompt.

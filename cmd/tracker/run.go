@@ -46,14 +46,14 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	tokenTracker := llm.NewTokenTracker()
 
 	// Create LLM client from environment variables.
-	// When --backend claude-code, the native client is optional — node execution
-	// routes through the claude CLI subprocess and autopilot can too.
+	// When --backend claude-code or acp, the native client is optional — node
+	// execution routes through the external agent subprocess.
 	llmClient, err := buildLLMClient(tokenTracker)
-	if err != nil && backend != "claude-code" {
+	if err != nil && backend != "claude-code" && backend != "acp" {
 		return formatLLMClientError(err)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using claude-code for all LLM calls\n", err)
+		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
 	}
 	if llmClient != nil {
 		defer llmClient.Close()
@@ -244,11 +244,11 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	tokenTracker := llm.NewTokenTracker()
 	llmClient, err := buildLLMClient(tokenTracker)
-	if err != nil && backend != "claude-code" {
+	if err != nil && backend != "claude-code" && backend != "acp" {
 		return formatLLMClientError(err)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using claude-code for all LLM calls\n", err)
+		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
 	}
 	if llmClient != nil {
 		defer llmClient.Close()
