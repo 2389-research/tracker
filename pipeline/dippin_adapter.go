@@ -3,11 +3,20 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/2389-research/dippin-lang/ir"
+)
+
+var (
+	ErrNilWorkflow     = errors.New("nil workflow")
+	ErrMissingStart    = errors.New("workflow missing Start node")
+	ErrMissingExit     = errors.New("workflow missing Exit node")
+	ErrUnknownNodeKind = errors.New("unknown node kind")
+	ErrUnknownConfig   = errors.New("unknown config type")
 )
 
 // FromDippinIR converts a Dippin IR Workflow to a Tracker Graph.
@@ -28,13 +37,13 @@ import (
 //   - A node has an unknown NodeKind
 func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	if workflow == nil {
-		return nil, fmt.Errorf("nil workflow")
+		return nil, ErrNilWorkflow
 	}
 	if workflow.Start == "" {
-		return nil, fmt.Errorf("workflow missing Start node")
+		return nil, ErrMissingStart
 	}
 	if workflow.Exit == "" {
-		return nil, fmt.Errorf("workflow missing Exit node")
+		return nil, ErrMissingExit
 	}
 
 	g := NewGraph(workflow.Name)
@@ -110,7 +119,7 @@ func NodeKindToShape(kind ir.NodeKind) (string, bool) {
 func convertNode(irNode *ir.Node) (*Node, error) {
 	shape, ok := NodeKindToShape(irNode.Kind)
 	if !ok {
-		return nil, fmt.Errorf("unknown node kind: %s", irNode.Kind)
+		return nil, fmt.Errorf("%s: %w", irNode.Kind, ErrUnknownNodeKind)
 	}
 
 	gNode := &Node{
@@ -174,7 +183,7 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 		extractSubgraphAttrs(*cfg, attrs)
 
 	default:
-		return fmt.Errorf("unknown config type: %T", config)
+		return fmt.Errorf("%T: %w", config, ErrUnknownConfig)
 	}
 
 	return nil

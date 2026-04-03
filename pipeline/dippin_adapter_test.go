@@ -3,6 +3,8 @@
 package pipeline
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1137,4 +1139,41 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestFromDippinIR_SentinelErrors(t *testing.T) {
+	// nil workflow → ErrNilWorkflow
+	_, err := FromDippinIR(nil)
+	if !errors.Is(err, ErrNilWorkflow) {
+		t.Errorf("nil workflow: got %v, want ErrNilWorkflow", err)
+	}
+
+	// missing Start → ErrMissingStart
+	_, err = FromDippinIR(&ir.Workflow{Exit: "x"})
+	if !errors.Is(err, ErrMissingStart) {
+		t.Errorf("missing start: got %v, want ErrMissingStart", err)
+	}
+
+	// missing Exit → ErrMissingExit
+	_, err = FromDippinIR(&ir.Workflow{Start: "s"})
+	if !errors.Is(err, ErrMissingExit) {
+		t.Errorf("missing exit: got %v, want ErrMissingExit", err)
+	}
+
+	// unknown node kind → ErrUnknownNodeKind
+	_, err = FromDippinIR(&ir.Workflow{
+		Name: "bad", Start: "s", Exit: "e",
+		Nodes: []*ir.Node{{ID: "s", Kind: "bogus"}},
+	})
+	if !errors.Is(err, ErrUnknownNodeKind) {
+		t.Errorf("unknown kind: got %v, want ErrUnknownNodeKind", err)
+	}
+
+	// ErrUnknownConfig is tested indirectly — it's only reachable if dippin-lang
+	// adds a new NodeConfig implementation that tracker hasn't mapped yet.
+	// We verify the sentinel exists and is usable with errors.Is.
+	wrapped := fmt.Errorf("test: %w", ErrUnknownConfig)
+	if !errors.Is(wrapped, ErrUnknownConfig) {
+		t.Error("ErrUnknownConfig should be matchable via errors.Is")
+	}
 }
