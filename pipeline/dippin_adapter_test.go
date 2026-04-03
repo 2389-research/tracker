@@ -3,6 +3,8 @@
 package pipeline
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1137,4 +1139,198 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestFromDippinIR_SentinelErrors(t *testing.T) {
+	// nil workflow → ErrNilWorkflow
+	_, err := FromDippinIR(nil)
+	if !errors.Is(err, ErrNilWorkflow) {
+		t.Errorf("nil workflow: got %v, want ErrNilWorkflow", err)
+	}
+
+	// missing Start → ErrMissingStart
+	_, err = FromDippinIR(&ir.Workflow{Exit: "x"})
+	if !errors.Is(err, ErrMissingStart) {
+		t.Errorf("missing start: got %v, want ErrMissingStart", err)
+	}
+
+	// missing Exit → ErrMissingExit
+	_, err = FromDippinIR(&ir.Workflow{Start: "s"})
+	if !errors.Is(err, ErrMissingExit) {
+		t.Errorf("missing exit: got %v, want ErrMissingExit", err)
+	}
+
+	// unknown node kind → ErrUnknownNodeKind
+	_, err = FromDippinIR(&ir.Workflow{
+		Name: "bad", Start: "s", Exit: "e",
+		Nodes: []*ir.Node{{ID: "s", Kind: "bogus"}},
+	})
+	if !errors.Is(err, ErrUnknownNodeKind) {
+		t.Errorf("unknown kind: got %v, want ErrUnknownNodeKind", err)
+	}
+
+	// ErrUnknownConfig is tested indirectly — it's only reachable if dippin-lang
+	// adds a new NodeConfig implementation that tracker hasn't mapped yet.
+	// We verify the sentinel exists and is usable with errors.Is.
+	wrapped := fmt.Errorf("test: %w", ErrUnknownConfig)
+	if !errors.Is(wrapped, ErrUnknownConfig) {
+		t.Error("ErrUnknownConfig should be matchable via errors.Is")
+	}
+}
+
+func TestFromDippinIR_NilNodeSkipped(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "nil-node",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			nil, // should be skipped
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+			nil, // should be skipped
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if len(graph.Nodes) != 2 {
+		t.Errorf("len(graph.Nodes) = %d, want 2", len(graph.Nodes))
+	}
+	if len(graph.Edges) != 1 {
+		t.Errorf("len(graph.Edges) = %d, want 1", len(graph.Edges))
+	}
+}
+
+func TestExtractNodeAttrs_NilPointerConfig(t *testing.T) {
+	attrs := map[string]string{}
+
+	var agentCfg *ir.AgentConfig
+	if err := extractNodeAttrs(agentCfg, attrs); err != nil {
+		t.Errorf("nil *AgentConfig: unexpected error: %v", err)
+	}
+
+	var humanCfg *ir.HumanConfig
+	if err := extractNodeAttrs(humanCfg, attrs); err != nil {
+		t.Errorf("nil *HumanConfig: unexpected error: %v", err)
+	}
+
+	var toolCfg *ir.ToolConfig
+	if err := extractNodeAttrs(toolCfg, attrs); err != nil {
+		t.Errorf("nil *ToolConfig: unexpected error: %v", err)
+	}
+
+	var parallelCfg *ir.ParallelConfig
+	if err := extractNodeAttrs(parallelCfg, attrs); err != nil {
+		t.Errorf("nil *ParallelConfig: unexpected error: %v", err)
+	}
+
+	var fanInCfg *ir.FanInConfig
+	if err := extractNodeAttrs(fanInCfg, attrs); err != nil {
+		t.Errorf("nil *FanInConfig: unexpected error: %v", err)
+	}
+
+	var subgraphCfg *ir.SubgraphConfig
+	if err := extractNodeAttrs(subgraphCfg, attrs); err != nil {
+		t.Errorf("nil *SubgraphConfig: unexpected error: %v", err)
+	}
+}
+
+func TestExtractSubgraphAttrs_DeterministicOrder(t *testing.T) {
+	cfg := ir.SubgraphConfig{
+		Ref: "my-subgraph",
+		Params: map[string]string{
+			"zebra":  "z",
+			"alpha":  "a",
+			"middle": "m",
+		},
+	}
+	attrs := map[string]string{}
+	extractSubgraphAttrs(cfg, attrs)
+	want := "alpha=a,middle=m,zebra=z"
+	if attrs["subgraph_params"] != want {
+		t.Errorf("subgraph_params = %q, want %q", attrs["subgraph_params"], want)
+	}
+
+	// Run 10 times to verify determinism (Go randomizes map iteration).
+	for i := 0; i < 10; i++ {
+		attrs2 := map[string]string{}
+		extractSubgraphAttrs(cfg, attrs2)
+		if attrs2["subgraph_params"] != want {
+			t.Errorf("iteration %d: subgraph_params = %q, want %q", i, attrs2["subgraph_params"], want)
+		}
+	}
+}
+
+func TestSerializeStylesheet_DeterministicOrder(t *testing.T) {
+	rules := []ir.StylesheetRule{
+		{
+			Selector: ir.StyleSelector{Kind: "universal"},
+			Properties: map[string]string{
+				"z_prop": "z",
+				"a_prop": "a",
+			},
+		},
+	}
+	result := serializeStylesheet(rules)
+	// Properties should be sorted: a_prop before z_prop.
+	aIdx := strings.Index(result, "a_prop")
+	zIdx := strings.Index(result, "z_prop")
+	if aIdx < 0 || zIdx < 0 {
+		t.Fatalf("result = %q, missing properties", result)
+	}
+	if aIdx > zIdx {
+		t.Errorf("properties not sorted: a_prop at %d, z_prop at %d in %q", aIdx, zIdx, result)
+	}
+}
+
+func TestFromDippinIR_WorkflowVersionMapped(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:    "versioned",
+		Start:   "start",
+		Exit:    "exit",
+		Version: "1",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if graph.Attrs["version"] != "1" {
+		t.Errorf("graph.Attrs[version] = %q, want %q", graph.Attrs["version"], "1")
+	}
+}
+
+func TestFromDippinIR_EmptyVersionOmitted(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "no-version",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if _, ok := graph.Attrs["version"]; ok {
+		t.Error("empty version should not be set in attrs")
+	}
 }

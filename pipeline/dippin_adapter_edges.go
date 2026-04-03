@@ -20,6 +20,9 @@ func synthesizeImplicitEdges(g *Graph, workflow *ir.Workflow) {
 	fanInBySource := buildFanInSourceMap(workflow)
 
 	for _, irNode := range workflow.Nodes {
+		if irNode == nil {
+			continue
+		}
 		switch cfg := irNode.Config.(type) {
 		case ir.ParallelConfig:
 			synthesizeParallelEdges(g, irNode, cfg, fanInBySource, existingEdges)
@@ -37,6 +40,9 @@ func synthesizeImplicitEdges(g *Graph, workflow *ir.Workflow) {
 func buildFanInSourceMap(workflow *ir.Workflow) map[string]string {
 	fanInBySource := make(map[string]string)
 	for _, irNode := range workflow.Nodes {
+		if irNode == nil {
+			continue
+		}
 		switch cfg := irNode.Config.(type) {
 		case ir.FanInConfig:
 			for _, source := range cfg.Sources {

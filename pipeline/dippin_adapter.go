@@ -3,11 +3,22 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/2389-research/dippin-lang/ir"
+)
+
+var (
+	ErrNilWorkflow     = errors.New("nil workflow")
+	ErrMissingStart    = errors.New("workflow missing Start node")
+	ErrMissingExit     = errors.New("workflow missing Exit node")
+	ErrUnknownNodeKind = errors.New("unknown node kind")
+	ErrUnknownConfig   = errors.New("unknown config type")
 )
 
 // FromDippinIR converts a Dippin IR Workflow to a Tracker Graph.
@@ -28,13 +39,13 @@ import (
 //   - A node has an unknown NodeKind
 func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	if workflow == nil {
-		return nil, fmt.Errorf("nil workflow")
+		return nil, ErrNilWorkflow
 	}
 	if workflow.Start == "" {
-		return nil, fmt.Errorf("workflow missing Start node")
+		return nil, ErrMissingStart
 	}
 	if workflow.Exit == "" {
-		return nil, fmt.Errorf("workflow missing Exit node")
+		return nil, ErrMissingExit
 	}
 
 	g := NewGraph(workflow.Name)
@@ -45,12 +56,18 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	if workflow.Goal != "" {
 		g.Attrs["goal"] = workflow.Goal
 	}
+	if workflow.Version != "" {
+		g.Attrs["version"] = workflow.Version
+	}
 
 	// Map workflow-level defaults to graph attributes
 	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
 
 	// Map IR nodes to Graph nodes, preserving declaration order.
 	for _, irNode := range workflow.Nodes {
+		if irNode == nil {
+			continue
+		}
 		gNode, err := convertNode(irNode)
 		if err != nil {
 			return nil, fmt.Errorf("node %s: %w", irNode.ID, err)
@@ -61,6 +78,9 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 
 	// Map IR edges to Graph edges
 	for _, irEdge := range workflow.Edges {
+		if irEdge == nil {
+			continue
+		}
 		gEdge := convertEdge(irEdge)
 		g.AddEdge(gEdge)
 	}
@@ -110,7 +130,7 @@ func NodeKindToShape(kind ir.NodeKind) (string, bool) {
 func convertNode(irNode *ir.Node) (*Node, error) {
 	shape, ok := NodeKindToShape(irNode.Kind)
 	if !ok {
-		return nil, fmt.Errorf("unknown node kind: %s", irNode.Kind)
+		return nil, fmt.Errorf("%s: %w", irNode.Kind, ErrUnknownNodeKind)
 	}
 
 	gNode := &Node{
@@ -146,35 +166,53 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 	case ir.AgentConfig:
 		extractAgentAttrs(cfg, attrs)
 	case *ir.AgentConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractAgentAttrs(*cfg, attrs)
 
 	case ir.HumanConfig:
 		extractHumanAttrs(cfg, attrs)
 	case *ir.HumanConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractHumanAttrs(*cfg, attrs)
 
 	case ir.ToolConfig:
 		extractToolAttrs(cfg, attrs)
 	case *ir.ToolConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractToolAttrs(*cfg, attrs)
 
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
 	case *ir.ParallelConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractParallelAttrs(*cfg, attrs)
 
 	case ir.FanInConfig:
 		extractFanInAttrs(cfg, attrs)
 	case *ir.FanInConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractFanInAttrs(*cfg, attrs)
 
 	case ir.SubgraphConfig:
 		extractSubgraphAttrs(cfg, attrs)
 	case *ir.SubgraphConfig:
+		if cfg == nil {
+			return nil
+		}
 		extractSubgraphAttrs(*cfg, attrs)
 
 	default:
-		return fmt.Errorf("unknown config type: %T", config)
+		return fmt.Errorf("%T: %w", config, ErrUnknownConfig)
 	}
 
 	return nil
@@ -328,10 +366,10 @@ func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
 		attrs["subgraph_ref"] = cfg.Ref
 	}
 	if len(cfg.Params) > 0 {
-		// Serialize params as comma-separated key=value pairs
+		// Serialize params as comma-separated key=value pairs (sorted for determinism).
 		var pairs []string
-		for k, v := range cfg.Params {
-			pairs = append(pairs, fmt.Sprintf("%s=%s", k, v))
+		for _, k := range slices.Sorted(maps.Keys(cfg.Params)) {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", k, cfg.Params[k]))
 		}
 		attrs["subgraph_params"] = strings.Join(pairs, ",")
 	}
@@ -437,8 +475,8 @@ func serializeStylesheet(rules []ir.StylesheetRule) string {
 	for _, rule := range rules {
 		selector := serializeSelector(rule.Selector)
 		var props []string
-		for k, v := range rule.Properties {
-			props = append(props, fmt.Sprintf("%s: %s", k, v))
+		for _, k := range slices.Sorted(maps.Keys(rule.Properties)) {
+			props = append(props, fmt.Sprintf("%s: %s", k, rule.Properties[k]))
 		}
 		parts = append(parts, fmt.Sprintf("%s { %s; }", selector, strings.Join(props, "; ")))
 	}
