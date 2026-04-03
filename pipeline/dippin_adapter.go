@@ -277,11 +277,12 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	}
 }
 
-// extractAgentBackendAttrs maps backend-selection and Claude-Code-specific keys
-// from a generic params map into node attrs consumed by CodergenHandler and
-// ClaudeCodeBackend. The recognized keys are:
+// extractAgentBackendAttrs maps backend-selection and backend-specific keys
+// from a generic params map into node attrs consumed by CodergenHandler,
+// ClaudeCodeBackend, and ACPBackend. The recognized keys are:
 //
-//   - backend         → attrs["backend"]          (e.g. "claude-code", "native")
+//   - backend         → attrs["backend"]          (e.g. "claude-code", "native", "acp")
+//   - acp_agent       → attrs["acp_agent"]         (explicit ACP binary: "claude-code-acp", "codex-acp", "gemini")
 //   - mcp_servers     → attrs["mcp_servers"]       (newline-separated name=cmd pairs)
 //   - allowed_tools   → attrs["allowed_tools"]     (comma-separated tool names)
 //   - disallowed_tools→ attrs["disallowed_tools"]  (comma-separated tool names)
@@ -293,6 +294,7 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 func extractAgentBackendAttrs(params map[string]string, attrs map[string]string) {
 	keys := []string{
 		"backend",
+		"acp_agent",
 		"mcp_servers",
 		"allowed_tools",
 		"disallowed_tools",
