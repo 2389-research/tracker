@@ -5,6 +5,47 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-04-03
+
+### Added
+
+- **Per-node response context keys**: Codergen and human handlers now write `response.<nodeID>` alongside `last_response`/`human_response`, enabling downstream nodes to reference specific upstream outputs instead of only the most recent. (#24)
+- **Parallel concurrency limits**: `max_concurrency` attr on parallel nodes limits concurrent branch goroutines via semaphore. Context-aware acquisition aborts on cancellation. (#27)
+- **Parallel branch timeout**: `branch_timeout` attr on parallel nodes sets per-branch context deadline. Slow branches fail without blocking fan-in. (#27)
+- **Human gate timeout**: `timeout` attr on human nodes with `timeout_action` (default/fail) and `default_choice` fallback. Applied to freeform, choice, and interview modes. (#30)
+- **Edge adjacency indexes**: `OutgoingEdges`/`IncomingEdges` now use O(1) map lookup via adjacency indexes built by `AddEdge`, with O(E) fallback for graphs built without `AddEdge`. Returns defensive copies. (#31)
+- **Format constants**: `FormatDip` and `FormatDOT` typed constants for pipeline format identification. (#9)
+- **Pipeline package documentation**: `pipeline/doc.go` with package overview and dual-format documentation. (#12)
+
+### Fixed
+
+- **P0: Goal-gate infinite fallback loop**: `FallbackTaken` guard persisted in checkpoint prevents one-shot fallback/escalation from looping. Separate fallback routing path in `handleExitNode` doesn't increment retry counts. (#15)
+- **P0: Parallel branch context loss on fan-in**: `PipelineContext.DiffFrom()` captures side effects from parallel branches. (#20)
+- **Adapter nil pointer guards**: Nil checks for IR nodes, edges, and all 6 pointer config types in `extractNodeAttrs`. Also guards in `synthesizeImplicitEdges` and `buildFanInSourceMap`. (#38)
+- **Adapter sentinel errors**: `ErrNilWorkflow`, `ErrMissingStart`, `ErrMissingExit`, `ErrUnknownNodeKind`, `ErrUnknownConfig` with `%w` wrapping for `errors.Is` support. (#33)
+- **Deterministic map iteration**: `extractSubgraphAttrs` and `serializeStylesheet` sort keys before iteration via `slices.Sorted(maps.Keys(...))`. (#8)
+- **Workflow.Version mapping**: `ir.Workflow.Version` now mapped to `g.Attrs["version"]`. (#25)
+- **Validation bypass removed**: Deleted `DippinValidated` field — all 5 structural validation checks always run for defense-in-depth. (#4)
+- **Library stderr cleanup**: Replaced `fmt.Fprintf(os.Stderr, ...)` with `log.Printf(...)` in library code (tracker.go, condition.go, autopilot handlers). (#7)
+- **Case-insensitive auto_status**: `parseAutoStatus` now matches STATUS prefix case-insensitively and skips STATUS lines inside code fences. (#23)
+- **Word-boundary fidelity truncation**: `truncateAtWordBoundary` cuts at whitespace (unicode.IsSpace) instead of mid-word, with `...` suffix and named `DefaultTruncateLimit` constant. (#34)
+- **Condition parser hardening**: Support `==` operator (space-delimited), strip surrounding double quotes from values in `=`/`==`/`!=` comparisons. (#21)
+- **Consensus pipeline parallelized**: `consensus_task.dip` now uses parallel fan-out/fan-in for DoD, Planning, and Review phases. (#26)
+- **CLI format detection default**: Unknown extensions now default to `.dip` instead of `.dot`, with case-insensitive extension matching. (#9)
+- **Empty API response retry**: Empty API responses (0 output tokens, 0 tool calls) now trigger `OutcomeRetry` instead of hard-failing. (#23)
+- **POSIX build constraint**: `//go:build !windows` on `agent/exec/local.go`. (#28)
+- **ConsoleInterviewer IsYesNo priority**: Yes/no check now runs before option list check, matching TUI behavior. (#48 review)
+- **Test rename**: `TestListBuiltinWorkflowsReturnsThree` → `ReturnsFour`. (#48 review)
+
+### Changed
+
+- **Retry backoff jitter**: `ExponentialBackoff` and `LinearBackoff` now apply ±25% random jitter to prevent thundering herd when multiple pipelines retry simultaneously. (#29)
+- **Code cleanup**: Unexported `NodeKindToShape`, removed `make([]*Edge, 0)`, replaced custom `contains` helper with `strings.Contains`, replaced bubble sort with `slices.SortFunc`. (#10)
+
+### Deprecated
+
+- **DOT format support**: `ParseDOT` is deprecated. Use `.dip` format with `FromDippinIR` instead. DOT support will be removed in v1.0. (#12)
+
 ## [0.14.0] - 2026-03-31
 
 ### Added
@@ -41,14 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cancel/fail EndTime**: Cancelled and retry-exhausted runs now set `trace.EndTime` so the run summary shows duration.
 - **failResult atomicity**: `failResult()` now accepts a `*Trace` parameter and sets both `Trace` and `Usage` internally, preventing silent data loss.
 - **Built-in pipeline prompts**: Removed trivial placeholder prompts from Start/Done nodes in built-in workflows that were causing unnecessary LLM calls.
-
-### Changed
-
-- **Retry backoff jitter**: `ExponentialBackoff` and `LinearBackoff` now apply ±25% random jitter to prevent thundering herd when multiple pipelines retry simultaneously.
-
-### Deprecated
-
-- **DOT format support**: `ParseDOT` is deprecated. Use `.dip` format with `FromDippinIR` instead. DOT support will be removed in v1.0. Run `tracker doctor` on `.dip` files to validate.
 
 ## [0.13.0] - 2026-03-28
 
