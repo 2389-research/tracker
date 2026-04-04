@@ -93,6 +93,7 @@ func TestFromDippinIR_AllNodeKinds(t *testing.T) {
 		{ir.NodeParallel, "component", ir.ParallelConfig{}},
 		{ir.NodeFanIn, "tripleoctagon", ir.FanInConfig{}},
 		{ir.NodeSubgraph, "tab", ir.SubgraphConfig{}},
+		{ir.NodeConditional, "diamond", ir.ConditionalConfig{}},
 	}
 
 	for _, tc := range testCases {

@@ -15,4 +15,4 @@ workflow simple_pipeline
 
   edges
     start -> generate
-    generate -> done [label: "success"]
+    generate -> done  label: success

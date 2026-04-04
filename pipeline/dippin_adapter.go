@@ -105,12 +105,13 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 // This mapping ensures the Graph produced by FromDippinIR matches
 // the shape convention used by ParseDOT, maintaining handler compatibility.
 var nodeKindToShapeMap = map[ir.NodeKind]string{
-	ir.NodeAgent:    "box",           // → codergen
-	ir.NodeHuman:    "hexagon",       // → wait.human
-	ir.NodeTool:     "parallelogram", // → tool
-	ir.NodeParallel: "component",     // → parallel
-	ir.NodeFanIn:    "tripleoctagon", // → parallel.fan_in
-	ir.NodeSubgraph: "tab",           // → subgraph
+	ir.NodeAgent:       "box",           // → codergen
+	ir.NodeHuman:       "hexagon",       // → wait.human
+	ir.NodeTool:        "parallelogram", // → tool
+	ir.NodeParallel:    "component",     // → parallel
+	ir.NodeFanIn:       "tripleoctagon", // → parallel.fan_in
+	ir.NodeSubgraph:    "tab",           // → subgraph
+	ir.NodeConditional: "diamond",       // → conditional (pure routing, no LLM call)
 }
 
 // nodeKindToShape returns the DOT shape for a given NodeKind.
@@ -205,6 +206,9 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 			return nil
 		}
 		extractSubgraphAttrs(*cfg, attrs)
+
+	case ir.ConditionalConfig, *ir.ConditionalConfig:
+		// Conditional nodes are pure routing — no config to extract.
 
 	default:
 		return fmt.Errorf("%T: %w", config, ErrUnknownConfig)
