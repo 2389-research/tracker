@@ -42,7 +42,7 @@ var acpAgentArgs = map[string][]string{
 //
 // Default binary mapping:
 //
-//   - anthropic → claude-code-acp (bridge: npm i -g claude-code-acp)
+//   - anthropic → claude-agent-acp (bridge: npm i -g @agentclientprotocol/claude-agent-acp)
 //   - openai   → codex-acp       (bridge: cargo install codex-acp)
 //   - gemini   → gemini --acp    (native ACP mode)
 //
@@ -122,7 +122,7 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 
 	// Step 1: Initialize the ACP connection.
 	log.Printf("[acp] initializing %s (pid %d)", agentName, cmd.Process.Pid)
-	_, initErr := conn.Initialize(ctx, acp.InitializeRequest{
+	initResp, initErr := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
 			Fs: acp.FileSystemCapability{
@@ -140,11 +140,19 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 		return agent.SessionResult{}, fmt.Errorf("acp: initialize failed for %s: %w", agentName, initErr)
 	}
 
+	if initResp.ProtocolVersion != acp.ProtocolVersionNumber {
+		log.Printf("[acp] warning: %s protocol version mismatch: got %q, want %q", agentName, initResp.ProtocolVersion, acp.ProtocolVersionNumber)
+	}
+
 	// Step 2: Create a session. McpServers is required by the ACP SDK
 	// (nil fails validation), so pass an empty slice when none are configured.
+	cwd := cfg.WorkingDir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
 	mcpServers := buildACPMcpServers(cfg)
 	sessResp, sessErr := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        cfg.WorkingDir,
+		Cwd:        cwd,
 		McpServers: mcpServers,
 	})
 	if sessErr != nil {
@@ -229,7 +237,10 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 
 	// Empty agent responses (0 text, 0 tool calls) are failures per project
 	// rules — the agent ran but produced nothing useful.
-	if len(handler.textParts) == 0 && handler.toolCount == 0 {
+	handler.mu.Lock()
+	empty := len(handler.textParts) == 0 && handler.toolCount == 0
+	handler.mu.Unlock()
+	if empty {
 		return result, fmt.Errorf("acp: %s returned empty response (0 text, 0 tool calls)", agentName)
 	}
 
@@ -374,7 +385,7 @@ var acpStrippedPrefixes = []string{
 // native auth (subscription, OAuth, etc.) rather than tracker's credentials.
 // TRACKER_PASS_API_KEYS=1 overrides this and passes everything through.
 func buildEnvForACP() []string {
-	if os.Getenv("TRACKER_PASS_API_KEYS") != "" {
+	if os.Getenv("TRACKER_PASS_API_KEYS") == "1" {
 		return os.Environ()
 	}
 

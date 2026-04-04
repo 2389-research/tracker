@@ -39,10 +39,29 @@ type acpClientHandler struct {
 // terminalState tracks a running subprocess created via CreateTerminal.
 type terminalState struct {
 	cmd    *exec.Cmd
-	output bytes.Buffer
-	mu     sync.Mutex
+	output syncBuffer
 	done   chan struct{}
 	err    error
+}
+
+// syncBuffer is a goroutine-safe bytes.Buffer for subprocess output.
+// The subprocess writes via cmd.Stdout/Stderr, while TerminalOutput reads
+// concurrently — both paths go through the embedded mutex.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *syncBuffer) Write(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *syncBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.String()
 }
 
 // SessionUpdate receives real-time updates from the ACP agent during prompt
@@ -258,9 +277,7 @@ func (h *acpClientHandler) TerminalOutput(_ context.Context, p acp.TerminalOutpu
 		return acp.TerminalOutputResponse{}, &acp.RequestError{Code: -32602, Message: fmt.Sprintf("unknown terminal: %q", p.TerminalId)}
 	}
 
-	ts.mu.Lock()
 	output := ts.output.String()
-	ts.mu.Unlock()
 
 	resp := acp.TerminalOutputResponse{Output: output}
 
@@ -313,7 +330,7 @@ func (h *acpClientHandler) KillTerminalCommand(_ context.Context, p acp.KillTerm
 		return acp.KillTerminalCommandResponse{}, &acp.RequestError{Code: -32602, Message: fmt.Sprintf("unknown terminal: %q", p.TerminalId)}
 	}
 
-	if ts.cmd.Process != nil {
+	if ts.cmd.Process != nil && ts.cmd.Process.Pid > 0 {
 		// Kill the process group for clean cleanup.
 		_ = syscall.Kill(-ts.cmd.Process.Pid, syscall.SIGKILL)
 	}
@@ -334,7 +351,7 @@ func (h *acpClientHandler) ReleaseTerminal(_ context.Context, p acp.ReleaseTermi
 	}
 
 	// Ensure process is dead before releasing.
-	if ts.cmd.Process != nil {
+	if ts.cmd.Process != nil && ts.cmd.Process.Pid > 0 {
 		select {
 		case <-ts.done:
 		default:
@@ -372,7 +389,7 @@ func (h *acpClientHandler) cleanup() {
 	h.mu.Unlock()
 
 	for _, ts := range terms {
-		if ts.cmd.Process != nil {
+		if ts.cmd.Process != nil && ts.cmd.Process.Pid > 0 {
 			select {
 			case <-ts.done:
 			default:
