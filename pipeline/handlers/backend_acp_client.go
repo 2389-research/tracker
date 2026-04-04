@@ -208,10 +208,10 @@ func (h *acpClientHandler) CreateTerminal(_ context.Context, p acp.CreateTermina
 	}
 	cmd.Dir = cwd
 
-	// Apply environment variables from the request. Use buildEnv() to strip
-	// API keys from the subprocess environment (same scoping as the main
-	// ACP agent process). Request-level env vars are appended after.
-	cmd.Env = buildEnv()
+	// Apply environment variables from the request. Use buildEnvForACP() to
+	// match the parent ACP agent process (full env passthrough). The ACP
+	// bridge and its terminals share the same environment.
+	cmd.Env = buildEnvForACP()
 	for _, ev := range p.Env {
 		cmd.Env = append(cmd.Env, ev.Name+"="+ev.Value)
 	}
