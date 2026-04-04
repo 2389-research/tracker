@@ -3,14 +3,24 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
+
+// nopCompleter satisfies agent.Completer for tests that need a non-nil client
+// but never actually call Complete.
+type nopCompleter struct{}
+
+func (nopCompleter) Complete(_ context.Context, _ *llm.Request) (*llm.Response, error) {
+	return &llm.Response{}, nil
+}
 
 func now() time.Time { return time.Now() }
 
@@ -526,7 +536,7 @@ func TestSelectBackendUnknown(t *testing.T) {
 }
 
 func TestSelectBackendNativeDefault(t *testing.T) {
-	h := NewCodergenHandler(nil, "/tmp")
+	h := NewCodergenHandler(nopCompleter{}, "/tmp")
 	node := &pipeline.Node{
 		ID:    "test",
 		Attrs: map[string]string{},
@@ -541,7 +551,7 @@ func TestSelectBackendNativeDefault(t *testing.T) {
 }
 
 func TestSelectBackendNativeExplicit(t *testing.T) {
-	h := NewCodergenHandler(nil, "/tmp")
+	h := NewCodergenHandler(nopCompleter{}, "/tmp")
 	node := &pipeline.Node{
 		ID:    "test",
 		Attrs: map[string]string{"backend": "native"},
@@ -556,7 +566,7 @@ func TestSelectBackendNativeExplicit(t *testing.T) {
 }
 
 func TestSelectBackendCodergenAlias(t *testing.T) {
-	h := NewCodergenHandler(nil, "/tmp")
+	h := NewCodergenHandler(nopCompleter{}, "/tmp")
 	node := &pipeline.Node{
 		ID:    "test",
 		Attrs: map[string]string{"backend": "codergen"},
@@ -567,6 +577,18 @@ func TestSelectBackendCodergenAlias(t *testing.T) {
 	}
 	if _, ok := backend.(*NativeBackend); !ok {
 		t.Errorf("expected NativeBackend, got %T", backend)
+	}
+}
+
+func TestSelectBackendNativeNilClientErrors(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	node := &pipeline.Node{
+		ID:    "test",
+		Attrs: map[string]string{},
+	}
+	_, err := h.selectBackend(node)
+	if err == nil {
+		t.Fatal("expected error for nil client, got nil")
 	}
 }
 

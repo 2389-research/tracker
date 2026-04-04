@@ -1,5 +1,5 @@
 // ABOUTME: AgentBackend interface and config types for pluggable execution backends.
-// ABOUTME: Supports native (agent.Session) and Claude Code (CLI subprocess) backends.
+// ABOUTME: Supports native (agent.Session), Claude Code (CLI subprocess), and ACP (Agent Client Protocol) backends.
 package pipeline
 
 import (
@@ -59,6 +59,11 @@ func (m PermissionMode) Valid() bool {
 		return true
 	}
 	return false
+}
+
+// ACPConfig holds ACP-backend-specific settings.
+type ACPConfig struct {
+	Agent string // explicit agent binary: "claude-agent-acp", "codex-acp", "gemini" (overrides provider mapping)
 }
 
 // MCPServerConfig defines an MCP server to attach to a session.

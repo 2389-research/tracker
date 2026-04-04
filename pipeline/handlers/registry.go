@@ -176,12 +176,16 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	// Parallel handler needs the graph and registry for branch dispatch.
 	registry.Register(NewParallelHandler(graph, registry, cfg.pipelineEvents))
 
-	// Codergen: prefer real handler, fall back to stub.
-	if cfg.llmClient != nil {
+	// Codergen: register when we have an LLM client OR an external backend
+	// that doesn't need one (claude-code, acp). External backends spawn
+	// their own subprocesses and don't use the native LLM client.
+	if cfg.llmClient != nil || cfg.defaultBackend == "claude-code" || cfg.defaultBackend == "acp" {
 		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir, WithGraphAttrs(graph.Attrs))
 		handler.env = cfg.execEnv
 		handler.eventHandler = cfg.agentEvents
-		handler.nativeBackend = NewNativeBackend(cfg.llmClient, cfg.execEnv)
+		if cfg.llmClient != nil {
+			handler.nativeBackend = NewNativeBackend(cfg.llmClient, cfg.execEnv)
+		}
 		handler.defaultBackendName = cfg.defaultBackend
 		handler.tokenTracker = cfg.tokenTracker
 		registry.Register(handler)

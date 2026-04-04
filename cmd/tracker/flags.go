@@ -126,7 +126,7 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream events as newline-delimited JSON to stdout")
 	fs.StringVar(&cfg.format, "format", "", "Pipeline format override: dip (default) or dot")
-	fs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default) or claude-code")
+	fs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
 	fs.StringVar(&cfg.autopilot, "autopilot", "", "Replace human gates with LLM judge (lax/mid/hard/mentor)")
 	fs.BoolVar(&cfg.autoApprove, "auto-approve", false, "Auto-approve all human gates (no LLM, deterministic)")
 
@@ -157,8 +157,8 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 
 	cfg.pipelineFile = positional[0]
 
-	if cfg.backend != "" && cfg.backend != "native" && cfg.backend != "claude-code" {
-		return cfg, fmt.Errorf("invalid backend %q: must be one of: native, claude-code", cfg.backend)
+	if cfg.backend != "" && cfg.backend != "native" && cfg.backend != "claude-code" && cfg.backend != "acp" {
+		return cfg, fmt.Errorf("invalid backend %q: must be one of: native, claude-code, acp", cfg.backend)
 	}
 
 	return cfg, nil
@@ -186,7 +186,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --json                    Stream events as newline-delimited JSON to stdout\n")
 	fmt.Fprintf(w, "  --no-tui                  Disable TUI dashboard; use plain console output\n")
 	fmt.Fprintf(w, "  --verbose                 Show raw provider stream events and extra LLM trace detail\n")
-	fmt.Fprintf(w, "  --backend string          Agent backend: native (default) or claude-code\n")
+	fmt.Fprintf(w, "  --backend string          Agent backend: native (default), claude-code, or acp\n")
 	fmt.Fprintf(w, "  --autopilot <persona>     Replace human gates with LLM judge (lax/mid/hard/mentor)\n")
 	fmt.Fprintf(w, "  --auto-approve            Auto-approve all human gates (deterministic, no LLM)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
