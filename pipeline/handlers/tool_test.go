@@ -278,6 +278,58 @@ func TestToolHandlerWritesStatusArtifactToPipelineArtifactDir(t *testing.T) {
 	}
 }
 
+func TestBuildToolEnv_StripsAPIKeys(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	t.Setenv("MY_CUSTOM_TOKEN", "tok-123")
+	t.Setenv("DATABASE_PASSWORD", "dbpass")
+	t.Setenv("SAFE_VAR", "keep-me")
+	t.Setenv("TRACKER_PASS_ENV", "")
+
+	env := buildToolEnv()
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should be stripped")
+	}
+	if _, ok := envMap["OPENAI_API_KEY"]; ok {
+		t.Error("OPENAI_API_KEY should be stripped")
+	}
+	if _, ok := envMap["MY_CUSTOM_TOKEN"]; ok {
+		t.Error("MY_CUSTOM_TOKEN should be stripped")
+	}
+	if _, ok := envMap["DATABASE_PASSWORD"]; ok {
+		t.Error("DATABASE_PASSWORD should be stripped")
+	}
+	if v, ok := envMap["SAFE_VAR"]; !ok || v != "keep-me" {
+		t.Error("SAFE_VAR should be preserved")
+	}
+}
+
+func TestBuildToolEnv_PassEnvOverride(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("TRACKER_PASS_ENV", "1")
+
+	env := buildToolEnv()
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; !ok {
+		t.Error("TRACKER_PASS_ENV=1 should preserve API keys")
+	}
+}
+
 func TestToolHandlerTrimsStdout(t *testing.T) {
 	env := toolTestEnv(t, map[string]exec.CommandResult{
 		"printf '  validation-pass  \n\n'": {Stdout: "  validation-pass  \n\n", ExitCode: 0},

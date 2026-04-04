@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +15,40 @@ import (
 )
 
 const defaultToolTimeout = 30 * time.Second
+
+// sensitiveEnvPatterns lists environment variable name patterns that should be
+// stripped from tool command subprocesses to prevent secret exfiltration.
+var sensitiveEnvPatterns = []string{
+	"_API_KEY",
+	"_SECRET",
+	"_TOKEN",
+	"_PASSWORD",
+}
+
+// buildToolEnv constructs a filtered environment for tool command execution.
+// Strips environment variables matching sensitive patterns to prevent
+// exfiltration via malicious tool commands. Override with TRACKER_PASS_ENV=1.
+func buildToolEnv() []string {
+	if os.Getenv("TRACKER_PASS_ENV") != "" {
+		return os.Environ()
+	}
+	var filtered []string
+	for _, env := range os.Environ() {
+		name := strings.SplitN(env, "=", 2)[0]
+		upper := strings.ToUpper(name)
+		sensitive := false
+		for _, pattern := range sensitiveEnvPatterns {
+			if strings.Contains(upper, pattern) {
+				sensitive = true
+				break
+			}
+		}
+		if !sensitive {
+			filtered = append(filtered, env)
+		}
+	}
+	return filtered
+}
 
 // ToolHandler executes shell commands specified in the node's "tool_command"
 // attribute. Command output is captured and stored in the pipeline context.
