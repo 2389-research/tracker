@@ -352,13 +352,47 @@ func buildACPMcpServers(cfg pipeline.AgentRunConfig) []acp.McpServer {
 	return []acp.McpServer{}
 }
 
+// acpStrippedPrefixes are env var prefixes stripped from ACP agent subprocesses.
+// ACP agents (Claude Code, Codex, Gemini CLI) handle their own auth natively
+// via subscription/OAuth — injecting tracker's API keys and base URLs overrides
+// the agent's own auth and can redirect it to the wrong endpoint (e.g. a
+// Cloudflare AI Gateway that doesn't support the agent's protocol).
+var acpStrippedPrefixes = []string{
+	"ANTHROPIC_API_KEY=",
+	"OPENAI_API_KEY=",
+	"GEMINI_API_KEY=",
+	"GOOGLE_API_KEY=",
+	"ANTHROPIC_BASE_URL=",
+	"OPENAI_BASE_URL=",
+	"GEMINI_BASE_URL=",
+	"GOOGLE_BASE_URL=",
+	"OPENROUTER_API_KEY=",
+}
+
 // buildEnvForACP returns the environment for ACP agent subprocesses.
-// Unlike the claude-code backend which strips API keys to force subscription
-// auth, ACP bridges handle credential routing internally — the wrapped agent
-// (Claude Code, Codex, Gemini) manages its own auth. We pass the full
-// environment so the bridge can authenticate normally.
+// Strips LLM provider API keys and base URLs so the agents use their own
+// native auth (subscription, OAuth, etc.) rather than tracker's credentials.
+// TRACKER_PASS_API_KEYS=1 overrides this and passes everything through.
 func buildEnvForACP() []string {
-	return os.Environ()
+	if os.Getenv("TRACKER_PASS_API_KEYS") != "" {
+		return os.Environ()
+	}
+
+	env := os.Environ()
+	clean := make([]string, 0, len(env))
+	for _, e := range env {
+		stripped := false
+		for _, prefix := range acpStrippedPrefixes {
+			if strings.HasPrefix(e, prefix) {
+				stripped = true
+				break
+			}
+		}
+		if !stripped {
+			clean = append(clean, e)
+		}
+	}
+	return clean
 }
 
 // killProcess sends SIGKILL to the process if it's running.
