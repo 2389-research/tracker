@@ -426,14 +426,18 @@ func TestACPCollectedText(t *testing.T) {
 	}
 
 	// Simulate multiple message chunks.
-	h.SessionUpdate(context.Background(), acp.SessionNotification{
+	if err := h.SessionUpdate(context.Background(), acp.SessionNotification{
 		SessionId: "s1",
 		Update:    acp.UpdateAgentMessageText("hello "),
-	})
-	h.SessionUpdate(context.Background(), acp.SessionNotification{
+	}); err != nil {
+		t.Fatalf("SessionUpdate(hello): %v", err)
+	}
+	if err := h.SessionUpdate(context.Background(), acp.SessionNotification{
 		SessionId: "s1",
 		Update:    acp.UpdateAgentMessageText("world"),
-	})
+	}); err != nil {
+		t.Fatalf("SessionUpdate(world): %v", err)
+	}
 
 	got := h.collectedText()
 	if got != "hello world" {

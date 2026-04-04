@@ -227,6 +227,12 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 		log.Printf("[acp] %s force-killed after successful prompt (bridge did not exit on stdin close)", agentName)
 	}
 
+	// Empty agent responses (0 text, 0 tool calls) are failures per project
+	// rules — the agent ran but produced nothing useful.
+	if len(handler.textParts) == 0 && handler.toolCount == 0 {
+		return result, fmt.Errorf("acp: %s returned empty response (0 text, 0 tool calls)", agentName)
+	}
+
 	return result, nil
 }
 

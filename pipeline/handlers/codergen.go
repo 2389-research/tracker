@@ -125,7 +125,7 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 		case "acp":
 			return h.ensureACPBackend()
 		case "native", "codergen":
-			return h.ensureNativeBackend(), nil
+			return h.ensureNativeBackend()
 		default:
 			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code, acp)", backend, node.ID)
 		}
@@ -137,7 +137,7 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 	case "acp":
 		return h.ensureACPBackend()
 	}
-	return h.ensureNativeBackend(), nil
+	return h.ensureNativeBackend()
 }
 
 // ensureClaudeCodeBackend returns the claude-code backend, lazily creating it
@@ -159,14 +159,18 @@ func (h *CodergenHandler) ensureClaudeCodeBackend() (pipeline.AgentBackend, erro
 }
 
 // ensureNativeBackend returns the native backend, lazily creating it if needed.
-// Thread-safe via sync.Once for parallel node execution.
-func (h *CodergenHandler) ensureNativeBackend() pipeline.AgentBackend {
+// Returns an error if no LLM client is available (e.g. --backend acp with no
+// API keys configured). Thread-safe via sync.Once for parallel node execution.
+func (h *CodergenHandler) ensureNativeBackend() (pipeline.AgentBackend, error) {
+	if h.client == nil {
+		return nil, fmt.Errorf("native backend requires an LLM client — configure API keys or use --backend acp/claude-code")
+	}
 	h.nativeOnce.Do(func() {
 		if h.nativeBackend == nil {
 			h.nativeBackend = NewNativeBackend(h.client, h.env)
 		}
 	})
-	return h.nativeBackend
+	return h.nativeBackend, nil
 }
 
 // ensureACPBackend returns the ACP backend, lazily creating it on first use.
