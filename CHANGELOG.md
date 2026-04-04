@@ -5,6 +5,28 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-04-04
+
+### Added
+
+- **ACP (Agent Client Protocol) backend**: Third execution backend alongside native and claude-code. Spawns ACP-compatible coding agents as subprocesses via JSON-RPC 2.0 over stdio using `github.com/coder/acp-go-sdk`. Per-node selection via `backend: acp` + `acp_agent` params in .dip files, global override via `--backend acp` CLI flag.
+- **ACP agent routing**: Provider-based binary mapping (`anthropic` → `claude-agent-acp`, `openai` → `codex-acp`, `gemini` → `gemini --acp`). The `acp_agent` node attribute overrides provider-based selection.
+- **ACP model bridging**: `mapModelToBridge` maps tracker model names (e.g. `claude-sonnet-4-6`) to bridge model IDs via substring matching against `NewSession` advertised models.
+- **ACP environment scoping**: API keys and base URLs stripped from subprocess environment by default so agents use native auth (subscription/OAuth). Override with `TRACKER_PASS_API_KEYS=1`.
+- **ACP terminal management**: Full `CreateTerminal`, `TerminalOutput`, `KillTerminalCommand`, `ReleaseTerminal` implementation with process group isolation (`Setpgid`) and goroutine-safe output buffering.
+- **ACP file operations**: `ReadTextFile` and `WriteTextFile` handlers scoped to the node's working directory.
+- **`ACPConfig` type**: Backend-specific config carrying explicit agent binary name, extracted from `params.acp_agent` in .dip files.
+- **`--backend acp` CLI flag**: Routes all agent nodes through ACP without per-node attrs.
+
+### Fixed
+
+- **ACP data race on empty response check**: `handler.mu` now locked before reading `textParts`/`toolCount` after prompt completes.
+- **ACP terminal output data race**: Replaced `bytes.Buffer` with `syncBuffer` (mutex-protected writer) for subprocess stdout/stderr.
+- **ACP protocol version validation**: `InitializeResponse.ProtocolVersion` checked against `ProtocolVersionNumber` with warning on mismatch.
+- **ACP empty Cwd fallback**: `os.Getwd()` used when `WorkingDir` is empty, preventing ACP SDK validation failure.
+- **ACP process kill safety**: `Pid > 0` guard before `syscall.Kill(-pid, SIGKILL)` at all 3 call sites to prevent killing pid 0 process group.
+- **`TRACKER_PASS_API_KEYS` truthiness**: Changed from `!= ""` to `== "1"` so `"false"` and `"0"` correctly strip keys.
+
 ## [0.15.0] - 2026-04-03
 
 ### Added
