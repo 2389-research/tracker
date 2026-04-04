@@ -122,3 +122,49 @@ func TestLocalPathEscapePrevention(t *testing.T) {
 		t.Error("expected error for path traversal")
 	}
 }
+
+func TestExecCommandWithLimit_Truncates(t *testing.T) {
+	env := NewLocalEnvironment(t.TempDir())
+	result, err := env.ExecCommandWithLimit(
+		context.Background(), "sh", []string{"-c", "yes hello | head -c 200000"},
+		5*time.Second, 1024,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Stdout) > 1100 {
+		t.Errorf("stdout len = %d, want <= ~1100", len(result.Stdout))
+	}
+	if !strings.Contains(result.Stdout, "...(output truncated") {
+		t.Error("expected truncation marker in stdout")
+	}
+}
+
+func TestExecCommandWithLimit_NoTruncation(t *testing.T) {
+	env := NewLocalEnvironment(t.TempDir())
+	result, err := env.ExecCommandWithLimit(
+		context.Background(), "sh", []string{"-c", "echo hello"},
+		5*time.Second, 65536,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result.Stdout, "truncated") {
+		t.Error("small output should not be truncated")
+	}
+}
+
+func TestExecCommandWithLimit_CustomEnv(t *testing.T) {
+	env := NewLocalEnvironment(t.TempDir())
+	customEnv := []string{"MY_VAR=hello"}
+	result, err := env.ExecCommandWithLimit(
+		context.Background(), "sh", []string{"-c", "echo $MY_VAR"},
+		5*time.Second, 65536, customEnv,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(result.Stdout) != "hello" {
+		t.Errorf("stdout = %q, want %q", strings.TrimSpace(result.Stdout), "hello")
+	}
+}
