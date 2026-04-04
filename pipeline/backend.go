@@ -63,7 +63,7 @@ func (m PermissionMode) Valid() bool {
 
 // ACPConfig holds ACP-backend-specific settings.
 type ACPConfig struct {
-	Agent string // explicit agent binary: "claude-agent-acp", "codex-agent-acp", "gemini" (overrides provider mapping)
+	Agent string // explicit agent binary: "claude-agent-acp", "codex-acp", "gemini" (overrides provider mapping)
 }
 
 // MCPServerConfig defines an MCP server to attach to a session.
