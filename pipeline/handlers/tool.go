@@ -43,7 +43,7 @@ var sensitiveEnvPatterns = []string{
 // Strips environment variables matching sensitive patterns to prevent
 // exfiltration via malicious tool commands. Override with TRACKER_PASS_ENV=1.
 func buildToolEnv() []string {
-	if os.Getenv("TRACKER_PASS_ENV") != "" {
+	if os.Getenv("TRACKER_PASS_ENV") == "1" {
 		return os.Environ()
 	}
 	var filtered []string
@@ -94,6 +94,9 @@ func NewToolHandlerWithConfig(env exec.ExecutionEnvironment, cfg ToolHandlerConf
 	maxLimit := cfg.MaxOutputLimit
 	if maxLimit <= 0 {
 		maxLimit = MaxOutputLimit
+	}
+	if outputLimit > maxLimit {
+		outputLimit = maxLimit
 	}
 	return &ToolHandler{
 		env:            env,
@@ -150,6 +153,12 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		command = expandedCommand
 	}
 
+	// Layer 2: Denylist/allowlist check on the user-authored command (before working_dir prepend,
+	// so allowlist patterns don't need to account for the injected "cd" prefix).
+	if err := CheckToolCommand(command, node.ID, h.allowlist, h.bypassDenylist); err != nil {
+		return pipeline.Outcome{}, err
+	}
+
 	artifactRoot := h.env.WorkingDir()
 	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
 		artifactRoot = dir
@@ -168,11 +177,6 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		command = fmt.Sprintf("cd %q && %s", cleaned, command)
 	}
 
-	// Layer 2: Denylist/allowlist check on the FINAL command string (after working_dir prepend).
-	if err := CheckToolCommand(command, node.ID, h.allowlist, h.bypassDenylist); err != nil {
-		return pipeline.Outcome{}, err
-	}
-
 	timeout := h.defaultTimeout
 	if timeoutStr, ok := node.Attrs["timeout"]; ok {
 		parsed, err := time.ParseDuration(timeoutStr)
@@ -188,6 +192,9 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		parsed, err := parseByteSize(limitStr)
 		if err != nil {
 			return pipeline.Outcome{}, fmt.Errorf("node %q has invalid output_limit %q: %w", node.ID, limitStr, err)
+		}
+		if parsed <= 0 {
+			return pipeline.Outcome{}, fmt.Errorf("node %q has non-positive output_limit %q", node.ID, limitStr)
 		}
 		if parsed > h.maxOutputLimit {
 			parsed = h.maxOutputLimit

@@ -199,7 +199,7 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 
 ### Tool node safety — LLM output as shell input
 - NEVER `eval` content extracted from LLM-written files (arbitrary command execution)
-- Variable expansion in tool_command uses a safe-key allowlist: only `outcome`, `preferred_label`, `human_response`, `interview_answers`, and `graph.goal` can be interpolated. All LLM-origin keys (`last_response`, `tool_stdout`, `response.*`, etc.) are blocked.
+- Variable expansion in tool_command uses a safe-key allowlist for `ctx.*` keys: only `outcome`, `preferred_label`, `human_response`, `interview_answers` can be interpolated. All `graph.*` and `params.*` keys are always allowed (author-controlled). All LLM-origin `ctx.*` keys (`last_response`, `tool_stdout`, `response.*`, etc.) are blocked.
 - The safe pattern: write LLM output to a file in a prior tool node, then read it in the command: `cat .ai/output.json | jq ...`
 - Tool command output is capped at 64KB per stream by default (configurable via `output_limit` node attr, hard ceiling 10MB via `--max-output-limit`)
 - A built-in denylist blocks common dangerous patterns (eval, pipe-to-shell, curl|sh). Use `--bypass-denylist` to override.

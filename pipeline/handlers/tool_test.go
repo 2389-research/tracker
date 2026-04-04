@@ -355,7 +355,7 @@ func TestToolHandlerTrimsStdout(t *testing.T) {
 }
 
 func TestToolHandler_BlocksTaintedVariable(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := toolTestEnv(t, nil)
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID: "verify", Shape: "parallelogram",
@@ -374,7 +374,9 @@ func TestToolHandler_BlocksTaintedVariable(t *testing.T) {
 }
 
 func TestToolHandler_AllowsSafeVariable(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo success": {Stdout: "success\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID: "check", Shape: "parallelogram",
@@ -393,7 +395,7 @@ func TestToolHandler_AllowsSafeVariable(t *testing.T) {
 }
 
 func TestToolHandler_DenylistBlocks(t *testing.T) {
-	env := exec.NewLocalEnvironment(t.TempDir())
+	env := toolTestEnv(t, nil)
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID: "bad", Shape: "parallelogram",

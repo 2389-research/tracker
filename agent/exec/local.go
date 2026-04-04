@@ -153,8 +153,9 @@ func (lb *limitedBuffer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	if len(p) > remaining {
-		p = p[:remaining]
 		lb.truncated = true
+		lb.buf.Write(p[:remaining])
+		return len(p), nil // report full length to avoid io.ErrShortWrite
 	}
 	return lb.buf.Write(p)
 }

@@ -15,16 +15,20 @@ var defaultDenyPatterns = []string{
 	"eval *",
 	"exec *",
 	"source *",
+	". ./*",
 	". /*",
 	"curl * | *",
 	"wget * | *",
 	"* | sh",
+	"* | sh *",
 	"* | bash",
+	"* | bash *",
 	"* | zsh",
+	"* | zsh *",
 	"* | /bin/sh",
+	"* | /bin/sh *",
 	"* | /bin/bash",
-	"* | sh -",
-	"* | bash -",
+	"* | /bin/bash *",
 }
 
 // splitStatementRe splits on ;, &&, ||, and newlines.
