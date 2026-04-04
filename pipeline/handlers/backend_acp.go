@@ -20,13 +20,13 @@ import (
 )
 
 // providerToAgent maps LLM provider names to ACP-compatible binary names.
-// The official ACP bridge packages are:
+// The official ACP bridge/agent packages are:
 //   - anthropic → claude-agent-acp (npm: @agentclientprotocol/claude-agent-acp)
-//   - openai   → codex-agent-acp  (npm: @agentclientprotocol/codex-agent-acp)
+//   - openai   → codex-acp        (npm: @zed-industries/codex-acp)
 //   - gemini   → gemini           (npm: @google/gemini-cli, native --acp mode)
 var providerToAgent = map[string]string{
 	"anthropic": "claude-agent-acp",
-	"openai":    "codex-agent-acp",
+	"openai":    "codex-acp",
 	"gemini":    "gemini",
 }
 

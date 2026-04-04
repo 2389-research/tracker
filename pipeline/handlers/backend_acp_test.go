@@ -29,9 +29,9 @@ func TestResolveAgentName(t *testing.T) {
 			expected: "claude-agent-acp",
 		},
 		{
-			name:     "openai maps to codex-agent-acp",
+			name:     "openai maps to codex-acp",
 			cfg:      pipeline.AgentRunConfig{Provider: "openai"},
-			expected: "codex-agent-acp",
+			expected: "codex-acp",
 		},
 		{
 			name:     "gemini maps to gemini",
@@ -516,7 +516,7 @@ func TestProviderToAgentMapping(t *testing.T) {
 	// Verify the mapping table has expected entries.
 	expected := map[string]string{
 		"anthropic": "claude-agent-acp",
-		"openai":    "codex-agent-acp",
+		"openai":    "codex-acp",
 		"gemini":    "gemini",
 	}
 	for provider, agent := range expected {
