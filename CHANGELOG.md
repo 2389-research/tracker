@@ -5,6 +5,16 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`mode: yes_no` human gate outcome mapping**: Yes now returns `OutcomeSuccess`, No returns `OutcomeFail`. Previously, `yes_no` fell through to choice mode which always returned `OutcomeSuccess` regardless of selection, causing `ctx.outcome = fail` conditions to never match. Pipelines using `mode: yes_no` with `ctx.outcome` edge conditions now route correctly.
+
+### Added
+
+- **`executeYesNo` handler**: Dedicated handler for `mode: yes_no` human gates. Presents fixed "Yes"/"No" choices and maps selection to outcome status. Comprehensive test coverage for all four human gate modes (choice, yes_no, freeform, interview).
+
 ## [0.16.0] - 2026-04-04
 
 ### Added

@@ -978,3 +978,233 @@ func TestHumanHandler_TimeoutUsesDefault(t *testing.T) {
 		t.Errorf("expected human_response 'approved', got %q", outcome.ContextUpdates[pipeline.ContextKeyHumanResponse])
 	}
 }
+
+// --- Human gate correctness: all modes must route correctly ---
+
+// yesNoInterviewer simulates a user picking a specific choice from the presented options.
+type yesNoInterviewer struct {
+	pick string // the choice to pick (e.g., "Yes" or "No")
+}
+
+func (y *yesNoInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
+	for _, c := range choices {
+		if c == y.pick {
+			return c, nil
+		}
+	}
+	return "", fmt.Errorf("choice %q not found in %v", y.pick, choices)
+}
+
+// TestYesNoMode_YesReturnsSuccess verifies that picking Yes in yes_no mode
+// returns OutcomeSuccess so ctx.outcome = success conditions match.
+func TestYesNoMode_YesReturnsSuccess(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Is it alive?",
+		Attrs: map[string]string{"mode": "yes_no"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "yes_path", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "no_path", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "yes_path", Label: "[Y] Yes", Condition: "ctx.outcome = success"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "no_path", Label: "[N] No", Condition: "ctx.outcome = fail"})
+
+	h := NewHumanHandler(&yesNoInterviewer{pick: "Yes"}, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected OutcomeSuccess for Yes, got %q", outcome.Status)
+	}
+}
+
+// TestYesNoMode_NoReturnsFail verifies that picking No in yes_no mode
+// returns OutcomeFail so ctx.outcome = fail conditions match.
+func TestYesNoMode_NoReturnsFail(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Is it alive?",
+		Attrs: map[string]string{"mode": "yes_no"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "yes_path", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "no_path", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "yes_path", Label: "[Y] Yes", Condition: "ctx.outcome = success"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "no_path", Label: "[N] No", Condition: "ctx.outcome = fail"})
+
+	h := NewHumanHandler(&yesNoInterviewer{pick: "No"}, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected OutcomeFail for No, got %q", outcome.Status)
+	}
+}
+
+// TestYesNoMode_PresentsYesNoChoices verifies that yes_no mode presents
+// exactly ["Yes", "No"] as choices, not edge labels.
+func TestYesNoMode_PresentsYesNoChoices(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Label: "Approve?",
+		Attrs: map[string]string{"mode": "yes_no"},
+	})
+	graph.AddNode(&pipeline.Node{ID: "a", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "b", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "a", Label: "[Y] Ship it", Condition: "ctx.outcome = success"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "b", Label: "[N] Reject", Condition: "ctx.outcome = fail"})
+
+	recorder := &recordingInterviewer{response: "Yes"}
+	h := NewHumanHandler(recorder, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recorder.choicesReceived) != 2 {
+		t.Fatalf("expected 2 choices, got %d: %v", len(recorder.choicesReceived), recorder.choicesReceived)
+	}
+	if recorder.choicesReceived[0] != "Yes" || recorder.choicesReceived[1] != "No" {
+		t.Errorf("expected [Yes, No], got %v", recorder.choicesReceived)
+	}
+}
+
+// TestAllGateModes_CorrectRouting is a comprehensive test verifying that every
+// human gate mode produces the correct outcome for edge routing.
+func TestAllGateModes_CorrectRouting(t *testing.T) {
+	t.Run("choice mode: outcome is always success, routing by preferred label", func(t *testing.T) {
+		graph := pipeline.NewGraph("test")
+		graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon", Label: "Pick"})
+		graph.AddNode(&pipeline.Node{ID: "a", Shape: "box"})
+		graph.AddNode(&pipeline.Node{ID: "b", Shape: "box"})
+		graph.AddEdge(&pipeline.Edge{From: "gate", To: "a", Label: "alpha"})
+		graph.AddEdge(&pipeline.Edge{From: "gate", To: "b", Label: "beta"})
+
+		for _, pick := range []string{"alpha", "beta"} {
+			h := NewHumanHandler(&recordingInterviewer{response: pick}, graph)
+			outcome, err := h.Execute(context.Background(), graph.Nodes["gate"], pipeline.NewPipelineContext())
+			if err != nil {
+				t.Fatalf("pick=%s: unexpected error: %v", pick, err)
+			}
+			if outcome.Status != pipeline.OutcomeSuccess {
+				t.Errorf("pick=%s: choice mode should always return OutcomeSuccess, got %q", pick, outcome.Status)
+			}
+			if outcome.PreferredLabel != pick {
+				t.Errorf("pick=%s: expected PreferredLabel %q, got %q", pick, pick, outcome.PreferredLabel)
+			}
+		}
+	})
+
+	t.Run("yes_no mode: Yes=success, No=fail", func(t *testing.T) {
+		graph := pipeline.NewGraph("test")
+		graph.AddNode(&pipeline.Node{
+			ID: "gate", Shape: "hexagon", Label: "Ready?",
+			Attrs: map[string]string{"mode": "yes_no"},
+		})
+		graph.AddNode(&pipeline.Node{ID: "yes_dest", Shape: "box"})
+		graph.AddNode(&pipeline.Node{ID: "no_dest", Shape: "box"})
+		graph.AddEdge(&pipeline.Edge{From: "gate", To: "yes_dest", Condition: "ctx.outcome = success"})
+		graph.AddEdge(&pipeline.Edge{From: "gate", To: "no_dest", Condition: "ctx.outcome = fail"})
+
+		// Yes → success
+		h := NewHumanHandler(&yesNoInterviewer{pick: "Yes"}, graph)
+		outcome, err := h.Execute(context.Background(), graph.Nodes["gate"], pipeline.NewPipelineContext())
+		if err != nil {
+			t.Fatalf("Yes: unexpected error: %v", err)
+		}
+		if outcome.Status != pipeline.OutcomeSuccess {
+			t.Errorf("Yes: expected OutcomeSuccess, got %q", outcome.Status)
+		}
+
+		// No → fail
+		h = NewHumanHandler(&yesNoInterviewer{pick: "No"}, graph)
+		outcome, err = h.Execute(context.Background(), graph.Nodes["gate"], pipeline.NewPipelineContext())
+		if err != nil {
+			t.Fatalf("No: unexpected error: %v", err)
+		}
+		if outcome.Status != pipeline.OutcomeFail {
+			t.Errorf("No: expected OutcomeFail, got %q", outcome.Status)
+		}
+	})
+
+	t.Run("freeform mode: outcome is success with human_response set", func(t *testing.T) {
+		graph := pipeline.NewGraph("test")
+		graph.AddNode(&pipeline.Node{
+			ID: "gate", Shape: "hexagon", Label: "Describe the bug",
+			Attrs: map[string]string{"mode": "freeform"},
+		})
+		graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+		graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+		recorder := &recordingFreeformInterviewer{freeformResponse: "the login page crashes"}
+		h := NewHumanHandler(recorder, graph)
+		outcome, err := h.Execute(context.Background(), graph.Nodes["gate"], pipeline.NewPipelineContext())
+		if err != nil {
+			t.Fatalf("freeform: unexpected error: %v", err)
+		}
+		if outcome.Status != pipeline.OutcomeSuccess {
+			t.Errorf("freeform: expected OutcomeSuccess, got %q", outcome.Status)
+		}
+		if outcome.ContextUpdates[pipeline.ContextKeyHumanResponse] != "the login page crashes" {
+			t.Errorf("freeform: expected human_response to be set, got %q", outcome.ContextUpdates[pipeline.ContextKeyHumanResponse])
+		}
+	})
+
+	t.Run("interview mode: success on completion, fail on cancel", func(t *testing.T) {
+		graph := pipeline.NewGraph("test")
+		graph.AddNode(&pipeline.Node{
+			ID: "gate", Shape: "hexagon",
+			Attrs: map[string]string{"mode": "interview"},
+		})
+		graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+		graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+		pctx := pipeline.NewPipelineContext()
+		pctx.Set("interview_questions", "1. What language? (Go, Python)\n2. Framework?")
+
+		// Completed interview → success
+		mock := &mockInterviewInterviewer{
+			result: &InterviewResult{
+				Questions: []InterviewAnswer{{Answer: "Go"}, {Answer: "Gin"}},
+			},
+		}
+		h := NewHumanHandler(mock, graph)
+		outcome, err := h.Execute(context.Background(), graph.Nodes["gate"], pctx)
+		if err != nil {
+			t.Fatalf("interview complete: unexpected error: %v", err)
+		}
+		if outcome.Status != pipeline.OutcomeSuccess {
+			t.Errorf("interview complete: expected OutcomeSuccess, got %q", outcome.Status)
+		}
+
+		// Canceled interview → fail
+		mockCancel := &mockInterviewInterviewer{
+			result: &InterviewResult{
+				Canceled:  true,
+				Questions: []InterviewAnswer{{Answer: "Go"}},
+			},
+		}
+		h = NewHumanHandler(mockCancel, graph)
+		outcome, err = h.Execute(context.Background(), graph.Nodes["gate"], pctx)
+		if err != nil {
+			t.Fatalf("interview cancel: unexpected error: %v", err)
+		}
+		if outcome.Status != pipeline.OutcomeFail {
+			t.Errorf("interview cancel: expected OutcomeFail, got %q", outcome.Status)
+		}
+	})
+}
