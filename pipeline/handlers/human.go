@@ -461,6 +461,8 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 		})
 	} else if node.Attrs["mode"] == "freeform" {
 		outcome, err = h.executeFreeform(node, prompt)
+	} else if node.Attrs["mode"] == "yes_no" {
+		outcome, err = h.executeYesNo(node, prompt)
 	} else {
 		outcome, err = h.executeChoice(node, prompt)
 	}
@@ -701,4 +703,23 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 	}
 
 	return pipeline.Outcome{Status: pipeline.OutcomeSuccess, PreferredLabel: selected}, nil
+}
+
+// executeYesNo handles yes_no mode: presents Yes/No choices and maps them to
+// OutcomeSuccess (Yes) or OutcomeFail (No) so pipelines can route with
+// ctx.outcome = success / ctx.outcome = fail conditions.
+func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
+	timeout := parseHumanTimeout(node)
+	selected, err := withTimeout(timeout, func() (string, error) {
+		return h.interviewer.Ask(prompt, []string{"Yes", "No"}, "")
+	})
+	if err != nil {
+		return pipeline.Outcome{}, fmt.Errorf("human gate yes/no failed for node %q: %w", node.ID, err)
+	}
+
+	status := pipeline.OutcomeSuccess
+	if selected == "No" {
+		status = pipeline.OutcomeFail
+	}
+	return pipeline.Outcome{Status: status, PreferredLabel: selected}, nil
 }

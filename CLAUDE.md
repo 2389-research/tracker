@@ -46,6 +46,13 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - All modal content types must implement Cancellable — Ctrl+C calls Cancel() to close reply channels and prevent goroutine hangs
 - Never block a pipeline handler goroutine on a channel send/receive without a cancellation path
 
+### Yes/No mode
+- `mode: yes_no` on human nodes presents a fixed "Yes"/"No" choice
+- Yes maps to `OutcomeSuccess`, No maps to `OutcomeFail`
+- Pipelines route with `ctx.outcome = success` / `ctx.outcome = fail` conditions
+- This is distinct from default choice mode, where outcome is always `success` and routing uses `PreferredLabel`
+- `AutoApproveInterviewer` picks "Yes" (first choice) by default — forward progress semantics
+
 ### Interview mode
 - `mode: interview` on human nodes enables structured multi-field form collection
 - Upstream agent outputs JSON questions: `{"questions": [{"text": "...", "context": "...", "options": [...]}]}`
