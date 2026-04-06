@@ -1,0 +1,337 @@
+workflow HumanGateTestSuite
+  goal: "Exercise every human gate mode (choice, yes_no, freeform, interview) with edge cases: timeout, default_choice, ctx.outcome routing, hybrid freeform, and interview cancel."
+  start: Start
+  exit: Exit
+
+  defaults
+    fidelity: summary:medium
+    max_retries: 1
+
+  tool Start
+    label: "Start"
+    timeout: 5s
+    command: echo "=== Human Gate Test Suite ==="
+
+  tool Exit
+    label: "Exit"
+    timeout: 5s
+    command: echo "=== All gates tested ==="
+
+  # ── Section 1: Yes/No Mode ────────────────────────────────────────────
+  # Tests executeYesNo: Yes → OutcomeSuccess, No → OutcomeFail.
+  # Validates ctx.outcome condition routing on edges.
+
+  human YesNoGate
+    label: "Do you like pizza?"
+    mode: yes_no
+
+  tool YesPath
+    label: "Yes Path"
+    timeout: 5s
+    command: echo "YES path taken — ctx.outcome was success"
+
+  tool NoPath
+    label: "No Path"
+    timeout: 5s
+    command: echo "NO path taken — ctx.outcome was fail"
+
+  tool YesNoConfirm
+    label: "Yes/No Confirmed"
+    timeout: 5s
+    command: echo "Section 1 complete: yes_no mode verified"
+
+  # ── Section 2: Choice Mode (multi-option + default_choice) ────────────
+  # Tests executeChoice with 3 labeled edges and default_choice attr.
+  # Routing is via PreferredLabel matching edge labels.
+
+  human ChoiceGate
+    label: "Pick a direction"
+    default_choice: North
+
+  tool NorthPath
+    label: "North"
+    timeout: 5s
+    command: echo "NORTH selected (this is the default)"
+
+  tool SouthPath
+    label: "South"
+    timeout: 5s
+    command: echo "SOUTH selected"
+
+  tool EastPath
+    label: "East"
+    timeout: 5s
+    command: echo "EAST selected"
+
+  tool ChoiceConfirm
+    label: "Choice Confirmed"
+    timeout: 5s
+    command: echo "Section 2 complete: choice mode verified"
+
+  # ── Section 3: Binary Choice (label routing, NOT yes_no) ──────────────
+  # A plain human node with [Y]/[N] labels. No mode attr — uses choice
+  # mode (PreferredLabel), NOT yes_no mode. Both paths are OutcomeSuccess.
+
+  human BinaryChoiceGate
+    label: "Continue to freeform tests?"
+
+  tool ContinuePath
+    label: "Continue"
+    timeout: 5s
+    command: echo "Continuing — label routing worked"
+
+  tool SkipPath
+    label: "Skip"
+    timeout: 5s
+    command: echo "Skipped — label routing worked"
+
+  tool BinaryConfirm
+    label: "Binary Confirmed"
+    timeout: 5s
+    command: echo "Section 3 complete: binary choice (label routing) verified"
+
+  # ── Section 4: Pure Freeform Mode ─────────────────────────────────────
+  # Tests executeFreeform with no labeled edges — pure text capture.
+  # Response stored in ctx.human_response, echoed by downstream agent.
+
+  human FreeformGate
+    label: "Type anything you want. Say something memorable."
+    mode: freeform
+
+  agent FreeformEcho
+    label: "Echo Freeform"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The human just typed something via freeform input. Their exact words were stored in context. Repeat back exactly what they said, then add a one-sentence reaction. Keep it brief.
+
+  tool FreeformConfirm
+    label: "Freeform Confirmed"
+    timeout: 5s
+    command: echo "Section 4 complete: pure freeform mode verified"
+
+  # ── Section 5: Hybrid Freeform (freeform + labeled edges) ─────────────
+  # Tests executeFreeform with labeled edges. Triggers AskFreeformWithLabels
+  # (HybridContent in TUI): radio buttons for labels + "other" textarea.
+  # Picking a label routes via PreferredLabel. Typing "other" captures text.
+
+  human HybridGate
+    label: "How should we proceed with the review?"
+    mode: freeform
+
+  tool ApproveRoute
+    label: "Approved"
+    timeout: 5s
+    command: echo "APPROVED — label selected from hybrid gate"
+
+  tool RejectRoute
+    label: "Rejected"
+    timeout: 5s
+    command: echo "REJECTED — label selected from hybrid gate"
+
+  tool EscalateRoute
+    label: "Escalated"
+    timeout: 5s
+    command: echo "ESCALATED — label selected from hybrid gate"
+
+  tool HybridConfirm
+    label: "Hybrid Confirmed"
+    timeout: 5s
+    command: echo "Section 5 complete: hybrid freeform mode verified"
+
+  # ── Section 6: Interview Mode ─────────────────────────────────────────
+  # Tests executeInterview end-to-end: agent generates structured JSON
+  # questions, interview gate parses and presents them, answers stored
+  # in ctx.interview_answers.
+
+  agent QuestionWriter
+    label: "Generate Questions"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    response_format: json_object
+    prompt:
+      Output ONLY this exact JSON object with no other text:
+      {"questions": [{"text": "What is your favorite programming language?", "options": ["Python", "Go", "Rust", "TypeScript"]}, {"text": "How many years of coding experience do you have?", "context": "Just a rough number is fine"}, {"text": "Do you enjoy writing tests?", "options": ["Yes", "No"]}]}
+
+  human InterviewGate
+    label: "Answer these questions"
+    mode: interview
+
+  agent InterviewEcho
+    label: "Summarize Interview"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      The human just completed an interview. Summarize their answers in 2-3 sentences. The answers are in context as interview_answers.
+
+  tool InterviewConfirm
+    label: "Interview Confirmed"
+    timeout: 5s
+    command: echo "Section 6 complete: interview mode verified"
+
+  # ── Section 7: Interview Cancel → OutcomeFail ─────────────────────────
+  # Tests that canceling an interview (Esc) returns OutcomeFail.
+  # Uses ctx.outcome conditional edges to verify routing.
+
+  agent QuestionWriter2
+    label: "Generate Cancel-Test Questions"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    response_format: json_object
+    prompt:
+      Output ONLY this exact JSON object with no other text:
+      {"questions": [{"text": "This interview tests cancel behavior. Press Esc to cancel, or answer to continue.", "options": ["Continue", "I want to test cancel"]}]}
+
+  human CancelableInterview
+    label: "Cancel this interview (Esc) or complete it"
+    mode: interview
+
+  tool CompletedPath
+    label: "Interview Completed"
+    timeout: 5s
+    command: echo "COMPLETED — interview was finished (ctx.outcome=success)"
+
+  tool CanceledPath
+    label: "Interview Canceled"
+    timeout: 5s
+    command: echo "CANCELED — interview was canceled (ctx.outcome=fail)"
+
+  tool CancelConfirm
+    label: "Cancel Test Confirmed"
+    timeout: 5s
+    command: echo "Section 7 complete: interview cancel routing verified"
+
+  # ── Section 8: Yes/No with Timeout (timeout_action=fail) ──────────────
+  # Tests timeout behavior. 5s timeout, timeout_action=fail.
+  # Let it expire to test timeout→fail path, or answer to test normal path.
+
+  human TimedGate
+    label: "Quick! Answer within 5 seconds!"
+    mode: yes_no
+    timeout: 5s
+    timeout_action: fail
+
+  tool TimedYesPath
+    label: "Timed Yes"
+    timeout: 5s
+    command: echo "Answered YES in time (ctx.outcome=success)"
+
+  tool TimedFailPath
+    label: "Timed Out or No"
+    timeout: 5s
+    command: echo "Timed out or answered NO (ctx.outcome=fail)"
+
+  tool TimeoutConfirm
+    label: "Timeout Test Confirmed"
+    timeout: 5s
+    command: echo "Section 8 complete: timeout behavior verified"
+
+  # ── Section 9: Choice with Timeout + Default ──────────────────────────
+  # Tests that timeout with default_choice picks the default (Safe)
+  # instead of failing. 10s timeout to give time to answer or let expire.
+
+  human DefaultTimedGate
+    label: "Pick quickly or get the default! (10s)"
+    timeout: 10s
+    default_choice: Safe
+
+  tool SafePath
+    label: "Safe"
+    timeout: 5s
+    command: echo "SAFE selected (this is the timeout default)"
+
+  tool RiskyPath
+    label: "Risky"
+    timeout: 5s
+    command: echo "RISKY selected (user chose manually)"
+
+  tool DefaultConfirm
+    label: "Default Timeout Confirmed"
+    timeout: 5s
+    command: echo "Section 9 complete: timeout with default verified"
+
+  # ── Section 10: Summary ───────────────────────────────────────────────
+
+  agent Summary
+    label: "Test Suite Complete"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: low
+    prompt:
+      Congratulate the tester! All 9 human gate test sections have been completed. List the modes tested: yes_no, choice (multi + binary), freeform (pure + hybrid), interview (complete + cancel), and timeout (fail + default). Keep it brief and celebratory.
+
+  # ── Edges ─────────────────────────────────────────────────────────────
+
+  edges
+    # Section 1: Yes/No
+    Start -> YesNoGate
+    YesNoGate -> YesPath  when ctx.outcome = success  label: "[Y] Yes"  weight: 2
+    YesNoGate -> NoPath  when ctx.outcome = fail  label: "[N] No"
+    YesPath -> YesNoConfirm
+    NoPath -> YesNoConfirm
+
+    # Section 2: Choice
+    YesNoConfirm -> ChoiceGate
+    ChoiceGate -> NorthPath  label: "North"  weight: 2
+    ChoiceGate -> SouthPath  label: "South"
+    ChoiceGate -> EastPath  label: "East"
+    NorthPath -> ChoiceConfirm
+    SouthPath -> ChoiceConfirm
+    EastPath -> ChoiceConfirm
+
+    # Section 3: Binary Choice
+    ChoiceConfirm -> BinaryChoiceGate
+    BinaryChoiceGate -> ContinuePath  label: "[Y] Yes"  weight: 2
+    BinaryChoiceGate -> SkipPath  label: "[N] No"
+    ContinuePath -> BinaryConfirm
+    SkipPath -> BinaryConfirm
+
+    # Section 4: Pure Freeform
+    BinaryConfirm -> FreeformGate
+    FreeformGate -> FreeformEcho
+    FreeformEcho -> FreeformConfirm
+
+    # Section 5: Hybrid Freeform
+    FreeformConfirm -> HybridGate
+    HybridGate -> ApproveRoute  label: "Approve"  weight: 2
+    HybridGate -> RejectRoute  label: "Reject"
+    HybridGate -> EscalateRoute  label: "Escalate"
+    ApproveRoute -> HybridConfirm
+    RejectRoute -> HybridConfirm
+    EscalateRoute -> HybridConfirm
+
+    # Section 6: Interview
+    HybridConfirm -> QuestionWriter
+    QuestionWriter -> InterviewGate
+    InterviewGate -> InterviewEcho
+    InterviewEcho -> InterviewConfirm
+
+    # Section 7: Interview Cancel
+    InterviewConfirm -> QuestionWriter2
+    QuestionWriter2 -> CancelableInterview
+    CancelableInterview -> CompletedPath  when ctx.outcome = success  label: "Completed"  weight: 2
+    CancelableInterview -> CanceledPath  when ctx.outcome = fail  label: "Canceled"
+    CompletedPath -> CancelConfirm
+    CanceledPath -> CancelConfirm
+
+    # Section 8: Timed Yes/No
+    CancelConfirm -> TimedGate
+    TimedGate -> TimedYesPath  when ctx.outcome = success  label: "[Y] Yes"  weight: 2
+    TimedGate -> TimedFailPath  when ctx.outcome = fail  label: "[N] No / Timeout"
+    TimedYesPath -> TimeoutConfirm
+    TimedFailPath -> TimeoutConfirm
+
+    # Section 9: Timed Choice with Default
+    TimeoutConfirm -> DefaultTimedGate
+    DefaultTimedGate -> SafePath  label: "Safe"  weight: 2
+    DefaultTimedGate -> RiskyPath  label: "Risky"
+    SafePath -> DefaultConfirm
+    RiskyPath -> DefaultConfirm
+
+    # Section 10: Summary
+    DefaultConfirm -> Summary
+    Summary -> Exit

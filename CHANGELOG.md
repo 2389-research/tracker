@@ -5,6 +5,21 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-04-05
+
+### Added
+
+- **Comprehensive human gate test suite**: `examples/human_gate_test_suite.dip` exercises all 4 gate modes (choice, yes_no, freeform, interview) plus timeout, default_choice, ctx.outcome routing, hybrid freeform, and interview cancel. 100 simulated paths, all reaching Exit.
+- **Backend selection precedence test**: Verifies node attr overrides global `--backend` CLI flag.
+
+### Changed
+
+- **dippin-lang v0.18.0**: Updated from v0.17.0. Adds `flatten` package for inlining subgraph refs into a single flat workflow.
+
+### Fixed
+
+- **human_gate_showcase.dip**: EchoFreeform agent no longer asks follow-up questions that conflict with the next gate's choices.
+
 ## [0.16.1] - 2026-04-04
 
 ### Fixed
