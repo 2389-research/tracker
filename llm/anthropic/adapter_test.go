@@ -1116,4 +1116,179 @@ func TestImageBase64SourceFormat(t *testing.T) {
 	}
 }
 
+// --- Thinking signature streaming ---
+
+func TestAdapterStreamThinkingSignature(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+
+		events := []string{
+			`event: message_start` + "\n" + `data: {"type":"message_start","message":{"id":"msg_think","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":0}}}`,
+			// Thinking block
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me analyze this."}}`,
+			// Signature delta — must be captured for round-tripping
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqQBCgIYAhIM1gbcDa9GJwZA2b3h"}}`,
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}`,
+			// Text block
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The answer is 42."}}`,
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":1}`,
+			`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":20}}`,
+			`event: message_stop` + "\n" + `data: {"type":"message_stop"}`,
+		}
+
+		for _, evt := range events {
+			fmt.Fprintf(w, "%s\n\n", evt)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Think about this.")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// Verify signature_delta was captured
+	var gotSignature bool
+	for _, evt := range events {
+		if evt.Type == llm.EventReasoningSignature {
+			gotSignature = true
+			if evt.ReasoningSignature != "EqQBCgIYAhIM1gbcDa9GJwZA2b3h" {
+				t.Errorf("expected signature, got %q", evt.ReasoningSignature)
+			}
+		}
+	}
+	if !gotSignature {
+		t.Error("expected reasoning_signature event from signature_delta")
+	}
+
+	// Accumulate and verify round-trip
+	acc := llm.NewStreamAccumulator()
+	for _, evt := range events {
+		acc.Process(evt)
+	}
+	resp := acc.Response()
+
+	// Thinking part should have signature
+	var foundThinking bool
+	for _, part := range resp.Message.Content {
+		if part.Kind == llm.KindThinking {
+			foundThinking = true
+			if part.Thinking == nil {
+				t.Fatal("expected non-nil ThinkingData")
+			}
+			if part.Thinking.Text != "Let me analyze this." {
+				t.Errorf("thinking text = %q", part.Thinking.Text)
+			}
+			if part.Thinking.Signature != "EqQBCgIYAhIM1gbcDa9GJwZA2b3h" {
+				t.Errorf("thinking signature = %q, want EqQBCgIYAhIM1gbcDa9GJwZA2b3h", part.Thinking.Signature)
+			}
+		}
+	}
+	if !foundThinking {
+		t.Error("expected thinking content part with signature")
+	}
+}
+
+func TestAdapterStreamRedactedThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+
+		events := []string{
+			`event: message_start` + "\n" + `data: {"type":"message_start","message":{"id":"msg_redact","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":0}}}`,
+			// Thinking block
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Reasoning..."}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_thinking"}}`,
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}`,
+			// Redacted thinking block — opaque data blob
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"opaque_redacted_blob_abc123"}}`,
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":1}`,
+			// Text block
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Done."}}`,
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":2}`,
+			`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":15}}`,
+			`event: message_stop` + "\n" + `data: {"type":"message_stop"}`,
+		}
+
+		for _, evt := range events {
+			fmt.Fprintf(w, "%s\n\n", evt)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "claude-opus-4-6",
+		Messages: []llm.Message{llm.UserMessage("Think hard.")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// Verify redacted_thinking event was emitted
+	var gotRedacted bool
+	for _, evt := range events {
+		if evt.Type == llm.EventRedactedThinking {
+			gotRedacted = true
+			if evt.ReasoningSignature != "opaque_redacted_blob_abc123" {
+				t.Errorf("expected redacted data, got %q", evt.ReasoningSignature)
+			}
+		}
+	}
+	if !gotRedacted {
+		t.Error("expected redacted_thinking event")
+	}
+
+	// Accumulate and verify all parts preserved
+	acc := llm.NewStreamAccumulator()
+	for _, evt := range events {
+		acc.Process(evt)
+	}
+	resp := acc.Response()
+
+	// Should have: thinking, redacted_thinking, text (in that order)
+	if len(resp.Message.Content) != 3 {
+		t.Fatalf("expected 3 content parts, got %d", len(resp.Message.Content))
+	}
+
+	// Part 0: thinking with signature
+	if resp.Message.Content[0].Kind != llm.KindThinking {
+		t.Errorf("part[0] kind = %s, want thinking", resp.Message.Content[0].Kind)
+	}
+	if resp.Message.Content[0].Thinking.Signature != "sig_thinking" {
+		t.Errorf("part[0] signature = %q", resp.Message.Content[0].Thinking.Signature)
+	}
+
+	// Part 1: redacted_thinking
+	if resp.Message.Content[1].Kind != llm.KindRedactedThinking {
+		t.Errorf("part[1] kind = %s, want redacted_thinking", resp.Message.Content[1].Kind)
+	}
+	if resp.Message.Content[1].Thinking.Signature != "opaque_redacted_blob_abc123" {
+		t.Errorf("part[1] data = %q", resp.Message.Content[1].Thinking.Signature)
+	}
+
+	// Part 2: text
+	if resp.Message.Content[2].Kind != llm.KindText {
+		t.Errorf("part[2] kind = %s, want text", resp.Message.Content[2].Kind)
+	}
+	if resp.Message.Content[2].Text != "Done." {
+		t.Errorf("part[2] text = %q", resp.Message.Content[2].Text)
+	}
+}
+
 func intPtr(v int) *int { return &v }

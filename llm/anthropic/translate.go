@@ -321,7 +321,9 @@ func translateMessage(m llm.Message) anthropicMessage {
 		role = "user"
 	}
 
-	var content []anthropicContent
+	// Initialize as empty slice (not nil) so JSON serializes to [] instead of null.
+	// The Anthropic API rejects null content with "Input should be a valid list".
+	content := make([]anthropicContent, 0, len(m.Content))
 	for _, part := range m.Content {
 		if c, ok := translateContentPart(part); ok {
 			content = append(content, c)
