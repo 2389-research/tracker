@@ -19,6 +19,7 @@ import (
 	"github.com/2389-research/tracker/llm/anthropic"
 	"github.com/2389-research/tracker/llm/google"
 	"github.com/2389-research/tracker/llm/openai"
+	openaicompat "github.com/2389-research/tracker/llm/openaicompat"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
@@ -264,13 +265,20 @@ func buildClient(provider string) (*llm.Client, error) {
 			}
 			return google.New(key, opts...), nil
 		},
+		"openai-compat": func(key string) (llm.ProviderAdapter, error) {
+			var opts []openaicompat.Option
+			if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
+				opts = append(opts, openaicompat.WithBaseURL(base))
+			}
+			return openaicompat.New(key, opts...), nil
+		},
 	}
 
 	// If a specific provider is requested, only configure that one.
 	if provider != "" {
 		constructor, ok := constructors[provider]
 		if !ok {
-			return nil, fmt.Errorf("unknown provider %q (valid: anthropic, openai, gemini)", provider)
+			return nil, fmt.Errorf("unknown provider %q (valid: anthropic, openai, gemini, openai-compat)", provider)
 		}
 		constructors = map[string]func(string) (llm.ProviderAdapter, error){
 			provider: constructor,
