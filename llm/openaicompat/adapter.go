@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -76,7 +77,7 @@ func (a *Adapter) Name() string {
 
 // Complete sends a synchronous request to the Chat Completions API.
 func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response, error) {
-	body, err := translateRequest(req)
+	body, err := translateRequest(req, false)
 	if err != nil {
 		return nil, fmt.Errorf("openai-compat: translate request: %w", err)
 	}
@@ -121,22 +122,9 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 	go func() {
 		defer close(ch)
 
-		body, err := translateRequest(req)
+		body, err := translateRequest(req, true)
 		if err != nil {
 			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: translate request: %w", err)}
-			return
-		}
-
-		// Inject stream: true into the body.
-		var bodyMap map[string]any
-		if err := json.Unmarshal(body, &bodyMap); err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-		bodyMap["stream"] = true
-		body, err = json.Marshal(bodyMap)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
 			return
 		}
 
@@ -194,6 +182,8 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	firstChunk := true
 	// Tool call accumulators keyed by tool_calls array index.
 	toolCalls := make(map[int]*sseToolCallAccum)
+	// Deferred finish event — held until [DONE] so tool call ends emit first.
+	var deferredFinish *llm.StreamEvent
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -204,9 +194,12 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 
 		data := strings.TrimPrefix(line, "data: ")
 
-		// [DONE] sentinel: emit accumulated tool call ends and break.
+		// [DONE] sentinel: emit tool call ends, then deferred finish.
 		if data == "[DONE]" {
 			a.emitAccumulatedToolCallEnds(toolCalls, ch)
+			if deferredFinish != nil {
+				ch <- *deferredFinish
+			}
 			break
 		}
 
@@ -263,7 +256,7 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 				}
 			}
 
-			// finish_reason present: emit EventFinish.
+			// finish_reason present: defer EventFinish until after tool call ends.
 			if choice.FinishReason != nil {
 				fr := translateFinishReason(*choice.FinishReason, len(toolCalls) > 0)
 				evt := llm.StreamEvent{
@@ -274,14 +267,18 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 					usage := translateUsage(*chunk.Usage)
 					evt.Usage = &usage
 				}
-				ch <- evt
+				deferredFinish = &evt
 			}
 		} else if chunk.Usage != nil {
-			// Usage-only chunk (no choices): emit finish with usage.
+			// Usage-only chunk (no choices): update deferred finish or create one.
 			usage := translateUsage(*chunk.Usage)
-			ch <- llm.StreamEvent{
-				Type:  llm.EventFinish,
-				Usage: &usage,
+			if deferredFinish != nil {
+				deferredFinish.Usage = &usage
+			} else {
+				deferredFinish = &llm.StreamEvent{
+					Type:  llm.EventFinish,
+					Usage: &usage,
+				}
 			}
 		}
 	}
@@ -292,9 +289,15 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 }
 
 // emitAccumulatedToolCallEnds emits EventToolCallEnd for each accumulated tool
-// call with the complete ID, name, and assembled arguments.
+// call in index order, with the complete ID, name, and assembled arguments.
 func (a *Adapter) emitAccumulatedToolCallEnds(toolCalls map[int]*sseToolCallAccum, ch chan<- llm.StreamEvent) {
-	for _, accum := range toolCalls {
+	indices := make([]int, 0, len(toolCalls))
+	for idx := range toolCalls {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		accum := toolCalls[idx]
 		ch <- llm.StreamEvent{
 			Type: llm.EventToolCallEnd,
 			ToolCall: &llm.ToolCallData{

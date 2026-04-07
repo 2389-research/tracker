@@ -337,6 +337,164 @@ func TestStream_HTTPError(t *testing.T) {
 	}
 }
 
+func TestStream_FinishAfterToolCallEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		lines := []string{
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":null}]}`,
+			"",
+			// Finish arrives BEFORE [DONE] — adapter must defer it.
+			`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// Find positions of ToolCallEnd and Finish.
+	toolEndIdx := -1
+	finishIdx := -1
+	for i, evt := range events {
+		if evt.Type == llm.EventToolCallEnd {
+			toolEndIdx = i
+		}
+		if evt.Type == llm.EventFinish {
+			finishIdx = i
+		}
+	}
+
+	if toolEndIdx == -1 {
+		t.Fatal("expected EventToolCallEnd")
+	}
+	if finishIdx == -1 {
+		t.Fatal("expected EventFinish")
+	}
+	if finishIdx <= toolEndIdx {
+		t.Errorf("EventFinish (idx=%d) must come after EventToolCallEnd (idx=%d)", finishIdx, toolEndIdx)
+	}
+}
+
+func TestStream_MultipleToolCalls_OrderedByIndex(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		lines := []string{
+			`data: {"id":"c2","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			"",
+			// Tool call 0 starts
+			`data: {"id":"c2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}`,
+			"",
+			// Tool call 1 starts (interleaved)
+			`data: {"id":"c2","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"write_file","arguments":""}}]},"finish_reason":null}]}`,
+			"",
+			// Args for call 0
+			`data: {"id":"c2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"p\":\"a\"}"}}]},"finish_reason":null}]}`,
+			"",
+			// Args for call 1
+			`data: {"id":"c2","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"p\":\"b\"}"}}]},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"c2","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	// Collect ToolCallEnd events in order.
+	var endNames []string
+	for _, evt := range events {
+		if evt.Type == llm.EventToolCallEnd && evt.ToolCall != nil {
+			endNames = append(endNames, evt.ToolCall.Name)
+		}
+	}
+
+	if len(endNames) != 2 {
+		t.Fatalf("expected 2 EventToolCallEnd events, got %d", len(endNames))
+	}
+	// Index 0 = read_file must come before index 1 = write_file.
+	if endNames[0] != "read_file" {
+		t.Errorf("first ToolCallEnd name = %q, want 'read_file'", endNames[0])
+	}
+	if endNames[1] != "write_file" {
+		t.Errorf("second ToolCallEnd name = %q, want 'write_file'", endNames[1])
+	}
+}
+
+func TestStream_StreamOptionsInRequest(t *testing.T) {
+	var capturedBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &capturedBody)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `data: {"id":"c3","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`)
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, `data: {"id":"c3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, `data: [DONE]`)
+		fmt.Fprintln(w, "")
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+	for range ch {
+	}
+
+	if capturedBody["stream"] != true {
+		t.Errorf("expected stream=true in request body, got %v", capturedBody["stream"])
+	}
+	so, ok := capturedBody["stream_options"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'stream_options' in request body")
+	}
+	if so["include_usage"] != true {
+		t.Errorf("expected stream_options.include_usage=true, got %v", so["include_usage"])
+	}
+}
+
 // errorAs is a test helper wrapping errors.As for generic error type matching.
 func errorAs[T any](err error, target *T) bool {
 	return errorAsImpl(err, target)

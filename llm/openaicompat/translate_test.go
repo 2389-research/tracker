@@ -18,7 +18,7 @@ func TestTranslateRequest_BasicUserMessage(t *testing.T) {
 		},
 	}
 
-	body, err := translateRequest(req)
+	body, err := translateRequest(req, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestTranslateRequest_AssistantWithToolCalls(t *testing.T) {
 		},
 	}
 
-	body, err := translateRequest(req)
+	body, err := translateRequest(req, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestTranslateRequest_ToolDefsWrapping(t *testing.T) {
 		},
 	}
 
-	body, err := translateRequest(req)
+	body, err := translateRequest(req, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestTranslateRequest_ResponseFormatJSON(t *testing.T) {
 		},
 	}
 
-	body, err := translateRequest(req)
+	body, err := translateRequest(req, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestTranslateRequest_JSONSchemaDropped(t *testing.T) {
 		},
 	}
 
-	body, err := translateRequest(req)
+	body, err := translateRequest(req, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,6 +365,48 @@ func TestTranslateResponse_WithToolCalls(t *testing.T) {
 	}
 	if string(calls[0].Arguments) != `{"command":"ls"}` {
 		t.Errorf("tool call arguments = %v, want json", string(calls[0].Arguments))
+	}
+}
+
+func TestTranslateRequest_StreamFlagAndOptions(t *testing.T) {
+	req := &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("hi")},
+	}
+
+	// Non-streaming: no stream field or stream_options.
+	body, err := translateRequest(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["stream"]; ok {
+		t.Error("non-streaming request must not have 'stream' field")
+	}
+	if _, ok := raw["stream_options"]; ok {
+		t.Error("non-streaming request must not have 'stream_options' field")
+	}
+
+	// Streaming: stream=true and stream_options.include_usage=true.
+	body, err = translateRequest(req, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["stream"] != true {
+		t.Errorf("stream = %v, want true", raw["stream"])
+	}
+	so, ok := raw["stream_options"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'stream_options' object in streaming request")
+	}
+	if so["include_usage"] != true {
+		t.Errorf("stream_options.include_usage = %v, want true", so["include_usage"])
 	}
 }
 

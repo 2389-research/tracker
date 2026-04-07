@@ -16,7 +16,7 @@ import (
 	"github.com/2389-research/tracker/llm/anthropic"
 	"github.com/2389-research/tracker/llm/google"
 	"github.com/2389-research/tracker/llm/openai"
-	openaicompat "github.com/2389-research/tracker/llm/openaicompat"
+	"github.com/2389-research/tracker/llm/openaicompat"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 	"github.com/2389-research/tracker/tui"

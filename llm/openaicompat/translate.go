@@ -26,6 +26,12 @@ type chatRequest struct {
 	Stop           []string            `json:"stop,omitempty"`
 	ResponseFormat *chatResponseFormat `json:"response_format,omitempty"`
 	Stream         bool                `json:"stream,omitempty"`
+	StreamOptions  *chatStreamOptions  `json:"stream_options,omitempty"`
+}
+
+// chatStreamOptions configures streaming behavior.
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // chatMessage represents a single message in the Chat Completions format.
@@ -92,7 +98,8 @@ type chatUsage struct {
 // --- Request translation ---
 
 // translateRequest converts a unified llm.Request to Chat Completions API JSON.
-func translateRequest(req *llm.Request) ([]byte, error) {
+// When stream is true, sets stream:true and requests usage in the final chunk.
+func translateRequest(req *llm.Request, stream bool) ([]byte, error) {
 	cr := chatRequest{
 		Model:       req.Model,
 		Temperature: req.Temperature,
@@ -105,6 +112,12 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		cr.MaxTokens = *req.MaxTokens
 	} else {
 		cr.MaxTokens = defaultMaxTokens
+	}
+
+	// Streaming: enable stream and request usage in the final chunk.
+	if stream {
+		cr.Stream = true
+		cr.StreamOptions = &chatStreamOptions{IncludeUsage: true}
 	}
 
 	// Messages — system messages stay in the array (Chat Completions format)
