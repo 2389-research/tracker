@@ -11,33 +11,36 @@ import (
 type StreamEventType string
 
 const (
-	EventStreamStart    StreamEventType = "stream_start"
-	EventTextStart      StreamEventType = "text_start"
-	EventTextDelta      StreamEventType = "text_delta"
-	EventTextEnd        StreamEventType = "text_end"
-	EventReasoningStart StreamEventType = "reasoning_start"
-	EventReasoningDelta StreamEventType = "reasoning_delta"
-	EventReasoningEnd   StreamEventType = "reasoning_end"
-	EventToolCallStart  StreamEventType = "tool_call_start"
-	EventToolCallDelta  StreamEventType = "tool_call_delta"
-	EventToolCallEnd    StreamEventType = "tool_call_end"
-	EventFinish         StreamEventType = "finish"
-	EventError          StreamEventType = "error"
-	EventProviderEvent  StreamEventType = "provider_event"
+	EventStreamStart        StreamEventType = "stream_start"
+	EventTextStart          StreamEventType = "text_start"
+	EventTextDelta          StreamEventType = "text_delta"
+	EventTextEnd            StreamEventType = "text_end"
+	EventReasoningStart     StreamEventType = "reasoning_start"
+	EventReasoningDelta     StreamEventType = "reasoning_delta"
+	EventReasoningSignature StreamEventType = "reasoning_signature"
+	EventReasoningEnd       StreamEventType = "reasoning_end"
+	EventRedactedThinking   StreamEventType = "redacted_thinking"
+	EventToolCallStart      StreamEventType = "tool_call_start"
+	EventToolCallDelta      StreamEventType = "tool_call_delta"
+	EventToolCallEnd        StreamEventType = "tool_call_end"
+	EventFinish             StreamEventType = "finish"
+	EventError              StreamEventType = "error"
+	EventProviderEvent      StreamEventType = "provider_event"
 )
 
 // StreamEvent represents a single event in a streaming response.
 type StreamEvent struct {
-	Type           StreamEventType `json:"type"`
-	Delta          string          `json:"delta,omitempty"`
-	TextID         string          `json:"text_id,omitempty"`
-	ReasoningDelta string          `json:"reasoning_delta,omitempty"`
-	ToolCall       *ToolCallData   `json:"tool_call,omitempty"`
-	FinishReason   *FinishReason   `json:"finish_reason,omitempty"`
-	Usage          *Usage          `json:"usage,omitempty"`
-	FullResponse   *Response       `json:"full_response,omitempty"`
-	Err            error           `json:"-"`
-	Raw            json.RawMessage `json:"raw,omitempty"`
+	Type               StreamEventType `json:"type"`
+	Delta              string          `json:"delta,omitempty"`
+	TextID             string          `json:"text_id,omitempty"`
+	ReasoningDelta     string          `json:"reasoning_delta,omitempty"`
+	ReasoningSignature string          `json:"reasoning_signature,omitempty"`
+	ToolCall           *ToolCallData   `json:"tool_call,omitempty"`
+	FinishReason       *FinishReason   `json:"finish_reason,omitempty"`
+	Usage              *Usage          `json:"usage,omitempty"`
+	FullResponse       *Response       `json:"full_response,omitempty"`
+	Err                error           `json:"-"`
+	Raw                json.RawMessage `json:"raw,omitempty"`
 }
 
 // StreamAccumulator collects streaming events into a complete Response.
@@ -46,8 +49,12 @@ type StreamAccumulator struct {
 	textOrder []string
 	textParts map[string]*strings.Builder
 
-	// reasoning accumulates reasoning deltas.
-	reasoning strings.Builder
+	// reasoning accumulates reasoning deltas and signature.
+	reasoning          strings.Builder
+	reasoningSignature string
+
+	// redactedThinking collects opaque data blobs for redacted thinking blocks.
+	redactedThinking []string
 
 	// toolCalls collects completed tool calls.
 	toolCalls []ToolCallData
@@ -89,6 +96,14 @@ func (a *StreamAccumulator) Process(event StreamEvent) {
 	case EventReasoningDelta:
 		a.reasoning.WriteString(event.ReasoningDelta)
 
+	case EventReasoningSignature:
+		a.reasoningSignature = event.ReasoningSignature
+
+	case EventRedactedThinking:
+		if event.ReasoningSignature != "" {
+			a.redactedThinking = append(a.redactedThinking, event.ReasoningSignature)
+		}
+
 	case EventToolCallStart:
 		if event.ToolCall != nil {
 			a.activeToolCall = &ToolCallData{
@@ -128,6 +143,28 @@ func (a *StreamAccumulator) Process(event StreamEvent) {
 func (a *StreamAccumulator) Response() Response {
 	var content []ContentPart
 
+	// Add reasoning first (matches API content block ordering: thinking before text).
+	if a.reasoning.Len() > 0 || a.reasoningSignature != "" {
+		content = append(content, ContentPart{
+			Kind: KindThinking,
+			Thinking: &ThinkingData{
+				Text:      a.reasoning.String(),
+				Signature: a.reasoningSignature,
+			},
+		})
+	}
+
+	// Add redacted thinking blocks (opaque data that must be round-tripped).
+	for _, data := range a.redactedThinking {
+		content = append(content, ContentPart{
+			Kind: KindRedactedThinking,
+			Thinking: &ThinkingData{
+				Redacted:  true,
+				Signature: data,
+			},
+		})
+	}
+
 	// Add text parts in insertion order.
 	for _, id := range a.textOrder {
 		if b, ok := a.textParts[id]; ok {
@@ -136,16 +173,6 @@ func (a *StreamAccumulator) Response() Response {
 				Text: b.String(),
 			})
 		}
-	}
-
-	// Add reasoning if present.
-	if a.reasoning.Len() > 0 {
-		content = append(content, ContentPart{
-			Kind: KindThinking,
-			Thinking: &ThinkingData{
-				Text: a.reasoning.String(),
-			},
-		})
 	}
 
 	// Add tool calls.

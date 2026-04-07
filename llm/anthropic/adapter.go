@@ -279,6 +279,7 @@ type sseContentBlockStart struct {
 		ID   string `json:"id,omitempty"`
 		Name string `json:"name,omitempty"`
 		Text string `json:"text,omitempty"`
+		Data string `json:"data,omitempty"` // redacted_thinking opaque blob
 	} `json:"content_block"`
 }
 
@@ -291,6 +292,7 @@ type sseContentBlockDelta struct {
 		Text        string `json:"text,omitempty"`
 		PartialJSON string `json:"partial_json,omitempty"`
 		Thinking    string `json:"thinking,omitempty"`
+		Signature   string `json:"signature,omitempty"` // thinking block signature
 	} `json:"delta"`
 }
 
@@ -354,6 +356,9 @@ func (a *Adapter) handleSSEBlockStart(data []byte, ch chan<- llm.StreamEvent, bl
 		ch <- llm.StreamEvent{Type: llm.EventToolCallStart, ToolCall: &llm.ToolCallData{ID: evt.ContentBlock.ID, Name: evt.ContentBlock.Name}}
 	case "thinking":
 		ch <- llm.StreamEvent{Type: llm.EventReasoningStart}
+	case "redacted_thinking":
+		// Redacted thinking blocks carry an opaque data blob that must be round-tripped.
+		ch <- llm.StreamEvent{Type: llm.EventRedactedThinking, ReasoningSignature: evt.ContentBlock.Data}
 	}
 }
 
@@ -370,6 +375,8 @@ func (a *Adapter) handleSSEBlockDelta(data []byte, ch chan<- llm.StreamEvent) {
 		ch <- llm.StreamEvent{Type: llm.EventToolCallDelta, Delta: evt.Delta.PartialJSON}
 	case "thinking_delta":
 		ch <- llm.StreamEvent{Type: llm.EventReasoningDelta, ReasoningDelta: evt.Delta.Thinking}
+	case "signature_delta":
+		ch <- llm.StreamEvent{Type: llm.EventReasoningSignature, ReasoningSignature: evt.Delta.Signature}
 	}
 }
 

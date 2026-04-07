@@ -5,6 +5,14 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-04-06
+
+### Fixed
+
+- **Thinking signature dropped in streaming**: The Anthropic SSE handler now captures `signature_delta` events. Previously, thinking block signatures were silently lost during streaming, causing multi-turn sessions with extended thinking (Opus 4.6) to crash with `messages.N.content: Input should be a valid list` when the API rejected the signature-less thinking block on the next turn.
+- **Redacted thinking blocks dropped in streaming**: The SSE handler now captures `redacted_thinking` content blocks and round-trips them through the `StreamAccumulator`. Previously, these opaque blocks were silently dropped, breaking conversation continuity.
+- **Nil message content serialized as `null`**: `translateMessage` now initializes content as an empty slice so JSON serializes to `[]` instead of `null` when all content parts are skipped.
+
 ## [0.16.2] - 2026-04-05
 
 ### Added
