@@ -720,6 +720,47 @@ func TestStream_MalformedSSEChunk(t *testing.T) {
 	}
 }
 
+func TestComplete_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error":{"message":"Internal server error"}}`)
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	_, err := adapter.Complete(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+	var serverErr *llm.ServerError
+	if !errors.As(err, &serverErr) {
+		t.Errorf("expected ServerError, got %T: %v", err, err)
+	}
+}
+
+func TestNew_BaseURLNormalization(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"http://localhost:1234/v1", "http://localhost:1234"},
+		{"http://localhost:1234", "http://localhost:1234"},
+		{"https://openrouter.ai/api", "https://openrouter.ai/api"},
+		{"https://api.example.com/v1", "https://api.example.com"},
+	}
+
+	for _, tt := range tests {
+		adapter := New("key", WithBaseURL(tt.input))
+		if adapter.baseURL != tt.expected {
+			t.Errorf("New(WithBaseURL(%q)).baseURL = %q, want %q", tt.input, adapter.baseURL, tt.expected)
+		}
+	}
+}
+
 // errorAs is a test helper wrapping errors.As for generic error type matching.
 func errorAs[T any](err error, target *T) bool {
 	return errorAsImpl(err, target)

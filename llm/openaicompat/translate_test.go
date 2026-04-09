@@ -411,6 +411,47 @@ func TestTranslateRequest_StreamFlagAndOptions(t *testing.T) {
 	}
 }
 
+func TestTranslateRequest_OptionalFields(t *testing.T) {
+	temp := 0.7
+	topP := 0.9
+	maxTok := 4096
+	req := &llm.Request{
+		Model:         "gpt-4.1",
+		Messages:      []llm.Message{llm.UserMessage("hi")},
+		Temperature:   &temp,
+		TopP:          &topP,
+		MaxTokens:     &maxTok,
+		StopSequences: []string{"END", "STOP"},
+	}
+
+	body, err := translateRequest(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	if raw["temperature"] != 0.7 {
+		t.Errorf("temperature = %v, want 0.7", raw["temperature"])
+	}
+	if raw["top_p"] != 0.9 {
+		t.Errorf("top_p = %v, want 0.9", raw["top_p"])
+	}
+	if int(raw["max_tokens"].(float64)) != 4096 {
+		t.Errorf("max_tokens = %v, want 4096", raw["max_tokens"])
+	}
+	stop, ok := raw["stop"].([]any)
+	if !ok || len(stop) != 2 {
+		t.Fatalf("stop = %v, want [END, STOP]", raw["stop"])
+	}
+	if stop[0] != "END" || stop[1] != "STOP" {
+		t.Errorf("stop = %v, want [END, STOP]", stop)
+	}
+}
+
 func TestTranslateResponse_EmptyChoices(t *testing.T) {
 	respJSON := `{
 		"id": "chatcmpl-789",
