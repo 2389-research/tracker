@@ -371,10 +371,12 @@ func buildACPMcpServers(cfg pipeline.AgentRunConfig) []acp.McpServer {
 var acpStrippedPrefixes = []string{
 	"ANTHROPIC_API_KEY=",
 	"OPENAI_API_KEY=",
+	"OPENAI_COMPAT_API_KEY=",
 	"GEMINI_API_KEY=",
 	"GOOGLE_API_KEY=",
 	"ANTHROPIC_BASE_URL=",
 	"OPENAI_BASE_URL=",
+	"OPENAI_COMPAT_BASE_URL=",
 	"GEMINI_BASE_URL=",
 	"GOOGLE_BASE_URL=",
 	"OPENROUTER_API_KEY=",
