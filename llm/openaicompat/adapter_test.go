@@ -621,6 +621,105 @@ func TestComplete_OversizedResponse(t *testing.T) {
 	}
 }
 
+func TestStream_ContextCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+
+		fmt.Fprintln(w, `data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}`)
+		fmt.Fprintln(w, "")
+		if flusher != nil {
+			flusher.Flush()
+		}
+
+		// Block until the request context is done
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(ctx, &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	// Read first event(s) to confirm stream started
+	<-ch
+
+	// Cancel the context
+	cancel()
+
+	// Drain remaining — should NOT see context error events
+	var gotContextError bool
+	for evt := range ch {
+		if evt.Type == llm.EventError {
+			if errors.Is(evt.Err, context.Canceled) || errors.Is(evt.Err, context.DeadlineExceeded) {
+				gotContextError = true
+			}
+		}
+	}
+
+	if gotContextError {
+		t.Error("context cancellation errors should be suppressed, not emitted as EventError")
+	}
+}
+
+func TestStream_MalformedSSEChunk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		lines := []string{
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}`,
+			"",
+			`data: {this is not valid json}`,
+			"",
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	var textAccum string
+	var errorCount int
+	var gotFinish bool
+	for evt := range ch {
+		switch evt.Type {
+		case llm.EventTextDelta:
+			textAccum += evt.Delta
+		case llm.EventError:
+			errorCount++
+		case llm.EventFinish:
+			gotFinish = true
+		}
+	}
+
+	if textAccum != "Hello world" {
+		t.Errorf("expected 'Hello world', got %q", textAccum)
+	}
+	if errorCount != 1 {
+		t.Errorf("expected 1 error event for malformed chunk, got %d", errorCount)
+	}
+	if !gotFinish {
+		t.Error("expected EventFinish after malformed chunk recovery")
+	}
+}
+
 // errorAs is a test helper wrapping errors.As for generic error type matching.
 func errorAs[T any](err error, target *T) bool {
 	return errorAsImpl(err, target)
