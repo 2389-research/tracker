@@ -21,6 +21,8 @@ import (
 const (
 	defaultBaseURL   = "https://openrouter.ai/api"
 	chatCompletePath = "/v1/chat/completions"
+	// maxResponseSize caps response body reads to prevent OOM from malicious servers.
+	maxResponseSize = 10 * 1024 * 1024 // 10MB
 )
 
 // Adapter implements llm.ProviderAdapter for any OpenAI Chat Completions compatible API.
@@ -95,9 +97,15 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	}
 	defer httpResp.Body.Close()
 
-	respBody, err := io.ReadAll(httpResp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize+1))
 	if err != nil {
 		return nil, &llm.NetworkError{SDKError: llm.SDKError{Msg: fmt.Sprintf("openai-compat: read response: %s", err.Error()), Cause: err}}
+	}
+	if int64(len(respBody)) > maxResponseSize {
+		return nil, &llm.InvalidRequestError{ProviderError: llm.ProviderError{
+			SDKError: llm.SDKError{Msg: "openai-compat: response body exceeds 10MB limit"},
+			Provider: "openai-compat",
+		}}
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
@@ -143,7 +151,7 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 		defer httpResp.Body.Close()
 
 		if httpResp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(httpResp.Body)
+			respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize))
 			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "openai-compat")}
 			return
 		}

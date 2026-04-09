@@ -596,6 +596,31 @@ func TestStream_TextLifecycleEvents(t *testing.T) {
 	}
 }
 
+func TestComplete_OversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Write more than the 10MB limit
+		for i := 0; i < 11*1024; i++ {
+			w.Write(make([]byte, 1024))
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	_, err := adapter.Complete(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	if err == nil {
+		t.Fatal("expected error for oversized response")
+	}
+	if !strings.Contains(err.Error(), "exceeds 10MB limit") {
+		t.Errorf("expected size-limit error, got: %v", err)
+	}
+}
+
 // errorAs is a test helper wrapping errors.As for generic error type matching.
 func errorAs[T any](err error, target *T) bool {
 	return errorAsImpl(err, target)
