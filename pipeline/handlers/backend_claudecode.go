@@ -240,6 +240,7 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 var providerKeyPrefixes = []string{
 	"ANTHROPIC_API_KEY=",
 	"OPENAI_API_KEY=",
+	"OPENAI_COMPAT_API_KEY=",
 	"GEMINI_API_KEY=",
 	"GOOGLE_API_KEY=",
 }

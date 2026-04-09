@@ -1007,6 +1007,37 @@ func TestEnsureStartExitNodes_SetsHandlerWhenNoPrompt(t *testing.T) {
 	}
 }
 
+// TestEnsureStartExitNodes_ShapeSetWithPrompt verifies that start/exit nodes
+// with prompts still get their Mdiamond/Msquare shapes but keep their handler.
+func TestEnsureStartExitNodes_ShapeSetWithPrompt(t *testing.T) {
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "begin",
+		ExitNode:  "end",
+	}
+	g.Nodes["begin"] = &Node{ID: "begin", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "hello"}}
+	g.Nodes["end"] = &Node{ID: "end", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "bye"}}
+	g.Edges = []*Edge{{From: "begin", To: "end"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	if g.Nodes["begin"].Shape != "Mdiamond" {
+		t.Errorf("begin shape = %q, want Mdiamond", g.Nodes["begin"].Shape)
+	}
+	if g.Nodes["begin"].Handler != "codergen" {
+		t.Errorf("begin handler = %q, want codergen (preserved)", g.Nodes["begin"].Handler)
+	}
+	if g.Nodes["end"].Shape != "Msquare" {
+		t.Errorf("end shape = %q, want Msquare", g.Nodes["end"].Shape)
+	}
+	if g.Nodes["end"].Handler != "codergen" {
+		t.Errorf("end handler = %q, want codergen (preserved)", g.Nodes["end"].Handler)
+	}
+}
+
 // TestExtractAgentBackendAttrs_SimulatedIRParams verifies that agent backend
 // attributes (model, provider, reasoning_effort, system_prompt) are correctly
 // extracted from IR AgentConfig into graph node attrs, simulating the params

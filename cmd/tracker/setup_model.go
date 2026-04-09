@@ -103,6 +103,7 @@ func newSetupModel(existing map[string]string) setupModel {
 		newProviderEntry("OpenAI", "OPENAI_API_KEY", "OPENAI_BASE_URL", existing),
 		newProviderEntry("Anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", existing),
 		newGeminiProviderEntry(existing),
+		newProviderEntry("OpenAI-Compat", "OPENAI_COMPAT_API_KEY", "OPENAI_COMPAT_BASE_URL", existing),
 	}
 
 	return setupModel{

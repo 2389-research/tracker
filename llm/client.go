@@ -93,13 +93,14 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 // values are factory functions that create adapters from an API key.
 // providerEnvKeys maps provider names to their environment variable names.
 var providerEnvKeys = map[string][]string{
-	"anthropic": {"ANTHROPIC_API_KEY"},
-	"openai":    {"OPENAI_API_KEY"},
-	"gemini":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+	"anthropic":     {"ANTHROPIC_API_KEY"},
+	"openai":        {"OPENAI_API_KEY"},
+	"gemini":        {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+	"openai-compat": {"OPENAI_COMPAT_API_KEY"},
 }
 
 // providerPriority defines the deterministic order for default provider selection.
-var providerPriority = []string{"anthropic", "openai", "gemini"}
+var providerPriority = []string{"anthropic", "openai", "gemini", "openai-compat"}
 
 func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapter, error)) (*Client, error) {
 	var opts []ClientOption
@@ -125,7 +126,7 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 
 	// Process non-standard providers.
 	for name, constructor := range constructors {
-		if name == "anthropic" || name == "openai" || name == "gemini" {
+		if name == "anthropic" || name == "openai" || name == "gemini" || name == "openai-compat" {
 			continue
 		}
 		opt, err := tryBuildProvider(name, constructor)
