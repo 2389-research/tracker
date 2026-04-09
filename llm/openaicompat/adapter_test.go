@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
@@ -492,6 +493,57 @@ func TestStream_StreamOptionsInRequest(t *testing.T) {
 	}
 	if so["include_usage"] != true {
 		t.Errorf("expected stream_options.include_usage=true, got %v", so["include_usage"])
+	}
+}
+
+func TestStream_SSEInStreamError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		lines := []string{
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}`,
+			"",
+			`data: {"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":"rate_limit_exceeded"}}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	var gotText bool
+	var gotError bool
+	var errorMsg string
+	for evt := range ch {
+		switch evt.Type {
+		case llm.EventTextDelta:
+			gotText = true
+		case llm.EventError:
+			gotError = true
+			if evt.Err != nil {
+				errorMsg = evt.Err.Error()
+			}
+		}
+	}
+
+	if !gotText {
+		t.Error("expected text delta before error")
+	}
+	if !gotError {
+		t.Error("expected EventError for in-stream error")
+	}
+	if !strings.Contains(errorMsg, "Rate limit exceeded") {
+		t.Errorf("error message should contain 'Rate limit exceeded', got: %s", errorMsg)
 	}
 }
 

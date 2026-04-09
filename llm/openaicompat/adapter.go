@@ -203,6 +203,18 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 			break
 		}
 
+		// Check for error objects embedded in the SSE stream.
+		if strings.Contains(data, `"error"`) {
+			var errChunk chatStreamError
+			if err := json.Unmarshal([]byte(data), &errChunk); err == nil && errChunk.Error.Message != "" {
+				ch <- llm.StreamEvent{
+					Type: llm.EventError,
+					Err:  sseErrorToTyped(errChunk.Error.Code, errChunk.Error.Message),
+				}
+				continue
+			}
+		}
+
 		// Parse the JSON chunk.
 		var chunk chatStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -315,6 +327,35 @@ func isContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
+// sseErrorToTyped maps an error code from an SSE stream event to a typed error.
+func sseErrorToTyped(code, message string) error {
+	base := llm.ProviderError{
+		SDKError:  llm.SDKError{Msg: "openai-compat: " + message},
+		Provider:  "openai-compat",
+		ErrorCode: code,
+	}
+	switch code {
+	case "insufficient_quota":
+		return &llm.QuotaExceededError{ProviderError: base}
+	case "invalid_api_key", "authentication_error":
+		return &llm.AuthenticationError{ProviderError: base}
+	case "model_not_found":
+		return &llm.NotFoundError{ProviderError: base}
+	case "invalid_request_error", "invalid_request":
+		return &llm.InvalidRequestError{ProviderError: base}
+	case "context_length_exceeded":
+		return &llm.ContextLengthError{ProviderError: base}
+	case "content_filter", "content_policy_violation":
+		return &llm.ContentFilterError{ProviderError: base}
+	case "rate_limit_exceeded":
+		return &llm.RateLimitError{ProviderError: base}
+	case "server_error", "internal_error":
+		return &llm.ServerError{ProviderError: base}
+	default:
+		return &llm.InvalidRequestError{ProviderError: base}
+	}
+}
+
 // --- SSE chunk types for the Chat Completions streaming format ---
 
 // chatStreamChunk represents a single SSE data payload in Chat Completions streaming.
@@ -350,4 +391,13 @@ type chatStreamToolCall struct {
 type chatStreamFunctionCall struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+// chatStreamError represents an error object embedded in a 200 SSE stream.
+type chatStreamError struct {
+	Error struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+	} `json:"error"`
 }
