@@ -5,6 +5,18 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-04-09
+
+### Fixed
+
+- **Turn-limit exhaustion treated as success**: Agents that exhausted their turn limit (or entered a tool call loop) were silently treated as `OutcomeSuccess`, allowing pipelines to advance past nodes that wrote zero files. Now returns `OutcomeFail` so the engine routes through explicit `when ctx.outcome = fail` edges (or stops via strict-failure-edge when no failure edge exists).
+- **Loop detection produces distinct diagnostic**: `turn_limit_msg` context key now distinguishes "agent entered tool call loop" from "agent exhausted turn limit" for clearer `tracker diagnose` output.
+
+### Added
+
+- **`ContextKeyTurnLimitMsg` constant**: New `pipeline.ContextKeyTurnLimitMsg` context key for turn-limit and loop-detection diagnostics. Added to `reservedContextKeys()` for linter recognition.
+- **Turn-limit and loop-detection tests**: `TestCodergenHandlerMaxTurnsExhaustedIsFail`, `TestCodergenHandlerMaxTurnsWithAutoStatusSuccess`, `TestCodergenHandlerMaxTurnsWithAutoStatusFail`, `TestCodergenHandlerLoopDetectedMessage`.
+
 ## [0.16.3] - 2026-04-06
 
 ### Fixed

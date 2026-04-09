@@ -109,7 +109,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
 	}
 
-	return h.buildSuccessOutcome(node, prompt, artifactRoot, sessResult, &collector)
+	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector)
 }
 
 // selectBackend chooses the appropriate AgentBackend based on node attributes
@@ -347,8 +347,12 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 	return outcome, nil
 }
 
-// buildSuccessOutcome constructs the outcome for a successful session run.
-func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
+// buildOutcome constructs the pipeline outcome from a completed session run.
+// Returns OutcomeFail for turn-limit exhaustion and loop detection (routes
+// through failure edges when present, stops on strict-failure-edge otherwise),
+// OutcomeFail/OutcomeRetry for empty sessions, or OutcomeSuccess for normal
+// completion. auto_status can override any of these.
+func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
 	responseText := collector.text()
 	responseArtifact := collector.transcript()
 	if responseArtifact == "" {
@@ -383,7 +387,26 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 		return outcome, nil
 	}
 
+	// Determine status. Turn-limit exhaustion and loop detection default to
+	// OutcomeFail so the engine routes through explicit failure edges (e.g.
+	// "when ctx.outcome = fail"). On nodes without failure edges, the
+	// strict-failure-edge rule stops the pipeline — which is correct: if the
+	// pipeline author didn't handle agent failure, silently continuing is worse.
+	//
+	// auto_status overrides the default for both turn-exhaustion and normal
+	// completion: the agent's explicit STATUS line is authoritative.
 	status := pipeline.OutcomeSuccess
+	var turnLimitMsg string
+
+	if sessResult.MaxTurnsUsed {
+		status = pipeline.OutcomeFail
+		if sessResult.LoopDetected {
+			turnLimitMsg = fmt.Sprintf("node %q: agent entered tool call loop (detected after %d turns)", node.ID, sessResult.Turns)
+		} else {
+			turnLimitMsg = fmt.Sprintf("node %q: agent exhausted turn limit (%d turns) without completing", node.ID, sessResult.Turns)
+		}
+	}
+
 	if node.Attrs["auto_status"] == "true" {
 		status = parseAutoStatus(responseText)
 	}
@@ -395,6 +418,9 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
 		},
 		Stats: buildSessionStats(sessResult),
+	}
+	if turnLimitMsg != "" {
+		outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] = turnLimitMsg
 	}
 	if sessResult.Usage.EstimatedCost > 0 {
 		outcome.ContextUpdates["last_cost"] = fmt.Sprintf("%.4f", sessResult.Usage.EstimatedCost)

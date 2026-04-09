@@ -22,6 +22,11 @@ const (
 	// specific upstream outputs without relying on last_response being current.
 	ContextKeyResponsePrefix = "response."
 
+	// ContextKeyTurnLimitMsg holds a diagnostic message when an agent exhausts
+	// its turn limit or enters a tool call loop. Present only in failure outcomes
+	// from turn-limit exhaustion; absent on normal success.
+	ContextKeyTurnLimitMsg = "turn_limit_msg"
+
 	// Interview mode context keys. Overridable via questions_key/answers_key
 	// node attributes in .dip files. These are the defaults when the attrs
 	// are not specified.
