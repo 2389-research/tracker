@@ -1248,8 +1248,10 @@ git commit -m "feat: add openai-compat adapter with Complete() and Stream()"
 In `llm/client.go`, add to the `providerEnvKeys` map (after the "gemini" entry):
 
 ```go
-"openai-compat": {"OPENAI_COMPAT_API_KEY", "OPENAI_API_KEY"},
+"openai-compat": {"OPENAI_COMPAT_API_KEY"},
 ```
+
+Note: No OPENAI_API_KEY fallback — avoids silently routing OpenAI keys to the compat endpoint (default: OpenRouter).
 
 And add to `providerPriority` (append at end — lowest priority):
 

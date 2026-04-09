@@ -18,7 +18,7 @@ Add a new provider `openai-compat` that speaks the OpenAI Chat Completions API. 
 - **In .dip files**: `provider: openai-compat`
 - **Default base URL**: `https://openrouter.ai/api` (overridable)
 - **Env vars**:
-  - `OPENAI_COMPAT_API_KEY` (primary) → `OPENAI_API_KEY` (fallback)
+  - `OPENAI_COMPAT_API_KEY` (primary)
   - `OPENAI_COMPAT_BASE_URL` (override)
 
 ## Files
@@ -149,8 +149,11 @@ var providerEnvKeys = map[string][]string{
     "anthropic":    {"ANTHROPIC_API_KEY"},
     "openai":       {"OPENAI_API_KEY"},
     "gemini":       {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-    "openai-compat": {"OPENAI_COMPAT_API_KEY", "OPENAI_API_KEY"},
+    "openai-compat": {"OPENAI_COMPAT_API_KEY"},
 }
+
+// Note: openai-compat does not fall back to OPENAI_API_KEY to avoid silently routing
+// OpenAI keys to the compat endpoint (default: OpenRouter).
 ```
 
 ### `tracker.go` and `cmd/tracker/run.go`
