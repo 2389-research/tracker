@@ -129,7 +129,7 @@ func TestComplete_HTTPError(t *testing.T) {
 
 	// Verify it's an AuthenticationError
 	var authErr *llm.AuthenticationError
-	if !errorAs(err, &authErr) {
+	if !errors.As(err, &authErr) {
 		t.Errorf("expected AuthenticationError, got %T: %v", err, err)
 	}
 }
@@ -327,7 +327,7 @@ func TestStream_HTTPError(t *testing.T) {
 			gotError = true
 			// Verify it's a RateLimitError
 			var rateErr *llm.RateLimitError
-			if !errorAs(evt.Err, &rateErr) {
+			if !errors.As(evt.Err, &rateErr) {
 				t.Errorf("expected RateLimitError, got %T: %v", evt.Err, evt.Err)
 			}
 		}
@@ -759,48 +759,4 @@ func TestNew_BaseURLNormalization(t *testing.T) {
 			t.Errorf("New(WithBaseURL(%q)).baseURL = %q, want %q", tt.input, adapter.baseURL, tt.expected)
 		}
 	}
-}
-
-// errorAs is a test helper wrapping errors.As for generic error type matching.
-func errorAs[T any](err error, target *T) bool {
-	return errorAsImpl(err, target)
-}
-
-func errorAsImpl(err error, target any) bool {
-	// Use a type switch to delegate to errors.As properly.
-	switch t := target.(type) {
-	case **llm.AuthenticationError:
-		return asAuthError(err, t)
-	case **llm.RateLimitError:
-		return asRateLimitError(err, t)
-	default:
-		return false
-	}
-}
-
-func asAuthError(err error, target **llm.AuthenticationError) bool {
-	var e *llm.AuthenticationError
-	if ok := extractError(err, &e); ok {
-		*target = e
-		return true
-	}
-	return false
-}
-
-func asRateLimitError(err error, target **llm.RateLimitError) bool {
-	var e *llm.RateLimitError
-	if ok := extractError(err, &e); ok {
-		*target = e
-		return true
-	}
-	return false
-}
-
-func extractError[T error](err error, target *T) bool {
-	return errorsAs(err, target)
-}
-
-// errorsAs wraps the standard errors.As function to keep imports clean.
-func errorsAs[T error](err error, target *T) bool {
-	return errors.As(err, target)
 }
