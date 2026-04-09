@@ -4,6 +4,7 @@ package openaicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/2389-research/tracker/llm"
@@ -308,8 +309,7 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		resp.Message.Content = translateChoiceMessage(choice.Message)
 		resp.FinishReason = translateFinishReason(choice.FinishReason, len(choice.Message.ToolCalls) > 0)
 	} else {
-		// Empty choices: stop with empty content
-		resp.FinishReason = llm.FinishReason{Reason: "stop", Raw: ""}
+		return nil, fmt.Errorf("openai-compat: empty response (0 choices, 0 content)")
 	}
 
 	return resp, nil

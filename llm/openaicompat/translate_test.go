@@ -4,6 +4,7 @@ package openaicompat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
@@ -422,16 +423,11 @@ func TestTranslateResponse_EmptyChoices(t *testing.T) {
 		}
 	}`
 
-	resp, err := translateResponse([]byte(respJSON))
-	if err != nil {
-		t.Fatal(err)
+	_, err := translateResponse([]byte(respJSON))
+	if err == nil {
+		t.Fatal("expected error for empty choices, got nil")
 	}
-
-	// Empty choices should give stop finish reason with empty message
-	if resp.FinishReason.Reason != "stop" {
-		t.Errorf("finish_reason = %v, want 'stop'", resp.FinishReason.Reason)
-	}
-	if resp.Message.Text() != "" {
-		t.Errorf("text = %v, want empty", resp.Message.Text())
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error should mention 'empty', got: %s", err)
 	}
 }
