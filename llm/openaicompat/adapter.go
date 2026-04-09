@@ -180,6 +180,7 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
 	firstChunk := true
+	textStarted := false
 	// Tool call accumulators keyed by tool_calls array index.
 	toolCalls := make(map[int]*sseToolCallAccum)
 	// Deferred finish event — held until [DONE] so tool call ends emit first.
@@ -194,8 +195,11 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 
 		data := strings.TrimPrefix(line, "data: ")
 
-		// [DONE] sentinel: emit tool call ends, then deferred finish.
+		// [DONE] sentinel: emit text end, tool call ends, then deferred finish.
 		if data == "[DONE]" {
+			if textStarted {
+				ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: "text"}
+			}
 			a.emitAccumulatedToolCallEnds(toolCalls, ch)
 			if deferredFinish != nil {
 				ch <- *deferredFinish
@@ -234,9 +238,14 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 
 			// Text content delta.
 			if choice.Delta.Content != "" {
+				if !textStarted {
+					ch <- llm.StreamEvent{Type: llm.EventTextStart, TextID: "text"}
+					textStarted = true
+				}
 				ch <- llm.StreamEvent{
-					Type:  llm.EventTextDelta,
-					Delta: choice.Delta.Content,
+					Type:   llm.EventTextDelta,
+					TextID: "text",
+					Delta:  choice.Delta.Content,
 				}
 			}
 

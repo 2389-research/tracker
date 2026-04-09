@@ -547,6 +547,55 @@ func TestStream_SSEInStreamError(t *testing.T) {
 	}
 }
 
+func TestStream_TextLifecycleEvents(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		lines := []string{
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	var types []llm.StreamEventType
+	for evt := range ch {
+		types = append(types, evt.Type)
+	}
+
+	var gotTextStart, gotTextEnd bool
+	for _, tp := range types {
+		if tp == llm.EventTextStart {
+			gotTextStart = true
+		}
+		if tp == llm.EventTextEnd {
+			gotTextEnd = true
+		}
+	}
+	if !gotTextStart {
+		t.Error("expected EventTextStart before text deltas")
+	}
+	if !gotTextEnd {
+		t.Error("expected EventTextEnd before finish")
+	}
+}
+
 // errorAs is a test helper wrapping errors.As for generic error type matching.
 func errorAs[T any](err error, target *T) bool {
 	return errorAsImpl(err, target)
