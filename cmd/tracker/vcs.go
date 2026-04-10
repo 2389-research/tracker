@@ -23,6 +23,12 @@ func initVersionFromVCS() {
 			vcsDirty = s.Value
 		}
 	}
+	// Module version is available from `go install ...@vX.Y.Z` even though
+	// VCS metadata is stripped. Use it when ldflags didn't set version.
+	if version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+
 	if commit == "unknown" && vcsRev != "" {
 		short := vcsRev
 		if len(short) > 8 {
