@@ -52,56 +52,69 @@ func (t *GrepSearchTool) Parameters() json.RawMessage {
 }
 
 func (t *GrepSearchTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
+	pattern, path, err := parseGrepInput(input)
+	if err != nil {
+		return "", err
+	}
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid regex: %w", err)
+	}
+
+	searchRoot, err := t.safePath(path)
+	if err != nil {
+		return "", err
+	}
+
+	matches, truncated, err := t.runSearch(ctx, searchRoot, path, re)
+	if err != nil {
+		return "", err
+	}
+
+	return formatGrepResults(pattern, matches, truncated), nil
+}
+
+// parseGrepInput unmarshals the JSON input and validates required fields.
+func parseGrepInput(input json.RawMessage) (pattern, path string, err error) {
 	var params struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
 	}
 	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("invalid input: %w", err)
+		return "", "", fmt.Errorf("invalid input: %w", err)
 	}
 	if params.Pattern == "" {
-		return "", fmt.Errorf("pattern is required")
+		return "", "", fmt.Errorf("pattern is required")
 	}
 	if params.Path == "" {
 		params.Path = "."
 	}
+	return params.Pattern, params.Path, nil
+}
 
-	re, err := regexp.Compile(params.Pattern)
-	if err != nil {
-		return "", fmt.Errorf("invalid regex: %w", err)
-	}
-
-	searchRoot, err := t.safePath(params.Path)
-	if err != nil {
-		return "", err
-	}
-
+// runSearch performs the grep search on the resolved path.
+func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp) ([]string, bool, error) {
 	info, err := os.Stat(searchRoot)
 	if err != nil {
-		return "", fmt.Errorf("path not found: %s", params.Path)
+		return nil, false, fmt.Errorf("path not found: %s", displayPath)
 	}
-
-	var matches []string
-	truncated := false
-
 	if info.IsDir() {
-		matches, truncated, err = t.searchDir(ctx, searchRoot, re)
-	} else {
-		matches, truncated, err = t.searchFile(searchRoot, re)
+		return t.searchDir(ctx, searchRoot, re)
 	}
-	if err != nil {
-		return "", err
-	}
+	return t.searchFile(searchRoot, re)
+}
 
+// formatGrepResults builds the final output string from search matches.
+func formatGrepResults(pattern string, matches []string, truncated bool) string {
 	if len(matches) == 0 {
-		return fmt.Sprintf("no matches for pattern %q", params.Pattern), nil
+		return fmt.Sprintf("no matches for pattern %q", pattern)
 	}
-
 	result := strings.Join(matches, "\n")
 	if truncated {
 		result += fmt.Sprintf("\n\n(results truncated, showing first %d of more matches)", maxGrepResults)
 	}
-	return result, nil
+	return result
 }
 
 // safePath validates that a relative path resolves inside the working directory.

@@ -81,10 +81,24 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 	userPrompt := buildUserPrompt(prompt, options, defaultOption)
 	fullPrompt := systemPrompt + "\n\n" + userPrompt
 
+	responseText, err := runClaudeSubprocess(a.claudePath, fullPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	decision, parseErr := parseDecision(responseText)
+	if parseErr != nil {
+		return fallbackDecisionFromPlainText(responseText, options, parseErr)
+	}
+	return decision, nil
+}
+
+// runClaudeSubprocess spawns the claude CLI and returns its trimmed stdout.
+func runClaudeSubprocess(claudePath, fullPrompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, a.claudePath,
+	cmd := exec.CommandContext(ctx, claudePath,
 		"--print",
 		"-p", fullPrompt,
 		"--max-turns", "1",
@@ -97,32 +111,28 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude CLI: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("claude CLI: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
 
 	responseText := strings.TrimSpace(stdout.String())
 	if responseText == "" {
-		return nil, fmt.Errorf("claude CLI returned empty response")
+		return "", fmt.Errorf("claude CLI returned empty response")
 	}
+	return responseText, nil
+}
 
-	decision, parseErr := parseDecision(responseText)
-	if parseErr != nil {
-		// If the response isn't valid JSON, try to extract a choice directly.
-		// The claude CLI sometimes returns plain text instead of JSON.
-		if len(options) > 0 {
-			for _, opt := range options {
-				if strings.Contains(strings.ToLower(responseText), strings.ToLower(opt)) {
-					return &autopilotDecision{
-						Choice:    opt,
-						Reasoning: responseText,
-					}, nil
-				}
-			}
+// fallbackDecisionFromPlainText tries to match plain text against known options
+// when JSON parsing fails, or returns the original parse error.
+func fallbackDecisionFromPlainText(responseText string, options []string, parseErr error) (*autopilotDecision, error) {
+	for _, opt := range options {
+		if strings.Contains(strings.ToLower(responseText), strings.ToLower(opt)) {
+			return &autopilotDecision{
+				Choice:    opt,
+				Reasoning: responseText,
+			}, nil
 		}
-		return nil, fmt.Errorf("claude-code autopilot: %w (response: %.200s)", parseErr, responseText)
 	}
-
-	return decision, nil
+	return nil, fmt.Errorf("claude-code autopilot: %w (response: %.200s)", parseErr, responseText)
 }
 
 // AskInterview implements InterviewInterviewer by routing all questions through

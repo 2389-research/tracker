@@ -450,33 +450,48 @@ func printRecommendations(cp *pipeline.Checkpoint, status string, activity []act
 // buildRecommendations generates recommendation strings from checkpoint state and activity.
 func buildRecommendations(cp *pipeline.Checkpoint, status string, activity []activityEntry) []string {
 	var recs []string
+	recs = append(recs, retryRecommendations(cp)...)
+	recs = append(recs, restartRecommendation(cp)...)
+	recs = append(recs, durationRecommendation(activity)...)
+	if status == "fail" && cp.CurrentNode != "" {
+		recs = append(recs, fmt.Sprintf("Pipeline failed at %s — check error details above", cp.CurrentNode))
+	}
+	return recs
+}
 
+// retryRecommendations returns suggestions for nodes with high retry counts.
+func retryRecommendations(cp *pipeline.Checkpoint) []string {
+	var recs []string
 	for nodeID, count := range cp.RetryCounts {
 		if count >= 2 {
 			recs = append(recs, fmt.Sprintf("Consider adjusting retry_policy for %s (used %d retries)", nodeID, count))
 		}
 	}
-
-	if cp.RestartCount > 0 {
-		suffix := "time"
-		if cp.RestartCount > 1 {
-			suffix = "times"
-		}
-		recs = append(recs, fmt.Sprintf("Pipeline restarted %d %s — review loop conditions", cp.RestartCount, suffix))
-	}
-
-	if len(activity) >= 2 {
-		total := activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
-		if total > 30*time.Minute {
-			recs = append(recs, "Long-running pipeline — consider fidelity=summary:medium for faster resumes")
-		}
-	}
-
-	if status == "fail" && cp.CurrentNode != "" {
-		recs = append(recs, fmt.Sprintf("Pipeline failed at %s — check error details above", cp.CurrentNode))
-	}
-
 	return recs
+}
+
+// restartRecommendation returns a suggestion when the pipeline restarted.
+func restartRecommendation(cp *pipeline.Checkpoint) []string {
+	if cp.RestartCount == 0 {
+		return nil
+	}
+	suffix := "time"
+	if cp.RestartCount > 1 {
+		suffix = "times"
+	}
+	return []string{fmt.Sprintf("Pipeline restarted %d %s — review loop conditions", cp.RestartCount, suffix)}
+}
+
+// durationRecommendation returns a suggestion for long-running pipelines.
+func durationRecommendation(activity []activityEntry) []string {
+	if len(activity) < 2 {
+		return nil
+	}
+	total := activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
+	if total > 30*time.Minute {
+		return []string{"Long-running pipeline — consider fidelity=summary:medium for faster resumes"}
+	}
+	return nil
 }
 
 func printAuditFooter() {

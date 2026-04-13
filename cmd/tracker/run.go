@@ -43,53 +43,29 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		return err
 	}
 
-	// Token tracker for LLM usage accumulation.
 	tokenTracker := llm.NewTokenTracker()
-
-	// Create LLM client from environment variables.
-	// When --backend claude-code or acp, the native client is optional — node
-	// execution routes through the external agent subprocess.
-	llmClient, err := buildLLMClient(tokenTracker)
-	if err != nil && backend != "claude-code" && backend != "acp" {
-		return formatLLMClientError(err)
-	}
+	llmClient, err := prepareNativeLLMClient(tokenTracker, backend)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
+		return err
 	}
 	if llmClient != nil {
 		defer llmClient.Close()
 	}
 
-	// Create execution environment for tool handlers.
 	execEnv := exec.NewLocalEnvironment(workdir)
-
-	// Choose interviewer: autopilot > auto-approve > terminal detection.
-	// activeAutopilotCfg is set by executeRun before calling run().
 	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient, backend)
 
-	// Build engine options.
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
-	var engineOpts []pipeline.EngineOption
-	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
-
-	// Log pipeline events to a JSONL activity log on disk.
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
 	defer activityLog.Close()
 
-	// Wire LLM trace events to the activity log for complete audit trail.
-	if llmClient != nil {
-		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
-		}))
-	}
+	wireLLMTraceToLog(llmClient, activityLog)
 
-	// Wire up event handlers based on output mode.
 	agentEventHandler, pipelineEventHandler := buildConsoleEventHandlers(
 		activityLog, llmClient, verbose, jsonOut,
 	)
-	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineEventHandler))
 
-	// Build the handler registry with real production dependencies.
+	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler)
 	registry := handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
@@ -101,31 +77,63 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		handlers.WithTokenTracker(tokenTracker),
 	)
 
-	if checkpoint != "" {
-		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
-	}
-
-	// Enable stylesheet resolution so node model attrs are resolved.
-	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
-
 	engine := pipeline.NewEngine(graph, registry, engineOpts...)
 
-	// Run with signal handling.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	result, runErr := engine.Run(ctx)
 
-	// Print run summary with resume hint even on cancellation/error,
-	// as long as we have a result with a run ID.
-	var pipelineErr error
-	if runErr != nil {
-		pipelineErr = fmt.Errorf("pipeline execution: %w", runErr)
-	} else if result.Status != pipeline.OutcomeSuccess {
-		pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
-	}
+	pipelineErr := interpretRunResult(result, runErr)
 	printRunSummary(result, pipelineErr, tokenTracker, pipelineFile)
 	return pipelineErr
+}
+
+// prepareNativeLLMClient creates the LLM client, returning nil without error
+// when an external backend is used and no native client is needed.
+func prepareNativeLLMClient(tokenTracker *llm.TokenTracker, backend string) (*llm.Client, error) {
+	client, err := buildLLMClient(tokenTracker)
+	if err != nil && backend != "claude-code" && backend != "acp" {
+		return nil, formatLLMClientError(err)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
+		return nil, nil
+	}
+	return client, nil
+}
+
+// wireLLMTraceToLog registers a trace observer that writes LLM events to the activity log.
+func wireLLMTraceToLog(llmClient *llm.Client, activityLog *pipeline.JSONLEventHandler) {
+	if llmClient != nil {
+		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+		}))
+	}
+}
+
+// buildEngineOptions assembles the engine option slice from config values.
+func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler) []pipeline.EngineOption {
+	opts := []pipeline.EngineOption{
+		pipeline.WithArtifactDir(artifactDir),
+		pipeline.WithPipelineEventHandler(evtHandler),
+		pipeline.WithStylesheetResolution(true),
+	}
+	if checkpoint != "" {
+		opts = append(opts, pipeline.WithCheckpointPath(checkpoint))
+	}
+	return opts
+}
+
+// interpretRunResult converts a raw engine run result into a pipeline-level error.
+func interpretRunResult(result *pipeline.EngineResult, runErr error) error {
+	if runErr != nil {
+		return fmt.Errorf("pipeline execution: %w", runErr)
+	}
+	if result.Status != pipeline.OutcomeSuccess {
+		return fmt.Errorf("pipeline finished with status: %s", result.Status)
+	}
+	return nil
 }
 
 // buildConsoleEventHandlers creates the agent and pipeline event handlers for

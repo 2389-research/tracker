@@ -250,17 +250,30 @@ func (r *ReviewHybridContent) View() string {
 
 	sb.WriteString(r.viewport.View())
 	sb.WriteString("\n")
-
-	// Divider with scroll position.
 	sb.WriteString(Styles.Muted.Render(fmt.Sprintf(
 		"─── Review (%d%%) ── PgUp/PgDn scroll ───",
 		int(r.viewport.ScrollPercent()*100))))
 	sb.WriteString("\n")
 
-	// Radio options.
+	r.writeReviewRadioOptions(&sb)
+	r.writeReviewOtherOption(&sb)
+
+	if r.onOther {
+		sb.WriteString("\n")
+		sb.WriteString(r.textarea.View())
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(Styles.Muted.Render(r.reviewHintText()))
+
+	return sb.String()
+}
+
+// writeReviewRadioOptions renders each labeled radio option for ReviewHybridContent.
+func (r *ReviewHybridContent) writeReviewRadioOptions(sb *strings.Builder) {
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
 	normalStyle := lipgloss.NewStyle()
-
 	for i, label := range r.labels {
 		if i == r.cursor && !r.onOther {
 			sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", label)))
@@ -269,32 +282,29 @@ func (r *ReviewHybridContent) View() string {
 		}
 		sb.WriteString("\n")
 	}
+}
 
-	// "Other" option.
-	if r.isOnOther() && !r.onOther {
+// writeReviewOtherOption renders the "other" radio option for ReviewHybridContent.
+func (r *ReviewHybridContent) writeReviewOtherOption(sb *strings.Builder) {
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
+	normalStyle := lipgloss.NewStyle()
+	switch {
+	case r.isOnOther() && !r.onOther:
 		sb.WriteString(selectedStyle.Render("  ● other (provide feedback)"))
-	} else if r.onOther {
+	case r.onOther:
 		sb.WriteString(selectedStyle.Render("  ● other:"))
-	} else {
+	default:
 		sb.WriteString(normalStyle.Render("  ○ other (provide feedback)"))
 	}
 	sb.WriteString("\n")
+}
 
-	// Textarea (visible when "other" is active).
+// reviewHintText returns the keyboard hint string for ReviewHybridContent.
+func (r *ReviewHybridContent) reviewHintText() string {
 	if r.onOther {
-		sb.WriteString("\n")
-		sb.WriteString(r.textarea.View())
-		sb.WriteString("\n")
+		return "type feedback  ctrl+s submit  esc back to options  ↑ back"
 	}
-
-	sb.WriteString("\n")
-	hint := "↑↓ navigate  enter select  esc cancel  pgup/pgdn scroll"
-	if r.onOther {
-		hint = "type feedback  ctrl+s submit  esc back to options  ↑ back"
-	}
-	sb.WriteString(Styles.Muted.Render(hint))
-
-	return sb.String()
+	return "↑↓ navigate  enter select  esc cancel  pgup/pgdn scroll"
 }
 
 func renderReviewHybridMarkdown(md string, width int) string {

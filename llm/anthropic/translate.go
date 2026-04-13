@@ -135,17 +135,29 @@ func extractSystemAndMessages(messages []llm.Message) ([]anthropicContent, []ant
 	var system []anthropicContent
 	var converted []anthropicMessage
 	for _, m := range messages {
-		if m.Role == llm.RoleSystem || m.Role == llm.RoleDeveloper {
-			for _, part := range m.Content {
-				if part.Kind == llm.KindText {
-					system = append(system, anthropicContent{Type: "text", Text: part.Text})
-				}
-			}
+		if isSystemRole(m.Role) {
+			system = append(system, extractSystemContent(m)...)
 		} else {
 			converted = append(converted, translateMessage(m))
 		}
 	}
 	return system, mergeConsecutiveMessages(converted)
+}
+
+// isSystemRole returns true for system and developer message roles.
+func isSystemRole(role llm.Role) bool {
+	return role == llm.RoleSystem || role == llm.RoleDeveloper
+}
+
+// extractSystemContent extracts text content parts from a system/developer message.
+func extractSystemContent(m llm.Message) []anthropicContent {
+	var out []anthropicContent
+	for _, part := range m.Content {
+		if part.Kind == llm.KindText {
+			out = append(out, anthropicContent{Type: "text", Text: part.Text})
+		}
+	}
+	return out
 }
 
 // appendResponseFormatInstruction appends JSON format instructions to system content.
@@ -355,21 +367,41 @@ func translateContentPart(part llm.ContentPart) (anthropicContent, bool) {
 	case llm.KindImage:
 		return translateImagePart(part)
 	case llm.KindToolCall:
-		if part.ToolCall != nil {
-			return anthropicContent{Type: "tool_use", ID: part.ToolCall.ID, Name: part.ToolCall.Name, Input: part.ToolCall.Arguments}, true
-		}
+		return translateToolCallContent(part)
 	case llm.KindToolResult:
-		if part.ToolResult != nil {
-			return anthropicContent{Type: "tool_result", ToolUseID: part.ToolResult.ToolCallID, Content: part.ToolResult.Content, IsError: part.ToolResult.IsError}, true
-		}
+		return translateToolResultContent(part)
 	case llm.KindThinking:
-		if part.Thinking != nil {
-			return anthropicContent{Type: "thinking", Thinking: part.Thinking.Text, Signature: part.Thinking.Signature}, true
-		}
+		return translateThinkingContent(part)
 	case llm.KindRedactedThinking:
-		if part.Thinking != nil {
-			return anthropicContent{Type: "redacted_thinking", Data: part.Thinking.Signature}, true
-		}
+		return translateRedactedThinkingContent(part)
+	}
+	return anthropicContent{}, false
+}
+
+func translateToolCallContent(part llm.ContentPart) (anthropicContent, bool) {
+	if part.ToolCall != nil {
+		return anthropicContent{Type: "tool_use", ID: part.ToolCall.ID, Name: part.ToolCall.Name, Input: part.ToolCall.Arguments}, true
+	}
+	return anthropicContent{}, false
+}
+
+func translateToolResultContent(part llm.ContentPart) (anthropicContent, bool) {
+	if part.ToolResult != nil {
+		return anthropicContent{Type: "tool_result", ToolUseID: part.ToolResult.ToolCallID, Content: part.ToolResult.Content, IsError: part.ToolResult.IsError}, true
+	}
+	return anthropicContent{}, false
+}
+
+func translateThinkingContent(part llm.ContentPart) (anthropicContent, bool) {
+	if part.Thinking != nil {
+		return anthropicContent{Type: "thinking", Thinking: part.Thinking.Text, Signature: part.Thinking.Signature}, true
+	}
+	return anthropicContent{}, false
+}
+
+func translateRedactedThinkingContent(part llm.ContentPart) (anthropicContent, bool) {
+	if part.Thinking != nil {
+		return anthropicContent{Type: "redacted_thinking", Data: part.Thinking.Signature}, true
 	}
 	return anthropicContent{}, false
 }

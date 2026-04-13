@@ -248,38 +248,8 @@ func parseDIPSource(source string) (*pipeline.Graph, error) {
 // base URL support and retry middleware. If provider is non-empty, only
 // that provider is configured (returns error if unknown).
 func buildClient(provider string) (*llm.Client, error) {
-	constructors := map[string]func(string) (llm.ProviderAdapter, error){
-		"anthropic": func(key string) (llm.ProviderAdapter, error) {
-			var opts []anthropic.Option
-			if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-				opts = append(opts, anthropic.WithBaseURL(base))
-			}
-			return anthropic.New(key, opts...), nil
-		},
-		"openai": func(key string) (llm.ProviderAdapter, error) {
-			var opts []openai.Option
-			if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
-				opts = append(opts, openai.WithBaseURL(base))
-			}
-			return openai.New(key, opts...), nil
-		},
-		"gemini": func(key string) (llm.ProviderAdapter, error) {
-			var opts []google.Option
-			if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
-				opts = append(opts, google.WithBaseURL(base))
-			}
-			return google.New(key, opts...), nil
-		},
-		"openai-compat": func(key string) (llm.ProviderAdapter, error) {
-			var opts []openaicompat.Option
-			if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
-				opts = append(opts, openaicompat.WithBaseURL(base))
-			}
-			return openaicompat.New(key, opts...), nil
-		},
-	}
+	constructors := allProviderConstructors()
 
-	// If a specific provider is requested, only configure that one.
 	if provider != "" {
 		constructor, ok := constructors[provider]
 		if !ok {
@@ -296,14 +266,54 @@ func buildClient(provider string) (*llm.Client, error) {
 	}
 
 	// LLM transport retries handle transient API errors (rate limits, 5xx).
-	// This is separate from pipeline-level RetryPolicy which controls
-	// node re-execution on logical failures.
 	client.AddMiddleware(llm.NewRetryMiddleware(
 		llm.WithMaxRetries(3),
 		llm.WithBaseDelay(2*time.Second),
 	))
 
 	return client, nil
+}
+
+// allProviderConstructors returns the full map of provider constructor functions.
+func allProviderConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
+	return map[string]func(string) (llm.ProviderAdapter, error){
+		"anthropic":     newAnthropicAdapter,
+		"openai":        newOpenAIAdapter,
+		"gemini":        newGeminiAdapter,
+		"openai-compat": newOpenAICompatAdapter,
+	}
+}
+
+func newAnthropicAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []anthropic.Option
+	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
+		opts = append(opts, anthropic.WithBaseURL(base))
+	}
+	return anthropic.New(key, opts...), nil
+}
+
+func newOpenAIAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []openai.Option
+	if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
+		opts = append(opts, openai.WithBaseURL(base))
+	}
+	return openai.New(key, opts...), nil
+}
+
+func newGeminiAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []google.Option
+	if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
+		opts = append(opts, google.WithBaseURL(base))
+	}
+	return google.New(key, opts...), nil
+}
+
+func newOpenAICompatAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []openaicompat.Option
+	if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
+		opts = append(opts, openaicompat.WithBaseURL(base))
+	}
+	return openaicompat.New(key, opts...), nil
 }
 
 // Run executes the pipeline to completion.

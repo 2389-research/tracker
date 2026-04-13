@@ -154,15 +154,7 @@ func (b *BubbleteaInterviewer) askMode1Choice(prompt string, choices []string, d
 	}
 	ch := make(chan string, 1)
 	content := NewChoiceContent(prompt, choices, ch)
-	// Set cursor to default choice if provided.
-	if defaultChoice != "" {
-		for i, c := range choices {
-			if c == defaultChoice {
-				content.cursor = i
-				break
-			}
-		}
-	}
+	setDefaultCursor(content, choices, defaultChoice)
 	runner := choiceRunner{content: content, replyCh: ch}
 	p := tea.NewProgram(runner)
 	finalModel, err := p.Run()
@@ -170,13 +162,34 @@ func (b *BubbleteaInterviewer) askMode1Choice(prompt string, choices []string, d
 		return "", fmt.Errorf("TUI choice gate failed: %w", err)
 	}
 	cr := finalModel.(choiceRunner)
-	if cr.result == "" && len(choices) > 0 {
-		if defaultChoice != "" {
-			return defaultChoice, nil
-		}
-		return choices[0], nil
+	return resolveChoiceResult(cr.result, choices, defaultChoice), nil
+}
+
+// setDefaultCursor positions the cursor on the default choice.
+func setDefaultCursor(content *ChoiceContent, choices []string, defaultChoice string) {
+	if defaultChoice == "" {
+		return
 	}
-	return cr.result, nil
+	for i, c := range choices {
+		if c == defaultChoice {
+			content.cursor = i
+			return
+		}
+	}
+}
+
+// resolveChoiceResult returns the selected choice or the appropriate fallback.
+func resolveChoiceResult(result string, choices []string, defaultChoice string) string {
+	if result != "" {
+		return result
+	}
+	if defaultChoice != "" {
+		return defaultChoice
+	}
+	if len(choices) > 0 {
+		return choices[0]
+	}
+	return result
 }
 
 // freeformRunner wraps FreeformContent in a tea.Model for inline Mode 1 programs.

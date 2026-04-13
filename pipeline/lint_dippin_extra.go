@@ -9,25 +9,29 @@ import (
 
 // lintDIP105 checks for no guaranteed success path from start to exit.
 func lintDIP105(g *Graph) []string {
-	var warnings []string
 	if g.StartNode == "" || g.ExitNode == "" {
-		return warnings
+		return nil
 	}
+	if hasUnconditionalPath(g, g.StartNode, g.ExitNode) {
+		return nil
+	}
+	return []string{"warning[DIP105]: no guaranteed success path from start to exit (all paths require conditions)"}
+}
 
-	// BFS from start to exit using only unconditional edges
+// hasUnconditionalPath returns true if there is a path from start to goal
+// using only unconditional (no condition) edges.
+func hasUnconditionalPath(g *Graph, start, goal string) bool {
 	visited := make(map[string]bool)
-	queue := []string{g.StartNode}
-	visited[g.StartNode] = true
+	queue := []string{start}
+	visited[start] = true
 
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
 
-		if current == g.ExitNode {
-			// Found a guaranteed path
-			return warnings
+		if current == goal {
+			return true
 		}
-
 		for _, edge := range g.OutgoingEdges(current) {
 			if edge.Condition == "" && !visited[edge.To] {
 				visited[edge.To] = true
@@ -35,9 +39,7 @@ func lintDIP105(g *Graph) []string {
 			}
 		}
 	}
-
-	warnings = append(warnings, "warning[DIP105]: no guaranteed success path from start to exit (all paths require conditions)")
-	return warnings
+	return false
 }
 
 // lintDIP106 checks for undefined variable references in prompts.

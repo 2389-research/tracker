@@ -93,26 +93,33 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 // resolveBranchEdges determines the branch target edges for a parallel node.
 func (h *ParallelHandler) resolveBranchEdges(node *pipeline.Node) ([]*pipeline.Edge, error) {
-	var edges []*pipeline.Edge
+	edges := h.collectBranchEdges(node)
+	if len(edges) == 0 {
+		return nil, fmt.Errorf("parallel node %q has no branch targets", node.ID)
+	}
+	return edges, nil
+}
+
+// collectBranchEdges builds the edge list from parallel_targets attr or outgoing edges.
+func (h *ParallelHandler) collectBranchEdges(node *pipeline.Node) []*pipeline.Edge {
 	joinID := node.Attrs["parallel_join"]
 	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
+		var edges []*pipeline.Edge
 		for _, target := range strings.Split(targetsAttr, ",") {
 			target = strings.TrimSpace(target)
 			if target != "" {
 				edges = append(edges, &pipeline.Edge{From: node.ID, To: target})
 			}
 		}
-	} else {
-		for _, e := range h.graph.OutgoingEdges(node.ID) {
-			if e.To != joinID {
-				edges = append(edges, e)
-			}
+		return edges
+	}
+	var edges []*pipeline.Edge
+	for _, e := range h.graph.OutgoingEdges(node.ID) {
+		if e.To != joinID {
+			edges = append(edges, e)
 		}
 	}
-	if len(edges) == 0 {
-		return nil, fmt.Errorf("parallel node %q has no branch targets", node.ID)
-	}
-	return edges, nil
+	return edges
 }
 
 // branchResultMsg pairs a branch index with its parallel result.
@@ -125,22 +132,8 @@ type branchResultMsg struct {
 func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) []ParallelResult {
 	snapshot := pctx.Snapshot()
 	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
-
-	// Parse max_concurrency — 0 means unlimited.
-	var sem chan struct{}
-	if maxStr := parallelNode.Attrs["max_concurrency"]; maxStr != "" {
-		if n, err := strconv.Atoi(maxStr); err == nil && n > 0 {
-			sem = make(chan struct{}, n)
-		}
-	}
-
-	// Parse branch_timeout — zero means no timeout.
-	var branchTimeout time.Duration
-	if toStr := parallelNode.Attrs["branch_timeout"]; toStr != "" {
-		if d, err := time.ParseDuration(toStr); err == nil && d > 0 {
-			branchTimeout = d
-		}
-	}
+	sem := parseSemaphore(parallelNode.Attrs["max_concurrency"])
+	branchTimeout := parseBranchTimeout(parallelNode.Attrs["branch_timeout"])
 
 	resultsCh := make(chan branchResultMsg, len(edges))
 	var wg sync.WaitGroup
@@ -154,7 +147,6 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 			}
 			continue
 		}
-
 		execNode := applyBranchOverrides(targetNode, branchOverrides)
 		wg.Add(1)
 		go h.runBranch(ctx, i, execNode, snapshot, artifactDir, sem, branchTimeout, resultsCh, &wg)
@@ -170,11 +162,32 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 	return collected
 }
 
+// parseSemaphore creates a concurrency semaphore channel from a string, or nil for unlimited.
+func parseSemaphore(maxStr string) chan struct{} {
+	if maxStr == "" {
+		return nil
+	}
+	if n, err := strconv.Atoi(maxStr); err == nil && n > 0 {
+		return make(chan struct{}, n)
+	}
+	return nil
+}
+
+// parseBranchTimeout parses a duration string for per-branch timeout, returning 0 for none.
+func parseBranchTimeout(toStr string) time.Duration {
+	if toStr == "" {
+		return 0
+	}
+	if d, err := time.ParseDuration(toStr); err == nil && d > 0 {
+		return d
+	}
+	return 0
+}
+
 // runBranch executes a single parallel branch in its own goroutine.
 // sem, if non-nil, is a buffered channel used as a semaphore to cap concurrency.
 // branchTimeout, if > 0, is applied as a per-branch context deadline.
 func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
-	// Acquire semaphore slot with context cancellation support.
 	if sem != nil {
 		select {
 		case sem <- struct{}{}:
@@ -189,18 +202,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	}
 
 	defer wg.Done()
-	defer func() {
-		if r := recover(); r != nil {
-			resultsCh <- branchResultMsg{
-				index:  idx,
-				result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
-			}
-			h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-				Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
-				Message: fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
-			})
-		}
-	}()
+	defer h.recoverBranch(idx, tn, resultsCh)
 
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type: pipeline.EventStageStarted, Timestamp: time.Now(), NodeID: tn.ID,
@@ -221,31 +223,51 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 	outcome, err := h.registry.Execute(execCtx, tn, branchCtx)
 
-	// Auto-capture any pctx.Set() calls the handler made directly,
-	// not just values returned via Outcome.ContextUpdates. This prevents
-	// silent data loss when handlers write to the context as a side effect.
 	mergedUpdates := branchCtx.DiffFrom(snapshot)
 	for k, v := range outcome.ContextUpdates {
-		mergedUpdates[k] = v // explicit ContextUpdates take priority
+		mergedUpdates[k] = v
 	}
 
-	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
+	pr := buildBranchResult(tn.ID, outcome, mergedUpdates, err)
+	h.emitBranchComplete(tn.ID, pr)
+	resultsCh <- branchResultMsg{index: idx, result: pr}
+}
+
+// buildBranchResult assembles a ParallelResult from the branch execution outcome.
+func buildBranchResult(nodeID string, outcome pipeline.Outcome, mergedUpdates map[string]string, err error) ParallelResult {
+	pr := ParallelResult{NodeID: nodeID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
 	if err != nil {
 		pr.Status = pipeline.OutcomeFail
 		pr.Error = err.Error()
 	}
+	return pr
+}
 
+// recoverBranch is a deferred panic handler for parallel branch goroutines.
+func (h *ParallelHandler) recoverBranch(idx int, tn *pipeline.Node, resultsCh chan<- branchResultMsg) {
+	if r := recover(); r != nil {
+		resultsCh <- branchResultMsg{
+			index:  idx,
+			result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
+		}
+		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
+			Message: fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
+		})
+	}
+}
+
+// emitBranchComplete emits the appropriate pipeline event for a branch result.
+func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult) {
 	if pr.Status == pipeline.OutcomeFail {
 		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID, Message: pr.Error,
+			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: nodeID, Message: pr.Error,
 		})
 	} else {
 		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type: pipeline.EventStageCompleted, Timestamp: time.Now(), NodeID: tn.ID,
+			Type: pipeline.EventStageCompleted, Timestamp: time.Now(), NodeID: nodeID,
 		})
 	}
-
-	resultsCh <- branchResultMsg{index: idx, result: pr}
 }
 
 // aggregateStatus returns success if at least one branch succeeded, fail otherwise.

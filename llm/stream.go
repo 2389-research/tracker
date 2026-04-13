@@ -87,9 +87,7 @@ func (a *StreamAccumulator) Process(event StreamEvent) {
 	case EventReasoningSignature:
 		a.reasoningSignature = event.ReasoningSignature
 	case EventRedactedThinking:
-		if event.ReasoningSignature != "" {
-			a.redactedThinking = append(a.redactedThinking, event.ReasoningSignature)
-		}
+		a.processRedactedThinking(event)
 	case EventToolCallStart:
 		a.processToolCallStart(event)
 	case EventToolCallDelta:
@@ -98,6 +96,12 @@ func (a *StreamAccumulator) Process(event StreamEvent) {
 		a.processToolCallEnd()
 	case EventFinish:
 		a.processFinish(event)
+	}
+}
+
+func (a *StreamAccumulator) processRedactedThinking(event StreamEvent) {
+	if event.ReasoningSignature != "" {
+		a.redactedThinking = append(a.redactedThinking, event.ReasoningSignature)
 	}
 }
 

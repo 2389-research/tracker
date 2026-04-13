@@ -55,18 +55,24 @@ func nodeFlags(node *pipeline.Node, graph *pipeline.Graph) tui.NodeFlags {
 	if _, ok := node.Attrs["fan_in_sources"]; ok {
 		flags.IsFanIn = true
 	}
-	// A node is a parallel branch if any other node lists it as a parallel target.
+	if isParallelBranchNode(node.ID, graph) {
+		flags.IsParallelBranch = true
+	}
+	return flags
+}
+
+// isParallelBranchNode returns true if any node in the graph lists nodeID as a parallel target.
+func isParallelBranchNode(nodeID string, graph *pipeline.Graph) bool {
 	for _, other := range graph.Nodes {
 		if targets, ok := other.Attrs["parallel_targets"]; ok {
 			for _, t := range splitTargets(targets) {
-				if t == node.ID {
-					flags.IsParallelBranch = true
-					return flags
+				if t == nodeID {
+					return true
 				}
 			}
 		}
 	}
-	return flags
+	return false
 }
 
 // splitTargets splits a comma-separated list of target node IDs.

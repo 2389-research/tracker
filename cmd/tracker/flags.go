@@ -94,15 +94,42 @@ func parseAuditFlags(args []string, cfg *runConfig) (runConfig, error) {
 // parseRunFlags parses flags for the default "run" mode, supporting flags
 // in any order relative to the pipeline file argument.
 func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
-	// Handle --help / -h that wasn't caught as subcommand.
-	if len(args) > 1 {
-		switch args[1] {
-		case "--help", "-h", "help":
-			return cfg, flag.ErrHelp
-		}
+	if isHelpRequest(args) {
+		return cfg, flag.ErrHelp
 	}
 
-	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	fs := newRunFlagSet(args[0], &cfg)
+	positional, err := parseArgsMultiPass(fs, args[1:])
+	if err != nil {
+		return cfg, err
+	}
+
+	if len(positional) < 1 {
+		return cfg, errUsage
+	}
+	cfg.pipelineFile = positional[0]
+
+	if err := validateBackend(cfg.backend); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+// isHelpRequest returns true when the second argument is a help flag.
+func isHelpRequest(args []string) bool {
+	if len(args) <= 1 {
+		return false
+	}
+	switch args[1] {
+	case "--help", "-h", "help":
+		return true
+	}
+	return false
+}
+
+// newRunFlagSet creates and configures the FlagSet for run command flags.
+func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
+	fs := flag.NewFlagSet(progName, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
 	fs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
@@ -115,39 +142,34 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	fs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
 	fs.StringVar(&cfg.autopilot, "autopilot", "", "Replace human gates with LLM judge (lax/mid/hard/mentor)")
 	fs.BoolVar(&cfg.autoApprove, "auto-approve", false, "Auto-approve all human gates (no LLM, deterministic)")
+	return fs
+}
 
-	// Go's flag package stops parsing at the first non-flag argument.
-	// To support flags in any order (e.g. "tracker pipeline.dot -c cp.json"),
-	// we gather all non-flag arguments across multiple parse passes.
-	remaining := args[1:]
+// parseArgsMultiPass runs multiple flag parse passes to collect positional
+// args even when flags appear after positional arguments.
+func parseArgsMultiPass(fs *flag.FlagSet, remaining []string) ([]string, error) {
 	var positional []string
 	for len(remaining) > 0 {
 		if err := fs.Parse(remaining); err != nil {
-			return cfg, err
+			return nil, err
 		}
 		positional = append(positional, fs.Args()...)
-		// If Parse consumed everything or stopped at a non-flag, we need
-		// to skip past the first positional arg and try parsing the rest.
 		if fs.NArg() == 0 {
 			break
 		}
-		// Skip the first positional arg and continue parsing the rest.
 		remaining = fs.Args()[1:]
 		positional = positional[:len(positional)-fs.NArg()]
 		positional = append(positional, fs.Args()[0])
 	}
+	return positional, nil
+}
 
-	if len(positional) < 1 {
-		return cfg, errUsage
+// validateBackend returns an error if the backend name is not recognized.
+func validateBackend(backend string) error {
+	if backend != "" && backend != "native" && backend != "claude-code" && backend != "acp" {
+		return fmt.Errorf("invalid backend %q: must be one of: native, claude-code, acp", backend)
 	}
-
-	cfg.pipelineFile = positional[0]
-
-	if cfg.backend != "" && cfg.backend != "native" && cfg.backend != "claude-code" && cfg.backend != "acp" {
-		return cfg, fmt.Errorf("invalid backend %q: must be one of: native, claude-code, acp", cfg.backend)
-	}
-
-	return cfg, nil
+	return nil
 }
 
 func printUsage(w io.Writer) {

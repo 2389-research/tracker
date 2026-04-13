@@ -280,33 +280,8 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 		return loopResult{action: loopReturn, err: fmt.Errorf("no outgoing edges from non-exit node %q", currentNodeID)}
 	}
 
-	// Strict failure mode: if the node failed and the only outgoing edges are
-	// unconditional, fail the pipeline rather than silently continuing.
-	// Enabled by default — pipelines that intentionally continue after failure
-	// should add explicit "when ctx.outcome = fail" edges.
-	if outcome, _ := s.pctx.Get(ContextKeyOutcome); outcome == OutcomeFail {
-		if !hasAnyConditionalEdge(edges) {
-			e.emit(PipelineEvent{
-				Type:      EventStageFailed,
-				Timestamp: time.Now(),
-				NodeID:    currentNodeID,
-				Message:   fmt.Sprintf("node %q failed with no failure edge — stopping pipeline", currentNodeID),
-			})
-			s.trace.AddEntry(*traceEntry)
-			s.trace.EndTime = time.Now()
-			return loopResult{
-				action: loopReturn,
-				result: &EngineResult{
-					RunID:          s.runID,
-					Status:         OutcomeFail,
-					CompletedNodes: s.cp.CompletedNodes,
-					Context:        s.pctx.Snapshot(),
-					Trace:          s.trace,
-					Usage:          s.trace.AggregateUsage(),
-				},
-				err: fmt.Errorf("node %q failed with no conditional edges to handle failure", currentNodeID),
-			}
-		}
+	if lr := e.checkStrictFailure(s, currentNodeID, traceEntry, edges); lr != nil {
+		return *lr
 	}
 
 	next, err := e.selectEdge(edges, s.pctx)
@@ -320,21 +295,59 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
 	if s.cp.IsCompleted(next.To) {
-		nextID, cont, result, err := e.handleLoopRestart(s, next.To, traceEntry)
-		if err != nil {
-			return loopResult{action: loopReturn, result: result, err: err}
-		}
-		if result != nil {
-			return loopResult{action: loopReturn, result: result}
-		}
-		if cont {
-			return loopResult{action: loopContinue, nextNodeID: nextID}
-		}
+		return e.handleCompletedTarget(s, next.To, traceEntry)
 	}
 
 	s.cp.CurrentNode = next.To
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	return loopResult{action: loopContinue, nextNodeID: next.To}
+}
+
+// checkStrictFailure enforces strict failure mode: a failed node with only
+// unconditional outgoing edges stops the pipeline.
+func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *TraceEntry, edges []*Edge) *loopResult {
+	outcome, _ := s.pctx.Get(ContextKeyOutcome)
+	if outcome != OutcomeFail || hasAnyConditionalEdge(edges) {
+		return nil
+	}
+	e.emit(PipelineEvent{
+		Type:      EventStageFailed,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("node %q failed with no failure edge — stopping pipeline", nodeID),
+	})
+	s.trace.AddEntry(*traceEntry)
+	s.trace.EndTime = time.Now()
+	lr := loopResult{
+		action: loopReturn,
+		result: &EngineResult{
+			RunID:          s.runID,
+			Status:         OutcomeFail,
+			CompletedNodes: s.cp.CompletedNodes,
+			Context:        s.pctx.Snapshot(),
+			Trace:          s.trace,
+			Usage:          s.trace.AggregateUsage(),
+		},
+		err: fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
+	}
+	return &lr
+}
+
+// handleCompletedTarget handles the case where the selected next node was already completed.
+func (e *Engine) handleCompletedTarget(s *runState, nextTo string, traceEntry *TraceEntry) loopResult {
+	nextID, cont, result, err := e.handleLoopRestart(s, nextTo, traceEntry)
+	if err != nil {
+		return loopResult{action: loopReturn, result: result, err: err}
+	}
+	if result != nil {
+		return loopResult{action: loopReturn, result: result}
+	}
+	if cont {
+		return loopResult{action: loopContinue, nextNodeID: nextID}
+	}
+	s.cp.CurrentNode = nextTo
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	return loopResult{action: loopContinue, nextNodeID: nextTo}
 }
 
 // cancelledResult builds the result when the context is cancelled.

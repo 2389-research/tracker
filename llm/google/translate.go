@@ -154,8 +154,7 @@ func translateGeminiTools(tools []llm.ToolDefinition) []geminiToolDecl {
 
 // buildGenerationConfig creates a Gemini generation config from the request fields.
 func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
-	needsResponseFormat := req.ResponseFormat != nil &&
-		(req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
+	needsResponseFormat := responseFormatRequired(req)
 
 	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat {
 		return nil
@@ -170,12 +169,23 @@ func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 		gc.MaxOutputTokens = req.MaxTokens
 	}
 	if needsResponseFormat {
-		gc.ResponseMimeType = "application/json"
-		if req.ResponseFormat.Type == "json_schema" && len(req.ResponseFormat.JSONSchema) > 0 {
-			gc.ResponseSchema = req.ResponseFormat.JSONSchema
-		}
+		applyResponseFormat(gc, req.ResponseFormat)
 	}
 	return gc
+}
+
+// responseFormatRequired returns true when the request specifies a JSON response format.
+func responseFormatRequired(req *llm.Request) bool {
+	return req.ResponseFormat != nil &&
+		(req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
+}
+
+// applyResponseFormat sets ResponseMimeType and optionally ResponseSchema on the config.
+func applyResponseFormat(gc *geminiGenConfig, rf *llm.ResponseFormat) {
+	gc.ResponseMimeType = "application/json"
+	if rf.Type == "json_schema" && len(rf.JSONSchema) > 0 {
+		gc.ResponseSchema = rf.JSONSchema
+	}
 }
 
 // mergeProviderOptions merges provider-specific options into the JSON body.
@@ -323,44 +333,8 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		return nil, err
 	}
 
-	var content []llm.ContentPart
-	var finishReason string
-
-	if len(gr.Candidates) > 0 {
-		candidate := gr.Candidates[0]
-		finishReason = candidate.FinishReason
-
-		for _, part := range candidate.Content.Parts {
-			if part.Text != "" {
-				content = append(content, llm.ContentPart{
-					Kind: llm.KindText,
-					Text: part.Text,
-				})
-			}
-			if part.FunctionCall != nil {
-				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-				content = append(content, llm.ContentPart{
-					Kind: llm.KindToolCall,
-					ToolCall: &llm.ToolCallData{
-						ID:             syntheticID(),
-						Name:           part.FunctionCall.Name,
-						Arguments:      argsJSON,
-						ThoughtSigData: part.ThoughtSignature,
-					},
-				})
-			}
-		}
-	}
-
-	var usage llm.Usage
-	if gr.UsageMetadata != nil {
-		usage = llm.Usage{
-			InputTokens:  gr.UsageMetadata.PromptTokenCount,
-			OutputTokens: gr.UsageMetadata.CandidatesTokenCount,
-			TotalTokens:  gr.UsageMetadata.TotalTokenCount,
-		}
-	}
-
+	content, finishReason := extractCandidateContent(gr.Candidates)
+	usage := extractUsage(gr.UsageMetadata)
 	fr := translateFinishReason(finishReason, hasToolCalls(content))
 
 	return &llm.Response{
@@ -374,6 +348,45 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		Usage:        usage,
 		Raw:          raw,
 	}, nil
+}
+
+// extractCandidateContent pulls content parts and finish reason from the first candidate.
+func extractCandidateContent(candidates []geminiCandidate) ([]llm.ContentPart, string) {
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+	candidate := candidates[0]
+	var content []llm.ContentPart
+	for _, part := range candidate.Content.Parts {
+		if part.Text != "" {
+			content = append(content, llm.ContentPart{Kind: llm.KindText, Text: part.Text})
+		}
+		if part.FunctionCall != nil {
+			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+			content = append(content, llm.ContentPart{
+				Kind: llm.KindToolCall,
+				ToolCall: &llm.ToolCallData{
+					ID:             syntheticID(),
+					Name:           part.FunctionCall.Name,
+					Arguments:      argsJSON,
+					ThoughtSigData: part.ThoughtSignature,
+				},
+			})
+		}
+	}
+	return content, candidate.FinishReason
+}
+
+// extractUsage converts Gemini usage metadata to the unified Usage struct.
+func extractUsage(meta *geminiUsageMeta) llm.Usage {
+	if meta == nil {
+		return llm.Usage{}
+	}
+	return llm.Usage{
+		InputTokens:  meta.PromptTokenCount,
+		OutputTokens: meta.CandidatesTokenCount,
+		TotalTokens:  meta.TotalTokenCount,
+	}
 }
 
 func hasToolCalls(parts []llm.ContentPart) bool {

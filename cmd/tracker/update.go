@@ -321,57 +321,66 @@ func downloadToTemp(dir, url string) (string, error) {
 // Note: checksums are fetched from the same GitHub release as the binary.
 // This guards against download corruption, not supply chain compromise.
 func verifyChecksum(filePath, assetName, checksumsURL string) error {
-	req, err := http.NewRequest("GET", checksumsURL, nil)
+	expectedHash, err := fetchExpectedHash(assetName, checksumsURL)
 	if err != nil {
 		return err
+	}
+	actualHash, err := computeFileSHA256(filePath)
+	if err != nil {
+		return err
+	}
+	if actualHash != expectedHash {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+	}
+	return nil
+}
+
+// fetchExpectedHash downloads checksums.txt and extracts the hash for assetName.
+func fetchExpectedHash(assetName, checksumsURL string) (string, error) {
+	req, err := http.NewRequest("GET", checksumsURL, nil)
+	if err != nil {
+		return "", err
 	}
 	req.Header.Set("User-Agent", "tracker/"+version)
 
 	resp, err := updateDLClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("fetch checksums: HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("fetch checksums: HTTP %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsSize))
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Parse checksums.txt: each line is "hash  filename"
-	var expectedHash string
 	for _, line := range strings.Split(string(body), "\n") {
 		parts := strings.Fields(line)
 		if len(parts) == 2 && parts[1] == assetName {
-			expectedHash = parts[0]
-			break
+			return parts[0], nil
 		}
 	}
-	if expectedHash == "" {
-		return fmt.Errorf("no checksum found for %s", assetName)
-	}
+	return "", fmt.Errorf("no checksum found for %s", assetName)
+}
 
-	// Compute actual hash
+// computeFileSHA256 opens a file and returns its SHA256 hex digest.
+func computeFileSHA256(filePath string) (string, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return err
+		return "", err
 	}
-	actualHash := hex.EncodeToString(h.Sum(nil))
-
-	if actualHash != expectedHash {
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
-	}
-	return nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // extractBinaryFromTar extracts the "tracker" binary from a .tar.gz file.

@@ -184,7 +184,6 @@ func ParseQuestions(markdown string) []Question {
 	index := 0
 
 	for _, line := range lines {
-		// Track fenced code block state
 		if reFence.MatchString(line) {
 			inFence = !inFence
 			continue
@@ -193,30 +192,13 @@ func ParseQuestions(markdown string) []Question {
 			continue
 		}
 
-		text, matched := matchQuestion(line)
-		if !matched {
+		q, ok := parseQuestionLine(line, index+1)
+		if !ok {
 			continue
 		}
-
-		// Strip markdown emphasis from question text for clean labels.
-		text = stripEmphasis(text)
-
-		// Extract trailing options parenthetical
-		var options []string
-		if m := reOptions.FindStringSubmatch(text); m != nil {
-			options = splitOptions(m[1])
-			// Strip the parenthetical from the text
-			text = strings.TrimSpace(reOptions.ReplaceAllString(text, ""))
-		}
-
 		index++
-		options = filterOtherOption(options)
-		questions = append(questions, Question{
-			Index:   index,
-			Text:    text,
-			Options: options,
-			IsYesNo: isYesNoQuestion(options, text),
-		})
+		q.Index = index
+		questions = append(questions, q)
 
 		if index >= maxQuestions {
 			break
@@ -224,6 +206,30 @@ func ParseQuestions(markdown string) []Question {
 	}
 
 	return questions
+}
+
+// parseQuestionLine attempts to parse a single markdown line into a Question.
+// Returns the Question and true if the line matched; otherwise returns false.
+func parseQuestionLine(line string, _ int) (Question, bool) {
+	text, matched := matchQuestion(line)
+	if !matched {
+		return Question{}, false
+	}
+
+	text = stripEmphasis(text)
+
+	var options []string
+	if m := reOptions.FindStringSubmatch(text); m != nil {
+		options = splitOptions(m[1])
+		text = strings.TrimSpace(reOptions.ReplaceAllString(text, ""))
+	}
+
+	options = filterOtherOption(options)
+	return Question{
+		Text:    text,
+		Options: options,
+		IsYesNo: isYesNoQuestion(options, text),
+	}, true
 }
 
 // matchQuestion returns the question text and true if the line matches any

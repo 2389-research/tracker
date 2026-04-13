@@ -143,36 +143,50 @@ func parsePatch(patch string) ([]patchOperation, error) {
 
 	var ops []patchOperation
 	for i := 1; i < len(lines); {
-		line := lines[i]
-		switch {
-		case line == "*** End Patch":
-			return ops, nil
-		case strings.HasPrefix(line, "*** Add File: "):
-			op, next, err := parseAddFile(lines, i)
-			if err != nil {
-				return nil, err
-			}
-			ops = append(ops, op)
-			i = next
-		case strings.HasPrefix(line, "*** Delete File: "):
-			ops = append(ops, patchOperation{
-				kind: patchDelete,
-				path: strings.TrimPrefix(line, "*** Delete File: "),
-			})
-			i++
-		case strings.HasPrefix(line, "*** Update File: "):
-			op, next, err := parseUpdateFile(lines, i)
-			if err != nil {
-				return nil, err
-			}
-			ops = append(ops, op)
-			i = next
-		default:
-			return nil, fmt.Errorf("unexpected patch line %q", line)
+		op, next, done, err := parsePatchLine(lines, i)
+		if err != nil {
+			return nil, err
 		}
+		if done {
+			return ops, nil
+		}
+		if op != nil {
+			ops = append(ops, *op)
+		}
+		i = next
 	}
 
 	return nil, fmt.Errorf("patch is missing *** End Patch")
+}
+
+// parsePatchLine processes one patch directive starting at line index i.
+// Returns (op, nextIndex, done, error). done=true signals *** End Patch was found.
+func parsePatchLine(lines []string, i int) (*patchOperation, int, bool, error) {
+	line := lines[i]
+	switch {
+	case line == "*** End Patch":
+		return nil, i, true, nil
+	case strings.HasPrefix(line, "*** Add File: "):
+		op, next, err := parseAddFile(lines, i)
+		if err != nil {
+			return nil, i, false, err
+		}
+		return &op, next, false, nil
+	case strings.HasPrefix(line, "*** Delete File: "):
+		op := patchOperation{
+			kind: patchDelete,
+			path: strings.TrimPrefix(line, "*** Delete File: "),
+		}
+		return &op, i + 1, false, nil
+	case strings.HasPrefix(line, "*** Update File: "):
+		op, next, err := parseUpdateFile(lines, i)
+		if err != nil {
+			return nil, i, false, err
+		}
+		return &op, next, false, nil
+	default:
+		return nil, i, false, fmt.Errorf("unexpected patch line %q", line)
+	}
 }
 
 // parseAddFile parses an "*** Add File:" block starting at line index i.

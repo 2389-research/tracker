@@ -134,53 +134,56 @@ func logEmptyResponseIfNeeded(resp *llm.Response, httpResp *http.Response, respB
 func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
 	ch := make(chan llm.StreamEvent, 64)
 	emitProviderEvents := shouldEmitProviderEvents(req)
-
 	go func() {
 		defer close(ch)
-
-		body, err := translateRequest(req)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: translate request: %w", err)}
-			return
-		}
-
-		// Inject stream: true into the body.
-		var bodyMap map[string]any
-		if err := json.Unmarshal(body, &bodyMap); err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-		bodyMap["stream"] = true
-		body, err = json.Marshal(bodyMap)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+messagesPath, bytes.NewReader(body))
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-		a.setHeaders(httpReq, req)
-
-		httpResp, err := a.httpClient.Do(httpReq)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
-			return
-		}
-		defer httpResp.Body.Close()
-
-		if httpResp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(httpResp.Body)
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "anthropic")}
-			return
-		}
-
-		a.parseSSE(httpResp.Body, ch, emitProviderEvents)
+		a.streamRequest(ctx, req, ch, emitProviderEvents)
 	}()
-
 	return ch
+}
+
+// streamRequest performs the HTTP request and streams events to ch.
+func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
+	body, err := buildStreamBody(req)
+	if err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+		return
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+messagesPath, bytes.NewReader(body))
+	if err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+		return
+	}
+	a.setHeaders(httpReq, req)
+
+	httpResp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
+		return
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "anthropic")}
+		return
+	}
+
+	a.parseSSE(httpResp.Body, ch, emitProviderEvents)
+}
+
+// buildStreamBody translates the request to JSON and injects stream:true.
+func buildStreamBody(req *llm.Request) ([]byte, error) {
+	body, err := translateRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: translate request: %w", err)
+	}
+	var bodyMap map[string]any
+	if err := json.Unmarshal(body, &bodyMap); err != nil {
+		return nil, err
+	}
+	bodyMap["stream"] = true
+	return json.Marshal(bodyMap)
 }
 
 // Close releases resources held by the adapter.

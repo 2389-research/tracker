@@ -422,28 +422,44 @@ func (ic *InterviewContent) handleSelectEnter(f *interviewField) tea.Cmd {
 
 // updateConfirmField handles the yes/no toggle.
 func (ic *InterviewContent) updateConfirmField(km tea.KeyMsg, f *interviewField) tea.Cmd {
+	if cmd, handled := ic.handleConfirmFieldSpecialKey(km, f); handled {
+		return cmd
+	}
+	return ic.handleConfirmFieldStringKey(km, f)
+}
+
+// handleConfirmFieldSpecialKey handles non-printable key events for confirm fields.
+func (ic *InterviewContent) handleConfirmFieldSpecialKey(km tea.KeyMsg, f *interviewField) (tea.Cmd, bool) {
 	switch km.Type {
 	case tea.KeyUp:
-		return ic.moveCursor(-1)
+		return ic.moveCursor(-1), true
 	case tea.KeyDown:
-		return ic.moveCursor(1)
+		return ic.moveCursor(1), true
 	case tea.KeyEnter:
-		// Set yes (or toggle) and advance.
-		if f.confirmed == nil {
-			v := true
-			f.confirmed = &v
-		} else {
-			v := !*f.confirmed
-			f.confirmed = &v
-		}
-		return ic.moveCursor(1)
+		toggleConfirmed(f)
+		return ic.moveCursor(1), true
 	case tea.KeyEscape:
 		if ic.cursor > 0 {
-			return ic.moveCursor(-1)
+			return ic.moveCursor(-1), true
 		}
-		return ic.cancel()
+		return ic.cancel(), true
 	}
+	return nil, false
+}
 
+// toggleConfirmed sets or toggles the confirmed boolean on a field.
+func toggleConfirmed(f *interviewField) {
+	if f.confirmed == nil {
+		v := true
+		f.confirmed = &v
+	} else {
+		v := !*f.confirmed
+		f.confirmed = &v
+	}
+}
+
+// handleConfirmFieldStringKey handles printable key events for confirm fields.
+func (ic *InterviewContent) handleConfirmFieldStringKey(km tea.KeyMsg, f *interviewField) tea.Cmd {
 	switch km.String() {
 	case "y", "Y":
 		v := true
@@ -869,24 +885,34 @@ func (ic *InterviewContent) fieldAnswered(f *interviewField) bool {
 // fieldAnswerText returns a short summary of the field's answer for the progress list.
 func (ic *InterviewContent) fieldAnswerText(f *interviewField) string {
 	if f.question.IsYesNo {
-		if f.confirmed == nil {
-			return ""
-		}
-		if *f.confirmed {
-			return "Yes"
-		}
-		return "No"
+		return yesNoAnswerText(f.confirmed)
 	}
 	if len(f.question.Options) > 0 {
-		if !f.selected {
-			return ""
-		}
-		if f.isOther || f.selectCursor >= len(f.question.Options) {
-			return strings.TrimSpace(f.otherInput.Value())
-		}
-		return f.question.Options[f.selectCursor]
+		return optionAnswerText(f)
 	}
 	return strings.TrimSpace(f.textInput.Value())
+}
+
+// yesNoAnswerText returns the display text for a yes/no field answer.
+func yesNoAnswerText(confirmed *bool) string {
+	if confirmed == nil {
+		return ""
+	}
+	if *confirmed {
+		return "Yes"
+	}
+	return "No"
+}
+
+// optionAnswerText returns the display text for an option-based field answer.
+func optionAnswerText(f *interviewField) string {
+	if !f.selected {
+		return ""
+	}
+	if f.isOther || f.selectCursor >= len(f.question.Options) {
+		return strings.TrimSpace(f.otherInput.Value())
+	}
+	return f.question.Options[f.selectCursor]
 }
 
 // pluralS returns "s" if n != 1.

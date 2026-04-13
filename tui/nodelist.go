@@ -99,7 +99,20 @@ func (nl *NodeList) View() string {
 		return sb.String()
 	}
 
-	// Build lines with connectors between visited nodes.
+	all := nl.buildNodeLines(nodes)
+	nl.autoScroll(nodes, all)
+	visible := nl.applyScrollWindow(all)
+
+	for _, l := range visible {
+		sb.WriteString(l.line)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// buildNodeLines constructs the full list of display lines including connectors.
+func (nl *NodeList) buildNodeLines(nodes []NodeEntry) []indexedLine {
 	var all []indexedLine
 	for i, node := range nodes {
 		if i > 0 {
@@ -110,26 +123,19 @@ func (nl *NodeList) View() string {
 		}
 		all = append(all, indexedLine{nl.renderNodeLineAt(node, i), i})
 	}
+	return all
+}
 
-	// Auto-scroll to keep the running node visible.
-	nl.autoScroll(nodes, all)
-
-	// Apply scroll window.
-	visible := all
-	if nl.height > 0 && len(visible) > nl.height {
-		end := nl.scroll + nl.height
-		if end > len(visible) {
-			end = len(visible)
-		}
-		visible = visible[nl.scroll:end]
+// applyScrollWindow clips the lines slice to the configured scroll window.
+func (nl *NodeList) applyScrollWindow(all []indexedLine) []indexedLine {
+	if nl.height <= 0 || len(all) <= nl.height {
+		return all
 	}
-
-	for _, l := range visible {
-		sb.WriteString(l.line)
-		sb.WriteString("\n")
+	end := nl.scroll + nl.height
+	if end > len(all) {
+		end = len(all)
 	}
-
-	return sb.String()
+	return all[nl.scroll:end]
 }
 
 // renderNodeLine builds the display line for a single node entry.

@@ -90,38 +90,47 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 		toolTimings: make(map[string]time.Duration),
 	}
 
-	// Apply all options first (including WithEnvironment and WithTools).
 	for _, opt := range opts {
 		opt(s)
 	}
 	s.registry.SetOutputLimits(s.config.ToolOutputLimits)
 
-	// Register built-in tools if an environment is set.
-	// Custom tools registered via WithTools take precedence over built-ins.
-	if s.env != nil {
-		builtins := builtInToolsForConfig(s.config, s.env)
-		for _, t := range builtins {
-			// Only register built-in if no custom tool with the same name exists.
-			if s.registry.Get(t.Name()) == nil {
-				s.registry.Register(t)
-			}
+	s.registerBuiltinTools()
+	s.initToolCache()
+	s.registerSpawnTool()
+
+	return s, nil
+}
+
+// registerBuiltinTools registers built-in tools for the session environment.
+// Custom tools registered via WithTools take precedence over built-ins.
+func (s *Session) registerBuiltinTools() {
+	if s.env == nil {
+		return
+	}
+	for _, t := range builtInToolsForConfig(s.config, s.env) {
+		if s.registry.Get(t.Name()) == nil {
+			s.registry.Register(t)
 		}
 	}
+}
 
-	// Initialize tool result cache if enabled.
+// initToolCache initializes the tool result cache when enabled by config.
+func (s *Session) initToolCache() {
 	if s.config.CacheToolResults {
 		s.cache = newToolCache()
 	}
+}
 
-	// Register spawn_agent tool if a session runner is provided.
-	if s.sessionRunner != nil {
-		spawnTool := tools.NewSpawnAgentTool(s.sessionRunner)
-		if s.registry.Get(spawnTool.Name()) == nil {
-			s.registry.Register(spawnTool)
-		}
+// registerSpawnTool registers the spawn_agent tool when a session runner is set.
+func (s *Session) registerSpawnTool() {
+	if s.sessionRunner == nil {
+		return
 	}
-
-	return s, nil
+	spawnTool := tools.NewSpawnAgentTool(s.sessionRunner)
+	if s.registry.Get(spawnTool.Name()) == nil {
+		s.registry.Register(spawnTool)
+	}
 }
 
 // turnState carries per-loop mutable state for the agentic turn loop.

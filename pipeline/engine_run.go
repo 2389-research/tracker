@@ -105,25 +105,40 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 		return
 	}
 
-	routingHints := make(map[string]string)
-	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeySuggestedNextNodes} {
-		if val, ok := pctx.Get(key); ok && val != "" {
-			routingHints[key] = val
-		}
-	}
+	routingHints := captureRoutingHints(pctx)
 
 	fidelity := ResolveFidelity(e.nodeOrDefault(cp.CurrentNode), e.graph.Attrs)
 	degraded := DegradeFidelity(fidelity)
 	compacted := CompactContext(pctx, cp.CompletedNodes, degraded, e.artifactDir, runID)
 
+	replaceContextValues(pctx, compacted)
+	restoreRoutingHints(pctx, routingHints)
+}
+
+// captureRoutingHints saves the current routing hint values from context.
+func captureRoutingHints(pctx *PipelineContext) map[string]string {
+	hints := make(map[string]string)
+	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeySuggestedNextNodes} {
+		if val, ok := pctx.Get(key); ok && val != "" {
+			hints[key] = val
+		}
+	}
+	return hints
+}
+
+// replaceContextValues clears the context and repopulates it with compacted values.
+func replaceContextValues(pctx *PipelineContext, compacted map[string]string) {
 	for k := range pctx.Snapshot() {
 		pctx.Set(k, "")
 	}
 	for k, v := range compacted {
 		pctx.Set(k, v)
 	}
+}
 
-	for k, v := range routingHints {
+// restoreRoutingHints re-applies routing hints that were cleared during compaction.
+func restoreRoutingHints(pctx *PipelineContext, hints map[string]string) {
+	for k, v := range hints {
 		if existing, ok := pctx.Get(k); !ok || existing == "" {
 			pctx.Set(k, v)
 		}

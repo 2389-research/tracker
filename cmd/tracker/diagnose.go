@@ -31,15 +31,40 @@ type nodeFailure struct {
 // diagnoseMostRecent finds and diagnoses the most recent run.
 func diagnoseMostRecent(workdir string) error {
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	latestID, err := findMostRecentRunID(runsDir)
+	if err != nil {
+		return err
+	}
+	return runDiagnose(workdir, latestID)
+}
+
+// findMostRecentRunID scans the runs directory for the most recent checkpoint.
+func findMostRecentRunID(runsDir string) (string, error) {
+	entries, err := readRunsDir(runsDir)
+	if err != nil {
+		return "", err
+	}
+	latestID := pickLatestRunID(runsDir, entries)
+	if latestID == "" {
+		return "", fmt.Errorf("no runs found with valid checkpoints")
+	}
+	return latestID, nil
+}
+
+// readRunsDir reads the runs directory, mapping ENOENT to a user-friendly error.
+func readRunsDir(runsDir string) ([]os.DirEntry, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("no runs found — run a pipeline first")
+			return nil, fmt.Errorf("no runs found — run a pipeline first")
 		}
-		return fmt.Errorf("cannot read runs directory: %w", err)
+		return nil, fmt.Errorf("cannot read runs directory: %w", err)
 	}
+	return entries, nil
+}
 
-	// Find the most recent run by checkpoint timestamp.
+// pickLatestRunID returns the directory name of the most recent valid checkpoint.
+func pickLatestRunID(runsDir string, entries []os.DirEntry) string {
 	var latestID string
 	var latestTime time.Time
 	for _, e := range entries {
@@ -56,10 +81,7 @@ func diagnoseMostRecent(workdir string) error {
 			latestID = e.Name()
 		}
 	}
-	if latestID == "" {
-		return fmt.Errorf("no runs found with valid checkpoints")
-	}
-	return runDiagnose(workdir, latestID)
+	return latestID
 }
 
 // runDiagnose performs deep failure analysis on a pipeline run.
@@ -130,36 +152,40 @@ func collectNodeFailures(runDir string) map[string]*nodeFailure {
 		if !e.IsDir() {
 			continue
 		}
-		statusPath := filepath.Join(runDir, e.Name(), "status.json")
-		data, err := os.ReadFile(statusPath)
-		if err != nil {
-			continue
+		if f := loadNodeFailure(runDir, e.Name()); f != nil {
+			failures[e.Name()] = f
 		}
-
-		var status struct {
-			Outcome        string            `json:"outcome"`
-			ContextUpdates map[string]string `json:"context_updates"`
-		}
-		if err := json.Unmarshal(data, &status); err != nil {
-			continue
-		}
-
-		if status.Outcome != "fail" {
-			continue
-		}
-
-		f := &nodeFailure{
-			nodeID:  e.Name(),
-			outcome: status.Outcome,
-		}
-		if status.ContextUpdates != nil {
-			f.stdout = status.ContextUpdates["tool_stdout"]
-			f.stderr = status.ContextUpdates["tool_stderr"]
-		}
-		failures[e.Name()] = f
 	}
 
 	return failures
+}
+
+// loadNodeFailure reads and parses a node's status.json, returning a nodeFailure
+// if the node failed, or nil otherwise.
+func loadNodeFailure(runDir, nodeID string) *nodeFailure {
+	statusPath := filepath.Join(runDir, nodeID, "status.json")
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		return nil
+	}
+
+	var status struct {
+		Outcome        string            `json:"outcome"`
+		ContextUpdates map[string]string `json:"context_updates"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		return nil
+	}
+	if status.Outcome != "fail" {
+		return nil
+	}
+
+	f := &nodeFailure{nodeID: nodeID, outcome: status.Outcome}
+	if status.ContextUpdates != nil {
+		f.stdout = status.ContextUpdates["tool_stdout"]
+		f.stderr = status.ContextUpdates["tool_stderr"]
+	}
+	return f
 }
 
 // diagnoseEntry is a parsed activity.jsonl line with fields needed for diagnosis.
@@ -181,10 +207,15 @@ func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
 	}
 
 	stageStarts := make(map[string]time.Time)
-	// Track per-node failure signatures to detect deterministic retries.
-	failSignatures := make(map[string][]string) // nodeID → list of error signatures per failure
+	failSignatures := make(map[string][]string)
 
-	for _, line := range strings.Split(string(data), "\n") {
+	parseActivityLines(string(data), failures, stageStarts, failSignatures)
+	applyRetryAnalysis(failures, failSignatures)
+}
+
+// parseActivityLines processes each JSONL line from the activity log.
+func parseActivityLines(data string, failures map[string]*nodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
+	for _, line := range strings.Split(data, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -195,8 +226,10 @@ func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
+}
 
-	// Analyze retry patterns.
+// applyRetryAnalysis updates failure records with retry count and pattern data.
+func applyRetryAnalysis(failures map[string]*nodeFailure, failSignatures map[string][]string) {
 	for nodeID, sigs := range failSignatures {
 		f, ok := failures[nodeID]
 		if !ok {

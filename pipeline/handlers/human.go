@@ -409,24 +409,34 @@ func (c *ConsoleInterviewer) resolveOptionInput(ans *InterviewAnswer, q Question
 		}
 	}
 	// Match by numeric index
-	var idx int
-	if _, err := fmt.Sscanf(input, "%d", &idx); err == nil {
-		if idx >= 1 && idx <= len(q.Options) {
-			ans.Answer = q.Options[idx-1]
-			return
-		}
-		if idx == len(q.Options)+1 {
-			// User selected "Other" by number — prompt for freeform text.
-			fmt.Fprintf(c.Writer, "Enter your answer: ")
-			otherLine, otherErr := c.readLine()
-			if otherErr == nil {
-				ans.Answer = strings.TrimSpace(otherLine)
-			}
-			return
-		}
+	if c.resolveNumericInput(ans, q, input) {
+		return
 	}
 	// Treat as "Other" freeform
 	ans.Answer = input
+}
+
+// resolveNumericInput attempts to match input as a 1-based option index.
+// Returns true if the input was handled (matched or "Other" selected).
+func (c *ConsoleInterviewer) resolveNumericInput(ans *InterviewAnswer, q Question, input string) bool {
+	var idx int
+	if _, err := fmt.Sscanf(input, "%d", &idx); err != nil {
+		return false
+	}
+	if idx >= 1 && idx <= len(q.Options) {
+		ans.Answer = q.Options[idx-1]
+		return true
+	}
+	if idx == len(q.Options)+1 {
+		// User selected "Other" by number — prompt for freeform text.
+		fmt.Fprintf(c.Writer, "Enter your answer: ")
+		otherLine, otherErr := c.readLine()
+		if otherErr == nil {
+			ans.Answer = strings.TrimSpace(otherLine)
+		}
+		return true
+	}
+	return false
 }
 
 // askFreeformQuestion handles an open-ended question with no options.
@@ -564,30 +574,11 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=freeform but interviewer does not support freeform input", node.ID)
 	}
 
-	// Collect edge labels for the labeled variant.
-	var labels []string
-	if h.graph != nil {
-		for _, e := range h.graph.OutgoingEdges(node.ID) {
-			if e.Label != "" {
-				labels = append(labels, e.Label)
-			}
-		}
-	}
+	labels := collectEdgeLabels(h.graph, node.ID)
 	defaultLabel := node.Attrs["default"]
-
-	// Use labeled variant if available and there are labels.
-	var response string
-	var err error
 	timeout := parseHumanTimeout(node)
-	if lfi, ok := fi.(LabeledFreeformInterviewer); ok && len(labels) > 0 {
-		response, err = withTimeout(timeout, func() (string, error) {
-			return lfi.AskFreeformWithLabels(prompt, labels, defaultLabel)
-		})
-	} else {
-		response, err = withTimeout(timeout, func() (string, error) {
-			return fi.AskFreeform(prompt)
-		})
-	}
+
+	response, err := askFreeformWithTimeout(fi, prompt, labels, defaultLabel, timeout)
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
 	}
@@ -605,6 +596,32 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	}
 
 	return outcome, nil
+}
+
+// collectEdgeLabels returns all non-empty labels from outgoing edges of nodeID.
+func collectEdgeLabels(graph *pipeline.Graph, nodeID string) []string {
+	if graph == nil {
+		return nil
+	}
+	var labels []string
+	for _, e := range graph.OutgoingEdges(nodeID) {
+		if e.Label != "" {
+			labels = append(labels, e.Label)
+		}
+	}
+	return labels
+}
+
+// askFreeformWithTimeout dispatches to the labeled or plain freeform variant with a timeout.
+func askFreeformWithTimeout(fi FreeformInterviewer, prompt string, labels []string, defaultLabel string, timeout time.Duration) (string, error) {
+	if lfi, ok := fi.(LabeledFreeformInterviewer); ok && len(labels) > 0 {
+		return withTimeout(timeout, func() (string, error) {
+			return lfi.AskFreeformWithLabels(prompt, labels, defaultLabel)
+		})
+	}
+	return withTimeout(timeout, func() (string, error) {
+		return fi.AskFreeform(prompt)
+	})
 }
 
 // matchFreeformLabel tries to match freeform response text against outgoing edge labels.

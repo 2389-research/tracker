@@ -186,26 +186,28 @@ func (h *acpClientHandler) ReadTextFile(_ context.Context, p acp.ReadTextFileReq
 	if err != nil {
 		return acp.ReadTextFileResponse{}, &acp.RequestError{Code: -32603, Message: err.Error()}
 	}
-	content := string(data)
-
-	// Apply line/limit filtering if requested.
-	if p.Line != nil || p.Limit != nil {
-		lines := strings.Split(content, "\n")
-		start := 0
-		if p.Line != nil && *p.Line > 1 {
-			start = *p.Line - 1 // 1-based to 0-based
-		}
-		if start > len(lines) {
-			start = len(lines)
-		}
-		end := len(lines)
-		if p.Limit != nil && start+*p.Limit < end {
-			end = start + *p.Limit
-		}
-		content = strings.Join(lines[start:end], "\n")
-	}
-
+	content := applyLineFilter(string(data), p.Line, p.Limit)
 	return acp.ReadTextFileResponse{Content: content}, nil
+}
+
+// applyLineFilter slices a file's content by optional 1-based start line and limit.
+func applyLineFilter(content string, line, limit *int) string {
+	if line == nil && limit == nil {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	start := 0
+	if line != nil && *line > 1 {
+		start = *line - 1
+	}
+	if start > len(lines) {
+		start = len(lines)
+	}
+	end := len(lines)
+	if limit != nil && start+*limit < end {
+		end = start + *limit
+	}
+	return strings.Join(lines[start:end], "\n")
 }
 
 // WriteTextFile writes content to a file on the local filesystem.

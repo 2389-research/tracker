@@ -46,65 +46,55 @@ func ExpandVariables(
 	if text == "" {
 		return text, nil
 	}
+	tcMode := len(toolCommandMode) > 0 && toolCommandMode[0]
+	return expandVariablesPass(text, ctx, params, graphAttrs, strict, tcMode)
+}
 
-	// Single-pass expansion: scan left to right, replacing variables.
-	// After each replacement, advance past the inserted value to prevent
-	// recursive expansion (e.g., if a value itself contains "${...}").
-	// Malformed tokens are skipped, not treated as terminators.
+// expandVariablesPass performs the single-pass variable expansion scan.
+func expandVariablesPass(
+	text string,
+	ctx *PipelineContext,
+	params map[string]string,
+	graphAttrs map[string]string,
+	strict bool,
+	tcMode bool,
+) (string, error) {
 	var buf strings.Builder
 	buf.Grow(len(text))
 	pos := 0
 	for pos < len(text) {
-		// Find the next variable start.
 		startIdx := strings.Index(text[pos:], "${")
 		if startIdx == -1 {
 			buf.WriteString(text[pos:])
 			break
 		}
 		startIdx += pos
-
-		// Write everything before the variable.
 		buf.WriteString(text[pos:startIdx])
 
-		// Find the closing brace.
 		endIdx := strings.Index(text[startIdx+2:], "}")
 		if endIdx == -1 {
-			// No closing brace — write the rest as literal.
 			buf.WriteString(text[startIdx:])
 			pos = len(text)
 			break
 		}
 		endIdx += startIdx + 2
 
-		// Extract the variable expression.
 		varExpr := text[startIdx+2 : endIdx]
-
-		// Parse namespace.key — skip malformed tokens.
 		parts := strings.SplitN(varExpr, ".", 2)
 		if varExpr == "" || len(parts) != 2 {
-			// Malformed: write as literal and continue scanning.
 			buf.WriteString(text[startIdx : endIdx+1])
 			pos = endIdx + 1
 			continue
 		}
 
-		namespace := parts[0]
-		key := parts[1]
-
-		value, err := resolveVariableValue(namespace, key, ctx, params, graphAttrs, strict,
-			len(toolCommandMode) > 0 && toolCommandMode[0])
+		value, err := resolveVariableValue(parts[0], parts[1], ctx, params, graphAttrs, strict, tcMode)
 		if err != nil {
 			return "", err
 		}
-
-		// Write the resolved value (NOT re-scanned for further variables).
 		buf.WriteString(value)
 		pos = endIdx + 1
 	}
-
-	result := buf.String()
-
-	return result, nil
+	return buf.String(), nil
 }
 
 // resolveVariableValue looks up a variable and applies tool-command safety and strict-mode checks.
@@ -187,28 +177,42 @@ func availableKeys(
 	params map[string]string,
 	graphAttrs map[string]string,
 ) []string {
-	var keys []string
-
-	switch namespace {
-	case "ctx":
-		if ctx != nil {
-			snapshot := ctx.Snapshot()
-			for k := range snapshot {
-				keys = append(keys, k)
-			}
-		}
-	case "params":
-		for k := range params {
-			keys = append(keys, k)
-		}
-	case "graph":
-		for k := range graphAttrs {
-			keys = append(keys, k)
-		}
-	}
-
+	keys := keysForNamespace(namespace, ctx, params, graphAttrs)
 	if len(keys) == 0 {
 		return []string{"(none)"}
+	}
+	return keys
+}
+
+// keysForNamespace extracts map keys for the given variable namespace.
+func keysForNamespace(namespace string, ctx *PipelineContext, params, graphAttrs map[string]string) []string {
+	switch namespace {
+	case "ctx":
+		return snapshotKeys(ctx)
+	case "params":
+		return mapKeys(params)
+	case "graph":
+		return mapKeys(graphAttrs)
+	}
+	return nil
+}
+
+func snapshotKeys(ctx *PipelineContext) []string {
+	if ctx == nil {
+		return nil
+	}
+	snapshot := ctx.Snapshot()
+	keys := make([]string, 0, len(snapshot))
+	for k := range snapshot {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
 	}
 	return keys
 }
@@ -240,7 +244,6 @@ func ParseSubgraphParams(paramsStr string) map[string]string {
 // InjectParamsIntoGraph creates a new graph with variable expansion applied to all
 // node attributes. This is used by the subgraph handler to inject params before execution.
 func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
-	// Create a shallow copy of the graph
 	clone := &Graph{
 		Name:      g.Name,
 		Nodes:     make(map[string]*Node, len(g.Nodes)),
@@ -251,51 +254,54 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 		ExitNode:  g.ExitNode,
 	}
 
-	// Clone and expand variables in all nodes
 	for id, node := range g.Nodes {
-		clonedNode := &Node{
-			ID:      node.ID,
-			Shape:   node.Shape,
-			Label:   node.Label,
-			Handler: node.Handler,
-			Attrs:   make(map[string]string, len(node.Attrs)),
+		cloned, err := cloneNodeWithExpansion(id, node, params, g.Attrs)
+		if err != nil {
+			return nil, err
 		}
-
-		// Expand variables in all attributes
-		for key, val := range node.Attrs {
-			expanded, err := ExpandVariables(val, nil, params, g.Attrs, false)
-			if err != nil {
-				return nil, fmt.Errorf("failed to expand variable in node %s attr %s: %w", id, key, err)
-			}
-			clonedNode.Attrs[key] = expanded
-		}
-
-		// Also expand the label if it contains variables
-		if node.Label != "" {
-			expanded, err := ExpandVariables(node.Label, nil, params, g.Attrs, false)
-			if err != nil {
-				return nil, fmt.Errorf("failed to expand variable in node %s label: %w", id, err)
-			}
-			clonedNode.Label = expanded
-		}
-
-		clone.Nodes[id] = clonedNode
+		clone.Nodes[id] = cloned
 	}
 
-	// Deep-clone edges to prevent concurrent subgraph executions from
-	// sharing mutable edge state.
 	for _, e := range g.Edges {
-		clonedEdge := &Edge{
+		clone.Edges = append(clone.Edges, &Edge{
 			From:      e.From,
 			To:        e.To,
 			Label:     e.Label,
 			Condition: e.Condition,
 			Attrs:     copyStringMap(e.Attrs),
-		}
-		clone.Edges = append(clone.Edges, clonedEdge)
+		})
 	}
 
 	return clone, nil
+}
+
+// cloneNodeWithExpansion clones a node and expands param variables in its attributes.
+func cloneNodeWithExpansion(id string, node *Node, params, graphAttrs map[string]string) (*Node, error) {
+	cloned := &Node{
+		ID:      node.ID,
+		Shape:   node.Shape,
+		Label:   node.Label,
+		Handler: node.Handler,
+		Attrs:   make(map[string]string, len(node.Attrs)),
+	}
+
+	for key, val := range node.Attrs {
+		expanded, err := ExpandVariables(val, nil, params, graphAttrs, false)
+		if err != nil {
+			return nil, fmt.Errorf("failed to expand variable in node %s attr %s: %w", id, key, err)
+		}
+		cloned.Attrs[key] = expanded
+	}
+
+	if node.Label != "" {
+		expanded, err := ExpandVariables(node.Label, nil, params, graphAttrs, false)
+		if err != nil {
+			return nil, fmt.Errorf("failed to expand variable in node %s label: %w", id, err)
+		}
+		cloned.Label = expanded
+	}
+
+	return cloned, nil
 }
 
 func copyStringMap(m map[string]string) map[string]string {

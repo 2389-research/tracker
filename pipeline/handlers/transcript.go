@@ -22,32 +22,44 @@ func (c *transcriptCollector) HandleEvent(evt agent.Event) {
 	case agent.EventTurnStart:
 		c.lines = append(c.lines, fmt.Sprintf("TURN %d", evt.Turn))
 	case agent.EventToolCallStart:
-		c.lines = append(c.lines, fmt.Sprintf("TOOL CALL: %s", evt.ToolName))
-		if evt.ToolInput != "" {
-			c.lines = append(c.lines, "INPUT:")
-			c.lines = append(c.lines, evt.ToolInput)
-		}
+		c.appendToolCallStart(evt)
 	case agent.EventToolCallEnd:
-		c.lines = append(c.lines, fmt.Sprintf("TOOL RESULT: %s", evt.ToolName))
-		if evt.ToolOutput != "" {
-			c.lines = append(c.lines, "OUTPUT:")
-			c.lines = append(c.lines, evt.ToolOutput)
-		}
-		if evt.ToolError != "" {
-			c.lines = append(c.lines, "ERROR:")
-			c.lines = append(c.lines, evt.ToolError)
-		}
+		c.appendToolCallEnd(evt)
 	case agent.EventTextDelta:
-		if evt.Text != "" {
-			c.textParts = append(c.textParts, evt.Text)
-			c.lines = append(c.lines, "TEXT:")
-			c.lines = append(c.lines, evt.Text)
-		}
+		c.appendTextDelta(evt)
 	case agent.EventError:
 		if evt.Err != nil {
 			c.lines = append(c.lines, "ERROR:")
 			c.lines = append(c.lines, evt.Err.Error())
 		}
+	}
+}
+
+func (c *transcriptCollector) appendToolCallStart(evt agent.Event) {
+	c.lines = append(c.lines, fmt.Sprintf("TOOL CALL: %s", evt.ToolName))
+	if evt.ToolInput != "" {
+		c.lines = append(c.lines, "INPUT:")
+		c.lines = append(c.lines, evt.ToolInput)
+	}
+}
+
+func (c *transcriptCollector) appendToolCallEnd(evt agent.Event) {
+	c.lines = append(c.lines, fmt.Sprintf("TOOL RESULT: %s", evt.ToolName))
+	if evt.ToolOutput != "" {
+		c.lines = append(c.lines, "OUTPUT:")
+		c.lines = append(c.lines, evt.ToolOutput)
+	}
+	if evt.ToolError != "" {
+		c.lines = append(c.lines, "ERROR:")
+		c.lines = append(c.lines, evt.ToolError)
+	}
+}
+
+func (c *transcriptCollector) appendTextDelta(evt agent.Event) {
+	if evt.Text != "" {
+		c.textParts = append(c.textParts, evt.Text)
+		c.lines = append(c.lines, "TEXT:")
+		c.lines = append(c.lines, evt.Text)
 	}
 }
 

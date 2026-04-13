@@ -430,35 +430,28 @@ func extractNodeIO(io ir.NodeIO, attrs map[string]string) {
 // extractWorkflowDefaults maps IR WorkflowDefaults to graph-level attributes.
 // These provide fallback values for nodes that don't specify per-node config.
 func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]string) {
-	if defaults.Model != "" {
-		attrs["llm_model"] = defaults.Model
-	}
-	if defaults.Provider != "" {
-		attrs["llm_provider"] = defaults.Provider
-	}
-	if defaults.RetryPolicy != "" {
-		attrs["default_retry_policy"] = defaults.RetryPolicy
-	}
+	setIfNonEmpty(attrs, "llm_model", defaults.Model)
+	setIfNonEmpty(attrs, "llm_provider", defaults.Provider)
+	setIfNonEmpty(attrs, "default_retry_policy", defaults.RetryPolicy)
 	if defaults.MaxRetries > 0 {
 		attrs["default_max_retry"] = strconv.Itoa(defaults.MaxRetries)
 	}
-	if defaults.Fidelity != "" {
-		attrs["default_fidelity"] = defaults.Fidelity
-	}
+	setIfNonEmpty(attrs, "default_fidelity", defaults.Fidelity)
 	if defaults.MaxRestarts > 0 {
 		attrs["max_restarts"] = strconv.Itoa(defaults.MaxRestarts)
 	}
-	if defaults.RestartTarget != "" {
-		attrs["restart_target"] = defaults.RestartTarget
-	}
+	setIfNonEmpty(attrs, "restart_target", defaults.RestartTarget)
 	if defaults.CacheTools {
 		attrs["cache_tool_results"] = "true"
 	}
-	if defaults.Compaction != "" {
-		attrs["context_compaction"] = defaults.Compaction
-	}
-	if defaults.OnResume != "" {
-		attrs["on_resume"] = defaults.OnResume
+	setIfNonEmpty(attrs, "context_compaction", defaults.Compaction)
+	setIfNonEmpty(attrs, "on_resume", defaults.OnResume)
+}
+
+// setIfNonEmpty sets attrs[key] = value only when value is non-empty.
+func setIfNonEmpty(attrs map[string]string, key, value string) {
+	if value != "" {
+		attrs[key] = value
 	}
 }
 

@@ -273,19 +273,21 @@ func validateConditionalFailEdges(g *Graph, ve *ValidationError) {
 		if n.Shape != "diamond" {
 			continue
 		}
-		outgoing := g.OutgoingEdges(n.ID)
-		hasFail := false
-		for _, e := range outgoing {
-			cond := strings.ToLower(e.Condition)
-			if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
-				hasFail = true
-				break
-			}
-		}
-		if !hasFail {
+		if !edgesHaveFailCondition(g.OutgoingEdges(n.ID)) {
 			ve.addWarning(fmt.Sprintf("conditional node %q has no fail edge", n.ID))
 		}
 	}
+}
+
+// edgesHaveFailCondition returns true if any edge has a fail-like condition.
+func edgesHaveFailCondition(edges []*Edge) bool {
+	for _, e := range edges {
+		cond := strings.ToLower(e.Condition)
+		if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
+			return true
+		}
+	}
+	return false
 }
 
 // validateEdgeLabelConsistency warns when a conditional (diamond) node has a mix
@@ -331,16 +333,7 @@ func AutoFix(g *Graph) []string {
 		if n.Shape != "diamond" {
 			continue
 		}
-		outgoing := g.OutgoingEdges(n.ID)
-		hasFail := false
-		for _, e := range outgoing {
-			cond := strings.ToLower(e.Condition)
-			if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
-				hasFail = true
-				break
-			}
-		}
-		if !hasFail {
+		if !edgesHaveFailCondition(g.OutgoingEdges(n.ID)) {
 			g.AddEdge(&Edge{
 				From:      n.ID,
 				To:        n.ID,

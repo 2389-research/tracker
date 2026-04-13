@@ -88,28 +88,27 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	}
 
 	artifactRoot := h.resolveArtifactRoot(pctx)
-
 	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
-
-	// Report token usage from backends that bypass the LLM client middleware
-	// (e.g., claude-code subprocess, ACP agents). Native backend usage flows
-	// through the TokenTracker middleware automatically — skip to avoid double-counting.
-	switch backend.(type) {
-	case *ClaudeCodeBackend:
-		if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
-			h.tokenTracker.AddUsage("claude-code", sessResult.Usage)
-		}
-	case *ACPBackend:
-		if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
-			h.tokenTracker.AddUsage("acp", sessResult.Usage)
-		}
-	}
+	h.trackExternalBackendUsage(backend, sessResult.Usage)
 
 	if runErr != nil {
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
 	}
-
 	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector)
+}
+
+// trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
+// Native backend usage is tracked by the middleware automatically — skip to avoid double-counting.
+func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBackend, usage llm.Usage) {
+	if h.tokenTracker == nil || usage.TotalTokens == 0 {
+		return
+	}
+	switch backend.(type) {
+	case *ClaudeCodeBackend:
+		h.tokenTracker.AddUsage("claude-code", usage)
+	case *ACPBackend:
+		h.tokenTracker.AddUsage("acp", usage)
+	}
 }
 
 // selectBackend chooses the appropriate AgentBackend based on node attributes

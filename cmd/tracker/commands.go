@@ -37,30 +37,53 @@ func fillDefaultDeps(deps commandDeps) commandDeps {
 
 // dispatchCommand routes the command mode to the appropriate executor.
 func dispatchCommand(cfg runConfig, deps commandDeps) error {
+	if cmd, ok := dispatchUtilityCommand(cfg, deps); ok {
+		return cmd
+	}
+	return executeRun(cfg, deps)
+}
+
+// dispatchUtilityCommand handles non-run subcommands.
+// Returns (result, true) when a subcommand matched, (nil, false) otherwise.
+func dispatchUtilityCommand(cfg runConfig, deps commandDeps) (error, bool) {
+	if err, ok := dispatchInfoCommands(cfg, deps); ok {
+		return err, true
+	}
+	return dispatchPipelineCommands(cfg)
+}
+
+// dispatchInfoCommands handles version/diagnose/doctor/setup/update subcommands.
+func dispatchInfoCommands(cfg runConfig, deps commandDeps) (error, bool) {
 	switch cfg.mode {
 	case modeVersion:
-		return executeVersion()
+		return executeVersion(), true
 	case modeDiagnose:
-		return executeDiagnose(cfg)
+		return executeDiagnose(cfg), true
 	case modeDoctor:
-		return executeDoctor(cfg)
+		return executeDoctor(cfg), true
 	case modeSetup:
-		return deps.runSetup()
-	case modeValidate:
-		return executeValidate(cfg)
-	case modeSimulate:
-		return executeSimulate(cfg)
-	case modeAudit:
-		return executeAudit(cfg)
-	case modeWorkflows:
-		return executeWorkflows()
-	case modeInit:
-		return executeInit(cfg)
+		return deps.runSetup(), true
 	case modeUpdate:
-		return executeUpdate()
-	default:
-		return executeRun(cfg, deps)
+		return executeUpdate(), true
 	}
+	return nil, false
+}
+
+// dispatchPipelineCommands handles validate/simulate/audit/workflows/init subcommands.
+func dispatchPipelineCommands(cfg runConfig) (error, bool) {
+	switch cfg.mode {
+	case modeValidate:
+		return executeValidate(cfg), true
+	case modeSimulate:
+		return executeSimulate(cfg), true
+	case modeAudit:
+		return executeAudit(cfg), true
+	case modeWorkflows:
+		return executeWorkflows(), true
+	case modeInit:
+		return executeInit(cfg), true
+	}
+	return nil, false
 }
 
 func executeVersion() error {
@@ -98,19 +121,10 @@ func printProviderStatus() {
 		{"openai", []string{"OPENAI_API_KEY"}},
 		{"gemini", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
 	}
-	var ready, missing []string
+	var ready []string
 	for _, p := range providers {
-		found := false
-		for _, e := range p.envs {
-			if os.Getenv(e) != "" {
-				found = true
-				break
-			}
-		}
-		if found {
+		if providerHasKey(p.envs) {
 			ready = append(ready, p.name)
-		} else {
-			missing = append(missing, p.name)
 		}
 	}
 	if len(ready) > 0 {
@@ -118,6 +132,16 @@ func printProviderStatus() {
 	} else {
 		fmt.Println("  providers: none (run `tracker setup`)")
 	}
+}
+
+// providerHasKey returns true if any of the given env vars is non-empty.
+func providerHasKey(envs []string) bool {
+	for _, e := range envs {
+		if os.Getenv(e) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func executeWorkflows() error {
@@ -298,6 +322,11 @@ func resolveRunIDToDir(runsDir, runID string) (string, error) {
 		}
 	}
 
+	return resolveRunMatches(runsDir, runID, matches)
+}
+
+// resolveRunMatches picks the correct directory from a list of prefix matches.
+func resolveRunMatches(runsDir, runID string, matches []string) (string, error) {
 	switch len(matches) {
 	case 0:
 		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
