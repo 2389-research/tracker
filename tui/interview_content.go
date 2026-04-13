@@ -140,46 +140,55 @@ func (ic *InterviewContent) prefill(prev *handlers.InterviewResult) {
 		if !ok {
 			continue
 		}
+		ic.prefillField(i, f, ans)
+	}
+}
 
-		if f.question.IsYesNo {
-			// Confirm field — check before Options so yes/no questions
-			// with residual options route here.
-			switch strings.ToLower(ans.Answer) {
-			case "yes":
-				v := true
-				ic.fields[i].confirmed = &v
-			case "no":
-				v := false
-				ic.fields[i].confirmed = &v
-			}
-			if ans.Elaboration != "" {
-				ic.fields[i].elaboration.SetValue(ans.Elaboration)
-			}
-		} else if len(f.question.Options) > 0 {
-			// Select field: find matching option or set as "Other".
-			matched := false
-			for j, opt := range f.question.Options {
-				if strings.EqualFold(opt, ans.Answer) {
-					ic.fields[i].selectCursor = j
-					ic.fields[i].selected = true
-					matched = true
-					break
-				}
-			}
-			if !matched && ans.Answer != "" {
-				// Set as "Other"
-				ic.fields[i].selectCursor = len(f.question.Options)
-				ic.fields[i].isOther = true
-				ic.fields[i].selected = true
-				ic.fields[i].otherInput.SetValue(ans.Answer)
-			}
-			if ans.Elaboration != "" {
-				ic.fields[i].elaboration.SetValue(ans.Elaboration)
-			}
-		} else {
-			// Text field.
-			ic.fields[i].textInput.SetValue(ans.Answer)
+// prefillField restores a single field from a previous answer.
+func (ic *InterviewContent) prefillField(i int, f interviewField, ans handlers.InterviewAnswer) {
+	if f.question.IsYesNo {
+		ic.prefillYesNo(i, ans)
+	} else if len(f.question.Options) > 0 {
+		ic.prefillSelect(i, f, ans)
+	} else {
+		ic.fields[i].textInput.SetValue(ans.Answer)
+	}
+}
+
+// prefillYesNo restores a yes/no confirmation field.
+func (ic *InterviewContent) prefillYesNo(i int, ans handlers.InterviewAnswer) {
+	switch strings.ToLower(ans.Answer) {
+	case "yes":
+		v := true
+		ic.fields[i].confirmed = &v
+	case "no":
+		v := false
+		ic.fields[i].confirmed = &v
+	}
+	if ans.Elaboration != "" {
+		ic.fields[i].elaboration.SetValue(ans.Elaboration)
+	}
+}
+
+// prefillSelect restores a radio-select field, falling back to "Other" when no option matches.
+func (ic *InterviewContent) prefillSelect(i int, f interviewField, ans handlers.InterviewAnswer) {
+	matched := false
+	for j, opt := range f.question.Options {
+		if strings.EqualFold(opt, ans.Answer) {
+			ic.fields[i].selectCursor = j
+			ic.fields[i].selected = true
+			matched = true
+			break
 		}
+	}
+	if !matched && ans.Answer != "" {
+		ic.fields[i].selectCursor = len(f.question.Options)
+		ic.fields[i].isOther = true
+		ic.fields[i].selected = true
+		ic.fields[i].otherInput.SetValue(ans.Answer)
+	}
+	if ans.Elaboration != "" {
+		ic.fields[i].elaboration.SetValue(ans.Elaboration)
 	}
 }
 
@@ -187,39 +196,7 @@ func (ic *InterviewContent) prefill(prev *handlers.InterviewResult) {
 func (ic *InterviewContent) collectAnswers() handlers.InterviewResult {
 	answers := make([]handlers.InterviewAnswer, len(ic.fields))
 	for i, f := range ic.fields {
-		ans := handlers.InterviewAnswer{
-			ID:      fmt.Sprintf("q%d", f.question.Index),
-			Text:    f.question.Text,
-			Options: f.question.Options,
-		}
-
-		if f.question.IsYesNo {
-			// Confirm field — check before Options so yes/no questions
-			// with residual options route here.
-			if f.confirmed != nil {
-				if *f.confirmed {
-					ans.Answer = "Yes"
-				} else {
-					ans.Answer = "No"
-				}
-			}
-			ans.Elaboration = strings.TrimSpace(f.elaboration.Value())
-		} else if len(f.question.Options) > 0 {
-			// Select field — only report answer if user explicitly confirmed.
-			if !f.selected {
-				ans.Answer = ""
-			} else if f.isOther || f.selectCursor >= len(f.question.Options) {
-				ans.Answer = strings.TrimSpace(f.otherInput.Value())
-			} else {
-				ans.Answer = f.question.Options[f.selectCursor]
-			}
-			ans.Elaboration = strings.TrimSpace(f.elaboration.Value())
-		} else {
-			// Text field.
-			ans.Answer = strings.TrimSpace(f.textInput.Value())
-		}
-
-		answers[i] = ans
+		answers[i] = ic.collectFieldAnswer(f)
 	}
 	result := handlers.InterviewResult{Questions: answers}
 	for _, a := range answers {
@@ -229,6 +206,49 @@ func (ic *InterviewContent) collectAnswers() handlers.InterviewResult {
 		}
 	}
 	return result
+}
+
+// collectFieldAnswer extracts the answer for a single field based on its type.
+func (ic *InterviewContent) collectFieldAnswer(f interviewField) handlers.InterviewAnswer {
+	ans := handlers.InterviewAnswer{
+		ID:      fmt.Sprintf("q%d", f.question.Index),
+		Text:    f.question.Text,
+		Options: f.question.Options,
+	}
+	if f.question.IsYesNo {
+		ans.Answer, ans.Elaboration = collectYesNoAnswer(f)
+	} else if len(f.question.Options) > 0 {
+		ans.Answer, ans.Elaboration = collectSelectAnswer(f)
+	} else {
+		ans.Answer = strings.TrimSpace(f.textInput.Value())
+	}
+	return ans
+}
+
+// collectYesNoAnswer returns the answer and elaboration for a yes/no field.
+func collectYesNoAnswer(f interviewField) (answer, elaboration string) {
+	if f.confirmed != nil {
+		if *f.confirmed {
+			answer = "Yes"
+		} else {
+			answer = "No"
+		}
+	}
+	elaboration = strings.TrimSpace(f.elaboration.Value())
+	return
+}
+
+// collectSelectAnswer returns the answer and elaboration for a radio-select field.
+func collectSelectAnswer(f interviewField) (answer, elaboration string) {
+	if f.selected {
+		if f.isOther || f.selectCursor >= len(f.question.Options) {
+			answer = strings.TrimSpace(f.otherInput.Value())
+		} else {
+			answer = f.question.Options[f.selectCursor]
+		}
+	}
+	elaboration = strings.TrimSpace(f.elaboration.Value())
+	return
 }
 
 // Update handles keyboard input for the interview form.
@@ -562,14 +582,21 @@ func (ic *InterviewContent) wrapText(text string, indent int) string {
 // View renders the interview form — one question at a time with progress summary.
 func (ic *InterviewContent) View() string {
 	var sb strings.Builder
+	sb.WriteString(ic.renderProgress())
+	sb.WriteString(ic.renderAnsweredSummary())
+	if ic.cursor < len(ic.fields) {
+		sb.WriteString(ic.renderCurrentQuestion())
+	}
+	sb.WriteString(ic.renderFooter())
+	return sb.String()
+}
 
+// renderProgress renders the header title and progress bar.
+func (ic *InterviewContent) renderProgress() string {
+	var sb strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout)
-	accentStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Width(ic.width - 2)
-	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
 	confirmedStyle := lipgloss.NewStyle().Foreground(ColorGreen)
-	normalStyle := lipgloss.NewStyle()
 
-	// Header with progress.
 	answered := 0
 	for _, f := range ic.fields {
 		if ic.fieldAnswered(&f) {
@@ -579,7 +606,6 @@ func (ic *InterviewContent) View() string {
 	sb.WriteString(titleStyle.Render(fmt.Sprintf("INTERVIEW  (%d/%d answered)", answered, len(ic.fields))))
 	sb.WriteString("\n")
 
-	// Progress bar.
 	barWidth := 40
 	if ic.width > 60 {
 		barWidth = ic.width / 2
@@ -591,20 +617,22 @@ func (ic *InterviewContent) View() string {
 	bar := strings.Repeat("━", filled) + strings.Repeat("─", barWidth-filled)
 	sb.WriteString(confirmedStyle.Render(bar))
 	sb.WriteString("\n\n")
+	return sb.String()
+}
 
-	// Summary of previously answered questions (compact, wrapped).
-	// Cap to the last N entries that fit in the viewport to avoid pushing
-	// the current question off-screen.
-	summaryW := ic.width - 6 // indent + margin
+// renderAnsweredSummary renders the compact list of previously answered questions.
+func (ic *InterviewContent) renderAnsweredSummary() string {
+	if ic.cursor == 0 {
+		return ""
+	}
+	confirmedStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+	summaryW := ic.width - 6
 	if summaryW < 20 {
 		summaryW = 20
 	}
 	summaryStyle := confirmedStyle.Width(summaryW)
 	skippedStyle := Styles.Muted.Width(summaryW)
 
-	// Estimate available rows for the summary: total height minus space
-	// for current question, hints, progress bar, remaining preview, and
-	// status line (~15 rows of chrome).
 	availRows := ic.height - 15
 	if availRows < 3 {
 		availRows = 3
@@ -614,6 +642,7 @@ func (ic *InterviewContent) View() string {
 		summaryStart = ic.cursor - availRows
 	}
 
+	var sb strings.Builder
 	for idx := summaryStart; idx < ic.cursor && idx < len(ic.fields); idx++ {
 		f := &ic.fields[idx]
 		answer := ic.fieldAnswerText(f)
@@ -624,140 +653,186 @@ func (ic *InterviewContent) View() string {
 		}
 		sb.WriteString("\n")
 	}
-	if ic.cursor > 0 {
-		sb.WriteString("\n")
-	}
+	sb.WriteString("\n")
+	return sb.String()
+}
 
-	// Current question — full rendering.
-	if ic.cursor < len(ic.fields) {
-		f := &ic.fields[ic.cursor]
+// renderCurrentQuestion renders the full block for the question at ic.cursor.
+func (ic *InterviewContent) renderCurrentQuestion() string {
+	f := &ic.fields[ic.cursor]
+	accentStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Width(ic.width - 2)
 
-		qLabel := fmt.Sprintf("Q%d of %d: %s", f.question.Index, len(ic.fields), f.question.Text)
-		sb.WriteString(accentStyle.Render(qLabel))
-		sb.WriteString("\n")
+	var sb strings.Builder
+	qLabel := fmt.Sprintf("Q%d of %d: %s", f.question.Index, len(ic.fields), f.question.Text)
+	sb.WriteString(accentStyle.Render(qLabel))
+	sb.WriteString("\n")
 
-		// Question context (wrapped).
-		if f.question.Context != "" {
-			ctxW := ic.width - 6
-			if ctxW < 20 {
-				ctxW = 20
-			}
-			ctxStyle := lipgloss.NewStyle().Faint(true).Italic(true).Width(ctxW)
-			sb.WriteString("  " + ctxStyle.Render(f.question.Context) + "\n")
+	if f.question.Context != "" {
+		ctxW := ic.width - 6
+		if ctxW < 20 {
+			ctxW = 20
 		}
-		sb.WriteString("\n")
+		ctxStyle := lipgloss.NewStyle().Faint(true).Italic(true).Width(ctxW)
+		sb.WriteString("  " + ctxStyle.Render(f.question.Context) + "\n")
+	}
+	sb.WriteString("\n")
 
-		if f.question.IsYesNo {
-			// Yes/No toggle.
-			yStr := "○ Yes"
-			nStr := "○ No"
-			if f.confirmed != nil {
-				if *f.confirmed {
-					yStr = confirmedStyle.Render("● Yes  ✓")
-					nStr = normalStyle.Render("○ No")
-				} else {
-					yStr = normalStyle.Render("○ Yes")
-					nStr = confirmedStyle.Render("● No  ✓")
-				}
-			}
-			sb.WriteString(fmt.Sprintf("  %s    %s", yStr, nStr))
-			sb.WriteString("\n")
-			// Elaboration textarea.
-			if f.editingElab {
-				sb.WriteString(Styles.Muted.Render("  Add details (optional):"))
-				sb.WriteString("\n")
-				sb.WriteString(f.elaboration.View())
-				sb.WriteString("\n")
-			} else if !ic.inTextarea {
-				sb.WriteString("\n")
-				sb.WriteString(Styles.Muted.Render("  y/n toggle  Enter confirm  Tab elaborate"))
-				sb.WriteString("\n")
-			}
+	if f.question.IsYesNo {
+		sb.WriteString(ic.renderYesNoField(f))
+	} else if len(f.question.Options) > 0 {
+		sb.WriteString(ic.renderSelectField(f))
+	} else {
+		sb.WriteString(ic.renderTextField(f))
+	}
+	return sb.String()
+}
 
-		} else if len(f.question.Options) > 0 {
-			// Radio select field (options wrapped to width).
-			optW := ic.width - 8 // indent (4) + bullet (4) + margin
-			if optW < 20 {
-				optW = 20
-			}
-			for j, opt := range f.question.Options {
-				isHovered := j == f.selectCursor && !f.isOther
-				isChosen := f.selected && j == f.selectCursor && !f.isOther
-				wrapped := lipgloss.NewStyle().Width(optW).Render(opt)
-				if isChosen {
-					sb.WriteString(confirmedStyle.Render(fmt.Sprintf("  ● %s  ✓", wrapped)))
-				} else if isHovered {
-					sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", wrapped)))
-				} else {
-					sb.WriteString(normalStyle.Render(fmt.Sprintf("  ○ %s", wrapped)))
-				}
-				sb.WriteString("\n")
-			}
-			// "Other" option.
-			if f.selectCursor >= len(f.question.Options) && !ic.inTextarea {
-				sb.WriteString(selectedStyle.Render("  ● Other"))
-			} else if f.isOther && ic.inTextarea && !f.editingElab {
-				sb.WriteString(selectedStyle.Render("  ● Other:"))
-			} else {
-				sb.WriteString(normalStyle.Render("  ○ Other"))
-			}
-			sb.WriteString("\n")
-			// Show other textarea when active.
-			if f.isOther && ic.inTextarea && !f.editingElab {
-				sb.WriteString(f.otherInput.View())
-				sb.WriteString("\n")
-				sb.WriteString(Styles.Muted.Render("  Enter confirm  Esc cancel"))
-				sb.WriteString("\n")
-			}
-			// Elaboration textarea.
-			if f.editingElab {
-				sb.WriteString(Styles.Muted.Render("  Add details (optional):"))
-				sb.WriteString("\n")
-				sb.WriteString(f.elaboration.View())
-				sb.WriteString("\n")
-			} else if !ic.inTextarea {
-				sb.WriteString("\n")
-				sb.WriteString(Styles.Muted.Render("  ↑↓ select  Enter confirm  Tab elaborate"))
-				sb.WriteString("\n")
-			}
+// renderYesNoField renders the yes/no toggle for a confirm question.
+func (ic *InterviewContent) renderYesNoField(f *interviewField) string {
+	confirmedStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+	normalStyle := lipgloss.NewStyle()
 
+	yStr := "○ Yes"
+	nStr := "○ No"
+	if f.confirmed != nil {
+		if *f.confirmed {
+			yStr = confirmedStyle.Render("● Yes  ✓")
+			nStr = normalStyle.Render("○ No")
 		} else {
-			// Text field.
-			if ic.inTextarea {
-				sb.WriteString(f.textInput.View())
-				sb.WriteString("\n")
-				sb.WriteString(Styles.Muted.Render("  Enter confirm  Esc cancel"))
-				sb.WriteString("\n")
-			} else {
-				val := f.textInput.Value()
-				if val == "" {
-					sb.WriteString(Styles.Muted.Render("  (press Enter to type your answer)"))
-				} else {
-					sb.WriteString(normalStyle.Render(fmt.Sprintf("  %s", val)))
-				}
-				sb.WriteString("\n\n")
-				sb.WriteString(Styles.Muted.Render("  Enter to type  Esc back"))
-				sb.WriteString("\n")
-			}
+			yStr = normalStyle.Render("○ Yes")
+			nStr = confirmedStyle.Render("● No  ✓")
 		}
 	}
 
-	// Remaining questions preview.
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  %s    %s", yStr, nStr))
+	sb.WriteString("\n")
+	sb.WriteString(ic.renderElaboration(f, "  y/n toggle  Enter confirm  Tab elaborate"))
+	return sb.String()
+}
+
+// renderSelectField renders the radio-select options for a multi-choice question.
+func (ic *InterviewContent) renderSelectField(f *interviewField) string {
+	var sb strings.Builder
+	sb.WriteString(ic.renderSelectOptions(f))
+	sb.WriteString(ic.renderElaboration(f, "  ↑↓ select  Enter confirm  Tab elaborate"))
+	return sb.String()
+}
+
+// renderSelectOptions renders the option list rows including the "Other" row.
+func (ic *InterviewContent) renderSelectOptions(f *interviewField) string {
+	var sb strings.Builder
+	sb.WriteString(ic.renderOptionRows(f))
+	sb.WriteString(ic.renderOtherRow(f))
+	return sb.String()
+}
+
+// renderOptionRows renders each named option as a radio row.
+func (ic *InterviewContent) renderOptionRows(f *interviewField) string {
+	confirmedStyle := lipgloss.NewStyle().Foreground(ColorGreen)
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
+	normalStyle := lipgloss.NewStyle()
+
+	optW := ic.width - 8
+	if optW < 20 {
+		optW = 20
+	}
+
+	var sb strings.Builder
+	for j, opt := range f.question.Options {
+		isHovered := j == f.selectCursor && !f.isOther
+		isChosen := f.selected && j == f.selectCursor && !f.isOther
+		wrapped := lipgloss.NewStyle().Width(optW).Render(opt)
+		if isChosen {
+			sb.WriteString(confirmedStyle.Render(fmt.Sprintf("  ● %s  ✓", wrapped)))
+		} else if isHovered {
+			sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", wrapped)))
+		} else {
+			sb.WriteString(normalStyle.Render(fmt.Sprintf("  ○ %s", wrapped)))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// renderOtherRow renders the "Other" option row and its textarea when active.
+func (ic *InterviewContent) renderOtherRow(f *interviewField) string {
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
+	normalStyle := lipgloss.NewStyle()
+
+	var sb strings.Builder
+	if f.selectCursor >= len(f.question.Options) && !ic.inTextarea {
+		sb.WriteString(selectedStyle.Render("  ● Other"))
+	} else if f.isOther && ic.inTextarea && !f.editingElab {
+		sb.WriteString(selectedStyle.Render("  ● Other:"))
+	} else {
+		sb.WriteString(normalStyle.Render("  ○ Other"))
+	}
+	sb.WriteString("\n")
+
+	if f.isOther && ic.inTextarea && !f.editingElab {
+		sb.WriteString(f.otherInput.View())
+		sb.WriteString("\n")
+		sb.WriteString(Styles.Muted.Render("  Enter confirm  Esc cancel"))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// renderElaboration renders the elaboration textarea or hint line for select/confirm questions.
+func (ic *InterviewContent) renderElaboration(f *interviewField, hint string) string {
+	var sb strings.Builder
+	if f.editingElab {
+		sb.WriteString(Styles.Muted.Render("  Add details (optional):"))
+		sb.WriteString("\n")
+		sb.WriteString(f.elaboration.View())
+		sb.WriteString("\n")
+	} else if !ic.inTextarea {
+		sb.WriteString("\n")
+		sb.WriteString(Styles.Muted.Render(hint))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// renderTextField renders an open-ended text input field.
+func (ic *InterviewContent) renderTextField(f *interviewField) string {
+	normalStyle := lipgloss.NewStyle()
+	var sb strings.Builder
+	if ic.inTextarea {
+		sb.WriteString(f.textInput.View())
+		sb.WriteString("\n")
+		sb.WriteString(Styles.Muted.Render("  Enter confirm  Esc cancel"))
+		sb.WriteString("\n")
+	} else {
+		val := f.textInput.Value()
+		if val == "" {
+			sb.WriteString(Styles.Muted.Render("  (press Enter to type your answer)"))
+		} else {
+			sb.WriteString(normalStyle.Render(fmt.Sprintf("  %s", val)))
+		}
+		sb.WriteString("\n\n")
+		sb.WriteString(Styles.Muted.Render("  Enter to type  Esc back"))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// renderFooter renders the remaining-questions preview and status line.
+func (ic *InterviewContent) renderFooter() string {
+	var sb strings.Builder
 	remaining := len(ic.fields) - ic.cursor - 1
 	if remaining > 0 {
 		sb.WriteString("\n")
 		sb.WriteString(Styles.Muted.Render(fmt.Sprintf("  %d question%s remaining", remaining, pluralS(remaining))))
 		sb.WriteString("\n")
 	}
-
 	sb.WriteString("\n")
-	// Status line.
 	if ic.inTextarea {
 		sb.WriteString(Styles.Muted.Render("Esc back to navigation  Ctrl+S submit all"))
 	} else {
 		sb.WriteString(Styles.Muted.Render("↑↓ navigate  Ctrl+S submit all  Esc cancel"))
 	}
-
 	return sb.String()
 }
 

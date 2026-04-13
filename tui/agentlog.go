@@ -389,33 +389,40 @@ func (al *AgentLog) rebuildFilter() {
 	al.filteredCache = al.filteredCache[:0]
 
 	for i, line := range al.lines {
-		// Always include separator lines (empty nodeID) — they provide
-		// structural context between nodes regardless of filter state.
-		isSeparator := line.nodeID == "" && line.kind == LineGeneral
-
-		// Node focus filter.
-		if !isSeparator && al.focusNodeID != "" && line.nodeID != "" && line.nodeID != al.focusNodeID {
-			continue
+		if al.linePassesFilter(line) {
+			al.filteredCache = append(al.filteredCache, i)
 		}
-		// Verbosity filter (separators pass through).
-		if !isSeparator && al.verbosity != VerbosityAll {
-			switch al.verbosity {
-			case VerbosityTools:
-				if line.kind != LineTool {
-					continue
-				}
-			case VerbosityErrors:
-				if line.kind != LineError {
-					continue
-				}
-			case VerbosityReasoning:
-				if line.kind != LineReasoning {
-					continue
-				}
-			}
-		}
-		al.filteredCache = append(al.filteredCache, i)
 	}
+}
+
+// linePassesFilter returns true if the line should be included in the filtered view.
+func (al *AgentLog) linePassesFilter(line styledLine) bool {
+	// Always include separator lines (empty nodeID) — they provide
+	// structural context between nodes regardless of filter state.
+	isSeparator := line.nodeID == "" && line.kind == LineGeneral
+
+	// Node focus filter.
+	if !isSeparator && al.focusNodeID != "" && line.nodeID != "" && line.nodeID != al.focusNodeID {
+		return false
+	}
+	// Verbosity filter (separators pass through).
+	if !isSeparator && al.verbosity != VerbosityAll {
+		return al.lineMatchesVerbosity(line)
+	}
+	return true
+}
+
+// lineMatchesVerbosity returns true if the line's kind matches the current verbosity level.
+func (al *AgentLog) lineMatchesVerbosity(line styledLine) bool {
+	switch al.verbosity {
+	case VerbosityTools:
+		return line.kind == LineTool
+	case VerbosityErrors:
+		return line.kind == LineError
+	case VerbosityReasoning:
+		return line.kind == LineReasoning
+	}
+	return true
 }
 
 // View renders the agent log viewport. The indicator is always rendered at the
@@ -429,21 +436,7 @@ func (al *AgentLog) View() string {
 
 	// 1. Build the fixed bottom section: indicator + partials.
 	indicator := al.activeNodeIndicators()
-	indicatorRendered := indicator + "\n"
-	bottomRows := termLines(indicator, width)
-
-	var partials []string
-	for nodeID, s := range al.streams {
-		if s.current.Len() > 0 {
-			prefix := ""
-			if len(al.streams) > 1 {
-				prefix = Styles.Muted.Render(nodeID+": ") + ""
-			}
-			line := prefix + Styles.PrimaryText.Render(s.current.String())
-			partials = append(partials, line)
-			bottomRows += termLines(line, width)
-		}
-	}
+	partials, bottomRows := al.buildPartials(indicator, width)
 
 	// Account for search bar at the bottom.
 	searchBarRows := 0
@@ -458,12 +451,48 @@ func (al *AgentLog) View() string {
 		contentBudget = 1
 	}
 
-	// 3. Rebuild filter cache if needed and walk filtered lines.
+	// 3. Rebuild filter cache if needed, resolve visible window start.
+	start, filtered, searchTerm := al.resolveViewWindow(contentBudget, width)
+
+	// 4. Render: header, then content, then partials, then indicator, then search.
+	var sb strings.Builder
+	sb.WriteString(al.renderHeader())
+	sb.WriteString(al.renderContent(filtered, start, searchTerm, partials, indicator))
+	sb.WriteString(indicator + "\n")
+	if al.search.Active() {
+		sb.WriteString(al.search.View())
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// buildPartials collects in-progress partial lines from active node streams and
+// returns them along with the total bottom row count (partials + indicator).
+func (al *AgentLog) buildPartials(indicator string, width int) ([]string, int) {
+	bottomRows := termLines(indicator, width)
+	var partials []string
+	for nodeID, s := range al.streams {
+		if s.current.Len() > 0 {
+			prefix := ""
+			if len(al.streams) > 1 {
+				prefix = Styles.Muted.Render(nodeID+": ") + ""
+			}
+			line := prefix + Styles.PrimaryText.Render(s.current.String())
+			partials = append(partials, line)
+			bottomRows += termLines(line, width)
+		}
+	}
+	return partials, bottomRows
+}
+
+// resolveViewWindow rebuilds the filter cache, updates search matches, and
+// walks backward from the end to find the start index that fits contentBudget rows.
+// Returns start index into filtered, the filtered slice, and the active search term.
+func (al *AgentLog) resolveViewWindow(contentBudget, width int) (int, []int, string) {
 	al.rebuildFilter()
 	filtered := al.filteredCache
 	totalFiltered := len(filtered)
 
-	// Update search matches against the filtered view (not full line buffer).
 	searchTerm := al.search.Term()
 	if al.search.Active() {
 		al.search.UpdateMatchesFiltered(al.lines, filtered)
@@ -480,16 +509,22 @@ func (al *AgentLog) View() string {
 		usedRows += rows
 		start--
 	}
+	return start, filtered, searchTerm
+}
 
-	// 4. Render: header, then content, then partials, then indicator, then search.
-	var sb strings.Builder
+// renderHeader returns the header label line for the activity log.
+func (al *AgentLog) renderHeader() string {
 	headerLabel := "ACTIVITY LOG"
 	if al.focusNodeID != "" {
 		headerLabel += " [" + al.focusNodeID + "]"
 	}
-	sb.WriteString(Styles.ZoneLabel.Render(headerLabel))
-	sb.WriteString("\n")
+	return Styles.ZoneLabel.Render(headerLabel) + "\n"
+}
 
+// renderContent renders the visible log lines, partials, and empty-state placeholder.
+func (al *AgentLog) renderContent(filtered []int, start int, searchTerm string, partials []string, indicator string) string {
+	totalFiltered := len(filtered)
+	var sb strings.Builder
 	if totalFiltered == 0 && len(partials) == 0 && indicator == " " {
 		sb.WriteString(Styles.DimText.Render("awaiting activity..."))
 		sb.WriteString("\n")
@@ -504,19 +539,10 @@ func (al *AgentLog) View() string {
 			sb.WriteString("\n")
 		}
 	}
-
 	for _, p := range partials {
 		sb.WriteString(p)
 		sb.WriteString("\n")
 	}
-
-	sb.WriteString(indicatorRendered)
-
-	if al.search.Active() {
-		sb.WriteString(al.search.View())
-		sb.WriteString("\n")
-	}
-
 	return sb.String()
 }
 
