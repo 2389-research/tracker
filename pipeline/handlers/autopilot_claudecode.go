@@ -148,38 +148,14 @@ func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev
 	fullPrompt := systemPrompt + "\n\n" + prompt
 
 	for attempt := 0; attempt < 2; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-
-		cmd := exec.CommandContext(ctx, a.claudePath,
-			"--print",
-			"-p", fullPrompt,
-			"--max-turns", "1",
-			"--output-format", "text",
-		)
-		cmd.Env = buildEnv()
-
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err != nil {
-			cancel()
-			return nil, fmt.Errorf("claude CLI interview: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		result, parseErr, fatalErr := a.runInterviewAttempt(fullPrompt, questions)
+		if fatalErr != nil {
+			return nil, fatalErr
 		}
-		cancel()
-
-		responseText := strings.TrimSpace(stdout.String())
-		if responseText == "" {
-			return nil, fmt.Errorf("claude CLI returned empty response for interview")
-		}
-
-		result, parseErr := parseInterviewResponse(responseText, questions)
 		if parseErr == nil {
 			return result, nil
 		}
-
 		if attempt == 0 {
-			// Retry with explicit JSON instruction appended.
 			fullPrompt += "\n\nIMPORTANT: Your previous response was not valid JSON. You MUST respond with ONLY a JSON object, no other text."
 			continue
 		}
@@ -187,6 +163,37 @@ func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev
 	}
 	// unreachable
 	return nil, fmt.Errorf("claude CLI interview: unexpected retry loop exit")
+}
+
+// runInterviewAttempt executes one claude CLI call and returns parsed result, parse error, or fatal error.
+func (a *ClaudeCodeAutopilotInterviewer) runInterviewAttempt(fullPrompt string, questions []Question) (*InterviewResult, error, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+
+	cmd := exec.CommandContext(ctx, a.claudePath,
+		"--print",
+		"-p", fullPrompt,
+		"--max-turns", "1",
+		"--output-format", "text",
+	)
+	cmd.Env = buildEnv()
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		cancel()
+		return nil, nil, fmt.Errorf("claude CLI interview: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+	cancel()
+
+	responseText := strings.TrimSpace(stdout.String())
+	if responseText == "" {
+		return nil, nil, fmt.Errorf("claude CLI returned empty response for interview")
+	}
+
+	result, parseErr := parseInterviewResponse(responseText, questions)
+	return result, parseErr, nil
 }
 
 // Compile-time assertions: ClaudeCodeAutopilotInterviewer implements both interfaces.

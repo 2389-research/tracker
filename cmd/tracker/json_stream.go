@@ -86,30 +86,40 @@ func (s *jsonStream) traceObserver() llm.TraceObserver {
 // agentHandler returns an agent EventHandler that writes to this stream.
 func (s *jsonStream) agentHandler() agent.EventHandler {
 	return agent.EventHandlerFunc(func(evt agent.Event) {
-		content := evt.ToolOutput
-		if content == "" {
-			content = evt.Text
-		}
-		entry := jsonStreamEvent{
-			Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
-			Source:    "agent",
-			Type:      string(evt.Type),
-			NodeID:    evt.NodeID,
-			Provider:  evt.Provider,
-			Model:     evt.Model,
-			ToolName:  evt.ToolName,
-			Content:   content,
-		}
-		if evt.ToolError != "" {
-			entry.Error = evt.ToolError
-		}
-		if evt.Err != nil {
-			if entry.Error != "" {
-				entry.Error += ": " + evt.Err.Error()
-			} else {
-				entry.Error = evt.Err.Error()
-			}
-		}
-		s.write(entry)
+		s.write(buildAgentStreamEntry(evt))
 	})
+}
+
+// buildAgentStreamEntry converts an agent.Event to a jsonStreamEvent.
+func buildAgentStreamEntry(evt agent.Event) jsonStreamEvent {
+	content := evt.ToolOutput
+	if content == "" {
+		content = evt.Text
+	}
+	entry := jsonStreamEvent{
+		Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
+		Source:    "agent",
+		Type:      string(evt.Type),
+		NodeID:    evt.NodeID,
+		Provider:  evt.Provider,
+		Model:     evt.Model,
+		ToolName:  evt.ToolName,
+		Content:   content,
+	}
+	entry.Error = buildStreamEntryError(evt)
+	return entry
+}
+
+// buildStreamEntryError combines ToolError and Err into a single error string.
+func buildStreamEntryError(evt agent.Event) string {
+	if evt.ToolError == "" && evt.Err == nil {
+		return ""
+	}
+	if evt.ToolError != "" && evt.Err != nil {
+		return evt.ToolError + ": " + evt.Err.Error()
+	}
+	if evt.ToolError != "" {
+		return evt.ToolError
+	}
+	return evt.Err.Error()
 }

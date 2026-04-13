@@ -252,12 +252,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	}
 
 	tokenTracker := llm.NewTokenTracker()
-	llmClient, err := buildLLMClient(tokenTracker)
-	if err != nil && backend != "claude-code" && backend != "acp" {
-		return formatLLMClientError(err)
-	}
+	llmClient, err := resolveLLMClient(tokenTracker, backend)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
+		return err
 	}
 	if llmClient != nil {
 		defer llmClient.Close()
@@ -283,27 +280,51 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo)
 
+	outcome, err := runTUIWithEngine(engine, prog)
+	if err != nil {
+		return err
+	}
+
+	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
+	notifyPipelineComplete(pipelineName, outcome.err)
+	return outcome.err
+}
+
+// resolveLLMClient builds the LLM client, handling non-fatal failures for headless backends.
+func resolveLLMClient(tokenTracker *llm.TokenTracker, backend string) (*llm.Client, error) {
+	llmClient, err := buildLLMClient(tokenTracker)
+	if err != nil && backend != "claude-code" && backend != "acp" {
+		return nil, formatLLMClientError(err)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
+	}
+	return llmClient, nil
+}
+
+// runTUIWithEngine runs the TUI program and waits for pipeline completion.
+func runTUIWithEngine(engine *pipeline.Engine, prog *tea.Program) (pipelineOutcome, error) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	outcomeCh := runPipelineAsync(engine, ctx, prog)
 
-	_, err = prog.Run()
+	_, err := prog.Run()
 	cancel()
 	if err != nil {
-		return fmt.Errorf("TUI program: %w", err)
+		return pipelineOutcome{}, fmt.Errorf("TUI program: %w", err)
 	}
 
-	outcome := waitForPipelineOutcome(outcomeCh)
-	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
+	return waitForPipelineOutcome(outcomeCh), nil
+}
 
+// notifyPipelineComplete sends a system notification for pipeline completion.
+func notifyPipelineComplete(pipelineName string, pipelineErr error) {
 	status := "completed"
-	if outcome.err != nil {
+	if pipelineErr != nil {
 		status = "failed"
 	}
 	tui.SendNotification("Tracker: "+pipelineName, "Pipeline "+status)
-
-	return outcome.err
 }
 
 // resolvePipelineName returns the pipeline display name from graph or filename.
@@ -434,36 +455,7 @@ func preMarkCompletedNodes(checkpoint string, nodeList []tui.NodeEntry, store *t
 // buildLLMClient constructs the LLM client from environment variables with
 // custom base URL support and attaches the token tracker middleware.
 func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
-	constructors := map[string]func(string) (llm.ProviderAdapter, error){
-		"anthropic": func(key string) (llm.ProviderAdapter, error) {
-			var opts []anthropic.Option
-			if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-				opts = append(opts, anthropic.WithBaseURL(base))
-			}
-			return anthropic.New(key, opts...), nil
-		},
-		"openai": func(key string) (llm.ProviderAdapter, error) {
-			var opts []openai.Option
-			if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
-				opts = append(opts, openai.WithBaseURL(base))
-			}
-			return openai.New(key, opts...), nil
-		},
-		"gemini": func(key string) (llm.ProviderAdapter, error) {
-			var opts []google.Option
-			if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
-				opts = append(opts, google.WithBaseURL(base))
-			}
-			return google.New(key, opts...), nil
-		},
-		"openai-compat": func(key string) (llm.ProviderAdapter, error) {
-			var opts []openaicompat.Option
-			if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
-				opts = append(opts, openaicompat.WithBaseURL(base))
-			}
-			return openaicompat.New(key, opts...), nil
-		},
-	}
+	constructors := buildProviderConstructors()
 
 	client, err := llm.NewClientFromEnv(constructors)
 	if err != nil {
@@ -484,6 +476,56 @@ func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
 	}
 
 	return client, nil
+}
+
+// buildProviderConstructors returns the map of provider name → adapter constructor.
+func buildProviderConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
+	return map[string]func(string) (llm.ProviderAdapter, error){
+		"anthropic":     buildAnthropicConstructor(),
+		"openai":        buildOpenAIConstructor(),
+		"gemini":        buildGeminiConstructor(),
+		"openai-compat": buildOpenAICompatConstructor(),
+	}
+}
+
+func buildAnthropicConstructor() func(string) (llm.ProviderAdapter, error) {
+	return func(key string) (llm.ProviderAdapter, error) {
+		var opts []anthropic.Option
+		if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
+			opts = append(opts, anthropic.WithBaseURL(base))
+		}
+		return anthropic.New(key, opts...), nil
+	}
+}
+
+func buildOpenAIConstructor() func(string) (llm.ProviderAdapter, error) {
+	return func(key string) (llm.ProviderAdapter, error) {
+		var opts []openai.Option
+		if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
+			opts = append(opts, openai.WithBaseURL(base))
+		}
+		return openai.New(key, opts...), nil
+	}
+}
+
+func buildGeminiConstructor() func(string) (llm.ProviderAdapter, error) {
+	return func(key string) (llm.ProviderAdapter, error) {
+		var opts []google.Option
+		if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
+			opts = append(opts, google.WithBaseURL(base))
+		}
+		return google.New(key, opts...), nil
+	}
+}
+
+func buildOpenAICompatConstructor() func(string) (llm.ProviderAdapter, error) {
+	return func(key string) (llm.ProviderAdapter, error) {
+		var opts []openaicompat.Option
+		if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
+			opts = append(opts, openaicompat.WithBaseURL(base))
+		}
+		return openaicompat.New(key, opts...), nil
+	}
 }
 
 // chooseInterviewer selects the interviewer implementation based on config.

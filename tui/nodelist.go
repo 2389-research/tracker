@@ -314,13 +314,7 @@ func (nl *NodeList) resolveLamp(nodeID string, status NodeState) (string, lipglo
 func (nl *NodeList) nodeStatusSuffix(nodeID string, status NodeState) string {
 	switch status {
 	case NodeRunning:
-		if toolName := nl.thinking.ToolName(nodeID); toolName != "" {
-			return " " + Styles.Muted.Render(toolName)
-		}
-		if nl.thinking.IsThinking(nodeID) {
-			elapsed := nl.thinking.Elapsed(nodeID).Truncate(time.Second)
-			return " " + Styles.Muted.Render(elapsed.String())
-		}
+		return nl.runningNodeSuffix(nodeID)
 	case NodeFailed:
 		if errMsg := nl.store.NodeError(nodeID); errMsg != "" {
 			return " " + Styles.Error.Render(errMsg)
@@ -329,6 +323,18 @@ func (nl *NodeList) nodeStatusSuffix(nodeID string, status NodeState) string {
 		if retryMsg := nl.store.NodeRetryMessage(nodeID); retryMsg != "" {
 			return " " + Styles.Muted.Render(retryMsg)
 		}
+	}
+	return ""
+}
+
+// runningNodeSuffix returns the status suffix for a running node (tool or elapsed time).
+func (nl *NodeList) runningNodeSuffix(nodeID string) string {
+	if toolName := nl.thinking.ToolName(nodeID); toolName != "" {
+		return " " + Styles.Muted.Render(toolName)
+	}
+	if nl.thinking.IsThinking(nodeID) {
+		elapsed := nl.thinking.Elapsed(nodeID).Truncate(time.Second)
+		return " " + Styles.Muted.Render(elapsed.String())
 	}
 	return ""
 }

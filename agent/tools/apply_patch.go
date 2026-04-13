@@ -137,10 +137,19 @@ type patchHunk struct {
 
 func parsePatch(patch string) ([]patchOperation, error) {
 	lines := strings.Split(patch, "\n")
-	if len(lines) == 0 || lines[0] != "*** Begin Patch" {
+	if !patchHasValidHeader(lines) {
 		return nil, fmt.Errorf("patch must begin with *** Begin Patch")
 	}
+	return parsePatchLines(lines)
+}
 
+// patchHasValidHeader checks that the patch starts with *** Begin Patch.
+func patchHasValidHeader(lines []string) bool {
+	return len(lines) > 0 && lines[0] == "*** Begin Patch"
+}
+
+// parsePatchLines iterates over patch lines and collects operations.
+func parsePatchLines(lines []string) ([]patchOperation, error) {
 	var ops []patchOperation
 	for i := 1; i < len(lines); {
 		op, next, done, err := parsePatchLine(lines, i)
@@ -155,7 +164,6 @@ func parsePatch(patch string) ([]patchOperation, error) {
 		}
 		i = next
 	}
-
 	return nil, fmt.Errorf("patch is missing *** End Patch")
 }
 

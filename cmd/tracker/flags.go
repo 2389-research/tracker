@@ -54,17 +54,7 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 	switch mode {
 	case modeVersion, modeSetup, modeDoctor, modeWorkflows, modeUpdate:
 		return *cfg, nil
-	case modeInit:
-		if len(args) > 2 {
-			cfg.pipelineFile = args[2]
-		}
-		return *cfg, nil
-	case modeValidate:
-		if len(args) > 2 {
-			cfg.pipelineFile = args[2]
-		}
-		return *cfg, nil
-	case modeSimulate:
+	case modeInit, modeValidate, modeSimulate:
 		if len(args) > 2 {
 			cfg.pipelineFile = args[2]
 		}

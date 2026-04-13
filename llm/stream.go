@@ -77,6 +77,14 @@ func NewStreamAccumulator() *StreamAccumulator {
 
 // Process handles a single StreamEvent, updating the accumulator state.
 func (a *StreamAccumulator) Process(event StreamEvent) {
+	if a.processTextOrReasoning(event) {
+		return
+	}
+	a.processToolOrFinish(event)
+}
+
+// processTextOrReasoning handles text and reasoning event types. Returns true if handled.
+func (a *StreamAccumulator) processTextOrReasoning(event StreamEvent) bool {
 	switch event.Type {
 	case EventTextStart:
 		a.processTextStart(event)
@@ -88,6 +96,15 @@ func (a *StreamAccumulator) Process(event StreamEvent) {
 		a.reasoningSignature = event.ReasoningSignature
 	case EventRedactedThinking:
 		a.processRedactedThinking(event)
+	default:
+		return false
+	}
+	return true
+}
+
+// processToolOrFinish handles tool call and finish event types.
+func (a *StreamAccumulator) processToolOrFinish(event StreamEvent) {
+	switch event.Type {
 	case EventToolCallStart:
 		a.processToolCallStart(event)
 	case EventToolCallDelta:
@@ -159,47 +176,7 @@ func (a *StreamAccumulator) processFinish(event StreamEvent) {
 
 // Response builds a complete Response from the accumulated events.
 func (a *StreamAccumulator) Response() Response {
-	var content []ContentPart
-
-	// Add reasoning first (matches API content block ordering: thinking before text).
-	if a.reasoning.Len() > 0 || a.reasoningSignature != "" {
-		content = append(content, ContentPart{
-			Kind: KindThinking,
-			Thinking: &ThinkingData{
-				Text:      a.reasoning.String(),
-				Signature: a.reasoningSignature,
-			},
-		})
-	}
-
-	// Add redacted thinking blocks (opaque data that must be round-tripped).
-	for _, data := range a.redactedThinking {
-		content = append(content, ContentPart{
-			Kind: KindRedactedThinking,
-			Thinking: &ThinkingData{
-				Redacted:  true,
-				Signature: data,
-			},
-		})
-	}
-
-	// Add text parts in insertion order.
-	for _, id := range a.textOrder {
-		if b, ok := a.textParts[id]; ok {
-			content = append(content, ContentPart{
-				Kind: KindText,
-				Text: b.String(),
-			})
-		}
-	}
-
-	// Add tool calls.
-	for i := range a.toolCalls {
-		content = append(content, ContentPart{
-			Kind:     KindToolCall,
-			ToolCall: &a.toolCalls[i],
-		})
-	}
+	content := a.buildContent()
 
 	resp := Response{
 		Message: Message{
@@ -216,4 +193,63 @@ func (a *StreamAccumulator) Response() Response {
 	}
 
 	return resp
+}
+
+// buildContent assembles all content parts in canonical order: reasoning, redacted thinking,
+// text parts (insertion order), then tool calls.
+func (a *StreamAccumulator) buildContent() []ContentPart {
+	var content []ContentPart
+	content = a.appendReasoningPart(content)
+	content = a.appendRedactedThinkingParts(content)
+	content = a.appendTextParts(content)
+	content = a.appendToolCallParts(content)
+	return content
+}
+
+func (a *StreamAccumulator) appendReasoningPart(content []ContentPart) []ContentPart {
+	if a.reasoning.Len() == 0 && a.reasoningSignature == "" {
+		return content
+	}
+	return append(content, ContentPart{
+		Kind: KindThinking,
+		Thinking: &ThinkingData{
+			Text:      a.reasoning.String(),
+			Signature: a.reasoningSignature,
+		},
+	})
+}
+
+func (a *StreamAccumulator) appendRedactedThinkingParts(content []ContentPart) []ContentPart {
+	for _, data := range a.redactedThinking {
+		content = append(content, ContentPart{
+			Kind: KindRedactedThinking,
+			Thinking: &ThinkingData{
+				Redacted:  true,
+				Signature: data,
+			},
+		})
+	}
+	return content
+}
+
+func (a *StreamAccumulator) appendTextParts(content []ContentPart) []ContentPart {
+	for _, id := range a.textOrder {
+		if b, ok := a.textParts[id]; ok {
+			content = append(content, ContentPart{
+				Kind: KindText,
+				Text: b.String(),
+			})
+		}
+	}
+	return content
+}
+
+func (a *StreamAccumulator) appendToolCallParts(content []ContentPart) []ContentPart {
+	for i := range a.toolCalls {
+		content = append(content, ContentPart{
+			Kind:     KindToolCall,
+			ToolCall: &a.toolCalls[i],
+		})
+	}
+	return content
 }

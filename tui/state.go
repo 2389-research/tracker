@@ -279,6 +279,14 @@ func (s *StateStore) ensure(id string) *nodeInfo {
 
 // Apply updates state based on a typed message.
 func (s *StateStore) Apply(msg interface{}) {
+	if s.applyNodeMsg(msg) {
+		return
+	}
+	s.applyPipelineOrThinkingMsg(msg)
+}
+
+// applyNodeMsg handles node lifecycle messages. Returns true if consumed.
+func (s *StateStore) applyNodeMsg(msg interface{}) bool {
 	switch m := msg.(type) {
 	case MsgNodeStarted:
 		s.applyNodeStarted(m)
@@ -292,6 +300,15 @@ func (s *StateStore) Apply(msg interface{}) {
 		ni := s.ensure(m.NodeID)
 		ni.status = NodeRetrying
 		ni.retryMsg = m.Message
+	default:
+		return false
+	}
+	return true
+}
+
+// applyPipelineOrThinkingMsg handles pipeline and thinking state messages.
+func (s *StateStore) applyPipelineOrThinkingMsg(msg interface{}) {
+	switch m := msg.(type) {
 	case MsgPipelineCompleted:
 		s.pipelineDone = true
 		s.markSkippedNodes()

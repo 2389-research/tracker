@@ -174,6 +174,15 @@ func (r *ReviewHybridContent) updateOtherMode(km tea.KeyMsg) tea.Cmd {
 
 // updateRadioMode handles keys when navigating the radio list.
 func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
+	if cmd := r.handleReviewActionKey(km); cmd != nil {
+		return cmd
+	}
+	r.handleReviewNavKey(km)
+	return nil
+}
+
+// handleReviewActionKey handles page, submit, and cancel keys.
+func (r *ReviewHybridContent) handleReviewActionKey(km tea.KeyMsg) tea.Cmd {
 	switch km.String() {
 	case "pgup", "pgdown":
 		var cmd tea.Cmd
@@ -183,7 +192,7 @@ func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 		if r.isOnOther() {
 			r.onOther = true
 			r.textarea.Focus()
-			return nil
+			return func() tea.Msg { return nil }
 		}
 		if len(r.labels) > 0 {
 			return r.submitLabel(r.labels[r.cursor])
@@ -191,6 +200,11 @@ func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 	case "esc":
 		return r.cancel()
 	}
+	return nil
+}
+
+// handleReviewNavKey handles Up/Down cursor movement.
+func (r *ReviewHybridContent) handleReviewNavKey(km tea.KeyMsg) {
 	switch km.Type {
 	case tea.KeyUp:
 		if r.cursor > 0 {
@@ -201,7 +215,6 @@ func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 			r.cursor++
 		}
 	}
-	return nil
 }
 
 func (r *ReviewHybridContent) submitLabel(label string) tea.Cmd {

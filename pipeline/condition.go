@@ -83,26 +83,28 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 		return result, nil
 	}
 
+	return evaluateEqualityClause(clause, ctx)
+}
+
+// evaluateEqualityClause handles =, ==, and != comparison operators.
+func evaluateEqualityClause(clause string, ctx *PipelineContext) (bool, error) {
 	// Try != first since it contains = as a substring.
 	if idx := strings.Index(clause, "!="); idx >= 0 {
-		key := strings.TrimSpace(clause[:idx])
+		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
 		expected := strings.Trim(strings.TrimSpace(clause[idx+2:]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
 		return actual != expected, nil
 	}
 
 	// Check for == operator (space-delimited to avoid matching == inside values).
 	if idx := strings.Index(clause, " == "); idx >= 0 {
-		key := strings.TrimSpace(clause[:idx])
+		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
 		expected := strings.Trim(strings.TrimSpace(clause[idx+4:]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
 		return actual == expected, nil
 	}
 
 	if idx := strings.Index(clause, "="); idx >= 0 {
-		key := strings.TrimSpace(clause[:idx])
+		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
 		expected := strings.Trim(strings.TrimSpace(clause[idx+1:]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
 		return actual == expected, nil
 	}
 

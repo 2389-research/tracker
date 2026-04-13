@@ -57,36 +57,39 @@ func (h HistoryTrail) View() string {
 	sb.WriteString("\n")
 
 	trail := h.buildTrail(path)
-
 	maxLines := h.height - 1
 	if maxLines < 1 {
 		maxLines = 1
 	}
 
 	countStyle := lipgloss.NewStyle().Foreground(ColorAmber)
-
 	for i, e := range trail {
 		if i >= maxLines {
 			break
 		}
-		status := h.store.NodeStatus(e.nodeID)
-		lamp, style := StatusLamp(status)
-
-		label := e.label
-		maxLabel := h.width - 6
-		if maxLabel > 0 && len(label) > maxLabel {
-			label = label[:maxLabel-1] + "…"
-		}
-
-		line := "  " + style.Render(lamp) + " " + label
-		if e.count > 1 {
-			line += " " + countStyle.Render(fmt.Sprintf("×%d", e.count))
-		}
-		sb.WriteString(line)
+		sb.WriteString(h.renderTrailEntry(e, countStyle))
 		sb.WriteString("\n")
 	}
 
 	return sb.String()
+}
+
+// renderTrailEntry renders a single trail entry line.
+func (h HistoryTrail) renderTrailEntry(e trailEntry, countStyle lipgloss.Style) string {
+	status := h.store.NodeStatus(e.nodeID)
+	lamp, style := StatusLamp(status)
+
+	label := e.label
+	maxLabel := h.width - 6
+	if maxLabel > 0 && len(label) > maxLabel {
+		label = label[:maxLabel-1] + "…"
+	}
+
+	line := "  " + style.Render(lamp) + " " + label
+	if e.count > 1 {
+		line += " " + countStyle.Render(fmt.Sprintf("×%d", e.count))
+	}
+	return line
 }
 
 // buildTrail creates deduplicated entries in reverse chronological order.

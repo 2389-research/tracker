@@ -77,11 +77,7 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 		defer cancel()
 	}
 
-	emit(agent.Event{
-		Type:      agent.EventLLMRequestPreparing,
-		Timestamp: time.Now(),
-		Provider:  "acp:" + agentName,
-	})
+	emit(agent.Event{Type: agent.EventLLMRequestPreparing, Timestamp: time.Now(), Provider: "acp:" + agentName})
 
 	proc, err := b.startProcess(ctx, agentPath, agentName, cfg.WorkingDir)
 	if err != nil {
@@ -103,7 +99,11 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 	}
 
 	emit(agent.Event{Type: agent.EventTurnStart, Timestamp: time.Now()})
+	return b.sendPromptAndCollect(ctx, conn, proc, sessID, agentName, cfg, handler)
+}
 
+// sendPromptAndCollect sends the prompt and handles the response/error.
+func (b *ACPBackend) sendPromptAndCollect(ctx context.Context, conn *acp.ClientSideConnection, proc *acpProcess, sessID acp.SessionId, agentName string, cfg pipeline.AgentRunConfig, handler *acpClientHandler) (agent.SessionResult, error) {
 	promptResp, promptErr := conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessID,
 		Prompt:    buildACPPromptBlocks(cfg),
@@ -312,26 +312,32 @@ func mapModelToBridge(trackerModel string, models *acp.SessionModelState) string
 	if models == nil {
 		return ""
 	}
-	lower := strings.ToLower(trackerModel)
+	if id := matchModelDirect(trackerModel, models.AvailableModels); id != "" {
+		return id
+	}
+	return matchModelSubstring(trackerModel, models.AvailableModels)
+}
 
-	// Direct match first.
-	for _, m := range models.AvailableModels {
+// matchModelDirect returns the first model ID that case-insensitively equals trackerModel.
+func matchModelDirect(trackerModel string, models []acp.ModelInfo) string {
+	for _, m := range models {
 		if strings.EqualFold(string(m.ModelId), trackerModel) {
 			return string(m.ModelId)
 		}
 	}
+	return ""
+}
 
-	// Substring match: "claude-sonnet-4-5" contains "sonnet".
-	for _, m := range models.AvailableModels {
+// matchModelSubstring returns the first non-default model ID whose name is
+// a substring of trackerModel (e.g. "sonnet" in "claude-sonnet-4-5").
+func matchModelSubstring(trackerModel string, models []acp.ModelInfo) string {
+	lower := strings.ToLower(trackerModel)
+	for _, m := range models {
 		id := strings.ToLower(string(m.ModelId))
-		if id == "default" {
-			continue // skip default for substring matching
-		}
-		if strings.Contains(lower, id) {
+		if id != "default" && strings.Contains(lower, id) {
 			return string(m.ModelId)
 		}
 	}
-
 	return ""
 }
 
@@ -406,22 +412,28 @@ func buildEnvForACP() []string {
 	if os.Getenv("TRACKER_PASS_API_KEYS") == "1" {
 		return os.Environ()
 	}
+	return filterEnvForACP(os.Environ())
+}
 
-	env := os.Environ()
+// filterEnvForACP strips API key and base URL env vars from the given environment.
+func filterEnvForACP(env []string) []string {
 	clean := make([]string, 0, len(env))
 	for _, e := range env {
-		stripped := false
-		for _, prefix := range acpStrippedPrefixes {
-			if strings.HasPrefix(e, prefix) {
-				stripped = true
-				break
-			}
-		}
-		if !stripped {
+		if !hasACPStrippedPrefix(e) {
 			clean = append(clean, e)
 		}
 	}
 	return clean
+}
+
+// hasACPStrippedPrefix returns true if the env var should be stripped for ACP agents.
+func hasACPStrippedPrefix(envVar string) bool {
+	for _, prefix := range acpStrippedPrefixes {
+		if strings.HasPrefix(envVar, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // killProcess sends SIGKILL to the process if it's running.

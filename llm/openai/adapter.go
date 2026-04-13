@@ -190,29 +190,29 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 	var eventType string
 
 	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "event: ") {
-			eventType = strings.TrimPrefix(line, "event: ")
-			continue
-		}
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if emitProviderEvents {
-			ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: json.RawMessage(data)}
-		}
-		resolvedType := resolveSSEEventType(eventType, data)
-		a.handleSSEData(resolvedType, []byte(data), ch)
-		eventType = ""
+		eventType = a.processSSELine(scanner.Text(), eventType, ch, emitProviderEvents)
 	}
 
 	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: SSE scan error: %w", err)}
 	}
+}
+
+// processSSELine handles a single SSE scanner line and returns the (possibly updated) event type.
+func (a *Adapter) processSSELine(line, eventType string, ch chan<- llm.StreamEvent, emitProviderEvents bool) string {
+	if strings.HasPrefix(line, "event: ") {
+		return strings.TrimPrefix(line, "event: ")
+	}
+	if !strings.HasPrefix(line, "data: ") {
+		return eventType
+	}
+	data := strings.TrimPrefix(line, "data: ")
+	if emitProviderEvents {
+		ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: json.RawMessage(data)}
+	}
+	resolvedType := resolveSSEEventType(eventType, data)
+	a.handleSSEData(resolvedType, []byte(data), ch)
+	return ""
 }
 
 // resolveSSEEventType returns the SSE event type. When no "event:" header preceded

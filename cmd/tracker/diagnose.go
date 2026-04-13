@@ -260,7 +260,12 @@ func allIdentical(ss []string) bool {
 // records with timing, handler info, and error details.
 func enrichFromEntry(entry diagnoseEntry, failures map[string]*nodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
 	ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+	processStageEvent(entry, failures, stageStarts, failSignatures, ts)
+	enrichNodeFailure(entry, failures)
+}
 
+// processStageEvent updates timing/signature data from stage lifecycle events.
+func processStageEvent(entry diagnoseEntry, failures map[string]*nodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string, ts time.Time) {
 	switch entry.Type {
 	case "stage_started":
 		stageStarts[entry.NodeID] = ts
@@ -271,7 +276,10 @@ func enrichFromEntry(entry diagnoseEntry, failures map[string]*nodeFailure, stag
 	case "stage_completed":
 		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
 	}
+}
 
+// enrichNodeFailure appends error and stderr details to the matching failure record.
+func enrichNodeFailure(entry diagnoseEntry, failures map[string]*nodeFailure) {
 	if entry.NodeID == "" {
 		return
 	}

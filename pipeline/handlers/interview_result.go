@@ -70,28 +70,37 @@ func BuildMarkdownSummary(r InterviewResult) string {
 
 	for i, q := range r.Questions {
 		b.WriteString(fmt.Sprintf("\n**Q%d: %s**\n", i+1, q.Text))
-
-		if strings.TrimSpace(q.Answer) == "" {
-			b.WriteString("(skipped)\n")
-		} else if q.Elaboration != "" {
-			b.WriteString(fmt.Sprintf("%s — %s\n", q.Answer, q.Elaboration))
-		} else {
-			b.WriteString(q.Answer + "\n")
-		}
+		b.WriteString(formatAnswerLine(q))
 	}
 
 	b.WriteString("\n---\n")
-	answered := 0
-	for _, q := range r.Questions {
-		if strings.TrimSpace(q.Answer) != "" {
-			answered++
-		}
-	}
-	b.WriteString(fmt.Sprintf("*%d of %d questions answered*", answered, len(r.Questions)))
+	b.WriteString(fmt.Sprintf("*%d of %d questions answered*", countAnswered(r.Questions), len(r.Questions)))
 
 	if r.Canceled {
 		b.WriteString("\n*Interview was canceled.*")
 	}
 
 	return b.String()
+}
+
+// formatAnswerLine returns the formatted answer string for a single question.
+func formatAnswerLine(q InterviewAnswer) string {
+	if strings.TrimSpace(q.Answer) == "" {
+		return "(skipped)\n"
+	}
+	if q.Elaboration != "" {
+		return fmt.Sprintf("%s — %s\n", q.Answer, q.Elaboration)
+	}
+	return q.Answer + "\n"
+}
+
+// countAnswered returns the number of questions that have a non-empty answer.
+func countAnswered(questions []InterviewAnswer) int {
+	count := 0
+	for _, q := range questions {
+		if strings.TrimSpace(q.Answer) != "" {
+			count++
+		}
+	}
+	return count
 }

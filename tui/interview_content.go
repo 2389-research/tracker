@@ -301,7 +301,6 @@ func (ic *InterviewContent) updateTextareaMode(km tea.KeyMsg) tea.Cmd {
 
 	switch km.String() {
 	case "esc":
-		// Exit textarea, return to navigation.
 		ic.inTextarea = false
 		ic.blurAll(f)
 		return nil
@@ -318,7 +317,11 @@ func (ic *InterviewContent) updateTextareaMode(km tea.KeyMsg) tea.Cmd {
 		return ic.moveCursor(1)
 	}
 
-	// Forward to the active textarea.
+	return ic.forwardToActiveTextarea(f, km)
+}
+
+// forwardToActiveTextarea routes the key event to the currently active textarea.
+func (ic *InterviewContent) forwardToActiveTextarea(f *interviewField, km tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	if f.editingElab {
 		f.elaboration, cmd = f.elaboration.Update(km)
@@ -380,30 +383,43 @@ func (ic *InterviewContent) updateSelectField(km tea.KeyMsg, f *interviewField) 
 func (ic *InterviewContent) handleSelectNavKeys(km tea.KeyMsg, f *interviewField, totalOpts int) tea.Cmd {
 	switch km.Type {
 	case tea.KeyUp:
-		if f.selectCursor > 0 {
-			f.selectCursor--
-			f.isOther = false
-		} else {
-			return ic.moveCursor(-1)
-		}
+		return ic.handleSelectUp(f)
 	case tea.KeyDown:
-		if f.selectCursor < totalOpts-1 {
-			f.selectCursor++
-			f.isOther = f.selectCursor >= len(f.question.Options)
-		} else {
-			return ic.moveCursor(1)
-		}
+		return ic.handleSelectDown(f, totalOpts)
 	case tea.KeyEnter:
 		return ic.handleSelectEnter(f)
 	case tea.KeyEscape:
-		if ic.cursor > 0 {
-			return ic.moveCursor(-1)
-		}
-		return ic.cancel()
-	default:
-		return nil
+		return ic.handleSelectEscape()
 	}
 	return nil
+}
+
+// handleSelectUp moves the cursor up in a select field.
+func (ic *InterviewContent) handleSelectUp(f *interviewField) tea.Cmd {
+	if f.selectCursor > 0 {
+		f.selectCursor--
+		f.isOther = false
+		return nil
+	}
+	return ic.moveCursor(-1)
+}
+
+// handleSelectDown moves the cursor down in a select field.
+func (ic *InterviewContent) handleSelectDown(f *interviewField, totalOpts int) tea.Cmd {
+	if f.selectCursor < totalOpts-1 {
+		f.selectCursor++
+		f.isOther = f.selectCursor >= len(f.question.Options)
+		return nil
+	}
+	return ic.moveCursor(1)
+}
+
+// handleSelectEscape moves to the previous question or cancels.
+func (ic *InterviewContent) handleSelectEscape() tea.Cmd {
+	if ic.cursor > 0 {
+		return ic.moveCursor(-1)
+	}
+	return ic.cancel()
 }
 
 // handleSelectEnter processes Enter on a select field (confirm or activate "Other").
@@ -672,17 +688,19 @@ func (ic *InterviewContent) renderAnsweredSummary() string {
 
 	var sb strings.Builder
 	for idx := summaryStart; idx < ic.cursor && idx < len(ic.fields); idx++ {
-		f := &ic.fields[idx]
-		answer := ic.fieldAnswerText(f)
-		if answer != "" {
-			sb.WriteString(summaryStyle.Render(fmt.Sprintf("  ✓ Q%d: %s → %s", f.question.Index, f.question.Text, answer)))
-		} else {
-			sb.WriteString(skippedStyle.Render(fmt.Sprintf("  · Q%d: %s (skipped)", f.question.Index, f.question.Text)))
-		}
-		sb.WriteString("\n")
+		sb.WriteString(ic.renderSummaryRow(&ic.fields[idx], summaryStyle, skippedStyle))
 	}
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+// renderSummaryRow renders one answered/skipped question in the summary list.
+func (ic *InterviewContent) renderSummaryRow(f *interviewField, summaryStyle, skippedStyle lipgloss.Style) string {
+	answer := ic.fieldAnswerText(f)
+	if answer != "" {
+		return summaryStyle.Render(fmt.Sprintf("  ✓ Q%d: %s → %s", f.question.Index, f.question.Text, answer)) + "\n"
+	}
+	return skippedStyle.Render(fmt.Sprintf("  · Q%d: %s (skipped)", f.question.Index, f.question.Text)) + "\n"
 }
 
 // renderCurrentQuestion renders the full block for the question at ic.cursor.
@@ -789,13 +807,7 @@ func (ic *InterviewContent) renderOtherRow(f *interviewField) string {
 	normalStyle := lipgloss.NewStyle()
 
 	var sb strings.Builder
-	if f.selectCursor >= len(f.question.Options) && !ic.inTextarea {
-		sb.WriteString(selectedStyle.Render("  ● Other"))
-	} else if f.isOther && ic.inTextarea && !f.editingElab {
-		sb.WriteString(selectedStyle.Render("  ● Other:"))
-	} else {
-		sb.WriteString(normalStyle.Render("  ○ Other"))
-	}
+	sb.WriteString(ic.otherRowLabel(f, selectedStyle, normalStyle))
 	sb.WriteString("\n")
 
 	if f.isOther && ic.inTextarea && !f.editingElab {
@@ -805,6 +817,17 @@ func (ic *InterviewContent) renderOtherRow(f *interviewField) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// otherRowLabel returns the rendered label for the "Other" row.
+func (ic *InterviewContent) otherRowLabel(f *interviewField, selectedStyle, normalStyle lipgloss.Style) string {
+	if f.selectCursor >= len(f.question.Options) && !ic.inTextarea {
+		return selectedStyle.Render("  ● Other")
+	}
+	if f.isOther && ic.inTextarea && !f.editingElab {
+		return selectedStyle.Render("  ● Other:")
+	}
+	return normalStyle.Render("  ○ Other")
 }
 
 // renderElaboration renders the elaboration textarea or hint line for select/confirm questions.

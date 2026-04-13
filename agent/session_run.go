@@ -202,45 +202,69 @@ func (s *Session) executeSingleTool(ctx context.Context, call llm.ToolCallData) 
 		ToolInput: string(call.Arguments),
 	})
 
-	tool := s.registry.Get(call.Name)
-	policy := tools.CachePolicyNone
-	if tool != nil {
-		policy = tools.GetCachePolicy(tool)
+	policy := s.toolCachePolicy(call.Name)
+
+	if result, hit := s.tryToolCache(call, policy); hit {
+		return result, 0
 	}
 
-	// Try cache first.
-	if s.cache != nil && policy == tools.CachePolicyCacheable {
-		if cached, hit := s.cache.get(call.Name, string(call.Arguments)); hit {
-			s.emit(Event{
-				Type:      EventToolCacheHit,
-				SessionID: s.id,
-				ToolName:  call.Name,
-				ToolInput: string(call.Arguments),
-			})
-			return llm.ToolResultData{
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Content:    cached,
-				IsError:    false,
-			}, 0
-		}
-	}
+	return s.executeAndCacheTool(ctx, call, policy)
+}
 
-	// Execute the tool.
+// toolCachePolicy returns the cache policy for the named tool, or CachePolicyNone if unknown.
+func (s *Session) toolCachePolicy(name string) tools.CachePolicy {
+	tool := s.registry.Get(name)
+	if tool == nil {
+		return tools.CachePolicyNone
+	}
+	return tools.GetCachePolicy(tool)
+}
+
+// tryToolCache checks the cache for a previous result. Returns the cached result and true on hit.
+func (s *Session) tryToolCache(call llm.ToolCallData, policy tools.CachePolicy) (llm.ToolResultData, bool) {
+	if s.cache == nil || policy != tools.CachePolicyCacheable {
+		return llm.ToolResultData{}, false
+	}
+	cached, hit := s.cache.get(call.Name, string(call.Arguments))
+	if !hit {
+		return llm.ToolResultData{}, false
+	}
+	s.emit(Event{
+		Type:      EventToolCacheHit,
+		SessionID: s.id,
+		ToolName:  call.Name,
+		ToolInput: string(call.Arguments),
+	})
+	return llm.ToolResultData{
+		ToolCallID: call.ID,
+		Name:       call.Name,
+		Content:    cached,
+		IsError:    false,
+	}, true
+}
+
+// executeAndCacheTool runs the tool, updates cache and timings, and returns the result.
+func (s *Session) executeAndCacheTool(ctx context.Context, call llm.ToolCallData, policy tools.CachePolicy) (llm.ToolResultData, time.Duration) {
 	toolStart := time.Now()
 	toolResult := s.registry.Execute(ctx, call)
 	toolDuration := time.Since(toolStart)
 	s.toolTimings[call.Name] += toolDuration
 
-	// Invalidate cache on mutating tools or unknown tools (safe
-	// default: an unclassified tool may have side effects).
-	if s.cache != nil && policy != tools.CachePolicyCacheable {
-		s.cache.invalidateAll()
-	}
-
-	if s.cache != nil && policy == tools.CachePolicyCacheable && !toolResult.IsError {
-		s.cache.store(call.Name, string(call.Arguments), toolResult.Content)
+	if s.cache != nil {
+		s.updateToolCache(call, policy, toolResult)
 	}
 
 	return toolResult, toolDuration
+}
+
+// updateToolCache invalidates or stores tool results based on cache policy.
+func (s *Session) updateToolCache(call llm.ToolCallData, policy tools.CachePolicy, result llm.ToolResultData) {
+	if policy != tools.CachePolicyCacheable {
+		// Invalidate on mutating or unknown tools (safe default: unclassified tools may have side effects).
+		s.cache.invalidateAll()
+		return
+	}
+	if !result.IsError {
+		s.cache.store(call.Name, string(call.Arguments), result.Content)
+	}
 }

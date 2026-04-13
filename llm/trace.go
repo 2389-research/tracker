@@ -241,20 +241,26 @@ func FormatModelHeader(provider, model string) string {
 }
 
 func formatBaseLine(prefix string, evt TraceEvent) string {
-	line := prefix
-	if evt.Provider != "" || evt.Model != "" {
-		line += " "
-		if evt.Provider != "" {
-			line += evt.Provider
-		}
-		if evt.Model != "" {
-			if evt.Provider != "" {
-				line += "/"
-			}
-			line += evt.Model
-		}
+	suffix := formatProviderModelSuffix(evt.Provider, evt.Model)
+	if suffix == "" {
+		return prefix
 	}
-	return line
+	return prefix + " " + suffix
+}
+
+// formatProviderModelSuffix returns "provider/model", "provider", "model", or "" depending
+// on which fields are set.
+func formatProviderModelSuffix(provider, model string) string {
+	if provider == "" && model == "" {
+		return ""
+	}
+	if provider == "" {
+		return model
+	}
+	if model == "" {
+		return provider
+	}
+	return provider + "/" + model
 }
 
 func appendPreview(preview string) string {

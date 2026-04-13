@@ -13,8 +13,8 @@ LDFLAGS  = -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DA
 COVERAGE_THRESHOLD ?= 80
 
 # Complexity thresholds
-CYCLO_MAX     ?= 10
-COGNITIVE_MAX ?= 10
+CYCLO_MAX     ?= 8
+COGNITIVE_MAX ?= 8
 FILE_MAX_LINES ?= 500
 
 # ─── Build ───────────────────────────────────────────────

@@ -21,25 +21,21 @@ func lintDIP105(g *Graph) []string {
 // hasUnconditionalPath returns true if there is a path from start to goal
 // using only unconditional (no condition) edges.
 func hasUnconditionalPath(g *Graph, start, goal string) bool {
-	visited := make(map[string]bool)
-	queue := []string{start}
-	visited[start] = true
+	visited := bfsVisit(start, func(node string) []string {
+		return unconditionalNeighbors(g, node)
+	})
+	return visited[goal]
+}
 
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		if current == goal {
-			return true
-		}
-		for _, edge := range g.OutgoingEdges(current) {
-			if edge.Condition == "" && !visited[edge.To] {
-				visited[edge.To] = true
-				queue = append(queue, edge.To)
-			}
+// unconditionalNeighbors returns the targets of unconditional outgoing edges from node.
+func unconditionalNeighbors(g *Graph, node string) []string {
+	var out []string
+	for _, edge := range g.OutgoingEdges(node) {
+		if edge.Condition == "" {
+			out = append(out, edge.To)
 		}
 	}
-	return false
+	return out
 }
 
 // lintDIP106 checks for undefined variable references in prompts.
@@ -183,13 +179,8 @@ func reservedContextKeys() map[string]bool {
 func collectAllWrites(g *Graph) map[string]bool {
 	allWrites := make(map[string]bool)
 	for _, node := range g.Nodes {
-		if w := node.Attrs["writes"]; w != "" {
-			for _, key := range strings.Split(w, ",") {
-				key = strings.TrimSpace(key)
-				if key != "" {
-					allWrites[key] = true
-				}
-			}
+		for key := range parseWriteKeys(node.Attrs["writes"]) {
+			allWrites[key] = true
 		}
 	}
 	return allWrites

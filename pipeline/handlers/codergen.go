@@ -250,43 +250,75 @@ func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) (*pipeline.
 
 // parseClaudeCodeToolAttrs parses MCP servers, allowed/disallowed tools.
 func parseClaudeCodeToolAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	if raw, ok := node.Attrs["mcp_servers"]; ok && raw != "" {
-		servers, err := pipeline.ParseMCPServers(raw)
-		if err != nil {
-			return fmt.Errorf("node %q: %w", node.ID, err)
-		}
-		ccCfg.MCPServers = servers
+	if err := applyMCPServers(node, ccCfg); err != nil {
+		return err
 	}
-	if raw, ok := node.Attrs["allowed_tools"]; ok && raw != "" {
-		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
-	}
-	if raw, ok := node.Attrs["disallowed_tools"]; ok && raw != "" {
-		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
-	}
+	applyToolLists(node, ccCfg)
 	if err := pipeline.ValidateToolLists(ccCfg.AllowedTools, ccCfg.DisallowedTools); err != nil {
 		return fmt.Errorf("node %q: %w", node.ID, err)
 	}
 	return nil
 }
 
+// applyMCPServers parses and sets MCPServers from node attrs if present.
+func applyMCPServers(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	raw, ok := node.Attrs["mcp_servers"]
+	if !ok || raw == "" {
+		return nil
+	}
+	servers, err := pipeline.ParseMCPServers(raw)
+	if err != nil {
+		return fmt.Errorf("node %q: %w", node.ID, err)
+	}
+	ccCfg.MCPServers = servers
+	return nil
+}
+
+// applyToolLists sets AllowedTools and DisallowedTools from node attrs if present.
+func applyToolLists(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
+	if raw := node.Attrs["allowed_tools"]; raw != "" {
+		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
+	}
+	if raw := node.Attrs["disallowed_tools"]; raw != "" {
+		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
+	}
+}
+
 // parseClaudeCodeBudgetAttrs parses max_budget_usd and permission_mode.
 func parseClaudeCodeBudgetAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	if raw, ok := node.Attrs["max_budget_usd"]; ok && raw != "" {
-		v, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
-			return fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
-		}
-		if v > 0 {
-			ccCfg.MaxBudgetUSD = v
-		}
+	if err := applyMaxBudget(node, ccCfg); err != nil {
+		return err
 	}
-	if raw, ok := node.Attrs["permission_mode"]; ok && raw != "" {
-		mode := pipeline.PermissionMode(raw)
-		if !mode.Valid() {
-			return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, acceptEdits, bypassPermissions, default, dontAsk, auto)", node.ID, raw)
-		}
-		ccCfg.PermissionMode = mode
+	return applyPermissionMode(node, ccCfg)
+}
+
+// applyMaxBudget parses and applies the max_budget_usd attribute if present.
+func applyMaxBudget(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	raw, ok := node.Attrs["max_budget_usd"]
+	if !ok || raw == "" {
+		return nil
 	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
+	}
+	if v > 0 {
+		ccCfg.MaxBudgetUSD = v
+	}
+	return nil
+}
+
+// applyPermissionMode parses and applies the permission_mode attribute if present.
+func applyPermissionMode(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	raw, ok := node.Attrs["permission_mode"]
+	if !ok || raw == "" {
+		return nil
+	}
+	mode := pipeline.PermissionMode(raw)
+	if !mode.Valid() {
+		return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, acceptEdits, bypassPermissions, default, dontAsk, auto)", node.ID, raw)
+	}
+	ccCfg.PermissionMode = mode
 	return nil
 }
 
@@ -387,12 +419,7 @@ func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt,
 		return pipeline.Outcome{}, false, nil
 	}
 
-	status := pipeline.OutcomeFail
-	msg := fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID)
-	if emptyAPIResponse {
-		status = pipeline.OutcomeRetry
-		msg = fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", node.ID)
-	}
+	status, msg := emptyResponseStatusMsg(node.ID, emptyAPIResponse)
 	outcome := pipeline.Outcome{
 		Status: status,
 		ContextUpdates: map[string]string{
@@ -405,6 +432,14 @@ func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt,
 		return pipeline.Outcome{}, true, err
 	}
 	return outcome, true, nil
+}
+
+// emptyResponseStatusMsg returns the outcome status and diagnostic message for an empty response.
+func emptyResponseStatusMsg(nodeID string, emptyAPIResponse bool) (string, string) {
+	if emptyAPIResponse {
+		return pipeline.OutcomeRetry, fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", nodeID)
+	}
+	return pipeline.OutcomeFail, fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", nodeID)
 }
 
 // buildSuccessOutcome handles the normal (non-empty) completion path, including
@@ -499,18 +534,26 @@ func (h *CodergenHandler) applyModelProvider(config *agent.SessionConfig, node *
 
 // applySessionLimits sets system prompt, max turns, and command timeout.
 func (h *CodergenHandler) applySessionLimits(config *agent.SessionConfig, node *pipeline.Node) {
-	if sp, ok := node.Attrs["system_prompt"]; ok {
+	if sp := node.Attrs["system_prompt"]; sp != "" {
 		config.SystemPrompt = sp
 	}
-	if mt, ok := node.Attrs["max_turns"]; ok {
-		if v, err := strconv.Atoi(mt); err == nil && v > 0 {
-			config.MaxTurns = v
-		}
+	if mt := node.Attrs["max_turns"]; mt != "" {
+		applyMaxTurns(config, mt)
 	}
-	if ct, ok := node.Attrs["command_timeout"]; ok {
-		if d, err := time.ParseDuration(ct); err == nil && d > 0 {
-			config.CommandTimeout = d
-		}
+	if ct := node.Attrs["command_timeout"]; ct != "" {
+		applyCommandTimeout(config, ct)
+	}
+}
+
+func applyMaxTurns(config *agent.SessionConfig, raw string) {
+	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+		config.MaxTurns = v
+	}
+}
+
+func applyCommandTimeout(config *agent.SessionConfig, raw string) {
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		config.CommandTimeout = d
 	}
 }
 
@@ -595,21 +638,28 @@ func parseAutoStatus(text string) string {
 		if inCodeBlock {
 			continue
 		}
-		upper := strings.ToUpper(trimmed)
-		if !strings.HasPrefix(upper, "STATUS:") {
-			continue
-		}
-		status := strings.ToLower(strings.TrimSpace(trimmed[len("STATUS:"):]))
-		switch status {
-		case "success":
-			result = pipeline.OutcomeSuccess
-		case "fail":
-			result = pipeline.OutcomeFail
-		case "retry":
-			result = pipeline.OutcomeRetry
+		if s := parseStatusLine(trimmed); s != "" {
+			result = s
 		}
 	}
 	return result
+}
+
+// parseStatusLine extracts the status value from a "STATUS: ..." line.
+// Returns "" if the line is not a valid STATUS directive.
+func parseStatusLine(trimmed string) string {
+	if !strings.HasPrefix(strings.ToUpper(trimmed), "STATUS:") {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(trimmed[len("STATUS:"):])) {
+	case "success":
+		return pipeline.OutcomeSuccess
+	case "fail":
+		return pipeline.OutcomeFail
+	case "retry":
+		return pipeline.OutcomeRetry
+	}
+	return ""
 }
 
 // prependContextSummary adds a compacted context summary section to the prompt

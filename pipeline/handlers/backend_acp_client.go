@@ -433,18 +433,7 @@ func formatRawInput(v any) string {
 
 // extractToolCallOutput builds a string from tool call content and rawOutput.
 func extractToolCallOutput(content []acp.ToolCallContent, rawOutput any) string {
-	var parts []string
-	for _, c := range content {
-		if c.Content != nil {
-			text := extractContentText(c.Content.Content)
-			if text != "" {
-				parts = append(parts, text)
-			}
-		}
-		if c.Diff != nil {
-			parts = append(parts, fmt.Sprintf("diff %s", c.Diff.Path))
-		}
-	}
+	parts := collectToolCallParts(content)
 	if len(parts) > 0 {
 		return strings.Join(parts, "\n")
 	}
@@ -452,4 +441,26 @@ func extractToolCallOutput(content []acp.ToolCallContent, rawOutput any) string 
 		return formatRawInput(rawOutput)
 	}
 	return ""
+}
+
+// collectToolCallParts extracts text fragments from a slice of tool call content items.
+func collectToolCallParts(content []acp.ToolCallContent) []string {
+	var parts []string
+	for _, c := range content {
+		parts = appendToolCallContentPart(parts, c)
+	}
+	return parts
+}
+
+// appendToolCallContentPart appends the text representation of a single ToolCallContent item.
+func appendToolCallContentPart(parts []string, c acp.ToolCallContent) []string {
+	if c.Content != nil {
+		if text := extractContentText(c.Content.Content); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if c.Diff != nil {
+		parts = append(parts, fmt.Sprintf("diff %s", c.Diff.Path))
+	}
+	return parts
 }

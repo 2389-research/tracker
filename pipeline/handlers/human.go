@@ -294,46 +294,49 @@ func (c *ConsoleInterviewer) AskFreeform(prompt string) (string, error) {
 // The user can respond by name (case-insensitive) or numeric index. A blank response
 // skips the question. Previous answers are shown as a hint when provided.
 func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
-	// Build ID-based lookup for previous answers.
-	prevByID := make(map[string]InterviewAnswer)
-	if prev != nil {
-		for _, a := range prev.Questions {
-			prevByID[a.ID] = a
-		}
-	}
-
+	prevByID := buildPrevAnswerIndex(prev)
 	answers := make([]InterviewAnswer, len(questions))
 	canceled := false
+
 	for i, q := range questions {
 		ans := InterviewAnswer{
 			ID:   fmt.Sprintf("q%d", q.Index),
 			Text: q.Text,
 		}
-		prevAns := prevByID[ans.ID]
-
-		// Print the question
 		fmt.Fprintf(c.Writer, "\nQ%d: %s\n", q.Index, q.Text)
 
-		var err error
-		if q.IsYesNo {
-			// Yes/no takes priority over options to stay consistent with TUI behavior.
-			err = c.askYesNoQuestion(&ans, prevAns)
-		} else if len(q.Options) > 0 {
-			err = c.askOptionQuestion(&ans, q, prevAns)
-		} else {
-			err = c.askFreeformQuestion(&ans, prevAns)
-		}
-
-		if err != nil {
+		if err := c.askQuestion(&ans, q, prevByID[ans.ID]); err != nil {
 			canceled = true
 			answers[i] = ans
 			fillRemainingEmpty(answers, questions, i+1)
 			break
 		}
-
 		answers[i] = ans
 	}
 	return &InterviewResult{Questions: answers, Canceled: canceled}, nil
+}
+
+// buildPrevAnswerIndex builds an ID-keyed lookup of previous interview answers.
+func buildPrevAnswerIndex(prev *InterviewResult) map[string]InterviewAnswer {
+	index := make(map[string]InterviewAnswer)
+	if prev != nil {
+		for _, a := range prev.Questions {
+			index[a.ID] = a
+		}
+	}
+	return index
+}
+
+// askQuestion dispatches to the appropriate question type handler.
+func (c *ConsoleInterviewer) askQuestion(ans *InterviewAnswer, q Question, prevAns InterviewAnswer) error {
+	if q.IsYesNo {
+		// Yes/no takes priority over options to stay consistent with TUI behavior.
+		return c.askYesNoQuestion(ans, prevAns)
+	}
+	if len(q.Options) > 0 {
+		return c.askOptionQuestion(ans, q, prevAns)
+	}
+	return c.askFreeformQuestion(ans, prevAns)
 }
 
 // fillRemainingEmpty fills answers[start:] with empty InterviewAnswer structs for
@@ -358,16 +361,22 @@ func (c *ConsoleInterviewer) askYesNoQuestion(ans *InterviewAnswer, prevAns Inte
 	if err != nil {
 		return err
 	}
-	input := strings.TrimSpace(strings.ToLower(line))
-	switch {
-	case input == "y" || input == "yes":
-		ans.Answer = "yes"
-	case input == "n" || input == "no":
-		ans.Answer = "no"
-	case input == "" && prevAns.Answer != "":
-		ans.Answer = prevAns.Answer
-	}
+	ans.Answer = resolveYesNoInput(strings.TrimSpace(strings.ToLower(line)), prevAns.Answer)
 	return nil
+}
+
+// resolveYesNoInput maps raw yes/no input to a canonical answer string.
+// Returns prevAnswer when input is blank and a previous answer exists.
+func resolveYesNoInput(input, prevAnswer string) string {
+	switch input {
+	case "y", "yes":
+		return "yes"
+	case "n", "no":
+		return "no"
+	case "":
+		return prevAnswer
+	}
+	return ""
 }
 
 // askOptionQuestion handles a question with a fixed option list, reading input from

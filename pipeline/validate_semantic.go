@@ -175,13 +175,22 @@ func validateSingleNodeAttrs(node *Node, ve *ValidationError) {
 	}
 	validateBoolAttr(node.Attrs, "cache_tool_results", "node", node.ID, ve)
 	validateEnumAttr(node.Attrs, "context_compaction", []string{"auto", "none"}, "node", node.ID, ve)
-	if v, ok := node.Attrs["context_compaction_threshold"]; ok {
-		f, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be a float", node.ID, v))
-		} else if f <= 0 || f > 1.0 {
-			ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be > 0 and <= 1.0", node.ID, v))
-		}
+	validateCompactionThreshold(node, ve)
+}
+
+// validateCompactionThreshold checks that context_compaction_threshold is a valid float in (0, 1].
+func validateCompactionThreshold(node *Node, ve *ValidationError) {
+	v, ok := node.Attrs["context_compaction_threshold"]
+	if !ok {
+		return
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be a float", node.ID, v))
+		return
+	}
+	if f <= 0 || f > 1.0 {
+		ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be > 0 and <= 1.0", node.ID, v))
 	}
 }
 

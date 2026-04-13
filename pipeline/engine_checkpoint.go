@@ -157,23 +157,41 @@ func isGoalGate(node *Node) bool {
 // Returns (target, goalGateNodeID, shouldRetry, unsatisfied).
 func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, string, bool, bool) {
 	for _, nodeID := range cp.CompletedNodes {
-		node := e.graph.Nodes[nodeID]
-		if node == nil || !isGoalGate(node) {
-			continue
+		if result, found := e.checkGoalGateNode(cp, nodeID, nodeOutcomes); found {
+			return result.target, result.nodeID, result.shouldRetry, result.unsatisfied
 		}
-		status := nodeOutcomes[nodeID]
-		if status == OutcomeSuccess || status == "partial_success" {
-			continue
-		}
-
-		// Check retry budget before allowing another loop.
-		if cp.RetryCount(nodeID) >= e.maxRetries(node) {
-			return e.goalGateExhaustedPath(cp, node, nodeID)
-		}
-
-		return e.goalGateRemainingPath(node, nodeID)
 	}
 	return "", "", false, false
+}
+
+// goalGateCheckResult holds the output of checkGoalGateNode.
+type goalGateCheckResult struct {
+	target      string
+	nodeID      string
+	shouldRetry bool
+	unsatisfied bool
+}
+
+// checkGoalGateNode evaluates a single completed node as a potential goal gate retry point.
+// Returns (result, true) if this node is an unsatisfied goal gate, (zero, false) otherwise.
+func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string, nodeOutcomes map[string]string) (goalGateCheckResult, bool) {
+	node := e.graph.Nodes[nodeID]
+	if node == nil || !isGoalGate(node) {
+		return goalGateCheckResult{}, false
+	}
+	status := nodeOutcomes[nodeID]
+	if status == OutcomeSuccess || status == "partial_success" {
+		return goalGateCheckResult{}, false
+	}
+
+	var t, n string
+	var retry, unsat bool
+	if cp.RetryCount(nodeID) >= e.maxRetries(node) {
+		t, n, retry, unsat = e.goalGateExhaustedPath(cp, node, nodeID)
+	} else {
+		t, n, retry, unsat = e.goalGateRemainingPath(node, nodeID)
+	}
+	return goalGateCheckResult{target: t, nodeID: n, shouldRetry: retry, unsatisfied: unsat}, true
 }
 
 // goalGateExhaustedPath handles the retry-budget-exhausted case for a goal gate.
@@ -183,25 +201,33 @@ func (e *Engine) goalGateExhaustedPath(cp *Checkpoint, node *Node, nodeID string
 	if cp.FallbackTaken[nodeID] {
 		return "", nodeID, false, true
 	}
-	fallbacks := []string{
+	fb := e.findFallbackTarget(node)
+	if fb == "" {
+		return "", nodeID, false, true
+	}
+	if cp.FallbackTaken == nil {
+		cp.FallbackTaken = map[string]bool{}
+	}
+	cp.FallbackTaken[nodeID] = true
+	return fb, nodeID, false, true
+}
+
+// findFallbackTarget returns the first valid fallback node ID from node and graph attrs.
+func (e *Engine) findFallbackTarget(node *Node) string {
+	candidates := []string{
 		node.Attrs["fallback_target"],
 		node.Attrs["fallback_retry_target"],
 		e.graph.Attrs["fallback_target"],
 		e.graph.Attrs["fallback_retry_target"],
 	}
-	for _, fb := range fallbacks {
-		if fb == "" {
-			continue
-		}
-		if _, ok := e.graph.Nodes[fb]; ok {
-			if cp.FallbackTaken == nil {
-				cp.FallbackTaken = map[string]bool{}
+	for _, fb := range candidates {
+		if fb != "" {
+			if _, ok := e.graph.Nodes[fb]; ok {
+				return fb
 			}
-			cp.FallbackTaken[nodeID] = true
-			return fb, nodeID, false, true
 		}
 	}
-	return "", nodeID, false, true
+	return ""
 }
 
 // goalGateRemainingPath handles the retries-still-available case for a goal gate.

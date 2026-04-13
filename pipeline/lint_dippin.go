@@ -102,17 +102,25 @@ func hasConditionalWithoutFallback(edges []*Edge) bool {
 func lintDIP104(g *Graph) []string {
 	var warnings []string
 	for _, node := range g.Nodes {
-		retryTarget, hasRetry := node.Attrs["retry_target"]
-		maxRetries, hasMax := node.Attrs["max_retries"]
-		fallbackTarget, hasFallback := node.Attrs["fallback_retry_target"]
-
-		// If node has retry_target but no max_retries or fallback, it's unbounded
-		if hasRetry && retryTarget != "" && (!hasMax || maxRetries == "" || maxRetries == "0") && (!hasFallback || fallbackTarget == "") {
+		if isUnboundedRetry(node.Attrs) {
 			warnings = append(warnings, fmt.Sprintf(
 				"warning[DIP104]: node %q has unbounded retry loop (no max_retries or fallback)", node.ID))
 		}
 	}
 	return warnings
+}
+
+// isUnboundedRetry returns true when a node has a retry_target but neither a
+// meaningful max_retries count nor a fallback_retry_target to escape the loop.
+func isUnboundedRetry(attrs map[string]string) bool {
+	retryTarget, hasRetry := attrs["retry_target"]
+	if !hasRetry || retryTarget == "" {
+		return false
+	}
+	maxRetries := attrs["max_retries"]
+	hasMaxRetries := maxRetries != "" && maxRetries != "0"
+	hasFallback := attrs["fallback_retry_target"] != ""
+	return !hasMaxRetries && !hasFallback
 }
 
 // knownProviderModels maps provider names to recognized model patterns.
@@ -186,19 +194,30 @@ func lintDIP101(g *Graph) []string {
 
 // bfsUnconditional performs BFS from StartNode following only unconditional edges.
 func bfsUnconditional(g *Graph) map[string]bool {
-	unconditional := make(map[string][]string)
+	adj := buildUnconditionalAdj(g)
+	return bfsVisit(g.StartNode, func(node string) []string { return adj[node] })
+}
+
+// buildUnconditionalAdj builds an adjacency list containing only unconditional edges.
+func buildUnconditionalAdj(g *Graph) map[string][]string {
+	adj := make(map[string][]string)
 	for _, edge := range g.Edges {
 		if edge.Condition == "" {
-			unconditional[edge.From] = append(unconditional[edge.From], edge.To)
+			adj[edge.From] = append(adj[edge.From], edge.To)
 		}
 	}
-	visited := make(map[string]bool)
-	visited[g.StartNode] = true
-	queue := []string{g.StartNode}
+	return adj
+}
+
+// bfsVisit performs BFS from start using the provided neighbor function.
+// Returns the set of visited nodes (including start).
+func bfsVisit(start string, neighbors func(string) []string) map[string]bool {
+	visited := map[string]bool{start: true}
+	queue := []string{start}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for _, next := range unconditional[current] {
+		for _, next := range neighbors(current) {
 			if !visited[next] {
 				visited[next] = true
 				queue = append(queue, next)
@@ -331,21 +350,34 @@ func collectNodeWrites(g *Graph) map[string]map[string]bool {
 	nodeWrites := make(map[string]map[string]bool)
 	for _, node := range g.Nodes {
 		if w := node.Attrs["writes"]; w != "" {
-			nodeWrites[node.ID] = make(map[string]bool)
-			for _, key := range strings.Split(w, ",") {
-				key = strings.TrimSpace(key)
-				if key != "" {
-					nodeWrites[node.ID][key] = true
-				}
-			}
+			nodeWrites[node.ID] = parseWriteKeys(w)
 		}
 	}
 	return nodeWrites
 }
 
+// parseWriteKeys splits a comma-separated writes attribute into a set of trimmed keys.
+func parseWriteKeys(w string) map[string]bool {
+	keys := make(map[string]bool)
+	for _, key := range strings.Split(w, ",") {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys[key] = true
+		}
+	}
+	return keys
+}
+
 // collectUpstreamKeys performs BFS backwards from nodeID and collects all context
 // keys written by upstream nodes.
 func collectUpstreamKeys(g *Graph, nodeID string, nodeWrites map[string]map[string]bool) map[string]bool {
+	upstream := bfsUpstreamNodes(g, nodeID)
+	return mergeWriteKeys(upstream, nodeWrites)
+}
+
+// bfsUpstreamNodes performs reverse BFS from nodeID and returns the set of all
+// predecessor node IDs (excluding nodeID itself).
+func bfsUpstreamNodes(g *Graph, nodeID string) map[string]bool {
 	upstream := make(map[string]bool)
 	queue := []string{nodeID}
 	visited := make(map[string]bool)
@@ -362,12 +394,16 @@ func collectUpstreamKeys(g *Graph, nodeID string, nodeWrites map[string]map[stri
 			}
 		}
 	}
+	return upstream
+}
 
-	upstreamKeys := make(map[string]bool)
+// mergeWriteKeys unions all context keys written by the given set of upstream nodes.
+func mergeWriteKeys(upstream map[string]bool, nodeWrites map[string]map[string]bool) map[string]bool {
+	keys := make(map[string]bool)
 	for upNode := range upstream {
 		for key := range nodeWrites[upNode] {
-			upstreamKeys[key] = true
+			keys[key] = true
 		}
 	}
-	return upstreamKeys
+	return keys
 }

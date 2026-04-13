@@ -70,37 +70,47 @@ func appendUnique(dst *[]string, src []string, seen map[string]bool) {
 	}
 }
 
+// toolCount pairs a tool name with its call count for sorting.
+type toolCount struct {
+	name  string
+	count int
+}
+
 // formatToolBreakdown returns a parenthesized breakdown like "(bash: 198, write: 67)".
 func formatToolBreakdown(toolCalls map[string]int) string {
 	if len(toolCalls) == 0 {
 		return ""
 	}
-	// Sort by count descending, then name ascending for stability.
-	type toolCount struct {
-		name  string
-		count int
-	}
-	var sorted []toolCount
-	for name, count := range toolCalls {
-		sorted = append(sorted, toolCount{name, count})
-	}
-	slices.SortFunc(sorted, func(a, b toolCount) int {
-		if a.count != b.count {
-			return b.count - a.count // descending by count
-		}
-		if a.name < b.name {
-			return -1
-		}
-		if a.name > b.name {
-			return 1
-		}
-		return 0
-	})
+	sorted := sortedToolCounts(toolCalls)
 	var parts []string
 	for _, tc := range sorted {
 		parts = append(parts, fmt.Sprintf("%s: %d", tc.name, tc.count))
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// sortedToolCounts converts a tool call map to a slice sorted by count desc, name asc.
+func sortedToolCounts(toolCalls map[string]int) []toolCount {
+	var sorted []toolCount
+	for name, count := range toolCalls {
+		sorted = append(sorted, toolCount{name, count})
+	}
+	slices.SortFunc(sorted, compareToolCounts)
+	return sorted
+}
+
+// compareToolCounts sorts by count descending, then name ascending.
+func compareToolCounts(a, b toolCount) int {
+	if a.count != b.count {
+		return b.count - a.count
+	}
+	if a.name < b.name {
+		return -1
+	}
+	if a.name > b.name {
+		return 1
+	}
+	return 0
 }
 
 // formatNumber adds comma separators to integers for readability.
@@ -199,12 +209,16 @@ func printRunTotals(result *pipeline.EngineResult, tracker *llm.TokenTracker) {
 		return
 	}
 	agg := aggregateSessionStats(result.Trace.Entries)
-
 	if agg.TotalTurns == 0 && agg.TotalToolCalls == 0 {
 		return
 	}
 	fmt.Println()
 	fmt.Println("─── Totals ────────────────────────────────────────────────")
+	printTotalsBody(agg, tracker)
+}
+
+// printTotalsBody prints the body rows of the totals section.
+func printTotalsBody(agg aggregatedStats, tracker *llm.TokenTracker) {
 	fmt.Printf("  LLM Turns:    %s\n", formatNumber(agg.TotalTurns))
 
 	toolLine := fmt.Sprintf("  Tool Calls:   %s", formatNumber(agg.TotalToolCalls))
@@ -328,28 +342,32 @@ func printPipelineFlow(result *pipeline.EngineResult) {
 // printNodeGraph renders a simple vertical ASCII graph of the executed nodes.
 func printNodeGraph(entries []pipeline.TraceEntry) {
 	for i, entry := range entries {
-		icon := "✓"
-		switch entry.Status {
-		case pipeline.OutcomeFail:
-			icon = "✗"
-		case pipeline.OutcomeRetry:
-			icon = "↻"
-		}
-
-		label := entry.NodeID
-		timing := formatElapsed(entry.Duration)
-
-		fmt.Printf("  %s %s (%s)\n", icon, label, timing)
-
-		// Draw connector to next node
-		if i < len(entries)-1 {
-			if entry.EdgeTo != "" && entry.EdgeTo != entries[i+1].NodeID {
-				// Show branching
-				fmt.Printf("  │ → %s\n", entry.EdgeTo)
-			}
-			fmt.Println("  │")
-		}
+		fmt.Printf("  %s %s (%s)\n", nodeStatusIcon(entry.Status), entry.NodeID, formatElapsed(entry.Duration))
+		printNodeConnector(entries, i)
 	}
+}
+
+// nodeStatusIcon returns the ASCII icon for a node execution status.
+func nodeStatusIcon(status string) string {
+	switch status {
+	case pipeline.OutcomeFail:
+		return "✗"
+	case pipeline.OutcomeRetry:
+		return "↻"
+	default:
+		return "✓"
+	}
+}
+
+// printNodeConnector draws the connector line between entries.
+func printNodeConnector(entries []pipeline.TraceEntry, i int) {
+	if i >= len(entries)-1 {
+		return
+	}
+	if entries[i].EdgeTo != "" && entries[i].EdgeTo != entries[i+1].NodeID {
+		fmt.Printf("  │ → %s\n", entries[i].EdgeTo)
+	}
+	fmt.Println("  │")
 }
 
 // printResumeHint shows the resume command when the pipeline didn't complete successfully.

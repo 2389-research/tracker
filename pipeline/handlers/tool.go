@@ -46,22 +46,29 @@ func buildToolEnv() []string {
 	if os.Getenv("TRACKER_PASS_ENV") == "1" {
 		return os.Environ()
 	}
+	return filterSensitiveEnv(os.Environ())
+}
+
+// filterSensitiveEnv returns a copy of env with sensitive vars removed.
+func filterSensitiveEnv(env []string) []string {
 	var filtered []string
-	for _, env := range os.Environ() {
-		name := strings.SplitN(env, "=", 2)[0]
-		upper := strings.ToUpper(name)
-		sensitive := false
-		for _, pattern := range sensitiveEnvPatterns {
-			if strings.Contains(upper, pattern) {
-				sensitive = true
-				break
-			}
-		}
-		if !sensitive {
-			filtered = append(filtered, env)
+	for _, e := range env {
+		if !hasSensitivePattern(e) {
+			filtered = append(filtered, e)
 		}
 	}
 	return filtered
+}
+
+// hasSensitivePattern returns true if the env var name matches a sensitive pattern.
+func hasSensitivePattern(envVar string) bool {
+	upper := strings.ToUpper(strings.SplitN(envVar, "=", 2)[0])
+	for _, pattern := range sensitiveEnvPatterns {
+		if strings.Contains(upper, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // ToolHandler executes shell commands specified in the node's "tool_command"

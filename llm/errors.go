@@ -170,6 +170,14 @@ func ErrorFromStatusCode(statusCode int, message, provider string) error {
 
 // errorForBase selects the concrete error type for the given status code and base.
 func errorForBase(statusCode int, base ProviderError) error {
+	if err := errorForClientStatus(statusCode, base); err != nil {
+		return err
+	}
+	return errorForServerStatus(statusCode, base)
+}
+
+// errorForClientStatus maps 4xx status codes to typed errors. Returns nil for non-4xx codes.
+func errorForClientStatus(statusCode int, base ProviderError) error {
 	switch statusCode {
 	case 400:
 		return &InvalidRequestError{ProviderError: base}
@@ -185,6 +193,13 @@ func errorForBase(statusCode int, base ProviderError) error {
 		return &ContextLengthError{ProviderError: base}
 	case 429:
 		return &RateLimitError{ProviderError: base}
+	}
+	return nil
+}
+
+// errorForServerStatus maps 5xx status codes to typed errors, falling back for unknowns.
+func errorForServerStatus(statusCode int, base ProviderError) error {
+	switch statusCode {
 	case 500, 502, 503, 504:
 		return &ServerError{ProviderError: base}
 	}

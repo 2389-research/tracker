@@ -97,29 +97,44 @@ func unescapeDOT(s string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			switch s[i+1] {
-			case 'n':
-				b.WriteByte('\n')
-				i++
-			case 't':
-				b.WriteByte('\t')
-				i++
-			case '\\':
-				b.WriteByte('\\')
-				i++
-			case '"':
-				b.WriteByte('"')
-				i++
-			default:
-				b.WriteByte(s[i])
-			}
-		} else {
-			b.WriteByte(s[i])
-		}
+	for i := 0; i < len(s); {
+		i = processDOTChar(&b, s, i)
 	}
 	return b.String()
+}
+
+// processDOTChar writes one character (or escape sequence) from s starting at pos.
+// Returns the next position to process.
+func processDOTChar(b *strings.Builder, s string, i int) int {
+	if s[i] == '\\' && i+1 < len(s) {
+		if writeDOTEscape(b, s[i+1]) {
+			return i + 2
+		}
+	} else {
+		b.WriteByte(s[i])
+	}
+	return i + 1
+}
+
+// writeDOTEscape writes the unescaped byte for a known DOT escape sequence.
+// Returns true if the escape was consumed (i.e. the caller should skip the next character).
+func writeDOTEscape(b *strings.Builder, next byte) bool {
+	switch next {
+	case 'n':
+		b.WriteByte('\n')
+		return true
+	case 't':
+		b.WriteByte('\t')
+		return true
+	case '\\':
+		b.WriteByte('\\')
+		return true
+	case '"':
+		b.WriteByte('"')
+		return true
+	}
+	b.WriteByte('\\')
+	return false
 }
 
 // collectedNode holds a parsed DOT node and its raw attributes.

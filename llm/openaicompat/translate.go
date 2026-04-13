@@ -216,22 +216,27 @@ func translateAssistantMessage(m llm.Message) chatMessage {
 func translateToolResultMessages(m llm.Message) []chatMessage {
 	var out []chatMessage
 	for _, c := range m.Content {
-		if c.Kind == llm.KindToolResult && c.ToolResult != nil {
-			callID := c.ToolResult.ToolCallID
-			if callID == "" {
-				callID = m.ToolCallID
-			}
-			if callID == "" {
-				callID = "call_unknown"
-			}
-			out = append(out, chatMessage{
-				Role:       "tool",
-				Content:    c.ToolResult.Content,
-				ToolCallID: callID,
-			})
+		if c.Kind != llm.KindToolResult || c.ToolResult == nil {
+			continue
 		}
+		out = append(out, chatMessage{
+			Role:       "tool",
+			Content:    c.ToolResult.Content,
+			ToolCallID: resolveToolCallID(c.ToolResult.ToolCallID, m.ToolCallID),
+		})
 	}
 	return out
+}
+
+// resolveToolCallID returns the first non-empty ID from the provided candidates,
+// falling back to "call_unknown" if all are empty.
+func resolveToolCallID(ids ...string) string {
+	for _, id := range ids {
+		if id != "" {
+			return id
+		}
+	}
+	return "call_unknown"
 }
 
 // translateToolDefs converts unified tool definitions to Chat Completions format.

@@ -108,17 +108,31 @@ func (st *jsonScanState) advance(ch byte, pos int) (done bool, endIdx int) {
 		st.escaped = false
 		return false, 0
 	}
-	if ch == '\\' && st.inString {
-		st.escaped = true
-		return false, 0
-	}
-	if ch == '"' {
-		st.inString = !st.inString
+	if st.handleStringEscape(ch) {
 		return false, 0
 	}
 	if st.inString {
 		return false, 0
 	}
+	return st.handleBrace(ch, pos)
+}
+
+// handleStringEscape processes backslash and quote characters inside strings.
+// Returns true if the character was consumed and no further processing is needed.
+func (st *jsonScanState) handleStringEscape(ch byte) bool {
+	if ch == '\\' && st.inString {
+		st.escaped = true
+		return true
+	}
+	if ch == '"' {
+		st.inString = !st.inString
+		return true
+	}
+	return false
+}
+
+// handleBrace processes '{' and '}' outside strings. Returns (done, endIdx).
+func (st *jsonScanState) handleBrace(ch byte, pos int) (bool, int) {
 	if ch == '{' {
 		st.depth++
 	} else if ch == '}' {
@@ -177,12 +191,13 @@ func ParseQuestions(markdown string) []Question {
 	if markdown == "" {
 		return nil
 	}
+	return parseMarkdownQuestions(strings.Split(markdown, "\n"))
+}
 
-	lines := strings.Split(markdown, "\n")
+// parseMarkdownQuestions scans lines, skipping fenced blocks, and extracts questions.
+func parseMarkdownQuestions(lines []string) []Question {
 	var questions []Question
 	inFence := false
-	index := 0
-
 	for _, line := range lines {
 		if reFence.MatchString(line) {
 			inFence = !inFence
@@ -191,21 +206,22 @@ func ParseQuestions(markdown string) []Question {
 		if inFence {
 			continue
 		}
-
-		q, ok := parseQuestionLine(line, index+1)
-		if !ok {
-			continue
-		}
-		index++
-		q.Index = index
-		questions = append(questions, q)
-
-		if index >= maxQuestions {
+		questions = appendParsedQuestion(questions, line)
+		if len(questions) >= maxQuestions {
 			break
 		}
 	}
-
 	return questions
+}
+
+// appendParsedQuestion parses a line and appends the question if it matches.
+func appendParsedQuestion(questions []Question, line string) []Question {
+	q, ok := parseQuestionLine(line, len(questions)+1)
+	if !ok {
+		return questions
+	}
+	q.Index = len(questions) + 1
+	return append(questions, q)
 }
 
 // parseQuestionLine attempts to parse a single markdown line into a Question.
@@ -302,19 +318,29 @@ func stripEmphasis(text string) string {
 // (case-insensitive), or when there are no explicit options and the question
 // text matches common yes/no interrogative patterns.
 func isYesNoQuestion(options []string, text string) bool {
-	if len(options) == 2 {
-		a := strings.ToLower(strings.TrimSpace(options[0]))
-		b := strings.ToLower(strings.TrimSpace(options[1]))
-		if (a == "yes" && b == "no") || (a == "no" && b == "yes") {
-			return true
-		}
+	if hasYesNoOptions(options) {
+		return true
 	}
 	// Text-based detection only applies when there are no explicit options,
 	// since explicit options override the inferred answer type.
 	if len(options) > 0 {
 		return false
 	}
-	// "Do/Does/Is/Are/Can/Will/Would/Should ..."
+	return hasYesNoPrefix(text)
+}
+
+// hasYesNoOptions returns true when options are exactly the pair [yes, no] (any order, any case).
+func hasYesNoOptions(options []string) bool {
+	if len(options) != 2 {
+		return false
+	}
+	a := strings.ToLower(strings.TrimSpace(options[0]))
+	b := strings.ToLower(strings.TrimSpace(options[1]))
+	return (a == "yes" && b == "no") || (a == "no" && b == "yes")
+}
+
+// hasYesNoPrefix returns true when the question text starts with a common yes/no interrogative.
+func hasYesNoPrefix(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	for _, prefix := range []string{"do ", "does ", "is ", "are ", "can ", "will ", "would ", "should ", "have ", "has "} {
 		if strings.HasPrefix(lower, prefix) {

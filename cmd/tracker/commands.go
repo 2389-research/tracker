@@ -172,22 +172,12 @@ func executeWorkflows() error {
 
 func executeInit(cfg runConfig) error {
 	if cfg.pipelineFile == "" {
-		workflows := listBuiltinWorkflows()
-		fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nAvailable workflows:\n")
-		for _, wf := range workflows {
-			fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
-		}
-		return fmt.Errorf("workflow name required")
+		return printInitUsage()
 	}
 
 	info, ok := lookupBuiltinWorkflow(cfg.pipelineFile)
 	if !ok {
-		workflows := listBuiltinWorkflows()
-		var names []string
-		for _, wf := range workflows {
-			names = append(names, wf.Name)
-		}
-		return fmt.Errorf("unknown workflow %q (available: %s)", cfg.pipelineFile, strings.Join(names, ", "))
+		return buildUnknownWorkflowError(cfg.pipelineFile)
 	}
 
 	outFile := info.Name + ".dip"
@@ -206,6 +196,26 @@ func executeInit(cfg runConfig) error {
 
 	fmt.Printf("Created %s — edit it, then run with: tracker %s\n", outFile, outFile)
 	return nil
+}
+
+// printInitUsage prints the usage and lists available workflows, then returns an error.
+func printInitUsage() error {
+	workflows := listBuiltinWorkflows()
+	fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nAvailable workflows:\n")
+	for _, wf := range workflows {
+		fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
+	}
+	return fmt.Errorf("workflow name required")
+}
+
+// buildUnknownWorkflowError returns an error listing available built-in workflow names.
+func buildUnknownWorkflowError(name string) error {
+	workflows := listBuiltinWorkflows()
+	var names []string
+	for _, wf := range workflows {
+		names = append(names, wf.Name)
+	}
+	return fmt.Errorf("unknown workflow %q (available: %s)", name, strings.Join(names, ", "))
 }
 
 func executeValidate(cfg runConfig) error {
@@ -372,11 +382,9 @@ func currentEnvKeys() map[string]struct{} {
 }
 
 func loadEnvFileIfPresent(path string, originalEnv map[string]struct{}) error {
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("stat env file %s: %w", path, err)
+	exists, err := checkEnvFileExists(path)
+	if err != nil || !exists {
+		return err
 	}
 
 	values, err := godotenv.Read(path)
@@ -384,6 +392,23 @@ func loadEnvFileIfPresent(path string, originalEnv map[string]struct{}) error {
 		return fmt.Errorf("load env file %s: %w", path, err)
 	}
 
+	return applyEnvValues(path, values, originalEnv)
+}
+
+// checkEnvFileExists returns (true, nil) if the file exists, (false, nil) if not found,
+// or (false, err) on stat failure.
+func checkEnvFileExists(path string) (bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat env file %s: %w", path, err)
+	}
+	return true, nil
+}
+
+// applyEnvValues sets env vars from values, skipping keys in originalEnv.
+func applyEnvValues(path string, values map[string]string, originalEnv map[string]struct{}) error {
 	for key, value := range values {
 		if _, exists := originalEnv[key]; exists {
 			continue

@@ -227,28 +227,30 @@ func buildUserPrompt(gatePrompt string, options []string, defaultOption string) 
 	b.WriteString("You are at a decision gate in a pipeline. Here is the context:\n\n")
 	b.WriteString(gatePrompt)
 	b.WriteString("\n\n")
-
-	if len(options) > 0 {
-		b.WriteString("Available options:\n")
-		for i, opt := range options {
-			marker := "  "
-			if opt == defaultOption {
-				marker = "* "
-			}
-			b.WriteString(fmt.Sprintf("%s%d. \"%s\"\n", marker, i+1, opt))
-		}
-		if defaultOption != "" {
-			b.WriteString(fmt.Sprintf("\n(* = default option: \"%s\")\n", defaultOption))
-		}
-	} else {
-		b.WriteString("This is a freeform gate — provide your response as text.\n")
-	}
-
+	appendOptionsSection(&b, options, defaultOption)
 	b.WriteString("\nRespond with ONLY a JSON object:\n")
 	b.WriteString(`{"choice": "<exact option text>", "reasoning": "<1-3 sentence explanation>"}`)
 	b.WriteString("\n\nFor freeform gates, put your text response in the \"choice\" field.\n")
-
 	return b.String()
+}
+
+// appendOptionsSection writes the options list or freeform notice to the builder.
+func appendOptionsSection(b *strings.Builder, options []string, defaultOption string) {
+	if len(options) == 0 {
+		b.WriteString("This is a freeform gate — provide your response as text.\n")
+		return
+	}
+	b.WriteString("Available options:\n")
+	for i, opt := range options {
+		marker := "  "
+		if opt == defaultOption {
+			marker = "* "
+		}
+		b.WriteString(fmt.Sprintf("%s%d. \"%s\"\n", marker, i+1, opt))
+	}
+	if defaultOption != "" {
+		b.WriteString(fmt.Sprintf("\n(* = default option: \"%s\")\n", defaultOption))
+	}
 }
 
 // parseDecision extracts the structured decision from LLM response text.

@@ -169,6 +169,14 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 
 // applyStreamMsg handles LLM streaming messages. Returns true if the message was consumed.
 func (al *AgentLog) applyStreamMsg(msg tea.Msg) bool {
+	if al.applyStreamMsgContent(msg) {
+		return true
+	}
+	return al.applyStreamMsgLifecycle(msg)
+}
+
+// applyStreamMsgContent handles streaming content messages (text, tools, errors).
+func (al *AgentLog) applyStreamMsgContent(msg tea.Msg) bool {
 	switch m := msg.(type) {
 	case MsgTextChunk:
 		al.appendText(m.NodeID, m.Text)
@@ -185,6 +193,15 @@ func (al *AgentLog) applyStreamMsg(msg tea.Msg) bool {
 		al.addTaggedLine(m.NodeID, Styles.Error.Render("ERROR: "+m.Error), LineError)
 	case MsgLLMProviderRaw:
 		al.handleProviderRaw(m)
+	default:
+		return false
+	}
+	return true
+}
+
+// applyStreamMsgLifecycle handles node lifecycle messages (completed, failed, retrying).
+func (al *AgentLog) applyStreamMsgLifecycle(msg tea.Msg) bool {
+	switch m := msg.(type) {
 	case MsgNodeFailed:
 		al.flushNode(m.NodeID)
 		al.addTaggedLine(m.NodeID, Styles.Error.Render("FAILED: "+m.Error), LineError)
@@ -388,27 +405,12 @@ func termLines(s string, width int) int {
 func (al *AgentLog) activeNodeIndicators() string {
 	var indicators []string
 
-	// Collect all nodes that are currently running.
 	for _, entry := range al.store.Nodes() {
 		if al.store.NodeStatus(entry.ID) != NodeRunning {
 			continue
 		}
-		nodeLabel := entry.Label
-		if nodeLabel == "" {
-			nodeLabel = entry.ID
-		}
-
-		if toolName := al.thinking.ToolName(entry.ID); toolName != "" {
-			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
-			indicators = append(indicators,
-				toolStyle(toolName).Render(fmt.Sprintf("» %s: %s (%.1fs)", nodeLabel, toolName, elapsed)))
-		} else if al.store.IsWaiting(entry.ID) {
-			indicators = append(indicators,
-				Styles.Muted.Render(fmt.Sprintf(":: %s: waiting for provider...", nodeLabel)))
-		} else if al.thinking.IsThinking(entry.ID) {
-			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
-			indicators = append(indicators,
-				Styles.Thinking.Render(fmt.Sprintf("⟳ %s: thinking... (%.1fs)", nodeLabel, elapsed)))
+		if ind := al.nodeIndicator(entry); ind != "" {
+			indicators = append(indicators, ind)
 		}
 	}
 
@@ -416,6 +418,27 @@ func (al *AgentLog) activeNodeIndicators() string {
 		return " "
 	}
 	return strings.Join(indicators, "\n")
+}
+
+// nodeIndicator builds the indicator string for a single running node.
+func (al *AgentLog) nodeIndicator(entry NodeEntry) string {
+	nodeLabel := entry.Label
+	if nodeLabel == "" {
+		nodeLabel = entry.ID
+	}
+
+	if toolName := al.thinking.ToolName(entry.ID); toolName != "" {
+		elapsed := al.thinking.Elapsed(entry.ID).Seconds()
+		return toolStyle(toolName).Render(fmt.Sprintf("» %s: %s (%.1fs)", nodeLabel, toolName, elapsed))
+	}
+	if al.store.IsWaiting(entry.ID) {
+		return Styles.Muted.Render(fmt.Sprintf(":: %s: waiting for provider...", nodeLabel))
+	}
+	if al.thinking.IsThinking(entry.ID) {
+		elapsed := al.thinking.Elapsed(entry.ID).Seconds()
+		return Styles.Thinking.Render(fmt.Sprintf("⟳ %s: thinking... (%.1fs)", nodeLabel, elapsed))
+	}
+	return ""
 }
 
 // rebuildFilter rebuilds the cached filtered indices based on verbosity and focus.

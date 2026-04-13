@@ -63,38 +63,58 @@ func expandVariablesPass(
 	buf.Grow(len(text))
 	pos := 0
 	for pos < len(text) {
-		startIdx := strings.Index(text[pos:], "${")
-		if startIdx == -1 {
-			buf.WriteString(text[pos:])
-			break
-		}
-		startIdx += pos
-		buf.WriteString(text[pos:startIdx])
-
-		endIdx := strings.Index(text[startIdx+2:], "}")
-		if endIdx == -1 {
-			buf.WriteString(text[startIdx:])
-			pos = len(text)
-			break
-		}
-		endIdx += startIdx + 2
-
-		varExpr := text[startIdx+2 : endIdx]
-		parts := strings.SplitN(varExpr, ".", 2)
-		if varExpr == "" || len(parts) != 2 {
-			buf.WriteString(text[startIdx : endIdx+1])
-			pos = endIdx + 1
-			continue
-		}
-
-		value, err := resolveVariableValue(parts[0], parts[1], ctx, params, graphAttrs, strict, tcMode)
+		next, err := expandNextVariable(&buf, text, pos, ctx, params, graphAttrs, strict, tcMode)
 		if err != nil {
 			return "", err
 		}
-		buf.WriteString(value)
-		pos = endIdx + 1
+		if next < 0 {
+			break
+		}
+		pos = next
 	}
 	return buf.String(), nil
+}
+
+// expandNextVariable finds and expands the next ${...} variable starting at pos.
+// Returns the new pos after the variable, or -1 if no more variables exist.
+func expandNextVariable(
+	buf *strings.Builder,
+	text string,
+	pos int,
+	ctx *PipelineContext,
+	params map[string]string,
+	graphAttrs map[string]string,
+	strict bool,
+	tcMode bool,
+) (int, error) {
+	startIdx := strings.Index(text[pos:], "${")
+	if startIdx == -1 {
+		buf.WriteString(text[pos:])
+		return -1, nil
+	}
+	startIdx += pos
+	buf.WriteString(text[pos:startIdx])
+
+	endIdx := strings.Index(text[startIdx+2:], "}")
+	if endIdx == -1 {
+		buf.WriteString(text[startIdx:])
+		return -1, nil
+	}
+	endIdx += startIdx + 2
+
+	varExpr := text[startIdx+2 : endIdx]
+	parts := strings.SplitN(varExpr, ".", 2)
+	if varExpr == "" || len(parts) != 2 {
+		buf.WriteString(text[startIdx : endIdx+1])
+		return endIdx + 1, nil
+	}
+
+	value, err := resolveVariableValue(parts[0], parts[1], ctx, params, graphAttrs, strict, tcMode)
+	if err != nil {
+		return 0, err
+	}
+	buf.WriteString(value)
+	return endIdx + 1, nil
 }
 
 // resolveVariableValue looks up a variable and applies tool-command safety and strict-mode checks.

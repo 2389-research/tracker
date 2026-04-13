@@ -91,47 +91,48 @@ func parseMessage(raw json.RawMessage, state *runState) []agent.Event {
 		log.Printf("[claude-code] warning: failed to unmarshal NDJSON message: %v", err)
 		return nil
 	}
-
 	now := time.Now()
+	return dispatchNDJSONMessage(msg, now, state)
+}
 
+// dispatchNDJSONMessage routes a parsed NDJSON message to the appropriate handler.
+func dispatchNDJSONMessage(msg ndjsonMessage, now time.Time, state *runState) []agent.Event {
 	switch msg.Type {
 	case "system":
-		if msg.Subtype == "init" {
-			return []agent.Event{
-				{
-					Type:      agent.EventLLMRequestPreparing,
-					Timestamp: now,
-					Provider:  "claude-code",
-				},
-				{
-					Type:      agent.EventTurnStart,
-					Timestamp: now,
-				},
-			}
-		}
-		return nil
-
+		return parseSystemMessage(msg, now)
 	case "assistant":
-		var content []ndjsonContent
-		if msg.Message != nil {
-			content = msg.Message.Content
-		}
-		return parseAssistantContent(content, now, state)
-
+		return parseAssistantMessage(msg, now, state)
 	case "user":
 		return parseUserContent(msg.Content, now, state)
-
 	case "result":
 		storeResult(msg, state)
 		return nil
-
 	case "rate_limit_event":
 		return nil
-
 	default:
 		log.Printf("[claude-code] warning: unknown NDJSON message type: %q", msg.Type)
 		return nil
 	}
+}
+
+// parseSystemMessage handles "system" type NDJSON messages.
+func parseSystemMessage(msg ndjsonMessage, now time.Time) []agent.Event {
+	if msg.Subtype != "init" {
+		return nil
+	}
+	return []agent.Event{
+		{Type: agent.EventLLMRequestPreparing, Timestamp: now, Provider: "claude-code"},
+		{Type: agent.EventTurnStart, Timestamp: now},
+	}
+}
+
+// parseAssistantMessage handles "assistant" type NDJSON messages.
+func parseAssistantMessage(msg ndjsonMessage, now time.Time, state *runState) []agent.Event {
+	var content []ndjsonContent
+	if msg.Message != nil {
+		content = msg.Message.Content
+	}
+	return parseAssistantContent(content, now, state)
 }
 
 // storeResult populates the session result from a "result" NDJSON message.

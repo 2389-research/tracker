@@ -161,6 +161,11 @@ func (c *ChoiceContent) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
+	return c.handleChoiceKey(km)
+}
+
+// handleChoiceKey processes a key event for choice navigation.
+func (c *ChoiceContent) handleChoiceKey(km tea.KeyMsg) tea.Cmd {
 	switch km.Type {
 	case tea.KeyUp:
 		if c.cursor > 0 {

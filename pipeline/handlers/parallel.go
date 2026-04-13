@@ -102,17 +102,26 @@ func (h *ParallelHandler) resolveBranchEdges(node *pipeline.Node) ([]*pipeline.E
 
 // collectBranchEdges builds the edge list from parallel_targets attr or outgoing edges.
 func (h *ParallelHandler) collectBranchEdges(node *pipeline.Node) []*pipeline.Edge {
-	joinID := node.Attrs["parallel_join"]
 	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
-		var edges []*pipeline.Edge
-		for _, target := range strings.Split(targetsAttr, ",") {
-			target = strings.TrimSpace(target)
-			if target != "" {
-				edges = append(edges, &pipeline.Edge{From: node.ID, To: target})
-			}
-		}
-		return edges
+		return edgesFromTargetsAttr(node.ID, targetsAttr)
 	}
+	return h.edgesFromOutgoing(node)
+}
+
+// edgesFromTargetsAttr builds edges from a comma-separated parallel_targets attribute value.
+func edgesFromTargetsAttr(fromID, targetsAttr string) []*pipeline.Edge {
+	var edges []*pipeline.Edge
+	for _, target := range strings.Split(targetsAttr, ",") {
+		if target = strings.TrimSpace(target); target != "" {
+			edges = append(edges, &pipeline.Edge{From: fromID, To: target})
+		}
+	}
+	return edges
+}
+
+// edgesFromOutgoing returns outgoing edges excluding the join node.
+func (h *ParallelHandler) edgesFromOutgoing(node *pipeline.Node) []*pipeline.Edge {
+	joinID := node.Attrs["parallel_join"]
 	var edges []*pipeline.Edge
 	for _, e := range h.graph.OutgoingEdges(node.ID) {
 		if e.To != joinID {
@@ -289,29 +298,32 @@ func aggregateBranchStats(results []ParallelResult) *pipeline.SessionStats {
 			continue
 		}
 		if agg == nil {
-			agg = &pipeline.SessionStats{
-				ToolCalls: make(map[string]int),
-			}
+			agg = &pipeline.SessionStats{ToolCalls: make(map[string]int)}
 		}
-		agg.Turns += r.Stats.Turns
-		agg.TotalToolCalls += r.Stats.TotalToolCalls
-		agg.InputTokens += r.Stats.InputTokens
-		agg.OutputTokens += r.Stats.OutputTokens
-		agg.TotalTokens += r.Stats.TotalTokens
-		agg.CostUSD += r.Stats.CostUSD
-		agg.Compactions += r.Stats.Compactions
-		agg.CacheHits += r.Stats.CacheHits
-		agg.CacheMisses += r.Stats.CacheMisses
-		if r.Stats.LongestTurn > agg.LongestTurn {
-			agg.LongestTurn = r.Stats.LongestTurn
-		}
-		agg.FilesModified = append(agg.FilesModified, r.Stats.FilesModified...)
-		agg.FilesCreated = append(agg.FilesCreated, r.Stats.FilesCreated...)
-		for name, count := range r.Stats.ToolCalls {
-			agg.ToolCalls[name] += count
-		}
+		mergeSessionStats(agg, r.Stats)
 	}
 	return agg
+}
+
+// mergeSessionStats adds src fields into dst in-place.
+func mergeSessionStats(dst, src *pipeline.SessionStats) {
+	dst.Turns += src.Turns
+	dst.TotalToolCalls += src.TotalToolCalls
+	dst.InputTokens += src.InputTokens
+	dst.OutputTokens += src.OutputTokens
+	dst.TotalTokens += src.TotalTokens
+	dst.CostUSD += src.CostUSD
+	dst.Compactions += src.Compactions
+	dst.CacheHits += src.CacheHits
+	dst.CacheMisses += src.CacheMisses
+	if src.LongestTurn > dst.LongestTurn {
+		dst.LongestTurn = src.LongestTurn
+	}
+	dst.FilesModified = append(dst.FilesModified, src.FilesModified...)
+	dst.FilesCreated = append(dst.FilesCreated, src.FilesCreated...)
+	for name, count := range src.ToolCalls {
+		dst.ToolCalls[name] += count
+	}
 }
 
 // parseBranchOverrides extracts branch.N.* attributes from a parallel node
@@ -326,25 +338,32 @@ func parseBranchOverrides(nodeAttrs map[string]string) map[string]map[string]str
 func indexBranchAttrs(nodeAttrs map[string]string) map[int]map[string]string {
 	indexed := make(map[int]map[string]string)
 	for key, val := range nodeAttrs {
-		if !strings.HasPrefix(key, "branch.") {
-			continue
+		if idx, attrName, ok := parseBranchAttrKey(key); ok {
+			if indexed[idx] == nil {
+				indexed[idx] = make(map[string]string)
+			}
+			indexed[idx][attrName] = val
 		}
-		rest := key[len("branch."):]
-		dotIdx := strings.Index(rest, ".")
-		if dotIdx < 0 {
-			continue
-		}
-		idx, err := strconv.Atoi(rest[:dotIdx])
-		if err != nil {
-			continue
-		}
-		attrName := rest[dotIdx+1:]
-		if indexed[idx] == nil {
-			indexed[idx] = make(map[string]string)
-		}
-		indexed[idx][attrName] = val
 	}
 	return indexed
+}
+
+// parseBranchAttrKey parses a "branch.N.attrName" key.
+// Returns (index, attrName, true) on success, (0, "", false) otherwise.
+func parseBranchAttrKey(key string) (int, string, bool) {
+	if !strings.HasPrefix(key, "branch.") {
+		return 0, "", false
+	}
+	rest := key[len("branch."):]
+	dotIdx := strings.Index(rest, ".")
+	if dotIdx < 0 {
+		return 0, "", false
+	}
+	idx, err := strconv.Atoi(rest[:dotIdx])
+	if err != nil {
+		return 0, "", false
+	}
+	return idx, rest[dotIdx+1:], true
 }
 
 // groupBranchOverridesByTarget converts indexed branch attrs to a target-keyed map.
@@ -355,17 +374,22 @@ func groupBranchOverridesByTarget(indexed map[int]map[string]string) map[string]
 		if target == "" {
 			continue
 		}
-		overrides := make(map[string]string)
-		for k, v := range branchAttrs {
-			if k != "target" {
-				overrides[k] = v
-			}
-		}
-		if len(overrides) > 0 {
+		if overrides := branchAttrsToOverrides(branchAttrs); len(overrides) > 0 {
 			byTarget[target] = overrides
 		}
 	}
 	return byTarget
+}
+
+// branchAttrsToOverrides copies all branch attrs except "target" into an overrides map.
+func branchAttrsToOverrides(branchAttrs map[string]string) map[string]string {
+	overrides := make(map[string]string)
+	for k, v := range branchAttrs {
+		if k != "target" {
+			overrides[k] = v
+		}
+	}
+	return overrides
 }
 
 // applyBranchOverrides creates a shallow clone of the target node with

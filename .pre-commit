@@ -71,8 +71,8 @@ fi
 # 7. Complexity (cyclomatic + cognitive — staged files only)
 echo ""
 echo "--- Complexity ---"
-CYCLO_MAX=10
-COGNITIVE_MAX=10
+CYCLO_MAX=8
+COGNITIVE_MAX=8
 STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' || true)
 if [ -n "$STAGED_GO" ]; then
   CYCLO_VIOLATIONS=$(echo "$STAGED_GO" | xargs gocyclo -over $CYCLO_MAX 2>&1 | wc -l | tr -d ' ')

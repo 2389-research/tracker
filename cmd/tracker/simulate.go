@@ -106,14 +106,19 @@ func bfsTraversal(graph *pipeline.Graph, visited map[string]bool) []*pipeline.No
 			continue
 		}
 		ordered = append(ordered, node)
-
-		for _, edge := range graph.OutgoingEdges(nodeID) {
-			if !visited[edge.To] {
-				queue = append(queue, edge.To)
-			}
-		}
+		queue = enqueueUnvisited(queue, graph.OutgoingEdges(nodeID), visited)
 	}
 	return ordered
+}
+
+// enqueueUnvisited appends unvisited edge targets to the queue.
+func enqueueUnvisited(queue []string, edges []*pipeline.Edge, visited map[string]bool) []string {
+	for _, edge := range edges {
+		if !visited[edge.To] {
+			queue = append(queue, edge.To)
+		}
+	}
+	return queue
 }
 
 // appendOrphanedNodes appends nodes not reachable from the start node.

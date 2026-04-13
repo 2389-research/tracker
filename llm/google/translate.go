@@ -211,29 +211,38 @@ func mergeProviderOptions(body []byte, providerOpts map[string]any, providerKey 
 // translateMessageToContent converts a unified llm.Message to a Gemini content item.
 func translateMessageToContent(m llm.Message) *geminiContent {
 	role := geminiRole(m.Role)
-	var parts []geminiPart
-
-	for _, part := range m.Content {
-		switch part.Kind {
-		case llm.KindText:
-			parts = append(parts, geminiPart{Text: part.Text})
-		case llm.KindToolCall:
-			if p := translateToolCallPart(part); p != nil {
-				parts = append(parts, *p)
-			}
-		case llm.KindToolResult:
-			if p := translateToolResultPart(part); p != nil {
-				parts = append(parts, *p)
-			}
-			// Image content parts can be added when KindImage is defined in the core types.
-		}
-	}
-
+	parts := translateContentParts(m.Content)
 	if len(parts) == 0 {
 		return nil
 	}
-
 	return &geminiContent{Role: role, Parts: parts}
+}
+
+// translateContentParts converts a slice of unified content parts to Gemini parts.
+func translateContentParts(content []llm.ContentPart) []geminiPart {
+	var parts []geminiPart
+	for _, part := range content {
+		if p := translateSingleContentPart(part); p != nil {
+			parts = append(parts, *p)
+		}
+	}
+	return parts
+}
+
+// translateSingleContentPart converts a single unified ContentPart to a Gemini part.
+// Returns nil for unsupported or empty parts.
+func translateSingleContentPart(part llm.ContentPart) *geminiPart {
+	switch part.Kind {
+	case llm.KindText:
+		p := geminiPart{Text: part.Text}
+		return &p
+	case llm.KindToolCall:
+		return translateToolCallPart(part)
+	case llm.KindToolResult:
+		return translateToolResultPart(part)
+	}
+	// Image content parts can be added when KindImage is defined in the core types.
+	return nil
 }
 
 // translateToolCallPart converts a tool call content part to a Gemini function call part.

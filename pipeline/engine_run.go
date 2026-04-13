@@ -302,47 +302,56 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 func (e *Engine) handleRetry(ctx context.Context, s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	policy := ResolveRetryPolicy(execNode, e.graph.Attrs)
 	if s.cp.RetryCount(currentNodeID) < policy.MaxRetries {
-		s.cp.IncrementRetry(currentNodeID)
+		return e.handleRetryWithinBudget(ctx, s, currentNodeID, execNode, traceEntry, policy)
+	}
+	return e.handleRetryExhausted(s, currentNodeID, execNode, traceEntry)
+}
 
-		backoff := policy.BackoffFn(s.cp.RetryCount(currentNodeID)-1, policy.BaseDelay)
-		if backoff > 0 {
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				e.saveCheckpoint(s.cp, s.pctx, s.runID)
-				s.trace.EndTime = time.Now()
-				return "", false, &EngineResult{
-					RunID:          s.runID,
-					Status:         OutcomeFail,
-					CompletedNodes: s.cp.CompletedNodes,
-					Context:        s.pctx.Snapshot(),
-					Trace:          s.trace,
-					Usage:          s.trace.AggregateUsage(),
-				}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
-			}
+// handleRetryWithinBudget runs a retry when budget remains: waits backoff, emits event, routes to target.
+func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry, policy *RetryPolicy) (string, bool, *EngineResult, error) {
+	s.cp.IncrementRetry(currentNodeID)
+
+	backoff := policy.BackoffFn(s.cp.RetryCount(currentNodeID)-1, policy.BaseDelay)
+	if backoff > 0 {
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			e.saveCheckpoint(s.cp, s.pctx, s.runID)
+			s.trace.EndTime = time.Now()
+			return "", false, &EngineResult{
+				RunID:          s.runID,
+				Status:         OutcomeFail,
+				CompletedNodes: s.cp.CompletedNodes,
+				Context:        s.pctx.Snapshot(),
+				Trace:          s.trace,
+				Usage:          s.trace.AggregateUsage(),
+			}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
 		}
-
-		e.emit(PipelineEvent{
-			Type:      EventStageRetrying,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    currentNodeID,
-			Message:   fmt.Sprintf("retrying node %q (attempt %d/%d, policy=%s)", currentNodeID, s.cp.RetryCount(currentNodeID), policy.MaxRetries, policy.Name),
-		})
-
-		target := currentNodeID
-		if rt, ok := execNode.Attrs["retry_target"]; ok {
-			target = rt
-		}
-		traceEntry.EdgeTo = target
-		s.trace.AddEntry(*traceEntry)
-		e.clearDownstream(target, s.cp)
-		s.cp.CurrentNode = target
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
-		return target, true, nil, nil
 	}
 
-	// Retries exhausted — check fallback.
+	e.emit(PipelineEvent{
+		Type:      EventStageRetrying,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    currentNodeID,
+		Message:   fmt.Sprintf("retrying node %q (attempt %d/%d, policy=%s)", currentNodeID, s.cp.RetryCount(currentNodeID), policy.MaxRetries, policy.Name),
+	})
+
+	target := currentNodeID
+	if rt, ok := execNode.Attrs["retry_target"]; ok {
+		target = rt
+	}
+	traceEntry.EdgeTo = target
+	s.trace.AddEntry(*traceEntry)
+	e.clearDownstream(target, s.cp)
+	s.cp.CurrentNode = target
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	return target, true, nil, nil
+}
+
+// handleRetryExhausted handles the case when retry budget is depleted.
+// Routes to fallback target if available, otherwise fails the pipeline.
+func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)

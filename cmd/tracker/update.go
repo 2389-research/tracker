@@ -134,25 +134,30 @@ func detectInstallMethod() string {
 
 // classifyInstallPath determines install method from the resolved binary path.
 func classifyInstallPath(resolved, gobin, gopath string) string {
-	// Homebrew detection — match known Homebrew prefixes
-	if strings.Contains(resolved, "/Cellar/") || strings.HasPrefix(resolved, "/opt/homebrew/") {
+	if isHomebrewPath(resolved) {
 		return "homebrew"
 	}
-
-	// go install detection
-	if gobin != "" && strings.HasPrefix(resolved, gobin) {
+	if isGoInstallPath(resolved, gobin, gopath) {
 		return "go-install"
+	}
+	return "binary"
+}
+
+// isHomebrewPath returns true if the binary path looks like a Homebrew install.
+func isHomebrewPath(resolved string) bool {
+	return strings.Contains(resolved, "/Cellar/") || strings.HasPrefix(resolved, "/opt/homebrew/")
+}
+
+// isGoInstallPath returns true if the binary path is under GOBIN, GOPATH/bin, or ~/go/bin.
+func isGoInstallPath(resolved, gobin, gopath string) bool {
+	if gobin != "" && strings.HasPrefix(resolved, gobin) {
+		return true
 	}
 	if gopath != "" && strings.Contains(resolved, filepath.Join(gopath, "bin")) {
-		return "go-install"
+		return true
 	}
-	// Default GOPATH
 	home, _ := os.UserHomeDir()
-	if home != "" && strings.HasPrefix(resolved, filepath.Join(home, "go", "bin")) {
-		return "go-install"
-	}
-
-	return "binary"
+	return home != "" && strings.HasPrefix(resolved, filepath.Join(home, "go", "bin"))
 }
 
 // selfReplace downloads and replaces the current binary.
@@ -197,17 +202,30 @@ func downloadAndPrepare(release *githubRelease, dir string) (string, error) {
 	}
 	defer os.Remove(tmpTar)
 
-	if checksumsURL != "" {
-		fmt.Print("Verifying checksum... ")
-		if err := verifyChecksum(tmpTar, assetName, checksumsURL); err != nil {
-			fmt.Println("FAILED")
-			return "", fmt.Errorf("checksum: %w", err)
-		}
-		fmt.Println("OK")
-	} else {
-		fmt.Println("Warning: no checksums.txt in release — skipping integrity verification")
+	if err := verifyChecksumIfAvailable(tmpTar, assetName, checksumsURL); err != nil {
+		return "", err
 	}
 
+	return extractAndTestBinary(tmpTar, dir)
+}
+
+// verifyChecksumIfAvailable verifies checksum when available, or warns if not.
+func verifyChecksumIfAvailable(tmpTar, assetName, checksumsURL string) error {
+	if checksumsURL == "" {
+		fmt.Println("Warning: no checksums.txt in release — skipping integrity verification")
+		return nil
+	}
+	fmt.Print("Verifying checksum... ")
+	if err := verifyChecksum(tmpTar, assetName, checksumsURL); err != nil {
+		fmt.Println("FAILED")
+		return fmt.Errorf("checksum: %w", err)
+	}
+	fmt.Println("OK")
+	return nil
+}
+
+// extractAndTestBinary extracts the binary from tar, sets permissions, and smoke-tests it.
+func extractAndTestBinary(tmpTar, dir string) (string, error) {
 	tmpBin, err := extractBinaryFromTar(tmpTar, dir)
 	if err != nil {
 		return "", fmt.Errorf("extract: %w", err)

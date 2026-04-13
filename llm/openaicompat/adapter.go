@@ -217,12 +217,16 @@ func (a *Adapter) processSSELine(line string, st *sseState, ch chan<- llm.Stream
 		return false
 	}
 	data := strings.TrimPrefix(line, "data: ")
-
 	if data == "[DONE]" {
 		a.handleSSEDone(st, ch)
 		return true
 	}
+	return a.processSSEDataPayload(data, st, ch)
+}
 
+// processSSEDataPayload parses and dispatches a non-DONE SSE data payload.
+// Returns false always (only [DONE] terminates the stream).
+func (a *Adapter) processSSEDataPayload(data string, st *sseState, ch chan<- llm.StreamEvent) bool {
 	if strings.Contains(data, `"error"`) && a.tryEmitSSEError(data, ch) {
 		return false
 	}
@@ -364,6 +368,14 @@ func sseErrorToTyped(code, message string) error {
 		Provider:  "openai-compat",
 		ErrorCode: code,
 	}
+	if err := sseErrorToTypedAuthQuota(code, base); err != nil {
+		return err
+	}
+	return sseErrorToTypedRequestServer(code, base)
+}
+
+// sseErrorToTypedAuthQuota maps auth, quota, and not-found error codes to typed errors.
+func sseErrorToTypedAuthQuota(code string, base llm.ProviderError) error {
 	switch code {
 	case "insufficient_quota":
 		return &llm.QuotaExceededError{ProviderError: base}
@@ -371,6 +383,13 @@ func sseErrorToTyped(code, message string) error {
 		return &llm.AuthenticationError{ProviderError: base}
 	case "model_not_found":
 		return &llm.NotFoundError{ProviderError: base}
+	}
+	return nil
+}
+
+// sseErrorToTypedRequestServer maps request, content, rate-limit, and server error codes.
+func sseErrorToTypedRequestServer(code string, base llm.ProviderError) error {
+	switch code {
 	case "invalid_request_error", "invalid_request":
 		return &llm.InvalidRequestError{ProviderError: base}
 	case "context_length_exceeded":

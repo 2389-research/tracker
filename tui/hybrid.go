@@ -122,6 +122,14 @@ func (h *HybridContent) updateOtherMode(km tea.KeyMsg) tea.Cmd {
 
 // updateRadioMode handles keys when navigating the radio list.
 func (h *HybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
+	if cmd := h.handleRadioNavKey(km); cmd != nil {
+		return cmd
+	}
+	return h.handleRadioActionKey(km)
+}
+
+// handleRadioNavKey handles Up/Down/Enter navigation keys.
+func (h *HybridContent) handleRadioNavKey(km tea.KeyMsg) tea.Cmd {
 	switch km.Type {
 	case tea.KeyUp:
 		if h.cursor > 0 {
@@ -135,10 +143,15 @@ func (h *HybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 		if h.isOnOther() {
 			h.onOther = true
 			h.textarea.Focus()
-			return nil
+			return func() tea.Msg { return nil }
 		}
 		return h.submitLabel(h.labels[h.cursor])
 	}
+	return nil
+}
+
+// handleRadioActionKey handles Ctrl+S (submit) and Esc (cancel) action keys.
+func (h *HybridContent) handleRadioActionKey(km tea.KeyMsg) tea.Cmd {
 	switch km.String() {
 	case "ctrl+s":
 		if h.isOnOther() {

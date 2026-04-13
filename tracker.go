@@ -80,12 +80,9 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("validate graph: %w", err)
 	}
 
-	workDir := cfg.WorkingDir
-	if workDir == "" {
-		workDir, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("get working directory: %w", err)
-		}
+	workDir, err := resolveWorkDir(cfg.WorkingDir)
+	if err != nil {
+		return nil, err
 	}
 
 	client, completer, err := resolveCompleter(cfg)
@@ -93,6 +90,23 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
+	return buildEngine(graph, cfg, workDir, client, completer), nil
+}
+
+// resolveWorkDir returns the working directory, falling back to cwd if empty.
+func resolveWorkDir(workDir string) (string, error) {
+	if workDir != "" {
+		return workDir, nil
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get working directory: %w", err)
+	}
+	return dir, nil
+}
+
+// buildEngine assembles the Engine after all dependencies are resolved.
+func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.Client, completer agent.Completer) *Engine {
 	// Clean up the auto-created client if anything below fails.
 	built := false
 	defer func() {
@@ -111,7 +125,7 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 	return &Engine{
 		inner:  inner,
 		client: client,
-	}, nil
+	}
 }
 
 // resolveCompleter returns the LLM client and completer, building a client from env if needed.

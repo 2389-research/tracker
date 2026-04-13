@@ -65,29 +65,37 @@ func ValidateAll(g *Graph) *ValidationError {
 // ValidateAllWithLint checks a parsed Graph for structural and semantic issues,
 // including Dippin lint warnings. Returns a ValidationError with both errors and warnings.
 func ValidateAllWithLint(g *Graph, registry *HandlerRegistry) *ValidationError {
-	// First, run structural validation
 	ve := validateGraph(g)
 	if ve == nil {
 		ve = &ValidationError{}
 	}
 
-	// Then, run semantic validation (includes lint rules)
 	if registry != nil {
-		err, lintWarnings := ValidateSemantic(g, registry)
-		if err != nil {
-			if verr, ok := err.(*ValidationError); ok {
-				ve.Errors = append(ve.Errors, verr.Errors...)
-			} else {
-				ve.Errors = append(ve.Errors, err.Error())
-			}
-		}
-		ve.Warnings = append(ve.Warnings, lintWarnings...)
+		applySemanticValidation(g, registry, ve)
 	}
 
 	if ve.hasErrors() || ve.hasWarnings() {
 		return ve
 	}
 	return nil
+}
+
+// applySemanticValidation runs semantic validation and appends errors/warnings to ve.
+func applySemanticValidation(g *Graph, registry *HandlerRegistry, ve *ValidationError) {
+	err, lintWarnings := ValidateSemantic(g, registry)
+	if err != nil {
+		appendValidationErrors(ve, err)
+	}
+	ve.Warnings = append(ve.Warnings, lintWarnings...)
+}
+
+// appendValidationErrors merges err into ve, unwrapping *ValidationError if possible.
+func appendValidationErrors(ve *ValidationError, err error) {
+	if verr, ok := err.(*ValidationError); ok {
+		ve.Errors = append(ve.Errors, verr.Errors...)
+	} else {
+		ve.Errors = append(ve.Errors, err.Error())
+	}
 }
 
 func validateGraph(g *Graph) *ValidationError {
@@ -178,14 +186,22 @@ func validateReachability(g *Graph, ve *ValidationError) {
 		return
 	}
 
-	visited := make(map[string]bool)
-	queue := []string{g.StartNode}
-	visited[g.StartNode] = true
+	visited := bfsVisitEdges(g)
+	for id := range g.Nodes {
+		if !visited[id] {
+			ve.add(fmt.Sprintf("node %q is unreachable from start node", id))
+		}
+	}
+}
 
+// bfsVisitEdges performs BFS from g.StartNode following all outgoing edges.
+// Returns the set of visited node IDs.
+func bfsVisitEdges(g *Graph) map[string]bool {
+	visited := map[string]bool{g.StartNode: true}
+	queue := []string{g.StartNode}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-
 		for _, e := range g.OutgoingEdges(current) {
 			if !visited[e.To] {
 				visited[e.To] = true
@@ -193,12 +209,7 @@ func validateReachability(g *Graph, ve *ValidationError) {
 			}
 		}
 	}
-
-	for id := range g.Nodes {
-		if !visited[id] {
-			ve.add(fmt.Sprintf("node %q is unreachable from start node", id))
-		}
-	}
+	return visited
 }
 
 // unconditionalEdgeSet returns a set of edges that have no condition.
@@ -237,19 +248,23 @@ func cyclesDFS(nodeID string, g *Graph, unconditional unconditionalEdgeSet, colo
 	const gray, black = 1, 2
 	color[nodeID] = gray
 	for _, e := range g.OutgoingEdges(nodeID) {
-		if !unconditional[[2]string{e.From, e.To}] {
-			continue
-		}
-		switch color[e.To] {
-		case gray:
+		if unconditional[[2]string{e.From, e.To}] && dfsVisitEdge(e.To, g, unconditional, color) {
 			return true
-		case 0: // white
-			if cyclesDFS(e.To, g, unconditional, color) {
-				return true
-			}
 		}
 	}
 	color[nodeID] = black
+	return false
+}
+
+// dfsVisitEdge checks a single edge target for a cycle.
+func dfsVisitEdge(target string, g *Graph, unconditional unconditionalEdgeSet, color map[string]int) bool {
+	const gray = 1
+	switch color[target] {
+	case gray:
+		return true
+	case 0: // white
+		return cyclesDFS(target, g, unconditional, color)
+	}
 	return false
 }
 

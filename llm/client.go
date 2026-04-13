@@ -124,6 +124,22 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 	return NewClient(opts...)
 }
 
+// appendProviderOpt tries to build a provider option and appends it to opts.
+// Returns updated opts, updated first provider name, and any error.
+func appendProviderOpt(opts []ClientOption, first, name string, constructor func(string) (ProviderAdapter, error)) ([]ClientOption, string, error) {
+	opt, err := tryBuildProvider(name, constructor)
+	if err != nil {
+		return nil, "", err
+	}
+	if opt != nil {
+		opts = append(opts, opt)
+		if first == "" {
+			first = name
+		}
+	}
+	return opts, first, nil
+}
+
 // buildStandardProviderOpts processes the standard providers in priority order.
 // Returns the built options, the first registered provider name, and any error.
 func buildStandardProviderOpts(constructors map[string]func(string) (ProviderAdapter, error)) ([]ClientOption, string, error) {
@@ -134,15 +150,10 @@ func buildStandardProviderOpts(constructors map[string]func(string) (ProviderAda
 		if !ok {
 			continue
 		}
-		opt, err := tryBuildProvider(name, constructor)
+		var err error
+		opts, first, err = appendProviderOpt(opts, first, name, constructor)
 		if err != nil {
 			return nil, "", err
-		}
-		if opt != nil {
-			opts = append(opts, opt)
-			if first == "" {
-				first = name
-			}
 		}
 	}
 	return opts, first, nil
@@ -157,15 +168,10 @@ func buildNonStandardProviderOpts(constructors map[string]func(string) (Provider
 		if isStandardProvider(name) {
 			continue
 		}
-		opt, err := tryBuildProvider(name, constructor)
+		var err error
+		opts, first, err = appendProviderOpt(opts, first, name, constructor)
 		if err != nil {
 			return nil, "", err
-		}
-		if opt != nil {
-			opts = append(opts, opt)
-			if first == "" {
-				first = name
-			}
 		}
 	}
 	return opts, first, nil

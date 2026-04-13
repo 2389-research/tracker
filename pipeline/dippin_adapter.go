@@ -260,6 +260,12 @@ func extractAgentPromptAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 
 // extractAgentExecutionAttrs sets turn limits, timeouts, caching, compaction, and feature flags.
 func extractAgentExecutionAttrs(cfg ir.AgentConfig, attrs map[string]string) {
+	extractAgentLimitsAttrs(cfg, attrs)
+	extractAgentFeatureAttrs(cfg, attrs)
+}
+
+// extractAgentLimitsAttrs sets turn limits, timeouts, and context management attrs.
+func extractAgentLimitsAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.MaxTurns > 0 {
 		attrs["max_turns"] = strconv.Itoa(cfg.MaxTurns)
 	}
@@ -275,6 +281,10 @@ func extractAgentExecutionAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.CompactionThreshold > 0 {
 		attrs["context_compaction_threshold"] = fmt.Sprintf("%.2f", cfg.CompactionThreshold)
 	}
+}
+
+// extractAgentFeatureAttrs sets reasoning, fidelity, and pipeline feature flag attrs.
+func extractAgentFeatureAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.ReasoningEffort != "" {
 		attrs["reasoning_effort"] = cfg.ReasoningEffort
 	}

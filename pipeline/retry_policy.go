@@ -101,21 +101,24 @@ func resolveBaseRetryPolicy(node *Node, graphAttrs map[string]string) *RetryPoli
 
 // applyRetryOverrides applies max_retries and base_delay overrides to the policy.
 func applyRetryOverrides(policy *RetryPolicy, node *Node, graphAttrs map[string]string) {
-	if mr, ok := node.Attrs["max_retries"]; ok {
-		if n, err := strconv.Atoi(mr); err == nil {
-			policy.MaxRetries = n
-		}
-	} else if mr, ok := graphAttrs["default_max_retry"]; ok {
+	if mr := resolveMaxRetries(node.Attrs, graphAttrs); mr != "" {
 		if n, err := strconv.Atoi(mr); err == nil {
 			policy.MaxRetries = n
 		}
 	}
-
 	if bd, ok := node.Attrs["base_delay"]; ok {
 		if d, err := time.ParseDuration(bd); err == nil {
 			policy.BaseDelay = d
 		}
 	}
+}
+
+// resolveMaxRetries returns the max retries string from node attrs, falling back to graph attrs.
+func resolveMaxRetries(nodeAttrs, graphAttrs map[string]string) string {
+	if mr := nodeAttrs["max_retries"]; mr != "" {
+		return mr
+	}
+	return graphAttrs["default_max_retry"]
 }
 
 // applyJitter adds ±25% random jitter to a duration, capped at maxBackoffDuration.

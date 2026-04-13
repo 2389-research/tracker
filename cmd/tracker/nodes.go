@@ -19,8 +19,11 @@ func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
 	}
 
 	order := topoSortNodes(graph)
+	return buildOrderedEntries(order, graph)
+}
 
-	// Build entries, ensuring exit node is always last.
+// buildOrderedEntries converts a topological order into NodeEntry slice with exit node last.
+func buildOrderedEntries(order []string, graph *pipeline.Graph) []tui.NodeEntry {
 	var entries []tui.NodeEntry
 	var exitEntry *tui.NodeEntry
 	for _, nodeID := range order {
@@ -28,11 +31,7 @@ func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
 		if !ok {
 			continue
 		}
-		label := node.Label
-		if label == "" {
-			label = node.ID
-		}
-		entry := tui.NodeEntry{ID: node.ID, Label: label, Flags: nodeFlags(node, graph)}
+		entry := nodeEntryFor(node, graph)
 		if nodeID == graph.ExitNode {
 			exitEntry = &entry
 			continue
@@ -42,8 +41,16 @@ func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
 	if exitEntry != nil {
 		entries = append(entries, *exitEntry)
 	}
-
 	return entries
+}
+
+// nodeEntryFor builds a NodeEntry for a single graph node.
+func nodeEntryFor(node *pipeline.Node, graph *pipeline.Graph) tui.NodeEntry {
+	label := node.Label
+	if label == "" {
+		label = node.ID
+	}
+	return tui.NodeEntry{ID: node.ID, Label: label, Flags: nodeFlags(node, graph)}
 }
 
 // nodeFlags determines the parallel execution role of a node from its attrs.
@@ -64,12 +71,18 @@ func nodeFlags(node *pipeline.Node, graph *pipeline.Graph) tui.NodeFlags {
 // isParallelBranchNode returns true if any node in the graph lists nodeID as a parallel target.
 func isParallelBranchNode(nodeID string, graph *pipeline.Graph) bool {
 	for _, other := range graph.Nodes {
-		if targets, ok := other.Attrs["parallel_targets"]; ok {
-			for _, t := range splitTargets(targets) {
-				if t == nodeID {
-					return true
-				}
-			}
+		if isTargetOf(nodeID, other.Attrs["parallel_targets"]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTargetOf returns true if nodeID appears in a comma-separated targets string.
+func isTargetOf(nodeID, targets string) bool {
+	for _, t := range splitTargets(targets) {
+		if t == nodeID {
+			return true
 		}
 	}
 	return false

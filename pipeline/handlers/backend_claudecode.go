@@ -117,18 +117,20 @@ func decodeNDJSON(stdout io.Reader, state *runState, emit func(agent.Event)) {
 			log.Printf("[claude-code] warning: failed to decode NDJSON line: %v", err)
 			continue
 		}
-		events := parseMessage(raw, state)
-		for _, evt := range events {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[claude-code] panic in event handler: %v", r)
-					}
-				}()
-				emit(evt)
-			}()
+		for _, evt := range parseMessage(raw, state) {
+			safeEmit(emit, evt)
 		}
 	}
+}
+
+// safeEmit calls emit with panic recovery so a handler crash doesn't abort the decode loop.
+func safeEmit(emit func(agent.Event), evt agent.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[claude-code] panic in event handler: %v", r)
+		}
+	}()
+	emit(evt)
 }
 
 // collectResult waits for the subprocess to exit and returns the accumulated result.
@@ -204,12 +206,28 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 
 // appendClaudeCodeArgs appends ClaudeCode-specific flags to args.
 func appendClaudeCodeArgs(args []string, ccCfg *pipeline.ClaudeCodeConfig) ([]string, error) {
-	if ccCfg.PermissionMode != "" {
-		if !ccCfg.PermissionMode.Valid() {
-			return nil, fmt.Errorf("invalid permission mode: %q", ccCfg.PermissionMode)
-		}
-		args = append(args, "--permission-mode", string(ccCfg.PermissionMode))
+	var err error
+	args, err = appendPermissionMode(args, ccCfg.PermissionMode)
+	if err != nil {
+		return nil, err
 	}
+	args = appendToolFlags(args, ccCfg)
+	return appendMCPServersArg(args, ccCfg.MCPServers)
+}
+
+// appendPermissionMode adds --permission-mode flag if mode is set and valid.
+func appendPermissionMode(args []string, mode pipeline.PermissionMode) ([]string, error) {
+	if mode == "" {
+		return args, nil
+	}
+	if !mode.Valid() {
+		return nil, fmt.Errorf("invalid permission mode: %q", mode)
+	}
+	return append(args, "--permission-mode", string(mode)), nil
+}
+
+// appendToolFlags adds --allowedTools, --disallowedTools, and --budget flags.
+func appendToolFlags(args []string, ccCfg *pipeline.ClaudeCodeConfig) []string {
 	if len(ccCfg.AllowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(ccCfg.AllowedTools, ","))
 	}
@@ -219,14 +237,19 @@ func appendClaudeCodeArgs(args []string, ccCfg *pipeline.ClaudeCodeConfig) ([]st
 	if ccCfg.MaxBudgetUSD > 0 {
 		args = append(args, "--budget", fmt.Sprintf("%.2f", ccCfg.MaxBudgetUSD))
 	}
-	if len(ccCfg.MCPServers) > 0 {
-		mcpJSON, err := buildMCPServersJSON(ccCfg.MCPServers)
-		if err != nil {
-			return nil, fmt.Errorf("mcp_servers: %w", err)
-		}
-		args = append(args, "--mcpServers", mcpJSON)
+	return args
+}
+
+// appendMCPServersArg adds --mcpServers flag if MCP servers are configured.
+func appendMCPServersArg(args []string, servers []pipeline.MCPServerConfig) ([]string, error) {
+	if len(servers) == 0 {
+		return args, nil
 	}
-	return args, nil
+	mcpJSON, err := buildMCPServersJSON(servers)
+	if err != nil {
+		return nil, fmt.Errorf("mcp_servers: %w", err)
+	}
+	return append(args, "--mcpServers", mcpJSON), nil
 }
 
 // providerKeyPrefixes are environment variable prefixes that should be stripped
@@ -251,22 +274,28 @@ func buildEnv() []string {
 	if os.Getenv("TRACKER_PASS_API_KEYS") != "" {
 		return os.Environ()
 	}
+	return filterProviderKeys(os.Environ())
+}
 
-	env := os.Environ()
+// filterProviderKeys strips LLM provider API key vars from the given environment.
+func filterProviderKeys(env []string) []string {
 	clean := make([]string, 0, len(env))
 	for _, e := range env {
-		stripped := false
-		for _, prefix := range providerKeyPrefixes {
-			if strings.HasPrefix(e, prefix) {
-				stripped = true
-				break
-			}
-		}
-		if !stripped {
+		if !hasProviderKeyPrefix(e) {
 			clean = append(clean, e)
 		}
 	}
 	return clean
+}
+
+// hasProviderKeyPrefix returns true if the env var is a provider API key that should be stripped.
+func hasProviderKeyPrefix(envVar string) bool {
+	for _, prefix := range providerKeyPrefixes {
+		if strings.HasPrefix(envVar, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // isClaudeModel returns true if the model name is an Anthropic model that the

@@ -62,7 +62,6 @@ func runDoctor(workdir string) error {
 
 func checkProviders() bool {
 	fmt.Println("  LLM Providers")
-	allPass := false
 	providers := []struct {
 		name    string
 		envVars []string
@@ -71,25 +70,30 @@ func checkProviders() bool {
 		{"OpenAI", []string{"OPENAI_API_KEY"}},
 		{"Gemini", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
 	}
+	allPass := false
 	for _, p := range providers {
-		found := false
-		for _, env := range p.envVars {
-			if v := os.Getenv(env); v != "" {
-				masked := maskKey(v)
-				printCheck(true, fmt.Sprintf("%-10s %s=%s", p.name, env, masked))
-				found = true
-				allPass = true
-				break
-			}
-		}
-		if !found {
-			printCheck(false, fmt.Sprintf("%-10s %s not set", p.name, p.envVars[0]))
+		if checkProviderEnvVars(p.name, p.envVars) {
+			allPass = true
 		}
 	}
 	if !allPass {
 		printHint("Run `tracker setup` to configure providers")
 	}
 	return allPass
+}
+
+// checkProviderEnvVars checks if any of the env vars for a provider are set.
+// Returns true if the provider is configured.
+func checkProviderEnvVars(name string, envVars []string) bool {
+	for _, env := range envVars {
+		if v := os.Getenv(env); v != "" {
+			masked := maskKey(v)
+			printCheck(true, fmt.Sprintf("%-10s %s=%s", name, env, masked))
+			return true
+		}
+	}
+	printCheck(false, fmt.Sprintf("%-10s %s not set", name, envVars[0]))
+	return false
 }
 
 func checkDippin() bool {
