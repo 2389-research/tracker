@@ -114,6 +114,60 @@ func TestContextConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestContextDiffFromNewKeys(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("a", "1")
+	ctx.Set("b", "2")
+
+	baseline := map[string]string{"a": "1"}
+	diff := ctx.DiffFrom(baseline)
+	if len(diff) != 1 || diff["b"] != "2" {
+		t.Errorf("expected {b:2}, got %v", diff)
+	}
+}
+
+func TestContextDiffFromChangedKeys(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("a", "new")
+
+	baseline := map[string]string{"a": "old"}
+	diff := ctx.DiffFrom(baseline)
+	if len(diff) != 1 || diff["a"] != "new" {
+		t.Errorf("expected {a:new}, got %v", diff)
+	}
+}
+
+func TestContextDiffFromUnchangedExcluded(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("a", "same")
+
+	baseline := map[string]string{"a": "same"}
+	diff := ctx.DiffFrom(baseline)
+	if len(diff) != 0 {
+		t.Errorf("expected empty diff, got %v", diff)
+	}
+}
+
+func TestContextDiffFromEmptyBaseline(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("x", "1")
+	ctx.Set("y", "2")
+
+	diff := ctx.DiffFrom(map[string]string{})
+	if len(diff) != 2 {
+		t.Errorf("expected 2 entries, got %v", diff)
+	}
+}
+
+func TestContextDiffFromEmptyContext(t *testing.T) {
+	ctx := NewPipelineContext()
+	baseline := map[string]string{"a": "1"}
+	diff := ctx.DiffFrom(baseline)
+	if len(diff) != 0 {
+		t.Errorf("expected empty diff, got %v", diff)
+	}
+}
+
 func TestContextSetInternal(t *testing.T) {
 	ctx := NewPipelineContext()
 	ctx.SetInternal("retry_count.node1", "3")

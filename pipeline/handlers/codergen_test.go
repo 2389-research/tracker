@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -643,6 +644,24 @@ func TestWithRegistryOptions(t *testing.T) {
 	WithExecEnvironment(nil)(cfg)
 }
 
+func TestCodergenHandler_WritesPerNodeResponse(t *testing.T) {
+	client := &fakeCompleter{responseText: "per-node output"}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{ID: "mynode", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "test"}}
+	pctx := pipeline.NewPipelineContext()
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.ContextUpdates[pipeline.ContextKeyLastResponse] != "per-node output" {
+		t.Errorf("last_response = %q, want %q", outcome.ContextUpdates[pipeline.ContextKeyLastResponse], "per-node output")
+	}
+	perNodeKey := pipeline.ContextKeyResponsePrefix + "mynode"
+	if outcome.ContextUpdates[perNodeKey] != "per-node output" {
+		t.Errorf("%s = %q, want %q", perNodeKey, outcome.ContextUpdates[perNodeKey], "per-node output")
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if !strings.Contains(s, sub) {
@@ -650,4 +669,278 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestParseAutoStatus_CaseInsensitive(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"STATUS: Success\nDone.", pipeline.OutcomeSuccess},
+		{"STATUS: FAIL\nBroken.", pipeline.OutcomeFail},
+		{"STATUS: Retry\nNeed more.", pipeline.OutcomeRetry},
+		{"STATUS: SUCCESS\nAll good.", pipeline.OutcomeSuccess},
+	}
+	for _, tt := range tests {
+		got := parseAutoStatus(tt.input)
+		if got != tt.want {
+			t.Errorf("parseAutoStatus(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestParseAutoStatus_SkipsCodeBlock(t *testing.T) {
+	input := "Here is how to set status:\n```\nSTATUS:fail\n```\nSTATUS:success\nDone."
+	got := parseAutoStatus(input)
+	if got != pipeline.OutcomeSuccess {
+		t.Errorf("parseAutoStatus with code block = %q, want %q", got, pipeline.OutcomeSuccess)
+	}
+}
+
+func TestParseAutoStatus_OnlyCodeBlockDefaultsToSuccess(t *testing.T) {
+	input := "Some output.\n```\nSTATUS:fail\n```\nNo real status here."
+	got := parseAutoStatus(input)
+	if got != pipeline.OutcomeSuccess {
+		t.Errorf("parseAutoStatus code-block-only = %q, want %q", got, pipeline.OutcomeSuccess)
+	}
+}
+
+// alwaysToolCallCompleter returns a tool call on every turn, forcing the agent
+// to exhaust its turn limit without stopping naturally.
+type alwaysToolCallCompleter struct {
+	turn int
+}
+
+func (c *alwaysToolCallCompleter) Complete(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	c.turn++
+	return &llm.Response{
+		Message: llm.Message{
+			Role: llm.RoleAssistant,
+			Content: []llm.ContentPart{
+				{Kind: llm.KindText, Text: "I'm still working on it..."},
+				{
+					Kind: llm.KindToolCall,
+					ToolCall: &llm.ToolCallData{
+						ID:        fmt.Sprintf("call_%d", c.turn),
+						Name:      "read",
+						Arguments: json.RawMessage(`{"path":"go.mod"}`),
+					},
+				},
+			},
+		},
+		FinishReason: llm.FinishReason{Reason: "tool_calls"},
+		Usage:        llm.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+	}, nil
+}
+
+func TestCodergenHandlerMaxTurnsExhaustedIsFail(t *testing.T) {
+	workdir := t.TempDir()
+	client := &alwaysToolCallCompleter{}
+	h := NewCodergenHandler(client, workdir)
+
+	node := &pipeline.Node{
+		ID:      "busy_agent",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":    "Build the auth screens",
+			"max_turns": "3",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected outcome %q when agent exhausts turn limit, got %q",
+			pipeline.OutcomeFail, outcome.Status)
+	}
+
+	// The turn_limit_msg context update should explain what happened.
+	msg := outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg]
+	if !strings.Contains(msg, "turn limit") {
+		t.Errorf("expected turn_limit_msg to mention turn limit, got %q", msg)
+	}
+
+	// last_response preserves whatever the collector captured (may be empty
+	// when agent only produced tool calls with no standalone text output).
+
+	// Diagnostic context should be present with correct value.
+	if outcome.ContextUpdates["last_turns"] != "3" {
+		t.Errorf("expected last_turns to be %q, got %q", "3", outcome.ContextUpdates["last_turns"])
+	}
+
+	// turn_limit_msg must NOT be present on normal success outcomes, only failures.
+	// This test exercises the failure path; the success test below verifies absence.
+}
+
+func TestCodergenHandlerMaxTurnsWithAutoStatusSuccess(t *testing.T) {
+	// When auto_status is true and the agent explicitly emitted STATUS:success
+	// before hitting the turn limit, the outcome should be success. The
+	// turn_limit_msg is still set (for diagnostics) but status is overridden.
+	workdir := t.TempDir()
+
+	// Both responses include tool calls, so with max_turns=2 the agent
+	// exhausts its turn limit. But the second response includes STATUS:success.
+	client := &scriptedCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{Kind: llm.KindText, Text: "working..."},
+						{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c1", Name: "read", Arguments: json.RawMessage(`{"path":"go.mod"}`)}},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+				Usage:        llm.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{Kind: llm.KindText, Text: "STATUS:success\nAll done."},
+						{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c2", Name: "read", Arguments: json.RawMessage(`{"path":"go.mod"}`)}},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+				Usage:        llm.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+			},
+		},
+	}
+	h := NewCodergenHandler(client, workdir)
+	node := &pipeline.Node{
+		ID:      "agent_with_status",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":      "Build the thing",
+			"max_turns":   "2",
+			"auto_status": "true",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected outcome %q when auto_status emits success despite turn limit, got %q",
+			pipeline.OutcomeSuccess, outcome.Status)
+	}
+
+	// turn_limit_msg is still set (MaxTurnsUsed was true) even though
+	// auto_status overrode the status to success. Diagnostics are preserved.
+	if outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] == "" {
+		t.Error("expected turn_limit_msg to be set for diagnostics even on auto_status success")
+	}
+}
+
+func TestCodergenHandlerMaxTurnsWithAutoStatusFail(t *testing.T) {
+	// When auto_status is true and the agent emitted STATUS:fail on its
+	// final text-only response, the outcome should be OutcomeFail.
+	//
+	// Note: auto_status only sees text from EventTextDelta, which is only
+	// emitted on turns without tool calls. When an agent exhausts turns
+	// entirely via tool calls, auto_status can't see the STATUS line.
+	// This test exercises the realistic case: agent does tool work, then
+	// emits a final STATUS:fail text response that stops the session.
+	workdir := t.TempDir()
+
+	client := &scriptedCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{Kind: llm.KindText, Text: "working on it..."},
+						{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c1", Name: "read", Arguments: json.RawMessage(`{"path":"go.mod"}`)}},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+				Usage:        llm.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+			},
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentPart{{Kind: llm.KindText, Text: "STATUS:fail\nCould not complete the task."}},
+				},
+				FinishReason: llm.FinishReason{Reason: "end_turn"},
+				Usage:        llm.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+			},
+		},
+	}
+	h := NewCodergenHandler(client, workdir)
+	node := &pipeline.Node{
+		ID:      "agent_fail_status",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":      "Build the thing",
+			"max_turns":   "3",
+			"auto_status": "true",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected outcome %q when auto_status emits fail, got %q",
+			pipeline.OutcomeFail, outcome.Status)
+	}
+
+	// Agent stopped naturally (text-only response), so no turn_limit_msg.
+	if outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] != "" {
+		t.Error("expected no turn_limit_msg when agent stops naturally with STATUS:fail")
+	}
+}
+
+func TestCodergenHandlerLoopDetectedMessage(t *testing.T) {
+	// When the agent enters a tool call loop, the turn_limit_msg should
+	// mention "tool call loop" rather than "turn limit".
+	workdir := t.TempDir()
+
+	// Use alwaysToolCallCompleter with identical tool calls on every turn.
+	// The agent's loop detection threshold defaults to 10, so max_turns=12
+	// gives enough turns for the loop detector to trigger.
+	client := &alwaysToolCallCompleter{}
+	h := NewCodergenHandler(client, workdir)
+
+	node := &pipeline.Node{
+		ID:      "loop_agent",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":    "Build something",
+			"max_turns": "12",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("expected outcome %q for loop-detected agent, got %q",
+			pipeline.OutcomeFail, outcome.Status)
+	}
+
+	msg := outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg]
+	if !strings.Contains(msg, "tool call loop") {
+		t.Errorf("expected turn_limit_msg to mention 'tool call loop', got %q", msg)
+	}
+	if strings.Contains(msg, "turn limit") {
+		t.Errorf("loop-detected message should NOT mention 'turn limit', got %q", msg)
+	}
 }

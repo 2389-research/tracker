@@ -3,6 +3,8 @@
 package pipeline
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +93,7 @@ func TestFromDippinIR_AllNodeKinds(t *testing.T) {
 		{ir.NodeParallel, "component", ir.ParallelConfig{}},
 		{ir.NodeFanIn, "tripleoctagon", ir.FanInConfig{}},
 		{ir.NodeSubgraph, "tab", ir.SubgraphConfig{}},
+		{ir.NodeConditional, "diamond", ir.ConditionalConfig{}},
 	}
 
 	for _, tc := range testCases {
@@ -435,10 +438,11 @@ func TestFromDippinIR_SubgraphConfig(t *testing.T) {
 		t.Errorf("subgraph_ref = %q, want %q", node.Attrs["subgraph_ref"], "subtask.dip")
 	}
 
-	// Params are serialized as comma-separated, order may vary
+	// Params are serialized as sorted comma-separated key=value pairs
 	params := node.Attrs["subgraph_params"]
-	if !contains(params, "env=prod") || !contains(params, "timeout=30s") {
-		t.Errorf("subgraph_params = %q, want to contain env=prod and timeout=30s", params)
+	want := "env=prod,timeout=30s"
+	if params != want {
+		t.Errorf("subgraph_params = %q, want %q", params, want)
 	}
 }
 
@@ -776,7 +780,7 @@ func TestFromDippinIR_Errors(t *testing.T) {
 			if err == nil {
 				t.Fatalf("FromDippinIR succeeded, want error containing %q", tt.wantErr)
 			}
-			if !contains(err.Error(), tt.wantErr) {
+			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
 			}
 		})
@@ -1003,6 +1007,37 @@ func TestEnsureStartExitNodes_SetsHandlerWhenNoPrompt(t *testing.T) {
 	}
 }
 
+// TestEnsureStartExitNodes_ShapeSetWithPrompt verifies that start/exit nodes
+// with prompts still get their Mdiamond/Msquare shapes but keep their handler.
+func TestEnsureStartExitNodes_ShapeSetWithPrompt(t *testing.T) {
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "begin",
+		ExitNode:  "end",
+	}
+	g.Nodes["begin"] = &Node{ID: "begin", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "hello"}}
+	g.Nodes["end"] = &Node{ID: "end", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "bye"}}
+	g.Edges = []*Edge{{From: "begin", To: "end"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	if g.Nodes["begin"].Shape != "Mdiamond" {
+		t.Errorf("begin shape = %q, want Mdiamond", g.Nodes["begin"].Shape)
+	}
+	if g.Nodes["begin"].Handler != "codergen" {
+		t.Errorf("begin handler = %q, want codergen (preserved)", g.Nodes["begin"].Handler)
+	}
+	if g.Nodes["end"].Shape != "Msquare" {
+		t.Errorf("end shape = %q, want Msquare", g.Nodes["end"].Shape)
+	}
+	if g.Nodes["end"].Handler != "codergen" {
+		t.Errorf("end handler = %q, want codergen (preserved)", g.Nodes["end"].Handler)
+	}
+}
+
 // TestExtractAgentBackendAttrs_SimulatedIRParams verifies that agent backend
 // attributes (model, provider, reasoning_effort, system_prompt) are correctly
 // extracted from IR AgentConfig into graph node attrs, simulating the params
@@ -1125,16 +1160,242 @@ func TestExtractHumanAttrs_InterviewDefaults(t *testing.T) {
 	}
 }
 
-// Helper function to check if a string contains a substring.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
+func TestFromDippinIR_SentinelErrors(t *testing.T) {
+	// nil workflow → ErrNilWorkflow
+	_, err := FromDippinIR(nil)
+	if !errors.Is(err, ErrNilWorkflow) {
+		t.Errorf("nil workflow: got %v, want ErrNilWorkflow", err)
+	}
+
+	// missing Start → ErrMissingStart
+	_, err = FromDippinIR(&ir.Workflow{Exit: "x"})
+	if !errors.Is(err, ErrMissingStart) {
+		t.Errorf("missing start: got %v, want ErrMissingStart", err)
+	}
+
+	// missing Exit → ErrMissingExit
+	_, err = FromDippinIR(&ir.Workflow{Start: "s"})
+	if !errors.Is(err, ErrMissingExit) {
+		t.Errorf("missing exit: got %v, want ErrMissingExit", err)
+	}
+
+	// unknown node kind → ErrUnknownNodeKind
+	_, err = FromDippinIR(&ir.Workflow{
+		Name: "bad", Start: "s", Exit: "e",
+		Nodes: []*ir.Node{{ID: "s", Kind: "bogus"}},
+	})
+	if !errors.Is(err, ErrUnknownNodeKind) {
+		t.Errorf("unknown kind: got %v, want ErrUnknownNodeKind", err)
+	}
+
+	// ErrUnknownConfig is tested indirectly — it's only reachable if dippin-lang
+	// adds a new NodeConfig implementation that tracker hasn't mapped yet.
+	// We verify the sentinel exists and is usable with errors.Is.
+	wrapped := fmt.Errorf("test: %w", ErrUnknownConfig)
+	if !errors.Is(wrapped, ErrUnknownConfig) {
+		t.Error("ErrUnknownConfig should be matchable via errors.Is")
+	}
 }
 
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+func TestFromDippinIR_NilNodeSkipped(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "nil-node",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			nil, // should be skipped
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+			nil, // should be skipped
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if len(graph.Nodes) != 2 {
+		t.Errorf("len(graph.Nodes) = %d, want 2", len(graph.Nodes))
+	}
+	if len(graph.Edges) != 1 {
+		t.Errorf("len(graph.Edges) = %d, want 1", len(graph.Edges))
+	}
+}
+
+func TestExtractNodeAttrs_NilPointerConfig(t *testing.T) {
+	attrs := map[string]string{}
+
+	var agentCfg *ir.AgentConfig
+	if err := extractNodeAttrs(agentCfg, attrs); err != nil {
+		t.Errorf("nil *AgentConfig: unexpected error: %v", err)
+	}
+
+	var humanCfg *ir.HumanConfig
+	if err := extractNodeAttrs(humanCfg, attrs); err != nil {
+		t.Errorf("nil *HumanConfig: unexpected error: %v", err)
+	}
+
+	var toolCfg *ir.ToolConfig
+	if err := extractNodeAttrs(toolCfg, attrs); err != nil {
+		t.Errorf("nil *ToolConfig: unexpected error: %v", err)
+	}
+
+	var parallelCfg *ir.ParallelConfig
+	if err := extractNodeAttrs(parallelCfg, attrs); err != nil {
+		t.Errorf("nil *ParallelConfig: unexpected error: %v", err)
+	}
+
+	var fanInCfg *ir.FanInConfig
+	if err := extractNodeAttrs(fanInCfg, attrs); err != nil {
+		t.Errorf("nil *FanInConfig: unexpected error: %v", err)
+	}
+
+	var subgraphCfg *ir.SubgraphConfig
+	if err := extractNodeAttrs(subgraphCfg, attrs); err != nil {
+		t.Errorf("nil *SubgraphConfig: unexpected error: %v", err)
+	}
+}
+
+func TestExtractSubgraphAttrs_DeterministicOrder(t *testing.T) {
+	cfg := ir.SubgraphConfig{
+		Ref: "my-subgraph",
+		Params: map[string]string{
+			"zebra":  "z",
+			"alpha":  "a",
+			"middle": "m",
+		},
+	}
+	attrs := map[string]string{}
+	extractSubgraphAttrs(cfg, attrs)
+	want := "alpha=a,middle=m,zebra=z"
+	if attrs["subgraph_params"] != want {
+		t.Errorf("subgraph_params = %q, want %q", attrs["subgraph_params"], want)
+	}
+
+	// Run 10 times to verify determinism (Go randomizes map iteration).
+	for i := 0; i < 10; i++ {
+		attrs2 := map[string]string{}
+		extractSubgraphAttrs(cfg, attrs2)
+		if attrs2["subgraph_params"] != want {
+			t.Errorf("iteration %d: subgraph_params = %q, want %q", i, attrs2["subgraph_params"], want)
 		}
 	}
-	return false
+}
+
+func TestSerializeStylesheet_DeterministicOrder(t *testing.T) {
+	rules := []ir.StylesheetRule{
+		{
+			Selector: ir.StyleSelector{Kind: "universal"},
+			Properties: map[string]string{
+				"z_prop": "z",
+				"a_prop": "a",
+			},
+		},
+	}
+	result := serializeStylesheet(rules)
+	// Properties should be sorted: a_prop before z_prop.
+	aIdx := strings.Index(result, "a_prop")
+	zIdx := strings.Index(result, "z_prop")
+	if aIdx < 0 || zIdx < 0 {
+		t.Fatalf("result = %q, missing properties", result)
+	}
+	if aIdx > zIdx {
+		t.Errorf("properties not sorted: a_prop at %d, z_prop at %d in %q", aIdx, zIdx, result)
+	}
+}
+
+func TestFromDippinIR_WorkflowVersionMapped(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:    "versioned",
+		Start:   "start",
+		Exit:    "exit",
+		Version: "1",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if graph.Attrs["version"] != "1" {
+		t.Errorf("graph.Attrs[version] = %q, want %q", graph.Attrs["version"], "1")
+	}
+}
+
+func TestFromDippinIR_EmptyVersionOmitted(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "no-version",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	if _, ok := graph.Attrs["version"]; ok {
+		t.Error("empty version should not be set in attrs")
+	}
+}
+
+func TestExtractAgentAttrs_ZeroValueFieldsOmitted(t *testing.T) {
+	attrs := map[string]string{}
+	extractAgentAttrs(ir.AgentConfig{}, attrs)
+	if len(attrs) != 0 {
+		t.Errorf("zero-value AgentConfig produced %d attrs, want 0: %v", len(attrs), attrs)
+	}
+}
+
+func TestExtractHumanAttrs_ZeroValueFieldsOmitted(t *testing.T) {
+	attrs := map[string]string{}
+	extractHumanAttrs(ir.HumanConfig{}, attrs)
+	if len(attrs) != 0 {
+		t.Errorf("zero-value HumanConfig produced %d attrs, want 0: %v", len(attrs), attrs)
+	}
+}
+
+func TestExtractToolAttrs_ZeroValueFieldsOmitted(t *testing.T) {
+	attrs := map[string]string{}
+	extractToolAttrs(ir.ToolConfig{}, attrs)
+	if len(attrs) != 0 {
+		t.Errorf("zero-value ToolConfig produced %d attrs, want 0: %v", len(attrs), attrs)
+	}
+}
+
+func TestConvertEdge_WeightAndRestart(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b", Weight: 5, Restart: true}
+	gEdge := convertEdge(irEdge)
+	if gEdge.Attrs["weight"] != "5" {
+		t.Errorf("weight = %q, want %q", gEdge.Attrs["weight"], "5")
+	}
+	if gEdge.Attrs["restart"] != "true" {
+		t.Errorf("restart = %q, want %q", gEdge.Attrs["restart"], "true")
+	}
+}
+
+func TestConvertEdge_ZeroWeightOmitted(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b"}
+	gEdge := convertEdge(irEdge)
+	if _, ok := gEdge.Attrs["weight"]; ok {
+		t.Error("zero weight should not be in attrs")
+	}
+	if _, ok := gEdge.Attrs["restart"]; ok {
+		t.Error("false restart should not be in attrs")
+	}
 }

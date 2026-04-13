@@ -20,6 +20,9 @@ func synthesizeImplicitEdges(g *Graph, workflow *ir.Workflow) {
 	fanInBySource := buildFanInSourceMap(workflow)
 
 	for _, irNode := range workflow.Nodes {
+		if irNode == nil {
+			continue
+		}
 		switch cfg := irNode.Config.(type) {
 		case ir.ParallelConfig:
 			synthesizeParallelEdges(g, irNode, cfg, fanInBySource, existingEdges)
@@ -37,6 +40,9 @@ func synthesizeImplicitEdges(g *Graph, workflow *ir.Workflow) {
 func buildFanInSourceMap(workflow *ir.Workflow) map[string]string {
 	fanInBySource := make(map[string]string)
 	for _, irNode := range workflow.Nodes {
+		if irNode == nil {
+			continue
+		}
 		switch cfg := irNode.Config.(type) {
 		case ir.FanInConfig:
 			for _, source := range cfg.Sources {
@@ -86,8 +92,8 @@ func synthesizeFanInEdges(g *Graph, irNode *ir.Node, cfg ir.FanInConfig, existin
 }
 
 // ensureStartExitNodes verifies that the start and exit nodes exist in the graph.
-// Nodes with a prompt attribute (real agent nodes) keep their existing handler;
-// nodes without a prompt get the start/exit passthrough handler and shape.
+// The start/exit shapes (Mdiamond/Msquare) are always set so the validator can
+// identify them. Nodes without a prompt also get the passthrough handler.
 func ensureStartExitNodes(g *Graph) error {
 	if _, ok := g.Nodes[g.StartNode]; !ok {
 		return fmt.Errorf("start node %q not found in graph", g.StartNode)
@@ -96,13 +102,13 @@ func ensureStartExitNodes(g *Graph) error {
 		return fmt.Errorf("exit node %q not found in graph", g.ExitNode)
 	}
 	startNode := g.Nodes[g.StartNode]
+	startNode.Shape = "Mdiamond"
 	if startNode.Attrs["prompt"] == "" {
-		startNode.Shape = "Mdiamond"
 		startNode.Handler = "start"
 	}
 	exitNode := g.Nodes[g.ExitNode]
+	exitNode.Shape = "Msquare"
 	if exitNode.Attrs["prompt"] == "" {
-		exitNode.Shape = "Msquare"
 		exitNode.Handler = "exit"
 	}
 	return nil

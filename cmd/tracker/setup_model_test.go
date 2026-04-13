@@ -19,10 +19,10 @@ func TestSetupModelStartsOnProviderSelectionPage(t *testing.T) {
 
 func TestSetupModelShowsThreeProviders(t *testing.T) {
 	m := newSetupModel(nil)
-	if got := len(m.providers); got != 3 {
-		t.Fatalf("expected 3 providers, got %d", got)
+	if got := len(m.providers); got != 4 {
+		t.Fatalf("expected 4 providers, got %d", got)
 	}
-	wantNames := []string{"OpenAI", "Anthropic", "Gemini"}
+	wantNames := []string{"OpenAI", "Anthropic", "Gemini", "OpenAI-Compat"}
 	for i, want := range wantNames {
 		if m.providers[i].name != want {
 			t.Errorf("providers[%d].name = %q, want %q", i, m.providers[i].name, want)

@@ -7,6 +7,16 @@ import (
 	"strings"
 )
 
+// toolCommandSafeCtxKeys lists the only ctx.* keys allowed in tool_command
+// variable expansion. All other ctx.* keys are blocked to prevent LLM output
+// injection into shell commands.
+var toolCommandSafeCtxKeys = map[string]bool{
+	"outcome":           true,
+	"preferred_label":   true,
+	"human_response":    true,
+	"interview_answers": true,
+}
+
 // ExpandVariables replaces ${namespace.key} patterns with values from the provided sources.
 // Supports three namespaces:
 //   - ctx: runtime context (from PipelineContext)
@@ -15,6 +25,10 @@ import (
 //
 // In lenient mode (strict=false), undefined variables expand to empty string.
 // In strict mode (strict=true), undefined variables return an error.
+//
+// When toolCommandMode is true (optional variadic parameter), only allowlisted
+// ctx.* keys can be expanded — all others return an error to prevent LLM output
+// injection into shell commands.
 //
 // Examples:
 //
@@ -27,6 +41,7 @@ func ExpandVariables(
 	params map[string]string,
 	graphAttrs map[string]string,
 	strict bool,
+	toolCommandMode ...bool,
 ) (string, error) {
 	if text == "" {
 		return text, nil
@@ -79,6 +94,18 @@ func ExpandVariables(
 		value, found, err := lookupVariable(namespace, key, ctx, params, graphAttrs)
 		if err != nil {
 			return "", err
+		}
+
+		// In tool command mode, block unsafe ctx.* keys.
+		isToolCmd := len(toolCommandMode) > 0 && toolCommandMode[0]
+		if isToolCmd && found && namespace == "ctx" && !toolCommandSafeCtxKeys[key] {
+			return "", fmt.Errorf(
+				"tool_command references unsafe variable ${ctx.%s} — "+
+					"LLM/tool output cannot be interpolated into shell commands. "+
+					"Safe ctx keys: outcome, preferred_label, human_response, interview_answers. "+
+					"Write output to a file in a prior tool node and read it in your command instead",
+				key,
+			)
 		}
 
 		if !found {
@@ -200,14 +227,13 @@ func ParseSubgraphParams(paramsStr string) map[string]string {
 func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 	// Create a shallow copy of the graph
 	clone := &Graph{
-		Name:            g.Name,
-		Nodes:           make(map[string]*Node, len(g.Nodes)),
-		Edges:           make([]*Edge, 0, len(g.Edges)),
-		Attrs:           copyStringMap(g.Attrs),
-		NodeOrder:       append([]string(nil), g.NodeOrder...),
-		StartNode:       g.StartNode,
-		ExitNode:        g.ExitNode,
-		DippinValidated: g.DippinValidated,
+		Name:      g.Name,
+		Nodes:     make(map[string]*Node, len(g.Nodes)),
+		Edges:     make([]*Edge, 0, len(g.Edges)),
+		Attrs:     copyStringMap(g.Attrs),
+		NodeOrder: append([]string(nil), g.NodeOrder...),
+		StartNode: g.StartNode,
+		ExitNode:  g.ExitNode,
 	}
 
 	// Clone and expand variables in all nodes

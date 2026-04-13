@@ -5,7 +5,9 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,43 +17,146 @@ import (
 
 const defaultToolTimeout = 30 * time.Second
 
+const (
+	DefaultOutputLimit = 64 * 1024        // 64KB per stream
+	MaxOutputLimit     = 10 * 1024 * 1024 // 10MB hard ceiling
+)
+
+// ToolHandlerConfig holds security configuration for tool command execution.
+type ToolHandlerConfig struct {
+	OutputLimit    int
+	MaxOutputLimit int
+	Allowlist      []string
+	BypassDenylist bool
+}
+
+// sensitiveEnvPatterns lists environment variable name patterns that should be
+// stripped from tool command subprocesses to prevent secret exfiltration.
+var sensitiveEnvPatterns = []string{
+	"_API_KEY",
+	"_SECRET",
+	"_TOKEN",
+	"_PASSWORD",
+}
+
+// buildToolEnv constructs a filtered environment for tool command execution.
+// Strips environment variables matching sensitive patterns to prevent
+// exfiltration via malicious tool commands. Override with TRACKER_PASS_ENV=1.
+func buildToolEnv() []string {
+	if os.Getenv("TRACKER_PASS_ENV") == "1" {
+		return os.Environ()
+	}
+	var filtered []string
+	for _, env := range os.Environ() {
+		name := strings.SplitN(env, "=", 2)[0]
+		upper := strings.ToUpper(name)
+		sensitive := false
+		for _, pattern := range sensitiveEnvPatterns {
+			if strings.Contains(upper, pattern) {
+				sensitive = true
+				break
+			}
+		}
+		if !sensitive {
+			filtered = append(filtered, env)
+		}
+	}
+	return filtered
+}
+
 // ToolHandler executes shell commands specified in the node's "tool_command"
 // attribute. Command output is captured and stored in the pipeline context.
 type ToolHandler struct {
 	env            exec.ExecutionEnvironment
 	defaultTimeout time.Duration
+	outputLimit    int
+	maxOutputLimit int
+	allowlist      []string
+	bypassDenylist bool
 }
 
 // NewToolHandler creates a ToolHandler with the default 30-second timeout.
 func NewToolHandler(env exec.ExecutionEnvironment) *ToolHandler {
-	return &ToolHandler{env: env, defaultTimeout: defaultToolTimeout}
+	return &ToolHandler{env: env, defaultTimeout: defaultToolTimeout, outputLimit: DefaultOutputLimit, maxOutputLimit: MaxOutputLimit}
 }
 
 // NewToolHandlerWithTimeout creates a ToolHandler with a custom default timeout.
 func NewToolHandlerWithTimeout(env exec.ExecutionEnvironment, timeout time.Duration) *ToolHandler {
-	return &ToolHandler{env: env, defaultTimeout: timeout}
+	return &ToolHandler{env: env, defaultTimeout: timeout, outputLimit: DefaultOutputLimit, maxOutputLimit: MaxOutputLimit}
+}
+
+// NewToolHandlerWithConfig creates a ToolHandler with full security configuration.
+func NewToolHandlerWithConfig(env exec.ExecutionEnvironment, cfg ToolHandlerConfig) *ToolHandler {
+	outputLimit := cfg.OutputLimit
+	if outputLimit <= 0 {
+		outputLimit = DefaultOutputLimit
+	}
+	maxLimit := cfg.MaxOutputLimit
+	if maxLimit <= 0 {
+		maxLimit = MaxOutputLimit
+	}
+	if outputLimit > maxLimit {
+		outputLimit = maxLimit
+	}
+	return &ToolHandler{
+		env:            env,
+		defaultTimeout: defaultToolTimeout,
+		outputLimit:    outputLimit,
+		maxOutputLimit: maxLimit,
+		allowlist:      cfg.Allowlist,
+		bypassDenylist: cfg.BypassDenylist,
+	}
 }
 
 // Name returns the handler name used for registry lookup.
 func (h *ToolHandler) Name() string { return "tool" }
 
+// parseByteSize parses a byte size string with optional KB/MB suffix.
+// Examples: "64KB" → 65536, "1MB" → 1048576, "4096" → 4096.
+func parseByteSize(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	upper := strings.ToUpper(s)
+	if strings.HasSuffix(upper, "MB") {
+		n, err := strconv.Atoi(strings.TrimSuffix(upper, "MB"))
+		return n * 1024 * 1024, err
+	}
+	if strings.HasSuffix(upper, "KB") {
+		n, err := strconv.Atoi(strings.TrimSuffix(upper, "KB"))
+		return n * 1024, err
+	}
+	return strconv.Atoi(s)
+}
+
 // Execute runs the shell command from the node's "tool_command" attribute.
 // It stores stdout and stderr in the pipeline context and returns success
 // for exit code 0, fail for non-zero exit codes. An optional "timeout"
 // attribute on the node overrides the default timeout.
+//
+// Security layers applied (in order):
+//  1. ExpandVariables with toolCommandMode=true — blocks unsafe ctx.* keys (FAIL CLOSED)
+//  2. CheckToolCommand — denylist/allowlist validation on the final command
+//  3. Per-node output_limit capped at h.maxOutputLimit
+//  4. ExecCommandWithLimit with buildToolEnv() for env stripping (LocalEnvironment only)
 func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	command := node.Attrs["tool_command"]
 	if command == "" {
 		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'tool_command'", node.ID)
 	}
 
-	// Expand ${namespace.key} variables in command (ctx, params, graph namespaces)
-	// Note: params are nil here since tool nodes don't have subgraph params directly,
-	// but if called within a subgraph, the params would have been expanded during
-	// InjectParamsIntoGraph before the subgraph engine runs.
-	expandedCommand, err := pipeline.ExpandVariables(command, pctx, nil, nil, false)
-	if err == nil && expandedCommand != "" {
+	// Layer 1: Expand ${namespace.key} variables with toolCommandMode=true.
+	// FAIL CLOSED: if expansion fails (e.g. unsafe ctx.* key), do NOT run the command.
+	expandedCommand, err := pipeline.ExpandVariables(command, pctx, nil, nil, false, true)
+	if err != nil {
+		return pipeline.Outcome{}, fmt.Errorf("node %q tool_command variable expansion failed: %w", node.ID, err)
+	}
+	if expandedCommand != "" {
 		command = expandedCommand
+	}
+
+	// Layer 2: Denylist/allowlist check on the user-authored command (before working_dir prepend,
+	// so allowlist patterns don't need to account for the injected "cd" prefix).
+	if err := CheckToolCommand(command, node.ID, h.allowlist, h.bypassDenylist); err != nil {
+		return pipeline.Outcome{}, err
 	}
 
 	artifactRoot := h.env.WorkingDir()
@@ -62,7 +167,7 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 	// Per-node working directory override (e.g., for git worktree isolation).
 	// Validate against path traversal and shell metacharacters before use.
 	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
-		if strings.ContainsAny(wd, "`$;|\n\r") {
+		if strings.ContainsAny(wd, "`$;|&()<>\n\r") {
 			return pipeline.Outcome{}, fmt.Errorf("node %q has unsafe working_dir %q: contains shell metacharacters", node.ID, wd)
 		}
 		cleaned := filepath.Clean(wd)
@@ -81,7 +186,30 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		timeout = parsed
 	}
 
-	result, err := h.env.ExecCommand(ctx, "sh", []string{"-c", command}, timeout)
+	// Layer 3: Parse per-node output_limit, cap at h.maxOutputLimit.
+	outputLimit := h.outputLimit
+	if limitStr, ok := node.Attrs["output_limit"]; ok && limitStr != "" {
+		parsed, err := parseByteSize(limitStr)
+		if err != nil {
+			return pipeline.Outcome{}, fmt.Errorf("node %q has invalid output_limit %q: %w", node.ID, limitStr, err)
+		}
+		if parsed <= 0 {
+			return pipeline.Outcome{}, fmt.Errorf("node %q has non-positive output_limit %q", node.ID, limitStr)
+		}
+		if parsed > h.maxOutputLimit {
+			parsed = h.maxOutputLimit
+		}
+		outputLimit = parsed
+	}
+
+	// Layer 4: Use ExecCommandWithLimit with buildToolEnv() when running on LocalEnvironment.
+	// For other ExecutionEnvironment implementations (e.g. mock, remote), fall back to ExecCommand.
+	var result exec.CommandResult
+	if le, ok := h.env.(*exec.LocalEnvironment); ok {
+		result, err = le.ExecCommandWithLimit(ctx, "sh", []string{"-c", command}, timeout, outputLimit, buildToolEnv())
+	} else {
+		result, err = h.env.ExecCommand(ctx, "sh", []string{"-c", command}, timeout)
+	}
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("tool command failed for node %q: %w", node.ID, err)
 	}

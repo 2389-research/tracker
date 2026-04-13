@@ -5,6 +5,7 @@ package tracker
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -18,8 +19,15 @@ import (
 	"github.com/2389-research/tracker/llm/anthropic"
 	"github.com/2389-research/tracker/llm/google"
 	"github.com/2389-research/tracker/llm/openai"
+	"github.com/2389-research/tracker/llm/openaicompat"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
+)
+
+// Pipeline format identifiers.
+const (
+	FormatDip = "dip" // Dippin format (current, default)
+	FormatDOT = "dot" // DOT/Graphviz format (deprecated)
 )
 
 // Config controls pipeline execution. All fields are optional.
@@ -196,7 +204,7 @@ func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
 
 	switch format {
 	case "dot":
-		fmt.Fprintln(os.Stderr, "WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
+		log.Println("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
 		graph, err := pipeline.ParseDOT(source)
 		if err != nil {
 			return nil, fmt.Errorf("parse DOT: %w", err)
@@ -212,14 +220,14 @@ func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
 		valResult := validator.Validate(wf)
 		if valResult.HasErrors() {
 			for _, d := range valResult.Diagnostics {
-				fmt.Fprintln(os.Stderr, d.String())
+				log.Println(d.String())
 			}
 			return nil, fmt.Errorf("%d validation error(s)", len(valResult.Errors()))
 		}
 		// Lint warnings (DIP101–DIP115) — print but don't block.
 		lintResult := validator.Lint(wf)
 		for _, d := range lintResult.Diagnostics {
-			fmt.Fprintln(os.Stderr, d.String())
+			log.Println(d.String())
 		}
 		graph, err := pipeline.FromDippinIR(wf)
 		if err != nil {
@@ -257,13 +265,20 @@ func buildClient(provider string) (*llm.Client, error) {
 			}
 			return google.New(key, opts...), nil
 		},
+		"openai-compat": func(key string) (llm.ProviderAdapter, error) {
+			var opts []openaicompat.Option
+			if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
+				opts = append(opts, openaicompat.WithBaseURL(base))
+			}
+			return openaicompat.New(key, opts...), nil
+		},
 	}
 
 	// If a specific provider is requested, only configure that one.
 	if provider != "" {
 		constructor, ok := constructors[provider]
 		if !ok {
-			return nil, fmt.Errorf("unknown provider %q (valid: anthropic, openai, gemini)", provider)
+			return nil, fmt.Errorf("unknown provider %q (valid: anthropic, openai, gemini, openai-compat)", provider)
 		}
 		constructors = map[string]func(string) (llm.ProviderAdapter, error){
 			provider: constructor,

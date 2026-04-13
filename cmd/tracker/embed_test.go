@@ -38,7 +38,7 @@ func TestLookupBuiltinWorkflowUnknown(t *testing.T) {
 	}
 }
 
-func TestListBuiltinWorkflowsReturnsThree(t *testing.T) {
+func TestListBuiltinWorkflowsReturnsFour(t *testing.T) {
 	workflows := listBuiltinWorkflows()
 	if len(workflows) != 4 {
 		t.Errorf("listBuiltinWorkflows returned %d workflows, want 4", len(workflows))

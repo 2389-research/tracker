@@ -22,7 +22,7 @@ workflow HumanGateShowcase
     provider: anthropic
     reasoning_effort: low
     prompt:
-      The user said something interesting via freeform input. Repeat it back to them and add a brief, witty reaction.
+      The user said something interesting via freeform input. Repeat it back to them and add a brief, witty one-sentence reaction. Do NOT ask any follow-up questions.
 
   human BinaryGate
     label: "Do you want to continue to the fun part?"

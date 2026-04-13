@@ -14,9 +14,6 @@ func TestNewGraph(t *testing.T) {
 	if g.Nodes == nil {
 		t.Error("expected Nodes map to be initialized")
 	}
-	if g.Edges == nil {
-		t.Error("expected Edges slice to be initialized")
-	}
 	if g.Attrs == nil {
 		t.Error("expected Attrs map to be initialized")
 	}
@@ -185,5 +182,53 @@ func TestGraphIncomingEdges(t *testing.T) {
 	edges := g.IncomingEdges("c")
 	if len(edges) != 2 {
 		t.Errorf("expected 2 incoming edges to 'c', got %d", len(edges))
+	}
+}
+
+func TestOutgoingEdgesIndexed(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "a", Shape: "box", Attrs: map[string]string{}})
+	g.AddNode(&Node{ID: "b", Shape: "box", Attrs: map[string]string{}})
+	g.AddNode(&Node{ID: "c", Shape: "box", Attrs: map[string]string{}})
+	g.AddEdge(&Edge{From: "a", To: "b"})
+	g.AddEdge(&Edge{From: "a", To: "c"})
+	g.AddEdge(&Edge{From: "b", To: "c"})
+
+	if len(g.OutgoingEdges("a")) != 2 {
+		t.Errorf("OutgoingEdges(a) = %d, want 2", len(g.OutgoingEdges("a")))
+	}
+	if len(g.OutgoingEdges("b")) != 1 {
+		t.Errorf("OutgoingEdges(b) = %d, want 1", len(g.OutgoingEdges("b")))
+	}
+	if len(g.OutgoingEdges("c")) != 0 {
+		t.Errorf("OutgoingEdges(c) = %d, want 0", len(g.OutgoingEdges("c")))
+	}
+	if len(g.IncomingEdges("c")) != 2 {
+		t.Errorf("IncomingEdges(c) = %d, want 2", len(g.IncomingEdges("c")))
+	}
+	if len(g.IncomingEdges("a")) != 0 {
+		t.Errorf("IncomingEdges(a) = %d, want 0", len(g.IncomingEdges("a")))
+	}
+}
+
+func TestEdgeLookupFallbackWithoutAddEdge(t *testing.T) {
+	// Graph built with direct Edges assignment (no AddEdge) — indexes are nil,
+	// so OutgoingEdges/IncomingEdges must fall back to linear scan.
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"a": {ID: "a"},
+			"b": {ID: "b"},
+		},
+		Edges: []*Edge{
+			{From: "a", To: "b", Attrs: map[string]string{}},
+		},
+	}
+	out := g.OutgoingEdges("a")
+	if len(out) != 1 {
+		t.Errorf("fallback OutgoingEdges(a) = %d, want 1", len(out))
+	}
+	in := g.IncomingEdges("b")
+	if len(in) != 1 {
+		t.Errorf("fallback IncomingEdges(b) = %d, want 1", len(in))
 	}
 }

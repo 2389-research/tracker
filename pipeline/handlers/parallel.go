@@ -67,7 +67,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
 	})
 
-	collected := h.executeBranches(ctx, edges, branchOverrides, pctx)
+	collected := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
 
 	resultsJSON, err := json.Marshal(collected)
 	if err != nil {
@@ -122,9 +122,25 @@ type branchResultMsg struct {
 }
 
 // executeBranches spawns goroutines for each branch and collects results.
-func (h *ParallelHandler) executeBranches(ctx context.Context, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) []ParallelResult {
+func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) []ParallelResult {
 	snapshot := pctx.Snapshot()
 	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
+
+	// Parse max_concurrency — 0 means unlimited.
+	var sem chan struct{}
+	if maxStr := parallelNode.Attrs["max_concurrency"]; maxStr != "" {
+		if n, err := strconv.Atoi(maxStr); err == nil && n > 0 {
+			sem = make(chan struct{}, n)
+		}
+	}
+
+	// Parse branch_timeout — zero means no timeout.
+	var branchTimeout time.Duration
+	if toStr := parallelNode.Attrs["branch_timeout"]; toStr != "" {
+		if d, err := time.ParseDuration(toStr); err == nil && d > 0 {
+			branchTimeout = d
+		}
+	}
 
 	resultsCh := make(chan branchResultMsg, len(edges))
 	var wg sync.WaitGroup
@@ -141,7 +157,7 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, edges []*pipeline
 
 		execNode := applyBranchOverrides(targetNode, branchOverrides)
 		wg.Add(1)
-		go h.runBranch(ctx, i, execNode, snapshot, artifactDir, resultsCh, &wg)
+		go h.runBranch(ctx, i, execNode, snapshot, artifactDir, sem, branchTimeout, resultsCh, &wg)
 	}
 
 	wg.Wait()
@@ -155,7 +171,23 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, edges []*pipeline
 }
 
 // runBranch executes a single parallel branch in its own goroutine.
-func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
+// sem, if non-nil, is a buffered channel used as a semaphore to cap concurrency.
+// branchTimeout, if > 0, is applied as a per-branch context deadline.
+func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
+	// Acquire semaphore slot with context cancellation support.
+	if sem != nil {
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+		case <-ctx.Done():
+			resultsCh <- branchResultMsg{
+				index:  idx,
+				result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("context canceled while waiting for concurrency slot: %v", ctx.Err())},
+			}
+			return
+		}
+	}
+
 	defer wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
@@ -180,9 +212,24 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 		branchCtx.SetInternal(pipeline.InternalKeyArtifactDir, artifactDir)
 	}
 
-	outcome, err := h.registry.Execute(ctx, tn, branchCtx)
+	execCtx := ctx
+	if branchTimeout > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(ctx, branchTimeout)
+		defer cancel()
+	}
 
-	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: outcome.ContextUpdates, Stats: outcome.Stats}
+	outcome, err := h.registry.Execute(execCtx, tn, branchCtx)
+
+	// Auto-capture any pctx.Set() calls the handler made directly,
+	// not just values returned via Outcome.ContextUpdates. This prevents
+	// silent data loss when handlers write to the context as a side effect.
+	mergedUpdates := branchCtx.DiffFrom(snapshot)
+	for k, v := range outcome.ContextUpdates {
+		mergedUpdates[k] = v // explicit ContextUpdates take priority
+	}
+
+	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
 	if err != nil {
 		pr.Status = pipeline.OutcomeFail
 		pr.Error = err.Error()

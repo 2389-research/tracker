@@ -481,6 +481,25 @@ func TestSelectBackendACP(t *testing.T) {
 			t.Errorf("expected *ACPBackend, got %T", b)
 		}
 	})
+
+	t.Run("node attr overrides global default", func(t *testing.T) {
+		h2 := &CodergenHandler{
+			client:             &fakeCompleter{responseText: "ok"},
+			defaultBackendName: "acp",
+			graphAttrs:         map[string]string{},
+		}
+		node := &pipeline.Node{
+			ID:    "test",
+			Attrs: map[string]string{"backend": "native"},
+		}
+		b, err := h2.selectBackend(node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := b.(*NativeBackend); !ok {
+			t.Errorf("expected *NativeBackend (node attr should override global), got %T", b)
+		}
+	})
 }
 
 func TestExtractContentText(t *testing.T) {

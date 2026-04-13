@@ -19,6 +19,7 @@ type HybridContent struct {
 	labels   []string
 	cursor   int // index into labels + "other"
 	onOther  bool
+	width    int
 	textarea textarea.Model
 	replyCh  chan<- string
 	done     bool
@@ -59,8 +60,9 @@ func NewHybridContent(prompt string, labels []string, defaultLabel string, reply
 	}
 }
 
-// SetWidth adjusts the textarea width.
+// SetWidth adjusts the content width for prompt wrapping and textarea.
 func (h *HybridContent) SetWidth(w int) {
+	h.width = w
 	inner := w - 8
 	if inner < 20 {
 		inner = 20
@@ -193,7 +195,11 @@ func (h *HybridContent) cancel() tea.Cmd {
 func (h *HybridContent) View() string {
 	var sb strings.Builder
 
-	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout)
+	promptWidth := h.width - 4
+	if promptWidth < 20 {
+		promptWidth = 20
+	}
+	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Width(promptWidth)
 	sb.WriteString(promptStyle.Render(h.prompt))
 	sb.WriteString("\n\n")
 

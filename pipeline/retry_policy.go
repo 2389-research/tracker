@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"math/rand/v2"
 	"strconv"
 	"time"
 )
@@ -119,27 +120,37 @@ func ResolveRetryPolicy(node *Node, graphAttrs map[string]string) *RetryPolicy {
 	return policy
 }
 
-// ExponentialBackoff returns 2^attempt * base, capped at 60s.
+// applyJitter adds ±25% random jitter to a duration, capped at maxBackoffDuration.
+func applyJitter(d time.Duration) time.Duration {
+	jitter := 0.75 + rand.Float64()*0.5 // [0.75, 1.25)
+	result := time.Duration(float64(d) * jitter)
+	if result > maxBackoffDuration {
+		return maxBackoffDuration
+	}
+	return result
+}
+
+// ExponentialBackoff returns 2^attempt * base with ±25% jitter, capped at 60s.
 func ExponentialBackoff(attempt int, base time.Duration) time.Duration {
 	delay := base
 	for i := 0; i < attempt; i++ {
 		delay *= 2
 		if delay > maxBackoffDuration {
-			return maxBackoffDuration
+			return applyJitter(maxBackoffDuration)
 		}
 	}
 	if delay > maxBackoffDuration {
-		return maxBackoffDuration
+		return applyJitter(maxBackoffDuration)
 	}
-	return delay
+	return applyJitter(delay)
 }
 
-// LinearBackoff returns (attempt+1) * base, capped at 60s.
+// LinearBackoff returns (attempt+1) * base with ±25% jitter, capped at 60s.
 // Like ExponentialBackoff, attempt is 0-indexed: attempt 0 = 1*base.
 func LinearBackoff(attempt int, base time.Duration) time.Duration {
 	delay := time.Duration(attempt+1) * base
 	if delay > maxBackoffDuration {
-		return maxBackoffDuration
+		return applyJitter(maxBackoffDuration)
 	}
-	return delay
+	return applyJitter(delay)
 }

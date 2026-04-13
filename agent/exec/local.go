@@ -1,3 +1,5 @@
+//go:build !windows
+
 // ABOUTME: LocalEnvironment implements ExecutionEnvironment for local filesystem and process execution.
 // ABOUTME: Enforces path containment within the working directory to prevent traversal attacks.
 package exec
@@ -10,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -129,6 +132,99 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 		return result, err
 	}
 
+	return result, nil
+}
+
+// limitedBuffer caps the amount of data that can be written. When the limit
+// is reached, excess data is silently discarded and the truncated flag is set.
+type limitedBuffer struct {
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (lb *limitedBuffer) Write(p []byte) (int, error) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	remaining := lb.limit - lb.buf.Len()
+	if remaining <= 0 {
+		lb.truncated = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		lb.truncated = true
+		lb.buf.Write(p[:remaining])
+		return len(p), nil // report full length to avoid io.ErrShortWrite
+	}
+	return lb.buf.Write(p)
+}
+
+func (lb *limitedBuffer) String() string {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	s := lb.buf.String()
+	if lb.truncated {
+		s += fmt.Sprintf("\n...(output truncated at %d bytes)", lb.limit)
+	}
+	return s
+}
+
+// ExecCommandWithLimit runs a command with output capped at outputLimit bytes per stream.
+// If outputLimit <= 0, output is unbounded (same as ExecCommand).
+// Optional env parameter sets the subprocess environment (nil = inherit parent).
+func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command string, args []string, timeout time.Duration, outputLimit int, env ...[]string) (CommandResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir = e.workDir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
+
+	if len(env) > 0 && env[0] != nil {
+		cmd.Env = env[0]
+	}
+
+	if outputLimit <= 0 {
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		result := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
+		if err != nil {
+			if ctx.Err() != nil {
+				return result, fmt.Errorf("command timed out after %v", timeout)
+			}
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				result.ExitCode = exitErr.ExitCode()
+				return result, nil
+			}
+			return result, err
+		}
+		return result, nil
+	}
+
+	stdoutBuf := &limitedBuffer{limit: outputLimit}
+	stderrBuf := &limitedBuffer{limit: outputLimit}
+	cmd.Stdout = stdoutBuf
+	cmd.Stderr = stderrBuf
+
+	err := cmd.Run()
+	result := CommandResult{Stdout: stdoutBuf.String(), Stderr: stderrBuf.String()}
+	if err != nil {
+		if ctx.Err() != nil {
+			return result, fmt.Errorf("command timed out after %v", timeout)
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+			return result, nil
+		}
+		return result, err
+	}
 	return result, nil
 }
 

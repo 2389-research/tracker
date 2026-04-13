@@ -59,6 +59,25 @@ archives:
       {{- .Os }}_
       {{- .Arch }}
 
+brews:
+  - ids:
+      - tracker
+    repository:
+      owner: 2389-research
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/2389-research/tracker
+    description: "Pipeline orchestration engine for multi-agent LLM workflows"
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    install: |
+      bin.install "tracker"
+    test: |
+      system "#{bin}/tracker", "version"
+
 checksum:
   name_template: checksums.txt
 

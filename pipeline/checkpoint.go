@@ -25,6 +25,11 @@ type Checkpoint struct {
 	// replay routing decisions instead of re-evaluating stale conditions.
 	EdgeSelections map[string]string `json:"edge_selections,omitempty"`
 
+	// FallbackTaken tracks which goal-gate nodes have already used their
+	// one-shot fallback/escalation route. Persisted in checkpoint JSON so
+	// the guard survives checkpoint save/restore cycles.
+	FallbackTaken map[string]bool `json:"fallback_taken,omitempty"`
+
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
 	completedSet map[string]bool `json:"-"`

@@ -109,7 +109,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
 	}
 
-	return h.buildSuccessOutcome(node, prompt, artifactRoot, sessResult, &collector)
+	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector)
 }
 
 // selectBackend chooses the appropriate AgentBackend based on node attributes
@@ -331,7 +331,8 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 	outcome := pipeline.Outcome{
 		Status: pipeline.OutcomeRetry,
 		ContextUpdates: map[string]string{
-			pipeline.ContextKeyLastResponse: runErr.Error(),
+			pipeline.ContextKeyLastResponse:             runErr.Error(),
+			pipeline.ContextKeyResponsePrefix + node.ID: runErr.Error(),
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -346,8 +347,12 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 	return outcome, nil
 }
 
-// buildSuccessOutcome constructs the outcome for a successful session run.
-func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
+// buildOutcome constructs the pipeline outcome from a completed session run.
+// Returns OutcomeFail for turn-limit exhaustion and loop detection (routes
+// through failure edges when present, stops on strict-failure-edge otherwise),
+// OutcomeFail/OutcomeRetry for empty sessions, or OutcomeSuccess for normal
+// completion. auto_status can override any of these.
+func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
 	responseText := collector.text()
 	responseArtifact := collector.transcript()
 	if responseArtifact == "" {
@@ -362,10 +367,17 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
 	emptyAPIResponse := strings.TrimSpace(responseText) == "" && sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
 	if strings.TrimSpace(responseText) == "" && (emptySession || emptyAPIResponse) {
+		status := pipeline.OutcomeFail
+		msg := fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID)
+		if emptyAPIResponse {
+			status = pipeline.OutcomeRetry
+			msg = fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", node.ID)
+		}
 		outcome := pipeline.Outcome{
-			Status: pipeline.OutcomeFail,
+			Status: status,
 			ContextUpdates: map[string]string{
-				pipeline.ContextKeyLastResponse: fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID),
+				pipeline.ContextKeyLastResponse:             msg,
+				pipeline.ContextKeyResponsePrefix + node.ID: msg,
 			},
 			Stats: buildSessionStats(sessResult),
 		}
@@ -375,7 +387,26 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 		return outcome, nil
 	}
 
+	// Determine status. Turn-limit exhaustion and loop detection default to
+	// OutcomeFail so the engine routes through explicit failure edges (e.g.
+	// "when ctx.outcome = fail"). On nodes without failure edges, the
+	// strict-failure-edge rule stops the pipeline — which is correct: if the
+	// pipeline author didn't handle agent failure, silently continuing is worse.
+	//
+	// auto_status overrides the default for both turn-exhaustion and normal
+	// completion: the agent's explicit STATUS line is authoritative.
 	status := pipeline.OutcomeSuccess
+	var turnLimitMsg string
+
+	if sessResult.MaxTurnsUsed {
+		status = pipeline.OutcomeFail
+		if sessResult.LoopDetected {
+			turnLimitMsg = fmt.Sprintf("node %q: agent entered tool call loop (detected after %d turns)", node.ID, sessResult.Turns)
+		} else {
+			turnLimitMsg = fmt.Sprintf("node %q: agent exhausted turn limit (%d turns) without completing", node.ID, sessResult.Turns)
+		}
+	}
+
 	if node.Attrs["auto_status"] == "true" {
 		status = parseAutoStatus(responseText)
 	}
@@ -383,9 +414,13 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	outcome := pipeline.Outcome{
 		Status: status,
 		ContextUpdates: map[string]string{
-			pipeline.ContextKeyLastResponse: responseText,
+			pipeline.ContextKeyLastResponse:             responseText,
+			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
 		},
 		Stats: buildSessionStats(sessResult),
+	}
+	if turnLimitMsg != "" {
+		outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] = turnLimitMsg
 	}
 	if sessResult.Usage.EstimatedCost > 0 {
 		outcome.ContextUpdates["last_cost"] = fmt.Sprintf("%.4f", sessResult.Usage.EstimatedCost)
@@ -502,18 +537,26 @@ func (h *CodergenHandler) applyCacheAndCompaction(config *agent.SessionConfig, n
 }
 
 // parseAutoStatus scans the response text for STATUS: directives and returns
-// the last one found. In multi-turn agentic sessions, the LLM emits text across
-// many turns, so the STATUS: line appears in the final turn's output — not the
-// first line of the concatenated text. Falls back to success if no valid STATUS
-// line is found.
+// the last one found. Case-insensitive matching. Lines inside code fences
+// (``` blocks) are skipped to avoid matching hallucinated STATUS lines.
+// Falls back to success if no valid STATUS line is found.
 func parseAutoStatus(text string) string {
 	result := pipeline.OutcomeSuccess
+	inCodeBlock := false
 	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "STATUS:") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
 			continue
 		}
-		status := strings.TrimSpace(strings.TrimPrefix(line, "STATUS:"))
+		if inCodeBlock {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if !strings.HasPrefix(upper, "STATUS:") {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(trimmed[len("STATUS:"):]))
 		switch status {
 		case "success":
 			result = pipeline.OutcomeSuccess

@@ -5,14 +5,77 @@ package handlers
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/tui/render"
 )
+
+var errHumanTimeout = fmt.Errorf("human gate timed out waiting for input")
+
+// withTimeout runs fn in a goroutine and returns its result, or errHumanTimeout
+// if the duration elapses first. A zero timeout means no timeout.
+//
+// Note: on timeout, the goroutine running fn is NOT canceled (the Interviewer
+// interface has no cancellation mechanism). The goroutine may leak until the
+// underlying I/O unblocks. This is an accepted tradeoff to avoid changing the
+// Interviewer interface.
+func withTimeout(timeout time.Duration, fn func() (string, error)) (string, error) {
+	if timeout <= 0 {
+		return fn()
+	}
+	type result struct {
+		val string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		v, e := fn()
+		ch <- result{v, e}
+	}()
+	select {
+	case r := <-ch:
+		return r.val, r.err
+	case <-time.After(timeout):
+		return "", errHumanTimeout
+	}
+}
+
+// withTimeoutOutcome is like withTimeout but for functions returning (Outcome, error).
+func withTimeoutOutcome(timeout time.Duration, fn func() (pipeline.Outcome, error)) (pipeline.Outcome, error) {
+	if timeout <= 0 {
+		return fn()
+	}
+	type result struct {
+		val pipeline.Outcome
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		v, e := fn()
+		ch <- result{v, e}
+	}()
+	select {
+	case r := <-ch:
+		return r.val, r.err
+	case <-time.After(timeout):
+		return pipeline.Outcome{}, errHumanTimeout
+	}
+}
+
+func parseHumanTimeout(node *pipeline.Node) time.Duration {
+	if ts, ok := node.Attrs["timeout"]; ok {
+		if d, err := time.ParseDuration(ts); err == nil {
+			return d
+		}
+	}
+	return 0
+}
 
 // Interviewer defines the interface for presenting choices to a human (or automated)
 // decision-maker. Implementations control how the prompt and choices are displayed
@@ -245,7 +308,33 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 		// Print the question
 		fmt.Fprintf(c.Writer, "\nQ%d: %s\n", q.Index, q.Text)
 
-		if len(q.Options) > 0 {
+		if q.IsYesNo {
+			// Yes/no takes priority over options to stay consistent with TUI behavior.
+			if prevAns.Answer != "" {
+				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
+			}
+			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
+			line, err := c.readLine()
+			if err != nil {
+				canceled = true
+				answers[i] = ans
+				for j := i + 1; j < len(questions); j++ {
+					answers[j] = InterviewAnswer{
+						ID:   fmt.Sprintf("q%d", questions[j].Index),
+						Text: questions[j].Text,
+					}
+				}
+				break
+			}
+			input := strings.TrimSpace(strings.ToLower(line))
+			if input == "y" || input == "yes" {
+				ans.Answer = "yes"
+			} else if input == "n" || input == "no" {
+				ans.Answer = "no"
+			} else if input == "" && prevAns.Answer != "" {
+				ans.Answer = prevAns.Answer
+			}
+		} else if len(q.Options) > 0 {
 			// Print numbered options
 			for j, opt := range q.Options {
 				fmt.Fprintf(c.Writer, "  %d) %s\n", j+1, opt)
@@ -299,32 +388,6 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 					}
 				}
 			} else if prevAns.Answer != "" {
-				// Blank input preserves the previous answer on retry.
-				ans.Answer = prevAns.Answer
-			}
-		} else if q.IsYesNo {
-			if prevAns.Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
-			}
-			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
-			line, err := c.readLine()
-			if err != nil {
-				canceled = true
-				answers[i] = ans
-				for j := i + 1; j < len(questions); j++ {
-					answers[j] = InterviewAnswer{
-						ID:   fmt.Sprintf("q%d", questions[j].Index),
-						Text: questions[j].Text,
-					}
-				}
-				break
-			}
-			input := strings.TrimSpace(strings.ToLower(line))
-			if input == "y" || input == "yes" {
-				ans.Answer = "yes"
-			} else if input == "n" || input == "no" {
-				ans.Answer = "no"
-			} else if input == "" && prevAns.Answer != "" {
 				// Blank input preserves the previous answer on retry.
 				ans.Answer = prevAns.Answer
 			}
@@ -388,13 +451,54 @@ func (h *HumanHandler) Name() string { return "wait.human" }
 func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	prompt := h.resolveHumanPrompt(node, pctx)
 
+	var outcome pipeline.Outcome
+	var err error
+
 	if node.Attrs["mode"] == "interview" {
-		return h.executeInterview(ctx, node, pctx)
+		timeout := parseHumanTimeout(node)
+		outcome, err = withTimeoutOutcome(timeout, func() (pipeline.Outcome, error) {
+			return h.executeInterview(ctx, node, pctx)
+		})
+	} else if node.Attrs["mode"] == "freeform" {
+		outcome, err = h.executeFreeform(node, prompt)
+	} else if node.Attrs["mode"] == "yes_no" {
+		outcome, err = h.executeYesNo(node, prompt)
+	} else {
+		outcome, err = h.executeChoice(node, prompt)
 	}
-	if node.Attrs["mode"] == "freeform" {
-		return h.executeFreeform(node, prompt)
+
+	if errors.Is(err, errHumanTimeout) {
+		action := node.Attrs["timeout_action"]
+		if action == "" {
+			action = "default"
+		}
+		switch action {
+		case "fail":
+			return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+				pipeline.ContextKeyHumanResponse: "timed out",
+			}}, nil
+		default:
+			def := node.Attrs["default_choice"]
+			if def == "" {
+				def = node.Attrs["default"]
+			}
+			if def == "" {
+				return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+					pipeline.ContextKeyHumanResponse: "timed out (no default)",
+				}}, nil
+			}
+			return pipeline.Outcome{
+				Status:         pipeline.OutcomeSuccess,
+				PreferredLabel: def,
+				ContextUpdates: map[string]string{
+					pipeline.ContextKeyHumanResponse:            def,
+					pipeline.ContextKeyResponsePrefix + node.ID: def,
+				},
+			}, nil
+		}
 	}
-	return h.executeChoice(node, prompt)
+
+	return outcome, err
 }
 
 // resolveHumanPrompt builds the full prompt with variable expansion and last response context.
@@ -440,18 +544,26 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	// Use labeled variant if available and there are labels.
 	var response string
 	var err error
+	timeout := parseHumanTimeout(node)
 	if lfi, ok := fi.(LabeledFreeformInterviewer); ok && len(labels) > 0 {
-		response, err = lfi.AskFreeformWithLabels(prompt, labels, defaultLabel)
+		response, err = withTimeout(timeout, func() (string, error) {
+			return lfi.AskFreeformWithLabels(prompt, labels, defaultLabel)
+		})
 	} else {
-		response, err = fi.AskFreeform(prompt)
+		response, err = withTimeout(timeout, func() (string, error) {
+			return fi.AskFreeform(prompt)
+		})
 	}
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
 	}
 
 	outcome := pipeline.Outcome{
-		Status:         pipeline.OutcomeSuccess,
-		ContextUpdates: map[string]string{pipeline.ContextKeyHumanResponse: response},
+		Status: pipeline.OutcomeSuccess,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyHumanResponse:            response,
+			pipeline.ContextKeyResponsePrefix + node.ID: response,
+		},
 	}
 
 	if h.graph != nil {
@@ -559,8 +671,9 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 	return pipeline.Outcome{
 		Status: status,
 		ContextUpdates: map[string]string{
-			answersKey:                       jsonStr,
-			pipeline.ContextKeyHumanResponse: summary,
+			answersKey:                                  jsonStr,
+			pipeline.ContextKeyHumanResponse:            summary,
+			pipeline.ContextKeyResponsePrefix + node.ID: summary,
 		},
 	}, nil
 }
@@ -581,10 +694,32 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		choices = append(choices, label)
 	}
 
-	selected, err := h.interviewer.Ask(prompt, choices, node.Attrs["default_choice"])
+	timeout := parseHumanTimeout(node)
+	selected, err := withTimeout(timeout, func() (string, error) {
+		return h.interviewer.Ask(prompt, choices, node.Attrs["default_choice"])
+	})
 	if err != nil {
-		return pipeline.Outcome{}, fmt.Errorf("human gate interview failed for node %q: %w", node.ID, err)
+		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
 	return pipeline.Outcome{Status: pipeline.OutcomeSuccess, PreferredLabel: selected}, nil
+}
+
+// executeYesNo handles yes_no mode: presents Yes/No choices and maps them to
+// OutcomeSuccess (Yes) or OutcomeFail (No) so pipelines can route with
+// ctx.outcome = success / ctx.outcome = fail conditions.
+func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
+	timeout := parseHumanTimeout(node)
+	selected, err := withTimeout(timeout, func() (string, error) {
+		return h.interviewer.Ask(prompt, []string{"Yes", "No"}, "")
+	})
+	if err != nil {
+		return pipeline.Outcome{}, fmt.Errorf("human gate yes/no failed for node %q: %w", node.ID, err)
+	}
+
+	status := pipeline.OutcomeSuccess
+	if selected == "No" {
+		status = pipeline.OutcomeFail
+	}
+	return pipeline.Outcome{Status: status, PreferredLabel: selected}, nil
 }

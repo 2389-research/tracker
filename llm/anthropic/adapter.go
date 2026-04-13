@@ -115,8 +115,13 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	if resp.Usage.OutputTokens == 0 && resp.Text() == "" && len(resp.ToolCalls()) == 0 {
 		log.Printf("[anthropic] WARNING: empty response (0 output tokens, no text, no tool calls) — status=%d stop_reason=%s model=%s request_id=%s raw_length=%d",
 			httpResp.StatusCode, resp.FinishReason.Raw, resp.Model, httpResp.Header.Get("Request-Id"), len(respBody))
-		if os.Getenv("TRACKER_DEBUG") != "" && len(respBody) < 2000 {
-			log.Printf("[anthropic] raw response body: %s", string(respBody))
+		if os.Getenv("TRACKER_DEBUG") != "" {
+			// Log truncated body to aid debugging without leaking full payloads.
+			preview := string(respBody)
+			if len(preview) > 200 {
+				preview = preview[:200] + "...(truncated)"
+			}
+			log.Printf("[anthropic] raw response preview (%d bytes): %s", len(respBody), preview)
 		}
 	}
 
@@ -274,6 +279,7 @@ type sseContentBlockStart struct {
 		ID   string `json:"id,omitempty"`
 		Name string `json:"name,omitempty"`
 		Text string `json:"text,omitempty"`
+		Data string `json:"data,omitempty"` // redacted_thinking opaque blob
 	} `json:"content_block"`
 }
 
@@ -286,6 +292,7 @@ type sseContentBlockDelta struct {
 		Text        string `json:"text,omitempty"`
 		PartialJSON string `json:"partial_json,omitempty"`
 		Thinking    string `json:"thinking,omitempty"`
+		Signature   string `json:"signature,omitempty"` // thinking block signature
 	} `json:"delta"`
 }
 
@@ -349,6 +356,9 @@ func (a *Adapter) handleSSEBlockStart(data []byte, ch chan<- llm.StreamEvent, bl
 		ch <- llm.StreamEvent{Type: llm.EventToolCallStart, ToolCall: &llm.ToolCallData{ID: evt.ContentBlock.ID, Name: evt.ContentBlock.Name}}
 	case "thinking":
 		ch <- llm.StreamEvent{Type: llm.EventReasoningStart}
+	case "redacted_thinking":
+		// Redacted thinking blocks carry an opaque data blob that must be round-tripped.
+		ch <- llm.StreamEvent{Type: llm.EventRedactedThinking, ReasoningSignature: evt.ContentBlock.Data}
 	}
 }
 
@@ -365,6 +375,8 @@ func (a *Adapter) handleSSEBlockDelta(data []byte, ch chan<- llm.StreamEvent) {
 		ch <- llm.StreamEvent{Type: llm.EventToolCallDelta, Delta: evt.Delta.PartialJSON}
 	case "thinking_delta":
 		ch <- llm.StreamEvent{Type: llm.EventReasoningDelta, ReasoningDelta: evt.Delta.Thinking}
+	case "signature_delta":
+		ch <- llm.StreamEvent{Type: llm.EventReasoningSignature, ReasoningSignature: evt.Delta.Signature}
 	}
 }
 

@@ -17,6 +17,16 @@ const (
 	ContextKeyToolStderr         = "tool_stderr"
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 
+	// ContextKeyResponsePrefix is prepended to a node ID to form a per-node
+	// response key (e.g. "response.mynode"). Downstream nodes can reference
+	// specific upstream outputs without relying on last_response being current.
+	ContextKeyResponsePrefix = "response."
+
+	// ContextKeyTurnLimitMsg holds a diagnostic message when an agent exhausts
+	// its turn limit or enters a tool call loop. Present only in failure outcomes
+	// from turn-limit exhaustion; absent on normal success.
+	ContextKeyTurnLimitMsg = "turn_limit_msg"
+
 	// Interview mode context keys. Overridable via questions_key/answers_key
 	// node attributes in .dip files. These are the defaults when the attrs
 	// are not specified.
@@ -97,6 +107,22 @@ func (c *PipelineContext) SetInternal(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.internal[key] = value
+}
+
+// DiffFrom returns all keys in the current context whose values differ from
+// the given baseline snapshot, including keys that exist in the context but
+// not in baseline. Keys present in baseline but absent here are not reported
+// (PipelineContext has no delete operation).
+func (c *PipelineContext) DiffFrom(baseline map[string]string) map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	diff := make(map[string]string)
+	for k, v := range c.values {
+		if baseVal, exists := baseline[k]; !exists || baseVal != v {
+			diff[k] = v
+		}
+	}
+	return diff
 }
 
 // NewPipelineContextFrom creates a PipelineContext pre-populated with the

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -557,5 +558,77 @@ func TestInjectParamsIntoGraph_MixedVariables(t *testing.T) {
 	expected := "Goal: Test workflow, Model: gpt-4"
 	if result.Nodes["Agent1"].Attrs["prompt"] != expected {
 		t.Errorf("got %q, want %q", result.Nodes["Agent1"].Attrs["prompt"], expected)
+	}
+}
+
+func TestExpandVariables_ToolCommandMode_BlocksLLMOutput(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("last_response", "malicious; rm -rf /")
+	ctx.Set("outcome", "success")
+
+	_, err := ExpandVariables("echo ${ctx.last_response}", ctx, nil, nil, false, true)
+	if err == nil {
+		t.Fatal("expected error for tainted key in tool command mode")
+	}
+	if !strings.Contains(err.Error(), "unsafe variable") {
+		t.Errorf("error = %q, want 'unsafe variable' message", err)
+	}
+
+	result, err := ExpandVariables("status=${ctx.outcome}", ctx, nil, nil, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error for safe key: %v", err)
+	}
+	if result != "status=success" {
+		t.Errorf("result = %q, want %q", result, "status=success")
+	}
+}
+
+func TestExpandVariables_ToolCommandMode_AllowsHumanResponse(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("human_response", "user typed this")
+
+	result, err := ExpandVariables("echo ${ctx.human_response}", ctx, nil, nil, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "echo user typed this" {
+		t.Errorf("result = %q, want %q", result, "echo user typed this")
+	}
+}
+
+func TestExpandVariables_ToolCommandMode_BlocksResponsePrefix(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("response.agent1", "LLM output here")
+
+	_, err := ExpandVariables("echo ${ctx.response.agent1}", ctx, nil, nil, false, true)
+	if err == nil {
+		t.Fatal("expected error for response.* key in tool command mode")
+	}
+}
+
+func TestExpandVariables_ToolCommandMode_AllowsGraphAndParams(t *testing.T) {
+	ctx := NewPipelineContext()
+	graphAttrs := map[string]string{"goal": "build the app"}
+	params := map[string]string{"model": "sonnet"}
+
+	result, err := ExpandVariables("${graph.goal} ${params.model}", ctx, params, graphAttrs, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "build the app sonnet" {
+		t.Errorf("result = %q, want %q", result, "build the app sonnet")
+	}
+}
+
+func TestExpandVariables_NormalMode_AllowsEverything(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("last_response", "hello world")
+
+	result, err := ExpandVariables("echo ${ctx.last_response}", ctx, nil, nil, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "echo hello world" {
+		t.Errorf("result = %q, want %q", result, "echo hello world")
 	}
 }

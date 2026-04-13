@@ -71,7 +71,7 @@ func BuildMarkdownSummary(r InterviewResult) string {
 	for i, q := range r.Questions {
 		b.WriteString(fmt.Sprintf("\n**Q%d: %s**\n", i+1, q.Text))
 
-		if q.Answer == "" {
+		if strings.TrimSpace(q.Answer) == "" {
 			b.WriteString("(skipped)\n")
 		} else if q.Elaboration != "" {
 			b.WriteString(fmt.Sprintf("%s — %s\n", q.Answer, q.Elaboration))
@@ -83,7 +83,7 @@ func BuildMarkdownSummary(r InterviewResult) string {
 	b.WriteString("\n---\n")
 	answered := 0
 	for _, q := range r.Questions {
-		if q.Answer != "" {
+		if strings.TrimSpace(q.Answer) != "" {
 			answered++
 		}
 	}

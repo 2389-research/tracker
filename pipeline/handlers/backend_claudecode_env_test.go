@@ -129,6 +129,19 @@ func TestBuildEnvPassthroughWithOverride(t *testing.T) {
 	}
 }
 
+func TestBuildEnv_StripsOpenAICompatKey(t *testing.T) {
+	t.Setenv("OPENAI_COMPAT_API_KEY", "test-compat-key-12345")
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+
+	env := buildEnv()
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "OPENAI_COMPAT_API_KEY=") {
+			t.Errorf("expected OPENAI_COMPAT_API_KEY stripped from env, but found: %s", e)
+		}
+	}
+}
+
 func TestBuildEnvNoKeysNoop(t *testing.T) {
 	// Ensure no API keys are set.
 	os.Unsetenv("ANTHROPIC_API_KEY")

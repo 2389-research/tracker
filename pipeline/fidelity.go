@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Fidelity represents a context fidelity level for pipeline execution.
@@ -142,14 +143,32 @@ func compactSummaryHigh(ctx *PipelineContext, completedNodes []string, artifactD
 	return result
 }
 
+// DefaultTruncateLimit is the maximum character length for context values
+// in truncate fidelity mode. Truncation is character-based (not token-based).
+const DefaultTruncateLimit = 500
+
+// truncateAtWordBoundary truncates s to approximately limit characters,
+// cutting at the last whitespace boundary (space, newline, tab) before the
+// limit. Appends "..." when truncation occurs.
+func truncateAtWordBoundary(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := strings.LastIndexFunc(s[:limit], unicode.IsSpace)
+	if cut <= 0 {
+		cut = limit
+	}
+	return s[:cut] + "..."
+}
+
 // compactMedium returns only medium-fidelity keys. When truncate is true,
-// each value is capped at 500 characters.
+// each value is capped at DefaultTruncateLimit characters, cut at a word boundary.
 func compactMedium(ctx *PipelineContext, truncate bool) map[string]string {
 	result := make(map[string]string)
 	for _, key := range mediumKeys {
 		if val, ok := ctx.Get(key); ok {
-			if truncate && len(val) > 500 {
-				val = val[:500]
+			if truncate {
+				val = truncateAtWordBoundary(val, DefaultTruncateLimit)
 			}
 			result[key] = val
 		}

@@ -5,6 +5,114 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-04-09
+
+### Fixed
+
+- **Turn-limit exhaustion treated as success**: Agents that exhausted their turn limit (or entered a tool call loop) were silently treated as `OutcomeSuccess`, allowing pipelines to advance past nodes that wrote zero files. Now returns `OutcomeFail` so the engine routes through explicit `when ctx.outcome = fail` edges (or stops via strict-failure-edge when no failure edge exists).
+- **Loop detection produces distinct diagnostic**: `turn_limit_msg` context key now distinguishes "agent entered tool call loop" from "agent exhausted turn limit" for clearer `tracker diagnose` output.
+
+### Added
+
+- **`ContextKeyTurnLimitMsg` constant**: New `pipeline.ContextKeyTurnLimitMsg` context key for turn-limit and loop-detection diagnostics. Added to `reservedContextKeys()` for linter recognition.
+- **Turn-limit and loop-detection tests**: `TestCodergenHandlerMaxTurnsExhaustedIsFail`, `TestCodergenHandlerMaxTurnsWithAutoStatusSuccess`, `TestCodergenHandlerMaxTurnsWithAutoStatusFail`, `TestCodergenHandlerLoopDetectedMessage`.
+
+## [0.16.3] - 2026-04-06
+
+### Fixed
+
+- **Thinking signature dropped in streaming**: The Anthropic SSE handler now captures `signature_delta` events. Previously, thinking block signatures were silently lost during streaming, causing multi-turn sessions with extended thinking (Opus 4.6) to crash with `messages.N.content: Input should be a valid list` when the API rejected the signature-less thinking block on the next turn.
+- **Redacted thinking blocks dropped in streaming**: The SSE handler now captures `redacted_thinking` content blocks and round-trips them through the `StreamAccumulator`. Previously, these opaque blocks were silently dropped, breaking conversation continuity.
+- **Nil message content serialized as `null`**: `translateMessage` now initializes content as an empty slice so JSON serializes to `[]` instead of `null` when all content parts are skipped.
+
+## [0.16.2] - 2026-04-05
+
+### Added
+
+- **Comprehensive human gate test suite**: `examples/human_gate_test_suite.dip` exercises all 4 gate modes (choice, yes_no, freeform, interview) plus timeout, default_choice, ctx.outcome routing, hybrid freeform, and interview cancel. 100 simulated paths, all reaching Exit.
+- **Backend selection precedence test**: Verifies node attr overrides global `--backend` CLI flag.
+
+### Changed
+
+- **dippin-lang v0.18.0**: Updated from v0.17.0. Adds `flatten` package for inlining subgraph refs into a single flat workflow.
+
+### Fixed
+
+- **human_gate_showcase.dip**: EchoFreeform agent no longer asks follow-up questions that conflict with the next gate's choices.
+
+## [0.16.1] - 2026-04-04
+
+### Fixed
+
+- **`mode: yes_no` human gate outcome mapping**: Yes now returns `OutcomeSuccess`, No returns `OutcomeFail`. Previously, `yes_no` fell through to choice mode which always returned `OutcomeSuccess` regardless of selection, causing `ctx.outcome = fail` conditions to never match. Pipelines using `mode: yes_no` with `ctx.outcome` edge conditions now route correctly.
+
+### Added
+
+- **`executeYesNo` handler**: Dedicated handler for `mode: yes_no` human gates. Presents fixed "Yes"/"No" choices and maps selection to outcome status. Comprehensive test coverage for all four human gate modes (choice, yes_no, freeform, interview).
+
+## [0.16.0] - 2026-04-04
+
+### Added
+
+- **ACP (Agent Client Protocol) backend**: Third execution backend alongside native and claude-code. Spawns ACP-compatible coding agents as subprocesses via JSON-RPC 2.0 over stdio using `github.com/coder/acp-go-sdk`. Per-node selection via `backend: acp` + `acp_agent` params in .dip files, global override via `--backend acp` CLI flag.
+- **ACP agent routing**: Provider-based binary mapping (`anthropic` → `claude-agent-acp`, `openai` → `codex-acp`, `gemini` → `gemini --acp`). The `acp_agent` node attribute overrides provider-based selection.
+- **ACP model bridging**: `mapModelToBridge` maps tracker model names (e.g. `claude-sonnet-4-6`) to bridge model IDs via substring matching against `NewSession` advertised models.
+- **ACP environment scoping**: API keys and base URLs stripped from subprocess environment by default so agents use native auth (subscription/OAuth). Override with `TRACKER_PASS_API_KEYS=1`.
+- **ACP terminal management**: Full `CreateTerminal`, `TerminalOutput`, `KillTerminalCommand`, `ReleaseTerminal` implementation with process group isolation (`Setpgid`) and goroutine-safe output buffering.
+- **ACP file operations**: `ReadTextFile` and `WriteTextFile` handlers scoped to the node's working directory.
+- **`ACPConfig` type**: Backend-specific config carrying explicit agent binary name, extracted from `params.acp_agent` in .dip files.
+- **`--backend acp` CLI flag**: Routes all agent nodes through ACP without per-node attrs.
+
+### Fixed
+
+- **ACP data race on empty response check**: `handler.mu` now locked before reading `textParts`/`toolCount` after prompt completes.
+- **ACP terminal output data race**: Replaced `bytes.Buffer` with `syncBuffer` (mutex-protected writer) for subprocess stdout/stderr.
+- **ACP protocol version validation**: `InitializeResponse.ProtocolVersion` checked against `ProtocolVersionNumber` with warning on mismatch.
+- **ACP empty Cwd fallback**: `os.Getwd()` used when `WorkingDir` is empty, preventing ACP SDK validation failure.
+- **ACP process kill safety**: `Pid > 0` guard before `syscall.Kill(-pid, SIGKILL)` at all 3 call sites to prevent killing pid 0 process group.
+- **`TRACKER_PASS_API_KEYS` truthiness**: Changed from `!= ""` to `== "1"` so `"false"` and `"0"` correctly strip keys.
+
+## [0.15.0] - 2026-04-03
+
+### Added
+
+- **Per-node response context keys**: Codergen and human handlers now write `response.<nodeID>` alongside `last_response`/`human_response`, enabling downstream nodes to reference specific upstream outputs instead of only the most recent. (#24)
+- **Parallel concurrency limits**: `max_concurrency` attr on parallel nodes limits concurrent branch goroutines via semaphore. Context-aware acquisition aborts on cancellation. (#27)
+- **Parallel branch timeout**: `branch_timeout` attr on parallel nodes sets per-branch context deadline. Slow branches fail without blocking fan-in. (#27)
+- **Human gate timeout**: `timeout` attr on human nodes with `timeout_action` (default/fail) and `default_choice` fallback. Applied to freeform, choice, and interview modes. (#30)
+- **Edge adjacency indexes**: `OutgoingEdges`/`IncomingEdges` now use O(1) map lookup via adjacency indexes built by `AddEdge`, with O(E) fallback for graphs built without `AddEdge`. Returns defensive copies. (#31)
+- **Format constants**: `FormatDip` and `FormatDOT` typed constants for pipeline format identification. (#9)
+- **Pipeline package documentation**: `pipeline/doc.go` with package overview and dual-format documentation. (#12)
+
+### Fixed
+
+- **P0: Goal-gate infinite fallback loop**: `FallbackTaken` guard persisted in checkpoint prevents one-shot fallback/escalation from looping. Separate fallback routing path in `handleExitNode` doesn't increment retry counts. (#15)
+- **P0: Parallel branch context loss on fan-in**: `PipelineContext.DiffFrom()` captures side effects from parallel branches. (#20)
+- **Adapter nil pointer guards**: Nil checks for IR nodes, edges, and all 6 pointer config types in `extractNodeAttrs`. Also guards in `synthesizeImplicitEdges` and `buildFanInSourceMap`. (#38)
+- **Adapter sentinel errors**: `ErrNilWorkflow`, `ErrMissingStart`, `ErrMissingExit`, `ErrUnknownNodeKind`, `ErrUnknownConfig` with `%w` wrapping for `errors.Is` support. (#33)
+- **Deterministic map iteration**: `extractSubgraphAttrs` and `serializeStylesheet` sort keys before iteration via `slices.Sorted(maps.Keys(...))`. (#8)
+- **Workflow.Version mapping**: `ir.Workflow.Version` now mapped to `g.Attrs["version"]`. (#25)
+- **Validation bypass removed**: Deleted `DippinValidated` field — all 5 structural validation checks always run for defense-in-depth. (#4)
+- **Library stderr cleanup**: Replaced `fmt.Fprintf(os.Stderr, ...)` with `log.Printf(...)` in library code (tracker.go, condition.go, autopilot handlers). (#7)
+- **Case-insensitive auto_status**: `parseAutoStatus` now matches STATUS prefix case-insensitively and skips STATUS lines inside code fences. (#23)
+- **Word-boundary fidelity truncation**: `truncateAtWordBoundary` cuts at whitespace (unicode.IsSpace) instead of mid-word, with `...` suffix and named `DefaultTruncateLimit` constant. (#34)
+- **Condition parser hardening**: Support `==` operator (space-delimited), strip surrounding double quotes from values in `=`/`==`/`!=` comparisons. (#21)
+- **Consensus pipeline parallelized**: `consensus_task.dip` now uses parallel fan-out/fan-in for DoD, Planning, and Review phases. (#26)
+- **CLI format detection default**: Unknown extensions now default to `.dip` instead of `.dot`, with case-insensitive extension matching. (#9)
+- **Empty API response retry**: Empty API responses (0 output tokens, 0 tool calls) now trigger `OutcomeRetry` instead of hard-failing. (#23)
+- **POSIX build constraint**: `//go:build !windows` on `agent/exec/local.go`. (#28)
+- **ConsoleInterviewer IsYesNo priority**: Yes/no check now runs before option list check, matching TUI behavior. (#48 review)
+- **Test rename**: `TestListBuiltinWorkflowsReturnsThree` → `ReturnsFour`. (#48 review)
+
+### Changed
+
+- **Retry backoff jitter**: `ExponentialBackoff` and `LinearBackoff` now apply ±25% random jitter to prevent thundering herd when multiple pipelines retry simultaneously. (#29)
+- **Code cleanup**: Unexported `NodeKindToShape`, removed `make([]*Edge, 0)`, replaced custom `contains` helper with `strings.Contains`, replaced bubble sort with `slices.SortFunc`. (#10)
+
+### Deprecated
+
+- **DOT format support**: `ParseDOT` is deprecated. Use `.dip` format with `FromDippinIR` instead. DOT support will be removed in v1.0. (#12)
+
 ## [0.14.0] - 2026-03-31
 
 ### Added
