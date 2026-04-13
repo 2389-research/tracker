@@ -8,6 +8,12 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ## Critical Rules
 
+### NEVER use --no-verify
+- `git commit --no-verify` and `git push --no-verify` are **forbidden** under all circumstances
+- If pre-commit hooks fail, fix the root cause — do not bypass the hooks
+- This applies even for merge commits, "pre-existing" issues, or any other justification
+- The hooks (coverage, complexity, tests, lint, format) are safety gates — skipping them defeats their purpose
+
 ### Never silently swallow errors
 - Provider errors (quota, auth, model not found) must hard-fail the pipeline, not retry
 - Empty agent responses (0 tokens, 0 tool calls) are failures, not successes

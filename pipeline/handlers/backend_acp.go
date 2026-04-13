@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -70,7 +71,6 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 		return agent.SessionResult{}, err
 	}
 
-	// Apply timeout from config.
 	if cfg.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
@@ -83,32 +83,9 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 		Provider:  "acp:" + agentName,
 	})
 
-	args := acpAgentArgs[agentName]
-	cmd := exec.CommandContext(ctx, agentPath, args...)
-	// ACP bridges need the full environment (including API keys) because the
-	// wrapped agents (e.g. Claude Code via claude-agent-acp) handle their own
-	// auth. Unlike the direct claude-code backend which strips keys to force
-	// subscription auth, ACP bridges manage credential routing internally.
-	cmd.Env = buildEnvForACP()
-
-	if cfg.WorkingDir != "" {
-		cmd.Dir = cfg.WorkingDir
-	}
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	stdin, err := cmd.StdinPipe()
+	proc, err := b.startProcess(ctx, agentPath, agentName, cfg.WorkingDir)
 	if err != nil {
-		return agent.SessionResult{}, fmt.Errorf("acp: failed to create stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return agent.SessionResult{}, fmt.Errorf("acp: failed to create stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return agent.SessionResult{}, fmt.Errorf("acp: failed to start %s: %w", agentName, err)
+		return agent.SessionResult{}, err
 	}
 
 	handler := &acpClientHandler{
@@ -118,10 +95,82 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 	}
 	defer handler.cleanup()
 
-	conn := acp.NewClientSideConnection(handler, stdin, stdout)
+	conn := acp.NewClientSideConnection(handler, proc.stdin, proc.stdout)
 
-	// Step 1: Initialize the ACP connection.
-	log.Printf("[acp] initializing %s (pid %d)", agentName, cmd.Process.Pid)
+	sessID, err := b.initSession(ctx, conn, proc, agentName, cfg)
+	if err != nil {
+		return agent.SessionResult{}, err
+	}
+
+	emit(agent.Event{Type: agent.EventTurnStart, Timestamp: time.Now()})
+
+	promptResp, promptErr := conn.Prompt(ctx, acp.PromptRequest{
+		SessionId: sessID,
+		Prompt:    buildACPPromptBlocks(cfg),
+	})
+
+	forceKilled := waitForProcess(proc.cmd, proc.stdin)
+	result := buildACPResult(handler, promptResp)
+
+	if promptErr != nil {
+		logStderr(agentName, "prompt", &proc.stderr)
+		if ctx.Err() != nil {
+			return result, fmt.Errorf("acp: prompt cancelled for %s: %w", agentName, ctx.Err())
+		}
+		return result, fmt.Errorf("acp: prompt failed for %s: %w", agentName, promptErr)
+	}
+
+	if forceKilled {
+		log.Printf("[acp] %s force-killed after successful prompt (bridge did not exit on stdin close)", agentName)
+	}
+
+	if handler.isEmpty() {
+		return result, fmt.Errorf("acp: %s returned empty response (0 text, 0 tool calls)", agentName)
+	}
+
+	return result, nil
+}
+
+// acpProcess bundles the subprocess handles for an ACP agent.
+type acpProcess struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	stderr bytes.Buffer
+}
+
+// startProcess launches the ACP agent binary and returns pipe handles.
+func (b *ACPBackend) startProcess(ctx context.Context, agentPath, agentName, workingDir string) (*acpProcess, error) {
+	args := acpAgentArgs[agentName]
+	cmd := exec.CommandContext(ctx, agentPath, args...)
+	cmd.Env = buildEnvForACP()
+	if workingDir != "" {
+		cmd.Dir = workingDir
+	}
+
+	proc := &acpProcess{cmd: cmd}
+	cmd.Stderr = &proc.stderr
+
+	var err error
+	proc.stdin, err = cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("acp: failed to create stdin pipe: %w", err)
+	}
+	proc.stdout, err = cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("acp: failed to create stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("acp: failed to start %s: %w", agentName, err)
+	}
+	return proc, nil
+}
+
+// initSession initializes the ACP connection, creates a session, and optionally
+// sets the model. Returns the session ID.
+func (b *ACPBackend) initSession(ctx context.Context, conn *acp.ClientSideConnection, proc *acpProcess, agentName string, cfg pipeline.AgentRunConfig) (acp.SessionId, error) {
+	log.Printf("[acp] initializing %s (pid %d)", agentName, proc.cmd.Process.Pid)
 	initResp, initErr := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
@@ -133,118 +182,83 @@ func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit 
 		},
 	})
 	if initErr != nil {
-		killProcess(cmd)
-		if stderrStr := strings.TrimSpace(stderr.String()); stderrStr != "" {
-			log.Printf("[acp] %s stderr during initialize: %s", agentName, stderrStr)
-		}
-		return agent.SessionResult{}, fmt.Errorf("acp: initialize failed for %s: %w", agentName, initErr)
+		killProcess(proc.cmd)
+		logStderr(agentName, "initialize", &proc.stderr)
+		return "", fmt.Errorf("acp: initialize failed for %s: %w", agentName, initErr)
 	}
 
 	if initResp.ProtocolVersion != acp.ProtocolVersionNumber {
 		log.Printf("[acp] warning: %s protocol version mismatch: got %q, want %q", agentName, initResp.ProtocolVersion, acp.ProtocolVersionNumber)
 	}
 
-	// Step 2: Create a session. McpServers is required by the ACP SDK
-	// (nil fails validation), so pass an empty slice when none are configured.
 	cwd := cfg.WorkingDir
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	mcpServers := buildACPMcpServers(cfg)
 	sessResp, sessErr := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        cwd,
-		McpServers: mcpServers,
+		McpServers: buildACPMcpServers(cfg),
 	})
 	if sessErr != nil {
-		killProcess(cmd)
-		if stderrStr := strings.TrimSpace(stderr.String()); stderrStr != "" {
-			log.Printf("[acp] %s stderr during new session: %s", agentName, stderrStr)
-		}
-		return agent.SessionResult{}, fmt.Errorf("acp: new session failed for %s: %w", agentName, sessErr)
+		killProcess(proc.cmd)
+		logStderr(agentName, "new session", &proc.stderr)
+		return "", fmt.Errorf("acp: new session failed for %s: %w", agentName, sessErr)
 	}
 
-	// Step 3: Optionally set the model if the bridge advertises it.
-	// ACP bridges expose their own model IDs (e.g. "sonnet", "default") which
-	// differ from native tracker model names (e.g. "claude-sonnet-4-5").
-	// Only send SetSessionModel if the requested model matches one the bridge
-	// listed in its NewSession response — otherwise the bridge accepts the
-	// unknown model silently but may fail internally on prompt.
 	if cfg.Model != "" {
-		bridgeModel := mapModelToBridge(cfg.Model, sessResp.Models)
-		if bridgeModel != "" {
-			_, modelErr := conn.SetSessionModel(ctx, acp.SetSessionModelRequest{
-				SessionId: sessResp.SessionId,
-				ModelId:   acp.ModelId(bridgeModel),
-			})
-			if modelErr != nil {
-				// Non-fatal: agent may not support SetSessionModel. Log and continue.
-				log.Printf("[acp] warning: SetSessionModel failed for %s (model=%s→%s): %v", agentName, cfg.Model, bridgeModel, modelErr)
-			}
-		} else {
-			log.Printf("[acp] skipping SetSessionModel — no bridge match for %q", cfg.Model)
-		}
+		setSessionModel(ctx, conn, sessResp, agentName, cfg.Model)
 	}
 
-	emit(agent.Event{
-		Type:      agent.EventTurnStart,
-		Timestamp: time.Now(),
-	})
+	return sessResp.SessionId, nil
+}
 
-	// Step 4: Send the prompt. This blocks until the agent completes.
-	prompt := buildACPPromptBlocks(cfg)
-	promptResp, promptErr := conn.Prompt(ctx, acp.PromptRequest{
+// setSessionModel attempts to set the model on the ACP session. Non-fatal on failure.
+func setSessionModel(ctx context.Context, conn *acp.ClientSideConnection, sessResp acp.NewSessionResponse, agentName, model string) {
+	bridgeModel := mapModelToBridge(model, sessResp.Models)
+	if bridgeModel == "" {
+		log.Printf("[acp] skipping SetSessionModel — no bridge match for %q", model)
+		return
+	}
+	_, err := conn.SetSessionModel(ctx, acp.SetSessionModelRequest{
 		SessionId: sessResp.SessionId,
-		Prompt:    prompt,
+		ModelId:   acp.ModelId(bridgeModel),
 	})
+	if err != nil {
+		log.Printf("[acp] warning: SetSessionModel failed for %s (model=%s→%s): %v", agentName, model, bridgeModel, err)
+	}
+}
 
-	// Close stdin to signal the agent to exit, then wait with a timeout.
-	// Some ACP bridges (e.g. claude-agent-acp) don't exit immediately after
-	// stdin closes — they may have cleanup or background work. We give a
-	// grace period then force-kill.
+// waitForProcess closes stdin and waits for the process to exit with a 5s grace period.
+// Returns true if the process was force-killed.
+func waitForProcess(cmd *exec.Cmd, stdin io.WriteCloser) bool {
 	_ = stdin.Close()
 
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- cmd.Wait() }()
 
-	forceKilled := false
 	select {
 	case <-waitCh:
+		return false
 	case <-time.After(5 * time.Second):
 		log.Printf("[acp] process did not exit after 5s, killing pid %d", cmd.Process.Pid)
 		killProcess(cmd)
 		<-waitCh
-		forceKilled = true
+		return true
 	}
+}
 
-	// Build result from collected handler state.
-	result := buildACPResult(handler, promptResp)
-
-	if promptErr != nil {
-		if stderrStr := strings.TrimSpace(stderr.String()); stderrStr != "" {
-			log.Printf("[acp] %s stderr during prompt: %s", agentName, stderrStr)
-		}
-		if ctx.Err() != nil {
-			return result, fmt.Errorf("acp: prompt cancelled for %s: %w", agentName, ctx.Err())
-		}
-		return result, fmt.Errorf("acp: prompt failed for %s: %w", agentName, promptErr)
+// logStderr logs the stderr output of an ACP agent if non-empty.
+func logStderr(agentName, phase string, stderr *bytes.Buffer) {
+	if s := strings.TrimSpace(stderr.String()); s != "" {
+		log.Printf("[acp] %s stderr during %s: %s", agentName, phase, s)
 	}
+}
 
-	// If the prompt succeeded but we had to force-kill the bridge, that's OK.
-	// The bridge simply didn't exit cleanly after completing its work.
-	if forceKilled {
-		log.Printf("[acp] %s force-killed after successful prompt (bridge did not exit on stdin close)", agentName)
-	}
-
-	// Empty agent responses (0 text, 0 tool calls) are failures per project
-	// rules — the agent ran but produced nothing useful.
-	handler.mu.Lock()
-	empty := len(handler.textParts) == 0 && handler.toolCount == 0
-	handler.mu.Unlock()
-	if empty {
-		return result, fmt.Errorf("acp: %s returned empty response (0 text, 0 tool calls)", agentName)
-	}
-
-	return result, nil
+// isEmpty returns true if the handler collected no text and no tool calls.
+func (h *acpClientHandler) isEmpty() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.textParts) == 0 && h.toolCount == 0
 }
 
 // resolveAgentName determines which ACP agent binary to use.

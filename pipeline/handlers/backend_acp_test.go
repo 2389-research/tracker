@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -632,11 +633,11 @@ func TestMapModelToBridge(t *testing.T) {
 		tracker string
 		want    string
 	}{
-		{"sonnet", "sonnet"},                       // direct match
-		{"claude-sonnet-4-6", "sonnet"},            // substring match
-		{"claude-haiku-4-5", "haiku"},              // substring match
-		{"unknown-model", ""},                      // no match
-		{"default", "default"},                     // direct match on default
+		{"sonnet", "sonnet"},            // direct match
+		{"claude-sonnet-4-6", "sonnet"}, // substring match
+		{"claude-haiku-4-5", "haiku"},   // substring match
+		{"unknown-model", ""},           // no match
+		{"default", "default"},          // direct match on default
 	}
 	for _, tt := range tests {
 		got := mapModelToBridge(tt.tracker, models)
@@ -736,6 +737,88 @@ func TestKillProcess_NilProcess(t *testing.T) {
 	// Should not panic on cmd with nil Process.
 	cmd := &exec.Cmd{}
 	killProcess(cmd) // no-op, should not panic
+}
+
+func TestLogStderr_NonEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteString("some error output\n")
+	// logStderr should not panic and should log the output.
+	logStderr("test-agent", "initialize", &buf)
+}
+
+func TestLogStderr_Empty(t *testing.T) {
+	var buf bytes.Buffer
+	// logStderr with empty buffer should be a no-op.
+	logStderr("test-agent", "prompt", &buf)
+}
+
+func TestACPHandler_IsEmpty(t *testing.T) {
+	h := &acpClientHandler{toolNames: make(map[string]string)}
+	if !h.isEmpty() {
+		t.Error("new handler should be empty")
+	}
+	h.textParts = append(h.textParts, "hello")
+	if h.isEmpty() {
+		t.Error("handler with text should not be empty")
+	}
+}
+
+func TestACPHandler_IsEmpty_ToolsOnly(t *testing.T) {
+	h := &acpClientHandler{toolNames: make(map[string]string), toolCount: 1}
+	if h.isEmpty() {
+		t.Error("handler with tool calls should not be empty")
+	}
+}
+
+func TestWaitForProcess_NormalExit(t *testing.T) {
+	// Use a real quick command to test the normal exit path.
+	cmd := exec.Command("true")
+	stdin, _ := cmd.StdinPipe()
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start 'true': %v", err)
+	}
+	forceKilled := waitForProcess(cmd, stdin)
+	if forceKilled {
+		t.Error("'true' should exit normally, not be force-killed")
+	}
+}
+
+func TestACPBackend_Run_AgentNotFound(t *testing.T) {
+	b := NewACPBackend()
+	cfg := pipeline.AgentRunConfig{
+		Provider: "anthropic",
+		Prompt:   "hello",
+	}
+	events := []agent.Event{}
+	emit := func(e agent.Event) { events = append(events, e) }
+
+	_, err := b.Run(context.Background(), cfg, emit)
+	if err == nil {
+		t.Fatal("expected error when agent binary not found")
+	}
+	if !strings.Contains(err.Error(), "not found in PATH") {
+		t.Errorf("error = %q, want 'not found in PATH'", err)
+	}
+}
+
+func TestACPBackend_StartProcess_BadPath(t *testing.T) {
+	b := NewACPBackend()
+	_, err := b.startProcess(context.Background(), "/nonexistent/binary", "test-agent", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for nonexistent binary")
+	}
+}
+
+func TestSetSessionModel_NoMatch(t *testing.T) {
+	// setSessionModel with no matching bridge model should log and return.
+	// We can't easily test the conn interaction, but we can verify it
+	// doesn't panic with a nil models response.
+	sessResp := acp.NewSessionResponse{
+		SessionId: "s1",
+		Models:    nil,
+	}
+	// This should just log "skipping SetSessionModel" and return.
+	setSessionModel(context.Background(), nil, sessResp, "test", "unknown-model")
 }
 
 func TestBuildEnvForACP_StripsAllPrefixes(t *testing.T) {
