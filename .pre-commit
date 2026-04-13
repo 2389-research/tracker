@@ -68,7 +68,33 @@ else
   warn "could not compute coverage"
 fi
 
-# 7. Dippin lint (core pipelines only, for speed)
+# 7. Complexity (cyclomatic + cognitive — staged files only)
+echo ""
+echo "--- Complexity ---"
+CYCLO_MAX=15
+COGNITIVE_MAX=15
+STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' || true)
+if [ -n "$STAGED_GO" ]; then
+  CYCLO_VIOLATIONS=$(echo "$STAGED_GO" | xargs gocyclo -over $CYCLO_MAX 2>&1 | wc -l | tr -d ' ')
+  COGNITIVE_VIOLATIONS=$(echo "$STAGED_GO" | xargs gocognit -over $COGNITIVE_MAX 2>&1 | wc -l | tr -d ' ')
+  if [ "$CYCLO_VIOLATIONS" -gt 0 ] || [ "$COGNITIVE_VIOLATIONS" -gt 0 ]; then
+    if [ "$CYCLO_VIOLATIONS" -gt 0 ]; then
+      echo "  Cyclomatic > $CYCLO_MAX in staged files:"
+      echo "$STAGED_GO" | xargs gocyclo -over $CYCLO_MAX 2>&1
+    fi
+    if [ "$COGNITIVE_VIOLATIONS" -gt 0 ]; then
+      echo "  Cognitive > $COGNITIVE_MAX in staged files:"
+      echo "$STAGED_GO" | xargs gocognit -over $COGNITIVE_MAX 2>&1
+    fi
+    fail "complexity violations in staged files (cyclomatic: $CYCLO_VIOLATIONS, cognitive: $COGNITIVE_VIOLATIONS)"
+  fi
+  pass "complexity (cyclomatic ≤ $CYCLO_MAX, cognitive ≤ $COGNITIVE_MAX)"
+else
+  pass "complexity (no staged .go files)"
+fi
+
+# 8. Dippin lint (core pipelines only, for speed)
+
 echo ""
 echo "--- Dippin Lint ---"
 if command -v dippin >/dev/null 2>&1; then
@@ -88,7 +114,7 @@ else
   warn "dippin CLI not found — skipping .dip lint"
 fi
 
-# 8. Workflow sync (examples/ must match cmd/tracker/workflows/)
+# 9. Workflow sync (examples/ must match cmd/tracker/workflows/)
 echo ""
 echo "--- Workflow Sync ---"
 if make check-workflows > /dev/null 2>&1; then
