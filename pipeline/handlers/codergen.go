@@ -360,33 +360,57 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
-	// Guard against truly empty responses. Two cases:
-	// 1. Zero turns, zero tool calls → session never started
-	// 2. Has turns but zero output tokens AND zero text → API returned empty (error swallowed)
-	// Case 2 does NOT apply when tool calls > 0 (agent did real work via tools).
-	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
-	emptyAPIResponse := strings.TrimSpace(responseText) == "" && sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
-	if strings.TrimSpace(responseText) == "" && (emptySession || emptyAPIResponse) {
-		status := pipeline.OutcomeFail
-		msg := fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID)
-		if emptyAPIResponse {
-			status = pipeline.OutcomeRetry
-			msg = fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", node.ID)
-		}
-		outcome := pipeline.Outcome{
-			Status: status,
-			ContextUpdates: map[string]string{
-				pipeline.ContextKeyLastResponse:             msg,
-				pipeline.ContextKeyResponsePrefix + node.ID: msg,
-			},
-			Stats: buildSessionStats(sessResult),
-		}
-		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
-			return pipeline.Outcome{}, err
-		}
-		return outcome, nil
+	if outcome, ok, err := h.buildEmptyResponseOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult); ok {
+		return outcome, err
 	}
 
+	return h.buildSuccessOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult)
+}
+
+// buildEmptyResponseOutcome handles the two empty-response cases and returns
+// (outcome, true, err) when an empty-response condition is detected, or
+// (zero, false, nil) when the session has real output and normal handling applies.
+//
+// Two empty cases:
+//  1. Zero turns, zero tool calls → session never started → OutcomeFail
+//  2. Has turns but zero output tokens AND zero text → API swallowed error → OutcomeRetry
+//
+// Case 2 does NOT apply when tool calls > 0 (agent did real work via tools).
+func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult) (pipeline.Outcome, bool, error) {
+	if strings.TrimSpace(responseText) != "" {
+		return pipeline.Outcome{}, false, nil
+	}
+
+	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
+	emptyAPIResponse := sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
+
+	if !emptySession && !emptyAPIResponse {
+		return pipeline.Outcome{}, false, nil
+	}
+
+	status := pipeline.OutcomeFail
+	msg := fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID)
+	if emptyAPIResponse {
+		status = pipeline.OutcomeRetry
+		msg = fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", node.ID)
+	}
+	outcome := pipeline.Outcome{
+		Status: status,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyLastResponse:             msg,
+			pipeline.ContextKeyResponsePrefix + node.ID: msg,
+		},
+		Stats: buildSessionStats(sessResult),
+	}
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
+		return pipeline.Outcome{}, true, err
+	}
+	return outcome, true, nil
+}
+
+// buildSuccessOutcome handles the normal (non-empty) completion path, including
+// turn-limit exhaustion and auto_status overrides.
+func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult) (pipeline.Outcome, error) {
 	// Determine status. Turn-limit exhaustion and loop detection default to
 	// OutcomeFail so the engine routes through explicit failure edges (e.g.
 	// "when ctx.outcome = fail"). On nodes without failure edges, the
@@ -396,15 +420,9 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 	// auto_status overrides the default for both turn-exhaustion and normal
 	// completion: the agent's explicit STATUS line is authoritative.
 	status := pipeline.OutcomeSuccess
-	var turnLimitMsg string
-
-	if sessResult.MaxTurnsUsed {
+	turnLimitMsg := buildTurnLimitMsg(node, sessResult)
+	if turnLimitMsg != "" {
 		status = pipeline.OutcomeFail
-		if sessResult.LoopDetected {
-			turnLimitMsg = fmt.Sprintf("node %q: agent entered tool call loop (detected after %d turns)", node.ID, sessResult.Turns)
-		} else {
-			turnLimitMsg = fmt.Sprintf("node %q: agent exhausted turn limit (%d turns) without completing", node.ID, sessResult.Turns)
-		}
 	}
 
 	if node.Attrs["auto_status"] == "true" {
@@ -432,6 +450,18 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil
+}
+
+// buildTurnLimitMsg returns a non-empty message when the session hit the turn limit,
+// and an empty string otherwise.
+func buildTurnLimitMsg(node *pipeline.Node, sessResult agent.SessionResult) string {
+	if !sessResult.MaxTurnsUsed {
+		return ""
+	}
+	if sessResult.LoopDetected {
+		return fmt.Sprintf("node %q: agent entered tool call loop (detected after %d turns)", node.ID, sessResult.Turns)
+	}
+	return fmt.Sprintf("node %q: agent exhausted turn limit (%d turns) without completing", node.ID, sessResult.Turns)
 }
 
 // buildConfig constructs a SessionConfig from the node's attributes, using

@@ -219,20 +219,7 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 		return "", fmt.Errorf("no choices available")
 	}
 
-	fmt.Fprintf(c.Writer, "\n%s\n", render.PromptPlain(prompt, 76))
-	for i, choice := range choices {
-		marker := "  "
-		if choice == defaultChoice {
-			marker = "* "
-		}
-		fmt.Fprintf(c.Writer, "%s%d) %s\n", marker, i+1, choice)
-	}
-
-	if defaultChoice != "" {
-		fmt.Fprintf(c.Writer, "Enter choice [%s]: ", defaultChoice)
-	} else {
-		fmt.Fprintf(c.Writer, "Enter choice: ")
-	}
+	c.printChoices(prompt, choices, defaultChoice)
 
 	line, err := c.readLine()
 	if err != nil {
@@ -247,21 +234,40 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 		return defaultChoice, nil
 	}
 
-	// Match by name (case-insensitive)
+	return matchConsoleChoice(input, choices)
+}
+
+// printChoices writes the numbered choice list to the writer.
+func (c *ConsoleInterviewer) printChoices(prompt string, choices []string, defaultChoice string) {
+	fmt.Fprintf(c.Writer, "\n%s\n", render.PromptPlain(prompt, 76))
+	for i, choice := range choices {
+		marker := "  "
+		if choice == defaultChoice {
+			marker = "* "
+		}
+		fmt.Fprintf(c.Writer, "%s%d) %s\n", marker, i+1, choice)
+	}
+	if defaultChoice != "" {
+		fmt.Fprintf(c.Writer, "Enter choice [%s]: ", defaultChoice)
+	} else {
+		fmt.Fprintf(c.Writer, "Enter choice: ")
+	}
+}
+
+// matchConsoleChoice finds a match for input in choices by exact name (case-insensitive)
+// or 1-based numeric index. Returns an error if no match is found.
+func matchConsoleChoice(input string, choices []string) (string, error) {
 	for _, choice := range choices {
 		if strings.EqualFold(input, choice) {
 			return choice, nil
 		}
 	}
-
-	// Match by numeric index (1-based)
 	var idx int
 	if _, err := fmt.Sscanf(input, "%d", &idx); err == nil {
 		if idx >= 1 && idx <= len(choices) {
 			return choices[idx-1], nil
 		}
 	}
-
 	return "", fmt.Errorf("invalid choice: %q", input)
 }
 
@@ -308,118 +314,140 @@ func (c *ConsoleInterviewer) AskInterview(questions []Question, prev *InterviewR
 		// Print the question
 		fmt.Fprintf(c.Writer, "\nQ%d: %s\n", q.Index, q.Text)
 
+		var err error
 		if q.IsYesNo {
 			// Yes/no takes priority over options to stay consistent with TUI behavior.
-			if prevAns.Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
-			}
-			fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
-			line, err := c.readLine()
-			if err != nil {
-				canceled = true
-				answers[i] = ans
-				for j := i + 1; j < len(questions); j++ {
-					answers[j] = InterviewAnswer{
-						ID:   fmt.Sprintf("q%d", questions[j].Index),
-						Text: questions[j].Text,
-					}
-				}
-				break
-			}
-			input := strings.TrimSpace(strings.ToLower(line))
-			if input == "y" || input == "yes" {
-				ans.Answer = "yes"
-			} else if input == "n" || input == "no" {
-				ans.Answer = "no"
-			} else if input == "" && prevAns.Answer != "" {
-				ans.Answer = prevAns.Answer
-			}
+			err = c.askYesNoQuestion(&ans, prevAns)
 		} else if len(q.Options) > 0 {
-			// Print numbered options
-			for j, opt := range q.Options {
-				fmt.Fprintf(c.Writer, "  %d) %s\n", j+1, opt)
-			}
-			fmt.Fprintf(c.Writer, "  %d) Other\n", len(q.Options)+1)
-
-			// Pre-fill hint
-			if prevAns.Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
-			}
-			fmt.Fprintf(c.Writer, "Enter choice (name or number, blank to skip): ")
-
-			line, err := c.readLine()
-			if err != nil {
-				canceled = true
-				answers[i] = ans
-				// Fill remaining questions with empty answers.
-				for j := i + 1; j < len(questions); j++ {
-					answers[j] = InterviewAnswer{
-						ID:   fmt.Sprintf("q%d", questions[j].Index),
-						Text: questions[j].Text,
-					}
-				}
-				break
-			}
-			input := strings.TrimSpace(line)
-			if input != "" {
-				// Match by name (case-insensitive) or number
-				matched := false
-				for _, opt := range q.Options {
-					if strings.EqualFold(input, opt) {
-						ans.Answer = opt
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					var idx int
-					if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx >= 1 && idx <= len(q.Options) {
-						ans.Answer = q.Options[idx-1]
-					} else if _, err := fmt.Sscanf(input, "%d", &idx); err == nil && idx == len(q.Options)+1 {
-						// User selected "Other" by number — prompt for freeform text.
-						fmt.Fprintf(c.Writer, "Enter your answer: ")
-						otherLine, otherErr := c.readLine()
-						if otherErr == nil {
-							ans.Answer = strings.TrimSpace(otherLine)
-						}
-					} else {
-						// Treat as "Other" freeform
-						ans.Answer = input
-					}
-				}
-			} else if prevAns.Answer != "" {
-				// Blank input preserves the previous answer on retry.
-				ans.Answer = prevAns.Answer
-			}
+			err = c.askOptionQuestion(&ans, q, prevAns)
 		} else {
-			if prevAns.Answer != "" {
-				fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
-			}
-			fmt.Fprintf(c.Writer, "> ")
-			line, err := c.readLine()
-			if err != nil {
-				canceled = true
-				answers[i] = ans
-				for j := i + 1; j < len(questions); j++ {
-					answers[j] = InterviewAnswer{
-						ID:   fmt.Sprintf("q%d", questions[j].Index),
-						Text: questions[j].Text,
-					}
-				}
-				break
-			}
-			text := strings.TrimSpace(line)
-			if text != "" {
-				ans.Answer = text
-			} else if prevAns.Answer != "" {
-				// Blank input preserves the previous answer on retry.
-				ans.Answer = prevAns.Answer
-			}
+			err = c.askFreeformQuestion(&ans, prevAns)
+		}
+
+		if err != nil {
+			canceled = true
+			answers[i] = ans
+			fillRemainingEmpty(answers, questions, i+1)
+			break
 		}
 
 		answers[i] = ans
 	}
 	return &InterviewResult{Questions: answers, Canceled: canceled}, nil
+}
+
+// fillRemainingEmpty fills answers[start:] with empty InterviewAnswer structs for
+// questions that were not reached due to cancellation.
+func fillRemainingEmpty(answers []InterviewAnswer, questions []Question, start int) {
+	for j := start; j < len(questions); j++ {
+		answers[j] = InterviewAnswer{
+			ID:   fmt.Sprintf("q%d", questions[j].Index),
+			Text: questions[j].Text,
+		}
+	}
+}
+
+// askYesNoQuestion handles a yes/no question, reading input from the console.
+// Returns an error only on I/O failure (treated as cancellation by the caller).
+func (c *ConsoleInterviewer) askYesNoQuestion(ans *InterviewAnswer, prevAns InterviewAnswer) error {
+	if prevAns.Answer != "" {
+		fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
+	}
+	fmt.Fprintf(c.Writer, "Enter (y/n, blank to skip): ")
+	line, err := c.readLine()
+	if err != nil {
+		return err
+	}
+	input := strings.TrimSpace(strings.ToLower(line))
+	switch {
+	case input == "y" || input == "yes":
+		ans.Answer = "yes"
+	case input == "n" || input == "no":
+		ans.Answer = "no"
+	case input == "" && prevAns.Answer != "":
+		ans.Answer = prevAns.Answer
+	}
+	return nil
+}
+
+// askOptionQuestion handles a question with a fixed option list, reading input from
+// the console. Returns an error only on I/O failure (treated as cancellation).
+func (c *ConsoleInterviewer) askOptionQuestion(ans *InterviewAnswer, q Question, prevAns InterviewAnswer) error {
+	for j, opt := range q.Options {
+		fmt.Fprintf(c.Writer, "  %d) %s\n", j+1, opt)
+	}
+	fmt.Fprintf(c.Writer, "  %d) Other\n", len(q.Options)+1)
+
+	if prevAns.Answer != "" {
+		fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
+	}
+	fmt.Fprintf(c.Writer, "Enter choice (name or number, blank to skip): ")
+
+	line, err := c.readLine()
+	if err != nil {
+		return err
+	}
+	input := strings.TrimSpace(line)
+	if input != "" {
+		c.resolveOptionInput(ans, q, input)
+	} else if prevAns.Answer != "" {
+		// Blank input preserves the previous answer on retry.
+		ans.Answer = prevAns.Answer
+	}
+	return nil
+}
+
+// resolveOptionInput maps a user-typed string to one of q's options (by name or
+// 1-based index). Selecting the "Other" slot (index == len+1) prompts for freeform
+// text. Unrecognised input is stored verbatim as a freeform answer.
+func (c *ConsoleInterviewer) resolveOptionInput(ans *InterviewAnswer, q Question, input string) {
+	// Match by name (case-insensitive)
+	for _, opt := range q.Options {
+		if strings.EqualFold(input, opt) {
+			ans.Answer = opt
+			return
+		}
+	}
+	// Match by numeric index
+	var idx int
+	if _, err := fmt.Sscanf(input, "%d", &idx); err == nil {
+		if idx >= 1 && idx <= len(q.Options) {
+			ans.Answer = q.Options[idx-1]
+			return
+		}
+		if idx == len(q.Options)+1 {
+			// User selected "Other" by number — prompt for freeform text.
+			fmt.Fprintf(c.Writer, "Enter your answer: ")
+			otherLine, otherErr := c.readLine()
+			if otherErr == nil {
+				ans.Answer = strings.TrimSpace(otherLine)
+			}
+			return
+		}
+	}
+	// Treat as "Other" freeform
+	ans.Answer = input
+}
+
+// askFreeformQuestion handles an open-ended question with no options.
+// Returns an error only on I/O failure (treated as cancellation by the caller).
+func (c *ConsoleInterviewer) askFreeformQuestion(ans *InterviewAnswer, prevAns InterviewAnswer) error {
+	if prevAns.Answer != "" {
+		fmt.Fprintf(c.Writer, "Previous: %s\n", prevAns.Answer)
+	}
+	fmt.Fprintf(c.Writer, "> ")
+	line, err := c.readLine()
+	if err != nil {
+		return err
+	}
+	text := strings.TrimSpace(line)
+	if text != "" {
+		ans.Answer = text
+	} else if prevAns.Answer != "" {
+		// Blank input preserves the previous answer on retry.
+		ans.Answer = prevAns.Answer
+	}
+	return nil
 }
 
 // Compile-time assertion: ConsoleInterviewer implements InterviewInterviewer.
@@ -597,55 +625,82 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=interview but interviewer does not support interviews", node.ID)
 	}
 
-	// Read config from node attrs (with defaults from pipeline constants)
-	questionsKey := node.Attrs["questions_key"]
+	questionsKey, answersKey := resolveInterviewKeys(node)
+	agentOutput := resolveAgentOutput(pctx, questionsKey)
+	questions := parseInterviewQuestions(agentOutput)
+
+	// 0 questions or malformed → fall back to freeform with prompt
+	if len(questions) == 0 {
+		return h.executeInterviewFallback(node, pctx, agentOutput, answersKey)
+	}
+
+	return h.runInterview(node, pctx, ii, questions, answersKey)
+}
+
+// resolveInterviewKeys returns the context keys for questions and answers,
+// using node attrs when set and falling back to pipeline constants.
+func resolveInterviewKeys(node *pipeline.Node) (questionsKey, answersKey string) {
+	questionsKey = node.Attrs["questions_key"]
 	if questionsKey == "" {
 		questionsKey = pipeline.ContextKeyInterviewQuestions
 	}
-	answersKey := node.Attrs["answers_key"]
+	answersKey = node.Attrs["answers_key"]
 	if answersKey == "" {
 		answersKey = pipeline.ContextKeyInterviewAnswers
 	}
+	return
+}
 
-	// Read upstream agent output from context
-	agentOutput, _ := pctx.Get(questionsKey)
-	if agentOutput == "" {
-		agentOutput, _ = pctx.Get(pipeline.ContextKeyLastResponse)
+// resolveAgentOutput reads the agent's raw output from the pipeline context,
+// preferring the dedicated questions key and falling back to last_response.
+func resolveAgentOutput(pctx *pipeline.PipelineContext, questionsKey string) string {
+	if v, ok := pctx.Get(questionsKey); ok && v != "" {
+		return v
 	}
+	v, _ := pctx.Get(pipeline.ContextKeyLastResponse)
+	return v
+}
 
-	// Try structured JSON first, fall back to markdown heuristic parsing.
+// parseInterviewQuestions tries structured JSON parsing first, then falls back
+// to the markdown heuristic parser. Returns nil if no questions are found.
+func parseInterviewQuestions(agentOutput string) []Question {
 	questions, jsonErr := ParseStructuredQuestions(agentOutput)
 	if jsonErr != nil {
 		questions = ParseQuestions(agentOutput)
 	}
+	return questions
+}
 
-	// 0 questions or malformed → fall back to freeform with prompt
-	if len(questions) == 0 {
-		prompt := node.Attrs["prompt"]
-		if prompt == "" {
-			prompt = node.Label
-		}
-		if prompt == "" {
-			prompt = "No questions were generated. Please provide any input."
-		}
-		if agentOutput != "" {
-			prompt = prompt + "\n\n---\n" + agentOutput
-		}
-		outcome, err := h.executeFreeform(node, prompt)
-		if err != nil {
-			return outcome, err
-		}
-		// Also persist the freeform response under answers_key so downstream
-		// nodes that read the interview answers can find it.
-		if outcome.ContextUpdates != nil {
-			if resp, ok := outcome.ContextUpdates[pipeline.ContextKeyHumanResponse]; ok {
-				outcome.ContextUpdates[answersKey] = resp
-			}
-		}
-		return outcome, nil
+// executeInterviewFallback handles the zero-questions case by falling back to
+// freeform input and also storing the response under answersKey.
+func (h *HumanHandler) executeInterviewFallback(node *pipeline.Node, pctx *pipeline.PipelineContext, agentOutput, answersKey string) (pipeline.Outcome, error) {
+	prompt := node.Attrs["prompt"]
+	if prompt == "" {
+		prompt = node.Label
 	}
+	if prompt == "" {
+		prompt = "No questions were generated. Please provide any input."
+	}
+	if agentOutput != "" {
+		prompt = prompt + "\n\n---\n" + agentOutput
+	}
+	outcome, err := h.executeFreeform(node, prompt)
+	if err != nil {
+		return outcome, err
+	}
+	// Also persist the freeform response under answers_key so downstream
+	// nodes that read the interview answers can find it.
+	if outcome.ContextUpdates != nil {
+		if resp, ok := outcome.ContextUpdates[pipeline.ContextKeyHumanResponse]; ok {
+			outcome.ContextUpdates[answersKey] = resp
+		}
+	}
+	return outcome, nil
+}
 
-	// Check for previous answers (retry pre-fill)
+// runInterview loads any previous answers for pre-fill, presents the interview,
+// and returns the outcome with serialized answers stored in answersKey.
+func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.PipelineContext, ii InterviewInterviewer, questions []Question, answersKey string) (pipeline.Outcome, error) {
 	var previous *InterviewResult
 	if prevJSON, ok := pctx.Get(answersKey); ok && prevJSON != "" {
 		if prev, err := DeserializeInterviewResult(prevJSON); err == nil {
@@ -653,13 +708,11 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 		}
 	}
 
-	// Present interview
 	result, err := ii.AskInterview(questions, previous)
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("interview failed for node %q: %w", node.ID, err)
 	}
 
-	// Store answers
 	jsonStr := SerializeInterviewResult(*result)
 	summary := BuildMarkdownSummary(*result)
 

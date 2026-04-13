@@ -138,24 +138,8 @@ func parseByteSize(s string) (int, error) {
 //  3. Per-node output_limit capped at h.maxOutputLimit
 //  4. ExecCommandWithLimit with buildToolEnv() for env stripping (LocalEnvironment only)
 func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	command := node.Attrs["tool_command"]
-	if command == "" {
-		return pipeline.Outcome{}, fmt.Errorf("node %q missing required attribute 'tool_command'", node.ID)
-	}
-
-	// Layer 1: Expand ${namespace.key} variables with toolCommandMode=true.
-	// FAIL CLOSED: if expansion fails (e.g. unsafe ctx.* key), do NOT run the command.
-	expandedCommand, err := pipeline.ExpandVariables(command, pctx, nil, nil, false, true)
+	command, err := h.expandAndValidateCommand(node, pctx)
 	if err != nil {
-		return pipeline.Outcome{}, fmt.Errorf("node %q tool_command variable expansion failed: %w", node.ID, err)
-	}
-	if expandedCommand != "" {
-		command = expandedCommand
-	}
-
-	// Layer 2: Denylist/allowlist check on the user-authored command (before working_dir prepend,
-	// so allowlist patterns don't need to account for the injected "cd" prefix).
-	if err := CheckToolCommand(command, node.ID, h.allowlist, h.bypassDenylist); err != nil {
 		return pipeline.Outcome{}, err
 	}
 
@@ -164,47 +148,104 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		artifactRoot = dir
 	}
 
-	// Per-node working directory override (e.g., for git worktree isolation).
-	// Validate against path traversal and shell metacharacters before use.
-	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
-		if strings.ContainsAny(wd, "`$;|&()<>\n\r") {
-			return pipeline.Outcome{}, fmt.Errorf("node %q has unsafe working_dir %q: contains shell metacharacters", node.ID, wd)
-		}
-		cleaned := filepath.Clean(wd)
-		if strings.Contains(cleaned, "..") {
-			return pipeline.Outcome{}, fmt.Errorf("node %q has unsafe working_dir %q: path traversal detected", node.ID, wd)
-		}
-		command = fmt.Sprintf("cd %q && %s", cleaned, command)
+	command, err = h.applyWorkingDir(node, command)
+	if err != nil {
+		return pipeline.Outcome{}, err
 	}
 
-	timeout := h.defaultTimeout
-	if timeoutStr, ok := node.Attrs["timeout"]; ok {
-		parsed, err := time.ParseDuration(timeoutStr)
-		if err != nil {
-			return pipeline.Outcome{}, fmt.Errorf("node %q has invalid timeout %q: %w", node.ID, timeoutStr, err)
-		}
-		timeout = parsed
+	timeout, err := h.parseTimeout(node)
+	if err != nil {
+		return pipeline.Outcome{}, err
 	}
 
-	// Layer 3: Parse per-node output_limit, cap at h.maxOutputLimit.
-	outputLimit := h.outputLimit
-	if limitStr, ok := node.Attrs["output_limit"]; ok && limitStr != "" {
-		parsed, err := parseByteSize(limitStr)
-		if err != nil {
-			return pipeline.Outcome{}, fmt.Errorf("node %q has invalid output_limit %q: %w", node.ID, limitStr, err)
-		}
-		if parsed <= 0 {
-			return pipeline.Outcome{}, fmt.Errorf("node %q has non-positive output_limit %q", node.ID, limitStr)
-		}
-		if parsed > h.maxOutputLimit {
-			parsed = h.maxOutputLimit
-		}
-		outputLimit = parsed
+	outputLimit, err := h.parseOutputLimit(node)
+	if err != nil {
+		return pipeline.Outcome{}, err
 	}
 
-	// Layer 4: Use ExecCommandWithLimit with buildToolEnv() when running on LocalEnvironment.
-	// For other ExecutionEnvironment implementations (e.g. mock, remote), fall back to ExecCommand.
+	return h.execAndBuildOutcome(ctx, node, command, artifactRoot, timeout, outputLimit)
+}
+
+// expandAndValidateCommand expands variables in the tool_command attribute and
+// runs denylist/allowlist validation. Returns the final command string or an error.
+func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeline.PipelineContext) (string, error) {
+	command := node.Attrs["tool_command"]
+	if command == "" {
+		return "", fmt.Errorf("node %q missing required attribute 'tool_command'", node.ID)
+	}
+
+	// Layer 1: Expand ${namespace.key} variables with toolCommandMode=true.
+	// FAIL CLOSED: if expansion fails (e.g. unsafe ctx.* key), do NOT run the command.
+	expanded, err := pipeline.ExpandVariables(command, pctx, nil, nil, false, true)
+	if err != nil {
+		return "", fmt.Errorf("node %q tool_command variable expansion failed: %w", node.ID, err)
+	}
+	if expanded != "" {
+		command = expanded
+	}
+
+	// Layer 2: Denylist/allowlist check on the user-authored command (before working_dir prepend,
+	// so allowlist patterns don't need to account for the injected "cd" prefix).
+	if err := CheckToolCommand(command, node.ID, h.allowlist, h.bypassDenylist); err != nil {
+		return "", err
+	}
+	return command, nil
+}
+
+// applyWorkingDir prepends a "cd <dir> && " prefix to command if the node has a
+// working_dir attribute. Validates against path traversal and shell metacharacters.
+func (h *ToolHandler) applyWorkingDir(node *pipeline.Node, command string) (string, error) {
+	wd, ok := node.Attrs["working_dir"]
+	if !ok || wd == "" {
+		return command, nil
+	}
+	if strings.ContainsAny(wd, "`$;|&()<>\n\r") {
+		return "", fmt.Errorf("node %q has unsafe working_dir %q: contains shell metacharacters", node.ID, wd)
+	}
+	cleaned := filepath.Clean(wd)
+	if strings.Contains(cleaned, "..") {
+		return "", fmt.Errorf("node %q has unsafe working_dir %q: path traversal detected", node.ID, wd)
+	}
+	return fmt.Sprintf("cd %q && %s", cleaned, command), nil
+}
+
+// parseTimeout returns the timeout for the node, preferring the node attr over the default.
+func (h *ToolHandler) parseTimeout(node *pipeline.Node) (time.Duration, error) {
+	timeoutStr, ok := node.Attrs["timeout"]
+	if !ok {
+		return h.defaultTimeout, nil
+	}
+	parsed, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		return 0, fmt.Errorf("node %q has invalid timeout %q: %w", node.ID, timeoutStr, err)
+	}
+	return parsed, nil
+}
+
+// parseOutputLimit returns the output byte limit for the node, capped at h.maxOutputLimit.
+func (h *ToolHandler) parseOutputLimit(node *pipeline.Node) (int, error) {
+	limitStr, ok := node.Attrs["output_limit"]
+	if !ok || limitStr == "" {
+		return h.outputLimit, nil
+	}
+	parsed, err := parseByteSize(limitStr)
+	if err != nil {
+		return 0, fmt.Errorf("node %q has invalid output_limit %q: %w", node.ID, limitStr, err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("node %q has non-positive output_limit %q", node.ID, limitStr)
+	}
+	if parsed > h.maxOutputLimit {
+		parsed = h.maxOutputLimit
+	}
+	return parsed, nil
+}
+
+// execAndBuildOutcome runs the command and builds the pipeline outcome from the result.
+// Layer 4: uses ExecCommandWithLimit on LocalEnvironment, ExecCommand otherwise.
+func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.Node, command, artifactRoot string, timeout time.Duration, outputLimit int) (pipeline.Outcome, error) {
 	var result exec.CommandResult
+	var err error
 	if le, ok := h.env.(*exec.LocalEnvironment); ok {
 		result, err = le.ExecCommandWithLimit(ctx, "sh", []string{"-c", command}, timeout, outputLimit, buildToolEnv())
 	} else {
@@ -226,17 +267,12 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 	stdout := strings.TrimRight(result.Stdout, " \t\n\r")
 	stderr := strings.TrimRight(result.Stderr, " \t\n\r")
 
-	return pipeline.Outcome{
-			Status: status,
-			ContextUpdates: map[string]string{
-				pipeline.ContextKeyToolStdout: stdout,
-				pipeline.ContextKeyToolStderr: stderr,
-			},
-		}, pipeline.WriteStatusArtifact(artifactRoot, node.ID, pipeline.Outcome{
-			Status: status,
-			ContextUpdates: map[string]string{
-				pipeline.ContextKeyToolStdout: stdout,
-				pipeline.ContextKeyToolStderr: stderr,
-			},
-		})
+	outcome := pipeline.Outcome{
+		Status: status,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyToolStdout: stdout,
+			pipeline.ContextKeyToolStderr: stderr,
+		},
+	}
+	return outcome, pipeline.WriteStatusArtifact(artifactRoot, node.ID, outcome)
 }
