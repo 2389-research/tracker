@@ -5,7 +5,9 @@ package handlers
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -614,5 +616,190 @@ func TestACPClientWriteFileCreatesDir(t *testing.T) {
 	}
 	if string(data) != "nested content" {
 		t.Errorf("unexpected content: %q", string(data))
+	}
+}
+
+func TestMapModelToBridge(t *testing.T) {
+	models := &acp.SessionModelState{
+		AvailableModels: []acp.ModelInfo{
+			{ModelId: acp.ModelId("sonnet")},
+			{ModelId: acp.ModelId("haiku")},
+			{ModelId: acp.ModelId("default")},
+		},
+	}
+
+	tests := []struct {
+		tracker string
+		want    string
+	}{
+		{"sonnet", "sonnet"},                       // direct match
+		{"claude-sonnet-4-6", "sonnet"},            // substring match
+		{"claude-haiku-4-5", "haiku"},              // substring match
+		{"unknown-model", ""},                      // no match
+		{"default", "default"},                     // direct match on default
+	}
+	for _, tt := range tests {
+		got := mapModelToBridge(tt.tracker, models)
+		if got != tt.want {
+			t.Errorf("mapModelToBridge(%q) = %q, want %q", tt.tracker, got, tt.want)
+		}
+	}
+
+	// nil models returns empty
+	if got := mapModelToBridge("anything", nil); got != "" {
+		t.Errorf("mapModelToBridge with nil models = %q, want empty", got)
+	}
+}
+
+func TestBuildACPResult(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"hello", " world"},
+		toolCount: 2,
+		turnCount: 3,
+		toolNames: map[string]string{"t1": "bash", "t2": "read"},
+	}
+	result := buildACPResult(handler, acp.PromptResponse{})
+	if result.Turns != 3 {
+		t.Errorf("Turns = %d, want 3", result.Turns)
+	}
+	if result.ToolCalls["bash"] != 1 {
+		t.Errorf("ToolCalls[bash] = %d, want 1", result.ToolCalls["bash"])
+	}
+	if result.ToolCalls["read"] != 1 {
+		t.Errorf("ToolCalls[read] = %d, want 1", result.ToolCalls["read"])
+	}
+}
+
+func TestBuildACPResult_MinOneTurn(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"output"},
+		turnCount: 0,
+		toolNames: make(map[string]string),
+	}
+	result := buildACPResult(handler, acp.PromptResponse{})
+	if result.Turns != 1 {
+		t.Errorf("Turns = %d, want 1 (minimum when text present)", result.Turns)
+	}
+}
+
+func TestBuildACPMcpServers(t *testing.T) {
+	cfg := pipeline.AgentRunConfig{}
+	servers := buildACPMcpServers(cfg)
+	if servers == nil {
+		t.Error("expected non-nil empty slice")
+	}
+	if len(servers) != 0 {
+		t.Errorf("expected empty servers, got %d", len(servers))
+	}
+}
+
+func TestBuildEnvForACP_StripsKeys(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	t.Setenv("SAFE_VAR", "keep")
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+
+	env := buildEnvForACP()
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should be stripped")
+	}
+	if v, ok := envMap["SAFE_VAR"]; !ok || v != "keep" {
+		t.Error("SAFE_VAR should be preserved")
+	}
+}
+
+func TestBuildEnvForACP_PassKeysOverride(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("TRACKER_PASS_API_KEYS", "1")
+
+	env := buildEnvForACP()
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; !ok {
+		t.Error("TRACKER_PASS_API_KEYS=1 should preserve keys")
+	}
+}
+
+func TestKillProcess_NilProcess(t *testing.T) {
+	// Should not panic on cmd with nil Process.
+	cmd := &exec.Cmd{}
+	killProcess(cmd) // no-op, should not panic
+}
+
+func TestBuildEnvForACP_StripsAllPrefixes(t *testing.T) {
+	// Test all stripped prefixes
+	t.Setenv("ANTHROPIC_API_KEY", "x")
+	t.Setenv("OPENAI_API_KEY", "x")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "x")
+	t.Setenv("GEMINI_API_KEY", "x")
+	t.Setenv("GOOGLE_API_KEY", "x")
+	t.Setenv("ANTHROPIC_BASE_URL", "x")
+	t.Setenv("OPENAI_BASE_URL", "x")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "x")
+	t.Setenv("GEMINI_BASE_URL", "x")
+	t.Setenv("GOOGLE_BASE_URL", "x")
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+
+	env := buildEnvForACP()
+	for _, e := range env {
+		name := strings.SplitN(e, "=", 2)[0]
+		for _, prefix := range acpStrippedPrefixes {
+			stripped := strings.TrimSuffix(prefix, "=")
+			if name == stripped {
+				t.Errorf("%s should be stripped", name)
+			}
+		}
+	}
+}
+
+func TestACPCollectedTextEmpty(t *testing.T) {
+	h := &acpClientHandler{
+		textParts: nil,
+		toolNames: make(map[string]string),
+	}
+	if got := h.collectedText(); got != "" {
+		t.Errorf("collectedText() = %q, want empty", got)
+	}
+}
+
+func TestBuildACPResult_EmptyHandler(t *testing.T) {
+	handler := &acpClientHandler{
+		toolNames: make(map[string]string),
+	}
+	result := buildACPResult(handler, acp.PromptResponse{})
+	if result.Turns != 0 {
+		t.Errorf("Turns = %d, want 0 for empty handler", result.Turns)
+	}
+}
+
+func TestResolveAgentName_ProviderMapping(t *testing.T) {
+	b := NewACPBackend()
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{"anthropic", "claude-agent-acp"},
+		{"openai", "codex-acp"},
+		{"gemini", "gemini"},
+		{"unknown", "claude-agent-acp"}, // default fallback
+	}
+	for _, tt := range tests {
+		cfg := pipeline.AgentRunConfig{Provider: tt.provider}
+		got := b.resolveAgentName(cfg)
+		if got != tt.want {
+			t.Errorf("resolveAgentName(provider=%q) = %q, want %q", tt.provider, got, tt.want)
+		}
 	}
 }

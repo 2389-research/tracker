@@ -192,3 +192,19 @@ func TestContextSetInternal(t *testing.T) {
 		t.Error("internal keys should not appear in Snapshot")
 	}
 }
+
+func TestNewPipelineContextFrom(t *testing.T) {
+	values := map[string]string{"key1": "val1", "key2": "val2"}
+	ctx := NewPipelineContextFrom(values)
+	if v, ok := ctx.Get("key1"); !ok || v != "val1" {
+		t.Errorf("key1 = %q, want %q", v, "val1")
+	}
+	if v, ok := ctx.Get("key2"); !ok || v != "val2" {
+		t.Errorf("key2 = %q, want %q", v, "val2")
+	}
+	// Should not share state with input map
+	values["key3"] = "val3"
+	if _, ok := ctx.Get("key3"); ok {
+		t.Error("context should not share state with input map")
+	}
+}

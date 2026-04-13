@@ -43,7 +43,7 @@ var acpAgentArgs = map[string][]string{
 // Default binary mapping:
 //
 //   - anthropic → claude-agent-acp (bridge: npm i -g @agentclientprotocol/claude-agent-acp)
-//   - openai   → codex-acp       (bridge: cargo install codex-acp)
+//   - openai   → codex-acp       (bridge: npm i -g @zed-industries/codex-acp)
 //   - gemini   → gemini --acp    (native ACP mode)
 //
 // The acp_agent node attribute overrides the binary name.
@@ -277,7 +277,9 @@ func (b *ACPBackend) ensureAgentPath(name string) (string, error) {
 	}
 
 	// Verify the binary responds to --version (skip for bridge binaries that may not support it).
-	verifyCmd := exec.Command(path, "--version")
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer verifyCancel()
+	verifyCmd := exec.CommandContext(verifyCtx, path, "--version")
 	if verifyErr := verifyCmd.Run(); verifyErr != nil {
 		// Some ACP bridge binaries (e.g. claude-code-acp) may not support --version.
 		// LookPath success is sufficient for bridges.
