@@ -14,7 +14,7 @@ COVERAGE_THRESHOLD ?= 80
 
 # Complexity thresholds
 CYCLO_MAX     ?= 15
-COGNITIVE_MAX ?= 25
+COGNITIVE_MAX ?= 15
 FILE_MAX_LINES ?= 500
 
 # ─── Build ───────────────────────────────────────────────
