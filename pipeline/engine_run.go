@@ -28,6 +28,34 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		e.checkpointPath = filepath.Join(e.artifactDir, runID, "checkpoint.json")
 	}
 
+	pctx := e.buildInitialContext()
+
+	cp, runID, err := e.loadCheckpointAndMerge(runID, pctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if e.artifactDir != "" {
+		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
+	}
+
+	stylesheet, err := e.maybeParseStylesheet()
+	if err != nil {
+		return nil, err
+	}
+
+	return &runState{
+		runID:        runID,
+		pctx:         pctx,
+		cp:           cp,
+		trace:        &Trace{RunID: runID, StartTime: time.Now()},
+		nodeOutcomes: make(map[string]string),
+		stylesheet:   stylesheet,
+	}, nil
+}
+
+// buildInitialContext creates a PipelineContext seeded with graph and initial context values.
+func (e *Engine) buildInitialContext() *PipelineContext {
 	pctx := NewPipelineContext()
 	for key, value := range e.graph.Attrs {
 		pctx.Set("graph."+key, value)
@@ -35,49 +63,40 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	for k, v := range e.initialContext {
 		pctx.Set(k, v)
 	}
+	return pctx
+}
 
+// loadCheckpointAndMerge loads or creates a checkpoint, merges its context into pctx,
+// and returns the checkpoint, resolved run ID, and any error.
+func (e *Engine) loadCheckpointAndMerge(runID string, pctx *PipelineContext) (*Checkpoint, string, error) {
 	cp, err := e.loadOrCreateCheckpoint(runID)
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint load: %w", err)
+		return nil, "", fmt.Errorf("checkpoint load: %w", err)
 	}
 	if cp.RunID != "" {
 		runID = cp.RunID
 	}
-
 	for k, v := range cp.Context {
 		pctx.Set(k, v)
 	}
-
 	e.compactResumeContext(cp, pctx, runID)
+	return cp, runID, nil
+}
 
-	if e.artifactDir != "" {
-		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
+// maybeParseStylesheet parses the model stylesheet from graph attrs if enabled.
+func (e *Engine) maybeParseStylesheet() (*Stylesheet, error) {
+	if !e.resolveStylesheet {
+		return nil, nil
 	}
-
-	var stylesheet *Stylesheet
-	if e.resolveStylesheet {
-		if ssRaw, ok := e.graph.Attrs["model_stylesheet"]; ok {
-			ss, err := ParseStylesheet(ssRaw)
-			if err != nil {
-				return nil, fmt.Errorf("parse stylesheet: %w", err)
-			}
-			stylesheet = ss
-		}
+	ssRaw, ok := e.graph.Attrs["model_stylesheet"]
+	if !ok {
+		return nil, nil
 	}
-
-	trace := &Trace{
-		RunID:     runID,
-		StartTime: time.Now(),
+	ss, err := ParseStylesheet(ssRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse stylesheet: %w", err)
 	}
-
-	return &runState{
-		runID:        runID,
-		pctx:         pctx,
-		cp:           cp,
-		trace:        trace,
-		nodeOutcomes: make(map[string]string),
-		stylesheet:   stylesheet,
-	}, nil
+	return ss, nil
 }
 
 // compactResumeContext applies fidelity-aware compaction when resuming from a checkpoint.

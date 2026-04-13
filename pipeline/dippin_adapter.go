@@ -48,42 +48,12 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		return nil, ErrMissingExit
 	}
 
-	g := NewGraph(workflow.Name)
-	g.StartNode = workflow.Start
-	g.ExitNode = workflow.Exit
+	g := buildGraphFromWorkflow(workflow)
 
-	// Map workflow-level goal to graph attributes (used by prompt expansion, fidelity, context)
-	if workflow.Goal != "" {
-		g.Attrs["goal"] = workflow.Goal
+	if err := addIRNodes(g, workflow.Nodes); err != nil {
+		return nil, err
 	}
-	if workflow.Version != "" {
-		g.Attrs["version"] = workflow.Version
-	}
-
-	// Map workflow-level defaults to graph attributes
-	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
-
-	// Map IR nodes to Graph nodes, preserving declaration order.
-	for _, irNode := range workflow.Nodes {
-		if irNode == nil {
-			continue
-		}
-		gNode, err := convertNode(irNode)
-		if err != nil {
-			return nil, fmt.Errorf("node %s: %w", irNode.ID, err)
-		}
-		g.AddNode(gNode)
-		g.NodeOrder = append(g.NodeOrder, irNode.ID)
-	}
-
-	// Map IR edges to Graph edges
-	for _, irEdge := range workflow.Edges {
-		if irEdge == nil {
-			continue
-		}
-		gEdge := convertEdge(irEdge)
-		g.AddEdge(gEdge)
-	}
+	addIREdges(g, workflow.Edges)
 
 	// Synthesize implicit edges from parallel fan-out targets and fan-in sources.
 	synthesizeImplicitEdges(g, workflow)
@@ -93,12 +63,52 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		return nil, err
 	}
 
-	// Convert stylesheet rules to graph attrs for engine resolution.
+	return g, nil
+}
+
+// buildGraphFromWorkflow initializes a Graph from top-level workflow metadata.
+func buildGraphFromWorkflow(workflow *ir.Workflow) *Graph {
+	g := NewGraph(workflow.Name)
+	g.StartNode = workflow.Start
+	g.ExitNode = workflow.Exit
+
+	if workflow.Goal != "" {
+		g.Attrs["goal"] = workflow.Goal
+	}
+	if workflow.Version != "" {
+		g.Attrs["version"] = workflow.Version
+	}
+	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
 	if len(workflow.Stylesheet) > 0 {
 		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
 	}
+	return g
+}
 
-	return g, nil
+// addIRNodes converts IR nodes and adds them to the graph in declaration order.
+func addIRNodes(g *Graph, irNodes []*ir.Node) error {
+	for _, irNode := range irNodes {
+		if irNode == nil {
+			continue
+		}
+		gNode, err := convertNode(irNode)
+		if err != nil {
+			return fmt.Errorf("node %s: %w", irNode.ID, err)
+		}
+		g.AddNode(gNode)
+		g.NodeOrder = append(g.NodeOrder, irNode.ID)
+	}
+	return nil
+}
+
+// addIREdges converts IR edges and adds them to the graph.
+func addIREdges(g *Graph, irEdges []*ir.Edge) {
+	for _, irEdge := range irEdges {
+		if irEdge == nil {
+			continue
+		}
+		g.AddEdge(convertEdge(irEdge))
+	}
 }
 
 // nodeKindToShapeMap maps IR NodeKind to DOT shape strings.
@@ -157,39 +167,58 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 	if config == nil {
 		return nil
 	}
+	if ok, err := extractValueNodeAttrs(config, attrs); ok {
+		return err
+	}
+	return extractPtrNodeAttrs(config, attrs)
+}
 
+// extractValueNodeAttrs handles value (non-pointer) IR config types.
+// Returns (true, err) if the type was recognized; (false, nil) otherwise.
+func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool, error) {
 	switch cfg := config.(type) {
 	case ir.AgentConfig:
 		extractAgentAttrs(cfg, attrs)
-	case *ir.AgentConfig:
-		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.HumanConfig:
 		extractHumanAttrs(cfg, attrs)
-	case *ir.HumanConfig:
-		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.ToolConfig:
 		extractToolAttrs(cfg, attrs)
-	case *ir.ToolConfig:
-		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
-	case *ir.ParallelConfig:
-		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.FanInConfig:
 		extractFanInAttrs(cfg, attrs)
-	case *ir.FanInConfig:
-		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.SubgraphConfig:
 		extractSubgraphAttrs(cfg, attrs)
+	case ir.ConditionalConfig:
+		// Conditional nodes are pure routing — no config to extract.
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// extractPtrNodeAttrs handles pointer IR config types.
+// Returns an error for unrecognized types.
+func extractPtrNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
+	switch cfg := config.(type) {
+	case *ir.AgentConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.HumanConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.ToolConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.ParallelConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.FanInConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
 	case *ir.SubgraphConfig:
 		return extractNodeAttrsPtr(cfg, attrs)
-	case ir.ConditionalConfig, *ir.ConditionalConfig:
+	case *ir.ConditionalConfig:
 		// Conditional nodes are pure routing — no config to extract.
+		return nil
 	default:
 		return fmt.Errorf("%T: %w", config, ErrUnknownConfig)
 	}
-
-	return nil
 }
 
 // extractNodeAttrsPtr dereferences a pointer IR config and dispatches to extractNodeAttrs.

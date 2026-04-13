@@ -84,6 +84,12 @@ func printSimNodes(w io.Writer, graph *pipeline.Graph) {
 // bfsNodeOrder returns graph nodes in BFS order from start, with orphaned nodes appended.
 func bfsNodeOrder(graph *pipeline.Graph) []*pipeline.Node {
 	visited := make(map[string]bool)
+	ordered := bfsTraversal(graph, visited)
+	return appendOrphanedNodes(graph, visited, ordered)
+}
+
+// bfsTraversal walks the graph from StartNode in BFS order, marking visited nodes.
+func bfsTraversal(graph *pipeline.Graph, visited map[string]bool) []*pipeline.Node {
 	queue := []string{graph.StartNode}
 	var ordered []*pipeline.Node
 
@@ -107,8 +113,11 @@ func bfsNodeOrder(graph *pipeline.Graph) []*pipeline.Node {
 			}
 		}
 	}
+	return ordered
+}
 
-	// Include any orphaned nodes not reachable from start.
+// appendOrphanedNodes appends nodes not reachable from the start node.
+func appendOrphanedNodes(graph *pipeline.Graph, visited map[string]bool, ordered []*pipeline.Node) []*pipeline.Node {
 	for _, node := range graph.Nodes {
 		if !visited[node.ID] {
 			ordered = append(ordered, node)

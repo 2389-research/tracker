@@ -354,41 +354,8 @@ func (ic *InterviewContent) updateNavigationMode(km tea.KeyMsg) tea.Cmd {
 func (ic *InterviewContent) updateSelectField(km tea.KeyMsg, f *interviewField) tea.Cmd {
 	totalOpts := len(f.question.Options) + 1 // +1 for "Other"
 
-	switch km.Type {
-	case tea.KeyUp:
-		if f.selectCursor > 0 {
-			f.selectCursor--
-			f.isOther = false
-		} else {
-			// Move to previous question.
-			return ic.moveCursor(-1)
-		}
-	case tea.KeyDown:
-		if f.selectCursor < totalOpts-1 {
-			f.selectCursor++
-			f.isOther = f.selectCursor >= len(f.question.Options)
-		} else {
-			// Move to next question.
-			return ic.moveCursor(1)
-		}
-	case tea.KeyEnter:
-		if f.selectCursor >= len(f.question.Options) {
-			// "Other" — activate otherInput textarea.
-			f.isOther = true
-			f.selected = true
-			ic.inTextarea = true
-			f.otherInput.Focus()
-			return nil
-		}
-		// Confirm selection and move to next question.
-		f.selected = true
-		return ic.moveCursor(1)
-	case tea.KeyEscape:
-		// Move to previous question; cancel only if at the first question.
-		if ic.cursor > 0 {
-			return ic.moveCursor(-1)
-		}
-		return ic.cancel()
+	if cmd := ic.handleSelectNavKeys(km, f, totalOpts); cmd != nil {
+		return cmd
 	}
 
 	switch km.String() {
@@ -406,6 +373,51 @@ func (ic *InterviewContent) updateSelectField(km tea.KeyMsg, f *interviewField) 
 		return ic.changePage(1)
 	}
 	return nil
+}
+
+// handleSelectNavKeys handles Up/Down/Enter/Escape navigation for a select field.
+// Returns a non-nil Cmd when the caller should return immediately.
+func (ic *InterviewContent) handleSelectNavKeys(km tea.KeyMsg, f *interviewField, totalOpts int) tea.Cmd {
+	switch km.Type {
+	case tea.KeyUp:
+		if f.selectCursor > 0 {
+			f.selectCursor--
+			f.isOther = false
+		} else {
+			return ic.moveCursor(-1)
+		}
+	case tea.KeyDown:
+		if f.selectCursor < totalOpts-1 {
+			f.selectCursor++
+			f.isOther = f.selectCursor >= len(f.question.Options)
+		} else {
+			return ic.moveCursor(1)
+		}
+	case tea.KeyEnter:
+		return ic.handleSelectEnter(f)
+	case tea.KeyEscape:
+		if ic.cursor > 0 {
+			return ic.moveCursor(-1)
+		}
+		return ic.cancel()
+	default:
+		return nil
+	}
+	return nil
+}
+
+// handleSelectEnter processes Enter on a select field (confirm or activate "Other").
+func (ic *InterviewContent) handleSelectEnter(f *interviewField) tea.Cmd {
+	if f.selectCursor >= len(f.question.Options) {
+		// "Other" — activate otherInput textarea.
+		f.isOther = true
+		f.selected = true
+		ic.inTextarea = true
+		f.otherInput.Focus()
+		return nil
+	}
+	f.selected = true
+	return ic.moveCursor(1)
 }
 
 // updateConfirmField handles the yes/no toggle.

@@ -65,27 +65,42 @@ func validateConditionSyntax(g *Graph, ve *ValidationError) {
 // operators have non-empty left-hand sides, and attempting evaluation with
 // a recovery guard against panics.
 func checkConditionSyntax(condition string, ctx *PipelineContext) error {
-	// Check for empty branches after splitting on || and &&.
-	orBranches := strings.Split(condition, "||")
-	for _, branch := range orBranches {
+	if err := checkLogicalBranches(condition); err != nil {
+		return err
+	}
+	return safeEvaluateCondition(condition, ctx)
+}
+
+// checkLogicalBranches validates that no branch of a logical expression is empty.
+func checkLogicalBranches(condition string) error {
+	for _, branch := range strings.Split(condition, "||") {
 		branch = strings.TrimSpace(branch)
 		if branch == "" {
 			return fmt.Errorf("empty operand in condition")
 		}
-		andClauses := strings.Split(branch, "&&")
-		for _, clause := range andClauses {
-			clause = strings.TrimSpace(clause)
-			if clause == "" {
-				return fmt.Errorf("empty operand in condition")
-			}
-			if err := checkClauseSyntax(clause); err != nil {
-				return err
-			}
+		if err := checkAndClauses(branch); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	// Try evaluating the condition to catch malformed clauses.
-	// Use a recover guard in case of unexpected panics.
+// checkAndClauses validates the individual AND clauses within an OR branch.
+func checkAndClauses(branch string) error {
+	for _, clause := range strings.Split(branch, "&&") {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			return fmt.Errorf("empty operand in condition")
+		}
+		if err := checkClauseSyntax(clause); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// safeEvaluateCondition evaluates the condition with a panic recovery guard.
+func safeEvaluateCondition(condition string, ctx *PipelineContext) error {
 	var evalErr error
 	func() {
 		defer func() {
@@ -95,7 +110,6 @@ func checkConditionSyntax(condition string, ctx *PipelineContext) error {
 		}()
 		_, evalErr = EvaluateCondition(condition, ctx)
 	}()
-
 	return evalErr
 }
 
@@ -115,30 +129,23 @@ func checkClauseOperands(inner, original string) error {
 	// Check word-based operators first.
 	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
 		if idx := strings.Index(inner, op); idx >= 0 {
-			left := strings.TrimSpace(inner[:idx])
-			right := strings.TrimSpace(inner[idx+len(op):])
-			if left == "" || right == "" {
-				return fmt.Errorf("empty operand around %q in clause %q", strings.TrimSpace(op), original)
-			}
-			return nil
+			return checkOperandPair(inner[:idx], inner[idx+len(op):], strings.TrimSpace(op), original)
 		}
 	}
 	// Check != before = to avoid partial match.
 	if idx := strings.Index(inner, "!="); idx >= 0 {
-		left := strings.TrimSpace(inner[:idx])
-		right := strings.TrimSpace(inner[idx+2:])
-		if left == "" || right == "" {
-			return fmt.Errorf("empty operand around '!=' in clause %q", original)
-		}
-		return nil
+		return checkOperandPair(inner[:idx], inner[idx+2:], "!=", original)
 	}
 	if idx := strings.Index(inner, "="); idx >= 0 {
-		left := strings.TrimSpace(inner[:idx])
-		right := strings.TrimSpace(inner[idx+1:])
-		if left == "" || right == "" {
-			return fmt.Errorf("empty operand around '=' in clause %q", original)
-		}
-		return nil
+		return checkOperandPair(inner[:idx], inner[idx+1:], "=", original)
+	}
+	return nil
+}
+
+// checkOperandPair validates that neither side of an operator is empty.
+func checkOperandPair(rawLeft, rawRight, op, original string) error {
+	if strings.TrimSpace(rawLeft) == "" || strings.TrimSpace(rawRight) == "" {
+		return fmt.Errorf("empty operand around %q in clause %q", op, original)
 	}
 	return nil
 }

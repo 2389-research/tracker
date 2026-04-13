@@ -112,14 +112,9 @@ func extractSystemAndContents(messages []llm.Message) (*geminiContent, []geminiC
 	var contents []geminiContent
 	for _, m := range messages {
 		if m.Role == llm.RoleSystem || m.Role == llm.RoleDeveloper {
-			for _, part := range m.Content {
-				if part.Kind == llm.KindText {
-					sysParts = append(sysParts, geminiPart{Text: part.Text})
-				}
-			}
+			sysParts = append(sysParts, extractSystemParts(m)...)
 		} else {
-			content := translateMessageToContent(m)
-			if content != nil {
+			if content := translateMessageToContent(m); content != nil {
 				contents = append(contents, *content)
 			}
 		}
@@ -128,6 +123,17 @@ func extractSystemAndContents(messages []llm.Message) (*geminiContent, []geminiC
 		return nil, contents
 	}
 	return &geminiContent{Parts: sysParts}, contents
+}
+
+// extractSystemParts collects text parts from a system/developer message.
+func extractSystemParts(m llm.Message) []geminiPart {
+	var parts []geminiPart
+	for _, part := range m.Content {
+		if part.Kind == llm.KindText {
+			parts = append(parts, geminiPart{Text: part.Text})
+		}
+	}
+	return parts
 }
 
 // translateGeminiTools converts unified tool definitions to Gemini format.

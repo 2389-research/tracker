@@ -183,41 +183,47 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			result.Duration = time.Since(start)
 			return false, err
 		}
-
-		s.drainSteering()
-		s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
-		turnStart := time.Now()
-
-		resp, err := s.doLLMCall(ctx, turn)
+		done, stop, err := s.executeTurn(ctx, turn, start, tracker, result, ts)
 		if err != nil {
-			result.Error = err
-			result.Duration = time.Since(start)
-			s.emit(Event{Type: EventError, SessionID: s.id, Err: err})
 			return false, err
 		}
-
-		s.updateUsage(result, resp, turn, tracker)
-		prevCacheHits, prevCacheMisses := s.snapshotCacheStats()
-		s.messages = append(s.messages, resp.Message)
-
-		toolCalls := resp.ToolCalls()
-		if len(toolCalls) == 0 {
-			done, stop, err := s.handleNoTools(resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts, start)
-			if err != nil {
-				return false, err
-			}
-			if stop {
-				return done, nil
-			}
-			continue
-		}
-
-		stopped := s.handleToolCalls(ctx, toolCalls, resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts)
-		if stopped {
-			return false, nil
+		if stop {
+			return done, nil
 		}
 	}
 	return false, nil
+}
+
+// executeTurn runs one LLM turn and handles its outcome.
+// Returns (stoppedNaturally, shouldStop, error).
+func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tracker *ContextWindowTracker, result *SessionResult, ts *turnState) (bool, bool, error) {
+	s.drainSteering()
+	s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
+	turnStart := time.Now()
+
+	resp, err := s.doLLMCall(ctx, turn)
+	if err != nil {
+		result.Error = err
+		result.Duration = time.Since(start)
+		s.emit(Event{Type: EventError, SessionID: s.id, Err: err})
+		return false, true, err
+	}
+
+	s.updateUsage(result, resp, turn, tracker)
+	prevCacheHits, prevCacheMisses := s.snapshotCacheStats()
+	s.messages = append(s.messages, resp.Message)
+
+	toolCalls := resp.ToolCalls()
+	if len(toolCalls) == 0 {
+		done, stop, err := s.handleNoTools(resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts, start)
+		return done, stop, err
+	}
+
+	stopped := s.handleToolCalls(ctx, toolCalls, resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts)
+	if stopped {
+		return false, true, nil
+	}
+	return false, false, nil
 }
 
 // handleNoTools processes a turn where the LLM returned no tool calls.

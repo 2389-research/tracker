@@ -538,31 +538,45 @@ func (h *CodergenHandler) applyResponseFormat(config *agent.SessionConfig, node 
 
 // applyCacheAndCompaction configures tool result caching and context compaction.
 func (h *CodergenHandler) applyCacheAndCompaction(config *agent.SessionConfig, node *pipeline.Node) {
+	h.applyCacheConfig(config, node)
+	h.applyCompactionConfig(config, node)
+}
+
+// applyCacheConfig sets CacheToolResults from graph and node attrs.
+func (h *CodergenHandler) applyCacheConfig(config *agent.SessionConfig, node *pipeline.Node) {
 	if v, ok := h.graphAttrs["cache_tool_results"]; ok && v == "true" {
 		config.CacheToolResults = true
 	}
 	if v, ok := node.Attrs["cache_tool_results"]; ok {
 		config.CacheToolResults = (v == "true")
 	}
+}
 
+// applyCompactionConfig sets ContextCompaction and CompactionThreshold from graph and node attrs.
+func (h *CodergenHandler) applyCompactionConfig(config *agent.SessionConfig, node *pipeline.Node) {
 	if v, ok := h.graphAttrs["context_compaction"]; ok && v == "auto" {
 		config.ContextCompaction = agent.CompactionAuto
 		config.CompactionThreshold = 0.6
 	}
 	if v, ok := node.Attrs["context_compaction"]; ok {
-		if v == "auto" {
-			config.ContextCompaction = agent.CompactionAuto
-			if config.CompactionThreshold == 0 {
-				config.CompactionThreshold = 0.6
-			}
-		} else {
-			config.ContextCompaction = agent.CompactionNone
-		}
+		applyNodeCompaction(config, v)
 	}
 	if v, ok := node.Attrs["context_compaction_threshold"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			config.CompactionThreshold = f
 		}
+	}
+}
+
+// applyNodeCompaction sets compaction mode from a node-level attribute value.
+func applyNodeCompaction(config *agent.SessionConfig, v string) {
+	if v == "auto" {
+		config.ContextCompaction = agent.CompactionAuto
+		if config.CompactionThreshold == 0 {
+			config.CompactionThreshold = 0.6
+		}
+	} else {
+		config.ContextCompaction = agent.CompactionNone
 	}
 }
 

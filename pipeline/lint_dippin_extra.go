@@ -105,23 +105,28 @@ func lintDIP103(g *Graph) []string {
 		if len(edges) < 2 {
 			continue
 		}
-
-		conditions := make(map[string]int)
-		for _, edge := range edges {
-			if edge.Condition != "" {
-				conditions[edge.Condition]++
-			}
-		}
-
-		for cond, count := range conditions {
-			if count > 1 {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP103]: node %q has %d edges with identical condition %q",
-					nodeID, count, cond))
-			}
-		}
+		warnings = append(warnings, findDuplicateConditions(nodeID, edges)...)
 	}
 
+	return warnings
+}
+
+// findDuplicateConditions returns warnings for any condition used on more than one outgoing edge.
+func findDuplicateConditions(nodeID string, edges []*Edge) []string {
+	conditions := make(map[string]int)
+	for _, edge := range edges {
+		if edge.Condition != "" {
+			conditions[edge.Condition]++
+		}
+	}
+	var warnings []string
+	for cond, count := range conditions {
+		if count > 1 {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP103]: node %q has %d edges with identical condition %q",
+				nodeID, count, cond))
+		}
+	}
 	return warnings
 }
 
@@ -135,26 +140,31 @@ func lintDIP109(g *Graph) []string {
 		if node.Handler != "subgraph" && node.Handler != "spawn" {
 			continue
 		}
-
-		params := node.Attrs["params"]
-		if params == "" {
-			continue
-		}
-
-		for _, pair := range strings.Split(params, ",") {
-			kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
-			if len(kv) < 1 {
-				continue
-			}
-			key := strings.TrimSpace(kv[0])
-			if reservedKeys[key] {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP109]: node %q params key %q collides with reserved context key",
-					node.ID, key))
-			}
-		}
+		warnings = append(warnings, checkSubgraphParamCollisions(node, reservedKeys)...)
 	}
 
+	return warnings
+}
+
+// checkSubgraphParamCollisions returns warnings for any params key that collides with reserved keys.
+func checkSubgraphParamCollisions(node *Node, reservedKeys map[string]bool) []string {
+	params := node.Attrs["params"]
+	if params == "" {
+		return nil
+	}
+	var warnings []string
+	for _, pair := range strings.Split(params, ",") {
+		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(kv) < 1 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		if reservedKeys[key] {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP109]: node %q params key %q collides with reserved context key",
+				node.ID, key))
+		}
+	}
 	return warnings
 }
 

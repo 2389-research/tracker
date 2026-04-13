@@ -14,6 +14,12 @@ import (
 )
 
 func executeCommand(cfg runConfig, deps commandDeps) error {
+	deps = fillDefaultDeps(deps)
+	return dispatchCommand(cfg, deps)
+}
+
+// fillDefaultDeps fills nil function fields in deps with production defaults.
+func fillDefaultDeps(deps commandDeps) commandDeps {
 	if deps.loadEnv == nil {
 		deps.loadEnv = loadEnvFiles
 	}
@@ -26,7 +32,11 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 	if deps.runTUI == nil {
 		deps.runTUI = runTUI
 	}
+	return deps
+}
 
+// dispatchCommand routes the command mode to the appropriate executor.
+func dispatchCommand(cfg runConfig, deps commandDeps) error {
 	switch cfg.mode {
 	case modeVersion:
 		return executeVersion()
@@ -203,10 +213,25 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
 
+	if err := printRunPreamble(cfg); err != nil {
+		return err
+	}
+
+	printStartupBanner()
+
+	checkpoint, err := resolveRunCheckpoint(cfg)
+	if err != nil {
+		return err
+	}
+
+	return selectAndRunMode(cfg, deps, checkpoint)
+}
+
+// printRunPreamble prints backend and autopilot status messages and validates persona.
+func printRunPreamble(cfg runConfig) error {
 	if cfg.backend != "" && cfg.backend != "native" {
 		fmt.Fprintf(os.Stderr, "Agent backend: %s\n", cfg.backend)
 	}
-
 	if cfg.autopilot != "" {
 		if _, err := handlers.ParsePersona(cfg.autopilot); err != nil {
 			return err
@@ -215,26 +240,23 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	} else if cfg.autoApprove {
 		fmt.Fprintln(os.Stderr, "Running in auto-approve mode — all human gates auto-approved")
 	}
+	return nil
+}
 
-	printStartupBanner()
-
-	// Resolve run ID to checkpoint path.
-	checkpoint := ""
-	if cfg.resumeID != "" {
-		cp, err := resolveCheckpoint(cfg.workdir, cfg.resumeID)
-		if err != nil {
-			return err
-		}
-		checkpoint = cp
+// resolveRunCheckpoint returns the checkpoint path for a resume run, or "" for new runs.
+func resolveRunCheckpoint(cfg runConfig) (string, error) {
+	if cfg.resumeID == "" {
+		return "", nil
 	}
+	return resolveCheckpoint(cfg.workdir, cfg.resumeID)
+}
 
+// selectAndRunMode picks TUI or plain console mode and starts the pipeline.
+func selectAndRunMode(cfg runConfig, deps commandDeps, checkpoint string) error {
 	// JSON streaming forces non-TUI (structured output to stdout).
-	// Auto-approve and autopilot both work inside the TUI — gates
-	// auto-dismiss without user input.
 	if cfg.jsonOut {
 		cfg.noTUI = true
 	}
-
 	// Fall back to plain console mode when TUI is disabled or stdin is not a
 	// terminal (e.g. CI, piped input, cron). TUI requires a real TTY.
 	if cfg.noTUI || !isatty.IsTerminal(os.Stdin.Fd()) {

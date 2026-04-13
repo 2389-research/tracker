@@ -281,37 +281,9 @@ func (s *StateStore) ensure(id string) *nodeInfo {
 func (s *StateStore) Apply(msg interface{}) {
 	switch m := msg.(type) {
 	case MsgNodeStarted:
-		if IsSubgraphNode(m.NodeID) {
-			s.ensureSubgraphNode(m.NodeID)
-		}
-		ni := s.ensure(m.NodeID)
-		ni.status = NodeRunning
-		ni.errMsg = ""
-		ni.retryMsg = ""
-		ni.startedAt = time.Now()
-		s.visitPath = append(s.visitPath, m.NodeID)
-		// Snapshot current total usage for per-node delta calculation.
-		// Note: for parallel nodes, deltas may include sibling usage since
-		// TokenTracker is global. This is a known limitation — per-node cost
-		// is most accurate for sequential execution.
-		if s.Tokens != nil {
-			s.startUsage[m.NodeID] = s.Tokens.TotalUsage()
-		}
+		s.applyNodeStarted(m)
 	case MsgNodeCompleted:
-		ni := s.ensure(m.NodeID)
-		ni.status = NodeDone
-		if !ni.startedAt.IsZero() {
-			ni.duration = time.Since(ni.startedAt)
-		}
-		// Compute per-node cost/token delta.
-		if s.Tokens != nil {
-			end := s.Tokens.TotalUsage()
-			if start, ok := s.startUsage[m.NodeID]; ok {
-				ni.cost = end.EstimatedCost - start.EstimatedCost
-				ni.tokens = end.TotalTokens - start.TotalTokens
-				delete(s.startUsage, m.NodeID)
-			}
-		}
+		s.applyNodeCompleted(m)
 	case MsgNodeFailed:
 		ni := s.ensure(m.NodeID)
 		ni.status = NodeFailed
@@ -334,5 +306,43 @@ func (s *StateStore) Apply(msg interface{}) {
 		s.ensure(m.NodeID).thinking = false
 	case MsgLLMRequestPreparing:
 		s.ensure(m.NodeID).waiting = true // set waiting state before provider responds
+	}
+}
+
+// applyNodeStarted handles MsgNodeStarted by initializing node tracking state.
+func (s *StateStore) applyNodeStarted(m MsgNodeStarted) {
+	if IsSubgraphNode(m.NodeID) {
+		s.ensureSubgraphNode(m.NodeID)
+	}
+	ni := s.ensure(m.NodeID)
+	ni.status = NodeRunning
+	ni.errMsg = ""
+	ni.retryMsg = ""
+	ni.startedAt = time.Now()
+	s.visitPath = append(s.visitPath, m.NodeID)
+	// Snapshot current total usage for per-node delta calculation.
+	// Note: for parallel nodes, deltas may include sibling usage since
+	// TokenTracker is global. This is a known limitation — per-node cost
+	// is most accurate for sequential execution.
+	if s.Tokens != nil {
+		s.startUsage[m.NodeID] = s.Tokens.TotalUsage()
+	}
+}
+
+// applyNodeCompleted handles MsgNodeCompleted by recording duration and token deltas.
+func (s *StateStore) applyNodeCompleted(m MsgNodeCompleted) {
+	ni := s.ensure(m.NodeID)
+	ni.status = NodeDone
+	if !ni.startedAt.IsZero() {
+		ni.duration = time.Since(ni.startedAt)
+	}
+	// Compute per-node cost/token delta.
+	if s.Tokens != nil {
+		end := s.Tokens.TotalUsage()
+		if start, ok := s.startUsage[m.NodeID]; ok {
+			ni.cost = end.EstimatedCost - start.EstimatedCost
+			ni.tokens = end.TotalTokens - start.TotalTokens
+			delete(s.startUsage, m.NodeID)
+		}
 	}
 }

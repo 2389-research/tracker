@@ -187,12 +187,9 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	if cfg.Model != "" && isClaudeModel(cfg.Model) {
 		args = append(args, "--model", cfg.Model)
 	}
-
 	if cfg.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", cfg.MaxTurns))
 	}
-
-	// System prompt is independent of ClaudeCodeConfig.
 	if cfg.SystemPrompt != "" {
 		args = append(args, "--system-prompt", cfg.SystemPrompt)
 	}
@@ -202,25 +199,26 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 		return args, nil
 	}
 
+	return appendClaudeCodeArgs(args, ccCfg)
+}
+
+// appendClaudeCodeArgs appends ClaudeCode-specific flags to args.
+func appendClaudeCodeArgs(args []string, ccCfg *pipeline.ClaudeCodeConfig) ([]string, error) {
 	if ccCfg.PermissionMode != "" {
 		if !ccCfg.PermissionMode.Valid() {
 			return nil, fmt.Errorf("invalid permission mode: %q", ccCfg.PermissionMode)
 		}
 		args = append(args, "--permission-mode", string(ccCfg.PermissionMode))
 	}
-
 	if len(ccCfg.AllowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(ccCfg.AllowedTools, ","))
 	}
-
 	if len(ccCfg.DisallowedTools) > 0 {
 		args = append(args, "--disallowedTools", strings.Join(ccCfg.DisallowedTools, ","))
 	}
-
 	if ccCfg.MaxBudgetUSD > 0 {
 		args = append(args, "--budget", fmt.Sprintf("%.2f", ccCfg.MaxBudgetUSD))
 	}
-
 	if len(ccCfg.MCPServers) > 0 {
 		mcpJSON, err := buildMCPServersJSON(ccCfg.MCPServers)
 		if err != nil {
@@ -228,7 +226,6 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 		}
 		args = append(args, "--mcpServers", mcpJSON)
 	}
-
 	return args, nil
 }
 

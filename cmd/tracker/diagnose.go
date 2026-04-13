@@ -273,6 +273,21 @@ func printNodeDiagnosis(f *nodeFailure) {
 
 	fmt.Println(headerStyle.Render(fmt.Sprintf("  ✗ %s", f.nodeID)))
 
+	printNodeDiagnosisMeta(f, labelStyle)
+	printIndentedBlock(labelStyle, "Output:", f.stdout)
+	printIndentedBlock(labelStyle, "Stderr:", f.stderr)
+	printNodeDiagnosisErrors(f, labelStyle)
+
+	// If no useful info was found, say so.
+	if f.stdout == "" && f.stderr == "" && len(f.errors) == 0 {
+		fmt.Printf("    %s\n", mutedStyle.Render("No error details captured — node may have failed silently"))
+	}
+
+	fmt.Println()
+}
+
+// printNodeDiagnosisMeta prints handler, duration, and retry count for a node failure.
+func printNodeDiagnosisMeta(f *nodeFailure, labelStyle lipgloss.Style) {
 	if f.handler != "" {
 		fmt.Printf("    %s %s\n", labelStyle.Render("Handler:"), f.handler)
 	}
@@ -290,27 +305,21 @@ func printNodeDiagnosis(f *nodeFailure) {
 		}
 		fmt.Printf("    %s %s\n", labelStyle.Render("Attempts:"), retryInfo)
 	}
+}
 
-	printIndentedBlock(labelStyle, "Output:", f.stdout)
-	printIndentedBlock(labelStyle, "Stderr:", f.stderr)
-
-	if len(f.errors) > 0 {
-		seen := make(map[string]bool)
-		fmt.Printf("    %s\n", labelStyle.Render("Errors:"))
-		for _, e := range f.errors {
-			if !seen[e] {
-				seen[e] = true
-				fmt.Printf("      %s\n", e)
-			}
+// printNodeDiagnosisErrors prints deduplicated error messages for a node failure.
+func printNodeDiagnosisErrors(f *nodeFailure, labelStyle lipgloss.Style) {
+	if len(f.errors) == 0 {
+		return
+	}
+	seen := make(map[string]bool)
+	fmt.Printf("    %s\n", labelStyle.Render("Errors:"))
+	for _, e := range f.errors {
+		if !seen[e] {
+			seen[e] = true
+			fmt.Printf("      %s\n", e)
 		}
 	}
-
-	// If no useful info was found, say so.
-	if f.stdout == "" && f.stderr == "" && len(f.errors) == 0 {
-		fmt.Printf("    %s\n", mutedStyle.Render("No error details captured — node may have failed silently"))
-	}
-
-	fmt.Println()
 }
 
 // printIndentedBlock prints a labeled multi-line block with 6-space indent.
@@ -370,27 +379,56 @@ func suggestRetryPattern(f *nodeFailure) []string {
 // suggestOutputPatterns checks stdout/stderr for known failure signatures.
 func suggestOutputPatterns(f *nodeFailure) []string {
 	var out []string
-
-	if strings.Contains(f.stdout, "ESCALATE") && strings.Contains(f.stdout, "fix attempts") {
-		out = append(out, fmt.Sprintf("%s: Hit fix attempt limit. The fix_attempts counter persists "+
-			"on disk across restarts — if you retry after escalation, the counter "+
-			"is already maxed. Reset it with: rm .ai/milestones/fix_attempts", f.nodeID))
-	}
-	if f.stdout == "" && f.stderr == "" && len(f.errors) == 0 {
-		out = append(out, fmt.Sprintf("%s: No error details captured. Check the activity.jsonl "+
-			"for this node's events: grep %q activity.jsonl | tail -20", f.nodeID, f.nodeID))
-	}
-	if strings.Contains(f.stderr, "command not found") || strings.Contains(f.stderr, "No such file or directory") {
-		out = append(out, fmt.Sprintf("%s: Shell command failed — check that the working directory "+
-			"and required tools exist before running", f.nodeID))
-	}
-	if strings.Contains(f.stdout, "FAIL") && strings.Contains(f.stdout, "go test") {
-		out = append(out, fmt.Sprintf("%s: Go test failures — check if .ai/milestones/known_failures "+
-			"should include these tests for this milestone", f.nodeID))
-	}
-	if f.duration > 0 && f.duration < 50*time.Millisecond && f.handler != "tool" {
-		out = append(out, fmt.Sprintf("%s: Completed in %s — suspiciously fast. May indicate "+
-			"a configuration issue or missing handler", f.nodeID, formatElapsed(f.duration)))
-	}
+	out = append(out, suggestEscalateLimitPattern(f)...)
+	out = append(out, suggestNoOutputPattern(f)...)
+	out = append(out, suggestShellCommandPattern(f)...)
+	out = append(out, suggestGoTestPattern(f)...)
+	out = append(out, suggestSuspiciouslyFastPattern(f)...)
 	return out
+}
+
+// suggestEscalateLimitPattern detects the fix_attempts escalation sentinel in stdout.
+func suggestEscalateLimitPattern(f *nodeFailure) []string {
+	if strings.Contains(f.stdout, "ESCALATE") && strings.Contains(f.stdout, "fix attempts") {
+		return []string{fmt.Sprintf("%s: Hit fix attempt limit. The fix_attempts counter persists "+
+			"on disk across restarts — if you retry after escalation, the counter "+
+			"is already maxed. Reset it with: rm .ai/milestones/fix_attempts", f.nodeID)}
+	}
+	return nil
+}
+
+// suggestNoOutputPattern detects failures that produced no diagnostics at all.
+func suggestNoOutputPattern(f *nodeFailure) []string {
+	if f.stdout == "" && f.stderr == "" && len(f.errors) == 0 {
+		return []string{fmt.Sprintf("%s: No error details captured. Check the activity.jsonl "+
+			"for this node's events: grep %q activity.jsonl | tail -20", f.nodeID, f.nodeID)}
+	}
+	return nil
+}
+
+// suggestShellCommandPattern detects missing command or file errors in stderr.
+func suggestShellCommandPattern(f *nodeFailure) []string {
+	if strings.Contains(f.stderr, "command not found") || strings.Contains(f.stderr, "No such file or directory") {
+		return []string{fmt.Sprintf("%s: Shell command failed — check that the working directory "+
+			"and required tools exist before running", f.nodeID)}
+	}
+	return nil
+}
+
+// suggestGoTestPattern detects Go test failures in stdout.
+func suggestGoTestPattern(f *nodeFailure) []string {
+	if strings.Contains(f.stdout, "FAIL") && strings.Contains(f.stdout, "go test") {
+		return []string{fmt.Sprintf("%s: Go test failures — check if .ai/milestones/known_failures "+
+			"should include these tests for this milestone", f.nodeID)}
+	}
+	return nil
+}
+
+// suggestSuspiciouslyFastPattern detects non-tool nodes that completed too quickly.
+func suggestSuspiciouslyFastPattern(f *nodeFailure) []string {
+	if f.duration > 0 && f.duration < 50*time.Millisecond && f.handler != "tool" {
+		return []string{fmt.Sprintf("%s: Completed in %s — suspiciously fast. May indicate "+
+			"a configuration issue or missing handler", f.nodeID, formatElapsed(f.duration))}
+	}
+	return nil
 }

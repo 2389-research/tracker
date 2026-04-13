@@ -292,23 +292,36 @@ func extractUserBetaHeaders(req *llm.Request) []string {
 // parseBetaHeaderValue converts a beta_headers value (string, []string, or []any)
 // to a string slice.
 func parseBetaHeaderValue(beta any) []string {
-	var out []string
 	switch v := beta.(type) {
 	case string:
 		if v != "" {
-			out = append(out, v)
+			return []string{v}
 		}
 	case []string:
-		for _, s := range v {
-			if s != "" {
-				out = append(out, s)
-			}
-		}
+		return filterNonEmpty(v)
 	case []any:
-		for _, item := range v {
-			if s, ok := item.(string); ok && s != "" {
-				out = append(out, s)
-			}
+		return filterNonEmptyAny(v)
+	}
+	return nil
+}
+
+// filterNonEmpty returns a copy of ss with empty strings removed.
+func filterNonEmpty(ss []string) []string {
+	var out []string
+	for _, s := range ss {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// filterNonEmptyAny extracts non-empty strings from a []any slice.
+func filterNonEmptyAny(items []any) []string {
+	var out []string
+	for _, item := range items {
+		if s, ok := item.(string); ok && s != "" {
+			out = append(out, s)
 		}
 	}
 	return out

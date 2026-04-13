@@ -62,28 +62,29 @@ func (rm *RetryMiddleware) WrapComplete(next CompleteHandler) CompleteHandler {
 		if err == nil {
 			return resp, nil
 		}
-
-		for attempt := 0; attempt < rm.maxRetries; attempt++ {
-			if !isRetryable(err) {
-				return nil, err
-			}
-
-			delay := rm.backoffDelay(attempt, err)
-
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
-
-			resp, err = next(ctx, req)
-			if err == nil {
-				return resp, nil
-			}
-		}
-
-		return nil, err
+		return rm.retryLoop(ctx, req, next, err)
 	}
+}
+
+// retryLoop executes the retry attempts after an initial failure.
+func (rm *RetryMiddleware) retryLoop(ctx context.Context, req *Request, next CompleteHandler, firstErr error) (*Response, error) {
+	err := firstErr
+	for attempt := 0; attempt < rm.maxRetries; attempt++ {
+		if !isRetryable(err) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(rm.backoffDelay(attempt, err)):
+		}
+		resp, retryErr := next(ctx, req)
+		if retryErr == nil {
+			return resp, nil
+		}
+		err = retryErr
+	}
+	return nil, err
 }
 
 // isRetryable checks whether an error should be retried.

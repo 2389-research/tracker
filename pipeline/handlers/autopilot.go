@@ -305,19 +305,7 @@ func (a *AutopilotInterviewer) fallback(options []string, defaultOption string) 
 // LLM in a single prompt and parsing the structured JSON response.
 // Provider errors hard-fail per CLAUDE.md. Only parse failures retry once.
 func (a *AutopilotInterviewer) AskInterview(questions []Question, prev *InterviewResult) (*InterviewResult, error) {
-	prompt := buildInterviewPrompt(questions)
-
-	// Include previous answers so the LLM can build on them.
-	if prev != nil && len(prev.Questions) > 0 {
-		var prevSection strings.Builder
-		prevSection.WriteString("\nPreviously answered:\n")
-		for _, ans := range prev.Questions {
-			if ans.Answer != "" {
-				prevSection.WriteString(fmt.Sprintf("- %s: %s\n", ans.Text, ans.Answer))
-			}
-		}
-		prompt += prevSection.String()
-	}
+	prompt := buildInterviewPromptWithHistory(questions, prev)
 
 	req := &llm.Request{
 		Model: a.resolveModel(),
@@ -330,6 +318,31 @@ func (a *AutopilotInterviewer) AskInterview(questions []Question, prev *Intervie
 	temp := 0.1
 	req.Temperature = &temp
 
+	result, err := a.callInterviewLLM(req, questions)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// buildInterviewPromptWithHistory builds the interview prompt, appending prior answers if any.
+func buildInterviewPromptWithHistory(questions []Question, prev *InterviewResult) string {
+	prompt := buildInterviewPrompt(questions)
+	if prev == nil || len(prev.Questions) == 0 {
+		return prompt
+	}
+	var sb strings.Builder
+	sb.WriteString("\nPreviously answered:\n")
+	for _, ans := range prev.Questions {
+		if ans.Answer != "" {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", ans.Text, ans.Answer))
+		}
+	}
+	return prompt + sb.String()
+}
+
+// callInterviewLLM calls the LLM and retries once on parse failure.
+func (a *AutopilotInterviewer) callInterviewLLM(req *llm.Request, questions []Question) (*InterviewResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	resp, err := a.client.Complete(ctx, req)
 	cancel()
@@ -338,18 +351,20 @@ func (a *AutopilotInterviewer) AskInterview(questions []Question, prev *Intervie
 	}
 
 	result, parseErr := parseInterviewResponse(resp.Message.Text(), questions)
+	if parseErr == nil {
+		return result, nil
+	}
+
+	// Retry once on parse failure.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+	resp2, err2 := a.client.Complete(ctx2, req)
+	cancel2()
+	if err2 != nil {
+		return nil, fmt.Errorf("autopilot interview retry: %w", err2)
+	}
+	result, parseErr = parseInterviewResponse(resp2.Message.Text(), questions)
 	if parseErr != nil {
-		// Retry once on parse failure — LLM may produce valid JSON on second try.
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
-		resp2, err2 := a.client.Complete(ctx2, req)
-		cancel2()
-		if err2 != nil {
-			return nil, fmt.Errorf("autopilot interview retry: %w", err2)
-		}
-		result, parseErr = parseInterviewResponse(resp2.Message.Text(), questions)
-		if parseErr != nil {
-			return nil, fmt.Errorf("autopilot interview: %w", parseErr)
-		}
+		return nil, fmt.Errorf("autopilot interview: %w", parseErr)
 	}
 	return result, nil
 }

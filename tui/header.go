@@ -53,9 +53,20 @@ func (h *Header) SetWidth(w int) { h.width = w }
 func (h *Header) View() string {
 	elapsed := time.Since(h.startedAt).Truncate(time.Second)
 
+	left := h.buildLeftSegment()
+	right := h.buildRightSegment(elapsed)
+
+	gap := h.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + fmt.Sprintf("%*s", gap, "") + right
+}
+
+// buildLeftSegment constructs the pipeline name + run ID + mode tags portion.
+func (h *Header) buildLeftSegment() string {
 	left := Styles.Header.Render(h.pipelineName) + "  " + Styles.Muted.Render(h.runID)
 
-	// Mode tags (backend, autopilot persona)
 	tagStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("0")).
 		Background(lipgloss.Color("208")).
@@ -65,34 +76,29 @@ func (h *Header) View() string {
 		left += "  " + tagStyle.Render(h.backend)
 	}
 	if h.autopilot != "" {
-		apStyle := tagStyle.Background(lipgloss.Color("63"))
-		left += "  " + apStyle.Render("autopilot:"+h.autopilot)
+		left += "  " + tagStyle.Background(lipgloss.Color("63")).Render("autopilot:"+h.autopilot)
 	}
+	return left
+}
 
+// buildRightSegment constructs the elapsed time + token/cost portion.
+func (h *Header) buildRightSegment(elapsed time.Duration) string {
 	right := Styles.Muted.Render(formatDuration(elapsed))
-
-	if h.store != nil && h.store.Tokens != nil {
-		usage := h.store.Tokens.TotalUsage()
-		if usage.TotalTokens > 0 {
-			tokenStr := formatTokenCount(usage.TotalTokens) + "t"
-			right = Styles.Readout.Render(tokenStr) + "  " + right
-		}
-		if usage.EstimatedCost > 0 {
-			costLabel := fmt.Sprintf("$%.2f", usage.EstimatedCost)
-			// When running through claude-code (Max subscription), show as
-			// usage estimate rather than actual cost since Max is flat-rate.
-			if h.isClaudeCodeOnly() {
-				costLabel = fmt.Sprintf("~$%.2f usage", usage.EstimatedCost)
-			}
-			right = lipgloss.NewStyle().Foreground(ColorAmber).Render(costLabel) + "  " + right
-		}
+	if h.store == nil || h.store.Tokens == nil {
+		return right
 	}
-
-	gap := h.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
+	usage := h.store.Tokens.TotalUsage()
+	if usage.TotalTokens > 0 {
+		right = Styles.Readout.Render(formatTokenCount(usage.TotalTokens)+"t") + "  " + right
 	}
-	return left + fmt.Sprintf("%*s", gap, "") + right
+	if usage.EstimatedCost > 0 {
+		costLabel := fmt.Sprintf("$%.2f", usage.EstimatedCost)
+		if h.isClaudeCodeOnly() {
+			costLabel = fmt.Sprintf("~$%.2f usage", usage.EstimatedCost)
+		}
+		right = lipgloss.NewStyle().Foreground(ColorAmber).Render(costLabel) + "  " + right
+	}
+	return right
 }
 
 // isClaudeCodeOnly returns true if all token usage is from the claude-code provider.

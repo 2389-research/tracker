@@ -61,28 +61,7 @@ func (g *Graph) AddNode(n *Node) {
 	if n.Attrs == nil {
 		n.Attrs = make(map[string]string)
 	}
-	explicitType := n.Attrs["type"]
-	if explicitType != "" {
-		n.Handler = explicitType
-	} else if handler, ok := ShapeToHandler(n.Shape); ok {
-		n.Handler = handler
-	}
-	// Diamond nodes with a tool_command should use the tool handler
-	// regardless of shape (the generator sometimes uses diamond shape
-	// for tool verification nodes). Skip if handler was set explicitly
-	// via the type attribute to respect user intent.
-	if explicitType == "" && n.Handler == "conditional" && n.Attrs["tool_command"] != "" {
-		n.Handler = "tool"
-	}
-	// Diamond nodes with a prompt (but no tool_command) should use
-	// codergen (LLM evaluation) instead of the no-op conditional handler.
-	// Skip if handler was set explicitly via the type attribute.
-	if explicitType == "" && n.Shape == "diamond" && n.Handler == "conditional" && n.Attrs["prompt"] != "" {
-		n.Handler = "codergen"
-		if n.Attrs["auto_status"] == "" {
-			n.Attrs["auto_status"] = "true"
-		}
-	}
+	resolveNodeHandler(n)
 	g.Nodes[n.ID] = n
 
 	switch n.Shape {
@@ -90,6 +69,40 @@ func (g *Graph) AddNode(n *Node) {
 		g.StartNode = n.ID
 	case "Msquare":
 		g.ExitNode = n.ID
+	}
+}
+
+// resolveNodeHandler assigns n.Handler based on shape, explicit type, and diamond overrides.
+func resolveNodeHandler(n *Node) {
+	explicitType := n.Attrs["type"]
+	if explicitType != "" {
+		n.Handler = explicitType
+		return
+	}
+	if handler, ok := ShapeToHandler(n.Shape); ok {
+		n.Handler = handler
+	}
+	applyDiamondOverrides(n)
+}
+
+// applyDiamondOverrides adjusts the handler for diamond-shaped nodes that carry
+// a tool_command or prompt attribute. These are special cases where the DOT graph
+// generator uses the diamond shape but intends tool or codergen semantics.
+func applyDiamondOverrides(n *Node) {
+	if n.Handler != "conditional" {
+		return
+	}
+	// Diamond nodes with a tool_command should use the tool handler.
+	if n.Attrs["tool_command"] != "" {
+		n.Handler = "tool"
+		return
+	}
+	// Diamond nodes with a prompt (but no tool_command) should use codergen.
+	if n.Shape == "diamond" && n.Attrs["prompt"] != "" {
+		n.Handler = "codergen"
+		if n.Attrs["auto_status"] == "" {
+			n.Attrs["auto_status"] = "true"
+		}
 	}
 }
 

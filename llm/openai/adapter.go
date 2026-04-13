@@ -202,19 +202,7 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 		if emitProviderEvents {
 			ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: json.RawMessage(data)}
 		}
-		// When no SSE "event:" line precedes the data, extract the type
-		// from the JSON payload itself. Some servers (including the
-		// AttractorBench mock) omit SSE event lines and embed the type
-		// in the data object.
-		resolvedType := eventType
-		if resolvedType == "" {
-			var peek struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal([]byte(data), &peek) == nil && peek.Type != "" {
-				resolvedType = peek.Type
-			}
-		}
+		resolvedType := resolveSSEEventType(eventType, data)
 		a.handleSSEData(resolvedType, []byte(data), ch)
 		eventType = ""
 	}
@@ -222,6 +210,21 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: SSE scan error: %w", err)}
 	}
+}
+
+// resolveSSEEventType returns the SSE event type. When no "event:" header preceded
+// the data, it falls back to extracting the type from the JSON payload itself.
+func resolveSSEEventType(headerType, data string) string {
+	if headerType != "" {
+		return headerType
+	}
+	var peek struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal([]byte(data), &peek) == nil && peek.Type != "" {
+		return peek.Type
+	}
+	return ""
 }
 
 // isContextError returns true for context cancellation/deadline errors that

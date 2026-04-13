@@ -20,45 +20,31 @@ func parseFlags(args []string) (runConfig, error) {
 	return parseRunFlags(args, cfg)
 }
 
+// subcommandMap maps CLI arg strings to command modes. "list" is an alias for audit.
+var subcommandMap = map[string]commandMode{
+	"version":             modeVersion,
+	"--version":           modeVersion,
+	"list":                modeAudit,
+	string(modeDiagnose):  modeDiagnose,
+	string(modeDoctor):    modeDoctor,
+	string(modeSetup):     modeSetup,
+	string(modeValidate):  modeValidate,
+	string(modeSimulate):  modeSimulate,
+	string(modeAudit):     modeAudit,
+	string(modeWorkflows): modeWorkflows,
+	string(modeInit):      modeInit,
+	string(modeUpdate):    modeUpdate,
+}
+
 // parseSubcommand checks if the second argument is a known subcommand and
 // sets the config mode. Returns the mode and true if matched.
 func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
-	switch arg {
-	case "version", "--version":
-		cfg.mode = modeVersion
-		return modeVersion, true
-	case "--help", "-h", "help":
+	if arg == "--help" || arg == "-h" || arg == "help" {
 		return "", false // signal ErrHelp below
-	case "list":
-		cfg.mode = modeAudit
-		return modeAudit, true
-	case string(modeDiagnose):
-		cfg.mode = modeDiagnose
-		return modeDiagnose, true
-	case string(modeDoctor):
-		cfg.mode = modeDoctor
-		return modeDoctor, true
-	case string(modeSetup):
-		cfg.mode = modeSetup
-		return modeSetup, true
-	case string(modeValidate):
-		cfg.mode = modeValidate
-		return modeValidate, true
-	case string(modeSimulate):
-		cfg.mode = modeSimulate
-		return modeSimulate, true
-	case string(modeAudit):
-		cfg.mode = modeAudit
-		return modeAudit, true
-	case string(modeWorkflows):
-		cfg.mode = modeWorkflows
-		return modeWorkflows, true
-	case string(modeInit):
-		cfg.mode = modeInit
-		return modeInit, true
-	case string(modeUpdate):
-		cfg.mode = modeUpdate
-		return modeUpdate, true
+	}
+	if mode, ok := subcommandMap[arg]; ok {
+		cfg.mode = mode
+		return mode, true
 	}
 	return "", false
 }

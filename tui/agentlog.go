@@ -160,6 +160,15 @@ func (al *AgentLog) Init() tea.Cmd { return nil }
 
 // Update implements tea.Model.
 func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
+	if al.applyStreamMsg(msg) {
+		return nil
+	}
+	al.applyControlMsg(msg)
+	return nil
+}
+
+// applyStreamMsg handles LLM streaming messages. Returns true if the message was consumed.
+func (al *AgentLog) applyStreamMsg(msg tea.Msg) bool {
 	switch m := msg.(type) {
 	case MsgTextChunk:
 		al.appendText(m.NodeID, m.Text)
@@ -175,10 +184,7 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 		al.flushNode(m.NodeID)
 		al.addTaggedLine(m.NodeID, Styles.Error.Render("ERROR: "+m.Error), LineError)
 	case MsgLLMProviderRaw:
-		if al.verboseTrace {
-			al.flushNode(m.NodeID)
-			al.addLine(m.NodeID, Styles.DimText.Render(m.Data))
-		}
+		al.handleProviderRaw(m)
 	case MsgNodeFailed:
 		al.flushNode(m.NodeID)
 		al.addTaggedLine(m.NodeID, Styles.Error.Render("FAILED: "+m.Error), LineError)
@@ -189,6 +195,15 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	case MsgNodeCompleted:
 		al.flushNode(m.NodeID)
 		delete(al.streams, m.NodeID)
+	default:
+		return false
+	}
+	return true
+}
+
+// applyControlMsg handles UI control messages (verbosity, focus, expand).
+func (al *AgentLog) applyControlMsg(msg tea.Msg) {
+	switch m := msg.(type) {
 	case MsgToggleExpand:
 		al.expanded = !al.expanded
 	case MsgCycleVerbosity:
@@ -198,7 +213,14 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	case MsgClearFocus:
 		al.SetFocusNodeID("")
 	}
-	return nil
+}
+
+// handleProviderRaw logs raw provider events when verbose trace is enabled.
+func (al *AgentLog) handleProviderRaw(m MsgLLMProviderRaw) {
+	if al.verboseTrace {
+		al.flushNode(m.NodeID)
+		al.addLine(m.NodeID, Styles.DimText.Render(m.Data))
+	}
 }
 
 // appendText processes streaming LLM text for a specific node.
@@ -302,6 +324,11 @@ func (al *AgentLog) styleLine(s *nodeStream, line string) string {
 		return Styles.DimText.Render(line)
 	}
 
+	return styleMarkdownLine(trimmed, line)
+}
+
+// styleMarkdownLine applies markdown-aware styling for a non-code-block line.
+func styleMarkdownLine(trimmed, line string) string {
 	// Headers.
 	if strings.HasPrefix(trimmed, "# ") {
 		return lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Render(trimmed)
@@ -317,7 +344,7 @@ func (al *AgentLog) styleLine(s *nodeStream, line string) string {
 	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
 		return Styles.PrimaryText.Render(line)
 	}
-	if len(trimmed) > 2 && trimmed[0] >= '0' && trimmed[0] <= '9' && (trimmed[1] == '.' || (len(trimmed) > 2 && trimmed[2] == '.')) {
+	if isNumberedListItem(trimmed) {
 		return Styles.PrimaryText.Render(line)
 	}
 
@@ -326,6 +353,17 @@ func (al *AgentLog) styleLine(s *nodeStream, line string) string {
 	}
 
 	return Styles.PrimaryText.Render(line)
+}
+
+// isNumberedListItem returns true if the line looks like "1. " or "12. ".
+func isNumberedListItem(trimmed string) bool {
+	if len(trimmed) < 3 {
+		return false
+	}
+	if trimmed[0] < '0' || trimmed[0] > '9' {
+		return false
+	}
+	return trimmed[1] == '.' || (len(trimmed) > 2 && trimmed[2] == '.')
 }
 
 // termLines counts how many terminal rows a styled string occupies.

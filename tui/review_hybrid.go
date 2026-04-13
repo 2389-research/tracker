@@ -42,19 +42,43 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 		height = 24
 	}
 
-	// Render full content via glamour — both label and context.
-	vpWidth := width - 4
-	var md string
-	if label != "" && context != "" {
-		md = label + "\n\n---\n\n" + context
-	} else if label != "" {
-		md = label
-	} else {
-		md = context
-	}
-	rendered := renderReviewHybridMarkdown(md, vpWidth)
+	rendered := renderReviewHybridMarkdown(buildReviewHybridMarkdown(label, context), width-4)
+	ta := buildReviewHybridTextarea(width)
 
-	// Textarea for "other" freeform input.
+	radioHeight := len(labels) + 5 // labels + other + hint + divider + blank
+	vpHeight := height - radioHeight - 1
+	if vpHeight < 5 {
+		vpHeight = 5
+	}
+
+	vp := viewport.New(width-2, vpHeight)
+	vp.SetContent(rendered)
+	vp.Style = lipgloss.NewStyle().Padding(0, 1)
+
+	return &ReviewHybridContent{
+		viewport: vp,
+		labels:   labels,
+		cursor:   findDefaultCursor(labels, defaultLabel),
+		textarea: ta,
+		replyCh:  replyCh,
+		width:    width,
+		height:   height,
+	}
+}
+
+// buildReviewHybridMarkdown combines label and context into a single markdown string.
+func buildReviewHybridMarkdown(label, context string) string {
+	if label != "" && context != "" {
+		return label + "\n\n---\n\n" + context
+	}
+	if label != "" {
+		return label
+	}
+	return context
+}
+
+// buildReviewHybridTextarea creates and configures the "other" textarea.
+func buildReviewHybridTextarea(width int) textarea.Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type specific feedback or instructions..."
 	ta.ShowLineNumbers = false
@@ -67,37 +91,20 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 	ta.FocusedStyle.Base = lipgloss.NewStyle().BorderForeground(ColorLabel)
 	ta.BlurredStyle.Base = ta.FocusedStyle.Base
 	ta.Blur()
+	return ta
+}
 
-	// Radio options + other + hints + divider + textarea (collapsed).
-	radioHeight := len(labels) + 5 // labels + other + hint + divider + blank
-	vpHeight := height - radioHeight - 1
-	if vpHeight < 5 {
-		vpHeight = 5
+// findDefaultCursor returns the cursor index for the given default label (case-insensitive).
+func findDefaultCursor(labels []string, defaultLabel string) int {
+	if defaultLabel == "" {
+		return 0
 	}
-
-	vp := viewport.New(width-2, vpHeight)
-	vp.SetContent(rendered)
-	vp.Style = lipgloss.NewStyle().Padding(0, 1)
-
-	cursor := 0
-	if defaultLabel != "" {
-		for i, l := range labels {
-			if strings.EqualFold(l, defaultLabel) {
-				cursor = i
-				break
-			}
+	for i, l := range labels {
+		if strings.EqualFold(l, defaultLabel) {
+			return i
 		}
 	}
-
-	return &ReviewHybridContent{
-		viewport: vp,
-		labels:   labels,
-		cursor:   cursor,
-		textarea: ta,
-		replyCh:  replyCh,
-		width:    width,
-		height:   height,
-	}
+	return 0
 }
 
 // SetSize updates dimensions.

@@ -130,29 +130,7 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 	truncated := false
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if info.IsDir() {
-			return skipHiddenDir(info, path, root)
-		}
-		if isBinaryExtension(info.Name()) {
-			return nil
-		}
-		fileMatches, fileTruncated, err := t.searchFile(path, re)
-		if err != nil {
-			return nil // skip unreadable files
-		}
-		matches = append(matches, fileMatches...)
-		if fileTruncated || len(matches) >= maxGrepResults {
-			truncated = true
-			matches = matches[:min(len(matches), maxGrepResults)]
-			return fmt.Errorf("limit reached")
-		}
-		return nil
+		return t.walkEntry(ctx, root, path, info, err, re, &matches, &truncated)
 	})
 
 	// "limit reached" is our sentinel, not a real error.
@@ -161,6 +139,33 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 	}
 
 	return matches, truncated, nil
+}
+
+// walkEntry processes one entry during the filepath.Walk of searchDir.
+func (t *GrepSearchTool) walkEntry(ctx context.Context, root, path string, info os.FileInfo, err error, re *regexp.Regexp, matches *[]string, truncated *bool) error {
+	if err != nil {
+		return nil // skip unreadable entries
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if info.IsDir() {
+		return skipHiddenDir(info, path, root)
+	}
+	if isBinaryExtension(info.Name()) {
+		return nil
+	}
+	fileMatches, fileTruncated, err := t.searchFile(path, re)
+	if err != nil {
+		return nil // skip unreadable files
+	}
+	*matches = append(*matches, fileMatches...)
+	if fileTruncated || len(*matches) >= maxGrepResults {
+		*truncated = true
+		*matches = (*matches)[:min(len(*matches), maxGrepResults)]
+		return fmt.Errorf("limit reached")
+	}
+	return nil
 }
 
 // skipHiddenDir returns filepath.SkipDir for hidden directories (except the root).

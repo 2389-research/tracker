@@ -66,7 +66,6 @@ func lintDIP111(g *Graph) []string {
 func lintDIP102(g *Graph) []string {
 	var warnings []string
 
-	// Build adjacency map of outgoing edges per node
 	outgoing := make(map[string][]*Edge)
 	for _, edge := range g.Edges {
 		outgoing[edge.From] = append(outgoing[edge.From], edge)
@@ -76,25 +75,27 @@ func lintDIP102(g *Graph) []string {
 		if len(edges) == 0 {
 			continue
 		}
-
-		hasConditional := false
-		hasUnconditional := false
-		for _, edge := range edges {
-			if edge.Condition != "" {
-				hasConditional = true
-			} else {
-				hasUnconditional = true
-			}
-		}
-
-		// Warn if node has conditional edges but no unconditional fallback
-		if hasConditional && !hasUnconditional {
+		if hasConditionalWithoutFallback(edges) {
 			warnings = append(warnings, fmt.Sprintf(
 				"warning[DIP102]: node %q has conditional edges but no default/unconditional edge", nodeID))
 		}
 	}
 
 	return warnings
+}
+
+// hasConditionalWithoutFallback returns true when edges contain conditional edges but no unconditional one.
+func hasConditionalWithoutFallback(edges []*Edge) bool {
+	hasConditional := false
+	hasUnconditional := false
+	for _, edge := range edges {
+		if edge.Condition != "" {
+			hasConditional = true
+		} else {
+			hasUnconditional = true
+		}
+	}
+	return hasConditional && !hasUnconditional
 }
 
 // lintDIP104 checks for unbounded retry loops.
@@ -298,25 +299,30 @@ func lintDIP112(g *Graph) []string {
 	reservedKeys := reservedContextKeys()
 
 	for _, node := range g.Nodes {
-		reads := node.Attrs["reads"]
-		if reads == "" {
-			continue
-		}
-
-		upstreamKeys := collectUpstreamKeys(g, node.ID, nodeWrites)
-
-		for _, key := range strings.Split(reads, ",") {
-			key = strings.TrimSpace(key)
-			if key == "" || reservedKeys[key] {
-				continue
-			}
-			if !upstreamKeys[key] {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP112]: node %q reads key %q not produced by upstream writes", node.ID, key))
-			}
-		}
+		warnings = append(warnings, checkNodeReadKeys(g, node, nodeWrites, reservedKeys)...)
 	}
 
+	return warnings
+}
+
+// checkNodeReadKeys validates that all keys declared in a node's "reads" attr are produced upstream.
+func checkNodeReadKeys(g *Graph, node *Node, nodeWrites map[string]map[string]bool, reservedKeys map[string]bool) []string {
+	reads := node.Attrs["reads"]
+	if reads == "" {
+		return nil
+	}
+	upstreamKeys := collectUpstreamKeys(g, node.ID, nodeWrites)
+	var warnings []string
+	for _, key := range strings.Split(reads, ",") {
+		key = strings.TrimSpace(key)
+		if key == "" || reservedKeys[key] {
+			continue
+		}
+		if !upstreamKeys[key] {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP112]: node %q reads key %q not produced by upstream writes", node.ID, key))
+		}
+	}
 	return warnings
 }
 

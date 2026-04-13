@@ -67,40 +67,45 @@ func (t *EditTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 	content, readErr := t.env.ReadFile(ctx, params.Path)
 
-	// When old_string is empty and the file doesn't exist, create a new file.
-	// When old_string is empty and the file does exist, return an error.
-	// Non-existence read errors trigger creation; other read errors are surfaced.
 	if params.OldString == "" {
-		if readErr != nil {
-			if !errors.Is(readErr, os.ErrNotExist) {
-				return "", fmt.Errorf("cannot read file: %w", readErr)
-			}
-			if err := t.env.WriteFile(ctx, params.Path, params.NewString); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("created %s", params.Path), nil
-		}
-		return "", fmt.Errorf("old_string is empty but %s already exists; provide the text to replace", params.Path)
+		return t.handleCreateOrReject(ctx, params.Path, params.NewString, readErr)
 	}
 
+	return t.handleReplace(ctx, params.Path, params.OldString, params.NewString, content, readErr)
+}
+
+// handleCreateOrReject handles the case where old_string is empty:
+// creates a new file if it doesn't exist, or returns an error if it does.
+func (t *EditTool) handleCreateOrReject(ctx context.Context, path, newString string, readErr error) (string, error) {
+	if readErr != nil {
+		if !errors.Is(readErr, os.ErrNotExist) {
+			return "", fmt.Errorf("cannot read file: %w", readErr)
+		}
+		if err := t.env.WriteFile(ctx, path, newString); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("created %s", path), nil
+	}
+	return "", fmt.Errorf("old_string is empty but %s already exists; provide the text to replace", path)
+}
+
+// handleReplace performs a unique string replacement in an existing file.
+func (t *EditTool) handleReplace(ctx context.Context, path, oldString, newString, content string, readErr error) (string, error) {
 	if readErr != nil {
 		return "", fmt.Errorf("cannot read file: %w", readErr)
 	}
-
-	count := strings.Count(content, params.OldString)
+	count := strings.Count(content, oldString)
 	if count == 0 {
-		return "", fmt.Errorf("old_string not found in %s", params.Path)
+		return "", fmt.Errorf("old_string not found in %s", path)
 	}
 	if count > 1 {
-		return "", fmt.Errorf("old_string found %d times in %s (must be unique)", count, params.Path)
+		return "", fmt.Errorf("old_string found %d times in %s (must be unique)", count, path)
 	}
-
-	newContent := strings.Replace(content, params.OldString, params.NewString, 1)
-	if err := t.env.WriteFile(ctx, params.Path, newContent); err != nil {
+	newContent := strings.Replace(content, oldString, newString, 1)
+	if err := t.env.WriteFile(ctx, path, newContent); err != nil {
 		return "", err
 	}
-
-	return fmt.Sprintf("edited %s", params.Path), nil
+	return fmt.Sprintf("edited %s", path), nil
 }
 
 // CachePolicy declares that edit is mutating and invalidates caches.

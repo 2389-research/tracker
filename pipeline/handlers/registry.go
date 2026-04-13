@@ -176,9 +176,16 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	// Parallel handler needs the graph and registry for branch dispatch.
 	registry.Register(NewParallelHandler(graph, registry, cfg.pipelineEvents))
 
-	// Codergen: register when we have an LLM client OR an external backend
-	// that doesn't need one (claude-code, acp). External backends spawn
-	// their own subprocesses and don't use the native LLM client.
+	registerCodergenHandler(registry, cfg, graph)
+	registerToolHandler(registry, cfg)
+	registerHumanHandler(registry, cfg, graph)
+	registerSubgraphHandler(registry, cfg, opts)
+
+	return registry
+}
+
+// registerCodergenHandler registers the codergen (LLM agent) handler or a stub.
+func registerCodergenHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, graph *pipeline.Graph) {
 	if cfg.llmClient != nil || cfg.defaultBackend == "claude-code" || cfg.defaultBackend == "acp" {
 		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir, WithGraphAttrs(graph.Attrs))
 		handler.env = cfg.execEnv
@@ -192,15 +199,19 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	} else if cfg.codergenFunc != nil {
 		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})
 	}
+}
 
-	// Tool: prefer real handler, fall back to stub.
+// registerToolHandler registers the tool handler or a stub.
+func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig) {
 	if cfg.execEnv != nil {
 		registry.Register(NewToolHandler(cfg.execEnv))
 	} else if cfg.toolExecFunc != nil {
 		registry.Register(&funcHandler{name: "tool", fn: cfg.toolExecFunc})
 	}
+}
 
-	// Human: prefer real handler, fall back to stub.
+// registerHumanHandler registers the human gate handler or a stub.
+func registerHumanHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, graph *pipeline.Graph) {
 	if cfg.interviewer != nil {
 		humanGraph := cfg.graph
 		if humanGraph == nil {
@@ -210,16 +221,16 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	} else if cfg.humanCallback != nil {
 		registry.Register(&funcHandler{name: "wait.human", fn: cfg.humanCallback})
 	}
+}
 
-	// Subgraph handler: register if subgraphs are provided.
-	if cfg.subgraphs != nil && len(cfg.subgraphs) > 0 {
+// registerSubgraphHandler registers the subgraph handler if subgraphs are provided.
+func registerSubgraphHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, opts []RegistryOption) {
+	if len(cfg.subgraphs) > 0 {
 		factory := NewRegistryFactory(opts...)
 		registry.Register(pipeline.NewSubgraphHandler(
 			cfg.subgraphs, registry, cfg.pipelineEvents, factory,
 		))
 	}
-
-	return registry
 }
 
 // funcHandler wraps a HandlerFunc into a pipeline.Handler for use in the registry.

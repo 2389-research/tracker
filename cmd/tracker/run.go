@@ -487,30 +487,35 @@ func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client,
 		return &handlers.AutoApproveFreeformInterviewer{}
 	}
 	if cfg.persona != "" {
-		persona, err := handlers.ParsePersona(cfg.persona)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %v, falling back to auto-approve\n", err)
-			return &handlers.AutoApproveFreeformInterviewer{}
-		}
-		// Use claude-code autopilot when backend is claude-code (avoids API key requirement).
-		if backend == "claude-code" {
-			ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(persona)
-			if ccErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
-			} else {
-				return ccAutopilot
-			}
-		}
-		if llmClient == nil {
-			fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to auto-approve\n")
-			return &handlers.AutoApproveFreeformInterviewer{}
-		}
-		return handlers.NewAutopilotInterviewer(llmClient, persona)
+		return chooseAutopilotInterviewer(cfg.persona, llmClient, backend)
 	}
 	if isTerminal {
 		return tui.NewMode1Interviewer()
 	}
 	return handlers.NewConsoleInterviewer()
+}
+
+// chooseAutopilotInterviewer resolves the best FreeformInterviewer for autopilot mode.
+// Prefers claude-code subprocess when backend matches, falls back to native LLM client.
+func chooseAutopilotInterviewer(persona string, llmClient *llm.Client, backend string) handlers.FreeformInterviewer {
+	p, err := handlers.ParsePersona(persona)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v, falling back to auto-approve\n", err)
+		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	if backend == "claude-code" {
+		ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(p)
+		if ccErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
+		} else {
+			return ccAutopilot
+		}
+	}
+	if llmClient == nil {
+		fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to auto-approve\n")
+		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	return handlers.NewAutopilotInterviewer(llmClient, p)
 }
 
 // configureTUIHeader sets backend and autopilot tags on the TUI header bar.

@@ -39,31 +39,35 @@ func aggregateSessionStats(entries []pipeline.TraceEntry) aggregatedStats {
 		if entry.Stats == nil {
 			continue
 		}
-		s := entry.Stats
-		agg.TotalTurns += s.Turns
-		agg.TotalToolCalls += s.TotalToolCalls
-		agg.Compactions += s.Compactions
-		agg.TotalInputTokens += s.InputTokens
-		agg.TotalOutputTokens += s.OutputTokens
-		agg.TotalTokens += s.TotalTokens
-		agg.TotalCostUSD += s.CostUSD
-		for name, count := range s.ToolCalls {
-			agg.ToolCallsByName[name] += count
-		}
-		for _, f := range s.FilesCreated {
-			if !seenCreated[f] {
-				seenCreated[f] = true
-				agg.FilesCreated = append(agg.FilesCreated, f)
-			}
-		}
-		for _, f := range s.FilesModified {
-			if !seenModified[f] {
-				seenModified[f] = true
-				agg.FilesModified = append(agg.FilesModified, f)
-			}
-		}
+		accumulateStatsEntry(&agg, entry.Stats, seenCreated, seenModified)
 	}
 	return agg
+}
+
+// accumulateStatsEntry merges one session stats entry into the aggregate.
+func accumulateStatsEntry(agg *aggregatedStats, s *pipeline.SessionStats, seenCreated, seenModified map[string]bool) {
+	agg.TotalTurns += s.Turns
+	agg.TotalToolCalls += s.TotalToolCalls
+	agg.Compactions += s.Compactions
+	agg.TotalInputTokens += s.InputTokens
+	agg.TotalOutputTokens += s.OutputTokens
+	agg.TotalTokens += s.TotalTokens
+	agg.TotalCostUSD += s.CostUSD
+	for name, count := range s.ToolCalls {
+		agg.ToolCallsByName[name] += count
+	}
+	appendUnique(&agg.FilesCreated, s.FilesCreated, seenCreated)
+	appendUnique(&agg.FilesModified, s.FilesModified, seenModified)
+}
+
+// appendUnique appends items from src to dst, skipping duplicates tracked in seen.
+func appendUnique(dst *[]string, src []string, seen map[string]bool) {
+	for _, f := range src {
+		if !seen[f] {
+			seen[f] = true
+			*dst = append(*dst, f)
+		}
+	}
 }
 
 // formatToolBreakdown returns a parenthesized breakdown like "(bash: 198, write: 67)".

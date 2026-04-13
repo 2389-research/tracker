@@ -280,21 +280,10 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 
 	for evt := range adapter.Stream(ctx, streamReq) {
 		if evt.Err != nil {
-			// Flush any buffered trace output before returning the error.
-			for _, obs := range observers {
-				if flusher, ok := obs.(interface{ Flush() }); ok {
-					flusher.Flush()
-				}
-			}
+			flushTraceObservers(observers)
 			return nil, evt.Err
 		}
-
-		before := len(traceBuilder.events)
-		traceBuilder.Process(evt)
-		for _, traceEvt := range traceBuilder.events[before:] {
-			notifyTraceObservers(observers, traceEvt)
-		}
-
+		processAndNotify(traceBuilder, observers, evt)
 		acc.Process(evt)
 	}
 
@@ -303,6 +292,24 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 	resp.Model = req.Model
 	resp.Latency = time.Since(start)
 	return &resp, nil
+}
+
+// flushTraceObservers flushes all observers that implement a Flush method.
+func flushTraceObservers(observers []TraceObserver) {
+	for _, obs := range observers {
+		if flusher, ok := obs.(interface{ Flush() }); ok {
+			flusher.Flush()
+		}
+	}
+}
+
+// processAndNotify processes a stream event through the trace builder and notifies observers.
+func processAndNotify(traceBuilder *TraceBuilder, observers []TraceObserver, evt StreamEvent) {
+	before := len(traceBuilder.events)
+	traceBuilder.Process(evt)
+	for _, traceEvt := range traceBuilder.events[before:] {
+		notifyTraceObservers(observers, traceEvt)
+	}
 }
 
 // Stream sends a streaming request to the resolved provider adapter.

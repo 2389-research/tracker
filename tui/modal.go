@@ -171,24 +171,35 @@ func (c *ChoiceContent) Update(msg tea.Msg) tea.Cmd {
 			c.cursor++
 		}
 	case tea.KeyEnter:
-		if len(c.choices) > 0 {
-			c.done = true
-			selected := c.choices[c.cursor]
-			if c.replyCh != nil {
-				c.replyCh <- selected
-				c.replyCh = nil
-			}
-			return func() tea.Msg { return MsgModalDismiss{} }
-		}
+		return c.confirmChoice()
 	case tea.KeyEscape:
-		c.done = true
-		if c.replyCh != nil {
-			close(c.replyCh)
-			c.replyCh = nil
-		}
-		return func() tea.Msg { return MsgModalDismiss{} }
+		return c.cancelChoice()
 	}
 	return nil
+}
+
+// confirmChoice selects the current choice and dismisses the modal.
+func (c *ChoiceContent) confirmChoice() tea.Cmd {
+	if len(c.choices) == 0 {
+		return nil
+	}
+	c.done = true
+	selected := c.choices[c.cursor]
+	if c.replyCh != nil {
+		c.replyCh <- selected
+		c.replyCh = nil
+	}
+	return func() tea.Msg { return MsgModalDismiss{} }
+}
+
+// cancelChoice cancels the choice and dismisses the modal.
+func (c *ChoiceContent) cancelChoice() tea.Cmd {
+	c.done = true
+	if c.replyCh != nil {
+		close(c.replyCh)
+		c.replyCh = nil
+	}
+	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
 // Cancel implements Cancellable for external cancellation (e.g., Ctrl+C).

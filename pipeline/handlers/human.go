@@ -479,54 +479,60 @@ func (h *HumanHandler) Name() string { return "wait.human" }
 func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	prompt := h.resolveHumanPrompt(node, pctx)
 
-	var outcome pipeline.Outcome
-	var err error
-
-	if node.Attrs["mode"] == "interview" {
-		timeout := parseHumanTimeout(node)
-		outcome, err = withTimeoutOutcome(timeout, func() (pipeline.Outcome, error) {
-			return h.executeInterview(ctx, node, pctx)
-		})
-	} else if node.Attrs["mode"] == "freeform" {
-		outcome, err = h.executeFreeform(node, prompt)
-	} else if node.Attrs["mode"] == "yes_no" {
-		outcome, err = h.executeYesNo(node, prompt)
-	} else {
-		outcome, err = h.executeChoice(node, prompt)
-	}
+	outcome, err := h.dispatchHumanMode(ctx, node, pctx, prompt)
 
 	if errors.Is(err, errHumanTimeout) {
-		action := node.Attrs["timeout_action"]
-		if action == "" {
-			action = "default"
-		}
-		switch action {
-		case "fail":
-			return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
-				pipeline.ContextKeyHumanResponse: "timed out",
-			}}, nil
-		default:
-			def := node.Attrs["default_choice"]
-			if def == "" {
-				def = node.Attrs["default"]
-			}
-			if def == "" {
-				return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
-					pipeline.ContextKeyHumanResponse: "timed out (no default)",
-				}}, nil
-			}
-			return pipeline.Outcome{
-				Status:         pipeline.OutcomeSuccess,
-				PreferredLabel: def,
-				ContextUpdates: map[string]string{
-					pipeline.ContextKeyHumanResponse:            def,
-					pipeline.ContextKeyResponsePrefix + node.ID: def,
-				},
-			}, nil
-		}
+		return h.handleHumanTimeout(node), nil
 	}
 
 	return outcome, err
+}
+
+// dispatchHumanMode routes to the appropriate human input handler based on the node mode.
+func (h *HumanHandler) dispatchHumanMode(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) (pipeline.Outcome, error) {
+	switch node.Attrs["mode"] {
+	case "interview":
+		timeout := parseHumanTimeout(node)
+		return withTimeoutOutcome(timeout, func() (pipeline.Outcome, error) {
+			return h.executeInterview(ctx, node, pctx)
+		})
+	case "freeform":
+		return h.executeFreeform(node, prompt)
+	case "yes_no":
+		return h.executeYesNo(node, prompt)
+	default:
+		return h.executeChoice(node, prompt)
+	}
+}
+
+// handleHumanTimeout returns the appropriate outcome when a human gate times out.
+func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome {
+	action := node.Attrs["timeout_action"]
+	if action == "" {
+		action = "default"
+	}
+	if action == "fail" {
+		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+			pipeline.ContextKeyHumanResponse: "timed out",
+		}}
+	}
+	def := node.Attrs["default_choice"]
+	if def == "" {
+		def = node.Attrs["default"]
+	}
+	if def == "" {
+		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+			pipeline.ContextKeyHumanResponse: "timed out (no default)",
+		}}
+	}
+	return pipeline.Outcome{
+		Status:         pipeline.OutcomeSuccess,
+		PreferredLabel: def,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyHumanResponse:            def,
+			pipeline.ContextKeyResponsePrefix + node.ID: def,
+		},
+	}
 }
 
 // resolveHumanPrompt builds the full prompt with variable expansion and last response context.

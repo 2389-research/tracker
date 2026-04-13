@@ -216,12 +216,25 @@ func (nl *NodeList) autoScroll(nodes []NodeEntry, lines []indexedLine) {
 // then the first running node, or -1 if neither is found.
 func (nl *NodeList) findScrollTarget(nodes []NodeEntry, lines []indexedLine) int {
 	if nl.selectedIdx >= 0 {
-		for i, l := range lines {
-			if l.nodeIdx == nl.selectedIdx {
-				return i
-			}
+		if i := findLineForNodeIdx(lines, nl.selectedIdx); i >= 0 {
+			return i
 		}
 	}
+	return findFirstRunningNodeLine(nl, nodes, lines)
+}
+
+// findLineForNodeIdx returns the first line index matching nodeIdx, or -1.
+func findLineForNodeIdx(lines []indexedLine, nodeIdx int) int {
+	for i, l := range lines {
+		if l.nodeIdx == nodeIdx {
+			return i
+		}
+	}
+	return -1
+}
+
+// findFirstRunningNodeLine returns the line index of the first running node, or -1.
+func findFirstRunningNodeLine(nl *NodeList, nodes []NodeEntry, lines []indexedLine) int {
 	for i, l := range lines {
 		if l.nodeIdx >= 0 && l.nodeIdx < len(nodes) {
 			if nl.store.NodeStatus(nodes[l.nodeIdx].ID) == NodeRunning {

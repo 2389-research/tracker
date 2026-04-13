@@ -72,69 +72,76 @@ func (h *acpClientHandler) SessionUpdate(_ context.Context, n acp.SessionNotific
 
 	switch {
 	case u.AgentMessageChunk != nil:
-		text := extractContentText(u.AgentMessageChunk.Content)
-		if text != "" {
-			h.mu.Lock()
-			h.textParts = append(h.textParts, text)
-			h.mu.Unlock()
-			h.safeEmit(agent.Event{
-				Type:      agent.EventTextDelta,
-				Timestamp: now,
-				Text:      text,
-			})
-		}
-
+		h.handleMessageChunk(u.AgentMessageChunk, now)
 	case u.AgentThoughtChunk != nil:
-		text := extractContentText(u.AgentThoughtChunk.Content)
-		if text != "" {
-			h.safeEmit(agent.Event{
-				Type:      agent.EventLLMReasoning,
-				Timestamp: now,
-				Text:      text,
-			})
-		}
-
+		h.handleThoughtChunk(u.AgentThoughtChunk, now)
 	case u.ToolCall != nil:
-		tc := u.ToolCall
-		h.mu.Lock()
-		h.toolNames[string(tc.ToolCallId)] = tc.Title
-		h.toolCount++
-		h.mu.Unlock()
-		h.safeEmit(agent.Event{
-			Type:      agent.EventToolCallStart,
-			Timestamp: now,
-			ToolName:  tc.Title,
-			ToolInput: formatRawInput(tc.RawInput),
-		})
-
+		h.handleToolCallStart(u.ToolCall, now)
 	case u.ToolCallUpdate != nil:
-		tc := u.ToolCallUpdate
-		h.mu.Lock()
-		name := h.toolNames[string(tc.ToolCallId)]
-		h.mu.Unlock()
-
-		if tc.Status != nil && (*tc.Status == acp.ToolCallStatusCompleted || *tc.Status == acp.ToolCallStatusFailed) {
-			evt := agent.Event{
-				Type:      agent.EventToolCallEnd,
-				Timestamp: now,
-				ToolName:  name,
-			}
-			output := extractToolCallOutput(tc.Content, tc.RawOutput)
-			if tc.Status != nil && *tc.Status == acp.ToolCallStatusFailed {
-				evt.ToolError = output
-			} else {
-				evt.ToolOutput = output
-			}
-			h.safeEmit(evt)
-		}
-
+		h.handleToolCallUpdate(u.ToolCallUpdate, now)
 	case u.Plan != nil:
 		// Plan updates are informational — no agent.Event equivalent.
-
 	default:
 		// AvailableCommandsUpdate, CurrentModeUpdate, UserMessageChunk — no mapping needed.
 	}
 	return nil
+}
+
+// handleMessageChunk processes an agent message text chunk.
+func (h *acpClientHandler) handleMessageChunk(chunk *acp.SessionUpdateAgentMessageChunk, now time.Time) {
+	text := extractContentText(chunk.Content)
+	if text == "" {
+		return
+	}
+	h.mu.Lock()
+	h.textParts = append(h.textParts, text)
+	h.mu.Unlock()
+	h.safeEmit(agent.Event{Type: agent.EventTextDelta, Timestamp: now, Text: text})
+}
+
+// handleThoughtChunk processes an agent reasoning/thought chunk.
+func (h *acpClientHandler) handleThoughtChunk(chunk *acp.SessionUpdateAgentThoughtChunk, now time.Time) {
+	text := extractContentText(chunk.Content)
+	if text != "" {
+		h.safeEmit(agent.Event{Type: agent.EventLLMReasoning, Timestamp: now, Text: text})
+	}
+}
+
+// handleToolCallStart processes a new tool call notification.
+func (h *acpClientHandler) handleToolCallStart(tc *acp.SessionUpdateToolCall, now time.Time) {
+	h.mu.Lock()
+	h.toolNames[string(tc.ToolCallId)] = tc.Title
+	h.toolCount++
+	h.mu.Unlock()
+	h.safeEmit(agent.Event{
+		Type:      agent.EventToolCallStart,
+		Timestamp: now,
+		ToolName:  tc.Title,
+		ToolInput: formatRawInput(tc.RawInput),
+	})
+}
+
+// handleToolCallUpdate processes a tool call status update.
+func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, now time.Time) {
+	if tc.Status == nil {
+		return
+	}
+	status := *tc.Status
+	if status != acp.ToolCallStatusCompleted && status != acp.ToolCallStatusFailed {
+		return
+	}
+	h.mu.Lock()
+	name := h.toolNames[string(tc.ToolCallId)]
+	h.mu.Unlock()
+
+	evt := agent.Event{Type: agent.EventToolCallEnd, Timestamp: now, ToolName: name}
+	output := extractToolCallOutput(tc.Content, tc.RawOutput)
+	if status == acp.ToolCallStatusFailed {
+		evt.ToolError = output
+	} else {
+		evt.ToolOutput = output
+	}
+	h.safeEmit(evt)
 }
 
 // RequestPermission auto-approves all permission requests by selecting the

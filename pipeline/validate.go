@@ -295,20 +295,31 @@ func validateEdgeLabelConsistency(g *Graph, ve *ValidationError) {
 		if n.Shape != "diamond" {
 			continue
 		}
-		outgoing := g.OutgoingEdges(n.ID)
-		if len(outgoing) < 2 {
-			continue
-		}
-		labeled := 0
-		for _, e := range outgoing {
-			if e.Label != "" {
-				labeled++
-			}
-		}
-		if labeled > 0 && labeled < len(outgoing) {
-			ve.addWarning(fmt.Sprintf("conditional node %q has inconsistent edge label usage (%d/%d labeled)", n.ID, labeled, len(outgoing)))
+		checkNodeEdgeLabelConsistency(g, n, ve)
+	}
+}
+
+// checkNodeEdgeLabelConsistency checks a single diamond node for inconsistent edge label usage.
+func checkNodeEdgeLabelConsistency(g *Graph, n *Node, ve *ValidationError) {
+	outgoing := g.OutgoingEdges(n.ID)
+	if len(outgoing) < 2 {
+		return
+	}
+	labeled := countLabeledEdges(outgoing)
+	if labeled > 0 && labeled < len(outgoing) {
+		ve.addWarning(fmt.Sprintf("conditional node %q has inconsistent edge label usage (%d/%d labeled)", n.ID, labeled, len(outgoing)))
+	}
+}
+
+// countLabeledEdges returns the number of edges with a non-empty label.
+func countLabeledEdges(edges []*Edge) int {
+	count := 0
+	for _, e := range edges {
+		if e.Label != "" {
+			count++
 		}
 	}
+	return count
 }
 
 // AutoFix applies automatic corrections to a graph and returns descriptions
