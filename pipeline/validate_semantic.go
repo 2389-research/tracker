@@ -103,44 +103,43 @@ func checkConditionSyntax(condition string, ctx *PipelineContext) error {
 // operands around its operator. For example, "== broken" is invalid because
 // it has an empty left-hand side.
 func checkClauseSyntax(clause string) error {
-	// Strip "not " prefix for negation.
 	inner := clause
 	if strings.HasPrefix(inner, "not ") {
 		inner = strings.TrimSpace(inner[4:])
 	}
+	return checkClauseOperands(inner, clause)
+}
 
-	// Check word-based operators.
+// checkClauseOperands checks that the recognized operator in the clause has non-empty operands.
+func checkClauseOperands(inner, original string) error {
+	// Check word-based operators first.
 	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
 		if idx := strings.Index(inner, op); idx >= 0 {
 			left := strings.TrimSpace(inner[:idx])
 			right := strings.TrimSpace(inner[idx+len(op):])
 			if left == "" || right == "" {
-				return fmt.Errorf("empty operand around %q in clause %q", strings.TrimSpace(op), clause)
+				return fmt.Errorf("empty operand around %q in clause %q", strings.TrimSpace(op), original)
 			}
 			return nil
 		}
 	}
-
-	// Check != before =.
+	// Check != before = to avoid partial match.
 	if idx := strings.Index(inner, "!="); idx >= 0 {
 		left := strings.TrimSpace(inner[:idx])
 		right := strings.TrimSpace(inner[idx+2:])
 		if left == "" || right == "" {
-			return fmt.Errorf("empty operand around '!=' in clause %q", clause)
+			return fmt.Errorf("empty operand around '!=' in clause %q", original)
 		}
 		return nil
 	}
-
 	if idx := strings.Index(inner, "="); idx >= 0 {
 		left := strings.TrimSpace(inner[:idx])
 		right := strings.TrimSpace(inner[idx+1:])
 		if left == "" || right == "" {
-			return fmt.Errorf("empty operand around '=' in clause %q", clause)
+			return fmt.Errorf("empty operand around '=' in clause %q", original)
 		}
 		return nil
 	}
-
-	// No recognized operator found — EvaluateCondition will report this.
 	return nil
 }
 

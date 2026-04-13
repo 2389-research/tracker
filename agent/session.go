@@ -124,6 +124,13 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 	return s, nil
 }
 
+// turnState carries per-loop mutable state for the agentic turn loop.
+type turnState struct {
+	lastToolSignature    string
+	consecutiveLoopCount int
+	emptyResponseRetries int
+}
+
 // Run executes the agentic loop: send user input to the LLM, execute any tool
 // calls, feed results back, and repeat until the LLM stops or max turns is reached.
 func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, error) {
@@ -152,94 +159,9 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	s.initConversation(userInput)
 
-	// Agentic loop.
-	stoppedNaturally := false
-	var lastToolSignature string
-	consecutiveLoopCount := 0
-	emptyResponseRetries := 0
-	const maxEmptyResponseRetries = 2
-	for turn := 1; turn <= s.config.MaxTurns; turn++ {
-		if err := ctx.Err(); err != nil {
-			result.Error = err
-			result.Duration = time.Since(start)
-			return result, err
-		}
-
-		s.drainSteering()
-
-		s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
-		turnStart := time.Now()
-
-		resp, err := s.doLLMCall(ctx, turn)
-		if err != nil {
-			result.Error = err
-			result.Duration = time.Since(start)
-			s.emit(Event{Type: EventError, SessionID: s.id, Err: err})
-			return result, err
-		}
-
-		s.updateUsage(&result, resp, turn, tracker)
-
-		// Snapshot cache stats before tool execution to compute per-turn deltas.
-		prevCacheHits, prevCacheMisses := s.snapshotCacheStats()
-
-		s.messages = append(s.messages, resp.Message)
-
-		toolCalls := resp.ToolCalls()
-		if len(toolCalls) == 0 {
-			done := s.handleNoToolCalls(resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, &result)
-			if done {
-				// Check: if the session produced NOTHING (no text ever, no tool calls ever)
-				// and this response is empty, the API silently failed. Retry instead of stopping.
-				if result.TotalToolCalls() == 0 && len(resp.Message.Content) == 0 && resp.Usage.OutputTokens == 0 {
-					if emptyResponseRetries < maxEmptyResponseRetries {
-						emptyResponseRetries++
-						diag := fmt.Sprintf("empty API response (0 output tokens, 0 tool calls) — provider=%s model=%s finish=%s input_tokens=%d raw_len=%d, retrying",
-							resp.Provider, resp.Model, resp.FinishReason.Raw, resp.Usage.InputTokens, len(resp.Raw))
-						s.emit(Event{Type: EventError, SessionID: s.id, Text: diag})
-						s.messages = append(s.messages, llm.UserMessage(
-							"Your previous response was empty. Please provide your response now.",
-						))
-						continue // retry instead of stopping
-					}
-					// All retries exhausted with empty responses — hard fail.
-					emptyErr := fmt.Errorf("agent session failed: %d consecutive empty API responses", maxEmptyResponseRetries)
-					result.Error = emptyErr
-					result.Duration = time.Since(start)
-					s.emit(Event{Type: EventError, SessionID: s.id, Err: emptyErr})
-					return result, emptyErr
-				}
-				stoppedNaturally = true
-				break
-			}
-			continue
-		}
-
-		// Loop detection.
-		signature := s.computeToolSignature(toolCalls)
-		if signature == lastToolSignature {
-			consecutiveLoopCount++
-		} else {
-			lastToolSignature = signature
-			consecutiveLoopCount = 1
-		}
-
-		if consecutiveLoopCount >= s.config.LoopDetectionThreshold {
-			loopErr := fmt.Errorf("loop detected: same tool calls repeated %d times", consecutiveLoopCount)
-			s.emit(Event{Type: EventError, SessionID: s.id, Err: loopErr})
-			result.LoopDetected = true
-			s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, &result)
-			s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
-			break
-		}
-
-		s.executeToolCalls(ctx, toolCalls, &result)
-
-		// Emit per-turn metrics after tool execution so TurnDuration includes
-		// tool wall-clock time and cache stats reflect this turn's deltas.
-		s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, &result)
-
-		s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
+	stoppedNaturally, err := s.runTurnLoop(ctx, start, tracker, &result)
+	if err != nil {
+		return result, err
 	}
 
 	if !stoppedNaturally {
@@ -250,6 +172,107 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	result.ContextUtilization = tracker.Utilization()
 	result.Duration = time.Since(start)
 	return result, nil
+}
+
+// runTurnLoop executes the agentic loop and returns (stoppedNaturally, error).
+func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *ContextWindowTracker, result *SessionResult) (bool, error) {
+	ts := &turnState{}
+	for turn := 1; turn <= s.config.MaxTurns; turn++ {
+		if err := ctx.Err(); err != nil {
+			result.Error = err
+			result.Duration = time.Since(start)
+			return false, err
+		}
+
+		s.drainSteering()
+		s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
+		turnStart := time.Now()
+
+		resp, err := s.doLLMCall(ctx, turn)
+		if err != nil {
+			result.Error = err
+			result.Duration = time.Since(start)
+			s.emit(Event{Type: EventError, SessionID: s.id, Err: err})
+			return false, err
+		}
+
+		s.updateUsage(result, resp, turn, tracker)
+		prevCacheHits, prevCacheMisses := s.snapshotCacheStats()
+		s.messages = append(s.messages, resp.Message)
+
+		toolCalls := resp.ToolCalls()
+		if len(toolCalls) == 0 {
+			done, stop, err := s.handleNoTools(resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts, start)
+			if err != nil {
+				return false, err
+			}
+			if stop {
+				return done, nil
+			}
+			continue
+		}
+
+		stopped := s.handleToolCalls(ctx, toolCalls, resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts)
+		if stopped {
+			return false, nil
+		}
+	}
+	return false, nil
+}
+
+// handleNoTools processes a turn where the LLM returned no tool calls.
+// Returns (stoppedNaturally, shouldStop, error).
+func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Time, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult, ts *turnState, start time.Time) (bool, bool, error) {
+	const maxEmptyResponseRetries = 2
+	done := s.handleNoToolCalls(resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result)
+	if !done {
+		return false, false, nil
+	}
+	// Check for empty API response — retry before stopping.
+	if result.TotalToolCalls() == 0 && len(resp.Message.Content) == 0 && resp.Usage.OutputTokens == 0 {
+		if ts.emptyResponseRetries < maxEmptyResponseRetries {
+			ts.emptyResponseRetries++
+			diag := fmt.Sprintf("empty API response (0 output tokens, 0 tool calls) — provider=%s model=%s finish=%s input_tokens=%d raw_len=%d, retrying",
+				resp.Provider, resp.Model, resp.FinishReason.Raw, resp.Usage.InputTokens, len(resp.Raw))
+			s.emit(Event{Type: EventError, SessionID: s.id, Text: diag})
+			s.messages = append(s.messages, llm.UserMessage(
+				"Your previous response was empty. Please provide your response now.",
+			))
+			return false, false, nil // continue loop
+		}
+		emptyErr := fmt.Errorf("agent session failed: %d consecutive empty API responses", maxEmptyResponseRetries)
+		result.Error = emptyErr
+		result.Duration = time.Since(start)
+		s.emit(Event{Type: EventError, SessionID: s.id, Err: emptyErr})
+		return false, true, emptyErr
+	}
+	return true, true, nil // stoppedNaturally=true
+}
+
+// handleToolCalls processes a turn where the LLM returned tool calls.
+// Returns true if the loop should stop (loop detected).
+func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, resp *llm.Response, turn int, turnStart time.Time, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult, ts *turnState) bool {
+	signature := s.computeToolSignature(toolCalls)
+	if signature == ts.lastToolSignature {
+		ts.consecutiveLoopCount++
+	} else {
+		ts.lastToolSignature = signature
+		ts.consecutiveLoopCount = 1
+	}
+
+	if ts.consecutiveLoopCount >= s.config.LoopDetectionThreshold {
+		loopErr := fmt.Errorf("loop detected: same tool calls repeated %d times", ts.consecutiveLoopCount)
+		s.emit(Event{Type: EventError, SessionID: s.id, Err: loopErr})
+		result.LoopDetected = true
+		s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
+		s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
+		return true
+	}
+
+	s.executeToolCalls(ctx, toolCalls, result)
+	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
+	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
+	return false
 }
 
 // emit sends an event with the current timestamp to the session's event handler.

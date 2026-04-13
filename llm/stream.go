@@ -79,63 +79,77 @@ func NewStreamAccumulator() *StreamAccumulator {
 func (a *StreamAccumulator) Process(event StreamEvent) {
 	switch event.Type {
 	case EventTextStart:
-		if _, exists := a.textParts[event.TextID]; !exists {
-			a.textOrder = append(a.textOrder, event.TextID)
-			a.textParts[event.TextID] = &strings.Builder{}
-		}
-
+		a.processTextStart(event)
 	case EventTextDelta:
-		b, exists := a.textParts[event.TextID]
-		if !exists {
-			a.textOrder = append(a.textOrder, event.TextID)
-			b = &strings.Builder{}
-			a.textParts[event.TextID] = b
-		}
-		b.WriteString(event.Delta)
-
+		a.processTextDelta(event)
 	case EventReasoningDelta:
 		a.reasoning.WriteString(event.ReasoningDelta)
-
 	case EventReasoningSignature:
 		a.reasoningSignature = event.ReasoningSignature
-
 	case EventRedactedThinking:
 		if event.ReasoningSignature != "" {
 			a.redactedThinking = append(a.redactedThinking, event.ReasoningSignature)
 		}
-
 	case EventToolCallStart:
-		if event.ToolCall != nil {
-			a.activeToolCall = &ToolCallData{
-				ID:             event.ToolCall.ID,
-				Name:           event.ToolCall.Name,
-				ThoughtSigData: event.ToolCall.ThoughtSigData,
-			}
-			a.activeToolArgs.Reset()
-			// Initialize from start event args (e.g., Google sends full args on start).
-			if len(event.ToolCall.Arguments) > 0 {
-				a.activeToolArgs.Write(event.ToolCall.Arguments)
-			}
-		}
-
+		a.processToolCallStart(event)
 	case EventToolCallDelta:
 		a.activeToolArgs.WriteString(event.Delta)
-
 	case EventToolCallEnd:
-		if a.activeToolCall != nil {
-			a.activeToolCall.Arguments = json.RawMessage(a.activeToolArgs.String())
-			a.toolCalls = append(a.toolCalls, *a.activeToolCall)
-			a.activeToolCall = nil
-			a.activeToolArgs.Reset()
-		}
-
+		a.processToolCallEnd()
 	case EventFinish:
-		if event.FinishReason != nil {
-			a.finishReason = event.FinishReason
-		}
-		if event.Usage != nil {
-			a.usage = event.Usage
-		}
+		a.processFinish(event)
+	}
+}
+
+func (a *StreamAccumulator) processTextStart(event StreamEvent) {
+	if _, exists := a.textParts[event.TextID]; !exists {
+		a.textOrder = append(a.textOrder, event.TextID)
+		a.textParts[event.TextID] = &strings.Builder{}
+	}
+}
+
+func (a *StreamAccumulator) processTextDelta(event StreamEvent) {
+	b, exists := a.textParts[event.TextID]
+	if !exists {
+		a.textOrder = append(a.textOrder, event.TextID)
+		b = &strings.Builder{}
+		a.textParts[event.TextID] = b
+	}
+	b.WriteString(event.Delta)
+}
+
+func (a *StreamAccumulator) processToolCallStart(event StreamEvent) {
+	if event.ToolCall == nil {
+		return
+	}
+	a.activeToolCall = &ToolCallData{
+		ID:             event.ToolCall.ID,
+		Name:           event.ToolCall.Name,
+		ThoughtSigData: event.ToolCall.ThoughtSigData,
+	}
+	a.activeToolArgs.Reset()
+	// Initialize from start event args (e.g., Google sends full args on start).
+	if len(event.ToolCall.Arguments) > 0 {
+		a.activeToolArgs.Write(event.ToolCall.Arguments)
+	}
+}
+
+func (a *StreamAccumulator) processToolCallEnd() {
+	if a.activeToolCall == nil {
+		return
+	}
+	a.activeToolCall.Arguments = json.RawMessage(a.activeToolArgs.String())
+	a.toolCalls = append(a.toolCalls, *a.activeToolCall)
+	a.activeToolCall = nil
+	a.activeToolArgs.Reset()
+}
+
+func (a *StreamAccumulator) processFinish(event StreamEvent) {
+	if event.FinishReason != nil {
+		a.finishReason = event.FinishReason
+	}
+	if event.Usage != nil {
+		a.usage = event.Usage
 	}
 }
 

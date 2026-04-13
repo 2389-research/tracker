@@ -42,33 +42,34 @@ func lintDIP105(g *Graph) []string {
 
 // lintDIP106 checks for undefined variable references in prompts.
 func lintDIP106(g *Graph) []string {
-	var warnings []string
-
 	allWrites := collectAllWrites(g)
 	reservedKeys := reservedContextKeys()
 
+	var warnings []string
 	for _, node := range g.Nodes {
-		prompt := node.Attrs["prompt"]
-		if prompt == "" {
+		warnings = append(warnings, lintDIP106Node(node, allWrites, reservedKeys)...)
+	}
+	return warnings
+}
+
+// lintDIP106Node checks a single node's prompt for undefined ctx variable references.
+func lintDIP106Node(node *Node, allWrites map[string]bool, reservedKeys map[string]bool) []string {
+	prompt := node.Attrs["prompt"]
+	if prompt == "" {
+		return nil
+	}
+	var warnings []string
+	for _, ref := range findVariableReferences(prompt) {
+		parts := strings.SplitN(ref, ".", 2)
+		if len(parts) != 2 || parts[0] != "ctx" {
 			continue
 		}
-
-		refs := findVariableReferences(prompt)
-		for _, ref := range refs {
-			parts := strings.SplitN(ref, ".", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			if parts[0] == "ctx" {
-				key := parts[1]
-				if !reservedKeys[key] && !allWrites[key] {
-					warnings = append(warnings, fmt.Sprintf(
-						"warning[DIP106]: node %q prompt references undefined variable ${ctx.%s}", node.ID, key))
-				}
-			}
+		key := parts[1]
+		if !reservedKeys[key] && !allWrites[key] {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP106]: node %q prompt references undefined variable ${ctx.%s}", node.ID, key))
 		}
 	}
-
 	return warnings
 }
 

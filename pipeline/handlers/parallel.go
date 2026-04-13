@@ -296,7 +296,12 @@ func aggregateBranchStats(results []ParallelResult) *pipeline.SessionStats {
 // and returns a map of target node ID → override attrs.
 // Format: branch.0.target=NodeA, branch.0.llm_model=gpt-4, etc.
 func parseBranchOverrides(nodeAttrs map[string]string) map[string]map[string]string {
-	// First pass: group attrs by branch index.
+	indexed := indexBranchAttrs(nodeAttrs)
+	return groupBranchOverridesByTarget(indexed)
+}
+
+// indexBranchAttrs groups branch.N.* node attributes by branch index N.
+func indexBranchAttrs(nodeAttrs map[string]string) map[int]map[string]string {
 	indexed := make(map[int]map[string]string)
 	for key, val := range nodeAttrs {
 		if !strings.HasPrefix(key, "branch.") {
@@ -317,8 +322,11 @@ func parseBranchOverrides(nodeAttrs map[string]string) map[string]map[string]str
 		}
 		indexed[idx][attrName] = val
 	}
+	return indexed
+}
 
-	// Second pass: key by target node ID.
+// groupBranchOverridesByTarget converts indexed branch attrs to a target-keyed map.
+func groupBranchOverridesByTarget(indexed map[int]map[string]string) map[string]map[string]string {
 	byTarget := make(map[string]map[string]string)
 	for _, branchAttrs := range indexed {
 		target := branchAttrs["target"]

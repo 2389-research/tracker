@@ -178,29 +178,10 @@ func resolveVariable(name string, ctx *PipelineContext) (string, bool) {
 	}
 	// Strip namespace prefixes: "ctx.outcome" → "outcome", "context.outcome" → "outcome"
 	if strings.HasPrefix(name, "ctx.") {
-		bare := strings.TrimPrefix(name, "ctx.")
-		// Handle ctx.internal.* — delegate to the internal map.
-		if strings.HasPrefix(bare, "internal.") {
-			internalKey := strings.TrimPrefix(bare, "internal.")
-			if val, ok := ctx.GetInternal(internalKey); ok {
-				return val, true
-			}
-		}
-		if val, ok := ctx.Get(bare); ok {
-			return val, true
-		}
+		return resolveCtxNamespace(strings.TrimPrefix(name, "ctx."), ctx)
 	}
 	if strings.HasPrefix(name, "context.") {
-		bare := strings.TrimPrefix(name, "context.")
-		if strings.HasPrefix(bare, "internal.") {
-			internalKey := strings.TrimPrefix(bare, "internal.")
-			if val, ok := ctx.GetInternal(internalKey); ok {
-				return val, true
-			}
-		}
-		if val, ok := ctx.Get(bare); ok {
-			return val, true
-		}
+		return resolveCtxNamespace(strings.TrimPrefix(name, "context."), ctx)
 	}
 	// Handle bare internal.* references.
 	if strings.HasPrefix(name, "internal.") {
@@ -208,6 +189,21 @@ func resolveVariable(name string, ctx *PipelineContext) (string, bool) {
 		if val, ok := ctx.GetInternal(internalKey); ok {
 			return val, true
 		}
+	}
+	return "", false
+}
+
+// resolveCtxNamespace resolves a bare key (after stripping "ctx." or "context." prefix).
+// Handles the "internal.*" sub-namespace and falls back to plain context lookup.
+func resolveCtxNamespace(bare string, ctx *PipelineContext) (string, bool) {
+	if strings.HasPrefix(bare, "internal.") {
+		internalKey := strings.TrimPrefix(bare, "internal.")
+		if val, ok := ctx.GetInternal(internalKey); ok {
+			return val, true
+		}
+	}
+	if val, ok := ctx.Get(bare); ok {
+		return val, true
 	}
 	return "", false
 }

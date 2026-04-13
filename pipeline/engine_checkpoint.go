@@ -167,55 +167,64 @@ func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]str
 		}
 
 		// Check retry budget before allowing another loop.
-		maxR := e.maxRetries(node)
-		if cp.RetryCount(nodeID) >= maxR {
-			// Retries exhausted — look for a fallback/escalation target.
-			// Guard: only take the fallback once per gate to prevent infinite loops.
-			if cp.FallbackTaken[nodeID] {
-				// Fallback already taken — signal unsatisfied without retry.
-				return "", nodeID, false, true
-			}
-			for _, fb := range []string{
-				node.Attrs["fallback_target"],
-				node.Attrs["fallback_retry_target"],
-				e.graph.Attrs["fallback_target"],
-				e.graph.Attrs["fallback_retry_target"],
-			} {
-				if fb == "" {
-					continue
-				}
-				if _, ok := e.graph.Nodes[fb]; ok {
-					// Mark fallback as taken so it won't loop.
-					if cp.FallbackTaken == nil {
-						cp.FallbackTaken = map[string]bool{}
-					}
-					cp.FallbackTaken[nodeID] = true
-					return fb, nodeID, false, true
-				}
-			}
-			// No fallback — signal unsatisfied without retry.
-			return "", nodeID, false, true
+		if cp.RetryCount(nodeID) >= e.maxRetries(node) {
+			return e.goalGateExhaustedPath(cp, node, nodeID)
 		}
 
-		// Retries remain — find a retry target.
-		for _, target := range []string{
-			node.Attrs["retry_target"],
-			node.Attrs["fallback_target"],
-			node.Attrs["fallback_retry_target"],
-			e.graph.Attrs["retry_target"],
-			e.graph.Attrs["fallback_target"],
-			e.graph.Attrs["fallback_retry_target"],
-		} {
-			if target == "" {
-				continue
-			}
-			if _, ok := e.graph.Nodes[target]; ok {
-				return target, nodeID, true, true
-			}
-		}
-		return "", nodeID, false, true
+		return e.goalGateRemainingPath(node, nodeID)
 	}
 	return "", "", false, false
+}
+
+// goalGateExhaustedPath handles the retry-budget-exhausted case for a goal gate.
+// Returns (target, nodeID, shouldRetry=false, unsatisfied=true).
+func (e *Engine) goalGateExhaustedPath(cp *Checkpoint, node *Node, nodeID string) (string, string, bool, bool) {
+	// Guard: only take the fallback once per gate to prevent infinite loops.
+	if cp.FallbackTaken[nodeID] {
+		return "", nodeID, false, true
+	}
+	fallbacks := []string{
+		node.Attrs["fallback_target"],
+		node.Attrs["fallback_retry_target"],
+		e.graph.Attrs["fallback_target"],
+		e.graph.Attrs["fallback_retry_target"],
+	}
+	for _, fb := range fallbacks {
+		if fb == "" {
+			continue
+		}
+		if _, ok := e.graph.Nodes[fb]; ok {
+			if cp.FallbackTaken == nil {
+				cp.FallbackTaken = map[string]bool{}
+			}
+			cp.FallbackTaken[nodeID] = true
+			return fb, nodeID, false, true
+		}
+	}
+	return "", nodeID, false, true
+}
+
+// goalGateRemainingPath handles the retries-still-available case for a goal gate.
+// Returns (target, nodeID, shouldRetry=true, unsatisfied=true) when a target is found,
+// or (empty, nodeID, false, true) if no valid retry target exists.
+func (e *Engine) goalGateRemainingPath(node *Node, nodeID string) (string, string, bool, bool) {
+	retryTargets := []string{
+		node.Attrs["retry_target"],
+		node.Attrs["fallback_target"],
+		node.Attrs["fallback_retry_target"],
+		e.graph.Attrs["retry_target"],
+		e.graph.Attrs["fallback_target"],
+		e.graph.Attrs["fallback_retry_target"],
+	}
+	for _, target := range retryTargets {
+		if target == "" {
+			continue
+		}
+		if _, ok := e.graph.Nodes[target]; ok {
+			return target, nodeID, true, true
+		}
+	}
+	return "", nodeID, false, true
 }
 
 // nodeOrDefault returns the node from the graph, or a default empty node if not found.

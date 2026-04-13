@@ -103,42 +103,18 @@ var providerEnvKeys = map[string][]string{
 var providerPriority = []string{"anthropic", "openai", "gemini", "openai-compat"}
 
 func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapter, error)) (*Client, error) {
-	var opts []ClientOption
-	var firstProvider string
-
-	// Process standard providers in priority order.
-	for _, name := range providerPriority {
-		constructor, ok := constructors[name]
-		if !ok {
-			continue
-		}
-		opt, err := tryBuildProvider(name, constructor)
-		if err != nil {
-			return nil, err
-		}
-		if opt != nil {
-			opts = append(opts, opt)
-			if firstProvider == "" {
-				firstProvider = name
-			}
-		}
+	opts, firstProvider, err := buildStandardProviderOpts(constructors)
+	if err != nil {
+		return nil, err
 	}
 
-	// Process non-standard providers.
-	for name, constructor := range constructors {
-		if name == "anthropic" || name == "openai" || name == "gemini" || name == "openai-compat" {
-			continue
-		}
-		opt, err := tryBuildProvider(name, constructor)
-		if err != nil {
-			return nil, err
-		}
-		if opt != nil {
-			opts = append(opts, opt)
-			if firstProvider == "" {
-				firstProvider = name
-			}
-		}
+	extraOpts, extraFirst, err := buildNonStandardProviderOpts(constructors)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, extraOpts...)
+	if firstProvider == "" {
+		firstProvider = extraFirst
 	}
 
 	if firstProvider != "" {
@@ -146,6 +122,62 @@ func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapt
 	}
 
 	return NewClient(opts...)
+}
+
+// buildStandardProviderOpts processes the standard providers in priority order.
+// Returns the built options, the first registered provider name, and any error.
+func buildStandardProviderOpts(constructors map[string]func(string) (ProviderAdapter, error)) ([]ClientOption, string, error) {
+	var opts []ClientOption
+	var first string
+	for _, name := range providerPriority {
+		constructor, ok := constructors[name]
+		if !ok {
+			continue
+		}
+		opt, err := tryBuildProvider(name, constructor)
+		if err != nil {
+			return nil, "", err
+		}
+		if opt != nil {
+			opts = append(opts, opt)
+			if first == "" {
+				first = name
+			}
+		}
+	}
+	return opts, first, nil
+}
+
+// buildNonStandardProviderOpts processes providers not in the standard priority list.
+// Returns the built options, the first registered provider name, and any error.
+func buildNonStandardProviderOpts(constructors map[string]func(string) (ProviderAdapter, error)) ([]ClientOption, string, error) {
+	var opts []ClientOption
+	var first string
+	for name, constructor := range constructors {
+		if isStandardProvider(name) {
+			continue
+		}
+		opt, err := tryBuildProvider(name, constructor)
+		if err != nil {
+			return nil, "", err
+		}
+		if opt != nil {
+			opts = append(opts, opt)
+			if first == "" {
+				first = name
+			}
+		}
+	}
+	return opts, first, nil
+}
+
+// isStandardProvider returns true for providers handled in providerPriority.
+func isStandardProvider(name string) bool {
+	switch name {
+	case "anthropic", "openai", "gemini", "openai-compat":
+		return true
+	}
+	return false
 }
 
 // tryBuildProvider attempts to find an API key in the environment and build a provider adapter.

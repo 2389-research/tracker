@@ -75,7 +75,14 @@ func printSimNodes(w io.Writer, graph *pipeline.Graph) {
 	fmt.Fprintf(w, "  %-20s  %-15s  %-12s  %s\n", "ID", "Handler", "Shape", "Label")
 	fmt.Fprintf(w, "  %-20s  %-15s  %-12s  %s\n", "\u2500\u2500", "\u2500\u2500\u2500\u2500\u2500\u2500\u2500", "\u2500\u2500\u2500\u2500\u2500", "\u2500\u2500\u2500\u2500\u2500")
 
-	// Walk in BFS order from start node for consistent ordering.
+	ordered := bfsNodeOrder(graph)
+	for _, node := range ordered {
+		printSimNodeRow(w, node)
+	}
+}
+
+// bfsNodeOrder returns graph nodes in BFS order from start, with orphaned nodes appended.
+func bfsNodeOrder(graph *pipeline.Graph) []*pipeline.Node {
 	visited := make(map[string]bool)
 	queue := []string{graph.StartNode}
 	var ordered []*pipeline.Node
@@ -107,23 +114,24 @@ func printSimNodes(w io.Writer, graph *pipeline.Graph) {
 			ordered = append(ordered, node)
 		}
 	}
+	return ordered
+}
 
-	for _, node := range ordered {
-		label := node.Label
-		if label == node.ID {
-			label = ""
-		}
-		id := node.ID
-		if len(id) > 20 {
-			id = id[:17] + "..."
-		}
-		fmt.Fprintf(w, "  %-20s  %-15s  %-12s  %s\n", id, node.Handler, node.Shape, label)
+// printSimNodeRow prints one node's summary row and its key attributes.
+func printSimNodeRow(w io.Writer, node *pipeline.Node) {
+	label := node.Label
+	if label == node.ID {
+		label = ""
+	}
+	id := node.ID
+	if len(id) > 20 {
+		id = id[:17] + "..."
+	}
+	fmt.Fprintf(w, "  %-20s  %-15s  %-12s  %s\n", id, node.Handler, node.Shape, label)
 
-		// Show important node attributes.
-		for _, key := range []string{"llm_model", "llm_provider", "retry_policy", "max_retries", "fidelity", "prompt"} {
-			if v, ok := node.Attrs[key]; ok {
-				fmt.Fprintf(w, "  %-20s  > %s=%s\n", "", key, v)
-			}
+	for _, key := range []string{"llm_model", "llm_provider", "retry_policy", "max_retries", "fidelity", "prompt"} {
+		if v, ok := node.Attrs[key]; ok {
+			fmt.Fprintf(w, "  %-20s  > %s=%s\n", "", key, v)
 		}
 	}
 }

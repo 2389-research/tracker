@@ -125,6 +125,18 @@ func loadActivityLog(runDir string) ([]activityEntry, error) {
 	return entries, scanner.Err()
 }
 
+// runSummary holds the display data for a single pipeline run listing.
+type runSummary struct {
+	runID     string
+	status    string
+	nodes     int
+	retries   int
+	restarts  int
+	timestamp time.Time
+	duration  time.Duration
+	failedAt  string
+}
+
 // listRuns shows all available runs with their status and node count.
 func listRuns(workdir string) error {
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
@@ -137,74 +149,78 @@ func listRuns(workdir string) error {
 		return fmt.Errorf("cannot read runs directory: %w", err)
 	}
 
-	type runSummary struct {
-		runID     string
-		status    string
-		nodes     int
-		retries   int
-		restarts  int
-		timestamp time.Time
-		duration  time.Duration
-		failedAt  string
-	}
-
-	var runs []runSummary
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		runDir := filepath.Join(runsDir, e.Name())
-		cpPath := filepath.Join(runDir, "checkpoint.json")
-
-		cp, cpErr := pipeline.LoadCheckpoint(cpPath)
-		if cpErr != nil {
-			continue
-		}
-
-		activity, _ := loadActivityLog(runDir)
-		sort.Slice(activity, func(i, j int) bool {
-			return activity[i].Timestamp.Before(activity[j].Timestamp)
-		})
-
-		status := determinePipelineStatus(cp, activity)
-
-		totalRetries := 0
-		for _, count := range cp.RetryCounts {
-			totalRetries += count
-		}
-
-		var dur time.Duration
-		if len(activity) >= 2 {
-			first := activity[0].Timestamp
-			last := activity[len(activity)-1].Timestamp
-			dur = last.Sub(first)
-		}
-
-		rs := runSummary{
-			runID:     e.Name(),
-			status:    status,
-			nodes:     len(cp.CompletedNodes),
-			retries:   totalRetries,
-			restarts:  cp.RestartCount,
-			timestamp: cp.Timestamp,
-			duration:  dur,
-		}
-		if status == "fail" {
-			rs.failedAt = cp.CurrentNode
-		}
-		runs = append(runs, rs)
-	}
-
+	runs := collectRunSummaries(runsDir, entries)
 	if len(runs) == 0 {
 		fmt.Println("No runs found. Run a pipeline first.")
 		return nil
 	}
 
-	// Sort by timestamp, most recent first.
 	sort.Slice(runs, func(i, j int) bool {
 		return runs[i].timestamp.After(runs[j].timestamp)
 	})
 
+	printRunList(runs)
+	return nil
+}
+
+// collectRunSummaries reads checkpoints and activity logs for all run directories.
+func collectRunSummaries(runsDir string, entries []os.DirEntry) []runSummary {
+	var runs []runSummary
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		rs, ok := buildRunSummary(runsDir, e.Name())
+		if ok {
+			runs = append(runs, rs)
+		}
+	}
+	return runs
+}
+
+// buildRunSummary constructs a runSummary for a single run directory.
+func buildRunSummary(runsDir, name string) (runSummary, bool) {
+	runDir := filepath.Join(runsDir, name)
+	cpPath := filepath.Join(runDir, "checkpoint.json")
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		return runSummary{}, false
+	}
+
+	activity, _ := loadActivityLog(runDir)
+	sort.Slice(activity, func(i, j int) bool {
+		return activity[i].Timestamp.Before(activity[j].Timestamp)
+	})
+
+	status := determinePipelineStatus(cp, activity)
+
+	totalRetries := 0
+	for _, count := range cp.RetryCounts {
+		totalRetries += count
+	}
+
+	var dur time.Duration
+	if len(activity) >= 2 {
+		dur = activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
+	}
+
+	rs := runSummary{
+		runID:     name,
+		status:    status,
+		nodes:     len(cp.CompletedNodes),
+		retries:   totalRetries,
+		restarts:  cp.RestartCount,
+		timestamp: cp.Timestamp,
+		duration:  dur,
+	}
+	if status == "fail" {
+		rs.failedAt = cp.CurrentNode
+	}
+	return rs, true
+}
+
+// printRunList prints the formatted run listing table.
+func printRunList(runs []runSummary) {
 	fmt.Println()
 	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "Run ID", "Status", "Nodes", "Retries", "Duration", "Failed At")
 	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "──────", "──────", "─────", "───────", "────────", "─────────")
@@ -217,24 +233,16 @@ func listRuns(workdir string) error {
 		case "fail":
 			icon = "FAIL"
 		}
-
 		durStr := ""
 		if r.duration > 0 {
 			durStr = formatElapsed(r.duration)
 		}
-
-		failedAt := ""
-		if r.failedAt != "" {
-			failedAt = r.failedAt
-		}
-
 		fmt.Printf("  %-14s  %-8s  %-6d  %-8d  %-10s  %s\n",
-			r.runID[:min(14, len(r.runID))], icon, r.nodes, r.retries, durStr, failedAt)
+			r.runID[:min(14, len(r.runID))], icon, r.nodes, r.retries, durStr, r.failedAt)
 	}
 
 	fmt.Printf("\n  %d runs total\n", len(runs))
 	fmt.Printf("  Inspect a run: tracker audit <runID>\n\n")
-	return nil
 }
 
 // runAudit loads run artifacts and prints a structured audit report.

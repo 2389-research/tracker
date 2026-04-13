@@ -91,32 +91,10 @@ func ExpandVariables(
 		namespace := parts[0]
 		key := parts[1]
 
-		value, found, err := lookupVariable(namespace, key, ctx, params, graphAttrs)
+		value, err := resolveVariableValue(namespace, key, ctx, params, graphAttrs, strict,
+			len(toolCommandMode) > 0 && toolCommandMode[0])
 		if err != nil {
 			return "", err
-		}
-
-		// In tool command mode, block unsafe ctx.* keys.
-		isToolCmd := len(toolCommandMode) > 0 && toolCommandMode[0]
-		if isToolCmd && found && namespace == "ctx" && !toolCommandSafeCtxKeys[key] {
-			return "", fmt.Errorf(
-				"tool_command references unsafe variable ${ctx.%s} — "+
-					"LLM/tool output cannot be interpolated into shell commands. "+
-					"Safe ctx keys: outcome, preferred_label, human_response, interview_answers. "+
-					"Write output to a file in a prior tool node and read it in your command instead",
-				key,
-			)
-		}
-
-		if !found {
-			if strict {
-				available := availableKeys(namespace, ctx, params, graphAttrs)
-				return "", fmt.Errorf(
-					"undefined variable ${%s.%s} (available keys in %s: %v)",
-					namespace, key, namespace, available,
-				)
-			}
-			value = ""
 		}
 
 		// Write the resolved value (NOT re-scanned for further variables).
@@ -127,6 +105,43 @@ func ExpandVariables(
 	result := buf.String()
 
 	return result, nil
+}
+
+// resolveVariableValue looks up a variable and applies tool-command safety and strict-mode checks.
+// Returns the resolved value (empty string for undefined in lenient mode) or an error.
+func resolveVariableValue(
+	namespace, key string,
+	ctx *PipelineContext,
+	params map[string]string,
+	graphAttrs map[string]string,
+	strict, toolCommandMode bool,
+) (string, error) {
+	value, found, err := lookupVariable(namespace, key, ctx, params, graphAttrs)
+	if err != nil {
+		return "", err
+	}
+
+	if toolCommandMode && found && namespace == "ctx" && !toolCommandSafeCtxKeys[key] {
+		return "", fmt.Errorf(
+			"tool_command references unsafe variable ${ctx.%s} — "+
+				"LLM/tool output cannot be interpolated into shell commands. "+
+				"Safe ctx keys: outcome, preferred_label, human_response, interview_answers. "+
+				"Write output to a file in a prior tool node and read it in your command instead",
+			key,
+		)
+	}
+
+	if !found {
+		if strict {
+			available := availableKeys(namespace, ctx, params, graphAttrs)
+			return "", fmt.Errorf(
+				"undefined variable ${%s.%s} (available keys in %s: %v)",
+				namespace, key, namespace, available,
+			)
+		}
+		return "", nil
+	}
+	return value, nil
 }
 
 // lookupVariable retrieves a value from the appropriate namespace.

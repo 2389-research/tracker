@@ -251,6 +251,19 @@ func resolveCheckpoint(workdir, runID string) (string, error) {
 		return "", fmt.Errorf("run ID cannot be empty")
 	}
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	resolved, err := resolveRunIDToDir(runsDir, runID)
+	if err != nil {
+		return "", err
+	}
+	cpPath := filepath.Join(runsDir, resolved, "checkpoint.json")
+	if _, err := os.Stat(cpPath); err != nil {
+		return "", fmt.Errorf("checkpoint not found for run %s: %w", resolved, err)
+	}
+	return cpPath, nil
+}
+
+// resolveRunIDToDir finds the unique run directory name for a given run ID or prefix.
+func resolveRunIDToDir(runsDir, runID string) (string, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		return "", fmt.Errorf("cannot read runs directory: %w", err)
@@ -258,10 +271,7 @@ func resolveCheckpoint(workdir, runID string) (string, error) {
 
 	var matches []string
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if strings.HasPrefix(e.Name(), runID) {
+		if e.IsDir() && strings.HasPrefix(e.Name(), runID) {
 			matches = append(matches, e.Name())
 		}
 	}
@@ -270,27 +280,15 @@ func resolveCheckpoint(workdir, runID string) (string, error) {
 	case 0:
 		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
 	case 1:
-		// Unique match (exact or prefix)
+		return matches[0], nil
 	default:
-		// Check for exact match among the prefix matches
-		exact := false
 		for _, m := range matches {
 			if m == runID {
-				matches = []string{m}
-				exact = true
-				break
+				return m, nil
 			}
 		}
-		if !exact {
-			return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
-		}
+		return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
 	}
-
-	cpPath := filepath.Join(runsDir, matches[0], "checkpoint.json")
-	if _, err := os.Stat(cpPath); err != nil {
-		return "", fmt.Errorf("checkpoint not found for run %s: %w", matches[0], err)
-	}
-	return cpPath, nil
 }
 
 func loadEnvFiles(workdir string) error {

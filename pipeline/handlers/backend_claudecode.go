@@ -289,45 +289,63 @@ func classifyError(stderr string, exitCode int) string {
 	if exitCode == 0 {
 		return pipeline.OutcomeSuccess
 	}
-
 	lower := strings.ToLower(stderr)
+	trimmed := strings.TrimSpace(stderr)
 
-	switch {
-	case strings.Contains(lower, "authentication") ||
-		strings.Contains(lower, "unauthorized") ||
-		strings.Contains(lower, "invalid api key"):
-		log.Printf("[claude-code] auth error (exit %d): %s", exitCode, strings.TrimSpace(stderr))
+	if isAuthError(lower) {
+		log.Printf("[claude-code] auth error (exit %d): %s", exitCode, trimmed)
 		return pipeline.OutcomeFail
-
-	case strings.Contains(lower, "credit balance") ||
-		strings.Contains(lower, "too low to access"):
-		log.Printf("[claude-code] API credit balance exhausted — claude CLI may be using ANTHROPIC_API_KEY instead of Max subscription. Unset ANTHROPIC_API_KEY to use subscription auth. stderr: %s", strings.TrimSpace(stderr))
+	}
+	if isCreditError(lower) {
+		log.Printf("[claude-code] API credit balance exhausted — claude CLI may be using ANTHROPIC_API_KEY instead of Max subscription. Unset ANTHROPIC_API_KEY to use subscription auth. stderr: %s", trimmed)
 		return pipeline.OutcomeFail
-
-	case strings.Contains(lower, "rate limit") ||
-		strings.Contains(lower, "429") ||
-		containsThrottle(lower):
+	}
+	if isRateLimitError(lower) {
 		log.Printf("[claude-code] rate limited (exit %d), will retry", exitCode)
 		return pipeline.OutcomeRetry
-
-	case strings.Contains(lower, "budget") ||
-		strings.Contains(lower, "spending limit"):
-		log.Printf("[claude-code] budget/spending limit hit (exit %d): %s", exitCode, strings.TrimSpace(stderr))
+	}
+	if isBudgetError(lower) {
+		log.Printf("[claude-code] budget/spending limit hit (exit %d): %s", exitCode, trimmed)
 		return pipeline.OutcomeFail
-
-	case strings.Contains(lower, "econnrefused") ||
-		strings.Contains(lower, "network") ||
-		strings.Contains(lower, "connection"):
+	}
+	if isNetworkError(lower) {
 		log.Printf("[claude-code] network error (exit %d), will retry", exitCode)
 		return pipeline.OutcomeRetry
-
-	case exitCode == 137:
+	}
+	if exitCode == 137 {
 		log.Printf("[claude-code] process killed (exit 137)")
 		return pipeline.OutcomeFail
 	}
-
-	log.Printf("[claude-code] unclassified error (exit %d): %s", exitCode, strings.TrimSpace(stderr))
+	log.Printf("[claude-code] unclassified error (exit %d): %s", exitCode, trimmed)
 	return pipeline.OutcomeFail
+}
+
+func isAuthError(lower string) bool {
+	return strings.Contains(lower, "authentication") ||
+		strings.Contains(lower, "unauthorized") ||
+		strings.Contains(lower, "invalid api key")
+}
+
+func isCreditError(lower string) bool {
+	return strings.Contains(lower, "credit balance") ||
+		strings.Contains(lower, "too low to access")
+}
+
+func isRateLimitError(lower string) bool {
+	return strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "429") ||
+		containsThrottle(lower)
+}
+
+func isBudgetError(lower string) bool {
+	return strings.Contains(lower, "budget") ||
+		strings.Contains(lower, "spending limit")
+}
+
+func isNetworkError(lower string) bool {
+	return strings.Contains(lower, "econnrefused") ||
+		strings.Contains(lower, "network") ||
+		strings.Contains(lower, "connection")
 }
 
 // containsThrottle returns true if lower contains "throttled" or "throttling"

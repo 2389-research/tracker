@@ -202,35 +202,12 @@ func translateMessageToContent(m llm.Message) *geminiContent {
 		case llm.KindText:
 			parts = append(parts, geminiPart{Text: part.Text})
 		case llm.KindToolCall:
-			if part.ToolCall != nil {
-				var args map[string]any
-				if len(part.ToolCall.Arguments) > 0 {
-					json.Unmarshal(part.ToolCall.Arguments, &args)
-				}
-				parts = append(parts, geminiPart{
-					FunctionCall: &geminiFunctionCall{
-						Name: part.ToolCall.Name,
-						Args: args,
-					},
-					ThoughtSignature: part.ToolCall.ThoughtSigData,
-				})
+			if p := translateToolCallPart(part); p != nil {
+				parts = append(parts, *p)
 			}
 		case llm.KindToolResult:
-			if part.ToolResult != nil {
-				// Gemini uses the function name (not call ID) to match function responses.
-				funcName := part.ToolResult.Name
-				if funcName == "" {
-					funcName = part.ToolResult.ToolCallID
-				}
-				parts = append(parts, geminiPart{
-					FunctionResponse: &geminiFunctionResp{
-						Name: funcName,
-						Response: map[string]any{
-							"content": part.ToolResult.Content,
-							"error":   part.ToolResult.IsError,
-						},
-					},
-				})
+			if p := translateToolResultPart(part); p != nil {
+				parts = append(parts, *p)
 			}
 			// Image content parts can be added when KindImage is defined in the core types.
 		}
@@ -240,9 +217,45 @@ func translateMessageToContent(m llm.Message) *geminiContent {
 		return nil
 	}
 
-	return &geminiContent{
-		Role:  role,
-		Parts: parts,
+	return &geminiContent{Role: role, Parts: parts}
+}
+
+// translateToolCallPart converts a tool call content part to a Gemini function call part.
+func translateToolCallPart(part llm.ContentPart) *geminiPart {
+	if part.ToolCall == nil {
+		return nil
+	}
+	var args map[string]any
+	if len(part.ToolCall.Arguments) > 0 {
+		json.Unmarshal(part.ToolCall.Arguments, &args)
+	}
+	return &geminiPart{
+		FunctionCall: &geminiFunctionCall{
+			Name: part.ToolCall.Name,
+			Args: args,
+		},
+		ThoughtSignature: part.ToolCall.ThoughtSigData,
+	}
+}
+
+// translateToolResultPart converts a tool result content part to a Gemini function response part.
+func translateToolResultPart(part llm.ContentPart) *geminiPart {
+	if part.ToolResult == nil {
+		return nil
+	}
+	// Gemini uses the function name (not call ID) to match function responses.
+	funcName := part.ToolResult.Name
+	if funcName == "" {
+		funcName = part.ToolResult.ToolCallID
+	}
+	return &geminiPart{
+		FunctionResponse: &geminiFunctionResp{
+			Name: funcName,
+			Response: map[string]any{
+				"content": part.ToolResult.Content,
+				"error":   part.ToolResult.IsError,
+			},
+		},
 	}
 }
 

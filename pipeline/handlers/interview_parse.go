@@ -86,50 +86,59 @@ func ParseStructuredQuestions(input string) ([]Question, error) {
 // counting. This correctly handles multiple JSON objects in the text (returns
 // only the first) and ignores braces inside string literals.
 func extractJSON(text string) string {
-	// Try stripping code fences first.
 	stripped := stripCodeFences(text)
-
 	start := strings.Index(stripped, "{")
 	if start == -1 {
 		return ""
 	}
+	return scanJSONObject(stripped, start)
+}
 
-	depth := 0
-	inString := false
-	escaped := false
+// jsonScanState tracks state for character-by-character JSON object scanning.
+type jsonScanState struct {
+	depth    int
+	inString bool
+	escaped  bool
+}
 
-	for i := start; i < len(stripped); i++ {
-		ch := stripped[i]
-
-		if escaped {
-			escaped = false
-			continue
-		}
-
-		if ch == '\\' && inString {
-			escaped = true
-			continue
-		}
-
-		if ch == '"' {
-			inString = !inString
-			continue
-		}
-
-		if inString {
-			continue
-		}
-
-		if ch == '{' {
-			depth++
-		} else if ch == '}' {
-			depth--
-			if depth == 0 {
-				return stripped[start : i+1]
-			}
+// advance processes one character and returns (done, endIndex).
+// done=true with endIndex>0 means a complete object was found ending at endIndex.
+func (st *jsonScanState) advance(ch byte, pos int) (done bool, endIdx int) {
+	if st.escaped {
+		st.escaped = false
+		return false, 0
+	}
+	if ch == '\\' && st.inString {
+		st.escaped = true
+		return false, 0
+	}
+	if ch == '"' {
+		st.inString = !st.inString
+		return false, 0
+	}
+	if st.inString {
+		return false, 0
+	}
+	if ch == '{' {
+		st.depth++
+	} else if ch == '}' {
+		st.depth--
+		if st.depth == 0 {
+			return true, pos + 1
 		}
 	}
+	return false, 0
+}
 
+// scanJSONObject scans from start, tracking brace depth and string escapes,
+// and returns the first complete JSON object. Returns "" if none found.
+func scanJSONObject(s string, start int) string {
+	var st jsonScanState
+	for i := start; i < len(s); i++ {
+		if done, end := st.advance(s[i], i); done {
+			return s[start:end]
+		}
+	}
 	return ""
 }
 

@@ -63,44 +63,53 @@ func (t *BashTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 		return "", fmt.Errorf("command is required")
 	}
 
-	timeout := t.defaultTimeout
-	if params.Timeout != nil {
-		requested := time.Duration(*params.Timeout * float64(time.Second))
-		if requested > t.maxTimeout {
-			requested = t.maxTimeout
-		}
-		if requested > 0 {
-			timeout = requested
-		}
-	}
+	timeout := t.resolveTimeout(params.Timeout)
 
 	result, err := t.env.ExecCommand(ctx, "sh", []string{"-c", params.Command}, timeout)
 	if err != nil {
 		return "", err
 	}
 
+	return formatCommandOutput(result.Stdout, result.Stderr, result.ExitCode), nil
+}
+
+// resolveTimeout returns the effective timeout, clamping to maxTimeout.
+func (t *BashTool) resolveTimeout(requested *float64) time.Duration {
+	if requested == nil {
+		return t.defaultTimeout
+	}
+	d := time.Duration(*requested * float64(time.Second))
+	if d > t.maxTimeout {
+		d = t.maxTimeout
+	}
+	if d > 0 {
+		return d
+	}
+	return t.defaultTimeout
+}
+
+// formatCommandOutput assembles stdout, stderr, and exit code into a single result string.
+func formatCommandOutput(stdout, stderr string, exitCode int) string {
 	var b strings.Builder
-	if result.Stdout != "" {
-		b.WriteString(result.Stdout)
+	if stdout != "" {
+		b.WriteString(stdout)
 	}
-	if result.Stderr != "" {
+	if stderr != "" {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "stderr: %s", result.Stderr)
+		fmt.Fprintf(&b, "stderr: %s", stderr)
 	}
-	if result.ExitCode != 0 {
+	if exitCode != 0 {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "exit code: %d", result.ExitCode)
+		fmt.Fprintf(&b, "exit code: %d", exitCode)
 	}
-
 	if b.Len() == 0 {
-		return "(no output)", nil
+		return "(no output)"
 	}
-
-	return b.String(), nil
+	return b.String()
 }
 
 // CachePolicy declares that bash execution is mutating and invalidates caches.

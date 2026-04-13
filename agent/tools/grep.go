@@ -137,17 +137,11 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 			return ctx.Err()
 		}
 		if info.IsDir() {
-			// Skip hidden directories.
-			if strings.HasPrefix(info.Name(), ".") && path != root {
-				return filepath.SkipDir
-			}
-			return nil
+			return skipHiddenDir(info, path, root)
 		}
-		// Skip binary-looking files by checking for common binary extensions.
 		if isBinaryExtension(info.Name()) {
 			return nil
 		}
-
 		fileMatches, fileTruncated, err := t.searchFile(path, re)
 		if err != nil {
 			return nil // skip unreadable files
@@ -167,6 +161,14 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 	}
 
 	return matches, truncated, nil
+}
+
+// skipHiddenDir returns filepath.SkipDir for hidden directories (except the root).
+func skipHiddenDir(info os.FileInfo, path, root string) error {
+	if strings.HasPrefix(info.Name(), ".") && path != root {
+		return filepath.SkipDir
+	}
+	return nil
 }
 
 // searchFile scans a single file for lines matching the regex.

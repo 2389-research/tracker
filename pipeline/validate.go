@@ -201,59 +201,56 @@ func validateReachability(g *Graph, ve *ValidationError) {
 	}
 }
 
+// unconditionalEdgeSet returns a set of edges that have no condition.
+// These are the only edges that matter for cycle detection.
+type unconditionalEdgeSet map[[2]string]bool
+
+func buildUnconditionalEdgeSet(g *Graph) unconditionalEdgeSet {
+	s := make(unconditionalEdgeSet)
+	for _, e := range g.Edges {
+		if e.Condition == "" {
+			s[[2]string{e.From, e.To}] = true
+		}
+	}
+	return s
+}
+
 // validateNoCycles uses DFS coloring to detect unconditional cycles in the graph.
 // Conditional back-edges (retry loops) are allowed because they are guarded by
 // runtime conditions and bounded by max_retries.
-// White = unvisited, Gray = in current path, Black = fully processed.
 func validateNoCycles(g *Graph, ve *ValidationError) {
 	if g.StartNode == "" {
 		return
 	}
 
-	// Build a set of unconditional edges for cycle detection.
-	// Conditional edges form intentional retry loops and are excluded.
-	type edgeKey struct{ from, to string }
-	unconditional := make(map[edgeKey]bool)
-	for _, e := range g.Edges {
-		if e.Condition == "" {
-			unconditional[edgeKey{e.From, e.To}] = true
-		}
-	}
+	unconditional := buildUnconditionalEdgeSet(g)
+	color := make(map[string]int, len(g.Nodes))
 
-	const (
-		white = 0
-		gray  = 1
-		black = 2
-	)
-
-	color := make(map[string]int)
-	for id := range g.Nodes {
-		color[id] = white
-	}
-
-	var dfs func(nodeID string) bool
-	dfs = func(nodeID string) bool {
-		color[nodeID] = gray
-		for _, e := range g.OutgoingEdges(nodeID) {
-			if !unconditional[edgeKey{e.From, e.To}] {
-				continue
-			}
-			switch color[e.To] {
-			case gray:
-				return true
-			case white:
-				if dfs(e.To) {
-					return true
-				}
-			}
-		}
-		color[nodeID] = black
-		return false
-	}
-
-	if dfs(g.StartNode) {
+	if cyclesDFS(g.StartNode, g, unconditional, color) {
 		ve.add("graph contains a cycle")
 	}
+}
+
+// cyclesDFS performs DFS coloring to detect unconditional cycles.
+// Returns true if a cycle is found. White=0, Gray=1, Black=2.
+func cyclesDFS(nodeID string, g *Graph, unconditional unconditionalEdgeSet, color map[string]int) bool {
+	const gray, black = 1, 2
+	color[nodeID] = gray
+	for _, e := range g.OutgoingEdges(nodeID) {
+		if !unconditional[[2]string{e.From, e.To}] {
+			continue
+		}
+		switch color[e.To] {
+		case gray:
+			return true
+		case 0: // white
+			if cyclesDFS(e.To, g, unconditional, color) {
+				return true
+			}
+		}
+	}
+	color[nodeID] = black
+	return false
 }
 
 // validateNoDuplicateEdges checks for edges with identical From, To, and Condition.

@@ -389,7 +389,11 @@ func extractBinaryFromTar(tarPath, destDir string) (string, error) {
 	}
 	defer gz.Close()
 
-	tr := tar.NewReader(gz)
+	return findAndExtractBinary(tar.NewReader(gz), destDir)
+}
+
+// findAndExtractBinary scans a tar archive for the "tracker" binary and writes it to destDir.
+func findAndExtractBinary(tr *tar.Reader, destDir string) (string, error) {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -398,31 +402,30 @@ func extractBinaryFromTar(tarPath, destDir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-
-		// Look for the tracker binary (may be at root or in a subdirectory).
-		// We use filepath.Base to ignore directory components — the output
-		// path is always destDir/.tracker-new regardless of archive layout.
 		base := filepath.Base(hdr.Name)
 		if base == "tracker" && hdr.Typeflag == tar.TypeReg {
-			tmpBin := filepath.Join(destDir, ".tracker-new")
-			out, err := os.Create(tmpBin)
-			if err != nil {
-				return "", err
-			}
-			n, err := io.Copy(out, io.LimitReader(tr, maxBinarySize+1))
-			if err != nil {
-				out.Close()
-				os.Remove(tmpBin)
-				return "", err
-			}
-			out.Close()
-			if n > maxBinarySize {
-				os.Remove(tmpBin)
-				return "", fmt.Errorf("extracted binary too large (%d bytes, max %d)", n, maxBinarySize)
-			}
-			return tmpBin, nil
+			return writeBinaryEntry(tr, destDir)
 		}
 	}
-
 	return "", fmt.Errorf("tracker binary not found in archive")
+}
+
+// writeBinaryEntry writes the current tar entry to destDir/.tracker-new.
+func writeBinaryEntry(tr *tar.Reader, destDir string) (string, error) {
+	tmpBin := filepath.Join(destDir, ".tracker-new")
+	out, err := os.Create(tmpBin)
+	if err != nil {
+		return "", err
+	}
+	n, err := io.Copy(out, io.LimitReader(tr, maxBinarySize+1))
+	out.Close()
+	if err != nil {
+		os.Remove(tmpBin)
+		return "", err
+	}
+	if n > maxBinarySize {
+		os.Remove(tmpBin)
+		return "", fmt.Errorf("extracted binary too large (%d bytes, max %d)", n, maxBinarySize)
+	}
+	return tmpBin, nil
 }

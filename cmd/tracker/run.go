@@ -256,15 +256,60 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	}
 
 	execEnv := exec.NewLocalEnvironment(workdir)
+	pipelineName := resolvePipelineName(graph, pipelineFile)
+	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 
-	pipelineName := graph.Name
-	if pipelineName == "" {
-		base := filepath.Base(pipelineFile)
-		ext := filepath.Ext(base)
-		pipelineName = base[:len(base)-len(ext)]
+	prog, store, activityLog, err := setupTUIProgram(graph, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
+	if err != nil {
+		return err
+	}
+	defer activityLog.Close()
+
+	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
+	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
+	_ = store // store used only in setupTUIProgram
+
+	pipelineCombo := buildTUIPipelineHandler(prog, activityLog, verbose, llmClient)
+
+	registry := buildTUIRegistry(graph, llmClient, workdir, execEnv, interviewer, activityLog, pipelineCombo, subgraphs, backend, tokenTracker, prog)
+
+	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	outcomeCh := runPipelineAsync(engine, ctx, prog)
+
+	_, err = prog.Run()
+	cancel()
+	if err != nil {
+		return fmt.Errorf("TUI program: %w", err)
 	}
 
-	// Build the TUI model.
+	outcome := waitForPipelineOutcome(outcomeCh)
+	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
+
+	status := "completed"
+	if outcome.err != nil {
+		status = "failed"
+	}
+	tui.SendNotification("Tracker: "+pipelineName, "Pipeline "+status)
+
+	return outcome.err
+}
+
+// resolvePipelineName returns the pipeline display name from graph or filename.
+func resolvePipelineName(graph *pipeline.Graph, pipelineFile string) string {
+	if graph.Name != "" {
+		return graph.Name
+	}
+	base := filepath.Base(pipelineFile)
+	ext := filepath.Ext(base)
+	return base[:len(base)-len(ext)]
+}
+
+// setupTUIProgram creates the TUI model, state store, and activity log.
+func setupTUIProgram(graph *pipeline.Graph, pipelineName, checkpoint string, tokenTracker *llm.TokenTracker, llmClient *llm.Client, verbose bool, backend, artifactDir string) (*tea.Program, *tui.StateStore, *pipeline.JSONLEventHandler, error) {
 	store := tui.NewStateStore(tokenTracker)
 	appModel := tui.NewAppModel(store, pipelineName, "")
 	appModel.SetVerboseTrace(verbose)
@@ -272,19 +317,17 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	nodeList := buildNodeList(graph)
 	appModel.SetInitialNodes(nodeList)
 
-	// Handle checkpoint resume — pre-mark completed nodes.
 	if checkpoint != "" {
 		preMarkCompletedNodes(checkpoint, nodeList, store)
 	}
 
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
-
-	// Activity log.
-	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
-	defer activityLog.Close()
+	return prog, store, activityLog, nil
+}
 
-	// Wire LLM trace events to both TUI and activity log.
+// buildTUIPipelineHandler wires LLM trace events to TUI+activity log and returns the combined handler.
+func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHandler, verbose bool, llmClient *llm.Client) pipeline.PipelineEventHandler {
 	if llmClient != nil {
 		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
 			for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
@@ -293,30 +336,22 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
 		}))
 	}
-
-	// Mode 2 interviewer — use autopilot wrapper if persona is active.
-	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
-	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
-
-	// Pipeline event handler that adapts and sends to TUI.
 	pipelineHandler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
-		msg := tui.AdaptPipelineEvent(evt)
-		if msg != nil {
+		if msg := tui.AdaptPipelineEvent(evt); msg != nil {
 			prog.Send(msg)
 		}
 	})
+	return pipeline.PipelineMultiHandler(pipelineHandler, activityLog)
+}
 
-	// Combine pipeline event handlers for both TUI and activity log.
-	pipelineCombo := pipeline.PipelineMultiHandler(pipelineHandler, activityLog)
-
-	// Build handler registry.
-	registry := handlers.NewDefaultRegistry(graph,
+// buildTUIRegistry builds the handler registry for TUI mode.
+func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir string, execEnv *exec.LocalEnvironment, interviewer handlers.LabeledFreeformInterviewer, activityLog *pipeline.JSONLEventHandler, pipelineCombo pipeline.PipelineEventHandler, subgraphs map[string]*pipeline.Graph, backend string, tokenTracker *llm.TokenTracker, prog *tea.Program) *pipeline.HandlerRegistry {
+	return handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
-			msg := tui.AdaptAgentEvent(evt, evt.NodeID)
-			if msg != nil {
+			if msg := tui.AdaptAgentEvent(evt, evt.NodeID); msg != nil {
 				prog.Send(msg)
 			}
 			errMsg := ""
@@ -330,7 +365,10 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		handlers.WithDefaultBackend(backend),
 		handlers.WithTokenTracker(tokenTracker),
 	)
+}
 
+// buildTUIEngine creates and configures the pipeline engine for TUI mode.
+func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, artifactDir, checkpoint string, pipelineCombo pipeline.PipelineEventHandler) *pipeline.Engine {
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
 	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineCombo))
@@ -338,18 +376,18 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
 	}
+	return pipeline.NewEngine(graph, registry, engineOpts...)
+}
 
-	engine := pipeline.NewEngine(graph, registry, engineOpts...)
+// pipelineOutcome holds the result of a pipeline run.
+type pipelineOutcome struct {
+	result *pipeline.EngineResult
+	err    error
+}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-
-	type pipelineOutcome struct {
-		result *pipeline.EngineResult
-		err    error
-	}
+// runPipelineAsync starts the pipeline in a background goroutine and returns the outcome channel.
+func runPipelineAsync(engine *pipeline.Engine, ctx context.Context, prog *tea.Program) chan pipelineOutcome {
 	outcomeCh := make(chan pipelineOutcome, 1)
-
 	go func() {
 		result, pipelineErr := engine.Run(ctx)
 		if pipelineErr == nil && result.Status != pipeline.OutcomeSuccess {
@@ -358,31 +396,17 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		outcomeCh <- pipelineOutcome{result: result, err: pipelineErr}
 		prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
 	}()
+	return outcomeCh
+}
 
-	_, err = prog.Run()
-	cancel() // Signal pipeline goroutine to stop.
-	if err != nil {
-		return fmt.Errorf("TUI program: %w", err)
-	}
-
-	// Wait for pipeline goroutine to finish, with a timeout so we don't
-	// hang forever if a subprocess ignores context cancellation.
-	var outcome pipelineOutcome
+// waitForPipelineOutcome waits for the pipeline to finish, with a 5s timeout.
+func waitForPipelineOutcome(outcomeCh chan pipelineOutcome) pipelineOutcome {
 	select {
-	case outcome = <-outcomeCh:
+	case outcome := <-outcomeCh:
+		return outcome
 	case <-time.After(5 * time.Second):
-		outcome = pipelineOutcome{err: fmt.Errorf("pipeline did not exit within 5s after TUI closed")}
+		return pipelineOutcome{err: fmt.Errorf("pipeline did not exit within 5s after TUI closed")}
 	}
-	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
-
-	// Desktop notification on pipeline completion.
-	status := "completed"
-	if outcome.err != nil {
-		status = "failed"
-	}
-	tui.SendNotification("Tracker: "+pipelineName, "Pipeline "+status)
-
-	return outcome.err
 }
 
 // preMarkCompletedNodes loads a checkpoint and marks completed nodes in the TUI store.

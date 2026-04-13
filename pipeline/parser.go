@@ -36,52 +36,49 @@ func ParseDOT(dot string) (*Graph, error) {
 		g.Attrs[cleanQuotes(key)] = cleanQuotes(val)
 	}
 
-	// Extract nodes.
 	for _, cn := range collector.nodes {
-		node := &Node{
-			ID:    cleanQuotes(cn.name),
-			Attrs: make(map[string]string),
-		}
-
-		for key, val := range cn.attrs {
-			cleaned := cleanQuotes(val)
-			switch key {
-			case "shape":
-				node.Shape = cleaned
-			case "label":
-				node.Label = cleaned
-			default:
-				node.Attrs[key] = cleaned
-			}
-		}
-
-		g.AddNode(node)
+		g.AddNode(buildDOTNode(cn))
 	}
 
-	// Extract edges.
 	for _, ce := range collector.edges {
-		edge := &Edge{
-			From:  cleanQuotes(ce.src),
-			To:    cleanQuotes(ce.dst),
-			Attrs: make(map[string]string),
-		}
-
-		for key, val := range ce.attrs {
-			cleaned := cleanQuotes(val)
-			switch key {
-			case "label":
-				edge.Label = cleaned
-			case "condition":
-				edge.Condition = cleaned
-			default:
-				edge.Attrs[key] = cleaned
-			}
-		}
-
-		g.AddEdge(edge)
+		g.AddEdge(buildDOTEdge(ce))
 	}
 
 	return g, nil
+}
+
+// buildDOTNode converts a collectedNode to a pipeline Node.
+func buildDOTNode(cn *collectedNode) *Node {
+	node := &Node{ID: cleanQuotes(cn.name), Attrs: make(map[string]string)}
+	for key, val := range cn.attrs {
+		cleaned := cleanQuotes(val)
+		switch key {
+		case "shape":
+			node.Shape = cleaned
+		case "label":
+			node.Label = cleaned
+		default:
+			node.Attrs[key] = cleaned
+		}
+	}
+	return node
+}
+
+// buildDOTEdge converts a collectedEdge to a pipeline Edge.
+func buildDOTEdge(ce *collectedEdge) *Edge {
+	edge := &Edge{From: cleanQuotes(ce.src), To: cleanQuotes(ce.dst), Attrs: make(map[string]string)}
+	for key, val := range ce.attrs {
+		cleaned := cleanQuotes(val)
+		switch key {
+		case "label":
+			edge.Label = cleaned
+		case "condition":
+			edge.Condition = cleaned
+		default:
+			edge.Attrs[key] = cleaned
+		}
+	}
+	return edge
 }
 
 // cleanQuotes removes surrounding double quotes from a DOT attribute value

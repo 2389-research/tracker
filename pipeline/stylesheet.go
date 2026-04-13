@@ -34,36 +34,56 @@ func ParseStylesheet(input string) (*Stylesheet, error) {
 		if block == "" {
 			continue
 		}
-		parts := strings.SplitN(block, "{", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid stylesheet rule: %q", block)
+		rule, err := parseStyleBlock(block)
+		if err != nil {
+			return nil, err
 		}
-		selector := strings.TrimSpace(parts[0])
-		propsStr := strings.TrimSpace(parts[1])
-		if selector == "" {
-			return nil, fmt.Errorf("empty selector")
-		}
-		properties := make(map[string]string)
-		for _, prop := range strings.Split(propsStr, ";") {
-			prop = strings.TrimSpace(prop)
-			if prop == "" {
-				continue
-			}
-			colonIdx := strings.Index(prop, ":")
-			if colonIdx < 0 {
-				return nil, fmt.Errorf("invalid property: %q", prop)
-			}
-			key := strings.TrimSpace(prop[:colonIdx])
-			value := strings.TrimSpace(prop[colonIdx+1:])
-			if key != "" && value != "" {
-				properties[key] = value
-			}
-		}
-		if len(properties) > 0 {
-			ss.Rules = append(ss.Rules, StyleRule{Selector: selector, Properties: properties})
+		if rule != nil {
+			ss.Rules = append(ss.Rules, *rule)
 		}
 	}
 	return ss, nil
+}
+
+// parseStyleBlock parses a single "selector { props }" block (without the closing brace).
+func parseStyleBlock(block string) (*StyleRule, error) {
+	parts := strings.SplitN(block, "{", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid stylesheet rule: %q", block)
+	}
+	selector := strings.TrimSpace(parts[0])
+	if selector == "" {
+		return nil, fmt.Errorf("empty selector")
+	}
+	properties, err := parseStyleProperties(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return nil, err
+	}
+	if len(properties) == 0 {
+		return nil, nil
+	}
+	return &StyleRule{Selector: selector, Properties: properties}, nil
+}
+
+// parseStyleProperties parses semicolon-separated "key: value" declarations.
+func parseStyleProperties(propsStr string) (map[string]string, error) {
+	properties := make(map[string]string)
+	for _, prop := range strings.Split(propsStr, ";") {
+		prop = strings.TrimSpace(prop)
+		if prop == "" {
+			continue
+		}
+		colonIdx := strings.Index(prop, ":")
+		if colonIdx < 0 {
+			return nil, fmt.Errorf("invalid property: %q", prop)
+		}
+		key := strings.TrimSpace(prop[:colonIdx])
+		value := strings.TrimSpace(prop[colonIdx+1:])
+		if key != "" && value != "" {
+			properties[key] = value
+		}
+	}
+	return properties, nil
 }
 
 // specificityOf returns the specificity rank of a selector.

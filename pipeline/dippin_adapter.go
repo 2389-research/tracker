@@ -162,54 +162,29 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 	case ir.AgentConfig:
 		extractAgentAttrs(cfg, attrs)
 	case *ir.AgentConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractAgentAttrs(*cfg, attrs)
-
+		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.HumanConfig:
 		extractHumanAttrs(cfg, attrs)
 	case *ir.HumanConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractHumanAttrs(*cfg, attrs)
-
+		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.ToolConfig:
 		extractToolAttrs(cfg, attrs)
 	case *ir.ToolConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractToolAttrs(*cfg, attrs)
-
+		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
 	case *ir.ParallelConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractParallelAttrs(*cfg, attrs)
-
+		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.FanInConfig:
 		extractFanInAttrs(cfg, attrs)
 	case *ir.FanInConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractFanInAttrs(*cfg, attrs)
-
+		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.SubgraphConfig:
 		extractSubgraphAttrs(cfg, attrs)
 	case *ir.SubgraphConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractSubgraphAttrs(*cfg, attrs)
-
+		return extractNodeAttrsPtr(cfg, attrs)
 	case ir.ConditionalConfig, *ir.ConditionalConfig:
 		// Conditional nodes are pure routing — no config to extract.
-
 	default:
 		return fmt.Errorf("%T: %w", config, ErrUnknownConfig)
 	}
@@ -217,7 +192,29 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 	return nil
 }
 
+// extractNodeAttrsPtr dereferences a pointer IR config and dispatches to extractNodeAttrs.
+// Returns nil immediately if the pointer is nil.
+func extractNodeAttrsPtr[T ir.NodeConfig](cfg *T, attrs map[string]string) error {
+	if cfg == nil {
+		return nil
+	}
+	return extractNodeAttrs(*cfg, attrs)
+}
+
 func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
+	extractAgentPromptAttrs(cfg, attrs)
+	extractAgentExecutionAttrs(cfg, attrs)
+	extractAgentOutputAttrs(cfg, attrs)
+	extractAgentBackendAttrs(cfg.Params, attrs)
+	for k, v := range cfg.Params {
+		if _, exists := attrs[k]; !exists {
+			attrs[k] = v
+		}
+	}
+}
+
+// extractAgentPromptAttrs sets prompt, system prompt, model, and provider attrs.
+func extractAgentPromptAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.Prompt != "" {
 		attrs["prompt"] = cfg.Prompt
 	}
@@ -230,6 +227,10 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.Provider != "" {
 		attrs["llm_provider"] = cfg.Provider
 	}
+}
+
+// extractAgentExecutionAttrs sets turn limits, timeouts, caching, compaction, and feature flags.
+func extractAgentExecutionAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.MaxTurns > 0 {
 		attrs["max_turns"] = strconv.Itoa(cfg.MaxTurns)
 	}
@@ -257,23 +258,15 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.GoalGate {
 		attrs["goal_gate"] = "true"
 	}
+}
 
-	// Structured output format (v0.16.0).
+// extractAgentOutputAttrs sets structured output format attrs (v0.16.0).
+func extractAgentOutputAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.ResponseFormat != "" {
 		attrs["response_format"] = cfg.ResponseFormat
 	}
 	if cfg.ResponseSchema != "" {
 		attrs["response_schema"] = cfg.ResponseSchema
-	}
-
-	// Generic params — pass through to node attrs for keys not already set
-	// by typed fields above. This enables runtime features like backend
-	// selection without requiring IR schema changes.
-	extractAgentBackendAttrs(cfg.Params, attrs)
-	for k, v := range cfg.Params {
-		if _, exists := attrs[k]; !exists {
-			attrs[k] = v
-		}
 	}
 }
 

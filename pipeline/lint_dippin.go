@@ -173,92 +173,109 @@ func isKnownModelProvider(provider, model string) bool {
 
 // lintDIP101 checks for nodes only reachable via conditional edges.
 func lintDIP101(g *Graph) []string {
-	var warnings []string
 	if g.StartNode == "" {
-		return warnings
+		return nil
 	}
 
-	// Build unconditional edge map
+	reachableUnconditional := bfsUnconditional(g)
+	allReachable := bfsAllEdges(g)
+
+	return warnConditionalOnlyNodes(allReachable, reachableUnconditional, g.StartNode)
+}
+
+// bfsUnconditional performs BFS from StartNode following only unconditional edges.
+func bfsUnconditional(g *Graph) map[string]bool {
 	unconditional := make(map[string][]string)
 	for _, edge := range g.Edges {
 		if edge.Condition == "" {
 			unconditional[edge.From] = append(unconditional[edge.From], edge.To)
 		}
 	}
-
-	// BFS from start following only unconditional edges
-	reachableUnconditional := make(map[string]bool)
+	visited := make(map[string]bool)
+	visited[g.StartNode] = true
 	queue := []string{g.StartNode}
-	reachableUnconditional[g.StartNode] = true
-
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-
 		for _, next := range unconditional[current] {
-			if !reachableUnconditional[next] {
-				reachableUnconditional[next] = true
+			if !visited[next] {
+				visited[next] = true
 				queue = append(queue, next)
 			}
 		}
 	}
+	return visited
+}
 
-	// Check all nodes reachable via ANY edge
-	allReachable := make(map[string]bool)
-	queue = []string{g.StartNode}
-	allReachable[g.StartNode] = true
-
+// bfsAllEdges performs BFS from StartNode following all edges.
+func bfsAllEdges(g *Graph) map[string]bool {
+	visited := make(map[string]bool)
+	visited[g.StartNode] = true
+	queue := []string{g.StartNode}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-
 		for _, edge := range g.OutgoingEdges(current) {
-			if !allReachable[edge.To] {
-				allReachable[edge.To] = true
+			if !visited[edge.To] {
+				visited[edge.To] = true
 				queue = append(queue, edge.To)
 			}
 		}
 	}
+	return visited
+}
 
-	// Warn for nodes reachable overall but not via unconditional path
+// warnConditionalOnlyNodes returns DIP101 warnings for nodes only reachable via conditional edges.
+func warnConditionalOnlyNodes(allReachable, reachableUnconditional map[string]bool, startNode string) []string {
+	var warnings []string
 	for nodeID := range allReachable {
-		if !reachableUnconditional[nodeID] && nodeID != g.StartNode {
+		if !reachableUnconditional[nodeID] && nodeID != startNode {
 			warnings = append(warnings, fmt.Sprintf(
 				"warning[DIP101]: node %q only reachable via conditional edges", nodeID))
 		}
 	}
-
 	return warnings
 }
 
 // lintDIP107 checks for unused context writes.
 func lintDIP107(g *Graph) []string {
-	var warnings []string
+	writes, reads := collectWritesAndReads(g)
+	return warnUnusedWrites(writes, reads)
+}
 
-	// Collect all writes and reads
-	writes := make(map[string][]string) // key -> []nodeID
-	reads := make(map[string][]string)  // key -> []nodeID
-
+// collectWritesAndReads builds maps of context keys to their writing/reading nodes.
+func collectWritesAndReads(g *Graph) (writes map[string][]string, reads map[string][]string) {
+	writes = make(map[string][]string) // key -> []nodeID
+	reads = make(map[string][]string)  // key -> []nodeID
 	for _, node := range g.Nodes {
-		if w := node.Attrs["writes"]; w != "" {
-			for _, key := range strings.Split(w, ",") {
-				key = strings.TrimSpace(key)
-				if key != "" {
-					writes[key] = append(writes[key], node.ID)
-				}
-			}
+		for _, key := range splitTrimKeys(node.Attrs["writes"]) {
+			writes[key] = append(writes[key], node.ID)
 		}
-		if r := node.Attrs["reads"]; r != "" {
-			for _, key := range strings.Split(r, ",") {
-				key = strings.TrimSpace(key)
-				if key != "" {
-					reads[key] = append(reads[key], node.ID)
-				}
-			}
+		for _, key := range splitTrimKeys(node.Attrs["reads"]) {
+			reads[key] = append(reads[key], node.ID)
 		}
 	}
+	return writes, reads
+}
 
-	// Warn for keys that are written but never read
+// splitTrimKeys splits a comma-separated attribute value into trimmed, non-empty keys.
+func splitTrimKeys(attr string) []string {
+	if attr == "" {
+		return nil
+	}
+	var keys []string
+	for _, key := range strings.Split(attr, ",") {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// warnUnusedWrites returns warnings for context keys that are written but never read.
+func warnUnusedWrites(writes, reads map[string][]string) []string {
+	var warnings []string
 	for key, writers := range writes {
 		if _, isRead := reads[key]; !isRead {
 			for _, nodeID := range writers {
@@ -267,7 +284,6 @@ func lintDIP107(g *Graph) []string {
 			}
 		}
 	}
-
 	return warnings
 }
 

@@ -239,14 +239,11 @@ func parseHunk(lines []string, start int) (patchHunk, int, error) {
 	i := start
 	for i < len(lines) {
 		line := lines[i]
-		if strings.HasPrefix(line, "@@") || line == "*** End Patch" {
-			break
-		}
-		if strings.HasPrefix(line, "*** ") {
-			if line == "*** End of File" {
+		done, eofFlag := isHunkTerminator(line)
+		if done {
+			if eofFlag {
 				hunk.noNewlineAtEOF = true
 				i++
-				break
 			}
 			break
 		}
@@ -256,21 +253,43 @@ func parseHunk(lines []string, start int) (patchHunk, int, error) {
 		if len(line) == 0 {
 			return patchHunk{}, 0, fmt.Errorf("empty patch line in hunk")
 		}
-		switch line[0] {
-		case ' ':
-			text := line[1:]
-			hunk.oldLines = append(hunk.oldLines, text)
-			hunk.newLines = append(hunk.newLines, text)
-		case '-':
-			hunk.oldLines = append(hunk.oldLines, line[1:])
-		case '+':
-			hunk.newLines = append(hunk.newLines, line[1:])
-		default:
-			return patchHunk{}, 0, fmt.Errorf("unsupported hunk line %q", line)
+		if err := applyHunkLine(line, &hunk); err != nil {
+			return patchHunk{}, 0, err
 		}
 		i++
 	}
 	return hunk, i, nil
+}
+
+// isHunkTerminator returns (shouldStop, isEndOfFile) for a hunk scan line.
+func isHunkTerminator(line string) (bool, bool) {
+	if strings.HasPrefix(line, "@@") || line == "*** End Patch" {
+		return true, false
+	}
+	if strings.HasPrefix(line, "*** ") {
+		if line == "*** End of File" {
+			return true, true
+		}
+		return true, false
+	}
+	return false, false
+}
+
+// applyHunkLine adds a single hunk line to the hunk based on its prefix character.
+func applyHunkLine(line string, hunk *patchHunk) error {
+	switch line[0] {
+	case ' ':
+		text := line[1:]
+		hunk.oldLines = append(hunk.oldLines, text)
+		hunk.newLines = append(hunk.newLines, text)
+	case '-':
+		hunk.oldLines = append(hunk.oldLines, line[1:])
+	case '+':
+		hunk.newLines = append(hunk.newLines, line[1:])
+	default:
+		return fmt.Errorf("unsupported hunk line %q", line)
+	}
+	return nil
 }
 
 func applyHunks(content string, hunks []patchHunk) (string, error) {
