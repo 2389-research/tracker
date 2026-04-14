@@ -296,6 +296,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 
 	traceEntry.EdgeTo = next.To
 	s.trace.AddEntry(*traceEntry)
+	e.emitCostUpdate(s)
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
 	if s.cp.IsCompleted(next.To) {

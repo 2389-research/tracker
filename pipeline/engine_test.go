@@ -1155,3 +1155,96 @@ func TestEngineResumeLoopingPipelineDoesNotInfiniteLoop(t *testing.T) {
 		t.Error("expected loop nodes to be re-executed, but none were")
 	}
 }
+
+func TestEngine_EmitsCostUpdatedAfterEachNode(t *testing.T) {
+	// 3-node linear graph: start -> middle -> end
+	g := NewGraph("cost_updated_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "middle", Shape: "box", Label: "Middle"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "start", To: "middle"})
+	g.AddEdge(&Edge{From: "middle", To: "end"})
+
+	// All three nodes return SessionStats so AggregateUsage returns non-nil.
+	nodeStats := &SessionStats{
+		InputTokens:  100,
+		OutputTokens: 50,
+		TotalTokens:  150,
+		CostUSD:      0.01,
+		Provider:     "test-provider",
+	}
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess, Stats: nodeStats}, nil
+		}})
+	}
+
+	var mu sync.Mutex
+	var costEvents []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventCostUpdated {
+			mu.Lock()
+			costEvents = append(costEvents, evt)
+			mu.Unlock()
+		}
+	})
+
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Fatalf("expected success, got %q", result.Status)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(costEvents) < 3 {
+		t.Errorf("expected at least 3 EventCostUpdated events, got %d", len(costEvents))
+	}
+
+	// Each event must carry a non-nil Cost snapshot.
+	for i, evt := range costEvents {
+		if evt.Cost == nil {
+			t.Errorf("event %d has nil Cost", i)
+			continue
+		}
+		if evt.Cost.TotalTokens <= 0 {
+			t.Errorf("event %d has TotalTokens=%d, want > 0", i, evt.Cost.TotalTokens)
+		}
+	}
+
+	// TotalTokens must be monotonically non-decreasing.
+	for i := 1; i < len(costEvents); i++ {
+		prev := costEvents[i-1].Cost
+		curr := costEvents[i].Cost
+		if prev == nil || curr == nil {
+			continue
+		}
+		if curr.TotalTokens < prev.TotalTokens {
+			t.Errorf("event %d TotalTokens=%d < event %d TotalTokens=%d (not monotonically non-decreasing)",
+				i, curr.TotalTokens, i-1, prev.TotalTokens)
+		}
+	}
+
+	// Final event must have cumulative cost >= 3 * 0.01 = 0.03 (with tolerance).
+	if len(costEvents) > 0 {
+		last := costEvents[len(costEvents)-1]
+		if last.Cost == nil {
+			t.Fatal("last EventCostUpdated has nil Cost")
+		}
+		const wantMinCost = 0.03 - 1e-9
+		if last.Cost.TotalCostUSD < wantMinCost {
+			t.Errorf("final Cost.TotalCostUSD=%.6f, want >= %.6f", last.Cost.TotalCostUSD, wantMinCost)
+		}
+		if last.Cost.WallElapsed <= 0 {
+			t.Errorf("final Cost.WallElapsed=%v, want > 0", last.Cost.WallElapsed)
+		}
+	}
+}

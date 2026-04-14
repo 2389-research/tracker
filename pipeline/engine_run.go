@@ -10,6 +10,27 @@ import (
 	"time"
 )
 
+// emitCostUpdate emits an EventCostUpdated carrying the current aggregate
+// usage from the trace. Safe to call when no LLM activity has occurred yet —
+// AggregateUsage returns nil and the event is suppressed.
+func (e *Engine) emitCostUpdate(s *runState) {
+	summary := s.trace.AggregateUsage()
+	if summary == nil {
+		return
+	}
+	e.emit(PipelineEvent{
+		Type:      EventCostUpdated,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		Cost: &CostSnapshot{
+			TotalTokens:    summary.TotalTokens,
+			TotalCostUSD:   summary.TotalCostUSD,
+			ProviderTotals: summary.ProviderTotals,
+			WallElapsed:    time.Since(s.trace.StartTime),
+		},
+	})
+}
+
 // runState holds per-run mutable state threaded through the main loop.
 type runState struct {
 	runID        string
@@ -475,6 +496,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)
+	e.emitCostUpdate(s)
 	return true, "", nil
 }
 
