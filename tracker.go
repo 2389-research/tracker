@@ -80,12 +80,9 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("validate graph: %w", err)
 	}
 
-	workDir := cfg.WorkingDir
-	if workDir == "" {
-		workDir, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("get working directory: %w", err)
-		}
+	workDir, err := resolveWorkDir(cfg.WorkingDir)
+	if err != nil {
+		return nil, err
 	}
 
 	client, completer, err := resolveCompleter(cfg)
@@ -93,6 +90,23 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
+	return buildEngine(graph, cfg, workDir, client, completer), nil
+}
+
+// resolveWorkDir returns the working directory, falling back to cwd if empty.
+func resolveWorkDir(workDir string) (string, error) {
+	if workDir != "" {
+		return workDir, nil
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get working directory: %w", err)
+	}
+	return dir, nil
+}
+
+// buildEngine assembles the Engine after all dependencies are resolved.
+func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.Client, completer agent.Completer) *Engine {
 	// Clean up the auto-created client if anything below fails.
 	built := false
 	defer func() {
@@ -111,7 +125,7 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 	return &Engine{
 		inner:  inner,
 		client: client,
-	}, nil
+	}
 }
 
 // resolveCompleter returns the LLM client and completer, building a client from env if needed.
@@ -129,28 +143,21 @@ func resolveCompleter(cfg Config) (*llm.Client, agent.Completer, error) {
 // injectGraphDefaults sets model, provider, and retry policy as graph-level attrs
 // when specified in Config and not already present in the graph.
 func injectGraphDefaults(graph *pipeline.Graph, cfg Config) {
-	if cfg.Model != "" || cfg.Provider != "" {
-		if graph.Attrs == nil {
-			graph.Attrs = make(map[string]string)
-		}
-		if cfg.Model != "" {
-			if _, exists := graph.Attrs["llm_model"]; !exists {
-				graph.Attrs["llm_model"] = cfg.Model
-			}
-		}
-		if cfg.Provider != "" {
-			if _, exists := graph.Attrs["llm_provider"]; !exists {
-				graph.Attrs["llm_provider"] = cfg.Provider
-			}
-		}
+	injectGraphAttrIfAbsent(graph, "llm_model", cfg.Model)
+	injectGraphAttrIfAbsent(graph, "llm_provider", cfg.Provider)
+	injectGraphAttrIfAbsent(graph, "default_retry_policy", cfg.RetryPolicy)
+}
+
+// injectGraphAttrIfAbsent sets a graph attribute only when value is non-empty and the key is not already set.
+func injectGraphAttrIfAbsent(graph *pipeline.Graph, key, value string) {
+	if value == "" {
+		return
 	}
-	if cfg.RetryPolicy != "" {
-		if graph.Attrs == nil {
-			graph.Attrs = make(map[string]string)
-		}
-		if _, exists := graph.Attrs["default_retry_policy"]; !exists {
-			graph.Attrs["default_retry_policy"] = cfg.RetryPolicy
-		}
+	if graph.Attrs == nil {
+		graph.Attrs = make(map[string]string)
+	}
+	if _, exists := graph.Attrs[key]; !exists {
+		graph.Attrs[key] = value
 	}
 }
 
@@ -194,87 +201,69 @@ func buildEngineOpts(cfg Config) []pipeline.EngineOption {
 // "strict digraph"; everything else is treated as .dip.
 func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
 	if format == "" {
-		trimmed := strings.TrimSpace(source)
-		if strings.HasPrefix(trimmed, "digraph") || strings.HasPrefix(trimmed, "strict digraph") {
-			format = "dot"
-		} else {
-			format = "dip"
-		}
+		format = detectSourceFormat(source)
 	}
 
 	switch format {
 	case "dot":
-		log.Println("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
-		graph, err := pipeline.ParseDOT(source)
-		if err != nil {
-			return nil, fmt.Errorf("parse DOT: %w", err)
-		}
-		return graph, nil
+		return parseDOTSource(source)
 	case "dip":
-		p := parser.NewParser(source, "inline.dip")
-		wf, err := p.Parse()
-		if err != nil {
-			return nil, fmt.Errorf("parse pipeline: %w", err)
-		}
-		// Run Dippin structural validation (DIP001–DIP009).
-		valResult := validator.Validate(wf)
-		if valResult.HasErrors() {
-			for _, d := range valResult.Diagnostics {
-				log.Println(d.String())
-			}
-			return nil, fmt.Errorf("%d validation error(s)", len(valResult.Errors()))
-		}
-		// Lint warnings (DIP101–DIP115) — print but don't block.
-		lintResult := validator.Lint(wf)
-		for _, d := range lintResult.Diagnostics {
-			log.Println(d.String())
-		}
-		graph, err := pipeline.FromDippinIR(wf)
-		if err != nil {
-			return nil, fmt.Errorf("convert pipeline IR: %w", err)
-		}
-		return graph, nil
+		return parseDIPSource(source)
 	default:
 		return nil, fmt.Errorf("unknown format %q (valid: dip, dot)", format)
 	}
+}
+
+// detectSourceFormat returns "dot" for DOT-syntax sources and "dip" otherwise.
+func detectSourceFormat(source string) string {
+	trimmed := strings.TrimSpace(source)
+	if strings.HasPrefix(trimmed, "digraph") || strings.HasPrefix(trimmed, "strict digraph") {
+		return "dot"
+	}
+	return "dip"
+}
+
+// parseDOTSource parses a DOT-format pipeline source.
+func parseDOTSource(source string) (*pipeline.Graph, error) {
+	log.Println("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
+	graph, err := pipeline.ParseDOT(source)
+	if err != nil {
+		return nil, fmt.Errorf("parse DOT: %w", err)
+	}
+	return graph, nil
+}
+
+// parseDIPSource parses a Dippin-format pipeline source, runs validation and lint.
+func parseDIPSource(source string) (*pipeline.Graph, error) {
+	p := parser.NewParser(source, "inline.dip")
+	wf, err := p.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parse pipeline: %w", err)
+	}
+	valResult := validator.Validate(wf)
+	if valResult.HasErrors() {
+		for _, d := range valResult.Diagnostics {
+			log.Println(d.String())
+		}
+		return nil, fmt.Errorf("%d validation error(s)", len(valResult.Errors()))
+	}
+	lintResult := validator.Lint(wf)
+	for _, d := range lintResult.Diagnostics {
+		log.Println(d.String())
+	}
+	graph, err := pipeline.FromDippinIR(wf)
+	if err != nil {
+		return nil, fmt.Errorf("convert pipeline IR: %w", err)
+	}
+	return graph, nil
 }
 
 // buildClient creates an LLM client from environment variables with
 // base URL support and retry middleware. If provider is non-empty, only
 // that provider is configured (returns error if unknown).
 func buildClient(provider string) (*llm.Client, error) {
-	constructors := map[string]func(string) (llm.ProviderAdapter, error){
-		"anthropic": func(key string) (llm.ProviderAdapter, error) {
-			var opts []anthropic.Option
-			if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-				opts = append(opts, anthropic.WithBaseURL(base))
-			}
-			return anthropic.New(key, opts...), nil
-		},
-		"openai": func(key string) (llm.ProviderAdapter, error) {
-			var opts []openai.Option
-			if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
-				opts = append(opts, openai.WithBaseURL(base))
-			}
-			return openai.New(key, opts...), nil
-		},
-		"gemini": func(key string) (llm.ProviderAdapter, error) {
-			var opts []google.Option
-			if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
-				opts = append(opts, google.WithBaseURL(base))
-			}
-			return google.New(key, opts...), nil
-		},
-		"openai-compat": func(key string) (llm.ProviderAdapter, error) {
-			var opts []openaicompat.Option
-			if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
-				opts = append(opts, openaicompat.WithBaseURL(base))
-			}
-			return openaicompat.New(key, opts...), nil
-		},
-	}
+	constructors := allProviderConstructors()
 
-	// If a specific provider is requested, only configure that one.
 	if provider != "" {
 		constructor, ok := constructors[provider]
 		if !ok {
@@ -291,14 +280,54 @@ func buildClient(provider string) (*llm.Client, error) {
 	}
 
 	// LLM transport retries handle transient API errors (rate limits, 5xx).
-	// This is separate from pipeline-level RetryPolicy which controls
-	// node re-execution on logical failures.
 	client.AddMiddleware(llm.NewRetryMiddleware(
 		llm.WithMaxRetries(3),
 		llm.WithBaseDelay(2*time.Second),
 	))
 
 	return client, nil
+}
+
+// allProviderConstructors returns the full map of provider constructor functions.
+func allProviderConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
+	return map[string]func(string) (llm.ProviderAdapter, error){
+		"anthropic":     newAnthropicAdapter,
+		"openai":        newOpenAIAdapter,
+		"gemini":        newGeminiAdapter,
+		"openai-compat": newOpenAICompatAdapter,
+	}
+}
+
+func newAnthropicAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []anthropic.Option
+	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
+		opts = append(opts, anthropic.WithBaseURL(base))
+	}
+	return anthropic.New(key, opts...), nil
+}
+
+func newOpenAIAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []openai.Option
+	if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
+		opts = append(opts, openai.WithBaseURL(base))
+	}
+	return openai.New(key, opts...), nil
+}
+
+func newGeminiAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []google.Option
+	if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
+		opts = append(opts, google.WithBaseURL(base))
+	}
+	return google.New(key, opts...), nil
+}
+
+func newOpenAICompatAdapter(key string) (llm.ProviderAdapter, error) {
+	var opts []openaicompat.Option
+	if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
+		opts = append(opts, openaicompat.WithBaseURL(base))
+	}
+	return openaicompat.New(key, opts...), nil
 }
 
 // Run executes the pipeline to completion.

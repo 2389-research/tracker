@@ -77,111 +77,106 @@ func NewStreamAccumulator() *StreamAccumulator {
 
 // Process handles a single StreamEvent, updating the accumulator state.
 func (a *StreamAccumulator) Process(event StreamEvent) {
+	if a.processTextOrReasoning(event) {
+		return
+	}
+	a.processToolOrFinish(event)
+}
+
+// processTextOrReasoning handles text and reasoning event types. Returns true if handled.
+func (a *StreamAccumulator) processTextOrReasoning(event StreamEvent) bool {
 	switch event.Type {
 	case EventTextStart:
-		if _, exists := a.textParts[event.TextID]; !exists {
-			a.textOrder = append(a.textOrder, event.TextID)
-			a.textParts[event.TextID] = &strings.Builder{}
-		}
-
+		a.processTextStart(event)
 	case EventTextDelta:
-		b, exists := a.textParts[event.TextID]
-		if !exists {
-			a.textOrder = append(a.textOrder, event.TextID)
-			b = &strings.Builder{}
-			a.textParts[event.TextID] = b
-		}
-		b.WriteString(event.Delta)
-
+		a.processTextDelta(event)
 	case EventReasoningDelta:
 		a.reasoning.WriteString(event.ReasoningDelta)
-
 	case EventReasoningSignature:
 		a.reasoningSignature = event.ReasoningSignature
-
 	case EventRedactedThinking:
-		if event.ReasoningSignature != "" {
-			a.redactedThinking = append(a.redactedThinking, event.ReasoningSignature)
-		}
+		a.processRedactedThinking(event)
+	default:
+		return false
+	}
+	return true
+}
 
+// processToolOrFinish handles tool call and finish event types.
+func (a *StreamAccumulator) processToolOrFinish(event StreamEvent) {
+	switch event.Type {
 	case EventToolCallStart:
-		if event.ToolCall != nil {
-			a.activeToolCall = &ToolCallData{
-				ID:             event.ToolCall.ID,
-				Name:           event.ToolCall.Name,
-				ThoughtSigData: event.ToolCall.ThoughtSigData,
-			}
-			a.activeToolArgs.Reset()
-			// Initialize from start event args (e.g., Google sends full args on start).
-			if len(event.ToolCall.Arguments) > 0 {
-				a.activeToolArgs.Write(event.ToolCall.Arguments)
-			}
-		}
-
+		a.processToolCallStart(event)
 	case EventToolCallDelta:
 		a.activeToolArgs.WriteString(event.Delta)
-
 	case EventToolCallEnd:
-		if a.activeToolCall != nil {
-			a.activeToolCall.Arguments = json.RawMessage(a.activeToolArgs.String())
-			a.toolCalls = append(a.toolCalls, *a.activeToolCall)
-			a.activeToolCall = nil
-			a.activeToolArgs.Reset()
-		}
-
+		a.processToolCallEnd()
 	case EventFinish:
-		if event.FinishReason != nil {
-			a.finishReason = event.FinishReason
-		}
-		if event.Usage != nil {
-			a.usage = event.Usage
-		}
+		a.processFinish(event)
+	}
+}
+
+func (a *StreamAccumulator) processRedactedThinking(event StreamEvent) {
+	if event.ReasoningSignature != "" {
+		a.redactedThinking = append(a.redactedThinking, event.ReasoningSignature)
+	}
+}
+
+func (a *StreamAccumulator) processTextStart(event StreamEvent) {
+	if _, exists := a.textParts[event.TextID]; !exists {
+		a.textOrder = append(a.textOrder, event.TextID)
+		a.textParts[event.TextID] = &strings.Builder{}
+	}
+}
+
+func (a *StreamAccumulator) processTextDelta(event StreamEvent) {
+	b, exists := a.textParts[event.TextID]
+	if !exists {
+		a.textOrder = append(a.textOrder, event.TextID)
+		b = &strings.Builder{}
+		a.textParts[event.TextID] = b
+	}
+	b.WriteString(event.Delta)
+}
+
+func (a *StreamAccumulator) processToolCallStart(event StreamEvent) {
+	if event.ToolCall == nil {
+		return
+	}
+	a.activeToolCall = &ToolCallData{
+		ID:             event.ToolCall.ID,
+		Name:           event.ToolCall.Name,
+		ThoughtSigData: event.ToolCall.ThoughtSigData,
+	}
+	a.activeToolArgs.Reset()
+	// Initialize from start event args (e.g., Google sends full args on start).
+	if len(event.ToolCall.Arguments) > 0 {
+		a.activeToolArgs.Write(event.ToolCall.Arguments)
+	}
+}
+
+func (a *StreamAccumulator) processToolCallEnd() {
+	if a.activeToolCall == nil {
+		return
+	}
+	a.activeToolCall.Arguments = json.RawMessage(a.activeToolArgs.String())
+	a.toolCalls = append(a.toolCalls, *a.activeToolCall)
+	a.activeToolCall = nil
+	a.activeToolArgs.Reset()
+}
+
+func (a *StreamAccumulator) processFinish(event StreamEvent) {
+	if event.FinishReason != nil {
+		a.finishReason = event.FinishReason
+	}
+	if event.Usage != nil {
+		a.usage = event.Usage
 	}
 }
 
 // Response builds a complete Response from the accumulated events.
 func (a *StreamAccumulator) Response() Response {
-	var content []ContentPart
-
-	// Add reasoning first (matches API content block ordering: thinking before text).
-	if a.reasoning.Len() > 0 || a.reasoningSignature != "" {
-		content = append(content, ContentPart{
-			Kind: KindThinking,
-			Thinking: &ThinkingData{
-				Text:      a.reasoning.String(),
-				Signature: a.reasoningSignature,
-			},
-		})
-	}
-
-	// Add redacted thinking blocks (opaque data that must be round-tripped).
-	for _, data := range a.redactedThinking {
-		content = append(content, ContentPart{
-			Kind: KindRedactedThinking,
-			Thinking: &ThinkingData{
-				Redacted:  true,
-				Signature: data,
-			},
-		})
-	}
-
-	// Add text parts in insertion order.
-	for _, id := range a.textOrder {
-		if b, ok := a.textParts[id]; ok {
-			content = append(content, ContentPart{
-				Kind: KindText,
-				Text: b.String(),
-			})
-		}
-	}
-
-	// Add tool calls.
-	for i := range a.toolCalls {
-		content = append(content, ContentPart{
-			Kind:     KindToolCall,
-			ToolCall: &a.toolCalls[i],
-		})
-	}
+	content := a.buildContent()
 
 	resp := Response{
 		Message: Message{
@@ -198,4 +193,63 @@ func (a *StreamAccumulator) Response() Response {
 	}
 
 	return resp
+}
+
+// buildContent assembles all content parts in canonical order: reasoning, redacted thinking,
+// text parts (insertion order), then tool calls.
+func (a *StreamAccumulator) buildContent() []ContentPart {
+	var content []ContentPart
+	content = a.appendReasoningPart(content)
+	content = a.appendRedactedThinkingParts(content)
+	content = a.appendTextParts(content)
+	content = a.appendToolCallParts(content)
+	return content
+}
+
+func (a *StreamAccumulator) appendReasoningPart(content []ContentPart) []ContentPart {
+	if a.reasoning.Len() == 0 && a.reasoningSignature == "" {
+		return content
+	}
+	return append(content, ContentPart{
+		Kind: KindThinking,
+		Thinking: &ThinkingData{
+			Text:      a.reasoning.String(),
+			Signature: a.reasoningSignature,
+		},
+	})
+}
+
+func (a *StreamAccumulator) appendRedactedThinkingParts(content []ContentPart) []ContentPart {
+	for _, data := range a.redactedThinking {
+		content = append(content, ContentPart{
+			Kind: KindRedactedThinking,
+			Thinking: &ThinkingData{
+				Redacted:  true,
+				Signature: data,
+			},
+		})
+	}
+	return content
+}
+
+func (a *StreamAccumulator) appendTextParts(content []ContentPart) []ContentPart {
+	for _, id := range a.textOrder {
+		if b, ok := a.textParts[id]; ok {
+			content = append(content, ContentPart{
+				Kind: KindText,
+				Text: b.String(),
+			})
+		}
+	}
+	return content
+}
+
+func (a *StreamAccumulator) appendToolCallParts(content []ContentPart) []ContentPart {
+	for i := range a.toolCalls {
+		content = append(content, ContentPart{
+			Kind:     KindToolCall,
+			ToolCall: &a.toolCalls[i],
+		})
+	}
+	return content
 }

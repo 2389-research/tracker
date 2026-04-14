@@ -25,11 +25,7 @@ var updateHintCh = make(chan string, 1)
 // If a newer version is available, sends the version to updateHintCh.
 // Always closes updateHintCh when done so printUpdateHint doesn't block.
 func maybeCheckForUpdate() {
-	if version == "dev" {
-		close(updateHintCh)
-		return
-	}
-	if os.Getenv("CI") != "" || os.Getenv("TRACKER_NO_UPDATE_CHECK") != "" {
+	if version == "dev" || os.Getenv("CI") != "" || os.Getenv("TRACKER_NO_UPDATE_CHECK") != "" {
 		close(updateHintCh)
 		return
 	}
@@ -39,37 +35,42 @@ func maybeCheckForUpdate() {
 		// Recover panics silently — writing to stderr here would corrupt
 		// the TUI if BubbleTea has taken over the terminal.
 		defer func() { recover() }()
+		runUpdateCheck()
+	}()
+}
 
-		cachePath := updateCheckCachePath()
-		if cachePath == "" {
-			return
-		}
+// runUpdateCheck performs the actual update check logic: reads cache, fetches if stale,
+// and sends the latest version to updateHintCh if an update is available.
+func runUpdateCheck() {
+	cachePath := updateCheckCachePath()
+	if cachePath == "" {
+		return
+	}
 
-		cache := readUpdateCache(cachePath)
-		if time.Since(cache.LastCheck) < 24*time.Hour {
-			if cache.Latest != "" && !versionsEqual(cache.Latest, version) {
-				updateHintCh <- cache.Latest
-			}
-			return
-		}
-
-		// Cache is stale — fetch fresh data.
-		// This HTTP call typically takes 200-2000ms. printUpdateHint waits
-		// up to 2s for it, but on the first stale check the hint may be
-		// missed. The cache update still persists so the next run shows it.
-		release, err := fetchLatestRelease()
-		if err != nil {
-			return // network failure — silently skip
-		}
-
-		cache.LastCheck = time.Now()
-		cache.Latest = release.TagName
-		writeUpdateCache(cachePath, cache)
-
-		if !versionsEqual(cache.Latest, version) {
+	cache := readUpdateCache(cachePath)
+	if time.Since(cache.LastCheck) < 24*time.Hour {
+		if cache.Latest != "" && !versionsEqual(cache.Latest, version) {
 			updateHintCh <- cache.Latest
 		}
-	}()
+		return
+	}
+
+	// Cache is stale — fetch fresh data.
+	// This HTTP call typically takes 200-2000ms. printUpdateHint waits
+	// up to 2s for it, but on the first stale check the hint may be
+	// missed. The cache update still persists so the next run shows it.
+	release, err := fetchLatestRelease()
+	if err != nil {
+		return // network failure — silently skip
+	}
+
+	cache.LastCheck = time.Now()
+	cache.Latest = release.TagName
+	writeUpdateCache(cachePath, cache)
+
+	if !versionsEqual(cache.Latest, version) {
+		updateHintCh <- cache.Latest
+	}
 }
 
 // printUpdateHint drains the update hint channel. Blocks until the background

@@ -34,36 +34,56 @@ func ParseStylesheet(input string) (*Stylesheet, error) {
 		if block == "" {
 			continue
 		}
-		parts := strings.SplitN(block, "{", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid stylesheet rule: %q", block)
+		rule, err := parseStyleBlock(block)
+		if err != nil {
+			return nil, err
 		}
-		selector := strings.TrimSpace(parts[0])
-		propsStr := strings.TrimSpace(parts[1])
-		if selector == "" {
-			return nil, fmt.Errorf("empty selector")
-		}
-		properties := make(map[string]string)
-		for _, prop := range strings.Split(propsStr, ";") {
-			prop = strings.TrimSpace(prop)
-			if prop == "" {
-				continue
-			}
-			colonIdx := strings.Index(prop, ":")
-			if colonIdx < 0 {
-				return nil, fmt.Errorf("invalid property: %q", prop)
-			}
-			key := strings.TrimSpace(prop[:colonIdx])
-			value := strings.TrimSpace(prop[colonIdx+1:])
-			if key != "" && value != "" {
-				properties[key] = value
-			}
-		}
-		if len(properties) > 0 {
-			ss.Rules = append(ss.Rules, StyleRule{Selector: selector, Properties: properties})
+		if rule != nil {
+			ss.Rules = append(ss.Rules, *rule)
 		}
 	}
 	return ss, nil
+}
+
+// parseStyleBlock parses a single "selector { props }" block (without the closing brace).
+func parseStyleBlock(block string) (*StyleRule, error) {
+	parts := strings.SplitN(block, "{", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid stylesheet rule: %q", block)
+	}
+	selector := strings.TrimSpace(parts[0])
+	if selector == "" {
+		return nil, fmt.Errorf("empty selector")
+	}
+	properties, err := parseStyleProperties(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return nil, err
+	}
+	if len(properties) == 0 {
+		return nil, nil
+	}
+	return &StyleRule{Selector: selector, Properties: properties}, nil
+}
+
+// parseStyleProperties parses semicolon-separated "key: value" declarations.
+func parseStyleProperties(propsStr string) (map[string]string, error) {
+	properties := make(map[string]string)
+	for _, prop := range strings.Split(propsStr, ";") {
+		prop = strings.TrimSpace(prop)
+		if prop == "" {
+			continue
+		}
+		colonIdx := strings.Index(prop, ":")
+		if colonIdx < 0 {
+			return nil, fmt.Errorf("invalid property: %q", prop)
+		}
+		key := strings.TrimSpace(prop[:colonIdx])
+		value := strings.TrimSpace(prop[colonIdx+1:])
+		if key != "" && value != "" {
+			properties[key] = value
+		}
+	}
+	return properties, nil
 }
 
 // specificityOf returns the specificity rank of a selector.
@@ -81,20 +101,30 @@ func specificityOf(selector string) int {
 	return 1
 }
 
+// matchedRule holds a stylesheet rule with its resolved priority metadata.
+type matchedRule struct {
+	specificity int
+	order       int
+	properties  map[string]string
+}
+
 // Resolve applies the stylesheet to a node and returns the final resolved
 // property map. Rules are applied in specificity order (low to high), so
 // higher-specificity selectors override lower ones. Explicit node attributes
 // override all stylesheet rules.
 func (ss *Stylesheet) Resolve(node *Node) map[string]string {
-	type matchedRule struct {
-		specificity int
-		order       int
-		properties  map[string]string
-	}
-
-	var matches []matchedRule
 	nodeClasses := parseClasses(node)
+	matches := ss.collectMatches(node, nodeClasses)
+	sortMatches(matches)
 
+	resolved := mergeMatchedProperties(matches)
+	applyExplicitNodeAttrs(resolved, node)
+	return resolved
+}
+
+// collectMatches returns all stylesheet rules that apply to the node.
+func (ss *Stylesheet) collectMatches(node *Node, nodeClasses map[string]bool) []matchedRule {
+	var matches []matchedRule
 	for i, rule := range ss.Rules {
 		if ruleMatchesNode(rule.Selector, node, nodeClasses) {
 			matches = append(matches, matchedRule{
@@ -104,33 +134,38 @@ func (ss *Stylesheet) Resolve(node *Node) map[string]string {
 			})
 		}
 	}
+	return matches
+}
 
-	// Sort by specificity ascending, then by source order ascending.
-	// Later applications overwrite earlier ones, so higher specificity wins.
+// sortMatches sorts rules by specificity ascending, then source order ascending.
+func sortMatches(matches []matchedRule) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].specificity != matches[j].specificity {
 			return matches[i].specificity < matches[j].specificity
 		}
 		return matches[i].order < matches[j].order
 	})
+}
 
+// mergeMatchedProperties combines all matched rule properties into a single map.
+func mergeMatchedProperties(matches []matchedRule) map[string]string {
 	resolved := make(map[string]string)
 	for _, m := range matches {
 		for k, v := range m.properties {
 			resolved[k] = v
 		}
 	}
+	return resolved
+}
 
-	// Explicit node attributes override stylesheet properties.
-	// Skip structural attributes that are not LLM configuration.
+// applyExplicitNodeAttrs overlays explicit node attributes, skipping structural keys.
+func applyExplicitNodeAttrs(resolved map[string]string, node *Node) {
 	for k, v := range node.Attrs {
 		if k == "class" || k == "shape" || k == "label" {
 			continue
 		}
 		resolved[k] = v
 	}
-
-	return resolved
 }
 
 // ruleMatchesNode checks whether a selector applies to the given node.

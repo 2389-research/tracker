@@ -180,6 +180,14 @@ type sseToolCallAccum struct {
 	Args strings.Builder
 }
 
+// sseState holds the mutable state threaded through SSE event processing.
+type sseState struct {
+	firstChunk     bool
+	textStarted    bool
+	toolCalls      map[int]*sseToolCallAccum
+	deferredFinish *llm.StreamEvent
+}
+
 // parseSSE reads SSE events from the Chat Completions response body and emits
 // StreamEvents. Chat Completions SSE format uses "data: {JSON}" lines with a
 // "data: [DONE]" sentinel.
@@ -187,133 +195,142 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
-	firstChunk := true
-	textStarted := false
-	// Tool call accumulators keyed by tool_calls array index.
-	toolCalls := make(map[int]*sseToolCallAccum)
-	// Deferred finish event — held until [DONE] so tool call ends emit first.
-	var deferredFinish *llm.StreamEvent
+	st := &sseState{
+		firstChunk: true,
+		toolCalls:  make(map[int]*sseToolCallAccum),
+	}
 
 	for scanner.Scan() {
-		line := scanner.Text()
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-
-		// [DONE] sentinel: emit text end, tool call ends, then deferred finish.
-		if data == "[DONE]" {
-			if textStarted {
-				ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: "text"}
-			}
-			a.emitAccumulatedToolCallEnds(toolCalls, ch)
-			if deferredFinish != nil {
-				ch <- *deferredFinish
-			}
+		if done := a.processSSELine(scanner.Text(), st, ch); done {
 			break
-		}
-
-		// Check for error objects embedded in the SSE stream.
-		if strings.Contains(data, `"error"`) {
-			var errChunk chatStreamError
-			if err := json.Unmarshal([]byte(data), &errChunk); err == nil && errChunk.Error.Message != "" {
-				ch <- llm.StreamEvent{
-					Type: llm.EventError,
-					Err:  sseErrorToTyped(errChunk.Error.Code, errChunk.Error.Message),
-				}
-				continue
-			}
-		}
-
-		// Parse the JSON chunk.
-		var chunk chatStreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: parse SSE chunk: %w", err)}
-			continue
-		}
-
-		// Emit stream_start on first chunk.
-		if firstChunk {
-			ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: json.RawMessage(data)}
-			firstChunk = false
-		}
-
-		// Process choices.
-		if len(chunk.Choices) > 0 {
-			choice := chunk.Choices[0]
-
-			// Text content delta.
-			if choice.Delta.Content != "" {
-				if !textStarted {
-					ch <- llm.StreamEvent{Type: llm.EventTextStart, TextID: "text"}
-					textStarted = true
-				}
-				ch <- llm.StreamEvent{
-					Type:   llm.EventTextDelta,
-					TextID: "text",
-					Delta:  choice.Delta.Content,
-				}
-			}
-
-			// Tool call deltas.
-			for _, tc := range choice.Delta.ToolCalls {
-				accum, exists := toolCalls[tc.Index]
-				if !exists {
-					// First appearance of this index: new tool call.
-					accum = &sseToolCallAccum{
-						ID:   tc.ID,
-						Name: tc.Function.Name,
-					}
-					toolCalls[tc.Index] = accum
-					ch <- llm.StreamEvent{
-						Type: llm.EventToolCallStart,
-						ToolCall: &llm.ToolCallData{
-							ID:   tc.ID,
-							Name: tc.Function.Name,
-						},
-					}
-				}
-				// Append argument deltas.
-				if tc.Function.Arguments != "" {
-					accum.Args.WriteString(tc.Function.Arguments)
-					ch <- llm.StreamEvent{
-						Type:  llm.EventToolCallDelta,
-						Delta: tc.Function.Arguments,
-					}
-				}
-			}
-
-			// finish_reason present: defer EventFinish until after tool call ends.
-			if choice.FinishReason != nil {
-				fr := translateFinishReason(*choice.FinishReason, len(toolCalls) > 0)
-				evt := llm.StreamEvent{
-					Type:         llm.EventFinish,
-					FinishReason: &fr,
-				}
-				if chunk.Usage != nil {
-					usage := translateUsage(*chunk.Usage)
-					evt.Usage = &usage
-				}
-				deferredFinish = &evt
-			}
-		} else if chunk.Usage != nil {
-			// Usage-only chunk (no choices): update deferred finish or create one.
-			usage := translateUsage(*chunk.Usage)
-			if deferredFinish != nil {
-				deferredFinish.Usage = &usage
-			} else {
-				deferredFinish = &llm.StreamEvent{
-					Type:  llm.EventFinish,
-					Usage: &usage,
-				}
-			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: SSE scan error: %w", err)}
+	}
+}
+
+// processSSELine processes a single SSE scan line and returns true when [DONE] is reached.
+func (a *Adapter) processSSELine(line string, st *sseState, ch chan<- llm.StreamEvent) bool {
+	if !strings.HasPrefix(line, "data: ") {
+		return false
+	}
+	data := strings.TrimPrefix(line, "data: ")
+	if data == "[DONE]" {
+		a.handleSSEDone(st, ch)
+		return true
+	}
+	return a.processSSEDataPayload(data, st, ch)
+}
+
+// processSSEDataPayload parses and dispatches a non-DONE SSE data payload.
+// Returns false always (only [DONE] terminates the stream).
+func (a *Adapter) processSSEDataPayload(data string, st *sseState, ch chan<- llm.StreamEvent) bool {
+	if strings.Contains(data, `"error"`) && a.tryEmitSSEError(data, ch) {
+		return false
+	}
+
+	var chunk chatStreamChunk
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: parse SSE chunk: %w", err)}
+		return false
+	}
+
+	if st.firstChunk {
+		ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: json.RawMessage(data)}
+		st.firstChunk = false
+	}
+
+	if len(chunk.Choices) > 0 {
+		a.handleSSEChoice(chunk, st, ch)
+	} else if chunk.Usage != nil {
+		a.handleSSEUsageOnly(chunk, st)
+	}
+	return false
+}
+
+// handleSSEDone handles the [DONE] sentinel: emits text end, tool call ends, then deferred finish.
+func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
+	if st.textStarted {
+		ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: "text"}
+	}
+	a.emitAccumulatedToolCallEnds(st.toolCalls, ch)
+	if st.deferredFinish != nil {
+		ch <- *st.deferredFinish
+	}
+}
+
+// tryEmitSSEError attempts to parse and emit an error embedded in the SSE stream.
+// Returns true if an error was found and emitted.
+func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
+	var errChunk chatStreamError
+	if err := json.Unmarshal([]byte(data), &errChunk); err == nil && errChunk.Error.Message != "" {
+		ch <- llm.StreamEvent{
+			Type: llm.EventError,
+			Err:  sseErrorToTyped(errChunk.Error.Code, errChunk.Error.Message),
+		}
+		return true
+	}
+	return false
+}
+
+// handleSSEChoice processes a chunk that contains choices (text or tool call deltas).
+func (a *Adapter) handleSSEChoice(chunk chatStreamChunk, st *sseState, ch chan<- llm.StreamEvent) {
+	choice := chunk.Choices[0]
+
+	if choice.Delta.Content != "" {
+		if !st.textStarted {
+			ch <- llm.StreamEvent{Type: llm.EventTextStart, TextID: "text"}
+			st.textStarted = true
+		}
+		ch <- llm.StreamEvent{Type: llm.EventTextDelta, TextID: "text", Delta: choice.Delta.Content}
+	}
+
+	for _, tc := range choice.Delta.ToolCalls {
+		a.handleSSEToolCallDelta(tc, st, ch)
+	}
+
+	if choice.FinishReason != nil {
+		a.handleSSEFinishReason(choice, chunk, st)
+	}
+}
+
+// handleSSEToolCallDelta processes a single tool call delta, creating or updating the accumulator.
+func (a *Adapter) handleSSEToolCallDelta(tc chatStreamToolCall, st *sseState, ch chan<- llm.StreamEvent) {
+	accum, exists := st.toolCalls[tc.Index]
+	if !exists {
+		accum = &sseToolCallAccum{ID: tc.ID, Name: tc.Function.Name}
+		st.toolCalls[tc.Index] = accum
+		ch <- llm.StreamEvent{
+			Type:     llm.EventToolCallStart,
+			ToolCall: &llm.ToolCallData{ID: tc.ID, Name: tc.Function.Name},
+		}
+	}
+	if tc.Function.Arguments != "" {
+		accum.Args.WriteString(tc.Function.Arguments)
+		ch <- llm.StreamEvent{Type: llm.EventToolCallDelta, Delta: tc.Function.Arguments}
+	}
+}
+
+// handleSSEFinishReason builds and defers the finish event until [DONE].
+func (a *Adapter) handleSSEFinishReason(choice chatStreamChoice, chunk chatStreamChunk, st *sseState) {
+	fr := translateFinishReason(*choice.FinishReason, len(st.toolCalls) > 0)
+	evt := llm.StreamEvent{Type: llm.EventFinish, FinishReason: &fr}
+	if chunk.Usage != nil {
+		usage := translateUsage(*chunk.Usage)
+		evt.Usage = &usage
+	}
+	st.deferredFinish = &evt
+}
+
+// handleSSEUsageOnly processes a usage-only chunk (no choices), updating the deferred finish.
+func (a *Adapter) handleSSEUsageOnly(chunk chatStreamChunk, st *sseState) {
+	usage := translateUsage(*chunk.Usage)
+	if st.deferredFinish != nil {
+		st.deferredFinish.Usage = &usage
+	} else {
+		st.deferredFinish = &llm.StreamEvent{Type: llm.EventFinish, Usage: &usage}
 	}
 }
 
@@ -351,6 +368,14 @@ func sseErrorToTyped(code, message string) error {
 		Provider:  "openai-compat",
 		ErrorCode: code,
 	}
+	if err := sseErrorToTypedAuthQuota(code, base); err != nil {
+		return err
+	}
+	return sseErrorToTypedRequestServer(code, base)
+}
+
+// sseErrorToTypedAuthQuota maps auth, quota, and not-found error codes to typed errors.
+func sseErrorToTypedAuthQuota(code string, base llm.ProviderError) error {
 	switch code {
 	case "insufficient_quota":
 		return &llm.QuotaExceededError{ProviderError: base}
@@ -358,6 +383,13 @@ func sseErrorToTyped(code, message string) error {
 		return &llm.AuthenticationError{ProviderError: base}
 	case "model_not_found":
 		return &llm.NotFoundError{ProviderError: base}
+	}
+	return nil
+}
+
+// sseErrorToTypedRequestServer maps request, content, rate-limit, and server error codes.
+func sseErrorToTypedRequestServer(code string, base llm.ProviderError) error {
+	switch code {
 	case "invalid_request_error", "invalid_request":
 		return &llm.InvalidRequestError{ProviderError: base}
 	case "context_length_exceeded":

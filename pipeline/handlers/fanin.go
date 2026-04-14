@@ -39,18 +39,7 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 		return pipeline.Outcome{}, fmt.Errorf("fan-in node %q: failed to unmarshal parallel.results: %w", node.ID, err)
 	}
 
-	merged := make(map[string]string)
-	anySuccess := false
-
-	for _, r := range results {
-		if r.Status == pipeline.OutcomeSuccess {
-			anySuccess = true
-			for k, v := range r.ContextUpdates {
-				merged[k] = v
-			}
-		}
-	}
-
+	merged, anySuccess := mergeSuccessfulBranches(results)
 	status := pipeline.OutcomeFail
 	if anySuccess {
 		status = pipeline.OutcomeSuccess
@@ -60,4 +49,20 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 		Status:         status,
 		ContextUpdates: merged,
 	}, nil
+}
+
+// mergeSuccessfulBranches collects context updates from successful branches.
+// Returns the merged map and whether any branch succeeded.
+func mergeSuccessfulBranches(results []ParallelResult) (map[string]string, bool) {
+	merged := make(map[string]string)
+	anySuccess := false
+	for _, r := range results {
+		if r.Status == pipeline.OutcomeSuccess {
+			anySuccess = true
+			for k, v := range r.ContextUpdates {
+				merged[k] = v
+			}
+		}
+	}
+	return merged, anySuccess
 }

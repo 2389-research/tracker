@@ -314,27 +314,7 @@ func (m setupModel) viewProviderSelect() string {
 	b.WriteString("\n\n")
 
 	for i, p := range m.providers {
-		cursor := "  "
-		if i == m.cursor {
-			cursor = selectedStyle.Render("▸ ")
-		}
-
-		check := checkboxStyle.Render("○")
-		if p.enabled {
-			check = checkboxStyle.Render("●")
-		}
-
-		name := p.name
-		if i == m.cursor {
-			name = selectedStyle.Render(name)
-		}
-
-		status := ""
-		if p.keyConfigured {
-			status = configuredHint.Render(" (configured)")
-		}
-
-		b.WriteString(fmt.Sprintf("  %s %s  %s%s\n", cursor, check, name, status))
+		b.WriteString(m.renderProviderRow(i, p))
 	}
 
 	b.WriteString("\n")
@@ -342,6 +322,31 @@ func (m setupModel) viewProviderSelect() string {
 	b.WriteString("\n")
 
 	return borderStyle.Render(b.String())
+}
+
+// renderProviderRow renders a single provider selection row.
+func (m setupModel) renderProviderRow(i int, p providerEntry) string {
+	cursor := "  "
+	if i == m.cursor {
+		cursor = selectedStyle.Render("▸ ")
+	}
+
+	check := checkboxStyle.Render("○")
+	if p.enabled {
+		check = checkboxStyle.Render("●")
+	}
+
+	name := p.name
+	if i == m.cursor {
+		name = selectedStyle.Render(name)
+	}
+
+	status := ""
+	if p.keyConfigured {
+		status = configuredHint.Render(" (configured)")
+	}
+
+	return fmt.Sprintf("  %s %s  %s%s\n", cursor, check, name, status)
 }
 
 func (m setupModel) viewProviderConfig() string {

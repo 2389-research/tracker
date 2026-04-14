@@ -52,56 +52,69 @@ func (t *GrepSearchTool) Parameters() json.RawMessage {
 }
 
 func (t *GrepSearchTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
+	pattern, path, err := parseGrepInput(input)
+	if err != nil {
+		return "", err
+	}
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid regex: %w", err)
+	}
+
+	searchRoot, err := t.safePath(path)
+	if err != nil {
+		return "", err
+	}
+
+	matches, truncated, err := t.runSearch(ctx, searchRoot, path, re)
+	if err != nil {
+		return "", err
+	}
+
+	return formatGrepResults(pattern, matches, truncated), nil
+}
+
+// parseGrepInput unmarshals the JSON input and validates required fields.
+func parseGrepInput(input json.RawMessage) (pattern, path string, err error) {
 	var params struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
 	}
 	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("invalid input: %w", err)
+		return "", "", fmt.Errorf("invalid input: %w", err)
 	}
 	if params.Pattern == "" {
-		return "", fmt.Errorf("pattern is required")
+		return "", "", fmt.Errorf("pattern is required")
 	}
 	if params.Path == "" {
 		params.Path = "."
 	}
+	return params.Pattern, params.Path, nil
+}
 
-	re, err := regexp.Compile(params.Pattern)
-	if err != nil {
-		return "", fmt.Errorf("invalid regex: %w", err)
-	}
-
-	searchRoot, err := t.safePath(params.Path)
-	if err != nil {
-		return "", err
-	}
-
+// runSearch performs the grep search on the resolved path.
+func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp) ([]string, bool, error) {
 	info, err := os.Stat(searchRoot)
 	if err != nil {
-		return "", fmt.Errorf("path not found: %s", params.Path)
+		return nil, false, fmt.Errorf("path not found: %s", displayPath)
 	}
-
-	var matches []string
-	truncated := false
-
 	if info.IsDir() {
-		matches, truncated, err = t.searchDir(ctx, searchRoot, re)
-	} else {
-		matches, truncated, err = t.searchFile(searchRoot, re)
+		return t.searchDir(ctx, searchRoot, re)
 	}
-	if err != nil {
-		return "", err
-	}
+	return t.searchFile(searchRoot, re)
+}
 
+// formatGrepResults builds the final output string from search matches.
+func formatGrepResults(pattern string, matches []string, truncated bool) string {
 	if len(matches) == 0 {
-		return fmt.Sprintf("no matches for pattern %q", params.Pattern), nil
+		return fmt.Sprintf("no matches for pattern %q", pattern)
 	}
-
 	result := strings.Join(matches, "\n")
 	if truncated {
 		result += fmt.Sprintf("\n\n(results truncated, showing first %d of more matches)", maxGrepResults)
 	}
-	return result, nil
+	return result
 }
 
 // safePath validates that a relative path resolves inside the working directory.
@@ -130,35 +143,7 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 	truncated := false
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if info.IsDir() {
-			// Skip hidden directories.
-			if strings.HasPrefix(info.Name(), ".") && path != root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Skip binary-looking files by checking for common binary extensions.
-		if isBinaryExtension(info.Name()) {
-			return nil
-		}
-
-		fileMatches, fileTruncated, err := t.searchFile(path, re)
-		if err != nil {
-			return nil // skip unreadable files
-		}
-		matches = append(matches, fileMatches...)
-		if fileTruncated || len(matches) >= maxGrepResults {
-			truncated = true
-			matches = matches[:min(len(matches), maxGrepResults)]
-			return fmt.Errorf("limit reached")
-		}
-		return nil
+		return t.walkEntry(ctx, root, path, info, err, re, &matches, &truncated)
 	})
 
 	// "limit reached" is our sentinel, not a real error.
@@ -167,6 +152,41 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 	}
 
 	return matches, truncated, nil
+}
+
+// walkEntry processes one entry during the filepath.Walk of searchDir.
+func (t *GrepSearchTool) walkEntry(ctx context.Context, root, path string, info os.FileInfo, err error, re *regexp.Regexp, matches *[]string, truncated *bool) error {
+	if err != nil {
+		return nil // skip unreadable entries
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if info.IsDir() {
+		return skipHiddenDir(info, path, root)
+	}
+	if isBinaryExtension(info.Name()) {
+		return nil
+	}
+	fileMatches, fileTruncated, err := t.searchFile(path, re)
+	if err != nil {
+		return nil // skip unreadable files
+	}
+	*matches = append(*matches, fileMatches...)
+	if fileTruncated || len(*matches) >= maxGrepResults {
+		*truncated = true
+		*matches = (*matches)[:min(len(*matches), maxGrepResults)]
+		return fmt.Errorf("limit reached")
+	}
+	return nil
+}
+
+// skipHiddenDir returns filepath.SkipDir for hidden directories (except the root).
+func skipHiddenDir(info os.FileInfo, path, root string) error {
+	if strings.HasPrefix(info.Name(), ".") && path != root {
+		return filepath.SkipDir
+	}
+	return nil
 }
 
 // searchFile scans a single file for lines matching the regex.

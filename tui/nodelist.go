@@ -99,7 +99,20 @@ func (nl *NodeList) View() string {
 		return sb.String()
 	}
 
-	// Build lines with connectors between visited nodes.
+	all := nl.buildNodeLines(nodes)
+	nl.autoScroll(nodes, all)
+	visible := nl.applyScrollWindow(all)
+
+	for _, l := range visible {
+		sb.WriteString(l.line)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// buildNodeLines constructs the full list of display lines including connectors.
+func (nl *NodeList) buildNodeLines(nodes []NodeEntry) []indexedLine {
 	var all []indexedLine
 	for i, node := range nodes {
 		if i > 0 {
@@ -110,26 +123,19 @@ func (nl *NodeList) View() string {
 		}
 		all = append(all, indexedLine{nl.renderNodeLineAt(node, i), i})
 	}
+	return all
+}
 
-	// Auto-scroll to keep the running node visible.
-	nl.autoScroll(nodes, all)
-
-	// Apply scroll window.
-	visible := all
-	if nl.height > 0 && len(visible) > nl.height {
-		end := nl.scroll + nl.height
-		if end > len(visible) {
-			end = len(visible)
-		}
-		visible = visible[nl.scroll:end]
+// applyScrollWindow clips the lines slice to the configured scroll window.
+func (nl *NodeList) applyScrollWindow(all []indexedLine) []indexedLine {
+	if nl.height <= 0 || len(all) <= nl.height {
+		return all
 	}
-
-	for _, l := range visible {
-		sb.WriteString(l.line)
-		sb.WriteString("\n")
+	end := nl.scroll + nl.height
+	if end > len(all) {
+		end = len(all)
 	}
-
-	return sb.String()
+	return all[nl.scroll:end]
 }
 
 // renderNodeLine builds the display line for a single node entry.
@@ -141,13 +147,27 @@ func (nl *NodeList) renderNodeLine(node NodeEntry) string {
 func (nl *NodeList) renderNodeLineAt(node NodeEntry, nodeIdx int) string {
 	status := nl.store.NodeStatus(node.ID)
 	lamp, style := nl.resolveLamp(node.ID, status)
+	label, indent := nl.resolveNodeLabel(node)
+	costSuffix := nl.buildCostSuffix(node, status)
 
-	label := node.Label
+	maxLabel := nl.width - 4 - len(indent) - lipgloss.Width(costSuffix)
+	if maxLabel > 0 && len(label) > maxLabel {
+		label = label[:maxLabel-1] + "…"
+	}
+
+	selector := nl.buildSelector(nodeIdx)
+	line := selector + indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
+	line += costSuffix
+	line += nl.nodeStatusSuffix(node.ID, status)
+	return line
+}
+
+// resolveNodeLabel returns the display label and indentation string for a node.
+func (nl *NodeList) resolveNodeLabel(node NodeEntry) (label, indent string) {
+	label = node.Label
 	if label == "" {
 		label = node.ID
 	}
-
-	indent := ""
 	if IsSubgraphNode(node.ID) {
 		depth := SubgraphDepth(node.ID)
 		indent = strings.Repeat("  ", depth)
@@ -155,42 +175,34 @@ func (nl *NodeList) renderNodeLineAt(node NodeEntry, nodeIdx int) string {
 			label = SubgraphChildLabel(node.ID)
 		}
 	}
+	return label, indent
+}
 
-	// Reserve space for cost suffix.
-	// Skip cost on parallel dispatchers and fan-in joiners — their delta
-	// snapshots overlap with children and produce misleading numbers.
-	costSuffix := ""
-	if status == NodeDone && !isParallelDispatcher(node) {
-		cost := nl.store.NodeCost(node.ID)
-		if cost > 0.001 {
-			// Mark parallel branch children as approximate (concurrent overlap).
-			prefix := "$"
-			if isParallelBranch(node) {
-				prefix = "~"
-			}
-			costSuffix = " " + Styles.CostBadge.Render(fmt.Sprintf("%s%.2f", prefix, cost))
-		}
+// buildCostSuffix returns the formatted cost badge string for a completed node, or empty string.
+func (nl *NodeList) buildCostSuffix(node NodeEntry, status NodeState) string {
+	if status != NodeDone || isParallelDispatcher(node) {
+		return ""
 	}
-
-	maxLabel := nl.width - 4 - len(indent) - lipgloss.Width(costSuffix)
-	if maxLabel > 0 && len(label) > maxLabel {
-		label = label[:maxLabel-1] + "…"
+	cost := nl.store.NodeCost(node.ID)
+	if cost <= 0.001 {
+		return ""
 	}
-
-	// Selection indicator — only shown when user has activated selection (selectedIdx >= 0).
-	selector := ""
-	if nl.selectedIdx >= 0 {
-		if nodeIdx == nl.selectedIdx {
-			selector = lipgloss.NewStyle().Foreground(ColorAmber).Bold(true).Render("▸") + " "
-		} else {
-			selector = "  "
-		}
+	prefix := "$"
+	if isParallelBranch(node) {
+		prefix = "~"
 	}
+	return " " + Styles.CostBadge.Render(fmt.Sprintf("%s%.2f", prefix, cost))
+}
 
-	line := selector + indent + style.Render(lamp) + " " + Styles.PrimaryText.Render(label)
-	line += costSuffix
-	line += nl.nodeStatusSuffix(node.ID, status)
-	return line
+// buildSelector returns the selection indicator prefix for a node row.
+func (nl *NodeList) buildSelector(nodeIdx int) string {
+	if nl.selectedIdx < 0 {
+		return ""
+	}
+	if nodeIdx == nl.selectedIdx {
+		return lipgloss.NewStyle().Foreground(ColorAmber).Bold(true).Render("▸") + " "
+	}
+	return "  "
 }
 
 // autoScroll adjusts the scroll offset to keep the target node visible.
@@ -199,34 +211,48 @@ func (nl *NodeList) autoScroll(nodes []NodeEntry, lines []indexedLine) {
 	if nl.height <= 0 {
 		return
 	}
-
-	targetLine := -1
-
-	// If user is navigating, scroll to selected node.
-	if nl.selectedIdx >= 0 {
-		for i, l := range lines {
-			if l.nodeIdx == nl.selectedIdx {
-				targetLine = i
-				break
-			}
-		}
-	}
-
-	// Otherwise scroll to running node.
-	if targetLine < 0 {
-		for i, l := range lines {
-			if l.nodeIdx >= 0 && l.nodeIdx < len(nodes) {
-				if nl.store.NodeStatus(nodes[l.nodeIdx].ID) == NodeRunning {
-					targetLine = i
-					break
-				}
-			}
-		}
-	}
-
+	targetLine := nl.findScrollTarget(nodes, lines)
 	if targetLine < 0 {
 		return
 	}
+	nl.clampScrollToTarget(targetLine)
+}
+
+// findScrollTarget returns the line index to scroll to: selected node first,
+// then the first running node, or -1 if neither is found.
+func (nl *NodeList) findScrollTarget(nodes []NodeEntry, lines []indexedLine) int {
+	if nl.selectedIdx >= 0 {
+		if i := findLineForNodeIdx(lines, nl.selectedIdx); i >= 0 {
+			return i
+		}
+	}
+	return findFirstRunningNodeLine(nl, nodes, lines)
+}
+
+// findLineForNodeIdx returns the first line index matching nodeIdx, or -1.
+func findLineForNodeIdx(lines []indexedLine, nodeIdx int) int {
+	for i, l := range lines {
+		if l.nodeIdx == nodeIdx {
+			return i
+		}
+	}
+	return -1
+}
+
+// findFirstRunningNodeLine returns the line index of the first running node, or -1.
+func findFirstRunningNodeLine(nl *NodeList, nodes []NodeEntry, lines []indexedLine) int {
+	for i, l := range lines {
+		if l.nodeIdx >= 0 && l.nodeIdx < len(nodes) {
+			if nl.store.NodeStatus(nodes[l.nodeIdx].ID) == NodeRunning {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// clampScrollToTarget adjusts nl.scroll so targetLine is visible in the viewport.
+func (nl *NodeList) clampScrollToTarget(targetLine int) {
 	if targetLine < nl.scroll {
 		nl.scroll = targetLine
 	}
@@ -288,13 +314,7 @@ func (nl *NodeList) resolveLamp(nodeID string, status NodeState) (string, lipglo
 func (nl *NodeList) nodeStatusSuffix(nodeID string, status NodeState) string {
 	switch status {
 	case NodeRunning:
-		if toolName := nl.thinking.ToolName(nodeID); toolName != "" {
-			return " " + Styles.Muted.Render(toolName)
-		}
-		if nl.thinking.IsThinking(nodeID) {
-			elapsed := nl.thinking.Elapsed(nodeID).Truncate(time.Second)
-			return " " + Styles.Muted.Render(elapsed.String())
-		}
+		return nl.runningNodeSuffix(nodeID)
 	case NodeFailed:
 		if errMsg := nl.store.NodeError(nodeID); errMsg != "" {
 			return " " + Styles.Error.Render(errMsg)
@@ -303,6 +323,18 @@ func (nl *NodeList) nodeStatusSuffix(nodeID string, status NodeState) string {
 		if retryMsg := nl.store.NodeRetryMessage(nodeID); retryMsg != "" {
 			return " " + Styles.Muted.Render(retryMsg)
 		}
+	}
+	return ""
+}
+
+// runningNodeSuffix returns the status suffix for a running node (tool or elapsed time).
+func (nl *NodeList) runningNodeSuffix(nodeID string) string {
+	if toolName := nl.thinking.ToolName(nodeID); toolName != "" {
+		return " " + Styles.Muted.Render(toolName)
+	}
+	if nl.thinking.IsThinking(nodeID) {
+		elapsed := nl.thinking.Elapsed(nodeID).Truncate(time.Second)
+		return " " + Styles.Muted.Render(elapsed.String())
 	}
 	return ""
 }

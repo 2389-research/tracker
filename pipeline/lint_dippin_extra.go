@@ -9,66 +9,65 @@ import (
 
 // lintDIP105 checks for no guaranteed success path from start to exit.
 func lintDIP105(g *Graph) []string {
-	var warnings []string
 	if g.StartNode == "" || g.ExitNode == "" {
-		return warnings
+		return nil
 	}
+	if hasUnconditionalPath(g, g.StartNode, g.ExitNode) {
+		return nil
+	}
+	return []string{"warning[DIP105]: no guaranteed success path from start to exit (all paths require conditions)"}
+}
 
-	// BFS from start to exit using only unconditional edges
-	visited := make(map[string]bool)
-	queue := []string{g.StartNode}
-	visited[g.StartNode] = true
+// hasUnconditionalPath returns true if there is a path from start to goal
+// using only unconditional (no condition) edges.
+func hasUnconditionalPath(g *Graph, start, goal string) bool {
+	visited := bfsVisit(start, func(node string) []string {
+		return unconditionalNeighbors(g, node)
+	})
+	return visited[goal]
+}
 
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		if current == g.ExitNode {
-			// Found a guaranteed path
-			return warnings
-		}
-
-		for _, edge := range g.OutgoingEdges(current) {
-			if edge.Condition == "" && !visited[edge.To] {
-				visited[edge.To] = true
-				queue = append(queue, edge.To)
-			}
+// unconditionalNeighbors returns the targets of unconditional outgoing edges from node.
+func unconditionalNeighbors(g *Graph, node string) []string {
+	var out []string
+	for _, edge := range g.OutgoingEdges(node) {
+		if edge.Condition == "" {
+			out = append(out, edge.To)
 		}
 	}
-
-	warnings = append(warnings, "warning[DIP105]: no guaranteed success path from start to exit (all paths require conditions)")
-	return warnings
+	return out
 }
 
 // lintDIP106 checks for undefined variable references in prompts.
 func lintDIP106(g *Graph) []string {
-	var warnings []string
-
 	allWrites := collectAllWrites(g)
 	reservedKeys := reservedContextKeys()
 
+	var warnings []string
 	for _, node := range g.Nodes {
-		prompt := node.Attrs["prompt"]
-		if prompt == "" {
+		warnings = append(warnings, lintDIP106Node(node, allWrites, reservedKeys)...)
+	}
+	return warnings
+}
+
+// lintDIP106Node checks a single node's prompt for undefined ctx variable references.
+func lintDIP106Node(node *Node, allWrites map[string]bool, reservedKeys map[string]bool) []string {
+	prompt := node.Attrs["prompt"]
+	if prompt == "" {
+		return nil
+	}
+	var warnings []string
+	for _, ref := range findVariableReferences(prompt) {
+		parts := strings.SplitN(ref, ".", 2)
+		if len(parts) != 2 || parts[0] != "ctx" {
 			continue
 		}
-
-		refs := findVariableReferences(prompt)
-		for _, ref := range refs {
-			parts := strings.SplitN(ref, ".", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			if parts[0] == "ctx" {
-				key := parts[1]
-				if !reservedKeys[key] && !allWrites[key] {
-					warnings = append(warnings, fmt.Sprintf(
-						"warning[DIP106]: node %q prompt references undefined variable ${ctx.%s}", node.ID, key))
-				}
-			}
+		key := parts[1]
+		if !reservedKeys[key] && !allWrites[key] {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP106]: node %q prompt references undefined variable ${ctx.%s}", node.ID, key))
 		}
 	}
-
 	return warnings
 }
 
@@ -104,23 +103,28 @@ func lintDIP103(g *Graph) []string {
 		if len(edges) < 2 {
 			continue
 		}
-
-		conditions := make(map[string]int)
-		for _, edge := range edges {
-			if edge.Condition != "" {
-				conditions[edge.Condition]++
-			}
-		}
-
-		for cond, count := range conditions {
-			if count > 1 {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP103]: node %q has %d edges with identical condition %q",
-					nodeID, count, cond))
-			}
-		}
+		warnings = append(warnings, findDuplicateConditions(nodeID, edges)...)
 	}
 
+	return warnings
+}
+
+// findDuplicateConditions returns warnings for any condition used on more than one outgoing edge.
+func findDuplicateConditions(nodeID string, edges []*Edge) []string {
+	conditions := make(map[string]int)
+	for _, edge := range edges {
+		if edge.Condition != "" {
+			conditions[edge.Condition]++
+		}
+	}
+	var warnings []string
+	for cond, count := range conditions {
+		if count > 1 {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP103]: node %q has %d edges with identical condition %q",
+				nodeID, count, cond))
+		}
+	}
 	return warnings
 }
 
@@ -134,26 +138,31 @@ func lintDIP109(g *Graph) []string {
 		if node.Handler != "subgraph" && node.Handler != "spawn" {
 			continue
 		}
-
-		params := node.Attrs["params"]
-		if params == "" {
-			continue
-		}
-
-		for _, pair := range strings.Split(params, ",") {
-			kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
-			if len(kv) < 1 {
-				continue
-			}
-			key := strings.TrimSpace(kv[0])
-			if reservedKeys[key] {
-				warnings = append(warnings, fmt.Sprintf(
-					"warning[DIP109]: node %q params key %q collides with reserved context key",
-					node.ID, key))
-			}
-		}
+		warnings = append(warnings, checkSubgraphParamCollisions(node, reservedKeys)...)
 	}
 
+	return warnings
+}
+
+// checkSubgraphParamCollisions returns warnings for any params key that collides with reserved keys.
+func checkSubgraphParamCollisions(node *Node, reservedKeys map[string]bool) []string {
+	params := node.Attrs["params"]
+	if params == "" {
+		return nil
+	}
+	var warnings []string
+	for _, pair := range strings.Split(params, ",") {
+		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(kv) < 1 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		if reservedKeys[key] {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[DIP109]: node %q params key %q collides with reserved context key",
+				node.ID, key))
+		}
+	}
 	return warnings
 }
 
@@ -170,13 +179,8 @@ func reservedContextKeys() map[string]bool {
 func collectAllWrites(g *Graph) map[string]bool {
 	allWrites := make(map[string]bool)
 	for _, node := range g.Nodes {
-		if w := node.Attrs["writes"]; w != "" {
-			for _, key := range strings.Split(w, ",") {
-				key = strings.TrimSpace(key)
-				if key != "" {
-					allWrites[key] = true
-				}
-			}
+		for key := range parseWriteKeys(node.Attrs["writes"]) {
+			allWrites[key] = true
 		}
 	}
 	return allWrites

@@ -48,42 +48,12 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		return nil, ErrMissingExit
 	}
 
-	g := NewGraph(workflow.Name)
-	g.StartNode = workflow.Start
-	g.ExitNode = workflow.Exit
+	g := buildGraphFromWorkflow(workflow)
 
-	// Map workflow-level goal to graph attributes (used by prompt expansion, fidelity, context)
-	if workflow.Goal != "" {
-		g.Attrs["goal"] = workflow.Goal
+	if err := addIRNodes(g, workflow.Nodes); err != nil {
+		return nil, err
 	}
-	if workflow.Version != "" {
-		g.Attrs["version"] = workflow.Version
-	}
-
-	// Map workflow-level defaults to graph attributes
-	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
-
-	// Map IR nodes to Graph nodes, preserving declaration order.
-	for _, irNode := range workflow.Nodes {
-		if irNode == nil {
-			continue
-		}
-		gNode, err := convertNode(irNode)
-		if err != nil {
-			return nil, fmt.Errorf("node %s: %w", irNode.ID, err)
-		}
-		g.AddNode(gNode)
-		g.NodeOrder = append(g.NodeOrder, irNode.ID)
-	}
-
-	// Map IR edges to Graph edges
-	for _, irEdge := range workflow.Edges {
-		if irEdge == nil {
-			continue
-		}
-		gEdge := convertEdge(irEdge)
-		g.AddEdge(gEdge)
-	}
+	addIREdges(g, workflow.Edges)
 
 	// Synthesize implicit edges from parallel fan-out targets and fan-in sources.
 	synthesizeImplicitEdges(g, workflow)
@@ -93,12 +63,52 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 		return nil, err
 	}
 
-	// Convert stylesheet rules to graph attrs for engine resolution.
+	return g, nil
+}
+
+// buildGraphFromWorkflow initializes a Graph from top-level workflow metadata.
+func buildGraphFromWorkflow(workflow *ir.Workflow) *Graph {
+	g := NewGraph(workflow.Name)
+	g.StartNode = workflow.Start
+	g.ExitNode = workflow.Exit
+
+	if workflow.Goal != "" {
+		g.Attrs["goal"] = workflow.Goal
+	}
+	if workflow.Version != "" {
+		g.Attrs["version"] = workflow.Version
+	}
+	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
 	if len(workflow.Stylesheet) > 0 {
 		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
 	}
+	return g
+}
 
-	return g, nil
+// addIRNodes converts IR nodes and adds them to the graph in declaration order.
+func addIRNodes(g *Graph, irNodes []*ir.Node) error {
+	for _, irNode := range irNodes {
+		if irNode == nil {
+			continue
+		}
+		gNode, err := convertNode(irNode)
+		if err != nil {
+			return fmt.Errorf("node %s: %w", irNode.ID, err)
+		}
+		g.AddNode(gNode)
+		g.NodeOrder = append(g.NodeOrder, irNode.ID)
+	}
+	return nil
+}
+
+// addIREdges converts IR edges and adds them to the graph.
+func addIREdges(g *Graph, irEdges []*ir.Edge) {
+	for _, irEdge := range irEdges {
+		if irEdge == nil {
+			continue
+		}
+		g.AddEdge(convertEdge(irEdge))
+	}
 }
 
 // nodeKindToShapeMap maps IR NodeKind to DOT shape strings.
@@ -157,67 +167,83 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 	if config == nil {
 		return nil
 	}
+	if ok, err := extractValueNodeAttrs(config, attrs); ok {
+		return err
+	}
+	return extractPtrNodeAttrs(config, attrs)
+}
 
+// extractValueNodeAttrs handles value (non-pointer) IR config types.
+// Returns (true, err) if the type was recognized; (false, nil) otherwise.
+func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool, error) {
 	switch cfg := config.(type) {
 	case ir.AgentConfig:
 		extractAgentAttrs(cfg, attrs)
-	case *ir.AgentConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractAgentAttrs(*cfg, attrs)
-
 	case ir.HumanConfig:
 		extractHumanAttrs(cfg, attrs)
-	case *ir.HumanConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractHumanAttrs(*cfg, attrs)
-
 	case ir.ToolConfig:
 		extractToolAttrs(cfg, attrs)
-	case *ir.ToolConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractToolAttrs(*cfg, attrs)
-
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
-	case *ir.ParallelConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractParallelAttrs(*cfg, attrs)
-
 	case ir.FanInConfig:
 		extractFanInAttrs(cfg, attrs)
-	case *ir.FanInConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractFanInAttrs(*cfg, attrs)
-
 	case ir.SubgraphConfig:
 		extractSubgraphAttrs(cfg, attrs)
-	case *ir.SubgraphConfig:
-		if cfg == nil {
-			return nil
-		}
-		extractSubgraphAttrs(*cfg, attrs)
-
-	case ir.ConditionalConfig, *ir.ConditionalConfig:
+	case ir.ConditionalConfig:
 		// Conditional nodes are pure routing — no config to extract.
+	default:
+		return false, nil
+	}
+	return true, nil
+}
 
+// extractPtrNodeAttrs handles pointer IR config types.
+// Returns an error for unrecognized types.
+func extractPtrNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
+	switch cfg := config.(type) {
+	case *ir.AgentConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.HumanConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.ToolConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.ParallelConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.FanInConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.SubgraphConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
+	case *ir.ConditionalConfig:
+		// Conditional nodes are pure routing — no config to extract.
+		return nil
 	default:
 		return fmt.Errorf("%T: %w", config, ErrUnknownConfig)
 	}
+}
 
-	return nil
+// extractNodeAttrsPtr dereferences a pointer IR config and dispatches to extractNodeAttrs.
+// Returns nil immediately if the pointer is nil.
+func extractNodeAttrsPtr[T ir.NodeConfig](cfg *T, attrs map[string]string) error {
+	if cfg == nil {
+		return nil
+	}
+	return extractNodeAttrs(*cfg, attrs)
 }
 
 func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
+	extractAgentPromptAttrs(cfg, attrs)
+	extractAgentExecutionAttrs(cfg, attrs)
+	extractAgentOutputAttrs(cfg, attrs)
+	extractAgentBackendAttrs(cfg.Params, attrs)
+	for k, v := range cfg.Params {
+		if _, exists := attrs[k]; !exists {
+			attrs[k] = v
+		}
+	}
+}
+
+// extractAgentPromptAttrs sets prompt, system prompt, model, and provider attrs.
+func extractAgentPromptAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.Prompt != "" {
 		attrs["prompt"] = cfg.Prompt
 	}
@@ -230,6 +256,16 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.Provider != "" {
 		attrs["llm_provider"] = cfg.Provider
 	}
+}
+
+// extractAgentExecutionAttrs sets turn limits, timeouts, caching, compaction, and feature flags.
+func extractAgentExecutionAttrs(cfg ir.AgentConfig, attrs map[string]string) {
+	extractAgentLimitsAttrs(cfg, attrs)
+	extractAgentFeatureAttrs(cfg, attrs)
+}
+
+// extractAgentLimitsAttrs sets turn limits, timeouts, and context management attrs.
+func extractAgentLimitsAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.MaxTurns > 0 {
 		attrs["max_turns"] = strconv.Itoa(cfg.MaxTurns)
 	}
@@ -245,6 +281,10 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.CompactionThreshold > 0 {
 		attrs["context_compaction_threshold"] = fmt.Sprintf("%.2f", cfg.CompactionThreshold)
 	}
+}
+
+// extractAgentFeatureAttrs sets reasoning, fidelity, and pipeline feature flag attrs.
+func extractAgentFeatureAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.ReasoningEffort != "" {
 		attrs["reasoning_effort"] = cfg.ReasoningEffort
 	}
@@ -257,23 +297,15 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.GoalGate {
 		attrs["goal_gate"] = "true"
 	}
+}
 
-	// Structured output format (v0.16.0).
+// extractAgentOutputAttrs sets structured output format attrs (v0.16.0).
+func extractAgentOutputAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.ResponseFormat != "" {
 		attrs["response_format"] = cfg.ResponseFormat
 	}
 	if cfg.ResponseSchema != "" {
 		attrs["response_schema"] = cfg.ResponseSchema
-	}
-
-	// Generic params — pass through to node attrs for keys not already set
-	// by typed fields above. This enables runtime features like backend
-	// selection without requiring IR schema changes.
-	extractAgentBackendAttrs(cfg.Params, attrs)
-	for k, v := range cfg.Params {
-		if _, exists := attrs[k]; !exists {
-			attrs[k] = v
-		}
 	}
 }
 
@@ -408,35 +440,28 @@ func extractNodeIO(io ir.NodeIO, attrs map[string]string) {
 // extractWorkflowDefaults maps IR WorkflowDefaults to graph-level attributes.
 // These provide fallback values for nodes that don't specify per-node config.
 func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]string) {
-	if defaults.Model != "" {
-		attrs["llm_model"] = defaults.Model
-	}
-	if defaults.Provider != "" {
-		attrs["llm_provider"] = defaults.Provider
-	}
-	if defaults.RetryPolicy != "" {
-		attrs["default_retry_policy"] = defaults.RetryPolicy
-	}
+	setIfNonEmpty(attrs, "llm_model", defaults.Model)
+	setIfNonEmpty(attrs, "llm_provider", defaults.Provider)
+	setIfNonEmpty(attrs, "default_retry_policy", defaults.RetryPolicy)
 	if defaults.MaxRetries > 0 {
 		attrs["default_max_retry"] = strconv.Itoa(defaults.MaxRetries)
 	}
-	if defaults.Fidelity != "" {
-		attrs["default_fidelity"] = defaults.Fidelity
-	}
+	setIfNonEmpty(attrs, "default_fidelity", defaults.Fidelity)
 	if defaults.MaxRestarts > 0 {
 		attrs["max_restarts"] = strconv.Itoa(defaults.MaxRestarts)
 	}
-	if defaults.RestartTarget != "" {
-		attrs["restart_target"] = defaults.RestartTarget
-	}
+	setIfNonEmpty(attrs, "restart_target", defaults.RestartTarget)
 	if defaults.CacheTools {
 		attrs["cache_tool_results"] = "true"
 	}
-	if defaults.Compaction != "" {
-		attrs["context_compaction"] = defaults.Compaction
-	}
-	if defaults.OnResume != "" {
-		attrs["on_resume"] = defaults.OnResume
+	setIfNonEmpty(attrs, "context_compaction", defaults.Compaction)
+	setIfNonEmpty(attrs, "on_resume", defaults.OnResume)
+}
+
+// setIfNonEmpty sets attrs[key] = value only when value is non-empty.
+func setIfNonEmpty(attrs map[string]string, key, value string) {
+	if value != "" {
+		attrs[key] = value
 	}
 }
 

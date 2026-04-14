@@ -72,69 +72,77 @@ func (h *acpClientHandler) SessionUpdate(_ context.Context, n acp.SessionNotific
 
 	switch {
 	case u.AgentMessageChunk != nil:
-		text := extractContentText(u.AgentMessageChunk.Content)
-		if text != "" {
-			h.mu.Lock()
-			h.textParts = append(h.textParts, text)
-			h.mu.Unlock()
-			h.safeEmit(agent.Event{
-				Type:      agent.EventTextDelta,
-				Timestamp: now,
-				Text:      text,
-			})
-		}
-
+		h.handleMessageChunk(u.AgentMessageChunk, now)
 	case u.AgentThoughtChunk != nil:
-		text := extractContentText(u.AgentThoughtChunk.Content)
-		if text != "" {
-			h.safeEmit(agent.Event{
-				Type:      agent.EventLLMReasoning,
-				Timestamp: now,
-				Text:      text,
-			})
-		}
-
+		h.handleThoughtChunk(u.AgentThoughtChunk, now)
 	case u.ToolCall != nil:
-		tc := u.ToolCall
-		h.mu.Lock()
-		h.toolNames[string(tc.ToolCallId)] = tc.Title
-		h.toolCount++
-		h.mu.Unlock()
-		h.safeEmit(agent.Event{
-			Type:      agent.EventToolCallStart,
-			Timestamp: now,
-			ToolName:  tc.Title,
-			ToolInput: formatRawInput(tc.RawInput),
-		})
-
+		h.handleToolCallStart(u.ToolCall, now)
 	case u.ToolCallUpdate != nil:
-		tc := u.ToolCallUpdate
-		h.mu.Lock()
-		name := h.toolNames[string(tc.ToolCallId)]
-		h.mu.Unlock()
-
-		if tc.Status != nil && (*tc.Status == acp.ToolCallStatusCompleted || *tc.Status == acp.ToolCallStatusFailed) {
-			evt := agent.Event{
-				Type:      agent.EventToolCallEnd,
-				Timestamp: now,
-				ToolName:  name,
-			}
-			output := extractToolCallOutput(tc.Content, tc.RawOutput)
-			if tc.Status != nil && *tc.Status == acp.ToolCallStatusFailed {
-				evt.ToolError = output
-			} else {
-				evt.ToolOutput = output
-			}
-			h.safeEmit(evt)
-		}
-
+		h.handleToolCallUpdate(u.ToolCallUpdate, now)
 	case u.Plan != nil:
 		// Plan updates are informational — no agent.Event equivalent.
-
 	default:
 		// AvailableCommandsUpdate, CurrentModeUpdate, UserMessageChunk — no mapping needed.
 	}
 	return nil
+}
+
+// handleMessageChunk processes an agent message text chunk.
+func (h *acpClientHandler) handleMessageChunk(chunk *acp.SessionUpdateAgentMessageChunk, now time.Time) {
+	text := extractContentText(chunk.Content)
+	if text == "" {
+		return
+	}
+	h.mu.Lock()
+	h.textParts = append(h.textParts, text)
+	h.mu.Unlock()
+	h.safeEmit(agent.Event{Type: agent.EventTextDelta, Timestamp: now, Text: text})
+}
+
+// handleThoughtChunk processes an agent reasoning/thought chunk.
+func (h *acpClientHandler) handleThoughtChunk(chunk *acp.SessionUpdateAgentThoughtChunk, now time.Time) {
+	text := extractContentText(chunk.Content)
+	if text != "" {
+		h.safeEmit(agent.Event{Type: agent.EventLLMReasoning, Timestamp: now, Text: text})
+	}
+}
+
+// handleToolCallStart processes a new tool call notification.
+func (h *acpClientHandler) handleToolCallStart(tc *acp.SessionUpdateToolCall, now time.Time) {
+	h.mu.Lock()
+	h.toolNames[string(tc.ToolCallId)] = tc.Title
+	h.toolCount++
+	h.mu.Unlock()
+	h.safeEmit(agent.Event{
+		Type:      agent.EventToolCallStart,
+		Timestamp: now,
+		ToolName:  tc.Title,
+		ToolInput: formatRawInput(tc.RawInput),
+	})
+}
+
+// handleToolCallUpdate processes a tool call status update.
+func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, now time.Time) {
+	if tc.Status == nil {
+		return
+	}
+	status := *tc.Status
+	if status != acp.ToolCallStatusCompleted && status != acp.ToolCallStatusFailed {
+		return
+	}
+	h.mu.Lock()
+	name := h.toolNames[string(tc.ToolCallId)]
+	h.turnCount++ // each tool round-trip counts as a turn
+	h.mu.Unlock()
+
+	evt := agent.Event{Type: agent.EventToolCallEnd, Timestamp: now, ToolName: name}
+	output := extractToolCallOutput(tc.Content, tc.RawOutput)
+	if status == acp.ToolCallStatusFailed {
+		evt.ToolError = output
+	} else {
+		evt.ToolOutput = output
+	}
+	h.safeEmit(evt)
 }
 
 // RequestPermission auto-approves all permission requests by selecting the
@@ -171,40 +179,101 @@ func (h *acpClientHandler) RequestPermission(_ context.Context, p acp.RequestPer
 }
 
 // ReadTextFile reads a file from the local filesystem.
+// Paths must be absolute and within the working directory.
 func (h *acpClientHandler) ReadTextFile(_ context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	if !filepath.IsAbs(p.Path) {
 		return acp.ReadTextFileResponse{}, &acp.RequestError{Code: -32602, Message: fmt.Sprintf("path must be absolute: %q", p.Path)}
+	}
+	if err := validatePathInWorkDir(p.Path, h.workingDir); err != nil {
+		return acp.ReadTextFileResponse{}, &acp.RequestError{Code: -32602, Message: err.Error()}
 	}
 	data, err := os.ReadFile(p.Path)
 	if err != nil {
 		return acp.ReadTextFileResponse{}, &acp.RequestError{Code: -32603, Message: err.Error()}
 	}
-	content := string(data)
-
-	// Apply line/limit filtering if requested.
-	if p.Line != nil || p.Limit != nil {
-		lines := strings.Split(content, "\n")
-		start := 0
-		if p.Line != nil && *p.Line > 1 {
-			start = *p.Line - 1 // 1-based to 0-based
-		}
-		if start > len(lines) {
-			start = len(lines)
-		}
-		end := len(lines)
-		if p.Limit != nil && start+*p.Limit < end {
-			end = start + *p.Limit
-		}
-		content = strings.Join(lines[start:end], "\n")
-	}
-
+	content := applyLineFilter(string(data), p.Line, p.Limit)
 	return acp.ReadTextFileResponse{Content: content}, nil
 }
 
+// validatePathInWorkDir ensures the given absolute path is under the working directory.
+// Resolves symlinks to prevent escaping the sandbox via symlink chains.
+func validatePathInWorkDir(path, workDir string) error {
+	if workDir == "" {
+		return nil // no restriction if working dir is unset
+	}
+	resolved, err := resolvePathForValidation(path)
+	if err != nil {
+		resolved = filepath.Clean(path) // fall back to Clean if symlink resolution fails
+	}
+	dir := filepath.Clean(workDir)
+	if !strings.HasPrefix(resolved, dir+string(filepath.Separator)) && resolved != dir {
+		return fmt.Errorf("path %q is outside working directory %q", path, workDir)
+	}
+	return nil
+}
+
+// resolvePathForValidation resolves symlinks for the longest existing prefix of path.
+func resolvePathForValidation(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	// Path may not exist yet (WriteTextFile). Resolve the parent.
+	parent := filepath.Dir(path)
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolvedParent, filepath.Base(path)), nil
+}
+
+// applyLineFilter slices a file's content by optional 1-based start line and limit.
+func applyLineFilter(content string, line, limit *int) string {
+	if line == nil && limit == nil {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	start, end := resolveLineRange(len(lines), line, limit)
+	return strings.Join(lines[start:end], "\n")
+}
+
+// resolveLineRange computes safe start/end indexes for line slicing.
+func resolveLineRange(total int, line, limit *int) (int, int) {
+	start := clampInt(derefLineStart(line), 0, total)
+	end := total
+	if limit != nil && *limit > 0 {
+		end = clampInt(start+*limit, start, total)
+	}
+	return start, end
+}
+
+// derefLineStart converts a 1-based line pointer to a 0-based index.
+func derefLineStart(line *int) int {
+	if line == nil || *line <= 1 {
+		return 0
+	}
+	return *line - 1
+}
+
+// clampInt restricts v to the range [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 // WriteTextFile writes content to a file on the local filesystem.
+// Paths must be absolute and within the working directory.
 func (h *acpClientHandler) WriteTextFile(_ context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	if !filepath.IsAbs(p.Path) {
 		return acp.WriteTextFileResponse{}, &acp.RequestError{Code: -32602, Message: fmt.Sprintf("path must be absolute: %q", p.Path)}
+	}
+	if err := validatePathInWorkDir(p.Path, h.workingDir); err != nil {
+		return acp.WriteTextFileResponse{}, &acp.RequestError{Code: -32602, Message: err.Error()}
 	}
 	// Ensure parent directory exists.
 	dir := filepath.Dir(p.Path)
@@ -424,18 +493,7 @@ func formatRawInput(v any) string {
 
 // extractToolCallOutput builds a string from tool call content and rawOutput.
 func extractToolCallOutput(content []acp.ToolCallContent, rawOutput any) string {
-	var parts []string
-	for _, c := range content {
-		if c.Content != nil {
-			text := extractContentText(c.Content.Content)
-			if text != "" {
-				parts = append(parts, text)
-			}
-		}
-		if c.Diff != nil {
-			parts = append(parts, fmt.Sprintf("diff %s", c.Diff.Path))
-		}
-	}
+	parts := collectToolCallParts(content)
 	if len(parts) > 0 {
 		return strings.Join(parts, "\n")
 	}
@@ -443,4 +501,26 @@ func extractToolCallOutput(content []acp.ToolCallContent, rawOutput any) string 
 		return formatRawInput(rawOutput)
 	}
 	return ""
+}
+
+// collectToolCallParts extracts text fragments from a slice of tool call content items.
+func collectToolCallParts(content []acp.ToolCallContent) []string {
+	var parts []string
+	for _, c := range content {
+		parts = appendToolCallContentPart(parts, c)
+	}
+	return parts
+}
+
+// appendToolCallContentPart appends the text representation of a single ToolCallContent item.
+func appendToolCallContentPart(parts []string, c acp.ToolCallContent) []string {
+	if c.Content != nil {
+		if text := extractContentText(c.Content.Content); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if c.Diff != nil {
+		parts = append(parts, fmt.Sprintf("diff %s", c.Diff.Path))
+	}
+	return parts
 }

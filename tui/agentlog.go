@@ -160,6 +160,23 @@ func (al *AgentLog) Init() tea.Cmd { return nil }
 
 // Update implements tea.Model.
 func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
+	if al.applyStreamMsg(msg) {
+		return nil
+	}
+	al.applyControlMsg(msg)
+	return nil
+}
+
+// applyStreamMsg handles LLM streaming messages. Returns true if the message was consumed.
+func (al *AgentLog) applyStreamMsg(msg tea.Msg) bool {
+	if al.applyStreamMsgContent(msg) {
+		return true
+	}
+	return al.applyStreamMsgLifecycle(msg)
+}
+
+// applyStreamMsgContent handles streaming content messages (text, tools, errors).
+func (al *AgentLog) applyStreamMsgContent(msg tea.Msg) bool {
 	switch m := msg.(type) {
 	case MsgTextChunk:
 		al.appendText(m.NodeID, m.Text)
@@ -175,10 +192,16 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 		al.flushNode(m.NodeID)
 		al.addTaggedLine(m.NodeID, Styles.Error.Render("ERROR: "+m.Error), LineError)
 	case MsgLLMProviderRaw:
-		if al.verboseTrace {
-			al.flushNode(m.NodeID)
-			al.addLine(m.NodeID, Styles.DimText.Render(m.Data))
-		}
+		al.handleProviderRaw(m)
+	default:
+		return false
+	}
+	return true
+}
+
+// applyStreamMsgLifecycle handles node lifecycle messages (completed, failed, retrying).
+func (al *AgentLog) applyStreamMsgLifecycle(msg tea.Msg) bool {
+	switch m := msg.(type) {
 	case MsgNodeFailed:
 		al.flushNode(m.NodeID)
 		al.addTaggedLine(m.NodeID, Styles.Error.Render("FAILED: "+m.Error), LineError)
@@ -189,6 +212,15 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	case MsgNodeCompleted:
 		al.flushNode(m.NodeID)
 		delete(al.streams, m.NodeID)
+	default:
+		return false
+	}
+	return true
+}
+
+// applyControlMsg handles UI control messages (verbosity, focus, expand).
+func (al *AgentLog) applyControlMsg(msg tea.Msg) {
+	switch m := msg.(type) {
 	case MsgToggleExpand:
 		al.expanded = !al.expanded
 	case MsgCycleVerbosity:
@@ -198,7 +230,14 @@ func (al *AgentLog) Update(msg tea.Msg) tea.Cmd {
 	case MsgClearFocus:
 		al.SetFocusNodeID("")
 	}
-	return nil
+}
+
+// handleProviderRaw logs raw provider events when verbose trace is enabled.
+func (al *AgentLog) handleProviderRaw(m MsgLLMProviderRaw) {
+	if al.verboseTrace {
+		al.flushNode(m.NodeID)
+		al.addLine(m.NodeID, Styles.DimText.Render(m.Data))
+	}
 }
 
 // appendText processes streaming LLM text for a specific node.
@@ -302,6 +341,11 @@ func (al *AgentLog) styleLine(s *nodeStream, line string) string {
 		return Styles.DimText.Render(line)
 	}
 
+	return styleMarkdownLine(trimmed, line)
+}
+
+// styleMarkdownLine applies markdown-aware styling for a non-code-block line.
+func styleMarkdownLine(trimmed, line string) string {
 	// Headers.
 	if strings.HasPrefix(trimmed, "# ") {
 		return lipgloss.NewStyle().Bold(true).Foreground(ColorReadout).Render(trimmed)
@@ -317,7 +361,7 @@ func (al *AgentLog) styleLine(s *nodeStream, line string) string {
 	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
 		return Styles.PrimaryText.Render(line)
 	}
-	if len(trimmed) > 2 && trimmed[0] >= '0' && trimmed[0] <= '9' && (trimmed[1] == '.' || (len(trimmed) > 2 && trimmed[2] == '.')) {
+	if isNumberedListItem(trimmed) {
 		return Styles.PrimaryText.Render(line)
 	}
 
@@ -326,6 +370,17 @@ func (al *AgentLog) styleLine(s *nodeStream, line string) string {
 	}
 
 	return Styles.PrimaryText.Render(line)
+}
+
+// isNumberedListItem returns true if the line looks like "1. " or "12. ".
+func isNumberedListItem(trimmed string) bool {
+	if len(trimmed) < 3 {
+		return false
+	}
+	if trimmed[0] < '0' || trimmed[0] > '9' {
+		return false
+	}
+	return trimmed[1] == '.' || (len(trimmed) > 2 && trimmed[2] == '.')
 }
 
 // termLines counts how many terminal rows a styled string occupies.
@@ -350,27 +405,12 @@ func termLines(s string, width int) int {
 func (al *AgentLog) activeNodeIndicators() string {
 	var indicators []string
 
-	// Collect all nodes that are currently running.
 	for _, entry := range al.store.Nodes() {
 		if al.store.NodeStatus(entry.ID) != NodeRunning {
 			continue
 		}
-		nodeLabel := entry.Label
-		if nodeLabel == "" {
-			nodeLabel = entry.ID
-		}
-
-		if toolName := al.thinking.ToolName(entry.ID); toolName != "" {
-			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
-			indicators = append(indicators,
-				toolStyle(toolName).Render(fmt.Sprintf("» %s: %s (%.1fs)", nodeLabel, toolName, elapsed)))
-		} else if al.store.IsWaiting(entry.ID) {
-			indicators = append(indicators,
-				Styles.Muted.Render(fmt.Sprintf(":: %s: waiting for provider...", nodeLabel)))
-		} else if al.thinking.IsThinking(entry.ID) {
-			elapsed := al.thinking.Elapsed(entry.ID).Seconds()
-			indicators = append(indicators,
-				Styles.Thinking.Render(fmt.Sprintf("⟳ %s: thinking... (%.1fs)", nodeLabel, elapsed)))
+		if ind := al.nodeIndicator(entry); ind != "" {
+			indicators = append(indicators, ind)
 		}
 	}
 
@@ -378,6 +418,27 @@ func (al *AgentLog) activeNodeIndicators() string {
 		return " "
 	}
 	return strings.Join(indicators, "\n")
+}
+
+// nodeIndicator builds the indicator string for a single running node.
+func (al *AgentLog) nodeIndicator(entry NodeEntry) string {
+	nodeLabel := entry.Label
+	if nodeLabel == "" {
+		nodeLabel = entry.ID
+	}
+
+	if toolName := al.thinking.ToolName(entry.ID); toolName != "" {
+		elapsed := al.thinking.Elapsed(entry.ID).Seconds()
+		return toolStyle(toolName).Render(fmt.Sprintf("» %s: %s (%.1fs)", nodeLabel, toolName, elapsed))
+	}
+	if al.store.IsWaiting(entry.ID) {
+		return Styles.Muted.Render(fmt.Sprintf(":: %s: waiting for provider...", nodeLabel))
+	}
+	if al.thinking.IsThinking(entry.ID) {
+		elapsed := al.thinking.Elapsed(entry.ID).Seconds()
+		return Styles.Thinking.Render(fmt.Sprintf("⟳ %s: thinking... (%.1fs)", nodeLabel, elapsed))
+	}
+	return ""
 }
 
 // rebuildFilter rebuilds the cached filtered indices based on verbosity and focus.
@@ -389,33 +450,40 @@ func (al *AgentLog) rebuildFilter() {
 	al.filteredCache = al.filteredCache[:0]
 
 	for i, line := range al.lines {
-		// Always include separator lines (empty nodeID) — they provide
-		// structural context between nodes regardless of filter state.
-		isSeparator := line.nodeID == "" && line.kind == LineGeneral
-
-		// Node focus filter.
-		if !isSeparator && al.focusNodeID != "" && line.nodeID != "" && line.nodeID != al.focusNodeID {
-			continue
+		if al.linePassesFilter(line) {
+			al.filteredCache = append(al.filteredCache, i)
 		}
-		// Verbosity filter (separators pass through).
-		if !isSeparator && al.verbosity != VerbosityAll {
-			switch al.verbosity {
-			case VerbosityTools:
-				if line.kind != LineTool {
-					continue
-				}
-			case VerbosityErrors:
-				if line.kind != LineError {
-					continue
-				}
-			case VerbosityReasoning:
-				if line.kind != LineReasoning {
-					continue
-				}
-			}
-		}
-		al.filteredCache = append(al.filteredCache, i)
 	}
+}
+
+// linePassesFilter returns true if the line should be included in the filtered view.
+func (al *AgentLog) linePassesFilter(line styledLine) bool {
+	// Always include separator lines (empty nodeID) — they provide
+	// structural context between nodes regardless of filter state.
+	isSeparator := line.nodeID == "" && line.kind == LineGeneral
+
+	// Node focus filter.
+	if !isSeparator && al.focusNodeID != "" && line.nodeID != "" && line.nodeID != al.focusNodeID {
+		return false
+	}
+	// Verbosity filter (separators pass through).
+	if !isSeparator && al.verbosity != VerbosityAll {
+		return al.lineMatchesVerbosity(line)
+	}
+	return true
+}
+
+// lineMatchesVerbosity returns true if the line's kind matches the current verbosity level.
+func (al *AgentLog) lineMatchesVerbosity(line styledLine) bool {
+	switch al.verbosity {
+	case VerbosityTools:
+		return line.kind == LineTool
+	case VerbosityErrors:
+		return line.kind == LineError
+	case VerbosityReasoning:
+		return line.kind == LineReasoning
+	}
+	return true
 }
 
 // View renders the agent log viewport. The indicator is always rendered at the
@@ -429,21 +497,7 @@ func (al *AgentLog) View() string {
 
 	// 1. Build the fixed bottom section: indicator + partials.
 	indicator := al.activeNodeIndicators()
-	indicatorRendered := indicator + "\n"
-	bottomRows := termLines(indicator, width)
-
-	var partials []string
-	for nodeID, s := range al.streams {
-		if s.current.Len() > 0 {
-			prefix := ""
-			if len(al.streams) > 1 {
-				prefix = Styles.Muted.Render(nodeID+": ") + ""
-			}
-			line := prefix + Styles.PrimaryText.Render(s.current.String())
-			partials = append(partials, line)
-			bottomRows += termLines(line, width)
-		}
-	}
+	partials, bottomRows := al.buildPartials(indicator, width)
 
 	// Account for search bar at the bottom.
 	searchBarRows := 0
@@ -458,12 +512,48 @@ func (al *AgentLog) View() string {
 		contentBudget = 1
 	}
 
-	// 3. Rebuild filter cache if needed and walk filtered lines.
+	// 3. Rebuild filter cache if needed, resolve visible window start.
+	start, filtered, searchTerm := al.resolveViewWindow(contentBudget, width)
+
+	// 4. Render: header, then content, then partials, then indicator, then search.
+	var sb strings.Builder
+	sb.WriteString(al.renderHeader())
+	sb.WriteString(al.renderContent(filtered, start, searchTerm, partials, indicator))
+	sb.WriteString(indicator + "\n")
+	if al.search.Active() {
+		sb.WriteString(al.search.View())
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// buildPartials collects in-progress partial lines from active node streams and
+// returns them along with the total bottom row count (partials + indicator).
+func (al *AgentLog) buildPartials(indicator string, width int) ([]string, int) {
+	bottomRows := termLines(indicator, width)
+	var partials []string
+	for nodeID, s := range al.streams {
+		if s.current.Len() > 0 {
+			prefix := ""
+			if len(al.streams) > 1 {
+				prefix = Styles.Muted.Render(nodeID+": ") + ""
+			}
+			line := prefix + Styles.PrimaryText.Render(s.current.String())
+			partials = append(partials, line)
+			bottomRows += termLines(line, width)
+		}
+	}
+	return partials, bottomRows
+}
+
+// resolveViewWindow rebuilds the filter cache, updates search matches, and
+// walks backward from the end to find the start index that fits contentBudget rows.
+// Returns start index into filtered, the filtered slice, and the active search term.
+func (al *AgentLog) resolveViewWindow(contentBudget, width int) (int, []int, string) {
 	al.rebuildFilter()
 	filtered := al.filteredCache
 	totalFiltered := len(filtered)
 
-	// Update search matches against the filtered view (not full line buffer).
 	searchTerm := al.search.Term()
 	if al.search.Active() {
 		al.search.UpdateMatchesFiltered(al.lines, filtered)
@@ -480,16 +570,22 @@ func (al *AgentLog) View() string {
 		usedRows += rows
 		start--
 	}
+	return start, filtered, searchTerm
+}
 
-	// 4. Render: header, then content, then partials, then indicator, then search.
-	var sb strings.Builder
+// renderHeader returns the header label line for the activity log.
+func (al *AgentLog) renderHeader() string {
 	headerLabel := "ACTIVITY LOG"
 	if al.focusNodeID != "" {
 		headerLabel += " [" + al.focusNodeID + "]"
 	}
-	sb.WriteString(Styles.ZoneLabel.Render(headerLabel))
-	sb.WriteString("\n")
+	return Styles.ZoneLabel.Render(headerLabel) + "\n"
+}
 
+// renderContent renders the visible log lines, partials, and empty-state placeholder.
+func (al *AgentLog) renderContent(filtered []int, start int, searchTerm string, partials []string, indicator string) string {
+	totalFiltered := len(filtered)
+	var sb strings.Builder
 	if totalFiltered == 0 && len(partials) == 0 && indicator == " " {
 		sb.WriteString(Styles.DimText.Render("awaiting activity..."))
 		sb.WriteString("\n")
@@ -504,19 +600,10 @@ func (al *AgentLog) View() string {
 			sb.WriteString("\n")
 		}
 	}
-
 	for _, p := range partials {
 		sb.WriteString(p)
 		sb.WriteString("\n")
 	}
-
-	sb.WriteString(indicatorRendered)
-
-	if al.search.Active() {
-		sb.WriteString(al.search.View())
-		sb.WriteString("\n")
-	}
-
 	return sb.String()
 }
 

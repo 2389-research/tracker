@@ -74,43 +74,54 @@ func (a *ActivityTracker) WrapComplete(next CompleteHandler) CompleteHandler {
 		resp, err := next(ctx, req)
 		latency := time.Since(start)
 
-		evt := ActivityEvent{
-			Timestamp:    start,
-			Model:        req.Model,
-			Provider:     req.Provider,
-			ToolCount:    len(req.Tools),
-			MessageCount: len(req.Messages),
-			Latency:      latency,
-		}
-
-		if err != nil {
-			evt.Err = err
-		} else if resp != nil {
-			evt.Provider = resp.Provider
-			evt.InputTokens = resp.Usage.InputTokens
-			evt.OutputTokens = resp.Usage.OutputTokens
-
-			// Extract tool call names
-			for _, tc := range resp.ToolCalls() {
-				evt.ToolCalls = append(evt.ToolCalls, tc.Name)
-			}
-
-			// Extract a text snippet if no tool calls
-			if len(evt.ToolCalls) == 0 {
-				text := resp.Text()
-				if len(text) > 80 {
-					text = text[:77] + "…"
-				}
-				// Collapse newlines for single-line display
-				text = strings.ReplaceAll(text, "\n", " ")
-				evt.ResponseSnippet = text
-			}
-		}
+		evt := buildActivityEvent(req, resp, err, start, latency)
 
 		if a.callback != nil {
 			a.callback(evt)
 		}
 
 		return resp, err
+	}
+}
+
+// buildActivityEvent constructs an ActivityEvent from the request, response, and error.
+func buildActivityEvent(req *Request, resp *Response, err error, start time.Time, latency time.Duration) ActivityEvent {
+	evt := ActivityEvent{
+		Timestamp:    start,
+		Model:        req.Model,
+		Provider:     req.Provider,
+		ToolCount:    len(req.Tools),
+		MessageCount: len(req.Messages),
+		Latency:      latency,
+	}
+
+	if err != nil {
+		evt.Err = err
+		return evt
+	}
+
+	if resp != nil {
+		populateActivityEventFromResponse(&evt, resp)
+	}
+	return evt
+}
+
+// populateActivityEventFromResponse fills in response-derived fields on the event.
+func populateActivityEventFromResponse(evt *ActivityEvent, resp *Response) {
+	evt.Provider = resp.Provider
+	evt.InputTokens = resp.Usage.InputTokens
+	evt.OutputTokens = resp.Usage.OutputTokens
+
+	for _, tc := range resp.ToolCalls() {
+		evt.ToolCalls = append(evt.ToolCalls, tc.Name)
+	}
+
+	// Extract a text snippet if no tool calls.
+	if len(evt.ToolCalls) == 0 {
+		text := resp.Text()
+		if len(text) > 80 {
+			text = text[:77] + "…"
+		}
+		evt.ResponseSnippet = strings.ReplaceAll(text, "\n", " ")
 	}
 }

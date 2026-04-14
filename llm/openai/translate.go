@@ -119,16 +119,23 @@ func extractInstructionsAndInput(messages []llm.Message) (string, []openaiInput)
 	var input []openaiInput
 	for _, m := range messages {
 		if m.Role == llm.RoleSystem || m.Role == llm.RoleDeveloper {
-			for _, part := range m.Content {
-				if part.Kind == llm.KindText {
-					instructions = append(instructions, part.Text)
-				}
-			}
+			instructions = append(instructions, extractTextParts(m)...)
 		} else {
 			input = append(input, translateMessageToInput(m)...)
 		}
 	}
 	return strings.Join(instructions, "\n"), input
+}
+
+// extractTextParts returns all KindText content strings from a message.
+func extractTextParts(m llm.Message) []string {
+	var parts []string
+	for _, part := range m.Content {
+		if part.Kind == llm.KindText {
+			parts = append(parts, part.Text)
+		}
+	}
+	return parts
 }
 
 // translateToolDefs converts unified tool definitions to OpenAI format.
@@ -173,18 +180,27 @@ func translateResponseFormat(rf *llm.ResponseFormat) *openaiText {
 func translateReasoningEffort(req *llm.Request) *openaiReason {
 	effort := req.ReasoningEffort
 	if effort == "" {
-		if opts, ok := req.ProviderOptions["openai"]; ok {
-			if optsMap, ok := opts.(map[string]any); ok {
-				if e, ok := optsMap["reasoning_effort"].(string); ok {
-					effort = e
-				}
-			}
-		}
+		effort = reasoningEffortFromProviderOptions(req.ProviderOptions)
 	}
 	if effort == "" {
 		return nil
 	}
 	return &openaiReason{Effort: effort}
+}
+
+// reasoningEffortFromProviderOptions extracts the reasoning_effort string from
+// the openai provider options map, returning empty string if absent.
+func reasoningEffortFromProviderOptions(providerOpts map[string]any) string {
+	opts, ok := providerOpts["openai"]
+	if !ok {
+		return ""
+	}
+	optsMap, ok := opts.(map[string]any)
+	if !ok {
+		return ""
+	}
+	e, _ := optsMap["reasoning_effort"].(string)
+	return e
 }
 
 // mergeProviderOptions merges provider-specific options into the JSON body,

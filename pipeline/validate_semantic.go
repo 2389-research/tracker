@@ -65,27 +65,42 @@ func validateConditionSyntax(g *Graph, ve *ValidationError) {
 // operators have non-empty left-hand sides, and attempting evaluation with
 // a recovery guard against panics.
 func checkConditionSyntax(condition string, ctx *PipelineContext) error {
-	// Check for empty branches after splitting on || and &&.
-	orBranches := strings.Split(condition, "||")
-	for _, branch := range orBranches {
+	if err := checkLogicalBranches(condition); err != nil {
+		return err
+	}
+	return safeEvaluateCondition(condition, ctx)
+}
+
+// checkLogicalBranches validates that no branch of a logical expression is empty.
+func checkLogicalBranches(condition string) error {
+	for _, branch := range strings.Split(condition, "||") {
 		branch = strings.TrimSpace(branch)
 		if branch == "" {
 			return fmt.Errorf("empty operand in condition")
 		}
-		andClauses := strings.Split(branch, "&&")
-		for _, clause := range andClauses {
-			clause = strings.TrimSpace(clause)
-			if clause == "" {
-				return fmt.Errorf("empty operand in condition")
-			}
-			if err := checkClauseSyntax(clause); err != nil {
-				return err
-			}
+		if err := checkAndClauses(branch); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	// Try evaluating the condition to catch malformed clauses.
-	// Use a recover guard in case of unexpected panics.
+// checkAndClauses validates the individual AND clauses within an OR branch.
+func checkAndClauses(branch string) error {
+	for _, clause := range strings.Split(branch, "&&") {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			return fmt.Errorf("empty operand in condition")
+		}
+		if err := checkClauseSyntax(clause); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// safeEvaluateCondition evaluates the condition with a panic recovery guard.
+func safeEvaluateCondition(condition string, ctx *PipelineContext) error {
 	var evalErr error
 	func() {
 		defer func() {
@@ -95,7 +110,6 @@ func checkConditionSyntax(condition string, ctx *PipelineContext) error {
 		}()
 		_, evalErr = EvaluateCondition(condition, ctx)
 	}()
-
 	return evalErr
 }
 
@@ -103,44 +117,36 @@ func checkConditionSyntax(condition string, ctx *PipelineContext) error {
 // operands around its operator. For example, "== broken" is invalid because
 // it has an empty left-hand side.
 func checkClauseSyntax(clause string) error {
-	// Strip "not " prefix for negation.
 	inner := clause
 	if strings.HasPrefix(inner, "not ") {
 		inner = strings.TrimSpace(inner[4:])
 	}
+	return checkClauseOperands(inner, clause)
+}
 
-	// Check word-based operators.
+// checkClauseOperands checks that the recognized operator in the clause has non-empty operands.
+func checkClauseOperands(inner, original string) error {
+	// Check word-based operators first.
 	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
 		if idx := strings.Index(inner, op); idx >= 0 {
-			left := strings.TrimSpace(inner[:idx])
-			right := strings.TrimSpace(inner[idx+len(op):])
-			if left == "" || right == "" {
-				return fmt.Errorf("empty operand around %q in clause %q", strings.TrimSpace(op), clause)
-			}
-			return nil
+			return checkOperandPair(inner[:idx], inner[idx+len(op):], strings.TrimSpace(op), original)
 		}
 	}
-
-	// Check != before =.
+	// Check != before = to avoid partial match.
 	if idx := strings.Index(inner, "!="); idx >= 0 {
-		left := strings.TrimSpace(inner[:idx])
-		right := strings.TrimSpace(inner[idx+2:])
-		if left == "" || right == "" {
-			return fmt.Errorf("empty operand around '!=' in clause %q", clause)
-		}
-		return nil
+		return checkOperandPair(inner[:idx], inner[idx+2:], "!=", original)
 	}
-
 	if idx := strings.Index(inner, "="); idx >= 0 {
-		left := strings.TrimSpace(inner[:idx])
-		right := strings.TrimSpace(inner[idx+1:])
-		if left == "" || right == "" {
-			return fmt.Errorf("empty operand around '=' in clause %q", clause)
-		}
-		return nil
+		return checkOperandPair(inner[:idx], inner[idx+1:], "=", original)
 	}
+	return nil
+}
 
-	// No recognized operator found — EvaluateCondition will report this.
+// checkOperandPair validates that neither side of an operator is empty.
+func checkOperandPair(rawLeft, rawRight, op, original string) error {
+	if strings.TrimSpace(rawLeft) == "" || strings.TrimSpace(rawRight) == "" {
+		return fmt.Errorf("empty operand around %q in clause %q", op, original)
+	}
 	return nil
 }
 
@@ -169,13 +175,22 @@ func validateSingleNodeAttrs(node *Node, ve *ValidationError) {
 	}
 	validateBoolAttr(node.Attrs, "cache_tool_results", "node", node.ID, ve)
 	validateEnumAttr(node.Attrs, "context_compaction", []string{"auto", "none"}, "node", node.ID, ve)
-	if v, ok := node.Attrs["context_compaction_threshold"]; ok {
-		f, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be a float", node.ID, v))
-		} else if f <= 0 || f > 1.0 {
-			ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be > 0 and <= 1.0", node.ID, v))
-		}
+	validateCompactionThreshold(node, ve)
+}
+
+// validateCompactionThreshold checks that context_compaction_threshold is a valid float in (0, 1].
+func validateCompactionThreshold(node *Node, ve *ValidationError) {
+	v, ok := node.Attrs["context_compaction_threshold"]
+	if !ok {
+		return
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be a float", node.ID, v))
+		return
+	}
+	if f <= 0 || f > 1.0 {
+		ve.add(fmt.Sprintf("node %q has invalid context_compaction_threshold %q: must be > 0 and <= 1.0", node.ID, v))
 	}
 }
 

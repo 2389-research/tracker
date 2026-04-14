@@ -43,40 +43,53 @@ func buildFanInSourceMap(workflow *ir.Workflow) map[string]string {
 		if irNode == nil {
 			continue
 		}
-		switch cfg := irNode.Config.(type) {
-		case ir.FanInConfig:
-			for _, source := range cfg.Sources {
-				fanInBySource[source] = irNode.ID
-			}
-		case *ir.FanInConfig:
-			for _, source := range cfg.Sources {
-				fanInBySource[source] = irNode.ID
-			}
-		}
+		indexFanInSources(fanInBySource, irNode)
 	}
 	return fanInBySource
+}
+
+// indexFanInSources registers fan-in sources for a node if it has a FanInConfig.
+func indexFanInSources(fanInBySource map[string]string, irNode *ir.Node) {
+	var sources []string
+	switch cfg := irNode.Config.(type) {
+	case ir.FanInConfig:
+		sources = cfg.Sources
+	case *ir.FanInConfig:
+		sources = cfg.Sources
+	}
+	for _, source := range sources {
+		fanInBySource[source] = irNode.ID
+	}
 }
 
 // synthesizeParallelEdges adds edges from a parallel node to its branch targets and fan-in join.
 func synthesizeParallelEdges(g *Graph, irNode *ir.Node, cfg ir.ParallelConfig, fanInBySource map[string]string, existingEdges map[[2]string]bool) {
 	for _, target := range cfg.Targets {
-		key := [2]string{irNode.ID, target}
-		if !existingEdges[key] {
-			g.AddEdge(&Edge{From: irNode.ID, To: target})
-			existingEdges[key] = true
-		}
+		addEdgeIfNew(g, irNode.ID, target, existingEdges)
 	}
 	if len(cfg.Targets) > 0 {
-		if joinID, ok := fanInBySource[cfg.Targets[0]]; ok {
-			key := [2]string{irNode.ID, joinID}
-			if !existingEdges[key] {
-				g.AddEdge(&Edge{From: irNode.ID, To: joinID})
-				existingEdges[key] = true
-			}
-			if node, ok := g.Nodes[irNode.ID]; ok {
-				node.Attrs["parallel_join"] = joinID
-			}
-		}
+		synthesizeJoinEdge(g, irNode, cfg.Targets[0], fanInBySource, existingEdges)
+	}
+}
+
+// addEdgeIfNew adds an edge to the graph only if it hasn't been added before.
+func addEdgeIfNew(g *Graph, from, to string, existingEdges map[[2]string]bool) {
+	key := [2]string{from, to}
+	if !existingEdges[key] {
+		g.AddEdge(&Edge{From: from, To: to})
+		existingEdges[key] = true
+	}
+}
+
+// synthesizeJoinEdge links the parallel node to the fan-in join node derived from firstTarget.
+func synthesizeJoinEdge(g *Graph, irNode *ir.Node, firstTarget string, fanInBySource map[string]string, existingEdges map[[2]string]bool) {
+	joinID, ok := fanInBySource[firstTarget]
+	if !ok {
+		return
+	}
+	addEdgeIfNew(g, irNode.ID, joinID, existingEdges)
+	if node, ok := g.Nodes[irNode.ID]; ok {
+		node.Attrs["parallel_join"] = joinID
 	}
 }
 

@@ -189,19 +189,30 @@ func stripAnsi(s string) string {
 	out.Grow(len(s))
 	inEsc := false
 	for _, r := range s {
-		if r == '\x1b' {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '~' {
-				inEsc = false
-			}
-			continue
-		}
-		out.WriteRune(r)
+		inEsc = processAnsiRune(r, inEsc, &out)
 	}
 	return out.String()
+}
+
+// processAnsiRune handles a single rune during ANSI stripping.
+// Returns the updated inEsc state.
+func processAnsiRune(r rune, inEsc bool, out *strings.Builder) bool {
+	if r == '\x1b' {
+		return true
+	}
+	if inEsc {
+		if isAnsiTerminator(r) {
+			return false
+		}
+		return true
+	}
+	out.WriteRune(r)
+	return false
+}
+
+// isAnsiTerminator returns true for runes that end an ANSI escape sequence.
+func isAnsiTerminator(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '~'
 }
 
 // HighlightLine highlights all occurrences of the search term in a styled line.

@@ -30,28 +30,7 @@ func NewNativeBackend(client agent.Completer, env exec.ExecutionEnvironment) *Na
 // If cfg.Extra contains an *agent.SessionConfig (set by CodergenHandler), it is
 // used directly to preserve all config fields (reasoning effort, caching, etc.).
 func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
-	var sessionCfg agent.SessionConfig
-
-	if sc, ok := cfg.Extra.(*agent.SessionConfig); ok && sc != nil {
-		sessionCfg = *sc
-	} else {
-		sessionCfg = agent.DefaultConfig()
-		if cfg.Model != "" {
-			sessionCfg.Model = cfg.Model
-		}
-		if cfg.Provider != "" {
-			sessionCfg.Provider = cfg.Provider
-		}
-		if cfg.MaxTurns > 0 {
-			sessionCfg.MaxTurns = cfg.MaxTurns
-		}
-		if cfg.SystemPrompt != "" {
-			sessionCfg.SystemPrompt = cfg.SystemPrompt
-		}
-		if cfg.WorkingDir != "" {
-			sessionCfg.WorkingDir = cfg.WorkingDir
-		}
-	}
+	sessionCfg := b.buildSessionConfig(cfg)
 
 	handler := agent.EventHandlerFunc(func(evt agent.Event) {
 		emit(evt)
@@ -70,4 +49,34 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	}
 
 	return sess.Run(ctx, cfg.Prompt)
+}
+
+// buildSessionConfig returns the SessionConfig to use for a run.
+// If cfg.Extra carries a pre-built *agent.SessionConfig it is used directly;
+// otherwise a default config is built from the AgentRunConfig fields.
+func (b *NativeBackend) buildSessionConfig(cfg pipeline.AgentRunConfig) agent.SessionConfig {
+	if sc, ok := cfg.Extra.(*agent.SessionConfig); ok && sc != nil {
+		return *sc
+	}
+	return applyRunConfigOverrides(agent.DefaultConfig(), cfg)
+}
+
+// applyRunConfigOverrides copies non-zero AgentRunConfig fields onto base.
+func applyRunConfigOverrides(base agent.SessionConfig, cfg pipeline.AgentRunConfig) agent.SessionConfig {
+	if cfg.Model != "" {
+		base.Model = cfg.Model
+	}
+	if cfg.Provider != "" {
+		base.Provider = cfg.Provider
+	}
+	if cfg.MaxTurns > 0 {
+		base.MaxTurns = cfg.MaxTurns
+	}
+	if cfg.SystemPrompt != "" {
+		base.SystemPrompt = cfg.SystemPrompt
+	}
+	if cfg.WorkingDir != "" {
+		base.WorkingDir = cfg.WorkingDir
+	}
+	return base
 }

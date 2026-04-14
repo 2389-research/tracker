@@ -65,29 +65,37 @@ func ValidateAll(g *Graph) *ValidationError {
 // ValidateAllWithLint checks a parsed Graph for structural and semantic issues,
 // including Dippin lint warnings. Returns a ValidationError with both errors and warnings.
 func ValidateAllWithLint(g *Graph, registry *HandlerRegistry) *ValidationError {
-	// First, run structural validation
 	ve := validateGraph(g)
 	if ve == nil {
 		ve = &ValidationError{}
 	}
 
-	// Then, run semantic validation (includes lint rules)
 	if registry != nil {
-		err, lintWarnings := ValidateSemantic(g, registry)
-		if err != nil {
-			if verr, ok := err.(*ValidationError); ok {
-				ve.Errors = append(ve.Errors, verr.Errors...)
-			} else {
-				ve.Errors = append(ve.Errors, err.Error())
-			}
-		}
-		ve.Warnings = append(ve.Warnings, lintWarnings...)
+		applySemanticValidation(g, registry, ve)
 	}
 
 	if ve.hasErrors() || ve.hasWarnings() {
 		return ve
 	}
 	return nil
+}
+
+// applySemanticValidation runs semantic validation and appends errors/warnings to ve.
+func applySemanticValidation(g *Graph, registry *HandlerRegistry, ve *ValidationError) {
+	err, lintWarnings := ValidateSemantic(g, registry)
+	if err != nil {
+		appendValidationErrors(ve, err)
+	}
+	ve.Warnings = append(ve.Warnings, lintWarnings...)
+}
+
+// appendValidationErrors merges err into ve, unwrapping *ValidationError if possible.
+func appendValidationErrors(ve *ValidationError, err error) {
+	if verr, ok := err.(*ValidationError); ok {
+		ve.Errors = append(ve.Errors, verr.Errors...)
+	} else {
+		ve.Errors = append(ve.Errors, err.Error())
+	}
 }
 
 func validateGraph(g *Graph) *ValidationError {
@@ -178,22 +186,7 @@ func validateReachability(g *Graph, ve *ValidationError) {
 		return
 	}
 
-	visited := make(map[string]bool)
-	queue := []string{g.StartNode}
-	visited[g.StartNode] = true
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		for _, e := range g.OutgoingEdges(current) {
-			if !visited[e.To] {
-				visited[e.To] = true
-				queue = append(queue, e.To)
-			}
-		}
-	}
-
+	visited := bfsVisitEdges(g)
 	for id := range g.Nodes {
 		if !visited[id] {
 			ve.add(fmt.Sprintf("node %q is unreachable from start node", id))
@@ -201,59 +194,78 @@ func validateReachability(g *Graph, ve *ValidationError) {
 	}
 }
 
+// bfsVisitEdges performs BFS from g.StartNode following all outgoing edges.
+// Returns the set of visited node IDs.
+func bfsVisitEdges(g *Graph) map[string]bool {
+	visited := map[string]bool{g.StartNode: true}
+	queue := []string{g.StartNode}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, e := range g.OutgoingEdges(current) {
+			if !visited[e.To] {
+				visited[e.To] = true
+				queue = append(queue, e.To)
+			}
+		}
+	}
+	return visited
+}
+
+// unconditionalEdgeSet returns a set of edges that have no condition.
+// These are the only edges that matter for cycle detection.
+type unconditionalEdgeSet map[[2]string]bool
+
+func buildUnconditionalEdgeSet(g *Graph) unconditionalEdgeSet {
+	s := make(unconditionalEdgeSet)
+	for _, e := range g.Edges {
+		if e.Condition == "" {
+			s[[2]string{e.From, e.To}] = true
+		}
+	}
+	return s
+}
+
 // validateNoCycles uses DFS coloring to detect unconditional cycles in the graph.
 // Conditional back-edges (retry loops) are allowed because they are guarded by
 // runtime conditions and bounded by max_retries.
-// White = unvisited, Gray = in current path, Black = fully processed.
 func validateNoCycles(g *Graph, ve *ValidationError) {
 	if g.StartNode == "" {
 		return
 	}
 
-	// Build a set of unconditional edges for cycle detection.
-	// Conditional edges form intentional retry loops and are excluded.
-	type edgeKey struct{ from, to string }
-	unconditional := make(map[edgeKey]bool)
-	for _, e := range g.Edges {
-		if e.Condition == "" {
-			unconditional[edgeKey{e.From, e.To}] = true
-		}
-	}
+	unconditional := buildUnconditionalEdgeSet(g)
+	color := make(map[string]int, len(g.Nodes))
 
-	const (
-		white = 0
-		gray  = 1
-		black = 2
-	)
-
-	color := make(map[string]int)
-	for id := range g.Nodes {
-		color[id] = white
-	}
-
-	var dfs func(nodeID string) bool
-	dfs = func(nodeID string) bool {
-		color[nodeID] = gray
-		for _, e := range g.OutgoingEdges(nodeID) {
-			if !unconditional[edgeKey{e.From, e.To}] {
-				continue
-			}
-			switch color[e.To] {
-			case gray:
-				return true
-			case white:
-				if dfs(e.To) {
-					return true
-				}
-			}
-		}
-		color[nodeID] = black
-		return false
-	}
-
-	if dfs(g.StartNode) {
+	if cyclesDFS(g.StartNode, g, unconditional, color) {
 		ve.add("graph contains a cycle")
 	}
+}
+
+// cyclesDFS performs DFS coloring to detect unconditional cycles.
+// Returns true if a cycle is found. White=0, Gray=1, Black=2.
+func cyclesDFS(nodeID string, g *Graph, unconditional unconditionalEdgeSet, color map[string]int) bool {
+	const gray, black = 1, 2
+	color[nodeID] = gray
+	for _, e := range g.OutgoingEdges(nodeID) {
+		if unconditional[[2]string{e.From, e.To}] && dfsVisitEdge(e.To, g, unconditional, color) {
+			return true
+		}
+	}
+	color[nodeID] = black
+	return false
+}
+
+// dfsVisitEdge checks a single edge target for a cycle.
+func dfsVisitEdge(target string, g *Graph, unconditional unconditionalEdgeSet, color map[string]int) bool {
+	const gray = 1
+	switch color[target] {
+	case gray:
+		return true
+	case 0: // white
+		return cyclesDFS(target, g, unconditional, color)
+	}
+	return false
 }
 
 // validateNoDuplicateEdges checks for edges with identical From, To, and Condition.
@@ -276,19 +288,21 @@ func validateConditionalFailEdges(g *Graph, ve *ValidationError) {
 		if n.Shape != "diamond" {
 			continue
 		}
-		outgoing := g.OutgoingEdges(n.ID)
-		hasFail := false
-		for _, e := range outgoing {
-			cond := strings.ToLower(e.Condition)
-			if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
-				hasFail = true
-				break
-			}
-		}
-		if !hasFail {
+		if !edgesHaveFailCondition(g.OutgoingEdges(n.ID)) {
 			ve.addWarning(fmt.Sprintf("conditional node %q has no fail edge", n.ID))
 		}
 	}
+}
+
+// edgesHaveFailCondition returns true if any edge has a fail-like condition.
+func edgesHaveFailCondition(edges []*Edge) bool {
+	for _, e := range edges {
+		cond := strings.ToLower(e.Condition)
+		if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
+			return true
+		}
+	}
+	return false
 }
 
 // validateEdgeLabelConsistency warns when a conditional (diamond) node has a mix
@@ -298,20 +312,31 @@ func validateEdgeLabelConsistency(g *Graph, ve *ValidationError) {
 		if n.Shape != "diamond" {
 			continue
 		}
-		outgoing := g.OutgoingEdges(n.ID)
-		if len(outgoing) < 2 {
-			continue
-		}
-		labeled := 0
-		for _, e := range outgoing {
-			if e.Label != "" {
-				labeled++
-			}
-		}
-		if labeled > 0 && labeled < len(outgoing) {
-			ve.addWarning(fmt.Sprintf("conditional node %q has inconsistent edge label usage (%d/%d labeled)", n.ID, labeled, len(outgoing)))
+		checkNodeEdgeLabelConsistency(g, n, ve)
+	}
+}
+
+// checkNodeEdgeLabelConsistency checks a single diamond node for inconsistent edge label usage.
+func checkNodeEdgeLabelConsistency(g *Graph, n *Node, ve *ValidationError) {
+	outgoing := g.OutgoingEdges(n.ID)
+	if len(outgoing) < 2 {
+		return
+	}
+	labeled := countLabeledEdges(outgoing)
+	if labeled > 0 && labeled < len(outgoing) {
+		ve.addWarning(fmt.Sprintf("conditional node %q has inconsistent edge label usage (%d/%d labeled)", n.ID, labeled, len(outgoing)))
+	}
+}
+
+// countLabeledEdges returns the number of edges with a non-empty label.
+func countLabeledEdges(edges []*Edge) int {
+	count := 0
+	for _, e := range edges {
+		if e.Label != "" {
+			count++
 		}
 	}
+	return count
 }
 
 // AutoFix applies automatic corrections to a graph and returns descriptions
@@ -323,16 +348,7 @@ func AutoFix(g *Graph) []string {
 		if n.Shape != "diamond" {
 			continue
 		}
-		outgoing := g.OutgoingEdges(n.ID)
-		hasFail := false
-		for _, e := range outgoing {
-			cond := strings.ToLower(e.Condition)
-			if strings.Contains(cond, "fail") || strings.Contains(cond, "!=success") {
-				hasFail = true
-				break
-			}
-		}
-		if !hasFail {
+		if !edgesHaveFailCondition(g.OutgoingEdges(n.ID)) {
 			g.AddEdge(&Edge{
 				From:      n.ID,
 				To:        n.ID,

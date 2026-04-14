@@ -88,28 +88,27 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	}
 
 	artifactRoot := h.resolveArtifactRoot(pctx)
-
 	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
-
-	// Report token usage from backends that bypass the LLM client middleware
-	// (e.g., claude-code subprocess, ACP agents). Native backend usage flows
-	// through the TokenTracker middleware automatically — skip to avoid double-counting.
-	switch backend.(type) {
-	case *ClaudeCodeBackend:
-		if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
-			h.tokenTracker.AddUsage("claude-code", sessResult.Usage)
-		}
-	case *ACPBackend:
-		if h.tokenTracker != nil && sessResult.Usage.TotalTokens > 0 {
-			h.tokenTracker.AddUsage("acp", sessResult.Usage)
-		}
-	}
+	h.trackExternalBackendUsage(backend, sessResult.Usage)
 
 	if runErr != nil {
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
 	}
-
 	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector)
+}
+
+// trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
+// Native backend usage is tracked by the middleware automatically — skip to avoid double-counting.
+func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBackend, usage llm.Usage) {
+	if h.tokenTracker == nil || usage.TotalTokens == 0 {
+		return
+	}
+	switch backend.(type) {
+	case *ClaudeCodeBackend:
+		h.tokenTracker.AddUsage("claude-code", usage)
+	case *ACPBackend:
+		h.tokenTracker.AddUsage("acp", usage)
+	}
 }
 
 // selectBackend chooses the appropriate AgentBackend based on node attributes
@@ -251,43 +250,75 @@ func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) (*pipeline.
 
 // parseClaudeCodeToolAttrs parses MCP servers, allowed/disallowed tools.
 func parseClaudeCodeToolAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	if raw, ok := node.Attrs["mcp_servers"]; ok && raw != "" {
-		servers, err := pipeline.ParseMCPServers(raw)
-		if err != nil {
-			return fmt.Errorf("node %q: %w", node.ID, err)
-		}
-		ccCfg.MCPServers = servers
+	if err := applyMCPServers(node, ccCfg); err != nil {
+		return err
 	}
-	if raw, ok := node.Attrs["allowed_tools"]; ok && raw != "" {
-		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
-	}
-	if raw, ok := node.Attrs["disallowed_tools"]; ok && raw != "" {
-		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
-	}
+	applyToolLists(node, ccCfg)
 	if err := pipeline.ValidateToolLists(ccCfg.AllowedTools, ccCfg.DisallowedTools); err != nil {
 		return fmt.Errorf("node %q: %w", node.ID, err)
 	}
 	return nil
 }
 
+// applyMCPServers parses and sets MCPServers from node attrs if present.
+func applyMCPServers(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	raw, ok := node.Attrs["mcp_servers"]
+	if !ok || raw == "" {
+		return nil
+	}
+	servers, err := pipeline.ParseMCPServers(raw)
+	if err != nil {
+		return fmt.Errorf("node %q: %w", node.ID, err)
+	}
+	ccCfg.MCPServers = servers
+	return nil
+}
+
+// applyToolLists sets AllowedTools and DisallowedTools from node attrs if present.
+func applyToolLists(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
+	if raw := node.Attrs["allowed_tools"]; raw != "" {
+		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
+	}
+	if raw := node.Attrs["disallowed_tools"]; raw != "" {
+		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
+	}
+}
+
 // parseClaudeCodeBudgetAttrs parses max_budget_usd and permission_mode.
 func parseClaudeCodeBudgetAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	if raw, ok := node.Attrs["max_budget_usd"]; ok && raw != "" {
-		v, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
-			return fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
-		}
-		if v > 0 {
-			ccCfg.MaxBudgetUSD = v
-		}
+	if err := applyMaxBudget(node, ccCfg); err != nil {
+		return err
 	}
-	if raw, ok := node.Attrs["permission_mode"]; ok && raw != "" {
-		mode := pipeline.PermissionMode(raw)
-		if !mode.Valid() {
-			return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, acceptEdits, bypassPermissions, default, dontAsk, auto)", node.ID, raw)
-		}
-		ccCfg.PermissionMode = mode
+	return applyPermissionMode(node, ccCfg)
+}
+
+// applyMaxBudget parses and applies the max_budget_usd attribute if present.
+func applyMaxBudget(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	raw, ok := node.Attrs["max_budget_usd"]
+	if !ok || raw == "" {
+		return nil
 	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
+	}
+	if v > 0 {
+		ccCfg.MaxBudgetUSD = v
+	}
+	return nil
+}
+
+// applyPermissionMode parses and applies the permission_mode attribute if present.
+func applyPermissionMode(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	raw, ok := node.Attrs["permission_mode"]
+	if !ok || raw == "" {
+		return nil
+	}
+	mode := pipeline.PermissionMode(raw)
+	if !mode.Valid() {
+		return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, acceptEdits, bypassPermissions, default, dontAsk, auto)", node.ID, raw)
+	}
+	ccCfg.PermissionMode = mode
 	return nil
 }
 
@@ -360,33 +391,60 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
-	// Guard against truly empty responses. Two cases:
-	// 1. Zero turns, zero tool calls → session never started
-	// 2. Has turns but zero output tokens AND zero text → API returned empty (error swallowed)
-	// Case 2 does NOT apply when tool calls > 0 (agent did real work via tools).
-	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
-	emptyAPIResponse := strings.TrimSpace(responseText) == "" && sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
-	if strings.TrimSpace(responseText) == "" && (emptySession || emptyAPIResponse) {
-		status := pipeline.OutcomeFail
-		msg := fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", node.ID)
-		if emptyAPIResponse {
-			status = pipeline.OutcomeRetry
-			msg = fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", node.ID)
-		}
-		outcome := pipeline.Outcome{
-			Status: status,
-			ContextUpdates: map[string]string{
-				pipeline.ContextKeyLastResponse:             msg,
-				pipeline.ContextKeyResponsePrefix + node.ID: msg,
-			},
-			Stats: buildSessionStats(sessResult),
-		}
-		if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
-			return pipeline.Outcome{}, err
-		}
-		return outcome, nil
+	if outcome, ok, err := h.buildEmptyResponseOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult); ok {
+		return outcome, err
 	}
 
+	return h.buildSuccessOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult)
+}
+
+// buildEmptyResponseOutcome handles the two empty-response cases and returns
+// (outcome, true, err) when an empty-response condition is detected, or
+// (zero, false, nil) when the session has real output and normal handling applies.
+//
+// Two empty cases:
+//  1. Zero turns, zero tool calls → session never started → OutcomeFail
+//  2. Has turns but zero output tokens AND zero text → API swallowed error → OutcomeRetry
+//
+// Case 2 does NOT apply when tool calls > 0 (agent did real work via tools).
+func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult) (pipeline.Outcome, bool, error) {
+	if strings.TrimSpace(responseText) != "" {
+		return pipeline.Outcome{}, false, nil
+	}
+
+	emptySession := sessResult.TotalToolCalls() == 0 && sessResult.Turns == 0
+	emptyAPIResponse := sessResult.Turns > 0 && sessResult.TotalToolCalls() == 0 && sessResult.Usage.OutputTokens == 0
+
+	if !emptySession && !emptyAPIResponse {
+		return pipeline.Outcome{}, false, nil
+	}
+
+	status, msg := emptyResponseStatusMsg(node.ID, emptyAPIResponse)
+	outcome := pipeline.Outcome{
+		Status: status,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyLastResponse:             msg,
+			pipeline.ContextKeyResponsePrefix + node.ID: msg,
+		},
+		Stats: buildSessionStats(sessResult),
+	}
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
+		return pipeline.Outcome{}, true, err
+	}
+	return outcome, true, nil
+}
+
+// emptyResponseStatusMsg returns the outcome status and diagnostic message for an empty response.
+func emptyResponseStatusMsg(nodeID string, emptyAPIResponse bool) (string, string) {
+	if emptyAPIResponse {
+		return pipeline.OutcomeRetry, fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", nodeID)
+	}
+	return pipeline.OutcomeFail, fmt.Sprintf("node %q: agent session produced no output (0 tokens, 0 tool calls) — check provider/model configuration", nodeID)
+}
+
+// buildSuccessOutcome handles the normal (non-empty) completion path, including
+// turn-limit exhaustion and auto_status overrides.
+func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult) (pipeline.Outcome, error) {
 	// Determine status. Turn-limit exhaustion and loop detection default to
 	// OutcomeFail so the engine routes through explicit failure edges (e.g.
 	// "when ctx.outcome = fail"). On nodes without failure edges, the
@@ -396,15 +454,9 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 	// auto_status overrides the default for both turn-exhaustion and normal
 	// completion: the agent's explicit STATUS line is authoritative.
 	status := pipeline.OutcomeSuccess
-	var turnLimitMsg string
-
-	if sessResult.MaxTurnsUsed {
+	turnLimitMsg := buildTurnLimitMsg(node, sessResult)
+	if turnLimitMsg != "" {
 		status = pipeline.OutcomeFail
-		if sessResult.LoopDetected {
-			turnLimitMsg = fmt.Sprintf("node %q: agent entered tool call loop (detected after %d turns)", node.ID, sessResult.Turns)
-		} else {
-			turnLimitMsg = fmt.Sprintf("node %q: agent exhausted turn limit (%d turns) without completing", node.ID, sessResult.Turns)
-		}
 	}
 
 	if node.Attrs["auto_status"] == "true" {
@@ -432,6 +484,18 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil
+}
+
+// buildTurnLimitMsg returns a non-empty message when the session hit the turn limit,
+// and an empty string otherwise.
+func buildTurnLimitMsg(node *pipeline.Node, sessResult agent.SessionResult) string {
+	if !sessResult.MaxTurnsUsed {
+		return ""
+	}
+	if sessResult.LoopDetected {
+		return fmt.Sprintf("node %q: agent entered tool call loop (detected after %d turns)", node.ID, sessResult.Turns)
+	}
+	return fmt.Sprintf("node %q: agent exhausted turn limit (%d turns) without completing", node.ID, sessResult.Turns)
 }
 
 // buildConfig constructs a SessionConfig from the node's attributes, using
@@ -470,18 +534,26 @@ func (h *CodergenHandler) applyModelProvider(config *agent.SessionConfig, node *
 
 // applySessionLimits sets system prompt, max turns, and command timeout.
 func (h *CodergenHandler) applySessionLimits(config *agent.SessionConfig, node *pipeline.Node) {
-	if sp, ok := node.Attrs["system_prompt"]; ok {
+	if sp := node.Attrs["system_prompt"]; sp != "" {
 		config.SystemPrompt = sp
 	}
-	if mt, ok := node.Attrs["max_turns"]; ok {
-		if v, err := strconv.Atoi(mt); err == nil && v > 0 {
-			config.MaxTurns = v
-		}
+	if mt := node.Attrs["max_turns"]; mt != "" {
+		applyMaxTurns(config, mt)
 	}
-	if ct, ok := node.Attrs["command_timeout"]; ok {
-		if d, err := time.ParseDuration(ct); err == nil && d > 0 {
-			config.CommandTimeout = d
-		}
+	if ct := node.Attrs["command_timeout"]; ct != "" {
+		applyCommandTimeout(config, ct)
+	}
+}
+
+func applyMaxTurns(config *agent.SessionConfig, raw string) {
+	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+		config.MaxTurns = v
+	}
+}
+
+func applyCommandTimeout(config *agent.SessionConfig, raw string) {
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		config.CommandTimeout = d
 	}
 }
 
@@ -508,31 +580,45 @@ func (h *CodergenHandler) applyResponseFormat(config *agent.SessionConfig, node 
 
 // applyCacheAndCompaction configures tool result caching and context compaction.
 func (h *CodergenHandler) applyCacheAndCompaction(config *agent.SessionConfig, node *pipeline.Node) {
+	h.applyCacheConfig(config, node)
+	h.applyCompactionConfig(config, node)
+}
+
+// applyCacheConfig sets CacheToolResults from graph and node attrs.
+func (h *CodergenHandler) applyCacheConfig(config *agent.SessionConfig, node *pipeline.Node) {
 	if v, ok := h.graphAttrs["cache_tool_results"]; ok && v == "true" {
 		config.CacheToolResults = true
 	}
 	if v, ok := node.Attrs["cache_tool_results"]; ok {
 		config.CacheToolResults = (v == "true")
 	}
+}
 
+// applyCompactionConfig sets ContextCompaction and CompactionThreshold from graph and node attrs.
+func (h *CodergenHandler) applyCompactionConfig(config *agent.SessionConfig, node *pipeline.Node) {
 	if v, ok := h.graphAttrs["context_compaction"]; ok && v == "auto" {
 		config.ContextCompaction = agent.CompactionAuto
 		config.CompactionThreshold = 0.6
 	}
 	if v, ok := node.Attrs["context_compaction"]; ok {
-		if v == "auto" {
-			config.ContextCompaction = agent.CompactionAuto
-			if config.CompactionThreshold == 0 {
-				config.CompactionThreshold = 0.6
-			}
-		} else {
-			config.ContextCompaction = agent.CompactionNone
-		}
+		applyNodeCompaction(config, v)
 	}
 	if v, ok := node.Attrs["context_compaction_threshold"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			config.CompactionThreshold = f
 		}
+	}
+}
+
+// applyNodeCompaction sets compaction mode from a node-level attribute value.
+func applyNodeCompaction(config *agent.SessionConfig, v string) {
+	if v == "auto" {
+		config.ContextCompaction = agent.CompactionAuto
+		if config.CompactionThreshold == 0 {
+			config.CompactionThreshold = 0.6
+		}
+	} else {
+		config.ContextCompaction = agent.CompactionNone
 	}
 }
 
@@ -552,21 +638,28 @@ func parseAutoStatus(text string) string {
 		if inCodeBlock {
 			continue
 		}
-		upper := strings.ToUpper(trimmed)
-		if !strings.HasPrefix(upper, "STATUS:") {
-			continue
-		}
-		status := strings.ToLower(strings.TrimSpace(trimmed[len("STATUS:"):]))
-		switch status {
-		case "success":
-			result = pipeline.OutcomeSuccess
-		case "fail":
-			result = pipeline.OutcomeFail
-		case "retry":
-			result = pipeline.OutcomeRetry
+		if s := parseStatusLine(trimmed); s != "" {
+			result = s
 		}
 	}
 	return result
+}
+
+// parseStatusLine extracts the status value from a "STATUS: ..." line.
+// Returns "" if the line is not a valid STATUS directive.
+func parseStatusLine(trimmed string) string {
+	if !strings.HasPrefix(strings.ToUpper(trimmed), "STATUS:") {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(trimmed[len("STATUS:"):])) {
+	case "success":
+		return pipeline.OutcomeSuccess
+	case "fail":
+		return pipeline.OutcomeFail
+	case "retry":
+		return pipeline.OutcomeRetry
+	}
+	return ""
 }
 
 // prependContextSummary adds a compacted context summary section to the prompt

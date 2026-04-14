@@ -134,25 +134,30 @@ func detectInstallMethod() string {
 
 // classifyInstallPath determines install method from the resolved binary path.
 func classifyInstallPath(resolved, gobin, gopath string) string {
-	// Homebrew detection — match known Homebrew prefixes
-	if strings.Contains(resolved, "/Cellar/") || strings.HasPrefix(resolved, "/opt/homebrew/") {
+	if isHomebrewPath(resolved) {
 		return "homebrew"
 	}
-
-	// go install detection
-	if gobin != "" && strings.HasPrefix(resolved, gobin) {
+	if isGoInstallPath(resolved, gobin, gopath) {
 		return "go-install"
+	}
+	return "binary"
+}
+
+// isHomebrewPath returns true if the binary path looks like a Homebrew install.
+func isHomebrewPath(resolved string) bool {
+	return strings.Contains(resolved, "/Cellar/") || strings.HasPrefix(resolved, "/opt/homebrew/")
+}
+
+// isGoInstallPath returns true if the binary path is under GOBIN, GOPATH/bin, or ~/go/bin.
+func isGoInstallPath(resolved, gobin, gopath string) bool {
+	if gobin != "" && strings.HasPrefix(resolved, gobin) {
+		return true
 	}
 	if gopath != "" && strings.Contains(resolved, filepath.Join(gopath, "bin")) {
-		return "go-install"
+		return true
 	}
-	// Default GOPATH
 	home, _ := os.UserHomeDir()
-	if home != "" && strings.HasPrefix(resolved, filepath.Join(home, "go", "bin")) {
-		return "go-install"
-	}
-
-	return "binary"
+	return home != "" && strings.HasPrefix(resolved, filepath.Join(home, "go", "bin"))
 }
 
 // selfReplace downloads and replaces the current binary.
@@ -197,17 +202,30 @@ func downloadAndPrepare(release *githubRelease, dir string) (string, error) {
 	}
 	defer os.Remove(tmpTar)
 
-	if checksumsURL != "" {
-		fmt.Print("Verifying checksum... ")
-		if err := verifyChecksum(tmpTar, assetName, checksumsURL); err != nil {
-			fmt.Println("FAILED")
-			return "", fmt.Errorf("checksum: %w", err)
-		}
-		fmt.Println("OK")
-	} else {
-		fmt.Println("Warning: no checksums.txt in release — skipping integrity verification")
+	if err := verifyChecksumIfAvailable(tmpTar, assetName, checksumsURL); err != nil {
+		return "", err
 	}
 
+	return extractAndTestBinary(tmpTar, dir)
+}
+
+// verifyChecksumIfAvailable verifies checksum when available, or warns if not.
+func verifyChecksumIfAvailable(tmpTar, assetName, checksumsURL string) error {
+	if checksumsURL == "" {
+		fmt.Println("Warning: no checksums.txt in release — skipping integrity verification")
+		return nil
+	}
+	fmt.Print("Verifying checksum... ")
+	if err := verifyChecksum(tmpTar, assetName, checksumsURL); err != nil {
+		fmt.Println("FAILED")
+		return fmt.Errorf("checksum: %w", err)
+	}
+	fmt.Println("OK")
+	return nil
+}
+
+// extractAndTestBinary extracts the binary from tar, sets permissions, and smoke-tests it.
+func extractAndTestBinary(tmpTar, dir string) (string, error) {
 	tmpBin, err := extractBinaryFromTar(tmpTar, dir)
 	if err != nil {
 		return "", fmt.Errorf("extract: %w", err)
@@ -321,57 +339,66 @@ func downloadToTemp(dir, url string) (string, error) {
 // Note: checksums are fetched from the same GitHub release as the binary.
 // This guards against download corruption, not supply chain compromise.
 func verifyChecksum(filePath, assetName, checksumsURL string) error {
-	req, err := http.NewRequest("GET", checksumsURL, nil)
+	expectedHash, err := fetchExpectedHash(assetName, checksumsURL)
 	if err != nil {
 		return err
+	}
+	actualHash, err := computeFileSHA256(filePath)
+	if err != nil {
+		return err
+	}
+	if actualHash != expectedHash {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+	}
+	return nil
+}
+
+// fetchExpectedHash downloads checksums.txt and extracts the hash for assetName.
+func fetchExpectedHash(assetName, checksumsURL string) (string, error) {
+	req, err := http.NewRequest("GET", checksumsURL, nil)
+	if err != nil {
+		return "", err
 	}
 	req.Header.Set("User-Agent", "tracker/"+version)
 
 	resp, err := updateDLClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("fetch checksums: HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("fetch checksums: HTTP %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsSize))
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Parse checksums.txt: each line is "hash  filename"
-	var expectedHash string
 	for _, line := range strings.Split(string(body), "\n") {
 		parts := strings.Fields(line)
 		if len(parts) == 2 && parts[1] == assetName {
-			expectedHash = parts[0]
-			break
+			return parts[0], nil
 		}
 	}
-	if expectedHash == "" {
-		return fmt.Errorf("no checksum found for %s", assetName)
-	}
+	return "", fmt.Errorf("no checksum found for %s", assetName)
+}
 
-	// Compute actual hash
+// computeFileSHA256 opens a file and returns its SHA256 hex digest.
+func computeFileSHA256(filePath string) (string, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return err
+		return "", err
 	}
-	actualHash := hex.EncodeToString(h.Sum(nil))
-
-	if actualHash != expectedHash {
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
-	}
-	return nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // extractBinaryFromTar extracts the "tracker" binary from a .tar.gz file.
@@ -389,7 +416,11 @@ func extractBinaryFromTar(tarPath, destDir string) (string, error) {
 	}
 	defer gz.Close()
 
-	tr := tar.NewReader(gz)
+	return findAndExtractBinary(tar.NewReader(gz), destDir)
+}
+
+// findAndExtractBinary scans a tar archive for the "tracker" binary and writes it to destDir.
+func findAndExtractBinary(tr *tar.Reader, destDir string) (string, error) {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -398,31 +429,30 @@ func extractBinaryFromTar(tarPath, destDir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-
-		// Look for the tracker binary (may be at root or in a subdirectory).
-		// We use filepath.Base to ignore directory components — the output
-		// path is always destDir/.tracker-new regardless of archive layout.
 		base := filepath.Base(hdr.Name)
 		if base == "tracker" && hdr.Typeflag == tar.TypeReg {
-			tmpBin := filepath.Join(destDir, ".tracker-new")
-			out, err := os.Create(tmpBin)
-			if err != nil {
-				return "", err
-			}
-			n, err := io.Copy(out, io.LimitReader(tr, maxBinarySize+1))
-			if err != nil {
-				out.Close()
-				os.Remove(tmpBin)
-				return "", err
-			}
-			out.Close()
-			if n > maxBinarySize {
-				os.Remove(tmpBin)
-				return "", fmt.Errorf("extracted binary too large (%d bytes, max %d)", n, maxBinarySize)
-			}
-			return tmpBin, nil
+			return writeBinaryEntry(tr, destDir)
 		}
 	}
-
 	return "", fmt.Errorf("tracker binary not found in archive")
+}
+
+// writeBinaryEntry writes the current tar entry to destDir/.tracker-new.
+func writeBinaryEntry(tr *tar.Reader, destDir string) (string, error) {
+	tmpBin := filepath.Join(destDir, ".tracker-new")
+	out, err := os.Create(tmpBin)
+	if err != nil {
+		return "", err
+	}
+	n, err := io.Copy(out, io.LimitReader(tr, maxBinarySize+1))
+	out.Close()
+	if err != nil {
+		os.Remove(tmpBin)
+		return "", err
+	}
+	if n > maxBinarySize {
+		os.Remove(tmpBin)
+		return "", fmt.Errorf("extracted binary too large (%d bytes, max %d)", n, maxBinarySize)
+	}
+	return tmpBin, nil
 }

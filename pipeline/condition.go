@@ -83,26 +83,28 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 		return result, nil
 	}
 
+	return evaluateEqualityClause(clause, ctx)
+}
+
+// evaluateEqualityClause handles =, ==, and != comparison operators.
+func evaluateEqualityClause(clause string, ctx *PipelineContext) (bool, error) {
 	// Try != first since it contains = as a substring.
 	if idx := strings.Index(clause, "!="); idx >= 0 {
-		key := strings.TrimSpace(clause[:idx])
+		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
 		expected := strings.Trim(strings.TrimSpace(clause[idx+2:]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
 		return actual != expected, nil
 	}
 
 	// Check for == operator (space-delimited to avoid matching == inside values).
 	if idx := strings.Index(clause, " == "); idx >= 0 {
-		key := strings.TrimSpace(clause[:idx])
+		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
 		expected := strings.Trim(strings.TrimSpace(clause[idx+4:]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
 		return actual == expected, nil
 	}
 
 	if idx := strings.Index(clause, "="); idx >= 0 {
-		key := strings.TrimSpace(clause[:idx])
+		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
 		expected := strings.Trim(strings.TrimSpace(clause[idx+1:]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
 		return actual == expected, nil
 	}
 
@@ -178,29 +180,10 @@ func resolveVariable(name string, ctx *PipelineContext) (string, bool) {
 	}
 	// Strip namespace prefixes: "ctx.outcome" → "outcome", "context.outcome" → "outcome"
 	if strings.HasPrefix(name, "ctx.") {
-		bare := strings.TrimPrefix(name, "ctx.")
-		// Handle ctx.internal.* — delegate to the internal map.
-		if strings.HasPrefix(bare, "internal.") {
-			internalKey := strings.TrimPrefix(bare, "internal.")
-			if val, ok := ctx.GetInternal(internalKey); ok {
-				return val, true
-			}
-		}
-		if val, ok := ctx.Get(bare); ok {
-			return val, true
-		}
+		return resolveCtxNamespace(strings.TrimPrefix(name, "ctx."), ctx)
 	}
 	if strings.HasPrefix(name, "context.") {
-		bare := strings.TrimPrefix(name, "context.")
-		if strings.HasPrefix(bare, "internal.") {
-			internalKey := strings.TrimPrefix(bare, "internal.")
-			if val, ok := ctx.GetInternal(internalKey); ok {
-				return val, true
-			}
-		}
-		if val, ok := ctx.Get(bare); ok {
-			return val, true
-		}
+		return resolveCtxNamespace(strings.TrimPrefix(name, "context."), ctx)
 	}
 	// Handle bare internal.* references.
 	if strings.HasPrefix(name, "internal.") {
@@ -208,6 +191,21 @@ func resolveVariable(name string, ctx *PipelineContext) (string, bool) {
 		if val, ok := ctx.GetInternal(internalKey); ok {
 			return val, true
 		}
+	}
+	return "", false
+}
+
+// resolveCtxNamespace resolves a bare key (after stripping "ctx." or "context." prefix).
+// Handles the "internal.*" sub-namespace and falls back to plain context lookup.
+func resolveCtxNamespace(bare string, ctx *PipelineContext) (string, bool) {
+	if strings.HasPrefix(bare, "internal.") {
+		internalKey := strings.TrimPrefix(bare, "internal.")
+		if val, ok := ctx.GetInternal(internalKey); ok {
+			return val, true
+		}
+	}
+	if val, ok := ctx.Get(bare); ok {
+		return val, true
 	}
 	return "", false
 }

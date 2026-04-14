@@ -161,6 +161,11 @@ func (c *ChoiceContent) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
+	return c.handleChoiceKey(km)
+}
+
+// handleChoiceKey processes a key event for choice navigation.
+func (c *ChoiceContent) handleChoiceKey(km tea.KeyMsg) tea.Cmd {
 	switch km.Type {
 	case tea.KeyUp:
 		if c.cursor > 0 {
@@ -171,24 +176,35 @@ func (c *ChoiceContent) Update(msg tea.Msg) tea.Cmd {
 			c.cursor++
 		}
 	case tea.KeyEnter:
-		if len(c.choices) > 0 {
-			c.done = true
-			selected := c.choices[c.cursor]
-			if c.replyCh != nil {
-				c.replyCh <- selected
-				c.replyCh = nil
-			}
-			return func() tea.Msg { return MsgModalDismiss{} }
-		}
+		return c.confirmChoice()
 	case tea.KeyEscape:
-		c.done = true
-		if c.replyCh != nil {
-			close(c.replyCh)
-			c.replyCh = nil
-		}
-		return func() tea.Msg { return MsgModalDismiss{} }
+		return c.cancelChoice()
 	}
 	return nil
+}
+
+// confirmChoice selects the current choice and dismisses the modal.
+func (c *ChoiceContent) confirmChoice() tea.Cmd {
+	if len(c.choices) == 0 {
+		return nil
+	}
+	c.done = true
+	selected := c.choices[c.cursor]
+	if c.replyCh != nil {
+		c.replyCh <- selected
+		c.replyCh = nil
+	}
+	return func() tea.Msg { return MsgModalDismiss{} }
+}
+
+// cancelChoice cancels the choice and dismisses the modal.
+func (c *ChoiceContent) cancelChoice() tea.Cmd {
+	c.done = true
+	if c.replyCh != nil {
+		close(c.replyCh)
+		c.replyCh = nil
+	}
+	return func() tea.Msg { return MsgModalDismiss{} }
 }
 
 // Cancel implements Cancellable for external cancellation (e.g., Ctrl+C).
@@ -244,18 +260,27 @@ func NewAutopilotContent(prompt, decision string, replyCh chan<- string) *Autopi
 }
 
 func (a *AutopilotContent) Update(msg tea.Msg) tea.Cmd {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		if keyMsg.Type == tea.KeyEnter || keyMsg.Type == tea.KeyEsc {
-			if !a.closed {
-				a.closed = true
-				select {
-				case a.replyCh <- a.decision:
-				default:
-				}
-			}
-		}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && isDismissKey(keyMsg) {
+		a.closeWithDecision()
 	}
 	return nil
+}
+
+// isDismissKey returns true for keys that dismiss the autopilot modal.
+func isDismissKey(km tea.KeyMsg) bool {
+	return km.Type == tea.KeyEnter || km.Type == tea.KeyEsc
+}
+
+// closeWithDecision sends the decision to the reply channel if not already closed.
+func (a *AutopilotContent) closeWithDecision() {
+	if a.closed {
+		return
+	}
+	a.closed = true
+	select {
+	case a.replyCh <- a.decision:
+	default:
+	}
 }
 
 func (a *AutopilotContent) View() string {

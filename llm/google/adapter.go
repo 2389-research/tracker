@@ -186,33 +186,40 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-
 		data := []byte(strings.TrimPrefix(line, "data: "))
-		if emitProviderEvents {
-			ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: data}
-		}
-
-		var chunk geminiResponse
-		if err := json.Unmarshal(data, &chunk); err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: parse SSE chunk: %w", err)}
+		if done := a.processSSELine(data, ch, state, emitProviderEvents); done {
 			return
 		}
-
-		if state.first {
-			ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: data}
-			state.first = false
-		}
-
-		if len(chunk.Candidates) == 0 {
-			continue
-		}
-
-		a.processCandidate(chunk.Candidates[0], &chunk, ch, state)
 	}
 
 	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: SSE scan error: %w", err)}
 	}
+}
+
+// processSSELine handles a single SSE data line. Returns true if scanning should stop.
+func (a *Adapter) processSSELine(data []byte, ch chan<- llm.StreamEvent, state *geminiStreamState, emitProviderEvents bool) bool {
+	if emitProviderEvents {
+		ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: data}
+	}
+
+	var chunk geminiResponse
+	if err := json.Unmarshal(data, &chunk); err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: parse SSE chunk: %w", err)}
+		return true
+	}
+
+	if state.first {
+		ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: data}
+		state.first = false
+	}
+
+	if len(chunk.Candidates) == 0 {
+		return false
+	}
+
+	a.processCandidate(chunk.Candidates[0], &chunk, ch, state)
+	return false
 }
 
 // processCandidate handles a single candidate from a Gemini SSE chunk.

@@ -56,6 +56,20 @@ func DefaultConfig() SessionConfig {
 }
 
 func (c SessionConfig) Validate() error {
+	if err := c.validateTimeouts(); err != nil {
+		return err
+	}
+	if err := c.validateLimits(); err != nil {
+		return err
+	}
+	if err := c.validateToolOutputLimits(); err != nil {
+		return err
+	}
+	return c.validateResponseFormat()
+}
+
+// validateTimeouts checks turn, command timeout, and loop detection fields.
+func (c SessionConfig) validateTimeouts() error {
 	if c.MaxTurns < 1 {
 		return fmt.Errorf("MaxTurns must be >= 1, got %d", c.MaxTurns)
 	}
@@ -71,6 +85,11 @@ func (c SessionConfig) Validate() error {
 	if c.LoopDetectionThreshold < 1 {
 		return fmt.Errorf("LoopDetectionThreshold must be >= 1, got %d", c.LoopDetectionThreshold)
 	}
+	return nil
+}
+
+// validateLimits checks context window and compaction threshold fields.
+func (c SessionConfig) validateLimits() error {
 	if c.ContextWindowLimit < 1000 {
 		return fmt.Errorf("ContextWindowLimit must be >= 1000, got %d", c.ContextWindowLimit)
 	}
@@ -82,22 +101,33 @@ func (c SessionConfig) Validate() error {
 			return fmt.Errorf("CompactionThreshold must be > 0 and <= 1.0 when compaction is auto, got %f", c.CompactionThreshold)
 		}
 	}
+	return nil
+}
+
+// validateToolOutputLimits checks all per-tool output limit values.
+func (c SessionConfig) validateToolOutputLimits() error {
 	for name, limit := range c.ToolOutputLimits {
 		if limit <= 0 {
 			return fmt.Errorf("ToolOutputLimits[%q] must be > 0, got %d", name, limit)
 		}
 	}
-	if c.ResponseFormat != "" {
-		if c.ResponseFormat != "json_object" && c.ResponseFormat != "json_schema" {
-			return fmt.Errorf("ResponseFormat must be \"json_object\" or \"json_schema\", got %q", c.ResponseFormat)
+	return nil
+}
+
+// validateResponseFormat checks ResponseFormat and ResponseSchema consistency.
+func (c SessionConfig) validateResponseFormat() error {
+	if c.ResponseFormat == "" {
+		return nil
+	}
+	if c.ResponseFormat != "json_object" && c.ResponseFormat != "json_schema" {
+		return fmt.Errorf("ResponseFormat must be \"json_object\" or \"json_schema\", got %q", c.ResponseFormat)
+	}
+	if c.ResponseFormat == "json_schema" {
+		if c.ResponseSchema == "" {
+			return fmt.Errorf("ResponseSchema must be non-empty when ResponseFormat is \"json_schema\"")
 		}
-		if c.ResponseFormat == "json_schema" {
-			if c.ResponseSchema == "" {
-				return fmt.Errorf("ResponseSchema must be non-empty when ResponseFormat is \"json_schema\"")
-			}
-			if !json.Valid([]byte(c.ResponseSchema)) {
-				return fmt.Errorf("ResponseSchema must be valid JSON, got %q", c.ResponseSchema)
-			}
+		if !json.Valid([]byte(c.ResponseSchema)) {
+			return fmt.Errorf("ResponseSchema must be valid JSON, got %q", c.ResponseSchema)
 		}
 	}
 	return nil

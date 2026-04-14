@@ -137,42 +137,64 @@ type patchHunk struct {
 
 func parsePatch(patch string) ([]patchOperation, error) {
 	lines := strings.Split(patch, "\n")
-	if len(lines) == 0 || lines[0] != "*** Begin Patch" {
+	if !patchHasValidHeader(lines) {
 		return nil, fmt.Errorf("patch must begin with *** Begin Patch")
 	}
+	return parsePatchLines(lines)
+}
 
+// patchHasValidHeader checks that the patch starts with *** Begin Patch.
+func patchHasValidHeader(lines []string) bool {
+	return len(lines) > 0 && lines[0] == "*** Begin Patch"
+}
+
+// parsePatchLines iterates over patch lines and collects operations.
+func parsePatchLines(lines []string) ([]patchOperation, error) {
 	var ops []patchOperation
 	for i := 1; i < len(lines); {
-		line := lines[i]
-		switch {
-		case line == "*** End Patch":
-			return ops, nil
-		case strings.HasPrefix(line, "*** Add File: "):
-			op, next, err := parseAddFile(lines, i)
-			if err != nil {
-				return nil, err
-			}
-			ops = append(ops, op)
-			i = next
-		case strings.HasPrefix(line, "*** Delete File: "):
-			ops = append(ops, patchOperation{
-				kind: patchDelete,
-				path: strings.TrimPrefix(line, "*** Delete File: "),
-			})
-			i++
-		case strings.HasPrefix(line, "*** Update File: "):
-			op, next, err := parseUpdateFile(lines, i)
-			if err != nil {
-				return nil, err
-			}
-			ops = append(ops, op)
-			i = next
-		default:
-			return nil, fmt.Errorf("unexpected patch line %q", line)
+		op, next, done, err := parsePatchLine(lines, i)
+		if err != nil {
+			return nil, err
 		}
+		if done {
+			return ops, nil
+		}
+		if op != nil {
+			ops = append(ops, *op)
+		}
+		i = next
 	}
-
 	return nil, fmt.Errorf("patch is missing *** End Patch")
+}
+
+// parsePatchLine processes one patch directive starting at line index i.
+// Returns (op, nextIndex, done, error). done=true signals *** End Patch was found.
+func parsePatchLine(lines []string, i int) (*patchOperation, int, bool, error) {
+	line := lines[i]
+	switch {
+	case line == "*** End Patch":
+		return nil, i, true, nil
+	case strings.HasPrefix(line, "*** Add File: "):
+		op, next, err := parseAddFile(lines, i)
+		if err != nil {
+			return nil, i, false, err
+		}
+		return &op, next, false, nil
+	case strings.HasPrefix(line, "*** Delete File: "):
+		op := patchOperation{
+			kind: patchDelete,
+			path: strings.TrimPrefix(line, "*** Delete File: "),
+		}
+		return &op, i + 1, false, nil
+	case strings.HasPrefix(line, "*** Update File: "):
+		op, next, err := parseUpdateFile(lines, i)
+		if err != nil {
+			return nil, i, false, err
+		}
+		return &op, next, false, nil
+	default:
+		return nil, i, false, fmt.Errorf("unexpected patch line %q", line)
+	}
 }
 
 // parseAddFile parses an "*** Add File:" block starting at line index i.
@@ -206,22 +228,9 @@ func parseUpdateFile(lines []string, i int) (patchOperation, int, error) {
 		moveTo = strings.TrimPrefix(lines[i], "*** Move to: ")
 		i++
 	}
-	var hunks []patchHunk
-	for i < len(lines) {
-		if strings.HasPrefix(lines[i], "*** ") || lines[i] == "*** End Patch" {
-			break
-		}
-		if strings.HasPrefix(lines[i], "@@") {
-			i++
-			hunk, next, err := parseHunk(lines, i)
-			if err != nil {
-				return patchOperation{}, 0, err
-			}
-			hunks = append(hunks, hunk)
-			i = next
-		} else {
-			return patchOperation{}, 0, fmt.Errorf("expected hunk header, got %q", lines[i])
-		}
+	hunks, i, err := parseUpdateHunks(lines, i)
+	if err != nil {
+		return patchOperation{}, 0, err
 	}
 	if len(hunks) == 0 {
 		return patchOperation{}, 0, fmt.Errorf("update %s has no hunks", path)
@@ -234,43 +243,101 @@ func parseUpdateFile(lines []string, i int) (patchOperation, int, error) {
 	}, i, nil
 }
 
+// parseUpdateHunks collects all @@ hunks within an "Update File" block.
+func parseUpdateHunks(lines []string, i int) ([]patchHunk, int, error) {
+	var hunks []patchHunk
+	for i < len(lines) {
+		if strings.HasPrefix(lines[i], "*** ") || lines[i] == "*** End Patch" {
+			break
+		}
+		if !strings.HasPrefix(lines[i], "@@") {
+			return nil, 0, fmt.Errorf("expected hunk header, got %q", lines[i])
+		}
+		i++
+		hunk, next, err := parseHunk(lines, i)
+		if err != nil {
+			return nil, 0, err
+		}
+		hunks = append(hunks, hunk)
+		i = next
+	}
+	return hunks, i, nil
+}
+
 func parseHunk(lines []string, start int) (patchHunk, int, error) {
 	hunk := patchHunk{}
 	i := start
 	for i < len(lines) {
-		line := lines[i]
-		if strings.HasPrefix(line, "@@") || line == "*** End Patch" {
-			break
+		advance, err := processHunkLine(lines, i, &hunk)
+		if err != nil {
+			return patchHunk{}, 0, err
 		}
-		if strings.HasPrefix(line, "*** ") {
-			if line == "*** End of File" {
-				hunk.noNewlineAtEOF = true
+		if advance < 0 {
+			// advance == -1 signals "stop, don't increment"
+			// advance == -2 signals "stop, increment for EOF marker"
+			if advance == -2 {
 				i++
-				break
 			}
 			break
 		}
-		if line == "" && i == len(lines)-1 {
-			break
-		}
-		if len(line) == 0 {
-			return patchHunk{}, 0, fmt.Errorf("empty patch line in hunk")
-		}
-		switch line[0] {
-		case ' ':
-			text := line[1:]
-			hunk.oldLines = append(hunk.oldLines, text)
-			hunk.newLines = append(hunk.newLines, text)
-		case '-':
-			hunk.oldLines = append(hunk.oldLines, line[1:])
-		case '+':
-			hunk.newLines = append(hunk.newLines, line[1:])
-		default:
-			return patchHunk{}, 0, fmt.Errorf("unsupported hunk line %q", line)
-		}
-		i++
+		i += advance
 	}
 	return hunk, i, nil
+}
+
+// processHunkLine handles one line of a hunk scan.
+// Returns (1, nil) to advance normally, (-1, nil) to stop without consuming, (-2, nil) to stop and consume (EOF marker), (0, err) on error.
+func processHunkLine(lines []string, i int, hunk *patchHunk) (int, error) {
+	line := lines[i]
+	done, eofFlag := isHunkTerminator(line)
+	if done {
+		if eofFlag {
+			hunk.noNewlineAtEOF = true
+			return -2, nil
+		}
+		return -1, nil
+	}
+	if line == "" && i == len(lines)-1 {
+		return -1, nil
+	}
+	if len(line) == 0 {
+		return 0, fmt.Errorf("empty patch line in hunk")
+	}
+	if err := applyHunkLine(line, hunk); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+// isHunkTerminator returns (shouldStop, isEndOfFile) for a hunk scan line.
+func isHunkTerminator(line string) (bool, bool) {
+	if strings.HasPrefix(line, "@@") || line == "*** End Patch" {
+		return true, false
+	}
+	if strings.HasPrefix(line, "*** ") {
+		if line == "*** End of File" {
+			return true, true
+		}
+		return true, false
+	}
+	return false, false
+}
+
+// applyHunkLine adds a single hunk line to the hunk based on its prefix character.
+func applyHunkLine(line string, hunk *patchHunk) error {
+	switch line[0] {
+	case ' ':
+		text := line[1:]
+		hunk.oldLines = append(hunk.oldLines, text)
+		hunk.newLines = append(hunk.newLines, text)
+	case '-':
+		hunk.oldLines = append(hunk.oldLines, line[1:])
+	case '+':
+		hunk.newLines = append(hunk.newLines, line[1:])
+	default:
+		return fmt.Errorf("unsupported hunk line %q", line)
+	}
+	return nil
 }
 
 func applyHunks(content string, hunks []patchHunk) (string, error) {

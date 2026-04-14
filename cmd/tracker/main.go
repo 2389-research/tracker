@@ -70,32 +70,20 @@ type setupResult struct {
 func main() {
 	cfg, err := parseFlags(os.Args)
 	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printUsage(os.Stdout)
-			os.Exit(0)
-		}
-		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
-		printUsage(os.Stderr)
-		os.Exit(1)
+		handleFlagsError(err)
+		return
 	}
 
 	if cfg.workdir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: cannot determine working directory: %v\n", err)
-			os.Exit(1)
-		}
-		cfg.workdir = wd
+		cfg.workdir = resolveMainWorkDir()
 	}
 
-	// Non-blocking update check (24h cache, background goroutine)
 	if cfg.mode == modeRun {
 		maybeCheckForUpdate()
 	}
 
 	err = executeCommand(cfg, commandDeps{})
 
-	// Print update hint after command completes (avoids racing with TUI/output).
 	if cfg.mode == modeRun {
 		printUpdateHint()
 	}
@@ -104,4 +92,25 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// handleFlagsError prints usage or error and exits for flag parsing failures.
+func handleFlagsError(err error) {
+	if errors.Is(err, flag.ErrHelp) {
+		printUsage(os.Stdout)
+		os.Exit(0)
+	}
+	fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
+	printUsage(os.Stderr)
+	os.Exit(1)
+}
+
+// resolveMainWorkDir returns the current working directory, exiting on failure.
+func resolveMainWorkDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot determine working directory: %v\n", err)
+		os.Exit(1)
+	}
+	return wd
 }

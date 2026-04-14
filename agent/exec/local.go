@@ -190,42 +190,47 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 	}
 
 	if outputLimit <= 0 {
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		result := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
-		if err != nil {
-			if ctx.Err() != nil {
-				return result, fmt.Errorf("command timed out after %v", timeout)
-			}
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				result.ExitCode = exitErr.ExitCode()
-				return result, nil
-			}
-			return result, err
-		}
-		return result, nil
+		return e.runUnlimited(ctx, cmd, timeout)
 	}
+	return e.runLimited(ctx, cmd, timeout, outputLimit)
+}
 
+// runUnlimited runs cmd with unbounded output buffers and translates the error.
+func (e *LocalEnvironment) runUnlimited(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) (CommandResult, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	result := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
+	return result, translateExecError(ctx, err, &result, timeout)
+}
+
+// runLimited runs cmd with limited output buffers and translates the error.
+func (e *LocalEnvironment) runLimited(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, outputLimit int) (CommandResult, error) {
 	stdoutBuf := &limitedBuffer{limit: outputLimit}
 	stderrBuf := &limitedBuffer{limit: outputLimit}
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
-
 	err := cmd.Run()
 	result := CommandResult{Stdout: stdoutBuf.String(), Stderr: stderrBuf.String()}
-	if err != nil {
-		if ctx.Err() != nil {
-			return result, fmt.Errorf("command timed out after %v", timeout)
-		}
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-			return result, nil
-		}
-		return result, err
+	return result, translateExecError(ctx, err, &result, timeout)
+}
+
+// translateExecError maps a cmd.Run error to a CommandResult exit code or a timeout error.
+// Returns nil if err is nil, a timeout error if ctx is done, populates result.ExitCode on ExitError,
+// or returns the error as-is for other failure types.
+func translateExecError(ctx context.Context, err error, result *CommandResult, timeout time.Duration) error {
+	if err == nil {
+		return nil
 	}
-	return result, nil
+	if ctx.Err() != nil {
+		return fmt.Errorf("command timed out after %v", timeout)
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		result.ExitCode = exitErr.ExitCode()
+		return nil
+	}
+	return err
 }
 
 // Glob returns file paths matching a pattern relative to the working directory.

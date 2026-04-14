@@ -112,14 +112,9 @@ func extractSystemAndContents(messages []llm.Message) (*geminiContent, []geminiC
 	var contents []geminiContent
 	for _, m := range messages {
 		if m.Role == llm.RoleSystem || m.Role == llm.RoleDeveloper {
-			for _, part := range m.Content {
-				if part.Kind == llm.KindText {
-					sysParts = append(sysParts, geminiPart{Text: part.Text})
-				}
-			}
+			sysParts = append(sysParts, extractSystemParts(m)...)
 		} else {
-			content := translateMessageToContent(m)
-			if content != nil {
+			if content := translateMessageToContent(m); content != nil {
 				contents = append(contents, *content)
 			}
 		}
@@ -128,6 +123,17 @@ func extractSystemAndContents(messages []llm.Message) (*geminiContent, []geminiC
 		return nil, contents
 	}
 	return &geminiContent{Parts: sysParts}, contents
+}
+
+// extractSystemParts collects text parts from a system/developer message.
+func extractSystemParts(m llm.Message) []geminiPart {
+	var parts []geminiPart
+	for _, part := range m.Content {
+		if part.Kind == llm.KindText {
+			parts = append(parts, geminiPart{Text: part.Text})
+		}
+	}
+	return parts
 }
 
 // translateGeminiTools converts unified tool definitions to Gemini format.
@@ -148,8 +154,7 @@ func translateGeminiTools(tools []llm.ToolDefinition) []geminiToolDecl {
 
 // buildGenerationConfig creates a Gemini generation config from the request fields.
 func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
-	needsResponseFormat := req.ResponseFormat != nil &&
-		(req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
+	needsResponseFormat := responseFormatRequired(req)
 
 	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat {
 		return nil
@@ -164,12 +169,23 @@ func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 		gc.MaxOutputTokens = req.MaxTokens
 	}
 	if needsResponseFormat {
-		gc.ResponseMimeType = "application/json"
-		if req.ResponseFormat.Type == "json_schema" && len(req.ResponseFormat.JSONSchema) > 0 {
-			gc.ResponseSchema = req.ResponseFormat.JSONSchema
-		}
+		applyResponseFormat(gc, req.ResponseFormat)
 	}
 	return gc
+}
+
+// responseFormatRequired returns true when the request specifies a JSON response format.
+func responseFormatRequired(req *llm.Request) bool {
+	return req.ResponseFormat != nil &&
+		(req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
+}
+
+// applyResponseFormat sets ResponseMimeType and optionally ResponseSchema on the config.
+func applyResponseFormat(gc *geminiGenConfig, rf *llm.ResponseFormat) {
+	gc.ResponseMimeType = "application/json"
+	if rf.Type == "json_schema" && len(rf.JSONSchema) > 0 {
+		gc.ResponseSchema = rf.JSONSchema
+	}
 }
 
 // mergeProviderOptions merges provider-specific options into the JSON body.
@@ -195,54 +211,76 @@ func mergeProviderOptions(body []byte, providerOpts map[string]any, providerKey 
 // translateMessageToContent converts a unified llm.Message to a Gemini content item.
 func translateMessageToContent(m llm.Message) *geminiContent {
 	role := geminiRole(m.Role)
-	var parts []geminiPart
-
-	for _, part := range m.Content {
-		switch part.Kind {
-		case llm.KindText:
-			parts = append(parts, geminiPart{Text: part.Text})
-		case llm.KindToolCall:
-			if part.ToolCall != nil {
-				var args map[string]any
-				if len(part.ToolCall.Arguments) > 0 {
-					json.Unmarshal(part.ToolCall.Arguments, &args)
-				}
-				parts = append(parts, geminiPart{
-					FunctionCall: &geminiFunctionCall{
-						Name: part.ToolCall.Name,
-						Args: args,
-					},
-					ThoughtSignature: part.ToolCall.ThoughtSigData,
-				})
-			}
-		case llm.KindToolResult:
-			if part.ToolResult != nil {
-				// Gemini uses the function name (not call ID) to match function responses.
-				funcName := part.ToolResult.Name
-				if funcName == "" {
-					funcName = part.ToolResult.ToolCallID
-				}
-				parts = append(parts, geminiPart{
-					FunctionResponse: &geminiFunctionResp{
-						Name: funcName,
-						Response: map[string]any{
-							"content": part.ToolResult.Content,
-							"error":   part.ToolResult.IsError,
-						},
-					},
-				})
-			}
-			// Image content parts can be added when KindImage is defined in the core types.
-		}
-	}
-
+	parts := translateContentParts(m.Content)
 	if len(parts) == 0 {
 		return nil
 	}
+	return &geminiContent{Role: role, Parts: parts}
+}
 
-	return &geminiContent{
-		Role:  role,
-		Parts: parts,
+// translateContentParts converts a slice of unified content parts to Gemini parts.
+func translateContentParts(content []llm.ContentPart) []geminiPart {
+	var parts []geminiPart
+	for _, part := range content {
+		if p := translateSingleContentPart(part); p != nil {
+			parts = append(parts, *p)
+		}
+	}
+	return parts
+}
+
+// translateSingleContentPart converts a single unified ContentPart to a Gemini part.
+// Returns nil for unsupported or empty parts.
+func translateSingleContentPart(part llm.ContentPart) *geminiPart {
+	switch part.Kind {
+	case llm.KindText:
+		p := geminiPart{Text: part.Text}
+		return &p
+	case llm.KindToolCall:
+		return translateToolCallPart(part)
+	case llm.KindToolResult:
+		return translateToolResultPart(part)
+	}
+	// Image content parts can be added when KindImage is defined in the core types.
+	return nil
+}
+
+// translateToolCallPart converts a tool call content part to a Gemini function call part.
+func translateToolCallPart(part llm.ContentPart) *geminiPart {
+	if part.ToolCall == nil {
+		return nil
+	}
+	var args map[string]any
+	if len(part.ToolCall.Arguments) > 0 {
+		json.Unmarshal(part.ToolCall.Arguments, &args)
+	}
+	return &geminiPart{
+		FunctionCall: &geminiFunctionCall{
+			Name: part.ToolCall.Name,
+			Args: args,
+		},
+		ThoughtSignature: part.ToolCall.ThoughtSigData,
+	}
+}
+
+// translateToolResultPart converts a tool result content part to a Gemini function response part.
+func translateToolResultPart(part llm.ContentPart) *geminiPart {
+	if part.ToolResult == nil {
+		return nil
+	}
+	// Gemini uses the function name (not call ID) to match function responses.
+	funcName := part.ToolResult.Name
+	if funcName == "" {
+		funcName = part.ToolResult.ToolCallID
+	}
+	return &geminiPart{
+		FunctionResponse: &geminiFunctionResp{
+			Name: funcName,
+			Response: map[string]any{
+				"content": part.ToolResult.Content,
+				"error":   part.ToolResult.IsError,
+			},
+		},
 	}
 }
 
@@ -304,44 +342,8 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		return nil, err
 	}
 
-	var content []llm.ContentPart
-	var finishReason string
-
-	if len(gr.Candidates) > 0 {
-		candidate := gr.Candidates[0]
-		finishReason = candidate.FinishReason
-
-		for _, part := range candidate.Content.Parts {
-			if part.Text != "" {
-				content = append(content, llm.ContentPart{
-					Kind: llm.KindText,
-					Text: part.Text,
-				})
-			}
-			if part.FunctionCall != nil {
-				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-				content = append(content, llm.ContentPart{
-					Kind: llm.KindToolCall,
-					ToolCall: &llm.ToolCallData{
-						ID:             syntheticID(),
-						Name:           part.FunctionCall.Name,
-						Arguments:      argsJSON,
-						ThoughtSigData: part.ThoughtSignature,
-					},
-				})
-			}
-		}
-	}
-
-	var usage llm.Usage
-	if gr.UsageMetadata != nil {
-		usage = llm.Usage{
-			InputTokens:  gr.UsageMetadata.PromptTokenCount,
-			OutputTokens: gr.UsageMetadata.CandidatesTokenCount,
-			TotalTokens:  gr.UsageMetadata.TotalTokenCount,
-		}
-	}
-
+	content, finishReason := extractCandidateContent(gr.Candidates)
+	usage := extractUsage(gr.UsageMetadata)
 	fr := translateFinishReason(finishReason, hasToolCalls(content))
 
 	return &llm.Response{
@@ -355,6 +357,45 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		Usage:        usage,
 		Raw:          raw,
 	}, nil
+}
+
+// extractCandidateContent pulls content parts and finish reason from the first candidate.
+func extractCandidateContent(candidates []geminiCandidate) ([]llm.ContentPart, string) {
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+	candidate := candidates[0]
+	var content []llm.ContentPart
+	for _, part := range candidate.Content.Parts {
+		if part.Text != "" {
+			content = append(content, llm.ContentPart{Kind: llm.KindText, Text: part.Text})
+		}
+		if part.FunctionCall != nil {
+			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+			content = append(content, llm.ContentPart{
+				Kind: llm.KindToolCall,
+				ToolCall: &llm.ToolCallData{
+					ID:             syntheticID(),
+					Name:           part.FunctionCall.Name,
+					Arguments:      argsJSON,
+					ThoughtSigData: part.ThoughtSignature,
+				},
+			})
+		}
+	}
+	return content, candidate.FinishReason
+}
+
+// extractUsage converts Gemini usage metadata to the unified Usage struct.
+func extractUsage(meta *geminiUsageMeta) llm.Usage {
+	if meta == nil {
+		return llm.Usage{}
+	}
+	return llm.Usage{
+		InputTokens:  meta.PromptTokenCount,
+		OutputTokens: meta.CandidatesTokenCount,
+		TotalTokens:  meta.TotalTokenCount,
+	}
 }
 
 func hasToolCalls(parts []llm.ContentPart) bool {

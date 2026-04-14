@@ -12,33 +12,51 @@ func initVersionFromVCS() {
 	if !ok {
 		return
 	}
-	var vcsRev, vcsTime, vcsDirty string
-	for _, s := range info.Settings {
+	vcsRev, vcsTime, vcsDirty := extractVCSSettings(info.Settings)
+	applyModuleVersion(info.Main.Version)
+	applyVCSCommit(vcsRev, vcsDirty)
+	applyVCSDate(vcsTime)
+}
+
+// extractVCSSettings pulls vcs.revision, vcs.time, and vcs.modified from build settings.
+func extractVCSSettings(settings []debug.BuildSetting) (rev, vcsTime, dirty string) {
+	for _, s := range settings {
 		switch s.Key {
 		case "vcs.revision":
-			vcsRev = s.Value
+			rev = s.Value
 		case "vcs.time":
 			vcsTime = s.Value
 		case "vcs.modified":
-			vcsDirty = s.Value
+			dirty = s.Value
 		}
 	}
-	// Module version is available from `go install ...@vX.Y.Z` even though
-	// VCS metadata is stripped. Use it when ldflags didn't set version.
-	if version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		version = info.Main.Version
-	}
+	return rev, vcsTime, dirty
+}
 
-	if commit == "unknown" && vcsRev != "" {
-		short := vcsRev
-		if len(short) > 8 {
-			short = short[:8]
-		}
-		if vcsDirty == "true" {
-			short += "-dirty"
-		}
-		commit = short
+// applyModuleVersion sets version from module metadata when ldflags didn't set it.
+func applyModuleVersion(mainVersion string) {
+	if version == "dev" && mainVersion != "" && mainVersion != "(devel)" {
+		version = mainVersion
 	}
+}
+
+// applyVCSCommit sets commit from VCS revision when ldflags didn't set it.
+func applyVCSCommit(vcsRev, vcsDirty string) {
+	if commit != "unknown" || vcsRev == "" {
+		return
+	}
+	short := vcsRev
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	if vcsDirty == "true" {
+		short += "-dirty"
+	}
+	commit = short
+}
+
+// applyVCSDate sets date from VCS time when ldflags didn't set it.
+func applyVCSDate(vcsTime string) {
 	if date == "unknown" && vcsTime != "" {
 		date = vcsTime
 	}

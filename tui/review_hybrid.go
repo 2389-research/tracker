@@ -42,19 +42,43 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 		height = 24
 	}
 
-	// Render full content via glamour — both label and context.
-	vpWidth := width - 4
-	var md string
-	if label != "" && context != "" {
-		md = label + "\n\n---\n\n" + context
-	} else if label != "" {
-		md = label
-	} else {
-		md = context
-	}
-	rendered := renderReviewHybridMarkdown(md, vpWidth)
+	rendered := renderReviewHybridMarkdown(buildReviewHybridMarkdown(label, context), width-4)
+	ta := buildReviewHybridTextarea(width)
 
-	// Textarea for "other" freeform input.
+	radioHeight := len(labels) + 5 // labels + other + hint + divider + blank
+	vpHeight := height - radioHeight - 1
+	if vpHeight < 5 {
+		vpHeight = 5
+	}
+
+	vp := viewport.New(width-2, vpHeight)
+	vp.SetContent(rendered)
+	vp.Style = lipgloss.NewStyle().Padding(0, 1)
+
+	return &ReviewHybridContent{
+		viewport: vp,
+		labels:   labels,
+		cursor:   findDefaultCursor(labels, defaultLabel),
+		textarea: ta,
+		replyCh:  replyCh,
+		width:    width,
+		height:   height,
+	}
+}
+
+// buildReviewHybridMarkdown combines label and context into a single markdown string.
+func buildReviewHybridMarkdown(label, context string) string {
+	if label != "" && context != "" {
+		return label + "\n\n---\n\n" + context
+	}
+	if label != "" {
+		return label
+	}
+	return context
+}
+
+// buildReviewHybridTextarea creates and configures the "other" textarea.
+func buildReviewHybridTextarea(width int) textarea.Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type specific feedback or instructions..."
 	ta.ShowLineNumbers = false
@@ -67,37 +91,20 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 	ta.FocusedStyle.Base = lipgloss.NewStyle().BorderForeground(ColorLabel)
 	ta.BlurredStyle.Base = ta.FocusedStyle.Base
 	ta.Blur()
+	return ta
+}
 
-	// Radio options + other + hints + divider + textarea (collapsed).
-	radioHeight := len(labels) + 5 // labels + other + hint + divider + blank
-	vpHeight := height - radioHeight - 1
-	if vpHeight < 5 {
-		vpHeight = 5
+// findDefaultCursor returns the cursor index for the given default label (case-insensitive).
+func findDefaultCursor(labels []string, defaultLabel string) int {
+	if defaultLabel == "" {
+		return 0
 	}
-
-	vp := viewport.New(width-2, vpHeight)
-	vp.SetContent(rendered)
-	vp.Style = lipgloss.NewStyle().Padding(0, 1)
-
-	cursor := 0
-	if defaultLabel != "" {
-		for i, l := range labels {
-			if strings.EqualFold(l, defaultLabel) {
-				cursor = i
-				break
-			}
+	for i, l := range labels {
+		if strings.EqualFold(l, defaultLabel) {
+			return i
 		}
 	}
-
-	return &ReviewHybridContent{
-		viewport: vp,
-		labels:   labels,
-		cursor:   cursor,
-		textarea: ta,
-		replyCh:  replyCh,
-		width:    width,
-		height:   height,
-	}
+	return 0
 }
 
 // SetSize updates dimensions.
@@ -167,6 +174,15 @@ func (r *ReviewHybridContent) updateOtherMode(km tea.KeyMsg) tea.Cmd {
 
 // updateRadioMode handles keys when navigating the radio list.
 func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
+	if cmd := r.handleReviewActionKey(km); cmd != nil {
+		return cmd
+	}
+	r.handleReviewNavKey(km)
+	return nil
+}
+
+// handleReviewActionKey handles page, submit, and cancel keys.
+func (r *ReviewHybridContent) handleReviewActionKey(km tea.KeyMsg) tea.Cmd {
 	switch km.String() {
 	case "pgup", "pgdown":
 		var cmd tea.Cmd
@@ -184,6 +200,11 @@ func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 	case "esc":
 		return r.cancel()
 	}
+	return nil
+}
+
+// handleReviewNavKey handles Up/Down cursor movement.
+func (r *ReviewHybridContent) handleReviewNavKey(km tea.KeyMsg) {
 	switch km.Type {
 	case tea.KeyUp:
 		if r.cursor > 0 {
@@ -194,7 +215,6 @@ func (r *ReviewHybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 			r.cursor++
 		}
 	}
-	return nil
 }
 
 func (r *ReviewHybridContent) submitLabel(label string) tea.Cmd {
@@ -243,17 +263,30 @@ func (r *ReviewHybridContent) View() string {
 
 	sb.WriteString(r.viewport.View())
 	sb.WriteString("\n")
-
-	// Divider with scroll position.
 	sb.WriteString(Styles.Muted.Render(fmt.Sprintf(
 		"─── Review (%d%%) ── PgUp/PgDn scroll ───",
 		int(r.viewport.ScrollPercent()*100))))
 	sb.WriteString("\n")
 
-	// Radio options.
+	r.writeReviewRadioOptions(&sb)
+	r.writeReviewOtherOption(&sb)
+
+	if r.onOther {
+		sb.WriteString("\n")
+		sb.WriteString(r.textarea.View())
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(Styles.Muted.Render(r.reviewHintText()))
+
+	return sb.String()
+}
+
+// writeReviewRadioOptions renders each labeled radio option for ReviewHybridContent.
+func (r *ReviewHybridContent) writeReviewRadioOptions(sb *strings.Builder) {
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
 	normalStyle := lipgloss.NewStyle()
-
 	for i, label := range r.labels {
 		if i == r.cursor && !r.onOther {
 			sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", label)))
@@ -262,32 +295,29 @@ func (r *ReviewHybridContent) View() string {
 		}
 		sb.WriteString("\n")
 	}
+}
 
-	// "Other" option.
-	if r.isOnOther() && !r.onOther {
+// writeReviewOtherOption renders the "other" radio option for ReviewHybridContent.
+func (r *ReviewHybridContent) writeReviewOtherOption(sb *strings.Builder) {
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
+	normalStyle := lipgloss.NewStyle()
+	switch {
+	case r.isOnOther() && !r.onOther:
 		sb.WriteString(selectedStyle.Render("  ● other (provide feedback)"))
-	} else if r.onOther {
+	case r.onOther:
 		sb.WriteString(selectedStyle.Render("  ● other:"))
-	} else {
+	default:
 		sb.WriteString(normalStyle.Render("  ○ other (provide feedback)"))
 	}
 	sb.WriteString("\n")
+}
 
-	// Textarea (visible when "other" is active).
+// reviewHintText returns the keyboard hint string for ReviewHybridContent.
+func (r *ReviewHybridContent) reviewHintText() string {
 	if r.onOther {
-		sb.WriteString("\n")
-		sb.WriteString(r.textarea.View())
-		sb.WriteString("\n")
+		return "type feedback  ctrl+s submit  esc back to options  ↑ back"
 	}
-
-	sb.WriteString("\n")
-	hint := "↑↓ navigate  enter select  esc cancel  pgup/pgdn scroll"
-	if r.onOther {
-		hint = "type feedback  ctrl+s submit  esc back to options  ↑ back"
-	}
-	sb.WriteString(Styles.Muted.Render(hint))
-
-	return sb.String()
+	return "↑↓ navigate  enter select  esc cancel  pgup/pgdn scroll"
 }
 
 func renderReviewHybridMarkdown(md string, width int) string {

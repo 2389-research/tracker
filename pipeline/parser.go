@@ -36,52 +36,49 @@ func ParseDOT(dot string) (*Graph, error) {
 		g.Attrs[cleanQuotes(key)] = cleanQuotes(val)
 	}
 
-	// Extract nodes.
 	for _, cn := range collector.nodes {
-		node := &Node{
-			ID:    cleanQuotes(cn.name),
-			Attrs: make(map[string]string),
-		}
-
-		for key, val := range cn.attrs {
-			cleaned := cleanQuotes(val)
-			switch key {
-			case "shape":
-				node.Shape = cleaned
-			case "label":
-				node.Label = cleaned
-			default:
-				node.Attrs[key] = cleaned
-			}
-		}
-
-		g.AddNode(node)
+		g.AddNode(buildDOTNode(cn))
 	}
 
-	// Extract edges.
 	for _, ce := range collector.edges {
-		edge := &Edge{
-			From:  cleanQuotes(ce.src),
-			To:    cleanQuotes(ce.dst),
-			Attrs: make(map[string]string),
-		}
-
-		for key, val := range ce.attrs {
-			cleaned := cleanQuotes(val)
-			switch key {
-			case "label":
-				edge.Label = cleaned
-			case "condition":
-				edge.Condition = cleaned
-			default:
-				edge.Attrs[key] = cleaned
-			}
-		}
-
-		g.AddEdge(edge)
+		g.AddEdge(buildDOTEdge(ce))
 	}
 
 	return g, nil
+}
+
+// buildDOTNode converts a collectedNode to a pipeline Node.
+func buildDOTNode(cn *collectedNode) *Node {
+	node := &Node{ID: cleanQuotes(cn.name), Attrs: make(map[string]string)}
+	for key, val := range cn.attrs {
+		cleaned := cleanQuotes(val)
+		switch key {
+		case "shape":
+			node.Shape = cleaned
+		case "label":
+			node.Label = cleaned
+		default:
+			node.Attrs[key] = cleaned
+		}
+	}
+	return node
+}
+
+// buildDOTEdge converts a collectedEdge to a pipeline Edge.
+func buildDOTEdge(ce *collectedEdge) *Edge {
+	edge := &Edge{From: cleanQuotes(ce.src), To: cleanQuotes(ce.dst), Attrs: make(map[string]string)}
+	for key, val := range ce.attrs {
+		cleaned := cleanQuotes(val)
+		switch key {
+		case "label":
+			edge.Label = cleaned
+		case "condition":
+			edge.Condition = cleaned
+		default:
+			edge.Attrs[key] = cleaned
+		}
+	}
+	return edge
 }
 
 // cleanQuotes removes surrounding double quotes from a DOT attribute value
@@ -100,29 +97,44 @@ func unescapeDOT(s string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			switch s[i+1] {
-			case 'n':
-				b.WriteByte('\n')
-				i++
-			case 't':
-				b.WriteByte('\t')
-				i++
-			case '\\':
-				b.WriteByte('\\')
-				i++
-			case '"':
-				b.WriteByte('"')
-				i++
-			default:
-				b.WriteByte(s[i])
-			}
-		} else {
-			b.WriteByte(s[i])
-		}
+	for i := 0; i < len(s); {
+		i = processDOTChar(&b, s, i)
 	}
 	return b.String()
+}
+
+// processDOTChar writes one character (or escape sequence) from s starting at pos.
+// Returns the next position to process.
+func processDOTChar(b *strings.Builder, s string, i int) int {
+	if s[i] == '\\' && i+1 < len(s) {
+		if writeDOTEscape(b, s[i+1]) {
+			return i + 2
+		}
+	} else {
+		b.WriteByte(s[i])
+	}
+	return i + 1
+}
+
+// writeDOTEscape writes the unescaped byte for a known DOT escape sequence.
+// Returns true if the escape was consumed (i.e. the caller should skip the next character).
+func writeDOTEscape(b *strings.Builder, next byte) bool {
+	switch next {
+	case 'n':
+		b.WriteByte('\n')
+		return true
+	case 't':
+		b.WriteByte('\t')
+		return true
+	case '\\':
+		b.WriteByte('\\')
+		return true
+	case '"':
+		b.WriteByte('"')
+		return true
+	}
+	b.WriteByte('\\')
+	return false
 }
 
 // collectedNode holds a parsed DOT node and its raw attributes.

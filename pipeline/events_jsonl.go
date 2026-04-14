@@ -84,6 +84,12 @@ func (h *JSONLEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 		return
 	}
 
+	entry := h.buildLogEntry(evt)
+	h.writeEntry(entry)
+}
+
+// buildLogEntry converts a PipelineEvent to a jsonlLogEntry.
+func (h *JSONLEventHandler) buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	entry := jsonlLogEntry{
 		Timestamp: evt.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
 		Source:    "pipeline",
@@ -96,26 +102,31 @@ func (h *JSONLEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 		entry.Error = evt.Err.Error()
 	}
 	if d := evt.Decision; d != nil {
-		entry.EdgeFrom = d.EdgeFrom
-		entry.EdgeTo = d.EdgeTo
-		entry.EdgeCondition = d.EdgeCondition
-		entry.EdgePriority = d.EdgePriority
-		if d.EdgeCondition != "" {
-			match := d.ConditionMatch
-			entry.ConditionMatch = &match
-		}
-		entry.OutcomeStatus = d.OutcomeStatus
-		entry.ContextSnapshot = d.ContextSnapshot
-		entry.ContextUpdates = d.ContextUpdates
-		if d.RestartCount > 0 {
-			rc := d.RestartCount
-			entry.RestartCount = &rc
-		}
-		entry.ClearedNodes = d.ClearedNodes
-		entry.TokenInput = d.TokenInput
-		entry.TokenOutput = d.TokenOutput
+		applyDecisionFields(&entry, d)
 	}
-	h.writeEntry(entry)
+	return entry
+}
+
+// applyDecisionFields copies edge decision fields into the log entry.
+func applyDecisionFields(entry *jsonlLogEntry, d *DecisionDetail) {
+	entry.EdgeFrom = d.EdgeFrom
+	entry.EdgeTo = d.EdgeTo
+	entry.EdgeCondition = d.EdgeCondition
+	entry.EdgePriority = d.EdgePriority
+	if d.EdgeCondition != "" {
+		match := d.ConditionMatch
+		entry.ConditionMatch = &match
+	}
+	entry.OutcomeStatus = d.OutcomeStatus
+	entry.ContextSnapshot = d.ContextSnapshot
+	entry.ContextUpdates = d.ContextUpdates
+	if d.RestartCount > 0 {
+		rc := d.RestartCount
+		entry.RestartCount = &rc
+	}
+	entry.ClearedNodes = d.ClearedNodes
+	entry.TokenInput = d.TokenInput
+	entry.TokenOutput = d.TokenOutput
 }
 
 // WriteAgentEvent logs an agent event to the activity log.

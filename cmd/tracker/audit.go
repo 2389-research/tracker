@@ -32,6 +32,15 @@ func resolveRunDir(workdir, runID string) (string, error) {
 		return "", fmt.Errorf("run ID cannot be empty")
 	}
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	matched, err := findRunDirMatch(runsDir, runID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(runsDir, matched), nil
+}
+
+// findRunDirMatch finds the unique directory name matching runID (exact or prefix).
+func findRunDirMatch(runsDir, runID string) (string, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		return "", fmt.Errorf("cannot read runs directory: %w", err)
@@ -39,10 +48,7 @@ func resolveRunDir(workdir, runID string) (string, error) {
 
 	var matches []string
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if strings.HasPrefix(e.Name(), runID) {
+		if e.IsDir() && strings.HasPrefix(e.Name(), runID) {
 			matches = append(matches, e.Name())
 		}
 	}
@@ -51,22 +57,20 @@ func resolveRunDir(workdir, runID string) (string, error) {
 	case 0:
 		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
 	case 1:
-		// Unique match (exact or prefix)
+		return matches[0], nil
 	default:
-		exact := false
-		for _, m := range matches {
-			if m == runID {
-				matches = []string{m}
-				exact = true
-				break
-			}
-		}
-		if !exact {
-			return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
+		return resolveAmbiguousMatch(matches, runID, runsDir)
+	}
+}
+
+// resolveAmbiguousMatch handles multiple prefix matches by preferring an exact match.
+func resolveAmbiguousMatch(matches []string, runID, runsDir string) (string, error) {
+	for _, m := range matches {
+		if m == runID {
+			return m, nil
 		}
 	}
-
-	return filepath.Join(runsDir, matches[0]), nil
+	return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
 }
 
 // loadActivityLog reads and parses activity.jsonl, skipping malformed lines.
@@ -88,41 +92,64 @@ func loadActivityLog(runDir string) ([]activityEntry, error) {
 		if line == "" {
 			continue
 		}
-
-		var raw struct {
-			Timestamp string `json:"ts"`
-			Type      string `json:"type"`
-			RunID     string `json:"run_id"`
-			NodeID    string `json:"node_id"`
-			Message   string `json:"message"`
-			Error     string `json:"error"`
+		entry, ok := parseActivityLine(line)
+		if ok {
+			entries = append(entries, entry)
 		}
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			// Skip malformed lines.
-			continue
-		}
-
-		ts, err := time.Parse(time.RFC3339Nano, raw.Timestamp)
-		if err != nil {
-			// Try alternate format.
-			ts, err = time.Parse("2006-01-02T15:04:05.000Z07:00", raw.Timestamp)
-			if err != nil {
-				// Skip lines with unparseable timestamps.
-				continue
-			}
-		}
-
-		entries = append(entries, activityEntry{
-			Timestamp: ts,
-			Type:      raw.Type,
-			RunID:     raw.RunID,
-			NodeID:    raw.NodeID,
-			Message:   raw.Message,
-			Error:     raw.Error,
-		})
 	}
 
 	return entries, scanner.Err()
+}
+
+// parseActivityLine decodes one JSON line from activity.jsonl.
+// Returns (entry, true) on success, (zero, false) on any parse error.
+func parseActivityLine(line string) (activityEntry, bool) {
+	var raw struct {
+		Timestamp string `json:"ts"`
+		Type      string `json:"type"`
+		RunID     string `json:"run_id"`
+		NodeID    string `json:"node_id"`
+		Message   string `json:"message"`
+		Error     string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return activityEntry{}, false
+	}
+	ts, ok := parseActivityTimestamp(raw.Timestamp)
+	if !ok {
+		return activityEntry{}, false
+	}
+	return activityEntry{
+		Timestamp: ts,
+		Type:      raw.Type,
+		RunID:     raw.RunID,
+		NodeID:    raw.NodeID,
+		Message:   raw.Message,
+		Error:     raw.Error,
+	}, true
+}
+
+// parseActivityTimestamp parses RFC3339Nano or the alternate millisecond format.
+func parseActivityTimestamp(s string) (time.Time, bool) {
+	if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return ts, true
+	}
+	if ts, err := time.Parse("2006-01-02T15:04:05.000Z07:00", s); err == nil {
+		return ts, true
+	}
+	return time.Time{}, false
+}
+
+// runSummary holds the display data for a single pipeline run listing.
+type runSummary struct {
+	runID     string
+	status    string
+	nodes     int
+	retries   int
+	restarts  int
+	timestamp time.Time
+	duration  time.Duration
+	failedAt  string
 }
 
 // listRuns shows all available runs with their status and node count.
@@ -137,74 +164,78 @@ func listRuns(workdir string) error {
 		return fmt.Errorf("cannot read runs directory: %w", err)
 	}
 
-	type runSummary struct {
-		runID     string
-		status    string
-		nodes     int
-		retries   int
-		restarts  int
-		timestamp time.Time
-		duration  time.Duration
-		failedAt  string
-	}
-
-	var runs []runSummary
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		runDir := filepath.Join(runsDir, e.Name())
-		cpPath := filepath.Join(runDir, "checkpoint.json")
-
-		cp, cpErr := pipeline.LoadCheckpoint(cpPath)
-		if cpErr != nil {
-			continue
-		}
-
-		activity, _ := loadActivityLog(runDir)
-		sort.Slice(activity, func(i, j int) bool {
-			return activity[i].Timestamp.Before(activity[j].Timestamp)
-		})
-
-		status := determinePipelineStatus(cp, activity)
-
-		totalRetries := 0
-		for _, count := range cp.RetryCounts {
-			totalRetries += count
-		}
-
-		var dur time.Duration
-		if len(activity) >= 2 {
-			first := activity[0].Timestamp
-			last := activity[len(activity)-1].Timestamp
-			dur = last.Sub(first)
-		}
-
-		rs := runSummary{
-			runID:     e.Name(),
-			status:    status,
-			nodes:     len(cp.CompletedNodes),
-			retries:   totalRetries,
-			restarts:  cp.RestartCount,
-			timestamp: cp.Timestamp,
-			duration:  dur,
-		}
-		if status == "fail" {
-			rs.failedAt = cp.CurrentNode
-		}
-		runs = append(runs, rs)
-	}
-
+	runs := collectRunSummaries(runsDir, entries)
 	if len(runs) == 0 {
 		fmt.Println("No runs found. Run a pipeline first.")
 		return nil
 	}
 
-	// Sort by timestamp, most recent first.
 	sort.Slice(runs, func(i, j int) bool {
 		return runs[i].timestamp.After(runs[j].timestamp)
 	})
 
+	printRunList(runs)
+	return nil
+}
+
+// collectRunSummaries reads checkpoints and activity logs for all run directories.
+func collectRunSummaries(runsDir string, entries []os.DirEntry) []runSummary {
+	var runs []runSummary
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		rs, ok := buildRunSummary(runsDir, e.Name())
+		if ok {
+			runs = append(runs, rs)
+		}
+	}
+	return runs
+}
+
+// buildRunSummary constructs a runSummary for a single run directory.
+func buildRunSummary(runsDir, name string) (runSummary, bool) {
+	runDir := filepath.Join(runsDir, name)
+	cpPath := filepath.Join(runDir, "checkpoint.json")
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		return runSummary{}, false
+	}
+
+	activity, _ := loadActivityLog(runDir)
+	sort.Slice(activity, func(i, j int) bool {
+		return activity[i].Timestamp.Before(activity[j].Timestamp)
+	})
+
+	status := determinePipelineStatus(cp, activity)
+
+	totalRetries := 0
+	for _, count := range cp.RetryCounts {
+		totalRetries += count
+	}
+
+	var dur time.Duration
+	if len(activity) >= 2 {
+		dur = activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
+	}
+
+	rs := runSummary{
+		runID:     name,
+		status:    status,
+		nodes:     len(cp.CompletedNodes),
+		retries:   totalRetries,
+		restarts:  cp.RestartCount,
+		timestamp: cp.Timestamp,
+		duration:  dur,
+	}
+	if status == "fail" {
+		rs.failedAt = cp.CurrentNode
+	}
+	return rs, true
+}
+
+// printRunList prints the formatted run listing table.
+func printRunList(runs []runSummary) {
 	fmt.Println()
 	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "Run ID", "Status", "Nodes", "Retries", "Duration", "Failed At")
 	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "──────", "──────", "─────", "───────", "────────", "─────────")
@@ -217,24 +248,16 @@ func listRuns(workdir string) error {
 		case "fail":
 			icon = "FAIL"
 		}
-
 		durStr := ""
 		if r.duration > 0 {
 			durStr = formatElapsed(r.duration)
 		}
-
-		failedAt := ""
-		if r.failedAt != "" {
-			failedAt = r.failedAt
-		}
-
 		fmt.Printf("  %-14s  %-8s  %-6d  %-8d  %-10s  %s\n",
-			r.runID[:min(14, len(r.runID))], icon, r.nodes, r.retries, durStr, failedAt)
+			r.runID[:min(14, len(r.runID))], icon, r.nodes, r.retries, durStr, r.failedAt)
 	}
 
 	fmt.Printf("\n  %d runs total\n", len(runs))
 	fmt.Printf("  Inspect a run: tracker audit <runID>\n\n")
-	return nil
 }
 
 // runAudit loads run artifacts and prints a structured audit report.
@@ -313,49 +336,50 @@ func printTimeline(activity []activityEntry) {
 		return
 	}
 
-	// Track stage start times for duration calculation.
 	stageStarts := make(map[string]time.Time)
-
 	for _, entry := range activity {
-		timeStr := entry.Timestamp.Format("15:04:05")
-
-		switch entry.Type {
-		case "pipeline_started", "pipeline_completed", "pipeline_failed", "loop_restart":
-			fmt.Printf("  %s  \u25b6 %s\n", timeStr, entry.Type)
-
-		case "stage_started":
-			stageStarts[entry.NodeID] = entry.Timestamp
-			fmt.Printf("  %s  \u25b8 %s \u2014 %s\n", timeStr, entry.NodeID, entry.Type)
-
-		case "stage_completed", "stage_failed":
-			dur := ""
-			if start, ok := stageStarts[entry.NodeID]; ok {
-				elapsed := entry.Timestamp.Sub(start)
-				dur = " (" + formatElapsed(elapsed) + ")"
-				delete(stageStarts, entry.NodeID)
-			}
-			fmt.Printf("  %s  \u25b8 %s \u2014 %s%s\n", timeStr, entry.NodeID, entry.Type, dur)
-
-		case "stage_retrying":
-			fmt.Printf("  %s  \u25b8 %s \u2014 %s\n", timeStr, entry.NodeID, entry.Type)
-
-		default:
-			if entry.NodeID != "" {
-				fmt.Printf("  %s  \u25b8 %s \u2014 %s\n", timeStr, entry.NodeID, entry.Type)
-			} else {
-				fmt.Printf("  %s  \u25b6 %s\n", timeStr, entry.Type)
-			}
-		}
+		printTimelineEntry(entry, stageStarts)
 	}
 
-	// Print total duration if we have start and end events.
-	if len(activity) >= 2 {
-		first := activity[0].Timestamp
-		last := activity[len(activity)-1].Timestamp
-		total := last.Sub(first)
-		if total > 0 {
-			fmt.Printf("  Total: %s\n", formatElapsed(total))
+	printTimelineTotalDuration(activity)
+}
+
+// printTimelineEntry prints one activity log entry to stdout.
+func printTimelineEntry(entry activityEntry, stageStarts map[string]time.Time) {
+	timeStr := entry.Timestamp.Format("15:04:05")
+
+	switch entry.Type {
+	case "pipeline_started", "pipeline_completed", "pipeline_failed", "loop_restart":
+		fmt.Printf("  %s  \u25b6 %s\n", timeStr, entry.Type)
+	case "stage_started":
+		stageStarts[entry.NodeID] = entry.Timestamp
+		fmt.Printf("  %s  \u25b8 %s \u2014 %s\n", timeStr, entry.NodeID, entry.Type)
+	case "stage_completed", "stage_failed":
+		dur := ""
+		if start, ok := stageStarts[entry.NodeID]; ok {
+			dur = " (" + formatElapsed(entry.Timestamp.Sub(start)) + ")"
+			delete(stageStarts, entry.NodeID)
 		}
+		fmt.Printf("  %s  \u25b8 %s \u2014 %s%s\n", timeStr, entry.NodeID, entry.Type, dur)
+	case "stage_retrying":
+		fmt.Printf("  %s  \u25b8 %s \u2014 %s\n", timeStr, entry.NodeID, entry.Type)
+	default:
+		if entry.NodeID != "" {
+			fmt.Printf("  %s  \u25b8 %s \u2014 %s\n", timeStr, entry.NodeID, entry.Type)
+		} else {
+			fmt.Printf("  %s  \u25b6 %s\n", timeStr, entry.Type)
+		}
+	}
+}
+
+// printTimelineTotalDuration prints total elapsed time across the activity log.
+func printTimelineTotalDuration(activity []activityEntry) {
+	if len(activity) < 2 {
+		return
+	}
+	total := activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
+	if total > 0 {
+		fmt.Printf("  Total: %s\n", formatElapsed(total))
 	}
 }
 
@@ -411,48 +435,63 @@ func printRecommendations(cp *pipeline.Checkpoint, status string, activity []act
 	fmt.Println()
 	fmt.Println("\u2500\u2500\u2500 Recommendations \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 
-	var recs []string
-
-	// Retry recommendations.
-	for nodeID, count := range cp.RetryCounts {
-		if count >= 2 {
-			recs = append(recs, fmt.Sprintf("Consider adjusting retry_policy for %s (used %d retries)", nodeID, count))
-		}
-	}
-
-	// Restart recommendation.
-	if cp.RestartCount > 0 {
-		suffix := "time"
-		if cp.RestartCount > 1 {
-			suffix = "times"
-		}
-		recs = append(recs, fmt.Sprintf("Pipeline restarted %d %s — review loop conditions", cp.RestartCount, suffix))
-	}
-
-	// Long-running pipeline recommendation.
-	if len(activity) >= 2 {
-		first := activity[0].Timestamp
-		last := activity[len(activity)-1].Timestamp
-		total := last.Sub(first)
-		if total > 30*time.Minute {
-			recs = append(recs, "Long-running pipeline — consider fidelity=summary:medium for faster resumes")
-		}
-	}
-
-	// Failed pipeline recommendation.
-	if status == "fail" && cp.CurrentNode != "" {
-		recs = append(recs, fmt.Sprintf("Pipeline failed at %s — check error details above", cp.CurrentNode))
-	}
+	recs := buildRecommendations(cp, status, activity)
 
 	if len(recs) == 0 {
 		fmt.Println("  (none)")
 	} else {
-		// Sort for deterministic output.
 		sort.Strings(recs)
 		for _, rec := range recs {
 			fmt.Printf("  \u2022 %s\n", rec)
 		}
 	}
+}
+
+// buildRecommendations generates recommendation strings from checkpoint state and activity.
+func buildRecommendations(cp *pipeline.Checkpoint, status string, activity []activityEntry) []string {
+	var recs []string
+	recs = append(recs, retryRecommendations(cp)...)
+	recs = append(recs, restartRecommendation(cp)...)
+	recs = append(recs, durationRecommendation(activity)...)
+	if status == "fail" && cp.CurrentNode != "" {
+		recs = append(recs, fmt.Sprintf("Pipeline failed at %s — check error details above", cp.CurrentNode))
+	}
+	return recs
+}
+
+// retryRecommendations returns suggestions for nodes with high retry counts.
+func retryRecommendations(cp *pipeline.Checkpoint) []string {
+	var recs []string
+	for nodeID, count := range cp.RetryCounts {
+		if count >= 2 {
+			recs = append(recs, fmt.Sprintf("Consider adjusting retry_policy for %s (used %d retries)", nodeID, count))
+		}
+	}
+	return recs
+}
+
+// restartRecommendation returns a suggestion when the pipeline restarted.
+func restartRecommendation(cp *pipeline.Checkpoint) []string {
+	if cp.RestartCount == 0 {
+		return nil
+	}
+	suffix := "time"
+	if cp.RestartCount > 1 {
+		suffix = "times"
+	}
+	return []string{fmt.Sprintf("Pipeline restarted %d %s — review loop conditions", cp.RestartCount, suffix)}
+}
+
+// durationRecommendation returns a suggestion for long-running pipelines.
+func durationRecommendation(activity []activityEntry) []string {
+	if len(activity) < 2 {
+		return nil
+	}
+	total := activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
+	if total > 30*time.Minute {
+		return []string{"Long-running pipeline — consider fidelity=summary:medium for faster resumes"}
+	}
+	return nil
 }
 
 func printAuditFooter() {

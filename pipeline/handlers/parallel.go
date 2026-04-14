@@ -93,26 +93,42 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 // resolveBranchEdges determines the branch target edges for a parallel node.
 func (h *ParallelHandler) resolveBranchEdges(node *pipeline.Node) ([]*pipeline.Edge, error) {
-	var edges []*pipeline.Edge
-	joinID := node.Attrs["parallel_join"]
-	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
-		for _, target := range strings.Split(targetsAttr, ",") {
-			target = strings.TrimSpace(target)
-			if target != "" {
-				edges = append(edges, &pipeline.Edge{From: node.ID, To: target})
-			}
-		}
-	} else {
-		for _, e := range h.graph.OutgoingEdges(node.ID) {
-			if e.To != joinID {
-				edges = append(edges, e)
-			}
-		}
-	}
+	edges := h.collectBranchEdges(node)
 	if len(edges) == 0 {
 		return nil, fmt.Errorf("parallel node %q has no branch targets", node.ID)
 	}
 	return edges, nil
+}
+
+// collectBranchEdges builds the edge list from parallel_targets attr or outgoing edges.
+func (h *ParallelHandler) collectBranchEdges(node *pipeline.Node) []*pipeline.Edge {
+	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
+		return edgesFromTargetsAttr(node.ID, targetsAttr)
+	}
+	return h.edgesFromOutgoing(node)
+}
+
+// edgesFromTargetsAttr builds edges from a comma-separated parallel_targets attribute value.
+func edgesFromTargetsAttr(fromID, targetsAttr string) []*pipeline.Edge {
+	var edges []*pipeline.Edge
+	for _, target := range strings.Split(targetsAttr, ",") {
+		if target = strings.TrimSpace(target); target != "" {
+			edges = append(edges, &pipeline.Edge{From: fromID, To: target})
+		}
+	}
+	return edges
+}
+
+// edgesFromOutgoing returns outgoing edges excluding the join node.
+func (h *ParallelHandler) edgesFromOutgoing(node *pipeline.Node) []*pipeline.Edge {
+	joinID := node.Attrs["parallel_join"]
+	var edges []*pipeline.Edge
+	for _, e := range h.graph.OutgoingEdges(node.ID) {
+		if e.To != joinID {
+			edges = append(edges, e)
+		}
+	}
+	return edges
 }
 
 // branchResultMsg pairs a branch index with its parallel result.
@@ -125,22 +141,8 @@ type branchResultMsg struct {
 func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) []ParallelResult {
 	snapshot := pctx.Snapshot()
 	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
-
-	// Parse max_concurrency — 0 means unlimited.
-	var sem chan struct{}
-	if maxStr := parallelNode.Attrs["max_concurrency"]; maxStr != "" {
-		if n, err := strconv.Atoi(maxStr); err == nil && n > 0 {
-			sem = make(chan struct{}, n)
-		}
-	}
-
-	// Parse branch_timeout — zero means no timeout.
-	var branchTimeout time.Duration
-	if toStr := parallelNode.Attrs["branch_timeout"]; toStr != "" {
-		if d, err := time.ParseDuration(toStr); err == nil && d > 0 {
-			branchTimeout = d
-		}
-	}
+	sem := parseSemaphore(parallelNode.Attrs["max_concurrency"])
+	branchTimeout := parseBranchTimeout(parallelNode.Attrs["branch_timeout"])
 
 	resultsCh := make(chan branchResultMsg, len(edges))
 	var wg sync.WaitGroup
@@ -154,7 +156,6 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 			}
 			continue
 		}
-
 		execNode := applyBranchOverrides(targetNode, branchOverrides)
 		wg.Add(1)
 		go h.runBranch(ctx, i, execNode, snapshot, artifactDir, sem, branchTimeout, resultsCh, &wg)
@@ -170,11 +171,32 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 	return collected
 }
 
+// parseSemaphore creates a concurrency semaphore channel from a string, or nil for unlimited.
+func parseSemaphore(maxStr string) chan struct{} {
+	if maxStr == "" {
+		return nil
+	}
+	if n, err := strconv.Atoi(maxStr); err == nil && n > 0 {
+		return make(chan struct{}, n)
+	}
+	return nil
+}
+
+// parseBranchTimeout parses a duration string for per-branch timeout, returning 0 for none.
+func parseBranchTimeout(toStr string) time.Duration {
+	if toStr == "" {
+		return 0
+	}
+	if d, err := time.ParseDuration(toStr); err == nil && d > 0 {
+		return d
+	}
+	return 0
+}
+
 // runBranch executes a single parallel branch in its own goroutine.
 // sem, if non-nil, is a buffered channel used as a semaphore to cap concurrency.
 // branchTimeout, if > 0, is applied as a per-branch context deadline.
 func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
-	// Acquire semaphore slot with context cancellation support.
 	if sem != nil {
 		select {
 		case sem <- struct{}{}:
@@ -189,18 +211,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	}
 
 	defer wg.Done()
-	defer func() {
-		if r := recover(); r != nil {
-			resultsCh <- branchResultMsg{
-				index:  idx,
-				result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
-			}
-			h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-				Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
-				Message: fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
-			})
-		}
-	}()
+	defer h.recoverBranch(idx, tn, resultsCh)
 
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type: pipeline.EventStageStarted, Timestamp: time.Now(), NodeID: tn.ID,
@@ -221,31 +232,51 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 	outcome, err := h.registry.Execute(execCtx, tn, branchCtx)
 
-	// Auto-capture any pctx.Set() calls the handler made directly,
-	// not just values returned via Outcome.ContextUpdates. This prevents
-	// silent data loss when handlers write to the context as a side effect.
 	mergedUpdates := branchCtx.DiffFrom(snapshot)
 	for k, v := range outcome.ContextUpdates {
-		mergedUpdates[k] = v // explicit ContextUpdates take priority
+		mergedUpdates[k] = v
 	}
 
-	pr := ParallelResult{NodeID: tn.ID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
+	pr := buildBranchResult(tn.ID, outcome, mergedUpdates, err)
+	h.emitBranchComplete(tn.ID, pr)
+	resultsCh <- branchResultMsg{index: idx, result: pr}
+}
+
+// buildBranchResult assembles a ParallelResult from the branch execution outcome.
+func buildBranchResult(nodeID string, outcome pipeline.Outcome, mergedUpdates map[string]string, err error) ParallelResult {
+	pr := ParallelResult{NodeID: nodeID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
 	if err != nil {
 		pr.Status = pipeline.OutcomeFail
 		pr.Error = err.Error()
 	}
+	return pr
+}
 
+// recoverBranch is a deferred panic handler for parallel branch goroutines.
+func (h *ParallelHandler) recoverBranch(idx int, tn *pipeline.Node, resultsCh chan<- branchResultMsg) {
+	if r := recover(); r != nil {
+		resultsCh <- branchResultMsg{
+			index:  idx,
+			result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
+		}
+		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
+			Message: fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
+		})
+	}
+}
+
+// emitBranchComplete emits the appropriate pipeline event for a branch result.
+func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult) {
 	if pr.Status == pipeline.OutcomeFail {
 		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID, Message: pr.Error,
+			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: nodeID, Message: pr.Error,
 		})
 	} else {
 		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type: pipeline.EventStageCompleted, Timestamp: time.Now(), NodeID: tn.ID,
+			Type: pipeline.EventStageCompleted, Timestamp: time.Now(), NodeID: nodeID,
 		})
 	}
-
-	resultsCh <- branchResultMsg{index: idx, result: pr}
 }
 
 // aggregateStatus returns success if at least one branch succeeded, fail otherwise.
@@ -267,75 +298,98 @@ func aggregateBranchStats(results []ParallelResult) *pipeline.SessionStats {
 			continue
 		}
 		if agg == nil {
-			agg = &pipeline.SessionStats{
-				ToolCalls: make(map[string]int),
-			}
+			agg = &pipeline.SessionStats{ToolCalls: make(map[string]int)}
 		}
-		agg.Turns += r.Stats.Turns
-		agg.TotalToolCalls += r.Stats.TotalToolCalls
-		agg.InputTokens += r.Stats.InputTokens
-		agg.OutputTokens += r.Stats.OutputTokens
-		agg.TotalTokens += r.Stats.TotalTokens
-		agg.CostUSD += r.Stats.CostUSD
-		agg.Compactions += r.Stats.Compactions
-		agg.CacheHits += r.Stats.CacheHits
-		agg.CacheMisses += r.Stats.CacheMisses
-		if r.Stats.LongestTurn > agg.LongestTurn {
-			agg.LongestTurn = r.Stats.LongestTurn
-		}
-		agg.FilesModified = append(agg.FilesModified, r.Stats.FilesModified...)
-		agg.FilesCreated = append(agg.FilesCreated, r.Stats.FilesCreated...)
-		for name, count := range r.Stats.ToolCalls {
-			agg.ToolCalls[name] += count
-		}
+		mergeSessionStats(agg, r.Stats)
 	}
 	return agg
+}
+
+// mergeSessionStats adds src fields into dst in-place.
+func mergeSessionStats(dst, src *pipeline.SessionStats) {
+	dst.Turns += src.Turns
+	dst.TotalToolCalls += src.TotalToolCalls
+	dst.InputTokens += src.InputTokens
+	dst.OutputTokens += src.OutputTokens
+	dst.TotalTokens += src.TotalTokens
+	dst.CostUSD += src.CostUSD
+	dst.Compactions += src.Compactions
+	dst.CacheHits += src.CacheHits
+	dst.CacheMisses += src.CacheMisses
+	if src.LongestTurn > dst.LongestTurn {
+		dst.LongestTurn = src.LongestTurn
+	}
+	dst.FilesModified = append(dst.FilesModified, src.FilesModified...)
+	dst.FilesCreated = append(dst.FilesCreated, src.FilesCreated...)
+	for name, count := range src.ToolCalls {
+		dst.ToolCalls[name] += count
+	}
 }
 
 // parseBranchOverrides extracts branch.N.* attributes from a parallel node
 // and returns a map of target node ID → override attrs.
 // Format: branch.0.target=NodeA, branch.0.llm_model=gpt-4, etc.
 func parseBranchOverrides(nodeAttrs map[string]string) map[string]map[string]string {
-	// First pass: group attrs by branch index.
+	indexed := indexBranchAttrs(nodeAttrs)
+	return groupBranchOverridesByTarget(indexed)
+}
+
+// indexBranchAttrs groups branch.N.* node attributes by branch index N.
+func indexBranchAttrs(nodeAttrs map[string]string) map[int]map[string]string {
 	indexed := make(map[int]map[string]string)
 	for key, val := range nodeAttrs {
-		if !strings.HasPrefix(key, "branch.") {
-			continue
+		if idx, attrName, ok := parseBranchAttrKey(key); ok {
+			if indexed[idx] == nil {
+				indexed[idx] = make(map[string]string)
+			}
+			indexed[idx][attrName] = val
 		}
-		rest := key[len("branch."):]
-		dotIdx := strings.Index(rest, ".")
-		if dotIdx < 0 {
-			continue
-		}
-		idx, err := strconv.Atoi(rest[:dotIdx])
-		if err != nil {
-			continue
-		}
-		attrName := rest[dotIdx+1:]
-		if indexed[idx] == nil {
-			indexed[idx] = make(map[string]string)
-		}
-		indexed[idx][attrName] = val
 	}
+	return indexed
+}
 
-	// Second pass: key by target node ID.
+// parseBranchAttrKey parses a "branch.N.attrName" key.
+// Returns (index, attrName, true) on success, (0, "", false) otherwise.
+func parseBranchAttrKey(key string) (int, string, bool) {
+	if !strings.HasPrefix(key, "branch.") {
+		return 0, "", false
+	}
+	rest := key[len("branch."):]
+	dotIdx := strings.Index(rest, ".")
+	if dotIdx < 0 {
+		return 0, "", false
+	}
+	idx, err := strconv.Atoi(rest[:dotIdx])
+	if err != nil {
+		return 0, "", false
+	}
+	return idx, rest[dotIdx+1:], true
+}
+
+// groupBranchOverridesByTarget converts indexed branch attrs to a target-keyed map.
+func groupBranchOverridesByTarget(indexed map[int]map[string]string) map[string]map[string]string {
 	byTarget := make(map[string]map[string]string)
 	for _, branchAttrs := range indexed {
 		target := branchAttrs["target"]
 		if target == "" {
 			continue
 		}
-		overrides := make(map[string]string)
-		for k, v := range branchAttrs {
-			if k != "target" {
-				overrides[k] = v
-			}
-		}
-		if len(overrides) > 0 {
+		if overrides := branchAttrsToOverrides(branchAttrs); len(overrides) > 0 {
 			byTarget[target] = overrides
 		}
 	}
 	return byTarget
+}
+
+// branchAttrsToOverrides copies all branch attrs except "target" into an overrides map.
+func branchAttrsToOverrides(branchAttrs map[string]string) map[string]string {
+	overrides := make(map[string]string)
+	for k, v := range branchAttrs {
+		if k != "target" {
+			overrides[k] = v
+		}
+	}
+	return overrides
 }
 
 // applyBranchOverrides creates a shallow clone of the target node with

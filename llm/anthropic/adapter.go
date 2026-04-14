@@ -98,8 +98,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		msg := string(respBody)
-		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, msg, "anthropic")
+		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "anthropic")
 	}
 
 	resp, err := translateResponse(respBody)
@@ -110,75 +109,81 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	resp.Provider = "anthropic"
 	resp.Latency = time.Since(start)
 
-	// Log diagnostic info for empty responses — helps debug silent API failures.
-	// Only log the raw body when TRACKER_DEBUG is set to avoid leaking sensitive data.
-	if resp.Usage.OutputTokens == 0 && resp.Text() == "" && len(resp.ToolCalls()) == 0 {
-		log.Printf("[anthropic] WARNING: empty response (0 output tokens, no text, no tool calls) — status=%d stop_reason=%s model=%s request_id=%s raw_length=%d",
-			httpResp.StatusCode, resp.FinishReason.Raw, resp.Model, httpResp.Header.Get("Request-Id"), len(respBody))
-		if os.Getenv("TRACKER_DEBUG") != "" {
-			// Log truncated body to aid debugging without leaking full payloads.
-			preview := string(respBody)
-			if len(preview) > 200 {
-				preview = preview[:200] + "...(truncated)"
-			}
-			log.Printf("[anthropic] raw response preview (%d bytes): %s", len(respBody), preview)
-		}
-	}
+	logEmptyResponseIfNeeded(resp, httpResp, respBody)
 
 	return resp, nil
+}
+
+// logEmptyResponseIfNeeded logs a warning when the response has no content.
+func logEmptyResponseIfNeeded(resp *llm.Response, httpResp *http.Response, respBody []byte) {
+	if resp.Usage.OutputTokens != 0 || resp.Text() != "" || len(resp.ToolCalls()) != 0 {
+		return
+	}
+	log.Printf("[anthropic] WARNING: empty response (0 output tokens, no text, no tool calls) — status=%d stop_reason=%s model=%s request_id=%s raw_length=%d",
+		httpResp.StatusCode, resp.FinishReason.Raw, resp.Model, httpResp.Header.Get("Request-Id"), len(respBody))
+	if os.Getenv("TRACKER_DEBUG") != "" {
+		preview := string(respBody)
+		if len(preview) > 200 {
+			preview = preview[:200] + "...(truncated)"
+		}
+		log.Printf("[anthropic] raw response preview (%d bytes): %s", len(respBody), preview)
+	}
 }
 
 // Stream sends a streaming request and returns a channel of events.
 func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
 	ch := make(chan llm.StreamEvent, 64)
 	emitProviderEvents := shouldEmitProviderEvents(req)
-
 	go func() {
 		defer close(ch)
-
-		body, err := translateRequest(req)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: translate request: %w", err)}
-			return
-		}
-
-		// Inject stream: true into the body.
-		var bodyMap map[string]any
-		if err := json.Unmarshal(body, &bodyMap); err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-		bodyMap["stream"] = true
-		body, err = json.Marshal(bodyMap)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+messagesPath, bytes.NewReader(body))
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-		a.setHeaders(httpReq, req)
-
-		httpResp, err := a.httpClient.Do(httpReq)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
-			return
-		}
-		defer httpResp.Body.Close()
-
-		if httpResp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(httpResp.Body)
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "anthropic")}
-			return
-		}
-
-		a.parseSSE(httpResp.Body, ch, emitProviderEvents)
+		a.streamRequest(ctx, req, ch, emitProviderEvents)
 	}()
-
 	return ch
+}
+
+// streamRequest performs the HTTP request and streams events to ch.
+func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
+	body, err := buildStreamBody(req)
+	if err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+		return
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+messagesPath, bytes.NewReader(body))
+	if err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+		return
+	}
+	a.setHeaders(httpReq, req)
+
+	httpResp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
+		return
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "anthropic")}
+		return
+	}
+
+	a.parseSSE(httpResp.Body, ch, emitProviderEvents)
+}
+
+// buildStreamBody translates the request to JSON and injects stream:true.
+func buildStreamBody(req *llm.Request) ([]byte, error) {
+	body, err := translateRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: translate request: %w", err)
+	}
+	var bodyMap map[string]any
+	if err := json.Unmarshal(body, &bodyMap); err != nil {
+		return nil, err
+	}
+	bodyMap["stream"] = true
+	return json.Marshal(bodyMap)
 }
 
 // Close releases resources held by the adapter.
@@ -210,40 +215,44 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 	var inputUsage *anthropicUsage
 
 	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "event: ") {
-			eventType = strings.TrimPrefix(line, "event: ")
-			continue
-		}
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if emitProviderEvents {
-			ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: json.RawMessage(data)}
-		}
-		// When no SSE "event:" line precedes the data, extract the type
-		// from the JSON payload itself. Some servers omit SSE event lines
-		// and embed the type in the data object.
-		resolvedType := eventType
-		if resolvedType == "" {
-			var peek struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal([]byte(data), &peek) == nil && peek.Type != "" {
-				resolvedType = peek.Type
-			}
-		}
-		a.handleSSEData(resolvedType, []byte(data), ch, blockTypes, &inputUsage)
-		eventType = ""
+		eventType = a.processSSELine(scanner.Text(), eventType, ch, emitProviderEvents, blockTypes, &inputUsage)
 	}
 
 	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: SSE scan error: %w", err)}
 	}
+}
+
+// processSSELine handles a single SSE scanner line and returns the (possibly updated) event type.
+func (a *Adapter) processSSELine(line, eventType string, ch chan<- llm.StreamEvent, emitProviderEvents bool, blockTypes map[int]string, inputUsage **anthropicUsage) string {
+	if strings.HasPrefix(line, "event: ") {
+		return strings.TrimPrefix(line, "event: ")
+	}
+	if !strings.HasPrefix(line, "data: ") {
+		return eventType
+	}
+	data := strings.TrimPrefix(line, "data: ")
+	if emitProviderEvents {
+		ch <- llm.StreamEvent{Type: llm.EventProviderEvent, Raw: json.RawMessage(data)}
+	}
+	resolvedType := resolveSSEEventType(eventType, data)
+	a.handleSSEData(resolvedType, []byte(data), ch, blockTypes, inputUsage)
+	return ""
+}
+
+// resolveSSEEventType returns the SSE event type. When no "event:" header preceded
+// the data, it falls back to extracting the type from the JSON payload itself.
+func resolveSSEEventType(headerType, data string) string {
+	if headerType != "" {
+		return headerType
+	}
+	var peek struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal([]byte(data), &peek) == nil && peek.Type != "" {
+		return peek.Type
+	}
+	return ""
 }
 
 // isContextError returns true for context cancellation/deadline errors that

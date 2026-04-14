@@ -44,28 +44,39 @@ func (l *TraceLogger) HandleTraceEvent(evt TraceEvent) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Batchable event kinds: accumulate and defer output.
-	if evt.Kind == TraceText || evt.Kind == TraceReasoning {
-		if l.batchKind != evt.Kind {
-			l.flushBatch()
-			l.batchKind = evt.Kind
-			l.batchProvider = evt.Provider
-			l.batchModel = evt.Model
-		}
-		if evt.Preview != "" {
-			l.batchParts = append(l.batchParts, evt.Preview)
-		}
+	if l.isBatchable(evt) {
+		l.accumulateBatch(evt)
 		return
 	}
+	l.flushAndWrite(evt)
+}
 
-	// Non-batchable event: check if it would produce output before flushing.
-	// This prevents invisible events (e.g. TraceProviderRaw when verbose=false)
-	// from breaking an active text/reasoning batch.
+// isBatchable returns true for event kinds that should be accumulated before output.
+func (l *TraceLogger) isBatchable(evt TraceEvent) bool {
+	return evt.Kind == TraceText || evt.Kind == TraceReasoning
+}
+
+// accumulateBatch adds a batchable event to the current batch, flushing first if kind changed.
+func (l *TraceLogger) accumulateBatch(evt TraceEvent) {
+	if l.batchKind != evt.Kind {
+		l.flushBatch()
+		l.batchKind = evt.Kind
+		l.batchProvider = evt.Provider
+		l.batchModel = evt.Model
+	}
+	if evt.Preview != "" {
+		l.batchParts = append(l.batchParts, evt.Preview)
+	}
+}
+
+// flushAndWrite flushes any pending batch and writes the formatted line for evt.
+// Non-batchable events that produce no output are silently ignored to avoid
+// breaking an active text/reasoning batch with invisible events.
+func (l *TraceLogger) flushAndWrite(evt TraceEvent) {
 	line := FormatTraceLine(evt, l.verbose)
 	if line == "" {
 		return
 	}
-
 	l.flushBatch()
 	l.writeLine(line)
 }

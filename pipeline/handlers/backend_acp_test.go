@@ -3,9 +3,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -614,5 +617,335 @@ func TestACPClientWriteFileCreatesDir(t *testing.T) {
 	}
 	if string(data) != "nested content" {
 		t.Errorf("unexpected content: %q", string(data))
+	}
+}
+
+func TestMapModelToBridge(t *testing.T) {
+	models := &acp.SessionModelState{
+		AvailableModels: []acp.ModelInfo{
+			{ModelId: acp.ModelId("sonnet")},
+			{ModelId: acp.ModelId("haiku")},
+			{ModelId: acp.ModelId("default")},
+		},
+	}
+
+	tests := []struct {
+		tracker string
+		want    string
+	}{
+		{"sonnet", "sonnet"},            // direct match
+		{"claude-sonnet-4-6", "sonnet"}, // substring match
+		{"claude-haiku-4-5", "haiku"},   // substring match
+		{"unknown-model", ""},           // no match
+		{"default", "default"},          // direct match on default
+	}
+	for _, tt := range tests {
+		got := mapModelToBridge(tt.tracker, models)
+		if got != tt.want {
+			t.Errorf("mapModelToBridge(%q) = %q, want %q", tt.tracker, got, tt.want)
+		}
+	}
+
+	// nil models returns empty
+	if got := mapModelToBridge("anything", nil); got != "" {
+		t.Errorf("mapModelToBridge with nil models = %q, want empty", got)
+	}
+}
+
+func TestBuildACPResult(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"hello", " world"},
+		toolCount: 2,
+		turnCount: 3,
+		toolNames: map[string]string{"t1": "bash", "t2": "read"},
+	}
+	result := buildACPResult(handler, acp.PromptResponse{})
+	if result.Turns != 3 {
+		t.Errorf("Turns = %d, want 3", result.Turns)
+	}
+	if result.ToolCalls["bash"] != 1 {
+		t.Errorf("ToolCalls[bash] = %d, want 1", result.ToolCalls["bash"])
+	}
+	if result.ToolCalls["read"] != 1 {
+		t.Errorf("ToolCalls[read] = %d, want 1", result.ToolCalls["read"])
+	}
+}
+
+func TestBuildACPResult_MinOneTurn(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"output"},
+		turnCount: 0,
+		toolNames: make(map[string]string),
+	}
+	result := buildACPResult(handler, acp.PromptResponse{})
+	if result.Turns != 1 {
+		t.Errorf("Turns = %d, want 1 (minimum when text present)", result.Turns)
+	}
+}
+
+func TestBuildACPMcpServers(t *testing.T) {
+	cfg := pipeline.AgentRunConfig{}
+	servers := buildACPMcpServers(cfg)
+	if servers == nil {
+		t.Error("expected non-nil empty slice")
+	}
+	if len(servers) != 0 {
+		t.Errorf("expected empty servers, got %d", len(servers))
+	}
+}
+
+func TestBuildEnvForACP_PassesByDefault(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("TRACKER_STRIP_ACP_KEYS", "")
+
+	env := buildEnvForACP()
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; !ok {
+		t.Error("ACP default should pass API keys through")
+	}
+}
+
+func TestBuildEnvForACP_StripsWhenRequested(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("SAFE_VAR", "keep")
+	t.Setenv("TRACKER_STRIP_ACP_KEYS", "1")
+
+	env := buildEnvForACP()
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should be stripped with TRACKER_STRIP_ACP_KEYS=1")
+	}
+	if v, ok := envMap["SAFE_VAR"]; !ok || v != "keep" {
+		t.Error("SAFE_VAR should be preserved")
+	}
+}
+
+func TestKillProcess_NilProcess(t *testing.T) {
+	// Should not panic on cmd with nil Process.
+	cmd := &exec.Cmd{}
+	killProcess(cmd) // no-op, should not panic
+}
+
+func TestLogStderr_NonEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteString("some error output\n")
+	// logStderr should not panic and should log the output.
+	logStderr("test-agent", "initialize", &buf)
+}
+
+func TestLogStderr_Empty(t *testing.T) {
+	var buf bytes.Buffer
+	// logStderr with empty buffer should be a no-op.
+	logStderr("test-agent", "prompt", &buf)
+}
+
+func TestACPHandler_IsEmpty(t *testing.T) {
+	h := &acpClientHandler{toolNames: make(map[string]string)}
+	if !h.isEmpty() {
+		t.Error("new handler should be empty")
+	}
+	h.textParts = append(h.textParts, "hello")
+	if h.isEmpty() {
+		t.Error("handler with text should not be empty")
+	}
+}
+
+func TestACPHandler_IsEmpty_ToolsOnly(t *testing.T) {
+	h := &acpClientHandler{toolNames: make(map[string]string), toolCount: 1}
+	if h.isEmpty() {
+		t.Error("handler with tool calls should not be empty")
+	}
+}
+
+func TestWaitForProcess_NormalExit(t *testing.T) {
+	// Use a real quick command to test the normal exit path.
+	cmd := exec.Command("true")
+	stdin, _ := cmd.StdinPipe()
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start 'true': %v", err)
+	}
+	forceKilled := waitForProcess(cmd, stdin)
+	if forceKilled {
+		t.Error("'true' should exit normally, not be force-killed")
+	}
+}
+
+func TestACPBackend_Run_AgentNotFound(t *testing.T) {
+	b := NewACPBackend()
+	cfg := pipeline.AgentRunConfig{
+		Provider: "anthropic",
+		Prompt:   "hello",
+	}
+	events := []agent.Event{}
+	emit := func(e agent.Event) { events = append(events, e) }
+
+	_, err := b.Run(context.Background(), cfg, emit)
+	if err == nil {
+		t.Fatal("expected error when agent binary not found")
+	}
+	if !strings.Contains(err.Error(), "not found in PATH") {
+		t.Errorf("error = %q, want 'not found in PATH'", err)
+	}
+}
+
+func TestACPBackend_StartProcess_BadPath(t *testing.T) {
+	b := NewACPBackend()
+	_, err := b.startProcess(context.Background(), "/nonexistent/binary", "test-agent", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for nonexistent binary")
+	}
+}
+
+func TestSetSessionModel_NoMatch(t *testing.T) {
+	// setSessionModel with no matching bridge model should log and return.
+	// We can't easily test the conn interaction, but we can verify it
+	// doesn't panic with a nil models response.
+	sessResp := acp.NewSessionResponse{
+		SessionId: "s1",
+		Models:    nil,
+	}
+	// This should just log "skipping SetSessionModel" and return.
+	setSessionModel(context.Background(), nil, sessResp, "test", "unknown-model")
+}
+
+func TestBuildEnvForACP_StripsAllPrefixes(t *testing.T) {
+	// Test all stripped prefixes
+	t.Setenv("ANTHROPIC_API_KEY", "x")
+	t.Setenv("OPENAI_API_KEY", "x")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "x")
+	t.Setenv("GEMINI_API_KEY", "x")
+	t.Setenv("GOOGLE_API_KEY", "x")
+	t.Setenv("ANTHROPIC_BASE_URL", "x")
+	t.Setenv("OPENAI_BASE_URL", "x")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "x")
+	t.Setenv("GEMINI_BASE_URL", "x")
+	t.Setenv("GOOGLE_BASE_URL", "x")
+	t.Setenv("TRACKER_STRIP_ACP_KEYS", "1")
+
+	env := buildEnvForACP()
+	for _, e := range env {
+		name := strings.SplitN(e, "=", 2)[0]
+		for _, prefix := range acpStrippedPrefixes {
+			stripped := strings.TrimSuffix(prefix, "=")
+			if name == stripped {
+				t.Errorf("%s should be stripped", name)
+			}
+		}
+	}
+}
+
+func TestACPCollectedTextEmpty(t *testing.T) {
+	h := &acpClientHandler{
+		textParts: nil,
+		toolNames: make(map[string]string),
+	}
+	if got := h.collectedText(); got != "" {
+		t.Errorf("collectedText() = %q, want empty", got)
+	}
+}
+
+func TestBuildACPResult_EmptyHandler(t *testing.T) {
+	handler := &acpClientHandler{
+		toolNames: make(map[string]string),
+	}
+	result := buildACPResult(handler, acp.PromptResponse{})
+	if result.Turns != 0 {
+		t.Errorf("Turns = %d, want 0 for empty handler", result.Turns)
+	}
+}
+
+func TestResolveAgentName_ProviderMapping(t *testing.T) {
+	b := NewACPBackend()
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{"anthropic", "claude-agent-acp"},
+		{"openai", "codex-acp"},
+		{"gemini", "gemini"},
+		{"unknown", "claude-agent-acp"}, // default fallback
+	}
+	for _, tt := range tests {
+		cfg := pipeline.AgentRunConfig{Provider: tt.provider}
+		got := b.resolveAgentName(cfg)
+		if got != tt.want {
+			t.Errorf("resolveAgentName(provider=%q) = %q, want %q", tt.provider, got, tt.want)
+		}
+	}
+}
+
+func TestValidatePathInWorkDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		workDir string
+		wantErr bool
+	}{
+		{"inside workdir", "/home/user/project/file.go", "/home/user/project", false},
+		{"workdir itself", "/home/user/project", "/home/user/project", false},
+		{"outside workdir", "/etc/passwd", "/home/user/project", true},
+		{"traversal attempt", "/home/user/project/../../../etc/passwd", "/home/user/project", true},
+		{"empty workdir allows all", "/etc/passwd", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePathInWorkDir(tt.path, tt.workDir)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validatePathInWorkDir(%q, %q) err=%v, wantErr=%v", tt.path, tt.workDir, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApplyLineFilter_NegativeValues(t *testing.T) {
+	content := "line1\nline2\nline3\nline4\nline5"
+
+	// Negative line should not panic
+	negLine := -5
+	result := applyLineFilter(content, &negLine, nil)
+	if result != content {
+		t.Errorf("negative line: got %q, want full content", result)
+	}
+
+	// Negative limit should not panic, treated as no limit
+	negLimit := -1
+	result = applyLineFilter(content, nil, &negLimit)
+	if result != content {
+		t.Errorf("negative limit: got %q, want full content", result)
+	}
+
+	// Zero limit should not panic
+	zeroLimit := 0
+	result = applyLineFilter(content, nil, &zeroLimit)
+	if result != content {
+		t.Errorf("zero limit: got %q, want full content", result)
+	}
+}
+
+func TestReadTextFile_RejectsPathOutsideWorkDir(t *testing.T) {
+	h := &acpClientHandler{
+		workingDir: t.TempDir(),
+		toolNames:  make(map[string]string),
+	}
+	_, err := h.ReadTextFile(context.Background(), acp.ReadTextFileRequest{
+		Path: "/etc/passwd",
+	})
+	if err == nil {
+		t.Fatal("expected error for path outside workdir")
+	}
+	if !strings.Contains(err.Error(), "outside working directory") {
+		t.Errorf("error = %q, want 'outside working directory'", err)
 	}
 }

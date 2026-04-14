@@ -15,41 +15,49 @@ func compactSummary(toolName, content string) string {
 	if content == "" {
 		return fmt.Sprintf("[previous %s result — 0 chars. Re-run if needed.]", toolName)
 	}
-
 	switch toolName {
 	case "read_file", "read":
-		lineCount := strings.Count(content, "\n")
-		if lineCount == 0 && len(content) > 0 {
-			lineCount = 1
-		}
-		unit := "lines"
-		if lineCount == 1 {
-			unit = "line"
-		}
-		return fmt.Sprintf("[previously read: %d %s. Re-read with %s if needed.]", lineCount, unit, toolName)
-
+		return compactReadSummary(toolName, content)
 	case "grep_search", "grep":
-		matchCount := 0
-		for _, line := range strings.Split(content, "\n") {
-			if strings.TrimSpace(line) != "" {
-				matchCount++
-			}
-		}
-		return fmt.Sprintf("[previously searched: %d matches found. Re-run %s if needed.]", matchCount, toolName)
-
+		return compactGrepSummary(toolName, content)
 	case "bash", "execute_command":
-		firstLine := content
-		if idx := strings.Index(content, "\n"); idx >= 0 {
-			firstLine = content[:idx]
-		}
-		if len(firstLine) > 30 {
-			firstLine = firstLine[:30]
-		}
-		return fmt.Sprintf("[previously ran: %s — Re-run if needed.]", firstLine)
-
+		return compactBashSummary(content)
 	default:
 		return fmt.Sprintf("[previous %s result — %d chars. Re-run if needed.]", toolName, len(content))
 	}
+}
+
+func compactReadSummary(toolName, content string) string {
+	lineCount := strings.Count(content, "\n")
+	if lineCount == 0 && len(content) > 0 {
+		lineCount = 1
+	}
+	unit := "lines"
+	if lineCount == 1 {
+		unit = "line"
+	}
+	return fmt.Sprintf("[previously read: %d %s. Re-read with %s if needed.]", lineCount, unit, toolName)
+}
+
+func compactGrepSummary(toolName, content string) string {
+	matchCount := 0
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) != "" {
+			matchCount++
+		}
+	}
+	return fmt.Sprintf("[previously searched: %d matches found. Re-run %s if needed.]", matchCount, toolName)
+}
+
+func compactBashSummary(content string) string {
+	firstLine := content
+	if idx := strings.Index(content, "\n"); idx >= 0 {
+		firstLine = content[:idx]
+	}
+	if len(firstLine) > 30 {
+		firstLine = firstLine[:30]
+	}
+	return fmt.Sprintf("[previously ran: %s — Re-run if needed.]", firstLine)
 }
 
 // compactMessages returns a new message slice with old tool results replaced by summaries.
@@ -65,36 +73,37 @@ func compactMessages(messages []llm.Message, currentTurn, protectedTurns int) []
 	turnCounter := 0
 
 	for i, msg := range messages {
-		// Track turns: every assistant message counts as a turn, matching the
-		// session loop's turn counter which increments on every LLM call.
 		if msg.Role == llm.RoleAssistant {
 			turnCounter++
 		}
-
-		// Compact tool results in old turns.
 		if msg.Role == llm.RoleTool && turnCounter <= cutoffTurn {
-			newMsg := llm.Message{
-				Role:    msg.Role,
-				Content: make([]llm.ContentPart, len(msg.Content)),
-			}
-			for j, part := range msg.Content {
-				if part.Kind == llm.KindToolResult && part.ToolResult != nil && !part.ToolResult.IsError {
-					newResult := *part.ToolResult
-					newResult.Content = compactSummary(newResult.Name, newResult.Content)
-					newPart := part
-					newPart.ToolResult = &newResult
-					newMsg.Content[j] = newPart
-				} else {
-					newMsg.Content[j] = part
-				}
-			}
-			result[i] = newMsg
+			result[i] = compactToolMessage(msg)
 		} else {
 			result[i] = msg
 		}
 	}
 
 	return result
+}
+
+// compactToolMessage replaces non-error tool results in a message with summary strings.
+func compactToolMessage(msg llm.Message) llm.Message {
+	newMsg := llm.Message{
+		Role:    msg.Role,
+		Content: make([]llm.ContentPart, len(msg.Content)),
+	}
+	for j, part := range msg.Content {
+		if part.Kind == llm.KindToolResult && part.ToolResult != nil && !part.ToolResult.IsError {
+			newResult := *part.ToolResult
+			newResult.Content = compactSummary(newResult.Name, newResult.Content)
+			newPart := part
+			newPart.ToolResult = &newResult
+			newMsg.Content[j] = newPart
+		} else {
+			newMsg.Content[j] = part
+		}
+	}
+	return newMsg
 }
 
 // compactIfNeeded checks context utilization and compacts old tool results if needed.

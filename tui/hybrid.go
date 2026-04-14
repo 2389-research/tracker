@@ -122,6 +122,14 @@ func (h *HybridContent) updateOtherMode(km tea.KeyMsg) tea.Cmd {
 
 // updateRadioMode handles keys when navigating the radio list.
 func (h *HybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
+	if cmd := h.handleRadioNavKey(km); cmd != nil {
+		return cmd
+	}
+	return h.handleRadioActionKey(km)
+}
+
+// handleRadioNavKey handles Up/Down/Enter navigation keys.
+func (h *HybridContent) handleRadioNavKey(km tea.KeyMsg) tea.Cmd {
 	switch km.Type {
 	case tea.KeyUp:
 		if h.cursor > 0 {
@@ -139,6 +147,11 @@ func (h *HybridContent) updateRadioMode(km tea.KeyMsg) tea.Cmd {
 		}
 		return h.submitLabel(h.labels[h.cursor])
 	}
+	return nil
+}
+
+// handleRadioActionKey handles Ctrl+S (submit) and Esc (cancel) action keys.
+func (h *HybridContent) handleRadioActionKey(km tea.KeyMsg) tea.Cmd {
 	switch km.String() {
 	case "ctrl+s":
 		if h.isOnOther() {
@@ -203,27 +216,8 @@ func (h *HybridContent) View() string {
 	sb.WriteString(promptStyle.Render(h.prompt))
 	sb.WriteString("\n\n")
 
-	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
-	normalStyle := lipgloss.NewStyle()
-
-	for i, label := range h.labels {
-		if i == h.cursor && !h.onOther {
-			sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", label)))
-		} else {
-			sb.WriteString(normalStyle.Render(fmt.Sprintf("  ○ %s", label)))
-		}
-		sb.WriteString("\n")
-	}
-
-	// "Other" option.
-	if h.isOnOther() && !h.onOther {
-		sb.WriteString(selectedStyle.Render("  ● other (provide feedback)"))
-	} else if h.onOther {
-		sb.WriteString(selectedStyle.Render("  ● other:"))
-	} else {
-		sb.WriteString(normalStyle.Render("  ○ other (provide feedback)"))
-	}
-	sb.WriteString("\n")
+	h.writeRadioOptions(&sb)
+	h.writeOtherOption(&sb)
 
 	if h.onOther {
 		sb.WriteString("\n")
@@ -232,11 +226,44 @@ func (h *HybridContent) View() string {
 	}
 
 	sb.WriteString("\n")
-	hint := "↑↓ navigate  enter select  ctrl+s submit  esc cancel"
-	if h.onOther {
-		hint = "type feedback  ctrl+s submit  esc back to options  ↑ back"
-	}
-	sb.WriteString(Styles.Muted.Render(hint))
+	sb.WriteString(Styles.Muted.Render(h.hintText()))
 
 	return sb.String()
+}
+
+// writeRadioOptions renders each labeled radio option.
+func (h *HybridContent) writeRadioOptions(sb *strings.Builder) {
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
+	normalStyle := lipgloss.NewStyle()
+	for i, label := range h.labels {
+		if i == h.cursor && !h.onOther {
+			sb.WriteString(selectedStyle.Render(fmt.Sprintf("  ● %s", label)))
+		} else {
+			sb.WriteString(normalStyle.Render(fmt.Sprintf("  ○ %s", label)))
+		}
+		sb.WriteString("\n")
+	}
+}
+
+// writeOtherOption renders the "other" radio option.
+func (h *HybridContent) writeOtherOption(sb *strings.Builder) {
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorGreen)
+	normalStyle := lipgloss.NewStyle()
+	switch {
+	case h.isOnOther() && !h.onOther:
+		sb.WriteString(selectedStyle.Render("  ● other (provide feedback)"))
+	case h.onOther:
+		sb.WriteString(selectedStyle.Render("  ● other:"))
+	default:
+		sb.WriteString(normalStyle.Render("  ○ other (provide feedback)"))
+	}
+	sb.WriteString("\n")
+}
+
+// hintText returns the keyboard hint string based on current state.
+func (h *HybridContent) hintText() string {
+	if h.onOther {
+		return "type feedback  ctrl+s submit  esc back to options  ↑ back"
+	}
+	return "↑↓ navigate  enter select  ctrl+s submit  esc cancel"
 }

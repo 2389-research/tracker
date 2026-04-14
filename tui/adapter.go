@@ -19,24 +19,24 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 	case pipeline.EventStageCompleted:
 		return MsgNodeCompleted{NodeID: evt.NodeID, Outcome: "success"}
 	case pipeline.EventStageFailed:
-		errMsg := evt.Message
-		if evt.Err != nil {
-			errMsg = evt.Err.Error()
-		}
-		return MsgNodeFailed{NodeID: evt.NodeID, Error: errMsg}
+		return MsgNodeFailed{NodeID: evt.NodeID, Error: pipelineEventMsg(evt)}
 	case pipeline.EventStageRetrying:
 		return MsgNodeRetrying{NodeID: evt.NodeID, Message: evt.Message}
 	case pipeline.EventPipelineCompleted:
 		return MsgPipelineCompleted{}
 	case pipeline.EventPipelineFailed:
-		errMsg := evt.Message
-		if evt.Err != nil {
-			errMsg = evt.Err.Error()
-		}
-		return MsgPipelineFailed{Error: errMsg}
+		return MsgPipelineFailed{Error: pipelineEventMsg(evt)}
 	default:
 		return nil
 	}
+}
+
+// pipelineEventMsg returns the error message from a pipeline event, preferring Err over Message.
+func pipelineEventMsg(evt pipeline.PipelineEvent) string {
+	if evt.Err != nil {
+		return evt.Err.Error()
+	}
+	return evt.Message
 }
 
 // AdaptAgentEvent maps an agent session event to a typed TUI message.
@@ -54,21 +54,31 @@ func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 	case agent.EventToolCallStart:
 		return MsgToolCallStart{NodeID: nodeID, ToolName: evt.ToolName, ToolInput: evt.ToolInput}
 	case agent.EventToolCallEnd:
-		return MsgToolCallEnd{
-			NodeID:   nodeID,
-			ToolName: evt.ToolName,
-			Output:   evt.ToolOutput,
-			Error:    evt.ToolError,
-		}
+		return adaptToolCallEnd(evt, nodeID)
 	case agent.EventError:
-		errMsg := ""
-		if evt.Err != nil {
-			errMsg = evt.Err.Error()
-		}
-		return MsgAgentError{NodeID: nodeID, Error: errMsg}
+		return adaptAgentError(evt, nodeID)
 	default:
 		return nil
 	}
+}
+
+// adaptToolCallEnd builds a MsgToolCallEnd from an agent tool call end event.
+func adaptToolCallEnd(evt agent.Event, nodeID string) tea.Msg {
+	return MsgToolCallEnd{
+		NodeID:   nodeID,
+		ToolName: evt.ToolName,
+		Output:   evt.ToolOutput,
+		Error:    evt.ToolError,
+	}
+}
+
+// adaptAgentError builds a MsgAgentError from an agent error event.
+func adaptAgentError(evt agent.Event, nodeID string) tea.Msg {
+	errMsg := ""
+	if evt.Err != nil {
+		errMsg = evt.Err.Error()
+	}
+	return MsgAgentError{NodeID: nodeID, Error: errMsg}
 }
 
 // AdaptLLMTraceEvent maps an LLM trace event to one or more typed TUI messages.

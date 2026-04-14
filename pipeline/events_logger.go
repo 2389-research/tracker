@@ -26,20 +26,32 @@ func (h *LoggingEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 
 	// Flush any batched resume events before printing the next real event.
 	h.flushResumed()
+	h.writeEventLine(evt)
+}
 
+// writeEventLine formats and writes a single pipeline event line.
+func (h *LoggingEventHandler) writeEventLine(evt PipelineEvent) {
 	ts := evt.Timestamp.Format("15:04:05")
 	if evt.NodeID != "" {
-		if evt.Err != nil {
-			fmt.Fprintf(h.Writer, "[%s] %-22s node=%-20s %s (err: %v)\n", ts, evt.Type, evt.NodeID, evt.Message, evt.Err)
-		} else {
-			fmt.Fprintf(h.Writer, "[%s] %-22s node=%-20s %s\n", ts, evt.Type, evt.NodeID, evt.Message)
-		}
+		h.writeNodeEventLine(ts, evt)
 	} else {
-		if evt.Err != nil {
-			fmt.Fprintf(h.Writer, "[%s] %-22s %s (err: %v)\n", ts, evt.Type, evt.Message, evt.Err)
-		} else {
-			fmt.Fprintf(h.Writer, "[%s] %-22s %s\n", ts, evt.Type, evt.Message)
-		}
+		h.writeGlobalEventLine(ts, evt)
+	}
+}
+
+func (h *LoggingEventHandler) writeNodeEventLine(ts string, evt PipelineEvent) {
+	if evt.Err != nil {
+		fmt.Fprintf(h.Writer, "[%s] %-22s node=%-20s %s (err: %v)\n", ts, evt.Type, evt.NodeID, evt.Message, evt.Err)
+	} else {
+		fmt.Fprintf(h.Writer, "[%s] %-22s node=%-20s %s\n", ts, evt.Type, evt.NodeID, evt.Message)
+	}
+}
+
+func (h *LoggingEventHandler) writeGlobalEventLine(ts string, evt PipelineEvent) {
+	if evt.Err != nil {
+		fmt.Fprintf(h.Writer, "[%s] %-22s %s (err: %v)\n", ts, evt.Type, evt.Message, evt.Err)
+	} else {
+		fmt.Fprintf(h.Writer, "[%s] %-22s %s\n", ts, evt.Type, evt.Message)
 	}
 }
 

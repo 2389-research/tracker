@@ -78,46 +78,47 @@ func ParseRetryPolicy(name string) (*RetryPolicy, bool) {
 // The resolved policy's MaxRetries is then overridden by node attr "max_retries"
 // or graph attr "default_max_retry" if either is set.
 func ResolveRetryPolicy(node *Node, graphAttrs map[string]string) *RetryPolicy {
-	var policy *RetryPolicy
+	policy := resolveBaseRetryPolicy(node, graphAttrs)
+	applyRetryOverrides(policy, node, graphAttrs)
+	return policy
+}
 
-	// Try node-level retry_policy attr first.
+// resolveBaseRetryPolicy picks the policy by priority: node attr > graph default > standard.
+func resolveBaseRetryPolicy(node *Node, graphAttrs map[string]string) *RetryPolicy {
 	if name, ok := node.Attrs["retry_policy"]; ok {
-		policy, _ = ParseRetryPolicy(name)
-	}
-
-	// Try graph-level default_retry_policy if node didn't specify a valid one.
-	if policy == nil {
-		if name, ok := graphAttrs["default_retry_policy"]; ok {
-			policy, _ = ParseRetryPolicy(name)
+		if p, found := ParseRetryPolicy(name); found {
+			return p
 		}
 	}
-
-	// Fall back to standard.
-	if policy == nil {
-		policy, _ = ParseRetryPolicy("standard")
-	}
-
-	// Apply max_retries override from node attr.
-	if mr, ok := node.Attrs["max_retries"]; ok {
-		if n, err := strconv.Atoi(mr); err == nil {
-			policy.MaxRetries = n
+	if name, ok := graphAttrs["default_retry_policy"]; ok {
+		if p, found := ParseRetryPolicy(name); found {
+			return p
 		}
-	} else if mr, ok := graphAttrs["default_max_retry"]; ok {
-		// Legacy graph-level max retry override.
+	}
+	p, _ := ParseRetryPolicy("standard")
+	return p
+}
+
+// applyRetryOverrides applies max_retries and base_delay overrides to the policy.
+func applyRetryOverrides(policy *RetryPolicy, node *Node, graphAttrs map[string]string) {
+	if mr := resolveMaxRetries(node.Attrs, graphAttrs); mr != "" {
 		if n, err := strconv.Atoi(mr); err == nil {
 			policy.MaxRetries = n
 		}
 	}
-
-	// Apply base_delay override from node attr (set by Dippin adapter
-	// from ir.RetryConfig.BaseDelay, e.g. "500ms", "2s").
 	if bd, ok := node.Attrs["base_delay"]; ok {
 		if d, err := time.ParseDuration(bd); err == nil {
 			policy.BaseDelay = d
 		}
 	}
+}
 
-	return policy
+// resolveMaxRetries returns the max retries string from node attrs, falling back to graph attrs.
+func resolveMaxRetries(nodeAttrs, graphAttrs map[string]string) string {
+	if mr := nodeAttrs["max_retries"]; mr != "" {
+		return mr
+	}
+	return graphAttrs["default_max_retry"]
 }
 
 // applyJitter adds ±25% random jitter to a duration, capped at maxBackoffDuration.

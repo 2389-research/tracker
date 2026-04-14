@@ -68,6 +68,14 @@ type sseResponseCompleted struct {
 
 // handleSSEData processes a single SSE data payload.
 func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.StreamEvent) {
+	if a.handleSSEDataCoreEvents(eventType, data, ch) {
+		return
+	}
+	a.handleSSEDataOtherEvents(eventType, data, ch)
+}
+
+// handleSSEDataCoreEvents handles the primary response event types. Returns true if handled.
+func (a *Adapter) handleSSEDataCoreEvents(eventType string, data []byte, ch chan<- llm.StreamEvent) bool {
 	switch eventType {
 	case "response.created":
 		a.handleSSEResponseCreated(data, ch)
@@ -77,6 +85,15 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 		a.handleSSEOutputTextDelta(data, ch)
 	case "response.function_call_arguments.delta":
 		a.handleSSEFuncArgsDelta(data, ch)
+	default:
+		return false
+	}
+	return true
+}
+
+// handleSSEDataOtherEvents handles completion, error, and no-op event types.
+func (a *Adapter) handleSSEDataOtherEvents(eventType string, data []byte, ch chan<- llm.StreamEvent) {
+	switch eventType {
 	case "response.output_item.done":
 		a.handleSSEOutputItemDone(data, ch)
 	case "response.completed":
@@ -246,6 +263,14 @@ func sseErrorToTyped(code, message string) error {
 		Provider:  "openai",
 		ErrorCode: code,
 	}
+	if err := sseErrorToTypedAuthQuota(code, base); err != nil {
+		return err
+	}
+	return sseErrorToTypedRequestServer(code, base)
+}
+
+// sseErrorToTypedAuthQuota handles auth, quota, and not-found error codes.
+func sseErrorToTypedAuthQuota(code string, base llm.ProviderError) error {
 	switch code {
 	case "insufficient_quota":
 		return &llm.QuotaExceededError{ProviderError: base}
@@ -253,6 +278,13 @@ func sseErrorToTyped(code, message string) error {
 		return &llm.AuthenticationError{ProviderError: base}
 	case "model_not_found":
 		return &llm.NotFoundError{ProviderError: base}
+	}
+	return nil
+}
+
+// sseErrorToTypedRequestServer handles request, content, rate-limit, and server error codes.
+func sseErrorToTypedRequestServer(code string, base llm.ProviderError) error {
+	switch code {
 	case "invalid_request_error", "invalid_request":
 		return &llm.InvalidRequestError{ProviderError: base}
 	case "context_length_exceeded":

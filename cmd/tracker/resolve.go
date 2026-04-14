@@ -17,7 +17,7 @@ import (
 //  5. Error with suggestions
 func resolvePipelineSource(name string) (path string, embedded bool, info WorkflowInfo, err error) {
 	// Explicit file path — pass through.
-	if strings.Contains(name, "/") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dot") {
+	if isExplicitFilePath(name) {
 		return name, false, WorkflowInfo{}, nil
 	}
 
@@ -37,17 +37,26 @@ func resolvePipelineSource(name string) (path string, embedded bool, info Workfl
 		return "", true, wf, nil
 	}
 
-	// Nothing matched — build a helpful error.
+	return "", false, WorkflowInfo{}, buildPipelineNotFoundError(name)
+}
+
+// isExplicitFilePath returns true if name is a file path (contains / or has a .dip/.dot extension).
+func isExplicitFilePath(name string) bool {
+	return strings.Contains(name, "/") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dot")
+}
+
+// buildPipelineNotFoundError builds an error message listing available built-ins.
+func buildPipelineNotFoundError(name string) error {
 	available := listBuiltinWorkflows()
-	if len(available) > 0 {
-		var names []string
-		for _, wf := range available {
-			names = append(names, wf.Name)
-		}
-		return "", false, WorkflowInfo{}, fmt.Errorf(
-			"unknown pipeline %q (no local file found, not a built-in workflow)\n  Available built-in workflows: %s\n  Run 'tracker workflows' to see details",
-			name, strings.Join(names, ", "),
-		)
+	if len(available) == 0 {
+		return fmt.Errorf("unknown pipeline %q: file not found", name)
 	}
-	return "", false, WorkflowInfo{}, fmt.Errorf("unknown pipeline %q: file not found", name)
+	var names []string
+	for _, wf := range available {
+		names = append(names, wf.Name)
+	}
+	return fmt.Errorf(
+		"unknown pipeline %q (no local file found, not a built-in workflow)\n  Available built-in workflows: %s\n  Run 'tracker workflows' to see details",
+		name, strings.Join(names, ", "),
+	)
 }

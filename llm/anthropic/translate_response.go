@@ -46,44 +46,7 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		return nil, err
 	}
 
-	var content []llm.ContentPart
-	for _, block := range ar.Content {
-		switch block.Type {
-		case "text":
-			content = append(content, llm.ContentPart{
-				Kind: llm.KindText,
-				Text: block.Text,
-			})
-
-		case "tool_use":
-			content = append(content, llm.ContentPart{
-				Kind: llm.KindToolCall,
-				ToolCall: &llm.ToolCallData{
-					ID:        block.ID,
-					Name:      block.Name,
-					Arguments: block.Input,
-				},
-			})
-
-		case "thinking":
-			content = append(content, llm.ContentPart{
-				Kind: llm.KindThinking,
-				Thinking: &llm.ThinkingData{
-					Text:      block.Thinking,
-					Signature: block.Signature,
-				},
-			})
-
-		case "redacted_thinking":
-			content = append(content, llm.ContentPart{
-				Kind: llm.KindRedactedThinking,
-				Thinking: &llm.ThinkingData{
-					Redacted:  true,
-					Signature: block.Data,
-				},
-			})
-		}
-	}
+	content := translateContentBlocks(ar.Content)
 
 	usage := llm.Usage{
 		InputTokens:  ar.Usage.InputTokens,
@@ -111,6 +74,52 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		Usage:        usage,
 		Raw:          raw,
 	}, nil
+}
+
+// translateContentBlocks converts Anthropic content blocks to unified llm.ContentPart values.
+func translateContentBlocks(blocks []anthropicContentBlock) []llm.ContentPart {
+	var content []llm.ContentPart
+	for _, block := range blocks {
+		if part, ok := translateContentBlock(block); ok {
+			content = append(content, part)
+		}
+	}
+	return content
+}
+
+// translateContentBlock converts a single Anthropic content block to a unified ContentPart.
+// Returns false if the block type is unrecognized.
+func translateContentBlock(block anthropicContentBlock) (llm.ContentPart, bool) {
+	switch block.Type {
+	case "text":
+		return llm.ContentPart{Kind: llm.KindText, Text: block.Text}, true
+	case "tool_use":
+		return llm.ContentPart{
+			Kind: llm.KindToolCall,
+			ToolCall: &llm.ToolCallData{
+				ID:        block.ID,
+				Name:      block.Name,
+				Arguments: block.Input,
+			},
+		}, true
+	case "thinking":
+		return llm.ContentPart{
+			Kind: llm.KindThinking,
+			Thinking: &llm.ThinkingData{
+				Text:      block.Thinking,
+				Signature: block.Signature,
+			},
+		}, true
+	case "redacted_thinking":
+		return llm.ContentPart{
+			Kind: llm.KindRedactedThinking,
+			Thinking: &llm.ThinkingData{
+				Redacted:  true,
+				Signature: block.Data,
+			},
+		}, true
+	}
+	return llm.ContentPart{}, false
 }
 
 // translateFinishReason maps Anthropic stop reasons to the unified finish reason format.

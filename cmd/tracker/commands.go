@@ -14,6 +14,12 @@ import (
 )
 
 func executeCommand(cfg runConfig, deps commandDeps) error {
+	deps = fillDefaultDeps(deps)
+	return dispatchCommand(cfg, deps)
+}
+
+// fillDefaultDeps fills nil function fields in deps with production defaults.
+func fillDefaultDeps(deps commandDeps) commandDeps {
 	if deps.loadEnv == nil {
 		deps.loadEnv = loadEnvFiles
 	}
@@ -26,31 +32,58 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 	if deps.runTUI == nil {
 		deps.runTUI = runTUI
 	}
+	return deps
+}
 
+// dispatchCommand routes the command mode to the appropriate executor.
+func dispatchCommand(cfg runConfig, deps commandDeps) error {
+	if cmd, ok := dispatchUtilityCommand(cfg, deps); ok {
+		return cmd
+	}
+	return executeRun(cfg, deps)
+}
+
+// dispatchUtilityCommand handles non-run subcommands.
+// Returns (result, true) when a subcommand matched, (nil, false) otherwise.
+func dispatchUtilityCommand(cfg runConfig, deps commandDeps) (error, bool) {
+	if err, ok := dispatchInfoCommands(cfg, deps); ok {
+		return err, true
+	}
+	return dispatchPipelineCommands(cfg)
+}
+
+// dispatchInfoCommands handles version/diagnose/doctor/setup/update subcommands.
+func dispatchInfoCommands(cfg runConfig, deps commandDeps) (error, bool) {
 	switch cfg.mode {
 	case modeVersion:
-		return executeVersion()
+		return executeVersion(), true
 	case modeDiagnose:
-		return executeDiagnose(cfg)
+		return executeDiagnose(cfg), true
 	case modeDoctor:
-		return executeDoctor(cfg)
+		return executeDoctor(cfg), true
 	case modeSetup:
-		return deps.runSetup()
-	case modeValidate:
-		return executeValidate(cfg)
-	case modeSimulate:
-		return executeSimulate(cfg)
-	case modeAudit:
-		return executeAudit(cfg)
-	case modeWorkflows:
-		return executeWorkflows()
-	case modeInit:
-		return executeInit(cfg)
+		return deps.runSetup(), true
 	case modeUpdate:
-		return executeUpdate()
-	default:
-		return executeRun(cfg, deps)
+		return executeUpdate(), true
 	}
+	return nil, false
+}
+
+// dispatchPipelineCommands handles validate/simulate/audit/workflows/init subcommands.
+func dispatchPipelineCommands(cfg runConfig) (error, bool) {
+	switch cfg.mode {
+	case modeValidate:
+		return executeValidate(cfg), true
+	case modeSimulate:
+		return executeSimulate(cfg), true
+	case modeAudit:
+		return executeAudit(cfg), true
+	case modeWorkflows:
+		return executeWorkflows(), true
+	case modeInit:
+		return executeInit(cfg), true
+	}
+	return nil, false
 }
 
 func executeVersion() error {
@@ -88,19 +121,10 @@ func printProviderStatus() {
 		{"openai", []string{"OPENAI_API_KEY"}},
 		{"gemini", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
 	}
-	var ready, missing []string
+	var ready []string
 	for _, p := range providers {
-		found := false
-		for _, e := range p.envs {
-			if os.Getenv(e) != "" {
-				found = true
-				break
-			}
-		}
-		if found {
+		if providerHasKey(p.envs) {
 			ready = append(ready, p.name)
-		} else {
-			missing = append(missing, p.name)
 		}
 	}
 	if len(ready) > 0 {
@@ -108,6 +132,16 @@ func printProviderStatus() {
 	} else {
 		fmt.Println("  providers: none (run `tracker setup`)")
 	}
+}
+
+// providerHasKey returns true if any of the given env vars is non-empty.
+func providerHasKey(envs []string) bool {
+	for _, e := range envs {
+		if os.Getenv(e) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func executeWorkflows() error {
@@ -138,22 +172,12 @@ func executeWorkflows() error {
 
 func executeInit(cfg runConfig) error {
 	if cfg.pipelineFile == "" {
-		workflows := listBuiltinWorkflows()
-		fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nAvailable workflows:\n")
-		for _, wf := range workflows {
-			fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
-		}
-		return fmt.Errorf("workflow name required")
+		return printInitUsage()
 	}
 
 	info, ok := lookupBuiltinWorkflow(cfg.pipelineFile)
 	if !ok {
-		workflows := listBuiltinWorkflows()
-		var names []string
-		for _, wf := range workflows {
-			names = append(names, wf.Name)
-		}
-		return fmt.Errorf("unknown workflow %q (available: %s)", cfg.pipelineFile, strings.Join(names, ", "))
+		return buildUnknownWorkflowError(cfg.pipelineFile)
 	}
 
 	outFile := info.Name + ".dip"
@@ -172,6 +196,26 @@ func executeInit(cfg runConfig) error {
 
 	fmt.Printf("Created %s — edit it, then run with: tracker %s\n", outFile, outFile)
 	return nil
+}
+
+// printInitUsage prints the usage and lists available workflows, then returns an error.
+func printInitUsage() error {
+	workflows := listBuiltinWorkflows()
+	fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nAvailable workflows:\n")
+	for _, wf := range workflows {
+		fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
+	}
+	return fmt.Errorf("workflow name required")
+}
+
+// buildUnknownWorkflowError returns an error listing available built-in workflow names.
+func buildUnknownWorkflowError(name string) error {
+	workflows := listBuiltinWorkflows()
+	var names []string
+	for _, wf := range workflows {
+		names = append(names, wf.Name)
+	}
+	return fmt.Errorf("unknown workflow %q (available: %s)", name, strings.Join(names, ", "))
 }
 
 func executeValidate(cfg runConfig) error {
@@ -203,10 +247,25 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
 
+	if err := printRunPreamble(cfg); err != nil {
+		return err
+	}
+
+	printStartupBanner()
+
+	checkpoint, err := resolveRunCheckpoint(cfg)
+	if err != nil {
+		return err
+	}
+
+	return selectAndRunMode(cfg, deps, checkpoint)
+}
+
+// printRunPreamble prints backend and autopilot status messages and validates persona.
+func printRunPreamble(cfg runConfig) error {
 	if cfg.backend != "" && cfg.backend != "native" {
 		fmt.Fprintf(os.Stderr, "Agent backend: %s\n", cfg.backend)
 	}
-
 	if cfg.autopilot != "" {
 		if _, err := handlers.ParsePersona(cfg.autopilot); err != nil {
 			return err
@@ -215,26 +274,23 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	} else if cfg.autoApprove {
 		fmt.Fprintln(os.Stderr, "Running in auto-approve mode — all human gates auto-approved")
 	}
+	return nil
+}
 
-	printStartupBanner()
-
-	// Resolve run ID to checkpoint path.
-	checkpoint := ""
-	if cfg.resumeID != "" {
-		cp, err := resolveCheckpoint(cfg.workdir, cfg.resumeID)
-		if err != nil {
-			return err
-		}
-		checkpoint = cp
+// resolveRunCheckpoint returns the checkpoint path for a resume run, or "" for new runs.
+func resolveRunCheckpoint(cfg runConfig) (string, error) {
+	if cfg.resumeID == "" {
+		return "", nil
 	}
+	return resolveCheckpoint(cfg.workdir, cfg.resumeID)
+}
 
+// selectAndRunMode picks TUI or plain console mode and starts the pipeline.
+func selectAndRunMode(cfg runConfig, deps commandDeps, checkpoint string) error {
 	// JSON streaming forces non-TUI (structured output to stdout).
-	// Auto-approve and autopilot both work inside the TUI — gates
-	// auto-dismiss without user input.
 	if cfg.jsonOut {
 		cfg.noTUI = true
 	}
-
 	// Fall back to plain console mode when TUI is disabled or stdin is not a
 	// terminal (e.g. CI, piped input, cron). TUI requires a real TTY.
 	if cfg.noTUI || !isatty.IsTerminal(os.Stdin.Fd()) {
@@ -251,6 +307,19 @@ func resolveCheckpoint(workdir, runID string) (string, error) {
 		return "", fmt.Errorf("run ID cannot be empty")
 	}
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	resolved, err := resolveRunIDToDir(runsDir, runID)
+	if err != nil {
+		return "", err
+	}
+	cpPath := filepath.Join(runsDir, resolved, "checkpoint.json")
+	if _, err := os.Stat(cpPath); err != nil {
+		return "", fmt.Errorf("checkpoint not found for run %s: %w", resolved, err)
+	}
+	return cpPath, nil
+}
+
+// resolveRunIDToDir finds the unique run directory name for a given run ID or prefix.
+func resolveRunIDToDir(runsDir, runID string) (string, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		return "", fmt.Errorf("cannot read runs directory: %w", err)
@@ -258,39 +327,29 @@ func resolveCheckpoint(workdir, runID string) (string, error) {
 
 	var matches []string
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if strings.HasPrefix(e.Name(), runID) {
+		if e.IsDir() && strings.HasPrefix(e.Name(), runID) {
 			matches = append(matches, e.Name())
 		}
 	}
 
+	return resolveRunMatches(runsDir, runID, matches)
+}
+
+// resolveRunMatches picks the correct directory from a list of prefix matches.
+func resolveRunMatches(runsDir, runID string, matches []string) (string, error) {
 	switch len(matches) {
 	case 0:
 		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
 	case 1:
-		// Unique match (exact or prefix)
+		return matches[0], nil
 	default:
-		// Check for exact match among the prefix matches
-		exact := false
 		for _, m := range matches {
 			if m == runID {
-				matches = []string{m}
-				exact = true
-				break
+				return m, nil
 			}
 		}
-		if !exact {
-			return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
-		}
+		return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
 	}
-
-	cpPath := filepath.Join(runsDir, matches[0], "checkpoint.json")
-	if _, err := os.Stat(cpPath); err != nil {
-		return "", fmt.Errorf("checkpoint not found for run %s: %w", matches[0], err)
-	}
-	return cpPath, nil
 }
 
 func loadEnvFiles(workdir string) error {
@@ -323,11 +382,9 @@ func currentEnvKeys() map[string]struct{} {
 }
 
 func loadEnvFileIfPresent(path string, originalEnv map[string]struct{}) error {
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("stat env file %s: %w", path, err)
+	exists, err := checkEnvFileExists(path)
+	if err != nil || !exists {
+		return err
 	}
 
 	values, err := godotenv.Read(path)
@@ -335,6 +392,23 @@ func loadEnvFileIfPresent(path string, originalEnv map[string]struct{}) error {
 		return fmt.Errorf("load env file %s: %w", path, err)
 	}
 
+	return applyEnvValues(path, values, originalEnv)
+}
+
+// checkEnvFileExists returns (true, nil) if the file exists, (false, nil) if not found,
+// or (false, err) on stat failure.
+func checkEnvFileExists(path string) (bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat env file %s: %w", path, err)
+	}
+	return true, nil
+}
+
+// applyEnvValues sets env vars from values, skipping keys in originalEnv.
+func applyEnvValues(path string, values map[string]string, originalEnv map[string]struct{}) error {
 	for key, value := range values {
 		if _, exists := originalEnv[key]; exists {
 			continue

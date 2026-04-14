@@ -83,30 +83,35 @@ func ParseMCPServers(raw string) ([]MCPServerConfig, error) {
 		if line == "" {
 			continue
 		}
-		idx := strings.Index(line, "=")
-		if idx < 0 {
-			return nil, fmt.Errorf("malformed mcp_servers entry: %q (missing '=')", line)
+		cfg, err := parseMCPServerLine(line, seen)
+		if err != nil {
+			return nil, err
 		}
-		name := strings.TrimSpace(line[:idx])
-		cmdStr := strings.TrimSpace(line[idx+1:])
-		if name == "" {
-			return nil, fmt.Errorf("malformed mcp_servers entry: %q (empty name)", line)
-		}
-		if cmdStr == "" {
-			return nil, fmt.Errorf("malformed mcp_servers entry: %q (empty command)", line)
-		}
-		if seen[name] {
-			return nil, fmt.Errorf("duplicate mcp_servers name: %q", name)
-		}
-		seen[name] = true
-		parts := strings.Fields(cmdStr)
-		servers = append(servers, MCPServerConfig{
-			Name:    name,
-			Command: parts[0],
-			Args:    parts[1:],
-		})
+		seen[cfg.Name] = true
+		servers = append(servers, cfg)
 	}
 	return servers, nil
+}
+
+// parseMCPServerLine parses a single "name=command args..." MCP server line.
+func parseMCPServerLine(line string, seen map[string]bool) (MCPServerConfig, error) {
+	idx := strings.Index(line, "=")
+	if idx < 0 {
+		return MCPServerConfig{}, fmt.Errorf("malformed mcp_servers entry: %q (missing '=')", line)
+	}
+	name := strings.TrimSpace(line[:idx])
+	cmdStr := strings.TrimSpace(line[idx+1:])
+	if name == "" {
+		return MCPServerConfig{}, fmt.Errorf("malformed mcp_servers entry: %q (empty name)", line)
+	}
+	if cmdStr == "" {
+		return MCPServerConfig{}, fmt.Errorf("malformed mcp_servers entry: %q (empty command)", line)
+	}
+	if seen[name] {
+		return MCPServerConfig{}, fmt.Errorf("duplicate mcp_servers name: %q", name)
+	}
+	parts := strings.Fields(cmdStr)
+	return MCPServerConfig{Name: name, Command: parts[0], Args: parts[1:]}, nil
 }
 
 // ParseToolList splits a comma-separated tool list, trimming whitespace.

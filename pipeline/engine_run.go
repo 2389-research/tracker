@@ -28,6 +28,34 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		e.checkpointPath = filepath.Join(e.artifactDir, runID, "checkpoint.json")
 	}
 
+	pctx := e.buildInitialContext()
+
+	cp, runID, err := e.loadCheckpointAndMerge(runID, pctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if e.artifactDir != "" {
+		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
+	}
+
+	stylesheet, err := e.maybeParseStylesheet()
+	if err != nil {
+		return nil, err
+	}
+
+	return &runState{
+		runID:        runID,
+		pctx:         pctx,
+		cp:           cp,
+		trace:        &Trace{RunID: runID, StartTime: time.Now()},
+		nodeOutcomes: make(map[string]string),
+		stylesheet:   stylesheet,
+	}, nil
+}
+
+// buildInitialContext creates a PipelineContext seeded with graph and initial context values.
+func (e *Engine) buildInitialContext() *PipelineContext {
 	pctx := NewPipelineContext()
 	for key, value := range e.graph.Attrs {
 		pctx.Set("graph."+key, value)
@@ -35,49 +63,40 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	for k, v := range e.initialContext {
 		pctx.Set(k, v)
 	}
+	return pctx
+}
 
+// loadCheckpointAndMerge loads or creates a checkpoint, merges its context into pctx,
+// and returns the checkpoint, resolved run ID, and any error.
+func (e *Engine) loadCheckpointAndMerge(runID string, pctx *PipelineContext) (*Checkpoint, string, error) {
 	cp, err := e.loadOrCreateCheckpoint(runID)
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint load: %w", err)
+		return nil, "", fmt.Errorf("checkpoint load: %w", err)
 	}
 	if cp.RunID != "" {
 		runID = cp.RunID
 	}
-
 	for k, v := range cp.Context {
 		pctx.Set(k, v)
 	}
-
 	e.compactResumeContext(cp, pctx, runID)
+	return cp, runID, nil
+}
 
-	if e.artifactDir != "" {
-		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
+// maybeParseStylesheet parses the model stylesheet from graph attrs if enabled.
+func (e *Engine) maybeParseStylesheet() (*Stylesheet, error) {
+	if !e.resolveStylesheet {
+		return nil, nil
 	}
-
-	var stylesheet *Stylesheet
-	if e.resolveStylesheet {
-		if ssRaw, ok := e.graph.Attrs["model_stylesheet"]; ok {
-			ss, err := ParseStylesheet(ssRaw)
-			if err != nil {
-				return nil, fmt.Errorf("parse stylesheet: %w", err)
-			}
-			stylesheet = ss
-		}
+	ssRaw, ok := e.graph.Attrs["model_stylesheet"]
+	if !ok {
+		return nil, nil
 	}
-
-	trace := &Trace{
-		RunID:     runID,
-		StartTime: time.Now(),
+	ss, err := ParseStylesheet(ssRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse stylesheet: %w", err)
 	}
-
-	return &runState{
-		runID:        runID,
-		pctx:         pctx,
-		cp:           cp,
-		trace:        trace,
-		nodeOutcomes: make(map[string]string),
-		stylesheet:   stylesheet,
-	}, nil
+	return ss, nil
 }
 
 // compactResumeContext applies fidelity-aware compaction when resuming from a checkpoint.
@@ -86,25 +105,40 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 		return
 	}
 
-	routingHints := make(map[string]string)
-	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeySuggestedNextNodes} {
-		if val, ok := pctx.Get(key); ok && val != "" {
-			routingHints[key] = val
-		}
-	}
+	routingHints := captureRoutingHints(pctx)
 
 	fidelity := ResolveFidelity(e.nodeOrDefault(cp.CurrentNode), e.graph.Attrs)
 	degraded := DegradeFidelity(fidelity)
 	compacted := CompactContext(pctx, cp.CompletedNodes, degraded, e.artifactDir, runID)
 
+	replaceContextValues(pctx, compacted)
+	restoreRoutingHints(pctx, routingHints)
+}
+
+// captureRoutingHints saves the current routing hint values from context.
+func captureRoutingHints(pctx *PipelineContext) map[string]string {
+	hints := make(map[string]string)
+	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeySuggestedNextNodes} {
+		if val, ok := pctx.Get(key); ok && val != "" {
+			hints[key] = val
+		}
+	}
+	return hints
+}
+
+// replaceContextValues clears the context and repopulates it with compacted values.
+func replaceContextValues(pctx *PipelineContext, compacted map[string]string) {
 	for k := range pctx.Snapshot() {
 		pctx.Set(k, "")
 	}
 	for k, v := range compacted {
 		pctx.Set(k, v)
 	}
+}
 
-	for k, v := range routingHints {
+// restoreRoutingHints re-applies routing hints that were cleared during compaction.
+func restoreRoutingHints(pctx *PipelineContext, hints map[string]string) {
+	for k, v := range hints {
 		if existing, ok := pctx.Get(k); !ok || existing == "" {
 			pctx.Set(k, v)
 		}
@@ -268,47 +302,56 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 func (e *Engine) handleRetry(ctx context.Context, s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	policy := ResolveRetryPolicy(execNode, e.graph.Attrs)
 	if s.cp.RetryCount(currentNodeID) < policy.MaxRetries {
-		s.cp.IncrementRetry(currentNodeID)
+		return e.handleRetryWithinBudget(ctx, s, currentNodeID, execNode, traceEntry, policy)
+	}
+	return e.handleRetryExhausted(s, currentNodeID, execNode, traceEntry)
+}
 
-		backoff := policy.BackoffFn(s.cp.RetryCount(currentNodeID)-1, policy.BaseDelay)
-		if backoff > 0 {
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				e.saveCheckpoint(s.cp, s.pctx, s.runID)
-				s.trace.EndTime = time.Now()
-				return "", false, &EngineResult{
-					RunID:          s.runID,
-					Status:         OutcomeFail,
-					CompletedNodes: s.cp.CompletedNodes,
-					Context:        s.pctx.Snapshot(),
-					Trace:          s.trace,
-					Usage:          s.trace.AggregateUsage(),
-				}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
-			}
+// handleRetryWithinBudget runs a retry when budget remains: waits backoff, emits event, routes to target.
+func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry, policy *RetryPolicy) (string, bool, *EngineResult, error) {
+	s.cp.IncrementRetry(currentNodeID)
+
+	backoff := policy.BackoffFn(s.cp.RetryCount(currentNodeID)-1, policy.BaseDelay)
+	if backoff > 0 {
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			e.saveCheckpoint(s.cp, s.pctx, s.runID)
+			s.trace.EndTime = time.Now()
+			return "", false, &EngineResult{
+				RunID:          s.runID,
+				Status:         OutcomeFail,
+				CompletedNodes: s.cp.CompletedNodes,
+				Context:        s.pctx.Snapshot(),
+				Trace:          s.trace,
+				Usage:          s.trace.AggregateUsage(),
+			}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
 		}
-
-		e.emit(PipelineEvent{
-			Type:      EventStageRetrying,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    currentNodeID,
-			Message:   fmt.Sprintf("retrying node %q (attempt %d/%d, policy=%s)", currentNodeID, s.cp.RetryCount(currentNodeID), policy.MaxRetries, policy.Name),
-		})
-
-		target := currentNodeID
-		if rt, ok := execNode.Attrs["retry_target"]; ok {
-			target = rt
-		}
-		traceEntry.EdgeTo = target
-		s.trace.AddEntry(*traceEntry)
-		e.clearDownstream(target, s.cp)
-		s.cp.CurrentNode = target
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
-		return target, true, nil, nil
 	}
 
-	// Retries exhausted — check fallback.
+	e.emit(PipelineEvent{
+		Type:      EventStageRetrying,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    currentNodeID,
+		Message:   fmt.Sprintf("retrying node %q (attempt %d/%d, policy=%s)", currentNodeID, s.cp.RetryCount(currentNodeID), policy.MaxRetries, policy.Name),
+	})
+
+	target := currentNodeID
+	if rt, ok := execNode.Attrs["retry_target"]; ok {
+		target = rt
+	}
+	traceEntry.EdgeTo = target
+	s.trace.AddEntry(*traceEntry)
+	e.clearDownstream(target, s.cp)
+	s.cp.CurrentNode = target
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	return target, true, nil, nil
+}
+
+// handleRetryExhausted handles the case when retry budget is depleted.
+// Routes to fallback target if available, otherwise fails the pipeline.
+func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)

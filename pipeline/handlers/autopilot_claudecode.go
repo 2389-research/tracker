@@ -81,10 +81,24 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 	userPrompt := buildUserPrompt(prompt, options, defaultOption)
 	fullPrompt := systemPrompt + "\n\n" + userPrompt
 
+	responseText, err := runClaudeSubprocess(a.claudePath, fullPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	decision, parseErr := parseDecision(responseText)
+	if parseErr != nil {
+		return fallbackDecisionFromPlainText(responseText, options, parseErr)
+	}
+	return decision, nil
+}
+
+// runClaudeSubprocess spawns the claude CLI and returns its trimmed stdout.
+func runClaudeSubprocess(claudePath, fullPrompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, a.claudePath,
+	cmd := exec.CommandContext(ctx, claudePath,
 		"--print",
 		"-p", fullPrompt,
 		"--max-turns", "1",
@@ -97,32 +111,28 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude CLI: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("claude CLI: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
 
 	responseText := strings.TrimSpace(stdout.String())
 	if responseText == "" {
-		return nil, fmt.Errorf("claude CLI returned empty response")
+		return "", fmt.Errorf("claude CLI returned empty response")
 	}
+	return responseText, nil
+}
 
-	decision, parseErr := parseDecision(responseText)
-	if parseErr != nil {
-		// If the response isn't valid JSON, try to extract a choice directly.
-		// The claude CLI sometimes returns plain text instead of JSON.
-		if len(options) > 0 {
-			for _, opt := range options {
-				if strings.Contains(strings.ToLower(responseText), strings.ToLower(opt)) {
-					return &autopilotDecision{
-						Choice:    opt,
-						Reasoning: responseText,
-					}, nil
-				}
-			}
+// fallbackDecisionFromPlainText tries to match plain text against known options
+// when JSON parsing fails, or returns the original parse error.
+func fallbackDecisionFromPlainText(responseText string, options []string, parseErr error) (*autopilotDecision, error) {
+	for _, opt := range options {
+		if strings.Contains(strings.ToLower(responseText), strings.ToLower(opt)) {
+			return &autopilotDecision{
+				Choice:    opt,
+				Reasoning: responseText,
+			}, nil
 		}
-		return nil, fmt.Errorf("claude-code autopilot: %w (response: %.200s)", parseErr, responseText)
 	}
-
-	return decision, nil
+	return nil, fmt.Errorf("claude-code autopilot: %w (response: %.200s)", parseErr, responseText)
 }
 
 // AskInterview implements InterviewInterviewer by routing all questions through
@@ -138,38 +148,14 @@ func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev
 	fullPrompt := systemPrompt + "\n\n" + prompt
 
 	for attempt := 0; attempt < 2; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-
-		cmd := exec.CommandContext(ctx, a.claudePath,
-			"--print",
-			"-p", fullPrompt,
-			"--max-turns", "1",
-			"--output-format", "text",
-		)
-		cmd.Env = buildEnv()
-
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err != nil {
-			cancel()
-			return nil, fmt.Errorf("claude CLI interview: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		result, parseErr, fatalErr := a.runInterviewAttempt(fullPrompt, questions)
+		if fatalErr != nil {
+			return nil, fatalErr
 		}
-		cancel()
-
-		responseText := strings.TrimSpace(stdout.String())
-		if responseText == "" {
-			return nil, fmt.Errorf("claude CLI returned empty response for interview")
-		}
-
-		result, parseErr := parseInterviewResponse(responseText, questions)
 		if parseErr == nil {
 			return result, nil
 		}
-
 		if attempt == 0 {
-			// Retry with explicit JSON instruction appended.
 			fullPrompt += "\n\nIMPORTANT: Your previous response was not valid JSON. You MUST respond with ONLY a JSON object, no other text."
 			continue
 		}
@@ -177,6 +163,37 @@ func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev
 	}
 	// unreachable
 	return nil, fmt.Errorf("claude CLI interview: unexpected retry loop exit")
+}
+
+// runInterviewAttempt executes one claude CLI call and returns parsed result, parse error, or fatal error.
+func (a *ClaudeCodeAutopilotInterviewer) runInterviewAttempt(fullPrompt string, questions []Question) (*InterviewResult, error, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+
+	cmd := exec.CommandContext(ctx, a.claudePath,
+		"--print",
+		"-p", fullPrompt,
+		"--max-turns", "1",
+		"--output-format", "text",
+	)
+	cmd.Env = buildEnv()
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		cancel()
+		return nil, nil, fmt.Errorf("claude CLI interview: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+	cancel()
+
+	responseText := strings.TrimSpace(stdout.String())
+	if responseText == "" {
+		return nil, nil, fmt.Errorf("claude CLI returned empty response for interview")
+	}
+
+	result, parseErr := parseInterviewResponse(responseText, questions)
+	return result, parseErr, nil
 }
 
 // Compile-time assertions: ClaudeCodeAutopilotInterviewer implements both interfaces.
