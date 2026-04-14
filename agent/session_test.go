@@ -93,6 +93,32 @@ func TestSessionTextOnlyResponse(t *testing.T) {
 	}
 }
 
+func TestSessionRunPopulatesProvider(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("Hello"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+				Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.Provider = "openai"
+	cfg.MaxTurns = 1
+
+	sess := mustNewSession(t, client, cfg)
+	result, err := sess.Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Provider != "openai" {
+		t.Errorf("expected result.Provider == \"openai\", got %q", result.Provider)
+	}
+}
+
 func TestSessionToolCallLoop(t *testing.T) {
 	toolCallResp := &llm.Response{
 		Message: llm.Message{
