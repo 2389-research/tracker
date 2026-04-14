@@ -13,13 +13,17 @@ import (
 
 // EngineResult holds the final outcome of a pipeline execution run.
 type EngineResult struct {
-	RunID          string
-	Status         string
-	CompletedNodes []string
-	Context        map[string]string
-	Trace          *Trace
-	Usage          *UsageSummary
+	RunID           string
+	Status          string
+	CompletedNodes  []string
+	Context         map[string]string
+	Trace           *Trace
+	Usage           *UsageSummary
+	BudgetLimitsHit []string // populated when a BudgetGuard halted the run
 }
+
+// OutcomeBudgetExceeded signals that a BudgetGuard halted the run.
+const OutcomeBudgetExceeded = "budget_exceeded"
 
 // Engine executes a pipeline graph by traversing nodes, dispatching handlers,
 // selecting edges, and managing retries and checkpoints.
@@ -31,6 +35,7 @@ type Engine struct {
 	resolveStylesheet bool
 	initialContext    map[string]string
 	artifactDir       string
+	budgetGuard       *BudgetGuard
 }
 
 // EngineOption configures optional Engine behavior.
@@ -71,6 +76,12 @@ func WithInitialContext(ctx map[string]string) EngineOption {
 	return func(e *Engine) {
 		e.initialContext = ctx
 	}
+}
+
+// WithBudgetGuard attaches a BudgetGuard evaluated after every terminal
+// node outcome. Nil guards are no-ops.
+func WithBudgetGuard(guard *BudgetGuard) EngineOption {
+	return func(e *Engine) { e.budgetGuard = guard }
 }
 
 // NewEngine creates a pipeline engine for the given graph and handler registry.
@@ -297,6 +308,9 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	traceEntry.EdgeTo = next.To
 	s.trace.AddEntry(*traceEntry)
 	e.emitCostUpdate(s)
+	if lr := e.checkBudgetAfterEmit(s); lr != nil {
+		return *lr
+	}
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
 	if s.cp.IsCompleted(next.To) {

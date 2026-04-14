@@ -1248,3 +1248,86 @@ func TestEngine_EmitsCostUpdatedAfterEachNode(t *testing.T) {
 		}
 	}
 }
+
+func TestEngine_HaltsOnBudgetBreach(t *testing.T) {
+	// 5-node linear graph: start -> n1 -> n2 -> n3 -> end
+	// Each handler returns 300 tokens. Guard: MaxTotalTokens=700.
+	// After node n1 completes we have 600 total (start + n1), after n2 we have 900.
+	// The check fires after emitCostUpdate in advanceToNextNode, so halt occurs
+	// after n2's trace entry is committed (total 900 > 700).
+	g := NewGraph("budget_halt_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "n1", Shape: "box", Label: "N1"})
+	g.AddNode(&Node{ID: "n2", Shape: "box", Label: "N2"})
+	g.AddNode(&Node{ID: "n3", Shape: "box", Label: "N3"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "start", To: "n1"})
+	g.AddEdge(&Edge{From: "n1", To: "n2"})
+	g.AddEdge(&Edge{From: "n2", To: "n3"})
+	g.AddEdge(&Edge{From: "n3", To: "end"})
+
+	nodeStats := &SessionStats{
+		InputTokens:  200,
+		OutputTokens: 100,
+		TotalTokens:  300,
+		CostUSD:      0.01,
+		Provider:     "test-provider",
+	}
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess, Stats: nodeStats}, nil
+		}})
+	}
+
+	var mu sync.Mutex
+	var budgetEvents []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventBudgetExceeded {
+			mu.Lock()
+			budgetEvents = append(budgetEvents, evt)
+			mu.Unlock()
+		}
+	})
+
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 700})
+	engine := NewEngine(g, reg,
+		WithPipelineEventHandler(handler),
+		WithBudgetGuard(guard),
+	)
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine.Run returned unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if result.Status != OutcomeBudgetExceeded {
+		t.Errorf("result.Status = %q, want %q", result.Status, OutcomeBudgetExceeded)
+	}
+
+	if len(result.BudgetLimitsHit) != 1 || result.BudgetLimitsHit[0] != "tokens" {
+		t.Errorf("BudgetLimitsHit = %v, want [\"tokens\"]", result.BudgetLimitsHit)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(budgetEvents) == 0 {
+		t.Error("expected at least one EventBudgetExceeded, got none")
+	}
+
+	// Pipeline must not have run to completion — n3 and end should not be completed.
+	completedSet := make(map[string]bool)
+	for _, n := range result.CompletedNodes {
+		completedSet[n] = true
+	}
+	if completedSet["n3"] || completedSet["end"] {
+		t.Errorf("pipeline should have halted before n3/end, CompletedNodes=%v", result.CompletedNodes)
+	}
+}
