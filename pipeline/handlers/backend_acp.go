@@ -229,7 +229,7 @@ func setSessionModel(ctx context.Context, conn *acp.ClientSideConnection, sessRe
 }
 
 // waitForProcess closes stdin and waits for the process to exit with a 5s grace period.
-// Returns true if the process was force-killed.
+// Returns true if the process was force-killed. Logs non-zero exit status.
 func waitForProcess(cmd *exec.Cmd, stdin io.WriteCloser) bool {
 	_ = stdin.Close()
 
@@ -237,13 +237,21 @@ func waitForProcess(cmd *exec.Cmd, stdin io.WriteCloser) bool {
 	go func() { waitCh <- cmd.Wait() }()
 
 	select {
-	case <-waitCh:
+	case waitErr := <-waitCh:
+		logWaitError(waitErr)
 		return false
 	case <-time.After(5 * time.Second):
 		log.Printf("[acp] process did not exit after 5s, killing pid %d", cmd.Process.Pid)
 		killProcess(cmd)
 		<-waitCh
 		return true
+	}
+}
+
+// logWaitError logs a non-nil wait error (e.g., non-zero exit status).
+func logWaitError(err error) {
+	if err != nil {
+		log.Printf("[acp] process exited with error: %v", err)
 	}
 }
 
@@ -405,14 +413,15 @@ var acpStrippedPrefixes = []string{
 }
 
 // buildEnvForACP returns the environment for ACP agent subprocesses.
-// Strips LLM provider API keys and base URLs so the agents use their own
-// native auth (subscription, OAuth, etc.) rather than tracker's credentials.
-// TRACKER_PASS_API_KEYS=1 overrides this and passes everything through.
+// ACP bridges handle their own credential routing internally, so the full
+// environment (including API keys) is passed through by default.
+// Set TRACKER_STRIP_ACP_KEYS=1 to strip provider keys (e.g., when bridges
+// should use subscription auth instead of API key auth).
 func buildEnvForACP() []string {
-	if os.Getenv("TRACKER_PASS_API_KEYS") == "1" {
-		return os.Environ()
+	if os.Getenv("TRACKER_STRIP_ACP_KEYS") == "1" {
+		return filterEnvForACP(os.Environ())
 	}
-	return filterEnvForACP(os.Environ())
+	return os.Environ()
 }
 
 // filterEnvForACP strips API key and base URL env vars from the given environment.

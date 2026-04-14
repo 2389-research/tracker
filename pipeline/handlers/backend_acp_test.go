@@ -694,31 +694,9 @@ func TestBuildACPMcpServers(t *testing.T) {
 	}
 }
 
-func TestBuildEnvForACP_StripsKeys(t *testing.T) {
+func TestBuildEnvForACP_PassesByDefault(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
-	t.Setenv("OPENAI_API_KEY", "sk-openai")
-	t.Setenv("SAFE_VAR", "keep")
-	t.Setenv("TRACKER_PASS_API_KEYS", "")
-
-	env := buildEnvForACP()
-	envMap := make(map[string]string)
-	for _, e := range env {
-		parts := strings.SplitN(e, "=", 2)
-		if len(parts) == 2 {
-			envMap[parts[0]] = parts[1]
-		}
-	}
-	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
-		t.Error("ANTHROPIC_API_KEY should be stripped")
-	}
-	if v, ok := envMap["SAFE_VAR"]; !ok || v != "keep" {
-		t.Error("SAFE_VAR should be preserved")
-	}
-}
-
-func TestBuildEnvForACP_PassKeysOverride(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
-	t.Setenv("TRACKER_PASS_API_KEYS", "1")
+	t.Setenv("TRACKER_STRIP_ACP_KEYS", "")
 
 	env := buildEnvForACP()
 	envMap := make(map[string]string)
@@ -729,7 +707,28 @@ func TestBuildEnvForACP_PassKeysOverride(t *testing.T) {
 		}
 	}
 	if _, ok := envMap["ANTHROPIC_API_KEY"]; !ok {
-		t.Error("TRACKER_PASS_API_KEYS=1 should preserve keys")
+		t.Error("ACP default should pass API keys through")
+	}
+}
+
+func TestBuildEnvForACP_StripsWhenRequested(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("SAFE_VAR", "keep")
+	t.Setenv("TRACKER_STRIP_ACP_KEYS", "1")
+
+	env := buildEnvForACP()
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should be stripped with TRACKER_STRIP_ACP_KEYS=1")
+	}
+	if v, ok := envMap["SAFE_VAR"]; !ok || v != "keep" {
+		t.Error("SAFE_VAR should be preserved")
 	}
 }
 
@@ -833,7 +832,7 @@ func TestBuildEnvForACP_StripsAllPrefixes(t *testing.T) {
 	t.Setenv("OPENAI_COMPAT_BASE_URL", "x")
 	t.Setenv("GEMINI_BASE_URL", "x")
 	t.Setenv("GOOGLE_BASE_URL", "x")
-	t.Setenv("TRACKER_PASS_API_KEYS", "")
+	t.Setenv("TRACKER_STRIP_ACP_KEYS", "1")
 
 	env := buildEnvForACP()
 	for _, e := range env {

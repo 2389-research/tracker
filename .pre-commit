@@ -73,6 +73,9 @@ echo ""
 echo "--- Complexity ---"
 CYCLO_MAX=8
 COGNITIVE_MAX=8
+if ! command -v gocyclo >/dev/null 2>&1 || ! command -v gocognit >/dev/null 2>&1; then
+  warn "gocyclo or gocognit not found — skipping complexity check (install: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest github.com/uudashr/gocognit/cmd/gocognit@latest)"
+else
 STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' || true)
 if [ -n "$STAGED_GO" ]; then
   CYCLO_VIOLATIONS=$(echo "$STAGED_GO" | xargs gocyclo -over $CYCLO_MAX 2>&1 | wc -l | tr -d ' ')
@@ -91,6 +94,7 @@ if [ -n "$STAGED_GO" ]; then
   pass "complexity (cyclomatic ≤ $CYCLO_MAX, cognitive ≤ $COGNITIVE_MAX)"
 else
   pass "complexity (no staged .go files)"
+fi
 fi
 
 # 8. Dippin lint (core pipelines only, for speed)

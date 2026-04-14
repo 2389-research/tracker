@@ -132,6 +132,7 @@ func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, n
 	}
 	h.mu.Lock()
 	name := h.toolNames[string(tc.ToolCallId)]
+	h.turnCount++ // each tool round-trip counts as a turn
 	h.mu.Unlock()
 
 	evt := agent.Event{Type: agent.EventToolCallEnd, Timestamp: now, ToolName: name}
@@ -195,16 +196,35 @@ func (h *acpClientHandler) ReadTextFile(_ context.Context, p acp.ReadTextFileReq
 }
 
 // validatePathInWorkDir ensures the given absolute path is under the working directory.
+// Resolves symlinks to prevent escaping the sandbox via symlink chains.
 func validatePathInWorkDir(path, workDir string) error {
 	if workDir == "" {
 		return nil // no restriction if working dir is unset
 	}
-	cleaned := filepath.Clean(path)
+	resolved, err := resolvePathForValidation(path)
+	if err != nil {
+		resolved = filepath.Clean(path) // fall back to Clean if symlink resolution fails
+	}
 	dir := filepath.Clean(workDir)
-	if !strings.HasPrefix(cleaned, dir+string(filepath.Separator)) && cleaned != dir {
+	if !strings.HasPrefix(resolved, dir+string(filepath.Separator)) && resolved != dir {
 		return fmt.Errorf("path %q is outside working directory %q", path, workDir)
 	}
 	return nil
+}
+
+// resolvePathForValidation resolves symlinks for the longest existing prefix of path.
+func resolvePathForValidation(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	// Path may not exist yet (WriteTextFile). Resolve the parent.
+	parent := filepath.Dir(path)
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolvedParent, filepath.Base(path)), nil
 }
 
 // applyLineFilter slices a file's content by optional 1-based start line and limit.
