@@ -371,6 +371,50 @@ tracker audit <run-id>
 | Every milestone needs fixing | known_failures has comments or bad format | Ensure bare test names only, no comments — v0.11.2 strips them automatically |
 | Build loop skips all milestones | Milestone headers don't match expected format | Use `## Milestone N: Title` format — v0.11.2 is flexible + fails loudly |
 
+## Cost Governance
+
+Tracker exposes per-provider token and dollar cost from every run, and can halt
+pipelines that exceed configured ceilings.
+
+**Library consumers** read cost via `Result.Cost`:
+
+```go
+result, _ := tracker.Run(ctx, source, tracker.Config{
+    Budget: pipeline.BudgetLimits{
+        MaxTotalTokens: 100_000,
+        MaxCostCents:   500,           // $5.00
+        MaxWallTime:    30 * time.Minute,
+    },
+})
+if result.Status == pipeline.OutcomeBudgetExceeded {
+    log.Printf("halt: %s, spent $%.4f", result.Cost.LimitsHit, result.Cost.TotalUSD)
+}
+for provider, pc := range result.Cost.ByProvider {
+    log.Printf("%s: %d tokens, $%.4f", provider, pc.Usage.InputTokens+pc.Usage.OutputTokens, pc.USD)
+}
+```
+
+**CLI users** pass flags on `tracker run`:
+
+```
+tracker run examples/ask_and_execute.dip \
+    --max-tokens 100000 \
+    --max-cost 500 \
+    --max-wall-time 30m
+```
+
+A halted run prints a `HALTED: budget exceeded` section naming the dimension
+that tripped. Run `tracker diagnose` to see the per-provider breakdown and
+remediation guidance.
+
+**Streaming consumers** subscribe to `EventCostUpdated` via
+`tracker.Config.EventHandler`. Each terminal-node outcome emits a
+`CostSnapshot` with aggregate tokens, dollar cost, per-provider totals,
+and wall-clock elapsed time.
+
+Reading budget limits directly from `.dip` workflow attrs is a follow-up
+tracked in #67.
+
 ## CLI Reference
 
 ```

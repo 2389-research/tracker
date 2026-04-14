@@ -176,6 +176,20 @@ The CLI summary in `cmd/tracker/summary.go` uses `llm.TokenTracker` for
 per-provider breakdowns (middleware-level) and `EngineResult.Usage` for
 trace-level aggregation. These are independent data sources.
 
+### Cost governance (v0.17.0+)
+
+`UsageSummary.ProviderTotals` carries the per-provider rollup (tokens + cost),
+and `tracker.Result.Cost` on the library API exposes dollar cost via
+`llm.TokenTracker.CostByProvider`. The pipeline engine enforces optional
+ceilings via `pipeline.BudgetGuard`, which is evaluated between nodes
+after every `emitCostUpdate`. A breach halts the run with
+`pipeline.OutcomeBudgetExceeded`, populates `EngineResult.BudgetLimitsHit`,
+and fires `EventBudgetExceeded` carrying the final `CostSnapshot`.
+
+Configure budgets via `tracker.Config.Budget` or the `--max-tokens`,
+`--max-cost` (cents), `--max-wall-time` CLI flags. Reading them from
+`.dip` workflow attrs is blocked on dippin-lang IR support (issue #67).
+
 ### OpenAI returns errors inside 200 SSE streams
 The Responses API returns HTTP 200 and sends `error` / `response.failed`
 as SSE event types. The adapter must handle these — they are NOT reflected
