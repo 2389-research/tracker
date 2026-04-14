@@ -247,6 +247,43 @@ func TestJSONLEventHandlerAgentErrorCombining(t *testing.T) {
 	}
 }
 
+func TestBuildLogEntry_CostSnapshot(t *testing.T) {
+	evt := PipelineEvent{
+		Type:      EventCostUpdated,
+		Timestamp: time.Unix(100, 0),
+		RunID:     "run-1",
+		Cost: &CostSnapshot{
+			TotalTokens:  1500,
+			TotalCostUSD: 0.0375,
+			ProviderTotals: map[string]ProviderUsage{
+				"anthropic": {InputTokens: 1000, OutputTokens: 500, CostUSD: 0.0375, SessionCount: 2},
+			},
+			WallElapsed: 500 * time.Millisecond,
+		},
+	}
+	entry := buildLogEntry(evt)
+	if entry.TotalTokens != 1500 {
+		t.Errorf("TotalTokens = %d, want 1500", entry.TotalTokens)
+	}
+	if entry.TotalCostUSD < 0.03749 || entry.TotalCostUSD > 0.03751 {
+		t.Errorf("TotalCostUSD = %f, want 0.0375", entry.TotalCostUSD)
+	}
+	if entry.WallElapsedMs != 500 {
+		t.Errorf("WallElapsedMs = %d, want 500", entry.WallElapsedMs)
+	}
+	if entry.ProviderTotals == nil || entry.ProviderTotals["anthropic"].InputTokens != 1000 {
+		t.Errorf("ProviderTotals[anthropic] = %+v", entry.ProviderTotals["anthropic"])
+	}
+}
+
+func TestBuildLogEntry_NilCost(t *testing.T) {
+	evt := PipelineEvent{Type: EventPipelineStarted, Timestamp: time.Unix(100, 0), RunID: "run-1"}
+	entry := buildLogEntry(evt)
+	if entry.TotalTokens != 0 || entry.TotalCostUSD != 0 {
+		t.Errorf("nil cost should yield zero fields, got %+v", entry)
+	}
+}
+
 type testErr struct{ msg string }
 
 func (e *testErr) Error() string { return e.msg }

@@ -84,6 +84,13 @@ func pickLatestRunID(runsDir string, entries []os.DirEntry) string {
 	return latestID
 }
 
+// budgetHalt holds information about a budget halt detected in the activity log.
+type budgetHalt struct {
+	TotalTokens   int
+	TotalCostUSD  float64
+	WallElapsedMs int64
+}
+
 // runDiagnose performs deep failure analysis on a pipeline run.
 func runDiagnose(workdir, runID string) error {
 	runDir, err := resolveRunDir(workdir, runID)
@@ -101,23 +108,41 @@ func runDiagnose(workdir, runID string) error {
 	// Collect node failures from status.json files.
 	failures := collectNodeFailures(runDir)
 
-	// Parse activity log for runtime errors and tool output.
-	enrichFromActivity(runDir, failures)
+	// Parse activity log for runtime errors, tool output, and budget halts.
+	halt := enrichFromActivity(runDir, failures)
 
-	// Print diagnosis.
+	printDiagnoseHeader(cp, halt, failures)
+	return nil
+}
+
+// printDiagnoseHeader renders the diagnose banner, budget halt section (if any),
+// and node failure details.
+func printDiagnoseHeader(cp *pipeline.Checkpoint, halt *budgetHalt, failures map[string]*nodeFailure) {
 	fmt.Println()
 	fmt.Println(bannerStyle.Render("tracker diagnose"))
 	fmt.Println()
 	fmt.Printf("  Run ID:  %s\n", cp.RunID)
 	fmt.Printf("  Nodes:   %d completed\n", len(cp.CompletedNodes))
 
-	if len(failures) == 0 {
+	// Surface budget halt prominently before other sections.
+	if halt != nil {
+		printBudgetHalt(halt)
+	}
+
+	if len(failures) == 0 && halt == nil {
 		fmt.Println()
 		fmt.Println(lipgloss.NewStyle().Foreground(colorNeon).Render("  No failures found — this run completed cleanly."))
 		fmt.Println()
-		return nil
+		return
 	}
 
+	if len(failures) > 0 {
+		printNodeFailures(failures, cp)
+	}
+}
+
+// printNodeFailures prints the failure count, per-node diagnosis, and suggestions.
+func printNodeFailures(failures map[string]*nodeFailure, cp *pipeline.Checkpoint) {
 	fmt.Printf("  Failures: %d\n", len(failures))
 	fmt.Println()
 
@@ -129,14 +154,30 @@ func runDiagnose(workdir, runID string) error {
 	sort.Strings(nodeIDs)
 
 	for _, nodeID := range nodeIDs {
-		f := failures[nodeID]
-		printNodeDiagnosis(f)
+		printNodeDiagnosis(failures[nodeID])
 	}
 
 	// Print suggestions.
 	printDiagnoseSuggestions(failures, cp)
+}
 
-	return nil
+// printBudgetHalt prints a prominent budget halt section.
+func printBudgetHalt(halt *budgetHalt) {
+	w := os.Stdout
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "━━━ Budget halt detected ━━━")
+	if halt.TotalTokens > 0 {
+		fmt.Fprintf(w, "  tokens used:  %d\n", halt.TotalTokens)
+	}
+	if halt.TotalCostUSD > 0 {
+		fmt.Fprintf(w, "  cost:         $%.4f\n", halt.TotalCostUSD)
+	}
+	if halt.WallElapsedMs > 0 {
+		fmt.Fprintf(w, "  wall time:    %dms\n", halt.WallElapsedMs)
+	}
+	fmt.Fprintln(w, "  suggestion:   raise the relevant --max-tokens, --max-cost, or --max-wall-time flag,")
+	fmt.Fprintln(w, "                or remove the Config.Budget value in your pipeline configuration")
+	fmt.Fprintln(w, "")
 }
 
 // collectNodeFailures reads status.json files from each node directory.
@@ -190,31 +231,38 @@ func loadNodeFailure(runDir, nodeID string) *nodeFailure {
 
 // diagnoseEntry is a parsed activity.jsonl line with fields needed for diagnosis.
 type diagnoseEntry struct {
-	Timestamp string `json:"ts"`
-	Type      string `json:"type"`
-	NodeID    string `json:"node_id"`
-	Error     string `json:"error"`
-	ToolErr   string `json:"tool_error"`
-	Handler   string `json:"handler"`
+	Timestamp     string  `json:"ts"`
+	Type          string  `json:"type"`
+	NodeID        string  `json:"node_id"`
+	Error         string  `json:"error"`
+	ToolErr       string  `json:"tool_error"`
+	Handler       string  `json:"handler"`
+	TotalTokens   int     `json:"total_tokens"`
+	TotalCostUSD  float64 `json:"total_cost_usd"`
+	WallElapsedMs int64   `json:"wall_elapsed_ms"`
 }
 
 // enrichFromActivity adds error messages, timing, and retry analysis from activity.jsonl.
-func enrichFromActivity(runDir string, failures map[string]*nodeFailure) {
+// Returns a non-nil *budgetHalt if a budget_exceeded event was found.
+func enrichFromActivity(runDir string, failures map[string]*nodeFailure) *budgetHalt {
 	path := filepath.Join(runDir, "activity.jsonl")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		return nil
 	}
 
 	stageStarts := make(map[string]time.Time)
 	failSignatures := make(map[string][]string)
 
-	parseActivityLines(string(data), failures, stageStarts, failSignatures)
+	halt := parseActivityLines(string(data), failures, stageStarts, failSignatures)
 	applyRetryAnalysis(failures, failSignatures)
+	return halt
 }
 
 // parseActivityLines processes each JSONL line from the activity log.
-func parseActivityLines(data string, failures map[string]*nodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
+// Returns a non-nil *budgetHalt if a budget_exceeded event was found.
+func parseActivityLines(data string, failures map[string]*nodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) *budgetHalt {
+	var halt *budgetHalt
 	for _, line := range strings.Split(data, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -224,8 +272,16 @@ func parseActivityLines(data string, failures map[string]*nodeFailure, stageStar
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
+		if entry.Type == "budget_exceeded" {
+			halt = &budgetHalt{
+				TotalTokens:   entry.TotalTokens,
+				TotalCostUSD:  entry.TotalCostUSD,
+				WallElapsedMs: entry.WallElapsedMs,
+			}
+		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
+	return halt
 }
 
 // applyRetryAnalysis updates failure records with retry count and pattern data.
