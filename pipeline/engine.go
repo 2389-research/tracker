@@ -86,6 +86,10 @@ func NewEngine(graph *Graph, registry *HandlerRegistry, opts ...EngineOption) *E
 	return e
 }
 
+// Graph returns the graph this engine executes. Used by library callers
+// that need to inspect graph attributes after construction.
+func (e *Engine) Graph() *Graph { return e.graph }
+
 // loopAction tells the main loop what to do after processing a node.
 type loopAction int
 

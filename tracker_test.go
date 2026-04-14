@@ -372,6 +372,54 @@ func TestValidateSource_ReturnsWarnings(t *testing.T) {
 	}
 }
 
+func TestRun_PopulatesResultCost(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	// Build the engine directly so we can inject known usage into the
+	// tokenTracker before running. The test is in package tracker (not
+	// tracker_test) so unexported fields are accessible.
+	engine, err := NewEngine(simpleDOT, Config{
+		Format:    "dot",
+		LLMClient: client,
+		Model:     "claude-sonnet-4-6", // known model so EstimateCost returns > 0
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	defer engine.Close()
+
+	// Inject known usage directly — stubCompleter bypasses middleware so we
+	// add it manually, mirroring the claude-code backend pattern.
+	engine.tokenTracker.AddUsage("anthropic", llm.Usage{InputTokens: 1000, OutputTokens: 500})
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Cost == nil {
+		t.Fatal("expected result.Cost to be non-nil")
+	}
+	if result.Cost.TotalUSD <= 0 {
+		t.Errorf("expected TotalUSD > 0, got %v", result.Cost.TotalUSD)
+	}
+	if len(result.Cost.ByProvider) == 0 {
+		t.Error("expected at least one entry in ByProvider")
+	}
+	entry, ok := result.Cost.ByProvider["anthropic"]
+	if !ok {
+		t.Fatalf("expected anthropic entry in ByProvider, got keys: %v", result.Cost.ByProvider)
+	}
+	if entry.Usage.InputTokens != 1000 {
+		t.Errorf("expected InputTokens=1000, got %d", entry.Usage.InputTokens)
+	}
+}
+
 func TestRun_WithRetryPolicy(t *testing.T) {
 	client := &stubCompleter{
 		response: &llm.Response{

@@ -50,6 +50,16 @@ type Config struct {
 	AutoApprove   bool                          // auto-approve all human gates with default/first option
 }
 
+// CostReport summarizes spend for a pipeline run.
+// TotalUSD is the sum of ByProvider[*].USD.
+// LimitsHit names the budget dimensions that halted the run (empty when the
+// run completed normally). Populated by BudgetGuard in a later task.
+type CostReport struct {
+	TotalUSD   float64
+	ByProvider map[string]llm.ProviderCost
+	LimitsHit  []string
+}
+
 // Result contains the outcome of a pipeline execution.
 type Result struct {
 	RunID            string
@@ -60,6 +70,7 @@ type Result struct {
 	Trace            *pipeline.Trace      // full execution trace (nodes, timing, stats)
 	TokensByProvider map[string]llm.Usage // per-provider token totals
 	ToolCallsByName  map[string]int       // tool call counts by name
+	Cost             *CostReport          // per-provider cost rollup; nil when no usage recorded
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
@@ -414,11 +425,38 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	result := resultFromEngine(engineResult)
 	if e.tokenTracker != nil {
 		result.TokensByProvider = e.tokenTracker.AllProviderUsage()
+		resolver := e.defaultModelResolver()
+		byProvider := e.tokenTracker.CostByProvider(resolver)
+		if len(byProvider) > 0 {
+			total := 0.0
+			for _, pc := range byProvider {
+				total += pc.USD
+			}
+			result.Cost = &CostReport{
+				TotalUSD:   total,
+				ByProvider: byProvider,
+			}
+		}
 	}
 	if engineResult != nil && engineResult.Trace != nil {
 		result.ToolCallsByName = engineResult.Trace.AggregateToolCalls()
 	}
 	return result, nil
+}
+
+// defaultModelResolver returns an llm.ModelResolver that maps any provider to
+// the graph's default model. Per-provider model overrides are not yet supported
+// (the same model attr is used for cost estimation regardless of provider).
+// When the graph has no llm_model attr set, the resolver returns "", which
+// yields USD=0 via llm.EstimateCost.
+func (e *Engine) defaultModelResolver() llm.ModelResolver {
+	model := ""
+	if e.inner != nil {
+		if g := e.inner.Graph(); g != nil {
+			model = g.Attrs["llm_model"]
+		}
+	}
+	return func(provider string) string { return model }
 }
 
 // Close releases resources. Must be called if the engine was created
