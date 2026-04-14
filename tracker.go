@@ -97,7 +97,7 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
-	return buildEngine(graph, cfg, workDir, client, completer), nil
+	return buildEngine(graph, cfg, workDir, client, completer)
 }
 
 // resolveWorkDir returns the working directory, falling back to cwd if empty.
@@ -113,7 +113,7 @@ func resolveWorkDir(workDir string) (string, error) {
 }
 
 // buildEngine assembles the Engine after all dependencies are resolved.
-func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.Client, completer agent.Completer) *Engine {
+func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.Client, completer agent.Completer) (*Engine, error) {
 	// Clean up the auto-created client if anything below fails.
 	built := false
 	defer func() {
@@ -125,7 +125,15 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	injectGraphDefaults(graph, cfg)
 
 	tokenTracker := llm.NewTokenTracker()
-	registry := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
+	// Attach token tracker as middleware to the LLM client so it captures
+	// per-provider usage during native backend runs.
+	if client != nil {
+		client.AddMiddleware(tokenTracker)
+	}
+	registry, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
+	if err != nil {
+		return nil, err
+	}
 	engineOpts := buildEngineOpts(cfg)
 	inner := pipeline.NewEngine(graph, registry, engineOpts...)
 
@@ -134,7 +142,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		inner:        inner,
 		client:       client,
 		tokenTracker: tokenTracker,
-	}
+	}, nil
 }
 
 // resolveCompleter returns the LLM client and completer, building a client from env if needed.
@@ -171,7 +179,7 @@ func injectGraphAttrIfAbsent(graph *pipeline.Graph, key, value string) {
 }
 
 // buildRegistry creates a handler registry with all dependencies wired.
-func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) *pipeline.HandlerRegistry {
+func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) (*pipeline.HandlerRegistry, error) {
 	env := exec.NewLocalEnvironment(workDir)
 	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(completer, workDir),
@@ -187,32 +195,33 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 	if cfg.Backend != "" {
 		registryOpts = append(registryOpts, handlers.WithDefaultBackend(cfg.Backend))
 	}
-	interviewer := resolveInterviewer(cfg, client)
+	interviewer, err := resolveInterviewer(cfg, client)
+	if err != nil {
+		return nil, err
+	}
 	if interviewer != nil {
 		registryOpts = append(registryOpts, handlers.WithInterviewer(interviewer, graph))
 	}
-	return handlers.NewDefaultRegistry(graph, registryOpts...)
+	return handlers.NewDefaultRegistry(graph, registryOpts...), nil
 }
 
 // resolveInterviewer selects an automated interviewer based on Config.
 // Returns nil if no automation is configured (interactive/default mode).
-func resolveInterviewer(cfg Config, client *llm.Client) handlers.FreeformInterviewer {
+func resolveInterviewer(cfg Config, client *llm.Client) (handlers.FreeformInterviewer, error) {
 	if cfg.AutoApprove {
-		return &handlers.AutoApproveFreeformInterviewer{}
+		return &handlers.AutoApproveFreeformInterviewer{}, nil
 	}
 	if cfg.Autopilot != "" {
 		persona, err := handlers.ParsePersona(cfg.Autopilot)
 		if err != nil {
-			log.Printf("WARNING: %v; falling back to auto-approve", err)
-			return &handlers.AutoApproveFreeformInterviewer{}
+			return nil, fmt.Errorf("invalid autopilot persona %q: %w", cfg.Autopilot, err)
 		}
 		if client == nil {
-			log.Printf("WARNING: no LLM client for autopilot; falling back to auto-approve")
-			return &handlers.AutoApproveFreeformInterviewer{}
+			return nil, fmt.Errorf("autopilot %q requires an LLM client (set Config.LLMClient or configure API keys)", cfg.Autopilot)
 		}
-		return handlers.NewAutopilotInterviewer(client, persona)
+		return handlers.NewAutopilotInterviewer(client, persona), nil
 	}
-	return nil
+	return nil, nil
 }
 
 // buildEngineOpts constructs engine options from Config.
@@ -431,6 +440,7 @@ func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, e
 
 	result := &ValidationResult{Graph: graph}
 
+	// Structural + semantic validation (includes warnings).
 	ve := pipeline.ValidateAll(graph)
 	if ve != nil {
 		result.Errors = append(result.Errors, ve.Errors...)
@@ -438,7 +448,7 @@ func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, e
 	}
 
 	if len(result.Errors) > 0 {
-		return result, fmt.Errorf("%s", result.Errors[0])
+		return result, fmt.Errorf("validation failed: %s", result.Errors[0])
 	}
 	return result, nil
 }
