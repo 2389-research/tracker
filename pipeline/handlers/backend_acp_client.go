@@ -178,9 +178,13 @@ func (h *acpClientHandler) RequestPermission(_ context.Context, p acp.RequestPer
 }
 
 // ReadTextFile reads a file from the local filesystem.
+// Paths must be absolute and within the working directory.
 func (h *acpClientHandler) ReadTextFile(_ context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	if !filepath.IsAbs(p.Path) {
 		return acp.ReadTextFileResponse{}, &acp.RequestError{Code: -32602, Message: fmt.Sprintf("path must be absolute: %q", p.Path)}
+	}
+	if err := validatePathInWorkDir(p.Path, h.workingDir); err != nil {
+		return acp.ReadTextFileResponse{}, &acp.RequestError{Code: -32602, Message: err.Error()}
 	}
 	data, err := os.ReadFile(p.Path)
 	if err != nil {
@@ -190,30 +194,66 @@ func (h *acpClientHandler) ReadTextFile(_ context.Context, p acp.ReadTextFileReq
 	return acp.ReadTextFileResponse{Content: content}, nil
 }
 
+// validatePathInWorkDir ensures the given absolute path is under the working directory.
+func validatePathInWorkDir(path, workDir string) error {
+	if workDir == "" {
+		return nil // no restriction if working dir is unset
+	}
+	cleaned := filepath.Clean(path)
+	dir := filepath.Clean(workDir)
+	if !strings.HasPrefix(cleaned, dir+string(filepath.Separator)) && cleaned != dir {
+		return fmt.Errorf("path %q is outside working directory %q", path, workDir)
+	}
+	return nil
+}
+
 // applyLineFilter slices a file's content by optional 1-based start line and limit.
 func applyLineFilter(content string, line, limit *int) string {
 	if line == nil && limit == nil {
 		return content
 	}
 	lines := strings.Split(content, "\n")
-	start := 0
-	if line != nil && *line > 1 {
-		start = *line - 1
-	}
-	if start > len(lines) {
-		start = len(lines)
-	}
-	end := len(lines)
-	if limit != nil && start+*limit < end {
-		end = start + *limit
-	}
+	start, end := resolveLineRange(len(lines), line, limit)
 	return strings.Join(lines[start:end], "\n")
 }
 
+// resolveLineRange computes safe start/end indexes for line slicing.
+func resolveLineRange(total int, line, limit *int) (int, int) {
+	start := clampInt(derefLineStart(line), 0, total)
+	end := total
+	if limit != nil && *limit > 0 {
+		end = clampInt(start+*limit, start, total)
+	}
+	return start, end
+}
+
+// derefLineStart converts a 1-based line pointer to a 0-based index.
+func derefLineStart(line *int) int {
+	if line == nil || *line <= 1 {
+		return 0
+	}
+	return *line - 1
+}
+
+// clampInt restricts v to the range [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 // WriteTextFile writes content to a file on the local filesystem.
+// Paths must be absolute and within the working directory.
 func (h *acpClientHandler) WriteTextFile(_ context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	if !filepath.IsAbs(p.Path) {
 		return acp.WriteTextFileResponse{}, &acp.RequestError{Code: -32602, Message: fmt.Sprintf("path must be absolute: %q", p.Path)}
+	}
+	if err := validatePathInWorkDir(p.Path, h.workingDir); err != nil {
+		return acp.WriteTextFileResponse{}, &acp.RequestError{Code: -32602, Message: err.Error()}
 	}
 	// Ensure parent directory exists.
 	dir := filepath.Dir(p.Path)

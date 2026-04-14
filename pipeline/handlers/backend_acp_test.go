@@ -886,3 +886,67 @@ func TestResolveAgentName_ProviderMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePathInWorkDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		workDir string
+		wantErr bool
+	}{
+		{"inside workdir", "/home/user/project/file.go", "/home/user/project", false},
+		{"workdir itself", "/home/user/project", "/home/user/project", false},
+		{"outside workdir", "/etc/passwd", "/home/user/project", true},
+		{"traversal attempt", "/home/user/project/../../../etc/passwd", "/home/user/project", true},
+		{"empty workdir allows all", "/etc/passwd", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePathInWorkDir(tt.path, tt.workDir)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validatePathInWorkDir(%q, %q) err=%v, wantErr=%v", tt.path, tt.workDir, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApplyLineFilter_NegativeValues(t *testing.T) {
+	content := "line1\nline2\nline3\nline4\nline5"
+
+	// Negative line should not panic
+	negLine := -5
+	result := applyLineFilter(content, &negLine, nil)
+	if result != content {
+		t.Errorf("negative line: got %q, want full content", result)
+	}
+
+	// Negative limit should not panic, treated as no limit
+	negLimit := -1
+	result = applyLineFilter(content, nil, &negLimit)
+	if result != content {
+		t.Errorf("negative limit: got %q, want full content", result)
+	}
+
+	// Zero limit should not panic
+	zeroLimit := 0
+	result = applyLineFilter(content, nil, &zeroLimit)
+	if result != content {
+		t.Errorf("zero limit: got %q, want full content", result)
+	}
+}
+
+func TestReadTextFile_RejectsPathOutsideWorkDir(t *testing.T) {
+	h := &acpClientHandler{
+		workingDir: t.TempDir(),
+		toolNames:  make(map[string]string),
+	}
+	_, err := h.ReadTextFile(context.Background(), acp.ReadTextFileRequest{
+		Path: "/etc/passwd",
+	})
+	if err == nil {
+		t.Fatal("expected error for path outside workdir")
+	}
+	if !strings.Contains(err.Error(), "outside working directory") {
+		t.Errorf("error = %q, want 'outside working directory'", err)
+	}
+}
