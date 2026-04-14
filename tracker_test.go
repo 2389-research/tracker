@@ -305,6 +305,73 @@ func TestNewEngine_InvalidProvider(t *testing.T) {
 	}
 }
 
+func TestValidateSource_ValidDip(t *testing.T) {
+	result, err := ValidateSource(simpleDip)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Errors) > 0 {
+		t.Errorf("unexpected errors: %v", result.Errors)
+	}
+	if result.Graph == nil {
+		t.Error("expected non-nil graph")
+	}
+}
+
+func TestValidateSource_InvalidSyntax(t *testing.T) {
+	result, err := ValidateSource("not valid at all {{{")
+	if err == nil && len(result.Errors) == 0 {
+		t.Fatal("expected errors for invalid syntax")
+	}
+}
+
+func TestValidateSource_WithFormatOption(t *testing.T) {
+	result, err := ValidateSource(simpleDip, WithValidateFormat("dip"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Graph == nil {
+		t.Error("expected non-nil graph")
+	}
+}
+
+func TestValidateSource_StructuralError(t *testing.T) {
+	// DOT graph missing an exit node — should fail validation.
+	badGraph := `digraph test {
+		start [shape=Mdiamond];
+		orphan [shape=box];
+		start -> orphan;
+	}`
+	result, err := ValidateSource(badGraph, WithValidateFormat("dot"))
+	if err == nil {
+		t.Fatal("expected validation error for graph without exit node")
+	}
+	if len(result.Errors) == 0 {
+		t.Error("expected at least one error in ValidationResult")
+	}
+}
+
+func TestValidateSource_ReturnsWarnings(t *testing.T) {
+	// A graph with a diamond node missing a fail edge produces a warning.
+	graphWithWarning := `digraph test {
+		start [shape=Mdiamond];
+		gate  [shape=diamond];
+		done  [shape=Msquare];
+		start -> gate;
+		gate -> done [label="outcome=success"];
+	}`
+	result, err := ValidateSource(graphWithWarning, WithValidateFormat("dot"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Errors) > 0 {
+		t.Errorf("unexpected errors: %v", result.Errors)
+	}
+}
+
 func TestRun_WithRetryPolicy(t *testing.T) {
 	client := &stubCompleter{
 		response: &llm.Response{

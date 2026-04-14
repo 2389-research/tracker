@@ -120,3 +120,53 @@ func TestTokenTrackerFallsBackToRequestProvider(t *testing.T) {
 		t.Errorf("expected 20 from fallback, got %d", usage.InputTokens)
 	}
 }
+
+func TestTokenTrackerAllProviderUsage(t *testing.T) {
+	tracker := NewTokenTracker()
+
+	for _, tc := range []struct {
+		provider string
+		input    int
+		output   int
+	}{
+		{"anthropic", 100, 50},
+		{"openai", 200, 80},
+		{"gemini", 150, 60},
+	} {
+		p := tc.provider
+		in := tc.input
+		out := tc.output
+		handler := tracker.WrapComplete(func(ctx context.Context, req *Request) (*Response, error) {
+			return &Response{Provider: p, Usage: Usage{InputTokens: in, OutputTokens: out}}, nil
+		})
+		_, _ = handler(context.Background(), &Request{Provider: p})
+	}
+
+	all := tracker.AllProviderUsage()
+	if len(all) != 3 {
+		t.Fatalf("expected 3 providers, got %d", len(all))
+	}
+	if all["anthropic"].InputTokens != 100 {
+		t.Errorf("anthropic InputTokens = %d, want 100", all["anthropic"].InputTokens)
+	}
+	if all["openai"].OutputTokens != 80 {
+		t.Errorf("openai OutputTokens = %d, want 80", all["openai"].OutputTokens)
+	}
+	if all["gemini"].InputTokens != 150 {
+		t.Errorf("gemini InputTokens = %d, want 150", all["gemini"].InputTokens)
+	}
+
+	// Verify returned map is a copy — mutations don't affect the tracker.
+	all["anthropic"] = Usage{InputTokens: 9999}
+	if tracker.ProviderUsage("anthropic").InputTokens != 100 {
+		t.Error("AllProviderUsage should return a copy, not a reference")
+	}
+}
+
+func TestTokenTrackerAllProviderUsageEmpty(t *testing.T) {
+	tracker := NewTokenTracker()
+	all := tracker.AllProviderUsage()
+	if len(all) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(all))
+	}
+}

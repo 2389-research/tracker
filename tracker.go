@@ -45,23 +45,30 @@ type Config struct {
 	AgentEvents   agent.EventHandler            // optional: live agent session events
 	LLMClient     agent.Completer               // optional: override auto-created client
 	Context       map[string]string             // optional: initial pipeline context
+	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
+	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
+	AutoApprove   bool                          // auto-approve all human gates with default/first option
 }
 
 // Result contains the outcome of a pipeline execution.
 type Result struct {
-	RunID          string
-	Status         string
-	CompletedNodes []string
-	Context        map[string]string
-	EngineResult   *pipeline.EngineResult
+	RunID            string
+	Status           string
+	CompletedNodes   []string
+	Context          map[string]string
+	EngineResult     *pipeline.EngineResult
+	Trace            *pipeline.Trace      // full execution trace (nodes, timing, stats)
+	TokensByProvider map[string]llm.Usage // per-provider token totals
+	ToolCallsByName  map[string]int       // tool call counts by name
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
 type Engine struct {
-	inner     *pipeline.Engine
-	client    *llm.Client // nil if caller provided their own Completer
-	closeOnce sync.Once
-	closeErr  error
+	inner        *pipeline.Engine
+	client       *llm.Client // nil if caller provided their own Completer
+	tokenTracker *llm.TokenTracker
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 // NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
@@ -90,7 +97,7 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
-	return buildEngine(graph, cfg, workDir, client, completer), nil
+	return buildEngine(graph, cfg, workDir, client, completer)
 }
 
 // resolveWorkDir returns the working directory, falling back to cwd if empty.
@@ -106,7 +113,7 @@ func resolveWorkDir(workDir string) (string, error) {
 }
 
 // buildEngine assembles the Engine after all dependencies are resolved.
-func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.Client, completer agent.Completer) *Engine {
+func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.Client, completer agent.Completer) (*Engine, error) {
 	// Clean up the auto-created client if anything below fails.
 	built := false
 	defer func() {
@@ -117,15 +124,28 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 
 	injectGraphDefaults(graph, cfg)
 
-	registry := buildRegistry(graph, completer, workDir, cfg)
+	tokenTracker := llm.NewTokenTracker()
+	// Attach token tracker as middleware to the LLM client so it captures
+	// per-provider usage during native backend runs. Works for both
+	// auto-created clients and user-provided *llm.Client via Config.LLMClient.
+	if client != nil {
+		client.AddMiddleware(tokenTracker)
+	} else if lc, ok := completer.(*llm.Client); ok {
+		lc.AddMiddleware(tokenTracker)
+	}
+	registry, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
+	if err != nil {
+		return nil, err
+	}
 	engineOpts := buildEngineOpts(cfg)
 	inner := pipeline.NewEngine(graph, registry, engineOpts...)
 
 	built = true
 	return &Engine{
-		inner:  inner,
-		client: client,
-	}
+		inner:        inner,
+		client:       client,
+		tokenTracker: tokenTracker,
+	}, nil
 }
 
 // resolveCompleter returns the LLM client and completer, building a client from env if needed.
@@ -162,11 +182,12 @@ func injectGraphAttrIfAbsent(graph *pipeline.Graph, key, value string) {
 }
 
 // buildRegistry creates a handler registry with all dependencies wired.
-func buildRegistry(graph *pipeline.Graph, completer agent.Completer, workDir string, cfg Config) *pipeline.HandlerRegistry {
+func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) (*pipeline.HandlerRegistry, error) {
 	env := exec.NewLocalEnvironment(workDir)
 	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(completer, workDir),
 		handlers.WithExecEnvironment(env),
+		handlers.WithTokenTracker(tokenTracker),
 	}
 	if cfg.AgentEvents != nil {
 		registryOpts = append(registryOpts, handlers.WithAgentEventHandler(cfg.AgentEvents))
@@ -174,7 +195,61 @@ func buildRegistry(graph *pipeline.Graph, completer agent.Completer, workDir str
 	if cfg.EventHandler != nil {
 		registryOpts = append(registryOpts, handlers.WithPipelineEventHandler(cfg.EventHandler))
 	}
-	return handlers.NewDefaultRegistry(graph, registryOpts...)
+	if cfg.Backend != "" {
+		registryOpts = append(registryOpts, handlers.WithDefaultBackend(cfg.Backend))
+	}
+	interviewer, err := resolveInterviewer(cfg, client, completer)
+	if err != nil {
+		return nil, err
+	}
+	if interviewer != nil {
+		registryOpts = append(registryOpts, handlers.WithInterviewer(interviewer, graph))
+	}
+	return handlers.NewDefaultRegistry(graph, registryOpts...), nil
+}
+
+// resolveInterviewer selects an automated interviewer based on Config.
+// Returns nil if no automation is configured (interactive/default mode).
+// When Backend is "claude-code", prefers ClaudeCodeAutopilotInterviewer.
+func resolveInterviewer(cfg Config, client *llm.Client, completer agent.Completer) (handlers.FreeformInterviewer, error) {
+	if cfg.AutoApprove {
+		return &handlers.AutoApproveFreeformInterviewer{}, nil
+	}
+	if cfg.Autopilot == "" {
+		return nil, nil
+	}
+	return resolveAutopilot(cfg, client, completer)
+}
+
+// resolveAutopilot builds an autopilot interviewer for the given persona and backend.
+func resolveAutopilot(cfg Config, client *llm.Client, completer agent.Completer) (handlers.FreeformInterviewer, error) {
+	persona, err := handlers.ParsePersona(cfg.Autopilot)
+	if err != nil {
+		return nil, fmt.Errorf("invalid autopilot persona %q: %w", cfg.Autopilot, err)
+	}
+	if cfg.Backend == "claude-code" {
+		if iv, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(persona); ccErr == nil {
+			return iv, nil
+		}
+		log.Printf("[tracker] claude-code autopilot init failed, trying native")
+	}
+	client = resolveAutopilotClient(client, completer)
+	if client == nil {
+		return nil, fmt.Errorf("autopilot %q requires an LLM client (set Config.LLMClient or configure API keys)", cfg.Autopilot)
+	}
+	return handlers.NewAutopilotInterviewer(client, persona), nil
+}
+
+// resolveAutopilotClient returns the LLM client for native autopilot,
+// trying a type assertion on completer if client is nil.
+func resolveAutopilotClient(client *llm.Client, completer agent.Completer) *llm.Client {
+	if client != nil {
+		return client
+	}
+	if lc, ok := completer.(*llm.Client); ok {
+		return lc
+	}
+	return nil
 }
 
 // buildEngineOpts constructs engine options from Config.
@@ -336,7 +411,14 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resultFromEngine(engineResult), nil
+	result := resultFromEngine(engineResult)
+	if e.tokenTracker != nil {
+		result.TokensByProvider = e.tokenTracker.AllProviderUsage()
+	}
+	if engineResult != nil && engineResult.Trace != nil {
+		result.ToolCallsByName = engineResult.Trace.AggregateToolCalls()
+	}
+	return result, nil
 }
 
 // Close releases resources. Must be called if the engine was created
@@ -348,6 +430,55 @@ func (e *Engine) Close() error {
 		}
 	})
 	return e.closeErr
+}
+
+// ValidationResult contains the outcome of pipeline validation.
+type ValidationResult struct {
+	Graph    *pipeline.Graph
+	Errors   []string
+	Warnings []string
+	Hints    []string
+}
+
+// ValidateOption configures ValidateSource behavior.
+type ValidateOption func(*validateConfig)
+
+type validateConfig struct {
+	format string
+}
+
+// WithValidateFormat sets the pipeline source format ("dip" or "dot").
+func WithValidateFormat(format string) ValidateOption {
+	return func(c *validateConfig) { c.format = format }
+}
+
+// ValidateSource parses and validates a pipeline source string without executing it.
+// Returns a ValidationResult with structured errors, warnings, and hints.
+// An error is returned when the source cannot be parsed or has structural errors.
+func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, error) {
+	cfg := &validateConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	graph, err := parsePipelineSource(source, cfg.format)
+	if err != nil {
+		return &ValidationResult{Errors: []string{err.Error()}}, err
+	}
+
+	result := &ValidationResult{Graph: graph}
+
+	// Structural + semantic validation (includes warnings).
+	ve := pipeline.ValidateAll(graph)
+	if ve != nil {
+		result.Errors = append(result.Errors, ve.Errors...)
+		result.Warnings = append(result.Warnings, ve.Warnings...)
+	}
+
+	if len(result.Errors) > 0 {
+		return result, fmt.Errorf("validation failed: %s", result.Errors[0])
+	}
+	return result, nil
 }
 
 // Run parses a pipeline source, auto-wires all internals, executes, and returns the result.
@@ -372,5 +503,6 @@ func resultFromEngine(er *pipeline.EngineResult) *Result {
 		CompletedNodes: er.CompletedNodes,
 		Context:        er.Context,
 		EngineResult:   er,
+		Trace:          er.Trace,
 	}
 }
