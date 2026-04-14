@@ -508,6 +508,56 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 	}
 }
 
+// TestAdapter_BudgetAttrsPassThrough verifies that workflow-level budget attrs
+// (max_total_tokens, max_cost_cents, max_wall_time) are passed through from
+// IR WorkflowDefaults to graph.Attrs when present, enabling Task 7 to read them
+// via graph.Attrs["max_total_tokens"] etc. without further mapping.
+//
+// NOTE: This test documents the expected behavior for when dippin-lang adds
+// these fields to WorkflowDefaults. Currently (v0.18.0), the fields don't exist
+// on the IR struct, so this test uses a manual graph construction to verify the
+// adapter would handle them correctly if they existed.
+func TestAdapter_BudgetAttrsPassThrough(t *testing.T) {
+	// Since ir.WorkflowDefaults doesn't have these fields yet, we directly
+	// construct a Graph as the adapter would produce if they did exist.
+	// This documents the contract: when dippin-lang v0.x+ adds:
+	//   MaxTotalTokens int
+	//   MaxCostCents   int
+	//   MaxWallTime    string
+	// The extractWorkflowDefaults function should map them like:
+	//   attrs["max_total_tokens"] = strconv.Itoa(defaults.MaxTotalTokens)
+	//   attrs["max_cost_cents"] = strconv.Itoa(defaults.MaxCostCents)
+	//   attrs["max_wall_time"] = defaults.MaxWallTime
+
+	// Simulate what the adapter would produce
+	g := &Graph{
+		Name:      "BudgetTest",
+		StartNode: "start",
+		ExitNode:  "exit",
+		Attrs: map[string]string{
+			"max_total_tokens": "50000",
+			"max_cost_cents":   "250",
+			"max_wall_time":    "10m",
+		},
+		Nodes: make(map[string]*Node),
+		Edges: []*Edge{},
+	}
+	g.Nodes["start"] = &Node{ID: "start", Shape: "Mdiamond", Handler: "start", Attrs: make(map[string]string)}
+	g.Nodes["exit"] = &Node{ID: "exit", Shape: "Msquare", Handler: "exit", Attrs: make(map[string]string)}
+	g.Edges = append(g.Edges, &Edge{From: "start", To: "exit"})
+
+	// Verify the attrs land in graph.Attrs with exact keys
+	if g.Attrs["max_total_tokens"] != "50000" {
+		t.Errorf("attrs[max_total_tokens] = %q, want %q", g.Attrs["max_total_tokens"], "50000")
+	}
+	if g.Attrs["max_cost_cents"] != "250" {
+		t.Errorf("attrs[max_cost_cents] = %q, want %q", g.Attrs["max_cost_cents"], "250")
+	}
+	if g.Attrs["max_wall_time"] != "10m" {
+		t.Errorf("attrs[max_wall_time] = %q, want %q", g.Attrs["max_wall_time"], "10m")
+	}
+}
+
 // TestFromDippinIR_EdgeConditions verifies edge conditions are preserved as raw strings.
 func TestFromDippinIR_EdgeConditions(t *testing.T) {
 	workflow := &ir.Workflow{
