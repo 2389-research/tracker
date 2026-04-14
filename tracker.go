@@ -45,6 +45,9 @@ type Config struct {
 	AgentEvents   agent.EventHandler            // optional: live agent session events
 	LLMClient     agent.Completer               // optional: override auto-created client
 	Context       map[string]string             // optional: initial pipeline context
+	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
+	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
+	AutoApprove   bool                          // auto-approve all human gates with default/first option
 }
 
 // Result contains the outcome of a pipeline execution.
@@ -54,6 +57,7 @@ type Result struct {
 	CompletedNodes []string
 	Context        map[string]string
 	EngineResult   *pipeline.EngineResult
+	Trace          *pipeline.Trace // full execution trace (nodes, timing, stats)
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
@@ -117,7 +121,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 
 	injectGraphDefaults(graph, cfg)
 
-	registry := buildRegistry(graph, completer, workDir, cfg)
+	registry := buildRegistry(graph, client, completer, workDir, cfg)
 	engineOpts := buildEngineOpts(cfg)
 	inner := pipeline.NewEngine(graph, registry, engineOpts...)
 
@@ -162,7 +166,7 @@ func injectGraphAttrIfAbsent(graph *pipeline.Graph, key, value string) {
 }
 
 // buildRegistry creates a handler registry with all dependencies wired.
-func buildRegistry(graph *pipeline.Graph, completer agent.Completer, workDir string, cfg Config) *pipeline.HandlerRegistry {
+func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config) *pipeline.HandlerRegistry {
 	env := exec.NewLocalEnvironment(workDir)
 	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(completer, workDir),
@@ -174,7 +178,35 @@ func buildRegistry(graph *pipeline.Graph, completer agent.Completer, workDir str
 	if cfg.EventHandler != nil {
 		registryOpts = append(registryOpts, handlers.WithPipelineEventHandler(cfg.EventHandler))
 	}
+	if cfg.Backend != "" {
+		registryOpts = append(registryOpts, handlers.WithDefaultBackend(cfg.Backend))
+	}
+	interviewer := resolveInterviewer(cfg, client)
+	if interviewer != nil {
+		registryOpts = append(registryOpts, handlers.WithInterviewer(interviewer, graph))
+	}
 	return handlers.NewDefaultRegistry(graph, registryOpts...)
+}
+
+// resolveInterviewer selects an automated interviewer based on Config.
+// Returns nil if no automation is configured (interactive/default mode).
+func resolveInterviewer(cfg Config, client *llm.Client) handlers.FreeformInterviewer {
+	if cfg.AutoApprove {
+		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	if cfg.Autopilot != "" {
+		persona, err := handlers.ParsePersona(cfg.Autopilot)
+		if err != nil {
+			log.Printf("WARNING: %v; falling back to auto-approve", err)
+			return &handlers.AutoApproveFreeformInterviewer{}
+		}
+		if client == nil {
+			log.Printf("WARNING: no LLM client for autopilot; falling back to auto-approve")
+			return &handlers.AutoApproveFreeformInterviewer{}
+		}
+		return handlers.NewAutopilotInterviewer(client, persona)
+	}
+	return nil
 }
 
 // buildEngineOpts constructs engine options from Config.
@@ -372,5 +404,6 @@ func resultFromEngine(er *pipeline.EngineResult) *Result {
 		CompletedNodes: er.CompletedNodes,
 		Context:        er.Context,
 		EngineResult:   er,
+		Trace:          er.Trace,
 	}
 }
