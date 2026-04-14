@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -67,5 +68,17 @@ func TestBudgetGuard_NilUsageHandled(t *testing.T) {
 	breach := g.Check(nil, time.Now())
 	if breach.Kind != BudgetOK {
 		t.Errorf("nil usage should be safe, got %v", breach.Kind)
+	}
+}
+
+func TestBudgetGuard_CostCeiling_RoundsBoundaryValue(t *testing.T) {
+	// The largest float64 strictly less than 0.51, when scaled by 100, yields
+	// 50.9999... which naive truncation would read as 50¢ (missing the breach
+	// on a 50¢ ceiling). Math.Round correctly reads it as 51¢.
+	justBelow := math.Nextafter(0.51, 0)
+	g := NewBudgetGuard(BudgetLimits{MaxCostCents: 50})
+	breach := g.Check(&UsageSummary{TotalCostUSD: justBelow}, time.Now())
+	if breach.Kind != BudgetCost {
+		t.Errorf("cost %.20f should breach 50¢ ceiling after rounding, got %v", justBelow, breach.Kind)
 	}
 }

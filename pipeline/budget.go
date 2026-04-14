@@ -2,7 +2,10 @@
 // ABOUTME: Halts execution with OutcomeBudgetExceeded when any configured limit is breached.
 package pipeline
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // BudgetLimits configures hard ceilings for a pipeline run.
 // A zero-value field means "no limit" for that dimension.
@@ -89,7 +92,7 @@ func (g *BudgetGuard) checkUsage(usage *UsageSummary) BudgetBreach {
 	if g.limits.MaxTotalTokens > 0 && usage.TotalTokens > g.limits.MaxTotalTokens {
 		return BudgetBreach{Kind: BudgetTokens, Message: "max_total_tokens exceeded"}
 	}
-	if g.limits.MaxCostCents > 0 && int(usage.TotalCostUSD*100) > g.limits.MaxCostCents {
+	if g.limits.MaxCostCents > 0 && int(math.Round(usage.TotalCostUSD*100)) > g.limits.MaxCostCents {
 		return BudgetBreach{Kind: BudgetCost, Message: "max_cost_cents exceeded"}
 	}
 	return BudgetBreach{Kind: BudgetOK}

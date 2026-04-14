@@ -36,23 +36,22 @@ func (e *Engine) emitCostUpdate(s *runState) {
 // an EngineResult with Status=OutcomeBudgetExceeded and BudgetLimitsHit.
 func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 	s.trace.EndTime = time.Now()
+	summary := s.trace.AggregateUsage()
+	var costSnap *CostSnapshot
+	if summary != nil {
+		costSnap = &CostSnapshot{
+			TotalTokens:    summary.TotalTokens,
+			TotalCostUSD:   summary.TotalCostUSD,
+			ProviderTotals: summary.ProviderTotals,
+			WallElapsed:    time.Since(s.trace.StartTime),
+		}
+	}
 	e.emit(PipelineEvent{
 		Type:      EventBudgetExceeded,
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		Message:   breach.Message,
-		Cost: func() *CostSnapshot {
-			summary := s.trace.AggregateUsage()
-			if summary == nil {
-				return nil
-			}
-			return &CostSnapshot{
-				TotalTokens:    summary.TotalTokens,
-				TotalCostUSD:   summary.TotalCostUSD,
-				ProviderTotals: summary.ProviderTotals,
-				WallElapsed:    time.Since(s.trace.StartTime),
-			}
-		}(),
+		Cost:      costSnap,
 	})
 	return loopResult{
 		action: loopReturn,
@@ -62,7 +61,7 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 			CompletedNodes:  s.cp.CompletedNodes,
 			Context:         s.pctx.Snapshot(),
 			Trace:           s.trace,
-			Usage:           s.trace.AggregateUsage(),
+			Usage:           summary,
 			BudgetLimitsHit: []string{breach.Kind.String()},
 		},
 	}
