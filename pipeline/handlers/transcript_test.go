@@ -78,6 +78,31 @@ func TestBuildSessionStatsIncludesTokenUsage(t *testing.T) {
 	}
 }
 
+func TestBuildSessionStatsPopulatesProvider(t *testing.T) {
+	r := agent.SessionResult{
+		Turns:    1,
+		Provider: "anthropic",
+		Usage:    llm.Usage{InputTokens: 100, OutputTokens: 50, TotalTokens: 150},
+	}
+
+	stats := buildSessionStats(r)
+	if stats.Provider != "anthropic" {
+		t.Errorf("expected Provider=%q, got %q", "anthropic", stats.Provider)
+	}
+}
+
+func TestBuildSessionStatsEmptyProvider(t *testing.T) {
+	r := agent.SessionResult{
+		Turns: 1,
+		// Provider not set — human gate / non-LLM node
+	}
+
+	stats := buildSessionStats(r)
+	if stats.Provider != "" {
+		t.Errorf("expected empty Provider, got %q", stats.Provider)
+	}
+}
+
 func TestBuildSessionStatsZeroUsage(t *testing.T) {
 	r := agent.SessionResult{
 		Turns:     1,

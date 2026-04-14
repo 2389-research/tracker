@@ -103,5 +103,6 @@ func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 		ReasoningTokens:  derefInt(r.Usage.ReasoningTokens),
 		CacheReadTokens:  derefInt(r.Usage.CacheReadTokens),
 		CacheWriteTokens: derefInt(r.Usage.CacheWriteTokens),
+		Provider:         r.Provider,
 	}
 }
