@@ -126,9 +126,12 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 
 	tokenTracker := llm.NewTokenTracker()
 	// Attach token tracker as middleware to the LLM client so it captures
-	// per-provider usage during native backend runs.
+	// per-provider usage during native backend runs. Works for both
+	// auto-created clients and user-provided *llm.Client via Config.LLMClient.
 	if client != nil {
 		client.AddMiddleware(tokenTracker)
+	} else if lc, ok := completer.(*llm.Client); ok {
+		lc.AddMiddleware(tokenTracker)
 	}
 	registry, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
 	if err != nil {
@@ -195,7 +198,7 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 	if cfg.Backend != "" {
 		registryOpts = append(registryOpts, handlers.WithDefaultBackend(cfg.Backend))
 	}
-	interviewer, err := resolveInterviewer(cfg, client)
+	interviewer, err := resolveInterviewer(cfg, client, completer)
 	if err != nil {
 		return nil, err
 	}
@@ -207,21 +210,46 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 
 // resolveInterviewer selects an automated interviewer based on Config.
 // Returns nil if no automation is configured (interactive/default mode).
-func resolveInterviewer(cfg Config, client *llm.Client) (handlers.FreeformInterviewer, error) {
+// When Backend is "claude-code", prefers ClaudeCodeAutopilotInterviewer.
+func resolveInterviewer(cfg Config, client *llm.Client, completer agent.Completer) (handlers.FreeformInterviewer, error) {
 	if cfg.AutoApprove {
 		return &handlers.AutoApproveFreeformInterviewer{}, nil
 	}
-	if cfg.Autopilot != "" {
-		persona, err := handlers.ParsePersona(cfg.Autopilot)
-		if err != nil {
-			return nil, fmt.Errorf("invalid autopilot persona %q: %w", cfg.Autopilot, err)
-		}
-		if client == nil {
-			return nil, fmt.Errorf("autopilot %q requires an LLM client (set Config.LLMClient or configure API keys)", cfg.Autopilot)
-		}
-		return handlers.NewAutopilotInterviewer(client, persona), nil
+	if cfg.Autopilot == "" {
+		return nil, nil
 	}
-	return nil, nil
+	return resolveAutopilot(cfg, client, completer)
+}
+
+// resolveAutopilot builds an autopilot interviewer for the given persona and backend.
+func resolveAutopilot(cfg Config, client *llm.Client, completer agent.Completer) (handlers.FreeformInterviewer, error) {
+	persona, err := handlers.ParsePersona(cfg.Autopilot)
+	if err != nil {
+		return nil, fmt.Errorf("invalid autopilot persona %q: %w", cfg.Autopilot, err)
+	}
+	if cfg.Backend == "claude-code" {
+		if iv, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(persona); ccErr == nil {
+			return iv, nil
+		}
+		log.Printf("[tracker] claude-code autopilot init failed, trying native")
+	}
+	client = resolveAutopilotClient(client, completer)
+	if client == nil {
+		return nil, fmt.Errorf("autopilot %q requires an LLM client (set Config.LLMClient or configure API keys)", cfg.Autopilot)
+	}
+	return handlers.NewAutopilotInterviewer(client, persona), nil
+}
+
+// resolveAutopilotClient returns the LLM client for native autopilot,
+// trying a type assertion on completer if client is nil.
+func resolveAutopilotClient(client *llm.Client, completer agent.Completer) *llm.Client {
+	if client != nil {
+		return client
+	}
+	if lc, ok := completer.(*llm.Client); ok {
+		return lc
+	}
+	return nil
 }
 
 // buildEngineOpts constructs engine options from Config.

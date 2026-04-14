@@ -755,7 +755,7 @@ func TestTraceAggregateToolCalls(t *testing.T) {
 		}
 	})
 
-	t.Run("entries with nil stats", func(t *testing.T) {
+	t.Run("entries with mixed stats", func(t *testing.T) {
 		tr := &Trace{
 			RunID: "nil-stats",
 			Entries: []TraceEntry{

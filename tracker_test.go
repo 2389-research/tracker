@@ -361,12 +361,15 @@ func TestValidateSource_ReturnsWarnings(t *testing.T) {
 		gate -> done [label="outcome=success"];
 	}`
 	result, err := ValidateSource(graphWithWarning, WithValidateFormat("dot"))
-	// Errors are not expected here — only a warning about missing fail edge.
-	_ = err
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	// Warnings may or may not be present depending on graph structure; just ensure no panic.
+	if len(result.Errors) > 0 {
+		t.Errorf("unexpected errors: %v", result.Errors)
+	}
 }
 
 func TestRun_WithRetryPolicy(t *testing.T) {
