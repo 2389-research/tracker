@@ -143,7 +143,7 @@ func (h *HybridContent) handleRadioNavKey(km tea.KeyMsg) tea.Cmd {
 		if h.isOnOther() {
 			h.onOther = true
 			h.textarea.Focus()
-			return func() tea.Msg { return nil }
+			return nil
 		}
 		return h.submitLabel(h.labels[h.cursor])
 	}

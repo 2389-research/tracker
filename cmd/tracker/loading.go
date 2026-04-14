@@ -99,6 +99,7 @@ func loadSubgraphNode(node *pipeline.Node, baseDir string, subgraphs map[string]
 		return fmt.Errorf("circular subgraph reference detected: %q resolves to %q which is already being loaded (cycle)", ref, absResolved)
 	}
 	visited[absResolved] = true
+	defer delete(visited, absResolved)
 
 	subGraph, err := loadPipeline(resolved, "")
 	if err != nil {

@@ -192,7 +192,7 @@ func (r *ReviewHybridContent) handleReviewActionKey(km tea.KeyMsg) tea.Cmd {
 		if r.isOnOther() {
 			r.onOther = true
 			r.textarea.Focus()
-			return func() tea.Msg { return nil }
+			return nil
 		}
 		if len(r.labels) > 0 {
 			return r.submitLabel(r.labels[r.cursor])
