@@ -78,6 +78,17 @@ func (t *TokenTracker) TotalUsage() Usage {
 	return total
 }
 
+// AllProviderUsage returns a copy of the accumulated usage for all providers.
+func (t *TokenTracker) AllProviderUsage() map[string]Usage {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	result := make(map[string]Usage, len(t.usage))
+	for k, v := range t.usage {
+		result[k] = v
+	}
+	return result
+}
+
 // Providers returns a sorted slice of provider names that have recorded usage.
 func (t *TokenTracker) Providers() []string {
 	t.mu.RLock()

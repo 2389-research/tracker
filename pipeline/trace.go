@@ -91,6 +91,20 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 	return s
 }
 
+// AggregateToolCalls sums tool call counts from all trace entries with session stats.
+func (t *Trace) AggregateToolCalls() map[string]int {
+	calls := make(map[string]int)
+	for _, entry := range t.Entries {
+		if entry.Stats == nil {
+			continue
+		}
+		for name, count := range entry.Stats.ToolCalls {
+			calls[name] += count
+		}
+	}
+	return calls
+}
+
 // Summary returns a human-readable summary of the trace.
 func (tr *Trace) Summary() string {
 	var b strings.Builder

@@ -52,20 +52,23 @@ type Config struct {
 
 // Result contains the outcome of a pipeline execution.
 type Result struct {
-	RunID          string
-	Status         string
-	CompletedNodes []string
-	Context        map[string]string
-	EngineResult   *pipeline.EngineResult
-	Trace          *pipeline.Trace // full execution trace (nodes, timing, stats)
+	RunID            string
+	Status           string
+	CompletedNodes   []string
+	Context          map[string]string
+	EngineResult     *pipeline.EngineResult
+	Trace            *pipeline.Trace      // full execution trace (nodes, timing, stats)
+	TokensByProvider map[string]llm.Usage // per-provider token totals
+	ToolCallsByName  map[string]int       // tool call counts by name
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
 type Engine struct {
-	inner     *pipeline.Engine
-	client    *llm.Client // nil if caller provided their own Completer
-	closeOnce sync.Once
-	closeErr  error
+	inner        *pipeline.Engine
+	client       *llm.Client // nil if caller provided their own Completer
+	tokenTracker *llm.TokenTracker
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 // NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
@@ -121,14 +124,16 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 
 	injectGraphDefaults(graph, cfg)
 
-	registry := buildRegistry(graph, client, completer, workDir, cfg)
+	tokenTracker := llm.NewTokenTracker()
+	registry := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
 	engineOpts := buildEngineOpts(cfg)
 	inner := pipeline.NewEngine(graph, registry, engineOpts...)
 
 	built = true
 	return &Engine{
-		inner:  inner,
-		client: client,
+		inner:        inner,
+		client:       client,
+		tokenTracker: tokenTracker,
 	}
 }
 
@@ -166,11 +171,12 @@ func injectGraphAttrIfAbsent(graph *pipeline.Graph, key, value string) {
 }
 
 // buildRegistry creates a handler registry with all dependencies wired.
-func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config) *pipeline.HandlerRegistry {
+func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) *pipeline.HandlerRegistry {
 	env := exec.NewLocalEnvironment(workDir)
 	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(completer, workDir),
 		handlers.WithExecEnvironment(env),
+		handlers.WithTokenTracker(tokenTracker),
 	}
 	if cfg.AgentEvents != nil {
 		registryOpts = append(registryOpts, handlers.WithAgentEventHandler(cfg.AgentEvents))
@@ -368,7 +374,14 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resultFromEngine(engineResult), nil
+	result := resultFromEngine(engineResult)
+	if e.tokenTracker != nil {
+		result.TokensByProvider = e.tokenTracker.AllProviderUsage()
+	}
+	if engineResult != nil && engineResult.Trace != nil {
+		result.ToolCallsByName = engineResult.Trace.AggregateToolCalls()
+	}
+	return result, nil
 }
 
 // Close releases resources. Must be called if the engine was created
@@ -380,6 +393,54 @@ func (e *Engine) Close() error {
 		}
 	})
 	return e.closeErr
+}
+
+// ValidationResult contains the outcome of pipeline validation.
+type ValidationResult struct {
+	Graph    *pipeline.Graph
+	Errors   []string
+	Warnings []string
+	Hints    []string
+}
+
+// ValidateOption configures ValidateSource behavior.
+type ValidateOption func(*validateConfig)
+
+type validateConfig struct {
+	format string
+}
+
+// WithValidateFormat sets the pipeline source format ("dip" or "dot").
+func WithValidateFormat(format string) ValidateOption {
+	return func(c *validateConfig) { c.format = format }
+}
+
+// ValidateSource parses and validates a pipeline source string without executing it.
+// Returns a ValidationResult with structured errors, warnings, and hints.
+// An error is returned when the source cannot be parsed or has structural errors.
+func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, error) {
+	cfg := &validateConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	graph, err := parsePipelineSource(source, cfg.format)
+	if err != nil {
+		return &ValidationResult{Errors: []string{err.Error()}}, err
+	}
+
+	result := &ValidationResult{Graph: graph}
+
+	ve := pipeline.ValidateAll(graph)
+	if ve != nil {
+		result.Errors = append(result.Errors, ve.Errors...)
+		result.Warnings = append(result.Warnings, ve.Warnings...)
+	}
+
+	if len(result.Errors) > 0 {
+		return result, fmt.Errorf("%s", result.Errors[0])
+	}
+	return result, nil
 }
 
 // Run parses a pipeline source, auto-wires all internals, executes, and returns the result.
