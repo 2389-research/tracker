@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 )
 
 type runConfig struct {
@@ -19,10 +20,13 @@ type runConfig struct {
 	resumeID     string // run ID to resume (resolved to checkpoint path)
 	noTUI        bool
 	verbose      bool
-	jsonOut      bool   // stream events as NDJSON to stdout
-	backend      string // agent execution backend: "" (default), "native", or "claude-code"
-	autopilot    string // persona name (lax/mid/hard/mentor) or empty
-	autoApprove  bool   // deterministic auto-approve, no LLM
+	jsonOut      bool          // stream events as NDJSON to stdout
+	backend      string        // agent execution backend: "" (default), "native", or "claude-code"
+	autopilot    string        // persona name (lax/mid/hard/mentor) or empty
+	autoApprove  bool          // deterministic auto-approve, no LLM
+	maxTokens    int           // halt if total tokens exceed this value (0 = no limit)
+	maxCostCents int           // halt if total cost in cents exceeds this value (0 = no limit)
+	maxWallTime  time.Duration // halt if wall time exceeds this duration (0 = no limit)
 }
 
 type commandMode string

@@ -35,6 +35,10 @@ type autopilotCfg struct {
 
 var activeAutopilotCfg autopilotCfg
 
+// activeBudgetLimits holds the budget limits for the current run.
+// Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
+var activeBudgetLimits pipeline.BudgetLimits
+
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
@@ -121,6 +125,9 @@ func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.Pipe
 	}
 	if checkpoint != "" {
 		opts = append(opts, pipeline.WithCheckpointPath(checkpoint))
+	}
+	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
+		opts = append(opts, pipeline.WithBudgetGuard(guard))
 	}
 	return opts
 }
@@ -404,6 +411,9 @@ func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, a
 	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
+	}
+	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
+		engineOpts = append(engineOpts, pipeline.WithBudgetGuard(guard))
 	}
 	return pipeline.NewEngine(graph, registry, engineOpts...)
 }
