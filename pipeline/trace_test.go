@@ -706,3 +706,74 @@ func TestEngineResultUsageFromTraceStats(t *testing.T) {
 		t.Errorf("SessionCount = %d, want 1", result.Usage.SessionCount)
 	}
 }
+
+func TestTraceAggregateToolCalls(t *testing.T) {
+	t.Run("normal aggregation", func(t *testing.T) {
+		tr := &Trace{
+			RunID: "tool-agg",
+			Entries: []TraceEntry{
+				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{
+					NodeID: "impl1", HandlerName: "codergen", Status: OutcomeSuccess,
+					Stats: &SessionStats{
+						ToolCalls: map[string]int{"bash": 5, "write": 3},
+					},
+				},
+				{
+					NodeID: "impl2", HandlerName: "codergen", Status: OutcomeSuccess,
+					Stats: &SessionStats{
+						ToolCalls: map[string]int{"bash": 2, "read": 4},
+					},
+				},
+				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+			},
+		}
+
+		calls := tr.AggregateToolCalls()
+		if calls["bash"] != 7 {
+			t.Errorf("bash = %d, want 7", calls["bash"])
+		}
+		if calls["write"] != 3 {
+			t.Errorf("write = %d, want 3", calls["write"])
+		}
+		if calls["read"] != 4 {
+			t.Errorf("read = %d, want 4", calls["read"])
+		}
+	})
+
+	t.Run("no tool calls", func(t *testing.T) {
+		tr := &Trace{
+			RunID: "no-tools",
+			Entries: []TraceEntry{
+				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+			},
+		}
+		calls := tr.AggregateToolCalls()
+		if len(calls) != 0 {
+			t.Errorf("expected empty map, got %v", calls)
+		}
+	})
+
+	t.Run("entries with nil stats", func(t *testing.T) {
+		tr := &Trace{
+			RunID: "nil-stats",
+			Entries: []TraceEntry{
+				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{
+					NodeID: "impl", HandlerName: "codergen", Status: OutcomeSuccess,
+					Stats: &SessionStats{
+						ToolCalls: map[string]int{"bash": 10},
+					},
+				},
+			},
+		}
+		calls := tr.AggregateToolCalls()
+		if calls["bash"] != 10 {
+			t.Errorf("bash = %d, want 10", calls["bash"])
+		}
+		if len(calls) != 1 {
+			t.Errorf("expected 1 tool, got %d", len(calls))
+		}
+	})
+}
