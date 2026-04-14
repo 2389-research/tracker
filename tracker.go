@@ -54,7 +54,7 @@ type Config struct {
 // CostReport summarizes spend for a pipeline run.
 // TotalUSD is the sum of ByProvider[*].USD.
 // LimitsHit names the budget dimensions that halted the run (empty when the
-// run completed normally). Populated by BudgetGuard in a later task.
+// run completed normally).
 type CostReport struct {
 	TotalUSD   float64
 	ByProvider map[string]llm.ProviderCost
