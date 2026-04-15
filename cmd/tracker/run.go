@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
@@ -38,6 +39,12 @@ var activeAutopilotCfg autopilotCfg
 // activeBudgetLimits holds the budget limits for the current run.
 // Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
 var activeBudgetLimits pipeline.BudgetLimits
+
+// activeExportBundle holds the --export-bundle path for the current run.
+// Set by executeRun. When non-empty, a git bundle of run artifacts is written
+// to this path after the pipeline completes. Failures are reported as warnings
+// and do not affect the run's exit code.
+var activeExportBundle string
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
@@ -90,6 +97,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 
 	pipelineErr := interpretRunResult(result, runErr)
 	printRunSummary(result, pipelineErr, tokenTracker, pipelineFile)
+	if result != nil && result.RunID != "" {
+		maybeExportBundle(artifactDir, result.RunID)
+	}
 	return pipelineErr
 }
 
@@ -294,6 +304,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
 	notifyPipelineComplete(pipelineName, outcome.err)
+	if outcome.result != nil && outcome.result.RunID != "" {
+		maybeExportBundle(artifactDir, outcome.result.RunID)
+	}
 	return outcome.err
 }
 
@@ -630,4 +643,19 @@ func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Cl
 		fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to interactive\n")
 	}
 	return tui.NewBubbleteaInterviewer(send)
+}
+
+// maybeExportBundle exports a git bundle of the run artifact repository when
+// --export-bundle is set. Best-effort: failures are printed as warnings and do
+// not affect the pipeline exit code. The run dir is <artifactBase>/<runID>.
+func maybeExportBundle(artifactBase, runID string) {
+	if activeExportBundle == "" {
+		return
+	}
+	runDir := filepath.Join(artifactBase, runID)
+	if err := tracker.ExportBundle(runDir, activeExportBundle); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: bundle export failed: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "  bundle: %s\n", activeExportBundle)
 }

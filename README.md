@@ -371,6 +371,41 @@ grep 'decision_condition' .tracker/runs/<id>/activity.jsonl | python3 -m json.to
 grep 'decision_outcome' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
 ```
 
+## Git Integration
+
+When `WithGitArtifacts(true)` is enabled (library) or `--git-artifacts` is set (CLI — see roadmap), the artifact run directory becomes a git repository. Each terminal node outcome creates a commit:
+
+```
+node(start): start outcome=success
+node(middle): codergen outcome=success
+node(end): exit outcome=success
+```
+
+Checkpoint tags (`checkpoint/<runID>/<nodeID>`) mark each save point.
+
+### Exporting a run as a portable bundle
+
+`ExportBundle` packages the entire git history — commits and tags — into a single file you can copy anywhere:
+
+```go
+// Library usage
+result, _ := engine.Run(ctx)
+if err := tracker.ExportBundle(result.ArtifactRunDir, "/tmp/run.bundle"); err != nil {
+    log.Printf("bundle export failed: %v", err)
+}
+```
+
+```bash
+# CLI usage: export bundle after the pipeline completes
+tracker --export-bundle /tmp/run.bundle examples/ask_and_execute.dip
+
+# Restore and inspect on any machine with git
+git clone /tmp/run.bundle /tmp/run
+cd /tmp/run && git log --oneline
+```
+
+The bundle is self-contained — no network access needed. Clone it on another machine, inspect the exact sequence of node outcomes, and replay from any checkpoint tag.
+
 ## Troubleshooting
 
 When a pipeline run doesn't go as expected, tracker gives you tools to understand what happened:

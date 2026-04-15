@@ -155,6 +155,17 @@ The parallel handler does concurrent dispatch internally and hints the engine
 where to go next via `suggested_next_nodes`. The engine has no special-case
 code for parallel execution.
 
+### Git artifacts and bundle export
+`WithGitArtifacts(true)` initializes the artifact run directory as a git repo
+and commits after every terminal node. `ExportBundle(runDir, outPath)` in
+`tracker_bundle.go` wraps `git bundle create <outPath> --all` to produce a
+portable, self-contained bundle of the run's full history (commits + tags).
+`Result.ArtifactRunDir` is the canonical way for callers to locate the run
+directory. The `--export-bundle` CLI flag calls `ExportBundle` as a post-run
+step; failures are warnings and do not affect the exit code. `ExportBundle`
+is the canonical way for a remote factory-worker to hand a completed run
+back to the user — clone with `git clone <bundle>` on any machine.
+
 ### Checkpoint resume is fragile
 Checkpoints store completed nodes and context snapshots. Edge selections are
 stored per-node for deterministic replay. But the restart counter is global

@@ -252,6 +252,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
+	// Store export-bundle path for maybeExportBundle (called from run/runTUI after completion).
+	activeExportBundle = cfg.exportBundle
 	// Store budget limits for buildEngineOptions (called from run/runTUI).
 	activeBudgetLimits = pipeline.BudgetLimits{
 		MaxTotalTokens: cfg.maxTokens,
