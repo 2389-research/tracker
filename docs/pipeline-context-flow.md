@@ -26,7 +26,7 @@ Each node solves a single well-scoped problem. Carrying a full conversation hist
 | `graph.goal` | engine (from `workflow.Goal`) | The workflow's stated objective, always available |
 | `parallel.results` | parallel handler | JSON array with one entry per branch: `{node_id, status, context_updates, stats}` |
 
-Custom keys written by any handler are also available — for example a tool node can `echo "KEY=value" >> $TRACKER_CONTEXT`-style patterns if the workflow author designs for it.
+Handlers do NOT let user content set arbitrary context keys. The table above lists every key that each handler writes. Agent, tool, and human nodes each populate a fixed set — agents write `last_response` and `response.<nodeID>`, tools write `tool_stdout`/`tool_stderr`, humans write `human_response` and `preferred_label`. If you need to propagate a custom value from one node to the next, see **[Returning custom data from a node](#returning-custom-data-from-a-node)** below.
 
 ## Referencing context in prompts and commands
 
@@ -63,6 +63,79 @@ After a node finishes, the engine calls `PipelineContext.ScopeToNode(nodeID)` wh
 3. **Explicit per-branch keys**: a branch's agent prompt can instruct the model to write a specific key (e.g. `branch_a_summary`), and the fan-in node reads `${ctx.branch_a_summary}`.
 
 Reading `${ctx.node.<BranchID>.last_response}` after a parallel block will NOT automatically contain each branch's final output — use one of the patterns above instead.
+
+## Returning custom data from a node
+
+**Handlers write only a fixed set of built-in keys** (see the table above). There is no "write any key you want from the agent's response" feature — no `$TRACKER_CONTEXT` environment variable, no magic response prefix. If you need a custom value from one node to be available under a specific key for downstream nodes, pick one of these three supported patterns:
+
+### 1. Encode structured output in `last_response` and reference it downstream
+
+The easiest pattern when the next node is also an agent. The producer emits JSON or a key-value block inside its response; the consumer reads `${ctx.last_response}` (or `${ctx.node.<id>.last_response}` for a specific ancestor) and instructs the LLM to parse it.
+
+```dip
+agent Planner
+  prompt: |
+    Plan the work. Respond with JSON:
+    { "milestone": "m1-auth", "files": ["auth.go", "session.go"] }
+  response_format: json_object
+
+agent Builder
+  prompt: |
+    Plan from Planner: ${ctx.last_response}
+    Parse the JSON, extract "milestone", and build the listed files.
+```
+
+Force the structure at the API level with `response_format: json_object` so the producer is guaranteed to emit valid JSON (Anthropic, OpenAI, and Gemini all support this via their native JSON modes — see CLAUDE.md's "Structured output" section).
+
+### 2. Write to a file from one node, read from the file in the next
+
+The robust pattern when the handoff is large, binary, or needs to survive across tool and human nodes. The producer writes to a known path under the working directory or `.ai/` scratch dir; downstream nodes read from the same path.
+
+```dip
+agent GenerateSpec
+  prompt: |
+    Write the spec to .ai/spec.md. Your `write` tool is available.
+
+tool ExtractMilestone
+  command: |
+    set -eu
+    jq -r '.milestone' < .ai/spec.md > .ai/milestone.txt
+    cat .ai/milestone.txt      # goes to tool_stdout
+
+agent Builder
+  prompt: |
+    Implementing milestone: ${ctx.tool_stdout}
+    Full spec lives at .ai/spec.md — read it with your tools.
+```
+
+The filesystem is the source of truth; `tool_stdout` / `last_response` just carry a small reference. This scales to megabyte-sized intermediate artifacts without blowing up the context window.
+
+### 3. Use `auto_status` to route on a structured cue from an agent response
+
+When the "custom value" you actually need is just the node's outcome (success/fail/retry), set `auto_status: true` on the agent. The handler scans the response for a `STATUS: success|fail|retry` line and sets the outcome accordingly. This drives edge routing via `when ctx.outcome = ...` without needing a separate key.
+
+```dip
+agent Critic
+  auto_status: true
+  prompt: |
+    Review the diff. End your response with exactly one line:
+    STATUS: success   (if the change is ready to merge)
+    STATUS: retry     (if the author needs to fix something)
+    STATUS: fail      (if the whole approach is wrong)
+
+edges
+  Critic -> Merge      when ctx.outcome = success
+  Critic -> FixReview  when ctx.outcome = retry
+  Critic -> Abandon    when ctx.outcome = fail
+```
+
+### What about tool nodes writing custom keys?
+
+A `tool` handler only writes `tool_stdout` and `tool_stderr`. There is no `echo FOO=bar` pattern that sets `${ctx.FOO}`. Use pattern 2 (filesystem) for large values, or make the command emit JSON on stdout and have a downstream agent parse `${ctx.tool_stdout}`.
+
+### What about human gates?
+
+A `human` node (`mode: freeform`) writes exactly `human_response` (the free text) and `response.<nodeID>`. Labeled gates also write `preferred_label`. There is no way for the human to set additional keys — if you need structured data from a human, run an agent after the gate that parses `${ctx.human_response}` into the keys you want, or use `mode: interview` for multi-field form collection.
 
 ## Fidelity levels
 
