@@ -52,8 +52,10 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 // parseFlagsForMode handles flag parsing for non-run subcommands.
 func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConfig, error) {
 	switch mode {
-	case modeVersion, modeSetup, modeDoctor, modeWorkflows, modeUpdate:
+	case modeVersion, modeSetup, modeWorkflows, modeUpdate:
 		return *cfg, nil
+	case modeDoctor:
+		return parseDoctorFlags(args, cfg)
 	case modeInit, modeValidate, modeSimulate:
 		if len(args) > 2 {
 			cfg.pipelineFile = args[2]
@@ -64,6 +66,27 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 	default:
 		return *cfg, nil
 	}
+}
+
+// parseDoctorFlags handles doctor-specific flag parsing.
+// Supports: --probe (live auth check), -w/--workdir, --backend, and an optional positional pipeline file.
+func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
+	dfs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	dfs.SetOutput(io.Discard)
+	dfs.BoolVar(&cfg.probe, "probe", false, "Perform live API auth check for each configured provider")
+	dfs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
+	dfs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
+	dfs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
+	if err := dfs.Parse(args[2:]); err != nil {
+		return *cfg, fmt.Errorf("doctor: %w", err)
+	}
+	if dfs.NArg() > 0 {
+		cfg.pipelineFile = dfs.Arg(0)
+	}
+	if err := validateBackend(cfg.backend); err != nil {
+		return *cfg, fmt.Errorf("doctor: %w", err)
+	}
+	return *cfg, nil
 }
 
 // parseAuditFlags handles audit-specific flag parsing.
@@ -186,7 +209,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
-	fmt.Fprintf(w, "  tracker doctor                Preflight health check\n")
+	fmt.Fprintf(w, "  tracker doctor [--probe] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
 	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
 	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")
 	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")

@@ -9,12 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`tracker doctor` robustness fixes** (PR #83 review round 2):
+  - Writability probes now use `os.CreateTemp` instead of fixed filenames (`.tracker_test_write`, `.tracker_write_probe`) — probes can't collide with real user files and are always cleaned up.
+  - `checkProviders` no longer emits ✗ lines for unconfigured providers when at least one provider is already configured. Missing providers are shown as an informational hint line (e.g. "not configured: OpenAI, Gemini (optional)"). The ✗ lines appear only when zero providers are configured.
+  - `checkGitignore` parses the `.gitignore` file line-by-line with exact (trimmed, slash-stripped) comparison instead of `strings.Contains` to prevent false positives (`runsheet` → `runs`, `my.tracker.bak` → `.tracker`).
+  - Removed spurious `TRACKER_ARTIFACT_DIR` check — that env var is not wired into any CLI code path; checking it was misleading.
+  - Disk space threshold confirmed at 10 GB (was already correct in code and CHANGELOG; the initial PR description saying 100 MB was wrong and has been corrected).
+  - `resolveProviderBaseURL` in `doctor.go` was a duplicate of the canonical function. The duplicate is removed; `doctor.go` now calls the exported `tracker.ResolveProviderBaseURL`. The Gemini gateway suffix is corrected to `/google-ai-studio` (was `/gemini`).
+  - `parseDoctorFlags` now validates `--backend` against the allowed set (`native`, `claude-code`, `acp`), consistent with `parseRunFlags`.
+
 - **Per-node backend selection now overrides global `--backend` flag** (issue #70): A node with `backend: native` always uses the native LLM client even when `--backend claude-code` is set globally, enabling mixed-backend pipelines (e.g. some nodes on claude-code subscription, others on OpenAI native API). The `selectBackend` priority is now documented: per-node attr > global flag > default native. The registry also registers the CodergenHandler when per-node backend attrs are present in the graph, even if the global default is native and no `--backend` flag is passed. Error messages for missing native client when using `--backend claude-code` now include actionable guidance.
 - **Start/exit node handler overwrite broadened fix**: `ensureStartExitNodes` previously checked only the `prompt` attribute to decide whether to preserve a node's handler, which meant tool nodes (`tool_command`) and human nodes (`mode`) designated as start/exit would still have their handlers silently overwritten. The helper now bases the decision on the resolved `Handler` field: any handler other than `codergen` is always preserved; only a bare `codergen` node with no `prompt` gets the passthrough. This fixes cases like `parallel` with `parallel_targets`, `parallel.fan_in` with `fan_in_sources`, `conditional`, `subgraph`, `stack.manager_loop`, and `wait.human` nodes used as start/exit. Closes #69.
 
 ### Added
 
 - **Cloudflare AI Gateway support** (`TRACKER_GATEWAY_URL` env var, `--gateway-url` CLI flag): set one gateway root URL and tracker routes every provider through Cloudflare's AI Gateway — Anthropic, OpenAI, Gemini, OpenAI-compat — avoiding 429 rate limits and enabling gateway-side analytics, caching, and model routing. The new `ResolveProviderBaseURL(provider)` helper resolves the per-provider base URL with priority `<PROVIDER>_BASE_URL` > `TRACKER_GATEWAY_URL` + provider suffix > empty (SDK default), so per-provider env var overrides still work. Closes #64.
+- **`tracker doctor` comprehensive preflight checks** (closes #61): `tracker doctor` now runs a structured series of checks with clear pass/warn/fail status, actionable fix messages, and documented exit codes (0=all pass, 1=any failure, 2=warnings only). New checks include:
+  - Per-provider API key validation with format hints (key prefix, length)
+  - `--probe` flag for live auth validation (makes a minimal 1-token API call per configured provider; offline-safe by default). The probe adapters honor `<PROVIDER>_BASE_URL` env vars (and `TRACKER_GATEWAY_URL`) so probing through a Cloudflare gateway works.
+  - `dippin` binary version detection; `checkVersionCompat` compares the installed CLI's major.minor against the `go.mod`-pinned version (`v0.18.0`) and warns on divergence.
+  - `.ai/` subdirectory writability check (note: `TRACKER_ARTIFACT_DIR` env var is not checked — it is not wired into the CLI and was removed to avoid misleading output)
+  - Disk space warning (warn if < 10 GB free — threshold confirmed in code; the initial PR description that said 100 MB was incorrect)
+  - `.gitignore` check for `.tracker/`, `runs/`, and `.ai/` entries (line-by-line exact match — no more false positives from substrings like `runsheet`)
+  - Environment variable warnings for dangerous override keys (`TRACKER_PASS_ENV`, `TRACKER_PASS_API_KEYS`)
+  - `--backend claude-code` awareness: hard-fails (exit 1) if the `claude` CLI is not found; without `--backend` the missing binary is a warning only.
+  - `tracker doctor [pipeline.dip]`: optional positional arg validates the pipeline file with full lint (same as `tracker validate`)
+  - Human-readable composite result lines per check group (providers, binaries, dirs)
+  - `-w/--workdir` and `--backend` flags on `tracker doctor` so `tracker -w /path doctor` and `tracker --backend claude-code doctor` work as expected.
+  - OpenAI-Compat provider now has a real `--probe` implementation (previously silently skipped).
+  - Probe default models updated to current catalog entries: Anthropic → `claude-haiku-4-5`, Gemini → `gemini-2.0-flash`.
+  - Exit code 2 is emitted when doctor finishes with warnings but no hard failures (was always 0). `DoctorWarningsError` sentinel returned from `runDoctorWithConfig`; `main.go` maps it to `os.Exit(2)`.
+
 - **Per-node context scoping** (`PipelineContext.ScopeToNode`): after each node's handler completes, the engine copies every key written during that node's execution into a `node.<nodeID>.<key>` namespace. Downstream nodes can read `node.MyAgent.last_response` to get a specific upstream node's output without being affected by later writes to the bare `last_response` key. Bare keys retain their last-writer-wins global semantics for full backward compatibility. New convenience method `GetScoped(nodeID, key)`. Closes #32.
 - `pipeline.ContextKeyNodePrefix` constant (`"node."`), the namespace prefix for per-node scoped keys.
 
