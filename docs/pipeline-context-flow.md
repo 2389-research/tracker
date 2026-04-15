@@ -52,11 +52,11 @@ Note that `ctx.` is the user-facing prefix; internally the engine stores bare ke
 
 ## Per-node scoping details
 
-After a node finishes, the engine calls `PipelineContext.ScopeToNode(nodeID)` which copies every key the node wrote during its execution into a `node.<nodeID>.<key>` alias. Earlier scoped aliases are preserved — only the bare keys get last-writer-wins semantics.
+After a node finishes, the engine calls `PipelineContext.ScopeToNode(nodeID)`, which copies the keys marked dirty by `Set` or `Merge` since the previous scope into `node.<nodeID>.<key>` aliases. Bootstrap writes that happen before execution begins (via `NewPipelineContextFrom` and the `ClearDirty` call in `initRunState`) are excluded — only keys dirtied during the node's actual execution are scoped. Keys that already start with `node.` are skipped to avoid creating doubly-nested aliases. Earlier scoped aliases are preserved — only the bare keys get last-writer-wins semantics.
 
 **Sequential pipelines:** `${ctx.node.<id>.last_response}` is the reliable way to reference a specific agent's output later in the run, instead of relying on `last_response` (which changes every node).
 
-**Parallel branches:** parallel branch handlers run in their own isolated context snapshots and their updates are merged into the parent context under the *parallel node's* scope — not under each branch's scope. If you need per-branch outputs after a fan-in, the robust patterns today are:
+**Parallel branches:** parallel branch handlers run in their own isolated context snapshots. After all branches complete, the parallel node writes a single `parallel.results` JSON array that surfaces each branch's status and context updates. The parent context does NOT gain per-branch scoped keys — there is no `${ctx.node.<BranchID>.*}` namespace populated by parallel execution. If you need per-branch outputs after a fan-in, the robust patterns today are:
 
 1. **Filesystem hand-off** (used by `examples/ask_and_execute.dip`): each branch writes files under `.ai/` and the fan-in node reads them.
 2. **Parse `parallel.results`**: the parallel handler writes a JSON array to `${ctx.parallel.results}` containing each branch's status and any `ContextUpdates` it produced.
@@ -148,7 +148,7 @@ An agent node receives a compacted view of the pipeline context as part of its p
 - **`summary:medium`** — only these keys: `outcome`, `last_response`, `human_response`, `preferred_label`, `tool_stdout`, `tool_stderr`, `graph.goal`.
 - **`summary:low`** — `graph.goal` plus a single `completed_summary` key listing which nodes have finished.
 - **`compact`** — `graph.goal` and `outcome` only.
-- **`truncate`** — same keys as `summary:medium`, but each value is word-boundary-truncated to 500 characters.
+- **`truncate`** — same keys as `summary:medium`, but each value is word-boundary-truncated to 500 characters and `"..."` is appended when truncation occurs.
 
 On resume from a checkpoint, the engine applies `DegradeFidelity()` to drop one level automatically so the replayed context doesn't blow out the window.
 
