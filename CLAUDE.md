@@ -176,6 +176,9 @@ The CLI summary in `cmd/tracker/summary.go` uses `llm.TokenTracker` for
 per-provider breakdowns (middleware-level) and `EngineResult.Usage` for
 trace-level aggregation. These are independent data sources.
 
+### Pipeline context isolation (v0.17.0+)
+For the user-facing model of data flow between nodes, context scoping, and fidelity levels, see **[Pipeline Context Flow](docs/pipeline-context-flow.md)**.
+
 ### Cost governance (v0.17.0+)
 
 `UsageSummary.ProviderTotals` carries the per-provider rollup (tokens + cost),
