@@ -18,3 +18,4 @@ coverage.out
 *.bak
 .claude/settings.local.json
 .private-journal/
+a/
