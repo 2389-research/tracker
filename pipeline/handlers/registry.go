@@ -211,8 +211,10 @@ func registerCodergenHandler(registry *pipeline.HandlerRegistry, cfg *registryCo
 	}
 }
 
-// graphHasPerNodeBackend returns true if any node in the graph specifies an
-// explicit "backend" attribute, indicating a mixed-backend pipeline.
+// graphHasPerNodeBackend returns true if any node in the graph specifies a
+// non-empty "backend" attribute. Used by the handler registry to decide
+// whether to register the full codergen handler even when the global default
+// is native, so mixed-backend pipelines work.
 func graphHasPerNodeBackend(graph *pipeline.Graph) bool {
 	if graph == nil {
 		return false
