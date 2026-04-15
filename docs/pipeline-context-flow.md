@@ -50,6 +50,24 @@ agent Synthesize
 
 Note that `ctx.` is the user-facing prefix; internally the engine stores bare keys (`last_response`) and scoped aliases (`node.Architect.last_response`). Conditions strip the prefix before lookup.
 
+### Safe-key restrictions for tool commands
+
+Agent prompts and conditions can interpolate any context key. **Tool commands have a restricted safe-key allowlist** to prevent LLM-origin values from leaking into shell commands and causing injection attacks.
+
+**Safe keys in tool commands:**
+- `outcome`, `preferred_label`, `human_response`, `interview_answers` (handler-written, user-controlled)
+- All `graph.*` keys (author-defined in the workflow)
+- All `params.*` keys (passed at pipeline invocation time)
+
+**Blocked keys in tool commands:**
+- `last_response` — LLM-generated, unsafe
+- `response.<nodeID>` — LLM-generated, unsafe
+- `tool_stdout`, `tool_stderr` — subprocess output, unsafe
+- `parallel.results` — LLM-generated, unsafe
+- Any other LLM-origin context keys
+
+If a tool command tries to interpolate a blocked key, the placeholder is replaced with an empty string. To safely use LLM output in a tool command, follow the **[Returning custom data from a node](#returning-custom-data-from-a-node)** pattern: have the agent write output to a file, then read the file in the tool command. See CLAUDE.md's **"Tool node safety"** section for detailed patterns and safety rationales.
+
 ## Per-node scoping details
 
 After a node finishes, the engine calls `PipelineContext.ScopeToNode(nodeID)`, which copies the keys marked dirty by `Set` or `Merge` since the previous scope into `node.<nodeID>.<key>` aliases. Bootstrap writes that happen before execution begins (via `NewPipelineContextFrom` and the `ClearDirty` call in `initRunState`) are excluded — only keys dirtied during the node's actual execution are scoped. Keys that already start with `node.` are skipped to avoid creating doubly-nested aliases. Earlier scoped aliases are preserved — only the bare keys get last-writer-wins semantics.
