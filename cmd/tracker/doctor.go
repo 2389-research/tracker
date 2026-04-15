@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -17,9 +18,20 @@ import (
 	"github.com/2389-research/tracker/llm/anthropic"
 	"github.com/2389-research/tracker/llm/google"
 	"github.com/2389-research/tracker/llm/openai"
+	"github.com/2389-research/tracker/llm/openaicompat"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// DoctorWarningsError is returned by runDoctorWithConfig when there are
+// warnings but no hard failures. main.go maps this to os.Exit(2).
+type DoctorWarningsError struct {
+	Warnings int
+}
+
+func (e *DoctorWarningsError) Error() string {
+	return fmt.Sprintf("doctor: %d warning(s) (no failures)", e.Warnings)
+}
 
 type checkResult struct {
 	ok      bool
@@ -118,6 +130,9 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 	if result.Failures > 0 {
 		return fmt.Errorf("health check failed")
 	}
+	if result.Warnings > 0 {
+		return &DoctorWarningsError{Warnings: result.Warnings}
+	}
 	return nil
 }
 
@@ -185,27 +200,81 @@ var knownProviders = []providerDef{
 	{
 		name:         "Anthropic",
 		envVars:      []string{"ANTHROPIC_API_KEY"},
-		defaultModel: "claude-haiku-3-5",
-		buildAdapter: func(key string) (llm.ProviderAdapter, error) { return anthropic.New(key), nil },
+		defaultModel: "claude-haiku-4-5",
+		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			var opts []anthropic.Option
+			if base := resolveProviderBaseURL("anthropic"); base != "" {
+				opts = append(opts, anthropic.WithBaseURL(base))
+			}
+			return anthropic.New(key, opts...), nil
+		},
 	},
 	{
 		name:         "OpenAI",
 		envVars:      []string{"OPENAI_API_KEY"},
 		defaultModel: "gpt-4o-mini",
-		buildAdapter: func(key string) (llm.ProviderAdapter, error) { return openai.New(key), nil },
+		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			var opts []openai.Option
+			if base := resolveProviderBaseURL("openai"); base != "" {
+				opts = append(opts, openai.WithBaseURL(base))
+			}
+			return openai.New(key, opts...), nil
+		},
 	},
 	{
 		name:         "OpenAI-Compat",
 		envVars:      []string{"OPENAI_COMPAT_API_KEY"},
 		defaultModel: "gpt-4o-mini",
-		buildAdapter: nil,
+		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			var opts []openaicompat.Option
+			if base := resolveProviderBaseURL("openai-compat"); base != "" {
+				opts = append(opts, openaicompat.WithBaseURL(base))
+			}
+			return openaicompat.New(key, opts...), nil
+		},
 	},
 	{
 		name:         "Gemini",
 		envVars:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 		defaultModel: "gemini-2.0-flash",
-		buildAdapter: func(key string) (llm.ProviderAdapter, error) { return google.New(key), nil },
+		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			var opts []google.Option
+			if base := resolveProviderBaseURL("gemini"); base != "" {
+				opts = append(opts, google.WithBaseURL(base))
+			}
+			return google.New(key, opts...), nil
+		},
 	},
+}
+
+// resolveProviderBaseURL returns the base URL override for a provider, checking
+// the provider-specific env var first, then falling back to TRACKER_GATEWAY_URL
+// with an appropriate suffix. This mirrors the logic in run.go and tracker.go.
+// provider is one of: "anthropic", "openai", "openai-compat", "gemini".
+func resolveProviderBaseURL(provider string) string {
+	envVarMap := map[string]string{
+		"anthropic":    "ANTHROPIC_BASE_URL",
+		"openai":       "OPENAI_BASE_URL",
+		"openai-compat": "OPENAI_COMPAT_BASE_URL",
+		"gemini":       "GEMINI_BASE_URL",
+	}
+	suffixMap := map[string]string{
+		"anthropic":    "/anthropic",
+		"openai":       "/openai",
+		"openai-compat": "/openai",
+		"gemini":       "/gemini",
+	}
+	if envVar, ok := envVarMap[provider]; ok {
+		if v := os.Getenv(envVar); v != "" {
+			return v
+		}
+	}
+	if gw := os.Getenv("TRACKER_GATEWAY_URL"); gw != "" {
+		if suffix, ok := suffixMap[provider]; ok {
+			return strings.TrimRight(gw, "/") + suffix
+		}
+	}
+	return ""
 }
 
 func checkProviders(probe bool) checkResult {
@@ -334,6 +403,10 @@ func getDippinVersion(path string) string {
 	return ver
 }
 
+// pinnedDippinVersion is the dippin-lang version from go.mod.
+// Keep in sync with the require line in go.mod.
+const pinnedDippinVersion = "v0.18.0"
+
 func checkVersionCompat() checkResult {
 	printCheck(true, fmt.Sprintf("tracker   %s (commit %s)", version, commit))
 	dippinPath, err := exec.LookPath("dippin")
@@ -346,31 +419,82 @@ func checkVersionCompat() checkResult {
 		}
 	}
 	cliVer := getDippinVersion(dippinPath)
-	printCheck(true, fmt.Sprintf("dippin    %s", cliVer))
+	printCheck(true, fmt.Sprintf("dippin    %s (installed) / %s (go.mod pin)", cliVer, pinnedDippinVersion))
+
+	if mismatch, msg := checkDippinVersionMismatch(cliVer, pinnedDippinVersion); mismatch {
+		printWarn(fmt.Sprintf("dippin version mismatch: %s", msg))
+		return checkResult{
+			ok:      false,
+			warn:    true,
+			message: fmt.Sprintf("tracker %s / dippin %s (mismatched — expected %s)", version, cliVer, pinnedDippinVersion),
+			fix:     fmt.Sprintf("install dippin %s to match the go.mod pin", pinnedDippinVersion),
+		}
+	}
 	return checkResult{ok: true, message: fmt.Sprintf("tracker %s / dippin %s", version, cliVer)}
+}
+
+// checkDippinVersionMismatch returns (true, reason) if the installed CLI version
+// diverges from the pinned version on major or minor components.
+func checkDippinVersionMismatch(cliVer, pinned string) (bool, string) {
+	cliMajor, cliMinor, ok1 := parseVersionMajorMinor(cliVer)
+	pinMajor, pinMinor, ok2 := parseVersionMajorMinor(pinned)
+	if !ok1 || !ok2 {
+		// Can't parse — skip the check to avoid false positives.
+		return false, ""
+	}
+	if cliMajor != pinMajor {
+		return true, fmt.Sprintf("installed major v%d != pinned major v%d", cliMajor, pinMajor)
+	}
+	if cliMinor != pinMinor {
+		return true, fmt.Sprintf("installed v%d.%d != pinned v%d.%d", cliMajor, cliMinor, pinMajor, pinMinor)
+	}
+	return false, ""
+}
+
+var semverRe = regexp.MustCompile(`v?(\d+)\.(\d+)`)
+
+func parseVersionMajorMinor(ver string) (major, minor int, ok bool) {
+	m := semverRe.FindStringSubmatch(ver)
+	if m == nil {
+		return 0, 0, false
+	}
+	fmt.Sscanf(m[1], "%d", &major)
+	fmt.Sscanf(m[2], "%d", &minor)
+	return major, minor, true
 }
 
 func checkOtherBinaries(backend string) checkResult {
 	allOk := true
+	hasWarn := false
 	if _, err := exec.LookPath("git"); err == nil {
 		printCheck(true, "git found (recommended for pipeline versioning)")
 	} else {
 		printWarn("git not found in PATH (recommended for pipeline versioning)")
-		allOk = false
+		hasWarn = true
 	}
 	claudePath, claudeErr := exec.LookPath("claude")
 	if claudeErr == nil {
 		claudeVer := getBinaryVersion(claudePath, "--version")
 		printCheck(true, fmt.Sprintf("claude %s (for --backend claude-code)", claudeVer))
 	} else if backend == "claude-code" {
+		// Hard fail: the user explicitly requested this backend; without the binary the run will fail.
 		printCheck(false, "claude CLI not found in PATH (required for --backend claude-code)")
 		printHint("install the Claude CLI from https://claude.ai/code")
 		allOk = false
 	} else {
 		printWarn("claude not found in PATH (install for --backend claude-code support)")
+		hasWarn = true
 	}
-	if allOk {
+	if allOk && !hasWarn {
 		return checkResult{ok: true, message: "optional binaries available"}
+	}
+	if !allOk {
+		return checkResult{
+			ok:      false,
+			warn:    false,
+			message: "required binary missing for selected backend",
+			fix:     "install the Claude CLI from https://claude.ai/code",
+		}
 	}
 	return checkResult{
 		ok:      false,
@@ -430,7 +554,7 @@ func checkGitignore(workdir string) {
 	gitignorePath := filepath.Join(workdir, ".gitignore")
 	content, err := os.ReadFile(gitignorePath)
 	if err != nil {
-		printWarn(".gitignore not found — add .tracker/ and runs/ to prevent committing run artifacts")
+		printWarn(".gitignore not found — add .tracker/, runs/, and .ai/ to prevent committing run artifacts")
 		return
 	}
 	cs := string(content)
@@ -440,6 +564,9 @@ func checkGitignore(workdir string) {
 	}
 	if !strings.Contains(cs, "runs") {
 		missing = append(missing, "runs/")
+	}
+	if !strings.Contains(cs, ".ai") {
+		missing = append(missing, ".ai/")
 	}
 	if len(missing) > 0 {
 		printWarn(fmt.Sprintf(".gitignore missing entries: %s", strings.Join(missing, ", ")))
@@ -525,7 +652,7 @@ func checkDiskSpace(workdir string) checkResult {
 	}
 	available := stat.Bavail * uint64(stat.Bsize)
 	availableGB := float64(available) / (1024 * 1024 * 1024)
-	const minGB = 1.0
+	const minGB = 10.0
 	if availableGB < minGB {
 		return checkResult{
 			ok:      false,

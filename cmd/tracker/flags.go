@@ -69,11 +69,14 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 }
 
 // parseDoctorFlags handles doctor-specific flag parsing.
-// Supports: --probe (live auth check) and an optional positional pipeline file.
+// Supports: --probe (live auth check), -w/--workdir, --backend, and an optional positional pipeline file.
 func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	dfs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dfs.SetOutput(io.Discard)
 	dfs.BoolVar(&cfg.probe, "probe", false, "Perform live API auth check for each configured provider")
+	dfs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
+	dfs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
+	dfs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
 	if err := dfs.Parse(args[2:]); err != nil {
 		return *cfg, fmt.Errorf("doctor: %w", err)
 	}

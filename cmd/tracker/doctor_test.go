@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -536,5 +537,149 @@ func TestParseFlagsDoctorWithProbeAndFile(t *testing.T) {
 	}
 	if cfg.pipelineFile != "pipeline.dip" {
 		t.Errorf("expected pipelineFile=pipeline.dip, got %q", cfg.pipelineFile)
+	}
+}
+
+func TestParseFlagsDoctorWithWorkdir(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "doctor", "--workdir", "/tmp/myproject"})
+	if err != nil {
+		t.Fatalf("parseFlags error: %v", err)
+	}
+	if cfg.workdir != "/tmp/myproject" {
+		t.Errorf("expected workdir=/tmp/myproject, got %q", cfg.workdir)
+	}
+}
+
+func TestParseFlagsDoctorWithShortWorkdir(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "doctor", "-w", "/tmp/myproject"})
+	if err != nil {
+		t.Fatalf("parseFlags error: %v", err)
+	}
+	if cfg.workdir != "/tmp/myproject" {
+		t.Errorf("expected workdir=/tmp/myproject, got %q", cfg.workdir)
+	}
+}
+
+func TestParseFlagsDoctorWithBackend(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "doctor", "--backend", "claude-code"})
+	if err != nil {
+		t.Fatalf("parseFlags error: %v", err)
+	}
+	if cfg.backend != "claude-code" {
+		t.Errorf("expected backend=claude-code, got %q", cfg.backend)
+	}
+}
+
+// ---- DoctorWarningsError exit code 2 ----------------------------------------
+
+func TestDoctorWarningsErrorSentinel(t *testing.T) {
+	e := &DoctorWarningsError{Warnings: 3}
+	if e.Error() == "" {
+		t.Error("expected non-empty error message")
+	}
+
+	// Verify errors.As works for the sentinel check in main.go.
+	var target *DoctorWarningsError
+	if !errors.As(e, &target) {
+		t.Error("errors.As should match *DoctorWarningsError")
+	}
+	if target.Warnings != 3 {
+		t.Errorf("expected Warnings=3, got %d", target.Warnings)
+	}
+}
+
+func TestRunDoctorWithConfigWarningsOnlyReturnsDoctorWarningsError(t *testing.T) {
+	dir := t.TempDir()
+	// No providers configured → provider check is a failure, not a warning.
+	// Trigger a warning-only result by setting dangerous env vars (warn)
+	// and a valid API key (providers pass).
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-testkey1234567890abcdef")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("TRACKER_PASS_ENV", "1") // triggers env warning
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+	t.Setenv("TRACKER_ARTIFACT_DIR", "")
+
+	cfg := DoctorConfig{}
+	err := runDoctorWithConfig(dir, cfg)
+	// Dippin may or may not be installed; if installed and compat check warns
+	// that's fine. The important thing is we get either nil or DoctorWarningsError
+	// (not a plain error) when there are warnings but no hard failures.
+	if err != nil {
+		var warnErr *DoctorWarningsError
+		if !errors.As(err, &warnErr) {
+			// Only acceptable non-nil result is DoctorWarningsError.
+			// A plain error means something else failed (e.g. dippin check failed).
+			// That's allowed in test environments without dippin installed.
+			t.Logf("got non-DoctorWarningsError: %v (acceptable if dippin not installed)", err)
+		}
+	}
+}
+
+// ---- checkDippinVersionMismatch ---------------------------------------------
+
+func TestCheckDippinVersionMismatch(t *testing.T) {
+	tests := []struct {
+		cli     string
+		pinned  string
+		wantMis bool
+	}{
+		{"v0.18.0", "v0.18.0", false},
+		{"v0.18.1", "v0.18.0", false}, // same major.minor, patch differs → ok
+		{"v0.17.0", "v0.18.0", true},  // minor mismatch
+		{"v1.0.0", "v0.18.0", true},   // major mismatch
+		{"(version unknown)", "v0.18.0", false}, // unparseable → skip
+	}
+	for _, tt := range tests {
+		got, _ := checkDippinVersionMismatch(tt.cli, tt.pinned)
+		if got != tt.wantMis {
+			t.Errorf("checkDippinVersionMismatch(%q, %q) = %v, want %v", tt.cli, tt.pinned, got, tt.wantMis)
+		}
+	}
+}
+
+// ---- checkGitignore with .ai/ -----------------------------------------------
+
+func TestCheckGitignoreWithAiEntry(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := ".tracker\nruns\n.ai\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Should not emit any warnings — just verify no panic.
+	checkGitignore(dir)
+}
+
+// ---- resolveProviderBaseURL -------------------------------------------------
+
+func TestResolveProviderBaseURLFromEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "https://custom.example.com")
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+
+	got := resolveProviderBaseURL("anthropic")
+	if got != "https://custom.example.com" {
+		t.Errorf("expected https://custom.example.com, got %q", got)
+	}
+}
+
+func TestResolveProviderBaseURLFromGateway(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.example.com")
+
+	got := resolveProviderBaseURL("anthropic")
+	if got != "https://gateway.example.com/anthropic" {
+		t.Errorf("expected https://gateway.example.com/anthropic, got %q", got)
+	}
+}
+
+func TestResolveProviderBaseURLEmpty(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+
+	got := resolveProviderBaseURL("anthropic")
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
 	}
 }

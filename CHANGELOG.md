@@ -17,15 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cloudflare AI Gateway support** (`TRACKER_GATEWAY_URL` env var, `--gateway-url` CLI flag): set one gateway root URL and tracker routes every provider through Cloudflare's AI Gateway — Anthropic, OpenAI, Gemini, OpenAI-compat — avoiding 429 rate limits and enabling gateway-side analytics, caching, and model routing. The new `ResolveProviderBaseURL(provider)` helper resolves the per-provider base URL with priority `<PROVIDER>_BASE_URL` > `TRACKER_GATEWAY_URL` + provider suffix > empty (SDK default), so per-provider env var overrides still work. Closes #64.
 - **`tracker doctor` comprehensive preflight checks** (closes #61): `tracker doctor` now runs a structured series of checks with clear pass/warn/fail status, actionable fix messages, and documented exit codes (0=all pass, 1=any failure, 2=warnings only). New checks include:
   - Per-provider API key validation with format hints (key prefix, length)
-  - `--probe` flag for live auth validation (makes a minimal 1-token API call per configured provider; offline-safe by default)
-  - `dippin` binary version detection and compatibility warning when mismatched with the bundled dippin-lang library
+  - `--probe` flag for live auth validation (makes a minimal 1-token API call per configured provider; offline-safe by default). The probe adapters honor `<PROVIDER>_BASE_URL` env vars (and `TRACKER_GATEWAY_URL`) so probing through a Cloudflare gateway works.
+  - `dippin` binary version detection; `checkVersionCompat` compares the installed CLI's major.minor against the `go.mod`-pinned version (`v0.18.0`) and warns on divergence.
   - `.ai/` subdirectory and `TRACKER_ARTIFACT_DIR` writability checks
-  - Disk space warning (warn if < 100 MB free)
-  - `.gitignore` check for `.tracker/` and `.ai/` entries
-  - Environment variable warnings for deprecated/conflicting keys
-  - `--backend claude-code` awareness: hard-fails if the `claude` CLI is not found
+  - Disk space warning (warn if < 10 GB free)
+  - `.gitignore` check for `.tracker/`, `runs/`, and `.ai/` entries
+  - Environment variable warnings for dangerous override keys (`TRACKER_PASS_ENV`, `TRACKER_PASS_API_KEYS`)
+  - `--backend claude-code` awareness: hard-fails (exit 1) if the `claude` CLI is not found; without `--backend` the missing binary is a warning only.
   - `tracker doctor [pipeline.dip]`: optional positional arg validates the pipeline file with full lint (same as `tracker validate`)
   - Human-readable composite result lines per check group (providers, binaries, dirs)
+  - `-w/--workdir` and `--backend` flags on `tracker doctor` so `tracker -w /path doctor` and `tracker --backend claude-code doctor` work as expected.
+  - OpenAI-Compat provider now has a real `--probe` implementation (previously silently skipped).
+  - Probe default models updated to current catalog entries: Anthropic → `claude-haiku-4-5`, Gemini → `gemini-2.0-flash`.
+  - Exit code 2 is emitted when doctor finishes with warnings but no hard failures (was always 0). `DoctorWarningsError` sentinel returned from `runDoctorWithConfig`; `main.go` maps it to `os.Exit(2)`.
 
 - **Per-node context scoping** (`PipelineContext.ScopeToNode`): after each node's handler completes, the engine copies every key written during that node's execution into a `node.<nodeID>.<key>` namespace. Downstream nodes can read `node.MyAgent.last_response` to get a specific upstream node's output without being affected by later writes to the bare `last_response` key. Bare keys retain their last-writer-wins global semantics for full backward compatibility. New convenience method `GetScoped(nodeID, key)`. Closes #32.
 - `pipeline.ContextKeyNodePrefix` constant (`"node."`), the namespace prefix for per-node scoped keys.

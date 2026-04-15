@@ -95,6 +95,11 @@ func main() {
 	}
 
 	if err != nil {
+		var doctorWarn *DoctorWarningsError
+		if errors.As(err, &doctorWarn) {
+			// exit 2 = doctor finished with warnings but no failures
+			os.Exit(2)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
