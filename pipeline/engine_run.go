@@ -514,7 +514,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		e.clearDownstream(fallback, s.cp)
 		s.cp.CurrentNode = fallback
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 		return fallback, true, nil, nil
 	}
 
@@ -591,7 +591,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 		return false, target, nil
 	}
 	// Fallback/escalation: target is set but not a retry (one-time redirect).
@@ -608,7 +608,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		s.trace.AddEntry(*traceEntry)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 		return false, target, nil
 	}
 	if unsatisfied {
