@@ -131,13 +131,15 @@ func ensureStartExitNodes(g *Graph) error {
 	return nil
 }
 
-// nodeHasHandlerContent reports whether a node has a real handler that requires
-// execution. Any resolved handler other than "codergen" (agent) is considered
-// meaningful — this covers tool, wait.human, parallel, parallel.fan_in,
-// conditional, subgraph, stack.manager_loop, and any future handlers without
-// needing to enumerate handler-specific attributes. A codergen node has content
-// only when it carries a prompt; without a prompt it is a bare placeholder that
-// should be replaced with the passthrough start/exit handler.
+// nodeHasHandlerContent reports whether a node has a real handler. Only two
+// cases are treated as "bare" passthroughs suitable for start/exit handler
+// assignment:
+//   - codergen nodes with no prompt (a placeholder agent node)
+//   - nodes with an empty/unresolved Handler (never dispatched, no content)
+//
+// Any other handler value (tool, wait.human, parallel, parallel.fan_in,
+// conditional, subgraph, stack.manager_loop, etc.) means the node has real
+// work to do and must keep its handler.
 func nodeHasHandlerContent(n *Node) bool {
 	if n.Handler != "" && n.Handler != "codergen" {
 		return true

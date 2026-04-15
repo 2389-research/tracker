@@ -1550,9 +1550,10 @@ func TestFromDippinIR_ToolStartExitNodes(t *testing.T) {
 }
 
 // TestNodeHasHandlerContent verifies the helper that distinguishes bare nodes
-// from nodes with handler-specific content. The helper is based on the resolved
-// Handler field: any handler other than "codergen" is considered meaningful.
-// A codergen node with no prompt is the only passthrough case.
+// from nodes with handler-specific content. Two cases are treated as bare
+// passthroughs: codergen nodes with no prompt and nodes with an empty/unresolved
+// Handler field. Any other handler type is considered meaningful and must be
+// preserved.
 func TestNodeHasHandlerContent(t *testing.T) {
 	tests := []struct {
 		name string
