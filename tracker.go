@@ -324,12 +324,13 @@ func parseDOTSource(source string) (*pipeline.Graph, error) {
 // parseDIPSource parses a Dippin-format pipeline source, runs validation and lint.
 func parseDIPSource(source string) (*pipeline.Graph, error) {
 	graph, diags, err := pipeline.LoadDippinWorkflow(source, "inline.dip")
-	if err != nil {
-		return nil, err
-	}
-	// Log validation errors and lint warnings.
+	// Log validation errors and lint warnings before returning so callers
+	// see the specific diagnostics even on fatal failures.
 	for _, d := range diags {
 		log.Println(d.String())
+	}
+	if err != nil {
+		return nil, err
 	}
 	return graph, nil
 }

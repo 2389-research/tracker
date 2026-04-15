@@ -164,12 +164,13 @@ func loadEmbeddedPipeline(info WorkflowInfo) (*pipeline.Graph, error) {
 // printed to stderr but do not block execution.
 func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
 	graph, diags, err := pipeline.LoadDippinWorkflow(source, filename)
-	if err != nil {
-		return nil, err
-	}
-	// Log validation errors and lint warnings to stderr.
+	// Log validation errors and lint warnings before returning so users
+	// see the specific diagnostics even on fatal failures.
 	for _, d := range diags {
 		fmt.Fprintln(os.Stderr, d.String())
+	}
+	if err != nil {
+		return nil, err
 	}
 	return graph, nil
 }
