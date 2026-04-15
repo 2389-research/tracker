@@ -397,10 +397,8 @@ for provider, pc := range result.Cost.ByProvider {
 **CLI users** pass flags directly to `tracker`:
 
 ```
-tracker examples/ask_and_execute.dip \
-    --max-tokens 100000 \
-    --max-cost 500 \
-    --max-wall-time 30m
+tracker --max-tokens 100000 --max-cost 500 --max-wall-time 30m \
+    examples/ask_and_execute.dip
 ```
 
 A halted run prints a `HALTED: budget exceeded` section naming the dimension
