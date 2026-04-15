@@ -102,7 +102,18 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	if err := validateBackend(cfg.backend); err != nil {
 		return cfg, err
 	}
+	if err := validateBudgetLimits(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+// validateBudgetLimits returns an error if any budget limit is negative.
+func validateBudgetLimits(cfg runConfig) error {
+	if cfg.maxTokens < 0 || cfg.maxCostCents < 0 || cfg.maxWallTime < 0 {
+		return fmt.Errorf("budget limits must be non-negative")
+	}
+	return nil
 }
 
 // isHelpRequest returns true when the second argument is a help flag.

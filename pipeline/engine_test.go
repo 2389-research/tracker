@@ -1331,3 +1331,79 @@ func TestEngine_HaltsOnBudgetBreach(t *testing.T) {
 		t.Errorf("pipeline should have halted before n3/end, CompletedNodes=%v", result.CompletedNodes)
 	}
 }
+
+// TestEngine_HaltsOnBudgetBreachDuringRetry verifies that the BudgetGuard fires
+// on the retry path, not just on normal node advancement. The node returns
+// OutcomeRetry twice, each attempt emitting 500 tokens. The guard limit is 600,
+// so after the first retry's trace entry is committed (total 500 from the initial
+// run + 500 from the retry attempt = 1000 > 600) the pipeline must halt.
+func TestEngine_HaltsOnBudgetBreachDuringRetry(t *testing.T) {
+	g := NewGraph("retry_budget_halt_test")
+	g.Attrs["default_max_retry"] = "5"
+	g.Attrs["default_retry_policy"] = "none"
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "retrying", Shape: "box", Label: "Retrying"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "start", To: "retrying"})
+	g.AddEdge(&Edge{From: "retrying", To: "end"})
+
+	nodeStats := &SessionStats{
+		InputTokens:  350,
+		OutputTokens: 150,
+		TotalTokens:  500,
+		CostUSD:      0.01,
+		Provider:     "test-provider",
+	}
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeRetry, Stats: nodeStats}, nil
+		}})
+	}
+
+	var mu sync.Mutex
+	var budgetEvents []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventBudgetExceeded {
+			mu.Lock()
+			budgetEvents = append(budgetEvents, evt)
+			mu.Unlock()
+		}
+	})
+
+	// Guard: 600 tokens. First attempt on "retrying" adds 500 tokens.
+	// After the retry trace entry is committed (attempt 1 = 500 tokens total),
+	// the budget check fires (500 < 600 still ok). On the second retry attempt
+	// another 500 is added (total 1000 > 600), budget must trip.
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 600})
+	engine := NewEngine(g, reg,
+		WithPipelineEventHandler(handler),
+		WithBudgetGuard(guard),
+	)
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine.Run returned unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if result.Status != OutcomeBudgetExceeded {
+		t.Errorf("result.Status = %q, want %q", result.Status, OutcomeBudgetExceeded)
+	}
+
+	if len(result.BudgetLimitsHit) != 1 || result.BudgetLimitsHit[0] != "tokens" {
+		t.Errorf("BudgetLimitsHit = %v, want [\"tokens\"]", result.BudgetLimitsHit)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(budgetEvents) == 0 {
+		t.Error("expected at least one EventBudgetExceeded, got none")
+	}
+}

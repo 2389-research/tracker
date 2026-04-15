@@ -32,9 +32,11 @@ func (e *Engine) emitCostUpdate(s *runState) {
 }
 
 // haltForBudget produces the terminal loopResult emitted when a BudgetGuard
-// trips. It sets the trace end time, emits EventBudgetExceeded, and packages
+// trips. It saves the checkpoint (so restarts skip already-completed nodes),
+// sets the trace end time, emits EventBudgetExceeded, and packages
 // an EngineResult with Status=OutcomeBudgetExceeded and BudgetLimitsHit.
 func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
 	summary := s.trace.AggregateUsage()
 	var costSnap *CostSnapshot
@@ -421,6 +423,10 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 	}
 	traceEntry.EdgeTo = target
 	s.trace.AddEntry(*traceEntry)
+	e.emitCostUpdate(s)
+	if lr := e.checkBudgetAfterEmit(s); lr != nil {
+		return "", false, lr.result, nil
+	}
 	e.clearDownstream(target, s.cp)
 	s.cp.CurrentNode = target
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)

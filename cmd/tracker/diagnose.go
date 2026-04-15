@@ -89,6 +89,7 @@ type budgetHalt struct {
 	TotalTokens   int
 	TotalCostUSD  float64
 	WallElapsedMs int64
+	Message       string // breach description, e.g. "max_total_tokens exceeded"
 }
 
 // runDiagnose performs deep failure analysis on a pipeline run.
@@ -166,6 +167,9 @@ func printBudgetHalt(halt *budgetHalt) {
 	w := os.Stdout
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "━━━ Budget halt detected ━━━")
+	if halt.Message != "" {
+		fmt.Fprintf(w, "  breach:       %s\n", halt.Message)
+	}
 	if halt.TotalTokens > 0 {
 		fmt.Fprintf(w, "  tokens used:  %d\n", halt.TotalTokens)
 	}
@@ -234,6 +238,7 @@ type diagnoseEntry struct {
 	Timestamp     string  `json:"ts"`
 	Type          string  `json:"type"`
 	NodeID        string  `json:"node_id"`
+	Message       string  `json:"message"`
 	Error         string  `json:"error"`
 	ToolErr       string  `json:"tool_error"`
 	Handler       string  `json:"handler"`
@@ -277,6 +282,7 @@ func parseActivityLines(data string, failures map[string]*nodeFailure, stageStar
 				TotalTokens:   entry.TotalTokens,
 				TotalCostUSD:  entry.TotalCostUSD,
 				WallElapsedMs: entry.WallElapsedMs,
+				Message:       entry.Message,
 			}
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
