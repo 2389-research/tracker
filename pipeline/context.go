@@ -1,8 +1,12 @@
 // ABOUTME: Thread-safe key-value store shared across all pipeline nodes during execution.
 // ABOUTME: Provides Get/Set/Merge/Snapshot operations and separate internal state for engine bookkeeping.
+// ABOUTME: Supports per-node namespace scoping via ScopeToNode — dirty keys are copied into node.<id>.<key>
+// ABOUTME: after each node completes, preserving individual node outputs without breaking global backward compat.
 package pipeline
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -32,6 +36,12 @@ const (
 	// are not specified.
 	ContextKeyInterviewQuestions = "interview_questions"
 	ContextKeyInterviewAnswers   = "interview_answers"
+
+	// ContextKeyNodePrefix is the prefix for per-node scoped context keys.
+	// After each node completes, ScopeToNode copies dirty keys into this namespace
+	// so downstream nodes can read e.g. "node.MyAgent.last_response" without
+	// colliding with the global "last_response" written by later nodes.
+	ContextKeyNodePrefix = "node."
 )
 
 // Internal context keys used by the engine for bookkeeping.
@@ -42,10 +52,17 @@ const (
 // PipelineContext is a thread-safe key-value store shared across all pipeline
 // nodes during execution. It has two namespaces: user-visible values and
 // internal engine bookkeeping (retry counters, loop state).
+//
+// Per-node scoping: every key written via Set or Merge is recorded in a dirty
+// set. After a node's handler completes, the engine calls ScopeToNode(nodeID)
+// to copy those dirty keys into "node.<nodeID>.<key>" entries. The dirty set is
+// then cleared, ready for the next node. Bare keys continue to be overwritten
+// globally (last-writer-wins), preserving full backward compatibility.
 type PipelineContext struct {
 	mu       sync.RWMutex
 	values   map[string]string
 	internal map[string]string
+	dirty    map[string]struct{}
 }
 
 // NewPipelineContext creates an empty pipeline context.
@@ -53,6 +70,7 @@ func NewPipelineContext() *PipelineContext {
 	return &PipelineContext{
 		values:   make(map[string]string),
 		internal: make(map[string]string),
+		dirty:    make(map[string]struct{}),
 	}
 }
 
@@ -64,14 +82,17 @@ func (c *PipelineContext) Get(key string) (string, bool) {
 	return v, ok
 }
 
-// Set stores a value in the user-visible context.
+// Set stores a value in the user-visible context and marks the key as dirty
+// so it will be included in the next ScopeToNode call.
 func (c *PipelineContext) Set(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.values[key] = value
+	c.dirty[key] = struct{}{}
 }
 
-// Merge applies all key-value pairs from updates into the user-visible context.
+// Merge applies all key-value pairs from updates into the user-visible context
+// and marks each key as dirty so it will be included in the next ScopeToNode call.
 func (c *PipelineContext) Merge(updates map[string]string) {
 	if updates == nil {
 		return
@@ -80,6 +101,7 @@ func (c *PipelineContext) Merge(updates map[string]string) {
 	defer c.mu.Unlock()
 	for k, v := range updates {
 		c.values[k] = v
+		c.dirty[k] = struct{}{}
 	}
 }
 
@@ -125,13 +147,57 @@ func (c *PipelineContext) DiffFrom(baseline map[string]string) map[string]string
 	return diff
 }
 
+// ScopeToNode copies all dirty (recently-written) keys into the per-node
+// namespace "node.<nodeID>.<key>" and then clears the dirty set. This lets
+// downstream nodes read a specific upstream node's output — for example
+// "node.MyAgent.last_response" — without being affected by later writes to
+// the bare "last_response" key. The bare keys are NOT removed; they retain
+// their last-writer-wins global semantics for backward compatibility.
+//
+// Keys that already start with ContextKeyNodePrefix (e.g. "node.X.foo") are
+// skipped — scoping them would create confusing doubly-nested keys like
+// "node.<id>.node.X.foo". The engine passes the node's graph ID directly.
+func (c *PipelineContext) ScopeToNode(nodeID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prefix := fmt.Sprintf("%s%s.", ContextKeyNodePrefix, nodeID)
+	for k := range c.dirty {
+		if strings.HasPrefix(k, ContextKeyNodePrefix) {
+			continue
+		}
+		c.values[prefix+k] = c.values[k]
+	}
+	c.dirty = make(map[string]struct{})
+}
+
+// ClearDirty resets the dirty set without scoping any keys. Call this after
+// all bootstrap writes (graph attrs, initial context, checkpoint restore) are
+// done and before the main engine loop starts, so that baseline values are not
+// copied into the first node's scoped namespace.
+func (c *PipelineContext) ClearDirty() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dirty = make(map[string]struct{})
+}
+
+// GetScoped retrieves the value of key from the per-node namespace for nodeID.
+// It is equivalent to Get("node.<nodeID>.<key>") but more readable at call
+// sites. Returns ("", false) if the scoped key has not been written.
+func (c *PipelineContext) GetScoped(nodeID, key string) (string, bool) {
+	return c.Get(fmt.Sprintf("%s%s.%s", ContextKeyNodePrefix, nodeID, key))
+}
+
 // NewPipelineContextFrom creates a PipelineContext pre-populated with the
 // given values. Used by the parallel handler to give each branch an isolated
 // snapshot of the shared context.
+//
+// Preloaded values are written directly without marking them dirty, so the
+// first ScopeToNode call after construction only scopes keys that were written
+// after construction — not the entire baseline snapshot.
 func NewPipelineContextFrom(values map[string]string) *PipelineContext {
 	ctx := NewPipelineContext()
 	for k, v := range values {
-		ctx.Set(k, v)
+		ctx.values[k] = v
 	}
 	return ctx
 }

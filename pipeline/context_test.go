@@ -208,3 +208,216 @@ func TestNewPipelineContextFrom(t *testing.T) {
 		t.Error("context should not share state with input map")
 	}
 }
+
+// --- Per-node scoping tests ---
+
+func TestScopeToNodeBasic(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("last_response", "hello from A")
+	ctx.ScopeToNode("A")
+
+	// Bare key still present.
+	v, ok := ctx.Get("last_response")
+	if !ok || v != "hello from A" {
+		t.Errorf("bare last_response = %q, want %q", v, "hello from A")
+	}
+	// Scoped key created.
+	v, ok = ctx.Get("node.A.last_response")
+	if !ok || v != "hello from A" {
+		t.Errorf("node.A.last_response = %q, want %q", v, "hello from A")
+	}
+}
+
+func TestScopeToNodeLastWriterWins(t *testing.T) {
+	ctx := NewPipelineContext()
+
+	// Node A writes last_response.
+	ctx.Set("last_response", "from A")
+	ctx.ScopeToNode("A")
+
+	// Node B overwrites last_response.
+	ctx.Set("last_response", "from B")
+	ctx.ScopeToNode("B")
+
+	// Global key holds last writer's value.
+	v, _ := ctx.Get("last_response")
+	if v != "from B" {
+		t.Errorf("global last_response = %q, want %q", v, "from B")
+	}
+	// Per-node keys preserve each node's original value.
+	va, _ := ctx.Get("node.A.last_response")
+	if va != "from A" {
+		t.Errorf("node.A.last_response = %q, want %q", va, "from A")
+	}
+	vb, _ := ctx.Get("node.B.last_response")
+	if vb != "from B" {
+		t.Errorf("node.B.last_response = %q, want %q", vb, "from B")
+	}
+}
+
+func TestScopeToNodeDirtyCleared(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("outcome", "success")
+	ctx.ScopeToNode("NodeX")
+
+	// Write a new key after scoping.
+	ctx.Set("new_key", "new_val")
+	ctx.ScopeToNode("NodeY")
+
+	// NodeX should not have new_key in its namespace.
+	if _, ok := ctx.Get("node.NodeX.new_key"); ok {
+		t.Error("node.NodeX.new_key should not exist — it was written after ScopeToNode(NodeX)")
+	}
+	// NodeY should have new_key.
+	v, ok := ctx.Get("node.NodeY.new_key")
+	if !ok || v != "new_val" {
+		t.Errorf("node.NodeY.new_key = %q, want %q", v, "new_val")
+	}
+}
+
+func TestScopeToNodeMerge(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Merge(map[string]string{
+		"tool_stdout": "hello",
+		"tool_stderr": "warn",
+	})
+	ctx.ScopeToNode("ToolNode")
+
+	if v, ok := ctx.Get("node.ToolNode.tool_stdout"); !ok || v != "hello" {
+		t.Errorf("node.ToolNode.tool_stdout = %q, want %q", v, "hello")
+	}
+	if v, ok := ctx.Get("node.ToolNode.tool_stderr"); !ok || v != "warn" {
+		t.Errorf("node.ToolNode.tool_stderr = %q, want %q", v, "warn")
+	}
+}
+
+func TestGetScoped(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("last_response", "scoped value")
+	ctx.ScopeToNode("Agent1")
+
+	v, ok := ctx.GetScoped("Agent1", "last_response")
+	if !ok || v != "scoped value" {
+		t.Errorf("GetScoped(Agent1, last_response) = %q, want %q", v, "scoped value")
+	}
+
+	// Missing key returns false.
+	_, ok = ctx.GetScoped("Agent1", "nonexistent")
+	if ok {
+		t.Error("GetScoped on nonexistent key should return false")
+	}
+}
+
+func TestScopeToNodeNoOp(t *testing.T) {
+	// ScopeToNode with no dirty keys should not panic and should leave context unchanged.
+	ctx := NewPipelineContext()
+	ctx.Set("existing", "val")
+	ctx.ScopeToNode("PriorNode") // clears dirty for "existing"
+
+	// Now scope again with nothing dirty.
+	ctx.ScopeToNode("EmptyNode")
+
+	if _, ok := ctx.Get("node.EmptyNode.existing"); ok {
+		t.Error("node.EmptyNode.existing should not exist — key was not dirty during EmptyNode's execution")
+	}
+}
+
+func TestScopeToNodeBackwardCompatConditions(t *testing.T) {
+	// Conditions like ctx.outcome = success must still work after scoping.
+	ctx := NewPipelineContext()
+	ctx.Set(ContextKeyOutcome, "success")
+	ctx.Set(ContextKeyLastResponse, "the response")
+	ctx.ScopeToNode("SomeNode")
+
+	// Bare keys still resolve correctly.
+	if v, ok := ctx.Get(ContextKeyOutcome); !ok || v != "success" {
+		t.Errorf("outcome = %q after scoping, want %q", v, "success")
+	}
+	if v, ok := ctx.Get(ContextKeyLastResponse); !ok || v != "the response" {
+		t.Errorf("last_response = %q after scoping, want %q", v, "the response")
+	}
+}
+
+func TestScopeToNodeSkipsNodePrefixedKeys(t *testing.T) {
+	// Keys already under the "node." namespace must not be re-scoped to avoid
+	// doubly-nested keys like "node.B.node.A.last_response".
+	ctx := NewPipelineContext()
+	ctx.Set("last_response", "from A")
+	ctx.ScopeToNode("A")
+
+	// Simulate a later node writing a scoped key directly (e.g. from a merge).
+	// This marks "node.A.last_response" dirty for the next ScopeToNode call.
+	ctx.Set("node.A.last_response", "injected")
+	ctx.ScopeToNode("B")
+
+	// "node.B.node.A.last_response" must not exist.
+	if _, ok := ctx.Get("node.B.node.A.last_response"); ok {
+		t.Error("doubly-nested scoped key should not be created")
+	}
+}
+
+func TestClearDirtyPreventsBootstrapScoping(t *testing.T) {
+	// Simulate engine bootstrap: keys are written via Set (which marks dirty),
+	// then ClearDirty is called before the main loop. After that, only keys
+	// written by the first handler should land in the node's scoped namespace.
+	ctx := NewPipelineContext()
+	ctx.Set("graph.goal", "build something") // simulates buildInitialContext
+	ctx.Set("graph.model", "gpt-4o")
+	ctx.Set("outcome", "success") // simulates checkpoint restore
+
+	// Engine calls ClearDirty after all bootstrap is done.
+	ctx.ClearDirty()
+
+	// First node handler writes its own key.
+	ctx.Set("last_response", "from the first handler")
+	ctx.ScopeToNode("FirstNode")
+
+	// Bootstrap keys must NOT appear in the first node's scoped namespace.
+	if _, ok := ctx.Get("node.FirstNode.graph.goal"); ok {
+		t.Error("bootstrap key graph.goal should not be scoped into node.FirstNode.*")
+	}
+	if _, ok := ctx.Get("node.FirstNode.graph.model"); ok {
+		t.Error("bootstrap key graph.model should not be scoped into node.FirstNode.*")
+	}
+	if _, ok := ctx.Get("node.FirstNode.outcome"); ok {
+		t.Error("checkpoint-restored key outcome should not be scoped into node.FirstNode.*")
+	}
+	// The handler-written key MUST appear.
+	if v, ok := ctx.Get("node.FirstNode.last_response"); !ok || v != "from the first handler" {
+		t.Errorf("node.FirstNode.last_response = %q, want %q", v, "from the first handler")
+	}
+	// Bare bootstrap keys must still be accessible.
+	if v, ok := ctx.Get("graph.goal"); !ok || v != "build something" {
+		t.Errorf("graph.goal = %q, want %q", v, "build something")
+	}
+}
+
+func TestNewPipelineContextFromPreloadedKeysNotDirty(t *testing.T) {
+	// NewPipelineContextFrom must not mark preloaded keys dirty. The first
+	// ScopeToNode call should only scope keys written after construction.
+	baseline := map[string]string{
+		"last_response": "preloaded",
+		"outcome":       "success",
+	}
+	ctx := NewPipelineContextFrom(baseline)
+
+	// Only this key is written after construction.
+	ctx.Set("new_key", "new_val")
+	ctx.ScopeToNode("FirstNode")
+
+	// Preloaded keys must NOT appear in the scoped namespace.
+	if _, ok := ctx.Get("node.FirstNode.last_response"); ok {
+		t.Error("preloaded key last_response should not be scoped into node.FirstNode.*")
+	}
+	if _, ok := ctx.Get("node.FirstNode.outcome"); ok {
+		t.Error("preloaded key outcome should not be scoped into node.FirstNode.*")
+	}
+	// The key written after construction MUST appear.
+	if v, ok := ctx.Get("node.FirstNode.new_key"); !ok || v != "new_val" {
+		t.Errorf("node.FirstNode.new_key = %q, want %q", v, "new_val")
+	}
+	// Bare preloaded keys must still be accessible.
+	if v, ok := ctx.Get("last_response"); !ok || v != "preloaded" {
+		t.Errorf("last_response = %q, want %q", v, "preloaded")
+	}
+}

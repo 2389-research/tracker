@@ -124,6 +124,11 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		return nil, err
 	}
 
+	// Clear the dirty set after all bootstrap writes (graph attrs, initial
+	// context, checkpoint restore, compaction) so that baseline values are not
+	// copied into the first node's scoped namespace when ScopeToNode is called.
+	pctx.ClearDirty()
+
 	return &runState{
 		runID:        runID,
 		pctx:         pctx,
