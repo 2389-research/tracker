@@ -245,8 +245,20 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		return err
 	}
 
+	// Validate that only one interviewer mode is selected.
+	if err := validateInterviewerFlags(cfg); err != nil {
+		return err
+	}
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
+	// Store webhook config for chooseInterviewer.
+	activeWebhookCfg = webhookCfg{
+		url:           cfg.webhookURL,
+		callbackAddr:  cfg.gateCallbackAddr,
+		timeout:       cfg.gateTimeout,
+		timeoutAction: cfg.gateTimeoutAction,
+		authHeader:    cfg.webhookAuthHeader,
+	}
 	// Store budget limits for buildEngineOptions (called from run/runTUI).
 	activeBudgetLimits = pipeline.BudgetLimits{
 		MaxTotalTokens: cfg.maxTokens,
@@ -280,6 +292,26 @@ func printRunPreamble(cfg runConfig) error {
 		fmt.Fprintf(os.Stderr, "Running in autopilot mode (persona: %s) — human gates answered by LLM\n", cfg.autopilot)
 	} else if cfg.autoApprove {
 		fmt.Fprintln(os.Stderr, "Running in auto-approve mode — all human gates auto-approved")
+	} else if cfg.webhookURL != "" {
+		fmt.Fprintf(os.Stderr, "Webhook gate mode: posting human gates to webhook, callback on %s\n", cfg.gateCallbackAddr)
+	}
+	return nil
+}
+
+// validateInterviewerFlags returns an error if multiple exclusive interviewer modes are set.
+func validateInterviewerFlags(cfg runConfig) error {
+	set := 0
+	if cfg.autopilot != "" {
+		set++
+	}
+	if cfg.autoApprove {
+		set++
+	}
+	if cfg.webhookURL != "" {
+		set++
+	}
+	if set > 1 {
+		return fmt.Errorf("only one of --autopilot, --auto-approve, or --webhook-url may be set at a time")
 	}
 	return nil
 }

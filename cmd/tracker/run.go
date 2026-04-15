@@ -35,6 +35,18 @@ type autopilotCfg struct {
 
 var activeAutopilotCfg autopilotCfg
 
+// webhookCfg holds webhook gate settings needed by chooseInterviewer.
+// Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
+type webhookCfg struct {
+	url           string        // outbound webhook URL
+	callbackAddr  string        // local callback server address
+	timeout       time.Duration // gate response timeout (0 = default 10m)
+	timeoutAction string        // "fail", "success", or "default"
+	authHeader    string        // Authorization header for outbound POSTs
+}
+
+var activeWebhookCfg webhookCfg
+
 // activeBudgetLimits holds the budget limits for the current run.
 // Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
 var activeBudgetLimits pipeline.BudgetLimits
@@ -539,12 +551,15 @@ func buildOpenAICompatConstructor() func(string) (llm.ProviderAdapter, error) {
 }
 
 // chooseInterviewer selects the interviewer implementation based on config.
-// Priority: --auto-approve > --autopilot > terminal detection.
+// Priority: --auto-approve > --webhook-url > --autopilot > terminal detection.
 // When backend is claude-code and autopilot is active, routes gate decisions
 // through the claude CLI subprocess instead of the native LLM client.
 func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.FreeformInterviewer {
 	if cfg.autoApprove {
 		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	if activeWebhookCfg.url != "" {
+		return newWebhookInterviewerFromCfg(activeWebhookCfg)
 	}
 	if cfg.persona != "" {
 		return chooseAutopilotInterviewer(cfg.persona, llmClient, backend)
@@ -553,6 +568,17 @@ func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client,
 		return tui.NewMode1Interviewer()
 	}
 	return handlers.NewConsoleInterviewer()
+}
+
+// newWebhookInterviewerFromCfg creates a WebhookInterviewer from the given config.
+// Note: the webhook URL is intentionally not logged to avoid leaking tokens in URLs.
+func newWebhookInterviewerFromCfg(cfg webhookCfg) handlers.FreeformInterviewer {
+	wi := handlers.NewWebhookInterviewer(cfg.url, cfg.callbackAddr)
+	wi.Timeout = cfg.timeout
+	wi.DefaultAction = cfg.timeoutAction
+	wi.AuthHeader = cfg.authHeader
+	fmt.Fprintf(os.Stderr, "Webhook gate mode: callback server on %s, timeout %v\n", cfg.callbackAddr, cfg.timeout)
+	return wi
 }
 
 // chooseAutopilotInterviewer resolves the best FreeformInterviewer for autopilot mode.
@@ -592,6 +618,13 @@ func configureTUIHeader(app *tui.AppModel, backend string, cfg autopilotCfg) {
 // If autopilot is active, wraps it so decisions flash in the TUI modal.
 // When backend is claude-code, routes autopilot through the claude subprocess.
 func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
+	if activeWebhookCfg.url != "" {
+		wi := newWebhookInterviewerFromCfg(activeWebhookCfg)
+		// WebhookInterviewer implements LabeledFreeformInterviewer.
+		if lfi, ok := wi.(handlers.LabeledFreeformInterviewer); ok {
+			return lfi
+		}
+	}
 	if cfg.persona != "" {
 		persona, _ := handlers.ParsePersona(cfg.persona)
 		// Use claude-code autopilot when backend is claude-code.

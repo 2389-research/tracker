@@ -508,3 +508,128 @@ func TestRun_BudgetHalt_FromConfig(t *testing.T) {
 		t.Errorf("expected LimitsHit[0]='tokens', got %q", result.Cost.LimitsHit[0])
 	}
 }
+
+// TestResolveProviderBaseURL_NoGatewayNoOverride tests when neither gateway nor override is set.
+func TestResolveProviderBaseURL_NoGatewayNoOverride(t *testing.T) {
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("GEMINI_BASE_URL", "")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+
+	tests := []struct {
+		provider string
+		expect   string
+	}{
+		{"anthropic", ""},
+		{"openai", ""},
+		{"gemini", ""},
+		{"openai-compat", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got := ResolveProviderBaseURL(tt.provider)
+			if got != tt.expect {
+				t.Errorf("ResolveProviderBaseURL(%q) = %q, want %q", tt.provider, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestResolveProviderBaseURL_GatewayOnly tests gateway URL synthesis without provider-specific overrides.
+func TestResolveProviderBaseURL_GatewayOnly(t *testing.T) {
+	gateway := "https://gateway.ai.cloudflare.com/v1/myaccount/mygateway"
+	t.Setenv("TRACKER_GATEWAY_URL", gateway)
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("GEMINI_BASE_URL", "")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+
+	tests := []struct {
+		provider string
+		expect   string
+	}{
+		{"anthropic", gateway + "/anthropic"},
+		{"openai", gateway + "/openai"},
+		{"gemini", gateway + "/google-ai-studio"},
+		{"openai-compat", gateway + "/openai"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got := ResolveProviderBaseURL(tt.provider)
+			if got != tt.expect {
+				t.Errorf("ResolveProviderBaseURL(%q) = %q, want %q", tt.provider, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestResolveProviderBaseURL_ProviderOverridesGateway tests that provider-specific env vars win over gateway.
+func TestResolveProviderBaseURL_ProviderOverridesGateway(t *testing.T) {
+	gateway := "https://gateway.ai.cloudflare.com/v1/myaccount/mygateway"
+	t.Setenv("TRACKER_GATEWAY_URL", gateway)
+	t.Setenv("ANTHROPIC_BASE_URL", "https://custom.anthropic.com")
+	t.Setenv("OPENAI_BASE_URL", "https://custom.openai.com")
+	t.Setenv("GEMINI_BASE_URL", "https://custom.gemini.com")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "https://custom.compat.com")
+
+	tests := []struct {
+		provider string
+		expect   string
+	}{
+		{"anthropic", "https://custom.anthropic.com"},
+		{"openai", "https://custom.openai.com"},
+		{"gemini", "https://custom.gemini.com"},
+		{"openai-compat", "https://custom.compat.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got := ResolveProviderBaseURL(tt.provider)
+			if got != tt.expect {
+				t.Errorf("ResolveProviderBaseURL(%q) = %q, want %q", tt.provider, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestResolveProviderBaseURL_TrailingSlashHandling tests that trailing slashes are handled correctly.
+func TestResolveProviderBaseURL_TrailingSlashHandling(t *testing.T) {
+	gateway := "https://gateway.ai.cloudflare.com/v1/myaccount/mygateway/"
+	t.Setenv("TRACKER_GATEWAY_URL", gateway)
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("GEMINI_BASE_URL", "")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+
+	tests := []struct {
+		provider string
+		expect   string
+	}{
+		{"anthropic", "https://gateway.ai.cloudflare.com/v1/myaccount/mygateway/anthropic"},
+		{"openai", "https://gateway.ai.cloudflare.com/v1/myaccount/mygateway/openai"},
+		{"gemini", "https://gateway.ai.cloudflare.com/v1/myaccount/mygateway/google-ai-studio"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got := ResolveProviderBaseURL(tt.provider)
+			if got != tt.expect {
+				t.Errorf("ResolveProviderBaseURL(%q) = %q, want %q", tt.provider, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestResolveProviderBaseURL_UnknownProvider tests that unknown providers return empty string.
+func TestResolveProviderBaseURL_UnknownProvider(t *testing.T) {
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.ai.cloudflare.com/v1/acc/gw")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+
+	got := ResolveProviderBaseURL("unknown-provider")
+	if got != "" {
+		t.Errorf("ResolveProviderBaseURL(unknown-provider) = %q, want empty string", got)
+	}
+}

@@ -254,6 +254,50 @@ export GEMINI_API_KEY=...
 
 Non-retryable provider errors (quota exceeded, auth failure, model not found) immediately fail the pipeline with a clear message instead of silently retrying.
 
+### Cloudflare AI Gateway
+
+Tracker supports the **Cloudflare AI Gateway** to handle rate limiting and route requests through Cloudflare's high-capacity infrastructure. This is particularly useful if you're hitting 429 rate limit errors from direct API calls.
+
+#### Setup
+
+First, [create an AI Gateway](https://developers.cloudflare.com/ai-gateway/) in your Cloudflare dashboard. Note your account ID and gateway slug.
+
+Then set the gateway URL:
+
+```bash
+export TRACKER_GATEWAY_URL="https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_slug>"
+```
+
+Tracker will automatically synthesize provider-specific URLs for each provider:
+- Anthropic → `<gateway>/anthropic`
+- OpenAI → `<gateway>/openai`
+- Gemini → `<gateway>/google-ai-studio`
+
+Your API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) still need to be set — Cloudflare passes authentication through to the underlying providers.
+
+You can also use the CLI flag:
+
+```bash
+tracker --gateway-url "https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_slug>" build_product
+```
+
+#### Provider-Specific Overrides
+
+If you want to route only certain providers through the gateway, set provider-specific base URLs instead:
+
+```bash
+export TRACKER_GATEWAY_URL="https://gateway.ai.cloudflare.com/v1/account/gateway"
+export ANTHROPIC_BASE_URL="https://api.anthropic.com"  # Direct, not through gateway
+# OpenAI and Gemini will use the gateway
+```
+
+Provider-specific `*_BASE_URL` env vars always take precedence over `TRACKER_GATEWAY_URL`.
+
+#### Learn More
+
+See the [Cloudflare AI Gateway documentation](https://developers.cloudflare.com/ai-gateway/) for setup, rate limiting, analytics, and advanced routing options.
+
+
 ## Architecture
 
 ```mermaid
