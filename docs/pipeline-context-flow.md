@@ -1,101 +1,149 @@
 # Pipeline Context Flow
 
-Each node in a Tracker pipeline runs a fresh LLM session with a clean context window. There is no conversation history that automatically carries from one node to the next. Data flows between nodes via context keys in a shared key-value store.
+Tracker pipelines pass data between nodes through a shared key-value store called the **pipeline context**, not through LLM chat history. Agent nodes start a fresh LLM session each time they run — prior conversation turns are not replayed. Tool, human, parallel, and fan-in nodes produce outputs by writing specific keys into the context. Downstream nodes read those keys to see what happened upstream.
 
 ## Core Concept
 
-- **Fresh session per node**: Each node gets a new LLM conversation, not a continuation of the previous one.
-- **Data flows via context keys**: Values like `last_response`, `outcome`, and custom keys persist in the pipeline context.
-- **Per-node scoping** (v0.17.0+): After each node, outputs are stored in `node.<nodeID>.<key>` to prevent collisions in parallel pipelines.
-- **Fidelity levels**: Control how much prior context is injected into each node's prompt to manage token usage.
+- **Fresh LLM sessions**: each agent node runs a brand-new conversation with its own system prompt. No chat history leaks between agent nodes.
+- **Shared context store**: all nodes read from and write to a single `PipelineContext` (a string-keyed map) for the whole run.
+- **Per-node scoping** (upcoming — currently on `main`, unreleased): after each node completes, every key it wrote is also copied into `node.<nodeID>.<key>` so later nodes can reference a specific upstream node's output by name.
+- **Fidelity levels** control how much context an agent node sees in its prompt to prevent context-window bloat.
 
-## Why This Design
+## Why sessions are fresh
 
-As noted in the project meeting: "The DIP files have a weird context window situation where it doesn't necessarily have previous context in... which has turned out to be pretty positive because if you look at how people are doing Claude Code the best, it's like clear context before doing big work."
+Each node solves a single well-scoped problem. Carrying a full conversation history across nodes would push the LLM into a context window built for a different task, wasting tokens and confusing attention. By resetting the session every node, tracker matches how the best Claude Code workflows operate — clear the context before big work, pass only the inputs that matter.
 
-Each node gets only the context it needs, not accumulated noise from all prior steps.
+## Built-in context keys
 
-## Built-in Context Keys
+| Key | Written by | Purpose |
+|---|---|---|
+| `last_response` | agent (codergen) handler | The most recent agent node's final message content |
+| `response.<nodeID>` | agent and human handlers | Per-node response snapshot addressable by node ID |
+| `outcome` | every handler | `success` / `fail` / `retry` / `escalate` for the node that just ran |
+| `preferred_label` | human handler | Label the user selected on a labeled gate |
+| `human_response` | human handler | Freeform text the user typed at a gate |
+| `tool_stdout` / `tool_stderr` | tool handler | Subprocess output captured from `tool_command` |
+| `graph.goal` | engine (from `workflow.Goal`) | The workflow's stated objective, always available |
+| `parallel.results` | parallel handler | JSON array with one entry per branch: `{node_id, status, context_updates, stats}` |
 
-| Key | Set By | Purpose |
-|-----|--------|---------|
-| `last_response` | Agent/tool | Most recent node's output |
-| `response.<nodeID>` | Agents | Per-node response snapshot |
-| `outcome` | All handlers | success/fail/retry status |
-| `preferred_label` | Human gates | User's choice from options |
-| `human_response` | Human gates | Freeform user input |
-| `tool_stdout` / `tool_stderr` | Tools | Command output |
-| `graph.goal` | Engine | Pipeline's goal |
+Custom keys written by any handler are also available — for example a tool node can `echo "KEY=value" >> $TRACKER_CONTEXT`-style patterns if the workflow author designs for it.
 
-## Per-Node Scoping
+## Referencing context in prompts and commands
 
-In parallel pipelines, the last-writer-wins model causes collisions. Scoped keys prevent this:
+Inside an agent `prompt:`, a tool `command:`, or an edge `when:` condition, refer to a context key with `${ctx.<key>}`:
 
 ```dip
-fan_in Review <- BranchA, BranchB
-
-agent Review
-  prompt: |
-    BranchA result: ${ctx.node.BranchA.last_response}
-    BranchB result: ${ctx.node.BranchB.last_response}
-```
-
-Without scoped keys, `last_response` would only contain whichever branch finished last.
-
-## Fidelity Levels
-
-Control context window size by specifying how much prior context to inject:
-
-- `full` — all context (default)
-- `summary:high` — all keys + trimmed artifacts
-- `summary:medium` — only: outcome, last_response, human_response, tool_stdout, graph.goal
-- `summary:low` — only: goal + completed node list
-- `compact` — goal + outcome only
-- `truncate` — summary:medium keys capped at ~500 chars
-
-## Common Patterns
-
-### Sequential Pipe
-```dip
-agent Step1
-  prompt: Analyze...
-
 agent Step2
-  prompt: Based on ${ctx.last_response}, now...
-```
-
-### Reference Specific Node
-```dip
-agent Later
   prompt: |
-    From Step1: ${ctx.node.Step1.last_response}
-    From Step2: ${ctx.node.Step2.last_response}
+    The planner said: ${ctx.last_response}
+    Goal: ${ctx.graph.goal}
 ```
 
-### Parallel with Fan-in
+For per-node scoped reads (addressing a specific earlier node):
+
 ```dip
-parallel Work -> BranchA, BranchB
-
-fan_in Join <- BranchA, BranchB
-
 agent Synthesize
   prompt: |
-    A: ${ctx.node.BranchA.last_response}
-    B: ${ctx.node.BranchB.last_response}
-    Combine these...
+    Design from Architect: ${ctx.node.Architect.last_response}
+    Review from Critic:    ${ctx.node.Critic.last_response}
 ```
 
-## Common Mistakes
+Note that `ctx.` is the user-facing prefix; internally the engine stores bare keys (`last_response`) and scoped aliases (`node.Architect.last_response`). Conditions strip the prefix before lookup.
 
-❌ Expecting chat history: Each node is a fresh session.
-✅ Pass data explicitly: Use context keys and scoped keys.
+## Per-node scoping details
 
-❌ Using `last_response` in parallel: Gets the last branch to finish.
-✅ Use scoped keys: `${ctx.node.Branch1.output}`, `${ctx.node.Branch2.output}`.
+After a node finishes, the engine calls `PipelineContext.ScopeToNode(nodeID)` which copies every key the node wrote during its execution into a `node.<nodeID>.<key>` alias. Earlier scoped aliases are preserved — only the bare keys get last-writer-wins semantics.
 
-## See Also
+**Sequential pipelines:** `${ctx.node.<id>.last_response}` is the reliable way to reference a specific agent's output later in the run, instead of relying on `last_response` (which changes every node).
 
-- [CLAUDE.md](../CLAUDE.md): "Token usage flows through three layers"
-- `pipeline/context.go`: `PipelineContext`, `ScopeToNode`, `GetScoped`
-- `pipeline/fidelity.go`: Fidelity levels implementation
-- `examples/ask_and_execute.dip`: Real-world parallel example
+**Parallel branches:** parallel branch handlers run in their own isolated context snapshots and their updates are merged into the parent context under the *parallel node's* scope — not under each branch's scope. If you need per-branch outputs after a fan-in, the robust patterns today are:
+
+1. **Filesystem hand-off** (used by `examples/ask_and_execute.dip`): each branch writes files under `.ai/` and the fan-in node reads them.
+2. **Parse `parallel.results`**: the parallel handler writes a JSON array to `${ctx.parallel.results}` containing each branch's status and any `ContextUpdates` it produced.
+3. **Explicit per-branch keys**: a branch's agent prompt can instruct the model to write a specific key (e.g. `branch_a_summary`), and the fan-in node reads `${ctx.branch_a_summary}`.
+
+Reading `${ctx.node.<BranchID>.last_response}` after a parallel block will NOT automatically contain each branch's final output — use one of the patterns above instead.
+
+## Fidelity levels
+
+An agent node receives a compacted view of the pipeline context as part of its prompt construction. The amount of context injected is controlled by the `fidelity` attribute.
+
+### Levels (from `pipeline/fidelity.go`)
+
+- **`full`** — every key in the pipeline context is passed through. Expensive; use for nodes that genuinely need the whole picture.
+- **`summary:high`** — all keys plus a `summary.<nodeID>` entry per completed node, containing the first 2000 characters of each node's artifact `response.md`.
+- **`summary:medium`** — only these keys: `outcome`, `last_response`, `human_response`, `preferred_label`, `tool_stdout`, `tool_stderr`, `graph.goal`.
+- **`summary:low`** — `graph.goal` plus a single `completed_summary` key listing which nodes have finished.
+- **`compact`** — `graph.goal` and `outcome` only.
+- **`truncate`** — same keys as `summary:medium`, but each value is word-boundary-truncated to 500 characters.
+
+On resume from a checkpoint, the engine applies `DegradeFidelity()` to drop one level automatically so the replayed context doesn't blow out the window.
+
+### How to configure fidelity
+
+Set it as a node attribute (highest precedence):
+
+```dip
+agent Planner
+  fidelity: summary:high
+  prompt: ...
+```
+
+Or set a graph-level default that every node inherits unless it overrides:
+
+```dip
+workflow build_product
+  defaults:
+    fidelity: summary:medium
+```
+
+Lookup order: node `fidelity` attribute → graph `default_fidelity` attribute → hardcoded default (`full`).
+
+## Common patterns
+
+### Sequential pipe
+
+```dip
+agent Analyze
+  prompt: |
+    Analyze this spec: ${ctx.human_response}
+
+agent Build
+  prompt: |
+    Based on: ${ctx.last_response}
+    Build the described feature.
+```
+
+### Reference a specific earlier node
+
+```dip
+agent Review
+  prompt: |
+    Plan from Architect: ${ctx.node.Architect.last_response}
+    Code from Builder:   ${ctx.node.Builder.last_response}
+    Review both and report.
+```
+
+### Conditional routing on outcome
+
+```dip
+edges
+  Build -> Test        when ctx.outcome = success
+  Build -> FixFailure  when ctx.outcome = fail
+```
+
+## Common mistakes
+
+| Mistake | Fix |
+|---|---|
+| Expecting the chat history from one agent node to carry into the next. | Reset your mental model: each agent node sees only its own prompt. Pass data explicitly via `${ctx.<key>}`. |
+| Reading `${ctx.last_response}` after a parallel fan-in and expecting the results of all branches. | Use `parallel.results`, filesystem hand-off, or explicit per-branch keys. |
+| Setting huge prompt content that blows past the context window. | Choose a lower fidelity, or use `truncate` / `summary:low` on downstream nodes. |
+| Relying on a custom key written by one node without declaring it in the workflow. | Pick a key name, write it in the upstream node's prompt/command, and read it downstream with `${ctx.<key>}`. |
+
+## See also
+
+- `CLAUDE.md` — "Token usage flows through three layers" explains how token accounting aggregates across nodes
+- `pipeline/context.go` — `PipelineContext`, `ScopeToNode`, `GetScoped`
+- `pipeline/fidelity.go` — fidelity level implementation and compaction
+- `examples/ask_and_execute.dip` — real-world parallel + fan-in pattern using filesystem hand-off

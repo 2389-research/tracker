@@ -157,7 +157,7 @@ Three namespaces for `${...}` syntax in prompts:
 
 Variables are expanded in a single pass — resolved values are never re-scanned, preventing recursive expansion.
 
-**Important**: Each node runs a fresh LLM session. Data flows between nodes via context keys, not conversation history. Use `${ctx.node.<nodeID>.<key>}` for specific upstream outputs (critical in parallel pipelines). See **[Pipeline Context Flow](docs/pipeline-context-flow.md)**.
+**Important**: Each agent node runs a fresh LLM session. Data flows between nodes via context keys, not conversation history. Per-node scoping (`${ctx.node.<nodeID>.<key>}`) is an unreleased feature currently on `main`; it lets you reference a specific earlier node's output without relying on the last-writer-wins `last_response` key. See **[Pipeline Context Flow](docs/pipeline-context-flow.md)** for the full model, fidelity levels, and parallel-branch patterns.
 
 ### Edge Conditions
 
