@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 	"github.com/joho/godotenv"
@@ -191,7 +192,7 @@ func executeInit(cfg runConfig) error {
 		return fmt.Errorf("%s already exists — remove it first or edit it directly", outFile)
 	}
 
-	data, err := embeddedWorkflows.ReadFile(info.File)
+	data, _, err := tracker.OpenWorkflow(info.Name)
 	if err != nil {
 		return fmt.Errorf("read embedded workflow: %w", err)
 	}
