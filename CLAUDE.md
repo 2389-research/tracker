@@ -29,7 +29,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - The adapter maps IR field names to tracker convention: `model` → `llm_model`, `provider` → `llm_provider`
 - Provider name is `gemini` not `google`
 - Variable expansion is single-pass — never re-scan resolved values
-- `ensureStartExitNodes` only assigns passthrough start/exit handlers to nodes without a `prompt` attribute. Agent nodes with prompts keep their codergen handler and execute real LLM calls.
+- `ensureStartExitNodes` only assigns passthrough start/exit handlers to nodes without handler-specific content. It checks for `prompt` (agent), `tool_command` (tool), and `mode` (human) attrs. Nodes with any of these keep their real handler. Bare nodes (none of the three) get the passthrough handler.
 
 ### Parallel execution
 - The parallel handler dispatches branches from `parallel_targets` attr, NOT from outgoing graph edges

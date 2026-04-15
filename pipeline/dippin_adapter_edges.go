@@ -106,7 +106,10 @@ func synthesizeFanInEdges(g *Graph, irNode *ir.Node, cfg ir.FanInConfig, existin
 
 // ensureStartExitNodes verifies that the start and exit nodes exist in the graph.
 // The start/exit shapes (Mdiamond/Msquare) are always set so the validator can
-// identify them. Nodes without a prompt also get the passthrough handler.
+// identify them. Nodes without handler-specific content (prompt, tool_command, or
+// mode) are treated as bare passthrough nodes and get the start/exit handler.
+// Nodes with actual content keep their handler so user-defined start/exit
+// commands (tool), prompts (agent), or gates (human) execute correctly.
 func ensureStartExitNodes(g *Graph) error {
 	if _, ok := g.Nodes[g.StartNode]; !ok {
 		return fmt.Errorf("start node %q not found in graph", g.StartNode)
@@ -116,13 +119,22 @@ func ensureStartExitNodes(g *Graph) error {
 	}
 	startNode := g.Nodes[g.StartNode]
 	startNode.Shape = "Mdiamond"
-	if startNode.Attrs["prompt"] == "" {
+	if !nodeHasHandlerContent(startNode) {
 		startNode.Handler = "start"
 	}
 	exitNode := g.Nodes[g.ExitNode]
 	exitNode.Shape = "Msquare"
-	if exitNode.Attrs["prompt"] == "" {
+	if !nodeHasHandlerContent(exitNode) {
 		exitNode.Handler = "exit"
 	}
 	return nil
+}
+
+// nodeHasHandlerContent reports whether a node has attributes that require a
+// specific handler to execute: prompt (agent/codergen), tool_command (tool), or
+// mode (human). Nodes with none of these are bare passthrough start/exit nodes.
+func nodeHasHandlerContent(n *Node) bool {
+	return n.Attrs["prompt"] != "" ||
+		n.Attrs["tool_command"] != "" ||
+		n.Attrs["mode"] != ""
 }

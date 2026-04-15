@@ -1399,3 +1399,197 @@ func TestConvertEdge_ZeroWeightOmitted(t *testing.T) {
 		t.Error("false restart should not be in attrs")
 	}
 }
+
+// TestEnsureStartExitNodes_ToolNodeKeepsHandler verifies that tool start/exit nodes
+// with a tool_command attribute keep their "tool" handler and are not overwritten
+// with the passthrough "start"/"exit" handler. This is the root cause of issue #69.
+func TestEnsureStartExitNodes_ToolNodeKeepsHandler(t *testing.T) {
+	// Simulate a tool Start node: shape=parallelogram (from adapter), handler=tool,
+	// tool_command set (from ToolConfig.Command).
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "Start",
+		ExitNode:  "Exit",
+	}
+	g.Nodes["Start"] = &Node{
+		ID:      "Start",
+		Shape:   "parallelogram",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "touch start.txt"},
+	}
+	g.Nodes["Exit"] = &Node{
+		ID:      "Exit",
+		Shape:   "parallelogram",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "touch exit.txt"},
+	}
+	g.Edges = []*Edge{{From: "Start", To: "Exit"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	// Shapes must be overridden to Mdiamond/Msquare for validator.
+	if g.Nodes["Start"].Shape != "Mdiamond" {
+		t.Errorf("start shape = %q, want Mdiamond", g.Nodes["Start"].Shape)
+	}
+	if g.Nodes["Exit"].Shape != "Msquare" {
+		t.Errorf("exit shape = %q, want Msquare", g.Nodes["Exit"].Shape)
+	}
+
+	// Handlers must NOT be overwritten — tool commands need the tool handler.
+	if g.Nodes["Start"].Handler != "tool" {
+		t.Errorf("start handler = %q, want tool (preserved)", g.Nodes["Start"].Handler)
+	}
+	if g.Nodes["Exit"].Handler != "tool" {
+		t.Errorf("exit handler = %q, want tool (preserved)", g.Nodes["Exit"].Handler)
+	}
+}
+
+// TestEnsureStartExitNodes_HumanNodeKeepsHandler verifies that human start/exit
+// nodes with a mode attribute keep their "wait.human" handler.
+func TestEnsureStartExitNodes_HumanNodeKeepsHandler(t *testing.T) {
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "Begin",
+		ExitNode:  "Finish",
+	}
+	g.Nodes["Begin"] = &Node{
+		ID:      "Begin",
+		Shape:   "hexagon",
+		Handler: "wait.human",
+		Attrs:   map[string]string{"mode": "yes_no"},
+	}
+	g.Nodes["Finish"] = &Node{
+		ID:      "Finish",
+		Shape:   "hexagon",
+		Handler: "wait.human",
+		Attrs:   map[string]string{"mode": "yes_no"},
+	}
+	g.Edges = []*Edge{{From: "Begin", To: "Finish"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	if g.Nodes["Begin"].Handler != "wait.human" {
+		t.Errorf("start handler = %q, want wait.human (preserved)", g.Nodes["Begin"].Handler)
+	}
+	if g.Nodes["Finish"].Handler != "wait.human" {
+		t.Errorf("exit handler = %q, want wait.human (preserved)", g.Nodes["Finish"].Handler)
+	}
+}
+
+// TestFromDippinIR_ToolStartExitNodes verifies that tool nodes used as start/exit
+// retain the "tool" handler when converted via FromDippinIR. This is the full
+// adapter-level regression test for issue #69.
+func TestFromDippinIR_ToolStartExitNodes(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ToolStartExitTest",
+		Start: "Start",
+		Exit:  "Exit",
+		Nodes: []*ir.Node{
+			{
+				ID:     "Start",
+				Kind:   ir.NodeTool,
+				Label:  "Start",
+				Config: ir.ToolConfig{Command: "touch start.txt"},
+			},
+			{
+				ID:     "Middle",
+				Kind:   ir.NodeTool,
+				Label:  "Middle",
+				Config: ir.ToolConfig{Command: "touch middle.txt"},
+			},
+			{
+				ID:     "Exit",
+				Kind:   ir.NodeTool,
+				Label:  "Exit",
+				Config: ir.ToolConfig{Command: "touch exit.txt"},
+			},
+		},
+		Edges: []*ir.Edge{
+			{From: "Start", To: "Middle"},
+			{From: "Middle", To: "Exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	// All three nodes must use the "tool" handler.
+	for _, id := range []string{"Start", "Middle", "Exit"} {
+		node := graph.Nodes[id]
+		if node == nil {
+			t.Fatalf("node %q not found in graph", id)
+		}
+		if node.Handler != "tool" {
+			t.Errorf("node %q handler = %q, want tool", id, node.Handler)
+		}
+	}
+
+	// Start/exit nodes get their shapes set for the validator.
+	if graph.Nodes["Start"].Shape != "Mdiamond" {
+		t.Errorf("Start shape = %q, want Mdiamond", graph.Nodes["Start"].Shape)
+	}
+	if graph.Nodes["Exit"].Shape != "Msquare" {
+		t.Errorf("Exit shape = %q, want Msquare", graph.Nodes["Exit"].Shape)
+	}
+
+	// Tool commands must be preserved in attrs.
+	if graph.Nodes["Start"].Attrs["tool_command"] != "touch start.txt" {
+		t.Errorf("Start tool_command = %q, want touch start.txt", graph.Nodes["Start"].Attrs["tool_command"])
+	}
+	if graph.Nodes["Exit"].Attrs["tool_command"] != "touch exit.txt" {
+		t.Errorf("Exit tool_command = %q, want touch exit.txt", graph.Nodes["Exit"].Attrs["tool_command"])
+	}
+}
+
+// TestNodeHasHandlerContent verifies the helper that distinguishes bare nodes
+// from nodes with handler-specific content.
+func TestNodeHasHandlerContent(t *testing.T) {
+	tests := []struct {
+		name string
+		node *Node
+		want bool
+	}{
+		{
+			name: "bare node - no content",
+			node: &Node{ID: "n", Attrs: make(map[string]string)},
+			want: false,
+		},
+		{
+			name: "agent node with prompt",
+			node: &Node{ID: "n", Attrs: map[string]string{"prompt": "do something"}},
+			want: true,
+		},
+		{
+			name: "tool node with command",
+			node: &Node{ID: "n", Attrs: map[string]string{"tool_command": "echo hi"}},
+			want: true,
+		},
+		{
+			name: "human node with mode",
+			node: &Node{ID: "n", Attrs: map[string]string{"mode": "yes_no"}},
+			want: true,
+		},
+		{
+			name: "node with only non-content attrs",
+			node: &Node{ID: "n", Attrs: map[string]string{"label": "My Node", "llm_model": "claude"}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nodeHasHandlerContent(tt.node)
+			if got != tt.want {
+				t.Errorf("nodeHasHandlerContent(%v) = %v, want %v", tt.node.Attrs, got, tt.want)
+			}
+		})
+	}
+}

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Per-node backend selection now overrides global `--backend` flag** (issue #70): A node with `backend: native` always uses the native LLM client even when `--backend claude-code` is set globally, enabling mixed-backend pipelines (e.g. some nodes on claude-code subscription, others on OpenAI native API). The `selectBackend` priority is now documented: per-node attr > global flag > default native. The registry also registers the CodergenHandler when per-node backend attrs are present in the graph, even if the global default is native and no `--backend` flag is passed. Error messages for missing native client when using `--backend claude-code` now include actionable guidance.
+- **Start/exit tool nodes silently skipped**: `ensureStartExitNodes` was checking only for a `prompt` attribute to determine if a start/exit node had meaningful content. Tool nodes (which use `tool_command`) and human nodes (which use `mode`) had no `prompt`, so their handlers were overwritten with the passthrough `start`/`exit` no-op. The check now uses a `nodeHasHandlerContent` helper that recognizes all three handler-specific attributes (`prompt`, `tool_command`, `mode`). Bare placeholder nodes (no content) still get the passthrough handler. Closes #69.
 
 ### Added
 
