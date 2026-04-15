@@ -83,6 +83,9 @@ func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	if dfs.NArg() > 0 {
 		cfg.pipelineFile = dfs.Arg(0)
 	}
+	if err := validateBackend(cfg.backend); err != nil {
+		return *cfg, fmt.Errorf("doctor: %w", err)
+	}
 	return *cfg, nil
 }
 

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	tracker "github.com/2389-research/tracker"
 )
 
 // ---- checkEnvWarnings -------------------------------------------------------
@@ -310,7 +312,6 @@ func TestCheckGitignoreMissing(t *testing.T) {
 
 func TestCheckArtifactDirsNoAiDir(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("TRACKER_ARTIFACT_DIR", "")
 
 	cr := checkArtifactDirs(dir)
 	// .ai/ doesn't exist but parent is writable — should pass.
@@ -321,7 +322,6 @@ func TestCheckArtifactDirsNoAiDir(t *testing.T) {
 
 func TestCheckArtifactDirsWithExistingAiDir(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("TRACKER_ARTIFACT_DIR", "")
 
 	aiDir := filepath.Join(dir, ".ai")
 	if err := os.Mkdir(aiDir, 0755); err != nil {
@@ -331,30 +331,6 @@ func TestCheckArtifactDirsWithExistingAiDir(t *testing.T) {
 	cr := checkArtifactDirs(dir)
 	if !cr.ok {
 		t.Errorf("expected ok=true when .ai/ exists and is writable, got %q", cr.message)
-	}
-}
-
-func TestCheckArtifactDirsWithCustomDir(t *testing.T) {
-	dir := t.TempDir()
-	customDir := filepath.Join(dir, "custom_artifacts")
-	if err := os.Mkdir(customDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TRACKER_ARTIFACT_DIR", customDir)
-
-	cr := checkArtifactDirs(dir)
-	if !cr.ok {
-		t.Errorf("expected ok=true with writable TRACKER_ARTIFACT_DIR, got %q", cr.message)
-	}
-}
-
-func TestCheckArtifactDirsWithMissingCustomDir(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("TRACKER_ARTIFACT_DIR", "/nonexistent/custom/dir")
-
-	cr := checkArtifactDirs(dir)
-	if cr.ok {
-		t.Error("expected ok=false when TRACKER_ARTIFACT_DIR doesn't exist")
 	}
 }
 
@@ -570,6 +546,13 @@ func TestParseFlagsDoctorWithBackend(t *testing.T) {
 	}
 }
 
+func TestParseFlagsDoctorInvalidBackend(t *testing.T) {
+	_, err := parseFlags([]string{"tracker", "doctor", "--backend", "invalid-backend"})
+	if err == nil {
+		t.Error("expected error for invalid --backend, got nil")
+	}
+}
+
 // ---- DoctorWarningsError exit code 2 ----------------------------------------
 
 func TestDoctorWarningsErrorSentinel(t *testing.T) {
@@ -652,13 +635,13 @@ func TestCheckGitignoreWithAiEntry(t *testing.T) {
 	checkGitignore(dir)
 }
 
-// ---- resolveProviderBaseURL -------------------------------------------------
+// ---- tracker.ResolveProviderBaseURL -----------------------------------------
 
 func TestResolveProviderBaseURLFromEnv(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "https://custom.example.com")
 	t.Setenv("TRACKER_GATEWAY_URL", "")
 
-	got := resolveProviderBaseURL("anthropic")
+	got := tracker.ResolveProviderBaseURL("anthropic")
 	if got != "https://custom.example.com" {
 		t.Errorf("expected https://custom.example.com, got %q", got)
 	}
@@ -668,7 +651,7 @@ func TestResolveProviderBaseURLFromGateway(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.example.com")
 
-	got := resolveProviderBaseURL("anthropic")
+	got := tracker.ResolveProviderBaseURL("anthropic")
 	if got != "https://gateway.example.com/anthropic" {
 		t.Errorf("expected https://gateway.example.com/anthropic, got %q", got)
 	}
@@ -678,8 +661,18 @@ func TestResolveProviderBaseURLEmpty(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	t.Setenv("TRACKER_GATEWAY_URL", "")
 
-	got := resolveProviderBaseURL("anthropic")
+	got := tracker.ResolveProviderBaseURL("anthropic")
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestResolveProviderBaseURLGeminiGateway(t *testing.T) {
+	t.Setenv("GEMINI_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.example.com")
+
+	got := tracker.ResolveProviderBaseURL("gemini")
+	if got != "https://gateway.example.com/google-ai-studio" {
+		t.Errorf("expected https://gateway.example.com/google-ai-studio, got %q", got)
 	}
 }

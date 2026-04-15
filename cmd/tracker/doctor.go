@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/llm/anthropic"
 	"github.com/2389-research/tracker/llm/google"
@@ -203,7 +204,7 @@ var knownProviders = []providerDef{
 		defaultModel: "claude-haiku-4-5",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
 			var opts []anthropic.Option
-			if base := resolveProviderBaseURL("anthropic"); base != "" {
+			if base := tracker.ResolveProviderBaseURL("anthropic"); base != "" {
 				opts = append(opts, anthropic.WithBaseURL(base))
 			}
 			return anthropic.New(key, opts...), nil
@@ -215,7 +216,7 @@ var knownProviders = []providerDef{
 		defaultModel: "gpt-4o-mini",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
 			var opts []openai.Option
-			if base := resolveProviderBaseURL("openai"); base != "" {
+			if base := tracker.ResolveProviderBaseURL("openai"); base != "" {
 				opts = append(opts, openai.WithBaseURL(base))
 			}
 			return openai.New(key, opts...), nil
@@ -227,7 +228,7 @@ var knownProviders = []providerDef{
 		defaultModel: "gpt-4o-mini",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
 			var opts []openaicompat.Option
-			if base := resolveProviderBaseURL("openai-compat"); base != "" {
+			if base := tracker.ResolveProviderBaseURL("openai-compat"); base != "" {
 				opts = append(opts, openaicompat.WithBaseURL(base))
 			}
 			return openaicompat.New(key, opts...), nil
@@ -239,7 +240,7 @@ var knownProviders = []providerDef{
 		defaultModel: "gemini-2.0-flash",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
 			var opts []google.Option
-			if base := resolveProviderBaseURL("gemini"); base != "" {
+			if base := tracker.ResolveProviderBaseURL("gemini"); base != "" {
 				opts = append(opts, google.WithBaseURL(base))
 			}
 			return google.New(key, opts...), nil
@@ -247,42 +248,14 @@ var knownProviders = []providerDef{
 	},
 }
 
-// resolveProviderBaseURL returns the base URL override for a provider, checking
-// the provider-specific env var first, then falling back to TRACKER_GATEWAY_URL
-// with an appropriate suffix. This mirrors the logic in run.go and tracker.go.
-// provider is one of: "anthropic", "openai", "openai-compat", "gemini".
-func resolveProviderBaseURL(provider string) string {
-	envVarMap := map[string]string{
-		"anthropic":     "ANTHROPIC_BASE_URL",
-		"openai":        "OPENAI_BASE_URL",
-		"openai-compat": "OPENAI_COMPAT_BASE_URL",
-		"gemini":        "GEMINI_BASE_URL",
-	}
-	suffixMap := map[string]string{
-		"anthropic":     "/anthropic",
-		"openai":        "/openai",
-		"openai-compat": "/openai",
-		"gemini":        "/gemini",
-	}
-	if envVar, ok := envVarMap[provider]; ok {
-		if v := os.Getenv(envVar); v != "" {
-			return v
-		}
-	}
-	if gw := os.Getenv("TRACKER_GATEWAY_URL"); gw != "" {
-		if suffix, ok := suffixMap[provider]; ok {
-			return strings.TrimRight(gw, "/") + suffix
-		}
-	}
-	return ""
-}
-
 func checkProviders(probe bool) checkResult {
-	foundAny := false
+	var configuredNames []string
+	var missingNames []string
+
 	for _, p := range knownProviders {
 		key, envName := findProviderKey(p.envVars)
 		if key == "" {
-			printCheck(false, fmt.Sprintf("%-15s %s not set", p.name, p.envVars[0]))
+			missingNames = append(missingNames, p.name)
 			continue
 		}
 		masked := maskKey(key)
@@ -302,19 +275,35 @@ func checkProviders(probe bool) checkResult {
 		} else {
 			printCheck(true, fmt.Sprintf("%-15s %s=%s", p.name, envName, masked))
 		}
-		foundAny = true
+		configuredNames = append(configuredNames, p.name)
 	}
-	if !foundAny {
+
+	if len(configuredNames) == 0 {
+		// Zero providers — emit ✗ for each missing one so the user can act.
+		for _, name := range missingNames {
+			for _, pd := range knownProviders {
+				if pd.name == name {
+					printCheck(false, fmt.Sprintf("%-15s %s not set", pd.name, pd.envVars[0]))
+					break
+				}
+			}
+		}
 		return checkResult{
 			ok:      false,
 			message: "no LLM providers configured",
 			fix:     "run `tracker setup` or export ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY",
 		}
 	}
-	if probe {
-		return checkResult{ok: true, message: "provider(s) configured and auth verified"}
+
+	// At least one provider is configured — show missing ones as informational only.
+	if len(missingNames) > 0 {
+		printHint(fmt.Sprintf("not configured: %s (optional)", strings.Join(missingNames, ", ")))
 	}
-	return checkResult{ok: true, message: "provider(s) configured"}
+
+	if probe {
+		return checkResult{ok: true, message: fmt.Sprintf("%d provider(s) configured and auth verified", len(configuredNames))}
+	}
+	return checkResult{ok: true, message: fmt.Sprintf("%d provider(s) configured: %s", len(configuredNames), strings.Join(configuredNames, ", "))}
 }
 
 func findProviderKey(envVars []string) (key, envName string) {
@@ -532,15 +521,16 @@ func checkWorkdir(workdir string) checkResult {
 			fix:     "point --workdir at a directory, not a file",
 		}
 	}
-	testFile := filepath.Join(workdir, ".tracker_test_write")
-	if err := os.WriteFile(testFile, []byte("test"), 0600); err != nil {
+	f, err := os.CreateTemp(workdir, ".tracker_probe_*")
+	if err != nil {
 		return checkResult{
 			ok:      false,
 			message: fmt.Sprintf("%s is not writable", workdir),
 			fix:     fmt.Sprintf("check permissions: chmod u+w %s", workdir),
 		}
 	}
-	os.Remove(testFile)
+	f.Close()
+	os.Remove(f.Name())
 	home, _ := os.UserHomeDir()
 	if workdir == home || workdir == "/" {
 		printWarn(fmt.Sprintf("%s (risk of accidental data loss — use a project subdirectory)", workdir))
@@ -557,16 +547,30 @@ func checkGitignore(workdir string) {
 		printWarn(".gitignore not found — add .tracker/, runs/, and .ai/ to prevent committing run artifacts")
 		return
 	}
-	cs := string(content)
+	// Parse line-by-line with exact matching (trimming whitespace and trailing slash)
+	// to avoid false positives like "runsheet" matching "runs" or "my.tracker.bak" matching ".tracker".
+	entries := make(map[string]bool)
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Normalize: strip trailing slash for comparison.
+		entries[strings.TrimRight(line, "/")] = true
+	}
+	want := []struct {
+		bare    string // key to check in normalized set
+		display string // shown in warning
+	}{
+		{".tracker", ".tracker/"},
+		{"runs", "runs/"},
+		{".ai", ".ai/"},
+	}
 	var missing []string
-	if !strings.Contains(cs, ".tracker") {
-		missing = append(missing, ".tracker/")
-	}
-	if !strings.Contains(cs, "runs") {
-		missing = append(missing, "runs/")
-	}
-	if !strings.Contains(cs, ".ai") {
-		missing = append(missing, ".ai/")
+	for _, w := range want {
+		if !entries[w.bare] {
+			missing = append(missing, w.display)
+		}
 	}
 	if len(missing) > 0 {
 		printWarn(fmt.Sprintf(".gitignore missing entries: %s", strings.Join(missing, ", ")))
@@ -575,12 +579,6 @@ func checkGitignore(workdir string) {
 
 func checkArtifactDirs(workdir string) checkResult {
 	allOk := true
-	artifactDir := os.Getenv("TRACKER_ARTIFACT_DIR")
-	if artifactDir != "" {
-		if !checkDirWritable(artifactDir, "TRACKER_ARTIFACT_DIR") {
-			allOk = false
-		}
-	}
 	aiDir := filepath.Join(workdir, ".ai")
 	if info, err := os.Stat(aiDir); err == nil {
 		if !info.IsDir() {
@@ -608,36 +606,17 @@ func checkArtifactDirs(workdir string) checkResult {
 		ok:      false,
 		warn:    true,
 		message: "some artifact directories have permission issues",
-		fix:     "fix directory permissions or update TRACKER_ARTIFACT_DIR",
+		fix:     "fix directory permissions: chmod u+w .ai",
 	}
-}
-
-func checkDirWritable(dir, label string) bool {
-	info, err := os.Stat(dir)
-	if err != nil {
-		printCheck(false, fmt.Sprintf("%s=%s does not exist", label, dir))
-		printHint(fmt.Sprintf("create the directory: mkdir -p %s", dir))
-		return false
-	}
-	if !info.IsDir() {
-		printCheck(false, fmt.Sprintf("%s=%s is not a directory", label, dir))
-		return false
-	}
-	if !isDirWritable(dir) {
-		printCheck(false, fmt.Sprintf("%s=%s is not writable", label, dir))
-		printHint(fmt.Sprintf("fix permissions: chmod u+w %s", dir))
-		return false
-	}
-	printCheck(true, fmt.Sprintf("%s=%s (writable)", label, dir))
-	return true
 }
 
 func isDirWritable(dir string) bool {
-	probe := filepath.Join(dir, ".tracker_write_probe")
-	if err := os.WriteFile(probe, []byte("x"), 0600); err != nil {
+	f, err := os.CreateTemp(dir, ".tracker_probe_*")
+	if err != nil {
 		return false
 	}
-	os.Remove(probe)
+	f.Close()
+	os.Remove(f.Name())
 	return true
 }
 
