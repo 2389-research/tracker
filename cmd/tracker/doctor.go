@@ -253,16 +253,16 @@ var knownProviders = []providerDef{
 // provider is one of: "anthropic", "openai", "openai-compat", "gemini".
 func resolveProviderBaseURL(provider string) string {
 	envVarMap := map[string]string{
-		"anthropic":    "ANTHROPIC_BASE_URL",
-		"openai":       "OPENAI_BASE_URL",
+		"anthropic":     "ANTHROPIC_BASE_URL",
+		"openai":        "OPENAI_BASE_URL",
 		"openai-compat": "OPENAI_COMPAT_BASE_URL",
-		"gemini":       "GEMINI_BASE_URL",
+		"gemini":        "GEMINI_BASE_URL",
 	}
 	suffixMap := map[string]string{
-		"anthropic":    "/anthropic",
-		"openai":       "/openai",
+		"anthropic":     "/anthropic",
+		"openai":        "/openai",
 		"openai-compat": "/openai",
-		"gemini":       "/gemini",
+		"gemini":        "/gemini",
 	}
 	if envVar, ok := envVarMap[provider]; ok {
 		if v := os.Getenv(envVar); v != "" {

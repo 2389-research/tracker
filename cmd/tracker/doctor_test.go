@@ -627,9 +627,9 @@ func TestCheckDippinVersionMismatch(t *testing.T) {
 		wantMis bool
 	}{
 		{"v0.18.0", "v0.18.0", false},
-		{"v0.18.1", "v0.18.0", false}, // same major.minor, patch differs → ok
-		{"v0.17.0", "v0.18.0", true},  // minor mismatch
-		{"v1.0.0", "v0.18.0", true},   // major mismatch
+		{"v0.18.1", "v0.18.0", false},           // same major.minor, patch differs → ok
+		{"v0.17.0", "v0.18.0", true},            // minor mismatch
+		{"v1.0.0", "v0.18.0", true},             // major mismatch
 		{"(version unknown)", "v0.18.0", false}, // unparseable → skip
 	}
 	for _, tt := range tests {
