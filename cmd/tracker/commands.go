@@ -253,6 +253,15 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		MaxCostCents:   cfg.maxCostCents,
 		MaxWallTime:    cfg.maxWallTime,
 	}
+	// Apply the Cloudflare AI Gateway root URL before buildLLMClient runs.
+	// ResolveProviderBaseURL honors per-provider *_BASE_URL env vars first,
+	// so setting TRACKER_GATEWAY_URL only affects providers the user hasn't
+	// already overridden.
+	if cfg.gatewayURL != "" {
+		if err := os.Setenv("TRACKER_GATEWAY_URL", cfg.gatewayURL); err != nil {
+			return fmt.Errorf("set TRACKER_GATEWAY_URL: %w", err)
+		}
+	}
 
 	if err := printRunPreamble(cfg); err != nil {
 		return err

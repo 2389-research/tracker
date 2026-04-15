@@ -254,6 +254,47 @@ export GEMINI_API_KEY=...
 
 Non-retryable provider errors (quota exceeded, auth failure, model not found) immediately fail the pipeline with a clear message instead of silently retrying.
 
+### Cloudflare AI Gateway
+
+Tracker can route every provider through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) so you stop hitting rate limits (Anthropic, OpenAI, etc. cap per-account request rates; Cloudflare's gateway capacity is much higher), gain central analytics and caching, and enable model routing on the gateway side.
+
+Set one env var or flag instead of four:
+
+```bash
+# The root URL of your Cloudflare AI Gateway:
+#   https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_slug>
+export TRACKER_GATEWAY_URL="https://gateway.ai.cloudflare.com/v1/acc/gw"
+
+# API keys still go to the provider — Cloudflare just proxies.
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=...
+
+tracker build_product
+```
+
+Or as a CLI flag:
+
+```bash
+tracker --gateway-url https://gateway.ai.cloudflare.com/v1/acc/gw build_product
+```
+
+Tracker automatically appends the per-provider suffix:
+
+| Provider | Resolved URL |
+|---|---|
+| `anthropic` | `<gateway>/anthropic` |
+| `openai` | `<gateway>/openai` |
+| `gemini` | `<gateway>/google-ai-studio` |
+| `openai-compat` | `<gateway>/compat` |
+
+**Per-provider overrides still win.** If you set `ANTHROPIC_BASE_URL` directly, Anthropic traffic goes there, and the gateway only proxies the providers you haven't explicitly overridden. This means you can point Anthropic at a self-hosted proxy while keeping OpenAI on Cloudflare with one command.
+
+**Troubleshooting:**
+- `429` from Cloudflare: something bigger is wrong (account-level limits, bad gateway slug). 429s from direct provider calls are what the gateway is meant to prevent.
+- `401`: check your provider API key, not the gateway — Cloudflare passes auth through.
+- Empty responses: verify the gateway slug is correct and the provider is enabled in the Cloudflare dashboard.
+
 ## Architecture
 
 ```mermaid

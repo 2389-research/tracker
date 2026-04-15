@@ -28,6 +28,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - `AgentConfig.Params` is a generic pass-through map — typed fields take precedence over Params keys
 - The adapter maps IR field names to tracker convention: `model` → `llm_model`, `provider` → `llm_provider`
 - Provider name is `gemini` not `google`
+- Provider base URL resolution goes through `tracker.ResolveProviderBaseURL(provider)`: `<PROVIDER>_BASE_URL` env var wins; if unset, `TRACKER_GATEWAY_URL` is used with the provider suffix appended (`/anthropic`, `/openai`, `/google-ai-studio`, `/compat`); otherwise empty (SDK default). The `--gateway-url` CLI flag sets `TRACKER_GATEWAY_URL` before the LLM client is built. Use this for Cloudflare AI Gateway routing.
 - Variable expansion is single-pass — never re-scan resolved values
 - `ensureStartExitNodes` only assigns passthrough start/exit handlers to bare codergen (Agent) nodes with no `prompt` attribute. All other resolved handlers (`tool`, `wait.human`, `parallel`, `parallel.fan_in`, `conditional`, `subgraph`, `stack.manager_loop`, etc.) are preserved. The detection is based on `n.Handler`, not on enumerating handler-specific attributes, so future handler types are automatically covered.
 

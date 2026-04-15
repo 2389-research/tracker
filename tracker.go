@@ -375,9 +375,47 @@ func allProviderConstructors() map[string]func(string) (llm.ProviderAdapter, err
 	}
 }
 
+// ResolveProviderBaseURL returns the base URL a provider's HTTP client should
+// use. Resolution order:
+//
+//  1. The provider-specific env var (ANTHROPIC_BASE_URL, OPENAI_BASE_URL,
+//     GEMINI_BASE_URL, OPENAI_COMPAT_BASE_URL).
+//  2. TRACKER_GATEWAY_URL with the Cloudflare AI Gateway provider suffix
+//     appended (e.g. ".../anthropic", ".../openai", ".../google-ai-studio").
+//  3. Empty string, meaning the provider's SDK default.
+//
+// Per-provider env vars always win over TRACKER_GATEWAY_URL, so users can set
+// a single gateway URL for everything and still override individual providers.
+// Trailing slashes on the gateway root are stripped before the suffix is
+// appended to prevent double-slash URLs. Unknown provider names return the
+// empty string.
+func ResolveProviderBaseURL(provider string) string {
+	var envKey, suffix string
+	switch provider {
+	case "anthropic":
+		envKey, suffix = "ANTHROPIC_BASE_URL", "/anthropic"
+	case "openai":
+		envKey, suffix = "OPENAI_BASE_URL", "/openai"
+	case "gemini":
+		envKey, suffix = "GEMINI_BASE_URL", "/google-ai-studio"
+	case "openai-compat":
+		envKey, suffix = "OPENAI_COMPAT_BASE_URL", "/compat"
+	default:
+		return ""
+	}
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	gateway := strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
+	if gateway == "" {
+		return ""
+	}
+	return gateway + suffix
+}
+
 func newAnthropicAdapter(key string) (llm.ProviderAdapter, error) {
 	var opts []anthropic.Option
-	if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
+	if base := ResolveProviderBaseURL("anthropic"); base != "" {
 		opts = append(opts, anthropic.WithBaseURL(base))
 	}
 	return anthropic.New(key, opts...), nil
@@ -385,7 +423,7 @@ func newAnthropicAdapter(key string) (llm.ProviderAdapter, error) {
 
 func newOpenAIAdapter(key string) (llm.ProviderAdapter, error) {
 	var opts []openai.Option
-	if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
+	if base := ResolveProviderBaseURL("openai"); base != "" {
 		opts = append(opts, openai.WithBaseURL(base))
 	}
 	return openai.New(key, opts...), nil
@@ -393,7 +431,7 @@ func newOpenAIAdapter(key string) (llm.ProviderAdapter, error) {
 
 func newGeminiAdapter(key string) (llm.ProviderAdapter, error) {
 	var opts []google.Option
-	if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
+	if base := ResolveProviderBaseURL("gemini"); base != "" {
 		opts = append(opts, google.WithBaseURL(base))
 	}
 	return google.New(key, opts...), nil
@@ -401,7 +439,7 @@ func newGeminiAdapter(key string) (llm.ProviderAdapter, error) {
 
 func newOpenAICompatAdapter(key string) (llm.ProviderAdapter, error) {
 	var opts []openaicompat.Option
-	if base := os.Getenv("OPENAI_COMPAT_BASE_URL"); base != "" {
+	if base := ResolveProviderBaseURL("openai-compat"); base != "" {
 		opts = append(opts, openaicompat.WithBaseURL(base))
 	}
 	return openaicompat.New(key, opts...), nil
