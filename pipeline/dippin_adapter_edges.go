@@ -106,10 +106,11 @@ func synthesizeFanInEdges(g *Graph, irNode *ir.Node, cfg ir.FanInConfig, existin
 
 // ensureStartExitNodes verifies that the start and exit nodes exist in the graph.
 // The start/exit shapes (Mdiamond/Msquare) are always set so the validator can
-// identify them. Nodes without handler-specific content (prompt, tool_command, or
-// mode) are treated as bare passthrough nodes and get the start/exit handler.
-// Nodes with actual content keep their handler so user-defined start/exit
-// commands (tool), prompts (agent), or gates (human) execute correctly.
+// identify them. Only bare codergen (agent) nodes with no prompt are treated as
+// passthrough placeholders and get the start/exit handler. Nodes with any other
+// resolved handler (tool, wait.human, parallel, parallel.fan_in, conditional,
+// subgraph, etc.) always keep their handler so user-defined start/exit logic
+// executes correctly.
 func ensureStartExitNodes(g *Graph) error {
 	if _, ok := g.Nodes[g.StartNode]; !ok {
 		return fmt.Errorf("start node %q not found in graph", g.StartNode)
@@ -130,11 +131,17 @@ func ensureStartExitNodes(g *Graph) error {
 	return nil
 }
 
-// nodeHasHandlerContent reports whether a node has attributes that require a
-// specific handler to execute: prompt (agent/codergen), tool_command (tool), or
-// mode (human). Nodes with none of these are bare passthrough start/exit nodes.
+// nodeHasHandlerContent reports whether a node has a real handler that requires
+// execution. Any resolved handler other than "codergen" (agent) is considered
+// meaningful — this covers tool, wait.human, parallel, parallel.fan_in,
+// conditional, subgraph, stack.manager_loop, and any future handlers without
+// needing to enumerate handler-specific attributes. A codergen node has content
+// only when it carries a prompt; without a prompt it is a bare placeholder that
+// should be replaced with the passthrough start/exit handler.
 func nodeHasHandlerContent(n *Node) bool {
-	return n.Attrs["prompt"] != "" ||
-		n.Attrs["tool_command"] != "" ||
-		n.Attrs["mode"] != ""
+	if n.Handler != "" && n.Handler != "codergen" {
+		return true
+	}
+	// Codergen (agent) nodes are passthrough placeholders unless they carry a prompt.
+	return n.Attrs["prompt"] != ""
 }

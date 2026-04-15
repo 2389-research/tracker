@@ -1550,7 +1550,9 @@ func TestFromDippinIR_ToolStartExitNodes(t *testing.T) {
 }
 
 // TestNodeHasHandlerContent verifies the helper that distinguishes bare nodes
-// from nodes with handler-specific content.
+// from nodes with handler-specific content. The helper is based on the resolved
+// Handler field: any handler other than "codergen" is considered meaningful.
+// A codergen node with no prompt is the only passthrough case.
 func TestNodeHasHandlerContent(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1558,28 +1560,64 @@ func TestNodeHasHandlerContent(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "bare node - no content",
-			node: &Node{ID: "n", Attrs: make(map[string]string)},
+			name: "bare codergen node - no content",
+			node: &Node{ID: "n", Handler: "codergen", Attrs: make(map[string]string)},
 			want: false,
 		},
 		{
 			name: "agent node with prompt",
-			node: &Node{ID: "n", Attrs: map[string]string{"prompt": "do something"}},
+			node: &Node{ID: "n", Handler: "codergen", Attrs: map[string]string{"prompt": "do something"}},
 			want: true,
 		},
 		{
 			name: "tool node with command",
-			node: &Node{ID: "n", Attrs: map[string]string{"tool_command": "echo hi"}},
+			node: &Node{ID: "n", Handler: "tool", Attrs: map[string]string{"tool_command": "echo hi"}},
 			want: true,
 		},
 		{
 			name: "human node with mode",
-			node: &Node{ID: "n", Attrs: map[string]string{"mode": "yes_no"}},
+			node: &Node{ID: "n", Handler: "wait.human", Attrs: map[string]string{"mode": "yes_no"}},
 			want: true,
 		},
 		{
-			name: "node with only non-content attrs",
-			node: &Node{ID: "n", Attrs: map[string]string{"label": "My Node", "llm_model": "claude"}},
+			name: "codergen node with only non-content attrs",
+			node: &Node{ID: "n", Handler: "codergen", Attrs: map[string]string{"label": "My Node", "llm_model": "claude"}},
+			want: false,
+		},
+		// Handler-type regression cases — all non-codergen handlers must be preserved.
+		{
+			name: "wait.human without mode attr (default mode)",
+			node: &Node{ID: "n", Handler: "wait.human", Attrs: make(map[string]string)},
+			want: true,
+		},
+		{
+			name: "parallel node with parallel_targets",
+			node: &Node{ID: "n", Handler: "parallel", Attrs: map[string]string{"parallel_targets": "A,B"}},
+			want: true,
+		},
+		{
+			name: "parallel.fan_in node with fan_in_sources",
+			node: &Node{ID: "n", Handler: "parallel.fan_in", Attrs: map[string]string{"fan_in_sources": "A,B"}},
+			want: true,
+		},
+		{
+			name: "conditional node (no attrs, pure routing)",
+			node: &Node{ID: "n", Handler: "conditional", Attrs: make(map[string]string)},
+			want: true,
+		},
+		{
+			name: "subgraph node with ref",
+			node: &Node{ID: "n", Handler: "subgraph", Attrs: map[string]string{"subgraph_ref": "sub.dip"}},
+			want: true,
+		},
+		{
+			name: "stack.manager_loop node",
+			node: &Node{ID: "n", Handler: "stack.manager_loop", Attrs: make(map[string]string)},
+			want: true,
+		},
+		{
+			name: "unresolved handler - empty string, no prompt",
+			node: &Node{ID: "n", Handler: "", Attrs: make(map[string]string)},
 			want: false,
 		},
 	}
