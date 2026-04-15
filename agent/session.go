@@ -153,6 +153,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	result := SessionResult{
 		SessionID: s.id,
+		Provider:  s.config.Provider,
 		ToolCalls: make(map[string]int),
 	}
 

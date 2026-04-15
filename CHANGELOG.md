@@ -5,6 +5,22 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Result.Cost` on the library API with per-provider rollup (`map[string]llm.ProviderCost`) and `TotalUSD`. Populated from the `llm.TokenTracker` middleware and priced via `llm.EstimateCost`. Closes #62.
+- `pipeline.BudgetGuard` enforcing `MaxTotalTokens`, `MaxCostCents`, and `MaxWallTime` limits. Halts the run with `pipeline.OutcomeBudgetExceeded` when any dimension trips. Closes #17.
+- New `tracker.Config.Budget` field (type `pipeline.BudgetLimits`) for library consumers.
+- New CLI flags on `tracker run`: `--max-tokens`, `--max-cost` (cents), `--max-wall-time`.
+- New pipeline events `cost_updated` (streaming per-node cost snapshots) and `budget_exceeded` (fired on halt). Both carry a `CostSnapshot` payload with `TotalTokens`, `TotalCostUSD`, `ProviderTotals`, and `WallElapsed`.
+- `tracker diagnose` surfaces a "Budget halt detected" section when a run halts on budget.
+- `UsageSummary.ProviderTotals` (per-provider token and cost rollup) on `pipeline.Trace.AggregateUsage()` output.
+
+### Notes
+
+- Reading budget limits from `.dip` workflow attrs is blocked on dippin-lang IR support; tracked in #67.
+
 ## [0.16.4] - 2026-04-09
 
 ### Fixed

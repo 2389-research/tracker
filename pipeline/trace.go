@@ -27,6 +27,7 @@ type SessionStats struct {
 	ReasoningTokens  int            `json:"reasoning_tokens"`
 	CacheReadTokens  int            `json:"cache_read_tokens"`
 	CacheWriteTokens int            `json:"cache_write_tokens"`
+	Provider         string         `json:"provider,omitempty"`
 }
 
 // TraceEntry records the execution of a single pipeline node.
@@ -54,16 +55,29 @@ func (tr *Trace) AddEntry(entry TraceEntry) {
 	tr.Entries = append(tr.Entries, entry)
 }
 
+// ProviderUsage is the per-provider rollup embedded in UsageSummary.
+type ProviderUsage struct {
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+	ReasoningTokens  int     `json:"reasoning_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	CacheWriteTokens int     `json:"cache_write_tokens"`
+	SessionCount     int     `json:"session_count"`
+}
+
 // UsageSummary aggregates token usage and cost across all pipeline nodes.
 type UsageSummary struct {
-	TotalInputTokens      int     `json:"total_input_tokens"`
-	TotalOutputTokens     int     `json:"total_output_tokens"`
-	TotalTokens           int     `json:"total_tokens"`
-	TotalCostUSD          float64 `json:"total_cost_usd"`
-	TotalReasoningTokens  int     `json:"total_reasoning_tokens"`
-	TotalCacheReadTokens  int     `json:"total_cache_read_tokens"`
-	TotalCacheWriteTokens int     `json:"total_cache_write_tokens"`
-	SessionCount          int     `json:"session_count"`
+	TotalInputTokens      int                      `json:"total_input_tokens"`
+	TotalOutputTokens     int                      `json:"total_output_tokens"`
+	TotalTokens           int                      `json:"total_tokens"`
+	TotalCostUSD          float64                  `json:"total_cost_usd"`
+	TotalReasoningTokens  int                      `json:"total_reasoning_tokens"`
+	TotalCacheReadTokens  int                      `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int                      `json:"total_cache_write_tokens"`
+	SessionCount          int                      `json:"session_count"`
+	ProviderTotals        map[string]ProviderUsage `json:"provider_totals,omitempty"`
 }
 
 // AggregateUsage sums token usage and cost from all trace entries with session stats.
@@ -71,7 +85,7 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 	if tr == nil {
 		return nil
 	}
-	s := &UsageSummary{}
+	s := &UsageSummary{ProviderTotals: make(map[string]ProviderUsage)}
 	for _, e := range tr.Entries {
 		if e.Stats == nil {
 			continue
@@ -84,9 +98,24 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 		s.TotalCacheReadTokens += e.Stats.CacheReadTokens
 		s.TotalCacheWriteTokens += e.Stats.CacheWriteTokens
 		s.SessionCount++
+		if p := e.Stats.Provider; p != "" {
+			pt := s.ProviderTotals[p]
+			pt.InputTokens += e.Stats.InputTokens
+			pt.OutputTokens += e.Stats.OutputTokens
+			pt.TotalTokens += e.Stats.TotalTokens
+			pt.CostUSD += e.Stats.CostUSD
+			pt.ReasoningTokens += e.Stats.ReasoningTokens
+			pt.CacheReadTokens += e.Stats.CacheReadTokens
+			pt.CacheWriteTokens += e.Stats.CacheWriteTokens
+			pt.SessionCount++
+			s.ProviderTotals[p] = pt
+		}
 	}
 	if s.SessionCount == 0 {
 		return nil
+	}
+	if len(s.ProviderTotals) == 0 {
+		s.ProviderTotals = nil
 	}
 	return s
 }

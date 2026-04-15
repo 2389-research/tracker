@@ -14,6 +14,7 @@ import (
 // SessionResult holds summary statistics and metadata from a completed session.
 type SessionResult struct {
 	SessionID          string
+	Provider           string
 	Duration           time.Duration
 	Turns              int
 	MaxTurnsUsed       bool

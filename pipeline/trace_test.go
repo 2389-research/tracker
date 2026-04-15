@@ -707,6 +707,59 @@ func TestEngineResultUsageFromTraceStats(t *testing.T) {
 	}
 }
 
+func TestAggregateUsage_PerProviderTotals(t *testing.T) {
+	tr := &Trace{Entries: []TraceEntry{
+		{Stats: &SessionStats{InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.01, Provider: "anthropic"}},
+		{Stats: &SessionStats{InputTokens: 200, OutputTokens: 75, TotalTokens: 275, CostUSD: 0.02, Provider: "openai"}},
+		{Stats: &SessionStats{InputTokens: 50, OutputTokens: 25, TotalTokens: 75, CostUSD: 0.005, Provider: "anthropic"}},
+	}}
+
+	s := tr.AggregateUsage()
+	if s == nil {
+		t.Fatal("AggregateUsage returned nil")
+	}
+	if s.TotalTokens != 500 {
+		t.Errorf("TotalTokens = %d, want 500", s.TotalTokens)
+	}
+	if len(s.ProviderTotals) != 2 {
+		t.Fatalf("ProviderTotals len = %d, want 2", len(s.ProviderTotals))
+	}
+
+	ant := s.ProviderTotals["anthropic"]
+	if ant.InputTokens != 150 || ant.OutputTokens != 75 || ant.TotalTokens != 225 {
+		t.Errorf("anthropic totals = %+v", ant)
+	}
+	if ant.CostUSD < 0.0149 || ant.CostUSD > 0.0151 {
+		t.Errorf("anthropic cost = %.4f, want 0.015", ant.CostUSD)
+	}
+	if ant.SessionCount != 2 {
+		t.Errorf("anthropic sessions = %d, want 2", ant.SessionCount)
+	}
+
+	oa := s.ProviderTotals["openai"]
+	if oa.InputTokens != 200 || oa.SessionCount != 1 {
+		t.Errorf("openai rollup = %+v", oa)
+	}
+}
+
+func TestAggregateUsage_SkipsEntriesWithoutProvider(t *testing.T) {
+	tr := &Trace{Entries: []TraceEntry{
+		{Stats: &SessionStats{InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.01}}, // no provider
+		{Stats: &SessionStats{InputTokens: 200, OutputTokens: 75, TotalTokens: 275, CostUSD: 0.02, Provider: "openai"}},
+	}}
+
+	s := tr.AggregateUsage()
+	if s == nil || s.TotalTokens != 425 {
+		t.Fatalf("totals wrong: %+v", s)
+	}
+	if len(s.ProviderTotals) != 1 {
+		t.Errorf("should only have 1 provider, got %d", len(s.ProviderTotals))
+	}
+	if _, ok := s.ProviderTotals["openai"]; !ok {
+		t.Errorf("openai missing from ProviderTotals")
+	}
+}
+
 func TestTraceAggregateToolCalls(t *testing.T) {
 	t.Run("normal aggregation", func(t *testing.T) {
 		tr := &Trace{

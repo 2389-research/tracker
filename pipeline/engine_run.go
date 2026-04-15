@@ -10,6 +10,86 @@ import (
 	"time"
 )
 
+// emitCostUpdate emits an EventCostUpdated carrying the current aggregate
+// usage from the trace. Safe to call when no LLM activity has occurred yet —
+// AggregateUsage returns nil and the event is suppressed.
+func (e *Engine) emitCostUpdate(s *runState) {
+	summary := s.trace.AggregateUsage()
+	if summary == nil {
+		return
+	}
+	e.emit(PipelineEvent{
+		Type:      EventCostUpdated,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		Cost: &CostSnapshot{
+			TotalTokens:    summary.TotalTokens,
+			TotalCostUSD:   summary.TotalCostUSD,
+			ProviderTotals: summary.ProviderTotals,
+			WallElapsed:    time.Since(s.trace.StartTime),
+		},
+	})
+}
+
+// haltForBudget produces the terminal loopResult emitted when a BudgetGuard
+// trips. It saves the checkpoint (so restarts skip already-completed nodes),
+// sets the trace end time, emits EventBudgetExceeded, and packages
+// an EngineResult with Status=OutcomeBudgetExceeded and BudgetLimitsHit.
+func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	s.trace.EndTime = time.Now()
+	summary := s.trace.AggregateUsage()
+	var costSnap *CostSnapshot
+	if summary != nil {
+		costSnap = &CostSnapshot{
+			TotalTokens:    summary.TotalTokens,
+			TotalCostUSD:   summary.TotalCostUSD,
+			ProviderTotals: summary.ProviderTotals,
+			WallElapsed:    time.Since(s.trace.StartTime),
+		}
+	}
+	e.emit(PipelineEvent{
+		Type:      EventBudgetExceeded,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		Message:   breach.Message,
+		Cost:      costSnap,
+	})
+	return loopResult{
+		action: loopReturn,
+		result: &EngineResult{
+			RunID:           s.runID,
+			Status:          OutcomeBudgetExceeded,
+			CompletedNodes:  s.cp.CompletedNodes,
+			Context:         s.pctx.Snapshot(),
+			Trace:           s.trace,
+			Usage:           summary,
+			BudgetLimitsHit: []string{breach.Kind.String()},
+		},
+	}
+}
+
+// checkBudgetAfterEmit runs the BudgetGuard against the current aggregate
+// usage. Returns a non-nil loopResult when a breach halts the run, or nil
+// to continue.
+func (e *Engine) checkBudgetAfterEmit(s *runState) *loopResult {
+	breach := e.budgetGuard.Check(s.trace.AggregateUsage(), s.trace.StartTime)
+	if breach.Kind == BudgetOK {
+		return nil
+	}
+	lr := e.haltForBudget(s, breach)
+	return &lr
+}
+
+// checkBudgetHaltForExit is a thin wrapper used by handleExitNode, which has
+// a different return signature from advanceToNextNode.
+func (e *Engine) checkBudgetHaltForExit(s *runState) *EngineResult {
+	if lr := e.checkBudgetAfterEmit(s); lr != nil {
+		return lr.result
+	}
+	return nil
+}
+
 // runState holds per-run mutable state threaded through the main loop.
 type runState struct {
 	runID        string
@@ -343,6 +423,10 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 	}
 	traceEntry.EdgeTo = target
 	s.trace.AddEntry(*traceEntry)
+	e.emitCostUpdate(s)
+	if lr := e.checkBudgetAfterEmit(s); lr != nil {
+		return "", false, lr.result, nil
+	}
 	e.clearDownstream(target, s.cp)
 	s.cp.CurrentNode = target
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
@@ -475,6 +559,10 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)
+	e.emitCostUpdate(s)
+	if halt := e.checkBudgetHaltForExit(s); halt != nil {
+		return false, "", halt
+	}
 	return true, "", nil
 }
 

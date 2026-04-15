@@ -102,7 +102,18 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	if err := validateBackend(cfg.backend); err != nil {
 		return cfg, err
 	}
+	if err := validateBudgetLimits(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+// validateBudgetLimits returns an error if any budget limit is negative.
+func validateBudgetLimits(cfg runConfig) error {
+	if cfg.maxTokens < 0 || cfg.maxCostCents < 0 || cfg.maxWallTime < 0 {
+		return fmt.Errorf("budget limits must be non-negative")
+	}
+	return nil
 }
 
 // isHelpRequest returns true when the second argument is a help flag.
@@ -132,6 +143,9 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
 	fs.StringVar(&cfg.autopilot, "autopilot", "", "Replace human gates with LLM judge (lax/mid/hard/mentor)")
 	fs.BoolVar(&cfg.autoApprove, "auto-approve", false, "Auto-approve all human gates (no LLM, deterministic)")
+	fs.IntVar(&cfg.maxTokens, "max-tokens", 0, "Halt if total tokens across the run exceed this value (0 = no limit)")
+	fs.IntVar(&cfg.maxCostCents, "max-cost", 0, "Halt if total cost in cents exceeds this value (0 = no limit)")
+	fs.DurationVar(&cfg.maxWallTime, "max-wall-time", 0, "Halt if pipeline wall time exceeds this duration (0 = no limit)")
 	return fs
 }
 
@@ -187,5 +201,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --backend string          Agent backend: native (default), claude-code, or acp\n")
 	fmt.Fprintf(w, "  --autopilot <persona>     Replace human gates with LLM judge (lax/mid/hard/mentor)\n")
 	fmt.Fprintf(w, "  --auto-approve            Auto-approve all human gates (deterministic, no LLM)\n")
+	fmt.Fprintf(w, "  --max-tokens int          Halt if total tokens exceed this value (0 = no limit)\n")
+	fmt.Fprintf(w, "  --max-cost int            Halt if total cost in cents exceeds this value (0 = no limit)\n")
+	fmt.Fprintf(w, "  --max-wall-time duration  Halt if pipeline wall time exceeds this duration (0 = no limit)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

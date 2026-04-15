@@ -37,6 +37,12 @@ type jsonlLogEntry struct {
 	ClearedNodes    []string          `json:"cleared_nodes,omitempty"`
 	TokenInput      int               `json:"token_input,omitempty"`
 	TokenOutput     int               `json:"token_output,omitempty"`
+
+	// Cost snapshot fields — non-zero for cost_updated and budget_exceeded events.
+	TotalTokens    int                      `json:"total_tokens,omitempty"`
+	TotalCostUSD   float64                  `json:"total_cost_usd,omitempty"`
+	ProviderTotals map[string]ProviderUsage `json:"provider_totals,omitempty"`
+	WallElapsedMs  int64                    `json:"wall_elapsed_ms,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a file.
@@ -84,12 +90,12 @@ func (h *JSONLEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 		return
 	}
 
-	entry := h.buildLogEntry(evt)
+	entry := buildLogEntry(evt)
 	h.writeEntry(entry)
 }
 
 // buildLogEntry converts a PipelineEvent to a jsonlLogEntry.
-func (h *JSONLEventHandler) buildLogEntry(evt PipelineEvent) jsonlLogEntry {
+func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	entry := jsonlLogEntry{
 		Timestamp: evt.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
 		Source:    "pipeline",
@@ -103,6 +109,12 @@ func (h *JSONLEventHandler) buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	}
 	if d := evt.Decision; d != nil {
 		applyDecisionFields(&entry, d)
+	}
+	if evt.Cost != nil {
+		entry.TotalTokens = evt.Cost.TotalTokens
+		entry.TotalCostUSD = evt.Cost.TotalCostUSD
+		entry.ProviderTotals = evt.Cost.ProviderTotals
+		entry.WallElapsedMs = evt.Cost.WallElapsed.Milliseconds()
 	}
 	return entry
 }

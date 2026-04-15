@@ -372,6 +372,54 @@ func TestValidateSource_ReturnsWarnings(t *testing.T) {
 	}
 }
 
+func TestRun_PopulatesResultCost(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	// Build the engine directly so we can inject known usage into the
+	// tokenTracker before running. The test is in package tracker (not
+	// tracker_test) so unexported fields are accessible.
+	engine, err := NewEngine(simpleDOT, Config{
+		Format:    "dot",
+		LLMClient: client,
+		Model:     "claude-sonnet-4-6", // known model so EstimateCost returns > 0
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	defer engine.Close()
+
+	// Inject known usage directly — stubCompleter bypasses middleware so we
+	// add it manually, mirroring the claude-code backend pattern.
+	engine.tokenTracker.AddUsage("anthropic", llm.Usage{InputTokens: 1000, OutputTokens: 500})
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Cost == nil {
+		t.Fatal("expected result.Cost to be non-nil")
+	}
+	if result.Cost.TotalUSD <= 0 {
+		t.Errorf("expected TotalUSD > 0, got %v", result.Cost.TotalUSD)
+	}
+	if len(result.Cost.ByProvider) == 0 {
+		t.Error("expected at least one entry in ByProvider")
+	}
+	entry, ok := result.Cost.ByProvider["anthropic"]
+	if !ok {
+		t.Fatalf("expected anthropic entry in ByProvider, got keys: %v", result.Cost.ByProvider)
+	}
+	if entry.Usage.InputTokens != 1000 {
+		t.Errorf("expected InputTokens=1000, got %d", entry.Usage.InputTokens)
+	}
+}
+
 func TestRun_WithRetryPolicy(t *testing.T) {
 	client := &stubCompleter{
 		response: &llm.Response{
@@ -390,5 +438,73 @@ func TestRun_WithRetryPolicy(t *testing.T) {
 	}
 	if result.Status != "success" {
 		t.Errorf("expected success, got %q", result.Status)
+	}
+}
+
+func TestRun_BudgetHalt_FromConfig(t *testing.T) {
+	// Create a DIP pipeline with an agent node that will execute through the real handler.
+	// This ensures that the agent session is created and the completer response's usage
+	// is recorded as SessionStats in the trace.
+	dipSource := `workflow budget_test
+  start: a
+  exit: b
+
+  agent a
+    label: Agent
+    prompt: "respond with done"
+
+  agent b
+    label: Done
+
+  edges
+    a -> b
+`
+
+	// Create a stub completer that returns responses with token usage.
+	// Each agent call will return 500 total tokens (200 input + 300 output).
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+			Usage: llm.Usage{
+				InputTokens:  200,
+				OutputTokens: 300,
+				TotalTokens:  500,
+			},
+		},
+	}
+
+	// Build the engine with a budget limit of 400 tokens.
+	// The first agent call will return 500 tokens, which exceeds the 400-token limit.
+	engine, err := NewEngine(dipSource, Config{
+		Format:    "dip",
+		LLMClient: client,
+		Budget: pipeline.BudgetLimits{
+			MaxTotalTokens: 400,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	defer engine.Close()
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify that the run halted due to budget breach.
+	if result.Status != pipeline.OutcomeBudgetExceeded {
+		t.Errorf("expected status %q, got %q", pipeline.OutcomeBudgetExceeded, result.Status)
+	}
+
+	// Verify that LimitsHit identifies the tokens dimension.
+	if result.Cost == nil {
+		t.Fatal("expected result.Cost to be non-nil")
+	}
+	if len(result.Cost.LimitsHit) == 0 {
+		t.Error("expected LimitsHit to be non-empty")
+	} else if result.Cost.LimitsHit[0] != "tokens" {
+		t.Errorf("expected LimitsHit[0]='tokens', got %q", result.Cost.LimitsHit[0])
 	}
 }

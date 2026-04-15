@@ -161,7 +161,9 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 	printTokensByProvider(tracker)
 	printPipelineFlow(result)
 
-	if pipelineErr != nil {
+	if result != nil && result.Status == pipeline.OutcomeBudgetExceeded {
+		printBudgetHaltBanner(result, tracker)
+	} else if pipelineErr != nil {
 		fmt.Println()
 		fmt.Printf("  ERROR: %v\n", pipelineErr)
 	}
@@ -368,6 +370,26 @@ func printNodeConnector(entries []pipeline.TraceEntry, i int) {
 		fmt.Printf("  │ → %s\n", entries[i].EdgeTo)
 	}
 	fmt.Println("  │")
+}
+
+// printBudgetHaltBanner prints a prominent halt notice when a budget limit was exceeded.
+func printBudgetHaltBanner(result *pipeline.EngineResult, tracker *llm.TokenTracker) {
+	fmt.Println()
+	fmt.Println("─── HALTED: budget exceeded ───────────────────────────────")
+	if len(result.BudgetLimitsHit) > 0 {
+		fmt.Printf("  reason: %s\n", strings.Join(result.BudgetLimitsHit, ", "))
+	}
+	if tracker != nil {
+		total := tracker.TotalUsage()
+		if total.InputTokens > 0 || total.OutputTokens > 0 {
+			totalToks := total.InputTokens + total.OutputTokens
+			fmt.Printf("  spent:  %s tokens", formatNumber(totalToks))
+			if total.EstimatedCost > 0 {
+				fmt.Printf(", $%.4f", total.EstimatedCost)
+			}
+			fmt.Println()
+		}
+	}
 }
 
 // printResumeHint shows the resume command when the pipeline didn't complete successfully.

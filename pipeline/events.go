@@ -28,7 +28,21 @@ const (
 	EventDecisionCondition PipelineEventType = "decision_condition"
 	EventDecisionOutcome   PipelineEventType = "decision_outcome"
 	EventDecisionRestart   PipelineEventType = "decision_restart"
+
+	// Cost governance events — emitted after each completed node and when a budget is exceeded.
+	EventCostUpdated    PipelineEventType = "cost_updated"
+	EventBudgetExceeded PipelineEventType = "budget_exceeded"
 )
+
+// CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.
+// It is a point-in-time view of the run's aggregate token usage, cost, and
+// wall-clock elapsed time.
+type CostSnapshot struct {
+	TotalTokens    int
+	TotalCostUSD   float64
+	ProviderTotals map[string]ProviderUsage
+	WallElapsed    time.Duration
+}
 
 // DecisionDetail carries structured data about a pipeline decision point.
 // It is attached to PipelineEvent via the Decision field for audit trail events.
@@ -67,6 +81,7 @@ type PipelineEvent struct {
 	Message   string
 	Err       error
 	Decision  *DecisionDetail // non-nil for decision audit trail events
+	Cost      *CostSnapshot   // non-nil for EventCostUpdated and EventBudgetExceeded events
 }
 
 // PipelineEventHandler receives pipeline events for observability purposes.

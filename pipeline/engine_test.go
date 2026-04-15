@@ -1155,3 +1155,255 @@ func TestEngineResumeLoopingPipelineDoesNotInfiniteLoop(t *testing.T) {
 		t.Error("expected loop nodes to be re-executed, but none were")
 	}
 }
+
+func TestEngine_EmitsCostUpdatedAfterEachNode(t *testing.T) {
+	// 3-node linear graph: start -> middle -> end
+	g := NewGraph("cost_updated_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "middle", Shape: "box", Label: "Middle"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "start", To: "middle"})
+	g.AddEdge(&Edge{From: "middle", To: "end"})
+
+	// All three nodes return SessionStats so AggregateUsage returns non-nil.
+	nodeStats := &SessionStats{
+		InputTokens:  100,
+		OutputTokens: 50,
+		TotalTokens:  150,
+		CostUSD:      0.01,
+		Provider:     "test-provider",
+	}
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess, Stats: nodeStats}, nil
+		}})
+	}
+
+	var mu sync.Mutex
+	var costEvents []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventCostUpdated {
+			mu.Lock()
+			costEvents = append(costEvents, evt)
+			mu.Unlock()
+		}
+	})
+
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Fatalf("expected success, got %q", result.Status)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(costEvents) < 3 {
+		t.Errorf("expected at least 3 EventCostUpdated events, got %d", len(costEvents))
+	}
+
+	// Each event must carry a non-nil Cost snapshot.
+	for i, evt := range costEvents {
+		if evt.Cost == nil {
+			t.Errorf("event %d has nil Cost", i)
+			continue
+		}
+		if evt.Cost.TotalTokens <= 0 {
+			t.Errorf("event %d has TotalTokens=%d, want > 0", i, evt.Cost.TotalTokens)
+		}
+	}
+
+	// TotalTokens must be monotonically non-decreasing.
+	for i := 1; i < len(costEvents); i++ {
+		prev := costEvents[i-1].Cost
+		curr := costEvents[i].Cost
+		if prev == nil || curr == nil {
+			continue
+		}
+		if curr.TotalTokens < prev.TotalTokens {
+			t.Errorf("event %d TotalTokens=%d < event %d TotalTokens=%d (not monotonically non-decreasing)",
+				i, curr.TotalTokens, i-1, prev.TotalTokens)
+		}
+	}
+
+	// Final event must have cumulative cost >= 3 * 0.01 = 0.03 (with tolerance).
+	if len(costEvents) > 0 {
+		last := costEvents[len(costEvents)-1]
+		if last.Cost == nil {
+			t.Fatal("last EventCostUpdated has nil Cost")
+		}
+		const wantMinCost = 0.03 - 1e-9
+		if last.Cost.TotalCostUSD < wantMinCost {
+			t.Errorf("final Cost.TotalCostUSD=%.6f, want >= %.6f", last.Cost.TotalCostUSD, wantMinCost)
+		}
+		if last.Cost.WallElapsed <= 0 {
+			t.Errorf("final Cost.WallElapsed=%v, want > 0", last.Cost.WallElapsed)
+		}
+	}
+}
+
+func TestEngine_HaltsOnBudgetBreach(t *testing.T) {
+	// 5-node linear graph: start -> n1 -> n2 -> n3 -> end
+	// Each handler returns 300 tokens. Guard: MaxTotalTokens=700.
+	// After node n1 completes we have 600 total (start + n1), after n2 we have 900.
+	// The check fires after emitCostUpdate in advanceToNextNode, so halt occurs
+	// after n2's trace entry is committed (total 900 > 700).
+	g := NewGraph("budget_halt_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "n1", Shape: "box", Label: "N1"})
+	g.AddNode(&Node{ID: "n2", Shape: "box", Label: "N2"})
+	g.AddNode(&Node{ID: "n3", Shape: "box", Label: "N3"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "start", To: "n1"})
+	g.AddEdge(&Edge{From: "n1", To: "n2"})
+	g.AddEdge(&Edge{From: "n2", To: "n3"})
+	g.AddEdge(&Edge{From: "n3", To: "end"})
+
+	nodeStats := &SessionStats{
+		InputTokens:  200,
+		OutputTokens: 100,
+		TotalTokens:  300,
+		CostUSD:      0.01,
+		Provider:     "test-provider",
+	}
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess, Stats: nodeStats}, nil
+		}})
+	}
+
+	var mu sync.Mutex
+	var budgetEvents []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventBudgetExceeded {
+			mu.Lock()
+			budgetEvents = append(budgetEvents, evt)
+			mu.Unlock()
+		}
+	})
+
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 700})
+	engine := NewEngine(g, reg,
+		WithPipelineEventHandler(handler),
+		WithBudgetGuard(guard),
+	)
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine.Run returned unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if result.Status != OutcomeBudgetExceeded {
+		t.Errorf("result.Status = %q, want %q", result.Status, OutcomeBudgetExceeded)
+	}
+
+	if len(result.BudgetLimitsHit) != 1 || result.BudgetLimitsHit[0] != "tokens" {
+		t.Errorf("BudgetLimitsHit = %v, want [\"tokens\"]", result.BudgetLimitsHit)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(budgetEvents) == 0 {
+		t.Error("expected at least one EventBudgetExceeded, got none")
+	}
+
+	// Pipeline must not have run to completion — n3 and end should not be completed.
+	completedSet := make(map[string]bool)
+	for _, n := range result.CompletedNodes {
+		completedSet[n] = true
+	}
+	if completedSet["n3"] || completedSet["end"] {
+		t.Errorf("pipeline should have halted before n3/end, CompletedNodes=%v", result.CompletedNodes)
+	}
+}
+
+// TestEngine_HaltsOnBudgetBreachDuringRetry verifies that the BudgetGuard fires
+// on the retry path, not just on normal node advancement. The node returns
+// OutcomeRetry twice, each attempt emitting 500 tokens. The guard limit is 600,
+// so after the first retry's trace entry is committed (total 500 from the initial
+// run + 500 from the retry attempt = 1000 > 600) the pipeline must halt.
+func TestEngine_HaltsOnBudgetBreachDuringRetry(t *testing.T) {
+	g := NewGraph("retry_budget_halt_test")
+	g.Attrs["default_max_retry"] = "5"
+	g.Attrs["default_retry_policy"] = "none"
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "retrying", Shape: "box", Label: "Retrying"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "start", To: "retrying"})
+	g.AddEdge(&Edge{From: "retrying", To: "end"})
+
+	nodeStats := &SessionStats{
+		InputTokens:  350,
+		OutputTokens: 150,
+		TotalTokens:  500,
+		CostUSD:      0.01,
+		Provider:     "test-provider",
+	}
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeRetry, Stats: nodeStats}, nil
+		}})
+	}
+
+	var mu sync.Mutex
+	var budgetEvents []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventBudgetExceeded {
+			mu.Lock()
+			budgetEvents = append(budgetEvents, evt)
+			mu.Unlock()
+		}
+	})
+
+	// Guard: 600 tokens. First attempt on "retrying" adds 500 tokens.
+	// After the retry trace entry is committed (attempt 1 = 500 tokens total),
+	// the budget check fires (500 < 600 still ok). On the second retry attempt
+	// another 500 is added (total 1000 > 600), budget must trip.
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 600})
+	engine := NewEngine(g, reg,
+		WithPipelineEventHandler(handler),
+		WithBudgetGuard(guard),
+	)
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine.Run returned unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if result.Status != OutcomeBudgetExceeded {
+		t.Errorf("result.Status = %q, want %q", result.Status, OutcomeBudgetExceeded)
+	}
+
+	if len(result.BudgetLimitsHit) != 1 || result.BudgetLimitsHit[0] != "tokens" {
+		t.Errorf("BudgetLimitsHit = %v, want [\"tokens\"]", result.BudgetLimitsHit)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(budgetEvents) == 0 {
+		t.Error("expected at least one EventBudgetExceeded, got none")
+	}
+}

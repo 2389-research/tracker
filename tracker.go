@@ -48,6 +48,17 @@ type Config struct {
 	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
 	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
 	AutoApprove   bool                          // auto-approve all human gates with default/first option
+	Budget        pipeline.BudgetLimits         // configures pipeline-level token, cost, and wall-time ceilings
+}
+
+// CostReport summarizes spend for a pipeline run.
+// TotalUSD is the sum of ByProvider[*].USD.
+// LimitsHit names the budget dimensions that halted the run (empty when the
+// run completed normally).
+type CostReport struct {
+	TotalUSD   float64
+	ByProvider map[string]llm.ProviderCost
+	LimitsHit  []string
 }
 
 // Result contains the outcome of a pipeline execution.
@@ -60,6 +71,7 @@ type Result struct {
 	Trace            *pipeline.Trace      // full execution trace (nodes, timing, stats)
 	TokensByProvider map[string]llm.Usage // per-provider token totals
 	ToolCallsByName  map[string]int       // tool call counts by name
+	Cost             *CostReport          // per-provider cost rollup; nil when no usage recorded
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
@@ -267,6 +279,9 @@ func buildEngineOpts(cfg Config) []pipeline.EngineOption {
 	if len(cfg.Context) > 0 {
 		opts = append(opts, pipeline.WithInitialContext(cfg.Context))
 	}
+	if guard := pipeline.NewBudgetGuard(cfg.Budget); guard != nil {
+		opts = append(opts, pipeline.WithBudgetGuard(guard))
+	}
 	opts = append(opts, pipeline.WithStylesheetResolution(true))
 	return opts
 }
@@ -412,13 +427,58 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 	result := resultFromEngine(engineResult)
-	if e.tokenTracker != nil {
-		result.TokensByProvider = e.tokenTracker.AllProviderUsage()
-	}
+	e.populateResultTokensAndCost(result, engineResult)
+	e.populateBudgetHaltIfNeeded(result, engineResult)
 	if engineResult != nil && engineResult.Trace != nil {
 		result.ToolCallsByName = engineResult.Trace.AggregateToolCalls()
 	}
 	return result, nil
+}
+
+// populateResultTokensAndCost fills in per-provider token counts and cost report from the tracker.
+func (e *Engine) populateResultTokensAndCost(result *Result, engineResult *pipeline.EngineResult) {
+	if e.tokenTracker == nil {
+		return
+	}
+	result.TokensByProvider = e.tokenTracker.AllProviderUsage()
+	resolver := e.defaultModelResolver()
+	byProvider := e.tokenTracker.CostByProvider(resolver)
+	if len(byProvider) > 0 {
+		total := 0.0
+		for _, pc := range byProvider {
+			total += pc.USD
+		}
+		result.Cost = &CostReport{
+			TotalUSD:   total,
+			ByProvider: byProvider,
+		}
+	}
+}
+
+// populateBudgetHaltIfNeeded fills in LimitsHit when a budget guard halted the run.
+func (e *Engine) populateBudgetHaltIfNeeded(result *Result, engineResult *pipeline.EngineResult) {
+	if engineResult == nil || engineResult.Status != pipeline.OutcomeBudgetExceeded {
+		return
+	}
+	if result.Cost == nil {
+		result.Cost = &CostReport{}
+	}
+	result.Cost.LimitsHit = engineResult.BudgetLimitsHit
+}
+
+// defaultModelResolver returns an llm.ModelResolver that maps any provider to
+// the graph's default model. Per-provider model overrides are not yet supported
+// (the same model attr is used for cost estimation regardless of provider).
+// When the graph has no llm_model attr set, the resolver returns "", which
+// yields USD=0 via llm.EstimateCost.
+func (e *Engine) defaultModelResolver() llm.ModelResolver {
+	model := ""
+	if e.inner != nil {
+		if g := e.inner.Graph(); g != nil {
+			model = g.Attrs["llm_model"]
+		}
+	}
+	return func(provider string) string { return model }
 }
 
 // Close releases resources. Must be called if the engine was created

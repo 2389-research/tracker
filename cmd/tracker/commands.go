@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 	"github.com/joho/godotenv"
 	"github.com/mattn/go-isatty"
@@ -246,6 +247,12 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
+	// Store budget limits for buildEngineOptions (called from run/runTUI).
+	activeBudgetLimits = pipeline.BudgetLimits{
+		MaxTotalTokens: cfg.maxTokens,
+		MaxCostCents:   cfg.maxCostCents,
+		MaxWallTime:    cfg.maxWallTime,
+	}
 
 	if err := printRunPreamble(cfg); err != nil {
 		return err
