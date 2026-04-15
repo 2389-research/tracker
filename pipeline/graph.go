@@ -42,6 +42,13 @@ type Graph struct {
 	// (DIP001–DIP009). Tracker's own validateGraph skips checks that overlap
 	// with those diagnostics, preventing false positives and divergence between
 	// `dippin doctor` and `tracker validate`.
+	//
+	// CONTRACT: this flag reflects the graph's state at the moment dippin
+	// validation ran. If the graph is subsequently mutated (nodes or edges
+	// added/removed programmatically), callers MUST clear this flag or
+	// re-run dippin validation before calling Validate again — otherwise
+	// tracker's structural checks will be skipped for a shape that has
+	// changed since dippin last validated it.
 	DippinValidated bool
 
 	// Adjacency indexes for O(1) edge lookup. Built by AddEdge.

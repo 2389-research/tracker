@@ -371,9 +371,11 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 		g.AddNode(&Node{ID: "b", Shape: "Msquare"})
 		g.AddEdge(&Edge{From: "a", To: "b"})
 
-		// Should NOT error — dippin already validated this.
+		// Should return nil — dippin already validated structural checks and
+		// no tracker-specific checks fire on this graph (all shapes recognized,
+		// no diamond nodes to trigger fail-edge or label-consistency warnings).
 		if err := Validate(g); err != nil {
-			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
 		}
 	})
 
@@ -387,8 +389,9 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 		g.AddEdge(&Edge{From: "s", To: "a"})
 		g.AddEdge(&Edge{From: "a", To: "e"})
 
+		// Should return nil — structural reachability check is skipped when dippin-validated.
 		if err := Validate(g); err != nil {
-			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
 		}
 	})
 
@@ -404,8 +407,9 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 		g.AddEdge(&Edge{From: "b", To: "a"}) // unconditional cycle
 		g.AddEdge(&Edge{From: "b", To: "e"})
 
+		// Should return nil — cycle detection is skipped when dippin-validated.
 		if err := Validate(g); err != nil {
-			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
 		}
 	})
 
@@ -419,8 +423,9 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 		g.AddEdge(&Edge{From: "s", To: "a"}) // duplicate
 		g.AddEdge(&Edge{From: "a", To: "e"})
 
+		// Should return nil — duplicate-edge check is skipped when dippin-validated.
 		if err := Validate(g); err != nil {
-			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
 		}
 	})
 
