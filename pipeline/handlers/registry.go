@@ -185,8 +185,20 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 }
 
 // registerCodergenHandler registers the codergen (LLM agent) handler or a stub.
+// The stub (codergenFunc) takes priority for testing. Otherwise, the full
+// CodergenHandler is registered whenever any backend is accessible — including
+// when the global default is native but per-node "backend" attrs could select
+// claude-code or acp. selectBackend will surface clear errors for nodes that
+// need a native client when none is available.
 func registerCodergenHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, graph *pipeline.Graph) {
-	if cfg.llmClient != nil || cfg.defaultBackend == "claude-code" || cfg.defaultBackend == "acp" {
+	if cfg.codergenFunc != nil {
+		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})
+		return
+	}
+	// Register the full CodergenHandler whenever any backend could be used:
+	// native (llmClient set), external (claude-code/acp global), or per-node
+	// backend attrs that override the global default.
+	if cfg.llmClient != nil || cfg.defaultBackend == "claude-code" || cfg.defaultBackend == "acp" || graphHasPerNodeBackend(graph) {
 		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir, WithGraphAttrs(graph.Attrs))
 		handler.env = cfg.execEnv
 		handler.eventHandler = cfg.agentEvents
@@ -196,9 +208,23 @@ func registerCodergenHandler(registry *pipeline.HandlerRegistry, cfg *registryCo
 		handler.defaultBackendName = cfg.defaultBackend
 		handler.tokenTracker = cfg.tokenTracker
 		registry.Register(handler)
-	} else if cfg.codergenFunc != nil {
-		registry.Register(&funcHandler{name: "codergen", fn: cfg.codergenFunc})
 	}
+}
+
+// graphHasPerNodeBackend returns true if any node in the graph specifies a
+// non-empty "backend" attribute. Used by the handler registry to decide
+// whether to register the full codergen handler even when the global default
+// is native, so mixed-backend pipelines work.
+func graphHasPerNodeBackend(graph *pipeline.Graph) bool {
+	if graph == nil {
+		return false
+	}
+	for _, n := range graph.Nodes {
+		if n.Attrs["backend"] != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // registerToolHandler registers the tool handler or a stub.

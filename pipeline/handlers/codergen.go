@@ -112,9 +112,13 @@ func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBacken
 }
 
 // selectBackend chooses the appropriate AgentBackend based on node attributes
-// and global default settings. When --backend claude-code is set, ALL nodes
-// go through the claude CLI — non-Anthropic provider/model attrs are stripped
-// so the CLI uses its default model under the user's subscription.
+// and global default settings. Priority:
+//  1. Per-node "backend" attribute (highest — always wins over global flag)
+//  2. Global --backend flag (fallback for nodes without explicit backend attr)
+//  3. Default: native
+//
+// This means a node with "backend: native" always uses native even when the
+// global --backend flag is "claude-code", enabling mixed-backend pipelines.
 func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
 	// Check node-level backend attr (explicit override always wins).
 	if backend := node.Attrs["backend"]; backend != "" {
@@ -129,7 +133,6 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code, acp)", backend, node.ID)
 		}
 	}
-	// Global --backend flag applies to all nodes.
 	switch h.defaultBackendName {
 	case "claude-code":
 		return h.ensureClaudeCodeBackend()
@@ -158,10 +161,19 @@ func (h *CodergenHandler) ensureClaudeCodeBackend() (pipeline.AgentBackend, erro
 }
 
 // ensureNativeBackend returns the native backend, lazily creating it if needed.
-// Returns an error if no LLM client is available (e.g. --backend acp with no
-// API keys configured). Thread-safe via sync.Once for parallel node execution.
+// Returns an error if no LLM client is available. This can happen when a node
+// has "backend: native" but the global --backend is "claude-code" and no API
+// keys are configured. Thread-safe via sync.Once for parallel node execution.
 func (h *CodergenHandler) ensureNativeBackend() (pipeline.AgentBackend, error) {
 	if h.client == nil {
+		if h.defaultBackendName == "claude-code" || h.defaultBackendName == "acp" {
+			return nil, fmt.Errorf(
+				"node requests native backend via \"backend: native\" (alias \"backend: codergen\") attr, but no API keys are configured — "+
+					"configure LLM provider API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) "+
+					"to use native backend alongside --backend %s",
+				h.defaultBackendName,
+			)
+		}
 		return nil, fmt.Errorf("native backend requires an LLM client — configure API keys or use --backend acp/claude-code")
 	}
 	h.nativeOnce.Do(func() {
