@@ -10,6 +10,53 @@ import (
 	"time"
 )
 
+// emitGitCommit records the node outcome as a git commit in the artifact repo.
+// Best-effort: errors are emitted as warnings and do not stop the pipeline.
+func (e *Engine) emitGitCommit(s *runState, nodeID string, traceEntry *TraceEntry) {
+	if s.gitRepo == nil {
+		return
+	}
+	handler := ""
+	if traceEntry != nil {
+		handler = traceEntry.HandlerName
+	}
+	status := ""
+	if traceEntry != nil {
+		status = traceEntry.Status
+	}
+	if err := s.gitRepo.CommitNode(nodeID, handler, status, traceEntry); err != nil {
+		e.emit(PipelineEvent{
+			Type:      EventWarning,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    nodeID,
+			Message:   fmt.Sprintf("git commit failed for node %q: %v", nodeID, err),
+		})
+	}
+}
+
+// saveCheckpointWithTag saves the checkpoint and creates a lightweight git tag
+// checkpoint/<runID>/<nodeID> pointing at HEAD (the most recent node-outcome
+// commit). Because checkpoint.json is in .gitignore it is never committed, so
+// the tag deliberately points at the preceding node-outcome commit — which is
+// exactly the state a checkpoint resume would replay from.
+// The git tag is best-effort; errors are emitted as warnings.
+func (e *Engine) saveCheckpointWithTag(cp *Checkpoint, pctx *PipelineContext, runID string, s *runState, nodeID string) {
+	e.saveCheckpoint(cp, pctx, runID)
+	if s.gitRepo == nil {
+		return
+	}
+	if err := s.gitRepo.TagCheckpoint(nodeID); err != nil {
+		e.emit(PipelineEvent{
+			Type:      EventWarning,
+			Timestamp: time.Now(),
+			RunID:     runID,
+			NodeID:    nodeID,
+			Message:   fmt.Sprintf("git tag failed for checkpoint at node %q: %v", nodeID, err),
+		})
+	}
+}
+
 // emitCostUpdate emits an EventCostUpdated carrying the current aggregate
 // usage from the trace. Safe to call when no LLM activity has occurred yet —
 // AggregateUsage returns nil and the event is suppressed.
@@ -98,6 +145,7 @@ type runState struct {
 	trace        *Trace
 	nodeOutcomes map[string]string
 	stylesheet   *Stylesheet
+	gitRepo      *gitArtifactRepo // non-nil when git artifact tracking is enabled
 }
 
 // initRunState initializes all per-run state: context, checkpoint, trace, and stylesheet.
@@ -129,6 +177,23 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	// copied into the first node's scoped namespace when ScopeToNode is called.
 	pctx.ClearDirty()
 
+	// Initialize git artifact repo if requested and an artifact dir is set.
+	var gitRepo *gitArtifactRepo
+	if e.gitArtifacts && e.artifactDir != "" {
+		repoDir := filepath.Join(e.artifactDir, runID)
+		gitRepo = newGitArtifactRepo(repoDir, runID)
+		if err := gitRepo.Init(); err != nil {
+			// Best-effort: emit a warning and continue without git tracking.
+			e.emit(PipelineEvent{
+				Type:      EventWarning,
+				Timestamp: time.Now(),
+				RunID:     runID,
+				Message:   fmt.Sprintf("git artifact init failed (continuing without git tracking): %v", err),
+			})
+			gitRepo = nil
+		}
+	}
+
 	return &runState{
 		runID:        runID,
 		pctx:         pctx,
@@ -136,6 +201,7 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		trace:        &Trace{RunID: runID, StartTime: time.Now()},
 		nodeOutcomes: make(map[string]string),
 		stylesheet:   stylesheet,
+		gitRepo:      gitRepo,
 	}, nil
 }
 
@@ -428,13 +494,14 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 	}
 	traceEntry.EdgeTo = target
 	s.trace.AddEntry(*traceEntry)
+	e.emitGitCommit(s, currentNodeID, traceEntry)
 	e.emitCostUpdate(s)
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
 		return "", false, lr.result, nil
 	}
 	e.clearDownstream(target, s.cp)
 	s.cp.CurrentNode = target
-	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 	return target, true, nil, nil
 }
 
@@ -444,9 +511,10 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		e.clearDownstream(fallback, s.cp)
 		s.cp.CurrentNode = fallback
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 		return fallback, true, nil, nil
 	}
 
@@ -459,6 +527,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		NodeID:    currentNodeID,
 		Message:   fmt.Sprintf("retries exhausted for node %q", currentNodeID),
 	})
+	e.emitGitCommit(s, currentNodeID, traceEntry)
 	s.trace.EndTime = time.Now()
 	result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 	return "", false, result, nil
@@ -519,9 +588,10 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		})
 		traceEntry.EdgeTo = target
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 		return false, target, nil
 	}
 	// Fallback/escalation: target is set but not a retry (one-time redirect).
@@ -538,7 +608,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		s.trace.AddEntry(*traceEntry)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 		return false, target, nil
 	}
 	if unsatisfied {
@@ -553,17 +623,20 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 			})
 		}
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 		return false, "", result
 	}
 	if outcomeStatus == OutcomeFail {
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)
+	e.emitGitCommit(s, currentNodeID, traceEntry)
 	e.emitCostUpdate(s)
 	if halt := e.checkBudgetHaltForExit(s); halt != nil {
 		return false, "", halt

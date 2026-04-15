@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`WithGitArtifacts(bool)` engine option** (issue #77, Layer 1): when enabled alongside `WithArtifactDir`, the artifact run directory is initialized as a (non-bare) git repository at run start and a commit is created after every terminal-outcome node — including success, fail, retry-exhausted, goal-gate fallback, and goal-gate unsatisfied paths. Commits carry a structured message (`node(<id>): <handler> outcome=<status>`) plus duration, edge, and token/cost metadata. `git log` gives a human-readable audit trail of execution order. Successful node advances also create lightweight checkpoint tags (`checkpoint/<runID>/<nodeID>`) intended as the basis for future replay support (Layer 2 — not wired up yet). On checkpoint resume, `Init()` detects an existing HEAD and skips the "run started" commit so replay doesn't add noise. All git operations are best-effort — git failures emit `EventWarning` events and do not crash the engine. Requires `git` in PATH; silently no-ops if `artifactDir` is unset or git is missing.
+
 ### Fixed
 
 - **`tracker doctor` robustness fixes** (PR #83 review round 2):

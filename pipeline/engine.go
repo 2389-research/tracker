@@ -36,6 +36,7 @@ type Engine struct {
 	initialContext    map[string]string
 	artifactDir       string
 	budgetGuard       *BudgetGuard
+	gitArtifacts      bool
 }
 
 // EngineOption configures optional Engine behavior.
@@ -82,6 +83,20 @@ func WithInitialContext(ctx map[string]string) EngineOption {
 // node outcome. Nil guards are no-ops.
 func WithBudgetGuard(guard *BudgetGuard) EngineOption {
 	return func(e *Engine) { e.budgetGuard = guard }
+}
+
+// WithGitArtifacts enables git-backed artifact tracking. When enabled, the
+// artifact dir is initialized as a git repo at run start, and each terminal
+// node outcome produces one commit capturing the artifact state at that
+// point. Checkpoint saves made via saveCheckpointWithTag (not all
+// saveCheckpoint call sites) also create a lightweight git tag of the form
+// checkpoint/<runID>/<nodeID> pointing at the most recent node-outcome commit,
+// intended as the basis for future checkpoint-replay support (Layer 2 of
+// issue #77 — not wired up by this option).
+//
+// Requires git in PATH. Silently no-ops if artifactDir is not set.
+func WithGitArtifacts(enabled bool) EngineOption {
+	return func(e *Engine) { e.gitArtifacts = enabled }
 }
 
 // NewEngine creates a pipeline engine for the given graph and handler registry.
@@ -316,6 +331,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 
 	traceEntry.EdgeTo = next.To
 	s.trace.AddEntry(*traceEntry)
+	e.emitGitCommit(s, currentNodeID, traceEntry)
 	e.emitCostUpdate(s)
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
 		return *lr
@@ -327,7 +343,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	}
 
 	s.cp.CurrentNode = next.To
-	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 	return loopResult{action: loopContinue, nextNodeID: next.To}
 }
 
