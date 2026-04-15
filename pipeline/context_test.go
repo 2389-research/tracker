@@ -356,6 +356,42 @@ func TestScopeToNodeSkipsNodePrefixedKeys(t *testing.T) {
 	}
 }
 
+func TestClearDirtyPreventsBootstrapScoping(t *testing.T) {
+	// Simulate engine bootstrap: keys are written via Set (which marks dirty),
+	// then ClearDirty is called before the main loop. After that, only keys
+	// written by the first handler should land in the node's scoped namespace.
+	ctx := NewPipelineContext()
+	ctx.Set("graph.goal", "build something") // simulates buildInitialContext
+	ctx.Set("graph.model", "gpt-4o")
+	ctx.Set("outcome", "success") // simulates checkpoint restore
+
+	// Engine calls ClearDirty after all bootstrap is done.
+	ctx.ClearDirty()
+
+	// First node handler writes its own key.
+	ctx.Set("last_response", "from the first handler")
+	ctx.ScopeToNode("FirstNode")
+
+	// Bootstrap keys must NOT appear in the first node's scoped namespace.
+	if _, ok := ctx.Get("node.FirstNode.graph.goal"); ok {
+		t.Error("bootstrap key graph.goal should not be scoped into node.FirstNode.*")
+	}
+	if _, ok := ctx.Get("node.FirstNode.graph.model"); ok {
+		t.Error("bootstrap key graph.model should not be scoped into node.FirstNode.*")
+	}
+	if _, ok := ctx.Get("node.FirstNode.outcome"); ok {
+		t.Error("checkpoint-restored key outcome should not be scoped into node.FirstNode.*")
+	}
+	// The handler-written key MUST appear.
+	if v, ok := ctx.Get("node.FirstNode.last_response"); !ok || v != "from the first handler" {
+		t.Errorf("node.FirstNode.last_response = %q, want %q", v, "from the first handler")
+	}
+	// Bare bootstrap keys must still be accessible.
+	if v, ok := ctx.Get("graph.goal"); !ok || v != "build something" {
+		t.Errorf("graph.goal = %q, want %q", v, "build something")
+	}
+}
+
 func TestNewPipelineContextFromPreloadedKeysNotDirty(t *testing.T) {
 	// NewPipelineContextFrom must not mark preloaded keys dirty. The first
 	// ScopeToNode call should only scope keys written after construction.

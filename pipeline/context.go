@@ -170,6 +170,16 @@ func (c *PipelineContext) ScopeToNode(nodeID string) {
 	c.dirty = make(map[string]struct{})
 }
 
+// ClearDirty resets the dirty set without scoping any keys. Call this after
+// all bootstrap writes (graph attrs, initial context, checkpoint restore) are
+// done and before the main engine loop starts, so that baseline values are not
+// copied into the first node's scoped namespace.
+func (c *PipelineContext) ClearDirty() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dirty = make(map[string]struct{})
+}
+
 // GetScoped retrieves the value of key from the per-node namespace for nodeID.
 // It is equivalent to Get("node.<nodeID>.<key>") but more readable at call
 // sites. Returns ("", false) if the scoped key has not been written.
