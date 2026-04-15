@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 )
 
 func parseFlags(args []string) (runConfig, error) {
@@ -128,6 +129,9 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	if err := validateBudgetLimits(cfg); err != nil {
 		return cfg, err
 	}
+	if err := validateWebhookFlags(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
 }
 
@@ -135,6 +139,24 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 func validateBudgetLimits(cfg runConfig) error {
 	if cfg.maxTokens < 0 || cfg.maxCostCents < 0 || cfg.maxWallTime < 0 {
 		return fmt.Errorf("budget limits must be non-negative")
+	}
+	return nil
+}
+
+// validateWebhookFlags returns an error if webhook flags are used incorrectly.
+// Mutual exclusion with --autopilot and --auto-approve is enforced at parse time.
+func validateWebhookFlags(cfg runConfig) error {
+	if cfg.webhookURL == "" {
+		return nil
+	}
+	if cfg.autopilot != "" {
+		return fmt.Errorf("--webhook-url and --autopilot are mutually exclusive: choose one gate automation strategy")
+	}
+	if cfg.autoApprove {
+		return fmt.Errorf("--webhook-url and --auto-approve are mutually exclusive: choose one gate automation strategy")
+	}
+	if cfg.gateTimeoutAction != "fail" && cfg.gateTimeoutAction != "success" {
+		return fmt.Errorf("--gate-timeout-action must be %q or %q, got %q", "fail", "success", cfg.gateTimeoutAction)
 	}
 	return nil
 }
@@ -170,6 +192,11 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.IntVar(&cfg.maxCostCents, "max-cost", 0, "Halt if total cost in cents exceeds this value (0 = no limit)")
 	fs.DurationVar(&cfg.maxWallTime, "max-wall-time", 0, "Halt if pipeline wall time exceeds this duration (0 = no limit)")
 	fs.StringVar(&cfg.gatewayURL, "gateway-url", "", "Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)")
+	fs.StringVar(&cfg.webhookURL, "webhook-url", "", "POST human gate prompts to this URL and wait for callback (headless execution)")
+	fs.StringVar(&cfg.gateCallbackAddr, "gate-callback-addr", ":8789", "Local addr for the callback server when --webhook-url is set")
+	fs.DurationVar(&cfg.gateTimeout, "gate-timeout", 10*time.Minute, "Per-gate wait timeout when --webhook-url is set")
+	fs.StringVar(&cfg.gateTimeoutAction, "gate-timeout-action", "fail", "What to do on gate timeout: fail or success")
+	fs.StringVar(&cfg.webhookAuthHeader, "webhook-auth", "", "Authorization header value sent on outbound webhook requests (e.g. 'Bearer sk_live_...')")
 	fs.StringVar(&cfg.exportBundle, "export-bundle", "", "After the run completes, write a git bundle of run artifacts to this path")
 	return fs
 }
@@ -230,6 +257,11 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --max-cost int            Halt if total cost in cents exceeds this value (0 = no limit)\n")
 	fmt.Fprintf(w, "  --max-wall-time duration  Halt if pipeline wall time exceeds this duration (0 = no limit)\n")
 	fmt.Fprintf(w, "  --gateway-url string      Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)\n")
+	fmt.Fprintf(w, "  --webhook-url string      POST human gate prompts to this URL and wait for callback (headless)\n")
+	fmt.Fprintf(w, "  --gate-callback-addr str  Local addr for the webhook callback server (default: :8789)\n")
+	fmt.Fprintf(w, "  --gate-timeout duration   Per-gate wait timeout when --webhook-url is set (default: 10m)\n")
+	fmt.Fprintf(w, "  --gate-timeout-action str What to do on gate timeout: fail (default) or success\n")
+	fmt.Fprintf(w, "  --webhook-auth string     Authorization header for outbound webhook requests\n")
 	fmt.Fprintf(w, "  --export-bundle string    Write a portable git bundle of run artifacts to this path after completion\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

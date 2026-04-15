@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -559,7 +558,7 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 		result.ToolCallsByName = engineResult.Trace.AggregateToolCalls()
 	}
 	if e.artifactDir != "" && result.RunID != "" {
-		result.ArtifactRunDir = filepath.Join(e.artifactDir, result.RunID)
+		result.ArtifactRunDir = e.artifactDir + "/" + result.RunID
 	}
 	return result, nil
 }
