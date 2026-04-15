@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`WithGitArtifacts(bool)` engine option** (issue #77, Layer 1): when enabled alongside `WithArtifactDir`, the artifact run directory is initialized as a git repository at run start and a commit is created after each terminal-outcome node. Commits carry a structured message (`node(<id>): <handler> outcome=<status>`) plus duration, edge, and token/cost metadata. `git log` gives a human-readable audit trail of execution order. Checkpoint saves are tagged as `checkpoint/<runID>/<nodeID>` for future replay (Layer 2). All git operations are best-effort — git failures emit `EventWarning` events and do not crash the engine. Requires `git` in PATH; silently no-ops if `artifactDir` is unset or git is missing.
+
 ### Fixed
 
 - **Per-node backend selection now overrides global `--backend` flag** (issue #70): A node with `backend: native` always uses the native LLM client even when `--backend claude-code` is set globally, enabling mixed-backend pipelines (e.g. some nodes on claude-code subscription, others on OpenAI native API). The `selectBackend` priority is now documented: per-node attr > global flag > default native. The registry also registers the CodergenHandler when per-node backend attrs are present in the graph, even if the global default is native and no `--backend` flag is passed. Error messages for missing native client when using `--backend claude-code` now include actionable guidance.
