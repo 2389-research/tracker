@@ -47,6 +47,13 @@ type Config struct {
 	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
 	AutoApprove   bool                          // auto-approve all human gates with default/first option
 	Budget        pipeline.BudgetLimits         // configures pipeline-level token, cost, and wall-time ceilings
+	// GatewayURL is the root URL of a Cloudflare AI Gateway (or any compatible
+	// proxy). When non-empty it is used as the base for all provider URLs, with
+	// the per-provider suffix appended (e.g. "<gateway>/anthropic"). A
+	// per-provider *_BASE_URL env var always takes precedence over GatewayURL so
+	// library callers can still override individual providers. The TRACKER_GATEWAY_URL
+	// env var is the fallback when GatewayURL is empty.
+	GatewayURL string
 }
 
 // CostReport summarizes spend for a pipeline run.
@@ -163,7 +170,7 @@ func resolveCompleter(cfg Config) (*llm.Client, agent.Completer, error) {
 	if cfg.LLMClient != nil {
 		return nil, cfg.LLMClient, nil
 	}
-	client, err := buildClient(cfg.Provider)
+	client, err := buildClient(cfg.Provider, cfg.GatewayURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create LLM client: %w", err)
 	}
@@ -338,8 +345,11 @@ func parseDIPSource(source string) (*pipeline.Graph, error) {
 // buildClient creates an LLM client from environment variables with
 // base URL support and retry middleware. If provider is non-empty, only
 // that provider is configured (returns error if unknown).
-func buildClient(provider string) (*llm.Client, error) {
-	constructors := allProviderConstructors()
+// gatewayURL is the Cloudflare AI Gateway root URL from Config.GatewayURL;
+// it is consulted after per-provider *_BASE_URL env vars and before
+// TRACKER_GATEWAY_URL (see resolveProviderBaseURLWithGateway).
+func buildClient(provider, gatewayURL string) (*llm.Client, error) {
+	constructors := allProviderConstructors(gatewayURL)
 
 	if provider != "" {
 		constructor, ok := constructors[provider]
@@ -366,13 +376,50 @@ func buildClient(provider string) (*llm.Client, error) {
 }
 
 // allProviderConstructors returns the full map of provider constructor functions.
-func allProviderConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
+// gatewayURL is the explicit gateway root URL (from Config.GatewayURL); it is
+// passed to the adapter constructors so library consumers don't need to mutate
+// os.Environ.
+func allProviderConstructors(gatewayURL string) map[string]func(string) (llm.ProviderAdapter, error) {
 	return map[string]func(string) (llm.ProviderAdapter, error){
-		"anthropic":     newAnthropicAdapter,
-		"openai":        newOpenAIAdapter,
-		"gemini":        newGeminiAdapter,
-		"openai-compat": newOpenAICompatAdapter,
+		"anthropic":     func(k string) (llm.ProviderAdapter, error) { return newAnthropicAdapter(k, gatewayURL) },
+		"openai":        func(k string) (llm.ProviderAdapter, error) { return newOpenAIAdapter(k, gatewayURL) },
+		"gemini":        func(k string) (llm.ProviderAdapter, error) { return newGeminiAdapter(k, gatewayURL) },
+		"openai-compat": func(k string) (llm.ProviderAdapter, error) { return newOpenAICompatAdapter(k, gatewayURL) },
 	}
+}
+
+// resolveProviderBaseURLWithGateway resolves the base URL for a provider,
+// consulting sources in priority order:
+//
+//  1. Per-provider env var (*_BASE_URL) — always wins.
+//  2. gatewayURL argument (from Config.GatewayURL) with provider suffix appended.
+//  3. TRACKER_GATEWAY_URL env var with provider suffix appended.
+//  4. Empty string — use provider SDK default.
+func resolveProviderBaseURLWithGateway(provider, gatewayURL string) string {
+	var envKey, suffix string
+	switch provider {
+	case "anthropic":
+		envKey, suffix = "ANTHROPIC_BASE_URL", "/anthropic"
+	case "openai":
+		envKey, suffix = "OPENAI_BASE_URL", "/openai"
+	case "gemini":
+		envKey, suffix = "GEMINI_BASE_URL", "/google-ai-studio"
+	case "openai-compat":
+		envKey, suffix = "OPENAI_COMPAT_BASE_URL", "/compat"
+	default:
+		return ""
+	}
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	if gatewayURL != "" {
+		return strings.TrimRight(gatewayURL, "/") + suffix
+	}
+	gateway := strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
+	if gateway == "" {
+		return ""
+	}
+	return gateway + suffix
 }
 
 // ResolveProviderBaseURL returns the base URL a provider's HTTP client should
@@ -413,33 +460,33 @@ func ResolveProviderBaseURL(provider string) string {
 	return gateway + suffix
 }
 
-func newAnthropicAdapter(key string) (llm.ProviderAdapter, error) {
+func newAnthropicAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
 	var opts []anthropic.Option
-	if base := ResolveProviderBaseURL("anthropic"); base != "" {
+	if base := resolveProviderBaseURLWithGateway("anthropic", gatewayURL); base != "" {
 		opts = append(opts, anthropic.WithBaseURL(base))
 	}
 	return anthropic.New(key, opts...), nil
 }
 
-func newOpenAIAdapter(key string) (llm.ProviderAdapter, error) {
+func newOpenAIAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
 	var opts []openai.Option
-	if base := ResolveProviderBaseURL("openai"); base != "" {
+	if base := resolveProviderBaseURLWithGateway("openai", gatewayURL); base != "" {
 		opts = append(opts, openai.WithBaseURL(base))
 	}
 	return openai.New(key, opts...), nil
 }
 
-func newGeminiAdapter(key string) (llm.ProviderAdapter, error) {
+func newGeminiAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
 	var opts []google.Option
-	if base := ResolveProviderBaseURL("gemini"); base != "" {
+	if base := resolveProviderBaseURLWithGateway("gemini", gatewayURL); base != "" {
 		opts = append(opts, google.WithBaseURL(base))
 	}
 	return google.New(key, opts...), nil
 }
 
-func newOpenAICompatAdapter(key string) (llm.ProviderAdapter, error) {
+func newOpenAICompatAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
 	var opts []openaicompat.Option
-	if base := ResolveProviderBaseURL("openai-compat"); base != "" {
+	if base := resolveProviderBaseURLWithGateway("openai-compat", gatewayURL); base != "" {
 		opts = append(opts, openaicompat.WithBaseURL(base))
 	}
 	return openaicompat.New(key, opts...), nil

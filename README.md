@@ -232,7 +232,7 @@ Submit with **Ctrl+S**. Enter inserts newlines. Esc cancels (empty) or submits (
 
 ### Providers
 
-Tracker supports three LLM providers: `anthropic`, `openai`, `gemini`. Set up with:
+Tracker supports four LLM providers: `anthropic`, `openai`, `gemini`, and `openai-compat` (for any OpenAI-compatible API). Set up with:
 
 ```bash
 # Interactive setup wizard

@@ -834,6 +834,88 @@ func TestParseFlagsBackendInvalid(t *testing.T) {
 	}
 }
 
+func TestParseFlagsGatewayURL(t *testing.T) {
+	const want = "https://gateway.ai.cloudflare.com/v1/acc/gw"
+	cfg, err := parseFlags([]string{"tracker", "--gateway-url", want, "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.gatewayURL != want {
+		t.Fatalf("gatewayURL = %q, want %q", cfg.gatewayURL, want)
+	}
+	if cfg.pipelineFile != "pipeline.dip" {
+		t.Fatalf("pipelineFile = %q, want %q", cfg.pipelineFile, "pipeline.dip")
+	}
+}
+
+func TestGatewayURLPropagatesViaEnv(t *testing.T) {
+	// executeRun sets TRACKER_GATEWAY_URL before buildLLMClient runs.
+	// Verify the env var is live in the same process after executeRun sets it.
+	unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
+
+	const gateway = "https://gateway.ai.cloudflare.com/v1/acc/test"
+	var envValueAtRunTime string
+
+	_ = executeCommand(runConfig{
+		mode:         modeRun,
+		pipelineFile: "pipeline.dip",
+		workdir:      "/tmp",
+		noTUI:        true,
+		gatewayURL:   gateway,
+	}, commandDeps{
+		loadEnv: func(string) error { return nil },
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+			// By the time run() is called, TRACKER_GATEWAY_URL must be set.
+			envValueAtRunTime = os.Getenv("TRACKER_GATEWAY_URL")
+			return nil
+		},
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+			t.Fatal("unexpected TUI path")
+			return nil
+		},
+	})
+
+	if envValueAtRunTime != gateway {
+		t.Fatalf("TRACKER_GATEWAY_URL inside run() = %q, want %q", envValueAtRunTime, gateway)
+	}
+}
+
+func TestResolveProviderBaseURLFromEnvGateway(t *testing.T) {
+	// resolveProviderBaseURLFromEnv must return the gateway-suffixed URL when
+	// TRACKER_GATEWAY_URL is set and no per-provider override exists.
+	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
+
+	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	want := "https://gw.example.com/v1/acc/slug/anthropic"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveProviderBaseURLFromEnvPerProviderWins(t *testing.T) {
+	// Per-provider *_BASE_URL must win over TRACKER_GATEWAY_URL.
+	t.Setenv("ANTHROPIC_BASE_URL", "https://custom-proxy.example.com")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
+
+	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	want := "https://custom-proxy.example.com"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveProviderBaseURLFromEnvNoGateway(t *testing.T) {
+	// With neither env var set, must return empty string (use provider SDK default).
+	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
+
+	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	if got != "" {
+		t.Fatalf("expected empty string, got %q", got)
+	}
+}
+
 func TestExecuteCommandRunPassesBackend(t *testing.T) {
 	var gotBackend string
 	err := executeCommand(runConfig{
