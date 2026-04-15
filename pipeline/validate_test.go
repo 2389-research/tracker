@@ -373,9 +373,7 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 
 		// Should NOT error — dippin already validated this.
 		if err := Validate(g); err != nil {
-			if strings.Contains(err.Error(), "start") {
-				t.Errorf("DippinValidated graph should not re-check for missing start node, got: %v", err)
-			}
+			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
 		}
 	})
 
@@ -390,9 +388,7 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 		g.AddEdge(&Edge{From: "a", To: "e"})
 
 		if err := Validate(g); err != nil {
-			if strings.Contains(err.Error(), "unreachable") {
-				t.Errorf("DippinValidated graph should not re-check reachability, got: %v", err)
-			}
+			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
 		}
 	})
 
@@ -409,9 +405,7 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 		g.AddEdge(&Edge{From: "b", To: "e"})
 
 		if err := Validate(g); err != nil {
-			if strings.Contains(err.Error(), "cycle") {
-				t.Errorf("DippinValidated graph should not re-check cycles, got: %v", err)
-			}
+			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
 		}
 	})
 
@@ -426,9 +420,7 @@ func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
 		g.AddEdge(&Edge{From: "a", To: "e"})
 
 		if err := Validate(g); err != nil {
-			if strings.Contains(err.Error(), "duplicate") {
-				t.Errorf("DippinValidated graph should not re-check duplicate edges, got: %v", err)
-			}
+			t.Errorf("DippinValidated graph should not fail validation, got: %v", err)
 		}
 	})
 

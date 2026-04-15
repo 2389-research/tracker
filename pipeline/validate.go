@@ -1,6 +1,6 @@
 // ABOUTME: Validates pipeline graph structure for correctness before execution.
-// ABOUTME: Tracker-specific checks (shapes, duplicate edges, conditional routing) always run.
-// ABOUTME: Structural checks that dippin-lang already covers are skipped when DippinValidated=true.
+// ABOUTME: Tracker-specific checks such as shapes and conditional routing always run.
+// ABOUTME: Structural checks that dippin-lang already covers, including duplicate-edge checks, are skipped when DippinValidated=true.
 package pipeline
 
 import (
