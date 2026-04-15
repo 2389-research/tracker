@@ -592,6 +592,132 @@ func TestSelectBackendNativeNilClientErrors(t *testing.T) {
 	}
 }
 
+// TestSelectBackendNodeAttrWinsOverGlobalClaudeCode verifies that a per-node
+// "backend: native" attribute overrides the global --backend claude-code flag.
+// This is the core fix for issue #70: mixed-backend pipelines.
+func TestSelectBackendNodeAttrWinsOverGlobalClaudeCode(t *testing.T) {
+	h := NewCodergenHandler(nopCompleter{}, "/tmp")
+	h.defaultBackendName = "claude-code" // simulate --backend claude-code
+
+	node := &pipeline.Node{
+		ID:    "openai-node",
+		Attrs: map[string]string{"backend": "native"}, // per-node override
+	}
+	backend, err := h.selectBackend(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := backend.(*NativeBackend); !ok {
+		t.Errorf("expected NativeBackend (per-node attr wins), got %T", backend)
+	}
+}
+
+// TestSelectBackendNodeAttrClaudeCodeOverGlobalNative verifies that a per-node
+// "backend: claude-code" attribute works when the global default is native.
+func TestSelectBackendNodeAttrClaudeCodeOverGlobalNative(t *testing.T) {
+	// Set up a handler with a native client but no global claude-code default.
+	h := NewCodergenHandler(nopCompleter{}, "/tmp")
+	// defaultBackendName is "" (native) by default.
+
+	// Pre-populate the claudeCodeBackend to avoid requiring the claude binary.
+	h.claudeCodeBackend = &ClaudeCodeBackend{claudePath: "/usr/bin/claude"}
+
+	node := &pipeline.Node{
+		ID:    "claude-node",
+		Attrs: map[string]string{"backend": "claude-code"},
+	}
+	backend, err := h.selectBackend(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := backend.(*ClaudeCodeBackend); !ok {
+		t.Errorf("expected ClaudeCodeBackend (per-node attr wins), got %T", backend)
+	}
+}
+
+// TestSelectBackendNativeAttrWithGlobalClaudeCodeNoClient verifies that when
+// the global backend is claude-code but no API keys are configured, a node with
+// "backend: native" gets a clear, actionable error message.
+func TestSelectBackendNativeAttrWithGlobalClaudeCodeNoClient(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp") // nil client = no API keys
+	h.defaultBackendName = "claude-code"
+
+	node := &pipeline.Node{
+		ID:    "native-node",
+		Attrs: map[string]string{"backend": "native"},
+	}
+	_, err := h.selectBackend(node)
+	if err == nil {
+		t.Fatal("expected error for native backend with nil client and global claude-code")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "backend: native") {
+		t.Errorf("expected 'backend: native' in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "API keys") {
+		t.Errorf("expected 'API keys' guidance in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "claude-code") {
+		t.Errorf("expected 'claude-code' context in error, got: %s", errMsg)
+	}
+}
+
+// TestSelectBackendGlobalClaudeCodeUsedWhenNoNodeAttr verifies that nodes
+// without an explicit "backend" attr use the global --backend claude-code.
+func TestSelectBackendGlobalClaudeCodeUsedWhenNoNodeAttr(t *testing.T) {
+	h := NewCodergenHandler(nil, "/tmp")
+	h.defaultBackendName = "claude-code"
+	// Pre-populate the claudeCodeBackend to avoid requiring the claude binary.
+	h.claudeCodeBackend = &ClaudeCodeBackend{claudePath: "/usr/bin/claude"}
+
+	node := &pipeline.Node{
+		ID:    "default-node",
+		Attrs: map[string]string{}, // no backend attr
+	}
+	backend, err := h.selectBackend(node)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := backend.(*ClaudeCodeBackend); !ok {
+		t.Errorf("expected ClaudeCodeBackend (global default), got %T", backend)
+	}
+}
+
+func TestGraphHasPerNodeBackend(t *testing.T) {
+	t.Run("no backend attrs", func(t *testing.T) {
+		g := pipeline.NewGraph("test")
+		g.Nodes["a"] = &pipeline.Node{ID: "a", Attrs: map[string]string{"prompt": "do it"}}
+		g.Nodes["b"] = &pipeline.Node{ID: "b", Attrs: map[string]string{"llm_model": "gpt-4o"}}
+		if graphHasPerNodeBackend(g) {
+			t.Error("expected false for graph with no backend attrs")
+		}
+	})
+
+	t.Run("one node has backend attr", func(t *testing.T) {
+		g := pipeline.NewGraph("test")
+		g.Nodes["a"] = &pipeline.Node{ID: "a", Attrs: map[string]string{"prompt": "do it"}}
+		g.Nodes["b"] = &pipeline.Node{ID: "b", Attrs: map[string]string{"backend": "claude-code"}}
+		if !graphHasPerNodeBackend(g) {
+			t.Error("expected true for graph with a backend attr")
+		}
+	})
+
+	t.Run("empty graph", func(t *testing.T) {
+		g := pipeline.NewGraph("test")
+		if graphHasPerNodeBackend(g) {
+			t.Error("expected false for empty graph")
+		}
+	})
+
+	t.Run("native backend attr counts", func(t *testing.T) {
+		g := pipeline.NewGraph("test")
+		g.Nodes["a"] = &pipeline.Node{ID: "a", Attrs: map[string]string{"backend": "native"}}
+		if !graphHasPerNodeBackend(g) {
+			t.Error("expected true for graph with backend: native attr")
+		}
+	})
+}
+
 func TestBuildClaudeCodeConfig(t *testing.T) {
 	h := NewCodergenHandler(nil, "/tmp")
 	node := &pipeline.Node{

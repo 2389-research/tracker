@@ -245,7 +245,8 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - `NativeBackend` wraps `agent.Session` — the existing turn loop with tool registry and context compaction (default)
 - Per-node selection via `backend: claude-code` attribute in `.dip` files; global via `--backend claude-code` CLI flag
 - Environment scoping: API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) are **stripped** from the subprocess env so the claude CLI uses subscription auth (Max/Pro OAuth). Override with `TRACKER_PASS_API_KEYS=1`.
-- With `--backend claude-code`, ALL nodes route through the claude CLI — non-Anthropic model names are stripped so the CLI uses its default
+- Per-node `backend` attr takes priority over the global `--backend` flag: a node with `backend: native` uses native even when `--backend claude-code` is set globally
+- With `--backend claude-code` and no per-node override, nodes route through the claude CLI — non-Anthropic model names are stripped so the CLI uses its default
 - `buildLLMClient()` is lazy: failure is non-fatal with `--backend claude-code` (native client only needed for native backend nodes)
 - Error classification: Claude CLI exit codes are mapped to pipeline outcomes (success, fail, escalate); credit balance errors logged with actionable guidance
 - The engine and TUI see the same `agent.Event` stream regardless of backend — no special-case code needed
