@@ -214,6 +214,9 @@ func registerCodergenHandler(registry *pipeline.HandlerRegistry, cfg *registryCo
 // graphHasPerNodeBackend returns true if any node in the graph specifies an
 // explicit "backend" attribute, indicating a mixed-backend pipeline.
 func graphHasPerNodeBackend(graph *pipeline.Graph) bool {
+	if graph == nil {
+		return false
+	}
 	for _, n := range graph.Nodes {
 		if n.Attrs["backend"] != "" {
 			return true

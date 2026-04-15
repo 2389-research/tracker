@@ -169,7 +169,7 @@ func (h *CodergenHandler) ensureNativeBackend() (pipeline.AgentBackend, error) {
 	if h.client == nil {
 		if h.defaultBackendName == "claude-code" || h.defaultBackendName == "acp" {
 			return nil, fmt.Errorf(
-				"node requests native backend via \"backend: native\" attr, but no API keys are configured — "+
+				"node requests native backend via \"backend: native\" (alias \"backend: codergen\") attr, but no API keys are configured — "+
 					"configure LLM provider API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) "+
 					"to use native backend alongside --backend %s",
 				h.defaultBackendName,
