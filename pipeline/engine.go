@@ -231,6 +231,12 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 
 	e.applyOutcome(s, currentNodeID, outcome)
 
+	// Copy every key written during this node's execution into the per-node
+	// namespace "node.<nodeID>.<key>" so downstream nodes can read a specific
+	// upstream node's output without collision. Bare keys keep their global
+	// last-writer-wins value for backward compatibility.
+	s.pctx.ScopeToNode(currentNodeID)
+
 	if outcome.Status == OutcomeRetry {
 		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, &traceEntry)
 	}

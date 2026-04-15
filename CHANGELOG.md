@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-node context scoping** (`PipelineContext.ScopeToNode`): after each node's handler completes, the engine copies every key written during that node's execution into a `node.<nodeID>.<key>` namespace. Downstream nodes can read `node.MyAgent.last_response` to get a specific upstream node's output without being affected by later writes to the bare `last_response` key. Bare keys retain their last-writer-wins global semantics for full backward compatibility. New convenience method `GetScoped(nodeID, key)`. Closes #32.
+- `pipeline.ContextKeyNodePrefix` constant (`"node."`), the namespace prefix for per-node scoped keys.
+
 - `Result.Cost` on the library API with per-provider rollup (`map[string]llm.ProviderCost`) and `TotalUSD`. Populated from the `llm.TokenTracker` middleware and priced via `llm.EstimateCost`. Closes #62.
 - `pipeline.BudgetGuard` enforcing `MaxTotalTokens`, `MaxCostCents`, and `MaxWallTime` limits. Halts the run with `pipeline.OutcomeBudgetExceeded` when any dimension trips. Closes #17.
 - New `tracker.Config.Budget` field (type `pipeline.BudgetLimits`) for library consumers.
