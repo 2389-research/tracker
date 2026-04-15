@@ -1399,3 +1399,468 @@ func TestConvertEdge_ZeroWeightOmitted(t *testing.T) {
 		t.Error("false restart should not be in attrs")
 	}
 }
+
+// TestEnsureStartExitNodes_ToolNodeKeepsHandler verifies that tool start/exit nodes
+// with a tool_command attribute keep their "tool" handler and are not overwritten
+// with the passthrough "start"/"exit" handler. This is the root cause of issue #69.
+func TestEnsureStartExitNodes_ToolNodeKeepsHandler(t *testing.T) {
+	// Simulate a tool Start node: shape=parallelogram (from adapter), handler=tool,
+	// tool_command set (from ToolConfig.Command).
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "Start",
+		ExitNode:  "Exit",
+	}
+	g.Nodes["Start"] = &Node{
+		ID:      "Start",
+		Shape:   "parallelogram",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "touch start.txt"},
+	}
+	g.Nodes["Exit"] = &Node{
+		ID:      "Exit",
+		Shape:   "parallelogram",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "touch exit.txt"},
+	}
+	g.Edges = []*Edge{{From: "Start", To: "Exit"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	// Shapes must be overridden to Mdiamond/Msquare for validator.
+	if g.Nodes["Start"].Shape != "Mdiamond" {
+		t.Errorf("start shape = %q, want Mdiamond", g.Nodes["Start"].Shape)
+	}
+	if g.Nodes["Exit"].Shape != "Msquare" {
+		t.Errorf("exit shape = %q, want Msquare", g.Nodes["Exit"].Shape)
+	}
+
+	// Handlers must NOT be overwritten — tool commands need the tool handler.
+	if g.Nodes["Start"].Handler != "tool" {
+		t.Errorf("start handler = %q, want tool (preserved)", g.Nodes["Start"].Handler)
+	}
+	if g.Nodes["Exit"].Handler != "tool" {
+		t.Errorf("exit handler = %q, want tool (preserved)", g.Nodes["Exit"].Handler)
+	}
+}
+
+// TestEnsureStartExitNodes_HumanNodeKeepsHandler verifies that human start/exit
+// nodes with a mode attribute keep their "wait.human" handler.
+func TestEnsureStartExitNodes_HumanNodeKeepsHandler(t *testing.T) {
+	g := &Graph{
+		Nodes:     make(map[string]*Node),
+		StartNode: "Begin",
+		ExitNode:  "Finish",
+	}
+	g.Nodes["Begin"] = &Node{
+		ID:      "Begin",
+		Shape:   "hexagon",
+		Handler: "wait.human",
+		Attrs:   map[string]string{"mode": "yes_no"},
+	}
+	g.Nodes["Finish"] = &Node{
+		ID:      "Finish",
+		Shape:   "hexagon",
+		Handler: "wait.human",
+		Attrs:   map[string]string{"mode": "yes_no"},
+	}
+	g.Edges = []*Edge{{From: "Begin", To: "Finish"}}
+
+	err := ensureStartExitNodes(g)
+	if err != nil {
+		t.Fatalf("ensureStartExitNodes failed: %v", err)
+	}
+
+	if g.Nodes["Begin"].Handler != "wait.human" {
+		t.Errorf("start handler = %q, want wait.human (preserved)", g.Nodes["Begin"].Handler)
+	}
+	if g.Nodes["Finish"].Handler != "wait.human" {
+		t.Errorf("exit handler = %q, want wait.human (preserved)", g.Nodes["Finish"].Handler)
+	}
+}
+
+// TestFromDippinIR_ToolStartExitNodes verifies that tool nodes used as start/exit
+// retain the "tool" handler when converted via FromDippinIR. This is the full
+// adapter-level regression test for issue #69.
+func TestFromDippinIR_ToolStartExitNodes(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ToolStartExitTest",
+		Start: "Start",
+		Exit:  "Exit",
+		Nodes: []*ir.Node{
+			{
+				ID:     "Start",
+				Kind:   ir.NodeTool,
+				Label:  "Start",
+				Config: ir.ToolConfig{Command: "touch start.txt"},
+			},
+			{
+				ID:     "Middle",
+				Kind:   ir.NodeTool,
+				Label:  "Middle",
+				Config: ir.ToolConfig{Command: "touch middle.txt"},
+			},
+			{
+				ID:     "Exit",
+				Kind:   ir.NodeTool,
+				Label:  "Exit",
+				Config: ir.ToolConfig{Command: "touch exit.txt"},
+			},
+		},
+		Edges: []*ir.Edge{
+			{From: "Start", To: "Middle"},
+			{From: "Middle", To: "Exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	// All three nodes must use the "tool" handler.
+	for _, id := range []string{"Start", "Middle", "Exit"} {
+		node := graph.Nodes[id]
+		if node == nil {
+			t.Fatalf("node %q not found in graph", id)
+		}
+		if node.Handler != "tool" {
+			t.Errorf("node %q handler = %q, want tool", id, node.Handler)
+		}
+	}
+
+	// Start/exit nodes get their shapes set for the validator.
+	if graph.Nodes["Start"].Shape != "Mdiamond" {
+		t.Errorf("Start shape = %q, want Mdiamond", graph.Nodes["Start"].Shape)
+	}
+	if graph.Nodes["Exit"].Shape != "Msquare" {
+		t.Errorf("Exit shape = %q, want Msquare", graph.Nodes["Exit"].Shape)
+	}
+
+	// Tool commands must be preserved in attrs.
+	if graph.Nodes["Start"].Attrs["tool_command"] != "touch start.txt" {
+		t.Errorf("Start tool_command = %q, want touch start.txt", graph.Nodes["Start"].Attrs["tool_command"])
+	}
+	if graph.Nodes["Exit"].Attrs["tool_command"] != "touch exit.txt" {
+		t.Errorf("Exit tool_command = %q, want touch exit.txt", graph.Nodes["Exit"].Attrs["tool_command"])
+	}
+}
+
+// TestNodeHasHandlerContent verifies the helper that distinguishes bare nodes
+// from nodes with handler-specific content. Two cases are treated as bare
+// passthroughs: codergen nodes with no prompt and nodes with an empty/unresolved
+// Handler field. Any other handler type is considered meaningful and must be
+// preserved.
+func TestNodeHasHandlerContent(t *testing.T) {
+	tests := []struct {
+		name string
+		node *Node
+		want bool
+	}{
+		{
+			name: "bare codergen node - no content",
+			node: &Node{ID: "n", Handler: "codergen", Attrs: make(map[string]string)},
+			want: false,
+		},
+		{
+			name: "agent node with prompt",
+			node: &Node{ID: "n", Handler: "codergen", Attrs: map[string]string{"prompt": "do something"}},
+			want: true,
+		},
+		{
+			name: "tool node with command",
+			node: &Node{ID: "n", Handler: "tool", Attrs: map[string]string{"tool_command": "echo hi"}},
+			want: true,
+		},
+		{
+			name: "human node with mode",
+			node: &Node{ID: "n", Handler: "wait.human", Attrs: map[string]string{"mode": "yes_no"}},
+			want: true,
+		},
+		{
+			name: "codergen node with only non-content attrs",
+			node: &Node{ID: "n", Handler: "codergen", Attrs: map[string]string{"label": "My Node", "llm_model": "claude"}},
+			want: false,
+		},
+		// Handler-type regression cases — all non-codergen handlers must be preserved.
+		{
+			name: "wait.human without mode attr (default mode)",
+			node: &Node{ID: "n", Handler: "wait.human", Attrs: make(map[string]string)},
+			want: true,
+		},
+		{
+			name: "parallel node with parallel_targets",
+			node: &Node{ID: "n", Handler: "parallel", Attrs: map[string]string{"parallel_targets": "A,B"}},
+			want: true,
+		},
+		{
+			name: "parallel.fan_in node with fan_in_sources",
+			node: &Node{ID: "n", Handler: "parallel.fan_in", Attrs: map[string]string{"fan_in_sources": "A,B"}},
+			want: true,
+		},
+		{
+			name: "conditional node (no attrs, pure routing)",
+			node: &Node{ID: "n", Handler: "conditional", Attrs: make(map[string]string)},
+			want: true,
+		},
+		{
+			name: "subgraph node with ref",
+			node: &Node{ID: "n", Handler: "subgraph", Attrs: map[string]string{"subgraph_ref": "sub.dip"}},
+			want: true,
+		},
+		{
+			name: "stack.manager_loop node",
+			node: &Node{ID: "n", Handler: "stack.manager_loop", Attrs: make(map[string]string)},
+			want: true,
+		},
+		{
+			name: "unresolved handler - empty string, no prompt",
+			node: &Node{ID: "n", Handler: "", Attrs: make(map[string]string)},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nodeHasHandlerContent(tt.node)
+			if got != tt.want {
+				t.Errorf("nodeHasHandlerContent(%v) = %v, want %v", tt.node.Attrs, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEnsureStartExitNodes_ParamsLeakPrevention is a regression test for the
+// AgentConfig.Params "mode"/"tool_command" collision bug (Codex P2, PR #72 / issue #69).
+//
+// A user-defined param named "mode" or "tool_command" leaked into node attrs via
+// extractAgentAttrs. The old attr-based nodeHasHandlerContent saw those keys and
+// falsely concluded the node was a human or tool node — preserving the codergen
+// handler even though the node had no prompt, which caused a runtime failure.
+//
+// With the handler-aware check: codergen + no prompt → nodeHasHandlerContent returns
+// false → ensureStartExitNodes correctly assigns the passthrough start/exit handler.
+func TestEnsureStartExitNodes_ParamsLeakPrevention(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ParamsLeakTest",
+		Start: "Begin",
+		Exit:  "End",
+		Nodes: []*ir.Node{
+			{
+				ID:   "Begin",
+				Kind: ir.NodeAgent,
+				Config: ir.AgentConfig{
+					// No prompt — bare passthrough agent node. Params["mode"] and
+					// Params["tool_command"] will be copied into node attrs by
+					// extractAgentAttrs. Under the old attr-based check these keys
+					// caused a false positive; the handler-aware check must ignore them.
+					Params: map[string]string{"mode": "something_custom", "tool_command": "echo collide"},
+				},
+			},
+			{
+				ID:   "End",
+				Kind: ir.NodeAgent,
+				Config: ir.AgentConfig{
+					Params: map[string]string{"mode": "something_custom"},
+				},
+			},
+		},
+		Edges: []*ir.Edge{
+			{From: "Begin", To: "End"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	begin := graph.Nodes["Begin"]
+	if begin == nil {
+		t.Fatal("Begin node not found")
+	}
+	// Leaked Params attrs ("mode", "tool_command") must NOT prevent the start handler
+	// from being assigned. The node has no prompt, so it is a passthrough start node.
+	if begin.Handler != "start" {
+		t.Errorf("Begin handler = %q, want start; leaked Params attrs should not prevent passthrough assignment", begin.Handler)
+	}
+	if begin.Shape != "Mdiamond" {
+		t.Errorf("Begin shape = %q, want Mdiamond", begin.Shape)
+	}
+	// Confirm the leaked attrs are present in node attrs (so the test exercises the
+	// exact collision path).
+	if begin.Attrs["mode"] != "something_custom" {
+		t.Errorf("Begin attrs[\"mode\"] = %q, want something_custom (leak not reproduced)", begin.Attrs["mode"])
+	}
+
+	end := graph.Nodes["End"]
+	if end == nil {
+		t.Fatal("End node not found")
+	}
+	if end.Handler != "exit" {
+		t.Errorf("End handler = %q, want exit; leaked Params attrs should not prevent passthrough assignment", end.Handler)
+	}
+	if end.Shape != "Msquare" {
+		t.Errorf("End shape = %q, want Msquare", end.Shape)
+	}
+}
+
+// TestEnsureStartExitNodes_ParallelStartExit verifies that a parallel node
+// designated as the workflow start keeps its "parallel" handler and is not
+// overwritten with the passthrough "start" sentinel. Drives through FromDippinIR.
+func TestEnsureStartExitNodes_ParallelStartExit(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ParallelStartTest",
+		Start: "Dispatch",
+		Exit:  "Join",
+		Nodes: []*ir.Node{
+			{
+				ID:    "Dispatch",
+				Kind:  ir.NodeParallel,
+				Label: "Dispatch",
+				Config: ir.ParallelConfig{
+					Targets: []string{"BranchA", "BranchB"},
+				},
+			},
+			{ID: "BranchA", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "Branch A work"}},
+			{ID: "BranchB", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "Branch B work"}},
+			{
+				ID:    "Join",
+				Kind:  ir.NodeFanIn,
+				Label: "Join",
+				Config: ir.FanInConfig{
+					Sources: []string{"BranchA", "BranchB"},
+				},
+			},
+		},
+		Edges: []*ir.Edge{},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	dispatch := graph.Nodes["Dispatch"]
+	if dispatch == nil {
+		t.Fatal("Dispatch node not found")
+	}
+	if dispatch.Handler != "parallel" {
+		t.Errorf("Dispatch handler = %q, want parallel (must be preserved)", dispatch.Handler)
+	}
+	if dispatch.Shape != "Mdiamond" {
+		t.Errorf("Dispatch shape = %q, want Mdiamond", dispatch.Shape)
+	}
+
+	join := graph.Nodes["Join"]
+	if join == nil {
+		t.Fatal("Join node not found")
+	}
+	if join.Handler != "parallel.fan_in" {
+		t.Errorf("Join handler = %q, want parallel.fan_in (must be preserved)", join.Handler)
+	}
+	if join.Shape != "Msquare" {
+		t.Errorf("Join shape = %q, want Msquare", join.Shape)
+	}
+}
+
+// TestEnsureStartExitNodes_ConditionalStartExit verifies that a conditional node
+// used as start/exit retains its "conditional" handler after FromDippinIR.
+func TestEnsureStartExitNodes_ConditionalStartExit(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ConditionalStartTest",
+		Start: "Route",
+		Exit:  "Done",
+		Nodes: []*ir.Node{
+			{ID: "Route", Kind: ir.NodeConditional, Label: "Route"},
+			{ID: "Done", Kind: ir.NodeConditional, Label: "Done"},
+		},
+		Edges: []*ir.Edge{
+			{From: "Route", To: "Done"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	route := graph.Nodes["Route"]
+	if route == nil {
+		t.Fatal("Route node not found")
+	}
+	if route.Handler != "conditional" {
+		t.Errorf("Route handler = %q, want conditional (must be preserved)", route.Handler)
+	}
+	if route.Shape != "Mdiamond" {
+		t.Errorf("Route shape = %q, want Mdiamond", route.Shape)
+	}
+
+	done := graph.Nodes["Done"]
+	if done == nil {
+		t.Fatal("Done node not found")
+	}
+	if done.Handler != "conditional" {
+		t.Errorf("Done handler = %q, want conditional (must be preserved)", done.Handler)
+	}
+	if done.Shape != "Msquare" {
+		t.Errorf("Done shape = %q, want Msquare", done.Shape)
+	}
+}
+
+// TestEnsureStartExitNodes_SubgraphStartExit verifies that a subgraph node
+// used as start/exit retains its "subgraph" handler after FromDippinIR.
+func TestEnsureStartExitNodes_SubgraphStartExit(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "SubgraphStartTest",
+		Start: "Sub",
+		Exit:  "Cleanup",
+		Nodes: []*ir.Node{
+			{
+				ID:     "Sub",
+				Kind:   ir.NodeSubgraph,
+				Label:  "Sub",
+				Config: ir.SubgraphConfig{Ref: "child.dip"},
+			},
+			{
+				ID:     "Cleanup",
+				Kind:   ir.NodeSubgraph,
+				Label:  "Cleanup",
+				Config: ir.SubgraphConfig{Ref: "cleanup.dip"},
+			},
+		},
+		Edges: []*ir.Edge{
+			{From: "Sub", To: "Cleanup"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	sub := graph.Nodes["Sub"]
+	if sub == nil {
+		t.Fatal("Sub node not found")
+	}
+	if sub.Handler != "subgraph" {
+		t.Errorf("Sub handler = %q, want subgraph (must be preserved)", sub.Handler)
+	}
+	if sub.Shape != "Mdiamond" {
+		t.Errorf("Sub shape = %q, want Mdiamond", sub.Shape)
+	}
+
+	cleanup := graph.Nodes["Cleanup"]
+	if cleanup == nil {
+		t.Fatal("Cleanup node not found")
+	}
+	if cleanup.Handler != "subgraph" {
+		t.Errorf("Cleanup handler = %q, want subgraph (must be preserved)", cleanup.Handler)
+	}
+	if cleanup.Shape != "Msquare" {
+		t.Errorf("Cleanup shape = %q, want Msquare", cleanup.Shape)
+	}
+}

@@ -106,7 +106,11 @@ func synthesizeFanInEdges(g *Graph, irNode *ir.Node, cfg ir.FanInConfig, existin
 
 // ensureStartExitNodes verifies that the start and exit nodes exist in the graph.
 // The start/exit shapes (Mdiamond/Msquare) are always set so the validator can
-// identify them. Nodes without a prompt also get the passthrough handler.
+// identify them. Only bare codergen (agent) nodes with no prompt are treated as
+// passthrough placeholders and get the start/exit handler. Nodes with any other
+// resolved handler (tool, wait.human, parallel, parallel.fan_in, conditional,
+// subgraph, etc.) always keep their handler so user-defined start/exit logic
+// executes correctly.
 func ensureStartExitNodes(g *Graph) error {
 	if _, ok := g.Nodes[g.StartNode]; !ok {
 		return fmt.Errorf("start node %q not found in graph", g.StartNode)
@@ -116,13 +120,30 @@ func ensureStartExitNodes(g *Graph) error {
 	}
 	startNode := g.Nodes[g.StartNode]
 	startNode.Shape = "Mdiamond"
-	if startNode.Attrs["prompt"] == "" {
+	if !nodeHasHandlerContent(startNode) {
 		startNode.Handler = "start"
 	}
 	exitNode := g.Nodes[g.ExitNode]
 	exitNode.Shape = "Msquare"
-	if exitNode.Attrs["prompt"] == "" {
+	if !nodeHasHandlerContent(exitNode) {
 		exitNode.Handler = "exit"
 	}
 	return nil
+}
+
+// nodeHasHandlerContent reports whether a node has a real handler. Only two
+// cases are treated as "bare" passthroughs suitable for start/exit handler
+// assignment:
+//   - codergen nodes with no prompt (a placeholder agent node)
+//   - nodes with an empty/unresolved Handler (never dispatched, no content)
+//
+// Any other handler value (tool, wait.human, parallel, parallel.fan_in,
+// conditional, subgraph, stack.manager_loop, etc.) means the node has real
+// work to do and must keep its handler.
+func nodeHasHandlerContent(n *Node) bool {
+	if n.Handler != "" && n.Handler != "codergen" {
+		return true
+	}
+	// Codergen (agent) nodes are passthrough placeholders unless they carry a prompt.
+	return n.Attrs["prompt"] != ""
 }
