@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/2389-research/dippin-lang/parser"
-	"github.com/2389-research/dippin-lang/validator"
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
@@ -325,25 +323,14 @@ func parseDOTSource(source string) (*pipeline.Graph, error) {
 
 // parseDIPSource parses a Dippin-format pipeline source, runs validation and lint.
 func parseDIPSource(source string) (*pipeline.Graph, error) {
-	p := parser.NewParser(source, "inline.dip")
-	wf, err := p.Parse()
-	if err != nil {
-		return nil, fmt.Errorf("parse pipeline: %w", err)
-	}
-	valResult := validator.Validate(wf)
-	if valResult.HasErrors() {
-		for _, d := range valResult.Diagnostics {
-			log.Println(d.String())
-		}
-		return nil, fmt.Errorf("%d validation error(s)", len(valResult.Errors()))
-	}
-	lintResult := validator.Lint(wf)
-	for _, d := range lintResult.Diagnostics {
+	graph, diags, err := pipeline.LoadDippinWorkflow(source, "inline.dip")
+	// Log validation errors and lint warnings before returning so callers
+	// see the specific diagnostics even on fatal failures.
+	for _, d := range diags {
 		log.Println(d.String())
 	}
-	graph, err := pipeline.FromDippinIR(wf)
 	if err != nil {
-		return nil, fmt.Errorf("convert pipeline IR: %w", err)
+		return nil, err
 	}
 	return graph, nil
 }

@@ -1,5 +1,6 @@
 // ABOUTME: Tests for pipeline graph validation rules.
 // ABOUTME: Validates start/exit node requirements, cycle detection, shape recognition, and reachability.
+// ABOUTME: Also verifies that DippinValidated=true suppresses structural checks already covered by dippin-lang.
 package pipeline
 
 import (
@@ -356,4 +357,118 @@ func TestValidationErrorWithWarnings(t *testing.T) {
 	if !strings.Contains(msg, " | ") {
 		t.Errorf("expected ' | ' separator between errors and warnings, got: %s", msg)
 	}
+}
+
+// TestDippinValidatedSkipsStructuralChecks verifies that graphs with
+// DippinValidated=true bypass the structural checks that dippin-lang's
+// validator (DIP001–DIP009) already covers. This prevents false positives
+// and divergence between `dippin doctor` and `tracker validate`.
+func TestDippinValidatedSkipsStructuralChecks(t *testing.T) {
+	t.Run("missing start node is ignored when dippin-validated", func(t *testing.T) {
+		g := NewGraph("no-start-dip")
+		g.DippinValidated = true
+		g.AddNode(&Node{ID: "a", Shape: "box"})
+		g.AddNode(&Node{ID: "b", Shape: "Msquare"})
+		g.AddEdge(&Edge{From: "a", To: "b"})
+
+		// Should return nil — dippin already validated structural checks and
+		// no tracker-specific checks fire on this graph (all shapes recognized,
+		// no diamond nodes to trigger fail-edge or label-consistency warnings).
+		if err := Validate(g); err != nil {
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
+		}
+	})
+
+	t.Run("unreachable node is ignored when dippin-validated", func(t *testing.T) {
+		g := NewGraph("unreachable-dip")
+		g.DippinValidated = true
+		g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+		g.AddNode(&Node{ID: "a", Shape: "box"})
+		g.AddNode(&Node{ID: "orphan", Shape: "box"})
+		g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+		g.AddEdge(&Edge{From: "s", To: "a"})
+		g.AddEdge(&Edge{From: "a", To: "e"})
+
+		// Should return nil — structural reachability check is skipped when dippin-validated.
+		if err := Validate(g); err != nil {
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
+		}
+	})
+
+	t.Run("unconditional cycle is ignored when dippin-validated", func(t *testing.T) {
+		g := NewGraph("cycle-dip")
+		g.DippinValidated = true
+		g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+		g.AddNode(&Node{ID: "a", Shape: "box"})
+		g.AddNode(&Node{ID: "b", Shape: "box"})
+		g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+		g.AddEdge(&Edge{From: "s", To: "a"})
+		g.AddEdge(&Edge{From: "a", To: "b"})
+		g.AddEdge(&Edge{From: "b", To: "a"}) // unconditional cycle
+		g.AddEdge(&Edge{From: "b", To: "e"})
+
+		// Should return nil — cycle detection is skipped when dippin-validated.
+		if err := Validate(g); err != nil {
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
+		}
+	})
+
+	t.Run("duplicate edges ignored when dippin-validated", func(t *testing.T) {
+		g := NewGraph("dup-edges-dip")
+		g.DippinValidated = true
+		g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+		g.AddNode(&Node{ID: "a", Shape: "box"})
+		g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+		g.AddEdge(&Edge{From: "s", To: "a"})
+		g.AddEdge(&Edge{From: "s", To: "a"}) // duplicate
+		g.AddEdge(&Edge{From: "a", To: "e"})
+
+		// Should return nil — duplicate-edge check is skipped when dippin-validated.
+		if err := Validate(g); err != nil {
+			t.Errorf("DippinValidated graph should pass Validate with no errors, got: %v", err)
+		}
+	})
+
+	t.Run("tracker-specific shape check still runs when dippin-validated", func(t *testing.T) {
+		g := NewGraph("bad-shape-dip")
+		g.DippinValidated = true
+		g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+		g.AddNode(&Node{ID: "x", Shape: "trapezium"}) // unrecognized shape
+		g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+		g.AddEdge(&Edge{From: "s", To: "x"})
+		g.AddEdge(&Edge{From: "x", To: "e"})
+
+		err := Validate(g)
+		if err == nil {
+			t.Fatal("expected error for unrecognized shape even when dippin-validated")
+		}
+		if !strings.Contains(err.Error(), "trapezium") {
+			t.Errorf("error should mention 'trapezium', got: %v", err)
+		}
+	})
+
+	t.Run("tracker-specific fail-edge warning still fires when dippin-validated", func(t *testing.T) {
+		g := NewGraph("no-fail-edge-dip")
+		g.DippinValidated = true
+		g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+		g.AddNode(&Node{ID: "check", Shape: "diamond"})
+		g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+		g.AddEdge(&Edge{From: "s", To: "check"})
+		g.AddEdge(&Edge{From: "check", To: "e", Condition: "outcome=success", Label: "success"})
+
+		ve := ValidateAll(g)
+		if ve == nil {
+			t.Fatal("expected warning for conditional node missing fail edge even when dippin-validated")
+		}
+		found := false
+		for _, w := range ve.Warnings {
+			if strings.Contains(w, "check") && strings.Contains(w, "fail") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected warning about missing fail edge on 'check', got warnings: %v", ve.Warnings)
+		}
+	})
 }

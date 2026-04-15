@@ -1,5 +1,6 @@
 // ABOUTME: Validates pipeline graph structure for correctness before execution.
-// ABOUTME: Checks for single start/exit, no cycles, recognized shapes, and full reachability.
+// ABOUTME: Tracker-specific checks such as shapes and conditional routing always run.
+// ABOUTME: Structural checks that dippin-lang already covers, including duplicate-edge checks, are skipped when DippinValidated=true.
 package pipeline
 
 import (
@@ -109,16 +110,40 @@ func validateGraph(g *Graph) *ValidationError {
 		return ve
 	}
 
-	// Structural checks (always run — defense in depth).
-	validateStartExit(g, ve)
-	validateEdgeEndpoints(g, ve)
-	validateExitOutgoingEdges(g, ve)
-	validateReachability(g, ve)
-	validateNoCycles(g, ve)
+	// Structural checks that overlap with dippin-lang's DIP001–DIP009.
+	// For graphs produced from .dip sources, dippin-lang's validator already ran
+	// these checks before conversion, so we skip them here to prevent
+	// false-positive divergence between `dippin doctor` and `tracker validate`.
+	// For DOT-format graphs (DippinValidated=false), we still run them because
+	// no upstream validator has covered them.
+	//
+	// Dippin checks covered:
+	//   DIP001 — start node missing
+	//   DIP002 — exit node missing
+	//   DIP003 — unknown node reference in edge
+	//   DIP004 — unreachable node(s) from start
+	//   DIP005 — unconditional cycle detected
+	//   DIP006 — exit node has outgoing edges
+	//   DIP009 — duplicate edge
+	// Note: DIP001 and DIP002 are complete coverage for .dip workflows, which
+	// come through FromDippinIR with exactly one start/exit node. The >1 start/exit
+	// check in validateStartExit is primarily relevant for DOT graphs, which tracker
+	// directly parses and may contain multiple structural variants.
+	if !g.DippinValidated {
+		validateStartExit(g, ve)
+		validateEdgeEndpoints(g, ve)
+		validateExitOutgoingEdges(g, ve)
+		validateReachability(g, ve)
+		validateNoCycles(g, ve)
+		validateNoDuplicateEdges(g, ve)
+	}
 
-	// Tracker-specific checks always run.
+	// Tracker-specific checks — always run regardless of source format.
+	// These cover concerns that dippin-lang does not validate:
+	//   validateShapes: DOT shape → handler resolution (tracker internal concept)
+	//   validateConditionalFailEdges: warns on diamond nodes missing a fail path
+	//   validateEdgeLabelConsistency: warns on mixed labeled/unlabeled edges
 	validateShapes(g, ve)
-	validateNoDuplicateEdges(g, ve)
 	validateConditionalFailEdges(g, ve)
 	validateEdgeLabelConsistency(g, ve)
 
