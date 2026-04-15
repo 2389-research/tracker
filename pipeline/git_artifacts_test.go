@@ -276,3 +276,103 @@ func TestEngine_WithGitArtifacts_ProducesCommitsPerNode(t *testing.T) {
 		t.Errorf("git log missing initial 'tracker: run' commit:\n%s", log)
 	}
 }
+
+// commitCount returns the number of non-empty lines in a `git log --oneline` output.
+func commitCount(log string) int {
+	n := 0
+	for _, l := range strings.Split(log, "\n") {
+		if strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// TestGitArtifactRepo_InitSkipsInitialCommitOnResume verifies that when Init()
+// runs against an artifact directory that already has a git HEAD from a prior
+// attempt, it does not append another "tracker: run <id> started" commit.
+// This is the checkpoint-resume case — we don't want every restart to add a
+// noise commit to git log.
+func TestGitArtifactRepo_InitSkipsInitialCommitOnResume(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+
+	// First Init — fresh repo, should produce the initial commit.
+	r1 := newGitArtifactRepo(dir, "run-1")
+	if err := r1.Init(); err != nil {
+		t.Fatalf("first Init: %v", err)
+	}
+	firstLog := gitOutput(t, dir, "log", "--oneline")
+	if firstCount := commitCount(firstLog); firstCount != 1 || !strings.Contains(firstLog, "tracker: run run-1 started") {
+		t.Fatalf("expected exactly one initial commit, got %d:\n%s", firstCount, firstLog)
+	}
+
+	// Second Init — existing HEAD, should NOT add another initial commit.
+	r2 := newGitArtifactRepo(dir, "run-2")
+	if err := r2.Init(); err != nil {
+		t.Fatalf("second Init: %v", err)
+	}
+	secondLog := gitOutput(t, dir, "log", "--oneline")
+	if secondLog != firstLog {
+		t.Errorf("resume Init should not add commits.\nbefore:\n%s\nafter:\n%s", firstLog, secondLog)
+	}
+}
+
+// TestEngine_WithGitArtifacts_CommitsFailOutcome verifies that a node that
+// fails at the exit path still produces a git commit recording the failure,
+// not just successes.
+func TestEngine_WithGitArtifacts_CommitsFailOutcome(t *testing.T) {
+	requireGit(t)
+	artifactBase := t.TempDir()
+
+	g := NewGraph("git_fail_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "exit", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "exit"})
+
+	reg := NewHandlerRegistry()
+	// start succeeds, exit returns fail.
+	reg.Register(&testHandler{name: "start", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		return Outcome{Status: OutcomeSuccess}, nil
+	}})
+	reg.Register(&testHandler{name: "exit", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		return Outcome{Status: OutcomeFail}, nil
+	}})
+
+	engine := NewEngine(g, reg,
+		WithArtifactDir(artifactBase),
+		WithGitArtifacts(true),
+	)
+	result, _ := engine.Run(context.Background())
+	if result == nil {
+		t.Fatalf("expected non-nil result on fail")
+	}
+	if result.Status != OutcomeFail {
+		t.Fatalf("expected fail status, got %q", result.Status)
+	}
+
+	// Locate the run dir.
+	entries, err := os.ReadDir(artifactBase)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var repoDir string
+	for _, e := range entries {
+		if e.IsDir() {
+			repoDir = filepath.Join(artifactBase, e.Name())
+			break
+		}
+	}
+	if repoDir == "" {
+		t.Fatalf("no run dir created")
+	}
+
+	log := gitOutput(t, repoDir, "log", "--oneline")
+	t.Logf("git log:\n%s", log)
+	if !strings.Contains(log, "node(exit):") {
+		t.Errorf("git log missing fail commit for exit node:\n%s", log)
+	}
+	if !strings.Contains(log, "outcome=fail") {
+		t.Errorf("git log missing outcome=fail:\n%s", log)
+	}
+}

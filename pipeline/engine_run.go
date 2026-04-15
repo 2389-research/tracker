@@ -522,6 +522,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		NodeID:    currentNodeID,
 		Message:   fmt.Sprintf("retries exhausted for node %q", currentNodeID),
 	})
+	e.emitGitCommit(s, currentNodeID, traceEntry)
 	s.trace.EndTime = time.Now()
 	result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 	return "", false, result, nil
@@ -616,12 +617,14 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 			})
 		}
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 		return false, "", result
 	}
 	if outcomeStatus == OutcomeFail {
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 		return false, "", result

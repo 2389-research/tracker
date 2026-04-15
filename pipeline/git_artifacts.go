@@ -4,9 +4,11 @@ package pipeline
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -28,12 +30,14 @@ func newGitArtifactRepo(dir, runID string) *gitArtifactRepo {
 	}
 }
 
-// Init initializes the artifact directory as a git repo:
+// Init initializes the artifact directory as a (non-bare) git repo:
 //  1. Ensures the directory exists.
 //  2. Runs `git init --quiet` if .git is absent.
-//  3. Sets local git user to tracker <tracker@local>.
+//  3. Sets local-only git user to tracker <tracker@local>.
 //  4. Creates .gitignore if absent.
-//  5. Makes an initial commit.
+//  5. Makes an initial empty commit — but ONLY if the repo has no existing
+//     history (i.e. this is a fresh run, not a resume against an existing
+//     artifact directory).
 //
 // Returns an error if git is missing from PATH or initialization fails.
 // Sets failed=true on error so subsequent calls are no-ops.
@@ -54,8 +58,18 @@ func (r *gitArtifactRepo) Init() error {
 		return fmt.Errorf("create artifact dir %q: %w", r.dir, err)
 	}
 
-	// Initialize git repo if .git doesn't already exist.
-	if _, err := os.Stat(fmt.Sprintf("%s/.git", r.dir)); os.IsNotExist(err) {
+	// Initialize git repo if .git doesn't already exist. Any Stat error
+	// other than "not exist" (permission, IO) is treated as fatal so we
+	// don't silently skip init and hit confusing downstream failures.
+	gitDir := filepath.Join(r.dir, ".git")
+	gitDirExists := false
+	if _, err := os.Stat(gitDir); err == nil {
+		gitDirExists = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		r.failed = true
+		return fmt.Errorf("stat %q: %w", gitDir, err)
+	}
+	if !gitDirExists {
 		if out, err := r.git("init", "--quiet"); err != nil {
 			r.failed = true
 			return fmt.Errorf("git init: %w\n%s", err, out)
@@ -72,28 +86,32 @@ func (r *gitArtifactRepo) Init() error {
 		return fmt.Errorf("git config user.email: %w\n%s", err, out)
 	}
 
-	// Create .gitignore if absent.
-	gitignorePath := fmt.Sprintf("%s/.gitignore", r.dir)
-	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		content := "*.tmp\ncheckpoint.json\n"
-		if err := os.WriteFile(gitignorePath, []byte(content), 0o644); err != nil {
-			// Non-fatal: missing .gitignore just means temp files may show up.
-			_ = err
-		}
+	// Create .gitignore if absent. Missing .gitignore is non-fatal —
+	// temp files will just show up in commits.
+	gitignorePath := filepath.Join(r.dir, ".gitignore")
+	if _, err := os.Stat(gitignorePath); errors.Is(err, os.ErrNotExist) {
+		_ = os.WriteFile(gitignorePath, []byte("*.tmp\ncheckpoint.json\n"), 0o644)
 	}
 
-	// Stage everything and make the initial commit.
+	// Only create the "run started" commit if the repo has no existing
+	// HEAD. On checkpoint resume, the artifact dir already has history
+	// from the earlier attempt and another empty commit would just add
+	// noise.
+	if out, err := r.git("rev-parse", "--verify", "HEAD"); err == nil && strings.TrimSpace(out) != "" {
+		// Existing HEAD — this is a resume. Skip the initial commit.
+		return nil
+	}
+
+	// Fresh repo: stage everything and make the initial empty commit.
 	if out, err := r.git("add", "."); err != nil {
 		r.failed = true
 		return fmt.Errorf("git add (initial): %w\n%s", err, out)
 	}
 	msg := fmt.Sprintf("tracker: run %s started", r.runID)
-	// Use --allow-empty in case the directory had nothing to add.
 	if out, err := r.git("commit", "--allow-empty", "-m", msg); err != nil {
 		r.failed = true
 		return fmt.Errorf("git commit (initial): %w\n%s", err, out)
 	}
-
 	return nil
 }
 
@@ -106,8 +124,10 @@ func (r *gitArtifactRepo) Init() error {
 //	edge_to: <edgeTo>  (if set)
 //	tokens: <total> cost: $<cost>  (if Stats is non-nil)
 //
-// Returns nil on success. On failure, logs the error but does not set failed=true
-// so subsequent node commits are still attempted.
+// Returns the error on failure. The caller (emitGitCommit in engine_run.go)
+// is responsible for emitting it as a PipelineEvent warning. On failure the
+// repo is NOT marked failed=true, so subsequent node commits are still
+// attempted — individual commit failures should not take down the whole run.
 func (r *gitArtifactRepo) CommitNode(nodeID, handler, status string, entry *TraceEntry) error {
 	if r.failed {
 		return nil

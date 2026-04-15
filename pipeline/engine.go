@@ -88,7 +88,10 @@ func WithBudgetGuard(guard *BudgetGuard) EngineOption {
 // WithGitArtifacts enables git-backed artifact tracking. When enabled, the
 // artifact dir is initialized as a git repo at run start, and each terminal
 // node outcome produces one commit capturing the artifact state at that
-// point. Checkpoint resume replays from the tagged commit.
+// point. Each checkpoint save also creates a lightweight git tag of the
+// form checkpoint/<runID>/<nodeID>, intended as the basis for future
+// checkpoint-replay support (Layer 2 of issue #77 — not wired up by this
+// option).
 //
 // Requires git in PATH. Silently no-ops if artifactDir is not set.
 func WithGitArtifacts(enabled bool) EngineOption {
