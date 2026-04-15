@@ -109,7 +109,12 @@ func executeDiagnose(cfg runConfig) error {
 
 func executeDoctor(cfg runConfig) error {
 	_ = loadEnvFiles(cfg.workdir)
-	return runDoctor(cfg.workdir)
+	doctorCfg := DoctorConfig{
+		probe:        cfg.probe,
+		pipelineFile: cfg.pipelineFile,
+		backend:      cfg.backend,
+	}
+	return runDoctorWithConfig(cfg.workdir, doctorCfg)
 }
 
 // printProviderStatus shows which LLM providers have API keys configured.
