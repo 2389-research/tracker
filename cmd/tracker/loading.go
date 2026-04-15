@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/2389-research/dippin-lang/parser"
-	"github.com/2389-research/dippin-lang/validator"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -165,34 +163,13 @@ func loadEmbeddedPipeline(info WorkflowInfo) (*pipeline.Graph, error) {
 // Graph representation. Validation errors are fatal; lint warnings are
 // printed to stderr but do not block execution.
 func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
-	p := parser.NewParser(source, filename)
-	workflow, err := p.Parse()
+	graph, diags, err := pipeline.LoadDippinWorkflow(source, filename)
 	if err != nil {
-		return nil, fmt.Errorf("parse Dippin file: %w", err)
+		return nil, err
 	}
-
-	// Run Dippin structural validation (DIP001–DIP009).
-	valResult := validator.Validate(workflow)
-	if valResult.HasErrors() {
-		for _, d := range valResult.Diagnostics {
-			fmt.Fprintln(os.Stderr, d.String())
-		}
-		return nil, fmt.Errorf("%d validation error(s) in %s", len(valResult.Errors()), filename)
-	}
-
-	// Run Dippin lint checks (DIP101–DIP115). Warnings only — don't block.
-	lintResult := validator.Lint(workflow)
-	for _, d := range lintResult.Diagnostics {
+	// Log validation errors and lint warnings to stderr.
+	for _, d := range diags {
 		fmt.Fprintln(os.Stderr, d.String())
 	}
-
-	graph, err := pipeline.FromDippinIR(workflow)
-	if err != nil {
-		return nil, fmt.Errorf("convert Dippin IR to graph: %w", err)
-	}
-
-	// Mark graph as already validated by dippin-lang so that tracker's
-	// own validator skips redundant structural checks (DIP001–DIP009).
-	graph.DippinValidated = true
 	return graph, nil
 }

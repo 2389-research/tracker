@@ -118,13 +118,17 @@ func validateGraph(g *Graph) *ValidationError {
 	// no upstream validator has covered them.
 	//
 	// Dippin checks covered:
-	//   DIP001 — start node missing (partial: we also check for >1 start)
-	//   DIP002 — exit node missing  (partial: we also check for >1 exit)
+	//   DIP001 — start node missing
+	//   DIP002 — exit node missing
 	//   DIP003 — unknown node reference in edge
 	//   DIP004 — unreachable node(s) from start
 	//   DIP005 — unconditional cycle detected
 	//   DIP006 — exit node has outgoing edges
 	//   DIP009 — duplicate edge
+	// Note: DIP001 and DIP002 are complete coverage for .dip workflows, which
+	// come through FromDippinIR with exactly one start/exit node. The >1 start/exit
+	// check in validateStartExit is primarily relevant for DOT graphs, which tracker
+	// directly parses and may contain multiple structural variants.
 	if !g.DippinValidated {
 		validateStartExit(g, ve)
 		validateEdgeEndpoints(g, ve)
