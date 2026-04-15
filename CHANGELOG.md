@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cloudflare AI Gateway support** (`TRACKER_GATEWAY_URL` env var, `--gateway-url` CLI flag): set one gateway root URL and tracker routes every provider through Cloudflare's AI Gateway — Anthropic, OpenAI, Gemini, OpenAI-compat — avoiding 429 rate limits and enabling gateway-side analytics, caching, and model routing. The new `ResolveProviderBaseURL(provider)` helper resolves the per-provider base URL with priority `<PROVIDER>_BASE_URL` > `TRACKER_GATEWAY_URL` + provider suffix > empty (SDK default), so per-provider env var overrides still work. Closes #64.
 - **Per-node context scoping** (`PipelineContext.ScopeToNode`): after each node's handler completes, the engine copies every key written during that node's execution into a `node.<nodeID>.<key>` namespace. Downstream nodes can read `node.MyAgent.last_response` to get a specific upstream node's output without being affected by later writes to the bare `last_response` key. Bare keys retain their last-writer-wins global semantics for full backward compatibility. New convenience method `GetScoped(nodeID, key)`. Closes #32.
 - `pipeline.ContextKeyNodePrefix` constant (`"node."`), the namespace prefix for per-node scoped keys.
 

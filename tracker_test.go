@@ -508,3 +508,66 @@ func TestRun_BudgetHalt_FromConfig(t *testing.T) {
 		t.Errorf("expected LimitsHit[0]='tokens', got %q", result.Cost.LimitsHit[0])
 	}
 }
+
+func TestResolveProviderBaseURL_NoGatewayNoOverride(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("GEMINI_BASE_URL", "")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+	for _, p := range []string{"anthropic", "openai", "gemini", "openai-compat"} {
+		if got := ResolveProviderBaseURL(p); got != "" {
+			t.Errorf("%s: got %q, want empty", p, got)
+		}
+	}
+}
+
+func TestResolveProviderBaseURL_GatewayOnly(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("GEMINI_BASE_URL", "")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.ai.cloudflare.com/v1/acc/gw")
+	cases := map[string]string{
+		"anthropic":     "https://gateway.ai.cloudflare.com/v1/acc/gw/anthropic",
+		"openai":        "https://gateway.ai.cloudflare.com/v1/acc/gw/openai",
+		"gemini":        "https://gateway.ai.cloudflare.com/v1/acc/gw/google-ai-studio",
+		"openai-compat": "https://gateway.ai.cloudflare.com/v1/acc/gw/compat",
+	}
+	for provider, want := range cases {
+		if got := ResolveProviderBaseURL(provider); got != want {
+			t.Errorf("%s: got %q, want %q", provider, got, want)
+		}
+	}
+}
+
+func TestResolveProviderBaseURL_ProviderOverridesGateway(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "https://my.proxy/anthropic")
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("GEMINI_BASE_URL", "")
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.ai.cloudflare.com/v1/acc/gw")
+
+	if got := ResolveProviderBaseURL("anthropic"); got != "https://my.proxy/anthropic" {
+		t.Errorf("anthropic: got %q, want provider-specific override", got)
+	}
+	// Other providers still flow through the gateway.
+	if got := ResolveProviderBaseURL("openai"); got != "https://gateway.ai.cloudflare.com/v1/acc/gw/openai" {
+		t.Errorf("openai: got %q, want gateway URL", got)
+	}
+}
+
+func TestResolveProviderBaseURL_TrailingSlashStripped(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://example/v1/a/g/")
+	if got := ResolveProviderBaseURL("anthropic"); got != "https://example/v1/a/g/anthropic" {
+		t.Errorf("got %q, want trailing slash stripped", got)
+	}
+}
+
+func TestResolveProviderBaseURL_UnknownProvider(t *testing.T) {
+	t.Setenv("TRACKER_GATEWAY_URL", "https://example/v1/a/g")
+	if got := ResolveProviderBaseURL("mystery"); got != "" {
+		t.Errorf("unknown provider should return empty, got %q", got)
+	}
+}
