@@ -337,3 +337,51 @@ func TestScopeToNodeBackwardCompatConditions(t *testing.T) {
 		t.Errorf("last_response = %q after scoping, want %q", v, "the response")
 	}
 }
+
+func TestScopeToNodeSkipsNodePrefixedKeys(t *testing.T) {
+	// Keys already under the "node." namespace must not be re-scoped to avoid
+	// doubly-nested keys like "node.B.node.A.last_response".
+	ctx := NewPipelineContext()
+	ctx.Set("last_response", "from A")
+	ctx.ScopeToNode("A")
+
+	// Simulate a later node writing a scoped key directly (e.g. from a merge).
+	// This marks "node.A.last_response" dirty for the next ScopeToNode call.
+	ctx.Set("node.A.last_response", "injected")
+	ctx.ScopeToNode("B")
+
+	// "node.B.node.A.last_response" must not exist.
+	if _, ok := ctx.Get("node.B.node.A.last_response"); ok {
+		t.Error("doubly-nested scoped key should not be created")
+	}
+}
+
+func TestNewPipelineContextFromPreloadedKeysNotDirty(t *testing.T) {
+	// NewPipelineContextFrom must not mark preloaded keys dirty. The first
+	// ScopeToNode call should only scope keys written after construction.
+	baseline := map[string]string{
+		"last_response": "preloaded",
+		"outcome":       "success",
+	}
+	ctx := NewPipelineContextFrom(baseline)
+
+	// Only this key is written after construction.
+	ctx.Set("new_key", "new_val")
+	ctx.ScopeToNode("FirstNode")
+
+	// Preloaded keys must NOT appear in the scoped namespace.
+	if _, ok := ctx.Get("node.FirstNode.last_response"); ok {
+		t.Error("preloaded key last_response should not be scoped into node.FirstNode.*")
+	}
+	if _, ok := ctx.Get("node.FirstNode.outcome"); ok {
+		t.Error("preloaded key outcome should not be scoped into node.FirstNode.*")
+	}
+	// The key written after construction MUST appear.
+	if v, ok := ctx.Get("node.FirstNode.new_key"); !ok || v != "new_val" {
+		t.Errorf("node.FirstNode.new_key = %q, want %q", v, "new_val")
+	}
+	// Bare preloaded keys must still be accessible.
+	if v, ok := ctx.Get("last_response"); !ok || v != "preloaded" {
+		t.Errorf("last_response = %q, want %q", v, "preloaded")
+	}
+}

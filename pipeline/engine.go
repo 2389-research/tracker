@@ -213,6 +213,9 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 
 	outcome, traceEntry, err := e.executeNode(ctx, s, currentNodeID, execNode)
 	if err != nil {
+		// Scope any keys written before the error so checkpoints and downstream
+		// nodes can still access this node's partial output via the scoped namespace.
+		s.pctx.ScopeToNode(currentNodeID)
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		s.trace.EndTime = time.Now()
 		return loopResult{

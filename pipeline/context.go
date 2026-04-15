@@ -6,6 +6,7 @@ package pipeline
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -153,14 +154,17 @@ func (c *PipelineContext) DiffFrom(baseline map[string]string) map[string]string
 // the bare "last_response" key. The bare keys are NOT removed; they retain
 // their last-writer-wins global semantics for backward compatibility.
 //
-// Callers should not pass a nodeID that itself starts with the "node." prefix;
-// that would create confusing double-nested keys. The engine passes the node's
-// graph ID directly.
+// Keys that already start with ContextKeyNodePrefix (e.g. "node.X.foo") are
+// skipped — scoping them would create confusing doubly-nested keys like
+// "node.<id>.node.X.foo". The engine passes the node's graph ID directly.
 func (c *PipelineContext) ScopeToNode(nodeID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	prefix := fmt.Sprintf("%s%s.", ContextKeyNodePrefix, nodeID)
 	for k := range c.dirty {
+		if strings.HasPrefix(k, ContextKeyNodePrefix) {
+			continue
+		}
 		c.values[prefix+k] = c.values[k]
 	}
 	c.dirty = make(map[string]struct{})
@@ -176,10 +180,14 @@ func (c *PipelineContext) GetScoped(nodeID, key string) (string, bool) {
 // NewPipelineContextFrom creates a PipelineContext pre-populated with the
 // given values. Used by the parallel handler to give each branch an isolated
 // snapshot of the shared context.
+//
+// Preloaded values are written directly without marking them dirty, so the
+// first ScopeToNode call after construction only scopes keys that were written
+// after construction — not the entire baseline snapshot.
 func NewPipelineContextFrom(values map[string]string) *PipelineContext {
 	ctx := NewPipelineContext()
 	for k, v := range values {
-		ctx.Set(k, v)
+		ctx.values[k] = v
 	}
 	return ctx
 }
