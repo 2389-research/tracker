@@ -191,5 +191,8 @@ func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
 		return nil, fmt.Errorf("convert Dippin IR to graph: %w", err)
 	}
 
+	// Mark graph as already validated by dippin-lang so that tracker's
+	// own validator skips redundant structural checks (DIP001–DIP009).
+	graph.DippinValidated = true
 	return graph, nil
 }

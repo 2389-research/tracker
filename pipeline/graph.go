@@ -37,6 +37,13 @@ type Graph struct {
 	// rather than BFS order which puts "Done" in the middle.
 	NodeOrder []string
 
+	// DippinValidated is set to true when the graph was produced from a .dip
+	// source that has already passed dippin-lang's structural validator
+	// (DIP001–DIP009). Tracker's own validateGraph skips checks that overlap
+	// with those diagnostics, preventing false positives and divergence between
+	// `dippin doctor` and `tracker validate`.
+	DippinValidated bool
+
 	// Adjacency indexes for O(1) edge lookup. Built by AddEdge.
 	outgoing map[string][]*Edge
 	incoming map[string][]*Edge
