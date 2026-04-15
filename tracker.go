@@ -64,7 +64,7 @@ type WebhookGateConfig struct {
 	WebhookURL    string        // required: URL to post gate payloads to
 	CallbackAddr  string        // local listen addr for callback server (default: :8789)
 	Timeout       time.Duration // wait timeout per gate (default: 10m)
-	TimeoutAction string        // "fail" (default), "success", or "default" on timeout
+	TimeoutAction string        // "fail" (default) or "success" on timeout
 	AuthHeader    string        // Authorization header for outbound requests
 	RunID         string        // optional: run ID embedded in gate payloads
 }

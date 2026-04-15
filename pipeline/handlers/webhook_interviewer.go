@@ -41,6 +41,11 @@ type WebhookGatePayload struct {
 	Choices        []WebhookGateChoice `json:"choices"`
 	CallbackURL    string              `json:"callback_url"`
 	TimeoutSeconds int                 `json:"timeout_seconds"`
+	// GateToken is a per-gate shared secret. The callback must echo this value
+	// in the X-Tracker-Gate-Token request header, or the server rejects it with 401.
+	// This provides lightweight replay protection for local/tunneled deployments.
+	// For production use, wrap the callback server behind TLS and a tunnel.
+	GateToken string `json:"gate_token"`
 }
 
 // WebhookGateResponse is the JSON body POSTed back to the local callback server.
@@ -50,9 +55,10 @@ type WebhookGateResponse struct {
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
-// webhookPending holds the reply channel for a pending gate.
+// webhookPending holds the reply channel and auth token for a pending gate.
 type webhookPending struct {
-	ch chan WebhookGateResponse
+	ch    chan WebhookGateResponse
+	token string // per-gate shared secret; must match X-Tracker-Gate-Token header
 }
 
 // WebhookInterviewer posts human gate prompts to an HTTP webhook and waits
@@ -80,8 +86,10 @@ type WebhookInterviewer struct {
 	// Defaults to 10 minutes when zero.
 	Timeout time.Duration
 
-	// DefaultAction controls what happens on timeout: "fail" (default), "success"
-	// (return the first choice), or "default" (use node's timeout_action attr, else "fail").
+	// DefaultAction controls what happens on timeout: "fail" (default, pipeline
+	// routes through failure edges) or "success" (return the first choice).
+	// Only these two values are supported — the interviewer has no per-call
+	// visibility into node attrs at construction time.
 	DefaultAction string
 
 	// AuthHeader is sent as the Authorization header on outbound webhook POSTs.
@@ -140,7 +148,13 @@ func (w *WebhookInterviewer) startServerOnce() error {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/gate/", w.handleCallback)
 
-		w.server = &http.Server{Handler: mux}
+		w.server = &http.Server{
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
 		go func() {
 			if err := w.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 				log.Printf("[webhook] callback server error: %v", err)
@@ -152,9 +166,22 @@ func (w *WebhookInterviewer) startServerOnce() error {
 
 // callbackBaseURL returns the base URL where the callback server is listening.
 // Uses the actual bound address (important when port 0 is used in tests).
+//
+// When the listener is bound to a wildcard address (0.0.0.0 or [::]), the
+// returned URL uses 127.0.0.1 so that local webhook services can dial back to
+// the callback server. If the webhook service is remote, the author is
+// responsible for making the callback port reachable (port forwarding, ngrok,
+// etc.) and should set CallbackAddr to a routable address.
 func (w *WebhookInterviewer) callbackBaseURL() string {
 	if w.listener != nil {
-		return "http://" + w.listener.Addr().String()
+		addr := w.listener.Addr().String()
+		// Rewrite wildcard listen addresses to loopback for dialable callback URLs.
+		if strings.HasPrefix(addr, "0.0.0.0:") {
+			addr = "127.0.0.1:" + strings.TrimPrefix(addr, "0.0.0.0:")
+		} else if strings.HasPrefix(addr, "[::]:") {
+			addr = "127.0.0.1:" + strings.TrimPrefix(addr, "[::]:")
+		}
+		return "http://" + addr
 	}
 	addr := w.CallbackAddr
 	if strings.HasPrefix(addr, ":") {
@@ -164,6 +191,9 @@ func (w *WebhookInterviewer) callbackBaseURL() string {
 }
 
 // handleCallback handles inbound POST /gate/<gateID> requests from external systems.
+// The request must carry the per-gate shared secret in the X-Tracker-Gate-Token
+// header (the value was included in the outbound payload as gate_token). Requests
+// with a missing or mismatched token are rejected with 401.
 func (w *WebhookInterviewer) handleCallback(rw http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
@@ -177,19 +207,29 @@ func (w *WebhookInterviewer) handleCallback(rw http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Look up the pending gate first so we can verify the token.
+	val, ok := w.pending.Load(gateID)
+	if !ok {
+		http.Error(rw, "unknown gate_id", http.StatusNotFound)
+		return
+	}
+	pending := val.(*webhookPending)
+
+	// Verify the per-gate shared secret.
+	if r.Header.Get("X-Tracker-Gate-Token") != pending.token {
+		http.Error(rw, "invalid or missing X-Tracker-Gate-Token", http.StatusUnauthorized)
+		return
+	}
+
+	// Cap body size to prevent memory exhaustion.
+	r.Body = http.MaxBytesReader(rw, r.Body, 64*1024)
+
 	var resp WebhookGateResponse
 	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
 		http.Error(rw, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	val, ok := w.pending.Load(gateID)
-	if !ok {
-		http.Error(rw, "unknown gate_id", http.StatusNotFound)
-		return
-	}
-
-	pending := val.(*webhookPending)
 	select {
 	case pending.ch <- resp:
 		rw.WriteHeader(http.StatusOK)
@@ -251,6 +291,8 @@ func (w *WebhookInterviewer) waitForResponse(gateID string, timeout time.Duratio
 var errGateCanceled = fmt.Errorf("webhook gate canceled")
 
 // timeoutResponse builds the response to use on timeout based on DefaultAction.
+// Supported values: "success" returns the first available choice; everything else
+// (including "fail" and unrecognised values) returns a "fail" response.
 func (w *WebhookInterviewer) timeoutResponse(choices []WebhookGateChoice) WebhookGateResponse {
 	action := strings.ToLower(strings.TrimSpace(w.DefaultAction))
 	switch action {
@@ -260,7 +302,7 @@ func (w *WebhookInterviewer) timeoutResponse(choices []WebhookGateChoice) Webhoo
 		}
 		return WebhookGateResponse{Choice: "success", Freeform: "gate timeout"}
 	default:
-		// "fail", "default", or anything else → fail
+		// "fail" or anything else → fail
 		return WebhookGateResponse{Choice: "fail", Freeform: "gate timeout"}
 	}
 }
@@ -284,14 +326,16 @@ func newGateID() string {
 	)
 }
 
-// registerPending registers a pending gate and returns the gate ID.
-func (w *WebhookInterviewer) registerPending() string {
-	gateID := newGateID()
+// registerPending registers a pending gate and returns the gate ID and its shared secret token.
+func (w *WebhookInterviewer) registerPending() (gateID, token string) {
+	gateID = newGateID()
+	token = newGateID() // reuse UUID generator for token — different random bytes
 	pending := &webhookPending{
-		ch: make(chan WebhookGateResponse, 1),
+		ch:    make(chan WebhookGateResponse, 1),
+		token: token,
 	}
 	w.pending.Store(gateID, pending)
-	return gateID
+	return gateID, token
 }
 
 // cleanupPending removes the gate from the pending map after it resolves.
@@ -305,7 +349,7 @@ func (w *WebhookInterviewer) ask(prompt, contextStr string, choices []WebhookGat
 		return WebhookGateResponse{}, false, err
 	}
 
-	gateID := w.registerPending()
+	gateID, token := w.registerPending()
 	defer w.cleanupPending(gateID)
 
 	timeout := w.effectiveTimeout()
@@ -319,6 +363,7 @@ func (w *WebhookInterviewer) ask(prompt, contextStr string, choices []WebhookGat
 		Choices:        choices,
 		CallbackURL:    callbackURL,
 		TimeoutSeconds: int(timeout.Seconds()),
+		GateToken:      token,
 	}
 
 	if err := w.postWebhook(payload); err != nil {
@@ -408,8 +453,12 @@ func (w *WebhookInterviewer) AskFreeformWithLabels(prompt string, labels []strin
 	}
 
 	if timedOut {
-		log.Printf("[webhook] labeled freeform gate timed out (action=%s), returning %q", w.DefaultAction, resp.Choice)
-		return resp.Choice, nil
+		// Route the timeout action through the same label resolver a real response
+		// uses. This maps "fail"/"success" to an actual label when possible, or
+		// falls back to defaultLabel so the pipeline always gets a valid edge label.
+		resolved := resolveWebhookChoice(resp.Choice, labels, defaultLabel)
+		log.Printf("[webhook] labeled freeform gate timed out (action=%s), returning %q", w.DefaultAction, resolved)
+		return resolved, nil
 	}
 
 	// Prefer Freeform when the responder typed custom text.

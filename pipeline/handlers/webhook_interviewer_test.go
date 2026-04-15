@@ -14,19 +14,30 @@ import (
 )
 
 // postCallback posts a WebhookGateResponse to the interviewer's callback server.
-func postCallback(t *testing.T, callbackURL string, resp WebhookGateResponse) {
+// It is safe to call from goroutines: it uses t.Errorf (not t.Fatalf) so it
+// never panics when called outside the test goroutine.
+func postCallback(t *testing.T, callbackURL string, resp WebhookGateResponse, token string) {
 	t.Helper()
 	body, err := json.Marshal(resp)
 	if err != nil {
-		t.Fatalf("marshal callback: %v", err)
+		t.Errorf("marshal callback: %v", err)
+		return
 	}
-	r, err := http.Post(callbackURL, "application/json", bytes.NewReader(body)) //nolint:noctx
+	req, err := http.NewRequest(http.MethodPost, callbackURL, bytes.NewReader(body)) //nolint:noctx
 	if err != nil {
-		t.Fatalf("post callback: %v", err)
+		t.Errorf("build callback request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tracker-Gate-Token", token)
+	r, err := http.DefaultClient.Do(req) //nolint:noctx
+	if err != nil {
+		t.Errorf("post callback: %v", err)
+		return
 	}
 	r.Body.Close()
 	if r.StatusCode != http.StatusOK {
-		t.Fatalf("callback returned %d", r.StatusCode)
+		t.Errorf("callback returned %d", r.StatusCode)
 	}
 }
 
@@ -51,7 +62,7 @@ func TestWebhookInterviewer_PostsAndReceivesResponse(t *testing.T) {
 		// Async: post back to the callback_url after a brief delay.
 		go func() {
 			time.Sleep(20 * time.Millisecond)
-			postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "Approve"})
+			postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "Approve"}, payload.GateToken)
 		}()
 	}))
 	defer webhookSrv.Close()
@@ -147,16 +158,20 @@ func TestWebhookInterviewer_TimeoutActionSuccess(t *testing.T) {
 // TestWebhookInterviewer_LabeledGate verifies that AskFreeformWithLabels sends choices
 // and correctly routes a labeled response.
 func TestWebhookInterviewer_LabeledGate(t *testing.T) {
+	// capturedPayload is written from the webhook server handler goroutine; protect with mu.
+	var mu sync.Mutex
 	var capturedPayload WebhookGatePayload
 
 	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload WebhookGatePayload
 		_ = json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
 		capturedPayload = payload
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		go func() {
 			time.Sleep(20 * time.Millisecond)
-			postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "needs-work"})
+			postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "needs-work"}, payload.GateToken)
 		}()
 	}))
 	defer webhookSrv.Close()
@@ -177,9 +192,12 @@ func TestWebhookInterviewer_LabeledGate(t *testing.T) {
 		t.Errorf("result = %q, want %q", result, "needs-work")
 	}
 
-	// Verify choices were sent
-	if len(capturedPayload.Choices) != 3 {
-		t.Errorf("choices count = %d, want 3", len(capturedPayload.Choices))
+	// Verify choices were sent (read under lock).
+	mu.Lock()
+	nChoices := len(capturedPayload.Choices)
+	mu.Unlock()
+	if nChoices != 3 {
+		t.Errorf("choices count = %d, want 3", nChoices)
 	}
 }
 
@@ -259,9 +277,9 @@ func TestWebhookInterviewer_ParallelGates(t *testing.T) {
 	}
 
 	// Post B first, then A (out of order).
-	postCallback(t, payloadB.CallbackURL, WebhookGateResponse{Choice: "continue"})
+	postCallback(t, payloadB.CallbackURL, WebhookGateResponse{Choice: "continue"}, payloadB.GateToken)
 	time.Sleep(10 * time.Millisecond)
-	postCallback(t, payloadA.CallbackURL, WebhookGateResponse{Choice: "yes"})
+	postCallback(t, payloadA.CallbackURL, WebhookGateResponse{Choice: "yes"}, payloadA.GateToken)
 
 	wg.Wait()
 
@@ -331,7 +349,7 @@ func TestWebhookInterviewer_FreeformResponse(t *testing.T) {
 			postCallback(t, payload.CallbackURL, WebhookGateResponse{
 				Choice:   "some choice",
 				Freeform: "the actual human text response",
-			})
+			}, payload.GateToken)
 		}()
 	}))
 	defer webhookSrv.Close()
