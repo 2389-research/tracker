@@ -53,7 +53,20 @@ type Config struct {
 	// per-provider *_BASE_URL env var always takes precedence over GatewayURL so
 	// library callers can still override individual providers. The TRACKER_GATEWAY_URL
 	// env var is the fallback when GatewayURL is empty.
-	GatewayURL string
+	GatewayURL  string
+	WebhookGate *WebhookGateConfig // optional: post human gates to an HTTP webhook and wait for callback
+}
+
+// WebhookGateConfig controls headless webhook-based human gate handling.
+// When set, human gate prompts are POSTed to WebhookURL and the pipeline
+// waits for a callback POST to the local callback server.
+type WebhookGateConfig struct {
+	WebhookURL    string        // required: URL to post gate payloads to
+	CallbackAddr  string        // local listen addr for callback server (default: :8789)
+	Timeout       time.Duration // wait timeout per gate (default: 10m)
+	TimeoutAction string        // "fail" (default) or "success" on timeout
+	AuthHeader    string        // Authorization header for outbound requests
+	RunID         string        // optional: run ID embedded in gate payloads
 }
 
 // CostReport summarizes spend for a pipeline run.
@@ -227,15 +240,45 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 
 // resolveInterviewer selects an automated interviewer based on Config.
 // Returns nil if no automation is configured (interactive/default mode).
+// Priority: AutoApprove > WebhookGate > Autopilot.
 // When Backend is "claude-code", prefers ClaudeCodeAutopilotInterviewer.
 func resolveInterviewer(cfg Config, client *llm.Client, completer agent.Completer) (handlers.FreeformInterviewer, error) {
 	if cfg.AutoApprove {
 		return &handlers.AutoApproveFreeformInterviewer{}, nil
 	}
+	if cfg.WebhookGate != nil {
+		return resolveWebhookInterviewer(cfg.WebhookGate)
+	}
 	if cfg.Autopilot == "" {
 		return nil, nil
 	}
 	return resolveAutopilot(cfg, client, completer)
+}
+
+// resolveWebhookInterviewer creates a WebhookInterviewer from a WebhookGateConfig.
+// Returns an error if WebhookURL is not set.
+func resolveWebhookInterviewer(wgc *WebhookGateConfig) (handlers.FreeformInterviewer, error) {
+	if wgc.WebhookURL == "" {
+		return nil, fmt.Errorf("WebhookGate.WebhookURL is required")
+	}
+	addr := wgc.CallbackAddr
+	if addr == "" {
+		addr = ":8789"
+	}
+	wi := handlers.NewWebhookInterviewer(wgc.WebhookURL, addr)
+	if wgc.Timeout > 0 {
+		wi.Timeout = wgc.Timeout
+	}
+	if wgc.TimeoutAction != "" {
+		wi.DefaultAction = wgc.TimeoutAction
+	}
+	if wgc.AuthHeader != "" {
+		wi.AuthHeader = wgc.AuthHeader
+	}
+	if wgc.RunID != "" {
+		wi.RunID = wgc.RunID
+	}
+	return wi, nil
 }
 
 // resolveAutopilot builds an autopilot interviewer for the given persona and backend.
