@@ -396,7 +396,7 @@ for provider, pc := range result.Cost.ByProvider {
 
 **CLI users** pass flags directly to `tracker`:
 
-```
+```bash
 tracker --max-tokens 100000 --max-cost 500 --max-wall-time 30m \
     examples/ask_and_execute.dip
 ```
