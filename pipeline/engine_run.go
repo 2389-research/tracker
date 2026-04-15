@@ -35,7 +35,11 @@ func (e *Engine) emitGitCommit(s *runState, nodeID string, traceEntry *TraceEntr
 	}
 }
 
-// saveCheckpointWithTag saves the checkpoint and creates a git checkpoint tag.
+// saveCheckpointWithTag saves the checkpoint and creates a lightweight git tag
+// checkpoint/<runID>/<nodeID> pointing at HEAD (the most recent node-outcome
+// commit). Because checkpoint.json is in .gitignore it is never committed, so
+// the tag deliberately points at the preceding node-outcome commit — which is
+// exactly the state a checkpoint resume would replay from.
 // The git tag is best-effort; errors are emitted as warnings.
 func (e *Engine) saveCheckpointWithTag(cp *Checkpoint, pctx *PipelineContext, runID string, s *runState, nodeID string) {
 	e.saveCheckpoint(cp, pctx, runID)
@@ -507,6 +511,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		e.clearDownstream(fallback, s.cp)
 		s.cp.CurrentNode = fallback
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
@@ -583,6 +588,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		})
 		traceEntry.EdgeTo = target
 		s.trace.AddEntry(*traceEntry)
+		e.emitGitCommit(s, currentNodeID, traceEntry)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)

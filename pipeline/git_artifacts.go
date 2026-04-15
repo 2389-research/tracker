@@ -134,9 +134,9 @@ func (r *gitArtifactRepo) CommitNode(nodeID, handler, status string, entry *Trac
 	}
 
 	// Stage all changes in the artifact dir.
-	if _, err := r.git("add", "."); err != nil {
+	if out, err := r.git("add", "."); err != nil {
 		// Non-fatal: log and continue.
-		return fmt.Errorf("git add for node %q: %w", nodeID, err)
+		return fmt.Errorf("git add for node %q: %w\n%s", nodeID, err, out)
 	}
 
 	// Build commit message.
@@ -155,9 +155,9 @@ func (r *gitArtifactRepo) CommitNode(nodeID, handler, status string, entry *Trac
 	}
 	msg := strings.TrimRight(sb.String(), "\n")
 
-	if _, err := r.git("commit", "--allow-empty", "-m", msg); err != nil {
+	if out, err := r.git("commit", "--allow-empty", "-m", msg); err != nil {
 		// Non-fatal: log and continue.
-		return fmt.Errorf("git commit for node %q: %w", nodeID, err)
+		return fmt.Errorf("git commit for node %q: %w\n%s", nodeID, err, out)
 	}
 	return nil
 }
@@ -171,8 +171,8 @@ func (r *gitArtifactRepo) TagCheckpoint(nodeID string) error {
 	}
 	tag := fmt.Sprintf("checkpoint/%s/%s", r.runID, nodeID)
 	// Use -f to overwrite if the same node is tagged again (e.g. retry).
-	if _, err := r.git("tag", "-f", tag); err != nil {
-		return fmt.Errorf("git tag %q: %w", tag, err)
+	if out, err := r.git("tag", "-f", tag); err != nil {
+		return fmt.Errorf("git tag %q: %w\n%s", tag, err, out)
 	}
 	return nil
 }
@@ -192,8 +192,12 @@ func (r *gitArtifactRepo) git(args ...string) (string, error) {
 
 // gitSafeEnv returns a copy of the current environment with sensitive variables
 // stripped to avoid leaking credentials into the git subprocess.
-// Mirrors the filterSensitiveEnv logic used by the tool handler.
+// Mirrors the filterSensitiveEnv logic used by the tool handler, including
+// the TRACKER_PASS_ENV=1 escape hatch.
 func gitSafeEnv() []string {
+	if os.Getenv("TRACKER_PASS_ENV") == "1" {
+		return os.Environ()
+	}
 	env := os.Environ()
 	var filtered []string
 	for _, e := range env {

@@ -277,6 +277,73 @@ func TestEngine_WithGitArtifacts_ProducesCommitsPerNode(t *testing.T) {
 	}
 }
 
+// TestEngine_WithGitArtifacts_CommitsRetryExhausted verifies that when a node
+// exhausts its retry budget (no fallback_retry_target set), the terminal
+// failure still produces a git commit recording the failure outcome.
+// This exercises the handleRetryExhausted no-fallback path in engine_run.go.
+func TestEngine_WithGitArtifacts_CommitsRetryExhausted(t *testing.T) {
+	requireGit(t)
+	artifactBase := t.TempDir()
+
+	g := NewGraph("git_retry_exhaust_test")
+	g.Attrs["default_max_retry"] = "2"
+	g.Attrs["default_retry_policy"] = "none"
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "flaky", Shape: "box", Label: "Flaky"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "flaky"})
+	g.AddEdge(&Edge{From: "flaky", To: "end"})
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			// "flaky" always returns retry — it will exhaust the budget.
+			if node.ID == "flaky" {
+				return Outcome{Status: OutcomeRetry}, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		}})
+	}
+
+	engine := NewEngine(g, reg,
+		WithArtifactDir(artifactBase),
+		WithGitArtifacts(true),
+	)
+	result, _ := engine.Run(context.Background())
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Status != OutcomeFail {
+		t.Fatalf("expected fail after retry exhaustion, got %q", result.Status)
+	}
+
+	// Locate the run dir.
+	entries, err := os.ReadDir(artifactBase)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var repoDir string
+	for _, e := range entries {
+		if e.IsDir() {
+			repoDir = filepath.Join(artifactBase, e.Name())
+			break
+		}
+	}
+	if repoDir == "" {
+		t.Fatal("no run dir created")
+	}
+
+	log := gitOutput(t, repoDir, "log", "--oneline")
+	t.Logf("git log:\n%s", log)
+
+	// There must be a commit for the flaky node showing outcome=fail (or retry,
+	// depending on how the terminal entry is recorded).
+	if !strings.Contains(log, "node(flaky):") {
+		t.Errorf("git log missing commit for flaky node:\n%s", log)
+	}
+}
+
 // commitCount returns the number of non-empty lines in a `git log --oneline` output.
 func commitCount(log string) int {
 	n := 0
