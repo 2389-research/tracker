@@ -250,6 +250,16 @@ func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tr
 	if stopped {
 		return false, true, nil
 	}
+
+	// Run the verify-after-edit loop if any edit tools were called this turn.
+	if s.turnHasEdits(toolCalls) {
+		if err := s.runVerifyLoop(ctx, result); err != nil {
+			// Verification infrastructure failure (e.g. binary not found).
+			// Emit a warning and proceed — do not block the pipeline.
+			s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: %v (proceeding)", err)})
+		}
+	}
+
 	return false, false, nil
 }
 
@@ -328,6 +338,88 @@ func (s *Session) maybeInjectReflection(hadErrors bool, ts *turnState) {
 	}
 	ts.consecutiveReflected++
 	s.messages = append(s.messages, llm.UserMessage(reflectionPrompt))
+}
+
+// turnHasEdits reports whether any of the tool calls in the turn are file-editing tools.
+func (s *Session) turnHasEdits(toolCalls []llm.ToolCallData) bool {
+	for _, tc := range toolCalls {
+		if isEditTool(tc.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+// runVerifyLoop runs the verify-after-edit inner loop. It resolves the verify
+// command, executes it, and injects repair prompts on failure. Repair turns
+// do NOT count toward session MaxTurns. After MaxVerifyRetries failures the
+// loop exits without blocking the caller.
+func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) error {
+	v := newVerifier(s.config)
+	if v == nil {
+		return nil // disabled or no command detected
+	}
+
+	maxRetries := s.config.MaxVerifyRetries
+	if maxRetries <= 0 {
+		maxRetries = 2 // default
+	}
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		passed, output, err := v.run(ctx)
+		if err != nil {
+			return err // real execution failure
+		}
+		if passed {
+			s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", v.cmd)})
+			return nil
+		}
+
+		// Verification failed — inject repair prompt and let the LLM fix it.
+		repairMsg := fmt.Sprintf(verifyRepairPrompt, v.cmd, 1, output)
+		s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: failed (attempt %d/%d), injecting repair prompt", attempt+1, maxRetries)})
+		s.messages = append(s.messages, llm.UserMessage(repairMsg))
+
+		// Run a repair turn (does NOT count toward MaxTurns).
+		if err := s.runRepairTurn(ctx, result); err != nil {
+			return err
+		}
+	}
+
+	// Run one final verification after the last repair attempt.
+	passed, _, err := v.run(ctx)
+	if err != nil {
+		return err
+	}
+	if passed {
+		s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed after repairs (%s)", v.cmd)})
+	} else {
+		s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: max retries (%d) exhausted, proceeding", maxRetries)})
+	}
+	return nil
+}
+
+// runRepairTurn executes one LLM repair turn outside the main MaxTurns budget.
+// It calls the LLM, dispatches any tool calls, and appends messages. The repair
+// turn's token usage is added to result.Usage so it's visible in session stats.
+func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) error {
+	resp, err := s.doLLMCall(ctx, -1) // turn=-1 marks it as a repair turn in events
+	if err != nil {
+		return err
+	}
+
+	// Accumulate usage (repair turns count toward total cost/token usage).
+	result.Usage = result.Usage.Add(resp.Usage)
+
+	s.messages = append(s.messages, resp.Message)
+
+	toolCalls := resp.ToolCalls()
+	if len(toolCalls) == 0 {
+		return nil // LLM responded with text only (e.g. "I fixed it")
+	}
+
+	s.executeToolCalls(ctx, toolCalls, result)
+	return nil
 }
 
 // emit sends an event with the current timestamp to the session's event handler.

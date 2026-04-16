@@ -202,9 +202,6 @@ func TestParityToolExecutionErrorsBecomeNamedErrorResults(t *testing.T) {
 	if toolResultCount != 1 {
 		t.Fatalf("expected exactly one tool result in second request, got %d", toolResultCount)
 	}
-	if toolResult == nil {
-		t.Fatal("expected exactly one tool result in second request")
-	}
 	if !toolResult.IsError {
 		t.Fatal("expected tool result to be marked as error")
 	}

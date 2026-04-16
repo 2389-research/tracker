@@ -525,6 +525,7 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	h.applyResponseFormat(&config, node)
 	h.applyCacheAndCompaction(&config, node)
 	h.applyReflectOnError(&config, node)
+	h.applyVerifyConfig(&config, node)
 
 	return config
 }
@@ -535,6 +536,28 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 func (h *CodergenHandler) applyReflectOnError(config *agent.SessionConfig, node *pipeline.Node) {
 	if v := node.Attrs["reflect_on_error"]; v == "false" {
 		config.ReflectOnError = false
+	}
+}
+
+// applyVerifyConfig sets VerifyAfterEdit, VerifyCommand, and MaxVerifyRetries
+// from graph-level defaults and node-level overrides.
+func (h *CodergenHandler) applyVerifyConfig(config *agent.SessionConfig, node *pipeline.Node) {
+	// Graph-level verify_command default (applies to all nodes that enable verification).
+	if v, ok := h.graphAttrs["verify_command"]; ok && v != "" {
+		config.VerifyCommand = v
+	}
+
+	// Node-level overrides take precedence.
+	if v, ok := node.Attrs["verify_after_edit"]; ok {
+		config.VerifyAfterEdit = v == "true"
+	}
+	if v, ok := node.Attrs["verify_command"]; ok && v != "" {
+		config.VerifyCommand = v
+	}
+	if v, ok := node.Attrs["max_verify_retries"]; ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			config.MaxVerifyRetries = n
+		}
 	}
 }
 
