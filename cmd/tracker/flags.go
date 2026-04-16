@@ -170,6 +170,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.IntVar(&cfg.maxCostCents, "max-cost", 0, "Halt if total cost in cents exceeds this value (0 = no limit)")
 	fs.DurationVar(&cfg.maxWallTime, "max-wall-time", 0, "Halt if pipeline wall time exceeds this duration (0 = no limit)")
 	fs.StringVar(&cfg.gatewayURL, "gateway-url", "", "Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)")
+	fs.StringVar(&cfg.exportBundle, "export-bundle", "", "After the run completes, write a git bundle of run artifacts to this path")
 	return fs
 }
 
@@ -229,5 +230,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --max-cost int            Halt if total cost in cents exceeds this value (0 = no limit)\n")
 	fmt.Fprintf(w, "  --max-wall-time duration  Halt if pipeline wall time exceeds this duration (0 = no limit)\n")
 	fmt.Fprintf(w, "  --gateway-url string      Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)\n")
+	fmt.Fprintf(w, "  --export-bundle string    Write a portable git bundle of run artifacts to this path after completion\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

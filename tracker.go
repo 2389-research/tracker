@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -90,6 +91,14 @@ type Result struct {
 	TokensByProvider map[string]llm.Usage // per-provider token totals
 	ToolCallsByName  map[string]int       // tool call counts by name
 	Cost             *CostReport          // per-provider cost rollup; nil when no usage recorded
+	// ArtifactRunDir is the run-specific artifact directory (e.g.
+	// "<artifactDir>/<runID>"). Populated when WithArtifactDir is set via
+	// Config.ArtifactDir. Pass this to ExportBundle to create a portable
+	// git bundle of the run's history.
+	ArtifactRunDir string
+	// BundlePath is the path of the exported git bundle. Populated only when
+	// ExportBundle is invoked by the caller after Run completes.
+	BundlePath string
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
@@ -99,6 +108,7 @@ type Engine struct {
 	tokenTracker *llm.TokenTracker
 	closeOnce    sync.Once
 	closeErr     error
+	artifactDir  string // base artifact directory; "" if not set
 }
 
 // NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
@@ -175,6 +185,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		inner:        inner,
 		client:       client,
 		tokenTracker: tokenTracker,
+		artifactDir:  cfg.ArtifactDir,
 	}, nil
 }
 
@@ -546,6 +557,9 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	e.populateBudgetHaltIfNeeded(result, engineResult)
 	if engineResult != nil && engineResult.Trace != nil {
 		result.ToolCallsByName = engineResult.Trace.AggregateToolCalls()
+	}
+	if e.artifactDir != "" && result.RunID != "" {
+		result.ArtifactRunDir = filepath.Join(e.artifactDir, result.RunID)
 	}
 	return result, nil
 }
