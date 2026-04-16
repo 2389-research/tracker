@@ -72,6 +72,7 @@ func DefaultConfig() SessionConfig {
 		Provider:                      DefaultProvider,
 		ContextCompaction:             CompactionNone,
 		ReflectOnError:                true,
+		MaxVerifyRetries:              2,
 	}
 }
 

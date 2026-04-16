@@ -93,7 +93,8 @@ func hasMakeTestTarget(path string) bool {
 	return makeTestTargetRe.Match(data)
 }
 
-// hasPytestSection returns true if the pyproject.toml contains a [tool.pytest] section.
+// hasPytestSection returns true if the pyproject.toml contains any [tool.pytest*] section
+// header (e.g. [tool.pytest] or [tool.pytest.ini_options]).
 // The full file is read so that sections appearing after the first 1 KB are not missed.
 func hasPytestSection(path string) bool {
 	data, err := os.ReadFile(path)
@@ -122,6 +123,9 @@ func newVerifier(cfg SessionConfig) *verifier {
 	if cmd == "" {
 		return nil // no build system detected; skip verification silently
 	}
+	// cfg.WorkingDir is set from s.env.WorkingDir in codergen (via SessionConfig.WorkingDir),
+	// so the verifier runs in the same directory as tool executions. If the session has no
+	// explicit WorkingDir it defaults to "." (process cwd), matching the tool handler default.
 	return &verifier{cmd: cmd, workDir: cfg.WorkingDir}
 }
 
@@ -166,9 +170,16 @@ func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output s
 
 // truncateTail keeps the last n bytes of s.
 // If len(s) <= n, returns s unchanged.
+// The prefix ("...(truncated)\n") is counted inside the n-byte budget so the
+// total returned string never exceeds n bytes.
 func truncateTail(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return "...(truncated)\n" + s[len(s)-n:]
+	const prefix = "...(truncated)\n"
+	keep := n - len(prefix)
+	if keep <= 0 {
+		return s[len(s)-n:] // n is smaller than the prefix; just return a raw tail
+	}
+	return prefix + s[len(s)-keep:]
 }

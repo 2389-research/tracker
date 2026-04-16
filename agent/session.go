@@ -363,7 +363,13 @@ func (s *Session) turnHasEdits(toolCalls []llm.ToolCallData) bool {
 		}
 	}
 	for _, tc := range toolCalls {
-		if isEditTool(tc.Name) && !errByID[tc.ID] {
+		if !isEditTool(tc.Name) {
+			continue
+		}
+		// Use the map-ok idiom: a missing ID (tool result not found) is not a
+		// confirmed success and should not trigger verification.
+		isErr, ok := errByID[tc.ID]
+		if ok && !isErr {
 			return true
 		}
 	}
@@ -380,10 +386,10 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 		return nil // disabled or no command detected
 	}
 
+	// MaxVerifyRetries == 0 means "run once, no retries on failure".
+	// DefaultConfig sets 2; callers that want to disable repair entirely should
+	// set MaxVerifyRetries to 0 explicitly and rely on the single-pass verify.
 	maxRetries := s.config.MaxVerifyRetries
-	if maxRetries <= 0 {
-		maxRetries = 2 // default
-	}
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		passed, exitCode, output, err := v.run(ctx)
@@ -422,6 +428,13 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 // runRepairTurn executes one LLM repair turn outside the main MaxTurns budget.
 // It calls the LLM, dispatches any tool calls, and appends messages. The repair
 // turn's token usage is added to result.Usage so it's visible in session stats.
+//
+// Intentional simplification: repair turns skip compaction checks, turn counting,
+// and turn-metric event emission that normal turns do. This is acceptable because
+// repair turns are bounded by MaxVerifyRetries (default 2) and produce at most
+// verifyOutputCap (4KB) of LLM-visible output — the cost impact is small and
+// predictable. Adding full bookkeeping would require threading the turn counter
+// and tracker into a shared path that would complicate the turn loop.
 func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) error {
 	resp, err := s.doLLMCall(ctx, -1) // turn=-1 marks it as a repair turn in events
 	if err != nil {

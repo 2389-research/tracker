@@ -57,6 +57,8 @@ func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 		return adaptToolCallEnd(evt, nodeID)
 	case agent.EventError:
 		return adaptAgentError(evt, nodeID)
+	case agent.EventVerify:
+		return MsgVerifyStatus{NodeID: nodeID, Text: evt.Text}
 	default:
 		return nil
 	}

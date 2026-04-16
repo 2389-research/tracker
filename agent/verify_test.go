@@ -162,10 +162,19 @@ func TestTruncateTail(t *testing.T) {
 			want: "hello",
 		},
 		{
+			// prefix is "...(truncated)\n" (15 bytes); n=20 → keep=5 → last 5 chars kept.
+			// Total returned: 15+5 = 20 bytes, within the cap.
 			name: "long string truncated from front",
+			s:    "abcdefghijklmnopqrstuvwxyz567890",
+			n:    20,
+			want: "...(truncated)\n67890",
+		},
+		{
+			// n smaller than prefix: no room for prefix, return raw tail (within n bytes)
+			name: "n smaller than prefix",
 			s:    "abcdefghij",
 			n:    5,
-			want: "...(truncated)\nfghij",
+			want: "fghij",
 		},
 	}
 
