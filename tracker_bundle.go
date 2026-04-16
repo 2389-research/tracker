@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 )
 
 // ExportBundle writes a git bundle of the run directory's artifact repository
@@ -25,7 +26,11 @@ func ExportBundle(runDir, outPath string) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found in PATH: %w", err)
 	}
-	cmd := exec.Command("git", "-C", runDir, "bundle", "create", outPath, "--all") //nolint:gosec
+	absPath, err := filepath.Abs(outPath)
+	if err != nil {
+		return fmt.Errorf("resolve output path %q: %w", outPath, err)
+	}
+	cmd := exec.Command("git", "-C", runDir, "bundle", "create", absPath, "--all") //nolint:gosec
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

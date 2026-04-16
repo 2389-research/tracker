@@ -139,6 +139,10 @@ func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.Pipe
 	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
 		opts = append(opts, pipeline.WithBudgetGuard(guard))
 	}
+	// --export-bundle implies git artifacts: the bundle requires a .git repo in the run dir.
+	if activeExportBundle != "" {
+		opts = append(opts, pipeline.WithGitArtifacts(true))
+	}
 	return opts
 }
 
@@ -427,6 +431,10 @@ func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, a
 	}
 	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
 		engineOpts = append(engineOpts, pipeline.WithBudgetGuard(guard))
+	}
+	// --export-bundle implies git artifacts: the bundle requires a .git repo in the run dir.
+	if activeExportBundle != "" {
+		engineOpts = append(engineOpts, pipeline.WithGitArtifacts(true))
 	}
 	return pipeline.NewEngine(graph, registry, engineOpts...)
 }
