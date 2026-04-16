@@ -35,6 +35,21 @@ func TestResolveSource_ExplicitFilePath(t *testing.T) {
 	}
 }
 
+func TestResolveSource_WindowsBackslashPath(t *testing.T) {
+	// A name containing a backslash should be treated as an explicit file path,
+	// not a bare workflow name. We expect an error (file doesn't exist), not a
+	// "not found in built-ins" error.
+	_, _, err := ResolveSource(`subdir\myflow.dip`, "")
+	if err == nil {
+		t.Fatal("expected error for non-existent Windows-style path")
+	}
+	// The error should NOT say "Available built-in workflows" — that message
+	// only appears when a bare name lookup fails.
+	if strings.Contains(err.Error(), "Available built-in workflows") {
+		t.Errorf("backslash path was treated as a bare name; expected file-not-found error, got: %v", err)
+	}
+}
+
 func TestResolveSource_BareNameDipSuffix(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "myflow.dip")

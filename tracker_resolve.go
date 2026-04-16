@@ -82,7 +82,7 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 // isExplicitFilePath returns true if name looks like a filesystem path rather
 // than a bare workflow name.
 func isExplicitFilePath(name string) bool {
-	return strings.Contains(name, "/") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dot")
+	return strings.ContainsAny(name, "/\\") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dot")
 }
 
 // buildPipelineNotFoundError returns a diagnostic listing all available

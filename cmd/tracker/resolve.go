@@ -44,7 +44,7 @@ func resolvePipelineSource(name string) (path string, embedded bool, info Workfl
 
 // isExplicitFilePath returns true if name is a file path (contains / or has a .dip/.dot extension).
 func isExplicitFilePath(name string) bool {
-	return strings.Contains(name, "/") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dot")
+	return strings.ContainsAny(name, "/\\") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dot")
 }
 
 // buildPipelineNotFoundError builds an error message listing available built-ins.
