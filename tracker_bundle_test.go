@@ -72,21 +72,11 @@ func TestExportBundle_RoundTrip(t *testing.T) {
 		t.Fatalf("expected success, got %q", result.Status)
 	}
 
-	// Find the run dir.
-	entries, err := os.ReadDir(artifactBase)
-	if err != nil {
-		t.Fatalf("ReadDir(artifactBase): %v", err)
+	// Derive the run dir directly from the known run ID — no directory scan needed.
+	if result.RunID == "" {
+		t.Fatal("engine result has empty RunID")
 	}
-	var runDir string
-	for _, e := range entries {
-		if e.IsDir() {
-			runDir = filepath.Join(artifactBase, e.Name())
-			break
-		}
-	}
-	if runDir == "" {
-		t.Fatal("no run dir created in artifact base")
-	}
+	runDir := filepath.Join(artifactBase, result.RunID)
 
 	// Export the bundle.
 	bundlePath := filepath.Join(t.TempDir(), "run.bundle")

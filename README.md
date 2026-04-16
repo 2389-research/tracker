@@ -375,7 +375,7 @@ grep 'decision_outcome' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
 
 When `WithGitArtifacts(true)` is enabled (library) or `--git-artifacts` is set (CLI — see roadmap), the artifact run directory becomes a git repository. Each terminal node outcome creates a commit:
 
-```
+```text
 node(start): start outcome=success
 node(middle): codergen outcome=success
 node(end): exit outcome=success
