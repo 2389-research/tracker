@@ -132,8 +132,7 @@ workflow BuildProductWithSuperspec
     label: "Stream A: Ingestion & Normalization"
     model: claude-sonnet-4-6
     provider: anthropic
-    params:
-      working_dir: .ai/worktrees/stream-a
+    working_dir: .ai/worktrees/stream-a
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -158,8 +157,7 @@ workflow BuildProductWithSuperspec
     label: "Stream B: Entity & Event Extraction"
     model: gpt-5.4
     provider: openai
-    params:
-      working_dir: .ai/worktrees/stream-b
+    working_dir: .ai/worktrees/stream-b
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -288,8 +286,7 @@ workflow BuildProductWithSuperspec
     label: "Stream C: Event Engine"
     model: claude-opus-4-6
     provider: anthropic
-    params:
-      working_dir: .ai/worktrees/stream-c
+    working_dir: .ai/worktrees/stream-c
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -318,8 +315,7 @@ workflow BuildProductWithSuperspec
     label: "Stream E: Ranking & Materialization"
     model: gpt-5.4
     provider: openai
-    params:
-      working_dir: .ai/worktrees/stream-e
+    working_dir: .ai/worktrees/stream-e
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -494,8 +490,7 @@ workflow BuildProductWithSuperspec
     label: "Stream F: UI & API"
     model: claude-sonnet-4-6
     provider: anthropic
-    params:
-      working_dir: .ai/worktrees/stream-f
+    working_dir: .ai/worktrees/stream-f
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -520,8 +515,7 @@ workflow BuildProductWithSuperspec
     label: "Stream G: Ops & Observability"
     model: gpt-5.4
     provider: openai
-    params:
-      working_dir: .ai/worktrees/stream-g
+    working_dir: .ai/worktrees/stream-g
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -620,8 +614,7 @@ workflow BuildProductWithSuperspec
     label: "Stream H: Evaluation & QA"
     model: claude-sonnet-4-6
     provider: anthropic
-    params:
-      working_dir: .ai/worktrees/stream-h
+    working_dir: .ai/worktrees/stream-h
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -650,8 +643,7 @@ workflow BuildProductWithSuperspec
     label: "Stream I: Docs & Compliance"
     model: gpt-5.4
     provider: openai
-    params:
-      working_dir: .ai/worktrees/stream-i
+    working_dir: .ai/worktrees/stream-i
     reasoning_effort: high
     fidelity: full
     prompt:
