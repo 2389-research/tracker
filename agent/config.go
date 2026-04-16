@@ -33,6 +33,10 @@ type SessionConfig struct {
 	ReasoningEffort               string // OpenAI reasoning effort: "low", "medium", "high"
 	ResponseFormat                string // "json_object" or "json_schema" — forces structured output
 	ResponseSchema                string // JSON schema string when ResponseFormat is "json_schema"
+	// ReflectOnError injects a structured reflection prompt after tool call
+	// errors to help the LLM reason about what went wrong before retrying.
+	// Default: true.
+	ReflectOnError bool
 }
 
 const (
@@ -52,6 +56,7 @@ func DefaultConfig() SessionConfig {
 		Model:                         DefaultModel,
 		Provider:                      DefaultProvider,
 		ContextCompaction:             CompactionNone,
+		ReflectOnError:                true,
 	}
 }
 

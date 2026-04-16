@@ -133,11 +133,28 @@ func (s *Session) registerSpawnTool() {
 	}
 }
 
+// reflectionPrompt is injected as a user message after a turn where one or more
+// tool calls failed.  It structures the LLM's reasoning about the failure before
+// it retries.  Keep it short — the actual error details live in the tool result
+// messages that precede it.
+const reflectionPrompt = `One or more tool calls failed. Before your next action, briefly analyze:
+1. What specifically went wrong?
+2. What assumption was incorrect?
+3. What is the minimal change that will fix this?
+
+Then proceed with your corrective action.`
+
+// maxReflectionTurns is the maximum number of consecutive turns on which the
+// reflection prompt is injected.  After this cap the agent retries without the
+// extra prompt to avoid infinite reflection loops.
+const maxReflectionTurns = 3
+
 // turnState carries per-loop mutable state for the agentic turn loop.
 type turnState struct {
 	lastToolSignature    string
 	consecutiveLoopCount int
 	emptyResponseRetries int
+	consecutiveReflected int // turns in a row that triggered reflection
 }
 
 // Run executes the agentic loop: send user input to the LLM, execute any tool
@@ -285,10 +302,29 @@ func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallD
 		return true
 	}
 
-	s.executeToolCalls(ctx, toolCalls, result)
+	hadErrors := s.executeToolCalls(ctx, toolCalls, result)
+	s.maybeInjectReflection(hadErrors, ts)
 	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 	return false
+}
+
+// maybeInjectReflection appends the structured reflection prompt when tool errors
+// occurred and the cap has not been reached.  It also resets the counter after a
+// clean turn so a later failure gets the full three reflection turns again.
+func (s *Session) maybeInjectReflection(hadErrors bool, ts *turnState) {
+	if !hadErrors {
+		ts.consecutiveReflected = 0
+		return
+	}
+	if !s.config.ReflectOnError {
+		return
+	}
+	if ts.consecutiveReflected >= maxReflectionTurns {
+		return
+	}
+	ts.consecutiveReflected++
+	s.messages = append(s.messages, llm.UserMessage(reflectionPrompt))
 }
 
 // emit sends an event with the current timestamp to the session's event handler.

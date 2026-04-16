@@ -166,11 +166,16 @@ func (s *Session) computeToolSignature(toolCalls []llm.ToolCallData) string {
 }
 
 // executeToolCalls runs each tool call sequentially and appends results to messages.
-func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) {
+// It returns true if any tool call resulted in an error.
+func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) bool {
 	var toolResults []llm.ContentPart
+	anyError := false
 	for _, call := range toolCalls {
 		toolResult, toolDuration := s.executeSingleTool(ctx, call)
 		result.ToolCalls[call.Name]++
+		if toolResult.IsError {
+			anyError = true
+		}
 
 		s.emit(Event{
 			Type:         EventToolCallEnd,
@@ -191,6 +196,7 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 		Role:    llm.RoleTool,
 		Content: toolResults,
 	})
+	return anyError
 }
 
 // executeSingleTool runs a single tool call, handling caching.
