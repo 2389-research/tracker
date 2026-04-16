@@ -88,6 +88,33 @@ func TestDetectVerifyCommand_MakefileNoFalsePositive(t *testing.T) {
 	}
 }
 
+func TestDetectVerifyCommand_PytestIni(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pytest.ini"), []byte("[pytest]\n"), 0o644) //nolint:errcheck
+	cmd := detectVerifyCommand(dir)
+	if cmd != "pytest" {
+		t.Errorf("got %q, want pytest", cmd)
+	}
+}
+
+func TestDetectVerifyCommand_PyprojectToml(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pyproject.toml"), []byte("[tool.pytest.ini_options]\n"), 0o644) //nolint:errcheck
+	cmd := detectVerifyCommand(dir)
+	if cmd != "pytest" {
+		t.Errorf("got %q, want pytest", cmd)
+	}
+}
+
+func TestDetectVerifyCommand_PyprojectWithoutPytest(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pyproject.toml"), []byte("[tool.black]\nline-length = 88\n"), 0o644) //nolint:errcheck
+	cmd := detectVerifyCommand(dir)
+	if cmd != "" {
+		t.Errorf("pyproject without pytest section should return empty, got %q", cmd)
+	}
+}
+
 func TestDetectVerifyCommand_NoMarkers(t *testing.T) {
 	dir := t.TempDir()
 	// Completely empty directory.

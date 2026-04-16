@@ -3,8 +3,8 @@
 package agent
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,11 +17,6 @@ const (
 	// verifyOutputCap is the maximum bytes of verification output fed back to the LLM.
 	// The tail is kept (most relevant errors appear at the end).
 	verifyOutputCap = 4096
-
-	// verifyBufferCap is the maximum bytes buffered from the verification command's
-	// combined stdout+stderr. Real test runs can produce MBs; this prevents OOM.
-	// We buffer more than verifyOutputCap so we can keep the tail after truncation.
-	verifyBufferCap = 64 * 1024
 
 	// verifyRepairPrompt is injected when verification fails after an edit turn.
 	verifyRepairPrompt = `Verification failed after your edits.
@@ -133,7 +128,8 @@ func newVerifier(cfg SessionConfig) *verifier {
 // run executes the verification command and returns (passed, exitCode, output, error).
 // A non-zero exit code is not an error — it is returned as passed=false with the
 // actual exit code and output. A real execution error (binary not found, etc.)
-// is returned as error. Output is capped at verifyBufferCap to prevent OOM.
+// is returned as error. Output is capped at verifyOutputCap (tail kept) to prevent
+// feeding large test logs to the LLM repair prompt.
 func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output string, err error) {
 	if strings.TrimSpace(v.cmd) == "" {
 		return false, 0, "", fmt.Errorf("empty verify command")
@@ -148,50 +144,24 @@ func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output s
 	// cleanup of long-running test suites (consistent with tool handler). Deferred
 	// because verify commands are author-controlled and typically short-lived.
 
-	// Cap combined output to prevent OOM on verbose test suites.
-	// Keep the tail (errors usually appear at the end).
-	var combined bytes.Buffer
-	cmd.Stdout = &limitedWriter{buf: &combined, limit: verifyBufferCap}
-	cmd.Stderr = &limitedWriter{buf: &combined, limit: verifyBufferCap}
+	// CombinedOutput merges stdout+stderr safely — exec.Cmd uses separate goroutines
+	// for each stream and bytes.Buffer is not safe for concurrent writes.
+	// The cap is applied post-execution so we keep the tail (errors appear at the end).
+	out, runErr := cmd.CombinedOutput()
 
-	runErr := cmd.Run()
-	out := combined.String()
+	// Apply size cap: keep the tail where errors typically appear.
+	outStr := truncateTail(string(out), verifyOutputCap)
 
 	if runErr != nil {
-		if ee, ok := runErr.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
 			// Non-zero exit code: verification failed but command ran fine.
 			// Return the real exit code so the repair prompt is accurate.
-			return false, ee.ExitCode(), truncateTail(out, verifyOutputCap), nil
+			return false, exitErr.ExitCode(), outStr, nil
 		}
-		return false, 0, "", runErr // real execution failure (e.g. binary not found)
+		return false, -1, outStr, runErr // real execution failure (e.g. binary not found)
 	}
-	return true, 0, out, nil
-}
-
-// limitedWriter caps how many bytes are forwarded to buf at limit bytes.
-// After the cap is reached, further writes are silently discarded.
-// Write always returns (len(p), nil) to satisfy the io.Writer contract —
-// returning a short write with err==nil would cause io.Copy to treat it as
-// an error per the Go spec.
-type limitedWriter struct {
-	buf   *bytes.Buffer
-	n     int64
-	limit int64
-}
-
-func (lw *limitedWriter) Write(p []byte) (int, error) {
-	if lw.n >= lw.limit {
-		return len(p), nil // cap reached — accept but discard
-	}
-	space := lw.limit - lw.n
-	if int64(len(p)) > space {
-		lw.buf.Write(p[:space]) //nolint:errcheck // bytes.Buffer.Write never returns an error
-		lw.n = lw.limit
-		return len(p), nil // accept full write, truncate internally
-	}
-	lw.buf.Write(p) //nolint:errcheck // bytes.Buffer.Write never returns an error
-	lw.n += int64(len(p))
-	return len(p), nil
+	return true, 0, outStr, nil
 }
 
 // truncateTail keeps the last n bytes of s.
