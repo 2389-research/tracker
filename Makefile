@@ -165,17 +165,17 @@ ci: fmt-check vet build test-short test-race coverage lint doctor complexity
 # ─── Workflow sync ────────────────────────────
 
 sync-workflows:
-	cp examples/ask_and_execute.dip cmd/tracker/workflows/
-	cp examples/build_product.dip cmd/tracker/workflows/
-	cp examples/build_product_with_superspec.dip cmd/tracker/workflows/
-	cp examples/deep_review.dip cmd/tracker/workflows/
+	cp examples/ask_and_execute.dip workflows/
+	cp examples/build_product.dip workflows/
+	cp examples/build_product_with_superspec.dip workflows/
+	cp examples/deep_review.dip workflows/
 	@echo "Workflows synced"
 
 check-workflows:
 	@FAIL=0; \
 	for f in ask_and_execute.dip build_product.dip build_product_with_superspec.dip deep_review.dip; do \
-		if ! diff -q "examples/$$f" "cmd/tracker/workflows/$$f" > /dev/null 2>&1; then \
-			echo "FAIL: examples/$$f differs from cmd/tracker/workflows/$$f"; \
+		if ! diff -q "examples/$$f" "workflows/$$f" > /dev/null 2>&1; then \
+			echo "FAIL: examples/$$f differs from workflows/$$f"; \
 			FAIL=1; \
 		fi; \
 	done; \

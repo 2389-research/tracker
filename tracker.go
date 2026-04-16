@@ -34,7 +34,8 @@ const (
 // the current working directory, and auto-generated run directories.
 type Config struct {
 	WorkingDir    string                        // default: os.Getwd()
-	CheckpointDir string                        // default: empty (engine auto-generates)
+	CheckpointDir string                        // checkpoint file path (checkpoint.json); default: empty (engine auto-generates)
+	ResumeRunID   string                        // optional: resume a previous run by ID or unique prefix; resolved via ResolveCheckpoint
 	ArtifactDir   string                        // default: empty (engine auto-generates)
 	Format        string                        // "dip" (default), "dot" (deprecated); empty = auto-detect
 	Model         string                        // default: env or claude-sonnet-4-6; graph-level attrs take precedence
@@ -132,12 +133,32 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
+	if err := applyResumeRunID(&cfg, workDir); err != nil {
+		return nil, err
+	}
+
 	client, completer, err := resolveCompleter(cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	return buildEngine(graph, cfg, workDir, client, completer)
+}
+
+// applyResumeRunID resolves Config.ResumeRunID to a concrete checkpoint path
+// and stores it on Config.CheckpointDir. A non-empty CheckpointDir on the
+// incoming config is honored as an explicit override — the user is telling
+// us exactly which file to use.
+func applyResumeRunID(cfg *Config, workDir string) error {
+	if cfg.ResumeRunID == "" || cfg.CheckpointDir != "" {
+		return nil
+	}
+	cpPath, err := ResolveCheckpoint(workDir, cfg.ResumeRunID)
+	if err != nil {
+		return fmt.Errorf("resume run %q: %w", cfg.ResumeRunID, err)
+	}
+	cfg.CheckpointDir = cpPath
+	return nil
 }
 
 // resolveWorkDir returns the working directory, falling back to cwd if empty.

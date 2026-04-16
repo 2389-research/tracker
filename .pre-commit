@@ -118,13 +118,13 @@ else
   warn "dippin CLI not found — skipping .dip lint"
 fi
 
-# 9. Workflow sync (examples/ must match cmd/tracker/workflows/)
+# 9. Workflow sync (examples/ must match workflows/)
 echo ""
 echo "--- Workflow Sync ---"
 if make check-workflows > /dev/null 2>&1; then
   pass "embedded workflows in sync"
 else
-  fail "examples/*.dip out of sync with cmd/tracker/workflows/ — run 'make sync-workflows'"
+  fail "examples/*.dip out of sync with workflows/ — run 'make sync-workflows'"
 fi
 
 echo ""

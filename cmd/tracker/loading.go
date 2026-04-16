@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -151,7 +152,7 @@ func resolveSubgraphPath(ref, baseDir string) (string, error) {
 // loadEmbeddedPipeline reads a .dip file from the embedded workflows FS
 // and parses it through the standard dippin pipeline loader.
 func loadEmbeddedPipeline(info WorkflowInfo) (*pipeline.Graph, error) {
-	data, err := embeddedWorkflows.ReadFile(info.File)
+	data, _, err := tracker.OpenWorkflow(info.Name)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded workflow %s: %w", info.Name, err)
 	}

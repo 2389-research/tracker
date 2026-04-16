@@ -5,6 +5,7 @@ package tracker
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
@@ -506,6 +507,64 @@ func TestRun_BudgetHalt_FromConfig(t *testing.T) {
 		t.Error("expected LimitsHit to be non-empty")
 	} else if result.Cost.LimitsHit[0] != "tokens" {
 		t.Errorf("expected LimitsHit[0]='tokens', got %q", result.Cost.LimitsHit[0])
+	}
+}
+
+func TestNewEngine_ResumeRunID(t *testing.T) {
+	// Set up a minimal checkpoint layout under a temp dir.
+	tmp := t.TempDir()
+	runID := "resumetest123"
+	runDir := filepath.Join(tmp, ".tracker", "runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cpPath := filepath.Join(runDir, "checkpoint.json")
+	// Minimal checkpoint JSON — engine only needs the file to exist for
+	// WithCheckpointPath; actual content is validated at resume time.
+	if err := os.WriteFile(cpPath, []byte(`{"completed_nodes":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	engine, err := NewEngine(simpleDOT, Config{
+		Format:      "dot",
+		LLMClient:   client,
+		WorkingDir:  tmp,
+		ResumeRunID: runID,
+	})
+	if err != nil {
+		t.Fatalf("NewEngine with ResumeRunID: %v", err)
+	}
+	defer engine.Close()
+
+	// Verify that applyResumeRunID resolved the run ID into CheckpointDir.
+	// We can't inspect the inner engine options directly, but a successful
+	// NewEngine without error confirms the checkpoint was found and accepted.
+	if engine.inner == nil {
+		t.Fatal("expected inner engine to be set")
+	}
+}
+
+func TestNewEngine_ResumeRunID_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	// Create the runs directory but no run with that ID.
+	if err := os.MkdirAll(filepath.Join(tmp, ".tracker", "runs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewEngine(simpleDOT, Config{
+		Format:      "dot",
+		WorkingDir:  tmp,
+		ResumeRunID: "nonexistent-run",
+	})
+	if err == nil {
+		t.Fatal("expected error when ResumeRunID doesn't match any run")
 	}
 }
 
