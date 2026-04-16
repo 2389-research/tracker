@@ -1485,8 +1485,7 @@ func TestVerifyAfterEdit_FailingTest_AutoRepair(t *testing.T) {
 	}
 
 	// Verify command fails on the first call, passes on the second.
-	callCount := 0
-	verifyScript := buildCountedVerifyCmd(t, &callCount, 1 /* fail first N times */)
+	verifyScript := buildCountedVerifyCmd(t, 1 /* fail first N times */)
 
 	cfg := DefaultConfig()
 	cfg.VerifyAfterEdit = true
@@ -1517,15 +1516,17 @@ func TestVerifyAfterEdit_FailingTest_AutoRepair(t *testing.T) {
 
 // TestVerifyAfterEdit_MaxRetriesExhausted ensures the session proceeds normally
 // after MaxVerifyRetries failures instead of blocking indefinitely.
+// The mock includes edit tool calls in repair turns so the verify sub-loop is
+// actually triggered (repair turns that only return text bypass the edit check).
 func TestVerifyAfterEdit_MaxRetriesExhausted(t *testing.T) {
 	client := &mockCompleter{
 		responses: []*llm.Response{
-			// Turn 1: edit tool call.
+			// Turn 1: edit tool call triggers verify loop.
 			makeEditToolCallResp("call_1"),
-			// Repair turn 1 (repair attempt 1).
-			makeStopResp("attempted fix 1"),
-			// Repair turn 2 (repair attempt 2).
-			makeStopResp("attempted fix 2"),
+			// Repair turn 1: LLM makes an edit (verify still fails after this).
+			makeEditToolCallResp("call_repair_1"),
+			// Repair turn 2: LLM makes another edit (verify still fails after this).
+			makeEditToolCallResp("call_repair_2"),
 			// Main loop continues after retries exhausted.
 			makeStopResp("done"),
 		},
@@ -1551,7 +1552,7 @@ func TestVerifyAfterEdit_MaxRetriesExhausted(t *testing.T) {
 
 // buildCountedVerifyCmd creates a shell script in a temp dir that fails for the
 // first failCount invocations and succeeds thereafter. Returns the script path.
-func buildCountedVerifyCmd(t *testing.T, callCount *int, failCount int) string {
+func buildCountedVerifyCmd(t *testing.T, failCount int) string {
 	t.Helper()
 	dir := t.TempDir()
 	// Use a counter file so successive shell invocations share state.

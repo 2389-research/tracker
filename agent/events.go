@@ -32,6 +32,9 @@ const (
 	EventContextCompaction    EventType = "context_compaction"
 	EventTurnMetrics          EventType = "turn_metrics"
 	EventLLMRequestPreparing  EventType = "llm_request_preparing"
+	// EventVerify is emitted for verify-after-edit status updates (pass/fail/retry).
+	// Use EventError only for infrastructure failures (binary not found, etc.).
+	EventVerify EventType = "verify"
 )
 
 // TurnMetrics captures per-turn token and performance data.

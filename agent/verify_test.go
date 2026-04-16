@@ -74,6 +74,20 @@ func TestDetectVerifyCommand_MakefileWithoutTestTarget(t *testing.T) {
 	}
 }
 
+func TestDetectVerifyCommand_MakefileNoFalsePositive(t *testing.T) {
+	// Targets like "unittest:" or "integration_test:" must NOT match.
+	dir := t.TempDir()
+	makefile := ".PHONY: unittest\nunittest:\n\tgo test ./...\n\n.PHONY: integration_test\nintegration_test:\n\tgo test -tags integration ./...\n"
+	if err := os.WriteFile(filepath.Join(dir, "Makefile"), []byte(makefile), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got := detectVerifyCommand(dir)
+	if got != "" {
+		t.Errorf("detectVerifyCommand = %q, want %q (unittest: and integration_test: must not match test:)", got, "")
+	}
+}
+
 func TestDetectVerifyCommand_NoMarkers(t *testing.T) {
 	dir := t.TempDir()
 	// Completely empty directory.

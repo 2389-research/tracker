@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -16,6 +18,11 @@ const (
 	// verifyOutputCap is the maximum bytes of verification output fed back to the LLM.
 	// The tail is kept (most relevant errors appear at the end).
 	verifyOutputCap = 4096
+
+	// verifyBufferCap is the maximum bytes buffered from the verification command's
+	// combined stdout+stderr. Real test runs can produce MBs; this prevents OOM.
+	// We buffer more than verifyOutputCap so we can keep the tail after truncation.
+	verifyBufferCap = 64 * 1024
 
 	// verifyRepairPrompt is injected when verification fails after an edit turn.
 	verifyRepairPrompt = `Verification failed after your edits.
@@ -77,8 +84,12 @@ func detectVerifyCommand(workDir string) string {
 	return ""
 }
 
-// hasMakeTestTarget returns true if the Makefile at path contains a "test:" target.
-// Only the first 1 KB is scanned to keep it fast.
+// makeTestTargetRe matches a "test:" target at the start of a line, avoiding
+// false positives on targets like "unittest:" or "integration_test:".
+var makeTestTargetRe = regexp.MustCompile(`(?m)^test\s*:`)
+
+// hasMakeTestTarget returns true if the Makefile at path contains a "test:" target
+// at the start of a line. Only the first 1 KB is scanned to keep it fast.
 func hasMakeTestTarget(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -88,7 +99,7 @@ func hasMakeTestTarget(path string) bool {
 
 	buf := make([]byte, 1024)
 	n, _ := f.Read(buf)
-	return strings.Contains(string(buf[:n]), "test:")
+	return makeTestTargetRe.Match(buf[:n])
 }
 
 // hasPytestSection returns true if the pyproject.toml contains a [tool.pytest] section.
@@ -127,34 +138,64 @@ func newVerifier(cfg SessionConfig) *verifier {
 	return &verifier{cmd: cmd, workDir: cfg.WorkingDir}
 }
 
-// run executes the verification command and returns (passed, output, error).
-// A non-zero exit code is not an error — it is returned as passed=false with output.
-// A real execution error (binary not found, etc.) is returned as error.
-func (v *verifier) run(ctx context.Context) (passed bool, output string, err error) {
-	parts := strings.Fields(v.cmd)
-	if len(parts) == 0 {
-		return false, "", fmt.Errorf("empty verify command")
+// run executes the verification command and returns (passed, exitCode, output, error).
+// A non-zero exit code is not an error — it is returned as passed=false with the
+// actual exit code and output. A real execution error (binary not found, etc.)
+// is returned as error. Output is capped at verifyBufferCap to prevent OOM.
+func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output string, err error) {
+	if strings.TrimSpace(v.cmd) == "" {
+		return false, 0, "", fmt.Errorf("empty verify command")
 	}
 
+	// Run via sh -c so the shell handles quoting and glob expansion, matching
+	// how tool_command is executed elsewhere in tracker.
 	//nolint:gosec // command comes from config/auto-detection, not user-controlled LLM output
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	cmd := exec.CommandContext(ctx, "sh", "-c", v.cmd)
 	cmd.Dir = v.workDir
 
+	// Cap combined output to prevent OOM on verbose test suites.
+	// Keep the tail (errors usually appear at the end).
 	var combined bytes.Buffer
-	cmd.Stdout = &combined
-	cmd.Stderr = &combined
+	limited := io.LimitReader(io.TeeReader(nopWriter{}, &combined), verifyBufferCap)
+	_ = limited // limitreader applied via pipe below
+	cmd.Stdout = &limitedWriter{buf: &combined, remaining: verifyBufferCap}
+	cmd.Stderr = &limitedWriter{buf: &combined, remaining: verifyBufferCap}
 
 	runErr := cmd.Run()
 	out := combined.String()
 
 	if runErr != nil {
-		if _, ok := runErr.(*exec.ExitError); ok {
+		if ee, ok := runErr.(*exec.ExitError); ok {
 			// Non-zero exit code: verification failed but command ran fine.
-			return false, truncateTail(out, verifyOutputCap), nil
+			// Return the real exit code so the repair prompt is accurate.
+			return false, ee.ExitCode(), truncateTail(out, verifyOutputCap), nil
 		}
-		return false, "", runErr // real execution failure (e.g. binary not found)
+		return false, 0, "", runErr // real execution failure (e.g. binary not found)
 	}
-	return true, out, nil
+	return true, 0, out, nil
+}
+
+// nopWriter discards all writes (used as the read side of TeeReader above — unused).
+type nopWriter struct{}
+
+func (nopWriter) Read(p []byte) (int, error) { return 0, io.EOF }
+
+// limitedWriter is a bytes.Buffer wrapper that stops writing after remaining bytes.
+type limitedWriter struct {
+	buf       *bytes.Buffer
+	remaining int
+}
+
+func (lw *limitedWriter) Write(p []byte) (int, error) {
+	if lw.remaining <= 0 {
+		return len(p), nil // silently discard — cap already reached
+	}
+	if len(p) > lw.remaining {
+		p = p[:lw.remaining]
+	}
+	n, err := lw.buf.Write(p)
+	lw.remaining -= n
+	return len(p), err // report original len so cmd doesn't error on short write
 }
 
 // truncateTail keeps the last n bytes of s.

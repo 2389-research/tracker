@@ -366,18 +366,18 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 	}
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		passed, output, err := v.run(ctx)
+		passed, exitCode, output, err := v.run(ctx)
 		if err != nil {
 			return err // real execution failure
 		}
 		if passed {
-			s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", v.cmd)})
+			s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", v.cmd)})
 			return nil
 		}
 
-		// Verification failed — inject repair prompt and let the LLM fix it.
-		repairMsg := fmt.Sprintf(verifyRepairPrompt, v.cmd, 1, output)
-		s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: failed (attempt %d/%d), injecting repair prompt", attempt+1, maxRetries)})
+		// Verification failed — inject repair prompt with the real exit code.
+		repairMsg := fmt.Sprintf(verifyRepairPrompt, v.cmd, exitCode, output)
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: failed (attempt %d/%d), injecting repair prompt", attempt+1, maxRetries)})
 		s.messages = append(s.messages, llm.UserMessage(repairMsg))
 
 		// Run a repair turn (does NOT count toward MaxTurns).
@@ -387,14 +387,14 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 	}
 
 	// Run one final verification after the last repair attempt.
-	passed, _, err := v.run(ctx)
+	passed, _, _, err := v.run(ctx)
 	if err != nil {
 		return err
 	}
 	if passed {
-		s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed after repairs (%s)", v.cmd)})
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed after repairs (%s)", v.cmd)})
 	} else {
-		s.emit(Event{Type: EventError, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: max retries (%d) exhausted, proceeding", maxRetries)})
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: max retries (%d) exhausted, proceeding", maxRetries)})
 	}
 	return nil
 }
