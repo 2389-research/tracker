@@ -1040,3 +1040,237 @@ func TestSession_NoCompactionWhenDisabled(t *testing.T) {
 		}
 	}
 }
+
+// reflectionErrorTool is a local Tool implementation for reflection tests that
+// always returns an error.  Defined here to avoid coupling to the errorTool type
+// in parity_coding_agent_test.go.
+type reflectionErrorTool struct {
+	name string
+	err  error
+}
+
+func (r *reflectionErrorTool) Name() string        { return r.name }
+func (r *reflectionErrorTool) Description() string { return "tool that always fails" }
+func (r *reflectionErrorTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (r *reflectionErrorTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", r.err
+}
+
+// countReflectionMessages counts how many user messages in msgs contain the
+// reflection prompt text.
+func countReflectionMessages(msgs []llm.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Role != llm.RoleUser {
+			continue
+		}
+		for _, part := range m.Content {
+			if strings.Contains(part.Text, "What specifically went wrong") {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestReflectionOnToolError verifies that the reflection prompt is injected as a
+// user message after a tool call fails.
+func TestReflectionOnToolError(t *testing.T) {
+	tool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("compilation failed")}
+
+	var capturedMessages []llm.Message
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			makeToolCallResponse("flaky"),
+		},
+		onComplete: func(req *llm.Request) {
+			capturedMessages = append(capturedMessages, req.Messages...)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.ReflectOnError = true
+	sess := mustNewSession(t, client, cfg, WithTools(tool))
+	if _, err := sess.Run(context.Background(), "Run the build"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The second LLM call should see the reflection message in the request messages.
+	if countReflectionMessages(capturedMessages) == 0 {
+		t.Error("expected at least one reflection user message after tool error, got none")
+	}
+}
+
+// TestReflectionDisabled verifies that no reflection prompt is injected when
+// ReflectOnError is false.
+func TestReflectionDisabled(t *testing.T) {
+	tool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("compilation failed")}
+
+	var capturedMessages []llm.Message
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			makeToolCallResponse("flaky"),
+		},
+		onComplete: func(req *llm.Request) {
+			capturedMessages = append(capturedMessages, req.Messages...)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.ReflectOnError = false
+	sess := mustNewSession(t, client, cfg, WithTools(tool))
+	if _, err := sess.Run(context.Background(), "Run the build"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if countReflectionMessages(capturedMessages) != 0 {
+		t.Error("expected no reflection messages when ReflectOnError is false")
+	}
+}
+
+// TestReflectionCapAtThree verifies that reflection is injected for at most
+// maxReflectionTurns consecutive error turns and not on subsequent ones.
+func TestReflectionCapAtThree(t *testing.T) {
+	tool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("always fails")}
+
+	// Build 5 tool-call responses followed by a final text response so the
+	// session terminates cleanly.  Total LLM calls = 6 (5 tool-call turns +
+	// 1 stop turn).
+	responses := make([]*llm.Response, 6)
+	for i := range 5 {
+		responses[i] = makeToolCallResponse("flaky")
+	}
+	responses[5] = &llm.Response{
+		Message:      llm.AssistantMessage("giving up"),
+		FinishReason: llm.FinishReason{Reason: "stop"},
+	}
+
+	// Capture the messages sent on each LLM call so we can see exactly which
+	// calls include the reflection text.
+	callMessages := [][]llm.Message{}
+	client := &mockCompleter{
+		responses: responses,
+		onComplete: func(req *llm.Request) {
+			snapshot := make([]llm.Message, len(req.Messages))
+			copy(snapshot, req.Messages)
+			callMessages = append(callMessages, snapshot)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.ReflectOnError = true
+	sess := mustNewSession(t, client, cfg, WithTools(tool))
+	if _, err := sess.Run(context.Background(), "Run 5 times"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 5 tool-call responses + 1 stop response = 6 total LLM calls.
+	// callMessages[0] is the initial call (before any tool result).
+	// callMessages[1] is after first error, callMessages[2] after second, etc.
+	if len(callMessages) != 6 {
+		t.Fatalf("expected 6 LLM calls (5 tool-call turns + 1 stop), got %d", len(callMessages))
+	}
+
+	// Calls 2, 3, 4 (indices 1, 2, 3) should each carry a reflection message.
+	for i, msgs := range callMessages[1:4] {
+		if countReflectionMessages(msgs) == 0 {
+			t.Errorf("call %d: expected reflection message, got none", i+2)
+		}
+	}
+
+	// After the cap the reflection message count must be exactly maxReflectionTurns
+	// (3).  No new reflections should be appended on calls 5 and 6.
+	for i, msgs := range callMessages[4:] {
+		n := countReflectionMessages(msgs)
+		if n != maxReflectionTurns {
+			t.Errorf("call %d: expected exactly %d reflection messages after cap, got %d",
+				i+5, maxReflectionTurns, n)
+		}
+	}
+}
+
+// TestReflectionResetOnSuccess verifies that the consecutive-reflection counter
+// resets after a successful turn so a later failure gets the full quota again.
+func TestReflectionResetOnSuccess(t *testing.T) {
+	failTool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("fail")}
+	successTool := &stubTool{name: "ok", output: "success output"}
+
+	// Pattern: fail(flaky) → succeed(ok) → fail(flaky) → done
+	responses := []*llm.Response{
+		// Turn 1: calls flaky (will error → reflection injected)
+		{
+			Message: llm.Message{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c1", Name: "flaky", Arguments: json.RawMessage(`{}`)}},
+				},
+			},
+			FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5},
+		},
+		// Turn 2: calls ok (succeeds → counter resets)
+		{
+			Message: llm.Message{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c2", Name: "ok", Arguments: json.RawMessage(`{}`)}},
+				},
+			},
+			FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5},
+		},
+		// Turn 3: calls flaky again (should trigger reflection again after reset)
+		{
+			Message: llm.Message{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c3", Name: "flaky", Arguments: json.RawMessage(`{}`)}},
+				},
+			},
+			FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5},
+		},
+		{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	callMessages := [][]llm.Message{}
+	client := &mockCompleter{
+		responses: responses,
+		onComplete: func(req *llm.Request) {
+			snapshot := make([]llm.Message, len(req.Messages))
+			copy(snapshot, req.Messages)
+			callMessages = append(callMessages, snapshot)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.ReflectOnError = true
+	sess := mustNewSession(t, client, cfg, WithTools(failTool, successTool))
+	if _, err := sess.Run(context.Background(), "test reset"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(callMessages) < 4 {
+		t.Fatalf("expected at least 4 LLM calls, got %d", len(callMessages))
+	}
+
+	// callMessages[1] = after first flaky error → reflection should appear
+	if countReflectionMessages(callMessages[1]) == 0 {
+		t.Error("expected reflection after first tool error")
+	}
+	// callMessages[2] = after successful ok call → no new reflection beyond what was already there
+	reflectionsAfterSuccess := countReflectionMessages(callMessages[2])
+	reflectionsBeforeReset := countReflectionMessages(callMessages[1])
+	if reflectionsAfterSuccess > reflectionsBeforeReset {
+		t.Error("reflection count should not increase after a successful turn")
+	}
+	// callMessages[3] = after second flaky error → counter was reset so reflection fires again
+	if countReflectionMessages(callMessages[3]) <= reflectionsAfterSuccess {
+		t.Error("expected reflection to be re-injected after counter reset on successful turn")
+	}
+}

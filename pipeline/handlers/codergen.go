@@ -524,8 +524,18 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	h.applyReasoningEffort(&config, node)
 	h.applyResponseFormat(&config, node)
 	h.applyCacheAndCompaction(&config, node)
+	h.applyReflectOnError(&config, node)
 
 	return config
+}
+
+// applyReflectOnError disables reflection on tool errors when the node explicitly
+// opts out via reflect_on_error="false".  The default (true) means no attribute is
+// required in existing pipelines to get the improvement.
+func (h *CodergenHandler) applyReflectOnError(config *agent.SessionConfig, node *pipeline.Node) {
+	if v := node.Attrs["reflect_on_error"]; v == "false" {
+		config.ReflectOnError = false
+	}
 }
 
 // applyModelProvider sets model and provider from graph-level defaults and node-level overrides.

@@ -69,9 +69,13 @@ func TestParityUnknownToolReturnsErrorResultNotSessionFailure(t *testing.T) {
 	}
 
 	var sawErrorResult bool
-	for _, part := range client.requests[1].Messages[len(client.requests[1].Messages)-1].Content {
-		if part.Kind == llm.KindToolResult && part.ToolResult != nil && part.ToolResult.IsError {
-			sawErrorResult = strings.Contains(part.ToolResult.Content, "unknown tool")
+	for _, msg := range client.requests[1].Messages {
+		for _, part := range msg.Content {
+			if part.Kind == llm.KindToolResult && part.ToolResult != nil && part.ToolResult.IsError {
+				if strings.Contains(part.ToolResult.Content, "unknown tool") {
+					sawErrorResult = true
+				}
+			}
 		}
 	}
 	if !sawErrorResult {
@@ -182,11 +186,25 @@ func TestParityToolExecutionErrorsBecomeNamedErrorResults(t *testing.T) {
 		t.Fatalf("turns = %d, want 2", result.Turns)
 	}
 
-	lastMsg := client.requests[1].Messages[len(client.requests[1].Messages)-1]
-	if len(lastMsg.Content) != 1 || lastMsg.Content[0].ToolResult == nil {
+	// Find the tool result message in the second request (reflection prompt may follow it).
+	// Assert there is exactly one RoleTool message — duplicates would indicate a bug.
+	var toolResult *llm.ToolResultData
+	toolResultCount := 0
+	for _, msg := range client.requests[1].Messages {
+		if msg.Role != llm.RoleTool {
+			continue
+		}
+		if len(msg.Content) == 1 && msg.Content[0].ToolResult != nil {
+			toolResultCount++
+			toolResult = msg.Content[0].ToolResult
+		}
+	}
+	if toolResultCount != 1 {
+		t.Fatalf("expected exactly one tool result in second request, got %d", toolResultCount)
+	}
+	if toolResult == nil {
 		t.Fatal("expected exactly one tool result in second request")
 	}
-	toolResult := lastMsg.Content[0].ToolResult
 	if !toolResult.IsError {
 		t.Fatal("expected tool result to be marked as error")
 	}
