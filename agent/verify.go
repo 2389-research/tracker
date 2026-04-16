@@ -152,6 +152,9 @@ func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output s
 	//nolint:gosec // command comes from config/auto-detection, not user-controlled LLM output
 	cmd := exec.CommandContext(ctx, "sh", "-c", v.cmd)
 	cmd.Dir = v.workDir
+	// TODO: add cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} for process-group
+	// cleanup of long-running test suites (consistent with tool handler). Deferred
+	// because verify commands are author-controlled and typically short-lived.
 
 	// Cap combined output to prevent OOM on verbose test suites.
 	// Keep the tail (errors usually appear at the end).
