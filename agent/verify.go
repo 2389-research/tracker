@@ -31,10 +31,10 @@ Please fix the failing test/lint issue, then I'll re-verify.`
 // editToolNames is the set of tool names that modify files on disk.
 // A turn that calls any of these triggers the verify-after-edit loop.
 var editToolNames = map[string]bool{
-	"write":          true,
-	"edit":           true,
-	"apply_patch":    true,
-	"notebook_edit":  true,
+	"write":         true,
+	"edit":          true,
+	"apply_patch":   true,
+	"notebook_edit": true,
 }
 
 // isEditTool reports whether the named tool modifies files.
