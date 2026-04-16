@@ -79,7 +79,8 @@ func TestOpenWorkflow_ReturnsSource(t *testing.T) {
 		t.Error("OpenWorkflow returned empty data")
 	}
 	if !strings.Contains(string(data), "workflow ") {
-		t.Errorf("workflow source does not contain 'workflow ' declaration: %q", string(data)[:200])
+		preview := string(data)[:min(len(data), 200)]
+		t.Errorf("workflow source does not contain 'workflow ' declaration: %q", preview)
 	}
 }
 

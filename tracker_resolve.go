@@ -28,9 +28,13 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 	}
 
 	if isExplicitFilePath(name) {
-		data, rerr := os.ReadFile(name)
+		path := name
+		if !filepath.IsAbs(path) && workDir != "" {
+			path = filepath.Join(workDir, name)
+		}
+		data, rerr := os.ReadFile(path)
 		if rerr != nil {
-			return "", WorkflowInfo{}, fmt.Errorf("read pipeline file %q: %w", name, rerr)
+			return "", WorkflowInfo{}, fmt.Errorf("read pipeline file %q: %w", path, rerr)
 		}
 		return string(data), WorkflowInfo{}, nil
 	}
@@ -49,6 +53,8 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 			return "", WorkflowInfo{}, fmt.Errorf("read %q: %w", dipPath, rerr)
 		}
 		return string(data), WorkflowInfo{}, nil
+	} else if !os.IsNotExist(statErr) {
+		return "", WorkflowInfo{}, fmt.Errorf("stat %q: %w", dipPath, statErr)
 	}
 
 	barePath := filepath.Join(baseDir, name)
@@ -58,6 +64,8 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 			return "", WorkflowInfo{}, fmt.Errorf("read %q: %w", barePath, rerr)
 		}
 		return string(data), WorkflowInfo{}, nil
+	} else if !os.IsNotExist(statErr) {
+		return "", WorkflowInfo{}, fmt.Errorf("stat %q: %w", barePath, statErr)
 	}
 
 	if wfInfo, ok := LookupWorkflow(name); ok {
@@ -98,8 +106,9 @@ func buildPipelineNotFoundError(name string) error {
 // the working directory's .tracker/runs/<runID>/checkpoint.json layout. The
 // runID argument may be a unique prefix of a real run ID.
 //
-// Returns the absolute path to checkpoint.json, or an error if the run is
-// not found, the prefix is ambiguous, or the checkpoint file is missing.
+// Returns the path to checkpoint.json (relative to workDir if workDir is
+// relative), or an error if the run is not found, the prefix is ambiguous,
+// or the checkpoint file is missing.
 //
 // This is the library equivalent of the CLI's `tracker -r <runID>` flag.
 // Library consumers can set Config.ResumeRunID to have NewEngine resolve
