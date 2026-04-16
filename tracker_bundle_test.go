@@ -72,7 +72,9 @@ func TestExportBundle_RoundTrip(t *testing.T) {
 		t.Fatalf("expected success, got %q", result.Status)
 	}
 
-	// Derive the run dir directly from the known run ID — no directory scan needed.
+	// Build the run dir from RunID. We can't use tracker.Result.ArtifactRunDir
+	// here because this test drives pipeline.Engine directly (not tracker.Engine),
+	// so only pipeline.EngineResult is available.
 	if result.RunID == "" {
 		t.Fatal("engine result has empty RunID")
 	}
@@ -162,7 +164,7 @@ func TestExportBundle_GitMissing(t *testing.T) {
 	// Git is available; override PATH to simulate a missing git.
 	origPath := os.Getenv("PATH")
 	t.Cleanup(func() { os.Setenv("PATH", origPath) }) //nolint:errcheck
-	os.Setenv("PATH", "/dev/null")                    //nolint:errcheck
+	os.Setenv("PATH", t.TempDir()) //nolint:errcheck // empty temp dir = no binaries
 
 	dir := t.TempDir()
 	bundlePath := filepath.Join(t.TempDir(), "out.bundle")
