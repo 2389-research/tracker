@@ -13,8 +13,8 @@ import (
 // ResolveSource resolves a pipeline name to the actual workflow source text.
 // The resolution order matches the CLI's tracker.resolvePipelineSource:
 //
-//  1. If name contains "/" or ends in ".dip"/".dot", treat it as a filesystem
-//     path and read it from disk.
+//  1. If name contains "/" or "\" (forward or back slash) or ends in
+//     ".dip"/".dot", treat it as a filesystem path and read it from disk.
 //  2. If "<name>.dip" exists under workDir, read that.
 //  3. If "<name>" exists under workDir, read that.
 //  4. If name matches a built-in workflow, return the embedded source.

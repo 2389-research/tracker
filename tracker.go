@@ -34,7 +34,7 @@ const (
 // the current working directory, and auto-generated run directories.
 type Config struct {
 	WorkingDir    string                        // default: os.Getwd()
-	CheckpointDir string                        // default: empty (engine auto-generates)
+	CheckpointDir string                        // checkpoint file path (checkpoint.json); default: empty (engine auto-generates)
 	ResumeRunID   string                        // optional: resume a previous run by ID or unique prefix; resolved via ResolveCheckpoint
 	ArtifactDir   string                        // default: empty (engine auto-generates)
 	Format        string                        // "dip" (default), "dot" (deprecated); empty = auto-detect

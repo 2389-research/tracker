@@ -12,7 +12,7 @@ import (
 
 // resolvePipelineSource resolves a pipeline name to either a filesystem path
 // or an embedded built-in workflow. Resolution order:
-//  1. Contains "/" or ends in .dip/.dot → filesystem path as-is
+//  1. Contains "/" or "\" (forward or back slash), or ends in .dip/.dot → filesystem path as-is
 //  2. name.dip exists in cwd → local file wins
 //  3. name exists as a file → return that path
 //  4. Built-in workflow by name → embedded

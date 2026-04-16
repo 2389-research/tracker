@@ -34,6 +34,7 @@ func loadWorkflowCatalog() {
 	catalogOnce.Do(func() {
 		catalogMap = make(map[string]WorkflowInfo)
 
+		// Embedded FS should never fail; return empty catalog on error.
 		entries, err := fs.ReadDir(embeddedWorkflows, "workflows")
 		if err != nil {
 			return
@@ -87,6 +88,10 @@ func parseWorkflowHeader(file string) (displayName, goal string) {
 		if strings.HasPrefix(trimmed, "start:") {
 			break
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		// Best-effort parse on embedded files — return whatever was collected.
+		return displayName, goal
 	}
 	return displayName, goal
 }
