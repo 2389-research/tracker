@@ -234,6 +234,9 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	extractAgentPromptAttrs(cfg, attrs)
 	extractAgentExecutionAttrs(cfg, attrs)
 	extractAgentOutputAttrs(cfg, attrs)
+	if cfg.Backend != "" {
+		attrs["backend"] = cfg.Backend
+	}
 	extractAgentBackendAttrs(cfg.Params, attrs)
 	for k, v := range cfg.Params {
 		if _, exists := attrs[k]; !exists {

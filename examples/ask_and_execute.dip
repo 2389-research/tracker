@@ -114,7 +114,8 @@ workflow AskAndExecute
     label: "Claude Implementation"
     model: claude-sonnet-4-6
     provider: anthropic
-    working_dir: .ai/worktrees/claude
+    params:
+      working_dir: .ai/worktrees/claude
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -134,7 +135,8 @@ workflow AskAndExecute
     label: "Codex Implementation"
     model: gpt-5.4
     provider: openai
-    working_dir: .ai/worktrees/codex
+    params:
+      working_dir: .ai/worktrees/codex
     reasoning_effort: high
     fidelity: full
     prompt:
@@ -154,7 +156,8 @@ workflow AskAndExecute
     label: "Gemini Implementation"
     model: gemini-2.5-pro
     provider: gemini
-    working_dir: .ai/worktrees/gemini
+    params:
+      working_dir: .ai/worktrees/gemini
     reasoning_effort: high
     fidelity: full
     prompt:
