@@ -1416,6 +1416,48 @@ func TestVerifyAfterEdit_NoEdits(t *testing.T) {
 	}
 }
 
+// TestVerifyAfterEdit_FailedWriteSkipsVerify ensures that verification is NOT
+// triggered when the edit tool call itself fails (e.g. permission denied).
+// A failed write leaves the workspace unchanged, so running verification would
+// test pre-existing failures unrelated to the current turn.
+func TestVerifyAfterEdit_FailedWriteSkipsVerify(t *testing.T) {
+	var capturedMessages [][]llm.Message
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			makeEditToolCallResp("call_1"),
+			makeStopResp("done"),
+		},
+		onComplete: func(req *llm.Request) {
+			snap := make([]llm.Message, len(req.Messages))
+			copy(snap, req.Messages)
+			capturedMessages = append(capturedMessages, snap)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.VerifyAfterEdit = true
+	cfg.VerifyCommand = verifyFailCmd() // would fail if verification is (wrongly) triggered
+
+	// errorTool simulates a write tool that fails (e.g. permission denied).
+	failWrite := &errorTool{name: "write", err: fmt.Errorf("permission denied")}
+	sess := mustNewSession(t, client, cfg, WithTools(failWrite))
+
+	_, err := sess.Run(context.Background(), "write a file")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No repair prompt — the write failed so the workspace was not modified.
+	for _, msgs := range capturedMessages {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && strings.Contains(m.Text(), "Verification failed") {
+				t.Error("repair prompt must not be injected when the edit tool itself failed")
+			}
+		}
+	}
+}
+
 // TestVerifyAfterEdit_PassingTest ensures normal completion when verification passes.
 func TestVerifyAfterEdit_PassingTest(t *testing.T) {
 	var capturedMessages [][]llm.Message

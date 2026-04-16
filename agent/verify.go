@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,31 +88,24 @@ func detectVerifyCommand(workDir string) string {
 var makeTestTargetRe = regexp.MustCompile(`(?m)^test\s*:`)
 
 // hasMakeTestTarget returns true if the Makefile at path contains a "test:" target
-// at the start of a line. Only the first 1 KB is scanned to keep it fast.
+// at the start of a line. The full file is read — Makefiles are typically small
+// config files and a valid target might appear anywhere in the file.
 func hasMakeTestTarget(path string) bool {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
-	defer f.Close()
-
-	buf := make([]byte, 1024)
-	n, _ := f.Read(buf)
-	return makeTestTargetRe.Match(buf[:n])
+	return makeTestTargetRe.Match(data)
 }
 
 // hasPytestSection returns true if the pyproject.toml contains a [tool.pytest] section.
-// Only the first 1 KB is scanned.
+// The full file is read so that sections appearing after the first 1 KB are not missed.
 func hasPytestSection(path string) bool {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
-	defer f.Close()
-
-	buf := make([]byte, 1024)
-	n, _ := f.Read(buf)
-	return strings.Contains(string(buf[:n]), "[tool.pytest")
+	return strings.Contains(string(data), "[tool.pytest")
 }
 
 // verifier holds configuration for the verify-after-edit loop and runs it.
@@ -159,10 +151,8 @@ func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output s
 	// Cap combined output to prevent OOM on verbose test suites.
 	// Keep the tail (errors usually appear at the end).
 	var combined bytes.Buffer
-	limited := io.LimitReader(io.TeeReader(nopWriter{}, &combined), verifyBufferCap)
-	_ = limited // limitreader applied via pipe below
-	cmd.Stdout = &limitedWriter{buf: &combined, remaining: verifyBufferCap}
-	cmd.Stderr = &limitedWriter{buf: &combined, remaining: verifyBufferCap}
+	cmd.Stdout = &limitedWriter{buf: &combined, limit: verifyBufferCap}
+	cmd.Stderr = &limitedWriter{buf: &combined, limit: verifyBufferCap}
 
 	runErr := cmd.Run()
 	out := combined.String()
@@ -178,27 +168,30 @@ func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output s
 	return true, 0, out, nil
 }
 
-// nopWriter discards all writes (used as the read side of TeeReader above — unused).
-type nopWriter struct{}
-
-func (nopWriter) Read(p []byte) (int, error) { return 0, io.EOF }
-
-// limitedWriter is a bytes.Buffer wrapper that stops writing after remaining bytes.
+// limitedWriter caps how many bytes are forwarded to buf at limit bytes.
+// After the cap is reached, further writes are silently discarded.
+// Write always returns (len(p), nil) to satisfy the io.Writer contract —
+// returning a short write with err==nil would cause io.Copy to treat it as
+// an error per the Go spec.
 type limitedWriter struct {
-	buf       *bytes.Buffer
-	remaining int
+	buf   *bytes.Buffer
+	n     int64
+	limit int64
 }
 
 func (lw *limitedWriter) Write(p []byte) (int, error) {
-	if lw.remaining <= 0 {
-		return len(p), nil // silently discard — cap already reached
+	if lw.n >= lw.limit {
+		return len(p), nil // cap reached — accept but discard
 	}
-	if len(p) > lw.remaining {
-		p = p[:lw.remaining]
+	space := lw.limit - lw.n
+	if int64(len(p)) > space {
+		lw.buf.Write(p[:space]) //nolint:errcheck // bytes.Buffer.Write never returns an error
+		lw.n = lw.limit
+		return len(p), nil // accept full write, truncate internally
 	}
-	n, err := lw.buf.Write(p)
-	lw.remaining -= n
-	return len(p), err // report original len so cmd doesn't error on short write
+	lw.buf.Write(p) //nolint:errcheck // bytes.Buffer.Write never returns an error
+	lw.n += int64(len(p))
+	return len(p), nil
 }
 
 // truncateTail keeps the last n bytes of s.

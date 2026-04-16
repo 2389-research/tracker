@@ -340,10 +340,30 @@ func (s *Session) maybeInjectReflection(hadErrors bool, ts *turnState) {
 	s.messages = append(s.messages, llm.UserMessage(reflectionPrompt))
 }
 
-// turnHasEdits reports whether any of the tool calls in the turn are file-editing tools.
+// turnHasEdits reports whether any edit tool call in the turn succeeded.
+// It checks both the tool name and the corresponding tool result to ensure the
+// workspace was actually modified. A failed write (e.g. permission denied)
+// does not count as an edit — running verification after an unchanged workspace
+// would test pre-existing failures unrelated to the current turn.
 func (s *Session) turnHasEdits(toolCalls []llm.ToolCallData) bool {
+	// Build a map of toolCallID → isError from the most recent tool-result message.
+	// executeToolCalls appends this message before turnHasEdits is called, but
+	// maybeInjectReflection may append additional user messages afterwards. Scan
+	// backwards to find the most recent RoleTool message.
+	errByID := make(map[string]bool, len(toolCalls))
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		msg := s.messages[i]
+		if msg.Role == llm.RoleTool {
+			for _, part := range msg.Content {
+				if part.Kind == llm.KindToolResult && part.ToolResult != nil {
+					errByID[part.ToolResult.ToolCallID] = part.ToolResult.IsError
+				}
+			}
+			break
+		}
+	}
 	for _, tc := range toolCalls {
-		if isEditTool(tc.Name) {
+		if isEditTool(tc.Name) && !errByID[tc.ID] {
 			return true
 		}
 	}
