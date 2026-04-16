@@ -1,5 +1,9 @@
 github.com/2389-research/dippin-lang v0.18.0 h1:ijaXEXme7X04ci+7iaWKeIp1j+/ixH7aBwoEPxJj7B4=
 github.com/2389-research/dippin-lang v0.18.0/go.mod h1:eKdey94iKAl0RWWYpW4LeXu1bWNVPHBlCkMcwuCR0Do=
+github.com/2389-research/dippin-lang v0.19.0 h1:X8twRJNGtPNFx7eUu/ir0HIzP5HowGyACoWPKgfsYkA=
+github.com/2389-research/dippin-lang v0.19.0/go.mod h1:eKdey94iKAl0RWWYpW4LeXu1bWNVPHBlCkMcwuCR0Do=
+github.com/2389-research/dippin-lang v0.19.1 h1:01tkGNeoaYKK0HGAd4lOcSd/0rF0A19yUYSgN+mnJX0=
+github.com/2389-research/dippin-lang v0.19.1/go.mod h1:eKdey94iKAl0RWWYpW4LeXu1bWNVPHBlCkMcwuCR0Do=
 github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ4pzQ=
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
 github.com/alecthomas/assert/v2 v2.7.0 h1:QtqSACNS3tF7oasA8CU6A6sXZSBDqnm7RfpLl9bZqbE=

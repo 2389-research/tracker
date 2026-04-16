@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/2389-research/dippin-lang/ir"
+	"github.com/2389-research/dippin-lang/parser"
 )
 
 // TestFromDippinIR_Minimal verifies the adapter handles a minimal valid workflow.
@@ -1862,5 +1863,88 @@ func TestEnsureStartExitNodes_SubgraphStartExit(t *testing.T) {
 	}
 	if cleanup.Shape != "Msquare" {
 		t.Errorf("Cleanup shape = %q, want Msquare", cleanup.Shape)
+	}
+}
+
+// TestFromDippinIR_BackendAttrRoundTrip is the end-to-end regression test for
+// issue #91: backend: claude-code on an agent node must land in
+// graph.Nodes[id].Attrs["backend"]. This test drives the full
+// parser → IR → adapter pipeline to catch silent drops at any layer.
+func TestFromDippinIR_BackendAttrRoundTrip(t *testing.T) {
+	src := `workflow BackendTest
+  goal: "Test per-node backend"
+  start: Start
+  exit: Native
+
+  defaults
+    model: "gpt-4.1-mini"
+    provider: openai
+
+  tool Start
+    label: "Setup"
+    timeout: 5s
+    command:
+      echo start
+
+  agent Claude
+    backend: claude-code
+    prompt: Hello from Claude
+
+  agent Native
+    backend: native
+    model: "deepseek-v3"
+    prompt: Hello from native
+
+  edges
+    Start -> Claude
+    Claude -> Native
+`
+	p := parser.NewParser(src, "backend_test.dip")
+	wf, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	// Verify the IR has the Backend field populated.
+	for _, n := range wf.Nodes {
+		cfg, ok := n.Config.(ir.AgentConfig)
+		if !ok {
+			continue
+		}
+		switch n.ID {
+		case "Claude":
+			if cfg.Backend != "claude-code" {
+				t.Errorf("IR node Claude: Backend = %q, want %q", cfg.Backend, "claude-code")
+			}
+		case "Native":
+			if cfg.Backend != "native" {
+				t.Errorf("IR node Native: Backend = %q, want %q", cfg.Backend, "native")
+			}
+		}
+	}
+
+	// Convert through the adapter and verify graph attrs.
+	graph, err := FromDippinIR(wf)
+	if err != nil {
+		t.Fatalf("FromDippinIR: %v", err)
+	}
+
+	claude := graph.Nodes["Claude"]
+	if claude == nil {
+		t.Fatal("graph missing node Claude")
+	}
+	if claude.Attrs["backend"] != "claude-code" {
+		t.Errorf("graph Claude backend = %q, want %q", claude.Attrs["backend"], "claude-code")
+	}
+
+	native := graph.Nodes["Native"]
+	if native == nil {
+		t.Fatal("graph missing node Native")
+	}
+	if native.Attrs["backend"] != "native" {
+		t.Errorf("graph Native backend = %q, want %q", native.Attrs["backend"], "native")
+	}
+	if native.Attrs["llm_model"] != "deepseek-v3" {
+		t.Errorf("graph Native model = %q, want %q", native.Attrs["llm_model"], "deepseek-v3")
 	}
 }

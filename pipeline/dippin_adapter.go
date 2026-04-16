@@ -235,6 +235,12 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	extractAgentExecutionAttrs(cfg, attrs)
 	extractAgentOutputAttrs(cfg, attrs)
 	extractAgentBackendAttrs(cfg.Params, attrs)
+	if cfg.Backend != "" {
+		attrs["backend"] = cfg.Backend
+	}
+	if cfg.WorkingDir != "" {
+		attrs["working_dir"] = cfg.WorkingDir
+	}
 	for k, v := range cfg.Params {
 		if _, exists := attrs[k]; !exists {
 			attrs[k] = v
