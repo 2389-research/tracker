@@ -253,10 +253,13 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
+	// Store webhook gate config for chooseInterviewer (called from run/runTUI).
+	activeWebhookGate = buildWebhookGateConfig(cfg)
 	// Store export-bundle path for maybeExportBundle (called from run/runTUI after completion).
 	activeExportBundle = cfg.exportBundle
 	// Store budget limits for buildEngineOptions (called from run/runTUI).
 	activeBudgetLimits = pipeline.BudgetLimits{
+
 		MaxTotalTokens: cfg.maxTokens,
 		MaxCostCents:   cfg.maxCostCents,
 		MaxWallTime:    cfg.maxWallTime,
@@ -297,7 +300,10 @@ func printRunPreamble(cfg runConfig) error {
 	if cfg.backend != "" && cfg.backend != "native" {
 		fmt.Fprintf(os.Stderr, "Agent backend: %s\n", cfg.backend)
 	}
-	if cfg.autopilot != "" {
+	if cfg.webhookURL != "" {
+		fmt.Fprintf(os.Stderr, "Webhook gate mode active — human gates will be POSTed to configured URL\n")
+		fmt.Fprintf(os.Stderr, "Callback server will start on %s\n", cfg.gateCallbackAddr)
+	} else if cfg.autopilot != "" {
 		if _, err := handlers.ParsePersona(cfg.autopilot); err != nil {
 			return err
 		}

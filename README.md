@@ -491,6 +491,86 @@ and wall-clock elapsed time.
 Reading budget limits directly from `.dip` workflow attrs is a follow-up
 tracked in #67.
 
+## Headless Execution (Webhook Gate)
+
+`--webhook-url` enables fully headless operation: instead of pausing the pipeline to wait for a human at a terminal, tracker POSTs every human gate as JSON to your URL and waits for a callback.
+
+This is the integration point for Slack bots, email approval flows, mobile push notifications, factory workers, or any custom approval system.
+
+### Flow
+
+1. A human gate fires → tracker POSTs a `WebhookGatePayload` to `--webhook-url`.
+2. Your service receives the payload, routes it to a human (Slack message, email, etc.).
+3. The human responds → your service POSTs a `WebhookGateResponse` to the `callback_url` field.
+4. Tracker resumes the pipeline with the human's answer.
+
+### CLI
+
+```bash
+tracker --webhook-url https://factory.example.com/api/gate \
+        --gate-timeout 30m \
+        --gate-timeout-action fail \
+        --webhook-auth "Bearer sk_live_..." \
+        examples/build_product.dip
+```
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--webhook-url` | _(required to enable)_ | URL to POST gate payloads to |
+| `--gate-callback-addr` | `:8789` | Local addr for the inbound callback server |
+| `--gate-timeout` | `10m` | How long to wait for a reply per gate |
+| `--gate-timeout-action` | `fail` | What to do on timeout: `fail` or `success` |
+| `--webhook-auth` | _(empty)_ | `Authorization` header on outbound POSTs |
+
+`--webhook-url` is mutually exclusive with `--autopilot` and `--auto-approve`.
+
+### Payload format
+
+Tracker POSTs JSON with this shape:
+
+```json
+{
+  "gate_id": "uuid",
+  "run_id": "optional-run-id",
+  "node_id": "ApproveSpec",
+  "prompt": "Review the spec. Approve, refine, or reject.",
+  "choices": [{"label": "approve", "value": "approve"}, ...],
+  "callback_url": "http://localhost:8789/gate/f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "timeout_seconds": 1800,
+  "gate_token": "per-gate-secret"
+}
+```
+
+Your service POSTs back to `callback_url` with:
+
+```json
+{
+  "choice": "approve",
+  "freeform": "optional free-text response",
+  "reasoning": "optional explanation"
+}
+```
+
+Include the `gate_token` value in the `X-Tracker-Gate-Token` header — the callback server rejects requests with missing or wrong tokens (HTTP 401).
+
+### Library API
+
+Library consumers set `tracker.Config.WebhookGate` instead of using CLI flags:
+
+```go
+result, _ := tracker.Run(ctx, source, tracker.Config{
+    WebhookGate: &tracker.WebhookGateConfig{
+        WebhookURL:    "https://factory.example.com/api/gate",
+        CallbackAddr:  ":8789",
+        Timeout:       30 * time.Minute,
+        TimeoutAction: "fail",
+        AuthHeader:    "Bearer sk_live_...",
+    },
+})
+```
+
 ## CLI Reference
 
 ```
@@ -515,6 +595,12 @@ tracker version                  Show version information
 - `--no-tui` — disable TUI dashboard, use plain console
 - `--verbose` — show raw provider stream events
 - `--backend` — agent backend: `native` (default) or `claude-code` (coming v0.12.0)
+- `--webhook-url` — POST human gate prompts to this URL and wait for callback (headless)
+- `--gate-callback-addr` — local addr for the webhook callback server (default: `:8789`)
+- `--gate-timeout` — per-gate wait timeout when `--webhook-url` is set (default: `10m`)
+- `--gate-timeout-action` — what to do on gate timeout: `fail` (default) or `success`
+- `--webhook-auth` — `Authorization` header for outbound webhook requests
+- `--export-bundle` — write a portable git bundle of run artifacts to the given path after completion
 
 ## Development
 

@@ -13,23 +13,28 @@ import (
 )
 
 type runConfig struct {
-	mode         commandMode
-	pipelineFile string
-	format       string // "dip", "dot", or "" (auto-detect from extension)
-	workdir      string
-	resumeID     string // run ID to resume (resolved to checkpoint path)
-	noTUI        bool
-	verbose      bool
-	jsonOut      bool          // stream events as NDJSON to stdout
-	backend      string        // agent execution backend: "" (default), "native", or "claude-code"
-	autopilot    string        // persona name (lax/mid/hard/mentor) or empty
-	autoApprove  bool          // deterministic auto-approve, no LLM
-	probe        bool          // doctor: perform live auth validation (network call per provider)
-	maxTokens    int           // halt if total tokens exceed this value (0 = no limit)
-	maxCostCents int           // halt if total cost in cents exceeds this value (0 = no limit)
-	maxWallTime  time.Duration // halt if wall time exceeds this duration (0 = no limit)
-	gatewayURL   string        // TRACKER_GATEWAY_URL override — synthesizes per-provider base URLs
-	exportBundle string        // path for post-run git bundle export; "" = skip
+	mode              commandMode
+	pipelineFile      string
+	format            string // "dip", "dot", or "" (auto-detect from extension)
+	workdir           string
+	resumeID          string // run ID to resume (resolved to checkpoint path)
+	noTUI             bool
+	verbose           bool
+	jsonOut           bool          // stream events as NDJSON to stdout
+	backend           string        // agent execution backend: "" (default), "native", or "claude-code"
+	autopilot         string        // persona name (lax/mid/hard/mentor) or empty
+	autoApprove       bool          // deterministic auto-approve, no LLM
+	probe             bool          // doctor: perform live auth validation (network call per provider)
+	maxTokens         int           // halt if total tokens exceed this value (0 = no limit)
+	maxCostCents      int           // halt if total cost in cents exceeds this value (0 = no limit)
+	maxWallTime       time.Duration // halt if wall time exceeds this duration (0 = no limit)
+	gatewayURL        string        // TRACKER_GATEWAY_URL override — synthesizes per-provider base URLs
+	webhookURL        string        // POST human gate prompts to this URL and wait for callback
+	gateCallbackAddr  string        // local addr for the callback server when --webhook-url is set
+	gateTimeout       time.Duration // per-gate wait timeout when --webhook-url is set
+	gateTimeoutAction string        // what to do on gate timeout: fail or success
+	webhookAuthHeader string        // Authorization header value for outbound webhook requests
+	exportBundle      string        // path for post-run git bundle export; "" = skip
 }
 
 type commandMode string

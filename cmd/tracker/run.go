@@ -26,6 +26,12 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+// canceller is satisfied by interviewers that hold resources (e.g. WebhookInterviewer
+// starts an HTTP server) and need cleanup when the run finishes or is interrupted.
+type canceller interface {
+	Cancel()
+}
+
 // autopilotCfg holds just the autopilot settings needed by chooseInterviewer.
 // Set by executeRun before calling run/runTUI, because commandDeps.run has a
 // fixed signature that can't be extended without breaking tests.
@@ -46,6 +52,50 @@ var activeBudgetLimits pipeline.BudgetLimits
 // and do not affect the run's exit code.
 var activeExportBundle string
 
+// activeWebhookGate holds the webhook gate config for the current run.
+// Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
+// Nil means no webhook gate is active.
+var activeWebhookGate *webhookGateCfg
+
+// webhookGateCfg holds just the webhook gate settings needed by chooseInterviewer.
+type webhookGateCfg struct {
+	webhookURL        string
+	gateCallbackAddr  string
+	gateTimeout       time.Duration
+	gateTimeoutAction string
+	webhookAuthHeader string
+}
+
+// buildWebhookGateConfig returns a populated *webhookGateCfg when webhookURL is set,
+// or nil when no webhook gate is configured.
+func buildWebhookGateConfig(cfg runConfig) *webhookGateCfg {
+	if cfg.webhookURL == "" {
+		return nil
+	}
+	return &webhookGateCfg{
+		webhookURL:        cfg.webhookURL,
+		gateCallbackAddr:  cfg.gateCallbackAddr,
+		gateTimeout:       cfg.gateTimeout,
+		gateTimeoutAction: cfg.gateTimeoutAction,
+		webhookAuthHeader: cfg.webhookAuthHeader,
+	}
+}
+
+// newWebhookInterviewerFromCfg constructs a WebhookInterviewer from a webhookGateCfg.
+func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookInterviewer {
+	wi := handlers.NewWebhookInterviewer(cfg.webhookURL, cfg.gateCallbackAddr)
+	if cfg.gateTimeout > 0 {
+		wi.Timeout = cfg.gateTimeout
+	}
+	if cfg.gateTimeoutAction != "" {
+		wi.DefaultAction = cfg.gateTimeoutAction
+	}
+	if cfg.webhookAuthHeader != "" {
+		wi.AuthHeader = cfg.webhookAuthHeader
+	}
+	return wi
+}
+
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
@@ -65,6 +115,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 
 	execEnv := exec.NewLocalEnvironment(workdir)
 	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient, backend)
+	if c, ok := interviewer.(canceller); ok {
+		defer c.Cancel()
+	}
 
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
@@ -138,10 +191,6 @@ func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.Pipe
 	}
 	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
 		opts = append(opts, pipeline.WithBudgetGuard(guard))
-	}
-	// --export-bundle implies git artifacts: the bundle requires a .git repo in the run dir.
-	if activeExportBundle != "" {
-		opts = append(opts, pipeline.WithGitArtifacts(true))
 	}
 	return opts
 }
@@ -293,6 +342,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
 	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
+	if c, ok := interviewer.(canceller); ok {
+		defer c.Cancel()
+	}
 	_ = store // store used only in setupTUIProgram
 
 	pipelineCombo := buildTUIPipelineHandler(prog, activityLog, verbose, llmClient)
@@ -431,10 +483,6 @@ func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, a
 	}
 	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
 		engineOpts = append(engineOpts, pipeline.WithBudgetGuard(guard))
-	}
-	// --export-bundle implies git artifacts: the bundle requires a .git repo in the run dir.
-	if activeExportBundle != "" {
-		engineOpts = append(engineOpts, pipeline.WithGitArtifacts(true))
 	}
 	return pipeline.NewEngine(graph, registry, engineOpts...)
 }
@@ -581,12 +629,15 @@ func buildOpenAICompatConstructor() func(string) (llm.ProviderAdapter, error) {
 }
 
 // chooseInterviewer selects the interviewer implementation based on config.
-// Priority: --auto-approve > --autopilot > terminal detection.
+// Priority: --auto-approve > --webhook-url > --autopilot > terminal detection.
 // When backend is claude-code and autopilot is active, routes gate decisions
 // through the claude CLI subprocess instead of the native LLM client.
 func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.FreeformInterviewer {
 	if cfg.autoApprove {
 		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	if activeWebhookGate != nil {
+		return newWebhookInterviewerFromCfg(activeWebhookGate)
 	}
 	if cfg.persona != "" {
 		return chooseAutopilotInterviewer(cfg.persona, llmClient, backend)
@@ -634,6 +685,12 @@ func configureTUIHeader(app *tui.AppModel, backend string, cfg autopilotCfg) {
 // If autopilot is active, wraps it so decisions flash in the TUI modal.
 // When backend is claude-code, routes autopilot through the claude subprocess.
 func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
+	if cfg.autoApprove {
+		return &handlers.AutoApproveFreeformInterviewer{}
+	}
+	if activeWebhookGate != nil {
+		return newWebhookInterviewerFromCfg(activeWebhookGate)
+	}
 	if cfg.persona != "" {
 		persona, _ := handlers.ParsePersona(cfg.persona)
 		// Use claude-code autopilot when backend is claude-code.

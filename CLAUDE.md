@@ -238,6 +238,7 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - When `--backend claude-code`, autopilot routes through the claude subprocess — no API key needed
 - Default model picks cheapest from configured provider via `Client.DefaultProvider()`
 - `autopilotCfg` in `cmd/tracker/run.go` threads the config to `chooseInterviewer`
+- For fully headless execution without an LLM judge, use `--webhook-url` instead — gates are POSTed to an external service and blocked on a callback (Closes #63, #86)
 
 ### Tool node safety — LLM output as shell input
 - NEVER `eval` content extracted from LLM-written files (arbitrary command execution)

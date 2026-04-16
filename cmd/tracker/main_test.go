@@ -942,3 +942,50 @@ func TestExecuteCommandRunPassesBackend(t *testing.T) {
 		t.Fatalf("backend = %q, want %q", gotBackend, "claude-code")
 	}
 }
+
+// TestParseFlagsExportBundle verifies that --export-bundle is parsed into
+// runConfig.exportBundle without modifying other fields.
+func TestParseFlagsExportBundle(t *testing.T) {
+	const bundlePath = "/tmp/myrun.bundle"
+	cfg, err := parseFlags([]string{"tracker", "--export-bundle", bundlePath, "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.exportBundle != bundlePath {
+		t.Fatalf("exportBundle = %q, want %q", cfg.exportBundle, bundlePath)
+	}
+	if cfg.pipelineFile != "pipeline.dip" {
+		t.Fatalf("pipelineFile = %q, want %q", cfg.pipelineFile, "pipeline.dip")
+	}
+}
+
+// TestExportBundleFieldPassedToActiveGlobal verifies that executeRun propagates
+// cfg.exportBundle into the activeExportBundle global, which maybeExportBundle reads.
+func TestExportBundleFieldPassedToActiveGlobal(t *testing.T) {
+	const bundlePath = "/tmp/testroundtrip.bundle"
+
+	t.Cleanup(func() { activeExportBundle = "" })
+
+	var captured string
+	_ = executeCommand(runConfig{
+		mode:         modeRun,
+		pipelineFile: "pipeline.dip",
+		workdir:      "/tmp",
+		noTUI:        true,
+		exportBundle: bundlePath,
+	}, commandDeps{
+		loadEnv: func(string) error { return nil },
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+			// Capture the global set by executeRun.
+			captured = activeExportBundle
+			return nil
+		},
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+			t.Fatal("unexpected TUI path")
+			return nil
+		},
+	})
+	if captured != bundlePath {
+		t.Fatalf("activeExportBundle inside run() = %q, want %q", captured, bundlePath)
+	}
+}
