@@ -1041,6 +1041,23 @@ func TestSession_NoCompactionWhenDisabled(t *testing.T) {
 	}
 }
 
+// reflectionErrorTool is a local Tool implementation for reflection tests that
+// always returns an error.  Defined here to avoid coupling to the errorTool type
+// in parity_coding_agent_test.go.
+type reflectionErrorTool struct {
+	name string
+	err  error
+}
+
+func (r *reflectionErrorTool) Name() string        { return r.name }
+func (r *reflectionErrorTool) Description() string { return "tool that always fails" }
+func (r *reflectionErrorTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (r *reflectionErrorTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", r.err
+}
+
 // countReflectionMessages counts how many user messages in msgs contain the
 // reflection prompt text.
 func countReflectionMessages(msgs []llm.Message) int {
@@ -1061,7 +1078,7 @@ func countReflectionMessages(msgs []llm.Message) int {
 // TestReflectionOnToolError verifies that the reflection prompt is injected as a
 // user message after a tool call fails.
 func TestReflectionOnToolError(t *testing.T) {
-	tool := &errorTool{name: "flaky", err: fmt.Errorf("compilation failed")}
+	tool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("compilation failed")}
 
 	var capturedMessages []llm.Message
 	client := &mockCompleter{
@@ -1076,7 +1093,9 @@ func TestReflectionOnToolError(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.ReflectOnError = true
 	sess := mustNewSession(t, client, cfg, WithTools(tool))
-	_, _ = sess.Run(context.Background(), "Run the build")
+	if _, err := sess.Run(context.Background(), "Run the build"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// The second LLM call should see the reflection message in the request messages.
 	if countReflectionMessages(capturedMessages) == 0 {
@@ -1087,7 +1106,7 @@ func TestReflectionOnToolError(t *testing.T) {
 // TestReflectionDisabled verifies that no reflection prompt is injected when
 // ReflectOnError is false.
 func TestReflectionDisabled(t *testing.T) {
-	tool := &errorTool{name: "flaky", err: fmt.Errorf("compilation failed")}
+	tool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("compilation failed")}
 
 	var capturedMessages []llm.Message
 	client := &mockCompleter{
@@ -1102,7 +1121,9 @@ func TestReflectionDisabled(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.ReflectOnError = false
 	sess := mustNewSession(t, client, cfg, WithTools(tool))
-	_, _ = sess.Run(context.Background(), "Run the build")
+	if _, err := sess.Run(context.Background(), "Run the build"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if countReflectionMessages(capturedMessages) != 0 {
 		t.Error("expected no reflection messages when ReflectOnError is false")
@@ -1112,10 +1133,11 @@ func TestReflectionDisabled(t *testing.T) {
 // TestReflectionCapAtThree verifies that reflection is injected for at most
 // maxReflectionTurns consecutive error turns and not on subsequent ones.
 func TestReflectionCapAtThree(t *testing.T) {
-	tool := &errorTool{name: "flaky", err: fmt.Errorf("always fails")}
+	tool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("always fails")}
 
 	// Build 5 tool-call responses followed by a final text response so the
-	// session terminates cleanly.
+	// session terminates cleanly.  Total LLM calls = 6 (5 tool-call turns +
+	// 1 stop turn).
 	responses := make([]*llm.Response, 6)
 	for i := range 5 {
 		responses[i] = makeToolCallResponse("flaky")
@@ -1140,24 +1162,31 @@ func TestReflectionCapAtThree(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.ReflectOnError = true
 	sess := mustNewSession(t, client, cfg, WithTools(tool))
-	_, _ = sess.Run(context.Background(), "Run 5 times")
+	if _, err := sess.Run(context.Background(), "Run 5 times"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	// Calls 1-3 should see reflection; calls 4-5 should not.
+	// 5 tool-call responses + 1 stop response = 6 total LLM calls.
 	// callMessages[0] is the initial call (before any tool result).
 	// callMessages[1] is after first error, callMessages[2] after second, etc.
-	if len(callMessages) < 5 {
-		t.Fatalf("expected at least 5 LLM calls, got %d", len(callMessages))
+	if len(callMessages) != 6 {
+		t.Fatalf("expected 6 LLM calls (5 tool-call turns + 1 stop), got %d", len(callMessages))
 	}
-	for i, msgs := range callMessages[1:4] { // calls 2,3,4 (1-indexed)
+
+	// Calls 2, 3, 4 (indices 1, 2, 3) should each carry a reflection message.
+	for i, msgs := range callMessages[1:4] {
 		if countReflectionMessages(msgs) == 0 {
 			t.Errorf("call %d: expected reflection message, got none", i+2)
 		}
 	}
-	for i, msgs := range callMessages[4:] { // calls 5+ should have no NEW reflection
-		// After cap is hit no more reflections are added; count should not exceed cap.
+
+	// After the cap the reflection message count must be exactly maxReflectionTurns
+	// (3).  No new reflections should be appended on calls 5 and 6.
+	for i, msgs := range callMessages[4:] {
 		n := countReflectionMessages(msgs)
-		if n > maxReflectionTurns {
-			t.Errorf("call %d: reflection count %d exceeds cap %d", i+5, n, maxReflectionTurns)
+		if n != maxReflectionTurns {
+			t.Errorf("call %d: expected exactly %d reflection messages after cap, got %d",
+				i+5, maxReflectionTurns, n)
 		}
 	}
 }
@@ -1165,7 +1194,7 @@ func TestReflectionCapAtThree(t *testing.T) {
 // TestReflectionResetOnSuccess verifies that the consecutive-reflection counter
 // resets after a successful turn so a later failure gets the full quota again.
 func TestReflectionResetOnSuccess(t *testing.T) {
-	failTool := &errorTool{name: "flaky", err: fmt.Errorf("fail")}
+	failTool := &reflectionErrorTool{name: "flaky", err: fmt.Errorf("fail")}
 	successTool := &stubTool{name: "ok", output: "success output"}
 
 	// Pattern: fail(flaky) → succeed(ok) → fail(flaky) → done
@@ -1222,7 +1251,9 @@ func TestReflectionResetOnSuccess(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.ReflectOnError = true
 	sess := mustNewSession(t, client, cfg, WithTools(failTool, successTool))
-	_, _ = sess.Run(context.Background(), "test reset")
+	if _, err := sess.Run(context.Background(), "test reset"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(callMessages) < 4 {
 		t.Fatalf("expected at least 4 LLM calls, got %d", len(callMessages))

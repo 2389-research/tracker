@@ -256,6 +256,9 @@ func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tr
 // handleNoTools processes a turn where the LLM returned no tool calls.
 // Returns (stoppedNaturally, shouldStop, error).
 func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Time, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult, ts *turnState, start time.Time) (bool, bool, error) {
+	// A text-only turn is a clean turn — reset the reflection counter so that
+	// a subsequent error gets the full three-turn reflection window again.
+	ts.consecutiveReflected = 0
 	const maxEmptyResponseRetries = 2
 	done := s.handleNoToolCalls(resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result)
 	if !done {

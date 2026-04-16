@@ -187,14 +187,20 @@ func TestParityToolExecutionErrorsBecomeNamedErrorResults(t *testing.T) {
 	}
 
 	// Find the tool result message in the second request (reflection prompt may follow it).
+	// Assert there is exactly one RoleTool message — duplicates would indicate a bug.
 	var toolResult *llm.ToolResultData
+	toolResultCount := 0
 	for _, msg := range client.requests[1].Messages {
 		if msg.Role != llm.RoleTool {
 			continue
 		}
 		if len(msg.Content) == 1 && msg.Content[0].ToolResult != nil {
+			toolResultCount++
 			toolResult = msg.Content[0].ToolResult
 		}
+	}
+	if toolResultCount != 1 {
+		t.Fatalf("expected exactly one tool result in second request, got %d", toolResultCount)
 	}
 	if toolResult == nil {
 		t.Fatal("expected exactly one tool result in second request")
