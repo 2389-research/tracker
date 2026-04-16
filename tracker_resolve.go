@@ -3,6 +3,7 @@
 package tracker
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -124,7 +125,10 @@ func ResolveCheckpoint(workDir, runID string) (string, error) {
 	}
 	cpPath := filepath.Join(runsDir, resolved, "checkpoint.json")
 	if _, err := os.Stat(cpPath); err != nil {
-		return "", fmt.Errorf("checkpoint not found for run %s: %w", resolved, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("checkpoint not found for run %s (no checkpoint.json in %s)", resolved, filepath.Join(runsDir, resolved))
+		}
+		return "", fmt.Errorf("checkpoint for run %s: %w", resolved, err)
 	}
 	return cpPath, nil
 }
