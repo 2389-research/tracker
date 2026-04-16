@@ -964,6 +964,8 @@ func TestParseFlagsExportBundle(t *testing.T) {
 func TestExportBundleFieldPassedToActiveGlobal(t *testing.T) {
 	const bundlePath = "/tmp/testroundtrip.bundle"
 
+	t.Cleanup(func() { activeExportBundle = "" })
+
 	var captured string
 	_ = executeCommand(runConfig{
 		mode:         modeRun,

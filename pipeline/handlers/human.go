@@ -156,8 +156,23 @@ func (a *AutoApproveFreeformInterviewer) AskInterview(questions []Question, prev
 	return &InterviewResult{Questions: answers}, nil
 }
 
+// AskFreeformWithLabels returns the defaultLabel if non-empty, otherwise the
+// first label. Falls back to "auto-approved" when no labels are provided.
+func (a *AutoApproveFreeformInterviewer) AskFreeformWithLabels(prompt string, labels []string, defaultLabel string) (string, error) {
+	if defaultLabel != "" {
+		return defaultLabel, nil
+	}
+	if len(labels) > 0 {
+		return labels[0], nil
+	}
+	return "auto-approved", nil
+}
+
 // Compile-time assertion: AutoApproveFreeformInterviewer implements InterviewInterviewer.
 var _ InterviewInterviewer = (*AutoApproveFreeformInterviewer)(nil)
+
+// Compile-time assertion: AutoApproveFreeformInterviewer implements LabeledFreeformInterviewer.
+var _ LabeledFreeformInterviewer = (*AutoApproveFreeformInterviewer)(nil)
 
 // CallbackInterviewer delegates question handling to a callback.
 type CallbackInterviewer struct {

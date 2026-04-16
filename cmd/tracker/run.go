@@ -685,6 +685,9 @@ func configureTUIHeader(app *tui.AppModel, backend string, cfg autopilotCfg) {
 // If autopilot is active, wraps it so decisions flash in the TUI modal.
 // When backend is claude-code, routes autopilot through the claude subprocess.
 func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
+	if cfg.autoApprove {
+		return &handlers.AutoApproveFreeformInterviewer{}
+	}
 	if activeWebhookGate != nil {
 		return newWebhookInterviewerFromCfg(activeWebhookGate)
 	}

@@ -537,7 +537,7 @@ Tracker POSTs JSON with this shape:
   "node_id": "ApproveSpec",
   "prompt": "Review the spec. Approve, refine, or reject.",
   "choices": [{"label": "approve", "value": "approve"}, ...],
-  "callback_url": "http://localhost:8789/gate/<gate_id>",
+  "callback_url": "http://localhost:8789/gate/f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "timeout_seconds": 1800,
   "gate_token": "per-gate-secret"
 }
