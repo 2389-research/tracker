@@ -300,7 +300,7 @@ func printRunPreamble(cfg runConfig) error {
 		fmt.Fprintf(os.Stderr, "Agent backend: %s\n", cfg.backend)
 	}
 	if cfg.webhookURL != "" {
-		fmt.Fprintf(os.Stderr, "Webhook gate mode — gates will be POSTed to %s\n", cfg.webhookURL)
+		fmt.Fprintf(os.Stderr, "Webhook gate mode active — human gates will be POSTed to configured URL\n")
 		fmt.Fprintf(os.Stderr, "Callback server will start on %s\n", cfg.gateCallbackAddr)
 	} else if cfg.autopilot != "" {
 		if _, err := handlers.ParsePersona(cfg.autopilot); err != nil {

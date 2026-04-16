@@ -600,6 +600,7 @@ tracker version                  Show version information
 - `--gate-timeout` — per-gate wait timeout when `--webhook-url` is set (default: `10m`)
 - `--gate-timeout-action` — what to do on gate timeout: `fail` (default) or `success`
 - `--webhook-auth` — `Authorization` header for outbound webhook requests
+- `--export-bundle` — write a portable git bundle of run artifacts to the given path after completion
 
 ## Development
 
