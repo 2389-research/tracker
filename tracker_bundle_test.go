@@ -28,7 +28,7 @@ func requireGitForBundle(t *testing.T) {
 func gitOutputBundle(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmdArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.Command("git", cmdArgs...) //nolint:gosec
+	cmd := exec.CommandContext(context.Background(), "git", cmdArgs...) //nolint:gosec
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -99,7 +99,7 @@ func TestExportBundle_RoundTrip(t *testing.T) {
 
 	// Clone the bundle into a restore dir.
 	restoreDir := filepath.Join(t.TempDir(), "restored")
-	cmd := exec.Command("git", "clone", bundlePath, restoreDir) //nolint:gosec
+	cmd := exec.CommandContext(context.Background(), "git", "clone", bundlePath, restoreDir) //nolint:gosec
 	var cloneOut bytes.Buffer
 	cmd.Stdout = &cloneOut
 	cmd.Stderr = &cloneOut
