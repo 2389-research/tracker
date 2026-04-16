@@ -26,6 +26,12 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+// canceller is satisfied by interviewers that hold resources (e.g. WebhookInterviewer
+// starts an HTTP server) and need cleanup when the run finishes or is interrupted.
+type canceller interface {
+	Cancel()
+}
+
 // autopilotCfg holds just the autopilot settings needed by chooseInterviewer.
 // Set by executeRun before calling run/runTUI, because commandDeps.run has a
 // fixed signature that can't be extended without breaking tests.
@@ -109,6 +115,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 
 	execEnv := exec.NewLocalEnvironment(workdir)
 	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient, backend)
+	if c, ok := interviewer.(canceller); ok {
+		defer c.Cancel()
+	}
 
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
@@ -333,6 +342,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
 	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
+	if c, ok := interviewer.(canceller); ok {
+		defer c.Cancel()
+	}
 	_ = store // store used only in setupTUIProgram
 
 	pipelineCombo := buildTUIPipelineHandler(prog, activityLog, verbose, llmClient)

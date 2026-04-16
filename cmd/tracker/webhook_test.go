@@ -106,6 +106,22 @@ func TestParseFlagsWebhook_InvalidTimeoutAction(t *testing.T) {
 	}
 }
 
+// TestParseFlagsWebhook_NegativeTimeout verifies that a negative --gate-timeout is rejected.
+func TestParseFlagsWebhook_NegativeTimeout(t *testing.T) {
+	_, err := parseFlags([]string{
+		"tracker",
+		"--webhook-url", "http://x",
+		"--gate-timeout", "-5m",
+		"pipeline.dip",
+	})
+	if err == nil {
+		t.Fatal("expected error for negative --gate-timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "--gate-timeout") {
+		t.Errorf("error should mention --gate-timeout, got: %v", err)
+	}
+}
+
 // TestBuildWebhookGateConfig_EmptyReturnsNil verifies that an empty webhookURL produces nil.
 func TestBuildWebhookGateConfig_EmptyReturnsNil(t *testing.T) {
 	cfg := runConfig{webhookURL: ""}

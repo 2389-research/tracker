@@ -155,6 +155,9 @@ func validateWebhookFlags(cfg runConfig) error {
 	if cfg.autoApprove {
 		return fmt.Errorf("--webhook-url and --auto-approve are mutually exclusive: choose one gate automation strategy")
 	}
+	if cfg.gateTimeout < 0 {
+		return fmt.Errorf("--gate-timeout must be non-negative, got %v", cfg.gateTimeout)
+	}
 	if cfg.gateTimeoutAction != "fail" && cfg.gateTimeoutAction != "success" {
 		return fmt.Errorf("--gate-timeout-action must be %q or %q, got %q", "fail", "success", cfg.gateTimeoutAction)
 	}
