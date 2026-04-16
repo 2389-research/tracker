@@ -164,7 +164,7 @@ func TestExportBundle_GitMissing(t *testing.T) {
 	// Git is available; override PATH to simulate a missing git.
 	origPath := os.Getenv("PATH")
 	t.Cleanup(func() { os.Setenv("PATH", origPath) }) //nolint:errcheck
-	os.Setenv("PATH", t.TempDir()) //nolint:errcheck // empty temp dir = no binaries
+	os.Setenv("PATH", t.TempDir())                    //nolint:errcheck // empty temp dir = no binaries
 
 	dir := t.TempDir()
 	bundlePath := filepath.Join(t.TempDir(), "out.bundle")
