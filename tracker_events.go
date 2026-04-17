@@ -4,7 +4,9 @@ package tracker
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
+
+const ndjsonTimestampLayout = "2006-01-02T15:04:05.000Z07:00"
 
 // NDJSONEvent is the stable wire format for the tracker --json mode. Field
 // tags are stable; new optional fields may be added without a major bump.
@@ -33,8 +37,9 @@ type NDJSONEvent struct {
 // line onto an io.Writer. Library consumers use it to produce the same
 // stream as the tracker CLI's --json mode.
 type NDJSONWriter struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu      sync.Mutex
+	w       io.Writer
+	errOnce sync.Once
 }
 
 // NewNDJSONWriter returns a new writer backed by w.
@@ -46,12 +51,17 @@ func NewNDJSONWriter(w io.Writer) *NDJSONWriter {
 func (s *NDJSONWriter) Write(evt NDJSONEvent) {
 	data, err := json.Marshal(evt)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "tracker: marshal NDJSON event: %v\n", err)
 		return
 	}
 	data = append(data, '\n')
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, _ = s.w.Write(data)
+	if _, werr := s.w.Write(data); werr != nil {
+		s.errOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "tracker: NDJSON stream write error: %v (further write errors suppressed)\n", werr)
+		})
+	}
 }
 
 // PipelineHandler returns a pipeline.PipelineEventHandler that writes events
@@ -59,7 +69,7 @@ func (s *NDJSONWriter) Write(evt NDJSONEvent) {
 func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 	return pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
 		entry := NDJSONEvent{
-			Timestamp: evt.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+			Timestamp: evt.Timestamp.Format(ndjsonTimestampLayout),
 			Source:    "pipeline",
 			Type:      string(evt.Type),
 			RunID:     evt.RunID,
@@ -77,7 +87,7 @@ func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 func (s *NDJSONWriter) TraceObserver() llm.TraceObserver {
 	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
 		s.Write(NDJSONEvent{
-			Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
+			Timestamp: time.Now().Format(ndjsonTimestampLayout),
 			Source:    "llm",
 			Type:      string(evt.Kind),
 			Provider:  evt.Provider,
@@ -96,7 +106,7 @@ func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 			content = evt.Text
 		}
 		entry := NDJSONEvent{
-			Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
+			Timestamp: time.Now().Format(ndjsonTimestampLayout),
 			Source:    "agent",
 			Type:      string(evt.Type),
 			NodeID:    evt.NodeID,

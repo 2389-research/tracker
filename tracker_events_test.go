@@ -293,6 +293,23 @@ func TestNDJSONWriter_AgentHandlerCombinesErrors(t *testing.T) {
 	}
 }
 
+func TestNDJSONWriter_AgentHandler_ContentPriority(t *testing.T) {
+	t.Run("ToolOutput wins when both present", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := NewNDJSONWriter(&buf)
+		h := w.AgentHandler()
+		h.HandleEvent(agent.Event{Type: agent.EventToolCallEnd, ToolOutput: "tool-out", Text: "text-out"})
+
+		var got NDJSONEvent
+		if err := json.Unmarshal(bytes.TrimRight(buf.Bytes(), "\n"), &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.Content != "tool-out" {
+			t.Errorf("content = %q, want tool-out", got.Content)
+		}
+	})
+}
+
 func TestNDJSONWriter_AgentHandlerErrorOnlyFromErr(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewNDJSONWriter(&buf)
