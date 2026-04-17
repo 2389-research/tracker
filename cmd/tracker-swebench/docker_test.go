@@ -3,7 +3,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -15,57 +14,86 @@ func TestContainerName(t *testing.T) {
 	}
 }
 
-func TestBuildCloneCmd(t *testing.T) {
-	got := buildCloneCmd(
+func TestBuildCloneCommands(t *testing.T) {
+	clone, checkout := buildCloneCommands(
 		"https://github.com/django/django.git",
 		"abc123",
 		"/workspace",
-		"/cache/django",
+		"/cache/django_django.git",
 	)
-	// Must be a sh -c invocation
-	if len(got) < 3 {
-		t.Fatalf("expected at least 3 elements, got %d: %v", len(got), got)
+
+	// Clone command must NOT use sh -c.
+	if clone[0] == "sh" {
+		t.Error("clone command must not use sh -c")
 	}
-	if got[0] != "sh" || got[1] != "-c" {
-		t.Errorf("expected [sh -c ...], got %v", got[:2])
+	if clone[0] != "git" {
+		t.Errorf("clone[0] = %q, want \"git\"", clone[0])
 	}
-	cmd := got[2]
-	if !strings.Contains(cmd, "--reference /cache/django") {
-		t.Errorf("expected --reference flag in cmd, got: %s", cmd)
+
+	// Must contain --reference with the bare repo path.
+	found := false
+	for i, arg := range clone {
+		if arg == "--reference" && i+1 < len(clone) && clone[i+1] == "/cache/django_django.git" {
+			found = true
+		}
 	}
-	if !strings.Contains(cmd, "git clone") {
-		t.Errorf("expected git clone in cmd, got: %s", cmd)
+	if !found {
+		t.Errorf("expected --reference /cache/django_django.git in clone args: %v", clone)
 	}
-	if !strings.Contains(cmd, "https://github.com/django/django.git") {
-		t.Errorf("expected repo URL in cmd, got: %s", cmd)
+
+	// Must contain --dissociate.
+	hasDissociate := false
+	for _, arg := range clone {
+		if arg == "--dissociate" {
+			hasDissociate = true
+		}
 	}
-	if !strings.Contains(cmd, "abc123") {
-		t.Errorf("expected commit in cmd, got: %s", cmd)
+	if !hasDissociate {
+		t.Errorf("expected --dissociate in clone args: %v", clone)
 	}
-	if !strings.Contains(cmd, "/workspace") {
-		t.Errorf("expected workDir in cmd, got: %s", cmd)
+
+	// Must end with repoURL and workDir.
+	if clone[len(clone)-2] != "https://github.com/django/django.git" {
+		t.Errorf("expected repo URL as second-to-last arg, got %q", clone[len(clone)-2])
+	}
+	if clone[len(clone)-1] != "/workspace" {
+		t.Errorf("expected workDir as last arg, got %q", clone[len(clone)-1])
+	}
+
+	// Checkout must be git -C workDir checkout commit.
+	expected := []string{"git", "-C", "/workspace", "checkout", "abc123"}
+	if len(checkout) != len(expected) {
+		t.Fatalf("checkout = %v, want %v", checkout, expected)
+	}
+	for i := range expected {
+		if checkout[i] != expected[i] {
+			t.Errorf("checkout[%d] = %q, want %q", i, checkout[i], expected[i])
+		}
 	}
 }
 
-func TestBuildCloneCmd_NoCache(t *testing.T) {
-	got := buildCloneCmd(
+func TestBuildCloneCommands_NoCache(t *testing.T) {
+	clone, checkout := buildCloneCommands(
 		"https://github.com/django/django.git",
 		"abc123",
 		"/workspace",
 		"",
 	)
-	if len(got) < 3 {
-		t.Fatalf("expected at least 3 elements, got %d: %v", len(got), got)
+
+	if clone[0] != "git" {
+		t.Errorf("clone[0] = %q, want \"git\"", clone[0])
 	}
-	if got[0] != "sh" || got[1] != "-c" {
-		t.Errorf("expected [sh -c ...], got %v", got[:2])
+	for _, arg := range clone {
+		if arg == "--reference" {
+			t.Error("expected no --reference flag when cachePath is empty")
+		}
+		if arg == "--dissociate" {
+			t.Error("expected no --dissociate when cachePath is empty")
+		}
 	}
-	cmd := got[2]
-	if strings.Contains(cmd, "--reference") {
-		t.Errorf("expected no --reference flag when cachePath empty, got: %s", cmd)
-	}
-	if !strings.Contains(cmd, "git clone") {
-		t.Errorf("expected git clone in cmd, got: %s", cmd)
+
+	if checkout[0] != "git" {
+		t.Errorf("checkout[0] = %q, want \"git\"", checkout[0])
 	}
 }
 

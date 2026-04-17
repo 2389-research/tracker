@@ -26,16 +26,20 @@ func containerName(instanceID string) string {
 	return "swe-" + instanceID
 }
 
-// buildCloneCmd returns the sh -c command slice to clone a repo and checkout a commit.
-// When cachePath is non-empty, adds the --reference flag for local object reuse.
-func buildCloneCmd(repoURL, commit, workDir, cachePath string) []string {
-	cloneArgs := "git clone"
+// buildCloneCommands returns two safe argument slices: one for git clone, one
+// for git checkout. No shell is involved — arguments are passed directly to
+// exec, eliminating injection via dataset-controlled values.
+// When cachePath is non-empty, --reference and --dissociate flags are added
+// for local object reuse without creating fragile alternates dependencies.
+func buildCloneCommands(repoURL, commit, workDir, cachePath string) (cloneArgs []string, checkoutArgs []string) {
+	cloneArgs = []string{"git", "clone"}
 	if cachePath != "" {
-		cloneArgs += " --reference " + cachePath
+		cloneArgs = append(cloneArgs, "--reference", cachePath, "--dissociate")
 	}
-	cloneArgs += " " + repoURL + " " + workDir
-	cmd := cloneArgs + " && git checkout " + commit
-	return []string{"sh", "-c", cmd}
+	cloneArgs = append(cloneArgs, repoURL, workDir)
+
+	checkoutArgs = []string{"git", "-C", workDir, "checkout", commit}
+	return cloneArgs, checkoutArgs
 }
 
 // buildEnvFlags converts a map of environment variables into docker -e KEY=VAL flag pairs.
@@ -187,11 +191,14 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	// Step 3: Clone the repo and checkout the base commit.
 	cachePath := ""
 	if r.CacheDir != "" {
-		cachePath = "/cache"
+		cachePath = "/cache/" + strings.ReplaceAll(inst.Repo, "/", "_") + ".git"
 	}
-	cloneCmd := buildCloneCmd(inst.RepoURL(), inst.BaseCommit, workDir, cachePath)
-	if err = dockerExec(ctx, name, nil, cloneCmd...); err != nil {
+	cloneArgs, checkoutArgs := buildCloneCommands(inst.RepoURL(), inst.BaseCommit, workDir, cachePath)
+	if err = dockerExec(ctx, name, nil, cloneArgs...); err != nil {
 		return "", AgentSummary{}, fmt.Errorf("clone repo: %w", err)
+	}
+	if err = dockerExec(ctx, name, nil, checkoutArgs...); err != nil {
+		return "", AgentSummary{}, fmt.Errorf("checkout commit: %w", err)
 	}
 
 	// Step 4: Install the package (log failure but continue).
