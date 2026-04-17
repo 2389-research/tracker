@@ -24,7 +24,10 @@ func FormatEventLine(evt Event) string {
 		}
 	case EventVerify:
 		if evt.Text != "" {
-			return "✔ " + evt.Text
+			if strings.Contains(evt.Text, "passed") {
+				return "✔ " + evt.Text
+			}
+			return "⚠ " + evt.Text
 		}
 	}
 	return ""

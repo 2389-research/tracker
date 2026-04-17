@@ -122,6 +122,9 @@ func (c SessionConfig) validateLimits() error {
 			return fmt.Errorf("CompactionThreshold must be > 0 and <= 1.0 when compaction is auto, got %f", c.CompactionThreshold)
 		}
 	}
+	if c.MaxVerifyRetries < 0 {
+		return fmt.Errorf("MaxVerifyRetries must be >= 0, got %d", c.MaxVerifyRetries)
+	}
 	return nil
 }
 
