@@ -218,7 +218,9 @@ func (r *DockerRunner) CleanupStale(ctx context.Context) {
 // Returns the git diff patch and an AgentSummary. On agent timeout, returns a partial diff.
 // When useCache is true and r.CacheDir is set, the repo cache is mounted and used as a
 // git clone --reference source. Pass false when the bare clone for this repo is unavailable.
-func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string, useCache bool) (patch string, summary AgentSummary, err error) {
+// promptPath is mounted read-only at /instance_prompt.txt inside the container so the
+// agent-runner can read multiline instance prompts that break Docker's --env-file format.
+func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string, useCache bool, promptPath string) (patch string, summary AgentSummary, err error) {
 	name := containerName(r.RunLabel, inst.InstanceID)
 	const workDir = "/workspace"
 
@@ -247,6 +249,9 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}
 	if r.PidsLimit > 0 {
 		createArgs = append(createArgs, "--pids-limit", fmt.Sprintf("%d", r.PidsLimit))
+	}
+	if promptPath != "" {
+		createArgs = append(createArgs, "-v", promptPath+":/instance_prompt.txt:ro")
 	}
 	createArgs = append(createArgs, r.Image, "sleep", "infinity")
 	if err = dockerCmd(ctx, createArgs...); err != nil {

@@ -96,10 +96,23 @@ type agentSummary struct {
 	DurationMs   int64 `json:"duration_ms"`
 }
 
+// instancePromptPath is the container-side path where the harness mounts
+// the instance prompt file. Used instead of env vars because multiline
+// prompts break Docker's --env-file format.
+const instancePromptPath = "/instance_prompt.txt"
+
 func main() {
 	cfg := parseConfig()
 	if cfg.Instance == "" {
-		log.Fatal("SWEBENCH_INSTANCE must be set")
+		// Fall back to reading from the mounted prompt file.
+		data, err := os.ReadFile(instancePromptPath)
+		if err != nil {
+			log.Fatalf("SWEBENCH_INSTANCE not set and %s not readable: %v", instancePromptPath, err)
+		}
+		cfg.Instance = string(data)
+	}
+	if cfg.Instance == "" {
+		log.Fatal("SWEBENCH_INSTANCE must be set or /instance_prompt.txt must exist")
 	}
 
 	baseURL := tracker.ResolveProviderBaseURL(cfg.Provider)

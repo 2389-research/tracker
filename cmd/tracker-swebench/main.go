@@ -181,15 +181,34 @@ Flags:
 			repoCachePath = "" // fall back to no cache
 		}
 
-		// Set per-instance env.
-		instEnv := make(map[string]string, len(agentEnv)+1)
+		// Set per-instance env (no multiline values — Docker --env-file
+		// does not support them).
+		instEnv := make(map[string]string, len(agentEnv))
 		for k, v := range agentEnv {
 			instEnv[k] = v
 		}
-		instEnv["SWEBENCH_INSTANCE"] = inst.AgentPrompt()
+
+		// Write the instance prompt to a temp file for mounting into the
+		// container. The prompt can be multiline and contain special chars
+		// that break Docker's --env-file format.
+		promptFile, promptErr := os.CreateTemp("", "swebench-prompt-*")
+		if promptErr != nil {
+			log.Printf("[%s] create prompt file: %v", inst.InstanceID, promptErr)
+			stats.Errors++
+			continue
+		}
+		if _, promptErr = promptFile.WriteString(inst.AgentPrompt()); promptErr != nil {
+			promptFile.Close()
+			os.Remove(promptFile.Name())
+			log.Printf("[%s] write prompt file: %v", inst.InstanceID, promptErr)
+			stats.Errors++
+			continue
+		}
+		promptFile.Close()
 
 		start := time.Now()
-		patch, summary, runErr := docker.RunInstance(ctx, inst, instEnv, repoCachePath != "")
+		patch, summary, runErr := docker.RunInstance(ctx, inst, instEnv, repoCachePath != "", promptFile.Name())
+		os.Remove(promptFile.Name())
 		elapsed := time.Since(start).Round(time.Second)
 
 		// Write prediction even on error (capture partial patch).
