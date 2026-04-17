@@ -666,7 +666,14 @@ func checkArtifactDirsLib(workdir string) CheckResult {
 		out.Message = "artifact directories writable"
 		return out
 	}
+	// Promote to "error" if any detail is an error (not just a warning).
 	out.Status = "warn"
+	for _, d := range out.Details {
+		if d.Status == "error" {
+			out.Status = "error"
+			break
+		}
+	}
 	out.Message = "some artifact directories have permission issues"
 	out.Hint = "fix directory permissions: chmod u+w .ai"
 	return out

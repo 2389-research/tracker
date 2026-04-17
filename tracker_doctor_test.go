@@ -33,7 +33,7 @@ func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
 
 func TestDoctor_NoProviderKeys(t *testing.T) {
 	workdir := t.TempDir()
-	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"} {
+	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY"} {
 		os.Unsetenv(k)
 	}
 

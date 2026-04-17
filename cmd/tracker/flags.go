@@ -74,7 +74,7 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	dfs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dfs.SetOutput(io.Discard)
-	dfs.BoolVar(&cfg.probe, "probe", false, "Perform live API auth check for each configured provider")
+	dfs.BoolVar(&cfg.probe, "probe", true, "Perform live API auth check with a 1-token request (set to false to skip)")
 	dfs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
 	dfs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
 	dfs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")

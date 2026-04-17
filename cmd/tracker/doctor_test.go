@@ -42,8 +42,8 @@ func TestParseFlagsDoctorNoArgs(t *testing.T) {
 	if cfg.mode != modeDoctor {
 		t.Errorf("mode = %q, want doctor", cfg.mode)
 	}
-	if cfg.probe {
-		t.Error("expected probe=false by default")
+	if !cfg.probe {
+		t.Error("expected probe=true by default")
 	}
 	if cfg.pipelineFile != "" {
 		t.Error("expected no pipeline file by default")
@@ -57,6 +57,16 @@ func TestParseFlagsDoctorWithProbe(t *testing.T) {
 	}
 	if !cfg.probe {
 		t.Error("expected probe=true with --probe flag")
+	}
+}
+
+func TestParseFlagsDoctorNoProbe(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "doctor", "--probe=false"})
+	if err != nil {
+		t.Fatalf("parseFlags error: %v", err)
+	}
+	if cfg.probe {
+		t.Error("expected probe=false with --probe=false flag")
 	}
 }
 
