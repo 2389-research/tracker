@@ -41,6 +41,19 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+func TestGetModelInfo_Sonnet46(t *testing.T) {
+	info := GetModelInfo("claude-sonnet-4-6")
+	if info == nil {
+		t.Fatal("claude-sonnet-4-6 not found in catalog")
+	}
+	if info.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want \"anthropic\"", info.Provider)
+	}
+	if info.ContextWindow != 200000 {
+		t.Errorf("ContextWindow = %d, want 200000", info.ContextWindow)
+	}
+}
+
 func TestGetLatestModel(t *testing.T) {
 	m := GetLatestModel("anthropic", "")
 	if m == nil {

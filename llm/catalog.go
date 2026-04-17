@@ -46,6 +46,19 @@ var defaultCatalog = []ModelInfo{
 		OutputCostPerM:    15.0,
 		Aliases:           []string{"sonnet-4-5", "claude-sonnet"},
 	},
+	{
+		ID:                "claude-sonnet-4-6",
+		Provider:          "anthropic",
+		DisplayName:       "Claude Sonnet 4.6",
+		ContextWindow:     200000,
+		MaxOutput:         16000,
+		SupportsTools:     true,
+		SupportsVision:    true,
+		SupportsReasoning: true,
+		InputCostPerM:     3.0,
+		OutputCostPerM:    15.0,
+		Aliases:           []string{"sonnet-4-6"},
+	},
 	// OpenAI models
 	{
 		ID:                "gpt-5.2",
