@@ -51,6 +51,15 @@ func buildEnvFlags(env map[string]string) []string {
 	return flags
 }
 
+// capturePatchCommands returns two argument slices: git add -A (to stage all
+// changes including new files) and git diff HEAD (to produce a diff of all
+// changes vs the original checkout commit).
+func capturePatchCommands(workDir string) (addArgs []string, diffArgs []string) {
+	addArgs = []string{"git", "-C", workDir, "add", "-A"}
+	diffArgs = []string{"git", "-C", workDir, "diff", "HEAD"}
+	return addArgs, diffArgs
+}
+
 // parseDiffOutput trims surrounding whitespace from raw git diff output.
 func parseDiffOutput(raw string) string {
 	return strings.TrimSpace(raw)
@@ -220,10 +229,19 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 		log.Printf("[%s] agent-runner error: %v", inst.InstanceID, agentErr)
 	}
 
-	// Step 6: Capture the git diff (even on agent timeout/failure, capture partial diff).
-	diffOutput, diffErr := dockerExecOutput(ctx, name, "git", "-C", workDir, "diff")
+	// Step 6: Stage all changes and capture diff vs HEAD (includes new files).
+	// Use a fresh context so we still capture the patch even if parent ctx is cancelled.
+	diffCtx, diffCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer diffCancel()
+
+	addArgs, diffCmdArgs := capturePatchCommands(workDir)
+	// Stage all changes (including untracked new files).
+	if addErr := dockerExec(diffCtx, name, nil, addArgs...); addErr != nil {
+		log.Printf("[%s] git add -A failed: %v", inst.InstanceID, addErr)
+	}
+	diffOutput, diffErr := dockerExecOutput(diffCtx, name, diffCmdArgs...)
 	if diffErr != nil {
-		log.Printf("[%s] git diff failed: %v", inst.InstanceID, diffErr)
+		log.Printf("[%s] git diff HEAD failed: %v", inst.InstanceID, diffErr)
 	}
 	patch = parseDiffOutput(diffOutput)
 

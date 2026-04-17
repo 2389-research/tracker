@@ -183,3 +183,29 @@ func TestParseAgentSummary_NoJSON(t *testing.T) {
 		t.Errorf("expected zero-value AgentSummary for non-JSON output, got %+v", got)
 	}
 }
+
+func TestCapturePatchCommands(t *testing.T) {
+	addArgs, diffArgs := capturePatchCommands("/workspace")
+
+	// git add -A in workDir
+	expectedAdd := []string{"git", "-C", "/workspace", "add", "-A"}
+	if len(addArgs) != len(expectedAdd) {
+		t.Fatalf("addArgs = %v, want %v", addArgs, expectedAdd)
+	}
+	for i := range expectedAdd {
+		if addArgs[i] != expectedAdd[i] {
+			t.Errorf("addArgs[%d] = %q, want %q", i, addArgs[i], expectedAdd[i])
+		}
+	}
+
+	// git diff HEAD in workDir
+	expectedDiff := []string{"git", "-C", "/workspace", "diff", "HEAD"}
+	if len(diffArgs) != len(expectedDiff) {
+		t.Fatalf("diffArgs = %v, want %v", diffArgs, expectedDiff)
+	}
+	for i := range expectedDiff {
+		if diffArgs[i] != expectedDiff[i] {
+			t.Errorf("diffArgs[%d] = %q, want %q", i, diffArgs[i], expectedDiff[i])
+		}
+	}
+}
