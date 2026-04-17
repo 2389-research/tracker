@@ -4,23 +4,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"syscall"
-	"time"
 
 	tracker "github.com/2389-research/tracker"
-	"github.com/2389-research/tracker/llm"
-	"github.com/2389-research/tracker/llm/anthropic"
-	"github.com/2389-research/tracker/llm/google"
-	"github.com/2389-research/tracker/llm/openai"
-	"github.com/2389-research/tracker/llm/openaicompat"
-	"github.com/2389-research/tracker/pipeline"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -34,31 +23,26 @@ func (e *DoctorWarningsError) Error() string {
 	return fmt.Sprintf("doctor: %d warning(s) (no failures)", e.Warnings)
 }
 
-type checkResult struct {
-	ok      bool
-	warn    bool
-	message string
-	fix     string
-}
-
-type check struct {
-	name     string
-	run      func() checkResult
-	required bool
-}
-
+// DoctorConfig is the CLI's internal options struct for `tracker doctor`.
+// It is distinct from tracker.DoctorConfig: these field names are the
+// CLI's historical lowercase convention, and only the CLI parses flags
+// into this type.
 type DoctorConfig struct {
 	probe        bool
 	pipelineFile string
 	backend      string
 }
 
+// DoctorResult retains counts exposed to older tests. The authoritative
+// tally lives on tracker.DoctorReport (Warnings/Errors + derived Passed).
 type DoctorResult struct {
 	Passed   int
 	Warnings int
 	Failures int
 }
 
+// formatLLMClientError massages the "no providers configured" error into
+// an actionable setup hint. Used by run.go when building the LLM client.
 func formatLLMClientError(err error) error {
 	if strings.Contains(err.Error(), "no providers configured") {
 		return fmt.Errorf(`no LLM providers configured
@@ -74,10 +58,12 @@ func formatLLMClientError(err error) error {
 }
 
 func runDoctor(workdir string) error {
-	cfg := DoctorConfig{}
-	return runDoctorWithConfig(workdir, cfg)
+	return runDoctorWithConfig(workdir, DoctorConfig{})
 }
 
+// runDoctorWithConfig runs preflight checks (via the tracker library) and
+// prints the results using the CLI's glamour format. Any write-side-effect
+// fix-ups (e.g. patching .gitignore) happen here, not in the library.
 func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 	if workdir == "" {
 		wd, err := os.Getwd()
@@ -87,42 +73,34 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 		workdir = wd
 	}
 
+	report, err := tracker.Doctor(tracker.DoctorConfig{
+		WorkDir:        workdir,
+		Backend:        cfg.backend,
+		ProbeProviders: cfg.probe,
+		PipelineFile:   cfg.pipelineFile,
+		TrackerVersion: version,
+		TrackerCommit:  commit,
+	})
+	if err != nil {
+		return err
+	}
+
 	fmt.Println()
 	fmt.Println(bannerStyle.Render("tracker doctor"))
 	fmt.Println()
 
-	checks := buildChecks(workdir, cfg)
-	result := DoctorResult{}
-
-	for _, c := range checks {
-		fmt.Printf("  %s\n", c.name)
-		cr := c.run()
-
-		if needsCompositeResultLine(c.name) {
-			switch {
-			case cr.ok && !cr.warn:
-				printCheck(true, cr.message)
-			case cr.warn:
-				printWarn(cr.message)
-			default:
-				printCheck(false, cr.message)
-			}
-		}
-		if cr.fix != "" && !cr.ok {
-			printHint(cr.fix)
-		}
-
-		switch {
-		case cr.ok && !cr.warn:
-			result.Passed++
-		case cr.warn || (!cr.ok && !c.required):
-			result.Warnings++
-		default:
-			result.Failures++
-		}
+	for _, c := range report.Checks {
+		fmt.Printf("  %s\n", c.Name)
+		printCheckResult(c)
 		fmt.Println()
 	}
 
+	// Write-side-effect fix-ups must not run inside the library. The
+	// Working Directory check emits a gitignore hint in its details;
+	// patch the file here now that the user has seen the warning.
+	maybeFixGitignore(report, workdir)
+
+	result := toDoctorResult(report)
 	printSummary(result)
 	fmt.Println()
 	fmt.Println(mutedStyle.Render("  exit codes: 0=all pass  1=failures  2=warnings only"))
@@ -137,6 +115,49 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 	return nil
 }
 
+// printCheckResult renders one CheckResult in the historical format. For
+// checks with per-item details, each detail is printed; the composite
+// line is only shown for checks that the CLI treats as single-fact
+// (Environment Warnings, Dippin Language, Disk Space).
+func printCheckResult(c tracker.CheckResult) {
+	for _, d := range c.Details {
+		switch d.Status {
+		case "ok":
+			printCheck(true, d.Message)
+		case "warn":
+			printWarn(d.Message)
+		case "hint":
+			printHint(d.Message)
+		default:
+			printCheck(false, d.Message)
+		}
+		if d.Hint != "" {
+			printHint(d.Hint)
+		}
+	}
+	if !needsCompositeResultLine(c.Name) {
+		// Composite line already implied by per-item details above.
+		if c.Hint != "" && c.Status != "ok" {
+			printHint(c.Hint)
+		}
+		return
+	}
+	switch c.Status {
+	case "ok":
+		printCheck(true, c.Message)
+	case "warn":
+		printWarn(c.Message)
+	default:
+		printCheck(false, c.Message)
+	}
+	if c.Hint != "" && c.Status != "ok" {
+		printHint(c.Hint)
+	}
+}
+
+// needsCompositeResultLine identifies checks whose per-item details already
+// cover every line the user sees. For those, printCheckResult skips the
+// composite summary to avoid a duplicate bullet.
 func needsCompositeResultLine(checkName string) bool {
 	switch checkName {
 	case "LLM Providers", "Version Compatibility", "Optional Binaries",
@@ -146,579 +167,84 @@ func needsCompositeResultLine(checkName string) bool {
 	return true
 }
 
-func buildChecks(workdir string, cfg DoctorConfig) []check {
-	checks := []check{
-		{name: "Environment Warnings", run: checkEnvWarnings, required: false},
-		{name: "LLM Providers", run: func() checkResult { return checkProviders(cfg.probe) }, required: true},
-		{name: "Dippin Language", run: checkDippin, required: true},
-		{name: "Version Compatibility", run: checkVersionCompat, required: false},
-		{name: "Optional Binaries", run: func() checkResult { return checkOtherBinaries(cfg.backend) }, required: false},
-		{name: "Working Directory", run: func() checkResult { return checkWorkdir(workdir) }, required: true},
-		{name: "Artifact Directories", run: func() checkResult { return checkArtifactDirs(workdir) }, required: false},
-		{name: "Disk Space", run: func() checkResult { return checkDiskSpace(workdir) }, required: false},
-	}
-	if cfg.pipelineFile != "" {
-		pf := cfg.pipelineFile
-		checks = append(checks, check{
-			name:     "Pipeline File",
-			run:      func() checkResult { return checkPipelineFile(pf) },
-			required: true,
-		})
-	}
-	return checks
-}
-
-func checkEnvWarnings() checkResult {
-	dangerousVars := map[string]string{
-		"TRACKER_PASS_ENV":      "passes all env vars to tool subprocesses (security risk)",
-		"TRACKER_PASS_API_KEYS": "passes API keys to tool subprocesses (security risk)",
-	}
-	var found []string
-	for envVar, desc := range dangerousVars {
-		if os.Getenv(envVar) != "" {
-			found = append(found, fmt.Sprintf("%s (%s)", envVar, desc))
-		}
-	}
-	if len(found) == 0 {
-		return checkResult{ok: true, message: "no dangerous environment variables detected"}
-	}
-	return checkResult{
-		ok:      false,
-		warn:    true,
-		message: fmt.Sprintf("dangerous variables set: %s", strings.Join(found, "; ")),
-		fix:     "unset TRACKER_PASS_ENV and TRACKER_PASS_API_KEYS to restore default security posture",
+// toDoctorResult recomputes Passed/Warnings/Failures in the CLI's legacy
+// counting scheme: a check with Status=warn OR (status=error AND the CLI
+// considers it non-required) becomes a Warning. tracker.DoctorReport has
+// already flattened this, so we simply map Warnings and Errors straight
+// through, deriving Passed by subtraction.
+func toDoctorResult(report *tracker.DoctorReport) DoctorResult {
+	total := len(report.Checks)
+	return DoctorResult{
+		Passed:   total - report.Warnings - report.Errors,
+		Warnings: report.Warnings,
+		Failures: report.Errors,
 	}
 }
 
-type providerDef struct {
-	name         string
-	envVars      []string
-	defaultModel string
-	buildAdapter func(key string) (llm.ProviderAdapter, error)
-}
-
-var knownProviders = []providerDef{
-	{
-		name:         "Anthropic",
-		envVars:      []string{"ANTHROPIC_API_KEY"},
-		defaultModel: "claude-haiku-4-5",
-		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
-			var opts []anthropic.Option
-			if base := tracker.ResolveProviderBaseURL("anthropic"); base != "" {
-				opts = append(opts, anthropic.WithBaseURL(base))
-			}
-			return anthropic.New(key, opts...), nil
-		},
-	},
-	{
-		name:         "OpenAI",
-		envVars:      []string{"OPENAI_API_KEY"},
-		defaultModel: "gpt-4o-mini",
-		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
-			var opts []openai.Option
-			if base := tracker.ResolveProviderBaseURL("openai"); base != "" {
-				opts = append(opts, openai.WithBaseURL(base))
-			}
-			return openai.New(key, opts...), nil
-		},
-	},
-	{
-		name:         "OpenAI-Compat",
-		envVars:      []string{"OPENAI_COMPAT_API_KEY"},
-		defaultModel: "gpt-4o-mini",
-		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
-			var opts []openaicompat.Option
-			if base := tracker.ResolveProviderBaseURL("openai-compat"); base != "" {
-				opts = append(opts, openaicompat.WithBaseURL(base))
-			}
-			return openaicompat.New(key, opts...), nil
-		},
-	},
-	{
-		name:         "Gemini",
-		envVars:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-		defaultModel: "gemini-2.0-flash",
-		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
-			var opts []google.Option
-			if base := tracker.ResolveProviderBaseURL("gemini"); base != "" {
-				opts = append(opts, google.WithBaseURL(base))
-			}
-			return google.New(key, opts...), nil
-		},
-	},
-}
-
-func checkProviders(probe bool) checkResult {
-	var configuredNames []string
-	var missingNames []string
-
-	for _, p := range knownProviders {
-		key, envName := findProviderKey(p.envVars)
-		if key == "" {
-			missingNames = append(missingNames, p.name)
+// maybeFixGitignore patches .gitignore when the library flagged it as
+// missing entries. The library detected the issue but did not write —
+// gitignore mutation is a CLI-only concern so tests and embedded callers
+// do not unexpectedly touch user files.
+func maybeFixGitignore(report *tracker.DoctorReport, workdir string) {
+	for _, c := range report.Checks {
+		if c.Name != "Working Directory" {
 			continue
 		}
-		masked := maskKey(key)
-		if !isValidAPIKey(p.name, key) {
-			printCheck(false, fmt.Sprintf("%-15s %s=%s (invalid format)", p.name, envName, masked))
-			printHint(fmt.Sprintf("%s keys should match expected format — run `tracker setup`", p.name))
-			continue
-		}
-		if probe && p.buildAdapter != nil {
-			authOk, authMsg := probeProvider(p, key)
-			if !authOk {
-				printCheck(false, fmt.Sprintf("%-15s %s=%s (auth failed: %s)", p.name, envName, masked, authMsg))
-				printHint(fmt.Sprintf("your %s key is invalid or expired — export a fresh key or run `tracker setup`", p.name))
-				continue
-			}
-			printCheck(true, fmt.Sprintf("%-15s %s=%s (auth verified)", p.name, envName, masked))
-		} else {
-			printCheck(true, fmt.Sprintf("%-15s %s=%s", p.name, envName, masked))
-		}
-		configuredNames = append(configuredNames, p.name)
-	}
-
-	if len(configuredNames) == 0 {
-		// Zero providers — emit ✗ for each missing one so the user can act.
-		for _, name := range missingNames {
-			for _, pd := range knownProviders {
-				if pd.name == name {
-					printCheck(false, fmt.Sprintf("%-15s %s not set", pd.name, pd.envVars[0]))
-					break
-				}
+		for _, d := range c.Details {
+			if strings.HasPrefix(d.Message, ".gitignore not found") ||
+				strings.HasPrefix(d.Message, ".gitignore missing entries") {
+				checkGitignore(workdir)
+				return
 			}
 		}
-		return checkResult{
-			ok:      false,
-			message: "no LLM providers configured",
-			fix:     "run `tracker setup` or export ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY",
-		}
-	}
-
-	// At least one provider is configured — show missing ones as informational only.
-	if len(missingNames) > 0 {
-		printHint(fmt.Sprintf("not configured: %s (optional)", strings.Join(missingNames, ", ")))
-	}
-
-	if probe {
-		return checkResult{ok: true, message: fmt.Sprintf("%d provider(s) configured and auth verified", len(configuredNames))}
-	}
-	return checkResult{ok: true, message: fmt.Sprintf("%d provider(s) configured: %s", len(configuredNames), strings.Join(configuredNames, ", "))}
-}
-
-func findProviderKey(envVars []string) (key, envName string) {
-	for _, e := range envVars {
-		if v := os.Getenv(e); v != "" {
-			return v, e
-		}
-	}
-	return "", ""
-}
-
-func probeProvider(p providerDef, key string) (bool, string) {
-	adapter, err := p.buildAdapter(key)
-	if err != nil {
-		return false, fmt.Sprintf("build adapter: %v", err)
-	}
-	client, err := llm.NewClient(llm.WithProvider(adapter))
-	if err != nil {
-		return false, fmt.Sprintf("create client: %v", err)
-	}
-	defer client.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	maxTok := 1
-	req := &llm.Request{
-		Model:     p.defaultModel,
-		Messages:  []llm.Message{llm.UserMessage("ping")},
-		MaxTokens: &maxTok,
-	}
-	_, err = client.Complete(ctx, req)
-	if err != nil {
-		msg := err.Error()
-		if isAuthError(msg) {
-			return false, "invalid or expired API key"
-		}
-		return false, trimErrMsg(msg, 80)
-	}
-	return true, ""
-}
-
-func isAuthError(msg string) bool {
-	lower := strings.ToLower(msg)
-	for _, kw := range []string{"401", "403", "unauthorized", "authentication", "invalid api key", "api key", "forbidden"} {
-		if strings.Contains(lower, kw) {
-			return true
-		}
-	}
-	return false
-}
-
-func trimErrMsg(msg string, maxLen int) string {
-	if len(msg) <= maxLen {
-		return msg
-	}
-	return msg[:maxLen] + "..."
-}
-
-func checkDippin() checkResult {
-	path, err := exec.LookPath("dippin")
-	if err != nil {
-		return checkResult{
-			ok:      false,
-			message: "dippin binary not found in PATH",
-			fix:     "install from https://github.com/2389-research/dippin-lang  (required for pipeline linting)",
-		}
-	}
-	ver := getDippinVersion(path)
-	printCheck(true, fmt.Sprintf("dippin %s at %s", ver, path))
-	return checkResult{ok: true, message: fmt.Sprintf("dippin %s", ver)}
-}
-
-func getDippinVersion(path string) string {
-	out, err := exec.Command(path, "--version").CombinedOutput()
-	if err != nil {
-		out, err = exec.Command(path, "version").CombinedOutput()
-		if err != nil {
-			return "(version unknown)"
-		}
-	}
-	ver := strings.TrimSpace(string(out))
-	ver = strings.TrimPrefix(ver, "dippin ")
-	ver = strings.TrimPrefix(ver, "version ")
-	if ver == "" {
-		return "(version unknown)"
-	}
-	return ver
-}
-
-// pinnedDippinVersion is the dippin-lang version from go.mod.
-// Keep in sync with the require line in go.mod.
-const pinnedDippinVersion = "v0.18.0"
-
-func checkVersionCompat() checkResult {
-	printCheck(true, fmt.Sprintf("tracker   %s (commit %s)", version, commit))
-	dippinPath, err := exec.LookPath("dippin")
-	if err != nil {
-		printWarn("dippin not found — skipping version compatibility check")
-		return checkResult{
-			ok:      false,
-			warn:    true,
-			message: fmt.Sprintf("tracker %s / dippin not found", version),
-		}
-	}
-	cliVer := getDippinVersion(dippinPath)
-	printCheck(true, fmt.Sprintf("dippin    %s (installed) / %s (go.mod pin)", cliVer, pinnedDippinVersion))
-
-	if mismatch, msg := checkDippinVersionMismatch(cliVer, pinnedDippinVersion); mismatch {
-		printWarn(fmt.Sprintf("dippin version mismatch: %s", msg))
-		return checkResult{
-			ok:      false,
-			warn:    true,
-			message: fmt.Sprintf("tracker %s / dippin %s (mismatched — expected %s)", version, cliVer, pinnedDippinVersion),
-			fix:     fmt.Sprintf("install dippin %s to match the go.mod pin", pinnedDippinVersion),
-		}
-	}
-	return checkResult{ok: true, message: fmt.Sprintf("tracker %s / dippin %s", version, cliVer)}
-}
-
-// checkDippinVersionMismatch returns (true, reason) if the installed CLI version
-// diverges from the pinned version on major or minor components.
-func checkDippinVersionMismatch(cliVer, pinned string) (bool, string) {
-	cliMajor, cliMinor, ok1 := parseVersionMajorMinor(cliVer)
-	pinMajor, pinMinor, ok2 := parseVersionMajorMinor(pinned)
-	if !ok1 || !ok2 {
-		// Can't parse — skip the check to avoid false positives.
-		return false, ""
-	}
-	if cliMajor != pinMajor {
-		return true, fmt.Sprintf("installed major v%d != pinned major v%d", cliMajor, pinMajor)
-	}
-	if cliMinor != pinMinor {
-		return true, fmt.Sprintf("installed v%d.%d != pinned v%d.%d", cliMajor, cliMinor, pinMajor, pinMinor)
-	}
-	return false, ""
-}
-
-var semverRe = regexp.MustCompile(`v?(\d+)\.(\d+)`)
-
-func parseVersionMajorMinor(ver string) (major, minor int, ok bool) {
-	m := semverRe.FindStringSubmatch(ver)
-	if m == nil {
-		return 0, 0, false
-	}
-	fmt.Sscanf(m[1], "%d", &major)
-	fmt.Sscanf(m[2], "%d", &minor)
-	return major, minor, true
-}
-
-func checkOtherBinaries(backend string) checkResult {
-	allOk := true
-	hasWarn := false
-	if _, err := exec.LookPath("git"); err == nil {
-		printCheck(true, "git found (recommended for pipeline versioning)")
-	} else {
-		printWarn("git not found in PATH (recommended for pipeline versioning)")
-		hasWarn = true
-	}
-	claudePath, claudeErr := exec.LookPath("claude")
-	if claudeErr == nil {
-		claudeVer := getBinaryVersion(claudePath, "--version")
-		printCheck(true, fmt.Sprintf("claude %s (for --backend claude-code)", claudeVer))
-	} else if backend == "claude-code" {
-		// Hard fail: the user explicitly requested this backend; without the binary the run will fail.
-		printCheck(false, "claude CLI not found in PATH (required for --backend claude-code)")
-		printHint("install the Claude CLI from https://claude.ai/code")
-		allOk = false
-	} else {
-		printWarn("claude not found in PATH (install for --backend claude-code support)")
-		hasWarn = true
-	}
-	if allOk && !hasWarn {
-		return checkResult{ok: true, message: "optional binaries available"}
-	}
-	if !allOk {
-		return checkResult{
-			ok:      false,
-			warn:    false,
-			message: "required binary missing for selected backend",
-			fix:     "install the Claude CLI from https://claude.ai/code",
-		}
-	}
-	return checkResult{
-		ok:      false,
-		warn:    true,
-		message: "some optional binaries missing",
-		fix:     "install git and/or the Claude CLI to unlock all tracker features",
 	}
 }
 
-func getBinaryVersion(path, flag string) string {
-	out, err := exec.Command(path, flag).CombinedOutput()
-	if err != nil {
-		return "(version unknown)"
-	}
-	lines := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)
-	if len(lines) == 0 {
-		return "(version unknown)"
-	}
-	return strings.TrimSpace(lines[0])
-}
-
-func checkWorkdir(workdir string) checkResult {
-	info, err := os.Stat(workdir)
-	if err != nil {
-		return checkResult{
-			ok:      false,
-			message: fmt.Sprintf("%s does not exist", workdir),
-			fix:     fmt.Sprintf("create the directory: mkdir -p %s", workdir),
-		}
-	}
-	if !info.IsDir() {
-		return checkResult{
-			ok:      false,
-			message: fmt.Sprintf("%s is not a directory", workdir),
-			fix:     "point --workdir at a directory, not a file",
-		}
-	}
-	f, err := os.CreateTemp(workdir, ".tracker_probe_*")
-	if err != nil {
-		return checkResult{
-			ok:      false,
-			message: fmt.Sprintf("%s is not writable", workdir),
-			fix:     fmt.Sprintf("check permissions: chmod u+w %s", workdir),
-		}
-	}
-	f.Close()
-	os.Remove(f.Name())
-	home, _ := os.UserHomeDir()
-	if workdir == home || workdir == "/" {
-		printWarn(fmt.Sprintf("%s (risk of accidental data loss — use a project subdirectory)", workdir))
-	}
-	checkGitignore(workdir)
-	printCheck(true, fmt.Sprintf("%s (writable)", workdir))
-	return checkResult{ok: true, message: fmt.Sprintf("%s is writable", workdir)}
-}
-
+// checkGitignore detects missing entries and appends them to the file.
+// This is the only write side effect in the doctor command; kept in the
+// CLI so the library stays read-only.
 func checkGitignore(workdir string) {
 	gitignorePath := filepath.Join(workdir, ".gitignore")
 	content, err := os.ReadFile(gitignorePath)
 	if err != nil {
-		printWarn(".gitignore not found — add .tracker/, runs/, and .ai/ to prevent committing run artifacts")
+		// File absent — the library already emitted a warn detail line.
 		return
 	}
-	// Parse line-by-line with exact matching (trimming whitespace and trailing slash)
-	// to avoid false positives like "runsheet" matching "runs" or "my.tracker.bak" matching ".tracker".
 	entries := make(map[string]bool)
 	for _, line := range strings.Split(string(content), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Normalize: strip trailing slash for comparison.
 		entries[strings.TrimRight(line, "/")] = true
 	}
 	want := []struct {
-		bare    string // key to check in normalized set
-		display string // shown in warning
+		bare    string
+		display string
 	}{
 		{".tracker", ".tracker/"},
 		{"runs", "runs/"},
 		{".ai", ".ai/"},
 	}
-	var missing []string
+	var toAppend []string
 	for _, w := range want {
 		if !entries[w.bare] {
-			missing = append(missing, w.display)
+			toAppend = append(toAppend, w.display)
 		}
 	}
-	if len(missing) > 0 {
-		printWarn(fmt.Sprintf(".gitignore missing entries: %s", strings.Join(missing, ", ")))
+	if len(toAppend) == 0 {
+		return
 	}
-}
-
-func checkArtifactDirs(workdir string) checkResult {
-	allOk := true
-	aiDir := filepath.Join(workdir, ".ai")
-	if info, err := os.Stat(aiDir); err == nil {
-		if !info.IsDir() {
-			printCheck(false, ".ai is not a directory")
-			allOk = false
-		} else if !isDirWritable(aiDir) {
-			printCheck(false, fmt.Sprintf("%s exists but is not writable", aiDir))
-			printHint(fmt.Sprintf("check permissions: chmod u+w %s", aiDir))
-			allOk = false
-		} else {
-			printCheck(true, fmt.Sprintf("%s exists and is writable", aiDir))
-		}
+	// Append missing entries (best-effort; silent on error — the user
+	// already saw the warning).
+	suffix := "\n"
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		suffix = "\n"
 	} else {
-		if isDirWritable(workdir) {
-			printCheck(true, fmt.Sprintf("%s will be created on first run", aiDir))
-		} else {
-			printCheck(false, fmt.Sprintf("%s cannot be created (parent not writable)", aiDir))
-			allOk = false
-		}
+		suffix = ""
 	}
-	if allOk {
-		return checkResult{ok: true, message: "artifact directories writable"}
-	}
-	return checkResult{
-		ok:      false,
-		warn:    true,
-		message: "some artifact directories have permission issues",
-		fix:     "fix directory permissions: chmod u+w .ai",
-	}
-}
-
-func isDirWritable(dir string) bool {
-	f, err := os.CreateTemp(dir, ".tracker_probe_*")
-	if err != nil {
-		return false
-	}
-	f.Close()
-	os.Remove(f.Name())
-	return true
-}
-
-func checkDiskSpace(workdir string) checkResult {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(workdir, &stat); err != nil {
-		return checkResult{
-			ok:      false,
-			warn:    true,
-			message: fmt.Sprintf("could not determine disk space: %v", err),
-		}
-	}
-	available := stat.Bavail * uint64(stat.Bsize)
-	availableGB := float64(available) / (1024 * 1024 * 1024)
-	const minGB = 10.0
-	if availableGB < minGB {
-		return checkResult{
-			ok:      false,
-			warn:    true,
-			message: fmt.Sprintf("low disk space: %.2f GB available (recommended: %.1f GB+)", availableGB, minGB),
-			fix:     "free up disk space before running long pipelines",
-		}
-	}
-	return checkResult{ok: true, message: fmt.Sprintf("%.2f GB available", availableGB)}
-}
-
-func checkPipelineFile(pipelineFile string) checkResult {
-	if _, err := os.Stat(pipelineFile); err != nil {
-		return checkResult{
-			ok:      false,
-			message: fmt.Sprintf("%s does not exist", pipelineFile),
-			fix:     fmt.Sprintf("check the file path: %s", pipelineFile),
-		}
-	}
-	if !strings.HasSuffix(pipelineFile, ".dip") {
-		printWarn(fmt.Sprintf("%s is not a .dip file — may not be a valid pipeline", pipelineFile))
-	}
-	format := ""
-	if strings.HasSuffix(pipelineFile, ".dip") {
-		format = "dip"
-	} else if strings.HasSuffix(pipelineFile, ".dot") {
-		format = "dot"
-	}
-	graph, err := loadPipeline(pipelineFile, format)
-	if err != nil {
-		return checkResult{
-			ok:      false,
-			message: fmt.Sprintf("%s: parse error: %v", pipelineFile, err),
-			fix:     "run `tracker validate " + pipelineFile + "` for full details",
-		}
-	}
-	registry := buildValidationRegistry()
-	ve := pipeline.ValidateAllWithLint(graph, registry)
-	if ve != nil && len(ve.Errors) > 0 {
-		for _, e := range ve.Errors {
-			printCheck(false, fmt.Sprintf("error: %s", e))
-		}
-		for _, w := range ve.Warnings {
-			printWarn(w)
-		}
-		return checkResult{
-			ok:      false,
-			message: fmt.Sprintf("%s failed validation (%d error(s))", pipelineFile, len(ve.Errors)),
-			fix:     "run `tracker validate " + pipelineFile + "` for full details",
-		}
-	}
-	if ve != nil && len(ve.Warnings) > 0 {
-		for _, w := range ve.Warnings {
-			printWarn(w)
-		}
-		printCheck(true, fmt.Sprintf("%s valid (%d nodes, %d edges, %d warning(s))",
-			pipelineFile, len(graph.Nodes), len(graph.Edges), len(ve.Warnings)))
-		return checkResult{
-			ok:      true,
-			warn:    true,
-			message: fmt.Sprintf("%s valid with %d warning(s)", pipelineFile, len(ve.Warnings)),
-		}
-	}
-	printCheck(true, fmt.Sprintf("%s valid (%d nodes, %d edges)", pipelineFile, len(graph.Nodes), len(graph.Edges)))
-	return checkResult{ok: true, message: fmt.Sprintf("%s is valid", pipelineFile)}
-}
-
-func maskKey(key string) string {
-	if len(key) <= 8 {
-		return "****"
-	}
-	return key[:4] + "..." + key[len(key)-4:]
-}
-
-func isValidAPIKey(provider string, key string) bool {
-	if key == "" {
-		return false
-	}
-	switch provider {
-	case "Anthropic":
-		return strings.HasPrefix(key, "sk-ant-") && len(key) > 10
-	case "OpenAI", "OpenAI-Compat":
-		return strings.HasPrefix(key, "sk-") && len(key) > 10
-	case "Gemini":
-		return len(key) > 10
-	}
-	return len(key) > 5
+	suffix += strings.Join(toAppend, "\n") + "\n"
+	_ = os.WriteFile(gitignorePath, append(content, []byte(suffix)...), 0o644)
 }
 
 func printCheck(ok bool, msg string) {
