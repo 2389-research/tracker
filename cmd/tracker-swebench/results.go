@@ -109,6 +109,7 @@ type RunStats struct {
 	Total        int
 	Completed    int
 	Skipped      int
+	Errors       int
 	TimedOut     int
 	Patched      int
 	InputTokens  int64
@@ -137,6 +138,7 @@ func (s *RunStats) Summary() string {
 			"  Total:     %d\n"+
 			"  Completed: %d (%.1f%%)\n"+
 			"  Skipped:   %d\n"+
+			"  Errors:    %d\n"+
 			"  Timed out: %d\n"+
 			"  Patched:   %d (%.1f%% of completed)\n"+
 			"  Tokens:    %.2fM in / %.2fM out",
@@ -144,6 +146,7 @@ func (s *RunStats) Summary() string {
 		s.Total,
 		s.Completed, completedPct,
 		s.Skipped,
+		s.Errors,
 		s.TimedOut,
 		s.Patched, patchPct,
 		inM, outM,

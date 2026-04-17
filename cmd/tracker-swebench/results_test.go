@@ -106,6 +106,7 @@ func TestRunStats_Summary(t *testing.T) {
 		Total:        10,
 		Completed:    7,
 		Skipped:      2,
+		Errors:       1,
 		TimedOut:     1,
 		Patched:      5,
 		InputTokens:  1_500_000,
@@ -117,12 +118,14 @@ func TestRunStats_Summary(t *testing.T) {
 	if summary == "" {
 		t.Fatal("Summary returned empty string")
 	}
-	// Check for key pieces of information.
 	if !strings.Contains(summary, "10") {
 		t.Error("summary should contain total count")
 	}
 	if !strings.Contains(summary, "7") {
 		t.Error("summary should contain completed count")
+	}
+	if !strings.Contains(summary, "Errors") {
+		t.Error("summary should contain Errors label")
 	}
 }
 

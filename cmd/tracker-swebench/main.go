@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -166,6 +167,19 @@ func main() {
 		// Write prediction even on error (capture partial patch).
 		if writeErr := rw.WritePrediction(inst.InstanceID, patch); writeErr != nil {
 			log.Printf("[%s] write prediction: %v", inst.InstanceID, writeErr)
+			stats.Errors++
+			// Write per-instance log even on prediction write failure.
+			logPath := filepath.Join(logsDir, inst.InstanceID+".log")
+			logContent := fmt.Sprintf("instance_id: %s\nelapsed: %s\nturns: %d\ninput_tokens: %d\noutput_tokens: %d\npatch_lines: %d\n",
+				inst.InstanceID, elapsed, summary.Turns, summary.InputTokens, summary.OutputTokens, patchLineCount(patch))
+			logContent += fmt.Sprintf("write_prediction_error: %v\n", writeErr)
+			if runErr != nil {
+				logContent += fmt.Sprintf("error: %v\n", runErr)
+			}
+			if logWriteErr := os.WriteFile(logPath, []byte(logContent), 0o644); logWriteErr != nil {
+				log.Printf("[%s] write log: %v", inst.InstanceID, logWriteErr)
+			}
+			continue
 		}
 
 		// Write per-instance log.
@@ -179,15 +193,18 @@ func main() {
 			log.Printf("[%s] write log: %v", inst.InstanceID, writeErr)
 		}
 
-		// Update stats.
+		// Update stats only after successful prediction write.
 		stats.Completed++
 		stats.InputTokens += summary.InputTokens
 		stats.OutputTokens += summary.OutputTokens
 		if patch != "" {
 			stats.Patched++
 		}
-		if runErr != nil && strings.Contains(runErr.Error(), "context deadline exceeded") {
-			stats.TimedOut++
+		if runErr != nil {
+			stats.Errors++
+			if errors.Is(runErr, context.DeadlineExceeded) {
+				stats.TimedOut++
+			}
 		}
 
 		// Print progress line.
@@ -196,6 +213,9 @@ func main() {
 	}
 
 	fmt.Println(stats.Summary())
+	if stats.Errors > 0 {
+		os.Exit(1)
+	}
 }
 
 // ensureBareClone clones repoURL as a bare repo to path if path does not already exist.
