@@ -10,7 +10,7 @@ echo "==> Cross-compiling agent-runner for linux/amd64..."
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o agent-runner ./agent-runner/
 
 echo "==> Building Docker image: tracker-swebench-base..."
-docker build -t tracker-swebench-base .
+docker build --platform linux/amd64 -t tracker-swebench-base .
 
 echo "==> Cleaning up agent-runner binary..."
 rm -f agent-runner

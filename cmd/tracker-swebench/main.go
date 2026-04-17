@@ -87,9 +87,12 @@ func main() {
 
 	// Create Docker runner.
 	docker := &DockerRunner{
-		Image:    *dockerImage,
-		CacheDir: cacheDir,
-		Timeout:  *timeout,
+		Image:     *dockerImage,
+		CacheDir:  cacheDir,
+		Timeout:   *timeout,
+		MemoryMB:  4096, // 4 GB
+		CPUs:      2.0,
+		PidsLimit: 512,
 	}
 
 	// Build base agent environment map.

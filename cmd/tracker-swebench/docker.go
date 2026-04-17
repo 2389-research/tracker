@@ -185,9 +185,12 @@ func dockerExecOutput(ctx context.Context, container string, args ...string) (st
 
 // DockerRunner manages the Docker container lifecycle for a single benchmark instance.
 type DockerRunner struct {
-	Image    string
-	CacheDir string
-	Timeout  time.Duration
+	Image     string
+	CacheDir  string
+	Timeout   time.Duration
+	MemoryMB  int     // container memory limit in MB (0 = no limit)
+	CPUs      float64 // container CPU limit (0 = no limit)
+	PidsLimit int     // container PID limit (0 = no limit)
 }
 
 // RunInstance creates a container, runs the agent, captures the diff patch, then cleans up.
@@ -212,6 +215,15 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	createArgs := []string{"create", "--name", name}
 	if r.CacheDir != "" {
 		createArgs = append(createArgs, "-v", r.CacheDir+":/cache:ro")
+	}
+	if r.MemoryMB > 0 {
+		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dm", r.MemoryMB))
+	}
+	if r.CPUs > 0 {
+		createArgs = append(createArgs, "--cpus", fmt.Sprintf("%.1f", r.CPUs))
+	}
+	if r.PidsLimit > 0 {
+		createArgs = append(createArgs, "--pids-limit", fmt.Sprintf("%d", r.PidsLimit))
 	}
 	createArgs = append(createArgs, r.Image, "sleep", "infinity")
 	if err = dockerCmd(ctx, createArgs...); err != nil {
