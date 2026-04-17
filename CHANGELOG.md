@@ -7,16 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-04-17
+
 ### Added
 
-- `tracker.NewNDJSONWriter(io.Writer)` — public NDJSON event writer producing the same wire format as `tracker --json`. Factory methods `PipelineHandler`, `AgentHandler`, `TraceObserver` return handlers that plug into `Config.EventHandler`, `Config.AgentEvents`, and the LLM trace hook. Closes Phase 1 of #76.
-- `tracker.Diagnose(runDir)` / `tracker.DiagnoseMostRecent(workDir)` — structured `*DiagnoseReport` with node failures, budget halt, and typed suggestions (`Kind: "retry_pattern" | "escalate_limit" | "no_output" | "shell_command" | "go_test" | "suspicious_timing" | "budget"`).
-- `tracker.Audit(runDir)` — structured `*AuditReport` with timeline, retries, errors, and recommendations.
-- `tracker.ListRuns(workDir)` — sorted `[]RunSummary` for enumerating past runs (newest first).
-- `tracker.Doctor(cfg)` — structured `*DoctorReport` for preflight health checks. `ProbeProviders` defaults to false; set true to make real API calls for auth verification. `CheckDetail.Status` has four values: `"ok"`, `"warn"`, `"error"`, and `"hint"` (informational sub-items such as optional providers not configured).
-- `tracker.Simulate(source)` — structured `*SimulateReport` with nodes, edges, execution plan, graph attributes, and unreachable-node list.
-- `tracker.ResolveRunDir(workDir, runID)` / `tracker.MostRecentRunID(workDir)` — exposed run-directory resolution helpers.
-- `tracker.ActivityEntry` / `tracker.LoadActivityLog(runDir)` / `tracker.ParseActivityLine(line)` / `tracker.SortActivityByTime(entries)` — shared activity.jsonl parsing used by CLI and library.
+- **CLI↔library feature parity — Phase 1 (NDJSON) + Phase 2** (#76, PR #101). Four CLI commands (`diagnose`, `audit`, `doctor`, `simulate`) and the NDJSON event writer are now public library APIs. Library consumers can reuse the CLI's behavior without shelling to a binary and parsing printed output.
+  - `tracker.NewNDJSONWriter(io.Writer)` — public NDJSON event writer producing the same wire format as `tracker --json`. Factory methods `PipelineHandler`, `AgentHandler`, `TraceObserver` return handlers that plug into `Config.EventHandler`, `Config.AgentEvents`, and the LLM trace hook. Closes Phase 1.
+  - `tracker.Diagnose(runDir)` / `tracker.DiagnoseMostRecent(workDir)` — structured `*DiagnoseReport` with node failures, budget halt, and typed suggestions (`Kind: "retry_pattern" | "escalate_limit" | "no_output" | "shell_command" | "go_test" | "suspicious_timing" | "budget"`).
+  - `tracker.Audit(runDir)` — structured `*AuditReport` with timeline, retries, errors, and recommendations.
+  - `tracker.ListRuns(workDir)` — sorted `[]RunSummary` for enumerating past runs (newest first).
+  - `tracker.Doctor(cfg)` — structured `*DoctorReport` for preflight health checks. `ProbeProviders` defaults to false; set true to make real API calls for auth verification. `CheckDetail.Status` has four values: `"ok"`, `"warn"`, `"error"`, and `"hint"` (informational sub-items such as optional providers not configured).
+  - `tracker.Simulate(source)` — structured `*SimulateReport` with nodes, edges, execution plan, graph attributes, and unreachable-node list.
+  - `tracker.ResolveRunDir(workDir, runID)` / `tracker.MostRecentRunID(workDir)` — exposed run-directory resolution helpers.
+  - `tracker.ActivityEntry` / `tracker.LoadActivityLog(runDir)` / `tracker.ParseActivityLine(line)` / `tracker.SortActivityByTime(entries)` — shared activity.jsonl parsing used by CLI and library.
+
+- **SWE-bench harness (`cmd/tracker-swebench`)**: a new orchestrator binary that evaluates tracker's agent against the SWE-bench dataset. Includes a Dockerfile and build script for the base image, container lifecycle management with SIGTERM handling and orphan cleanup, dataset JSONL parsing, results writer with resumability, container resource limits (CPU/memory) and `--platform` pinning, secure `--env-file` for API keys (replacing `-e` flags), instance-ID validation + scoped container names, integration test for the dataset-to-results pipeline, and an in-container `agent-runner` binary that captures all changes via `git diff` (including new files).
+
+- **`WithExtraHeaders` option for Anthropic and OpenAI adapters**: injects custom HTTP headers (e.g., `cf-aig-token`) for gateway auth. Used by the swebench harness to forward `CF_AIG_TOKEN` from the host through the container to the agent-runner.
 
 ### Fixed
 
@@ -33,10 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed ineffectual assignment to `suffix` in `cmd/tracker/doctor.go` `maybeFixGitignore`.
 - `checkDiskSpaceLib` moved to platform-specific files (`tracker_doctor_unix.go` / `tracker_doctor_windows.go`) to avoid a Windows build failure from `syscall.Statfs`.
 - `enrichFromEntryNF` and `updateFailureTimingNF` now guard against zero timestamps to prevent incorrect duration calculations in `DiagnoseReport`.
+- `claude-sonnet-4-6` added to the LLM model catalog — the model was in `pricing.go` but missing from `catalog.go`, causing `GetModelInfo` to return nil and cost reporting to show `$0.00` for the swebench harness default model.
+- ACP backend: `validatePathInWorkDir` now resolves symlinks on both `path` and `workDir`. On macOS `/var` is a symlink to `/private/var`, which was causing path validation to reject files inside `t.TempDir()`.
 
 ### Changed
 
 - `cmd/tracker/diagnose.go`, `audit.go`, `doctor.go`, `simulate.go` are now thin printers over the new library APIs. CLI stdout and `--json` wire format are byte-identical. Closes Phase 2 of #76.
+- `dippin-lang` dependency bumped from `v0.19.1` → `v0.20.0`. CI installs the matching CLI version (was stale at `v0.10.0`). `examples/human_gate_test_suite.dip` renamed `default_choice:` → `default:` to match the IR field. The file is temporarily skipped from `make lint` because v0.20.0's stricter parser rejects `timeout:` / `timeout_action:` on human nodes — tracker supports those attrs at the node level but dippin-lang's `HumanConfig` IR doesn't expose them yet. Tracked upstream at dippin-lang#18.
 
 - **Structured reflection prompt on tool failure** (issue #93): when a tool call returns an error, the agent session now automatically injects a user-role reflection message before the next LLM turn. The prompt asks the model to identify what went wrong, what assumption was incorrect, and what minimal change will fix it — matching the pattern used by top SWE-bench agents (~10-15% recovery improvement). The feature is enabled by default (`ReflectOnError: true` in `DefaultConfig()`) and capped at three consecutive reflection turns to prevent infinite loops; the counter resets after any clean (no-error) turn. Pipeline authors can opt individual nodes out via `reflect_on_error: false` in their `.dip` file.
 - **Verify-after-edit loop with auto-test** (closes #94): agent sessions can now automatically run tests after any turn that includes file-edit tool calls (`write`, `edit`, `apply_patch`, `notebook_edit`). Modelled on top SWE-bench agent behaviour (~15-20% improvement on benchmark), this transparent inner loop catches regressions before the LLM moves on.
