@@ -1,0 +1,8 @@
+{
+  "run_id": "halted-run",
+  "completed_nodes": ["Start"],
+  "current_node": "",
+  "retry_counts": {},
+  "restart_count": 0,
+  "timestamp": "2026-04-17T12:00:00Z"
+}
