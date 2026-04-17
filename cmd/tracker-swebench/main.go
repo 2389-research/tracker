@@ -150,6 +150,9 @@ Flags:
 	if v := os.Getenv("OPENAI_API_KEY"); v != "" {
 		agentEnv["OPENAI_API_KEY"] = v
 	}
+	if v := os.Getenv("CF_AIG_TOKEN"); v != "" {
+		agentEnv["CF_AIG_TOKEN"] = v
+	}
 
 	stats := RunStats{
 		Total:     len(instances),

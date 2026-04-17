@@ -27,9 +27,10 @@ const (
 
 // Adapter implements llm.ProviderAdapter for the Anthropic Messages API.
 type Adapter struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	apiKey       string
+	baseURL      string
+	httpClient   *http.Client
+	extraHeaders map[string]string
 }
 
 // Option configures an Adapter.
@@ -39,6 +40,14 @@ type Option func(*Adapter)
 func WithBaseURL(url string) Option {
 	return func(a *Adapter) {
 		a.baseURL = url
+	}
+}
+
+// WithExtraHeaders adds custom headers to every request. Useful for gateway
+// authentication (e.g., cf-aig-token for Cloudflare AI Gateway).
+func WithExtraHeaders(headers map[string]string) Option {
+	return func(a *Adapter) {
+		a.extraHeaders = headers
 	}
 }
 
@@ -200,6 +209,11 @@ func (a *Adapter) setHeaders(httpReq *http.Request, req *llm.Request) {
 	// Collect and apply beta headers (user-specified + auto-injected).
 	if beta := collectBetaHeaders(req); beta != "" {
 		httpReq.Header.Set("anthropic-beta", beta)
+	}
+
+	// Apply extra headers (e.g., gateway auth tokens).
+	for k, v := range a.extraHeaders {
+		httpReq.Header.Set(k, v)
 	}
 }
 
