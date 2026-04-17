@@ -193,4 +193,3 @@ func printDiagnoseSuggestions(suggestions []tracker.Suggestion) {
 	}
 	fmt.Println()
 }
-

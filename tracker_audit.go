@@ -14,17 +14,17 @@ import (
 
 // AuditReport is the structured result of Audit().
 type AuditReport struct {
-	RunID              string          `json:"run_id"`
-	Status             string          `json:"status"`
-	TotalDuration      time.Duration   `json:"total_duration_ns"`
-	Timeline           []TimelineEntry `json:"timeline"`
-	Retries            []RetryRecord   `json:"retries,omitempty"`
-	Errors             []ActivityError `json:"errors,omitempty"`
-	Recommendations    []string        `json:"recommendations,omitempty"`
+	RunID           string          `json:"run_id"`
+	Status          string          `json:"status"`
+	TotalDuration   time.Duration   `json:"total_duration_ns"`
+	Timeline        []TimelineEntry `json:"timeline"`
+	Retries         []RetryRecord   `json:"retries,omitempty"`
+	Errors          []ActivityError `json:"errors,omitempty"`
+	Recommendations []string        `json:"recommendations,omitempty"`
 	// Header fields used by the CLI printer.
-	CompletedNodes     int             `json:"completed_nodes"`
-	RestartCount       int             `json:"restart_count"`
-	CheckpointTimestamp time.Time      `json:"checkpoint_timestamp"`
+	CompletedNodes      int       `json:"completed_nodes"`
+	RestartCount        int       `json:"restart_count"`
+	CheckpointTimestamp time.Time `json:"checkpoint_timestamp"`
 }
 
 // TimelineEntry is a single entry in the audit timeline.
