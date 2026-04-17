@@ -5,8 +5,10 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -18,6 +20,8 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		return err
 	}
 
+	// Keep the existing graph-level parsing for validation warnings
+	// (library Simulate doesn't currently surface validation warnings).
 	var graph *pipeline.Graph
 	if isEmbedded {
 		graph, err = loadEmbeddedPipeline(info)
@@ -38,105 +42,76 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		}
 	}
 
-	printSimHeader(w, graph, pipelineFile)
-	printSimNodes(w, graph)
-	printSimEdges(w, graph)
-	printSimExecutionPlan(w, graph)
-	printSimFooter(w)
+	// Re-parse via library for the structured report.
+	var source string
+	if isEmbedded {
+		data, _, oerr := tracker.OpenWorkflow(info.Name)
+		if oerr != nil {
+			return fmt.Errorf("open embedded workflow: %w", oerr)
+		}
+		source = string(data)
+	} else {
+		data, rerr := os.ReadFile(resolved)
+		if rerr != nil {
+			return fmt.Errorf("read pipeline file: %w", rerr)
+		}
+		source = string(data)
+	}
 
+	report, err := tracker.Simulate(source)
+	if err != nil {
+		return err
+	}
+
+	printSimReport(w, report, pipelineFile)
 	return nil
 }
 
-func printSimHeader(w io.Writer, graph *pipeline.Graph, dotFile string) {
+// printSimReport is the top-level entry point for printing a SimulateReport.
+func printSimReport(w io.Writer, report *tracker.SimulateReport, displayName string) {
+	printSimHeader(w, report, displayName)
+	printSimNodesFromReport(w, report.Nodes)
+	printSimEdgesFromReport(w, report.Edges)
+	printSimExecutionPlanFromReport(w, report)
+	printSimFooter(w)
+}
+
+func printSimHeader(w io.Writer, report *tracker.SimulateReport, dotFile string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "\u2550\u2550\u2550 Pipeline Simulation \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550")
-	name := graph.Name
+	name := report.Name
 	if name == "" {
 		name = dotFile
 	}
 	fmt.Fprintf(w, "  Pipeline:  %s\n", name)
-	fmt.Fprintf(w, "  Nodes:     %d\n", len(graph.Nodes))
-	fmt.Fprintf(w, "  Edges:     %d\n", len(graph.Edges))
-	fmt.Fprintf(w, "  Start:     %s\n", graph.StartNode)
-	fmt.Fprintf(w, "  Exit:      %s\n", graph.ExitNode)
+	fmt.Fprintf(w, "  Nodes:     %d\n", len(report.Nodes))
+	fmt.Fprintf(w, "  Edges:     %d\n", len(report.Edges))
+	fmt.Fprintf(w, "  Start:     %s\n", report.StartNode)
+	fmt.Fprintf(w, "  Exit:      %s\n", report.ExitNode)
 
-	if len(graph.Attrs) > 0 {
+	if len(report.GraphAttrs) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  Graph Attributes:")
-		for k, v := range graph.Attrs {
+		for k, v := range report.GraphAttrs {
 			fmt.Fprintf(w, "    %s = %s\n", k, v)
 		}
 	}
 }
 
-func printSimNodes(w io.Writer, graph *pipeline.Graph) {
+func printSimNodesFromReport(w io.Writer, nodes []tracker.SimNode) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "\u2500\u2500\u2500 Nodes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 	fmt.Fprintf(w, "  %-20s  %-15s  %-12s  %s\n", "ID", "Handler", "Shape", "Label")
 	fmt.Fprintf(w, "  %-20s  %-15s  %-12s  %s\n", "\u2500\u2500", "\u2500\u2500\u2500\u2500\u2500\u2500\u2500", "\u2500\u2500\u2500\u2500\u2500", "\u2500\u2500\u2500\u2500\u2500")
 
-	ordered := bfsNodeOrder(graph)
-	for _, node := range ordered {
+	for _, node := range nodes {
 		printSimNodeRow(w, node)
 	}
 }
 
-// bfsNodeOrder returns graph nodes in BFS order from start, with orphaned nodes appended.
-func bfsNodeOrder(graph *pipeline.Graph) []*pipeline.Node {
-	visited := make(map[string]bool)
-	ordered := bfsTraversal(graph, visited)
-	return appendOrphanedNodes(graph, visited, ordered)
-}
-
-// bfsTraversal walks the graph from StartNode in BFS order, marking visited nodes.
-func bfsTraversal(graph *pipeline.Graph, visited map[string]bool) []*pipeline.Node {
-	queue := []string{graph.StartNode}
-	var ordered []*pipeline.Node
-
-	for len(queue) > 0 {
-		nodeID := queue[0]
-		queue = queue[1:]
-		if visited[nodeID] {
-			continue
-		}
-		visited[nodeID] = true
-
-		node, ok := graph.Nodes[nodeID]
-		if !ok {
-			continue
-		}
-		ordered = append(ordered, node)
-		queue = enqueueUnvisited(queue, graph.OutgoingEdges(nodeID), visited)
-	}
-	return ordered
-}
-
-// enqueueUnvisited appends unvisited edge targets to the queue.
-func enqueueUnvisited(queue []string, edges []*pipeline.Edge, visited map[string]bool) []string {
-	for _, edge := range edges {
-		if !visited[edge.To] {
-			queue = append(queue, edge.To)
-		}
-	}
-	return queue
-}
-
-// appendOrphanedNodes appends nodes not reachable from the start node.
-func appendOrphanedNodes(graph *pipeline.Graph, visited map[string]bool, ordered []*pipeline.Node) []*pipeline.Node {
-	for _, node := range graph.Nodes {
-		if !visited[node.ID] {
-			ordered = append(ordered, node)
-		}
-	}
-	return ordered
-}
-
 // printSimNodeRow prints one node's summary row and its key attributes.
-func printSimNodeRow(w io.Writer, node *pipeline.Node) {
+func printSimNodeRow(w io.Writer, node tracker.SimNode) {
 	label := node.Label
-	if label == node.ID {
-		label = ""
-	}
 	id := node.ID
 	if len(id) > 20 {
 		id = id[:17] + "..."
@@ -150,11 +125,11 @@ func printSimNodeRow(w io.Writer, node *pipeline.Node) {
 	}
 }
 
-func printSimEdges(w io.Writer, graph *pipeline.Graph) {
+func printSimEdgesFromReport(w io.Writer, edges []tracker.SimEdge) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "\u2500\u2500\u2500 Edges \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 
-	for _, edge := range graph.Edges {
+	for _, edge := range edges {
 		label := ""
 		if edge.Label != "" {
 			label = fmt.Sprintf("  [%s]", edge.Label)
@@ -167,70 +142,53 @@ func printSimEdges(w io.Writer, graph *pipeline.Graph) {
 	}
 }
 
-func printSimExecutionPlan(w io.Writer, graph *pipeline.Graph) {
+func printSimExecutionPlanFromReport(w io.Writer, report *tracker.SimulateReport) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "\u2500\u2500\u2500 Execution Plan \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
 	fmt.Fprintln(w, "  (simulated BFS traversal from start node)")
 	fmt.Fprintln(w)
 
-	if graph.StartNode == "" {
+	if report.StartNode == "" {
 		fmt.Fprintln(w, "  ! No start node found")
 		return
 	}
 
-	visited := make(map[string]bool)
-	queue := []string{graph.StartNode}
-	step := 0
-
-	for len(queue) > 0 {
-		nodeID := queue[0]
-		queue = queue[1:]
-		if visited[nodeID] {
-			continue
-		}
-		visited[nodeID] = true
-		step++
-
-		node, ok := graph.Nodes[nodeID]
-		if !ok {
-			continue
-		}
-
-		printSimPlanStep(w, node, step)
-		queue = printSimPlanEdges(w, graph, nodeID, visited, queue)
+	// Build a lookup map from node ID to SimNode for label/handler access.
+	nodeByID := make(map[string]tracker.SimNode, len(report.Nodes))
+	for _, n := range report.Nodes {
+		nodeByID[n.ID] = n
 	}
 
-	printSimUnreachable(w, graph, visited)
+	for _, step := range report.ExecutionPlan {
+		node := nodeByID[step.NodeID]
+		printSimPlanStepFromReport(w, step, node, report.ExitNode)
+	}
+
+	if len(report.Unreachable) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "  ! Unreachable nodes: %s\n", strings.Join(report.Unreachable, ", "))
+	}
 }
 
-// printSimPlanStep prints a single step in the execution plan.
-func printSimPlanStep(w io.Writer, node *pipeline.Node, step int) {
+// printSimPlanStepFromReport prints a single step and its outgoing edges.
+func printSimPlanStepFromReport(w io.Writer, step tracker.PlanStep, node tracker.SimNode, exitNode string) {
+	// Use label if set (and different from ID), otherwise use ID — mirrors original behavior.
 	label := node.Label
-	if label == "" || label == node.ID {
-		label = node.ID
+	if label == "" {
+		label = step.NodeID
 	}
-	fmt.Fprintf(w, "  %2d. %s  (%s)\n", step, label, node.Handler)
-}
-
-// printSimPlanEdges prints outgoing edges for a node and enqueues unvisited targets.
-func printSimPlanEdges(w io.Writer, graph *pipeline.Graph, nodeID string, visited map[string]bool, queue []string) []string {
-	edges := graph.OutgoingEdges(nodeID)
-	for _, edge := range edges {
-		extra := formatEdgeAnnotation(*edge)
+	fmt.Fprintf(w, "  %2d. %s  (%s)\n", step.Step, label, node.Handler)
+	for _, edge := range step.Edges {
+		extra := formatSimEdgeAnnotation(edge)
 		fmt.Fprintf(w, "      \u2514\u2500> %s%s\n", edge.To, extra)
-		if !visited[edge.To] {
-			queue = append(queue, edge.To)
-		}
 	}
-
-	if len(edges) == 0 && nodeID != graph.ExitNode {
+	if len(step.Edges) == 0 && step.NodeID != exitNode {
 		fmt.Fprintln(w, "      ! dead end (no outgoing edges)")
 	}
-	return queue
 }
 
-// formatEdgeAnnotation returns label and condition annotations for an edge.
-func formatEdgeAnnotation(edge pipeline.Edge) string {
+// formatSimEdgeAnnotation returns label and condition annotations for a SimEdge.
+func formatSimEdgeAnnotation(edge tracker.SimEdge) string {
 	extra := ""
 	if edge.Label != "" {
 		extra = fmt.Sprintf(" [%s]", edge.Label)
@@ -239,20 +197,6 @@ func formatEdgeAnnotation(edge pipeline.Edge) string {
 		extra += fmt.Sprintf(" (when: %s)", edge.Condition)
 	}
 	return extra
-}
-
-// printSimUnreachable reports any nodes not visited during BFS.
-func printSimUnreachable(w io.Writer, graph *pipeline.Graph, visited map[string]bool) {
-	var unreachable []string
-	for id := range graph.Nodes {
-		if !visited[id] {
-			unreachable = append(unreachable, id)
-		}
-	}
-	if len(unreachable) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintf(w, "  ! Unreachable nodes: %s\n", strings.Join(unreachable, ", "))
-	}
 }
 
 func printSimFooter(w io.Writer) {

@@ -1,0 +1,6 @@
+{"ts":"2026-04-17T10:00:00Z","type":"pipeline_started","run_id":"ok-run"}
+{"ts":"2026-04-17T10:00:01Z","type":"stage_started","node_id":"Start"}
+{"ts":"2026-04-17T10:00:02Z","type":"stage_completed","node_id":"Start","handler":"agent"}
+{"ts":"2026-04-17T10:00:03Z","type":"stage_started","node_id":"End"}
+{"ts":"2026-04-17T10:00:04Z","type":"stage_completed","node_id":"End","handler":"agent"}
+{"ts":"2026-04-17T10:00:05Z","type":"pipeline_completed","run_id":"ok-run"}

@@ -1,0 +1,8 @@
+{
+  "run_id": "ok-run",
+  "completed_nodes": ["Start", "End"],
+  "current_node": "",
+  "retry_counts": {},
+  "restart_count": 0,
+  "timestamp": "2026-04-17T10:00:00Z"
+}

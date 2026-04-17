@@ -1,0 +1,8 @@
+{
+  "run_id": "failed-run",
+  "completed_nodes": ["Setup"],
+  "current_node": "Build",
+  "retry_counts": {"Build": 2},
+  "restart_count": 0,
+  "timestamp": "2026-04-17T11:00:00Z"
+}

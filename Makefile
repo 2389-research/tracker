@@ -133,6 +133,11 @@ lint:
 	@command -v dippin >/dev/null 2>&1 || { echo "dippin CLI not found; skipping .dip lint"; exit 0; }
 	@FAIL=0; \
 	for f in examples/*.dip; do \
+		case "$$f" in \
+			examples/human_gate_test_suite.dip) \
+				echo "SKIP: $$f (uses human timeout/timeout_action — not in dippin-lang IR yet)"; \
+				continue;; \
+		esac; \
 		ERRORS=$$(dippin check "$$f" 2>&1 | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('errors',0))" 2>/dev/null || echo "0"); \
 		if [ "$$ERRORS" -gt 0 ]; then \
 			echo "FAIL: $$f has $$ERRORS errors"; \

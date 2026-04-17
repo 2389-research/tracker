@@ -23,7 +23,7 @@ jobs:
           cache: true
 
       - name: Install dippin CLI
-        run: go install github.com/2389-research/dippin-lang/cmd/dippin@v0.10.0
+        run: go install github.com/2389-research/dippin-lang/cmd/dippin@v0.20.0
 
       - name: Format check
         run: make fmt-check

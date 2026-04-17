@@ -74,7 +74,7 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	dfs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dfs.SetOutput(io.Discard)
-	dfs.BoolVar(&cfg.probe, "probe", false, "Perform live API auth check for each configured provider")
+	dfs.BoolVar(&cfg.probe, "probe", true, "Perform live API auth check with a 1-token request (set to false to skip)")
 	dfs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
 	dfs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
 	dfs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
@@ -240,7 +240,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
-	fmt.Fprintf(w, "  tracker doctor [--probe] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
+	fmt.Fprintf(w, "  tracker doctor [--probe=false] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
 	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
 	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")
 	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")
