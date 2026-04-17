@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -30,58 +31,11 @@ type nodeFailure struct {
 
 // diagnoseMostRecent finds and diagnoses the most recent run.
 func diagnoseMostRecent(workdir string) error {
-	runsDir := filepath.Join(workdir, ".tracker", "runs")
-	latestID, err := findMostRecentRunID(runsDir)
+	latestID, err := tracker.MostRecentRunID(workdir)
 	if err != nil {
 		return err
 	}
 	return runDiagnose(workdir, latestID)
-}
-
-// findMostRecentRunID scans the runs directory for the most recent checkpoint.
-func findMostRecentRunID(runsDir string) (string, error) {
-	entries, err := readRunsDir(runsDir)
-	if err != nil {
-		return "", err
-	}
-	latestID := pickLatestRunID(runsDir, entries)
-	if latestID == "" {
-		return "", fmt.Errorf("no runs found with valid checkpoints")
-	}
-	return latestID, nil
-}
-
-// readRunsDir reads the runs directory, mapping ENOENT to a user-friendly error.
-func readRunsDir(runsDir string) ([]os.DirEntry, error) {
-	entries, err := os.ReadDir(runsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no runs found — run a pipeline first")
-		}
-		return nil, fmt.Errorf("cannot read runs directory: %w", err)
-	}
-	return entries, nil
-}
-
-// pickLatestRunID returns the directory name of the most recent valid checkpoint.
-func pickLatestRunID(runsDir string, entries []os.DirEntry) string {
-	var latestID string
-	var latestTime time.Time
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		cpPath := filepath.Join(runsDir, e.Name(), "checkpoint.json")
-		cp, err := pipeline.LoadCheckpoint(cpPath)
-		if err != nil {
-			continue
-		}
-		if cp.Timestamp.After(latestTime) {
-			latestTime = cp.Timestamp
-			latestID = e.Name()
-		}
-	}
-	return latestID
 }
 
 // budgetHalt holds information about a budget halt detected in the activity log.
@@ -94,7 +48,7 @@ type budgetHalt struct {
 
 // runDiagnose performs deep failure analysis on a pipeline run.
 func runDiagnose(workdir, runID string) error {
-	runDir, err := resolveRunDir(workdir, runID)
+	runDir, err := tracker.ResolveRunDir(workdir, runID)
 	if err != nil {
 		return err
 	}

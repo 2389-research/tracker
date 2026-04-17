@@ -3,142 +3,18 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/pipeline"
+	tracker "github.com/2389-research/tracker"
 )
 
-// activityEntry represents a single parsed line from activity.jsonl.
-type activityEntry struct {
-	Timestamp time.Time
-	Type      string
-	RunID     string
-	NodeID    string
-	Message   string
-	Error     string
-}
-
-// resolveRunDir finds the run directory for a given run ID using prefix matching.
-// Returns the absolute path to the run directory.
-func resolveRunDir(workdir, runID string) (string, error) {
-	if runID == "" {
-		return "", fmt.Errorf("run ID cannot be empty")
-	}
-	runsDir := filepath.Join(workdir, ".tracker", "runs")
-	matched, err := findRunDirMatch(runsDir, runID)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(runsDir, matched), nil
-}
-
-// findRunDirMatch finds the unique directory name matching runID (exact or prefix).
-func findRunDirMatch(runsDir, runID string) (string, error) {
-	entries, err := os.ReadDir(runsDir)
-	if err != nil {
-		return "", fmt.Errorf("cannot read runs directory: %w", err)
-	}
-
-	var matches []string
-	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), runID) {
-			matches = append(matches, e.Name())
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
-	case 1:
-		return matches[0], nil
-	default:
-		return resolveAmbiguousMatch(matches, runID, runsDir)
-	}
-}
-
-// resolveAmbiguousMatch handles multiple prefix matches by preferring an exact match.
-func resolveAmbiguousMatch(matches []string, runID, runsDir string) (string, error) {
-	for _, m := range matches {
-		if m == runID {
-			return m, nil
-		}
-	}
-	return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
-}
-
-// loadActivityLog reads and parses activity.jsonl, skipping malformed lines.
-func loadActivityLog(runDir string) ([]activityEntry, error) {
-	path := filepath.Join(runDir, "activity.jsonl")
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("open activity log: %w", err)
-	}
-	defer f.Close()
-
-	var entries []activityEntry
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		entry, ok := parseActivityLine(line)
-		if ok {
-			entries = append(entries, entry)
-		}
-	}
-
-	return entries, scanner.Err()
-}
-
-// parseActivityLine decodes one JSON line from activity.jsonl.
-// Returns (entry, true) on success, (zero, false) on any parse error.
-func parseActivityLine(line string) (activityEntry, bool) {
-	var raw struct {
-		Timestamp string `json:"ts"`
-		Type      string `json:"type"`
-		RunID     string `json:"run_id"`
-		NodeID    string `json:"node_id"`
-		Message   string `json:"message"`
-		Error     string `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(line), &raw); err != nil {
-		return activityEntry{}, false
-	}
-	ts, ok := parseActivityTimestamp(raw.Timestamp)
-	if !ok {
-		return activityEntry{}, false
-	}
-	return activityEntry{
-		Timestamp: ts,
-		Type:      raw.Type,
-		RunID:     raw.RunID,
-		NodeID:    raw.NodeID,
-		Message:   raw.Message,
-		Error:     raw.Error,
-	}, true
-}
-
-// parseActivityTimestamp parses RFC3339Nano or the alternate millisecond format.
-func parseActivityTimestamp(s string) (time.Time, bool) {
-	if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return ts, true
-	}
-	if ts, err := time.Parse("2006-01-02T15:04:05.000Z07:00", s); err == nil {
-		return ts, true
-	}
-	return time.Time{}, false
-}
+// activityEntry is a type alias for the library type, kept for local use.
+type activityEntry = tracker.ActivityEntry
 
 // runSummary holds the display data for a single pipeline run listing.
 type runSummary struct {
@@ -202,10 +78,8 @@ func buildRunSummary(runsDir, name string) (runSummary, bool) {
 		return runSummary{}, false
 	}
 
-	activity, _ := loadActivityLog(runDir)
-	sort.Slice(activity, func(i, j int) bool {
-		return activity[i].Timestamp.Before(activity[j].Timestamp)
-	})
+	activity, _ := tracker.LoadActivityLog(runDir)
+	tracker.SortActivityByTime(activity)
 
 	status := determinePipelineStatus(cp, activity)
 
@@ -262,7 +136,7 @@ func printRunList(runs []runSummary) {
 
 // runAudit loads run artifacts and prints a structured audit report.
 func runAudit(workdir, runID string) error {
-	runDir, err := resolveRunDir(workdir, runID)
+	runDir, err := tracker.ResolveRunDir(workdir, runID)
 	if err != nil {
 		return err
 	}
@@ -275,13 +149,11 @@ func runAudit(workdir, runID string) error {
 	}
 
 	// Load activity log and sort by timestamp to handle concurrent writes.
-	activity, err := loadActivityLog(runDir)
+	activity, err := tracker.LoadActivityLog(runDir)
 	if err != nil {
 		return fmt.Errorf("load activity log: %w", err)
 	}
-	sort.Slice(activity, func(i, j int) bool {
-		return activity[i].Timestamp.Before(activity[j].Timestamp)
-	})
+	tracker.SortActivityByTime(activity)
 
 	// Determine pipeline status.
 	status := determinePipelineStatus(cp, activity)
