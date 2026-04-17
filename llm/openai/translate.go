@@ -4,6 +4,7 @@ package openai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/2389-research/tracker/llm"
@@ -70,7 +71,9 @@ type openaiInput struct {
 // MarshalJSON serializes an openaiInput using only the fields required for
 // the item's type. Required fields are always emitted (no omitempty) so
 // strict validators cannot reject the request for missing fields when a
-// value happens to be an empty string.
+// value happens to be an empty string. An unrecognized non-empty Type is
+// an error rather than a silent fallback — adding a new item shape should
+// be a compile-or-test failure, not a wire-format bug.
 func (i openaiInput) MarshalJSON() ([]byte, error) {
 	switch i.Type {
 	case "function_call":
@@ -79,19 +82,33 @@ func (i openaiInput) MarshalJSON() ([]byte, error) {
 			CallID    string `json:"call_id"`
 			Name      string `json:"name"`
 			Arguments string `json:"arguments"`
-		}{i.Type, i.CallID, i.Name, i.Arguments})
+		}{
+			Type:      i.Type,
+			CallID:    i.CallID,
+			Name:      i.Name,
+			Arguments: i.Arguments,
+		})
 	case "function_call_output":
 		return json.Marshal(struct {
 			Type   string `json:"type"`
 			CallID string `json:"call_id"`
 			Output string `json:"output"`
-		}{i.Type, i.CallID, i.Output})
-	default:
+		}{
+			Type:   i.Type,
+			CallID: i.CallID,
+			Output: i.Output,
+		})
+	case "":
 		// Role-based message (user / assistant / system / developer).
 		return json.Marshal(struct {
 			Role    string `json:"role"`
 			Content string `json:"content"`
-		}{i.Role, i.Content})
+		}{
+			Role:    i.Role,
+			Content: i.Content,
+		})
+	default:
+		return nil, fmt.Errorf("openai: unsupported input type %q", i.Type)
 	}
 }
 

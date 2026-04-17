@@ -247,7 +247,7 @@ func TestTranslateRequestMultiTurnToolCall(t *testing.T) {
 // surfaces on OpenRouter and OpenRouter-proxied models (GLM, Qwen, Kimi).
 func TestTranslateRequest_EmptyToolResult_KeepsOutputField(t *testing.T) {
 	req := &llm.Request{
-		Model: "openai/gpt-4.1",
+		Model: "gpt-4.1",
 		Messages: []llm.Message{
 			llm.UserMessage("call the tool"),
 			llm.ToolResultMessage("call_empty", "", false),
@@ -263,8 +263,17 @@ func TestTranslateRequest_EmptyToolResult_KeepsOutputField(t *testing.T) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatal(err)
 	}
-	input := raw["input"].([]any)
-	fco := input[1].(map[string]any)
+	input, ok := raw["input"].([]any)
+	if !ok {
+		t.Fatalf("input = %T, want []any", raw["input"])
+	}
+	if len(input) < 2 {
+		t.Fatalf("input length = %d, want at least 2", len(input))
+	}
+	fco, ok := input[1].(map[string]any)
+	if !ok {
+		t.Fatalf("input[1] = %T, want map[string]any", input[1])
+	}
 	if fco["type"] != "function_call_output" {
 		t.Fatalf("expected function_call_output, got %v", fco["type"])
 	}
@@ -273,8 +282,12 @@ func TestTranslateRequest_EmptyToolResult_KeepsOutputField(t *testing.T) {
 		t.Fatal("output field must be present on function_call_output items " +
 			"(required by OpenAI Responses API; OpenRouter rejects if missing)")
 	}
-	if out != "" {
-		t.Errorf("output = %v, want empty string", out)
+	outStr, ok := out.(string)
+	if !ok {
+		t.Fatalf("output = %T, want string (null/undefined breaks strict validators)", out)
+	}
+	if outStr != "" {
+		t.Errorf("output = %q, want empty string", outStr)
 	}
 }
 
@@ -284,7 +297,7 @@ func TestTranslateRequest_EmptyToolResult_KeepsOutputField(t *testing.T) {
 // spec requires to be present — strict validators reject `undefined`.
 func TestTranslateRequest_EmptyArguments_KeepsArgumentsField(t *testing.T) {
 	req := &llm.Request{
-		Model: "openai/gpt-4.1",
+		Model: "gpt-4.1",
 		Messages: []llm.Message{
 			{
 				Role: llm.RoleAssistant,
@@ -308,15 +321,46 @@ func TestTranslateRequest_EmptyArguments_KeepsArgumentsField(t *testing.T) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatal(err)
 	}
-	input := raw["input"].([]any)
-	fc := input[0].(map[string]any)
+	input, ok := raw["input"].([]any)
+	if !ok {
+		t.Fatalf("input = %T, want []any", raw["input"])
+	}
+	if len(input) < 1 {
+		t.Fatalf("input length = %d, want at least 1", len(input))
+	}
+	fc, ok := input[0].(map[string]any)
+	if !ok {
+		t.Fatalf("input[0] = %T, want map[string]any", input[0])
+	}
 	if fc["type"] != "function_call" {
 		t.Fatalf("expected function_call, got %v", fc["type"])
 	}
-	if _, present := fc["name"]; !present {
-		t.Error("name field must be present on function_call items")
+	name, ok := fc["name"].(string)
+	if !ok {
+		t.Fatalf("name = %T, want string", fc["name"])
 	}
-	if _, present := fc["arguments"]; !present {
-		t.Error("arguments field must be present on function_call items (empty string is OK, undefined is not)")
+	if name != "pwd" {
+		t.Errorf("name = %q, want pwd", name)
+	}
+	args, present := fc["arguments"]
+	if !present {
+		t.Fatal("arguments field must be present on function_call items (empty string is OK, undefined is not)")
+	}
+	argsStr, ok := args.(string)
+	if !ok {
+		t.Fatalf("arguments = %T, want string", args)
+	}
+	if argsStr != "" {
+		t.Errorf("arguments = %q, want empty string", argsStr)
+	}
+}
+
+// TestOpenaiInput_MarshalJSON_UnknownTypeIsError verifies we fail fast on an
+// unrecognized discriminator rather than silently emitting a malformed item.
+func TestOpenaiInput_MarshalJSON_UnknownTypeIsError(t *testing.T) {
+	i := openaiInput{Type: "made_up_type"}
+	_, err := json.Marshal(i)
+	if err == nil {
+		t.Fatal("expected error when marshaling unknown Type, got nil")
 	}
 }
