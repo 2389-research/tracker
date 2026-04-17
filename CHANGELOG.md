@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `tracker.NewNDJSONWriter(io.Writer)` — public NDJSON event writer producing the same wire format as `tracker --json`. Factory methods `PipelineHandler`, `AgentHandler`, `TraceObserver` return handlers that plug into `Config.EventHandler`, `Config.AgentEvents`, and the LLM trace hook. Closes Phase 1 of #76.
+- `tracker.Diagnose(runDir)` / `tracker.DiagnoseMostRecent(workDir)` — structured `*DiagnoseReport` with node failures, budget halt, and typed suggestions (`Kind: "retry_pattern" | "escalate_limit" | "no_output" | "shell_command" | "go_test" | "suspicious_timing" | "budget"`).
+- `tracker.Audit(runDir)` — structured `*AuditReport` with timeline, retries, errors, and recommendations.
+- `tracker.ListRuns(workDir)` — sorted `[]RunSummary` for enumerating past runs (newest first).
+- `tracker.Doctor(cfg)` — structured `*DoctorReport` for preflight health checks. `ProbeProviders` defaults to false; set true to make real API calls for auth verification.
+- `tracker.Simulate(source)` — structured `*SimulateReport` with nodes, edges, execution plan, graph attributes, and unreachable-node list.
+- `tracker.ResolveRunDir(workDir, runID)` / `tracker.MostRecentRunID(workDir)` — exposed run-directory resolution helpers.
+- `tracker.ActivityEntry` / `tracker.LoadActivityLog(runDir)` / `tracker.ParseActivityLine(line)` / `tracker.SortActivityByTime(entries)` — shared activity.jsonl parsing used by CLI and library.
+
+### Changed
+
+- `cmd/tracker/diagnose.go`, `audit.go`, `doctor.go`, `simulate.go` are now thin printers over the new library APIs. CLI stdout and `--json` wire format are byte-identical. Closes Phase 2 of #76.
+
 - **Structured reflection prompt on tool failure** (issue #93): when a tool call returns an error, the agent session now automatically injects a user-role reflection message before the next LLM turn. The prompt asks the model to identify what went wrong, what assumption was incorrect, and what minimal change will fix it — matching the pattern used by top SWE-bench agents (~10-15% recovery improvement). The feature is enabled by default (`ReflectOnError: true` in `DefaultConfig()`) and capped at three consecutive reflection turns to prevent infinite loops; the counter resets after any clean (no-error) turn. Pipeline authors can opt individual nodes out via `reflect_on_error: false` in their `.dip` file.
 - **Verify-after-edit loop with auto-test** (closes #94): agent sessions can now automatically run tests after any turn that includes file-edit tool calls (`write`, `edit`, `apply_patch`, `notebook_edit`). Modelled on top SWE-bench agent behaviour (~15-20% improvement on benchmark), this transparent inner loop catches regressions before the LLM moves on.
   - `SessionConfig.VerifyAfterEdit bool` — opt-in flag (default: false).

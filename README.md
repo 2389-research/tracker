@@ -571,6 +571,35 @@ result, _ := tracker.Run(ctx, source, tracker.Config{
 })
 ```
 
+### Analyzing past runs from code
+
+```go
+import tracker "github.com/2389-research/tracker"
+
+report, err := tracker.DiagnoseMostRecent(".")
+if err != nil { log.Fatal(err) }
+
+for _, f := range report.Failures {
+    fmt.Printf("failed: %s (handler=%s, retries=%d)\n",
+        f.NodeID, f.Handler, f.RetryCount)
+}
+for _, s := range report.Suggestions {
+    fmt.Printf("  %s: %s\n", s.Kind, s.Message)
+}
+```
+
+`tracker.Audit`, `tracker.Simulate`, and `tracker.Doctor` follow the same pattern and return JSON-serializable reports.
+
+To stream events programmatically in the same NDJSON format as `tracker --json`, use `tracker.NewNDJSONWriter`:
+
+```go
+w := tracker.NewNDJSONWriter(os.Stdout)
+result, _ := tracker.Run(ctx, source, tracker.Config{
+    EventHandler: w.PipelineHandler(),
+    AgentEvents:  w.AgentHandler(),
+})
+```
+
 ## CLI Reference
 
 ```
