@@ -80,10 +80,14 @@ Flags:
 		}
 	}
 
-	// Create results directories.
-	logsDir := filepath.Join(*resultsDir, "logs")
-	cacheDir := filepath.Join(*resultsDir, "repo-cache")
-	for _, dir := range []string{*resultsDir, logsDir, cacheDir} {
+	// Create results directories. Docker -v requires absolute paths.
+	absResultsDir, err := filepath.Abs(*resultsDir)
+	if err != nil {
+		log.Fatalf("resolve results dir: %v", err)
+	}
+	logsDir := filepath.Join(absResultsDir, "logs")
+	cacheDir := filepath.Join(absResultsDir, "repo-cache")
+	for _, dir := range []string{absResultsDir, logsDir, cacheDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Fatalf("create dir %q: %v", dir, err)
 		}
@@ -99,7 +103,7 @@ Flags:
 		Timeout:    timeout.String(),
 		Commit:     buildCommit(),
 	}
-	metaPath := filepath.Join(*resultsDir, "run_meta.json")
+	metaPath := filepath.Join(absResultsDir, "run_meta.json")
 	if err := WriteRunMeta(metaPath, meta); err != nil {
 		log.Fatalf("write run meta: %v", err)
 	}
