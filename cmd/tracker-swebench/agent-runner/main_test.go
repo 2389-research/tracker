@@ -31,8 +31,8 @@ func TestParseConfig_Defaults(t *testing.T) {
 	if cfg.MaxTurns != 50 {
 		t.Errorf("expected MaxTurns=50, got %d", cfg.MaxTurns)
 	}
-	if cfg.Timeout != 10*time.Minute {
-		t.Errorf("expected Timeout=10m, got %v", cfg.Timeout)
+	if cfg.Timeout != 30*time.Minute {
+		t.Errorf("expected Timeout=30m, got %v", cfg.Timeout)
 	}
 	if cfg.Instance != "django__django-12345" {
 		t.Errorf("expected Instance=django__django-12345, got %q", cfg.Instance)

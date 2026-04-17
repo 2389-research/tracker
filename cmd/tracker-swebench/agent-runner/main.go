@@ -28,16 +28,22 @@ the issue. Do not refactor unrelated code.
 
 ## Approach
 1. Read the issue carefully. Understand what's broken and what the expected behavior is.
-2. Explore the relevant code. Use grep_search and glob to find the right files.
-3. Write a fix. Make targeted edits — smallest diff that solves the problem.
-4. Run the existing test suite to verify your fix doesn't break anything.
-5. If there are specific test commands mentioned in the issue, run those.
+2. Reproduce the bug first. Find and run the relevant test(s) to confirm the failure.
+3. Check git log --oneline -10 for recent context around the affected code.
+4. Explore the relevant code. Use grep_search and glob to find the right files.
+5. Write a fix. Make targeted edits — smallest diff that solves the problem.
+6. Run the failing test again to verify your fix resolves it.
+7. Run the broader test suite to check for regressions.
 
 ## Rules
 - Do NOT create new test files. The evaluation uses the repo's existing test suite.
 - Do NOT modify test files unless the issue specifically requires it.
 - Keep your changes minimal and focused.
-- If you're unsure about the fix, read more code before editing.`
+- If you're unsure about the fix, read more code before editing.
+- Always re-read a file before editing it if you haven't read it recently.
+- After editing, verify the fix by running the relevant tests.
+- You may use absolute paths in bash commands (e.g., /workspace/tests/). Only file
+  tool arguments (read_file, write_file, etc.) require relative paths.`
 
 type runnerConfig struct {
 	Instance string
@@ -57,7 +63,7 @@ func parseConfig() runnerConfig {
 		Model:    "claude-sonnet-4-6",
 		Provider: "anthropic",
 		MaxTurns: 50,
-		Timeout:  10 * time.Minute,
+		Timeout:  30 * time.Minute,
 	}
 
 	if v := os.Getenv("SWEBENCH_REPO_DIR"); v != "" {

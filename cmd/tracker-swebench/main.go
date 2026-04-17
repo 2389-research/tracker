@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -26,10 +27,32 @@ func main() {
 	output := flag.String("output", "./predictions.jsonl", "output file for predictions")
 	resultsDir := flag.String("results-dir", "./results", "results directory")
 	maxTurns := flag.Int("max-turns", 50, "maximum agent turns per instance")
-	timeout := flag.Duration("timeout", 10*time.Minute, "per-instance timeout")
+	timeout := flag.Duration("timeout", 30*time.Minute, "per-instance timeout")
 	instance := flag.String("instance", "", "single instance filter (optional)")
 	force := flag.Bool("force", false, "re-run completed instances")
 	dockerImage := flag.String("docker-image", "tracker-swebench-base", "Docker image to use")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `tracker-swebench — run tracker's code agent against SWE-bench Lite instances
+
+Usage:
+  tracker-swebench --dataset <path> [flags]
+
+Prerequisites:
+  1. Build the Docker image:  cd cmd/tracker-swebench && bash build.sh
+  2. Set API key:             export ANTHROPIC_API_KEY=sk-ant-...
+  3. Download dataset:        SWE-bench Lite JSONL from the SWE-bench repository
+
+Examples:
+  tracker-swebench --dataset swebench_lite.jsonl
+  tracker-swebench --dataset swebench_lite.jsonl --instance django__django-11099
+  tracker-swebench --dataset swebench_lite.jsonl --model gpt-5.2 --provider openai
+  tracker-swebench --dataset swebench_lite.jsonl --force --timeout 30m
+
+Flags:
+`)
+		flag.PrintDefaults()
+	}
 
 	flag.Parse()
 
@@ -74,6 +97,7 @@ func main() {
 		Dataset:    *dataset,
 		MaxTurns:   *maxTurns,
 		Timeout:    timeout.String(),
+		Commit:     buildCommit(),
 	}
 	metaPath := filepath.Join(*resultsDir, "run_meta.json")
 	if err := WriteRunMeta(metaPath, meta); err != nil {
@@ -216,6 +240,23 @@ func main() {
 	if stats.Errors > 0 {
 		os.Exit(1)
 	}
+}
+
+// buildCommit returns the VCS revision from Go build info, or "unknown".
+func buildCommit() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" {
+			if len(s.Value) > 12 {
+				return s.Value[:12]
+			}
+			return s.Value
+		}
+	}
+	return "unknown"
 }
 
 // ensureBareClone clones repoURL as a bare repo to path if path does not already exist.
