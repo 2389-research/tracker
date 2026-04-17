@@ -99,3 +99,21 @@ func TestSimulate_InvalidSource(t *testing.T) {
 		t.Fatal("expected error for invalid source")
 	}
 }
+
+func TestSimulate_GraphAttrsPopulated(t *testing.T) {
+	// Use DOT format to set graph-level attributes reliably without
+	// depending on dippin-lang's specific syntax for workflow-level attrs.
+	src := `digraph pipeline {
+		graph [llm_model="claude-sonnet-4-6"];
+		Start [shape=Mdiamond label="Start"];
+		End [shape=Msquare label="End"];
+		Start -> End;
+	}`
+	r, err := Simulate(src)
+	if err != nil {
+		t.Fatalf("Simulate: %v", err)
+	}
+	if r.GraphAttrs == nil || r.GraphAttrs["llm_model"] != "claude-sonnet-4-6" {
+		t.Errorf("graph attrs missing/wrong: %+v", r.GraphAttrs)
+	}
+}

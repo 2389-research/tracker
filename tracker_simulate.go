@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -11,14 +12,15 @@ import (
 // SimulateReport is the structured output of a dry-run over a pipeline
 // source. No LLM calls, no side effects — pure graph introspection.
 type SimulateReport struct {
-	Format        string     `json:"format"`
-	Name          string     `json:"name,omitempty"`
-	StartNode     string     `json:"start_node,omitempty"`
-	ExitNode      string     `json:"exit_node,omitempty"`
-	Nodes         []SimNode  `json:"nodes"`
-	Edges         []SimEdge  `json:"edges"`
-	ExecutionPlan []PlanStep `json:"execution_plan"`
-	Unreachable   []string   `json:"unreachable,omitempty"`
+	Format        string            `json:"format"`
+	Name          string            `json:"name,omitempty"`
+	StartNode     string            `json:"start_node,omitempty"`
+	ExitNode      string            `json:"exit_node,omitempty"`
+	GraphAttrs    map[string]string `json:"graph_attrs,omitempty"`
+	Nodes         []SimNode         `json:"nodes"`
+	Edges         []SimEdge         `json:"edges"`
+	ExecutionPlan []PlanStep        `json:"execution_plan"`
+	Unreachable   []string          `json:"unreachable,omitempty"`
 }
 
 // SimNode is a node in a SimulateReport.
@@ -58,6 +60,7 @@ func Simulate(source string) (*SimulateReport, error) {
 		StartNode: graph.StartNode,
 		ExitNode:  graph.ExitNode,
 	}
+	r.GraphAttrs = copyStringMap(graph.Attrs)
 	r.Nodes = collectSimNodes(graph)
 	r.Edges = collectSimEdges(graph)
 	r.ExecutionPlan, r.Unreachable = buildExecutionPlan(graph)
@@ -131,6 +134,7 @@ func buildExecutionPlan(graph *pipeline.Graph) ([]PlanStep, []string) {
 			unreachable = append(unreachable, id)
 		}
 	}
+	sort.Strings(unreachable)
 	return plan, unreachable
 }
 

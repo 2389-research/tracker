@@ -63,20 +63,20 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		return err
 	}
 
-	printSimReport(w, report, pipelineFile, graph)
+	printSimReport(w, report, pipelineFile)
 	return nil
 }
 
 // printSimReport is the top-level entry point for printing a SimulateReport.
-func printSimReport(w io.Writer, report *tracker.SimulateReport, displayName string, graph *pipeline.Graph) {
-	printSimHeader(w, report, displayName, graph)
+func printSimReport(w io.Writer, report *tracker.SimulateReport, displayName string) {
+	printSimHeader(w, report, displayName)
 	printSimNodesFromReport(w, report.Nodes)
 	printSimEdgesFromReport(w, report.Edges)
 	printSimExecutionPlanFromReport(w, report)
 	printSimFooter(w)
 }
 
-func printSimHeader(w io.Writer, report *tracker.SimulateReport, dotFile string, graph *pipeline.Graph) {
+func printSimHeader(w io.Writer, report *tracker.SimulateReport, dotFile string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "\u2550\u2550\u2550 Pipeline Simulation \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550")
 	name := report.Name
@@ -89,10 +89,10 @@ func printSimHeader(w io.Writer, report *tracker.SimulateReport, dotFile string,
 	fmt.Fprintf(w, "  Start:     %s\n", report.StartNode)
 	fmt.Fprintf(w, "  Exit:      %s\n", report.ExitNode)
 
-	if graph != nil && len(graph.Attrs) > 0 {
+	if len(report.GraphAttrs) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  Graph Attributes:")
-		for k, v := range graph.Attrs {
+		for k, v := range report.GraphAttrs {
 			fmt.Fprintf(w, "    %s = %s\n", k, v)
 		}
 	}
