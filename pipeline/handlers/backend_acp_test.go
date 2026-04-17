@@ -783,6 +783,10 @@ func TestWaitForProcess_NormalExit(t *testing.T) {
 }
 
 func TestACPBackend_Run_AgentNotFound(t *testing.T) {
+	// Use a nonexistent agent name so LookPath fails even if
+	// claude-agent-acp is installed on the host.
+	t.Setenv("PATH", t.TempDir()) // empty dir — no binaries found
+
 	b := NewACPBackend()
 	cfg := pipeline.AgentRunConfig{
 		Provider: "anthropic",

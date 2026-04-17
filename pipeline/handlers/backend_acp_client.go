@@ -205,7 +205,10 @@ func validatePathInWorkDir(path, workDir string) error {
 	if err != nil {
 		resolved = filepath.Clean(path) // fall back to Clean if symlink resolution fails
 	}
-	dir := filepath.Clean(workDir)
+	dir, err := resolvePathForValidation(workDir)
+	if err != nil {
+		dir = filepath.Clean(workDir) // fall back to Clean if symlink resolution fails
+	}
 	if !strings.HasPrefix(resolved, dir+string(filepath.Separator)) && resolved != dir {
 		return fmt.Errorf("path %q is outside working directory %q", path, workDir)
 	}
@@ -213,18 +216,31 @@ func validatePathInWorkDir(path, workDir string) error {
 }
 
 // resolvePathForValidation resolves symlinks for the longest existing prefix of path.
+// Walks up the directory tree until it finds an existing ancestor, resolves symlinks
+// on that ancestor, then re-appends the non-existent tail segments.
 func resolvePathForValidation(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err == nil {
 		return resolved, nil
 	}
-	// Path may not exist yet (WriteTextFile). Resolve the parent.
-	parent := filepath.Dir(path)
-	resolvedParent, err := filepath.EvalSymlinks(parent)
-	if err != nil {
-		return "", err
+	// Path may not exist yet (WriteTextFile). Walk up to find the first
+	// existing ancestor and resolve symlinks on it.
+	clean := filepath.Clean(path)
+	cur := clean
+	var tail []string
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			// Reached root without finding an existing dir.
+			return "", fmt.Errorf("no existing ancestor for %q", path)
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		resolved, err := filepath.EvalSymlinks(parent)
+		if err == nil {
+			return filepath.Join(append([]string{resolved}, tail...)...), nil
+		}
+		cur = parent
 	}
-	return filepath.Join(resolvedParent, filepath.Base(path)), nil
 }
 
 // applyLineFilter slices a file's content by optional 1-based start line and limit.
