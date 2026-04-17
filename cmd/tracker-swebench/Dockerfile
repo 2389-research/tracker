@@ -12,6 +12,6 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip install --no-cache-dir setuptools wheel
 
-COPY agent-runner /usr/local/bin/agent-runner
+COPY agent-runner-bin /usr/local/bin/agent-runner
 
 WORKDIR /workspace
