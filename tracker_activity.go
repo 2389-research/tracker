@@ -26,7 +26,12 @@ func ResolveRunDir(workdir, runID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(runsDir, matched), nil
+	runDir := filepath.Join(runsDir, matched)
+	absRunDir, err := filepath.Abs(runDir)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve absolute run directory path: %w", err)
+	}
+	return absRunDir, nil
 }
 
 func findRunDirMatchLib(runsDir, runID string) (string, error) {
@@ -76,9 +81,10 @@ func MostRecentRunID(workdir string) (string, error) {
 		cpPath := filepath.Join(runsDir, e.Name(), "checkpoint.json")
 		cp, err := pipeline.LoadCheckpoint(cpPath)
 		if err != nil {
-			if !os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "warning: skipping run %s: %v\n", e.Name(), err)
-			}
+			// Silently skip invalid or missing checkpoints — the run directory
+			// may be partially written or belong to a different tool. Callers
+			// that need diagnostic output should inspect the runs directory
+			// directly.
 			continue
 		}
 		if cp.Timestamp.After(latestTime) {

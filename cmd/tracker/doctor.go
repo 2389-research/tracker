@@ -237,11 +237,9 @@ func checkGitignore(workdir string) {
 	}
 	// Append missing entries (best-effort; silent on error — the user
 	// already saw the warning).
-	suffix := "\n"
+	suffix := ""
 	if len(content) > 0 && content[len(content)-1] != '\n' {
 		suffix = "\n"
-	} else {
-		suffix = ""
 	}
 	suffix += strings.Join(toAppend, "\n") + "\n"
 	_ = os.WriteFile(gitignorePath, append(content, []byte(suffix)...), 0o644)

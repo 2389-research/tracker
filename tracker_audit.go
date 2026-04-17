@@ -128,6 +128,8 @@ func classifyStatus(cp *pipeline.Checkpoint, activity []ActivityEntry) string {
 			return "success"
 		case "pipeline_failed":
 			return "fail"
+		case "budget_exceeded":
+			return "fail"
 		}
 	}
 	if cp.CurrentNode != "" {

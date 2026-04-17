@@ -161,11 +161,16 @@ func simBFSNodeOrder(graph *pipeline.Graph) []*pipeline.Node {
 			}
 		}
 	}
+	var orphans []*pipeline.Node
 	for _, node := range graph.Nodes {
 		if !visited[node.ID] {
-			ordered = append(ordered, node)
+			orphans = append(orphans, node)
 		}
 	}
+	sort.Slice(orphans, func(i, j int) bool {
+		return orphans[i].ID < orphans[j].ID
+	})
+	ordered = append(ordered, orphans...)
 	return ordered
 }
 

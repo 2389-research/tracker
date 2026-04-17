@@ -105,8 +105,12 @@ func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 		if content == "" {
 			content = evt.Text
 		}
+		ts := evt.Timestamp
+		if ts.IsZero() {
+			ts = time.Now()
+		}
 		entry := NDJSONEvent{
-			Timestamp: time.Now().Format(ndjsonTimestampLayout),
+			Timestamp: ts.Format(ndjsonTimestampLayout),
 			Source:    "agent",
 			Type:      string(evt.Type),
 			NodeID:    evt.NodeID,

@@ -13,10 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tracker.Diagnose(runDir)` / `tracker.DiagnoseMostRecent(workDir)` — structured `*DiagnoseReport` with node failures, budget halt, and typed suggestions (`Kind: "retry_pattern" | "escalate_limit" | "no_output" | "shell_command" | "go_test" | "suspicious_timing" | "budget"`).
 - `tracker.Audit(runDir)` — structured `*AuditReport` with timeline, retries, errors, and recommendations.
 - `tracker.ListRuns(workDir)` — sorted `[]RunSummary` for enumerating past runs (newest first).
-- `tracker.Doctor(cfg)` — structured `*DoctorReport` for preflight health checks. `ProbeProviders` defaults to false; set true to make real API calls for auth verification. `CheckDetail.Status` has five values: `"ok"`, `"warn"`, `"error"`, `"skip"`, and `"hint"` (informational sub-items such as optional providers not configured).
+- `tracker.Doctor(cfg)` — structured `*DoctorReport` for preflight health checks. `ProbeProviders` defaults to false; set true to make real API calls for auth verification. `CheckDetail.Status` has four values: `"ok"`, `"warn"`, `"error"`, and `"hint"` (informational sub-items such as optional providers not configured).
 - `tracker.Simulate(source)` — structured `*SimulateReport` with nodes, edges, execution plan, graph attributes, and unreachable-node list.
 - `tracker.ResolveRunDir(workDir, runID)` / `tracker.MostRecentRunID(workDir)` — exposed run-directory resolution helpers.
 - `tracker.ActivityEntry` / `tracker.LoadActivityLog(runDir)` / `tracker.ParseActivityLine(line)` / `tracker.SortActivityByTime(entries)` — shared activity.jsonl parsing used by CLI and library.
+
+### Fixed
+
+- `classifyStatus` now correctly returns `"fail"` for budget-halted runs (runs with a `budget_exceeded` activity event were previously mis-classified as `"success"`).
+- `NDJSONWriter.AgentHandler` now preserves the original `agent.Event.Timestamp` instead of re-stamping with `time.Now()`, preventing event reordering in the NDJSON stream.
+- `simBFSNodeOrder` now sorts orphan nodes by ID before appending, making `SimulateReport.Nodes` ordering deterministic.
+- `ResolveRunDir` now always returns an absolute path via `filepath.Abs`, matching its documented contract.
+- `MostRecentRunID` no longer writes to `os.Stderr` from a library function; invalid checkpoint directories are silently skipped.
+- `checkWorkdirLib` now correctly propagates `warn` details to the section-level `Status` field.
+- `checkProvidersLib` now propagates individual provider `error` details to the section-level `Status` (was always `"ok"` when any provider was configured).
+- `getDippinVersion` now uses `exec.CommandContext` with a 5-second timeout to prevent hangs on unresponsive dippin binaries.
+- `PinnedDippinVersion` constant updated to `v0.20.0` to match the `go.mod` requirement.
+- `checkPipelineFileLib` no longer warns when the pipeline file has a `.dot` extension (both `.dip` and `.dot` are valid input formats).
+- Fixed ineffectual assignment to `suffix` in `cmd/tracker/doctor.go` `maybeFixGitignore`.
+- `checkDiskSpaceLib` moved to platform-specific files (`tracker_doctor_unix.go` / `tracker_doctor_windows.go`) to avoid a Windows build failure from `syscall.Statfs`.
+- `enrichFromEntryNF` and `updateFailureTimingNF` now guard against zero timestamps to prevent incorrect duration calculations in `DiagnoseReport`.
 
 ### Changed
 

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/2389-research/tracker/llm"
@@ -23,7 +22,7 @@ import (
 
 // PinnedDippinVersion is the dippin-lang version from go.mod.
 // Keep in sync with the require line in go.mod.
-const PinnedDippinVersion = "v0.18.0"
+const PinnedDippinVersion = "v0.20.0"
 
 // DoctorConfig configures a Doctor() run.
 type DoctorConfig struct {
@@ -206,6 +205,7 @@ func checkProvidersLib(probe bool) CheckResult {
 	out := CheckResult{Name: "LLM Providers"}
 	var configuredNames []string
 	var missingNames []string
+	hasProviderErrors := false
 
 	for _, p := range knownProviders {
 		key, envName := findProviderKey(p.envVars)
@@ -220,6 +220,7 @@ func checkProvidersLib(probe bool) CheckResult {
 				Message: fmt.Sprintf("%-15s %s=%s (invalid format)", p.name, envName, masked),
 				Hint:    fmt.Sprintf("%s keys should match expected format — run `tracker setup`", p.name),
 			})
+			hasProviderErrors = true
 			continue
 		}
 		if probe && p.buildAdapter != nil {
@@ -230,6 +231,7 @@ func checkProvidersLib(probe bool) CheckResult {
 					Message: fmt.Sprintf("%-15s %s=%s (auth failed: %s)", p.name, envName, masked, authMsg),
 					Hint:    fmt.Sprintf("your %s key is invalid or expired — export a fresh key or run `tracker setup`", p.name),
 				})
+				hasProviderErrors = true
 				continue
 			}
 			out.Details = append(out.Details, CheckDetail{
@@ -272,7 +274,11 @@ func checkProvidersLib(probe bool) CheckResult {
 		})
 	}
 
-	out.Status = "ok"
+	if hasProviderErrors {
+		out.Status = "warn"
+	} else {
+		out.Status = "ok"
+	}
 	if probe {
 		out.Message = fmt.Sprintf("%d provider(s) configured and auth verified", len(configuredNames))
 	} else {
@@ -363,9 +369,11 @@ func checkDippinLib() CheckResult {
 }
 
 func getDippinVersion(path string) string {
-	out, err := exec.Command(path, "--version").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	if err != nil {
-		out, err = exec.Command(path, "version").CombinedOutput()
+		out, err = exec.CommandContext(ctx, path, "version").CombinedOutput()
 		if err != nil {
 			return "(version unknown)"
 		}
@@ -558,12 +566,14 @@ func checkWorkdirLib(workdir string) CheckResult {
 	f.Close()
 	os.Remove(f.Name())
 
+	hasWarn := false
 	home, _ := os.UserHomeDir()
 	if workdir == home || workdir == "/" {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  "warn",
 			Message: fmt.Sprintf("%s (risk of accidental data loss — use a project subdirectory)", workdir),
 		})
+		hasWarn = true
 	}
 
 	// Detect missing .gitignore entries without modifying the file.
@@ -572,14 +582,20 @@ func checkWorkdirLib(workdir string) CheckResult {
 			Status:  "warn",
 			Message: missing,
 		})
+		hasWarn = true
 	}
 
 	out.Details = append(out.Details, CheckDetail{
 		Status:  "ok",
 		Message: fmt.Sprintf("%s (writable)", workdir),
 	})
-	out.Status = "ok"
-	out.Message = fmt.Sprintf("%s is writable", workdir)
+	if hasWarn {
+		out.Status = "warn"
+		out.Message = fmt.Sprintf("%s is writable (with warnings)", workdir)
+	} else {
+		out.Status = "ok"
+		out.Message = fmt.Sprintf("%s is writable", workdir)
+	}
 	return out
 }
 
@@ -690,32 +706,8 @@ func isDirWritable(dir string) bool {
 }
 
 // checkDiskSpaceLib warns when available disk space under workdir is low.
-func checkDiskSpaceLib(workdir string) CheckResult {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(workdir, &stat); err != nil {
-		return CheckResult{
-			Name:    "Disk Space",
-			Status:  "warn",
-			Message: fmt.Sprintf("could not determine disk space: %v", err),
-		}
-	}
-	available := stat.Bavail * uint64(stat.Bsize)
-	availableGB := float64(available) / (1024 * 1024 * 1024)
-	const minGB = 10.0
-	if availableGB < minGB {
-		return CheckResult{
-			Name:    "Disk Space",
-			Status:  "warn",
-			Message: fmt.Sprintf("low disk space: %.2f GB available (recommended: %.1f GB+)", availableGB, minGB),
-			Hint:    "free up disk space before running long pipelines",
-		}
-	}
-	return CheckResult{
-		Name:    "Disk Space",
-		Status:  "ok",
-		Message: fmt.Sprintf("%.2f GB available", availableGB),
-	}
-}
+// The implementation is platform-specific; see tracker_doctor_unix.go and
+// tracker_doctor_windows.go.
 
 // checkPipelineFileLib parses and validates a pipeline file.
 func checkPipelineFileLib(pipelineFile string) CheckResult {
@@ -726,10 +718,10 @@ func checkPipelineFileLib(pipelineFile string) CheckResult {
 		out.Hint = fmt.Sprintf("check the file path: %s", pipelineFile)
 		return out
 	}
-	if !strings.HasSuffix(pipelineFile, ".dip") {
+	if !strings.HasSuffix(pipelineFile, ".dip") && !strings.HasSuffix(pipelineFile, ".dot") {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  "warn",
-			Message: fmt.Sprintf("%s is not a .dip file — may not be a valid pipeline", pipelineFile),
+			Message: fmt.Sprintf("%s is not a .dip or .dot file — may not be a valid pipeline", pipelineFile),
 		})
 	}
 	fileBytes, err := os.ReadFile(pipelineFile)

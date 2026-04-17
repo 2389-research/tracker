@@ -200,7 +200,9 @@ func enrichFromEntryNF(entry diagnoseEntryLib, failures map[string]*NodeFailure,
 	ts, _ := parseActivityTimestampLib(entry.Timestamp)
 	switch entry.Type {
 	case "stage_started":
-		stageStarts[entry.NodeID] = ts
+		if !ts.IsZero() {
+			stageStarts[entry.NodeID] = ts
+		}
 	case "stage_failed":
 		updateFailureTimingNF(failures[entry.NodeID], stageStarts, entry, ts)
 		sig := entry.Error + "\x00" + entry.ToolErr
@@ -227,7 +229,7 @@ func updateFailureTimingNF(f *NodeFailure, stageStarts map[string]time.Time, ent
 	if f == nil {
 		return
 	}
-	if start, ok := stageStarts[entry.NodeID]; ok && !ts.IsZero() {
+	if start, ok := stageStarts[entry.NodeID]; ok && !start.IsZero() && !ts.IsZero() {
 		f.Duration = ts.Sub(start)
 	}
 	if entry.Handler != "" {
