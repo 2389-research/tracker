@@ -235,15 +235,15 @@ func buildJSONEventHandlers(
 	llmClient *llm.Client,
 	logAgentEvent func(agent.Event),
 ) (agent.EventHandler, pipeline.PipelineEventHandler) {
-	stream := newJSONStream(os.Stdout)
+	stream := tracker.NewNDJSONWriter(os.Stdout)
 	if llmClient != nil {
-		llmClient.AddTraceObserver(stream.traceObserver())
+		llmClient.AddTraceObserver(stream.TraceObserver())
 	}
 	agentHandler := agent.EventHandlerFunc(func(evt agent.Event) {
 		logAgentEvent(evt)
-		stream.agentHandler().HandleEvent(evt)
+		stream.AgentHandler().HandleEvent(evt)
 	})
-	pipelineHandler := pipeline.PipelineMultiHandler(stream.pipelineHandler(), activityLog)
+	pipelineHandler := pipeline.PipelineMultiHandler(stream.PipelineHandler(), activityLog)
 	return agentHandler, pipelineHandler
 }
 

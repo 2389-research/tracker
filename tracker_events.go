@@ -1,6 +1,6 @@
-// ABOUTME: Unified NDJSON stream writer for --json mode.
-// ABOUTME: Streams pipeline events, LLM trace events, and agent events as typed JSON lines to stdout.
-package main
+// ABOUTME: Public NDJSON event writer for the tracker --json wire format.
+// ABOUTME: Threaded from pipeline/LLM/agent event streams; thread-safe for concurrent writers.
+package tracker
 
 import (
 	"encoding/json"
@@ -13,8 +13,9 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// jsonStreamEvent is the unified NDJSON output format for --json mode.
-type jsonStreamEvent struct {
+// NDJSONEvent is the stable wire format for the tracker --json mode. Field
+// tags are stable; new optional fields may be added without a major bump.
+type NDJSONEvent struct {
 	Timestamp string `json:"ts"`
 	Source    string `json:"source"`              // "pipeline", "llm", "agent"
 	Type      string `json:"type"`                // event type within source
@@ -28,17 +29,21 @@ type jsonStreamEvent struct {
 	Content   string `json:"content,omitempty"`   // text content (LLM output, tool output)
 }
 
-// jsonStream writes typed NDJSON events to an io.Writer. Thread-safe.
-type jsonStream struct {
+// NDJSONWriter is a thread-safe writer that serializes NDJSONEvents line by
+// line onto an io.Writer. Library consumers use it to produce the same
+// stream as the tracker CLI's --json mode.
+type NDJSONWriter struct {
 	mu sync.Mutex
 	w  io.Writer
 }
 
-func newJSONStream(w io.Writer) *jsonStream {
-	return &jsonStream{w: w}
+// NewNDJSONWriter returns a new writer backed by w.
+func NewNDJSONWriter(w io.Writer) *NDJSONWriter {
+	return &NDJSONWriter{w: w}
 }
 
-func (s *jsonStream) write(evt jsonStreamEvent) {
+// Write serializes evt as a JSON line. Safe to call from multiple goroutines.
+func (s *NDJSONWriter) Write(evt NDJSONEvent) {
 	data, err := json.Marshal(evt)
 	if err != nil {
 		return
@@ -49,10 +54,11 @@ func (s *jsonStream) write(evt jsonStreamEvent) {
 	_, _ = s.w.Write(data)
 }
 
-// pipelineHandler returns a PipelineEventHandler that writes to this stream.
-func (s *jsonStream) pipelineHandler() pipeline.PipelineEventHandler {
+// PipelineHandler returns a pipeline.PipelineEventHandler that writes events
+// to this stream.
+func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 	return pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
-		entry := jsonStreamEvent{
+		entry := NDJSONEvent{
 			Timestamp: evt.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
 			Source:    "pipeline",
 			Type:      string(evt.Type),
@@ -63,14 +69,14 @@ func (s *jsonStream) pipelineHandler() pipeline.PipelineEventHandler {
 		if evt.Err != nil {
 			entry.Error = evt.Err.Error()
 		}
-		s.write(entry)
+		s.Write(entry)
 	})
 }
 
-// traceObserver returns an LLM TraceObserver that writes to this stream.
-func (s *jsonStream) traceObserver() llm.TraceObserver {
+// TraceObserver returns an llm.TraceObserver that writes trace events to this stream.
+func (s *NDJSONWriter) TraceObserver() llm.TraceObserver {
 	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-		entry := jsonStreamEvent{
+		s.Write(NDJSONEvent{
 			Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
 			Source:    "llm",
 			Type:      string(evt.Kind),
@@ -78,40 +84,33 @@ func (s *jsonStream) traceObserver() llm.TraceObserver {
 			Model:     evt.Model,
 			ToolName:  evt.ToolName,
 			Content:   evt.Preview,
-		}
-		s.write(entry)
+		})
 	})
 }
 
-// agentHandler returns an agent EventHandler that writes to this stream.
-func (s *jsonStream) agentHandler() agent.EventHandler {
+// AgentHandler returns an agent.EventHandler that writes agent events to this stream.
+func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 	return agent.EventHandlerFunc(func(evt agent.Event) {
-		s.write(buildAgentStreamEntry(evt))
+		content := evt.ToolOutput
+		if content == "" {
+			content = evt.Text
+		}
+		entry := NDJSONEvent{
+			Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
+			Source:    "agent",
+			Type:      string(evt.Type),
+			NodeID:    evt.NodeID,
+			Provider:  evt.Provider,
+			Model:     evt.Model,
+			ToolName:  evt.ToolName,
+			Content:   content,
+		}
+		entry.Error = buildNDJSONEntryError(evt)
+		s.Write(entry)
 	})
 }
 
-// buildAgentStreamEntry converts an agent.Event to a jsonStreamEvent.
-func buildAgentStreamEntry(evt agent.Event) jsonStreamEvent {
-	content := evt.ToolOutput
-	if content == "" {
-		content = evt.Text
-	}
-	entry := jsonStreamEvent{
-		Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
-		Source:    "agent",
-		Type:      string(evt.Type),
-		NodeID:    evt.NodeID,
-		Provider:  evt.Provider,
-		Model:     evt.Model,
-		ToolName:  evt.ToolName,
-		Content:   content,
-	}
-	entry.Error = buildStreamEntryError(evt)
-	return entry
-}
-
-// buildStreamEntryError combines ToolError and Err into a single error string.
-func buildStreamEntryError(evt agent.Event) string {
+func buildNDJSONEntryError(evt agent.Event) string {
 	if evt.ToolError == "" && evt.Err == nil {
 		return ""
 	}

@@ -1,6 +1,6 @@
-// ABOUTME: Tests for the unified NDJSON stream writer used in --json mode.
-// ABOUTME: Verifies pipeline, LLM trace, and agent events serialize correctly as typed JSON lines.
-package main
+// ABOUTME: Tests for the public NDJSONWriter and NDJSONEvent types in the tracker package.
+// ABOUTME: Covers write, stable JSON tags, concurrency, and handler factory methods.
+package tracker
 
 import (
 	"bytes"
@@ -16,118 +16,90 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-func TestJSONStreamWriteProducesValidNDJSON(t *testing.T) {
+func TestNDJSONWriter_Write(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
+	w := NewNDJSONWriter(&buf)
+	w.Write(NDJSONEvent{Timestamp: "2026-04-17T10:00:00Z", Source: "pipeline", Type: "stage_started", NodeID: "N1"})
 
-	s.write(jsonStreamEvent{
-		Timestamp: "2026-03-14T10:00:00.000Z",
-		Source:    "pipeline",
-		Type:      "pipeline_started",
-		RunID:     "abc123",
-		Message:   "pipeline started",
-	})
-
-	line := strings.TrimSpace(buf.String())
-	var parsed jsonStreamEvent
-	if err := json.Unmarshal([]byte(line), &parsed); err != nil {
-		t.Fatalf("invalid JSON: %v\nraw: %s", err, line)
+	line := strings.TrimSuffix(buf.String(), "\n")
+	var got NDJSONEvent
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if parsed.Source != "pipeline" {
-		t.Errorf("source = %q, want pipeline", parsed.Source)
-	}
-	if parsed.RunID != "abc123" {
-		t.Errorf("run_id = %q, want abc123", parsed.RunID)
-	}
-	if parsed.Message != "pipeline started" {
-		t.Errorf("message = %q, want 'pipeline started'", parsed.Message)
+	if got.Source != "pipeline" || got.Type != "stage_started" || got.NodeID != "N1" {
+		t.Errorf("wrong event: %+v", got)
 	}
 }
 
-func TestJSONStreamOmitsEmptyFields(t *testing.T) {
+func TestNDJSONWriter_StableJSONTags(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
+	w := NewNDJSONWriter(&buf)
+	w.Write(NDJSONEvent{
+		Timestamp: "t", Source: "agent", Type: "tool_call",
+		RunID: "r1", NodeID: "n1", Message: "m", Error: "e",
+		Provider: "p", Model: "mo", ToolName: "tn", Content: "c",
+	})
+	want := `"ts":"t"`
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("missing stable tag %q in output: %s", want, buf.String())
+	}
+	for _, tag := range []string{`"source"`, `"type"`, `"run_id"`, `"node_id"`, `"message"`, `"error"`, `"provider"`, `"model"`, `"tool_name"`, `"content"`} {
+		if !strings.Contains(buf.String(), tag) {
+			t.Errorf("missing JSON tag %s in output", tag)
+		}
+	}
+}
 
-	s.write(jsonStreamEvent{
-		Timestamp: "2026-03-14T10:00:00.000Z",
+func TestNDJSONWriter_ConcurrentWrites(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewNDJSONWriter(&buf)
+
+	const n = 100
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			w.Write(NDJSONEvent{Timestamp: "t", Source: "pipeline", Type: "x"})
+		}()
+	}
+	wg.Wait()
+
+	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	if len(lines) != n {
+		t.Fatalf("got %d lines, want %d", len(lines), n)
+	}
+	for i, l := range lines {
+		var evt NDJSONEvent
+		if err := json.Unmarshal([]byte(l), &evt); err != nil {
+			t.Fatalf("line %d: unmarshal: %v; got %q", i, err, l)
+		}
+	}
+}
+
+func TestNDJSONWriter_OmitsEmptyFields(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewNDJSONWriter(&buf)
+	w.Write(NDJSONEvent{
+		Timestamp: "2026-04-17T10:00:00Z",
 		Source:    "llm",
 		Type:      "request_start",
 	})
 
 	line := strings.TrimSpace(buf.String())
-	// Fields with omitempty should not appear
-	if strings.Contains(line, `"run_id"`) {
-		t.Error("expected run_id to be omitted when empty")
-	}
-	if strings.Contains(line, `"error"`) {
-		t.Error("expected error to be omitted when empty")
-	}
-	if strings.Contains(line, `"node_id"`) {
-		t.Error("expected node_id to be omitted when empty")
-	}
-}
-
-func TestJSONStreamMultipleEventsProduceMultipleLines(t *testing.T) {
-	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-
-	for i := 0; i < 3; i++ {
-		s.write(jsonStreamEvent{
-			Timestamp: "2026-03-14T10:00:00.000Z",
-			Source:    "pipeline",
-			Type:      "test",
-		})
-	}
-
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(lines))
-	}
-	for i, line := range lines {
-		var evt jsonStreamEvent
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
-			t.Errorf("line %d: invalid JSON: %v", i, err)
+	for _, tag := range []string{`"run_id"`, `"error"`, `"node_id"`, `"message"`, `"provider"`, `"model"`, `"tool_name"`, `"content"`} {
+		if strings.Contains(line, tag) {
+			t.Errorf("expected %s to be omitted when empty, got: %s", tag, line)
 		}
 	}
 }
 
-func TestJSONStreamConcurrentWritesAreSafe(t *testing.T) {
+func TestNDJSONWriter_PipelineHandler(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-
-	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.write(jsonStreamEvent{
-				Timestamp: "2026-03-14T10:00:00.000Z",
-				Source:    "agent",
-				Type:      "concurrent",
-			})
-		}()
-	}
-	wg.Wait()
-
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 50 {
-		t.Fatalf("expected 50 lines, got %d", len(lines))
-	}
-	for i, line := range lines {
-		var evt jsonStreamEvent
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
-			t.Errorf("line %d: invalid JSON: %v", i, err)
-		}
-	}
-}
-
-func TestJSONStreamPipelineHandler(t *testing.T) {
-	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	handler := s.pipelineHandler()
+	w := NewNDJSONWriter(&buf)
+	handler := w.PipelineHandler()
 
 	ts := time.Date(2026, 3, 14, 10, 0, 0, 0, time.UTC)
-
 	handler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:      pipeline.EventPipelineStarted,
 		Timestamp: ts,
@@ -136,7 +108,7 @@ func TestJSONStreamPipelineHandler(t *testing.T) {
 		Message:   "started",
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -157,10 +129,10 @@ func TestJSONStreamPipelineHandler(t *testing.T) {
 	}
 }
 
-func TestJSONStreamPipelineHandlerWithError(t *testing.T) {
+func TestNDJSONWriter_PipelineHandlerWithError(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	handler := s.pipelineHandler()
+	w := NewNDJSONWriter(&buf)
+	handler := w.PipelineHandler()
 
 	handler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:      pipeline.EventPipelineFailed,
@@ -170,7 +142,7 @@ func TestJSONStreamPipelineHandlerWithError(t *testing.T) {
 		Err:       errors.New("context cancelled"),
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -179,10 +151,10 @@ func TestJSONStreamPipelineHandlerWithError(t *testing.T) {
 	}
 }
 
-func TestJSONStreamTraceObserver(t *testing.T) {
+func TestNDJSONWriter_TraceObserver(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	observer := s.traceObserver()
+	w := NewNDJSONWriter(&buf)
+	observer := w.TraceObserver()
 
 	observer.HandleTraceEvent(llm.TraceEvent{
 		Kind:     llm.TraceRequestStart,
@@ -191,7 +163,7 @@ func TestJSONStreamTraceObserver(t *testing.T) {
 		Preview:  "hello world",
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -209,10 +181,10 @@ func TestJSONStreamTraceObserver(t *testing.T) {
 	}
 }
 
-func TestJSONStreamTraceObserverWithToolName(t *testing.T) {
+func TestNDJSONWriter_TraceObserverWithToolName(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	observer := s.traceObserver()
+	w := NewNDJSONWriter(&buf)
+	observer := w.TraceObserver()
 
 	observer.HandleTraceEvent(llm.TraceEvent{
 		Kind:     llm.TraceToolPrepare,
@@ -221,7 +193,7 @@ func TestJSONStreamTraceObserverWithToolName(t *testing.T) {
 		ToolName: "execute_command",
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -230,10 +202,10 @@ func TestJSONStreamTraceObserverWithToolName(t *testing.T) {
 	}
 }
 
-func TestJSONStreamAgentHandler(t *testing.T) {
+func TestNDJSONWriter_AgentHandler(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	handler := s.agentHandler()
+	w := NewNDJSONWriter(&buf)
+	handler := w.AgentHandler()
 
 	handler.HandleEvent(agent.Event{
 		Type:       agent.EventToolCallEnd,
@@ -243,7 +215,7 @@ func TestJSONStreamAgentHandler(t *testing.T) {
 		ToolOutput: "file contents here",
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -261,17 +233,17 @@ func TestJSONStreamAgentHandler(t *testing.T) {
 	}
 }
 
-func TestJSONStreamAgentHandlerFallsBackToText(t *testing.T) {
+func TestNDJSONWriter_AgentHandlerFallsBackToText(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	handler := s.agentHandler()
+	w := NewNDJSONWriter(&buf)
+	handler := w.AgentHandler()
 
 	handler.HandleEvent(agent.Event{
 		Type: agent.EventTextDelta,
 		Text: "thinking about the problem",
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -280,10 +252,10 @@ func TestJSONStreamAgentHandlerFallsBackToText(t *testing.T) {
 	}
 }
 
-func TestJSONStreamAgentHandlerWithToolError(t *testing.T) {
+func TestNDJSONWriter_AgentHandlerWithToolError(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	handler := s.agentHandler()
+	w := NewNDJSONWriter(&buf)
+	handler := w.AgentHandler()
 
 	handler.HandleEvent(agent.Event{
 		Type:      agent.EventToolCallEnd,
@@ -291,7 +263,7 @@ func TestJSONStreamAgentHandlerWithToolError(t *testing.T) {
 		ToolError: "command timed out",
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -300,10 +272,10 @@ func TestJSONStreamAgentHandlerWithToolError(t *testing.T) {
 	}
 }
 
-func TestJSONStreamAgentHandlerCombinesErrors(t *testing.T) {
+func TestNDJSONWriter_AgentHandlerCombinesErrors(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	handler := s.agentHandler()
+	w := NewNDJSONWriter(&buf)
+	handler := w.AgentHandler()
 
 	handler.HandleEvent(agent.Event{
 		Type:      agent.EventToolCallEnd,
@@ -312,7 +284,7 @@ func TestJSONStreamAgentHandlerCombinesErrors(t *testing.T) {
 		Err:       errors.New("process killed"),
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -321,17 +293,17 @@ func TestJSONStreamAgentHandlerCombinesErrors(t *testing.T) {
 	}
 }
 
-func TestJSONStreamAgentHandlerErrorOnlyFromErr(t *testing.T) {
+func TestNDJSONWriter_AgentHandlerErrorOnlyFromErr(t *testing.T) {
 	var buf bytes.Buffer
-	s := newJSONStream(&buf)
-	handler := s.agentHandler()
+	w := NewNDJSONWriter(&buf)
+	handler := w.AgentHandler()
 
 	handler.HandleEvent(agent.Event{
 		Type: agent.EventError,
 		Err:  errors.New("session failed"),
 	})
 
-	var evt jsonStreamEvent
+	var evt NDJSONEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
