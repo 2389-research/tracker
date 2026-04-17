@@ -69,6 +69,12 @@ const (
 )
 
 // Diagnose analyzes a run directory and returns a structured report.
+//
+// The runDir argument must be a trusted path — Diagnose reads
+// checkpoint.json, activity.jsonl, and every <nodeID>/status.json
+// under it. For user-supplied input, resolve the path via
+// ResolveRunDir or DiagnoseMostRecent first, which enforce the
+// .tracker/runs/<runID> layout.
 func Diagnose(runDir string) (*DiagnoseReport, error) {
 	cpPath := filepath.Join(runDir, "checkpoint.json")
 	cp, err := pipeline.LoadCheckpoint(cpPath)
@@ -191,7 +197,7 @@ func parseActivityLinesForDiagnose(data string, failures map[string]*NodeFailure
 }
 
 func enrichFromEntryNF(entry diagnoseEntryLib, failures map[string]*NodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
-	ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+	ts, _ := parseActivityTimestampLib(entry.Timestamp)
 	switch entry.Type {
 	case "stage_started":
 		stageStarts[entry.NodeID] = ts

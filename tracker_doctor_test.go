@@ -10,8 +10,7 @@ import (
 
 func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
 	workdir := t.TempDir()
-	must(t, os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-12345678901234567890"))
-	t.Cleanup(func() { os.Unsetenv("ANTHROPIC_API_KEY") })
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-12345678901234567890")
 
 	r, err := Doctor(DoctorConfig{WorkDir: workdir, ProbeProviders: false})
 	if err != nil {
@@ -34,7 +33,7 @@ func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
 func TestDoctor_NoProviderKeys(t *testing.T) {
 	workdir := t.TempDir()
 	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY"} {
-		os.Unsetenv(k)
+		t.Setenv(k, "")
 	}
 
 	r, err := Doctor(DoctorConfig{WorkDir: workdir, ProbeProviders: false})

@@ -65,7 +65,7 @@ type CheckResult struct {
 // CheckDetail is one sub-line within a CheckResult — used for per-item
 // status lines (per-provider, per-binary, per-subdirectory).
 type CheckDetail struct {
-	Status  string `json:"status"` // "ok" | "warn" | "error"
+	Status  string `json:"status"` // "ok" | "warn" | "error" | "hint" — "hint" is used for informational sub-items (e.g. optional providers not configured)
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
 }

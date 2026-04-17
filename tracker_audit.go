@@ -63,6 +63,11 @@ type RunSummary struct {
 
 // Audit reads checkpoint.json and activity.jsonl under runDir and returns a
 // structured report.
+//
+// The runDir argument must be a trusted path — Audit reads checkpoint.json
+// and activity.jsonl directly under it. For user-supplied input, resolve
+// the path via ResolveRunDir or use MostRecentRunID first, which enforce
+// the .tracker/runs/<runID> layout.
 func Audit(runDir string) (*AuditReport, error) {
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
 	if err != nil {

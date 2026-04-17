@@ -240,7 +240,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
-	fmt.Fprintf(w, "  tracker doctor [--probe] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
+	fmt.Fprintf(w, "  tracker doctor [--probe=false] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
 	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
 	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")
 	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")
