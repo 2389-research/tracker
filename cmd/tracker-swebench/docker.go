@@ -191,6 +191,26 @@ type DockerRunner struct {
 	MemoryMB  int     // container memory limit in MB (0 = no limit)
 	CPUs      float64 // container CPU limit (0 = no limit)
 	PidsLimit int     // container PID limit (0 = no limit)
+	RunLabel  string  // label value for orphan cleanup (e.g., run timestamp)
+}
+
+// CleanupStale removes any containers with the swebench label from prior runs.
+func (r *DockerRunner) CleanupStale(ctx context.Context) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+		"--filter", "label=swebench",
+		"--format", "{{.Names}}")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return // best-effort
+	}
+	for _, name := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if name == "" {
+			continue
+		}
+		log.Printf("cleaning up stale container: %s", name)
+		_ = dockerCmd(ctx, "rm", "-f", name)
+	}
 }
 
 // RunInstance creates a container, runs the agent, captures the diff patch, then cleans up.
@@ -212,7 +232,7 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}()
 
 	// Step 1: Create the container.
-	createArgs := []string{"create", "--name", name}
+	createArgs := []string{"create", "--name", name, "--label", "swebench=" + r.RunLabel}
 	if r.CacheDir != "" {
 		createArgs = append(createArgs, "-v", r.CacheDir+":/cache:ro")
 	}

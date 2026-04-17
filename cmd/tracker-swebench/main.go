@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -85,6 +86,10 @@ func main() {
 	}
 	defer rw.Close()
 
+	// Handle Ctrl+C and SIGTERM gracefully.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Create Docker runner.
 	docker := &DockerRunner{
 		Image:     *dockerImage,
@@ -93,7 +98,11 @@ func main() {
 		MemoryMB:  4096, // 4 GB
 		CPUs:      2.0,
 		PidsLimit: 512,
+		RunLabel:  time.Now().Format("20060102-150405"),
 	}
+
+	// Clean up orphaned containers from prior crashed runs.
+	docker.CleanupStale(ctx)
 
 	// Build base agent environment map.
 	agentEnv := map[string]string{
@@ -112,10 +121,6 @@ func main() {
 	if v := os.Getenv("OPENAI_API_KEY"); v != "" {
 		agentEnv["OPENAI_API_KEY"] = v
 	}
-
-	// Handle Ctrl+C gracefully.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 
 	stats := RunStats{
 		Total:     len(instances),
