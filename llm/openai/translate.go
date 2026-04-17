@@ -44,19 +44,55 @@ type openaiTextFormat struct {
 }
 
 // openaiInput represents a single item in the flat input array.
+//
+// The OpenAI Responses API input array is a discriminated union keyed by
+// Type (empty Type = role-based message). MarshalJSON emits only the
+// fields valid for the item's discriminator, with each type's required
+// fields always present — never stripped by omitempty. This matters for
+// strict validators (OpenRouter's Zod schema, issue #114) that reject a
+// function_call_output with a missing `output` field when a tool returned
+// an empty string, or a function_call with missing `arguments`.
 type openaiInput struct {
-	// Common fields
-	Role string `json:"role,omitempty"`
-	// For user/assistant messages
-	Content string `json:"content,omitempty"`
-	// For function_call items (tool invocations from the model)
-	Type      string `json:"type,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	// For function_call_output items (tool results)
-	CallID string `json:"call_id,omitempty"`
-	Output string `json:"output,omitempty"`
+	// Role-message fields (Type == "")
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Discriminator
+	Type string `json:"type"`
+	// function_call fields
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	// function_call / function_call_output shared
+	CallID string `json:"call_id"`
+	// function_call_output field
+	Output string `json:"output"`
+}
+
+// MarshalJSON serializes an openaiInput using only the fields required for
+// the item's type. Required fields are always emitted (no omitempty) so
+// strict validators cannot reject the request for missing fields when a
+// value happens to be an empty string.
+func (i openaiInput) MarshalJSON() ([]byte, error) {
+	switch i.Type {
+	case "function_call":
+		return json.Marshal(struct {
+			Type      string `json:"type"`
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{i.Type, i.CallID, i.Name, i.Arguments})
+	case "function_call_output":
+		return json.Marshal(struct {
+			Type   string `json:"type"`
+			CallID string `json:"call_id"`
+			Output string `json:"output"`
+		}{i.Type, i.CallID, i.Output})
+	default:
+		// Role-based message (user / assistant / system / developer).
+		return json.Marshal(struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{i.Role, i.Content})
+	}
 }
 
 type openaiTool struct {

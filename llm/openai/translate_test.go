@@ -238,3 +238,85 @@ func TestTranslateRequestMultiTurnToolCall(t *testing.T) {
 		t.Errorf("input length = %d, want 4 (user, assistant_text, function_call, function_call_output)", len(input))
 	}
 }
+
+// TestTranslateRequest_EmptyToolResult_KeepsOutputField verifies that a
+// function_call_output item always serializes the `output` field, even when
+// the tool returned an empty string. OpenRouter's strict Zod validator for
+// the OpenAI Responses API rejects the request when `output` is missing
+// (issue #114). OpenAI itself is lenient and accepts it, so this bug only
+// surfaces on OpenRouter and OpenRouter-proxied models (GLM, Qwen, Kimi).
+func TestTranslateRequest_EmptyToolResult_KeepsOutputField(t *testing.T) {
+	req := &llm.Request{
+		Model: "openai/gpt-4.1",
+		Messages: []llm.Message{
+			llm.UserMessage("call the tool"),
+			llm.ToolResultMessage("call_empty", "", false),
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	input := raw["input"].([]any)
+	fco := input[1].(map[string]any)
+	if fco["type"] != "function_call_output" {
+		t.Fatalf("expected function_call_output, got %v", fco["type"])
+	}
+	out, present := fco["output"]
+	if !present {
+		t.Fatal("output field must be present on function_call_output items " +
+			"(required by OpenAI Responses API; OpenRouter rejects if missing)")
+	}
+	if out != "" {
+		t.Errorf("output = %v, want empty string", out)
+	}
+}
+
+// TestTranslateRequest_EmptyArguments_KeepsArgumentsField verifies that a
+// function_call item always serializes the `arguments` field as a string.
+// A no-argument tool call produces an empty string, which the Responses API
+// spec requires to be present — strict validators reject `undefined`.
+func TestTranslateRequest_EmptyArguments_KeepsArgumentsField(t *testing.T) {
+	req := &llm.Request{
+		Model: "openai/gpt-4.1",
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{
+						ID:   "call_noargs",
+						Name: "pwd",
+						// Arguments is nil → becomes empty string after string(...)
+					}},
+				},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatalf("translateRequest: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	input := raw["input"].([]any)
+	fc := input[0].(map[string]any)
+	if fc["type"] != "function_call" {
+		t.Fatalf("expected function_call, got %v", fc["type"])
+	}
+	if _, present := fc["name"]; !present {
+		t.Error("name field must be present on function_call items")
+	}
+	if _, present := fc["arguments"]; !present {
+		t.Error("arguments field must be present on function_call items (empty string is OK, undefined is not)")
+	}
+}
