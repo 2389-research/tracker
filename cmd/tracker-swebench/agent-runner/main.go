@@ -1,73 +1,173 @@
-// ABOUTME: agent-runner binary for executing a tracker coding agent inside a SWE-bench Docker container.
-// ABOUTME: Reads config from environment variables, runs the agent against a repo, and writes a JSON summary.
+// ABOUTME: In-container agent binary for SWE-bench evaluation harness.
+// ABOUTME: Creates an agent.Session directly to fix GitHub issues inside Docker containers.
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"log"
 	"os"
 	"strconv"
 	"time"
+
+	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/agent"
+	agentexec "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/llm"
 )
 
-// swebenchSystemPrompt is the system prompt given to the coding agent for SWE-bench tasks.
-const swebenchSystemPrompt = `You are an expert software engineer solving a GitHub issue.
-You have access to the repository checked out at the configured repo directory.
-Read the problem statement carefully, explore the codebase, reproduce the issue if possible,
-implement a minimal fix, and verify it with existing tests. Do not add unnecessary changes.
-Focus only on the specific issue described. When done, your changes will be captured as a git diff.`
+const swebenchSystemPrompt = `You are an expert software engineer tasked with fixing a GitHub issue.
 
-// agentConfig holds the runtime configuration for one agent-runner invocation.
-type agentConfig struct {
+You have access to the repository at /workspace. The repository is already
+checked out at the correct commit.
+
+## Your task
+Fix the issue described below. Make the minimal changes necessary to resolve
+the issue. Do not refactor unrelated code.
+
+## Approach
+1. Read the issue carefully. Understand what's broken and what the expected behavior is.
+2. Explore the relevant code. Use grep_search and glob to find the right files.
+3. Write a fix. Make targeted edits — smallest diff that solves the problem.
+4. Run the existing test suite to verify your fix doesn't break anything.
+5. If there are specific test commands mentioned in the issue, run those.
+
+## Rules
+- Do NOT create new test files. The evaluation uses the repo's existing test suite.
+- Do NOT modify test files unless the issue specifically requires it.
+- Keep your changes minimal and focused.
+- If you're unsure about the fix, read more code before editing.`
+
+type runnerConfig struct {
 	Instance string
 	RepoDir  string
 	Model    string
 	Provider string
 	MaxTurns int
 	Timeout  time.Duration
-	Prompt   string
 }
 
-// parseConfig reads agent configuration from environment variables with sensible defaults.
-func parseConfig() agentConfig {
-	cfg := agentConfig{
+// parseConfig reads runner configuration from environment variables,
+// falling back to sensible defaults for all optional fields.
+func parseConfig() runnerConfig {
+	cfg := runnerConfig{
 		Instance: os.Getenv("SWEBENCH_INSTANCE"),
-		RepoDir:  envOrDefault("SWEBENCH_REPO_DIR", "/workspace"),
-		Model:    envOrDefault("SWEBENCH_MODEL", "claude-sonnet-4-6"),
-		Provider: envOrDefault("SWEBENCH_PROVIDER", "anthropic"),
-		MaxTurns: envIntOrDefault("SWEBENCH_MAX_TURNS", 50),
-		Timeout:  envDurationOrDefault("SWEBENCH_TIMEOUT", 10*time.Minute),
-		Prompt:   os.Getenv("SWEBENCH_PROMPT"),
+		RepoDir:  "/workspace",
+		Model:    "claude-sonnet-4-6",
+		Provider: "anthropic",
+		MaxTurns: 50,
+		Timeout:  10 * time.Minute,
 	}
+
+	if v := os.Getenv("SWEBENCH_REPO_DIR"); v != "" {
+		cfg.RepoDir = v
+	}
+	if v := os.Getenv("SWEBENCH_MODEL"); v != "" {
+		cfg.Model = v
+	}
+	if v := os.Getenv("SWEBENCH_PROVIDER"); v != "" {
+		cfg.Provider = v
+	}
+	if v := os.Getenv("SWEBENCH_MAX_TURNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MaxTurns = n
+		}
+	}
+	if v := os.Getenv("SWEBENCH_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Timeout = d
+		}
+	}
+
 	return cfg
 }
 
-// envOrDefault returns the value of the named env var, or def if empty.
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-// envIntOrDefault returns the int value of the named env var, or def if empty or invalid.
-func envIntOrDefault(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
-}
-
-// envDurationOrDefault returns the duration value of the named env var, or def if empty or invalid.
-func envDurationOrDefault(key string, def time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-	}
-	return def
+type agentSummary struct {
+	Turns        int   `json:"turns"`
+	InputTokens  int   `json:"input_tokens"`
+	OutputTokens int   `json:"output_tokens"`
+	DurationMs   int64 `json:"duration_ms"`
 }
 
 func main() {
-	// TODO: implement full agent-runner execution loop
+	cfg := parseConfig()
+	if cfg.Instance == "" {
+		log.Fatal("SWEBENCH_INSTANCE must be set")
+	}
+
+	baseURL := tracker.ResolveProviderBaseURL(cfg.Provider)
+
+	client, err := buildLLMClient(cfg.Provider, baseURL)
+	if err != nil {
+		log.Fatalf("failed to build LLM client: %v", err)
+	}
+	defer client.Close()
+
+	sessionCfg := agent.DefaultConfig()
+	sessionCfg.Model = cfg.Model
+	sessionCfg.Provider = cfg.Provider
+	sessionCfg.MaxTurns = cfg.MaxTurns
+	sessionCfg.CommandTimeout = 30 * time.Second
+	sessionCfg.MaxCommandTimeout = 5 * time.Minute
+	sessionCfg.ContextCompaction = agent.CompactionAuto
+	sessionCfg.CompactionThreshold = 0.7
+	sessionCfg.ReflectOnError = true
+	sessionCfg.WorkingDir = cfg.RepoDir
+	sessionCfg.SystemPrompt = swebenchSystemPrompt
+
+	env := agentexec.NewLocalEnvironment(cfg.RepoDir)
+
+	sess, err := agent.NewSession(client, sessionCfg, agent.WithEnvironment(env))
+	if err != nil {
+		log.Fatalf("failed to create agent session: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	defer cancel()
+
+	start := time.Now()
+	result, err := sess.Run(ctx, cfg.Instance)
+	elapsed := time.Since(start)
+
+	summary := agentSummary{
+		DurationMs: elapsed.Milliseconds(),
+	}
+	if result.Turns > 0 {
+		summary.Turns = result.Turns
+		summary.InputTokens = result.Usage.InputTokens
+		summary.OutputTokens = result.Usage.OutputTokens
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.Encode(summary)
+
+	if err != nil {
+		log.Fatalf("agent session failed: %v", err)
+	}
+}
+
+// buildLLMClient creates a single-provider LLM client with retry middleware.
+func buildLLMClient(provider, baseURL string) (*llm.Client, error) {
+	constructors := map[string]func(string) (llm.ProviderAdapter, error){
+		provider: func(key string) (llm.ProviderAdapter, error) {
+			switch provider {
+			case "openai":
+				return newOpenAIAdapter(key, baseURL)
+			default:
+				return newAnthropicAdapter(key, baseURL)
+			}
+		},
+	}
+
+	client, err := llm.NewClientFromEnv(constructors)
+	if err != nil {
+		return nil, err
+	}
+
+	client.AddMiddleware(llm.NewRetryMiddleware(
+		llm.WithMaxRetries(3),
+		llm.WithBaseDelay(2*time.Second),
+	))
+
+	return client, nil
 }
