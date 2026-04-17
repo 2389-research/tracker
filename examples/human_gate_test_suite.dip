@@ -46,7 +46,7 @@ workflow HumanGateTestSuite
 
   human ChoiceGate
     label: "Pick a direction"
-    default_choice: North
+    default: North
 
   tool NorthPath
     label: "North"
@@ -237,7 +237,7 @@ workflow HumanGateTestSuite
   human DefaultTimedGate
     label: "Pick quickly or get the default! (10s)"
     timeout: 10s
-    default_choice: Safe
+    default: Safe
 
   tool SafePath
     label: "Safe"
