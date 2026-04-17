@@ -3,6 +3,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,5 +72,15 @@ func TestParseConfig_FromEnv(t *testing.T) {
 func TestSystemPrompt(t *testing.T) {
 	if swebenchSystemPrompt == "" {
 		t.Error("swebenchSystemPrompt must not be empty")
+	}
+}
+
+func TestBuildLLMClient_UnsupportedProvider(t *testing.T) {
+	_, err := buildLLMClient("gemini", "")
+	if err == nil {
+		t.Fatal("expected error for unsupported provider, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported provider") {
+		t.Errorf("expected 'unsupported provider' in error, got: %v", err)
 	}
 }

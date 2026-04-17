@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -84,8 +85,8 @@ func parseConfig() runnerConfig {
 
 type agentSummary struct {
 	Turns        int   `json:"turns"`
-	InputTokens  int   `json:"input_tokens"`
-	OutputTokens int   `json:"output_tokens"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
 	DurationMs   int64 `json:"duration_ms"`
 }
 
@@ -134,12 +135,14 @@ func main() {
 	}
 	if result.Turns > 0 {
 		summary.Turns = result.Turns
-		summary.InputTokens = result.Usage.InputTokens
-		summary.OutputTokens = result.Usage.OutputTokens
+		summary.InputTokens = int64(result.Usage.InputTokens)
+		summary.OutputTokens = int64(result.Usage.OutputTokens)
 	}
 
 	enc := json.NewEncoder(os.Stdout)
-	enc.Encode(summary)
+	if encErr := enc.Encode(summary); encErr != nil {
+		log.Printf("failed to encode summary: %v", encErr)
+	}
 
 	if err != nil {
 		log.Fatalf("agent session failed: %v", err)
@@ -148,6 +151,14 @@ func main() {
 
 // buildLLMClient creates a single-provider LLM client with retry middleware.
 func buildLLMClient(provider, baseURL string) (*llm.Client, error) {
+	// Validate provider upfront.
+	switch provider {
+	case "anthropic", "openai":
+		// supported
+	default:
+		return nil, fmt.Errorf("unsupported provider %q: must be \"anthropic\" or \"openai\"", provider)
+	}
+
 	constructors := map[string]func(string) (llm.ProviderAdapter, error){
 		provider: func(key string) (llm.ProviderAdapter, error) {
 			switch provider {
