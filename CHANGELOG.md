@@ -12,11 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Library API hardening for v1.0** (#102, #103, #104, #106, #109):
   - Typed enum-like strings for `CheckStatus` and `SuggestionKind` so consumers can switch-exhaust. Existing constants (`SuggestionRetryPattern`, etc.) retain their underlying string values.
   - `tracker.WithVersionInfo(version, commit)` functional option replaces the CLI-only `DoctorConfig.TrackerVersion` / `TrackerCommit` fields.
-  - `DoctorConfig.LogWriter` / `DiagnoseConfig.LogWriter` / `AuditConfig.LogWriter` — optional `io.Writer` for non-fatal parse warnings. Nil is treated as `io.Discard` so library callers no longer see stray warnings on `os.Stderr`. The `tracker` CLI sets this to `io.Discard` for user-facing commands.
+  - `DiagnoseConfig.LogWriter` / `AuditConfig.LogWriter` — optional `io.Writer` for non-fatal parse warnings. Nil is treated as `io.Discard` so library callers no longer see stray warnings on `os.Stderr`. The `tracker` CLI sets this to `io.Discard` for user-facing commands. `Doctor` has no warnings to suppress so it deliberately does not carry a `LogWriter` field.
   - `Doctor`, `Diagnose`, `DiagnoseMostRecent`, `Audit`, `Simulate` now accept `context.Context`, honored by provider probes and binary version lookups. `getBinaryVersion` now uses `exec.CommandContext` with a 5-second timeout, matching `getDippinVersion`.
   - Provider probe error bodies are now sanitized (API keys and bearer tokens stripped) before they land in `CheckDetail.Message`.
-  - `NDJSON` handler closures (pipeline, agent, LLM trace) now `recover()` from panics in the underlying writer so a misbehaving sink cannot crash the caller goroutine.
-  - `Diagnose` now streams `activity.jsonl` with `bufio.Scanner` instead of `os.ReadFile` → `strings.Split`, matching `LoadActivityLog` and avoiding a memory spike on large runs.
+  - `NDJSON` handler closures (pipeline, agent, LLM trace) now `recover()` from panics in the underlying writer so a misbehaving sink cannot crash the caller goroutine. Panic suppression is per-`NDJSONWriter` instance (not package-level), so one misbehaving sink cannot silence unrelated writers in the same process.
+  - `Diagnose` now streams `activity.jsonl` with `bufio.Scanner` instead of `os.ReadFile` → `strings.Split`, matching `LoadActivityLog` and avoiding a memory spike on large runs. Scanner errors (1 MB line-length overflow, I/O) and `ctx.Err()` now propagate out of `Diagnose` as a real error — partial reports are never returned as success, so automation with deadlines can distinguish complete from truncated analysis.
 
 ### Changed
 

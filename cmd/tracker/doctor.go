@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,7 +79,6 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 		Backend:        cfg.backend,
 		ProbeProviders: cfg.probe,
 		PipelineFile:   cfg.pipelineFile,
-		LogWriter:      io.Discard,
 	}, tracker.WithVersionInfo(version, commit))
 	if err != nil {
 		return err

@@ -80,12 +80,11 @@ type RunSummary struct {
 // the path via ResolveRunDir or use MostRecentRunID first, which enforce
 // the .tracker/runs/<runID> layout.
 //
-// ctx is accepted for future extensibility. A nil context is treated as
-// context.Background().
+// ctx is accepted for future extensibility (cancellation of checkpoint or
+// activity log parsing). It is currently unused but part of the public
+// signature so callers do not need to re-thread it later.
 func Audit(ctx context.Context, runDir string, opts ...AuditConfig) (*AuditReport, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	_ = ctx                    // reserved for future cancellation plumbing
 	_ = firstAuditConfig(opts) // reserved for future fields
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
 	if err != nil {

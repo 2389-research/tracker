@@ -384,3 +384,27 @@ func TestNDJSONWriter_TraceObserver_PanicRecovery(t *testing.T) {
 	w := NewNDJSONWriter(&panicWriter{})
 	w.TraceObserver().HandleTraceEvent(llm.TraceEvent{Kind: llm.TraceRequestStart})
 }
+
+// TestNDJSONWriter_PanicSuppressionIsPerInstance verifies that one writer
+// recovering from a panic does not silence panic logging on a separate
+// writer instance. Both writers must independently report their first
+// panic; regressions here mean package-level state re-crept in.
+func TestNDJSONWriter_PanicSuppressionIsPerInstance(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("handlers should recover, got: %v", r)
+		}
+	}()
+	w1 := NewNDJSONWriter(&panicWriter{})
+	w2 := NewNDJSONWriter(&panicWriter{})
+	// First panic on w1 — must not consume w2's Once.
+	w1.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventPipelineStarted,
+		Timestamp: time.Now(),
+	})
+	// Second panic on w2 — still the first on its own instance.
+	w2.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventPipelineStarted,
+		Timestamp: time.Now(),
+	})
+}

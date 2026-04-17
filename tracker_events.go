@@ -44,9 +44,10 @@ type StreamEvent struct {
 // (network socket, pipe), wrap it in a bufio.Writer or a channel-backed
 // forwarder to decouple producers from the slow sink.
 type NDJSONWriter struct {
-	mu      sync.Mutex
-	w       io.Writer
-	errOnce sync.Once
+	mu        sync.Mutex
+	w         io.Writer
+	errOnce   sync.Once
+	panicOnce sync.Once
 }
 
 // NewNDJSONWriter returns a new writer backed by w.
@@ -78,11 +79,11 @@ func (s *NDJSONWriter) Write(evt StreamEvent) error {
 
 // PipelineHandler returns a pipeline.PipelineEventHandler that writes events
 // to this stream. Panics in the underlying writer are recovered and logged
-// to os.Stderr once so a misbehaving sink cannot crash the pipeline
-// goroutine.
+// to os.Stderr once (per writer instance) so a misbehaving sink cannot
+// crash the pipeline goroutine.
 func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 	return pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
-		defer recoverNDJSONPanic("pipeline")
+		defer s.recoverPanic("pipeline")
 		entry := StreamEvent{
 			Timestamp: evt.Timestamp.Format(ndjsonTimestampLayout),
 			Source:    "pipeline",
@@ -103,7 +104,7 @@ func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 // PipelineHandler).
 func (s *NDJSONWriter) TraceObserver() llm.TraceObserver {
 	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-		defer recoverNDJSONPanic("llm")
+		defer s.recoverPanic("llm")
 		_ = s.Write(StreamEvent{
 			Timestamp: time.Now().Format(ndjsonTimestampLayout),
 			Source:    "llm",
@@ -121,7 +122,7 @@ func (s *NDJSONWriter) TraceObserver() llm.TraceObserver {
 // PipelineHandler).
 func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 	return agent.EventHandlerFunc(func(evt agent.Event) {
-		defer recoverNDJSONPanic("agent")
+		defer s.recoverPanic("agent")
 		content := evt.ToolOutput
 		if content == "" {
 			content = evt.Text
@@ -145,11 +146,14 @@ func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 	})
 }
 
-var ndjsonPanicOnce sync.Once
-
-func recoverNDJSONPanic(source string) {
+// recoverPanic recovers from a handler panic and logs the first occurrence
+// per writer instance. Using a per-instance sync.Once (not package-level)
+// means multiple NDJSONWriter instances (e.g., different runs streaming to
+// different sinks) each get their own suppression state, so one misbehaving
+// sink does not silence unrelated panics elsewhere in the process.
+func (s *NDJSONWriter) recoverPanic(source string) {
 	if r := recover(); r != nil {
-		ndjsonPanicOnce.Do(func() {
+		s.panicOnce.Do(func() {
 			fmt.Fprintf(os.Stderr, "tracker: NDJSON %s handler recovered from panic: %v (further panics suppressed)\n", source, r)
 		})
 	}

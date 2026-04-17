@@ -5,7 +5,6 @@ package tracker
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,12 +37,6 @@ type DoctorConfig struct {
 	// PipelineFile, when non-empty, adds a "Pipeline File" check that parses
 	// and validates the given .dip / .dot file.
 	PipelineFile string
-	// LogWriter receives non-fatal parse warnings (bad status.json,
-	// unreadable activity.jsonl, etc.). Nil is treated as io.Discard so
-	// embedded library callers do not see warnings on os.Stderr. The
-	// tracker CLI sets this to os.Stderr for factory/webhook consumers
-	// and io.Discard for user-facing commands.
-	LogWriter io.Writer
 	// versionInfo is populated by WithVersionInfo. Unexported so callers
 	// use the functional option rather than setting CLI-specific fields.
 	versionInfo versionInfo

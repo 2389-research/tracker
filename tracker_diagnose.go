@@ -94,9 +94,10 @@ const (
 // ResolveRunDir or DiagnoseMostRecent first, which enforce the
 // .tracker/runs/<runID> layout.
 //
-// ctx is accepted for future extensibility (cancellation of long parses);
-// current callers may pass context.Background(). A nil context is treated
-// as context.Background().
+// If ctx is cancelled mid-parse, Diagnose returns ctx.Err() — a partial
+// report is never returned as a success, so callers using deadlines can
+// distinguish complete from truncated analysis. A nil ctx is treated as
+// context.Background() (no cancellation possible).
 func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*DiagnoseReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -114,7 +115,11 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 		CompletedNodes: len(cp.CompletedNodes),
 	}
 	failures := collectNodeFailures(runDir, logW)
-	report.BudgetHalt = enrichFromActivity(ctx, runDir, failures)
+	halt, err := enrichFromActivity(ctx, runDir, failures, logW)
+	if err != nil {
+		return nil, err
+	}
+	report.BudgetHalt = halt
 	report.Failures = sortedFailures(failures)
 	report.Suggestions = buildSuggestions(report.Failures, report.BudgetHalt)
 	return report, nil
@@ -201,11 +206,20 @@ type diagnoseEntry struct {
 	WallElapsedMs int64   `json:"wall_elapsed_ms"`
 }
 
-func enrichFromActivity(ctx context.Context, runDir string, failures map[string]*NodeFailure) *BudgetHalt {
+// enrichFromActivity streams activity.jsonl, populating failures + detecting
+// budget halt events. Returns (nil, nil) if activity.jsonl does not exist
+// (runs that never started). Returns ctx.Err() if cancellation fires
+// mid-parse, and scanner.Err() if the scanner aborts (buffer overflow at
+// 1 MB, I/O error) — both surface truncation to the caller so partial
+// analysis is never silently treated as authoritative.
+func enrichFromActivity(ctx context.Context, runDir string, failures map[string]*NodeFailure, logW io.Writer) (*BudgetHalt, error) {
 	path := filepath.Join(runDir, "activity.jsonl")
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open activity log: %w", err)
 	}
 	defer f.Close()
 
@@ -217,8 +231,8 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 	// Match LoadActivityLog: allow 1 MB lines.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		if ctx.Err() != nil {
-			break
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -238,8 +252,12 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(logW, "warning: activity log scanner stopped at %s: %v\n", path, err)
+		return nil, fmt.Errorf("scan activity log: %w", err)
+	}
 	applyRetryAnalysis(failures, failSignatures)
-	return halt
+	return halt, nil
 }
 
 func enrichFromEntry(entry diagnoseEntry, failures map[string]*NodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {

@@ -588,7 +588,7 @@ for _, s := range report.Suggestions {
 }
 ```
 
-`tracker.Audit`, `tracker.Simulate`, and `tracker.Doctor` follow the same pattern and return JSON-serializable reports. All four accept `context.Context` as their first argument and an optional config struct (`AuditConfig`, `DiagnoseConfig`, `DoctorConfig`) with a `LogWriter` for non-fatal parse warnings — set it to `io.Discard` to silence warnings in embedded callers.
+`tracker.Audit`, `tracker.DiagnoseMostRecent`, `tracker.Simulate`, and `tracker.Doctor` all accept `context.Context` as their first argument and return JSON-serializable reports. `Audit` and `DiagnoseMostRecent`/`Diagnose` additionally accept an optional config (`AuditConfig`, `DiagnoseConfig`) with a `LogWriter` for non-fatal parse warnings — set it to `io.Discard` to silence warnings in embedded callers. `Simulate` takes just `ctx` and source text; `Doctor` takes a required `DoctorConfig` plus optional functional options (e.g., `tracker.WithVersionInfo`).
 
 To stream events programmatically in the same NDJSON format as `tracker --json`, use `tracker.NewNDJSONWriter`:
 

@@ -72,3 +72,18 @@ func TestDiagnose_BudgetHalt(t *testing.T) {
 		t.Error("empty breach message")
 	}
 }
+
+// TestDiagnose_CtxCancelled verifies that a cancelled context propagates
+// out of Diagnose — a partial report is never returned as a success, so
+// automation with deadlines can distinguish complete from truncated output.
+func TestDiagnose_CtxCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the call
+	_, err := Diagnose(ctx, "testdata/runs/failed")
+	if err == nil {
+		t.Fatal("expected ctx.Err() to propagate, got nil")
+	}
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
