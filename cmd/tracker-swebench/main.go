@@ -153,6 +153,12 @@ Flags:
 	if v := os.Getenv("CF_AIG_TOKEN"); v != "" {
 		agentEnv["CF_AIG_TOKEN"] = v
 	}
+	// Pass through provider base URL overrides (e.g., Bedrock gateway).
+	for _, envKey := range []string{"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"} {
+		if v := os.Getenv(envKey); v != "" {
+			agentEnv[envKey] = v
+		}
+	}
 
 	stats := RunStats{
 		Total:     len(instances),
