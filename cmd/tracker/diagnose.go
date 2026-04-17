@@ -185,6 +185,9 @@ func printDiagnoseSuggestions(suggestions []tracker.Suggestion) {
 		fmt.Println("  (none)")
 	} else {
 		for _, s := range suggestions {
+			if s.Kind == tracker.SuggestionBudget {
+				continue // printBudgetHalt already shows this
+			}
 			fmt.Printf("  %s %s\n", lipgloss.NewStyle().Foreground(colorWarm).Render("→"), s.Message)
 		}
 	}

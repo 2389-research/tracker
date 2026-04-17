@@ -25,15 +25,21 @@ type DiagnoseReport struct {
 
 // NodeFailure captures everything known about a failed node.
 type NodeFailure struct {
-	NodeID           string        `json:"node_id"`
-	Outcome          string        `json:"outcome"`
-	Handler          string        `json:"handler,omitempty"`
-	Duration         time.Duration `json:"duration_ns,omitempty"`
-	RetryCount       int           `json:"retry_count,omitempty"`
-	IdenticalRetries bool          `json:"identical_retries,omitempty"`
-	Stdout           string        `json:"stdout,omitempty"`
-	Stderr           string        `json:"stderr,omitempty"`
-	Errors           []string      `json:"errors,omitempty"`
+	NodeID  string `json:"node_id"`
+	Outcome string `json:"outcome"`
+	Handler string `json:"handler,omitempty"`
+	// Duration is the elapsed time for the most recent attempt of the node.
+	Duration time.Duration `json:"duration_ns,omitempty"`
+	// RetryCount is the number of stage_failed events observed for this node
+	// — i.e., the total failure count, not "retries beyond the first attempt."
+	// A node that failed once (no retry) has RetryCount == 1.
+	RetryCount int `json:"retry_count,omitempty"`
+	// IdenticalRetries is true when every stage_failed event had the same
+	// error/tool_error signature — a deterministic bug, not a flaky one.
+	IdenticalRetries bool     `json:"identical_retries,omitempty"`
+	Stdout           string   `json:"stdout,omitempty"`
+	Stderr           string   `json:"stderr,omitempty"`
+	Errors           []string `json:"errors,omitempty"`
 }
 
 // BudgetHalt holds information about a budget halt detected in the activity log.
@@ -119,6 +125,7 @@ func loadNodeFailureLib(runDir, nodeID string) *NodeFailure {
 		ContextUpdates map[string]string `json:"context_updates"`
 	}
 	if err := json.Unmarshal(data, &status); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot parse %s: %v\n", statusPath, err)
 		return nil
 	}
 	if status.Outcome != "fail" {
