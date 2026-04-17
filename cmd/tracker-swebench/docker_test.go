@@ -9,8 +9,8 @@ import (
 )
 
 func TestContainerName(t *testing.T) {
-	got := containerName("django__django-11095")
-	want := "swe-django__django-11095"
+	got := containerName("20260416-120000", "django__django-11095")
+	want := "swe-20260416-120000-django__django-11095"
 	if got != want {
 		t.Errorf("containerName() = %q, want %q", got, want)
 	}

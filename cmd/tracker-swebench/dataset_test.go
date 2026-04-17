@@ -138,3 +138,28 @@ func TestInstance_RepoURL(t *testing.T) {
 		t.Errorf("RepoURL: got %q, want %q", got, want)
 	}
 }
+
+func TestValidateInstanceID(t *testing.T) {
+	tests := []struct {
+		id    string
+		valid bool
+	}{
+		{"django__django-11099", true},
+		{"sympy__sympy-12345", true},
+		{"scikit-learn__scikit-learn-9876", true},
+		{"", false},
+		{"../../etc/passwd", false},
+		{"foo;rm -rf /", false},
+		{"foo bar", false},
+		{"a/b", false},
+	}
+	for _, tt := range tests {
+		err := validateInstanceID(tt.id)
+		if tt.valid && err != nil {
+			t.Errorf("validateInstanceID(%q) = %v, want nil", tt.id, err)
+		}
+		if !tt.valid && err == nil {
+			t.Errorf("validateInstanceID(%q) = nil, want error", tt.id)
+		}
+	}
+}

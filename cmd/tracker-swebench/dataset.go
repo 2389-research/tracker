@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -34,6 +35,21 @@ func (inst Instance) AgentPrompt() string {
 	return inst.ProblemStatement + "\n\n## Hints\n\n" + inst.HintsText
 }
 
+// instanceIDPattern matches valid SWE-bench instance IDs: alphanumeric, underscores, hyphens, dots.
+var instanceIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.=-]*$`)
+
+// validateInstanceID checks that an instance ID is safe for use as a Docker
+// container name suffix and filesystem path component.
+func validateInstanceID(id string) error {
+	if id == "" {
+		return fmt.Errorf("empty instance ID")
+	}
+	if !instanceIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid instance ID %q: must match [a-zA-Z0-9][a-zA-Z0-9_.=-]*", id)
+	}
+	return nil
+}
+
 // LoadDataset reads a JSONL file and returns the parsed instances.
 // Blank lines are skipped. Returns an error with the line number on malformed JSON.
 func LoadDataset(path string) ([]Instance, error) {
@@ -58,6 +74,9 @@ func LoadDataset(path string) ([]Instance, error) {
 		}
 		var inst Instance
 		if err := json.Unmarshal([]byte(line), &inst); err != nil {
+			return nil, fmt.Errorf("line %d: %w", lineNum, err)
+		}
+		if err := validateInstanceID(inst.InstanceID); err != nil {
 			return nil, fmt.Errorf("line %d: %w", lineNum, err)
 		}
 		instances = append(instances, inst)

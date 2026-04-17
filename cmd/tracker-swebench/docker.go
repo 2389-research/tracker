@@ -22,9 +22,10 @@ type AgentSummary struct {
 	DurationMs   int64 `json:"duration_ms"`
 }
 
-// containerName returns the Docker container name for a given instance ID.
-func containerName(instanceID string) string {
-	return "swe-" + instanceID
+// containerName returns the Docker container name for a given run label and instance ID.
+// Including the run label prevents name collisions across concurrent runs.
+func containerName(runLabel, instanceID string) string {
+	return "swe-" + runLabel + "-" + instanceID
 }
 
 // buildCloneCommands returns two safe argument slices: one for git clone, one
@@ -216,7 +217,7 @@ func (r *DockerRunner) CleanupStale(ctx context.Context) {
 // RunInstance creates a container, runs the agent, captures the diff patch, then cleans up.
 // Returns the git diff patch and an AgentSummary. On agent timeout, returns a partial diff.
 func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string) (patch string, summary AgentSummary, err error) {
-	name := containerName(inst.InstanceID)
+	name := containerName(r.RunLabel, inst.InstanceID)
 	const workDir = "/workspace"
 
 	// Always stop and remove the container when done.
