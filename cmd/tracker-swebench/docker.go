@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -42,13 +43,32 @@ func buildCloneCommands(repoURL, commit, workDir, cachePath string) (cloneArgs [
 	return cloneArgs, checkoutArgs
 }
 
-// buildEnvFlags converts a map of environment variables into docker -e KEY=VAL flag pairs.
-func buildEnvFlags(env map[string]string) []string {
-	flags := make([]string, 0, len(env)*2)
-	for k, v := range env {
-		flags = append(flags, "-e", k+"="+v)
+// writeEnvFile writes environment variables to a temporary file in KEY=VALUE
+// format with mode 0600, returning the path. The caller must os.Remove the
+// file when done. This avoids exposing secrets via docker -e flags which are
+// visible in process listings and docker inspect output.
+func writeEnvFile(env map[string]string) (string, error) {
+	f, err := os.CreateTemp("", "swebench-env-*")
+	if err != nil {
+		return "", fmt.Errorf("create env file: %w", err)
 	}
-	return flags
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", fmt.Errorf("chmod env file: %w", err)
+	}
+	for k, v := range env {
+		if _, err := fmt.Fprintf(f, "%s=%s\n", k, v); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return "", fmt.Errorf("write env var: %w", err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("close env file: %w", err)
+	}
+	return f.Name(), nil
 }
 
 // capturePatchCommands returns two argument slices: git add -A (to stage all
@@ -109,10 +129,13 @@ func dockerCmd(ctx context.Context, args ...string) error {
 	return nil
 }
 
-// dockerExec runs `docker exec [-e K=V ...] <container> <args...>` and streams output to logs.
-func dockerExec(ctx context.Context, container string, env map[string]string, args ...string) error {
+// dockerExec runs `docker exec [--env-file <path>] <container> <args...>` and streams output to logs.
+// Pass envFilePath="" when no environment variables are needed.
+func dockerExec(ctx context.Context, container string, envFilePath string, args ...string) error {
 	execArgs := []string{"exec"}
-	execArgs = append(execArgs, buildEnvFlags(env)...)
+	if envFilePath != "" {
+		execArgs = append(execArgs, "--env-file", envFilePath)
+	}
 	execArgs = append(execArgs, container)
 	execArgs = append(execArgs, args...)
 
@@ -126,9 +149,12 @@ func dockerExec(ctx context.Context, container string, env map[string]string, ar
 }
 
 // dockerExecCapture runs docker exec and returns combined stdout+stderr as a string.
-func dockerExecCapture(ctx context.Context, container string, env map[string]string, args ...string) (string, error) {
+// Pass envFilePath="" when no environment variables are needed.
+func dockerExecCapture(ctx context.Context, container string, envFilePath string, args ...string) (string, error) {
 	execArgs := []string{"exec"}
-	execArgs = append(execArgs, buildEnvFlags(env)...)
+	if envFilePath != "" {
+		execArgs = append(execArgs, "--env-file", envFilePath)
+	}
 	execArgs = append(execArgs, container)
 	execArgs = append(execArgs, args...)
 
@@ -203,15 +229,15 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 		cachePath = "/cache/" + strings.ReplaceAll(inst.Repo, "/", "_") + ".git"
 	}
 	cloneArgs, checkoutArgs := buildCloneCommands(inst.RepoURL(), inst.BaseCommit, workDir, cachePath)
-	if err = dockerExec(ctx, name, nil, cloneArgs...); err != nil {
+	if err = dockerExec(ctx, name, "", cloneArgs...); err != nil {
 		return "", AgentSummary{}, fmt.Errorf("clone repo: %w", err)
 	}
-	if err = dockerExec(ctx, name, nil, checkoutArgs...); err != nil {
+	if err = dockerExec(ctx, name, "", checkoutArgs...); err != nil {
 		return "", AgentSummary{}, fmt.Errorf("checkout commit: %w", err)
 	}
 
 	// Step 4: Install the package (log failure but continue).
-	pipOut, pipErr := dockerExecCapture(ctx, name, nil, "sh", "-c", "pip install -e . 2>&1 | tail -5")
+	pipOut, pipErr := dockerExecCapture(ctx, name, "", "sh", "-c", "pip install -e . 2>&1 | tail -5")
 	if pipErr != nil {
 		log.Printf("[%s] pip install failed (continuing): %v\noutput: %s", inst.InstanceID, pipErr, pipOut)
 	} else {
@@ -219,10 +245,17 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}
 
 	// Step 5: Run the agent with a timeout.
+	// Write agent env to a secure temp file (avoids key exposure in process args).
 	agentCtx, agentCancel := context.WithTimeout(ctx, r.Timeout)
 	defer agentCancel()
 
-	agentOutput, agentErr := dockerExecCapture(agentCtx, name, agentEnv, "agent-runner")
+	envFilePath, envErr := writeEnvFile(agentEnv)
+	if envErr != nil {
+		return "", AgentSummary{}, fmt.Errorf("write env file: %w", envErr)
+	}
+	defer os.Remove(envFilePath)
+
+	agentOutput, agentErr := dockerExecCapture(agentCtx, name, envFilePath, "agent-runner")
 	summary = parseAgentSummary(agentOutput)
 
 	if agentErr != nil {
@@ -236,7 +269,7 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 
 	addArgs, diffCmdArgs := capturePatchCommands(workDir)
 	// Stage all changes (including untracked new files).
-	if addErr := dockerExec(diffCtx, name, nil, addArgs...); addErr != nil {
+	if addErr := dockerExec(diffCtx, name, "", addArgs...); addErr != nil {
 		log.Printf("[%s] git add -A failed: %v", inst.InstanceID, addErr)
 	}
 	diffOutput, diffErr := dockerExecOutput(diffCtx, name, diffCmdArgs...)

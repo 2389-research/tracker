@@ -3,6 +3,8 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -97,33 +99,38 @@ func TestBuildCloneCommands_NoCache(t *testing.T) {
 	}
 }
 
-func TestBuildEnvFlags(t *testing.T) {
+func TestWriteEnvFile(t *testing.T) {
 	env := map[string]string{
-		"FOO": "bar",
-		"BAZ": "qux",
+		"API_KEY": "sk-secret",
+		"MODEL":   "claude-sonnet-4-6",
 	}
-	flags := buildEnvFlags(env)
 
-	// Must have even count (pairs of -e KEY=VAL)
-	if len(flags)%2 != 0 {
-		t.Fatalf("expected even number of flags, got %d: %v", len(flags), flags)
+	path, err := writeEnvFile(env)
+	if err != nil {
+		t.Fatalf("writeEnvFile: %v", err)
 	}
-	// Every even-indexed element must be "-e"
-	for i := 0; i < len(flags); i += 2 {
-		if flags[i] != "-e" {
-			t.Errorf("flags[%d] = %q, want \"-e\"", i, flags[i])
-		}
+	defer os.Remove(path)
+
+	// File must exist and have restrictive permissions.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat env file: %v", err)
 	}
-	// Build a set of KEY=VAL pairs
-	got := map[string]bool{}
-	for i := 1; i < len(flags); i += 2 {
-		got[flags[i]] = true
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("env file permissions = %o, want 0600", info.Mode().Perm())
 	}
-	if !got["FOO=bar"] {
-		t.Error("expected FOO=bar in flags")
+
+	// Contents must be KEY=VALUE lines.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
 	}
-	if !got["BAZ=qux"] {
-		t.Error("expected BAZ=qux in flags")
+	content := string(data)
+	if !strings.Contains(content, "API_KEY=sk-secret\n") {
+		t.Errorf("expected API_KEY=sk-secret in env file, got:\n%s", content)
+	}
+	if !strings.Contains(content, "MODEL=claude-sonnet-4-6\n") {
+		t.Errorf("expected MODEL line in env file, got:\n%s", content)
 	}
 }
 
