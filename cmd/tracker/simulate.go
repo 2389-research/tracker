@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -58,7 +59,7 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		source = string(data)
 	}
 
-	report, err := tracker.Simulate(source)
+	report, err := tracker.Simulate(context.Background(), source)
 	if err != nil {
 		return err
 	}

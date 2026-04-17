@@ -3,7 +3,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"time"
 
 	tracker "github.com/2389-research/tracker"
@@ -11,7 +13,7 @@ import (
 
 // listRuns shows all available runs with their status and node count.
 func listRuns(workdir string) error {
-	runs, err := tracker.ListRuns(workdir)
+	runs, err := tracker.ListRuns(workdir, tracker.AuditConfig{LogWriter: io.Discard})
 	if err != nil {
 		return err
 	}
@@ -55,7 +57,7 @@ func runAudit(workdir, runID string) error {
 	if err != nil {
 		return err
 	}
-	report, err := tracker.Audit(runDir)
+	report, err := tracker.Audit(context.Background(), runDir)
 	if err != nil {
 		return err
 	}

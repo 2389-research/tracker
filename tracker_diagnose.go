@@ -3,8 +3,11 @@
 package tracker
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +16,16 @@ import (
 
 	"github.com/2389-research/tracker/pipeline"
 )
+
+// DiagnoseConfig configures a Diagnose() run.
+type DiagnoseConfig struct {
+	// LogWriter receives non-fatal parse warnings (malformed status.json
+	// files, unreadable artifact directories). Nil is treated as
+	// io.Discard so library callers do not see stray warnings on
+	// os.Stderr. The tracker CLI sets this to io.Discard for user-facing
+	// commands.
+	LogWriter io.Writer
+}
 
 // DiagnoseReport is the structured output of Diagnose / DiagnoseMostRecent.
 type DiagnoseReport struct {
@@ -50,22 +63,27 @@ type BudgetHalt struct {
 	Message       string  `json:"message"`
 }
 
+// SuggestionKind is the typed string identifying which template produced a
+// Suggestion. The underlying string values are stable; new kinds may be
+// added additively.
+type SuggestionKind string
+
 // Suggestion is an actionable recommendation produced by Diagnose.
 type Suggestion struct {
-	NodeID  string `json:"node_id,omitempty"`
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
+	NodeID  string         `json:"node_id,omitempty"`
+	Kind    SuggestionKind `json:"kind"`
+	Message string         `json:"message"`
 }
 
 // Suggestion kinds (stable; new ones may be added additively).
 const (
-	SuggestionRetryPattern     = "retry_pattern"
-	SuggestionEscalateLimit    = "escalate_limit"
-	SuggestionNoOutput         = "no_output"
-	SuggestionShellCommand     = "shell_command"
-	SuggestionGoTest           = "go_test"
-	SuggestionSuspiciousTiming = "suspicious_timing"
-	SuggestionBudget           = "budget"
+	SuggestionRetryPattern     SuggestionKind = "retry_pattern"
+	SuggestionEscalateLimit    SuggestionKind = "escalate_limit"
+	SuggestionNoOutput         SuggestionKind = "no_output"
+	SuggestionShellCommand     SuggestionKind = "shell_command"
+	SuggestionGoTest           SuggestionKind = "go_test"
+	SuggestionSuspiciousTiming SuggestionKind = "suspicious_timing"
+	SuggestionBudget           SuggestionKind = "budget"
 )
 
 // Diagnose analyzes a run directory and returns a structured report.
@@ -75,7 +93,17 @@ const (
 // under it. For user-supplied input, resolve the path via
 // ResolveRunDir or DiagnoseMostRecent first, which enforce the
 // .tracker/runs/<runID> layout.
-func Diagnose(runDir string) (*DiagnoseReport, error) {
+//
+// ctx is accepted for future extensibility (cancellation of long parses);
+// current callers may pass context.Background(). A nil context is treated
+// as context.Background().
+func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*DiagnoseReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfg := firstDiagnoseConfig(opts)
+	logW := logWriterOrDiscard(cfg.LogWriter)
+
 	cpPath := filepath.Join(runDir, "checkpoint.json")
 	cp, err := pipeline.LoadCheckpoint(cpPath)
 	if err != nil {
@@ -85,25 +113,39 @@ func Diagnose(runDir string) (*DiagnoseReport, error) {
 		RunID:          cp.RunID,
 		CompletedNodes: len(cp.CompletedNodes),
 	}
-	failures := collectNodeFailuresLib(runDir)
-	report.BudgetHalt = enrichFromActivityLib(runDir, failures)
+	failures := collectNodeFailures(runDir, logW)
+	report.BudgetHalt = enrichFromActivity(ctx, runDir, failures)
 	report.Failures = sortedFailures(failures)
 	report.Suggestions = buildSuggestions(report.Failures, report.BudgetHalt)
 	return report, nil
 }
 
 // DiagnoseMostRecent finds the most recent run under workdir and diagnoses it.
-func DiagnoseMostRecent(workdir string) (*DiagnoseReport, error) {
+func DiagnoseMostRecent(ctx context.Context, workdir string, opts ...DiagnoseConfig) (*DiagnoseReport, error) {
 	id, err := MostRecentRunID(workdir)
 	if err != nil {
 		return nil, err
 	}
-	return Diagnose(filepath.Join(workdir, ".tracker", "runs", id))
+	return Diagnose(ctx, filepath.Join(workdir, ".tracker", "runs", id), opts...)
+}
+
+func firstDiagnoseConfig(opts []DiagnoseConfig) DiagnoseConfig {
+	if len(opts) == 0 {
+		return DiagnoseConfig{}
+	}
+	return opts[0]
+}
+
+func logWriterOrDiscard(w io.Writer) io.Writer {
+	if w == nil {
+		return io.Discard
+	}
+	return w
 }
 
 // ----- internals -----
 
-func collectNodeFailuresLib(runDir string) map[string]*NodeFailure {
+func collectNodeFailures(runDir string, logW io.Writer) map[string]*NodeFailure {
 	failures := make(map[string]*NodeFailure)
 	entries, err := os.ReadDir(runDir)
 	if err != nil {
@@ -113,14 +155,14 @@ func collectNodeFailuresLib(runDir string) map[string]*NodeFailure {
 		if !e.IsDir() {
 			continue
 		}
-		if f := loadNodeFailureLib(runDir, e.Name()); f != nil {
+		if f := loadNodeFailure(runDir, e.Name(), logW); f != nil {
 			failures[e.Name()] = f
 		}
 	}
 	return failures
 }
 
-func loadNodeFailureLib(runDir, nodeID string) *NodeFailure {
+func loadNodeFailure(runDir, nodeID string, logW io.Writer) *NodeFailure {
 	statusPath := filepath.Join(runDir, nodeID, "status.json")
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
@@ -131,7 +173,7 @@ func loadNodeFailureLib(runDir, nodeID string) *NodeFailure {
 		ContextUpdates map[string]string `json:"context_updates"`
 	}
 	if err := json.Unmarshal(data, &status); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: cannot parse %s: %v\n", statusPath, err)
+		fmt.Fprintf(logW, "warning: cannot parse %s: %v\n", statusPath, err)
 		return nil
 	}
 	if status.Outcome != "fail" {
@@ -145,8 +187,8 @@ func loadNodeFailureLib(runDir, nodeID string) *NodeFailure {
 	return f
 }
 
-// diagnoseEntryLib is a parsed activity.jsonl line with fields needed for diagnosis.
-type diagnoseEntryLib struct {
+// diagnoseEntry is a parsed activity.jsonl line with fields needed for diagnosis.
+type diagnoseEntry struct {
 	Timestamp     string  `json:"ts"`
 	Type          string  `json:"type"`
 	NodeID        string  `json:"node_id"`
@@ -159,27 +201,30 @@ type diagnoseEntryLib struct {
 	WallElapsedMs int64   `json:"wall_elapsed_ms"`
 }
 
-func enrichFromActivityLib(runDir string, failures map[string]*NodeFailure) *BudgetHalt {
+func enrichFromActivity(ctx context.Context, runDir string, failures map[string]*NodeFailure) *BudgetHalt {
 	path := filepath.Join(runDir, "activity.jsonl")
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
+	defer f.Close()
+
 	stageStarts := map[string]time.Time{}
 	failSignatures := map[string][]string{}
-	halt := parseActivityLinesForDiagnose(string(data), failures, stageStarts, failSignatures)
-	applyRetryAnalysisLib(failures, failSignatures)
-	return halt
-}
-
-func parseActivityLinesForDiagnose(data string, failures map[string]*NodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) *BudgetHalt {
 	var halt *BudgetHalt
-	for _, line := range strings.Split(data, "\n") {
-		line = strings.TrimSpace(line)
+
+	scanner := bufio.NewScanner(f)
+	// Match LoadActivityLog: allow 1 MB lines.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		var entry diagnoseEntryLib
+		var entry diagnoseEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
@@ -191,24 +236,25 @@ func parseActivityLinesForDiagnose(data string, failures map[string]*NodeFailure
 				Message:       entry.Message,
 			}
 		}
-		enrichFromEntryNF(entry, failures, stageStarts, failSignatures)
+		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
+	applyRetryAnalysis(failures, failSignatures)
 	return halt
 }
 
-func enrichFromEntryNF(entry diagnoseEntryLib, failures map[string]*NodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
-	ts, _ := parseActivityTimestampLib(entry.Timestamp)
+func enrichFromEntry(entry diagnoseEntry, failures map[string]*NodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
+	ts, _ := parseActivityTimestamp(entry.Timestamp)
 	switch entry.Type {
 	case "stage_started":
 		if !ts.IsZero() {
 			stageStarts[entry.NodeID] = ts
 		}
 	case "stage_failed":
-		updateFailureTimingNF(failures[entry.NodeID], stageStarts, entry, ts)
+		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
 		sig := entry.Error + "\x00" + entry.ToolErr
 		failSignatures[entry.NodeID] = append(failSignatures[entry.NodeID], sig)
 	case "stage_completed":
-		updateFailureTimingNF(failures[entry.NodeID], stageStarts, entry, ts)
+		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
 	}
 	if entry.NodeID == "" {
 		return
@@ -225,7 +271,7 @@ func enrichFromEntryNF(entry diagnoseEntryLib, failures map[string]*NodeFailure,
 	}
 }
 
-func updateFailureTimingNF(f *NodeFailure, stageStarts map[string]time.Time, entry diagnoseEntryLib, ts time.Time) {
+func updateFailureTiming(f *NodeFailure, stageStarts map[string]time.Time, entry diagnoseEntry, ts time.Time) {
 	if f == nil {
 		return
 	}
@@ -237,7 +283,7 @@ func updateFailureTimingNF(f *NodeFailure, stageStarts map[string]time.Time, ent
 	}
 }
 
-func applyRetryAnalysisLib(failures map[string]*NodeFailure, failSignatures map[string][]string) {
+func applyRetryAnalysis(failures map[string]*NodeFailure, failSignatures map[string][]string) {
 	for nodeID, sigs := range failSignatures {
 		f, ok := failures[nodeID]
 		if !ok {

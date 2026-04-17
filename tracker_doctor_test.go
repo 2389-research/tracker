@@ -3,6 +3,7 @@
 package tracker
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,7 +13,7 @@ func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
 	workdir := t.TempDir()
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-12345678901234567890")
 
-	r, err := Doctor(DoctorConfig{WorkDir: workdir, ProbeProviders: false})
+	r, err := Doctor(context.Background(), DoctorConfig{WorkDir: workdir, ProbeProviders: false})
 	if err != nil {
 		t.Fatalf("Doctor: %v", err)
 	}
@@ -36,7 +37,7 @@ func TestDoctor_NoProviderKeys(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	r, err := Doctor(DoctorConfig{WorkDir: workdir, ProbeProviders: false})
+	r, err := Doctor(context.Background(), DoctorConfig{WorkDir: workdir, ProbeProviders: false})
 	if err != nil {
 		t.Fatalf("Doctor: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestDoctor_PipelineFileValidation(t *testing.T) {
 `
 	must(t, os.WriteFile(pf, []byte(src), 0o644))
 
-	r, err := Doctor(DoctorConfig{WorkDir: workdir, PipelineFile: pf, ProbeProviders: false})
+	r, err := Doctor(context.Background(), DoctorConfig{WorkDir: workdir, PipelineFile: pf, ProbeProviders: false})
 	if err != nil {
 		t.Fatalf("Doctor: %v", err)
 	}
@@ -74,5 +75,46 @@ func TestDoctor_PipelineFileValidation(t *testing.T) {
 	}
 	if pipelineCheck == nil {
 		t.Fatal("Pipeline File check missing when PipelineFile set")
+	}
+}
+
+func TestSanitizeProviderError(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "anthropic key",
+			in:   "auth failed: sk-ant-api03-abcdef1234567890abcdef",
+			want: "auth failed: [redacted-key]",
+		},
+		{
+			name: "openai key",
+			in:   "invalid key sk-abcdef1234567890abcdef",
+			want: "invalid key [redacted-key]",
+		},
+		{
+			name: "google key",
+			in:   "request failed AIzaSyAbcDef1234567890abcdef_01",
+			want: "request failed [redacted-key]",
+		},
+		{
+			name: "bearer token",
+			in:   "401 Unauthorized: Bearer abc.def.ghi12345",
+			want: "401 Unauthorized: Bearer [redacted]",
+		},
+		{
+			name: "plain message",
+			in:   "connection refused",
+			want: "connection refused",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := sanitizeProviderError(c.in); got != c.want {
+				t.Errorf("sanitizeProviderError(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
 	}
 }

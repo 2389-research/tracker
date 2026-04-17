@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Library API hardening for v1.0** (#102, #103, #104, #106, #109):
+  - Typed enum-like strings for `CheckStatus` and `SuggestionKind` so consumers can switch-exhaust. Existing constants (`SuggestionRetryPattern`, etc.) retain their underlying string values.
+  - `tracker.WithVersionInfo(version, commit)` functional option replaces the CLI-only `DoctorConfig.TrackerVersion` / `TrackerCommit` fields.
+  - `DoctorConfig.LogWriter` / `DiagnoseConfig.LogWriter` / `AuditConfig.LogWriter` — optional `io.Writer` for non-fatal parse warnings. Nil is treated as `io.Discard` so library callers no longer see stray warnings on `os.Stderr`. The `tracker` CLI sets this to `io.Discard` for user-facing commands.
+  - `Doctor`, `Diagnose`, `DiagnoseMostRecent`, `Audit`, `Simulate` now accept `context.Context`, honored by provider probes and binary version lookups. `getBinaryVersion` now uses `exec.CommandContext` with a 5-second timeout, matching `getDippinVersion`.
+  - Provider probe error bodies are now sanitized (API keys and bearer tokens stripped) before they land in `CheckDetail.Message`.
+  - `NDJSON` handler closures (pipeline, agent, LLM trace) now `recover()` from panics in the underlying writer so a misbehaving sink cannot crash the caller goroutine.
+  - `Diagnose` now streams `activity.jsonl` with `bufio.Scanner` instead of `os.ReadFile` → `strings.Split`, matching `LoadActivityLog` and avoiding a memory spike on large runs.
+
+### Changed
+
+- **BREAKING** (library):
+  - `tracker.Doctor(cfg)` → `tracker.Doctor(ctx, cfg, opts...)`.
+  - `tracker.Diagnose(runDir)` → `tracker.Diagnose(ctx, runDir, opts...)`.
+  - `tracker.DiagnoseMostRecent(workdir)` → `tracker.DiagnoseMostRecent(ctx, workdir, opts...)`.
+  - `tracker.Audit(runDir)` → `tracker.Audit(ctx, runDir, opts...)`.
+  - `tracker.Simulate(source)` → `tracker.Simulate(ctx, source)`.
+  - `tracker.ListRuns(workdir)` now accepts optional `...AuditConfig`.
+  - `tracker.NDJSONEvent` → `tracker.StreamEvent`. Wire-format JSON tags unchanged.
+  - `NDJSONWriter.Write` now returns `error` so callers can detect a broken stream. First failure is still logged to `os.Stderr` once (unchanged behavior); subsequent failures are surfaced via the return value.
+  - `DoctorConfig.TrackerVersion` and `DoctorConfig.TrackerCommit` removed — use `tracker.WithVersionInfo(version, commit)` instead.
+  - `CheckResult.Status` and `CheckDetail.Status` are now typed as `tracker.CheckStatus` (underlying string). Untyped string literal comparisons (`status == "ok"`) keep working.
+  - `Suggestion.Kind` is now typed as `tracker.SuggestionKind` (underlying string).
+- `tracker diagnose` suggestion order is now deterministic (alphabetical by node ID). Previously suggestions printed in Go map-iteration order, which varied between runs.
+
 ## [0.18.0] - 2026-04-17
 
 ### Added

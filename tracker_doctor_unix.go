@@ -8,12 +8,12 @@ import (
 	"syscall"
 )
 
-func checkDiskSpaceLib(workdir string) CheckResult {
+func checkDiskSpace(workdir string) CheckResult {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(workdir, &stat); err != nil {
 		return CheckResult{
 			Name:    "Disk Space",
-			Status:  "warn",
+			Status:  CheckStatusWarn,
 			Message: fmt.Sprintf("could not determine disk space: %v", err),
 		}
 	}
@@ -23,14 +23,14 @@ func checkDiskSpaceLib(workdir string) CheckResult {
 	if availableGB < minGB {
 		return CheckResult{
 			Name:    "Disk Space",
-			Status:  "warn",
+			Status:  CheckStatusWarn,
 			Message: fmt.Sprintf("low disk space: %.2f GB available (recommended: %.1f GB+)", availableGB, minGB),
 			Hint:    "free up disk space before running long pipelines",
 		}
 	}
 	return CheckResult{
 		Name:    "Disk Space",
-		Status:  "ok",
+		Status:  CheckStatusOK,
 		Message: fmt.Sprintf("%.2f GB available", availableGB),
 	}
 }

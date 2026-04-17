@@ -576,7 +576,7 @@ result, _ := tracker.Run(ctx, source, tracker.Config{
 ```go
 import tracker "github.com/2389-research/tracker"
 
-report, err := tracker.DiagnoseMostRecent(".")
+report, err := tracker.DiagnoseMostRecent(ctx, ".")
 if err != nil { log.Fatal(err) }
 
 for _, f := range report.Failures {
@@ -588,7 +588,7 @@ for _, s := range report.Suggestions {
 }
 ```
 
-`tracker.Audit`, `tracker.Simulate`, and `tracker.Doctor` follow the same pattern and return JSON-serializable reports.
+`tracker.Audit`, `tracker.Simulate`, and `tracker.Doctor` follow the same pattern and return JSON-serializable reports. All four accept `context.Context` as their first argument and an optional config struct (`AuditConfig`, `DiagnoseConfig`, `DoctorConfig`) with a `LogWriter` for non-fatal parse warnings — set it to `io.Discard` to silence warnings in embedded callers.
 
 To stream events programmatically in the same NDJSON format as `tracker --json`, use `tracker.NewNDJSONWriter`:
 

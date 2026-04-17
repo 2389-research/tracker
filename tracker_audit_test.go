@@ -1,13 +1,15 @@
 package tracker
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestAudit_CompletedRun(t *testing.T) {
-	r, err := Audit("testdata/runs/ok")
+	r, err := Audit(context.Background(), "testdata/runs/ok")
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -23,7 +25,7 @@ func TestAudit_CompletedRun(t *testing.T) {
 }
 
 func TestAudit_FailedRun(t *testing.T) {
-	r, err := Audit("testdata/runs/failed")
+	r, err := Audit(context.Background(), "testdata/runs/failed")
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -63,5 +65,30 @@ func TestListRuns_MultipleRuns(t *testing.T) {
 	}
 	if runs[0].RunID != "r2" {
 		t.Errorf("first = %q, want r2 (newest first)", runs[0].RunID)
+	}
+}
+
+func TestListRuns_LogWriterSilencesWarnings(t *testing.T) {
+	// Build a run directory whose checkpoint loads fine but whose activity.jsonl
+	// is unreadable (EISDIR). buildRunSummary should emit a warning to the
+	// LogWriter rather than os.Stderr.
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	must(t, os.MkdirAll(filepath.Join(runsDir, "r1"), 0o755))
+	must(t, os.WriteFile(filepath.Join(runsDir, "r1", "checkpoint.json"),
+		[]byte(`{"run_id":"r1","completed_nodes":["A"],"timestamp":"2026-04-17T10:00:00Z"}`), 0o644))
+	// Make activity.jsonl a directory so os.ReadFile fails with EISDIR.
+	must(t, os.MkdirAll(filepath.Join(runsDir, "r1", "activity.jsonl"), 0o755))
+
+	var logBuf bytes.Buffer
+	runs, err := ListRuns(workdir, AuditConfig{LogWriter: &logBuf})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(runs))
+	}
+	if logBuf.Len() == 0 {
+		t.Error("expected log writer to receive a warning about activity.jsonl")
 	}
 }

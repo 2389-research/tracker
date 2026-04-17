@@ -3,6 +3,7 @@
 package tracker
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -47,8 +48,16 @@ type PlanStep struct {
 	Edges  []SimEdge `json:"edges,omitempty"`
 }
 
-// Simulate parses source and returns a SimulateReport. Format is detected from content.
-func Simulate(source string) (*SimulateReport, error) {
+// Simulate parses source and returns a SimulateReport. Format is detected
+// from content.
+//
+// ctx is accepted for future extensibility (e.g. cancelling a slow parse
+// on very large graphs). A nil context is treated as context.Background().
+func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_ = ctx // reserved for future use
 	format := detectSourceFormat(source)
 	graph, err := parsePipelineSource(source, format)
 	if err != nil {

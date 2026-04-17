@@ -3,10 +3,10 @@
 
 package tracker
 
-func checkDiskSpaceLib(_ string) CheckResult {
+func checkDiskSpace(_ string) CheckResult {
 	return CheckResult{
 		Name:    "Disk Space",
-		Status:  "ok",
+		Status:  CheckStatusOK,
 		Message: "disk space check not available on Windows",
 	}
 }

@@ -1,11 +1,12 @@
 package tracker
 
 import (
+	"context"
 	"testing"
 )
 
 func TestDiagnose_CleanRun(t *testing.T) {
-	r, err := Diagnose("testdata/runs/ok")
+	r, err := Diagnose(context.Background(), "testdata/runs/ok")
 	if err != nil {
 		t.Fatalf("Diagnose: %v", err)
 	}
@@ -24,7 +25,7 @@ func TestDiagnose_CleanRun(t *testing.T) {
 }
 
 func TestDiagnose_FailureWithRetries(t *testing.T) {
-	r, err := Diagnose("testdata/runs/failed")
+	r, err := Diagnose(context.Background(), "testdata/runs/failed")
 	if err != nil {
 		t.Fatalf("Diagnose: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestDiagnose_FailureWithRetries(t *testing.T) {
 	if f.Handler != "tool" {
 		t.Errorf("handler = %q", f.Handler)
 	}
-	kinds := map[string]bool{}
+	kinds := map[SuggestionKind]bool{}
 	for _, s := range r.Suggestions {
 		kinds[s.Kind] = true
 	}
@@ -57,7 +58,7 @@ func TestDiagnose_FailureWithRetries(t *testing.T) {
 }
 
 func TestDiagnose_BudgetHalt(t *testing.T) {
-	r, err := Diagnose("testdata/runs/budget_halted")
+	r, err := Diagnose(context.Background(), "testdata/runs/budget_halted")
 	if err != nil {
 		t.Fatalf("Diagnose: %v", err)
 	}
