@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1273,4 +1275,347 @@ func TestReflectionResetOnSuccess(t *testing.T) {
 	if countReflectionMessages(callMessages[3]) <= reflectionsAfterSuccess {
 		t.Error("expected reflection to be re-injected after counter reset on successful turn")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Verify-after-edit tests
+// ---------------------------------------------------------------------------
+
+// makeEditToolCallResp builds a response that contains a single "write" tool call.
+func makeEditToolCallResp(id string) *llm.Response {
+	return &llm.Response{
+		Message: llm.Message{
+			Role: llm.RoleAssistant,
+			Content: []llm.ContentPart{
+				{
+					Kind: llm.KindToolCall,
+					ToolCall: &llm.ToolCallData{
+						ID:        id,
+						Name:      "write",
+						Arguments: json.RawMessage(`{"path":"main.go","content":"package main"}`),
+					},
+				},
+			},
+		},
+		FinishReason: llm.FinishReason{Reason: "tool_calls"},
+		Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	}
+}
+
+// makeReadToolCallResp builds a response with a single "read" tool call (non-edit).
+func makeReadToolCallResp(id string) *llm.Response {
+	return &llm.Response{
+		Message: llm.Message{
+			Role: llm.RoleAssistant,
+			Content: []llm.ContentPart{
+				{
+					Kind: llm.KindToolCall,
+					ToolCall: &llm.ToolCallData{
+						ID:        id,
+						Name:      "read",
+						Arguments: json.RawMessage(`{"path":"main.go"}`),
+					},
+				},
+			},
+		},
+		FinishReason: llm.FinishReason{Reason: "tool_calls"},
+		Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	}
+}
+
+// makeStopResp returns a terminal response (no tool calls).
+func makeStopResp(text string) *llm.Response {
+	return &llm.Response{
+		Message:      llm.AssistantMessage(text),
+		FinishReason: llm.FinishReason{Reason: "stop"},
+		Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	}
+}
+
+// verifyPassCmd returns a shell one-liner that always exits 0.
+func verifyPassCmd() string { return "true" }
+
+// verifyFailCmd returns a shell one-liner that always exits 1 with error output.
+func verifyFailCmd() string { return "false" }
+
+// TestVerifyAfterEdit_Disabled ensures no repair prompts are injected when
+// VerifyAfterEdit is false, even if edit tools were used.
+func TestVerifyAfterEdit_Disabled(t *testing.T) {
+	var capturedMessages [][]llm.Message
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			makeEditToolCallResp("call_1"),
+			makeStopResp("done"),
+		},
+		onComplete: func(req *llm.Request) {
+			snap := make([]llm.Message, len(req.Messages))
+			copy(snap, req.Messages)
+			capturedMessages = append(capturedMessages, snap)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.VerifyAfterEdit = false
+	cfg.VerifyCommand = verifyFailCmd() // would fail if called
+
+	writeTool := &stubTool{name: "write", output: "wrote"}
+	sess := mustNewSession(t, client, cfg, WithTools(writeTool))
+
+	_, err := sess.Run(context.Background(), "write something")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No verify repair prompt should be present in any message.
+	for _, msgs := range capturedMessages {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && strings.Contains(m.Text(), "Verification failed") {
+				t.Error("repair prompt should not be injected when VerifyAfterEdit is false")
+			}
+		}
+	}
+}
+
+// TestVerifyAfterEdit_NoEdits ensures verification is skipped when the turn
+// contains only non-edit tool calls.
+func TestVerifyAfterEdit_NoEdits(t *testing.T) {
+	var capturedMessages [][]llm.Message
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			makeReadToolCallResp("call_1"),
+			makeStopResp("done"),
+		},
+		onComplete: func(req *llm.Request) {
+			snap := make([]llm.Message, len(req.Messages))
+			copy(snap, req.Messages)
+			capturedMessages = append(capturedMessages, snap)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.VerifyAfterEdit = true
+	cfg.VerifyCommand = verifyFailCmd() // would fail if called
+
+	readTool := &stubTool{name: "read", output: "content"}
+	sess := mustNewSession(t, client, cfg, WithTools(readTool))
+
+	_, err := sess.Run(context.Background(), "read something")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No verify repair prompt should appear since no edit tools were used.
+	for _, msgs := range capturedMessages {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && strings.Contains(m.Text(), "Verification failed") {
+				t.Error("repair prompt should not be injected when no edit tools were used")
+			}
+		}
+	}
+}
+
+// TestVerifyAfterEdit_FailedWriteSkipsVerify ensures that verification is NOT
+// triggered when the edit tool call itself fails (e.g. permission denied).
+// A failed write leaves the workspace unchanged, so running verification would
+// test pre-existing failures unrelated to the current turn.
+func TestVerifyAfterEdit_FailedWriteSkipsVerify(t *testing.T) {
+	var capturedMessages [][]llm.Message
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			makeEditToolCallResp("call_1"),
+			makeStopResp("done"),
+		},
+		onComplete: func(req *llm.Request) {
+			snap := make([]llm.Message, len(req.Messages))
+			copy(snap, req.Messages)
+			capturedMessages = append(capturedMessages, snap)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.VerifyAfterEdit = true
+	cfg.VerifyCommand = verifyFailCmd() // would fail if verification is (wrongly) triggered
+
+	// errorTool simulates a write tool that fails (e.g. permission denied).
+	failWrite := &errorTool{name: "write", err: fmt.Errorf("permission denied")}
+	sess := mustNewSession(t, client, cfg, WithTools(failWrite))
+
+	_, err := sess.Run(context.Background(), "write a file")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No repair prompt — the write failed so the workspace was not modified.
+	for _, msgs := range capturedMessages {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && strings.Contains(m.Text(), "Verification failed") {
+				t.Error("repair prompt must not be injected when the edit tool itself failed")
+			}
+		}
+	}
+}
+
+// TestVerifyAfterEdit_PassingTest ensures normal completion when verification passes.
+func TestVerifyAfterEdit_PassingTest(t *testing.T) {
+	var capturedMessages [][]llm.Message
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			makeEditToolCallResp("call_1"),
+			makeStopResp("done"),
+		},
+		onComplete: func(req *llm.Request) {
+			snap := make([]llm.Message, len(req.Messages))
+			copy(snap, req.Messages)
+			capturedMessages = append(capturedMessages, snap)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.VerifyAfterEdit = true
+	cfg.VerifyCommand = verifyPassCmd()
+	cfg.MaxVerifyRetries = 2
+
+	writeTool := &stubTool{name: "write", output: "wrote"}
+	sess := mustNewSession(t, client, cfg, WithTools(writeTool))
+
+	result, err := sess.Run(context.Background(), "write a file")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.MaxTurnsUsed {
+		t.Error("expected normal completion, not turn-limit exhaustion")
+	}
+
+	// Verify that NO repair prompt was injected.
+	for _, msgs := range capturedMessages {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && strings.Contains(m.Text(), "Verification failed") {
+				t.Error("repair prompt should not be injected when verification passes")
+			}
+		}
+	}
+
+	// The LLM should only have been called twice: once for the edit turn, once for the stop.
+	if client.calls != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", client.calls)
+	}
+}
+
+// TestVerifyAfterEdit_FailingTest_AutoRepair ensures the repair prompt is injected
+// when verification fails, and that the LLM gets to respond.
+func TestVerifyAfterEdit_FailingTest_AutoRepair(t *testing.T) {
+	var capturedMessages [][]llm.Message
+
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			// Turn 1: LLM writes a file.
+			makeEditToolCallResp("call_1"),
+			// Repair turn 1: LLM writes a fixed file (edit tool again).
+			makeEditToolCallResp("call_repair_1"),
+			// Turn 2: LLM stops after the successful verification.
+			makeStopResp("done"),
+		},
+		onComplete: func(req *llm.Request) {
+			snap := make([]llm.Message, len(req.Messages))
+			copy(snap, req.Messages)
+			capturedMessages = append(capturedMessages, snap)
+		},
+	}
+
+	// Verify command fails on the first call, passes on the second.
+	verifyScript := buildCountedVerifyCmd(t, 1 /* fail first N times */)
+
+	cfg := DefaultConfig()
+	cfg.VerifyAfterEdit = true
+	cfg.VerifyCommand = verifyScript
+	cfg.MaxVerifyRetries = 2
+
+	writeTool := &stubTool{name: "write", output: "wrote"}
+	sess := mustNewSession(t, client, cfg, WithTools(writeTool))
+
+	_, err := sess.Run(context.Background(), "write a file")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// A repair prompt must have been injected.
+	foundRepairPrompt := false
+	for _, msgs := range capturedMessages {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && strings.Contains(m.Text(), "Verification failed") {
+				foundRepairPrompt = true
+			}
+		}
+	}
+	if !foundRepairPrompt {
+		t.Error("expected repair prompt to be injected after verification failure")
+	}
+}
+
+// TestVerifyAfterEdit_MaxRetriesExhausted ensures the session proceeds normally
+// after MaxVerifyRetries failures instead of blocking indefinitely.
+// The mock includes edit tool calls in repair turns so the verify sub-loop is
+// actually triggered (repair turns that only return text bypass the edit check).
+func TestVerifyAfterEdit_MaxRetriesExhausted(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			// Turn 1: edit tool call triggers verify loop.
+			makeEditToolCallResp("call_1"),
+			// Repair turn 1: LLM makes an edit (verify still fails after this).
+			makeEditToolCallResp("call_repair_1"),
+			// Repair turn 2: LLM makes another edit (verify still fails after this).
+			makeEditToolCallResp("call_repair_2"),
+			// Main loop continues after retries exhausted.
+			makeStopResp("done"),
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.VerifyAfterEdit = true
+	cfg.VerifyCommand = verifyFailCmd() // always fails
+	cfg.MaxVerifyRetries = 2
+
+	writeTool := &stubTool{name: "write", output: "wrote"}
+	sess := mustNewSession(t, client, cfg, WithTools(writeTool))
+
+	result, err := sess.Run(context.Background(), "write something")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Session should complete (not be stuck in an infinite loop).
+	if result.MaxTurnsUsed {
+		t.Error("expected session to complete without hitting MaxTurns")
+	}
+}
+
+// buildCountedVerifyCmd creates a shell script in a temp dir that fails for the
+// first failCount invocations and succeeds thereafter. Returns the script path.
+func buildCountedVerifyCmd(t *testing.T, failCount int) string {
+	t.Helper()
+	dir := t.TempDir()
+	// Use a counter file so successive shell invocations share state.
+	counterFile := filepath.Join(dir, "count")
+	scriptPath := filepath.Join(dir, "verify.sh")
+
+	script := fmt.Sprintf(`#!/bin/sh
+COUNT_FILE="%s"
+FAIL_COUNT=%d
+count=$(cat "$COUNT_FILE" 2>/dev/null || echo 0)
+count=$((count + 1))
+echo $count > "$COUNT_FILE"
+if [ "$count" -le "$FAIL_COUNT" ]; then
+  echo "test failed: attempt $count" >&2
+  exit 1
+fi
+exit 0
+`, counterFile, failCount)
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("WriteFile script: %v", err)
+	}
+	return scriptPath
 }

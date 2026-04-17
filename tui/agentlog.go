@@ -191,6 +191,13 @@ func (al *AgentLog) applyStreamMsgContent(msg tea.Msg) bool {
 	case MsgAgentError:
 		al.flushNode(m.NodeID)
 		al.addTaggedLine(m.NodeID, Styles.Error.Render("ERROR: "+m.Error), LineError)
+	case MsgVerifyStatus:
+		al.flushNode(m.NodeID)
+		if strings.Contains(m.Text, "passed") {
+			al.addTaggedLine(m.NodeID, "✔ "+m.Text, LineGeneral)
+		} else {
+			al.addTaggedLine(m.NodeID, Styles.Warn.Render("⚠ "+m.Text), LineGeneral)
+		}
 	case MsgLLMProviderRaw:
 		al.handleProviderRaw(m)
 	default:

@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Structured reflection prompt on tool failure** (issue #93): when a tool call returns an error, the agent session now automatically injects a user-role reflection message before the next LLM turn. The prompt asks the model to identify what went wrong, what assumption was incorrect, and what minimal change will fix it — matching the pattern used by top SWE-bench agents (~10-15% recovery improvement). The feature is enabled by default (`ReflectOnError: true` in `DefaultConfig()`) and capped at three consecutive reflection turns to prevent infinite loops; the counter resets after any clean (no-error) turn. Pipeline authors can opt individual nodes out via `reflect_on_error: false` in their `.dip` file.
+- **Verify-after-edit loop with auto-test** (closes #94): agent sessions can now automatically run tests after any turn that includes file-edit tool calls (`write`, `edit`, `apply_patch`, `notebook_edit`). Modelled on top SWE-bench agent behaviour (~15-20% improvement on benchmark), this transparent inner loop catches regressions before the LLM moves on.
+  - `SessionConfig.VerifyAfterEdit bool` — opt-in flag (default: false).
+  - `SessionConfig.VerifyCommand string` — explicit command; if empty, auto-detection runs: `go.mod` → `go test ./...`, `Cargo.toml` → `cargo test`, `package.json` → `npm test`, `Makefile` with `test:` target → `make test`, `pytest.ini`/`pyproject.toml[tool.pytest]` → `pytest`.
+  - `SessionConfig.MaxVerifyRetries int` — max verify→repair cycles per edit turn (default: 2). After exhaustion the session proceeds without blocking.
+  - Repair turns do NOT count toward `MaxTurns` — they are a transparent sub-loop.
+  - Verification output is capped at 4 KB (tail kept — most relevant errors appear at the end).
+  - Pipeline nodes wire the feature via `verify_after_edit`, `verify_command`, and `max_verify_retries` node attributes. `verify_command` can also be set at graph level as a default for all nodes.
+  - New file `agent/verify.go`; 8 new tests in `agent/verify_test.go` and `agent/session_test.go`.
 
 ## [0.17.0] - 2026-04-16
 

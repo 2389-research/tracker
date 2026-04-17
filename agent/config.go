@@ -37,6 +37,21 @@ type SessionConfig struct {
 	// errors to help the LLM reason about what went wrong before retrying.
 	// Default: true.
 	ReflectOnError bool
+
+	// VerifyAfterEdit enables automatic test/lint verification after turns that
+	// include file writes or edits. If verification fails, the error is fed back
+	// to the LLM with a repair prompt. Default: false (opt-in).
+	VerifyAfterEdit bool
+
+	// VerifyCommand is the explicit verification command to run. When empty,
+	// auto-detection is used (looks for go.mod → "go test ./...", Cargo.toml →
+	// "cargo test", package.json → "npm test", Makefile with test target →
+	// "make test", pytest markers → "pytest").
+	VerifyCommand string
+
+	// MaxVerifyRetries is the maximum number of verify→repair cycles per edit
+	// turn before giving up and proceeding. Default: 2.
+	MaxVerifyRetries int
 }
 
 const (
@@ -57,6 +72,7 @@ func DefaultConfig() SessionConfig {
 		Provider:                      DefaultProvider,
 		ContextCompaction:             CompactionNone,
 		ReflectOnError:                true,
+		MaxVerifyRetries:              2,
 	}
 }
 
@@ -105,6 +121,9 @@ func (c SessionConfig) validateLimits() error {
 		if c.CompactionThreshold <= 0 || c.CompactionThreshold > 1.0 {
 			return fmt.Errorf("CompactionThreshold must be > 0 and <= 1.0 when compaction is auto, got %f", c.CompactionThreshold)
 		}
+	}
+	if c.MaxVerifyRetries < 0 {
+		return fmt.Errorf("MaxVerifyRetries must be >= 0, got %d", c.MaxVerifyRetries)
 	}
 	return nil
 }

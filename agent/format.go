@@ -22,6 +22,13 @@ func FormatEventLine(evt Event) string {
 		if evt.Err != nil {
 			return "✖ " + evt.Err.Error()
 		}
+	case EventVerify:
+		if evt.Text != "" {
+			if strings.Contains(evt.Text, "passed") {
+				return "✔ " + evt.Text
+			}
+			return "⚠ " + evt.Text
+		}
 	}
 	return ""
 }
