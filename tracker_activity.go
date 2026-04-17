@@ -76,6 +76,9 @@ func MostRecentRunID(workdir string) (string, error) {
 		cpPath := filepath.Join(runsDir, e.Name(), "checkpoint.json")
 		cp, err := pipeline.LoadCheckpoint(cpPath)
 		if err != nil {
+			if !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "warning: skipping run %s: %v\n", e.Name(), err)
+			}
 			continue
 		}
 		if cp.Timestamp.After(latestTime) {
@@ -89,14 +92,17 @@ func MostRecentRunID(workdir string) (string, error) {
 	return latestID, nil
 }
 
-// ActivityEntry is a parsed line from activity.jsonl.
+// ActivityEntry is a parsed line from activity.jsonl. Populate via
+// ParseActivityLine — ActivityEntry is not itself a JSON-wire type because
+// tracker has historically used two timestamp formats and time.Time's
+// default unmarshal handles only RFC3339Nano.
 type ActivityEntry struct {
-	Timestamp time.Time `json:"ts"`
-	Type      string    `json:"type"`
-	RunID     string    `json:"run_id,omitempty"`
-	NodeID    string    `json:"node_id,omitempty"`
-	Message   string    `json:"message,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	Timestamp time.Time
+	Type      string
+	RunID     string
+	NodeID    string
+	Message   string
+	Error     string
 }
 
 // LoadActivityLog reads and parses activity.jsonl, skipping malformed lines.

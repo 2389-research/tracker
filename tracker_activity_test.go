@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestResolveRunDir_ExactMatch(t *testing.T) {
@@ -122,5 +123,33 @@ garbage
 	}
 	if entries[0].Type != "a" || entries[1].Type != "b" {
 		t.Errorf("wrong entries: %+v", entries)
+	}
+}
+
+func TestSortActivityByTime_Order(t *testing.T) {
+	t1 := time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Second)
+	t3 := t2.Add(time.Second)
+	entries := []ActivityEntry{
+		{Timestamp: t3, Type: "c"},
+		{Timestamp: t1, Type: "a"},
+		{Timestamp: t2, Type: "b"},
+	}
+	SortActivityByTime(entries)
+	if entries[0].Type != "a" || entries[1].Type != "b" || entries[2].Type != "c" {
+		t.Errorf("wrong order: %+v", entries)
+	}
+}
+
+func TestSortActivityByTime_EqualTimestamps(t *testing.T) {
+	ts := time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC)
+	entries := []ActivityEntry{
+		{Timestamp: ts, Type: "x"},
+		{Timestamp: ts, Type: "y"},
+	}
+	SortActivityByTime(entries)
+	// Either order is acceptable — we just require no panic and preserved length.
+	if len(entries) != 2 {
+		t.Fatalf("lost entries: %d", len(entries))
 	}
 }

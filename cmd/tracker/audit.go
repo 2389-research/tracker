@@ -13,7 +13,6 @@ import (
 	tracker "github.com/2389-research/tracker"
 )
 
-// activityEntry is a type alias for the library type, kept for local use.
 type activityEntry = tracker.ActivityEntry
 
 // runSummary holds the display data for a single pipeline run listing.
