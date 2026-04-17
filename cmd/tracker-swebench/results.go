@@ -39,7 +39,7 @@ func NewResultsWriter(path, model string) (*ResultsWriter, error) {
 				continue
 			}
 			var p Prediction
-			if jsonErr := json.Unmarshal([]byte(line), &p); jsonErr == nil && p.InstanceID != "" {
+			if jsonErr := json.Unmarshal([]byte(line), &p); jsonErr == nil && p.InstanceID != "" && p.ModelPatch != "" {
 				completed[p.InstanceID] = struct{}{}
 			}
 		}
@@ -75,7 +75,11 @@ func (w *ResultsWriter) WritePrediction(instanceID, patch string) error {
 	if _, err := w.file.Write(data); err != nil {
 		return fmt.Errorf("write prediction: %w", err)
 	}
-	w.completed[instanceID] = struct{}{}
+	// Only mark as completed if the patch is non-empty. Empty patches from
+	// timeouts or errors should be retried on resume.
+	if patch != "" {
+		w.completed[instanceID] = struct{}{}
+	}
 	return nil
 }
 

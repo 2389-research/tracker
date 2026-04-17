@@ -169,6 +169,52 @@ func TestWriteRunMeta(t *testing.T) {
 	}
 }
 
+func TestResultsWriter_EmptyPatchNotCompleted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "predictions.jsonl")
+
+	w, err := NewResultsWriter(path, "test-model")
+	if err != nil {
+		t.Fatalf("NewResultsWriter: %v", err)
+	}
+
+	// Write empty patch — should still write the line but NOT mark as completed.
+	if err := w.WritePrediction("instance-timeout", ""); err != nil {
+		t.Fatalf("WritePrediction: %v", err)
+	}
+
+	// Instance should NOT be in the completed set.
+	if w.IsCompleted("instance-timeout") {
+		t.Error("empty-patch instance should not be marked as completed")
+	}
+
+	// Write a real patch — should mark as completed.
+	if err := w.WritePrediction("instance-ok", "diff --git a/fix.py"); err != nil {
+		t.Fatalf("WritePrediction: %v", err)
+	}
+	if !w.IsCompleted("instance-ok") {
+		t.Error("non-empty patch instance should be marked as completed")
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Resume: empty-patch instance should NOT be skipped.
+	w2, err := NewResultsWriter(path, "test-model")
+	if err != nil {
+		t.Fatalf("NewResultsWriter (resume): %v", err)
+	}
+	defer w2.Close()
+
+	if w2.IsCompleted("instance-timeout") {
+		t.Error("resume: empty-patch instance should not be marked completed")
+	}
+	if !w2.IsCompleted("instance-ok") {
+		t.Error("resume: non-empty patch instance should be completed")
+	}
+}
+
 func TestWriteRunMeta_OmitsEmptyGateway(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "run_meta.json")
