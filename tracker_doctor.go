@@ -718,11 +718,13 @@ func checkPipelineFileLib(pipelineFile string) CheckResult {
 		out.Hint = fmt.Sprintf("check the file path: %s", pipelineFile)
 		return out
 	}
+	hasWarn := false
 	if !strings.HasSuffix(pipelineFile, ".dip") && !strings.HasSuffix(pipelineFile, ".dot") {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  "warn",
 			Message: fmt.Sprintf("%s is not a .dip or .dot file — may not be a valid pipeline", pipelineFile),
 		})
+		hasWarn = true
 	}
 	fileBytes, err := os.ReadFile(pipelineFile)
 	if err != nil {
@@ -778,8 +780,13 @@ func checkPipelineFileLib(pipelineFile string) CheckResult {
 		Status:  "ok",
 		Message: fmt.Sprintf("%s valid (%d nodes, %d edges)", pipelineFile, len(graph.Nodes), len(graph.Edges)),
 	})
-	out.Status = "ok"
-	out.Message = fmt.Sprintf("%s is valid", pipelineFile)
+	if hasWarn {
+		out.Status = "warn"
+		out.Message = fmt.Sprintf("%s is valid but has warnings", pipelineFile)
+	} else {
+		out.Status = "ok"
+		out.Message = fmt.Sprintf("%s is valid", pipelineFile)
+	}
 	return out
 }
 

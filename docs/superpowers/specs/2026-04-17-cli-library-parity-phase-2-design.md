@@ -147,13 +147,17 @@ func DiagnoseMostRecent(workDir string) (*DiagnoseReport, error)
 
 ```go
 type AuditReport struct {
-    RunID           string          `json:"run_id"`
-    Status          string          `json:"status"`          // "completed" | "in_progress" | "failed"
-    TotalDuration   time.Duration   `json:"total_duration_ns"`
-    Timeline        []TimelineEntry `json:"timeline"`
-    Retries         []RetryRecord   `json:"retries,omitempty"`
-    Errors          []ActivityError `json:"errors,omitempty"`
-    Recommendations []string        `json:"recommendations,omitempty"`
+    RunID               string          `json:"run_id"`
+    Status              string          `json:"status"`          // "success" | "fail"
+    TotalDuration       time.Duration   `json:"total_duration_ns"`
+    Timeline            []TimelineEntry `json:"timeline"`
+    Retries             []RetryRecord   `json:"retries,omitempty"`
+    Errors              []ActivityError `json:"errors,omitempty"`
+    Recommendations     []string        `json:"recommendations,omitempty"`
+    // Header fields used by the CLI printer.
+    CompletedNodes      int             `json:"completed_nodes"`
+    RestartCount        int             `json:"restart_count"`
+    CheckpointTimestamp time.Time       `json:"checkpoint_timestamp"`
 }
 
 type TimelineEntry struct {
@@ -166,7 +170,16 @@ type TimelineEntry struct {
 
 type RetryRecord   struct { NodeID string; Attempts int }
 type ActivityError struct { Timestamp time.Time; NodeID string; Message string }
-type RunSummary    struct { RunID string; StartedAt time.Time; Status string; NodeCount int }
+type RunSummary    struct {
+    RunID     string
+    Status    string        // "success" | "fail"
+    Nodes     int
+    Retries   int
+    Restarts  int
+    Timestamp time.Time
+    Duration  time.Duration
+    FailedAt  string        // node ID where the run failed, if any
+}
 
 func Audit(runDir string) (*AuditReport, error)
 func ListRuns(workDir string) ([]RunSummary, error)

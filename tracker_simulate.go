@@ -101,11 +101,11 @@ func collectSimEdges(graph *pipeline.Graph) []SimEdge {
 
 func buildExecutionPlan(graph *pipeline.Graph) ([]PlanStep, []string) {
 	if graph.StartNode == "" {
-		return nil, nil
+		return []PlanStep{}, []string{}
 	}
 	visited := make(map[string]bool)
 	queue := []string{graph.StartNode}
-	var plan []PlanStep
+	plan := make([]PlanStep, 0)
 	step := 0
 	for len(queue) > 0 {
 		id := queue[0]
