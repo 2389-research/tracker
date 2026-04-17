@@ -185,7 +185,7 @@ Flags:
 		instEnv["SWEBENCH_INSTANCE"] = inst.AgentPrompt()
 
 		start := time.Now()
-		patch, summary, runErr := docker.RunInstance(ctx, inst, instEnv)
+		patch, summary, runErr := docker.RunInstance(ctx, inst, instEnv, repoCachePath != "")
 		elapsed := time.Since(start).Round(time.Second)
 
 		// Write prediction even on error (capture partial patch).

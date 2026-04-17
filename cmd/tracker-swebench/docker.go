@@ -216,7 +216,9 @@ func (r *DockerRunner) CleanupStale(ctx context.Context) {
 
 // RunInstance creates a container, runs the agent, captures the diff patch, then cleans up.
 // Returns the git diff patch and an AgentSummary. On agent timeout, returns a partial diff.
-func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string) (patch string, summary AgentSummary, err error) {
+// When useCache is true and r.CacheDir is set, the repo cache is mounted and used as a
+// git clone --reference source. Pass false when the bare clone for this repo is unavailable.
+func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string, useCache bool) (patch string, summary AgentSummary, err error) {
 	name := containerName(r.RunLabel, inst.InstanceID)
 	const workDir = "/workspace"
 
@@ -234,7 +236,7 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 
 	// Step 1: Create the container.
 	createArgs := []string{"create", "--name", name, "--label", "swebench=" + r.RunLabel}
-	if r.CacheDir != "" {
+	if useCache && r.CacheDir != "" {
 		createArgs = append(createArgs, "-v", r.CacheDir+":/cache:ro")
 	}
 	if r.MemoryMB > 0 {
@@ -258,7 +260,7 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 
 	// Step 3: Clone the repo and checkout the base commit.
 	cachePath := ""
-	if r.CacheDir != "" {
+	if useCache && r.CacheDir != "" {
 		cachePath = "/cache/" + strings.ReplaceAll(inst.Repo, "/", "_") + ".git"
 	}
 	cloneArgs, checkoutArgs := buildCloneCommands(inst.RepoURL(), inst.BaseCommit, workDir, cachePath)

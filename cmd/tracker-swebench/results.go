@@ -33,6 +33,9 @@ func NewResultsWriter(path, model string) (*ResultsWriter, error) {
 	// Read existing predictions if the file already exists.
 	if f, err := os.Open(path); err == nil {
 		scanner := bufio.NewScanner(f)
+		// Large patches can exceed the default 64 KiB scanner buffer.
+		const maxBuf = 10 * 1024 * 1024
+		scanner.Buffer(make([]byte, maxBuf), maxBuf)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line == "" {
