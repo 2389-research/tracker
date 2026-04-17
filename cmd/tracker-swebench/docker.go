@@ -1,0 +1,229 @@
+// ABOUTME: Docker container lifecycle management for the swebench benchmarking harness.
+// ABOUTME: Shells out to the docker CLI to create, start, exec, stop, and remove containers per instance.
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// AgentSummary holds token usage and timing stats extracted from agent-runner output.
+type AgentSummary struct {
+	Turns        int   `json:"turns"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	DurationMs   int64 `json:"duration_ms"`
+}
+
+// containerName returns the Docker container name for a given instance ID.
+func containerName(instanceID string) string {
+	return "swe-" + instanceID
+}
+
+// buildCloneCmd returns the sh -c command slice to clone a repo and checkout a commit.
+// When cachePath is non-empty, adds the --reference flag for local object reuse.
+func buildCloneCmd(repoURL, commit, workDir, cachePath string) []string {
+	cloneArgs := "git clone"
+	if cachePath != "" {
+		cloneArgs += " --reference " + cachePath
+	}
+	cloneArgs += " " + repoURL + " " + workDir
+	cmd := cloneArgs + " && git checkout " + commit
+	return []string{"sh", "-c", cmd}
+}
+
+// buildEnvFlags converts a map of environment variables into docker -e KEY=VAL flag pairs.
+func buildEnvFlags(env map[string]string) []string {
+	flags := make([]string, 0, len(env)*2)
+	for k, v := range env {
+		flags = append(flags, "-e", k+"="+v)
+	}
+	return flags
+}
+
+// parseDiffOutput trims surrounding whitespace from raw git diff output.
+func parseDiffOutput(raw string) string {
+	return strings.TrimSpace(raw)
+}
+
+// patchLineCount counts non-empty lines in a patch string. Returns 0 for empty string.
+func patchLineCount(patch string) int {
+	if patch == "" {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(patch, "\n") {
+		if line != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// parseAgentSummary extracts the AgentSummary JSON from the last non-empty line of output.
+// Returns zero-value AgentSummary if the last line is not valid JSON.
+func parseAgentSummary(output string) AgentSummary {
+	lines := strings.Split(output, "\n")
+	// Find last non-empty line.
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		var summary AgentSummary
+		if err := json.Unmarshal([]byte(line), &summary); err != nil {
+			return AgentSummary{}
+		}
+		return summary
+	}
+	return AgentSummary{}
+}
+
+// dockerCmd runs `docker <args>` and returns an error that includes stderr on failure.
+func dockerCmd(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker %s: %w\nstderr: %s", args[0], err, stderr.String())
+	}
+	return nil
+}
+
+// dockerExec runs `docker exec [-e K=V ...] <container> <args...>` and streams output to logs.
+func dockerExec(ctx context.Context, container string, env map[string]string, args ...string) error {
+	execArgs := []string{"exec"}
+	execArgs = append(execArgs, buildEnvFlags(env)...)
+	execArgs = append(execArgs, container)
+	execArgs = append(execArgs, args...)
+
+	cmd := exec.CommandContext(ctx, "docker", execArgs...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker exec %s: %w\nstderr: %s", container, err, stderr.String())
+	}
+	return nil
+}
+
+// dockerExecCapture runs docker exec and returns combined stdout+stderr as a string.
+func dockerExecCapture(ctx context.Context, container string, env map[string]string, args ...string) (string, error) {
+	execArgs := []string{"exec"}
+	execArgs = append(execArgs, buildEnvFlags(env)...)
+	execArgs = append(execArgs, container)
+	execArgs = append(execArgs, args...)
+
+	cmd := exec.CommandContext(ctx, "docker", execArgs...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return out.String(), fmt.Errorf("docker exec %s: %w\noutput: %s", container, err, out.String())
+	}
+	return out.String(), nil
+}
+
+// dockerExecOutput runs docker exec and returns stdout only (stderr is discarded).
+func dockerExecOutput(ctx context.Context, container string, args ...string) (string, error) {
+	execArgs := []string{"exec", container}
+	execArgs = append(execArgs, args...)
+
+	cmd := exec.CommandContext(ctx, "docker", execArgs...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("docker exec %s: %w\nstderr: %s", container, err, stderr.String())
+	}
+	return stdout.String(), nil
+}
+
+// DockerRunner manages the Docker container lifecycle for a single benchmark instance.
+type DockerRunner struct {
+	Image    string
+	CacheDir string
+	Timeout  time.Duration
+}
+
+// RunInstance creates a container, runs the agent, captures the diff patch, then cleans up.
+// Returns the git diff patch and an AgentSummary. On agent timeout, returns a partial diff.
+func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string) (patch string, summary AgentSummary, err error) {
+	name := containerName(inst.InstanceID)
+	const workDir = "/workspace"
+
+	// Always stop and remove the container when done.
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if stopErr := dockerCmd(stopCtx, "stop", name); stopErr != nil {
+			log.Printf("[%s] docker stop: %v", inst.InstanceID, stopErr)
+		}
+		if rmErr := dockerCmd(stopCtx, "rm", "-f", name); rmErr != nil {
+			log.Printf("[%s] docker rm: %v", inst.InstanceID, rmErr)
+		}
+	}()
+
+	// Step 1: Create the container.
+	createArgs := []string{"create", "--name", name}
+	if r.CacheDir != "" {
+		createArgs = append(createArgs, "-v", r.CacheDir+":/cache:ro")
+	}
+	createArgs = append(createArgs, r.Image, "sleep", "infinity")
+	if err = dockerCmd(ctx, createArgs...); err != nil {
+		return "", AgentSummary{}, fmt.Errorf("create container: %w", err)
+	}
+
+	// Step 2: Start the container.
+	if err = dockerCmd(ctx, "start", name); err != nil {
+		return "", AgentSummary{}, fmt.Errorf("start container: %w", err)
+	}
+
+	// Step 3: Clone the repo and checkout the base commit.
+	cachePath := ""
+	if r.CacheDir != "" {
+		cachePath = "/cache"
+	}
+	cloneCmd := buildCloneCmd(inst.RepoURL(), inst.BaseCommit, workDir, cachePath)
+	if err = dockerExec(ctx, name, nil, cloneCmd...); err != nil {
+		return "", AgentSummary{}, fmt.Errorf("clone repo: %w", err)
+	}
+
+	// Step 4: Install the package (log failure but continue).
+	pipOut, pipErr := dockerExecCapture(ctx, name, nil, "sh", "-c", "pip install -e . 2>&1 | tail -5")
+	if pipErr != nil {
+		log.Printf("[%s] pip install failed (continuing): %v\noutput: %s", inst.InstanceID, pipErr, pipOut)
+	} else {
+		log.Printf("[%s] pip install: %s", inst.InstanceID, strings.TrimSpace(pipOut))
+	}
+
+	// Step 5: Run the agent with a timeout.
+	agentCtx, agentCancel := context.WithTimeout(ctx, r.Timeout)
+	defer agentCancel()
+
+	agentOutput, agentErr := dockerExecCapture(agentCtx, name, agentEnv, "agent-runner")
+	summary = parseAgentSummary(agentOutput)
+
+	if agentErr != nil {
+		log.Printf("[%s] agent-runner error: %v", inst.InstanceID, agentErr)
+	}
+
+	// Step 6: Capture the git diff (even on agent timeout/failure, capture partial diff).
+	diffOutput, diffErr := dockerExecOutput(ctx, name, "git", "-C", workDir, "diff")
+	if diffErr != nil {
+		log.Printf("[%s] git diff failed: %v", inst.InstanceID, diffErr)
+	}
+	patch = parseDiffOutput(diffOutput)
+
+	// Propagate agent error only after capturing the patch.
+	if agentErr != nil {
+		return patch, summary, fmt.Errorf("agent-runner: %w", agentErr)
+	}
+
+	return patch, summary, nil
+}
