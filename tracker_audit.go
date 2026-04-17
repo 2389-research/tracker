@@ -112,7 +112,7 @@ func ListRuns(workdir string) ([]RunSummary, error) {
 			runs = append(runs, rs)
 		}
 	}
-	sort.Slice(runs, func(i, j int) bool { return runs[i].Timestamp.After(runs[j].Timestamp) })
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].Timestamp.After(runs[j].Timestamp) })
 	return runs, nil
 }
 
@@ -212,7 +212,11 @@ func buildLibRunSummary(runsDir, name string) (RunSummary, bool) {
 	if err != nil {
 		return RunSummary{}, false
 	}
-	activity, _ := LoadActivityLog(runDir)
+	activity, lerr := LoadActivityLog(runDir)
+	if lerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: run %s: cannot read activity log: %v\n", name, lerr)
+		activity = nil // continue with nil so the summary still builds
+	}
 	SortActivityByTime(activity)
 	status := classifyStatus(cp, activity)
 	totalRetries := 0

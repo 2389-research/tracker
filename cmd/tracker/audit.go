@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
 	"time"
 
 	tracker "github.com/2389-research/tracker"
@@ -192,10 +191,7 @@ func printRecommendations(recs []string) {
 		return
 	}
 
-	sorted := make([]string, len(recs))
-	copy(sorted, recs)
-	sort.Strings(sorted)
-	for _, rec := range sorted {
+	for _, rec := range recs {
 		fmt.Printf("  \u2022 %s\n", rec)
 	}
 }
