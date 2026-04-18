@@ -61,10 +61,10 @@ const (
 
 func DefaultConfig() SessionConfig {
 	return SessionConfig{
-		MaxTurns:                      50,
+		MaxTurns:                      80,
 		CommandTimeout:                10 * time.Second,
 		MaxCommandTimeout:             10 * time.Minute,
-		LoopDetectionThreshold:        10,
+		LoopDetectionThreshold:        4,
 		ContextWindowLimit:            200000,
 		ContextWindowWarningThreshold: 0.8,
 		WorkingDir:                    ".",

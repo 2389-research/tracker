@@ -140,7 +140,6 @@ func main() {
 	sessionCfg.ReflectOnError = true
 	sessionCfg.VerifyAfterEdit = true
 	sessionCfg.VerifyCommand = "python -m pytest --tb=short -q -x 2>&1 | tail -50"
-	sessionCfg.LoopDetectionThreshold = 4
 	sessionCfg.WorkingDir = cfg.RepoDir
 	sessionCfg.SystemPrompt = swebenchSystemPrompt
 

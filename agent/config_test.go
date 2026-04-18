@@ -10,8 +10,8 @@ import (
 func TestConfigDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.MaxTurns != 50 {
-		t.Errorf("expected MaxTurns 50, got %d", cfg.MaxTurns)
+	if cfg.MaxTurns != 80 {
+		t.Errorf("expected MaxTurns 80, got %d", cfg.MaxTurns)
 	}
 	if cfg.CommandTimeout != 10*time.Second {
 		t.Errorf("expected CommandTimeout 10s, got %v", cfg.CommandTimeout)
@@ -19,8 +19,8 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.MaxCommandTimeout != 10*time.Minute {
 		t.Errorf("expected MaxCommandTimeout 10m, got %v", cfg.MaxCommandTimeout)
 	}
-	if cfg.LoopDetectionThreshold != 10 {
-		t.Errorf("expected LoopDetectionThreshold 10, got %d", cfg.LoopDetectionThreshold)
+	if cfg.LoopDetectionThreshold != 4 {
+		t.Errorf("expected LoopDetectionThreshold 4, got %d", cfg.LoopDetectionThreshold)
 	}
 	if cfg.WorkingDir != "." {
 		t.Errorf("expected WorkingDir '.', got %q", cfg.WorkingDir)

@@ -1163,6 +1163,7 @@ func TestReflectionCapAtThree(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.ReflectOnError = true
+	cfg.LoopDetectionThreshold = 10 // higher than default so 5 identical calls don't trigger loop detection
 	sess := mustNewSession(t, client, cfg, WithTools(tool))
 	if _, err := sess.Run(context.Background(), "Run 5 times"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
