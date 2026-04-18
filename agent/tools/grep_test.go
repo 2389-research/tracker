@@ -187,3 +187,159 @@ func TestGrepSearchRegexCapture(t *testing.T) {
 		t.Errorf("should not match line 2, got %q", result)
 	}
 }
+
+func TestGrepSearchContextLines(t *testing.T) {
+	dir := t.TempDir()
+	// Lines: 1:aaa 2:bbb 3:MATCH 4:ddd 5:eee
+	content := "aaa\nbbb\nMATCH\nddd\neee\n"
+	if err := os.WriteFile(filepath.Join(dir, "ctx.txt"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewGrepSearchTool(env)
+
+	input := json.RawMessage(`{"pattern": "MATCH", "path": "ctx.txt", "context_lines": 1}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Line 2 (bbb) should appear as context with `-` separator.
+	if !strings.Contains(result, "ctx.txt-2-bbb") {
+		t.Errorf("expected context line before match (ctx.txt-2-bbb), got %q", result)
+	}
+	// Line 3 (MATCH) should appear with `:` separator.
+	if !strings.Contains(result, "ctx.txt:3:MATCH") {
+		t.Errorf("expected match line (ctx.txt:3:MATCH), got %q", result)
+	}
+	// Line 4 (ddd) should appear as context with `-` separator.
+	if !strings.Contains(result, "ctx.txt-4-ddd") {
+		t.Errorf("expected context line after match (ctx.txt-4-ddd), got %q", result)
+	}
+	// Line 1 (aaa) should not be included — outside the context window.
+	if strings.Contains(result, "aaa") {
+		t.Errorf("should not include aaa (outside context window), got %q", result)
+	}
+}
+
+func TestGrepSearchContextLinesMerge(t *testing.T) {
+	dir := t.TempDir()
+	// Lines: 1:aaa 2:MATCH1 3:bbb 4:ccc 5:MATCH2 6:ddd
+	// With context_lines=2: match1 window=[1..4], match2 window=[3..6] — they overlap, should merge.
+	content := "aaa\nMATCH1\nbbb\nccc\nMATCH2\nddd\n"
+	if err := os.WriteFile(filepath.Join(dir, "merge.txt"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewGrepSearchTool(env)
+
+	input := json.RawMessage(`{"pattern": "MATCH", "path": "merge.txt", "context_lines": 2}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Both matches must be present.
+	if !strings.Contains(result, "merge.txt:2:MATCH1") {
+		t.Errorf("expected MATCH1 at line 2, got %q", result)
+	}
+	if !strings.Contains(result, "merge.txt:5:MATCH2") {
+		t.Errorf("expected MATCH2 at line 5, got %q", result)
+	}
+	// No `--` separator because windows overlap/merge.
+	if strings.Contains(result, "--") {
+		t.Errorf("expected no -- separator for merged windows, got %q", result)
+	}
+	// bbb (line 3) should appear exactly once as a context line.
+	count := strings.Count(result, "bbb")
+	if count != 1 {
+		t.Errorf("expected bbb to appear exactly once (no duplicate context), got count=%d in %q", count, result)
+	}
+}
+
+func TestGrepSearchSkipsPycache(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "__pycache__"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "__pycache__", "cached.py"), []byte("HIDDEN_MATCH\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// A real file with the same pattern to confirm search works at all.
+	if err := os.WriteFile(filepath.Join(dir, "visible.py"), []byte("REAL_MATCH\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewGrepSearchTool(env)
+
+	input := json.RawMessage(`{"pattern": "MATCH"}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "__pycache__") {
+		t.Errorf("should not search inside __pycache__, got %q", result)
+	}
+	if !strings.Contains(result, "REAL_MATCH") {
+		t.Errorf("expected REAL_MATCH in visible.py, got %q", result)
+	}
+}
+
+func TestGrepSearchSkipsNodeModules(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "lib"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "node_modules", "lib", "index.js"), []byte("HIDDEN_MATCH\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.js"), []byte("REAL_MATCH\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewGrepSearchTool(env)
+
+	input := json.RawMessage(`{"pattern": "MATCH"}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "node_modules") {
+		t.Errorf("should not search inside node_modules, got %q", result)
+	}
+	if !strings.Contains(result, "REAL_MATCH") {
+		t.Errorf("expected REAL_MATCH in app.js, got %q", result)
+	}
+}
+
+func TestGrepSearchSkipsBuild(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "build"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "build", "output.js"), []byte("HIDDEN_MATCH\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src.go"), []byte("REAL_MATCH\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewGrepSearchTool(env)
+
+	input := json.RawMessage(`{"pattern": "MATCH"}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "build/") {
+		t.Errorf("should not search inside build/, got %q", result)
+	}
+	if !strings.Contains(result, "REAL_MATCH") {
+		t.Errorf("expected REAL_MATCH in src.go, got %q", result)
+	}
+}

@@ -45,6 +45,10 @@ func (t *GrepSearchTool) Parameters() json.RawMessage {
 			"path": {
 				"type": "string",
 				"description": "File or directory to search in, relative to working directory. Defaults to '.' (entire working directory)."
+			},
+			"context_lines": {
+				"type": "integer",
+				"description": "Number of context lines to show before and after each match. Default 0."
 			}
 		},
 		"required": ["pattern"]
@@ -52,7 +56,7 @@ func (t *GrepSearchTool) Parameters() json.RawMessage {
 }
 
 func (t *GrepSearchTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
-	pattern, path, err := parseGrepInput(input)
+	pattern, path, contextLines, err := parseGrepInput(input)
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +71,7 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input json.RawMessage) (st
 		return "", err
 	}
 
-	matches, truncated, err := t.runSearch(ctx, searchRoot, path, re)
+	matches, truncated, err := t.runSearch(ctx, searchRoot, path, re, contextLines)
 	if err != nil {
 		return "", err
 	}
@@ -76,33 +80,34 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input json.RawMessage) (st
 }
 
 // parseGrepInput unmarshals the JSON input and validates required fields.
-func parseGrepInput(input json.RawMessage) (pattern, path string, err error) {
+func parseGrepInput(input json.RawMessage) (pattern, path string, contextLines int, err error) {
 	var params struct {
-		Pattern string `json:"pattern"`
-		Path    string `json:"path"`
+		Pattern      string `json:"pattern"`
+		Path         string `json:"path"`
+		ContextLines int    `json:"context_lines"`
 	}
 	if err := json.Unmarshal(input, &params); err != nil {
-		return "", "", fmt.Errorf("invalid input: %w", err)
+		return "", "", 0, fmt.Errorf("invalid input: %w", err)
 	}
 	if params.Pattern == "" {
-		return "", "", fmt.Errorf("pattern is required")
+		return "", "", 0, fmt.Errorf("pattern is required")
 	}
 	if params.Path == "" {
 		params.Path = "."
 	}
-	return params.Pattern, params.Path, nil
+	return params.Pattern, params.Path, params.ContextLines, nil
 }
 
 // runSearch performs the grep search on the resolved path.
-func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp) ([]string, bool, error) {
+func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp, contextLines int) ([]string, bool, error) {
 	info, err := os.Stat(searchRoot)
 	if err != nil {
 		return nil, false, fmt.Errorf("path not found: %s", displayPath)
 	}
 	if info.IsDir() {
-		return t.searchDir(ctx, searchRoot, re)
+		return t.searchDir(ctx, searchRoot, re, contextLines)
 	}
-	return t.searchFile(searchRoot, re)
+	return t.searchFile(searchRoot, re, contextLines)
 }
 
 // formatGrepResults builds the final output string from search matches.
@@ -138,12 +143,12 @@ func (t *GrepSearchTool) safePath(rel string) (string, error) {
 }
 
 // searchDir walks a directory recursively, searching each regular file for matches.
-func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.Regexp) ([]string, bool, error) {
+func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.Regexp, contextLines int) ([]string, bool, error) {
 	var matches []string
 	truncated := false
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		return t.walkEntry(ctx, root, path, info, err, re, &matches, &truncated)
+		return t.walkEntry(ctx, root, path, info, err, re, contextLines, &matches, &truncated)
 	})
 
 	// "limit reached" is our sentinel, not a real error.
@@ -155,7 +160,7 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 }
 
 // walkEntry processes one entry during the filepath.Walk of searchDir.
-func (t *GrepSearchTool) walkEntry(ctx context.Context, root, path string, info os.FileInfo, err error, re *regexp.Regexp, matches *[]string, truncated *bool) error {
+func (t *GrepSearchTool) walkEntry(ctx context.Context, root, path string, info os.FileInfo, err error, re *regexp.Regexp, contextLines int, matches *[]string, truncated *bool) error {
 	if err != nil {
 		return nil // skip unreadable entries
 	}
@@ -163,12 +168,12 @@ func (t *GrepSearchTool) walkEntry(ctx context.Context, root, path string, info 
 		return ctx.Err()
 	}
 	if info.IsDir() {
-		return skipHiddenDir(info, path, root)
+		return shouldSkipDir(info, path, root)
 	}
 	if isBinaryExtension(info.Name()) {
 		return nil
 	}
-	fileMatches, fileTruncated, err := t.searchFile(path, re)
+	fileMatches, fileTruncated, err := t.searchFile(path, re, contextLines)
 	if err != nil {
 		return nil // skip unreadable files
 	}
@@ -181,16 +186,36 @@ func (t *GrepSearchTool) walkEntry(ctx context.Context, root, path string, info 
 	return nil
 }
 
-// skipHiddenDir returns filepath.SkipDir for hidden directories (except the root).
-func skipHiddenDir(info os.FileInfo, path, root string) error {
-	if strings.HasPrefix(info.Name(), ".") && path != root {
+// shouldSkipDir returns filepath.SkipDir for hidden directories and known noise directories (except the root).
+func shouldSkipDir(info os.FileInfo, path, root string) error {
+	if path == root {
+		return nil
+	}
+	name := info.Name()
+	if strings.HasPrefix(name, ".") {
+		return filepath.SkipDir
+	}
+	noiseDir := map[string]bool{
+		"__pycache__":  true,
+		".tox":         true,
+		"build":        true,
+		"dist":         true,
+		"node_modules": true,
+		"venv":         true,
+		".venv":        true,
+	}
+	if noiseDir[name] {
+		return filepath.SkipDir
+	}
+	if strings.HasSuffix(name, ".egg-info") {
 		return filepath.SkipDir
 	}
 	return nil
 }
 
 // searchFile scans a single file for lines matching the regex.
-func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp) ([]string, bool, error) {
+// When contextLines > 0, it buffers the whole file first and emits match groups with context.
+func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp, contextLines int) ([]string, bool, error) {
 	f, err := os.Open(absPath)
 	if err != nil {
 		return nil, false, err
@@ -202,6 +227,14 @@ func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp) ([]string
 		relPath = absPath
 	}
 
+	if contextLines <= 0 {
+		return searchFileNoContext(f, relPath, re)
+	}
+	return searchFileWithContext(f, relPath, re, contextLines)
+}
+
+// searchFileNoContext performs a simple line-by-line scan with no context buffering.
+func searchFileNoContext(f *os.File, relPath string, re *regexp.Regexp) ([]string, bool, error) {
 	var matches []string
 	truncated := false
 	scanner := bufio.NewScanner(f)
@@ -220,6 +253,87 @@ func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp) ([]string
 	}
 
 	return matches, truncated, scanner.Err()
+}
+
+// searchFileWithContext buffers the entire file and emits match lines plus N context lines
+// before and after each match. Context lines use `filepath-linenum-content` format;
+// match lines use `filepath:linenum:content`. Overlapping windows are merged and
+// non-contiguous groups are separated by `--`.
+func searchFileWithContext(f *os.File, relPath string, re *regexp.Regexp, n int) ([]string, bool, error) {
+	scanner := bufio.NewScanner(f)
+	var allLines []string
+	for scanner.Scan() {
+		allLines = append(allLines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, false, err
+	}
+
+	total := len(allLines)
+
+	// Collect 0-based indices of matching lines.
+	var matchIndices []int
+	for i, line := range allLines {
+		if re.MatchString(line) {
+			matchIndices = append(matchIndices, i)
+		}
+	}
+	if len(matchIndices) == 0 {
+		return nil, false, nil
+	}
+
+	// Build non-overlapping groups of [start, end] inclusive (0-based).
+	type group struct{ start, end int }
+	var groups []group
+	cur := group{
+		start: max(0, matchIndices[0]-n),
+		end:   min(total-1, matchIndices[0]+n),
+	}
+	for _, idx := range matchIndices[1:] {
+		wStart := max(0, idx-n)
+		wEnd := min(total-1, idx+n)
+		if wStart <= cur.end+1 {
+			// Overlapping or adjacent — merge.
+			if wEnd > cur.end {
+				cur.end = wEnd
+			}
+		} else {
+			groups = append(groups, cur)
+			cur = group{start: wStart, end: wEnd}
+		}
+	}
+	groups = append(groups, cur)
+
+	// Build a set of match indices for quick lookup.
+	matchSet := make(map[int]bool, len(matchIndices))
+	for _, idx := range matchIndices {
+		matchSet[idx] = true
+	}
+
+	var out []string
+	truncated := false
+	matchCount := 0
+
+	for i, g := range groups {
+		if i > 0 {
+			out = append(out, "--")
+		}
+		for lineIdx := g.start; lineIdx <= g.end; lineIdx++ {
+			lineNum := lineIdx + 1 // 1-based
+			content := allLines[lineIdx]
+			if matchSet[lineIdx] {
+				out = append(out, fmt.Sprintf("%s:%d:%s", relPath, lineNum, content))
+				matchCount++
+				if matchCount >= maxGrepResults {
+					return out, true, nil
+				}
+			} else {
+				out = append(out, fmt.Sprintf("%s-%d-%s", relPath, lineNum, content))
+			}
+		}
+	}
+
+	return out, truncated, nil
 }
 
 // isBinaryExtension returns true for file extensions that are likely binary.
