@@ -96,7 +96,7 @@ func (t *EditTool) handleReplace(ctx context.Context, path, oldString, newString
 	}
 	count := strings.Count(content, oldString)
 	if count == 0 {
-		return "", fmt.Errorf("old_string not found in %s", path)
+		return "", fmt.Errorf("old_string not found in %s.\n\n%s\n\nHint: the file may have changed since you last read it. Re-read with the read tool before retrying.", path, nearbyContext(content, oldString))
 	}
 	if count > 1 {
 		return "", fmt.Errorf("old_string found %d times in %s (must be unique)", count, path)
@@ -106,6 +106,61 @@ func (t *EditTool) handleReplace(ctx context.Context, path, oldString, newString
 		return "", err
 	}
 	return fmt.Sprintf("edited %s", path), nil
+}
+
+// nearbyContext finds the closest matching region in content to help the agent understand
+// what the file actually contains near where old_string was expected.
+func nearbyContext(content, oldString string) string {
+	lines := strings.Split(content, "\n")
+
+	// Find the first non-empty line of old_string to use as a search anchor.
+	firstLine := ""
+	for _, l := range strings.Split(oldString, "\n") {
+		if strings.TrimSpace(l) != "" {
+			firstLine = l
+			break
+		}
+	}
+
+	// Locate the anchor line in the file to find the closest region.
+	anchorLine := -1
+	if firstLine != "" {
+		for i, l := range lines {
+			if strings.Contains(l, firstLine) {
+				anchorLine = i
+				break
+			}
+		}
+	}
+
+	const contextRadius = 5
+	const fallbackLines = 20
+
+	var start, end int
+	if anchorLine >= 0 {
+		start = anchorLine - contextRadius
+		if start < 0 {
+			start = 0
+		}
+		end = anchorLine + contextRadius + 1
+		if end > len(lines) {
+			end = len(lines)
+		}
+	} else {
+		// No anchor found: show the first fallbackLines lines.
+		start = 0
+		end = len(lines)
+		if end > fallbackLines {
+			end = fallbackLines
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Closest content near expected location:\n")
+	for i := start; i < end; i++ {
+		sb.WriteString(fmt.Sprintf("%4d: %s\n", i+1, lines[i]))
+	}
+	return sb.String()
 }
 
 // CachePolicy declares that edit is mutating and invalidates caches.

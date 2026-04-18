@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/agent/exec"
@@ -110,5 +111,35 @@ func TestEditToolEmptyOldStringExistingFile(t *testing.T) {
 	_, err := tool.Execute(context.Background(), input)
 	if err == nil {
 		t.Error("expected error when old_string is empty and file exists")
+	}
+}
+
+func TestEditToolNotFoundShowsContext(t *testing.T) {
+	dir := t.TempDir()
+	fileContent := "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n"
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte(fileContent), 0644)
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewEditTool(env)
+
+	input := json.RawMessage(`{
+		"path": "main.go",
+		"old_string": "func main() {\n\tfmt.Println(\"goodbye\")\n}",
+		"new_string": "func main() {}"
+	}`)
+	_, err := tool.Execute(context.Background(), input)
+	if err == nil {
+		t.Fatal("expected error when old_string not found")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "Closest content") {
+		t.Errorf("expected error to contain 'Closest content', got: %s", errMsg)
+	}
+	// Should include a line number (e.g. "5:")
+	if !strings.Contains(errMsg, ":") {
+		t.Errorf("expected error to contain line numbers, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "Re-read") {
+		t.Errorf("expected error to contain re-read hint, got: %s", errMsg)
 	}
 }
