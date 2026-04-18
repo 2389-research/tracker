@@ -74,6 +74,14 @@ func (t *ReadTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 
+	// Reject negative values to avoid slice-bounds panics.
+	if params.Offset < 0 {
+		return "", fmt.Errorf("offset must be >= 0, got %d", params.Offset)
+	}
+	if params.Limit < 0 {
+		return "", fmt.Errorf("limit must be >= 0, got %d", params.Limit)
+	}
+
 	// Treat offset=0 as offset=1 (start of file).
 	startLine := params.Offset
 	if startLine == 0 {
@@ -87,8 +95,11 @@ func (t *ReadTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 	// Convert to 0-based slice index.
 	startIdx := startLine - 1
 	endIdx := totalLines
-	if params.Limit > 0 && startIdx+params.Limit < endIdx {
-		endIdx = startIdx + params.Limit
+	if params.Limit > 0 {
+		remaining := totalLines - startIdx
+		if params.Limit < remaining {
+			endIdx = startIdx + params.Limit
+		}
 	}
 
 	selected := lines[startIdx:endIdx]

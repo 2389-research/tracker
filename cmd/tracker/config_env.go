@@ -9,13 +9,15 @@ import (
 )
 
 var providerEnvKeys = map[string]struct{}{
-	"OPENAI_API_KEY":     {},
-	"ANTHROPIC_API_KEY":  {},
-	"GEMINI_API_KEY":     {},
-	"GOOGLE_API_KEY":     {},
-	"OPENAI_BASE_URL":    {},
-	"ANTHROPIC_BASE_URL": {},
-	"GEMINI_BASE_URL":    {},
+	"OPENAI_API_KEY":         {},
+	"ANTHROPIC_API_KEY":      {},
+	"GEMINI_API_KEY":         {},
+	"GOOGLE_API_KEY":         {},
+	"OPENAI_BASE_URL":        {},
+	"ANTHROPIC_BASE_URL":     {},
+	"GEMINI_BASE_URL":        {},
+	"OPENAI_COMPAT_API_KEY":  {},
+	"OPENAI_COMPAT_BASE_URL": {},
 }
 
 func resolveConfigEnvPath() (string, error) {

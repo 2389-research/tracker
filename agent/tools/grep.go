@@ -18,6 +18,17 @@ import (
 // maxGrepResults caps the number of matching lines returned to avoid overwhelming output.
 const maxGrepResults = 100
 
+// noiseDirs are directories skipped during recursive grep to reduce noise.
+// Dot-prefixed dirs (e.g. .git, .tox, .venv) are already skipped by the
+// HasPrefix(".") check in shouldSkipDir, so they are not listed here.
+var noiseDirs = map[string]bool{
+	"__pycache__":  true,
+	"build":        true,
+	"dist":         true,
+	"node_modules": true,
+	"venv":         true,
+}
+
 // GrepSearchTool searches for regex patterns across files in the working directory.
 type GrepSearchTool struct {
 	env exec.ExecutionEnvironment
@@ -195,16 +206,7 @@ func shouldSkipDir(info os.FileInfo, path, root string) error {
 	if strings.HasPrefix(name, ".") {
 		return filepath.SkipDir
 	}
-	noiseDir := map[string]bool{
-		"__pycache__":  true,
-		".tox":         true,
-		"build":        true,
-		"dist":         true,
-		"node_modules": true,
-		"venv":         true,
-		".venv":        true,
-	}
-	if noiseDir[name] {
+	if noiseDirs[name] {
 		return filepath.SkipDir
 	}
 	if strings.HasSuffix(name, ".egg-info") {

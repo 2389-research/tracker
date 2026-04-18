@@ -128,6 +128,49 @@ func TestReadToolWithOffsetAndLimit(t *testing.T) {
 	}
 }
 
+func TestReadToolNegativeOffset(t *testing.T) {
+	tool, name := newFiveLineFile(t)
+
+	input := fmt.Sprintf(`{"path": %q, "offset": -5}`, name)
+	_, err := tool.Execute(context.Background(), json.RawMessage(input))
+	if err == nil {
+		t.Fatal("expected error for negative offset")
+	}
+	if !strings.Contains(err.Error(), "offset must be >= 0") {
+		t.Errorf("error should mention 'offset must be >= 0', got: %v", err)
+	}
+}
+
+func TestReadToolNegativeLimit(t *testing.T) {
+	tool, name := newFiveLineFile(t)
+
+	input := fmt.Sprintf(`{"path": %q, "limit": -1}`, name)
+	_, err := tool.Execute(context.Background(), json.RawMessage(input))
+	if err == nil {
+		t.Fatal("expected error for negative limit")
+	}
+	if !strings.Contains(err.Error(), "limit must be >= 0") {
+		t.Errorf("error should mention 'limit must be >= 0', got: %v", err)
+	}
+}
+
+func TestReadToolOverflowLimit(t *testing.T) {
+	tool, name := newFiveLineFile(t)
+
+	// A very large limit should not panic — should just return to end of file.
+	input := fmt.Sprintf(`{"path": %q, "offset": 2, "limit": 999999}`, name)
+	result, err := tool.Execute(context.Background(), json.RawMessage(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "line two") {
+		t.Errorf("expected line two in result, got: %q", result)
+	}
+	if !strings.Contains(result, "line five") {
+		t.Errorf("expected line five (end of file) in result, got: %q", result)
+	}
+}
+
 func TestReadToolOffsetBeyondEOF(t *testing.T) {
 	tool, name := newFiveLineFile(t)
 

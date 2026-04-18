@@ -432,7 +432,7 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 // Intentional simplification: repair turns skip compaction checks, turn counting,
 // and turn-metric event emission that normal turns do. This is acceptable because
 // repair turns are bounded by MaxVerifyRetries (default 2) and produce at most
-// verifyOutputCap (4KB) of LLM-visible output — the cost impact is small and
+// verifyOutputCap (16KB) of LLM-visible output — the cost impact is small and
 // predictable. Adding full bookkeeping would require threading the turn counter
 // and tracker into a shared path that would complicate the turn loop.
 func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) error {

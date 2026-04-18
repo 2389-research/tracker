@@ -76,6 +76,36 @@ func TestCompactBashSummary_LongCommand(t *testing.T) {
 	}
 }
 
+func TestCompactBashSummary_MixedPassFail(t *testing.T) {
+	// "3 passed, 1 failed" should be detected as failed, not passed.
+	content := "pytest -q\nsome output\n3 passed, 1 failed in 4.2s\n"
+	summary := compactBashSummary(content)
+	if !strings.Contains(summary, "(failed)") {
+		t.Errorf("expected '(failed)' for mixed pass/fail output, got: %s", summary)
+	}
+	if strings.Contains(summary, "(passed)") {
+		t.Errorf("should not contain '(passed)' when failures are present, got: %s", summary)
+	}
+}
+
+func TestCompactBashSummary_OkSubstring(t *testing.T) {
+	// Words containing "ok" as a substring should NOT trigger pass detection.
+	content := "pip install\nLooking for cookbook\nchecking hooks\n"
+	summary := compactBashSummary(content)
+	if strings.Contains(summary, "(passed)") {
+		t.Errorf("'cookbook'/'hooks' should not trigger pass detection, got: %s", summary)
+	}
+}
+
+func TestCompactBashSummary_GoTestOk(t *testing.T) {
+	// Go's "ok \t<pkg>" format should trigger pass detection.
+	content := "go test ./...\nok  \tgithub.com/foo/bar\n"
+	summary := compactBashSummary(content)
+	if !strings.Contains(summary, "(passed)") {
+		t.Errorf("expected '(passed)' for Go test 'ok' output, got: %s", summary)
+	}
+}
+
 func TestCompactBashSummary_NoSignal(t *testing.T) {
 	content := "ls -la\nfile1.txt\nfile2.txt\n"
 	summary := compactBashSummary(content)
