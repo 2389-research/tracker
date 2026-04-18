@@ -41,9 +41,49 @@ func TestCompactSummary_GrepTool(t *testing.T) {
 func TestCompactSummary_BashTool(t *testing.T) {
 	content := "go test ./... -v\nok  \tpackage1\nok  \tpackage2\n"
 	summary := compactSummary("bash", content)
-	expected := "[previously ran: go test ./... -v — Re-run if needed.]"
+	expected := "[previously ran: go test ./... -v (passed) — 4 lines output. Re-run if needed.]"
 	if summary != expected {
 		t.Errorf("expected %q, got %q", expected, summary)
+	}
+}
+
+func TestCompactBashSummary_DetectsPass(t *testing.T) {
+	content := "pytest -q\nsome output\n3 passed\n"
+	summary := compactBashSummary(content)
+	if !strings.Contains(summary, "(passed)") {
+		t.Errorf("expected summary to contain '(passed)', got: %s", summary)
+	}
+}
+
+func TestCompactBashSummary_DetectsFail(t *testing.T) {
+	content := "go test ./...\nsome output\nFAILED\n"
+	summary := compactBashSummary(content)
+	if !strings.Contains(summary, "(failed)") {
+		t.Errorf("expected summary to contain '(failed)', got: %s", summary)
+	}
+}
+
+func TestCompactBashSummary_LongCommand(t *testing.T) {
+	longCmd := strings.Repeat("a", 100)
+	content := longCmd + "\nsome output\n"
+	summary := compactBashSummary(content)
+	// Command should be truncated to 80 chars
+	if strings.Contains(summary, longCmd) {
+		t.Errorf("expected long command to be truncated, got: %s", summary)
+	}
+	if !strings.Contains(summary, strings.Repeat("a", 80)) {
+		t.Errorf("expected first 80 chars of command in summary, got: %s", summary)
+	}
+}
+
+func TestCompactBashSummary_NoSignal(t *testing.T) {
+	content := "ls -la\nfile1.txt\nfile2.txt\n"
+	summary := compactBashSummary(content)
+	if strings.Contains(summary, "(passed)") || strings.Contains(summary, "(failed)") {
+		t.Errorf("expected no signal suffix for neutral output, got: %s", summary)
+	}
+	if !strings.Contains(summary, "lines output") {
+		t.Errorf("expected 'lines output' in summary, got: %s", summary)
 	}
 }
 

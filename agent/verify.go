@@ -16,14 +16,14 @@ import (
 const (
 	// verifyOutputCap is the maximum bytes of verification output fed back to the LLM.
 	// The tail is kept (most relevant errors appear at the end).
-	verifyOutputCap = 4096
+	verifyOutputCap = 16384
 
 	// verifyRepairPrompt is injected when verification fails after an edit turn.
 	verifyRepairPrompt = `Verification failed after your edits.
 
 Command: %s
 Exit code: %d
-Output (truncated to 4KB):
+Output (truncated to 16KB):
 %s
 
 Please fix the failing test/lint issue, then I'll re-verify.`

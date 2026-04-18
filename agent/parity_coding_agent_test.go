@@ -326,13 +326,19 @@ func TestParityProviderProfilesExposeProviderAlignedToolsets(t *testing.T) {
 			name:        "anthropic provider keeps edit",
 			provider:    "anthropic",
 			wantPresent: "edit",
-			wantMissing: "apply_patch",
+			wantMissing: "",
+		},
+		{
+			name:        "anthropic provider also gets apply_patch",
+			provider:    "anthropic",
+			wantPresent: "apply_patch",
+			wantMissing: "",
 		},
 		{
 			name:        "model catalog infers google profile",
 			model:       "gemini-3-pro-preview",
 			wantPresent: "edit",
-			wantMissing: "apply_patch",
+			wantMissing: "",
 		},
 	}
 

@@ -28,8 +28,8 @@ func TestParseConfig_Defaults(t *testing.T) {
 	if cfg.Provider != "anthropic" {
 		t.Errorf("expected Provider=anthropic, got %q", cfg.Provider)
 	}
-	if cfg.MaxTurns != 50 {
-		t.Errorf("expected MaxTurns=50, got %d", cfg.MaxTurns)
+	if cfg.MaxTurns != 80 {
+		t.Errorf("expected MaxTurns=80, got %d", cfg.MaxTurns)
 	}
 	if cfg.Timeout != 30*time.Minute {
 		t.Errorf("expected Timeout=30m, got %v", cfg.Timeout)
