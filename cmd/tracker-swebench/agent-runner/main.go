@@ -140,6 +140,24 @@ func main() {
 	sessionCfg.ReflectOnError = true
 	sessionCfg.VerifyAfterEdit = true
 	sessionCfg.VerifyCommand = "python -m pytest --tb=short -q -x 2>&1 | tail -50"
+	sessionCfg.VerifyBroadCommand = "python -m pytest --tb=short -q 2>&1 | tail -100"
+	sessionCfg.Checkpoints = []agent.Checkpoint{
+		{
+			Fraction: 0.5,
+			Message: `CHECKPOINT: You've used half your turn budget. Before continuing:
+1. List what approaches you've tried so far and their results.
+2. If none of your approaches have made the failing tests pass, STOP and re-read the issue description and test file from scratch.
+3. Consider whether you're editing the right file/function. The fix might be elsewhere.
+4. Commit to ONE approach and test it thoroughly before trying alternatives.`,
+		},
+		{
+			Fraction: 0.75,
+			Message: `URGENT: You have 25% of your turn budget remaining.
+1. If you have a partially working fix, focus on making it complete.
+2. If nothing has worked, apply your best-guess minimal fix NOW and run the tests.
+3. Do NOT start exploring new files or refactoring — focus on testing what you have.`,
+		},
+	}
 	sessionCfg.WorkingDir = cfg.RepoDir
 	sessionCfg.SystemPrompt = swebenchSystemPrompt
 
