@@ -201,6 +201,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.gateTimeoutAction, "gate-timeout-action", "fail", "What to do on gate timeout: fail or success")
 	fs.StringVar(&cfg.webhookAuthHeader, "webhook-auth", "", "Authorization header value sent on outbound webhook requests (e.g. 'Bearer sk_live_...')")
 	fs.StringVar(&cfg.exportBundle, "export-bundle", "", "After the run completes, write a git bundle of run artifacts to this path")
+	fs.StringVar(&cfg.artifactDir, "artifact-dir", "", "Override node state directory (default: <workdir>/.tracker/runs)")
 	return fs
 }
 
@@ -266,5 +267,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --gate-timeout-action string What to do on gate timeout: fail (default) or success\n")
 	fmt.Fprintf(w, "  --webhook-auth string     Authorization header for outbound webhook requests\n")
 	fmt.Fprintf(w, "  --export-bundle string    Write a portable git bundle of run artifacts to this path after completion\n")
+	fmt.Fprintf(w, "  --artifact-dir string     Override node state directory (default: <workdir>/.tracker/runs)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }
