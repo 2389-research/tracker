@@ -115,6 +115,7 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	reapProcessGroup(cmd)
 
 	result := CommandResult{
 		Stdout: stdout.String(),
@@ -201,6 +202,7 @@ func (e *LocalEnvironment) runUnlimited(ctx context.Context, cmd *exec.Cmd, time
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	reapProcessGroup(cmd)
 	result := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
 	return result, translateExecError(ctx, err, &result, timeout)
 }
@@ -212,8 +214,21 @@ func (e *LocalEnvironment) runLimited(ctx context.Context, cmd *exec.Cmd, timeou
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
 	err := cmd.Run()
+	reapProcessGroup(cmd)
 	result := CommandResult{Stdout: stdoutBuf.String(), Stderr: stderrBuf.String()}
 	return result, translateExecError(ctx, err, &result, timeout)
+}
+
+// reapProcessGroup sends SIGKILL to the process group after a command completes.
+// This catches background daemons (e.g. ssh-agent) spawned by the shell that
+// survive after the foreground process exits. The kill is best-effort — the
+// process group may already be gone.
+func reapProcessGroup(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+	// Negative PID targets the entire process group.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
 // translateExecError maps a cmd.Run error to a CommandResult exit code or a timeout error.

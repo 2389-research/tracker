@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const (
@@ -144,14 +146,21 @@ func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output s
 	//nolint:gosec // command comes from config/auto-detection, not user-controlled LLM output
 	cmd := exec.CommandContext(ctx, "sh", "-c", v.cmd)
 	cmd.Dir = v.workDir
-	// TODO: add cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} for process-group
-	// cleanup of long-running test suites (consistent with tool handler). Deferred
-	// because verify commands are author-controlled and typically short-lived.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 
 	// CombinedOutput merges stdout+stderr safely — exec.Cmd uses separate goroutines
 	// for each stream and bytes.Buffer is not safe for concurrent writes.
 	// The cap is applied post-execution so we keep the tail (errors appear at the end).
 	out, runErr := cmd.CombinedOutput()
+
+	// Reap any background processes spawned by the shell (e.g. ssh-agent).
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	// Apply size cap: keep the tail where errors typically appear.
 	outStr := truncateTail(string(out), verifyOutputCap)
