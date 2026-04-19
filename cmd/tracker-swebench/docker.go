@@ -220,7 +220,7 @@ func (r *DockerRunner) CleanupStale(ctx context.Context) {
 // git clone --reference source. Pass false when the bare clone for this repo is unavailable.
 // promptPath is mounted read-only at /instance_prompt.txt inside the container so the
 // agent-runner can read multiline instance prompts that break Docker's --env-file format.
-func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string, useCache bool, promptPath string) (patch string, summary AgentSummary, err error) {
+func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string, useCache bool, promptPath string) (patch string, summary AgentSummary, transcript string, err error) {
 	name := containerName(r.RunLabel, inst.InstanceID)
 	const workDir = "/workspace"
 
@@ -255,12 +255,12 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}
 	createArgs = append(createArgs, r.Image, "sleep", "infinity")
 	if err = dockerCmd(ctx, createArgs...); err != nil {
-		return "", AgentSummary{}, fmt.Errorf("create container: %w", err)
+		return "", AgentSummary{}, "", fmt.Errorf("create container: %w", err)
 	}
 
 	// Step 2: Start the container.
 	if err = dockerCmd(ctx, "start", name); err != nil {
-		return "", AgentSummary{}, fmt.Errorf("start container: %w", err)
+		return "", AgentSummary{}, "", fmt.Errorf("start container: %w", err)
 	}
 
 	// Step 3: Clone the repo and checkout the base commit.
@@ -270,10 +270,10 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}
 	cloneArgs, checkoutArgs := buildCloneCommands(inst.RepoURL(), inst.BaseCommit, workDir, cachePath)
 	if err = dockerExec(ctx, name, "", cloneArgs...); err != nil {
-		return "", AgentSummary{}, fmt.Errorf("clone repo: %w", err)
+		return "", AgentSummary{}, "", fmt.Errorf("clone repo: %w", err)
 	}
 	if err = dockerExec(ctx, name, "", checkoutArgs...); err != nil {
-		return "", AgentSummary{}, fmt.Errorf("checkout commit: %w", err)
+		return "", AgentSummary{}, "", fmt.Errorf("checkout commit: %w", err)
 	}
 
 	// Step 4: Install the package (log failure but continue).
@@ -291,15 +291,16 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 
 	envFilePath, envErr := writeEnvFile(agentEnv)
 	if envErr != nil {
-		return "", AgentSummary{}, fmt.Errorf("write env file: %w", envErr)
+		return "", AgentSummary{}, "", fmt.Errorf("write env file: %w", envErr)
 	}
 	defer os.Remove(envFilePath)
 
 	agentOutput, agentErr := dockerExecCapture(agentCtx, name, envFilePath, "agent-runner")
 	summary = parseAgentSummary(agentOutput)
+	transcript = agentOutput
 
 	if agentErr != nil {
-		log.Printf("[%s] agent-runner error: %v", inst.InstanceID, agentErr)
+		log.Printf("[%s] agent-runner error: %v\noutput: %s", inst.InstanceID, agentErr, agentOutput)
 	}
 
 	// Step 6: Stage all changes and capture diff vs HEAD (includes new files).
@@ -320,8 +321,8 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 
 	// Propagate agent error only after capturing the patch.
 	if agentErr != nil {
-		return patch, summary, fmt.Errorf("agent-runner: %w", agentErr)
+		return patch, summary, transcript, fmt.Errorf("agent-runner: %w", agentErr)
 	}
 
-	return patch, summary, nil
+	return patch, summary, transcript, nil
 }

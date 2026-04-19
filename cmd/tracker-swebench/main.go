@@ -216,7 +216,7 @@ Flags:
 		promptFile.Close()
 
 		start := time.Now()
-		patch, summary, runErr := docker.RunInstance(ctx, inst, instEnv, repoCachePath != "", promptFile.Name())
+		patch, summary, agentTranscript, runErr := docker.RunInstance(ctx, inst, instEnv, repoCachePath != "", promptFile.Name())
 		os.Remove(promptFile.Name())
 		elapsed := time.Since(start).Round(time.Second)
 
@@ -247,6 +247,14 @@ Flags:
 		}
 		if writeErr := os.WriteFile(logPath, []byte(logContent), 0o644); writeErr != nil {
 			log.Printf("[%s] write log: %v", inst.InstanceID, writeErr)
+		}
+
+		// Write agent transcript for post-mortem analysis.
+		if agentTranscript != "" {
+			transcriptPath := filepath.Join(logsDir, inst.InstanceID+".transcript.log")
+			if writeErr := os.WriteFile(transcriptPath, []byte(agentTranscript), 0o644); writeErr != nil {
+				log.Printf("[%s] write transcript: %v", inst.InstanceID, writeErr)
+			}
 		}
 
 		// Update stats only after successful prediction write.

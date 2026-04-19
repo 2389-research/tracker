@@ -163,7 +163,12 @@ func main() {
 
 	env := agentexec.NewLocalEnvironment(cfg.RepoDir)
 
-	sess, err := agent.NewSession(client, sessionCfg, agent.WithEnvironment(env))
+	// Log agent events to stderr for transcript visibility.
+	evtHandler := agent.EventHandlerFunc(func(evt agent.Event) {
+		log.Printf("[agent:%s] turn=%d %s", evt.Type, evt.Turn, evt.Text)
+	})
+
+	sess, err := agent.NewSession(client, sessionCfg, agent.WithEnvironment(env), agent.WithEventHandler(evtHandler))
 	if err != nil {
 		log.Fatalf("failed to create agent session: %v", err)
 	}
