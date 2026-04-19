@@ -4,12 +4,12 @@ package agent
 
 // evalCheckpoint returns the checkpoint message to inject at the given turn,
 // or "" if no checkpoint fires. Each checkpoint fires exactly once: on the
-// turn number that equals ceil(fraction * maxTurns). Callers do not need to
+// turn number that equals int(fraction * maxTurns). Callers do not need to
 // track fired state — the turn-number match is deterministic.
 func evalCheckpoint(checkpoints []Checkpoint, turn, maxTurns int) string {
 	for _, cp := range checkpoints {
 		// Compute the exact turn this checkpoint fires on.
-		// Use ceiling so fraction=0.5 with maxTurns=80 fires on turn 40.
+		// Truncation: fraction=0.5 with maxTurns=80 fires on turn 40.
 		triggerTurn := int(cp.Fraction * float64(maxTurns))
 		if triggerTurn < 1 {
 			triggerTurn = 1
