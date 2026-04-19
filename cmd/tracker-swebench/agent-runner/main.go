@@ -139,8 +139,8 @@ func main() {
 	sessionCfg.CompactionThreshold = 0.7
 	sessionCfg.ReflectOnError = true
 	sessionCfg.VerifyAfterEdit = true
-	sessionCfg.VerifyCommand = "python -m pytest --tb=short -q -x 2>&1 | tail -50"
-	sessionCfg.VerifyBroadCommand = "python -m pytest --tb=short -q 2>&1 | tail -100"
+	sessionCfg.VerifyCommand = "set -o pipefail; python -m pytest --tb=short -q -x 2>&1 | tail -50"
+	sessionCfg.VerifyBroadCommand = "set -o pipefail; python -m pytest --tb=short -q 2>&1 | tail -100"
 	sessionCfg.Checkpoints = []agent.Checkpoint{
 		{
 			Fraction: 0.5,

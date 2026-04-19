@@ -399,17 +399,17 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 	maxRetries := s.config.MaxVerifyRetries
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		passed, exitCode, output, err := v.run(ctx)
+		res, err := v.run(ctx)
 		if err != nil {
 			return err // real execution failure
 		}
-		if passed {
-			s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", v.cmd)})
+		if res.Passed {
+			s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", res.Command)})
 			return nil
 		}
 
-		// Verification failed — inject repair prompt with the real exit code.
-		repairMsg := fmt.Sprintf(verifyRepairPrompt, v.cmd, exitCode, output)
+		// Verification failed — inject repair prompt with the actual command that failed.
+		repairMsg := verifyRepairPrompt(res.Command, res.ExitCode, res.Output)
 		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: failed (attempt %d/%d), injecting repair prompt", attempt+1, maxRetries)})
 		s.messages = append(s.messages, llm.UserMessage(repairMsg))
 
@@ -420,12 +420,12 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 	}
 
 	// Run one final verification after the last repair attempt.
-	passed, _, _, err := v.run(ctx)
+	res, err := v.run(ctx)
 	if err != nil {
 		return err
 	}
-	if passed {
-		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed after repairs (%s)", v.cmd)})
+	if res.Passed {
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed after repairs (%s)", res.Command)})
 	} else {
 		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: max retries (%d) exhausted, proceeding", maxRetries)})
 	}

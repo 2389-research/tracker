@@ -222,19 +222,19 @@ func TestTwoPhaseVerify_BroadRunsAfterFocusedPasses(t *testing.T) {
 		workDir:  dir,
 	}
 
-	passed, exitCode, output, err := v.run(context.Background())
+	res, err := v.run(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Broad test fails, so overall verification should fail.
-	if passed {
+	if res.Passed {
 		t.Error("expected verification to fail due to broad test failure")
 	}
-	if exitCode == 0 {
+	if res.ExitCode == 0 {
 		t.Error("expected non-zero exit code from broad test")
 	}
-	if !strings.Contains(output, "test_regression") {
-		t.Errorf("expected broad test output, got %q", output)
+	if !strings.Contains(res.Output, "test_regression") {
+		t.Errorf("expected broad test output, got %q", res.Output)
 	}
 }
 
@@ -249,11 +249,11 @@ func TestTwoPhaseVerify_NoBroadCommand(t *testing.T) {
 		workDir: dir,
 	}
 
-	passed, _, _, err := v.run(context.Background())
+	res, err := v.run(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !passed {
+	if !res.Passed {
 		t.Error("expected verification to pass with no broad command")
 	}
 }

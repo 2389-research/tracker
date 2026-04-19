@@ -1,3 +1,5 @@
+//go:build !windows
+
 // ABOUTME: Verify-after-edit loop: auto-detects build system, runs tests after file edits, and injects repair prompts.
 // ABOUTME: Transparent inner loop — verification turns do not count against session MaxTurns.
 package agent
@@ -19,17 +21,19 @@ const (
 	// verifyOutputCap is the maximum bytes of verification output fed back to the LLM.
 	// The tail is kept (most relevant errors appear at the end).
 	verifyOutputCap = 16384
+)
 
-	// verifyRepairPrompt is injected when verification fails after an edit turn.
-	verifyRepairPrompt = `Verification failed after your edits.
+// verifyRepairPrompt returns the repair prompt injected when verification fails.
+func verifyRepairPrompt(command string, exitCode int, output string) string {
+	return fmt.Sprintf(`Verification failed after your edits.
 
 Command: %s
 Exit code: %d
-Output (truncated to 16KB):
+Output (truncated to %dKB):
 %s
 
-Please fix the failing test/lint issue, then I'll re-verify.`
-)
+Please fix the failing test/lint issue, then I'll re-verify.`, command, exitCode, verifyOutputCap/1024, output)
+}
 
 // editToolNames is the set of tool names that modify files on disk.
 // A turn that calls any of these triggers the verify-after-edit loop.
@@ -136,32 +140,41 @@ func newVerifier(cfg SessionConfig) *verifier {
 	}
 }
 
+// verifyResult holds the result of a verification run, including which command
+// was executed so callers can attribute failures correctly.
+type verifyResult struct {
+	Passed   bool
+	ExitCode int
+	Output   string
+	Command  string // the command that produced this result
+}
+
 // run executes the two-phase verification: focused test first, then optional broad
 // regression test. If the focused test fails, the broad test is skipped and the
 // focused result is returned immediately. If both pass, the broad result is returned.
 // A non-zero exit code is not an error — it is returned as passed=false with the
 // actual exit code and output. A real execution error (binary not found, etc.)
 // is returned as error.
-func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output string, err error) {
+func (v *verifier) run(ctx context.Context) (verifyResult, error) {
 	// Phase 1: focused test.
-	passed, exitCode, output, err = v.runCommand(ctx, v.cmd)
-	if err != nil || !passed {
-		return passed, exitCode, output, err
+	res, err := v.runCommand(ctx, v.cmd)
+	if err != nil || !res.Passed {
+		return res, err
 	}
 
 	// Phase 2: broad regression test (optional).
 	if v.broadCmd == "" {
-		return true, 0, output, nil
+		return res, nil
 	}
 	return v.runCommand(ctx, v.broadCmd)
 }
 
-// runCommand executes a single verification command and returns (passed, exitCode, output, error).
+// runCommand executes a single verification command and returns a verifyResult.
 // Output is capped at verifyOutputCap (tail kept) to prevent feeding large test logs to the
 // LLM repair prompt.
-func (v *verifier) runCommand(ctx context.Context, command string) (passed bool, exitCode int, output string, err error) {
+func (v *verifier) runCommand(ctx context.Context, command string) (verifyResult, error) {
 	if strings.TrimSpace(command) == "" {
-		return false, 0, "", fmt.Errorf("empty verify command")
+		return verifyResult{Command: command}, fmt.Errorf("empty verify command")
 	}
 
 	// Run via sh -c so the shell handles quoting and glob expansion, matching
@@ -193,11 +206,11 @@ func (v *verifier) runCommand(ctx context.Context, command string) (passed bool,
 		if errors.As(runErr, &exitErr) {
 			// Non-zero exit code: verification failed but command ran fine.
 			// Return the real exit code so the repair prompt is accurate.
-			return false, exitErr.ExitCode(), outStr, nil
+			return verifyResult{Passed: false, ExitCode: exitErr.ExitCode(), Output: outStr, Command: command}, nil
 		}
-		return false, -1, outStr, runErr // real execution failure (e.g. binary not found)
+		return verifyResult{Passed: false, ExitCode: -1, Output: outStr, Command: command}, runErr
 	}
-	return true, 0, outStr, nil
+	return verifyResult{Passed: true, ExitCode: 0, Output: outStr, Command: command}, nil
 }
 
 // truncateTail keeps the last n bytes of s.

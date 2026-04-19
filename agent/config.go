@@ -102,7 +102,23 @@ func (c SessionConfig) Validate() error {
 	if err := c.validateToolOutputLimits(); err != nil {
 		return err
 	}
+	if err := c.validateCheckpoints(); err != nil {
+		return err
+	}
 	return c.validateResponseFormat()
+}
+
+// validateCheckpoints checks that all checkpoint fractions are in [0, 1] and messages are non-empty.
+func (c SessionConfig) validateCheckpoints() error {
+	for i, cp := range c.Checkpoints {
+		if cp.Fraction < 0 || cp.Fraction > 1 {
+			return fmt.Errorf("Checkpoints[%d].Fraction must be in [0, 1], got %f", i, cp.Fraction)
+		}
+		if cp.Message == "" {
+			return fmt.Errorf("Checkpoints[%d].Message must be non-empty", i)
+		}
+	}
+	return nil
 }
 
 // validateTimeouts checks turn, command timeout, and loop detection fields.

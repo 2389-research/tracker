@@ -119,19 +119,19 @@ func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath 
 	if info.IsDir() {
 		return t.searchDir(ctx, searchRoot, re, contextLines)
 	}
-	matches, truncated, err := t.searchFile(searchRoot, re, contextLines)
+	res, err := t.searchFile(searchRoot, re, contextLines)
 	if err != nil {
 		return nil, false, 0, err
 	}
-	totalMatches := len(matches)
-	if truncated {
+	totalMatches := res.matchCount
+	if res.truncated {
 		// Count the remaining matches beyond what searchFile collected.
 		extra, countErr := t.countFileMatches(searchRoot, re)
 		if countErr == nil {
 			totalMatches = extra
 		}
 	}
-	return matches, truncated, totalMatches, nil
+	return res.lines, res.truncated, totalMatches, nil
 }
 
 // formatGrepResults builds the final output string from search matches.
@@ -192,20 +192,20 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 
 		if !capReached {
 			// Still collecting matches.
-			fileMatches, fileTruncated, err := t.searchFile(path, re, contextLines)
+			res, err := t.searchFile(path, re, contextLines)
 			if err != nil {
 				return nil // skip unreadable files
 			}
-			matches = append(matches, fileMatches...)
-			totalMatches += len(fileMatches)
-			if fileTruncated || len(matches) >= maxGrepResults {
+			matches = append(matches, res.lines...)
+			totalMatches += res.matchCount
+			if res.truncated || len(matches) >= maxGrepResults {
 				truncated = true
 				capReached = true
 				matches = matches[:min(len(matches), maxGrepResults)]
 				// For a truncated single file, countFileMatches gives the true total.
-				if fileTruncated {
+				if res.truncated {
 					if n, err := t.countFileMatches(path, re); err == nil {
-						totalMatches = totalMatches - len(fileMatches) + n
+						totalMatches = totalMatches - res.matchCount + n
 					}
 				}
 			}
@@ -261,12 +261,19 @@ func shouldSkipDir(info os.FileInfo, path, root string) error {
 	return nil
 }
 
+// searchFileResult holds output from searching a single file.
+type searchFileResult struct {
+	lines      []string // rendered output lines (may include context + separators)
+	matchCount int      // actual regex match count (excludes context/separator lines)
+	truncated  bool     // whether the match cap was hit
+}
+
 // searchFile scans a single file for lines matching the regex.
 // When contextLines > 0, it buffers the whole file first and emits match groups with context.
-func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp, contextLines int) ([]string, bool, error) {
+func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp, contextLines int) (searchFileResult, error) {
 	f, err := os.Open(absPath)
 	if err != nil {
-		return nil, false, err
+		return searchFileResult{}, err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -282,7 +289,7 @@ func (t *GrepSearchTool) searchFile(absPath string, re *regexp.Regexp, contextLi
 }
 
 // searchFileNoContext performs a simple line-by-line scan with no context buffering.
-func searchFileNoContext(f *os.File, relPath string, re *regexp.Regexp) ([]string, bool, error) {
+func searchFileNoContext(f *os.File, relPath string, re *regexp.Regexp) (searchFileResult, error) {
 	var matches []string
 	truncated := false
 	scanner := bufio.NewScanner(f)
@@ -300,21 +307,22 @@ func searchFileNoContext(f *os.File, relPath string, re *regexp.Regexp) ([]strin
 		}
 	}
 
-	return matches, truncated, scanner.Err()
+	// For no-context mode, every output line is a match line.
+	return searchFileResult{lines: matches, matchCount: len(matches), truncated: truncated}, scanner.Err()
 }
 
 // searchFileWithContext buffers the entire file and emits match lines plus N context lines
 // before and after each match. Context lines use `filepath-linenum-content` format;
 // match lines use `filepath:linenum:content`. Overlapping windows are merged and
 // non-contiguous groups are separated by `--`.
-func searchFileWithContext(f *os.File, relPath string, re *regexp.Regexp, n int) ([]string, bool, error) {
+func searchFileWithContext(f *os.File, relPath string, re *regexp.Regexp, n int) (searchFileResult, error) {
 	scanner := bufio.NewScanner(f)
 	var allLines []string
 	for scanner.Scan() {
 		allLines = append(allLines, scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, false, err
+		return searchFileResult{}, err
 	}
 
 	total := len(allLines)
@@ -327,7 +335,7 @@ func searchFileWithContext(f *os.File, relPath string, re *regexp.Regexp, n int)
 		}
 	}
 	if len(matchIndices) == 0 {
-		return nil, false, nil
+		return searchFileResult{}, nil
 	}
 
 	// Build non-overlapping groups of [start, end] inclusive (0-based).
@@ -373,7 +381,7 @@ func searchFileWithContext(f *os.File, relPath string, re *regexp.Regexp, n int)
 				out = append(out, fmt.Sprintf("%s:%d:%s", relPath, lineNum, content))
 				matchCount++
 				if matchCount >= maxGrepResults {
-					return out, true, nil
+					return searchFileResult{lines: out, matchCount: matchCount, truncated: true}, nil
 				}
 			} else {
 				out = append(out, fmt.Sprintf("%s-%d-%s", relPath, lineNum, content))
@@ -381,7 +389,7 @@ func searchFileWithContext(f *os.File, relPath string, re *regexp.Regexp, n int)
 		}
 	}
 
-	return out, truncated, nil
+	return searchFileResult{lines: out, matchCount: matchCount, truncated: truncated}, nil
 }
 
 // isBinaryExtension returns true for file extensions that are likely binary.

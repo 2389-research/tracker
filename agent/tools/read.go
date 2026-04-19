@@ -71,7 +71,9 @@ func (t *ReadTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 		return content, nil
 	}
 
-	lines := strings.Split(content, "\n")
+	// Trim trailing newline before splitting to avoid an inflated line count.
+	// Most files end with "\n", and strings.Split would produce an extra empty element.
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	totalLines := len(lines)
 
 	// Reject negative values to avoid slice-bounds panics.

@@ -66,12 +66,18 @@ func compactBashSummary(content string) string {
 	}
 	for _, line := range searchLines {
 		lower := strings.ToLower(line)
+		trimmed := strings.TrimSpace(lower)
 		// Check failure keywords first — "3 passed, 1 failed" is a failure.
-		if strings.Contains(lower, "failed") || strings.Contains(lower, "error") || strings.Contains(lower, "fail") {
+		// Use word-boundary-aware patterns to avoid matching "error_handler", "failover", etc.
+		if strings.Contains(lower, "failed") ||
+			strings.HasPrefix(trimmed, "error:") || strings.HasPrefix(trimmed, "error ") ||
+			strings.Contains(lower, " error") || strings.HasSuffix(trimmed, "error") ||
+			strings.Contains(lower, "failure") {
 			signal = " (failed)"
 			break
 		}
-		if strings.Contains(lower, "passed") || strings.HasPrefix(strings.TrimSpace(lower), "ok ") || strings.HasPrefix(strings.TrimSpace(lower), "ok\t") {
+		if strings.Contains(lower, "passed") ||
+			strings.HasPrefix(trimmed, "ok ") || strings.HasPrefix(trimmed, "ok\t") || trimmed == "ok" {
 			signal = " (passed)"
 			break
 		}
