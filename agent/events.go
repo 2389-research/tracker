@@ -35,6 +35,9 @@ const (
 	// EventVerify is emitted for verify-after-edit status updates (pass/fail/retry).
 	// Use EventError only for infrastructure failures (binary not found, etc.).
 	EventVerify EventType = "verify"
+	// EventCheckpoint is emitted when a turn-budget checkpoint fires and its
+	// message is injected into the conversation as a user message.
+	EventCheckpoint EventType = "checkpoint"
 )
 
 // TurnMetrics captures per-turn token and performance data.

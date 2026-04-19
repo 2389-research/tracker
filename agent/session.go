@@ -225,6 +225,13 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 // Returns (stoppedNaturally, shouldStop, error).
 func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tracker *ContextWindowTracker, result *SessionResult, ts *turnState) (bool, bool, error) {
 	s.drainSteering()
+
+	// Check if a turn-budget checkpoint should fire on this turn.
+	if cpMsg := evalCheckpoint(s.config.Checkpoints, turn, s.config.MaxTurns); cpMsg != "" {
+		s.messages = append(s.messages, llm.UserMessage(cpMsg))
+		s.emit(Event{Type: EventCheckpoint, SessionID: s.id, Turn: turn, Text: cpMsg})
+	}
+
 	s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
 	turnStart := time.Now()
 
