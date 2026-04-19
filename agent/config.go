@@ -52,6 +52,22 @@ type SessionConfig struct {
 	// MaxVerifyRetries is the maximum number of verify→repair cycles per edit
 	// turn before giving up and proceeding. Default: 2.
 	MaxVerifyRetries int
+
+	// Checkpoints are messages injected at specific turn-budget fractions.
+	// Each checkpoint fires exactly once, on the turn where the fraction is
+	// first reached. Fraction is in [0, 1] — e.g. 0.6 means "at 60% of MaxTurns".
+	Checkpoints []Checkpoint
+
+	// VerifyBroadCommand is an optional second verification command run after
+	// the focused VerifyCommand passes. Use this for regression detection
+	// (e.g. run the full test module without -x). Empty means disabled.
+	VerifyBroadCommand string
+}
+
+// Checkpoint defines a message to inject at a specific turn-budget fraction.
+type Checkpoint struct {
+	Fraction float64 // 0.0–1.0 fraction of MaxTurns
+	Message  string  // message injected as a user message
 }
 
 const (
