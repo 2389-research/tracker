@@ -82,12 +82,12 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input json.RawMessage) (st
 		return "", err
 	}
 
-	matches, truncated, err := t.runSearch(ctx, searchRoot, path, re, contextLines)
+	matches, truncated, totalMatches, err := t.runSearch(ctx, searchRoot, path, re, contextLines)
 	if err != nil {
 		return "", err
 	}
 
-	return formatGrepResults(pattern, matches, truncated), nil
+	return formatGrepResults(pattern, matches, truncated, totalMatches), nil
 }
 
 // parseGrepInput unmarshals the JSON input and validates required fields.
@@ -110,25 +110,40 @@ func parseGrepInput(input json.RawMessage) (pattern, path string, contextLines i
 }
 
 // runSearch performs the grep search on the resolved path.
-func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp, contextLines int) ([]string, bool, error) {
+// Returns matches, whether they were truncated, the total match count (>= len(matches)), and any error.
+func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp, contextLines int) ([]string, bool, int, error) {
 	info, err := os.Stat(searchRoot)
 	if err != nil {
-		return nil, false, fmt.Errorf("path not found: %s", displayPath)
+		return nil, false, 0, fmt.Errorf("path not found: %s", displayPath)
 	}
 	if info.IsDir() {
 		return t.searchDir(ctx, searchRoot, re, contextLines)
 	}
-	return t.searchFile(searchRoot, re, contextLines)
+	matches, truncated, err := t.searchFile(searchRoot, re, contextLines)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	totalMatches := len(matches)
+	if truncated {
+		// Count the remaining matches beyond what searchFile collected.
+		extra, countErr := t.countFileMatches(searchRoot, re)
+		if countErr == nil {
+			totalMatches = extra
+		}
+	}
+	return matches, truncated, totalMatches, nil
 }
 
 // formatGrepResults builds the final output string from search matches.
-func formatGrepResults(pattern string, matches []string, truncated bool) string {
+// When truncated, totalMatches carries the full count across all files so
+// the agent can decide whether to narrow the search pattern.
+func formatGrepResults(pattern string, matches []string, truncated bool, totalMatches int) string {
 	if len(matches) == 0 {
 		return fmt.Sprintf("no matches for pattern %q", pattern)
 	}
 	result := strings.Join(matches, "\n")
 	if truncated {
-		result += fmt.Sprintf("\n\n(results truncated, showing first %d of more matches)", maxGrepResults)
+		result += fmt.Sprintf("\n\n(showing first %d of %d total matches — narrow your search pattern)", maxGrepResults, totalMatches)
 	}
 	return result
 }
@@ -154,47 +169,78 @@ func (t *GrepSearchTool) safePath(rel string) (string, error) {
 }
 
 // searchDir walks a directory recursively, searching each regular file for matches.
-func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.Regexp, contextLines int) ([]string, bool, error) {
+// Returns matches (capped at maxGrepResults), whether truncated, total match count, and any error.
+func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.Regexp, contextLines int) ([]string, bool, int, error) {
 	var matches []string
 	truncated := false
+	totalMatches := 0
+	capReached := false
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		return t.walkEntry(ctx, root, path, info, err, re, contextLines, &matches, &truncated)
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil // skip unreadable entries
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if info.IsDir() {
+			return shouldSkipDir(info, path, root)
+		}
+		if isBinaryExtension(info.Name()) {
+			return nil
+		}
+
+		if !capReached {
+			// Still collecting matches.
+			fileMatches, fileTruncated, err := t.searchFile(path, re, contextLines)
+			if err != nil {
+				return nil // skip unreadable files
+			}
+			matches = append(matches, fileMatches...)
+			totalMatches += len(fileMatches)
+			if fileTruncated || len(matches) >= maxGrepResults {
+				truncated = true
+				capReached = true
+				matches = matches[:min(len(matches), maxGrepResults)]
+				// For a truncated single file, countFileMatches gives the true total.
+				if fileTruncated {
+					if n, err := t.countFileMatches(path, re); err == nil {
+						totalMatches = totalMatches - len(fileMatches) + n
+					}
+				}
+			}
+		} else {
+			// Cap already hit — only count remaining matches.
+			if n, err := t.countFileMatches(path, re); err == nil {
+				totalMatches += n
+			}
+		}
+		return nil
 	})
 
-	// "limit reached" is our sentinel, not a real error.
-	if err != nil && err.Error() != "limit reached" && ctx.Err() == nil {
-		return matches, truncated, err
+	if err != nil && ctx.Err() == nil {
+		return matches, truncated, totalMatches, err
 	}
 
-	return matches, truncated, nil
+	return matches, truncated, totalMatches, nil
 }
 
-// walkEntry processes one entry during the filepath.Walk of searchDir.
-func (t *GrepSearchTool) walkEntry(ctx context.Context, root, path string, info os.FileInfo, err error, re *regexp.Regexp, contextLines int, matches *[]string, truncated *bool) error {
+// countFileMatches counts matching lines in a file without collecting them.
+func (t *GrepSearchTool) countFileMatches(absPath string, re *regexp.Regexp) (int, error) {
+	f, err := os.Open(absPath)
 	if err != nil {
-		return nil // skip unreadable entries
+		return 0, err
 	}
-	if ctx.Err() != nil {
-		return ctx.Err()
+	defer func() { _ = f.Close() }()
+
+	count := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if re.MatchString(scanner.Text()) {
+			count++
+		}
 	}
-	if info.IsDir() {
-		return shouldSkipDir(info, path, root)
-	}
-	if isBinaryExtension(info.Name()) {
-		return nil
-	}
-	fileMatches, fileTruncated, err := t.searchFile(path, re, contextLines)
-	if err != nil {
-		return nil // skip unreadable files
-	}
-	*matches = append(*matches, fileMatches...)
-	if fileTruncated || len(*matches) >= maxGrepResults {
-		*truncated = true
-		*matches = (*matches)[:min(len(*matches), maxGrepResults)]
-		return fmt.Errorf("limit reached")
-	}
-	return nil
+	return count, scanner.Err()
 }
 
 // shouldSkipDir returns filepath.SkipDir for hidden directories and known noise directories (except the root).

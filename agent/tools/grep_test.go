@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,7 +139,7 @@ func TestGrepSearchMaxResults(t *testing.T) {
 	if matchCount > 100 {
 		t.Errorf("expected at most 100 matches, got %d", matchCount)
 	}
-	if !strings.Contains(result, "truncated") {
+	if !strings.Contains(result, "showing first 100") {
 		t.Errorf("expected truncation message, got %q", result)
 	}
 }
@@ -313,6 +314,33 @@ func TestGrepSearchSkipsNodeModules(t *testing.T) {
 	}
 	if !strings.Contains(result, "REAL_MATCH") {
 		t.Errorf("expected REAL_MATCH in app.js, got %q", result)
+	}
+}
+
+func TestGrepSearchTotalMatchCount(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file with 150 matching lines — exceeds maxGrepResults (100).
+	var content strings.Builder
+	for i := 0; i < 150; i++ {
+		content.WriteString(fmt.Sprintf("match line %d\n", i))
+	}
+	os.WriteFile(filepath.Join(dir, "big.txt"), []byte(content.String()), 0644)
+
+	env := exec.NewLocalEnvironment(dir)
+	tool := NewGrepSearchTool(env)
+
+	input := json.RawMessage(`{"pattern": "match line", "path": "big.txt"}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should mention that there are 150 total matches, not just "more matches".
+	if !strings.Contains(result, "150") {
+		t.Errorf("expected total match count 150 in output, got:\n%s", result)
+	}
+	if !strings.Contains(result, "showing first 100") {
+		t.Errorf("expected truncation message, got:\n%s", result)
 	}
 }
 
