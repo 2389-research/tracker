@@ -108,8 +108,9 @@ func hasPytestSection(path string) bool {
 
 // verifier holds configuration for the verify-after-edit loop and runs it.
 type verifier struct {
-	cmd     string // resolved verification command (never empty)
-	workDir string
+	cmd      string // focused verification command (never empty)
+	broadCmd string // optional broad regression command (empty = skip)
+	workDir  string
 }
 
 // newVerifier resolves the verify command and returns a verifier ready to use,
@@ -128,23 +129,45 @@ func newVerifier(cfg SessionConfig) *verifier {
 	// cfg.WorkingDir is set from s.env.WorkingDir in codergen (via SessionConfig.WorkingDir),
 	// so the verifier runs in the same directory as tool executions. If the session has no
 	// explicit WorkingDir it defaults to "." (process cwd), matching the tool handler default.
-	return &verifier{cmd: cmd, workDir: cfg.WorkingDir}
+	return &verifier{
+		cmd:      cmd,
+		broadCmd: cfg.VerifyBroadCommand,
+		workDir:  cfg.WorkingDir,
+	}
 }
 
-// run executes the verification command and returns (passed, exitCode, output, error).
+// run executes the two-phase verification: focused test first, then optional broad
+// regression test. If the focused test fails, the broad test is skipped and the
+// focused result is returned immediately. If both pass, the broad result is returned.
 // A non-zero exit code is not an error — it is returned as passed=false with the
 // actual exit code and output. A real execution error (binary not found, etc.)
-// is returned as error. Output is capped at verifyOutputCap (tail kept) to prevent
-// feeding large test logs to the LLM repair prompt.
+// is returned as error.
 func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output string, err error) {
-	if strings.TrimSpace(v.cmd) == "" {
+	// Phase 1: focused test.
+	passed, exitCode, output, err = v.runCommand(ctx, v.cmd)
+	if err != nil || !passed {
+		return passed, exitCode, output, err
+	}
+
+	// Phase 2: broad regression test (optional).
+	if v.broadCmd == "" {
+		return true, 0, output, nil
+	}
+	return v.runCommand(ctx, v.broadCmd)
+}
+
+// runCommand executes a single verification command and returns (passed, exitCode, output, error).
+// Output is capped at verifyOutputCap (tail kept) to prevent feeding large test logs to the
+// LLM repair prompt.
+func (v *verifier) runCommand(ctx context.Context, command string) (passed bool, exitCode int, output string, err error) {
+	if strings.TrimSpace(command) == "" {
 		return false, 0, "", fmt.Errorf("empty verify command")
 	}
 
 	// Run via sh -c so the shell handles quoting and glob expansion, matching
 	// how tool_command is executed elsewhere in tracker.
 	//nolint:gosec // command comes from config/auto-detection, not user-controlled LLM output
-	cmd := exec.CommandContext(ctx, "sh", "-c", v.cmd)
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = v.workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
