@@ -319,3 +319,43 @@ func TestAppWindowResize(t *testing.T) {
 		t.Error("expected non-empty view after resize")
 	}
 }
+
+func TestAppSubgraphChildrenInView(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{
+		{ID: "Start", Label: "Start"},
+		{ID: "SubA", Label: "SubA"},
+		{ID: "Done", Label: "Done"},
+	})
+	app := NewAppModel(store, "composed-pipeline", "run1")
+	app.Init()
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	// Simulate parent pipeline running, then subgraph expanding.
+	app.Update(MsgNodeStarted{NodeID: "Start"})
+	app.Update(MsgNodeCompleted{NodeID: "Start"})
+	app.Update(MsgNodeStarted{NodeID: "SubA"})
+	app.Update(MsgNodeStarted{NodeID: "SubA/ChildStep1"})
+	app.Update(MsgNodeCompleted{NodeID: "SubA/ChildStep1"})
+	app.Update(MsgNodeStarted{NodeID: "SubA/ChildStep2"})
+
+	// The full view should contain the dynamically-inserted child nodes.
+	view := app.View()
+
+	if !strings.Contains(view, "ChildStep1") {
+		t.Errorf("expected ChildStep1 in app view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "ChildStep2") {
+		t.Errorf("expected ChildStep2 in app view, got:\n%s", view)
+	}
+
+	// Verify the state store has the right node count.
+	nodes := store.Nodes()
+	if len(nodes) != 5 { // Start, SubA, SubA/ChildStep1, SubA/ChildStep2, Done
+		ids := make([]string, len(nodes))
+		for i, n := range nodes {
+			ids[i] = n.ID
+		}
+		t.Errorf("expected 5 nodes, got %d: %v", len(nodes), ids)
+	}
+}

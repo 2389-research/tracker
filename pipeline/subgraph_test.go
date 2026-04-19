@@ -188,6 +188,80 @@ func TestSubgraphHandler_SubgraphFailure(t *testing.T) {
 	}
 }
 
+func TestSubgraphHandler_ScopedEvents(t *testing.T) {
+	// Verify that child engine events arrive at the parent's event handler
+	// with node IDs prefixed by the parent node ID.
+	subGraph := NewGraph("sub")
+	subGraph.AddNode(&Node{ID: "sub_s", Shape: "Mdiamond", Label: "SubStart"})
+	subGraph.AddNode(&Node{ID: "sub_step", Shape: "box", Label: "SubStep"})
+	subGraph.AddNode(&Node{ID: "sub_end", Shape: "Msquare", Label: "SubEnd"})
+	subGraph.AddEdge(&Edge{From: "sub_s", To: "sub_step"})
+	subGraph.AddEdge(&Edge{From: "sub_step", To: "sub_end"})
+
+	reg := newTestRegistry()
+
+	// Collect all events emitted through the parent's pipeline handler.
+	var events []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		events = append(events, evt)
+	})
+
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"child": subGraph},
+			reg, handler, nil,
+		).Execute,
+	})
+
+	g := NewGraph("parent")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "sg", Shape: "tab", Label: "SubgraphNode", Attrs: map[string]string{"subgraph_ref": "child"}})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "sg"})
+	g.AddEdge(&Edge{From: "sg", To: "end"})
+
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+
+	// Check that child events have scoped node IDs.
+	scopedNodeIDs := map[string]bool{}
+	for _, evt := range events {
+		if evt.Type == EventStageStarted && IsSubgraphNodeID(evt.NodeID) {
+			scopedNodeIDs[evt.NodeID] = true
+		}
+	}
+
+	// We expect at least sub_s, sub_step, sub_end from child engine,
+	// all prefixed with "sg/".
+	expectedScoped := []string{"sg/sub_s", "sg/sub_step", "sg/sub_end"}
+	for _, want := range expectedScoped {
+		if !scopedNodeIDs[want] {
+			t.Errorf("expected scoped event for %q, got events: %v", want, scopedNodeIDs)
+		}
+	}
+}
+
+// IsSubgraphNodeID mirrors the TUI's IsSubgraphNode check for testing.
+func IsSubgraphNodeID(id string) bool {
+	return len(id) > 0 && id[0] != '/' && contains(id, "/")
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSubgraphHandler_ShapeMapping(t *testing.T) {
 	handler, ok := ShapeToHandler("tab")
 	if !ok {
