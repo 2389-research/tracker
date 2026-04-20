@@ -1,0 +1,6 @@
+{"ts":"2026-04-20T00:00:00Z","type":"pipeline_started"}
+{"ts":"2026-04-20T00:00:01Z","type":"stage_started","node_id":"Zeta","handler":"tool"}
+{"ts":"2026-04-20T00:00:02Z","type":"stage_failed","node_id":"Zeta","handler":"tool"}
+{"ts":"2026-04-20T00:00:03Z","type":"stage_started","node_id":"Alpha","handler":"tool"}
+{"ts":"2026-04-20T00:00:04Z","type":"stage_failed","node_id":"Alpha","handler":"tool"}
+{"ts":"2026-04-20T00:00:05Z","type":"pipeline_failed"}

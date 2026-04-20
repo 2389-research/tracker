@@ -1,0 +1,8 @@
+{
+  "run_id": "multi-failed-run",
+  "completed_nodes": [],
+  "current_node": "Alpha",
+  "retry_counts": {},
+  "restart_count": 0,
+  "timestamp": "2026-04-20T00:00:00Z"
+}

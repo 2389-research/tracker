@@ -71,3 +71,22 @@ func TestDiagnose_BudgetHalt(t *testing.T) {
 		t.Error("empty breach message")
 	}
 }
+
+func TestDiagnose_SuggestionsDeterministicOrder(t *testing.T) {
+	r, err := Diagnose("testdata/runs/multi_failed")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if len(r.Failures) != 2 {
+		t.Fatalf("got %d failures, want 2", len(r.Failures))
+	}
+	if len(r.Suggestions) != 2 {
+		t.Fatalf("got %d suggestions, want 2", len(r.Suggestions))
+	}
+	if r.Suggestions[0].NodeID != "Alpha" {
+		t.Errorf("suggestion[0].node_id = %q, want Alpha", r.Suggestions[0].NodeID)
+	}
+	if r.Suggestions[1].NodeID != "Zeta" {
+		t.Errorf("suggestion[1].node_id = %q, want Zeta", r.Suggestions[1].NodeID)
+	}
+}
