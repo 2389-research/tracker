@@ -37,6 +37,7 @@ type Engine struct {
 	artifactDir       string
 	budgetGuard       *BudgetGuard
 	gitArtifacts      bool
+	steeringCh        <-chan map[string]string
 }
 
 // EngineOption configures optional Engine behavior.
@@ -97,6 +98,14 @@ func WithBudgetGuard(guard *BudgetGuard) EngineOption {
 // Requires git in PATH. Silently no-ops if artifactDir is not set.
 func WithGitArtifacts(enabled bool) EngineOption {
 	return func(e *Engine) { e.gitArtifacts = enabled }
+}
+
+// WithSteeringChan provides a channel for injecting context updates into the
+// pipeline between node executions. The engine drains pending updates after
+// each node's outcome is applied, making steered values visible to edge
+// selection and the next node's prompt expansion. Nil channels are no-ops.
+func WithSteeringChan(ch <-chan map[string]string) EngineOption {
+	return func(e *Engine) { e.steeringCh = ch }
 }
 
 // NewEngine creates a pipeline engine for the given graph and handler registry.
@@ -248,6 +257,11 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	}
 
 	e.applyOutcome(s, currentNodeID, outcome)
+
+	// Drain any pending steering updates injected by an external supervisor
+	// (e.g., manager_loop handler). Merged values become visible to edge
+	// selection and the next node's prompt expansion.
+	e.drainSteering(s)
 
 	// Copy every key written during this node's execution into the per-node
 	// namespace "node.<nodeID>.<key>" so downstream nodes can read a specific

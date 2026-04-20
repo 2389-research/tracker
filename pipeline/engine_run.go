@@ -447,6 +447,24 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 	})
 }
 
+// drainSteering non-blockingly drains all pending steering context updates from
+// the steering channel and merges them into the run's pipeline context. Called
+// between node executions so steered values are visible to edge selection and
+// the next node. Mirrors agent/session_run.go:drainSteering().
+func (e *Engine) drainSteering(s *runState) {
+	if e.steeringCh == nil {
+		return
+	}
+	for {
+		select {
+		case update := <-e.steeringCh:
+			s.pctx.Merge(update)
+		default:
+			return
+		}
+	}
+}
+
 // handleRetry processes a retry outcome. Returns (nextNodeID, shouldContinue, result, error).
 // If shouldContinue is true, the main loop should continue with nextNodeID.
 // If result is non-nil, the pipeline should return that result.
