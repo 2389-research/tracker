@@ -139,7 +139,7 @@ func TestEditToolNotFoundShowsContext(t *testing.T) {
 	if !strings.Contains(errMsg, ":") {
 		t.Errorf("expected error to contain line numbers, got: %s", errMsg)
 	}
-	if !strings.Contains(errMsg, "Re-read") {
+	if !strings.Contains(errMsg, "re-read") {
 		t.Errorf("expected error to contain re-read hint, got: %s", errMsg)
 	}
 }

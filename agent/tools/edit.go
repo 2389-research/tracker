@@ -96,7 +96,7 @@ func (t *EditTool) handleReplace(ctx context.Context, path, oldString, newString
 	}
 	count := strings.Count(content, oldString)
 	if count == 0 {
-		return "", fmt.Errorf("old_string not found in %s.\n\n%s\n\nHint: the file may have changed since you last read it. Re-read with the read tool before retrying.", path, nearbyContext(content, oldString))
+		return "", fmt.Errorf("old_string not found in %s\n\n%s\n\nHint: the file may have changed since you last read it — re-read with the read tool before retrying", path, nearbyContext(content, oldString))
 	}
 	if count > 1 {
 		return "", fmt.Errorf("old_string found %d times in %s (must be unique)", count, path)
@@ -158,7 +158,7 @@ func nearbyContext(content, oldString string) string {
 	var sb strings.Builder
 	sb.WriteString("Closest content near expected location:\n")
 	for i := start; i < end; i++ {
-		sb.WriteString(fmt.Sprintf("%4d: %s\n", i+1, lines[i]))
+		fmt.Fprintf(&sb, "%4d: %s\n", i+1, lines[i])
 	}
 	return sb.String()
 }

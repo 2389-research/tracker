@@ -322,7 +322,7 @@ func TestGrepSearchTotalMatchCount(t *testing.T) {
 	// Create a file with 150 matching lines — exceeds maxGrepResults (100).
 	var content strings.Builder
 	for i := 0; i < 150; i++ {
-		content.WriteString(fmt.Sprintf("match line %d\n", i))
+		fmt.Fprintf(&content, "match line %d\n", i)
 	}
 	os.WriteFile(filepath.Join(dir, "big.txt"), []byte(content.String()), 0644)
 

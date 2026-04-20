@@ -1634,7 +1634,7 @@ func TestCheckpointInjection(t *testing.T) {
 	}
 
 	sess := mustNewSession(t, client, cfg, WithTools(&stubTool{name: "stub", output: "ok"}))
-	sess.Run(context.Background(), "do work")
+	_, _ = sess.Run(context.Background(), "do work")
 
 	found := false
 	for _, msg := range capturedMessages {

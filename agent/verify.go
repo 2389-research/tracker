@@ -184,6 +184,9 @@ func (v *verifier) runCommand(ctx context.Context, command string) (verifyResult
 	cmd.Dir = v.workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 5 * time.Second
