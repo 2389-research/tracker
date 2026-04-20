@@ -239,7 +239,7 @@ func (p paramMapFlag) Set(value string) error {
 	if *p.target == nil {
 		*p.target = make(map[string]string)
 	}
-	(*p.target)[key] = strings.TrimSpace(val)
+	(*p.target)[key] = val
 	return nil
 }
 

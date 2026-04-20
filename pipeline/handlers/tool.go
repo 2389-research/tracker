@@ -183,7 +183,7 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 
 	// Layer 1: Expand ${namespace.key} variables with toolCommandMode=true.
 	// FAIL CLOSED: if expansion fails (e.g. unsafe ctx.* key), do NOT run the command.
-	graphAttrs := graphAttrsFromContext(pctx)
+	graphAttrs := extractGraphAttrsFromContext(pctx)
 	params := pipeline.ExtractParamsFromGraphAttrs(graphAttrs)
 	expanded, err := pipeline.ExpandVariables(command, pctx, params, graphAttrs, false, true)
 	if err != nil {
@@ -201,7 +201,7 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 	return command, nil
 }
 
-func graphAttrsFromContext(pctx *pipeline.PipelineContext) map[string]string {
+func extractGraphAttrsFromContext(pctx *pipeline.PipelineContext) map[string]string {
 	if pctx == nil {
 		return nil
 	}
