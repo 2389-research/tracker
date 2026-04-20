@@ -2,6 +2,7 @@
 package tracker
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -24,7 +25,7 @@ const simpleSource = `workflow X
 `
 
 func TestSimulate_BasicGraph(t *testing.T) {
-	r, err := Simulate(simpleSource)
+	r, err := Simulate(context.Background(), simpleSource)
 	if err != nil {
 		t.Fatalf("Simulate: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestSimulate_UnreachableDetection(t *testing.T) {
 		Start -> S;
 		S -> E;
 	}`
-	r, err := Simulate(src)
+	r, err := Simulate(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Simulate: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestSimulate_EdgeConditionPropagated(t *testing.T) {
   edges
     S -> E when ctx.outcome = success
 `
-	r, err := Simulate(src)
+	r, err := Simulate(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Simulate: %v", err)
 	}
@@ -94,9 +95,20 @@ func TestSimulate_EdgeConditionPropagated(t *testing.T) {
 }
 
 func TestSimulate_InvalidSource(t *testing.T) {
-	_, err := Simulate("this is not a pipeline")
+	_, err := Simulate(context.Background(), "this is not a pipeline")
 	if err == nil {
 		t.Fatal("expected error for invalid source")
+	}
+}
+
+// TestSimulate_CtxCancelledAtEntry verifies Simulate returns the caller's
+// cancellation error immediately rather than silently parsing.
+func TestSimulate_CtxCancelledAtEntry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Simulate(ctx, simpleSource)
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 
@@ -109,7 +121,7 @@ func TestSimulate_GraphAttrsPopulated(t *testing.T) {
 		End [shape=Msquare label="End"];
 		Start -> End;
 	}`
-	r, err := Simulate(src)
+	r, err := Simulate(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Simulate: %v", err)
 	}

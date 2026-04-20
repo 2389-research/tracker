@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,14 +74,12 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 		workdir = wd
 	}
 
-	report, err := tracker.Doctor(tracker.DoctorConfig{
+	report, err := tracker.Doctor(context.Background(), tracker.DoctorConfig{
 		WorkDir:        workdir,
 		Backend:        cfg.backend,
 		ProbeProviders: cfg.probe,
 		PipelineFile:   cfg.pipelineFile,
-		TrackerVersion: version,
-		TrackerCommit:  commit,
-	})
+	}, tracker.WithVersionInfo(version, commit))
 	if err != nil {
 		return err
 	}

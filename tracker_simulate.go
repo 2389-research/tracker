@@ -3,6 +3,7 @@
 package tracker
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -47,8 +48,22 @@ type PlanStep struct {
 	Edges  []SimEdge `json:"edges,omitempty"`
 }
 
-// Simulate parses source and returns a SimulateReport. Format is detected from content.
-func Simulate(source string) (*SimulateReport, error) {
+// Simulate parses source and returns a SimulateReport. Format is detected
+// from content.
+//
+// ctx is checked at entry so a caller that passes an already-cancelled
+// context gets an immediate error instead of silent work. Full
+// cancellation mid-parse would require threading ctx through
+// parsePipelineSource → dippin-lang's parser, which is out of scope
+// today (parses are fast and O(n) anyway). Nil is coalesced to
+// context.Background().
+func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	format := detectSourceFormat(source)
 	graph, err := parsePipelineSource(source, format)
 	if err != nil {

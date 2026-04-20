@@ -1,4 +1,4 @@
-// ABOUTME: Tests for the public NDJSONWriter and NDJSONEvent types in the tracker package.
+// ABOUTME: Tests for the public NDJSONWriter and StreamEvent types in the tracker package.
 // ABOUTME: Covers write, stable JSON tags, concurrency, and handler factory methods.
 package tracker
 
@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -19,10 +21,10 @@ import (
 func TestNDJSONWriter_Write(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewNDJSONWriter(&buf)
-	w.Write(NDJSONEvent{Timestamp: "2026-04-17T10:00:00Z", Source: "pipeline", Type: "stage_started", NodeID: "N1"})
+	w.Write(StreamEvent{Timestamp: "2026-04-17T10:00:00Z", Source: "pipeline", Type: "stage_started", NodeID: "N1"})
 
 	line := strings.TrimSuffix(buf.String(), "\n")
-	var got NDJSONEvent
+	var got StreamEvent
 	if err := json.Unmarshal([]byte(line), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -34,7 +36,7 @@ func TestNDJSONWriter_Write(t *testing.T) {
 func TestNDJSONWriter_StableJSONTags(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewNDJSONWriter(&buf)
-	w.Write(NDJSONEvent{
+	w.Write(StreamEvent{
 		Timestamp: "t", Source: "agent", Type: "tool_call",
 		RunID: "r1", NodeID: "n1", Message: "m", Error: "e",
 		Provider: "p", Model: "mo", ToolName: "tn", Content: "c",
@@ -60,7 +62,7 @@ func TestNDJSONWriter_ConcurrentWrites(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			w.Write(NDJSONEvent{Timestamp: "t", Source: "pipeline", Type: "x"})
+			w.Write(StreamEvent{Timestamp: "t", Source: "pipeline", Type: "x"})
 		}()
 	}
 	wg.Wait()
@@ -70,7 +72,7 @@ func TestNDJSONWriter_ConcurrentWrites(t *testing.T) {
 		t.Fatalf("got %d lines, want %d", len(lines), n)
 	}
 	for i, l := range lines {
-		var evt NDJSONEvent
+		var evt StreamEvent
 		if err := json.Unmarshal([]byte(l), &evt); err != nil {
 			t.Fatalf("line %d: unmarshal: %v; got %q", i, err, l)
 		}
@@ -80,7 +82,7 @@ func TestNDJSONWriter_ConcurrentWrites(t *testing.T) {
 func TestNDJSONWriter_OmitsEmptyFields(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewNDJSONWriter(&buf)
-	w.Write(NDJSONEvent{
+	w.Write(StreamEvent{
 		Timestamp: "2026-04-17T10:00:00Z",
 		Source:    "llm",
 		Type:      "request_start",
@@ -108,7 +110,7 @@ func TestNDJSONWriter_PipelineHandler(t *testing.T) {
 		Message:   "started",
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -142,7 +144,7 @@ func TestNDJSONWriter_PipelineHandlerWithError(t *testing.T) {
 		Err:       errors.New("context cancelled"),
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -163,7 +165,7 @@ func TestNDJSONWriter_TraceObserver(t *testing.T) {
 		Preview:  "hello world",
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -193,7 +195,7 @@ func TestNDJSONWriter_TraceObserverWithToolName(t *testing.T) {
 		ToolName: "execute_command",
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -215,7 +217,7 @@ func TestNDJSONWriter_AgentHandler(t *testing.T) {
 		ToolOutput: "file contents here",
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -243,7 +245,7 @@ func TestNDJSONWriter_AgentHandlerFallsBackToText(t *testing.T) {
 		Text: "thinking about the problem",
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -263,7 +265,7 @@ func TestNDJSONWriter_AgentHandlerWithToolError(t *testing.T) {
 		ToolError: "command timed out",
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -284,7 +286,7 @@ func TestNDJSONWriter_AgentHandlerCombinesErrors(t *testing.T) {
 		Err:       errors.New("process killed"),
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -300,7 +302,7 @@ func TestNDJSONWriter_AgentHandler_ContentPriority(t *testing.T) {
 		h := w.AgentHandler()
 		h.HandleEvent(agent.Event{Type: agent.EventToolCallEnd, ToolOutput: "tool-out", Text: "text-out"})
 
-		var got NDJSONEvent
+		var got StreamEvent
 		if err := json.Unmarshal(bytes.TrimRight(buf.Bytes(), "\n"), &got); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
@@ -320,11 +322,141 @@ func TestNDJSONWriter_AgentHandlerErrorOnlyFromErr(t *testing.T) {
 		Err:  errors.New("session failed"),
 	})
 
-	var evt NDJSONEvent
+	var evt StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if evt.Error != "session failed" {
 		t.Errorf("error = %q, want 'session failed'", evt.Error)
 	}
+}
+
+// errWriter always returns an error on Write, used to exercise NDJSONWriter's
+// error-propagation path.
+type errWriter struct{ err error }
+
+func (e *errWriter) Write(_ []byte) (int, error) { return 0, e.err }
+
+// shortWriter returns n < len(p) with a nil error — a legal but rare
+// io.Writer behavior that NDJSONWriter must treat as a stream error so
+// silent truncation cannot sneak through.
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil // one byte short, nil error
+}
+
+func TestNDJSONWriter_Write_ShortWriteIsError(t *testing.T) {
+	w := NewNDJSONWriter(shortWriter{})
+	err := w.Write(StreamEvent{Timestamp: "t", Source: "pipeline", Type: "x"})
+	if err != io.ErrShortWrite {
+		t.Errorf("err = %v, want io.ErrShortWrite", err)
+	}
+}
+
+func TestNDJSONWriter_WriteReturnsError(t *testing.T) {
+	w := NewNDJSONWriter(&errWriter{err: errors.New("sink closed")})
+	err := w.Write(StreamEvent{Timestamp: "t", Source: "pipeline", Type: "stage_started"})
+	if err == nil {
+		t.Fatal("expected non-nil error when backing writer fails")
+	}
+	if !strings.Contains(err.Error(), "sink closed") {
+		t.Errorf("error = %q, want to contain 'sink closed'", err.Error())
+	}
+}
+
+// panicWriter panics on Write, used to exercise handler panic-recovery paths.
+type panicWriter struct{}
+
+func (p *panicWriter) Write(_ []byte) (int, error) { panic("sink exploded") }
+
+func TestNDJSONWriter_PipelineHandler_PanicRecovery(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("PipelineHandler should recover from panic, got: %v", r)
+		}
+	}()
+	w := NewNDJSONWriter(&panicWriter{})
+	w.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "r",
+	})
+}
+
+func TestNDJSONWriter_AgentHandler_PanicRecovery(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("AgentHandler should recover from panic, got: %v", r)
+		}
+	}()
+	w := NewNDJSONWriter(&panicWriter{})
+	w.AgentHandler().HandleEvent(agent.Event{Type: agent.EventTextDelta, Text: "x"})
+}
+
+func TestNDJSONWriter_TraceObserver_PanicRecovery(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("TraceObserver should recover from panic, got: %v", r)
+		}
+	}()
+	w := NewNDJSONWriter(&panicWriter{})
+	w.TraceObserver().HandleTraceEvent(llm.TraceEvent{Kind: llm.TraceRequestStart})
+}
+
+// TestNDJSONWriter_PanicSuppressionIsPerInstance verifies that one writer
+// recovering from a panic does not silence panic logging on a separate
+// writer instance. Both writers must independently emit their first
+// panic line to os.Stderr; regressions here mean package-level state
+// re-crept in (a package-level sync.Once would log once and silently
+// swallow the second, which the assertion below catches).
+func TestNDJSONWriter_PanicSuppressionIsPerInstance(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("handlers should recover, got: %v", r)
+		}
+	}()
+
+	stderr := captureStderr(t, func() {
+		w1 := NewNDJSONWriter(&panicWriter{})
+		w2 := NewNDJSONWriter(&panicWriter{})
+		w1.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventPipelineStarted, Timestamp: time.Now(),
+		})
+		w2.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventPipelineStarted, Timestamp: time.Now(),
+		})
+	})
+
+	// Count the recovered-panic log lines. Each writer must emit its own.
+	// Package-level suppression would produce exactly 1; per-instance produces 2.
+	got := strings.Count(stderr, "NDJSON pipeline handler recovered from panic")
+	if got != 2 {
+		t.Errorf("got %d panic log lines, want 2 (each writer instance logs independently); stderr was:\n%s", got, stderr)
+	}
+}
+
+// captureStderr swaps os.Stderr for an os.Pipe for the duration of fn,
+// returning the captured output as a string.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	fn()
+	w.Close()
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(data)
 }
