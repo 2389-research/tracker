@@ -128,6 +128,77 @@ func TestBuildNodeListSubgraphParallelFlagsArePreserved(t *testing.T) {
 	}
 }
 
+// TestBuildNodeListCyclicSubgraphsTerminate verifies that a cyclic subgraphs
+// map (A references B, B references A) does not stack-overflow in
+// buildNodeList. Cycles are normally rejected upstream by
+// loadSubgraphsRecursive, but a library caller passing a map directly
+// bypasses that check. The cycle-guard visited set must catch it.
+func TestBuildNodeListCyclicSubgraphsTerminate(t *testing.T) {
+	parent := pipeline.NewGraph("parent")
+	parent.AddNode(&pipeline.Node{ID: "start", Shape: "Mdiamond"})
+	parent.AddNode(&pipeline.Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "A"}})
+	parent.AddNode(&pipeline.Node{ID: "done", Shape: "Msquare"})
+	parent.AddEdge(&pipeline.Edge{From: "start", To: "sg"})
+	parent.AddEdge(&pipeline.Edge{From: "sg", To: "done"})
+
+	a := pipeline.NewGraph("A")
+	a.AddNode(&pipeline.Node{ID: "aStart", Shape: "Mdiamond"})
+	a.AddNode(&pipeline.Node{ID: "aRef", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "B"}})
+	a.AddNode(&pipeline.Node{ID: "aEnd", Shape: "Msquare"})
+	a.AddEdge(&pipeline.Edge{From: "aStart", To: "aRef"})
+	a.AddEdge(&pipeline.Edge{From: "aRef", To: "aEnd"})
+
+	b := pipeline.NewGraph("B")
+	b.AddNode(&pipeline.Node{ID: "bStart", Shape: "Mdiamond"})
+	b.AddNode(&pipeline.Node{ID: "bRef", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "A"}}) // cycle
+	b.AddNode(&pipeline.Node{ID: "bEnd", Shape: "Msquare"})
+	b.AddEdge(&pipeline.Edge{From: "bStart", To: "bRef"})
+	b.AddEdge(&pipeline.Edge{From: "bRef", To: "bEnd"})
+
+	// Must terminate; must not recurse infinitely. Any non-panic return is a pass.
+	entries := buildNodeList(parent, map[string]*pipeline.Graph{"A": a, "B": b})
+	if len(entries) == 0 {
+		t.Fatal("expected non-empty result even with cycle; got zero entries")
+	}
+	// bRef references A again — expansion must stop there. Verify the deepest
+	// ID does not include a second "A" expansion (i.e. "sg/aRef/bRef/aStart"
+	// would indicate the cycle guard failed).
+	ids := nodeIDs(entries)
+	for _, id := range ids {
+		// "sg/aRef/bRef" is OK (the cycle-pointing parent itself appears).
+		// What must NOT appear is anything under "sg/aRef/bRef/a..." — that's re-expansion.
+		if len(id) > len("sg/aRef/bRef/") && id[:len("sg/aRef/bRef/")] == "sg/aRef/bRef/" {
+			t.Errorf("cycle guard failed: %q shows re-expansion past the cycle boundary", id)
+		}
+	}
+}
+
+// TestBuildNodeListSelfReferencingSubgraphTerminates verifies a single-ref
+// cycle (X → X) is caught by the visited set.
+func TestBuildNodeListSelfReferencingSubgraphTerminates(t *testing.T) {
+	parent := pipeline.NewGraph("parent")
+	parent.AddNode(&pipeline.Node{ID: "start", Shape: "Mdiamond"})
+	parent.AddNode(&pipeline.Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "X"}})
+	parent.AddNode(&pipeline.Node{ID: "done", Shape: "Msquare"})
+	parent.AddEdge(&pipeline.Edge{From: "start", To: "sg"})
+	parent.AddEdge(&pipeline.Edge{From: "sg", To: "done"})
+
+	x := pipeline.NewGraph("X")
+	x.AddNode(&pipeline.Node{ID: "xStart", Shape: "Mdiamond"})
+	x.AddNode(&pipeline.Node{ID: "xRef", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "X"}}) // self-ref
+	x.AddNode(&pipeline.Node{ID: "xEnd", Shape: "Msquare"})
+	x.AddEdge(&pipeline.Edge{From: "xStart", To: "xRef"})
+	x.AddEdge(&pipeline.Edge{From: "xRef", To: "xEnd"})
+
+	entries := buildNodeList(parent, map[string]*pipeline.Graph{"X": x})
+	ids := nodeIDs(entries)
+	for _, id := range ids {
+		if len(id) > len("sg/xRef/") && id[:len("sg/xRef/")] == "sg/xRef/" {
+			t.Errorf("self-ref cycle guard failed: %q shows re-expansion", id)
+		}
+	}
+}
+
 func nodeIDs(entries []tui.NodeEntry) []string {
 	ids := make([]string, 0, len(entries))
 	for _, e := range entries {

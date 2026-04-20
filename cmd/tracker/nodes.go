@@ -13,19 +13,32 @@ import (
 // pipeline graph in topological (execution) order. Start is first, Done is
 // last, everything in between is ordered by when it would be reached during
 // execution. Uses Kahn's algorithm with BFS tie-breaking from StartNode.
+// Subgraph children are inserted recursively after their parent entries.
 func buildNodeList(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) []tui.NodeEntry {
+	return buildNodeListVisited(graph, subgraphs, make(map[string]bool))
+}
+
+// buildNodeListVisited is the recursive core — visited tracks subgraph_ref
+// values already being expanded so a cyclic map (A→B→A) cannot recurse to
+// stack overflow during TUI init. Cycles are normally rejected upstream by
+// cmd/tracker/loading.go:loadSubgraphsRecursive (keyed by absolute file
+// path), but a library caller could pass a programmatically constructed
+// map that bypasses that check. Defense in depth.
+func buildNodeListVisited(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, visited map[string]bool) []tui.NodeEntry {
 	if graph.StartNode == "" {
 		return nil
 	}
 
 	order := topoSortNodes(graph)
 	entries := buildOrderedEntries(order, graph)
-	return expandSubgraphChildren(entries, graph, subgraphs)
+	return expandSubgraphChildren(entries, graph, subgraphs, visited)
 }
 
 // expandSubgraphChildren inserts child subgraph nodes directly after each
-// subgraph parent entry, recursively handling nested subgraphs.
-func expandSubgraphChildren(entries []tui.NodeEntry, graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) []tui.NodeEntry {
+// subgraph parent entry, recursively handling nested subgraphs. Each ref
+// is added to visited before recursing and removed after, so sibling
+// subgraphs sharing a ref are still expanded but a cycle is broken.
+func expandSubgraphChildren(entries []tui.NodeEntry, graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, visited map[string]bool) []tui.NodeEntry {
 	if len(subgraphs) == 0 {
 		return entries
 	}
@@ -40,12 +53,18 @@ func expandSubgraphChildren(entries []tui.NodeEntry, graph *pipeline.Graph, subg
 		}
 
 		ref := node.Attrs["subgraph_ref"]
+		if ref == "" || visited[ref] {
+			continue // missing ref or cycle — skip expansion
+		}
 		childGraph, ok := subgraphs[ref]
 		if !ok {
 			continue
 		}
 
-		childEntries := buildNodeList(childGraph, subgraphs)
+		visited[ref] = true
+		childEntries := buildNodeListVisited(childGraph, subgraphs, visited)
+		delete(visited, ref)
+
 		for _, child := range childEntries {
 			child.ID = entry.ID + "/" + child.ID
 			child.Label = tui.SubgraphChildLabel(child.ID)
