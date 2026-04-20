@@ -22,7 +22,7 @@ import (
 
 // PinnedDippinVersion is the dippin-lang version from go.mod.
 // Keep in sync with the require line in go.mod.
-const PinnedDippinVersion = "v0.20.0"
+const PinnedDippinVersion = "v0.21.0"
 
 // DoctorConfig configures a Doctor() run.
 type DoctorConfig struct {

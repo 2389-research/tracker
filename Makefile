@@ -129,37 +129,36 @@ complexity-report:
 
 # ─── Lint ────────────────────────────────────────────────
 
+# DIPPIN_VERSION is derived from go.mod so the local `dippin` binary and
+# the go module always match. This avoids "unrecognized field" failures
+# when a contributor's PATH binary lags behind the dep bump.
+DIPPIN_VERSION := $(shell awk '/github.com\/2389-research\/dippin-lang/ {print $$2}' go.mod)
+DIPPIN := go run github.com/2389-research/dippin-lang/cmd/dippin@$(DIPPIN_VERSION)
+
 lint:
-	@command -v dippin >/dev/null 2>&1 || { echo "dippin CLI not found; skipping .dip lint"; exit 0; }
 	@FAIL=0; \
 	for f in examples/*.dip; do \
-		case "$$f" in \
-			examples/human_gate_test_suite.dip) \
-				echo "SKIP: $$f (uses human timeout/timeout_action — not in dippin-lang IR yet)"; \
-				continue;; \
-		esac; \
-		ERRORS=$$(dippin check "$$f" 2>&1 | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('errors',0))" 2>/dev/null || echo "0"); \
+		ERRORS=$$($(DIPPIN) check "$$f" 2>&1 | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('errors',0))" 2>/dev/null || echo "0"); \
 		if [ "$$ERRORS" -gt 0 ]; then \
 			echo "FAIL: $$f has $$ERRORS errors"; \
 			FAIL=1; \
 		fi; \
 	done; \
 	if [ "$$FAIL" -gt 0 ]; then exit 1; fi
-	@echo "All .dip files pass lint"
+	@echo "All .dip files pass lint (via $(DIPPIN_VERSION))"
 
 doctor:
-	@command -v dippin >/dev/null 2>&1 || { echo "dippin CLI not found; skipping doctor"; exit 0; }
 	@FAIL=0; \
 	for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip; do \
-		GRADE=$$(dippin doctor "$$f" 2>&1 | grep 'Grade' | sed 's/.*Grade: //' | sed 's/  .*//'); \
-		SCORE=$$(dippin doctor "$$f" 2>&1 | grep 'Score' | sed 's/.*Score: //' | sed 's/\/100//'); \
+		GRADE=$$($(DIPPIN) doctor "$$f" 2>&1 | grep 'Grade' | sed 's/.*Grade: //' | sed 's/  .*//'); \
+		SCORE=$$($(DIPPIN) doctor "$$f" 2>&1 | grep 'Score' | sed 's/.*Score: //' | sed 's/\/100//'); \
 		printf "%-50s %s  %s/100\n" "$$(basename $$f)" "$$GRADE" "$$SCORE"; \
 		if [ "$$GRADE" != "A" ]; then \
 			FAIL=1; \
 		fi; \
 	done; \
 	if [ "$$FAIL" -gt 0 ]; then echo "FAIL: core pipelines must be grade A"; exit 1; fi
-	@echo "All core pipelines grade A"
+	@echo "All core pipelines grade A (via $(DIPPIN_VERSION))"
 
 # ─── CI (all gates in sequence) ──────────────────────────
 

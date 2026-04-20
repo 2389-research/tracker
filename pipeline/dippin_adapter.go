@@ -363,6 +363,12 @@ func extractHumanAttrs(cfg ir.HumanConfig, attrs map[string]string) {
 	if cfg.Prompt != "" {
 		attrs["prompt"] = cfg.Prompt
 	}
+	if cfg.Timeout > 0 {
+		attrs["timeout"] = cfg.Timeout.String()
+	}
+	if cfg.TimeoutAction != "" {
+		attrs["timeout_action"] = cfg.TimeoutAction
+	}
 }
 
 func extractToolAttrs(cfg ir.ToolConfig, attrs map[string]string) {
@@ -463,6 +469,18 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 	}
 	setIfNonEmpty(attrs, "context_compaction", defaults.Compaction)
 	setIfNonEmpty(attrs, "on_resume", defaults.OnResume)
+	// Budget ceilings (optional; zero means unset — tracker.resolveBudgetLimits
+	// will honor these as fallback when Config.Budget and --max-* CLI flags
+	// are not provided).
+	if defaults.MaxTotalTokens > 0 {
+		attrs["max_total_tokens"] = strconv.Itoa(defaults.MaxTotalTokens)
+	}
+	if defaults.MaxCostCents > 0 {
+		attrs["max_cost_cents"] = strconv.Itoa(defaults.MaxCostCents)
+	}
+	if defaults.MaxWallTime > 0 {
+		attrs["max_wall_time"] = defaults.MaxWallTime.String()
+	}
 }
 
 func extractWorkflowVars(vars map[string]string, attrs map[string]string) {

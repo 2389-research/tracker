@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -202,7 +203,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	if err != nil {
 		return nil, err
 	}
-	engineOpts := buildEngineOpts(cfg)
+	engineOpts := buildEngineOpts(cfg, graph)
 	inner := pipeline.NewEngine(graph, registry, engineOpts...)
 
 	built = true
@@ -348,8 +349,12 @@ func resolveAutopilotClient(client *llm.Client, completer agent.Completer) *llm.
 	return nil
 }
 
-// buildEngineOpts constructs engine options from Config.
-func buildEngineOpts(cfg Config) []pipeline.EngineOption {
+// buildEngineOpts constructs engine options from Config. When a config
+// budget field is zero, buildEngineOpts falls back to the matching
+// graph-level attr (max_total_tokens, max_cost_cents, max_wall_time)
+// populated by the adapter from dippin WorkflowDefaults. Explicit
+// Config.Budget values always win over the workflow fallback.
+func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption {
 	var opts []pipeline.EngineOption
 	if cfg.CheckpointDir != "" {
 		opts = append(opts, pipeline.WithCheckpointPath(cfg.CheckpointDir))
@@ -363,11 +368,51 @@ func buildEngineOpts(cfg Config) []pipeline.EngineOption {
 	if len(cfg.Context) > 0 {
 		opts = append(opts, pipeline.WithInitialContext(cfg.Context))
 	}
-	if guard := pipeline.NewBudgetGuard(cfg.Budget); guard != nil {
+	budget := ResolveBudgetLimits(cfg.Budget, graph)
+	if guard := pipeline.NewBudgetGuard(budget); guard != nil {
 		opts = append(opts, pipeline.WithBudgetGuard(guard))
 	}
 	opts = append(opts, pipeline.WithStylesheetResolution(true))
 	return opts
+}
+
+// ResolveBudgetLimits fills any zero field on cfg from the matching
+// workflow-level default in graph.Attrs. Config values take precedence —
+// the graph attrs are only consulted for fields the caller left unset.
+// Returns the original cfg unchanged if graph is nil or has no attrs.
+//
+// The graph-level keys consulted are max_total_tokens, max_cost_cents,
+// and max_wall_time, which the dippin adapter writes from
+// WorkflowDefaults.Max* fields in v0.21.0+.
+//
+// Exported so the tracker CLI can merge its --max-* flag values with
+// workflow defaults without re-implementing the same logic.
+func ResolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipeline.BudgetLimits {
+	if graph == nil || len(graph.Attrs) == 0 {
+		return cfg
+	}
+	if cfg.MaxTotalTokens == 0 {
+		if v, ok := graph.Attrs["max_total_tokens"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.MaxTotalTokens = n
+			}
+		}
+	}
+	if cfg.MaxCostCents == 0 {
+		if v, ok := graph.Attrs["max_cost_cents"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.MaxCostCents = n
+			}
+		}
+	}
+	if cfg.MaxWallTime == 0 {
+		if v, ok := graph.Attrs["max_wall_time"]; ok {
+			if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				cfg.MaxWallTime = d
+			}
+		}
+	}
+	return cfg
 }
 
 // parsePipelineSource parses a pipeline source string using the given format.

@@ -16,7 +16,7 @@ bin/
 .scratch/
 coverage.out
 *.bak
-.claude/settings.local.json
+.claude/
 .private-journal/
 a/
 runs/

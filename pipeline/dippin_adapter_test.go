@@ -264,6 +264,44 @@ func TestFromDippinIR_HumanConfig(t *testing.T) {
 	}
 }
 
+// TestFromDippinIR_HumanConfigTimeout verifies that dippin-lang v0.21.0's
+// new HumanConfig.Timeout and HumanConfig.TimeoutAction fields land in
+// node.Attrs as "timeout" and "timeout_action" — the keys tracker's
+// pipeline/handlers/human.go already reads. Closes tracker#112.
+func TestFromDippinIR_HumanConfigTimeout(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "HumanTimeoutTest",
+		Start: "start",
+		Exit:  "human",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "human",
+				Kind: ir.NodeHuman,
+				Config: ir.HumanConfig{
+					Mode:          "choice",
+					Timeout:       2 * time.Minute,
+					TimeoutAction: "default",
+				},
+			},
+		},
+		Edges: []*ir.Edge{{From: "start", To: "human"}},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR: %v", err)
+	}
+
+	node := graph.Nodes["human"]
+	if node.Attrs["timeout"] != "2m0s" {
+		t.Errorf("timeout = %q, want 2m0s", node.Attrs["timeout"])
+	}
+	if node.Attrs["timeout_action"] != "default" {
+		t.Errorf("timeout_action = %q, want default", node.Attrs["timeout_action"])
+	}
+}
+
 // TestFromDippinIR_ToolConfig verifies ToolConfig extraction.
 func TestFromDippinIR_ToolConfig(t *testing.T) {
 	workflow := &ir.Workflow{
@@ -505,6 +543,65 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 	for _, tt := range tests {
 		if attrs[tt.key] != tt.value {
 			t.Errorf("attrs[%q] = %q, want %q", tt.key, attrs[tt.key], tt.value)
+		}
+	}
+}
+
+// TestFromDippinIR_WorkflowBudgetDefaults verifies that dippin-lang v0.21.0's
+// new WorkflowDefaults.MaxTotalTokens / MaxCostCents / MaxWallTime fields
+// land in graph.Attrs with the corresponding keys. Closes tracker#67.
+func TestFromDippinIR_WorkflowBudgetDefaults(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "BudgetTest",
+		Start: "start",
+		Exit:  "exit",
+		Defaults: ir.WorkflowDefaults{
+			MaxTotalTokens: 50000,
+			MaxCostCents:   250,
+			MaxWallTime:    15 * time.Minute,
+		},
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "start", To: "exit"}},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR: %v", err)
+	}
+	if graph.Attrs["max_total_tokens"] != "50000" {
+		t.Errorf("max_total_tokens = %q, want 50000", graph.Attrs["max_total_tokens"])
+	}
+	if graph.Attrs["max_cost_cents"] != "250" {
+		t.Errorf("max_cost_cents = %q, want 250", graph.Attrs["max_cost_cents"])
+	}
+	if graph.Attrs["max_wall_time"] != "15m0s" {
+		t.Errorf("max_wall_time = %q, want 15m0s", graph.Attrs["max_wall_time"])
+	}
+}
+
+// TestFromDippinIR_WorkflowBudgetUnsetOmitted verifies zero-value budget
+// fields produce no graph.Attrs entry.
+func TestFromDippinIR_WorkflowBudgetUnsetOmitted(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "NoBudgetTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "start", To: "exit"}},
+	}
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR: %v", err)
+	}
+	for _, k := range []string{"max_total_tokens", "max_cost_cents", "max_wall_time"} {
+		if _, ok := graph.Attrs[k]; ok {
+			t.Errorf("expected %q to be omitted when unset, got %q", k, graph.Attrs[k])
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
@@ -690,5 +691,62 @@ func TestResolveProviderBaseURL_UnknownProvider(t *testing.T) {
 	t.Setenv("TRACKER_GATEWAY_URL", "https://example/v1/a/g")
 	if got := ResolveProviderBaseURL("mystery"); got != "" {
 		t.Errorf("unknown provider should return empty, got %q", got)
+	}
+}
+
+// TestResolveBudgetLimits_FallsBackToGraphAttrs verifies that when
+// Config.Budget is zero, ResolveBudgetLimits fills from the graph-level
+// max_total_tokens / max_cost_cents / max_wall_time attrs populated by
+// the dippin adapter from WorkflowDefaults. Closes tracker#67.
+func TestResolveBudgetLimits_FallsBackToGraphAttrs(t *testing.T) {
+	graph := &pipeline.Graph{Attrs: map[string]string{
+		"max_total_tokens": "50000",
+		"max_cost_cents":   "250",
+		"max_wall_time":    "15m",
+	}}
+	got := ResolveBudgetLimits(pipeline.BudgetLimits{}, graph)
+	if got.MaxTotalTokens != 50000 {
+		t.Errorf("MaxTotalTokens = %d, want 50000", got.MaxTotalTokens)
+	}
+	if got.MaxCostCents != 250 {
+		t.Errorf("MaxCostCents = %d, want 250", got.MaxCostCents)
+	}
+	if got.MaxWallTime != 15*time.Minute {
+		t.Errorf("MaxWallTime = %v, want 15m", got.MaxWallTime)
+	}
+}
+
+// TestResolveBudgetLimits_ConfigWinsOverGraph verifies that explicit
+// Config.Budget values are NOT overridden by graph attrs. The adapter
+// defaults only fill fields the caller left zero.
+func TestResolveBudgetLimits_ConfigWinsOverGraph(t *testing.T) {
+	graph := &pipeline.Graph{Attrs: map[string]string{
+		"max_total_tokens": "50000",
+		"max_cost_cents":   "250",
+		"max_wall_time":    "15m",
+	}}
+	cfg := pipeline.BudgetLimits{
+		MaxTotalTokens: 9999,
+		MaxCostCents:   1,
+		MaxWallTime:    time.Second,
+	}
+	got := ResolveBudgetLimits(cfg, graph)
+	if got.MaxTotalTokens != 9999 {
+		t.Errorf("explicit MaxTotalTokens overridden: got %d, want 9999", got.MaxTotalTokens)
+	}
+	if got.MaxCostCents != 1 {
+		t.Errorf("explicit MaxCostCents overridden: got %d, want 1", got.MaxCostCents)
+	}
+	if got.MaxWallTime != time.Second {
+		t.Errorf("explicit MaxWallTime overridden: got %v, want 1s", got.MaxWallTime)
+	}
+}
+
+// TestResolveBudgetLimits_NilGraph verifies the no-op case.
+func TestResolveBudgetLimits_NilGraph(t *testing.T) {
+	cfg := pipeline.BudgetLimits{MaxTotalTokens: 100}
+	got := ResolveBudgetLimits(cfg, nil)
+	if got.MaxTotalTokens != 100 {
+		t.Errorf("nil graph should pass cfg through, got %+v", got)
 	}
 }
