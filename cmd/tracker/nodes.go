@@ -13,13 +13,46 @@ import (
 // pipeline graph in topological (execution) order. Start is first, Done is
 // last, everything in between is ordered by when it would be reached during
 // execution. Uses Kahn's algorithm with BFS tie-breaking from StartNode.
-func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
+func buildNodeList(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) []tui.NodeEntry {
 	if graph.StartNode == "" {
 		return nil
 	}
 
 	order := topoSortNodes(graph)
-	return buildOrderedEntries(order, graph)
+	entries := buildOrderedEntries(order, graph)
+	return expandSubgraphChildren(entries, graph, subgraphs)
+}
+
+// expandSubgraphChildren inserts child subgraph nodes directly after each
+// subgraph parent entry, recursively handling nested subgraphs.
+func expandSubgraphChildren(entries []tui.NodeEntry, graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) []tui.NodeEntry {
+	if len(subgraphs) == 0 {
+		return entries
+	}
+
+	var out []tui.NodeEntry
+	for _, entry := range entries {
+		out = append(out, entry)
+
+		node, ok := graph.Nodes[entry.ID]
+		if !ok || node.Handler != "subgraph" {
+			continue
+		}
+
+		ref := node.Attrs["subgraph_ref"]
+		childGraph, ok := subgraphs[ref]
+		if !ok {
+			continue
+		}
+
+		childEntries := buildNodeList(childGraph, subgraphs)
+		for _, child := range childEntries {
+			child.ID = entry.ID + "/" + child.ID
+			child.Label = tui.SubgraphChildLabel(child.ID)
+			out = append(out, child)
+		}
+	}
+	return out
 }
 
 // buildOrderedEntries converts a topological order into NodeEntry slice with exit node last.

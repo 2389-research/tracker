@@ -334,7 +334,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	pipelineName := resolvePipelineName(graph, pipelineFile)
 	artifactDir := filepath.Join(workdir, ".tracker", "runs")
 
-	prog, store, activityLog, err := setupTUIProgram(graph, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
+	prog, store, activityLog, err := setupTUIProgram(graph, subgraphs, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
 	if err != nil {
 		return err
 	}
@@ -414,12 +414,12 @@ func resolvePipelineName(graph *pipeline.Graph, pipelineFile string) string {
 }
 
 // setupTUIProgram creates the TUI model, state store, and activity log.
-func setupTUIProgram(graph *pipeline.Graph, pipelineName, checkpoint string, tokenTracker *llm.TokenTracker, llmClient *llm.Client, verbose bool, backend, artifactDir string) (*tea.Program, *tui.StateStore, *pipeline.JSONLEventHandler, error) {
+func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, pipelineName, checkpoint string, tokenTracker *llm.TokenTracker, llmClient *llm.Client, verbose bool, backend, artifactDir string) (*tea.Program, *tui.StateStore, *pipeline.JSONLEventHandler, error) {
 	store := tui.NewStateStore(tokenTracker)
 	appModel := tui.NewAppModel(store, pipelineName, "")
 	appModel.SetVerboseTrace(verbose)
 	configureTUIHeader(appModel, backend, activeAutopilotCfg)
-	nodeList := buildNodeList(graph)
+	nodeList := buildNodeList(graph, subgraphs)
 	appModel.SetInitialNodes(nodeList)
 
 	if checkpoint != "" {
