@@ -40,7 +40,15 @@ tracker -r <run-id> build_product.dip
 
 # When something goes wrong
 tracker diagnose
+
+# Override workflow params at runtime (v0.19.0)
+tracker --param model=claude-opus-4 --param retries=3 build_product
+
+# Pin the run's artifact directory explicitly (v0.19.0)
+tracker --artifact-dir /tmp/tracker-runs build_product
 ```
+
+> **What's new in v0.19.0** (2026-04-20): breaking library API changes (ctx-first `Doctor`/`Diagnose`/`Audit`/`Simulate`, `NDJSONEvent` → `StreamEvent`, typed `CheckStatus` / `SuggestionKind`); workflow-level `${params.*}` with `--param` overrides; workflow-level budget ceilings (`max_total_tokens` / `max_cost_cents` / `max_wall_time`) in `defaults:`; per-human-gate `timeout` / `timeout_action`; TUI now pre-populates subgraph children in the sidebar; OpenRouter `invalid_prompt` fix for GLM/Qwen/Kimi; SWE-bench-driven agent defaults lifted benchmark from 59% → 70%. See [CHANGELOG.md](./CHANGELOG.md) for full migration notes.
 
 ## Pipeline Examples
 
@@ -157,7 +165,7 @@ Three namespaces for `${...}` syntax in prompts:
 
 Variables are expanded in a single pass — resolved values are never re-scanned, preventing recursive expansion.
 
-**Important**: Each agent node runs a fresh LLM session. Data flows between nodes via context keys, not conversation history. Per-node scoping (`${ctx.node.<nodeID>.<key>}`) is an unreleased feature currently on `main`; it lets you reference a specific earlier node's output without relying on the last-writer-wins `last_response` key. See **[Pipeline Context Flow](docs/pipeline-context-flow.md)** for the full model, fidelity levels, and parallel-branch patterns.
+**Important**: Each agent node runs a fresh LLM session. Data flows between nodes via context keys, not conversation history. Per-node scoping (`${ctx.node.<nodeID>.<key>}`) lets you reference a specific earlier node's output without relying on the last-writer-wins `last_response` key. See **[Pipeline Context Flow](docs/pipeline-context-flow.md)** for the full model, fidelity levels, and parallel-branch patterns.
 
 ### Edge Conditions
 

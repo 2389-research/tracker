@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-04-20
+
 ### Added
 
 - **Library API hardening for v1.0** (#102, #103, #104, #106, #109):
@@ -19,7 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Diagnose` now streams `activity.jsonl` with `bufio.Scanner` instead of `os.ReadFile` → `strings.Split`, matching `LoadActivityLog` and avoiding a memory spike on large runs. Scanner errors (1 MB line-length overflow, I/O) and `ctx.Err()` now propagate out of `Diagnose` as a real error — partial reports are never returned as success, so automation with deadlines can distinguish complete from truncated analysis.
 - **Workflow params via `${params.*}` with CLI/library overrides** (closes #81): top-level Dippin `vars` now map to graph attrs under `params.<key>`, making them available in agent prompts, tool commands, and edge conditions through `${params.key}` interpolation. Added repeatable `--param key=value` on the CLI plus `tracker.Config.Params` for library callers; overrides hard-fail on unknown keys at startup and run summaries print effective overridden params. New lint rules DIP120 (undeclared `${params.*}` reference) and DIP121 (declared but unused var).
 - **Per-human-gate timeout / timeout_action in `.dip`** (closes #112): the dippin-lang v0.21.0 IR exposes `HumanConfig.Timeout` and `HumanConfig.TimeoutAction`; the adapter copies them into `node.Attrs["timeout"]` / `node.Attrs["timeout_action"]` where `pipeline/handlers/human.go` already consumed them. The `examples/human_gate_test_suite.dip` Makefile lint skip is removed.
-- **Workflow-level budget ceilings from `.dip`** (closes #67): dippin-lang v0.21.0 adds `WorkflowDefaults.MaxTotalTokens`, `WorkflowDefaults.MaxCostCents`, and `WorkflowDefaults.MaxWallTime`. The adapter now maps them to `graph.Attrs["max_total_tokens"]` / `["max_cost_cents"]` / `["max_wall_time"]`, and `tracker.resolveBudgetLimits` uses them as a fallback when `Config.Budget` and the matching `--max-*` CLI flags are zero. Explicit config values still win.
+- **Workflow-level budget ceilings from `.dip`** (closes #67): dippin-lang v0.21.0 adds `WorkflowDefaults.MaxTotalTokens`, `WorkflowDefaults.MaxCostCents`, and `WorkflowDefaults.MaxWallTime`. The adapter now maps them to `graph.Attrs["max_total_tokens"]` / `["max_cost_cents"]` / `["max_wall_time"]`, and `tracker.ResolveBudgetLimits` uses them as a fallback when `Config.Budget` and the matching `--max-*` CLI flags are zero. Explicit config values still win. Wired through both the library engine builder and the CLI's console/TUI engine builders.
+- **TUI pre-populates subgraph children in the sidebar** (closes #118): subgraph reference nodes previously appeared as opaque single rows until child `stage_started` events arrived. `buildNodeList` now accepts the `subgraphs` map and recursively flattens child graphs with prefixed IDs (`Parent/Child/...`), preserving user-set labels and parallel/fan-in flags. Lazy insertion remains as a fallback with a cycle guard for self-referential subgraph maps.
+- **Agent quality-of-life improvements from SWE-bench work**:
+  - **Turn-budget checkpoints**: optional guidance messages injected at configurable fractions of the turn budget (50%, 75%) to reduce thrashing on hard instances.
+  - **Two-phase verify-after-edit**: focused test first, broad regression test second, with a configurable repair retry budget. Models the pattern top SWE-bench agents use.
+  - **Tool polish**: `grep` gets context lines, noise-dir filtering, and truncated-match count; `read` gets `offset`/`limit` for paged access; `edit` shows nearby context on a miss.
+  - **Process safety**: tool subprocess groups are killed after the shell command completes, preventing orphan zombies on timeouts.
+  - **SWE-bench harness**: agent event logging + transcript capture; checkpoint and verify config threaded into `agent-runner`.
+  - **Config defaults promoted**: `DefaultConfig()` now uses `MaxTokens: 16384`, auto-continue on truncation, and `LoopDetectionThreshold: 4` — values measured effective in SWE-bench Lite (59.0% → 70.3% baseline shift).
+  - New CLI flag `--artifact-dir` overrides the node state directory.
 
 ### Changed
 
