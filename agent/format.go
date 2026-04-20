@@ -29,6 +29,10 @@ func FormatEventLine(evt Event) string {
 			}
 			return "⚠ " + evt.Text
 		}
+	case EventCheckpoint:
+		if evt.Text != "" {
+			return "⏱ checkpoint: " + previewEventText(evt.Text)
+		}
 	}
 	return ""
 }

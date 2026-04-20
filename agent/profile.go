@@ -22,6 +22,7 @@ func builtInToolsForConfig(cfg SessionConfig, env exec.ExecutionEnvironment) []t
 			tools.NewReadTool(env),
 			tools.NewWriteTool(env),
 			tools.NewEditTool(env),
+			tools.NewApplyPatchTool(env),
 			tools.NewGlobTool(env),
 			tools.NewGrepSearchTool(env),
 			tools.NewBashTool(env, cfg.CommandTimeout, cfg.MaxCommandTimeout),

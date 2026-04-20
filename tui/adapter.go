@@ -59,6 +59,8 @@ func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 		return adaptAgentError(evt, nodeID)
 	case agent.EventVerify:
 		return MsgVerifyStatus{NodeID: nodeID, Text: evt.Text}
+	case agent.EventCheckpoint:
+		return MsgVerifyStatus{NodeID: nodeID, Text: "checkpoint: " + evt.Text}
 	default:
 		return nil
 	}

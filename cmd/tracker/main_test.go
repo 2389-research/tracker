@@ -989,3 +989,49 @@ func TestExportBundleFieldPassedToActiveGlobal(t *testing.T) {
 		t.Fatalf("activeExportBundle inside run() = %q, want %q", captured, bundlePath)
 	}
 }
+
+// TestParseFlagsArtifactDir verifies that --artifact-dir is parsed into
+// runConfig.artifactDir without modifying other fields.
+func TestParseFlagsArtifactDir(t *testing.T) {
+	const dir = "/tmp/custom-artifacts"
+	cfg, err := parseFlags([]string{"tracker", "--artifact-dir", dir, "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.artifactDir != dir {
+		t.Fatalf("artifactDir = %q, want %q", cfg.artifactDir, dir)
+	}
+	if cfg.pipelineFile != "pipeline.dip" {
+		t.Fatalf("pipelineFile = %q, want %q", cfg.pipelineFile, "pipeline.dip")
+	}
+}
+
+// TestArtifactDirFieldPassedToActiveGlobal verifies that executeRun propagates
+// cfg.artifactDir into the activeArtifactDir global, which run/runTUI reads.
+func TestArtifactDirFieldPassedToActiveGlobal(t *testing.T) {
+	const dir = "/tmp/custom-artifacts"
+
+	t.Cleanup(func() { activeArtifactDir = "" })
+
+	var captured string
+	_ = executeCommand(runConfig{
+		mode:         modeRun,
+		pipelineFile: "pipeline.dip",
+		workdir:      "/tmp",
+		noTUI:        true,
+		artifactDir:  dir,
+	}, commandDeps{
+		loadEnv: func(string) error { return nil },
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+			captured = activeArtifactDir
+			return nil
+		},
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+			t.Fatal("unexpected TUI path")
+			return nil
+		},
+	})
+	if captured != dir {
+		t.Fatalf("activeArtifactDir inside run() = %q, want %q", captured, dir)
+	}
+}

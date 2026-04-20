@@ -1,3 +1,5 @@
+//go:build !windows
+
 // ABOUTME: Verify-after-edit loop: auto-detects build system, runs tests after file edits, and injects repair prompts.
 // ABOUTME: Transparent inner loop — verification turns do not count against session MaxTurns.
 package agent
@@ -11,23 +13,27 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const (
 	// verifyOutputCap is the maximum bytes of verification output fed back to the LLM.
 	// The tail is kept (most relevant errors appear at the end).
-	verifyOutputCap = 4096
+	verifyOutputCap = 16384
+)
 
-	// verifyRepairPrompt is injected when verification fails after an edit turn.
-	verifyRepairPrompt = `Verification failed after your edits.
+// verifyRepairPrompt returns the repair prompt injected when verification fails.
+func verifyRepairPrompt(command string, exitCode int, output string) string {
+	return fmt.Sprintf(`Verification failed after your edits.
 
 Command: %s
 Exit code: %d
-Output (truncated to 4KB):
+Output (truncated to %dKB):
 %s
 
-Please fix the failing test/lint issue, then I'll re-verify.`
-)
+Please fix the failing test/lint issue, then I'll re-verify.`, command, exitCode, verifyOutputCap/1024, output)
+}
 
 // editToolNames is the set of tool names that modify files on disk.
 // A turn that calls any of these triggers the verify-after-edit loop.
@@ -106,8 +112,9 @@ func hasPytestSection(path string) bool {
 
 // verifier holds configuration for the verify-after-edit loop and runs it.
 type verifier struct {
-	cmd     string // resolved verification command (never empty)
-	workDir string
+	cmd      string // focused verification command (never empty)
+	broadCmd string // optional broad regression command (empty = skip)
+	workDir  string
 }
 
 // newVerifier resolves the verify command and returns a verifier ready to use,
@@ -126,32 +133,73 @@ func newVerifier(cfg SessionConfig) *verifier {
 	// cfg.WorkingDir is set from s.env.WorkingDir in codergen (via SessionConfig.WorkingDir),
 	// so the verifier runs in the same directory as tool executions. If the session has no
 	// explicit WorkingDir it defaults to "." (process cwd), matching the tool handler default.
-	return &verifier{cmd: cmd, workDir: cfg.WorkingDir}
+	return &verifier{
+		cmd:      cmd,
+		broadCmd: cfg.VerifyBroadCommand,
+		workDir:  cfg.WorkingDir,
+	}
 }
 
-// run executes the verification command and returns (passed, exitCode, output, error).
+// verifyResult holds the result of a verification run, including which command
+// was executed so callers can attribute failures correctly.
+type verifyResult struct {
+	Passed   bool
+	ExitCode int
+	Output   string
+	Command  string // the command that produced this result
+}
+
+// run executes the two-phase verification: focused test first, then optional broad
+// regression test. If the focused test fails, the broad test is skipped and the
+// focused result is returned immediately. If both pass, the broad result is returned.
 // A non-zero exit code is not an error — it is returned as passed=false with the
 // actual exit code and output. A real execution error (binary not found, etc.)
-// is returned as error. Output is capped at verifyOutputCap (tail kept) to prevent
-// feeding large test logs to the LLM repair prompt.
-func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output string, err error) {
-	if strings.TrimSpace(v.cmd) == "" {
-		return false, 0, "", fmt.Errorf("empty verify command")
+// is returned as error.
+func (v *verifier) run(ctx context.Context) (verifyResult, error) {
+	// Phase 1: focused test.
+	res, err := v.runCommand(ctx, v.cmd)
+	if err != nil || !res.Passed {
+		return res, err
+	}
+
+	// Phase 2: broad regression test (optional).
+	if v.broadCmd == "" {
+		return res, nil
+	}
+	return v.runCommand(ctx, v.broadCmd)
+}
+
+// runCommand executes a single verification command and returns a verifyResult.
+// Output is capped at verifyOutputCap (tail kept) to prevent feeding large test logs to the
+// LLM repair prompt.
+func (v *verifier) runCommand(ctx context.Context, command string) (verifyResult, error) {
+	if strings.TrimSpace(command) == "" {
+		return verifyResult{Command: command}, fmt.Errorf("empty verify command")
 	}
 
 	// Run via sh -c so the shell handles quoting and glob expansion, matching
 	// how tool_command is executed elsewhere in tracker.
 	//nolint:gosec // command comes from config/auto-detection, not user-controlled LLM output
-	cmd := exec.CommandContext(ctx, "sh", "-c", v.cmd)
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = v.workDir
-	// TODO: add cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} for process-group
-	// cleanup of long-running test suites (consistent with tool handler). Deferred
-	// because verify commands are author-controlled and typically short-lived.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 
 	// CombinedOutput merges stdout+stderr safely — exec.Cmd uses separate goroutines
 	// for each stream and bytes.Buffer is not safe for concurrent writes.
 	// The cap is applied post-execution so we keep the tail (errors appear at the end).
 	out, runErr := cmd.CombinedOutput()
+
+	// Reap any background processes spawned by the shell (e.g. ssh-agent).
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	// Apply size cap: keep the tail where errors typically appear.
 	outStr := truncateTail(string(out), verifyOutputCap)
@@ -161,11 +209,11 @@ func (v *verifier) run(ctx context.Context) (passed bool, exitCode int, output s
 		if errors.As(runErr, &exitErr) {
 			// Non-zero exit code: verification failed but command ran fine.
 			// Return the real exit code so the repair prompt is accurate.
-			return false, exitErr.ExitCode(), outStr, nil
+			return verifyResult{Passed: false, ExitCode: exitErr.ExitCode(), Output: outStr, Command: command}, nil
 		}
-		return false, -1, outStr, runErr // real execution failure (e.g. binary not found)
+		return verifyResult{Passed: false, ExitCode: -1, Output: outStr, Command: command}, runErr
 	}
-	return true, 0, outStr, nil
+	return verifyResult{Passed: true, ExitCode: 0, Output: outStr, Command: command}, nil
 }
 
 // truncateTail keeps the last n bytes of s.

@@ -50,14 +50,40 @@ func compactGrepSummary(toolName, content string) string {
 }
 
 func compactBashSummary(content string) string {
-	firstLine := content
-	if idx := strings.Index(content, "\n"); idx >= 0 {
-		firstLine = content[:idx]
+	lines := strings.Split(content, "\n")
+
+	// Extract the command (first line, capped at 80 chars).
+	cmd := lines[0]
+	if len(cmd) > 80 {
+		cmd = cmd[:80]
 	}
-	if len(firstLine) > 30 {
-		firstLine = firstLine[:30]
+
+	// Look for pass/fail signal in the last 10 lines.
+	var signal string
+	searchLines := lines
+	if len(searchLines) > 10 {
+		searchLines = searchLines[len(searchLines)-10:]
 	}
-	return fmt.Sprintf("[previously ran: %s — Re-run if needed.]", firstLine)
+	for _, line := range searchLines {
+		lower := strings.ToLower(line)
+		trimmed := strings.TrimSpace(lower)
+		// Check failure keywords first — "3 passed, 1 failed" is a failure.
+		// Use word-boundary-aware patterns to avoid matching "error_handler", "failover", etc.
+		if strings.Contains(lower, "failed") ||
+			strings.HasPrefix(trimmed, "error:") || strings.HasPrefix(trimmed, "error ") ||
+			strings.Contains(lower, " error") || strings.HasSuffix(trimmed, "error") ||
+			strings.Contains(lower, "failure") {
+			signal = " (failed)"
+			break
+		}
+		if strings.Contains(lower, "passed") ||
+			strings.HasPrefix(trimmed, "ok ") || strings.HasPrefix(trimmed, "ok\t") || trimmed == "ok" {
+			signal = " (passed)"
+			break
+		}
+	}
+
+	return fmt.Sprintf("[previously ran: %s%s — %d lines output. Re-run if needed.]", cmd, signal, len(lines))
 }
 
 // compactMessages returns a new message slice with old tool results replaced by summaries.

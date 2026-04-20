@@ -57,6 +57,10 @@ var activeExportBundle string
 // Nil means no webhook gate is active.
 var activeWebhookGate *webhookGateCfg
 
+// activeArtifactDir holds the --artifact-dir override for the current run.
+// Set by executeRun before calling run/runTUI. Empty means default (<workdir>/.tracker/runs).
+var activeArtifactDir string
+
 // webhookGateCfg holds just the webhook gate settings needed by chooseInterviewer.
 type webhookGateCfg struct {
 	webhookURL        string
@@ -119,7 +123,10 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		defer c.Cancel()
 	}
 
-	artifactDir := filepath.Join(workdir, ".tracker", "runs")
+	artifactDir := activeArtifactDir
+	if artifactDir == "" {
+		artifactDir = filepath.Join(workdir, ".tracker", "runs")
+	}
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
 	defer activityLog.Close()
 
@@ -332,7 +339,10 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	execEnv := exec.NewLocalEnvironment(workdir)
 	pipelineName := resolvePipelineName(graph, pipelineFile)
-	artifactDir := filepath.Join(workdir, ".tracker", "runs")
+	artifactDir := activeArtifactDir
+	if artifactDir == "" {
+		artifactDir = filepath.Join(workdir, ".tracker", "runs")
+	}
 
 	prog, store, activityLog, err := setupTUIProgram(graph, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
 	if err != nil {

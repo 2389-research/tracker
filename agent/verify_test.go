@@ -2,8 +2,10 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -201,5 +203,57 @@ func TestIsEditTool(t *testing.T) {
 		if isEditTool(name) {
 			t.Errorf("isEditTool(%q) = true, want false", name)
 		}
+	}
+}
+
+func TestTwoPhaseVerify_BroadRunsAfterFocusedPasses(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a script that always passes for focused, fails for broad.
+	focusedScript := filepath.Join(dir, "focused.sh")
+	os.WriteFile(focusedScript, []byte("#!/bin/sh\nexit 0\n"), 0755) //nolint:errcheck
+
+	broadScript := filepath.Join(dir, "broad.sh")
+	os.WriteFile(broadScript, []byte("#!/bin/sh\necho 'FAIL: test_regression'\nexit 1\n"), 0755) //nolint:errcheck
+
+	v := &verifier{
+		cmd:      focusedScript,
+		broadCmd: broadScript,
+		workDir:  dir,
+	}
+
+	res, err := v.run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Broad test fails, so overall verification should fail.
+	if res.Passed {
+		t.Error("expected verification to fail due to broad test failure")
+	}
+	if res.ExitCode == 0 {
+		t.Error("expected non-zero exit code from broad test")
+	}
+	if !strings.Contains(res.Output, "test_regression") {
+		t.Errorf("expected broad test output, got %q", res.Output)
+	}
+}
+
+func TestTwoPhaseVerify_NoBroadCommand(t *testing.T) {
+	dir := t.TempDir()
+
+	script := filepath.Join(dir, "pass.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755) //nolint:errcheck
+
+	v := &verifier{
+		cmd:     script,
+		workDir: dir,
+	}
+
+	res, err := v.run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Passed {
+		t.Error("expected verification to pass with no broad command")
 	}
 }

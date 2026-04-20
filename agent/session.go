@@ -225,6 +225,13 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 // Returns (stoppedNaturally, shouldStop, error).
 func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tracker *ContextWindowTracker, result *SessionResult, ts *turnState) (bool, bool, error) {
 	s.drainSteering()
+
+	// Check if a turn-budget checkpoint should fire on this turn.
+	if cpMsg := evalCheckpoint(s.config.Checkpoints, turn, s.config.MaxTurns); cpMsg != "" {
+		s.messages = append(s.messages, llm.UserMessage(cpMsg))
+		s.emit(Event{Type: EventCheckpoint, SessionID: s.id, Turn: turn, Text: cpMsg})
+	}
+
 	s.emit(Event{Type: EventTurnStart, SessionID: s.id, Turn: turn})
 	turnStart := time.Now()
 
@@ -392,17 +399,17 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 	maxRetries := s.config.MaxVerifyRetries
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		passed, exitCode, output, err := v.run(ctx)
+		res, err := v.run(ctx)
 		if err != nil {
 			return err // real execution failure
 		}
-		if passed {
-			s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", v.cmd)})
+		if res.Passed {
+			s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", res.Command)})
 			return nil
 		}
 
-		// Verification failed — inject repair prompt with the real exit code.
-		repairMsg := fmt.Sprintf(verifyRepairPrompt, v.cmd, exitCode, output)
+		// Verification failed — inject repair prompt with the actual command that failed.
+		repairMsg := verifyRepairPrompt(res.Command, res.ExitCode, res.Output)
 		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: failed (attempt %d/%d), injecting repair prompt", attempt+1, maxRetries)})
 		s.messages = append(s.messages, llm.UserMessage(repairMsg))
 
@@ -413,12 +420,12 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 	}
 
 	// Run one final verification after the last repair attempt.
-	passed, _, _, err := v.run(ctx)
+	res, err := v.run(ctx)
 	if err != nil {
 		return err
 	}
-	if passed {
-		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed after repairs (%s)", v.cmd)})
+	if res.Passed {
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed after repairs (%s)", res.Command)})
 	} else {
 		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: max retries (%d) exhausted, proceeding", maxRetries)})
 	}
@@ -432,7 +439,7 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 // Intentional simplification: repair turns skip compaction checks, turn counting,
 // and turn-metric event emission that normal turns do. This is acceptable because
 // repair turns are bounded by MaxVerifyRetries (default 2) and produce at most
-// verifyOutputCap (4KB) of LLM-visible output — the cost impact is small and
+// verifyOutputCap (16KB) of LLM-visible output — the cost impact is small and
 // predictable. Adding full bookkeeping would require threading the turn counter
 // and tracker into a shared path that would complicate the turn loop.
 func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) error {

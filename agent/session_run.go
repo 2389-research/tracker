@@ -13,9 +13,9 @@ import (
 
 // initConversation sets up the initial system and user messages.
 func (s *Session) initConversation(userInput string) {
-	basePrompt := "All file paths in tool calls MUST be relative to the working directory. " +
-		"NEVER use absolute paths starting with '/'. " +
-		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\"."
+	basePrompt := "File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative to the working directory. " +
+		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\". " +
+		"Bash commands may use absolute paths when needed."
 	if s.config.SystemPrompt != "" {
 		s.messages = append(s.messages, llm.SystemMessage(basePrompt+"\n\n"+s.config.SystemPrompt))
 	} else {

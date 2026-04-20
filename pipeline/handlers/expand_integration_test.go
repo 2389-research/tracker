@@ -187,3 +187,77 @@ func (m *mockLLMClient) MaxContextWindow() int {
 func (m *mockLLMClient) SupportsStreaming() bool {
 	return false
 }
+
+func TestSubgraphScopedEvents_Integration(t *testing.T) {
+	// Build child graph: start -> agent -> exit
+	childGraph := pipeline.NewGraph("child")
+	childGraph.AddNode(&pipeline.Node{ID: "cs", Shape: "Mdiamond", Label: "ChildStart"})
+	childGraph.AddNode(&pipeline.Node{ID: "ca", Shape: "box", Label: "ChildAgent", Attrs: map[string]string{"auto_status": "true", "prompt": "say hello"}})
+	childGraph.AddNode(&pipeline.Node{ID: "ce", Shape: "Msquare", Label: "ChildEnd"})
+	childGraph.AddEdge(&pipeline.Edge{From: "cs", To: "ca"})
+	childGraph.AddEdge(&pipeline.Edge{From: "ca", To: "ce"})
+
+	// Build parent graph: start -> subgraph -> exit
+	parentGraph := pipeline.NewGraph("parent")
+	parentGraph.AddNode(&pipeline.Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	parentGraph.AddNode(&pipeline.Node{ID: "sg", Shape: "tab", Label: "SubA", Attrs: map[string]string{"subgraph_ref": "child"}})
+	parentGraph.AddNode(&pipeline.Node{ID: "end", Shape: "Msquare", Label: "End"})
+	parentGraph.AddEdge(&pipeline.Edge{From: "s", To: "sg"})
+	parentGraph.AddEdge(&pipeline.Edge{From: "sg", To: "end"})
+
+	// Collect all pipeline events.
+	var events []pipeline.PipelineEvent
+	handler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
+		events = append(events, evt)
+	})
+
+	mock := &mockLLMClient{response: "STATUS:success"}
+
+	// Use NewDefaultRegistry — the same path as the TUI.
+	subgraphs := map[string]*pipeline.Graph{"child": childGraph}
+	registry := NewDefaultRegistry(parentGraph,
+		WithLLMClient(mock, "/tmp"),
+		WithPipelineEventHandler(handler),
+		WithSubgraphs(subgraphs),
+	)
+
+	engine := pipeline.NewEngine(parentGraph, registry,
+		pipeline.WithPipelineEventHandler(handler),
+	)
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected success, got %q", result.Status)
+	}
+
+	// Check for scoped stage_started events from the child.
+	scopedStarted := map[string]bool{}
+	for _, evt := range events {
+		if evt.Type == pipeline.EventStageStarted && strings.Contains(evt.NodeID, "/") {
+			scopedStarted[evt.NodeID] = true
+		}
+	}
+
+	expected := []string{"sg/cs", "sg/ca", "sg/ce"}
+	for _, want := range expected {
+		if !scopedStarted[want] {
+			t.Errorf("missing scoped event for %q; got events: %v", want, scopedStarted)
+		}
+	}
+
+	// Verify parent events are also present (unscoped).
+	parentStarted := map[string]bool{}
+	for _, evt := range events {
+		if evt.Type == pipeline.EventStageStarted && !strings.Contains(evt.NodeID, "/") {
+			parentStarted[evt.NodeID] = true
+		}
+	}
+	for _, want := range []string{"s", "sg", "end"} {
+		if !parentStarted[want] {
+			t.Errorf("missing parent event for %q; got events: %v", want, parentStarted)
+		}
+	}
+}

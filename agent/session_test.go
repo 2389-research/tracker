@@ -1163,6 +1163,7 @@ func TestReflectionCapAtThree(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.ReflectOnError = true
+	cfg.LoopDetectionThreshold = 10 // higher than default so 5 identical calls don't trigger loop detection
 	sess := mustNewSession(t, client, cfg, WithTools(tool))
 	if _, err := sess.Run(context.Background(), "Run 5 times"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1589,6 +1590,60 @@ func TestVerifyAfterEdit_MaxRetriesExhausted(t *testing.T) {
 	// Session should complete (not be stuck in an infinite loop).
 	if result.MaxTurnsUsed {
 		t.Error("expected session to complete without hitting MaxTurns")
+	}
+}
+
+func TestCheckpointInjection(t *testing.T) {
+	// Set up a mock that tracks injected messages.
+	var capturedMessages []string
+	client := &mockCompleter{
+		onComplete: func(req *llm.Request) {
+			for _, msg := range req.Messages {
+				if msg.Role == llm.RoleUser {
+					for _, part := range msg.Content {
+						if part.Kind == llm.KindText && strings.Contains(part.Text, "CHECKPOINT") {
+							capturedMessages = append(capturedMessages, part.Text)
+						}
+					}
+				}
+			}
+		},
+	}
+
+	// Respond with tool calls for 10 turns, then stop.
+	for i := 0; i < 10; i++ {
+		client.responses = append(client.responses, &llm.Response{
+			Message: llm.Message{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{{
+					Kind:     llm.KindToolCall,
+					ToolCall: &llm.ToolCallData{ID: fmt.Sprintf("tc_%d", i), Name: "stub", Arguments: json.RawMessage(`{}`)},
+				}},
+			},
+			FinishReason: llm.FinishReason{Reason: "tool_use"},
+			Usage:        llm.Usage{InputTokens: 100, OutputTokens: 50},
+		})
+	}
+
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 10
+	// Raise loop detection above MaxTurns so repeated stub calls don't trigger it.
+	cfg.LoopDetectionThreshold = 20
+	cfg.Checkpoints = []Checkpoint{
+		{Fraction: 0.5, Message: "[CHECKPOINT] halfway there"},
+	}
+
+	sess := mustNewSession(t, client, cfg, WithTools(&stubTool{name: "stub", output: "ok"}))
+	_, _ = sess.Run(context.Background(), "do work")
+
+	found := false
+	for _, msg := range capturedMessages {
+		if strings.Contains(msg, "halfway there") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("checkpoint message not injected; captured: %v", capturedMessages)
 	}
 }
 

@@ -257,6 +257,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	activeWebhookGate = buildWebhookGateConfig(cfg)
 	// Store export-bundle path for maybeExportBundle (called from run/runTUI after completion).
 	activeExportBundle = cfg.exportBundle
+	// Store artifact-dir override for run/runTUI.
+	activeArtifactDir = cfg.artifactDir
 	// Store budget limits for buildEngineOptions (called from run/runTUI).
 	activeBudgetLimits = pipeline.BudgetLimits{
 

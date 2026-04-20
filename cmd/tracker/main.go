@@ -35,6 +35,7 @@ type runConfig struct {
 	gateTimeoutAction string        // what to do on gate timeout: fail or success
 	webhookAuthHeader string        // Authorization header value for outbound webhook requests
 	exportBundle      string        // path for post-run git bundle export; "" = skip
+	artifactDir       string        // override node state directory; "" = <workdir>/.tracker/runs
 }
 
 type commandMode string

@@ -28,12 +28,13 @@ the issue. Do not refactor unrelated code.
 
 ## Approach
 1. Read the issue carefully. Understand what's broken and what the expected behavior is.
-2. Reproduce the bug first. Find and run the relevant test(s) to confirm the failure.
-3. Check git log --oneline -10 for recent context around the affected code.
-4. Explore the relevant code. Use grep_search and glob to find the right files.
+2. Explore the relevant code. Use grep_search and glob to find the right files.
+3. Read the relevant test files to understand what the tests expect.
+4. Check git log --oneline -10 for recent context around the affected code.
 5. Write a fix. Make targeted edits — smallest diff that solves the problem.
-6. Run the failing test again to verify your fix resolves it.
-7. Run the broader test suite to check for regressions.
+6. Run the failing test to verify your fix: python -m pytest <test_file> -x --tb=short
+7. Run the broader test module to check for regressions: python -m pytest <test_dir> -x --tb=short
+8. If tests fail, read the error carefully, fix, and re-run.
 
 ## Rules
 - Do NOT create new test files. The evaluation uses the repo's existing test suite.
@@ -41,9 +42,14 @@ the issue. Do not refactor unrelated code.
 - Keep your changes minimal and focused.
 - If you're unsure about the fix, read more code before editing.
 - Always re-read a file before editing it if you haven't read it recently.
-- After editing, verify the fix by running the relevant tests.
-- You may use absolute paths in bash commands (e.g., /workspace/tests/). Only file
-  tool arguments (read_file, write_file, etc.) require relative paths.`
+- After editing, verify the fix by running the specific failing test AND the broader test module.
+- You may use absolute paths in bash commands (e.g., /workspace/tests/).
+
+## Anti-thrashing
+- If you've been exploring for 20+ turns without a fix, commit to your best candidate and test it.
+- Don't keep searching for a "perfect" solution — apply your best fix and iterate from test feedback.
+- Read test files BEFORE implementing — understand the expected interface/behavior.
+- When tests fail after your fix, read the FULL error output before making more changes.`
 
 type runnerConfig struct {
 	Instance string
@@ -62,7 +68,7 @@ func parseConfig() runnerConfig {
 		RepoDir:  "/workspace",
 		Model:    "claude-sonnet-4-6",
 		Provider: "anthropic",
-		MaxTurns: 50,
+		MaxTurns: 80,
 		Timeout:  30 * time.Minute,
 	}
 
@@ -132,12 +138,37 @@ func main() {
 	sessionCfg.ContextCompaction = agent.CompactionAuto
 	sessionCfg.CompactionThreshold = 0.7
 	sessionCfg.ReflectOnError = true
+	sessionCfg.VerifyAfterEdit = true
+	sessionCfg.VerifyCommand = "set -o pipefail; python -m pytest --tb=short -q -x 2>&1 | tail -50"
+	sessionCfg.VerifyBroadCommand = "set -o pipefail; python -m pytest --tb=short -q 2>&1 | tail -100"
+	sessionCfg.Checkpoints = []agent.Checkpoint{
+		{
+			Fraction: 0.5,
+			Message: `CHECKPOINT: You've used half your turn budget. Before continuing:
+1. List what approaches you've tried so far and their results.
+2. If none of your approaches have made the failing tests pass, STOP and re-read the issue description and test file from scratch.
+3. Consider whether you're editing the right file/function. The fix might be elsewhere.
+4. Commit to ONE approach and test it thoroughly before trying alternatives.`,
+		},
+		{
+			Fraction: 0.75,
+			Message: `URGENT: You have 25% of your turn budget remaining.
+1. If you have a partially working fix, focus on making it complete.
+2. If nothing has worked, apply your best-guess minimal fix NOW and run the tests.
+3. Do NOT start exploring new files or refactoring — focus on testing what you have.`,
+		},
+	}
 	sessionCfg.WorkingDir = cfg.RepoDir
 	sessionCfg.SystemPrompt = swebenchSystemPrompt
 
 	env := agentexec.NewLocalEnvironment(cfg.RepoDir)
 
-	sess, err := agent.NewSession(client, sessionCfg, agent.WithEnvironment(env))
+	// Log agent events to stderr for transcript visibility.
+	evtHandler := agent.EventHandlerFunc(func(evt agent.Event) {
+		log.Printf("[agent:%s] turn=%d %s", evt.Type, evt.Turn, evt.Text)
+	})
+
+	sess, err := agent.NewSession(client, sessionCfg, agent.WithEnvironment(env), agent.WithEventHandler(evtHandler))
 	if err != nil {
 		log.Fatalf("failed to create agent session: %v", err)
 	}

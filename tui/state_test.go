@@ -83,6 +83,69 @@ func TestStateStoreNodeRetrying(t *testing.T) {
 	}
 }
 
+func TestStateStoreSubgraphNodeInsertion(t *testing.T) {
+	s := NewStateStore(nil)
+	s.SetNodes([]NodeEntry{
+		{ID: "Start", Label: "Start"},
+		{ID: "SubA", Label: "SubA"},
+		{ID: "Done", Label: "Done"},
+	})
+
+	// Simulate subgraph child nodes starting (dynamic insertion).
+	s.Apply(MsgNodeStarted{NodeID: "SubA/Child1"})
+	s.Apply(MsgNodeStarted{NodeID: "SubA/Child2"})
+
+	nodes := s.Nodes()
+	// Expect: Start, SubA, SubA/Child1, SubA/Child2, Done
+	if len(nodes) != 5 {
+		t.Fatalf("expected 5 nodes, got %d: %v", len(nodes), nodeIDs(nodes))
+	}
+
+	expected := []string{"Start", "SubA", "SubA/Child1", "SubA/Child2", "Done"}
+	for i, want := range expected {
+		if nodes[i].ID != want {
+			t.Errorf("nodes[%d] = %q, want %q (full: %v)", i, nodes[i].ID, want, nodeIDs(nodes))
+		}
+	}
+
+	// Verify the children are running.
+	if s.NodeStatus("SubA/Child1") != NodeRunning {
+		t.Errorf("expected SubA/Child1 running, got %v", s.NodeStatus("SubA/Child1"))
+	}
+	if s.NodeStatus("SubA/Child2") != NodeRunning {
+		t.Errorf("expected SubA/Child2 running, got %v", s.NodeStatus("SubA/Child2"))
+	}
+
+	// Verify visit path includes subgraph nodes.
+	path := s.VisitPath()
+	if len(path) != 2 || path[0] != "SubA/Child1" || path[1] != "SubA/Child2" {
+		t.Errorf("expected visit path [SubA/Child1, SubA/Child2], got %v", path)
+	}
+}
+
+func TestStateStoreSubgraphHelpers(t *testing.T) {
+	if !IsSubgraphNode("Parent/Child") {
+		t.Error("Parent/Child should be a subgraph node")
+	}
+	if IsSubgraphNode("TopLevel") {
+		t.Error("TopLevel should not be a subgraph node")
+	}
+	if SubgraphDepth("A/B/C") != 2 {
+		t.Errorf("expected depth 2, got %d", SubgraphDepth("A/B/C"))
+	}
+	if SubgraphChildLabel("Parent/Child") != "Child" {
+		t.Errorf("expected 'Child', got %q", SubgraphChildLabel("Parent/Child"))
+	}
+}
+
+func nodeIDs(entries []NodeEntry) []string {
+	ids := make([]string, len(entries))
+	for i, e := range entries {
+		ids[i] = e.ID
+	}
+	return ids
+}
+
 func TestStateStoreCompletedCount(t *testing.T) {
 	s := NewStateStore(nil)
 	s.SetNodes([]NodeEntry{{ID: "n1"}, {ID: "n2"}, {ID: "n3"}})

@@ -52,6 +52,22 @@ type SessionConfig struct {
 	// MaxVerifyRetries is the maximum number of verify→repair cycles per edit
 	// turn before giving up and proceeding. Default: 2.
 	MaxVerifyRetries int
+
+	// Checkpoints are messages injected at specific turn-budget fractions.
+	// Each checkpoint fires exactly once, on the turn where the fraction is
+	// first reached. Fraction is in [0, 1] — e.g. 0.6 means "at 60% of MaxTurns".
+	Checkpoints []Checkpoint
+
+	// VerifyBroadCommand is an optional second verification command run after
+	// the focused VerifyCommand passes. Use this for regression detection
+	// (e.g. run the full test module without -x). Empty means disabled.
+	VerifyBroadCommand string
+}
+
+// Checkpoint defines a message to inject at a specific turn-budget fraction.
+type Checkpoint struct {
+	Fraction float64 // 0.0–1.0 fraction of MaxTurns
+	Message  string  // message injected as a user message
 }
 
 const (
@@ -61,10 +77,10 @@ const (
 
 func DefaultConfig() SessionConfig {
 	return SessionConfig{
-		MaxTurns:                      50,
+		MaxTurns:                      80,
 		CommandTimeout:                10 * time.Second,
 		MaxCommandTimeout:             10 * time.Minute,
-		LoopDetectionThreshold:        10,
+		LoopDetectionThreshold:        4,
 		ContextWindowLimit:            200000,
 		ContextWindowWarningThreshold: 0.8,
 		WorkingDir:                    ".",
@@ -86,7 +102,23 @@ func (c SessionConfig) Validate() error {
 	if err := c.validateToolOutputLimits(); err != nil {
 		return err
 	}
+	if err := c.validateCheckpoints(); err != nil {
+		return err
+	}
 	return c.validateResponseFormat()
+}
+
+// validateCheckpoints checks that all checkpoint fractions are in [0, 1] and messages are non-empty.
+func (c SessionConfig) validateCheckpoints() error {
+	for i, cp := range c.Checkpoints {
+		if cp.Fraction < 0 || cp.Fraction > 1 {
+			return fmt.Errorf("Checkpoints[%d].Fraction must be in [0, 1], got %f", i, cp.Fraction)
+		}
+		if cp.Message == "" {
+			return fmt.Errorf("Checkpoints[%d].Message must be non-empty", i)
+		}
+	}
+	return nil
 }
 
 // validateTimeouts checks turn, command timeout, and loop detection fields.
