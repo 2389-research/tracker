@@ -183,13 +183,19 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 
 	// Layer 1: Expand ${namespace.key} variables with toolCommandMode=true.
 	// FAIL CLOSED: if expansion fails (e.g. unsafe ctx.* key), do NOT run the command.
+	// Always assign the expanded result — keeping the original on empty
+	// expansion would leave literal ${...} placeholders in the command
+	// and ship them to the shell. An all-empty post-expansion command
+	// is itself an error: the user intended something, it resolved to
+	// nothing, running "" is not a meaningful fallback.
 	graphAttrs, params := extractGraphAttrsAndParams(pctx)
 	expanded, err := pipeline.ExpandVariables(command, pctx, params, graphAttrs, false, true)
 	if err != nil {
 		return "", fmt.Errorf("node %q tool_command variable expansion failed: %w", node.ID, err)
 	}
-	if expanded != "" {
-		command = expanded
+	command = expanded
+	if strings.TrimSpace(command) == "" {
+		return "", fmt.Errorf("node %q tool_command expanded to empty — check that all ${...} references resolve", node.ID)
 	}
 
 	// Layer 2: Denylist/allowlist check on the user-authored command (before working_dir prepend,

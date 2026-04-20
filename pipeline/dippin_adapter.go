@@ -467,7 +467,7 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 
 func extractWorkflowVars(vars map[string]string, attrs map[string]string) {
 	for key, value := range vars {
-		attrs[graphParamPrefix+key] = value
+		attrs[GraphParamAttrKey(key)] = value
 	}
 }
 

@@ -415,6 +415,32 @@ func TestToolHandler_ExpandsWorkflowParams(t *testing.T) {
 	}
 }
 
+// TestToolHandler_EmptyExpansionIsError verifies that a tool_command that
+// expands entirely to empty (e.g., a single ${params.foo} where foo is
+// empty) fails the node instead of silently running an empty command.
+// Before the fix, the "only apply if non-empty" guard kept the literal
+// `${params.foo}` placeholder in the command and shipped it to the shell.
+func TestToolHandler_EmptyExpansionIsError(t *testing.T) {
+	env := toolTestEnv(t, nil)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID: "empty", Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "${params.missing}"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	// graph.params.missing is set but empty — simulates a legitimately-
+	// empty value (not "undefined").
+	pctx.Set("graph.params.missing", "")
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected error when tool_command expands to empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "expanded to empty") {
+		t.Errorf("error = %q, want to mention 'expanded to empty'", err.Error())
+	}
+}
+
 func TestToolHandler_DenylistBlocks(t *testing.T) {
 	env := toolTestEnv(t, nil)
 	h := NewToolHandler(env)
