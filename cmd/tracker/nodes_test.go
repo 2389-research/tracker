@@ -173,8 +173,6 @@ func TestBuildNodeListCyclicSubgraphsTerminate(t *testing.T) {
 	}
 }
 
-// TestBuildNodeListSelfReferencingSubgraphTerminates verifies a single-ref
-// cycle (X → X) is caught by the visited set.
 // TestBuildNodeListSubgraphPreservesChildLabels verifies that a child
 // workflow's user-set Labels survive prefixing. Before the fix, the
 // expansion overwrote Label with SubgraphChildLabel(newPrefixedID),
@@ -212,6 +210,8 @@ func TestBuildNodeListSubgraphPreservesChildLabels(t *testing.T) {
 	}
 }
 
+// TestBuildNodeListSelfReferencingSubgraphTerminates verifies a single-ref
+// cycle (X → X) is caught by the visited set.
 func TestBuildNodeListSelfReferencingSubgraphTerminates(t *testing.T) {
 	parent := pipeline.NewGraph("parent")
 	parent.AddNode(&pipeline.Node{ID: "start", Shape: "Mdiamond"})
