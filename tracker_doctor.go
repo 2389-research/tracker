@@ -361,7 +361,11 @@ func probeProvider(ctx context.Context, p providerDef, key string) (bool, string
 		if isAuthError(msg) {
 			return false, "invalid or expired API key"
 		}
-		return false, sanitizeProviderError(trimErrMsg(msg, 80))
+		// Sanitize FIRST, then trim. If we trim first, a key that
+		// straddles the 80-char boundary gets cut into a shorter prefix
+		// that no longer matches the regex, leaking the prefix. Sanitize
+		// the full message, then trim whatever's left.
+		return false, trimErrMsg(sanitizeProviderError(msg), 80)
 	}
 	return true, ""
 }

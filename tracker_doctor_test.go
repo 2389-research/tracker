@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -116,5 +117,28 @@ func TestSanitizeProviderError(t *testing.T) {
 				t.Errorf("sanitizeProviderError(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+// TestSanitizeThenTrim_NoPartialKeyLeak verifies the sanitize-before-trim
+// ordering in probeProvider. A key that straddles the trim boundary must
+// not produce a leaked prefix after truncation. Regression guard for PR
+// feedback on issue #106 follow-up.
+func TestSanitizeThenTrim_NoPartialKeyLeak(t *testing.T) {
+	// Construct a message where the key starts at char 50 and runs past
+	// the 80-char truncation point. Trimming first would leave a 30-char
+	// prefix of the key that's shorter than the regex minimum, so the
+	// regex would miss it and the prefix would leak.
+	key := "sk-ant-api03-" + strings.Repeat("A", 60)
+	msg := strings.Repeat("x", 50) + key
+
+	// Correct order: sanitize first, then trim.
+	got := trimErrMsg(sanitizeProviderError(msg), 80)
+
+	if strings.Contains(got, "sk-ant-") {
+		t.Errorf("got = %q; leaked key prefix (must be redacted before trim)", got)
+	}
+	if !strings.Contains(got, "[redacted-key]") {
+		t.Errorf("got = %q; want [redacted-key] substitution", got)
 	}
 }

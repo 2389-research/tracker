@@ -52,9 +52,12 @@ type PlanStep struct {
 // from content.
 //
 // ctx is accepted for future extensibility (e.g. cancelling a slow parse
-// on very large graphs). It is currently unused but part of the public
-// signature so callers do not need to re-thread it later.
+// on very large graphs). Nil is coalesced to context.Background() so that
+// when cancellation is wired in later, nil-callers do not regress.
 func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	_ = ctx // reserved for future cancellation plumbing
 	format := detectSourceFormat(source)
 	graph, err := parsePipelineSource(source, format)

@@ -81,9 +81,12 @@ type RunSummary struct {
 // the .tracker/runs/<runID> layout.
 //
 // ctx is accepted for future extensibility (cancellation of checkpoint or
-// activity log parsing). It is currently unused but part of the public
-// signature so callers do not need to re-thread it later.
+// activity log parsing). Nil is coalesced to context.Background() so that
+// when cancellation is wired in later, nil-callers do not regress.
 func Audit(ctx context.Context, runDir string, opts ...AuditConfig) (*AuditReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	_ = ctx                    // reserved for future cancellation plumbing
 	_ = firstAuditConfig(opts) // reserved for future fields
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
