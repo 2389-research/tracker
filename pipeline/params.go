@@ -9,6 +9,14 @@ import (
 
 const graphParamPrefix = "params."
 
+// GraphParamAttrKey returns the graph.Attrs key used to store workflow
+// param `key` (i.e. "params."+key). Callers should use this helper rather
+// than hard-coding the prefix so the shape stays consistent if it ever
+// changes.
+func GraphParamAttrKey(key string) string {
+	return graphParamPrefix + key
+}
+
 // ExtractParamsFromGraphAttrs returns params declared in graph attrs under
 // the "params." prefix.
 func ExtractParamsFromGraphAttrs(graphAttrs map[string]string) map[string]string {

@@ -466,7 +466,7 @@ func applyRunParamOverrides(graph *pipeline.Graph) error {
 	}
 	effective := make(map[string]string, len(activeRunParams))
 	for key := range activeRunParams {
-		effective[key] = graph.Attrs["params."+key]
+		effective[key] = graph.Attrs[pipeline.GraphParamAttrKey(key)]
 	}
 	activeEffectiveRunParams = effective
 	return nil
