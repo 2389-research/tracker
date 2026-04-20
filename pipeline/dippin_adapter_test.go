@@ -509,6 +509,35 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 	}
 }
 
+func TestFromDippinIR_WorkflowVarsMappedToParams(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "VarsTest",
+		Start: "start",
+		Exit:  "exit",
+		Vars: map[string]string{
+			"foo": "bar",
+			"env": "prod",
+		},
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "start", To: "exit"}},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	if graph.Attrs["params.foo"] != "bar" {
+		t.Fatalf("params.foo = %q, want bar", graph.Attrs["params.foo"])
+	}
+	if graph.Attrs["params.env"] != "prod" {
+		t.Fatalf("params.env = %q, want prod", graph.Attrs["params.env"])
+	}
+}
+
 // TestFromDippinIR_EdgeConditions verifies edge conditions are preserved as raw strings.
 func TestFromDippinIR_EdgeConditions(t *testing.T) {
 	workflow := &ir.Workflow{

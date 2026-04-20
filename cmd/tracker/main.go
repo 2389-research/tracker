@@ -28,6 +28,7 @@ type runConfig struct {
 	maxTokens         int           // halt if total tokens exceed this value (0 = no limit)
 	maxCostCents      int           // halt if total cost in cents exceeds this value (0 = no limit)
 	maxWallTime       time.Duration // halt if wall time exceeds this duration (0 = no limit)
+	params            map[string]string
 	gatewayURL        string        // TRACKER_GATEWAY_URL override — synthesizes per-provider base URLs
 	webhookURL        string        // POST human gate prompts to this URL and wait for callback
 	gateCallbackAddr  string        // local addr for the callback server when --webhook-url is set

@@ -580,8 +580,17 @@ func (h *HumanHandler) resolveHumanPrompt(node *pipeline.Node, pctx *pipeline.Pi
 	if h.graph != nil {
 		graphAttrs = h.graph.Attrs
 	}
-	if expanded, err := pipeline.ExpandVariables(prompt, pctx, nil, graphAttrs, false); err == nil && expanded != "" {
+	params := pipeline.ExtractParamsFromGraphAttrs(graphAttrs)
+	// Assign the expanded result unconditionally. Only-if-non-empty
+	// would leave literal ${...} placeholders in the prompt when a
+	// variable legitimately resolves to empty. If expansion errors,
+	// leave the original prompt alone (lenient behaviour — a human
+	// gate should still show something to the user).
+	if expanded, err := pipeline.ExpandVariables(prompt, pctx, params, graphAttrs, false); err == nil {
 		prompt = expanded
+	}
+	if strings.TrimSpace(prompt) == "" {
+		prompt = fmt.Sprintf("Human gate: %s", node.ID)
 	}
 
 	if lastResp, ok := pctx.Get(pipeline.ContextKeyLastResponse); ok && lastResp != "" {

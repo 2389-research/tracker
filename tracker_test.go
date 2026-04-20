@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
@@ -89,6 +90,67 @@ func TestNewEngine_DipFormat(t *testing.T) {
 
 	if engine.inner == nil {
 		t.Fatal("expected inner engine to be set")
+	}
+}
+
+func TestNewEngine_ParamsOverride(t *testing.T) {
+	const withParams = `workflow test
+  start: s
+  exit: e
+
+  vars
+    foo: baz
+
+  agent s
+    prompt: "Param: ${params.foo}"
+
+  agent e
+    prompt: "done"
+
+  edges
+    s -> e
+`
+
+	engine, err := NewEngine(withParams, Config{
+		Format:    "dip",
+		LLMClient: &stubCompleter{response: &llm.Response{Message: llm.AssistantMessage("done"), FinishReason: llm.FinishReason{Reason: "stop"}}},
+		Params:    map[string]string{"foo": "bar"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer engine.Close()
+
+	if got := engine.inner.Graph().Attrs["params.foo"]; got != "bar" {
+		t.Fatalf("params.foo = %q, want bar", got)
+	}
+}
+
+func TestNewEngine_ParamsUnknownFails(t *testing.T) {
+	const noParams = `workflow test
+  start: s
+  exit: e
+
+  agent s
+    prompt: "Start"
+
+  agent e
+    prompt: "End"
+
+  edges
+    s -> e
+`
+
+	_, err := NewEngine(noParams, Config{
+		Format:    "dip",
+		LLMClient: &stubCompleter{response: &llm.Response{Message: llm.AssistantMessage("done"), FinishReason: llm.FinishReason{Reason: "stop"}}},
+		Params:    map[string]string{"foo": "bar"},
+	})
+	if err == nil {
+		t.Fatal("expected unknown param error")
+	}
+	if !strings.Contains(err.Error(), "unknown param") {
+		t.Fatalf("error = %v, want unknown param", err)
 	}
 }
 

@@ -66,13 +66,36 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q not found", ref)
 	}
 
-	// Parse params from node attrs if present
-	params := ParseSubgraphParams(node.Attrs["subgraph_params"])
+	// Merge child workflow's own vars defaults with parent-provided
+	// subgraph_params. Parent overrides win — the child's declared vars
+	// only supply fallbacks for keys the parent didn't explicitly pass.
+	// Without this merge, the pre-expansion pass in InjectParamsIntoGraph
+	// would resolve ${params.foo} to "" when foo is declared as a child
+	// var but not passed from the parent, silently losing the default.
+	childDefaults := ExtractParamsFromGraphAttrs(subGraph.Attrs)
+	parentOverrides := ParseSubgraphParams(node.Attrs["subgraph_params"])
+	params := make(map[string]string, len(childDefaults)+len(parentOverrides))
+	for k, v := range childDefaults {
+		params[k] = v
+	}
+	for k, v := range parentOverrides {
+		params[k] = v
+	}
 
 	// Inject params into graph (creates clone if params exist)
 	subGraphWithParams, err := InjectParamsIntoGraph(subGraph, params)
 	if err != nil {
 		return Outcome{Status: OutcomeFail}, fmt.Errorf("failed to inject params into subgraph %q: %w", ref, err)
+	}
+
+	// After pre-expansion, write the merged effective params back onto
+	// the clone's Attrs so any runtime handler reading graph.Attrs sees
+	// the overridden values (not just the child's original defaults).
+	if subGraphWithParams.Attrs == nil {
+		subGraphWithParams.Attrs = make(map[string]string)
+	}
+	for k, v := range params {
+		subGraphWithParams.Attrs[GraphParamAttrKey(k)] = v
 	}
 
 	// Create scoped pipeline event handler that prefixes child node IDs

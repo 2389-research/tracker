@@ -157,6 +157,48 @@ func TestEngineEdgeSelectionByCondition(t *testing.T) {
 	}
 }
 
+func TestEngineEdgeSelectionByConditionWithParamsInterpolation(t *testing.T) {
+	g := NewGraph("cond_params_test")
+	g.Attrs["params.route"] = "beta"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "a", Shape: "box", Label: "A"})
+	g.AddNode(&Node{ID: "b", Shape: "box", Label: "B"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "a", Condition: "route=${params.route}"})
+	g.AddEdge(&Edge{From: "s", To: "b", Condition: "route=alpha"})
+	g.AddEdge(&Edge{From: "a", To: "end"})
+	g.AddEdge(&Edge{From: "b", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "start",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         OutcomeSuccess,
+				ContextUpdates: map[string]string{"route": "beta"},
+			}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	completedSet := make(map[string]bool)
+	for _, n := range result.CompletedNodes {
+		completedSet[n] = true
+	}
+	if !completedSet["a"] {
+		t.Error("expected node 'a' to be completed (condition route=${params.route})")
+	}
+	if completedSet["b"] {
+		t.Error("expected node 'b' to NOT be completed")
+	}
+}
+
 func TestEngineEdgeSelectionByPreferredLabel(t *testing.T) {
 	g := NewGraph("label_test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})

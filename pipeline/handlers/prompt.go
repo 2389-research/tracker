@@ -19,7 +19,8 @@ func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
 		return "", fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
 	}
 
-	prompt, err := pipeline.ExpandVariables(prompt, pctx, nil, graphAttrs, false)
+	params := pipeline.ExtractParamsFromGraphAttrs(graphAttrs)
+	prompt, err := pipeline.ExpandVariables(prompt, pctx, params, graphAttrs, false)
 	if err != nil {
 		return "", fmt.Errorf("node %q variable expansion failed: %w", node.ID, err)
 	}

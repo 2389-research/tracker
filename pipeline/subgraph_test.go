@@ -262,6 +262,98 @@ func contains(s, sub string) bool {
 	return false
 }
 
+// TestSubgraphHandler_ChildVarDefaultsPreserved verifies that a child
+// workflow's own vars (declared at the child workflow level, landing in
+// subGraph.Attrs as "params.<key>") survive subgraph invocation even
+// when the parent doesn't pass a subgraph_params override for that key.
+// Regression guard for PR #117 Codex P1: pre-expansion in
+// InjectParamsIntoGraph previously only saw parent-provided params,
+// silently replacing unpassed ${params.foo} with empty string.
+func TestSubgraphHandler_ChildVarDefaultsPreserved(t *testing.T) {
+	subGraph := NewGraph("child")
+	// Declare "foo" as a child-level var.
+	subGraph.Attrs = map[string]string{
+		GraphParamAttrKey("foo"): "child_default",
+	}
+	subGraph.AddNode(&Node{ID: "cs", Shape: "Mdiamond"})
+	subGraph.AddNode(&Node{
+		ID:    "step",
+		Shape: "box",
+		Attrs: map[string]string{"prompt": "value=${params.foo}"},
+	})
+	subGraph.AddNode(&Node{ID: "ce", Shape: "Msquare"})
+	subGraph.AddEdge(&Edge{From: "cs", To: "step"})
+	subGraph.AddEdge(&Edge{From: "step", To: "ce"})
+
+	// Parent subgraph node with NO explicit subgraph_params.
+	h := NewSubgraphHandler(
+		map[string]*Graph{"child": subGraph},
+		NewHandlerRegistry(), nil, nil,
+	)
+	parentNode := &Node{ID: "sg", Attrs: map[string]string{"subgraph_ref": "child"}}
+
+	// Build the merged params the way Execute will, via its private logic
+	// mirrored here for assertion. We don't want to actually run the
+	// sub-engine (would need registered handlers); we just check the
+	// injection preserves the default.
+	childDefaults := ExtractParamsFromGraphAttrs(subGraph.Attrs)
+	parentOverrides := ParseSubgraphParams(parentNode.Attrs["subgraph_params"])
+	params := make(map[string]string)
+	for k, v := range childDefaults {
+		params[k] = v
+	}
+	for k, v := range parentOverrides {
+		params[k] = v
+	}
+
+	injected, err := InjectParamsIntoGraph(subGraph, params)
+	if err != nil {
+		t.Fatalf("InjectParamsIntoGraph: %v", err)
+	}
+	got := injected.Nodes["step"].Attrs["prompt"]
+	if got != "value=child_default" {
+		t.Errorf("prompt = %q, want value=child_default (child's own var default must survive)", got)
+	}
+	// Prevent the handler reference from being flagged unused by
+	// static analysis; real execution is covered by TestSubgraphHandler_Execute.
+	_ = h
+}
+
+// TestSubgraphHandler_ParentOverrideWinsOverChildDefault verifies that
+// an explicit subgraph_params value overrides the child's var default.
+func TestSubgraphHandler_ParentOverrideWinsOverChildDefault(t *testing.T) {
+	subGraph := NewGraph("child")
+	subGraph.Attrs = map[string]string{GraphParamAttrKey("foo"): "child_default"}
+	subGraph.AddNode(&Node{ID: "cs", Shape: "Mdiamond"})
+	subGraph.AddNode(&Node{
+		ID:    "step",
+		Shape: "box",
+		Attrs: map[string]string{"prompt": "value=${params.foo}"},
+	})
+	subGraph.AddNode(&Node{ID: "ce", Shape: "Msquare"})
+	subGraph.AddEdge(&Edge{From: "cs", To: "step"})
+	subGraph.AddEdge(&Edge{From: "step", To: "ce"})
+
+	childDefaults := ExtractParamsFromGraphAttrs(subGraph.Attrs)
+	parentOverrides := ParseSubgraphParams("foo=parent_override")
+	params := make(map[string]string)
+	for k, v := range childDefaults {
+		params[k] = v
+	}
+	for k, v := range parentOverrides {
+		params[k] = v
+	}
+
+	injected, err := InjectParamsIntoGraph(subGraph, params)
+	if err != nil {
+		t.Fatalf("InjectParamsIntoGraph: %v", err)
+	}
+	got := injected.Nodes["step"].Attrs["prompt"]
+	if got != "value=parent_override" {
+		t.Errorf("prompt = %q, want value=parent_override", got)
+	}
+}
+
 func TestSubgraphHandler_ShapeMapping(t *testing.T) {
 	handler, ok := ShapeToHandler("tab")
 	if !ok {

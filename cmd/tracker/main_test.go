@@ -848,6 +848,26 @@ func TestParseFlagsGatewayURL(t *testing.T) {
 	}
 }
 
+func TestParseFlagsParamOverrides(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--param", "foo=bar", "--param", "env=prod", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.params["foo"] != "bar" || cfg.params["env"] != "prod" {
+		t.Fatalf("params = %#v, want foo=bar env=prod", cfg.params)
+	}
+}
+
+func TestParseFlagsParamInvalidFormat(t *testing.T) {
+	_, err := parseFlags([]string{"tracker", "--param", "not-a-pair", "pipeline.dip"})
+	if err == nil {
+		t.Fatal("expected parse error for invalid --param")
+	}
+	if !strings.Contains(err.Error(), "key=value") {
+		t.Fatalf("error = %v, want key=value", err)
+	}
+}
+
 func TestGatewayURLPropagatesViaEnv(t *testing.T) {
 	// executeRun sets TRACKER_GATEWAY_URL before buildLLMClient runs.
 	// Verify the env var is live in the same process after executeRun sets it.
@@ -913,6 +933,43 @@ func TestResolveProviderBaseURLFromEnvNoGateway(t *testing.T) {
 	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
 	if got != "" {
 		t.Fatalf("expected empty string, got %q", got)
+	}
+}
+
+func TestApplyRunParamOverrides(t *testing.T) {
+	g := pipeline.NewGraph("test")
+	g.Attrs["params.foo"] = "default"
+	activeRunParams = map[string]string{"foo": "bar"}
+	t.Cleanup(func() {
+		activeRunParams = nil
+		activeEffectiveRunParams = nil
+	})
+
+	if err := applyRunParamOverrides(g); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := g.Attrs["params.foo"]; got != "bar" {
+		t.Fatalf("params.foo = %q, want bar", got)
+	}
+	if got := activeEffectiveRunParams["foo"]; got != "bar" {
+		t.Fatalf("activeEffectiveRunParams.foo = %q, want bar", got)
+	}
+}
+
+func TestApplyRunParamOverridesUnknownParam(t *testing.T) {
+	g := pipeline.NewGraph("test")
+	activeRunParams = map[string]string{"missing": "bar"}
+	t.Cleanup(func() {
+		activeRunParams = nil
+		activeEffectiveRunParams = nil
+	})
+
+	err := applyRunParamOverrides(g)
+	if err == nil {
+		t.Fatal("expected error for unknown param")
+	}
+	if !strings.Contains(err.Error(), "unknown param") {
+		t.Fatalf("error = %v, want unknown param", err)
 	}
 }
 

@@ -5,9 +5,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	tracker "github.com/2389-research/tracker"
@@ -45,6 +48,12 @@ var activeAutopilotCfg autopilotCfg
 // activeBudgetLimits holds the budget limits for the current run.
 // Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
 var activeBudgetLimits pipeline.BudgetLimits
+
+// activeRunParams holds parsed --param overrides for the current run.
+var activeRunParams map[string]string
+
+// activeEffectiveRunParams holds effective values for params that were overridden.
+var activeEffectiveRunParams map[string]string
 
 // activeExportBundle holds the --export-bundle path for the current run.
 // Set by executeRun. When non-empty, a git bundle of run artifacts is written
@@ -105,6 +114,9 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
 	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
+		return err
+	}
+	if err := applyRunParamOverrides(graph); err != nil {
 		return err
 	}
 
@@ -327,6 +339,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	if err != nil {
 		return err
 	}
+	if err := applyRunParamOverrides(graph); err != nil {
+		return err
+	}
 
 	tokenTracker := llm.NewTokenTracker()
 	llmClient, err := resolveLLMClient(tokenTracker, backend)
@@ -439,6 +454,33 @@ func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
 	return prog, store, activityLog, nil
+}
+
+func applyRunParamOverrides(graph *pipeline.Graph) error {
+	activeEffectiveRunParams = nil
+	if len(activeRunParams) == 0 {
+		return nil
+	}
+	if err := pipeline.ApplyGraphParamOverrides(graph, activeRunParams); err != nil {
+		return fmt.Errorf("apply --param overrides: %w", err)
+	}
+	effective := make(map[string]string, len(activeRunParams))
+	for key := range activeRunParams {
+		effective[key] = graph.Attrs[pipeline.GraphParamAttrKey(key)]
+	}
+	activeEffectiveRunParams = effective
+	return nil
+}
+
+func formatParamOverridesForSummary(params map[string]string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var pairs []string
+	for _, key := range slices.Sorted(maps.Keys(params)) {
+		pairs = append(pairs, fmt.Sprintf("%s=%s", key, params[key]))
+	}
+	return strings.Join(pairs, ", ")
 }
 
 // buildTUIPipelineHandler wires LLM trace events to TUI+activity log and returns the combined handler.

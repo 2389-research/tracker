@@ -6,6 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -194,6 +197,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.IntVar(&cfg.maxTokens, "max-tokens", 0, "Halt if total tokens across the run exceed this value (0 = no limit)")
 	fs.IntVar(&cfg.maxCostCents, "max-cost", 0, "Halt if total cost in cents exceeds this value (0 = no limit)")
 	fs.DurationVar(&cfg.maxWallTime, "max-wall-time", 0, "Halt if pipeline wall time exceeds this duration (0 = no limit)")
+	fs.Var(paramMapFlag{target: &cfg.params}, "param", "Override workflow param (repeatable): key=value")
 	fs.StringVar(&cfg.gatewayURL, "gateway-url", "", "Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)")
 	fs.StringVar(&cfg.webhookURL, "webhook-url", "", "POST human gate prompts to this URL and wait for callback (headless execution)")
 	fs.StringVar(&cfg.gateCallbackAddr, "gate-callback-addr", ":8789", "Local addr for the callback server when --webhook-url is set")
@@ -203,6 +207,40 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.exportBundle, "export-bundle", "", "After the run completes, write a git bundle of run artifacts to this path")
 	fs.StringVar(&cfg.artifactDir, "artifact-dir", "", "Override node state directory (default: <workdir>/.tracker/runs)")
 	return fs
+}
+
+type paramMapFlag struct {
+	target *map[string]string
+}
+
+func (p paramMapFlag) String() string {
+	if p.target == nil || *p.target == nil {
+		return ""
+	}
+	var pairs []string
+	for _, key := range slices.Sorted(maps.Keys(*p.target)) {
+		pairs = append(pairs, fmt.Sprintf("%s=%s", key, (*p.target)[key]))
+	}
+	return strings.Join(pairs, ",")
+}
+
+func (p paramMapFlag) Set(value string) error {
+	key, val, ok := strings.Cut(value, "=")
+	if !ok {
+		return fmt.Errorf("invalid --param %q: expected key=value", value)
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return fmt.Errorf("invalid --param %q: key cannot be empty", value)
+	}
+	if p.target == nil {
+		return fmt.Errorf("invalid --param target")
+	}
+	if *p.target == nil {
+		*p.target = make(map[string]string)
+	}
+	(*p.target)[key] = val
+	return nil
 }
 
 // parseArgsMultiPass runs multiple flag parse passes to collect positional
@@ -260,6 +298,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --max-tokens int          Halt if total tokens exceed this value (0 = no limit)\n")
 	fmt.Fprintf(w, "  --max-cost int            Halt if total cost in cents exceeds this value (0 = no limit)\n")
 	fmt.Fprintf(w, "  --max-wall-time duration  Halt if pipeline wall time exceeds this duration (0 = no limit)\n")
+	fmt.Fprintf(w, "  --param key=value         Override a declared workflow param (repeatable)\n")
 	fmt.Fprintf(w, "  --gateway-url string      Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)\n")
 	fmt.Fprintf(w, "  --webhook-url string      POST human gate prompts to this URL and wait for callback (headless)\n")
 	fmt.Fprintf(w, "  --gate-callback-addr string  Local addr for the webhook callback server (default: :8789)\n")

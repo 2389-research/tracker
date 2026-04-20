@@ -189,11 +189,3 @@ func TestStateStoreLazyInsertKeepsSiblingArrivalOrder(t *testing.T) {
 		t.Fatalf("node order mismatch\n got: %v\nwant: %v", got, want)
 	}
 }
-
-func nodeIDs(entries []NodeEntry) []string {
-	ids := make([]string, 0, len(entries))
-	for _, e := range entries {
-		ids = append(ids, e.ID)
-	}
-	return ids
-}

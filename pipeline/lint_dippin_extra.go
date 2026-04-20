@@ -4,6 +4,8 @@ package pipeline
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -184,4 +186,59 @@ func collectAllWrites(g *Graph) map[string]bool {
 		}
 	}
 	return allWrites
+}
+
+// lintDIP120 warns when ${params.<key>} is referenced but not declared at workflow level.
+func lintDIP120(g *Graph) []string {
+	declared := ExtractParamsFromGraphAttrs(g.Attrs)
+	references := collectParamsReferences(g)
+
+	var warnings []string
+	for key := range references {
+		if _, ok := declared[key]; ok {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("warning[DIP120]: workflow references undeclared param ${params.%s}", key))
+	}
+	slices.Sort(warnings)
+	return warnings
+}
+
+// lintDIP121 warns when a declared workflow param is never referenced.
+func lintDIP121(g *Graph) []string {
+	declared := ExtractParamsFromGraphAttrs(g.Attrs)
+	references := collectParamsReferences(g)
+
+	var warnings []string
+	for _, key := range slices.Sorted(maps.Keys(declared)) {
+		if references[key] {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("warning[DIP121]: workflow param %q is declared but never referenced", key))
+	}
+	return warnings
+}
+
+func collectParamsReferences(g *Graph) map[string]bool {
+	refs := make(map[string]bool)
+	for _, node := range g.Nodes {
+		collectParamsReferencesInText(node.Label, refs)
+		for _, value := range node.Attrs {
+			collectParamsReferencesInText(value, refs)
+		}
+	}
+	for _, edge := range g.Edges {
+		collectParamsReferencesInText(edge.Condition, refs)
+	}
+	return refs
+}
+
+func collectParamsReferencesInText(text string, refs map[string]bool) {
+	for _, ref := range findVariableReferences(text) {
+		namespace, key, ok := strings.Cut(ref, ".")
+		if !ok || namespace != "params" || key == "" {
+			continue
+		}
+		refs[key] = true
+	}
 }

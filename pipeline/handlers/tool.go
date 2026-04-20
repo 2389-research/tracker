@@ -183,12 +183,19 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 
 	// Layer 1: Expand ${namespace.key} variables with toolCommandMode=true.
 	// FAIL CLOSED: if expansion fails (e.g. unsafe ctx.* key), do NOT run the command.
-	expanded, err := pipeline.ExpandVariables(command, pctx, nil, nil, false, true)
+	// Always assign the expanded result — keeping the original on empty
+	// expansion would leave literal ${...} placeholders in the command
+	// and ship them to the shell. An all-empty post-expansion command
+	// is itself an error: the user intended something, it resolved to
+	// nothing, running "" is not a meaningful fallback.
+	graphAttrs, params := extractGraphAttrsAndParams(pctx)
+	expanded, err := pipeline.ExpandVariables(command, pctx, params, graphAttrs, false, true)
 	if err != nil {
 		return "", fmt.Errorf("node %q tool_command variable expansion failed: %w", node.ID, err)
 	}
-	if expanded != "" {
-		command = expanded
+	command = expanded
+	if strings.TrimSpace(command) == "" {
+		return "", fmt.Errorf("node %q tool_command expanded to empty — check that all ${...} references resolve", node.ID)
 	}
 
 	// Layer 2: Denylist/allowlist check on the user-authored command (before working_dir prepend,
@@ -197,6 +204,36 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 		return "", err
 	}
 	return command, nil
+}
+
+// extractGraphAttrsAndParams walks the context snapshot once and returns:
+//   - graphAttrs: every "graph.<key>" entry with the prefix stripped
+//   - params: every "graph.params.<key>" entry (i.e. workflow-level params)
+//     with both prefixes stripped.
+//
+// Single pass replaces the previous snapshot + two-pass extraction. The
+// handler reads params via context (not directly from graph.Attrs) because
+// the pipeline engine already seeds graph.Attrs → "graph.*" keys at
+// startup in buildInitialContext, and checkpoint resume merges the same
+// context. Subgraphs inherit parent graph.* via initialContext overlay.
+func extractGraphAttrsAndParams(pctx *pipeline.PipelineContext) (graphAttrs, params map[string]string) {
+	if pctx == nil {
+		return nil, nil
+	}
+	const graphPrefix = "graph."
+	const paramsInGraphPrefix = "graph.params."
+	graphAttrs = make(map[string]string)
+	params = make(map[string]string)
+	for key, value := range pctx.Snapshot() {
+		if !strings.HasPrefix(key, graphPrefix) {
+			continue
+		}
+		graphAttrs[strings.TrimPrefix(key, graphPrefix)] = value
+		if strings.HasPrefix(key, paramsInGraphPrefix) {
+			params[strings.TrimPrefix(key, paramsInGraphPrefix)] = value
+		}
+	}
+	return graphAttrs, params
 }
 
 // applyWorkingDir prepends a "cd <dir> && " prefix to command if the node has a

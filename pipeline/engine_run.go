@@ -230,6 +230,14 @@ func (e *Engine) loadCheckpointAndMerge(runID string, pctx *PipelineContext) (*C
 	for k, v := range cp.Context {
 		pctx.Set(k, v)
 	}
+	// Re-seed graph.* from the live graph.Attrs after checkpoint merge.
+	// Workflow-level params (graph.params.*) and other graph attributes
+	// are authoritative from the current graph, not whatever was captured
+	// in a prior run's checkpoint — otherwise ${params.*} overrides
+	// supplied on this invocation would silently regress to stale values.
+	for key, value := range e.graph.Attrs {
+		pctx.Set("graph."+key, value)
+	}
 	e.compactResumeContext(cp, pctx, runID)
 	return cp, runID, nil
 }

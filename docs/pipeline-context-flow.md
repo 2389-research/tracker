@@ -50,6 +50,8 @@ agent Synthesize
 
 Note that `ctx.` is the user-facing prefix; internally the engine stores bare keys (`last_response`) and scoped aliases (`node.Architect.last_response`). Conditions strip the prefix before lookup.
 
+Workflow-level params are also available via `${params.<key>}`. Define defaults in the top-level `vars` block and optionally override them at run-time with repeatable CLI flags: `tracker workflow.dip --param key=value`.
+
 ### Safe-key restrictions for tool commands
 
 Agent prompts and conditions can interpolate any context key. **Tool commands have a restricted safe-key allowlist** to prevent LLM-origin values from leaking into shell commands and causing injection attacks.
@@ -57,7 +59,7 @@ Agent prompts and conditions can interpolate any context key. **Tool commands ha
 **Safe keys in tool commands:**
 - `outcome`, `preferred_label`, `human_response`, `interview_answers` (handler-written, user-controlled)
 - All `graph.*` keys (author-defined in the workflow)
-- All `params.*` keys (passed at pipeline invocation time)
+- All `params.*` keys (declared in workflow `vars`, optionally overridden via `--param`)
 
 **Blocked keys in tool commands:**
 - `last_response` — LLM-generated, unsafe
