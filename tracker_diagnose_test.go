@@ -1,11 +1,12 @@
 package tracker
 
 import (
+	"context"
 	"testing"
 )
 
 func TestDiagnose_CleanRun(t *testing.T) {
-	r, err := Diagnose("testdata/runs/ok")
+	r, err := Diagnose(context.Background(), "testdata/runs/ok")
 	if err != nil {
 		t.Fatalf("Diagnose: %v", err)
 	}
@@ -24,7 +25,7 @@ func TestDiagnose_CleanRun(t *testing.T) {
 }
 
 func TestDiagnose_FailureWithRetries(t *testing.T) {
-	r, err := Diagnose("testdata/runs/failed")
+	r, err := Diagnose(context.Background(), "testdata/runs/failed")
 	if err != nil {
 		t.Fatalf("Diagnose: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestDiagnose_FailureWithRetries(t *testing.T) {
 	if f.Handler != "tool" {
 		t.Errorf("handler = %q", f.Handler)
 	}
-	kinds := map[string]bool{}
+	kinds := map[SuggestionKind]bool{}
 	for _, s := range r.Suggestions {
 		kinds[s.Kind] = true
 	}
@@ -57,7 +58,7 @@ func TestDiagnose_FailureWithRetries(t *testing.T) {
 }
 
 func TestDiagnose_BudgetHalt(t *testing.T) {
-	r, err := Diagnose("testdata/runs/budget_halted")
+	r, err := Diagnose(context.Background(), "testdata/runs/budget_halted")
 	if err != nil {
 		t.Fatalf("Diagnose: %v", err)
 	}
@@ -69,5 +70,20 @@ func TestDiagnose_BudgetHalt(t *testing.T) {
 	}
 	if r.BudgetHalt.Message == "" {
 		t.Error("empty breach message")
+	}
+}
+
+// TestDiagnose_CtxCancelled verifies that a cancelled context propagates
+// out of Diagnose — a partial report is never returned as a success, so
+// automation with deadlines can distinguish complete from truncated output.
+func TestDiagnose_CtxCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the call
+	_, err := Diagnose(ctx, "testdata/runs/failed")
+	if err == nil {
+		t.Fatal("expected ctx.Err() to propagate, got nil")
+	}
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }

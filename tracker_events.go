@@ -17,9 +17,9 @@ import (
 
 const ndjsonTimestampLayout = "2006-01-02T15:04:05.000Z07:00"
 
-// NDJSONEvent is the stable wire format for the tracker --json mode. Field
+// StreamEvent is the stable wire format for the tracker --json mode. Field
 // tags are stable; new optional fields may be added without a major bump.
-type NDJSONEvent struct {
+type StreamEvent struct {
 	Timestamp string `json:"ts"`
 	Source    string `json:"source"`              // "pipeline", "llm", "agent"
 	Type      string `json:"type"`                // event type within source
@@ -33,13 +33,21 @@ type NDJSONEvent struct {
 	Content   string `json:"content,omitempty"`   // text content (LLM output, tool output)
 }
 
-// NDJSONWriter is a thread-safe writer that serializes NDJSONEvents line by
+// NDJSONWriter is a thread-safe writer that serializes StreamEvents line by
 // line onto an io.Writer. Library consumers use it to produce the same
 // stream as the tracker CLI's --json mode.
+//
+// Backpressure note: Write holds an internal mutex for the duration of the
+// underlying io.Writer.Write call. When three handler sources (pipeline,
+// agent, LLM trace) share one writer, a slow backing writer serializes
+// handler callbacks across those sources. If the backing writer can block
+// (network socket, pipe), wrap it in a bufio.Writer or a channel-backed
+// forwarder to decouple producers from the slow sink.
 type NDJSONWriter struct {
-	mu      sync.Mutex
-	w       io.Writer
-	errOnce sync.Once
+	mu        sync.Mutex
+	w         io.Writer
+	errOnce   sync.Once
+	panicOnce sync.Once
 }
 
 // NewNDJSONWriter returns a new writer backed by w.
@@ -47,28 +55,41 @@ func NewNDJSONWriter(w io.Writer) *NDJSONWriter {
 	return &NDJSONWriter{w: w}
 }
 
-// Write serializes evt as a JSON line. Safe to call from multiple goroutines.
-func (s *NDJSONWriter) Write(evt NDJSONEvent) {
+// Write serializes evt as a JSON line. Safe to call from multiple
+// goroutines. Returns a non-nil error if marshalling or writing to the
+// underlying io.Writer fails, including short writes (io.Writer.Write
+// may legally return n < len(data) with a nil error). The first write
+// error is also logged to os.Stderr once so long-running callers that
+// ignore the return value still surface it.
+func (s *NDJSONWriter) Write(evt StreamEvent) error {
 	data, err := json.Marshal(evt)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tracker: marshal NDJSON event: %v\n", err)
-		return
+		return fmt.Errorf("marshal NDJSON event: %w", err)
 	}
 	data = append(data, '\n')
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, werr := s.w.Write(data); werr != nil {
+	n, werr := s.w.Write(data)
+	if werr == nil && n < len(data) {
+		werr = io.ErrShortWrite
+	}
+	if werr != nil {
 		s.errOnce.Do(func() {
 			fmt.Fprintf(os.Stderr, "tracker: NDJSON stream write error: %v (further write errors suppressed)\n", werr)
 		})
+		return werr
 	}
+	return nil
 }
 
 // PipelineHandler returns a pipeline.PipelineEventHandler that writes events
-// to this stream.
+// to this stream. Panics in the underlying writer are recovered and logged
+// to os.Stderr once (per writer instance) so a misbehaving sink cannot
+// crash the pipeline goroutine.
 func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 	return pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
-		entry := NDJSONEvent{
+		defer s.recoverPanic("pipeline")
+		entry := StreamEvent{
 			Timestamp: evt.Timestamp.Format(ndjsonTimestampLayout),
 			Source:    "pipeline",
 			Type:      string(evt.Type),
@@ -79,14 +100,17 @@ func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 		if evt.Err != nil {
 			entry.Error = evt.Err.Error()
 		}
-		s.Write(entry)
+		_ = s.Write(entry)
 	})
 }
 
-// TraceObserver returns an llm.TraceObserver that writes trace events to this stream.
+// TraceObserver returns an llm.TraceObserver that writes trace events to
+// this stream. Panics in the underlying writer are recovered (see
+// PipelineHandler).
 func (s *NDJSONWriter) TraceObserver() llm.TraceObserver {
 	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-		s.Write(NDJSONEvent{
+		defer s.recoverPanic("llm")
+		_ = s.Write(StreamEvent{
 			Timestamp: time.Now().Format(ndjsonTimestampLayout),
 			Source:    "llm",
 			Type:      string(evt.Kind),
@@ -98,9 +122,12 @@ func (s *NDJSONWriter) TraceObserver() llm.TraceObserver {
 	})
 }
 
-// AgentHandler returns an agent.EventHandler that writes agent events to this stream.
+// AgentHandler returns an agent.EventHandler that writes agent events to
+// this stream. Panics in the underlying writer are recovered (see
+// PipelineHandler).
 func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 	return agent.EventHandlerFunc(func(evt agent.Event) {
+		defer s.recoverPanic("agent")
 		content := evt.ToolOutput
 		if content == "" {
 			content = evt.Text
@@ -109,7 +136,7 @@ func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 		if ts.IsZero() {
 			ts = time.Now()
 		}
-		entry := NDJSONEvent{
+		entry := StreamEvent{
 			Timestamp: ts.Format(ndjsonTimestampLayout),
 			Source:    "agent",
 			Type:      string(evt.Type),
@@ -119,12 +146,25 @@ func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 			ToolName:  evt.ToolName,
 			Content:   content,
 		}
-		entry.Error = buildNDJSONEntryError(evt)
-		s.Write(entry)
+		entry.Error = buildStreamEntryError(evt)
+		_ = s.Write(entry)
 	})
 }
 
-func buildNDJSONEntryError(evt agent.Event) string {
+// recoverPanic recovers from a handler panic and logs the first occurrence
+// per writer instance. Using a per-instance sync.Once (not package-level)
+// means multiple NDJSONWriter instances (e.g., different runs streaming to
+// different sinks) each get their own suppression state, so one misbehaving
+// sink does not silence unrelated panics elsewhere in the process.
+func (s *NDJSONWriter) recoverPanic(source string) {
+	if r := recover(); r != nil {
+		s.panicOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "tracker: NDJSON %s handler recovered from panic: %v (further panics suppressed)\n", source, r)
+		})
+	}
+}
+
+func buildStreamEntryError(evt agent.Event) string {
 	if evt.ToolError == "" && evt.Err == nil {
 		return ""
 	}

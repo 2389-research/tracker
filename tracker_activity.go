@@ -159,7 +159,7 @@ func ParseActivityLine(line string) (ActivityEntry, bool) {
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return ActivityEntry{}, false
 	}
-	ts, ok := parseActivityTimestampLib(raw.Timestamp)
+	ts, ok := parseActivityTimestamp(raw.Timestamp)
 	if !ok {
 		return ActivityEntry{}, false
 	}
@@ -173,7 +173,7 @@ func ParseActivityLine(line string) (ActivityEntry, bool) {
 	}, true
 }
 
-func parseActivityTimestampLib(s string) (time.Time, bool) {
+func parseActivityTimestamp(s string) (time.Time, bool) {
 	if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		return ts, true
 	}

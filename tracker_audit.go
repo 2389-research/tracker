@@ -3,7 +3,9 @@
 package tracker
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +13,15 @@ import (
 
 	"github.com/2389-research/tracker/pipeline"
 )
+
+// AuditConfig configures an Audit() or ListRuns() call.
+type AuditConfig struct {
+	// LogWriter receives non-fatal warnings (unreadable activity.jsonl
+	// in a run directory, etc.). Nil is treated as io.Discard so
+	// embedded library callers do not see warnings on os.Stderr. The
+	// tracker CLI sets this to io.Discard for user-facing commands.
+	LogWriter io.Writer
+}
 
 // AuditReport is the structured result of Audit().
 type AuditReport struct {
@@ -68,7 +79,24 @@ type RunSummary struct {
 // and activity.jsonl directly under it. For user-supplied input, resolve
 // the path via ResolveRunDir or use MostRecentRunID first, which enforce
 // the .tracker/runs/<runID> layout.
-func Audit(runDir string) (*AuditReport, error) {
+//
+// ctx is checked at entry so a caller that passes an already-cancelled
+// context gets an immediate error instead of silent work. Full
+// cancellation mid-parse would require threading ctx through
+// pipeline.LoadCheckpoint and LoadActivityLog, which is out of scope
+// today (both are fast and bounded). Nil is coalesced to
+// context.Background().
+//
+// Audit does not accept AuditConfig — it emits no warnings to suppress.
+// Use ListRuns + AuditConfig{LogWriter} for bulk enumeration where the
+// summary builder may skip unreadable activity logs.
+func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load checkpoint: %w", err)
@@ -98,7 +126,9 @@ func Audit(runDir string) (*AuditReport, error) {
 }
 
 // ListRuns returns all runs under workdir/.tracker/runs, sorted newest first.
-func ListRuns(workdir string) ([]RunSummary, error) {
+func ListRuns(workdir string, opts ...AuditConfig) ([]RunSummary, error) {
+	cfg := firstAuditConfig(opts)
+	logW := logWriterOrDiscard(cfg.LogWriter)
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
@@ -112,13 +142,20 @@ func ListRuns(workdir string) ([]RunSummary, error) {
 		if !e.IsDir() {
 			continue
 		}
-		rs, ok := buildLibRunSummary(runsDir, e.Name())
+		rs, ok := buildRunSummary(runsDir, e.Name(), logW)
 		if ok {
 			runs = append(runs, rs)
 		}
 	}
 	sort.SliceStable(runs, func(i, j int) bool { return runs[i].Timestamp.After(runs[j].Timestamp) })
 	return runs, nil
+}
+
+func firstAuditConfig(opts []AuditConfig) AuditConfig {
+	if len(opts) == 0 {
+		return AuditConfig{}
+	}
+	return opts[0]
 }
 
 func classifyStatus(cp *pipeline.Checkpoint, activity []ActivityEntry) string {
@@ -213,7 +250,7 @@ func buildAuditRecommendations(cp *pipeline.Checkpoint, status string, total tim
 	return recs
 }
 
-func buildLibRunSummary(runsDir, name string) (RunSummary, bool) {
+func buildRunSummary(runsDir, name string, logW io.Writer) (RunSummary, bool) {
 	runDir := filepath.Join(runsDir, name)
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
 	if err != nil {
@@ -221,7 +258,7 @@ func buildLibRunSummary(runsDir, name string) (RunSummary, bool) {
 	}
 	activity, lerr := LoadActivityLog(runDir)
 	if lerr != nil {
-		fmt.Fprintf(os.Stderr, "warning: run %s: cannot read activity log: %v\n", name, lerr)
+		fmt.Fprintf(logW, "warning: run %s: cannot read activity log: %v\n", name, lerr)
 		activity = nil // continue with nil so the summary still builds
 	}
 	SortActivityByTime(activity)
