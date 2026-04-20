@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -288,11 +289,20 @@ func TestManagerLoopHandler_EventsEmitted(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	registry.Register(NewStartHandler())
 	registry.Register(NewExitHandler())
+	// Block the child on a channel until the manager has ticked at least
+	// one cycle. This replaces a fragile time.Sleep — the manager's
+	// EventManagerCycleTick is what the assertion below is looking for,
+	// and it is emitted from a goroutine we can synchronise on via the
+	// collector.
+	releaseChild := make(chan struct{})
 	registry.Register(&stubHandler{
 		name: "step_handler",
-		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-			// Sleep a bit so at least one poll cycle fires.
-			time.Sleep(3 * time.Millisecond)
+		execFunc: func(ctx context.Context, _ *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			select {
+			case <-releaseChild:
+			case <-ctx.Done():
+				return pipeline.Outcome{}, ctx.Err()
+			}
 			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	})
@@ -307,6 +317,25 @@ func TestManagerLoopHandler_EventsEmitted(t *testing.T) {
 		"manager.max_cycles":    "100",
 	}}
 	pctx := pipeline.NewPipelineContext()
+
+	// Watch the collector for the first cycle tick, then release the
+	// child. Poll on a short interval that's still fast enough to be
+	// effectively instantaneous but doesn't race against the test harness.
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, evt := range collector.Events() {
+				if evt.Type == pipeline.EventManagerCycleTick {
+					close(releaseChild)
+					return
+				}
+			}
+			time.Sleep(500 * time.Microsecond)
+		}
+		// Safety valve: release anyway so the test fails loudly on the
+		// assertion below rather than hanging indefinitely.
+		close(releaseChild)
+	}()
 
 	outcome, err := h.Execute(context.Background(), node, pctx)
 	if err != nil {
@@ -500,11 +529,20 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	registry.Register(NewStartHandler())
 	registry.Register(NewExitHandler())
+	// step1 blocks on a channel rather than sleeping — the watcher
+	// goroutine closes the channel as soon as the manager has injected
+	// "hint" into the parent context (which is the observable signal
+	// that steering fired). Synchronising on the actual state change
+	// makes the test deterministic across slow CI runners.
+	releaseStep1 := make(chan struct{})
 	registry.Register(&stubHandler{
 		name: "step1_handler",
-		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-			// Block long enough for the manager's poll loop to fire and send steering.
-			time.Sleep(5 * time.Millisecond)
+		execFunc: func(ctx context.Context, _ *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			select {
+			case <-releaseStep1:
+			case <-ctx.Done():
+				return pipeline.Outcome{}, ctx.Err()
+			}
 			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	})
@@ -518,8 +556,13 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 		},
 	})
 
+	// Collect events so the watcher can observe when the manager emitted
+	// "steered N keys into child" — the deterministic signal that the
+	// steering channel was written to and ready to be drained by the
+	// engine between step1 and step2.
+	steerCollector := &collectingEventHandler{}
 	graphs := map[string]*pipeline.Graph{"child_pipeline": g}
-	h := NewManagerLoopHandler(graphs, registry, pipeline.PipelineNoopHandler, nil)
+	h := NewManagerLoopHandler(graphs, registry, steerCollector, nil)
 
 	// Steer condition fires at cycles=1, injecting "hint=go_faster".
 	node := &pipeline.Node{ID: "mgr", Handler: "stack.manager_loop", Attrs: map[string]string{
@@ -530,6 +573,20 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 		"manager.steer_context":   "hint=go_faster",
 	}}
 	pctx := pipeline.NewPipelineContext()
+
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, evt := range steerCollector.Events() {
+				if strings.Contains(evt.Message, "steered") {
+					close(releaseStep1)
+					return
+				}
+			}
+			time.Sleep(500 * time.Microsecond)
+		}
+		close(releaseStep1) // safety valve
+	}()
 
 	outcome, err := h.Execute(context.Background(), node, pctx)
 	if err != nil {

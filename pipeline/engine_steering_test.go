@@ -35,8 +35,11 @@ func TestEngine_SteeringChan_MergesContext(t *testing.T) {
 		},
 	})
 
-	// Create a steering channel and pre-load it with a value.
-	// The engine drains after step1's outcome, so step2 should see it.
+	// Create a steering channel and pre-load it with a value. The engine
+	// drains after each node's applyOutcome (including the start node),
+	// so because steerCh is pre-loaded before Run(), the value merges
+	// after the start node completes and is visible to both step1 and
+	// step2. The assertion below reads it from step2's context view.
 	steerCh := make(chan map[string]string, 1)
 	steerCh <- map[string]string{"steer_key": "steered_value"}
 

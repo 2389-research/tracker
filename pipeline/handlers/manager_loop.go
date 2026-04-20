@@ -166,7 +166,10 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 		resultCh <- engineResultMsg{result: result, err: runErr}
 	}()
 
-	// Emit child-started event.
+	// Emit child-started event. Handler-emitted events deliberately
+	// leave RunID unset — it is not surfaced to handlers through
+	// PipelineContext today. Observability tools should correlate via
+	// NodeID + Timestamp for now.
 	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageStarted,
 		Timestamp: time.Now(),
@@ -175,7 +178,12 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 	})
 	pctx.Set("stack.child.status", "running")
 
-	// Poll loop.
+	// Poll loop. Using an explicit time.NewTimer (rather than time.After
+	// inside the select) so we can Stop+Reset it per iteration. time.After
+	// allocates a new timer per call that isn't GC'd until it fires; with
+	// short poll intervals in long-running loops, those accumulate.
+	pollTimer := time.NewTimer(cfg.pollInterval)
+	defer pollTimer.Stop()
 	cycles := 0
 	for {
 		select {
@@ -189,7 +197,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 		case msg := <-resultCh:
 			return h.handleChildResult(node.ID, msg, cycles, pctx)
 
-		case <-time.After(cfg.pollInterval):
+		case <-pollTimer.C:
 			cycles++
 			pctx.Set("stack.child.cycles", strconv.Itoa(cycles))
 
@@ -246,6 +254,9 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 					}
 				}
 			}
+			// Reset for the next poll. The timer is already drained by the
+			// case firing above, so Reset is safe here.
+			pollTimer.Reset(cfg.pollInterval)
 		}
 	}
 }

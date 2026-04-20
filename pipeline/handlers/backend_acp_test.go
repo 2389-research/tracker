@@ -918,10 +918,16 @@ func TestValidatePathInWorkDir_SymlinkEscape(t *testing.T) {
 	realDir := t.TempDir()
 	outsideDir := t.TempDir()
 	workDir := filepath.Join(realDir, "workspace")
-	os.Mkdir(workDir, 0o755)
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
 
-	// Create a symlink inside workDir that points outside.
-	os.Symlink(outsideDir, filepath.Join(workDir, "escape"))
+	// Create a symlink inside workDir that points outside. Skip the test
+	// (rather than fail) if the environment doesn't support symlinks —
+	// e.g., some Windows CI runners.
+	if err := os.Symlink(outsideDir, filepath.Join(workDir, "escape")); err != nil {
+		t.Skipf("symlink not available in this environment: %v", err)
+	}
 
 	// A file directly under the symlinked dir should be outside workDir
 	// after symlink resolution.

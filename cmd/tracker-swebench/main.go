@@ -94,8 +94,11 @@ Flags:
 	}
 
 	// Write run metadata.
-	// Record which base URL override is active (if any).
-	baseURLOverride := os.Getenv(strings.ToUpper(*provider) + "_BASE_URL")
+	// Record which base URL override is active (if any). Normalize hyphens
+	// to underscores before uppercasing so providers like "openai-compat"
+	// map to OPENAI_COMPAT_BASE_URL, matching how ResolveProviderBaseURL
+	// derives its env var keys.
+	baseURLOverride := os.Getenv(strings.ToUpper(strings.ReplaceAll(*provider, "-", "_")) + "_BASE_URL")
 	meta := RunMeta{
 		Model:           *model,
 		Provider:        *provider,
