@@ -158,15 +158,15 @@ func (s *RunStats) Summary() string {
 
 // RunMeta holds metadata about the benchmark run written to a JSON file at the start.
 type RunMeta struct {
-	Model          string    `json:"model"`
-	Provider       string    `json:"provider"`
-	GatewayURL     string    `json:"gateway_url,omitempty"`
-	BaseURLOveride string    `json:"base_url_override,omitempty"`
-	Dataset        string    `json:"dataset"`
-	MaxTurns       int       `json:"max_turns"`
-	Timeout        string    `json:"timeout"`
-	StartedAt      time.Time `json:"started_at"`
-	Commit         string    `json:"commit,omitempty"`
+	Model           string    `json:"model"`
+	Provider        string    `json:"provider"`
+	GatewayURL      string    `json:"gateway_url,omitempty"`
+	BaseURLOverride string    `json:"base_url_override,omitempty"`
+	Dataset         string    `json:"dataset"`
+	MaxTurns        int       `json:"max_turns"`
+	Timeout         string    `json:"timeout"`
+	StartedAt       time.Time `json:"started_at"`
+	Commit          string    `json:"commit,omitempty"`
 }
 
 // WriteRunMeta writes meta as indented JSON to path. StartedAt is auto-filled with the current

@@ -205,7 +205,11 @@ func validatePathInWorkDir(path, workDir string) error {
 	}
 	// Reject raw paths containing ".." to prevent symlink/../escape attacks.
 	// filepath.Clean would collapse these lexically, masking the escape.
-	for _, seg := range strings.Split(path, string(filepath.Separator)) {
+	// Split on both '/' and '\' to catch Windows-style paths on any platform.
+	segments := strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	for _, seg := range segments {
 		if seg == ".." {
 			return fmt.Errorf("path %q contains '..' component", path)
 		}

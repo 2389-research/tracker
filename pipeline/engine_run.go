@@ -457,7 +457,10 @@ func (e *Engine) drainSteering(s *runState) {
 	}
 	for {
 		select {
-		case update := <-e.steeringCh:
+		case update, ok := <-e.steeringCh:
+			if !ok {
+				return
+			}
 			s.pctx.Merge(update)
 		default:
 			return

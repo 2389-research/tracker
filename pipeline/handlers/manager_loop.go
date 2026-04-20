@@ -181,6 +181,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 		select {
 		case <-ctx.Done():
 			cancelChild()
+			<-resultCh // wait for child goroutine to finish
 			pctx.Set("stack.child.status", "cancelled")
 			return pipeline.Outcome{Status: pipeline.OutcomeFail},
 				fmt.Errorf("manager_loop: cancelled: %w", ctx.Err())
@@ -201,6 +202,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 
 			if cycles >= cfg.maxCycles {
 				cancelChild()
+				<-resultCh // wait for child goroutine to finish
 				pctx.Set("stack.child.status", "max_cycles_exceeded")
 				h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 					Type:      pipeline.EventStageFailed,
@@ -216,6 +218,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 			if cfg.stopCondition != "" {
 				if match, _ := pipeline.EvaluateCondition(cfg.stopCondition, pctx); match {
 					cancelChild()
+					<-resultCh // wait for child goroutine to finish
 					pctx.Set("stack.child.status", "stop_condition_met")
 					h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 						Type:      pipeline.EventStageCompleted,
@@ -273,16 +276,22 @@ func (h *ManagerLoopHandler) handleChildResult(nodeID string, msg engineResultMs
 		}
 
 		// Child pipeline failed (non-success status).
+		// Preserve the child's exit status (e.g. OutcomeBudgetExceeded) rather than
+		// flattening everything to OutcomeFail.
+		childStatus := result.Status
+		if childStatus == "" {
+			childStatus = pipeline.OutcomeFail
+		}
 		pctx.Set("stack.child.status", "failed")
-		pctx.Set("stack.child.exit_status", result.Status)
+		pctx.Set("stack.child.exit_status", childStatus)
 		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 			Type:      pipeline.EventStageFailed,
 			Timestamp: time.Now(),
 			NodeID:    nodeID,
-			Message:   fmt.Sprintf("manager_loop: child completed with status %q", result.Status),
+			Message:   fmt.Sprintf("manager_loop: child completed with status %q", childStatus),
 		})
 		return pipeline.Outcome{
-			Status:         pipeline.OutcomeFail,
+			Status:         childStatus,
 			ContextUpdates: result.Context,
 		}, nil
 	}
