@@ -94,14 +94,17 @@ Flags:
 	}
 
 	// Write run metadata.
+	// Record which base URL override is active (if any).
+	baseURLOverride := os.Getenv(strings.ToUpper(*provider) + "_BASE_URL")
 	meta := RunMeta{
-		Model:      *model,
-		Provider:   *provider,
-		GatewayURL: *gatewayURL,
-		Dataset:    *dataset,
-		MaxTurns:   *maxTurns,
-		Timeout:    timeout.String(),
-		Commit:     buildCommit(),
+		Model:          *model,
+		Provider:       *provider,
+		GatewayURL:     *gatewayURL,
+		BaseURLOveride: baseURLOverride,
+		Dataset:        *dataset,
+		MaxTurns:       *maxTurns,
+		Timeout:        timeout.String(),
+		Commit:         buildCommit(),
 	}
 	metaPath := filepath.Join(absResultsDir, "run_meta.json")
 	if err := WriteRunMeta(metaPath, meta); err != nil {
