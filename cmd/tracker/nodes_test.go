@@ -175,6 +175,43 @@ func TestBuildNodeListCyclicSubgraphsTerminate(t *testing.T) {
 
 // TestBuildNodeListSelfReferencingSubgraphTerminates verifies a single-ref
 // cycle (X → X) is caught by the visited set.
+// TestBuildNodeListSubgraphPreservesChildLabels verifies that a child
+// workflow's user-set Labels survive prefixing. Before the fix, the
+// expansion overwrote Label with SubgraphChildLabel(newPrefixedID),
+// silently discarding any explicit label the user set inside the child
+// workflow. Regression guard for PR #119 Copilot feedback.
+func TestBuildNodeListSubgraphPreservesChildLabels(t *testing.T) {
+	parent := pipeline.NewGraph("parent")
+	parent.AddNode(&pipeline.Node{ID: "start", Shape: "Mdiamond"})
+	parent.AddNode(&pipeline.Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	parent.AddNode(&pipeline.Node{ID: "done", Shape: "Msquare"})
+	parent.AddEdge(&pipeline.Edge{From: "start", To: "sg"})
+	parent.AddEdge(&pipeline.Edge{From: "sg", To: "done"})
+
+	child := pipeline.NewGraph("child")
+	child.AddNode(&pipeline.Node{ID: "cstart", Shape: "Mdiamond"})
+	// Explicit user-set label with spaces — must not be clobbered.
+	child.AddNode(&pipeline.Node{ID: "build", Shape: "box", Label: "Build Artifact"})
+	// No label — falls back to ID in nodeEntryFor.
+	child.AddNode(&pipeline.Node{ID: "parse", Shape: "box"})
+	child.AddNode(&pipeline.Node{ID: "cend", Shape: "Msquare"})
+	child.AddEdge(&pipeline.Edge{From: "cstart", To: "build"})
+	child.AddEdge(&pipeline.Edge{From: "build", To: "parse"})
+	child.AddEdge(&pipeline.Edge{From: "parse", To: "cend"})
+
+	entries := buildNodeList(parent, map[string]*pipeline.Graph{"child": child})
+	buildEntry := findNodeEntry(t, entries, "sg/build")
+	if buildEntry.Label != "Build Artifact" {
+		t.Errorf("user-set Label lost: got %q, want %q", buildEntry.Label, "Build Artifact")
+	}
+	// No-label node: Label should be the original unqualified ID, not the
+	// prefixed one (so render's short-form display still works).
+	parseEntry := findNodeEntry(t, entries, "sg/parse")
+	if parseEntry.Label != "parse" {
+		t.Errorf("ID-fallback Label wrong: got %q, want %q", parseEntry.Label, "parse")
+	}
+}
+
 func TestBuildNodeListSelfReferencingSubgraphTerminates(t *testing.T) {
 	parent := pipeline.NewGraph("parent")
 	parent.AddNode(&pipeline.Node{ID: "start", Shape: "Mdiamond"})

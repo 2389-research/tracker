@@ -67,7 +67,13 @@ func expandSubgraphChildren(entries []tui.NodeEntry, graph *pipeline.Graph, subg
 
 		for _, child := range childEntries {
 			child.ID = entry.ID + "/" + child.ID
-			child.Label = tui.SubgraphChildLabel(child.ID)
+			// Preserve the child's Label from nodeEntryFor. It is either
+			// the user's explicit label (e.g. "Build step") or the original
+			// unqualified node ID as a fallback. Overwriting here with
+			// SubgraphChildLabel(new-prefixed-ID) would discard user-set
+			// labels. Render (tui/nodelist.go:resolveNodeLabel) handles
+			// the ID-fallback case naturally — Label != node.ID after
+			// prefixing, so it uses Label as-is.
 			out = append(out, child)
 		}
 	}
