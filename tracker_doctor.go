@@ -613,8 +613,17 @@ func checkWorkdir(workdir string) CheckResult {
 	info, err := os.Stat(workdir)
 	if err != nil {
 		out.Status = CheckStatusError
-		out.Message = fmt.Sprintf("%s does not exist", workdir)
-		out.Hint = fmt.Sprintf("create the directory: mkdir -p %s", workdir)
+		switch {
+		case os.IsNotExist(err):
+			out.Message = fmt.Sprintf("%s does not exist", workdir)
+			out.Hint = fmt.Sprintf("create the directory: mkdir -p %s", workdir)
+		case os.IsPermission(err):
+			out.Message = fmt.Sprintf("permission denied accessing %s", workdir)
+			out.Hint = fmt.Sprintf("check permissions on %s or a parent directory", workdir)
+		default:
+			out.Message = fmt.Sprintf("cannot stat %s: %v", workdir, err)
+			out.Hint = "check the path and its parent directories"
+		}
 		return out
 	}
 	if !info.IsDir() {
@@ -709,7 +718,9 @@ func checkArtifactDirs(workdir string) CheckResult {
 	out := CheckResult{Name: "Artifact Directories"}
 	allOk := true
 	aiDir := filepath.Join(workdir, ".ai")
-	if info, err := os.Stat(aiDir); err == nil {
+	info, err := os.Stat(aiDir)
+	switch {
+	case err == nil:
 		switch {
 		case !info.IsDir():
 			out.Details = append(out.Details, CheckDetail{
@@ -730,7 +741,7 @@ func checkArtifactDirs(workdir string) CheckResult {
 				Message: fmt.Sprintf("%s exists and is writable", aiDir),
 			})
 		}
-	} else {
+	case os.IsNotExist(err):
 		if isDirWritable(workdir) {
 			out.Details = append(out.Details, CheckDetail{
 				Status:  CheckStatusOK,
@@ -743,6 +754,15 @@ func checkArtifactDirs(workdir string) CheckResult {
 			})
 			allOk = false
 		}
+	default:
+		// Non-ENOENT stat failure — permission denied, I/O error, etc.
+		// Report the real failure instead of pretending .ai is missing.
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusError,
+			Message: fmt.Sprintf("cannot inspect %s: %v", aiDir, err),
+			Hint:    fmt.Sprintf("check permissions on %s and its parents", aiDir),
+		})
+		allOk = false
 	}
 	if allOk {
 		out.Status = CheckStatusOK
@@ -781,8 +801,17 @@ func checkPipelineFile(pipelineFile string) CheckResult {
 	out := CheckResult{Name: "Pipeline File"}
 	if _, err := os.Stat(pipelineFile); err != nil {
 		out.Status = CheckStatusError
-		out.Message = fmt.Sprintf("%s does not exist", pipelineFile)
-		out.Hint = fmt.Sprintf("check the file path: %s", pipelineFile)
+		switch {
+		case os.IsNotExist(err):
+			out.Message = fmt.Sprintf("%s does not exist", pipelineFile)
+			out.Hint = fmt.Sprintf("check the file path: %s", pipelineFile)
+		case os.IsPermission(err):
+			out.Message = fmt.Sprintf("permission denied reading %s", pipelineFile)
+			out.Hint = fmt.Sprintf("check permissions: chmod +r %s", pipelineFile)
+		default:
+			out.Message = fmt.Sprintf("cannot stat %s: %v", pipelineFile, err)
+			out.Hint = "check the file path and permissions"
+		}
 		return out
 	}
 	hasWarn := false

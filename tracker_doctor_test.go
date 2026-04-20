@@ -142,3 +142,71 @@ func TestSanitizeThenTrim_NoPartialKeyLeak(t *testing.T) {
 		t.Errorf("got = %q; want [redacted-key] substitution", got)
 	}
 }
+
+// TestCheckWorkdir_DistinguishesErrorKinds verifies that permission-denied
+// and other non-ENOENT stat failures are reported with the right remediation
+// hint, rather than being reported as "does not exist" + an mkdir hint.
+func TestCheckWorkdir_DistinguishesErrorKinds(t *testing.T) {
+	t.Run("missing path", func(t *testing.T) {
+		r := checkWorkdir(filepath.Join(t.TempDir(), "does-not-exist"))
+		if r.Status != CheckStatusError {
+			t.Fatalf("status = %q, want error", r.Status)
+		}
+		if !strings.Contains(r.Message, "does not exist") {
+			t.Errorf("message = %q, want 'does not exist'", r.Message)
+		}
+		if !strings.Contains(r.Hint, "mkdir") {
+			t.Errorf("hint = %q, want mkdir suggestion", r.Hint)
+		}
+	})
+	t.Run("permission denied", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("permission tests are meaningless as root")
+		}
+		parent := t.TempDir()
+		inner := filepath.Join(parent, "locked")
+		must(t, os.Mkdir(inner, 0o755))
+		// Revoke search/execute on parent → stat of inner fails with EACCES.
+		must(t, os.Chmod(parent, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+		r := checkWorkdir(inner)
+		if r.Status != CheckStatusError {
+			t.Fatalf("status = %q, want error", r.Status)
+		}
+		if strings.Contains(r.Hint, "mkdir") {
+			t.Errorf("permission error should not suggest mkdir, got hint = %q", r.Hint)
+		}
+		if !strings.Contains(r.Message, "permission denied") &&
+			!strings.Contains(r.Message, "cannot stat") {
+			t.Errorf("message = %q, want permission-denied or stat-error wording", r.Message)
+		}
+	})
+}
+
+// TestCheckArtifactDirs_NonENOENTStatError verifies that a stat failure on
+// .ai that is not ENOENT (e.g. permission denied) is reported as an error
+// rather than silently treated as "will be created on first run".
+func TestCheckArtifactDirs_NonENOENTStatError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission tests are meaningless as root")
+	}
+	workdir := t.TempDir()
+	aiDir := filepath.Join(workdir, ".ai")
+	must(t, os.Mkdir(aiDir, 0o755))
+	// Make workdir unreadable/unsearchable so stat on .ai fails with EACCES
+	// (not ENOENT — .ai does exist).
+	must(t, os.Chmod(workdir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(workdir, 0o755) })
+
+	r := checkArtifactDirs(workdir)
+	if r.Status != CheckStatusError {
+		t.Fatalf("status = %q, want error (permission failure must not be reported as OK)", r.Status)
+	}
+	// No detail should say "will be created on first run" — that's the lie we're guarding against.
+	for _, d := range r.Details {
+		if strings.Contains(d.Message, "will be created") {
+			t.Errorf("detail %q hides the real permission error", d.Message)
+		}
+	}
+}

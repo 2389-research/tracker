@@ -51,14 +51,19 @@ type PlanStep struct {
 // Simulate parses source and returns a SimulateReport. Format is detected
 // from content.
 //
-// ctx is accepted for future extensibility (e.g. cancelling a slow parse
-// on very large graphs). Nil is coalesced to context.Background() so that
-// when cancellation is wired in later, nil-callers do not regress.
+// ctx is checked at entry so a caller that passes an already-cancelled
+// context gets an immediate error instead of silent work. Full
+// cancellation mid-parse would require threading ctx through
+// parsePipelineSource → dippin-lang's parser, which is out of scope
+// today (parses are fast and O(n) anyway). Nil is coalesced to
+// context.Background().
 func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_ = ctx // reserved for future cancellation plumbing
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	format := detectSourceFormat(source)
 	graph, err := parsePipelineSource(source, format)
 	if err != nil {

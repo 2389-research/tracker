@@ -101,6 +101,17 @@ func TestSimulate_InvalidSource(t *testing.T) {
 	}
 }
 
+// TestSimulate_CtxCancelledAtEntry verifies Simulate returns the caller's
+// cancellation error immediately rather than silently parsing.
+func TestSimulate_CtxCancelledAtEntry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Simulate(ctx, simpleSource)
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
 func TestSimulate_GraphAttrsPopulated(t *testing.T) {
 	// Use DOT format to set graph-level attributes reliably without
 	// depending on dippin-lang's specific syntax for workflow-level attrs.

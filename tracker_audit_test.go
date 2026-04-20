@@ -92,3 +92,15 @@ func TestListRuns_LogWriterSilencesWarnings(t *testing.T) {
 		t.Error("expected log writer to receive a warning about activity.jsonl")
 	}
 }
+
+// TestAudit_CtxCancelledAtEntry verifies Audit returns the caller's
+// cancellation error immediately rather than silently proceeding with the
+// expensive checkpoint + activity log reads.
+func TestAudit_CtxCancelledAtEntry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Audit(ctx, "testdata/runs/ok")
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}

@@ -80,14 +80,19 @@ type RunSummary struct {
 // the path via ResolveRunDir or use MostRecentRunID first, which enforce
 // the .tracker/runs/<runID> layout.
 //
-// ctx is accepted for future extensibility (cancellation of checkpoint or
-// activity log parsing). Nil is coalesced to context.Background() so that
-// when cancellation is wired in later, nil-callers do not regress.
+// ctx is checked at entry so a caller that passes an already-cancelled
+// context gets an immediate error instead of silent work. Full
+// cancellation mid-parse would require threading ctx through
+// pipeline.LoadCheckpoint and LoadActivityLog, which is out of scope
+// today (both are fast and bounded). Nil is coalesced to
+// context.Background().
 func Audit(ctx context.Context, runDir string, opts ...AuditConfig) (*AuditReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_ = ctx                    // reserved for future cancellation plumbing
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	_ = firstAuditConfig(opts) // reserved for future fields
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
 	if err != nil {
