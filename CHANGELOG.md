@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Suggestion.Kind` is now typed as `tracker.SuggestionKind` (underlying string).
 - `tracker diagnose` suggestion order is now deterministic (alphabetical by node ID). Previously suggestions printed in Go map-iteration order, which varied between runs.
 
+### Fixed
+
+- **OpenAI Responses API: `function_call_output` and `function_call` items now always serialize required fields** (closes #114). Previously the shared `openaiInput` struct used `omitempty` on every field, so a tool returning an empty-string result produced `{"type":"function_call_output","call_id":"..."}` with no `output` field, and a no-argument tool call produced `function_call` with no `arguments`. OpenAI's endpoint tolerated this, but OpenRouter's strict Zod validator rejected the requests with `invalid_prompt` / `invalid_union` errors, symptomatic on GLM, Qwen, and Kimi via OpenRouter. Fixed by replacing the `omitempty`-tagged single struct with a `MarshalJSON` method that emits only fields valid per item type, with required fields always present. Reported by @Nopik.
+
 ## [0.18.0] - 2026-04-17
 
 ### Added
