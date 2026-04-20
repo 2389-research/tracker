@@ -129,3 +129,50 @@ func TestEngine_SteeringChan_MultipleUpdates(t *testing.T) {
 		t.Errorf("step2 saw key_b=%q, want %q", seenB, "val_b")
 	}
 }
+
+func TestEngine_SteeringChan_NotAttributedToNodeScope(t *testing.T) {
+	// Steered keys must not appear under any node's per-node namespace
+	// (node.<id>.<key>). Steering is an external signal, not a node output.
+	g := NewGraph("steer_scope")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "step1", Shape: "box", Label: "Step1"})
+	g.AddNode(&Node{ID: "step2", Shape: "box", Label: "Step2"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "step1"})
+	g.AddEdge(&Edge{From: "step1", To: "step2"})
+	g.AddEdge(&Edge{From: "step2", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	steerCh := make(chan map[string]string, 1)
+	steerCh <- map[string]string{"steer_key": "steered_value"}
+
+	engine := NewEngine(g, reg, WithSteeringChan(steerCh))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Fatalf("expected success, got %q", result.Status)
+	}
+
+	// Bare key is globally visible.
+	if got := result.Context["steer_key"]; got != "steered_value" {
+		t.Errorf("bare steer_key=%q, want %q", got, "steered_value")
+	}
+
+	// No node's scoped namespace should contain steer_key — it wasn't produced
+	// by any node's handler, only injected via the steering channel.
+	for _, nodeID := range []string{"s", "step1", "step2", "end"} {
+		scopedKey := "node." + nodeID + ".steer_key"
+		if _, exists := result.Context[scopedKey]; exists {
+			t.Errorf("steer_key leaked into node scope %q", scopedKey)
+		}
+	}
+}

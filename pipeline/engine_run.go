@@ -461,7 +461,7 @@ func (e *Engine) drainSteering(s *runState) {
 			if !ok {
 				return
 			}
-			s.pctx.Merge(update)
+			s.pctx.MergeWithoutDirty(update)
 		default:
 			return
 		}

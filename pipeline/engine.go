@@ -258,16 +258,21 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 
 	e.applyOutcome(s, currentNodeID, outcome)
 
-	// Drain any pending steering updates injected by an external supervisor
-	// (e.g., manager_loop handler). Merged values become visible to edge
-	// selection and the next node's prompt expansion.
-	e.drainSteering(s)
-
 	// Copy every key written during this node's execution into the per-node
 	// namespace "node.<nodeID>.<key>" so downstream nodes can read a specific
 	// upstream node's output without collision. Bare keys keep their global
 	// last-writer-wins value for backward compatibility.
+	//
+	// Scoping runs before drainSteering so that externally-injected steering
+	// values are not misattributed to this node's scoped namespace.
 	s.pctx.ScopeToNode(currentNodeID)
+
+	// Drain any pending steering updates injected by an external supervisor
+	// (e.g., manager_loop handler). Merged values become visible to edge
+	// selection and the next node's prompt expansion. Steering uses
+	// MergeWithoutDirty so the updates stay in the bare/global namespace and
+	// never flow into any node's per-node scope.
+	e.drainSteering(s)
 
 	if outcome.Status == OutcomeRetry {
 		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, &traceEntry)

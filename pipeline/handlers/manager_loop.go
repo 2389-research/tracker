@@ -65,15 +65,25 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 	}
 
 	if v := attrs["manager.poll_interval"]; v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.pollInterval = d
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return cfg, fmt.Errorf("manager_loop: invalid manager.poll_interval %q: %w", v, err)
 		}
+		if d <= 0 {
+			return cfg, fmt.Errorf("manager_loop: manager.poll_interval must be > 0, got %q", v)
+		}
+		cfg.pollInterval = d
 	}
 
 	if v := attrs["manager.max_cycles"]; v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.maxCycles = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return cfg, fmt.Errorf("manager_loop: invalid manager.max_cycles %q: %w", v, err)
 		}
+		if n <= 0 {
+			return cfg, fmt.Errorf("manager_loop: manager.max_cycles must be > 0, got %q", v)
+		}
+		cfg.maxCycles = n
 	}
 
 	cfg.stopCondition = attrs["manager.stop_condition"]
@@ -132,6 +142,13 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 	childRegistry := h.registry
 	if h.registryFactory != nil {
 		childRegistry = h.registryFactory(childGraph, node.ID)
+	}
+	// Defensive: if both registry and factory are nil we'd pass a nil
+	// registry to NewEngine and panic on the first handler lookup.
+	// Report clearly instead.
+	if childRegistry == nil {
+		return pipeline.Outcome{Status: pipeline.OutcomeFail},
+			fmt.Errorf("manager_loop: no handler registry available for child subgraph %q", cfg.subgraphRef)
 	}
 
 	childCtx, cancelChild := context.WithCancel(ctx)
@@ -222,9 +239,21 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 					fmt.Errorf("manager_loop: max_cycles %d reached", cfg.maxCycles)
 			}
 
-			// Evaluate stop condition against the parent context.
+			// Evaluate stop condition against the parent context. A parse
+			// error here means the author wrote a malformed condition —
+			// fail the manager loop with a clear error rather than
+			// silently treating as "never match", which would hide the
+			// misconfiguration until max_cycles.
 			if cfg.stopCondition != "" {
-				if match, _ := pipeline.EvaluateCondition(cfg.stopCondition, pctx); match {
+				match, condErr := pipeline.EvaluateCondition(cfg.stopCondition, pctx)
+				if condErr != nil {
+					cancelChild()
+					<-resultCh
+					pctx.Set("stack.child.status", "stop_condition_invalid")
+					return pipeline.Outcome{Status: pipeline.OutcomeFail},
+						fmt.Errorf("manager_loop: stop_condition %q is invalid: %w", cfg.stopCondition, condErr)
+				}
+				if match {
 					cancelChild()
 					<-resultCh // wait for child goroutine to finish
 					pctx.Set("stack.child.status", "stop_condition_met")
@@ -240,7 +269,15 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 
 			// Steering: inject context into running child when condition matches.
 			if cfg.steerExpr != "" && steeringCh != nil {
-				if match, _ := pipeline.EvaluateCondition(cfg.steerExpr, pctx); match {
+				match, condErr := pipeline.EvaluateCondition(cfg.steerExpr, pctx)
+				if condErr != nil {
+					cancelChild()
+					<-resultCh
+					pctx.Set("stack.child.status", "steer_condition_invalid")
+					return pipeline.Outcome{Status: pipeline.OutcomeFail},
+						fmt.Errorf("manager_loop: steer_condition %q is invalid: %w", cfg.steerExpr, condErr)
+				}
+				if match {
 					select {
 					case steeringCh <- cfg.steerKeys:
 						h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
@@ -286,9 +323,13 @@ func (h *ManagerLoopHandler) handleChildResult(nodeID string, msg engineResultMs
 			}, nil
 		}
 
-		// Child pipeline failed (non-success status).
-		// Preserve the child's exit status (e.g. OutcomeBudgetExceeded) rather than
-		// flattening everything to OutcomeFail.
+		// Child pipeline failed (non-success status). Record the child's
+		// real exit status (e.g. OutcomeBudgetExceeded) in context for
+		// inspection, but return a valid handler-level outcome. Handler
+		// Status values must be from the handler-outcome set
+		// (success/fail/retry) — engine-level statuses like
+		// OutcomeBudgetExceeded would fall through the engine's outcome
+		// switch and be silently treated as success.
 		childStatus := result.Status
 		if childStatus == "" {
 			childStatus = pipeline.OutcomeFail
@@ -302,7 +343,7 @@ func (h *ManagerLoopHandler) handleChildResult(nodeID string, msg engineResultMs
 			Message:   fmt.Sprintf("manager_loop: child completed with status %q", childStatus),
 		})
 		return pipeline.Outcome{
-			Status:         childStatus,
+			Status:         pipeline.OutcomeFail,
 			ContextUpdates: result.Context,
 		}, nil
 	}
