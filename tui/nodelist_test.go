@@ -128,3 +128,23 @@ func TestNodeListThinkingAnimation(t *testing.T) {
 		t.Errorf("expected thinking frame, got: %s", view)
 	}
 }
+
+func TestNodeListRendersSubgraphIndentAndLabels(t *testing.T) {
+	store := NewStateStore(nil)
+	store.SetNodes([]NodeEntry{
+		{ID: "Parent"},
+		{ID: "Parent/Child"},
+		{ID: "Parent/Child/Grand"},
+		{ID: "Done"},
+	})
+	tr := NewThinkingTracker()
+	nl := NewNodeList(store, tr, 10)
+
+	plain := stripANSI(nl.View())
+	if !strings.Contains(plain, "  "+LampPending+" Child") {
+		t.Fatalf("expected child row with 2-space indent and Child label, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "    "+LampPending+" Grand") {
+		t.Fatalf("expected grandchild row with 4-space indent and Grand label, got:\n%s", plain)
+	}
+}

@@ -13,13 +13,71 @@ import (
 // pipeline graph in topological (execution) order. Start is first, Done is
 // last, everything in between is ordered by when it would be reached during
 // execution. Uses Kahn's algorithm with BFS tie-breaking from StartNode.
-func buildNodeList(graph *pipeline.Graph) []tui.NodeEntry {
+// Subgraph children are inserted recursively after their parent entries.
+func buildNodeList(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) []tui.NodeEntry {
+	return buildNodeListVisited(graph, subgraphs, make(map[string]bool))
+}
+
+// buildNodeListVisited is the recursive core — visited tracks subgraph_ref
+// values already being expanded so a cyclic map (A→B→A) cannot recurse to
+// stack overflow during TUI init. Cycles are normally rejected upstream by
+// cmd/tracker/loading.go:loadSubgraphsRecursive (keyed by absolute file
+// path), but a library caller could pass a programmatically constructed
+// map that bypasses that check. Defense in depth.
+func buildNodeListVisited(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, visited map[string]bool) []tui.NodeEntry {
 	if graph.StartNode == "" {
 		return nil
 	}
 
 	order := topoSortNodes(graph)
-	return buildOrderedEntries(order, graph)
+	entries := buildOrderedEntries(order, graph)
+	return expandSubgraphChildren(entries, graph, subgraphs, visited)
+}
+
+// expandSubgraphChildren inserts child subgraph nodes directly after each
+// subgraph parent entry, recursively handling nested subgraphs. Each ref
+// is added to visited before recursing and removed after, so sibling
+// subgraphs sharing a ref are still expanded but a cycle is broken.
+func expandSubgraphChildren(entries []tui.NodeEntry, graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, visited map[string]bool) []tui.NodeEntry {
+	if len(subgraphs) == 0 {
+		return entries
+	}
+
+	var out []tui.NodeEntry
+	for _, entry := range entries {
+		out = append(out, entry)
+
+		node, ok := graph.Nodes[entry.ID]
+		if !ok || node.Handler != "subgraph" {
+			continue
+		}
+
+		ref := node.Attrs["subgraph_ref"]
+		if ref == "" || visited[ref] {
+			continue // missing ref or cycle — skip expansion
+		}
+		childGraph, ok := subgraphs[ref]
+		if !ok {
+			continue
+		}
+
+		visited[ref] = true
+		childEntries := buildNodeListVisited(childGraph, subgraphs, visited)
+		delete(visited, ref)
+
+		for _, child := range childEntries {
+			child.ID = entry.ID + "/" + child.ID
+			// Preserve the child's Label from nodeEntryFor. It is either
+			// the user's explicit label (e.g. "Build step") or the original
+			// unqualified node ID as a fallback. Overwriting here with
+			// SubgraphChildLabel(new-prefixed-ID) would discard user-set
+			// labels. Render (tui/nodelist.go:resolveNodeLabel) handles
+			// the ID-fallback case naturally — Label != node.ID after
+			// prefixing, so it uses Label as-is.
+			out = append(out, child)
+		}
+	}
+	return out
 }
 
 // buildOrderedEntries converts a topological order into NodeEntry slice with exit node last.

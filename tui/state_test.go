@@ -2,7 +2,10 @@
 // ABOUTME: Verifies state updates via Apply and reads via getters.
 package tui
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestStateStoreInitialState(t *testing.T) {
 	s := NewStateStore(nil)
@@ -155,4 +158,42 @@ func TestStateStoreCompletedCount(t *testing.T) {
 	if done != 2 || total != 3 {
 		t.Errorf("expected 2/3, got %d/%d", done, total)
 	}
+}
+
+func TestStateStoreLazyInsertsSubgraphChildAfterParent(t *testing.T) {
+	s := NewStateStore(nil)
+	s.SetNodes([]NodeEntry{{ID: "Parent"}, {ID: "Done"}})
+
+	s.Apply(MsgNodeStarted{NodeID: "Parent/Child"})
+
+	got := nodeIDs(s.Nodes())
+	want := []string{"Parent", "Parent/Child", "Done"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("node order mismatch\n got: %v\nwant: %v", got, want)
+	}
+	if s.NodeStatus("Parent/Child") != NodeRunning {
+		t.Fatalf("expected Parent/Child running, got %v", s.NodeStatus("Parent/Child"))
+	}
+}
+
+func TestStateStoreLazyInsertKeepsSiblingArrivalOrder(t *testing.T) {
+	s := NewStateStore(nil)
+	s.SetNodes([]NodeEntry{{ID: "Parent"}, {ID: "Done"}})
+
+	s.Apply(MsgNodeStarted{NodeID: "Parent/ChildA"})
+	s.Apply(MsgNodeStarted{NodeID: "Parent/ChildB"})
+
+	got := nodeIDs(s.Nodes())
+	want := []string{"Parent", "Parent/ChildA", "Parent/ChildB", "Done"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("node order mismatch\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func nodeIDs(entries []NodeEntry) []string {
+	ids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		ids = append(ids, e.ID)
+	}
+	return ids
 }
