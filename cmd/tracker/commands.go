@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -266,6 +267,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		MaxCostCents:   cfg.maxCostCents,
 		MaxWallTime:    cfg.maxWallTime,
 	}
+	activeRunParams = maps.Clone(cfg.params)
+	activeEffectiveRunParams = nil
 	// Apply --gateway-url before buildLLMClient is called.
 	// Timing is correct: executeRun sets the env var here, then calls
 	// selectAndRunMode → run/runTUI → buildLLMClient → buildProviderConstructors,

@@ -1,4 +1,4 @@
-// ABOUTME: Tests for Dippin semantic lint rules (DIP101-DIP112).
+// ABOUTME: Tests for Dippin semantic lint rules (DIP101-DIP112, DIP120-DIP121).
 package pipeline
 
 import (
@@ -134,6 +134,36 @@ func TestLintDIP104_NoWarningWithMaxRetries(t *testing.T) {
 	warnings := LintDippinRules(g)
 	if containsWarning(warnings, "DIP104", "") {
 		t.Errorf("unexpected DIP104 warning: %v", warnings)
+	}
+}
+
+func TestLintDIP120_UndeclaredParamsReference(t *testing.T) {
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "Agent1",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "Value: ${params.missing}"},
+	})
+
+	warnings := LintDippinRules(g)
+	if !containsWarning(warnings, "DIP120", "missing") {
+		t.Errorf("expected DIP120 warning, got: %v", warnings)
+	}
+}
+
+func TestLintDIP121_UnusedDeclaredParam(t *testing.T) {
+	g := NewGraph("test")
+	g.Attrs["params.foo"] = "bar"
+	g.Attrs["params.unused"] = "x"
+	g.AddNode(&Node{
+		ID:      "Agent1",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "Value: ${params.foo}"},
+	})
+
+	warnings := LintDippinRules(g)
+	if !containsWarning(warnings, "DIP121", "unused") {
+		t.Errorf("expected DIP121 warning, got: %v", warnings)
 	}
 }
 

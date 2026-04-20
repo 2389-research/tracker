@@ -155,6 +155,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 	fmt.Println("═══ Run Complete ══════════════════════════════════════════")
 
 	printRunHeader(result)
+	printParamOverrideSummary()
 	printRunDuration(result)
 	printRunTotals(result, tracker)
 	printNodeTable(result)
@@ -171,6 +172,13 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 	printResumeHint(result, pipelineFile)
 
 	fmt.Println("═══════════════════════════════════════════════════════════")
+}
+
+func printParamOverrideSummary() {
+	if len(activeEffectiveRunParams) == 0 {
+		return
+	}
+	fmt.Printf("  Params:    %s\n", formatParamOverridesForSummary(activeEffectiveRunParams))
 }
 
 // printRunHeader prints the run ID and status lines.

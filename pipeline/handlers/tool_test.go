@@ -394,6 +394,27 @@ func TestToolHandler_AllowsSafeVariable(t *testing.T) {
 	}
 }
 
+func TestToolHandler_ExpandsWorkflowParams(t *testing.T) {
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo prod": {Stdout: "prod\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID: "check", Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "echo ${params.env}"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("graph.params.env", "prod")
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("status = %q, want success", outcome.Status)
+	}
+}
+
 func TestToolHandler_DenylistBlocks(t *testing.T) {
 	env := toolTestEnv(t, nil)
 	h := NewToolHandler(env)

@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Provider probe error bodies are now sanitized (API keys and bearer tokens stripped) before they land in `CheckDetail.Message`.
   - `NDJSON` handler closures (pipeline, agent, LLM trace) now `recover()` from panics in the underlying writer so a misbehaving sink cannot crash the caller goroutine. Panic suppression is per-`NDJSONWriter` instance (not package-level), so one misbehaving sink cannot silence unrelated writers in the same process.
   - `Diagnose` now streams `activity.jsonl` with `bufio.Scanner` instead of `os.ReadFile` → `strings.Split`, matching `LoadActivityLog` and avoiding a memory spike on large runs. Scanner errors (1 MB line-length overflow, I/O) and `ctx.Err()` now propagate out of `Diagnose` as a real error — partial reports are never returned as success, so automation with deadlines can distinguish complete from truncated analysis.
+- **Workflow params via `${params.*}` with CLI/library overrides** (closes #81): top-level Dippin `vars` now map to graph attrs under `params.<key>`, making them available in agent prompts, tool commands, and edge conditions through `${params.key}` interpolation. Added repeatable `--param key=value` on the CLI plus `tracker.Config.Params` for library callers; overrides hard-fail on unknown keys at startup and run summaries print effective overridden params. New lint rules DIP120 (undeclared `${params.*}` reference) and DIP121 (declared but unused var).
 
 ### Changed
 

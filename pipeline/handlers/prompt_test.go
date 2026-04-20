@@ -29,6 +29,23 @@ func TestResolvePromptExpandsGraphVariables(t *testing.T) {
 	}
 }
 
+func TestResolvePromptExpandsParamsVariables(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "gen",
+		Attrs: map[string]string{"prompt": "Build ${params.target_name}"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	graphAttrs := map[string]string{"params.target_name": "my-app"}
+
+	prompt, err := ResolvePrompt(node, pctx, graphAttrs, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, "my-app") {
+		t.Errorf("expected ${params.target_name} expanded to 'my-app', got %q", prompt)
+	}
+}
+
 func TestResolvePromptInjectsPipelineContext(t *testing.T) {
 	node := &pipeline.Node{
 		ID:    "gen",

@@ -580,7 +580,8 @@ func (h *HumanHandler) resolveHumanPrompt(node *pipeline.Node, pctx *pipeline.Pi
 	if h.graph != nil {
 		graphAttrs = h.graph.Attrs
 	}
-	if expanded, err := pipeline.ExpandVariables(prompt, pctx, nil, graphAttrs, false); err == nil && expanded != "" {
+	params := pipeline.ExtractParamsFromGraphAttrs(graphAttrs)
+	if expanded, err := pipeline.ExpandVariables(prompt, pctx, params, graphAttrs, false); err == nil && expanded != "" {
 		prompt = expanded
 	}
 

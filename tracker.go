@@ -45,6 +45,7 @@ type Config struct {
 	AgentEvents   agent.EventHandler            // optional: live agent session events
 	LLMClient     agent.Completer               // optional: override auto-created client
 	Context       map[string]string             // optional: initial pipeline context
+	Params        map[string]string             // optional: override declared workflow params (keys without "params." prefix)
 	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
 	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
 	AutoApprove   bool                          // auto-approve all human gates with default/first option
@@ -183,6 +184,9 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		}
 	}()
 
+	if err := pipeline.ApplyGraphParamOverrides(graph, cfg.Params); err != nil {
+		return nil, fmt.Errorf("apply params: %w", err)
+	}
 	injectGraphDefaults(graph, cfg)
 
 	tokenTracker := llm.NewTokenTracker()

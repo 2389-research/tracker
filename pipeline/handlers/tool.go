@@ -183,7 +183,9 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 
 	// Layer 1: Expand ${namespace.key} variables with toolCommandMode=true.
 	// FAIL CLOSED: if expansion fails (e.g. unsafe ctx.* key), do NOT run the command.
-	expanded, err := pipeline.ExpandVariables(command, pctx, nil, nil, false, true)
+	graphAttrs := graphAttrsFromContext(pctx)
+	params := pipeline.ExtractParamsFromGraphAttrs(graphAttrs)
+	expanded, err := pipeline.ExpandVariables(command, pctx, params, graphAttrs, false, true)
 	if err != nil {
 		return "", fmt.Errorf("node %q tool_command variable expansion failed: %w", node.ID, err)
 	}
@@ -197,6 +199,21 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 		return "", err
 	}
 	return command, nil
+}
+
+func graphAttrsFromContext(pctx *pipeline.PipelineContext) map[string]string {
+	if pctx == nil {
+		return nil
+	}
+	snapshot := pctx.Snapshot()
+	attrs := make(map[string]string)
+	for key, value := range snapshot {
+		if !strings.HasPrefix(key, "graph.") {
+			continue
+		}
+		attrs[strings.TrimPrefix(key, "graph.")] = value
+	}
+	return attrs
 }
 
 // applyWorkingDir prepends a "cd <dir> && " prefix to command if the node has a

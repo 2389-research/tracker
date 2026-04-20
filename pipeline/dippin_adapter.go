@@ -79,6 +79,7 @@ func buildGraphFromWorkflow(workflow *ir.Workflow) *Graph {
 		g.Attrs["version"] = workflow.Version
 	}
 	extractWorkflowDefaults(workflow.Defaults, g.Attrs)
+	extractWorkflowVars(workflow.Vars, g.Attrs)
 	if len(workflow.Stylesheet) > 0 {
 		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
 	}
@@ -462,6 +463,12 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 	}
 	setIfNonEmpty(attrs, "context_compaction", defaults.Compaction)
 	setIfNonEmpty(attrs, "on_resume", defaults.OnResume)
+}
+
+func extractWorkflowVars(vars map[string]string, attrs map[string]string) {
+	for key, value := range vars {
+		attrs[graphParamPrefix+key] = value
+	}
 }
 
 // setIfNonEmpty sets attrs[key] = value only when value is non-empty.

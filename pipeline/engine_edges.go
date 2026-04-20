@@ -31,11 +31,16 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 
 // selectByCondition evaluates condition expressions on edges, returning the first match.
 func (e *Engine) selectByCondition(edges []*Edge, pctx *PipelineContext, ctxSnap map[string]string) (*Edge, error) {
+	params := ExtractParamsFromGraphAttrs(e.graph.Attrs)
 	for _, edge := range edges {
 		if edge.Condition == "" {
 			continue
 		}
-		match, err := EvaluateCondition(edge.Condition, pctx)
+		expandedCondition, err := ExpandVariables(edge.Condition, pctx, params, e.graph.Attrs, false)
+		if err != nil {
+			return nil, fmt.Errorf("expand condition on edge %s->%s: %w", edge.From, edge.To, err)
+		}
+		match, err := EvaluateCondition(expandedCondition, pctx)
 		if err != nil {
 			return nil, fmt.Errorf("evaluate condition on edge %s->%s: %w", edge.From, edge.To, err)
 		}
