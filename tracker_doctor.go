@@ -320,7 +320,7 @@ func probeProvider(p providerDef, key string) (bool, string) {
 		if isAuthError(msg) {
 			return false, "invalid or expired API key"
 		}
-		return false, trimErrMsg(msg, 80)
+		return false, trimErrMsg(sanitizeProviderError(msg), 80)
 	}
 	return true, ""
 }
@@ -340,6 +340,26 @@ func trimErrMsg(msg string, maxLen int) string {
 		return msg
 	}
 	return msg[:maxLen] + "..."
+}
+
+var providerErrorSanitizers = []struct {
+	re   *regexp.Regexp
+	repl string
+}{
+	{regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+\b`), "Bearer [REDACTED]"},
+	{regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]+\b`), "[REDACTED_API_KEY]"},
+	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}\b`), "[REDACTED_API_KEY]"},
+	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{20,}\b`), "[REDACTED_API_KEY]"},
+	{regexp.MustCompile(`(?i)\b(request[-_ ]?id)\s*[:=]\s*[A-Za-z0-9._-]+\b`), "$1=[REDACTED]"},
+	{regexp.MustCompile(`\breq_[A-Za-z0-9_-]+\b`), "req_[REDACTED]"},
+}
+
+func sanitizeProviderError(msg string) string {
+	sanitized := msg
+	for _, rule := range providerErrorSanitizers {
+		sanitized = rule.re.ReplaceAllString(sanitized, rule.repl)
+	}
+	return sanitized
 }
 
 // checkDippinLib verifies the dippin binary is installed. The full "dippin

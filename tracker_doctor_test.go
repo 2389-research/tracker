@@ -3,9 +3,13 @@
 package tracker
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
@@ -74,5 +78,62 @@ func TestDoctor_PipelineFileValidation(t *testing.T) {
 	}
 	if pipelineCheck == nil {
 		t.Fatal("Pipeline File check missing when PipelineFile set")
+	}
+}
+
+type doctorProbeTestAdapter struct {
+	completeErr error
+}
+
+func (a *doctorProbeTestAdapter) Name() string { return "test" }
+
+func (a *doctorProbeTestAdapter) Complete(_ context.Context, _ *llm.Request) (*llm.Response, error) {
+	return nil, a.completeErr
+}
+
+func (a *doctorProbeTestAdapter) Stream(_ context.Context, _ *llm.Request) <-chan llm.StreamEvent {
+	ch := make(chan llm.StreamEvent)
+	close(ch)
+	return ch
+}
+
+func (a *doctorProbeTestAdapter) Close() error { return nil }
+
+func TestSanitizeProviderError_RedactsSensitiveTokens(t *testing.T) {
+	in := "request failed: Authorization: Bearer verySecretToken request-id=req_abc123 key=sk-ant-supersecret AIzaSyA1234567890123456789012345"
+	got := sanitizeProviderError(in)
+
+	for _, secret := range []string{
+		"verySecretToken",
+		"req_abc123",
+		"sk-ant-supersecret",
+		"AIzaSyA1234567890123456789012345",
+	} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("sanitized message still contains secret %q: %q", secret, got)
+		}
+	}
+}
+
+func TestProbeProvider_SanitizesNonAuthError(t *testing.T) {
+	secret := "sk-1234567890SECRET"
+	ok, msg := probeProvider(providerDef{
+		name:         "OpenAI",
+		defaultModel: "gpt-4.1-mini",
+		buildAdapter: func(_ string) (llm.ProviderAdapter, error) {
+			return &doctorProbeTestAdapter{
+				completeErr: &llm.ProviderError{
+					SDKError: llm.SDKError{Msg: "boom Bearer topsecret " + secret + " req_abc123"},
+					Provider: "openai",
+				},
+			}, nil
+		},
+	}, "test-key")
+
+	if ok {
+		t.Fatal("expected auth probe to fail")
+	}
+	if strings.Contains(msg, "topsecret") || strings.Contains(msg, secret) || strings.Contains(msg, "req_abc123") {
+		t.Fatalf("probe message not sanitized: %q", msg)
 	}
 }
