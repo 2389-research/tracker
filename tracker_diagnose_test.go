@@ -1,6 +1,10 @@
 package tracker
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,5 +73,31 @@ func TestDiagnose_BudgetHalt(t *testing.T) {
 	}
 	if r.BudgetHalt.Message == "" {
 		t.Error("empty breach message")
+	}
+}
+
+func TestDiagnoseWithConfig_LogsMalformedStatusJSON(t *testing.T) {
+	runDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(runDir, "checkpoint.json"),
+		[]byte(`{"run_id":"bad-status","completed_nodes":["Start"],"timestamp":"2026-04-17T10:00:00Z"}`), 0o644); err != nil {
+		t.Fatalf("write checkpoint: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(runDir, "Build"), 0o755); err != nil {
+		t.Fatalf("mkdir node: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "Build", "status.json"), []byte("{"), 0o644); err != nil {
+		t.Fatalf("write status: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	r, err := DiagnoseWithConfig(runDir, DiagnoseConfig{LogWriter: &logBuf})
+	if err != nil {
+		t.Fatalf("DiagnoseWithConfig: %v", err)
+	}
+	if r.RunID != "bad-status" {
+		t.Fatalf("run_id = %q", r.RunID)
+	}
+	if !strings.Contains(logBuf.String(), "warning: cannot parse") {
+		t.Fatalf("missing warning in log output: %q", logBuf.String())
 	}
 }

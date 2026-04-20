@@ -5,6 +5,7 @@ package tracker
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -57,6 +58,13 @@ type Suggestion struct {
 	Message string `json:"message"`
 }
 
+// DiagnoseConfig configures non-fatal warning output for Diagnose.
+type DiagnoseConfig struct {
+	// LogWriter receives non-fatal warnings while parsing run artifacts. When
+	// nil, warnings are written to os.Stderr.
+	LogWriter io.Writer
+}
+
 // Suggestion kinds (stable; new ones may be added additively).
 const (
 	SuggestionRetryPattern     = "retry_pattern"
@@ -76,6 +84,11 @@ const (
 // ResolveRunDir or DiagnoseMostRecent first, which enforce the
 // .tracker/runs/<runID> layout.
 func Diagnose(runDir string) (*DiagnoseReport, error) {
+	return DiagnoseWithConfig(runDir, DiagnoseConfig{})
+}
+
+// DiagnoseWithConfig analyzes a run directory and returns a structured report.
+func DiagnoseWithConfig(runDir string, cfg DiagnoseConfig) (*DiagnoseReport, error) {
 	cpPath := filepath.Join(runDir, "checkpoint.json")
 	cp, err := pipeline.LoadCheckpoint(cpPath)
 	if err != nil {
@@ -85,7 +98,7 @@ func Diagnose(runDir string) (*DiagnoseReport, error) {
 		RunID:          cp.RunID,
 		CompletedNodes: len(cp.CompletedNodes),
 	}
-	failures := collectNodeFailuresLib(runDir)
+	failures := collectNodeFailuresLib(runDir, logWriterOrStderr(cfg.LogWriter))
 	report.BudgetHalt = enrichFromActivityLib(runDir, failures)
 	report.Failures = sortedFailures(failures)
 	report.Suggestions = buildSuggestions(report.Failures, report.BudgetHalt)
@@ -94,16 +107,21 @@ func Diagnose(runDir string) (*DiagnoseReport, error) {
 
 // DiagnoseMostRecent finds the most recent run under workdir and diagnoses it.
 func DiagnoseMostRecent(workdir string) (*DiagnoseReport, error) {
+	return DiagnoseMostRecentWithConfig(workdir, DiagnoseConfig{})
+}
+
+// DiagnoseMostRecentWithConfig finds the most recent run under workdir and diagnoses it.
+func DiagnoseMostRecentWithConfig(workdir string, cfg DiagnoseConfig) (*DiagnoseReport, error) {
 	id, err := MostRecentRunID(workdir)
 	if err != nil {
 		return nil, err
 	}
-	return Diagnose(filepath.Join(workdir, ".tracker", "runs", id))
+	return DiagnoseWithConfig(filepath.Join(workdir, ".tracker", "runs", id), cfg)
 }
 
 // ----- internals -----
 
-func collectNodeFailuresLib(runDir string) map[string]*NodeFailure {
+func collectNodeFailuresLib(runDir string, logWriter io.Writer) map[string]*NodeFailure {
 	failures := make(map[string]*NodeFailure)
 	entries, err := os.ReadDir(runDir)
 	if err != nil {
@@ -113,14 +131,14 @@ func collectNodeFailuresLib(runDir string) map[string]*NodeFailure {
 		if !e.IsDir() {
 			continue
 		}
-		if f := loadNodeFailureLib(runDir, e.Name()); f != nil {
+		if f := loadNodeFailureLib(runDir, e.Name(), logWriter); f != nil {
 			failures[e.Name()] = f
 		}
 	}
 	return failures
 }
 
-func loadNodeFailureLib(runDir, nodeID string) *NodeFailure {
+func loadNodeFailureLib(runDir, nodeID string, logWriter io.Writer) *NodeFailure {
 	statusPath := filepath.Join(runDir, nodeID, "status.json")
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
@@ -131,7 +149,7 @@ func loadNodeFailureLib(runDir, nodeID string) *NodeFailure {
 		ContextUpdates map[string]string `json:"context_updates"`
 	}
 	if err := json.Unmarshal(data, &status); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: cannot parse %s: %v\n", statusPath, err)
+		fmt.Fprintf(logWriter, "warning: cannot parse %s: %v\n", statusPath, err)
 		return nil
 	}
 	if status.Outcome != "fail" {

@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -14,7 +15,7 @@ import (
 
 // diagnoseMostRecent finds and diagnoses the most recent run.
 func diagnoseMostRecent(workdir string) error {
-	report, err := tracker.DiagnoseMostRecent(workdir)
+	report, err := tracker.DiagnoseMostRecentWithConfig(workdir, tracker.DiagnoseConfig{LogWriter: io.Discard})
 	if err != nil {
 		return err
 	}
@@ -28,7 +29,7 @@ func runDiagnose(workdir, runID string) error {
 	if err != nil {
 		return err
 	}
-	report, err := tracker.Diagnose(runDir)
+	report, err := tracker.DiagnoseWithConfig(runDir, tracker.DiagnoseConfig{LogWriter: io.Discard})
 	if err != nil {
 		return err
 	}

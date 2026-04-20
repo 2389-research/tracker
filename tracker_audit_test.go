@@ -1,8 +1,10 @@
 package tracker
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,5 +65,25 @@ func TestListRuns_MultipleRuns(t *testing.T) {
 	}
 	if runs[0].RunID != "r2" {
 		t.Errorf("first = %q, want r2 (newest first)", runs[0].RunID)
+	}
+}
+
+func TestListRunsWithConfig_LogsUnreadableActivity(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	must(t, os.MkdirAll(filepath.Join(runsDir, "r1"), 0o755))
+	must(t, os.WriteFile(filepath.Join(runsDir, "r1", "checkpoint.json"),
+		[]byte(`{"run_id":"r1","completed_nodes":["A"],"timestamp":"2026-04-17T10:00:00Z"}`), 0o644))
+	activityPath := filepath.Join(runsDir, "r1", "activity.jsonl")
+	must(t, os.WriteFile(activityPath, []byte(`{"ts":"2026-04-17T10:00:00Z","type":"pipeline_started"}`), 0o644))
+	must(t, os.Chmod(activityPath, 0o000))
+
+	var logBuf bytes.Buffer
+	_, err := ListRunsWithConfig(workdir, ListRunsConfig{LogWriter: &logBuf})
+	if err != nil {
+		t.Fatalf("ListRunsWithConfig: %v", err)
+	}
+	if !strings.Contains(logBuf.String(), "warning: run r1: cannot read activity log:") {
+		t.Fatalf("missing warning in log output: %q", logBuf.String())
 	}
 }

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **OpenAI Responses API: `function_call_output` and `function_call` items now always serialize required fields** (closes #114). Previously the shared `openaiInput` struct used `omitempty` on every field, so a tool returning an empty-string result produced `{"type":"function_call_output","call_id":"..."}` with no `output` field, and a no-argument tool call produced `function_call` with no `arguments`. OpenAI's endpoint tolerated this, but OpenRouter's strict Zod validator rejected the requests with `invalid_prompt` / `invalid_union` errors, symptomatic on GLM, Qwen, and Kimi via OpenRouter. Fixed by replacing the `omitempty`-tagged single struct with a `MarshalJSON` method that emits only fields valid per item type, with required fields always present. Reported by @Nopik.
+- `tracker audit` / run listing and `tracker diagnose` now suppress non-fatal library warning noise on CLI stderr by using configurable library log writers and passing `io.Discard` from user-facing CLI commands. Library callers can still opt into warnings by setting `ListRunsConfig.LogWriter` / `DiagnoseConfig.LogWriter`.
 
 ## [0.18.0] - 2026-04-17
 

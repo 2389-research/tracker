@@ -583,3 +583,57 @@ func TestListRunsNoRunsDir(t *testing.T) {
 		t.Fatalf("expected 'No runs found' when dir missing, got:\n%s", output)
 	}
 }
+
+func TestListRuns_SuppressesLibraryWarningsOnStderr(t *testing.T) {
+	workdir, runDir := setupTestRun(t, "bad-activity")
+
+	now := time.Now()
+	makeCheckpoint(t, runDir, map[string]interface{}{
+		"run_id":          "bad-activity",
+		"current_node":    "",
+		"completed_nodes": []string{"Start"},
+		"retry_counts":    map[string]int{},
+		"context":         map[string]string{},
+		"timestamp":       now.Format(time.RFC3339),
+		"restart_count":   0,
+	})
+	activityPath := filepath.Join(runDir, "activity.jsonl")
+	if err := os.WriteFile(activityPath, []byte(`{"ts":"2026-04-17T10:00:00Z","type":"pipeline_started"}`), 0o644); err != nil {
+		t.Fatalf("write activity: %v", err)
+	}
+	if err := os.Chmod(activityPath, 0o000); err != nil {
+		t.Fatalf("chmod activity: %v", err)
+	}
+
+	oldStdout := os.Stdout
+	stdoutR, stdoutW, _ := os.Pipe()
+	os.Stdout = stdoutW
+	oldStderr := os.Stderr
+	stderrR, stderrW, _ := os.Pipe()
+	os.Stderr = stderrW
+
+	err := listRuns(workdir)
+
+	stdoutW.Close()
+	os.Stdout = oldStdout
+	stderrW.Close()
+	os.Stderr = oldStderr
+
+	if err != nil {
+		t.Fatalf("listRuns returned error: %v", err)
+	}
+
+	stdoutBuf := make([]byte, 8192)
+	nOut, _ := stdoutR.Read(stdoutBuf)
+	stdout := string(stdoutBuf[:nOut])
+	if !strings.Contains(stdout, "bad-activity") {
+		t.Fatalf("expected run in stdout listing, got:\n%s", stdout)
+	}
+
+	stderrBuf := make([]byte, 8192)
+	nErr, _ := stderrR.Read(stderrBuf)
+	stderr := string(stderrBuf[:nErr])
+	if strings.Contains(stderr, "warning: run bad-activity: cannot read activity log") {
+		t.Fatalf("expected warning to be suppressed on stderr, got:\n%s", stderr)
+	}
+}

@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -61,6 +62,13 @@ type RunSummary struct {
 	FailedAt  string        `json:"failed_at,omitempty"`
 }
 
+// ListRunsConfig configures non-fatal warning output for ListRuns.
+type ListRunsConfig struct {
+	// LogWriter receives non-fatal warnings while scanning runs. When nil,
+	// warnings are written to os.Stderr.
+	LogWriter io.Writer
+}
+
 // Audit reads checkpoint.json and activity.jsonl under runDir and returns a
 // structured report.
 //
@@ -99,6 +107,11 @@ func Audit(runDir string) (*AuditReport, error) {
 
 // ListRuns returns all runs under workdir/.tracker/runs, sorted newest first.
 func ListRuns(workdir string) ([]RunSummary, error) {
+	return ListRunsWithConfig(workdir, ListRunsConfig{})
+}
+
+// ListRunsWithConfig returns all runs under workdir/.tracker/runs, sorted newest first.
+func ListRunsWithConfig(workdir string, cfg ListRunsConfig) ([]RunSummary, error) {
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
@@ -108,11 +121,12 @@ func ListRuns(workdir string) ([]RunSummary, error) {
 		return nil, fmt.Errorf("cannot read runs directory: %w", err)
 	}
 	var runs []RunSummary
+	logWriter := logWriterOrStderr(cfg.LogWriter)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		rs, ok := buildLibRunSummary(runsDir, e.Name())
+		rs, ok := buildLibRunSummary(runsDir, e.Name(), logWriter)
 		if ok {
 			runs = append(runs, rs)
 		}
@@ -213,7 +227,7 @@ func buildAuditRecommendations(cp *pipeline.Checkpoint, status string, total tim
 	return recs
 }
 
-func buildLibRunSummary(runsDir, name string) (RunSummary, bool) {
+func buildLibRunSummary(runsDir, name string, logWriter io.Writer) (RunSummary, bool) {
 	runDir := filepath.Join(runsDir, name)
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
 	if err != nil {
@@ -221,7 +235,7 @@ func buildLibRunSummary(runsDir, name string) (RunSummary, bool) {
 	}
 	activity, lerr := LoadActivityLog(runDir)
 	if lerr != nil {
-		fmt.Fprintf(os.Stderr, "warning: run %s: cannot read activity log: %v\n", name, lerr)
+		fmt.Fprintf(logWriter, "warning: run %s: cannot read activity log: %v\n", name, lerr)
 		activity = nil // continue with nil so the summary still builds
 	}
 	SortActivityByTime(activity)
@@ -247,4 +261,11 @@ func buildLibRunSummary(runsDir, name string) (RunSummary, bool) {
 		rs.FailedAt = cp.CurrentNode
 	}
 	return rs, true
+}
+
+func logWriterOrStderr(w io.Writer) io.Writer {
+	if w == nil {
+		return os.Stderr
+	}
+	return w
 }
