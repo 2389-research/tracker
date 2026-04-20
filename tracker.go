@@ -368,7 +368,7 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 	if len(cfg.Context) > 0 {
 		opts = append(opts, pipeline.WithInitialContext(cfg.Context))
 	}
-	budget := resolveBudgetLimits(cfg.Budget, graph)
+	budget := ResolveBudgetLimits(cfg.Budget, graph)
 	if guard := pipeline.NewBudgetGuard(budget); guard != nil {
 		opts = append(opts, pipeline.WithBudgetGuard(guard))
 	}
@@ -376,11 +376,18 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 	return opts
 }
 
-// resolveBudgetLimits fills any zero field on cfg from the matching
+// ResolveBudgetLimits fills any zero field on cfg from the matching
 // workflow-level default in graph.Attrs. Config values take precedence —
 // the graph attrs are only consulted for fields the caller left unset.
 // Returns the original cfg unchanged if graph is nil or has no attrs.
-func resolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipeline.BudgetLimits {
+//
+// The graph-level keys consulted are max_total_tokens, max_cost_cents,
+// and max_wall_time, which the dippin adapter writes from
+// WorkflowDefaults.Max* fields in v0.21.0+.
+//
+// Exported so the tracker CLI can merge its --max-* flag values with
+// workflow defaults without re-implementing the same logic.
+func ResolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipeline.BudgetLimits {
 	if graph == nil || len(graph.Attrs) == 0 {
 		return cfg
 	}

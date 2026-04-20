@@ -148,7 +148,7 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		activityLog, llmClient, verbose, jsonOut,
 	)
 
-	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler)
+	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler, graph)
 	registry := handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
@@ -199,7 +199,10 @@ func wireLLMTraceToLog(llmClient *llm.Client, activityLog *pipeline.JSONLEventHa
 }
 
 // buildEngineOptions assembles the engine option slice from config values.
-func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler) []pipeline.EngineOption {
+// Budget limits are the effective merge of activeBudgetLimits (CLI --max-*
+// flags) over workflow-level defaults from graph.Attrs (populated by the
+// dippin adapter from WorkflowDefaults.Max*). CLI flags always win.
+func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler, graph *pipeline.Graph) []pipeline.EngineOption {
 	opts := []pipeline.EngineOption{
 		pipeline.WithArtifactDir(artifactDir),
 		pipeline.WithPipelineEventHandler(evtHandler),
@@ -208,7 +211,8 @@ func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.Pipe
 	if checkpoint != "" {
 		opts = append(opts, pipeline.WithCheckpointPath(checkpoint))
 	}
-	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
+	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
+	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {
 		opts = append(opts, pipeline.WithBudgetGuard(guard))
 	}
 	return opts
@@ -533,7 +537,8 @@ func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, a
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
 	}
-	if guard := pipeline.NewBudgetGuard(activeBudgetLimits); guard != nil {
+	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
+	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {
 		engineOpts = append(engineOpts, pipeline.WithBudgetGuard(guard))
 	}
 	return pipeline.NewEngine(graph, registry, engineOpts...)

@@ -695,7 +695,7 @@ func TestResolveProviderBaseURL_UnknownProvider(t *testing.T) {
 }
 
 // TestResolveBudgetLimits_FallsBackToGraphAttrs verifies that when
-// Config.Budget is zero, resolveBudgetLimits fills from the graph-level
+// Config.Budget is zero, ResolveBudgetLimits fills from the graph-level
 // max_total_tokens / max_cost_cents / max_wall_time attrs populated by
 // the dippin adapter from WorkflowDefaults. Closes tracker#67.
 func TestResolveBudgetLimits_FallsBackToGraphAttrs(t *testing.T) {
@@ -704,7 +704,7 @@ func TestResolveBudgetLimits_FallsBackToGraphAttrs(t *testing.T) {
 		"max_cost_cents":   "250",
 		"max_wall_time":    "15m",
 	}}
-	got := resolveBudgetLimits(pipeline.BudgetLimits{}, graph)
+	got := ResolveBudgetLimits(pipeline.BudgetLimits{}, graph)
 	if got.MaxTotalTokens != 50000 {
 		t.Errorf("MaxTotalTokens = %d, want 50000", got.MaxTotalTokens)
 	}
@@ -730,7 +730,7 @@ func TestResolveBudgetLimits_ConfigWinsOverGraph(t *testing.T) {
 		MaxCostCents:   1,
 		MaxWallTime:    time.Second,
 	}
-	got := resolveBudgetLimits(cfg, graph)
+	got := ResolveBudgetLimits(cfg, graph)
 	if got.MaxTotalTokens != 9999 {
 		t.Errorf("explicit MaxTotalTokens overridden: got %d, want 9999", got.MaxTotalTokens)
 	}
@@ -745,7 +745,7 @@ func TestResolveBudgetLimits_ConfigWinsOverGraph(t *testing.T) {
 // TestResolveBudgetLimits_NilGraph verifies the no-op case.
 func TestResolveBudgetLimits_NilGraph(t *testing.T) {
 	cfg := pipeline.BudgetLimits{MaxTotalTokens: 100}
-	got := resolveBudgetLimits(cfg, nil)
+	got := ResolveBudgetLimits(cfg, nil)
 	if got.MaxTotalTokens != 100 {
 		t.Errorf("nil graph should pass cfg through, got %+v", got)
 	}
