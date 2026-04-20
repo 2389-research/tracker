@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -335,6 +337,26 @@ type errWriter struct{ err error }
 
 func (e *errWriter) Write(_ []byte) (int, error) { return 0, e.err }
 
+// shortWriter returns n < len(p) with a nil error — a legal but rare
+// io.Writer behavior that NDJSONWriter must treat as a stream error so
+// silent truncation cannot sneak through.
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil // one byte short, nil error
+}
+
+func TestNDJSONWriter_Write_ShortWriteIsError(t *testing.T) {
+	w := NewNDJSONWriter(shortWriter{})
+	err := w.Write(StreamEvent{Timestamp: "t", Source: "pipeline", Type: "x"})
+	if err != io.ErrShortWrite {
+		t.Errorf("err = %v, want io.ErrShortWrite", err)
+	}
+}
+
 func TestNDJSONWriter_WriteReturnsError(t *testing.T) {
 	w := NewNDJSONWriter(&errWriter{err: errors.New("sink closed")})
 	err := w.Write(StreamEvent{Timestamp: "t", Source: "pipeline", Type: "stage_started"})
@@ -387,24 +409,54 @@ func TestNDJSONWriter_TraceObserver_PanicRecovery(t *testing.T) {
 
 // TestNDJSONWriter_PanicSuppressionIsPerInstance verifies that one writer
 // recovering from a panic does not silence panic logging on a separate
-// writer instance. Both writers must independently report their first
-// panic; regressions here mean package-level state re-crept in.
+// writer instance. Both writers must independently emit their first
+// panic line to os.Stderr; regressions here mean package-level state
+// re-crept in (a package-level sync.Once would log once and silently
+// swallow the second, which the assertion below catches).
 func TestNDJSONWriter_PanicSuppressionIsPerInstance(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("handlers should recover, got: %v", r)
 		}
 	}()
-	w1 := NewNDJSONWriter(&panicWriter{})
-	w2 := NewNDJSONWriter(&panicWriter{})
-	// First panic on w1 — must not consume w2's Once.
-	w1.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
-		Type:      pipeline.EventPipelineStarted,
-		Timestamp: time.Now(),
+
+	stderr := captureStderr(t, func() {
+		w1 := NewNDJSONWriter(&panicWriter{})
+		w2 := NewNDJSONWriter(&panicWriter{})
+		w1.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventPipelineStarted, Timestamp: time.Now(),
+		})
+		w2.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+			Type: pipeline.EventPipelineStarted, Timestamp: time.Now(),
+		})
 	})
-	// Second panic on w2 — still the first on its own instance.
-	w2.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
-		Type:      pipeline.EventPipelineStarted,
-		Timestamp: time.Now(),
-	})
+
+	// Count the recovered-panic log lines. Each writer must emit its own.
+	// Package-level suppression would produce exactly 1; per-instance produces 2.
+	got := strings.Count(stderr, "NDJSON pipeline handler recovered from panic")
+	if got != 2 {
+		t.Errorf("got %d panic log lines, want 2 (each writer instance logs independently); stderr was:\n%s", got, stderr)
+	}
+}
+
+// captureStderr swaps os.Stderr for an os.Pipe for the duration of fn,
+// returning the captured output as a string.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	fn()
+	w.Close()
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(data)
 }

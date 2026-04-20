@@ -574,8 +574,13 @@ result, _ := tracker.Run(ctx, source, tracker.Config{
 ### Analyzing past runs from code
 
 ```go
-import tracker "github.com/2389-research/tracker"
+import (
+    "context"
 
+    tracker "github.com/2389-research/tracker"
+)
+
+ctx := context.Background()
 report, err := tracker.DiagnoseMostRecent(ctx, ".")
 if err != nil { log.Fatal(err) }
 
@@ -588,7 +593,7 @@ for _, s := range report.Suggestions {
 }
 ```
 
-`tracker.Audit`, `tracker.DiagnoseMostRecent`, `tracker.Simulate`, and `tracker.Doctor` all accept `context.Context` as their first argument and return JSON-serializable reports. `Audit` and `DiagnoseMostRecent`/`Diagnose` additionally accept an optional config (`AuditConfig`, `DiagnoseConfig`) with a `LogWriter` for non-fatal parse warnings — set it to `io.Discard` to silence warnings in embedded callers. `Simulate` takes just `ctx` and source text; `Doctor` takes a required `DoctorConfig` plus optional functional options (e.g., `tracker.WithVersionInfo`).
+`tracker.Audit`, `tracker.DiagnoseMostRecent`, `tracker.Simulate`, and `tracker.Doctor` all accept `context.Context` as their first argument and return JSON-serializable reports. `tracker.ListRuns` and `DiagnoseMostRecent`/`Diagnose` accept an optional config (`AuditConfig`, `DiagnoseConfig`) with a `LogWriter` for non-fatal parse warnings — set it to `io.Discard` to silence warnings in embedded callers. `Audit` and `Simulate` currently take just `ctx` (plus their payload); `Doctor` takes a required `DoctorConfig` plus optional functional options (e.g., `tracker.WithVersionInfo`).
 
 To stream events programmatically in the same NDJSON format as `tracker --json`, use `tracker.NewNDJSONWriter`:
 

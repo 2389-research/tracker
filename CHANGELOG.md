@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tracker.Doctor(cfg)` → `tracker.Doctor(ctx, cfg, opts...)`.
   - `tracker.Diagnose(runDir)` → `tracker.Diagnose(ctx, runDir, opts...)`.
   - `tracker.DiagnoseMostRecent(workdir)` → `tracker.DiagnoseMostRecent(ctx, workdir, opts...)`.
-  - `tracker.Audit(runDir)` → `tracker.Audit(ctx, runDir, opts...)`.
+  - `tracker.Audit(runDir)` → `tracker.Audit(ctx, runDir)`. (No config struct — Audit emits no suppressible warnings. Use `ListRuns` + `AuditConfig{LogWriter}` for bulk enumeration.)
   - `tracker.Simulate(source)` → `tracker.Simulate(ctx, source)`.
   - `tracker.ListRuns(workdir)` now accepts optional `...AuditConfig`.
   - `tracker.NDJSONEvent` → `tracker.StreamEvent`. Wire-format JSON tags unchanged.

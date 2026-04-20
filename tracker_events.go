@@ -57,9 +57,10 @@ func NewNDJSONWriter(w io.Writer) *NDJSONWriter {
 
 // Write serializes evt as a JSON line. Safe to call from multiple
 // goroutines. Returns a non-nil error if marshalling or writing to the
-// underlying io.Writer fails; the first write error is also logged to
-// os.Stderr once so long-running callers that ignore the error still
-// surface it.
+// underlying io.Writer fails, including short writes (io.Writer.Write
+// may legally return n < len(data) with a nil error). The first write
+// error is also logged to os.Stderr once so long-running callers that
+// ignore the return value still surface it.
 func (s *NDJSONWriter) Write(evt StreamEvent) error {
 	data, err := json.Marshal(evt)
 	if err != nil {
@@ -68,7 +69,11 @@ func (s *NDJSONWriter) Write(evt StreamEvent) error {
 	data = append(data, '\n')
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, werr := s.w.Write(data); werr != nil {
+	n, werr := s.w.Write(data)
+	if werr == nil && n < len(data) {
+		werr = io.ErrShortWrite
+	}
+	if werr != nil {
 		s.errOnce.Do(func() {
 			fmt.Fprintf(os.Stderr, "tracker: NDJSON stream write error: %v (further write errors suppressed)\n", werr)
 		})

@@ -121,6 +121,9 @@ func Doctor(ctx context.Context, cfg DoctorConfig, opts ...DoctorOption) (*Docto
 		ctx = context.Background()
 	}
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		opt(&cfg)
 	}
 	if cfg.WorkDir == "" {
@@ -265,13 +268,19 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 			continue
 		}
 		if probe && p.buildAdapter != nil {
-			authOk, authMsg := probeProvider(ctx, p, key)
-			if !authOk {
-				out.Details = append(out.Details, CheckDetail{
-					Status:  CheckStatusError,
-					Message: fmt.Sprintf("%-15s %s=%s (auth failed: %s)", p.name, envName, masked, authMsg),
-					Hint:    fmt.Sprintf("your %s key is invalid or expired — export a fresh key or run `tracker setup`", p.name),
-				})
+			ok, probeMsg, isAuth := probeProvider(ctx, p, key)
+			if !ok {
+				detail := CheckDetail{Status: CheckStatusError}
+				if isAuth {
+					detail.Message = fmt.Sprintf("%-15s %s=%s (auth failed: %s)", p.name, envName, masked, probeMsg)
+					detail.Hint = fmt.Sprintf("your %s key is invalid or expired — export a fresh key or run `tracker setup`", p.name)
+				} else {
+					// DNS, timeout, transport, context cancel, or other non-auth failure.
+					// Do NOT tell the user to rotate a working key.
+					detail.Message = fmt.Sprintf("%-15s %s=%s (probe failed: %s)", p.name, envName, masked, probeMsg)
+					detail.Hint = fmt.Sprintf("probe for %s failed on network/transport — verify connectivity and %s_BASE_URL before rotating keys", p.name, strings.ToUpper(p.name))
+				}
+				out.Details = append(out.Details, detail)
 				hasProviderErrors = true
 				continue
 			}
@@ -337,14 +346,17 @@ func findProviderKey(envVars []string) (key, envName string) {
 	return "", ""
 }
 
-func probeProvider(ctx context.Context, p providerDef, key string) (bool, string) {
+// probeProvider returns (ok, msg, isAuthFailure). The third return lets the
+// caller distinguish an actual auth failure (rotate-the-key guidance) from
+// a network/transport/timeout failure (don't rotate good keys).
+func probeProvider(ctx context.Context, p providerDef, key string) (bool, string, bool) {
 	adapter, err := p.buildAdapter(key)
 	if err != nil {
-		return false, fmt.Sprintf("build adapter: %v", err)
+		return false, fmt.Sprintf("build adapter: %v", err), false
 	}
 	client, err := llm.NewClient(llm.WithProvider(adapter))
 	if err != nil {
-		return false, fmt.Sprintf("create client: %v", err)
+		return false, fmt.Sprintf("create client: %v", err), false
 	}
 	defer client.Close()
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -359,15 +371,15 @@ func probeProvider(ctx context.Context, p providerDef, key string) (bool, string
 	if err != nil {
 		msg := err.Error()
 		if isAuthError(msg) {
-			return false, "invalid or expired API key"
+			return false, "invalid or expired API key", true
 		}
 		// Sanitize FIRST, then trim. If we trim first, a key that
 		// straddles the 80-char boundary gets cut into a shorter prefix
 		// that no longer matches the regex, leaking the prefix. Sanitize
 		// the full message, then trim whatever's left.
-		return false, trimErrMsg(sanitizeProviderError(msg), 80)
+		return false, trimErrMsg(sanitizeProviderError(msg), 80), false
 	}
-	return true, ""
+	return true, "", false
 }
 
 // sanitizeProviderError strips API keys and bearer tokens from provider error

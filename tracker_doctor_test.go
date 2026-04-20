@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -160,6 +161,9 @@ func TestCheckWorkdir_DistinguishesErrorKinds(t *testing.T) {
 		}
 	})
 	t.Run("permission denied", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("permission semantics differ on Windows")
+		}
 		if os.Geteuid() == 0 {
 			t.Skip("permission tests are meaningless as root")
 		}
@@ -188,6 +192,9 @@ func TestCheckWorkdir_DistinguishesErrorKinds(t *testing.T) {
 // .ai that is not ENOENT (e.g. permission denied) is reported as an error
 // rather than silently treated as "will be created on first run".
 func TestCheckArtifactDirs_NonENOENTStatError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission semantics differ on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("permission tests are meaningless as root")
 	}

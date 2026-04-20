@@ -19,11 +19,13 @@ import (
 
 // DiagnoseConfig configures a Diagnose() run.
 type DiagnoseConfig struct {
-	// LogWriter receives non-fatal parse warnings (malformed status.json
-	// files, unreadable artifact directories). Nil is treated as
-	// io.Discard so library callers do not see stray warnings on
-	// os.Stderr. The tracker CLI sets this to io.Discard for user-facing
-	// commands.
+	// LogWriter receives non-fatal parse/read warnings — specifically
+	// malformed status.json content (one warning per bad file) and
+	// bufio.Scanner errors while reading activity.jsonl (e.g. lines
+	// exceeding the 1 MB buffer limit, I/O failures). Nil is treated
+	// as io.Discard so library callers do not see stray warnings on
+	// os.Stderr. The tracker CLI sets this to io.Discard for user-
+	// facing commands.
 	LogWriter io.Writer
 }
 

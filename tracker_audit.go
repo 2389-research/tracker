@@ -86,14 +86,17 @@ type RunSummary struct {
 // pipeline.LoadCheckpoint and LoadActivityLog, which is out of scope
 // today (both are fast and bounded). Nil is coalesced to
 // context.Background().
-func Audit(ctx context.Context, runDir string, opts ...AuditConfig) (*AuditReport, error) {
+//
+// Audit does not accept AuditConfig — it emits no warnings to suppress.
+// Use ListRuns + AuditConfig{LogWriter} for bulk enumeration where the
+// summary builder may skip unreadable activity logs.
+func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	_ = firstAuditConfig(opts) // reserved for future fields
 	cp, err := pipeline.LoadCheckpoint(filepath.Join(runDir, "checkpoint.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load checkpoint: %w", err)
