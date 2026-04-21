@@ -197,9 +197,22 @@ func (h *acpClientHandler) ReadTextFile(_ context.Context, p acp.ReadTextFileReq
 
 // validatePathInWorkDir ensures the given absolute path is under the working directory.
 // Resolves symlinks to prevent escaping the sandbox via symlink chains.
+// SECURITY: rejects paths containing ".." segments before resolution to prevent
+// symlink/.. traversal attacks (where a symlink points outside and .. then exits).
 func validatePathInWorkDir(path, workDir string) error {
 	if workDir == "" {
 		return nil // no restriction if working dir is unset
+	}
+	// Reject raw paths containing ".." to prevent symlink/../escape attacks.
+	// filepath.Clean would collapse these lexically, masking the escape.
+	// Split on both '/' and '\' to catch Windows-style paths on any platform.
+	segments := strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	for _, seg := range segments {
+		if seg == ".." {
+			return fmt.Errorf("path %q contains '..' component", path)
+		}
 	}
 	resolved, err := resolvePathForValidation(path)
 	if err != nil {

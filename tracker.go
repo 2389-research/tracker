@@ -665,19 +665,20 @@ func (e *Engine) populateBudgetHaltIfNeeded(result *Result, engineResult *pipeli
 	result.Cost.LimitsHit = engineResult.BudgetLimitsHit
 }
 
-// defaultModelResolver returns an llm.ModelResolver that maps any provider to
-// the graph's default model. Per-provider model overrides are not yet supported
-// (the same model attr is used for cost estimation regardless of provider).
-// When the graph has no llm_model attr set, the resolver returns "", which
-// yields USD=0 via llm.EstimateCost.
+// defaultModelResolver returns an llm.ModelResolver that uses per-provider
+// observed models from the token tracker, falling back to the graph's default
+// llm_model attr for providers where no model was observed.
 func (e *Engine) defaultModelResolver() llm.ModelResolver {
-	model := ""
+	fallback := ""
 	if e.inner != nil {
 		if g := e.inner.Graph(); g != nil {
-			model = g.Attrs["llm_model"]
+			fallback = g.Attrs["llm_model"]
 		}
 	}
-	return func(provider string) string { return model }
+	if e.tokenTracker != nil {
+		return e.tokenTracker.ObservedModelResolver(fallback)
+	}
+	return func(provider string) string { return fallback }
 }
 
 // Close releases resources. Must be called if the engine was created

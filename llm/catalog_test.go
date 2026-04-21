@@ -49,8 +49,8 @@ func TestGetModelInfo_Sonnet46(t *testing.T) {
 	if info.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want \"anthropic\"", info.Provider)
 	}
-	if info.ContextWindow != 200000 {
-		t.Errorf("ContextWindow = %d, want 200000", info.ContextWindow)
+	if info.ContextWindow != 1000000 {
+		t.Errorf("ContextWindow = %d, want 1000000", info.ContextWindow)
 	}
 }
 
