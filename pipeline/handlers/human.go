@@ -812,10 +812,14 @@ func buildInterviewAnswersObjectJSON(result *InterviewResult) (string, error) {
 			continue
 		}
 		if key := strings.TrimSpace(q.ID); key != "" {
-			obj[key] = answer
+			if _, exists := obj[key]; !exists {
+				obj[key] = answer
+			}
 		}
 		if key := normalizeInterviewQuestionKey(q.Text); key != "" {
-			obj[key] = answer
+			if _, exists := obj[key]; !exists {
+				obj[key] = answer
+			}
 		}
 	}
 	b, err := json.Marshal(obj)

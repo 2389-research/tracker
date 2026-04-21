@@ -91,5 +91,5 @@ func rawJSONValueToContext(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &s); err == nil {
 		return s
 	}
-	return strings.TrimSpace(string(raw))
+	return string(raw)
 }

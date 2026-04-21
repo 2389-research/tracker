@@ -38,12 +38,11 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 
 func formatWritesError(nodeID string, writes []string, source string, parseErr error, raw string) string {
 	return fmt.Sprintf(
-		"node %q declared writes: [%s]\n%s is not compatible with writes extraction: %v\nRaw %s: %s",
+		"node %q declared writes: [%s]\n%s is not compatible with writes extraction: %v\nRaw output: %s",
 		nodeID,
 		strings.Join(writes, ", "),
 		source,
 		parseErr,
-		strings.ToLower(source),
 		raw,
 	)
 }
