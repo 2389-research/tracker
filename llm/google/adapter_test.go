@@ -401,6 +401,32 @@ func TestAdapterComplete(t *testing.T) {
 	}
 }
 
+func TestAdapterCompleteFallsBackToRequestedModelWhenModelVersionMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"candidates": [{
+				"content": {"role": "model", "parts": [{"text": "Hello from Gemini!"}]},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15}
+		}`)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	resp, err := a.Complete(context.Background(), &llm.Request{
+		Model:    "gemini-2.5-pro",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Model != "gemini-2.5-pro" {
+		t.Fatalf("Model = %q, want request model", resp.Model)
+	}
+}
+
 func TestAdapterCompleteErrorStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

@@ -98,18 +98,20 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 		s.TotalCacheReadTokens += e.Stats.CacheReadTokens
 		s.TotalCacheWriteTokens += e.Stats.CacheWriteTokens
 		s.SessionCount++
-		if p := e.Stats.Provider; p != "" {
-			pt := s.ProviderTotals[p]
-			pt.InputTokens += e.Stats.InputTokens
-			pt.OutputTokens += e.Stats.OutputTokens
-			pt.TotalTokens += e.Stats.TotalTokens
-			pt.CostUSD += e.Stats.CostUSD
-			pt.ReasoningTokens += e.Stats.ReasoningTokens
-			pt.CacheReadTokens += e.Stats.CacheReadTokens
-			pt.CacheWriteTokens += e.Stats.CacheWriteTokens
-			pt.SessionCount++
-			s.ProviderTotals[p] = pt
+		provider := e.Stats.Provider
+		if provider == "" {
+			provider = "unknown"
 		}
+		pt := s.ProviderTotals[provider]
+		pt.InputTokens += e.Stats.InputTokens
+		pt.OutputTokens += e.Stats.OutputTokens
+		pt.TotalTokens += e.Stats.TotalTokens
+		pt.CostUSD += e.Stats.CostUSD
+		pt.ReasoningTokens += e.Stats.ReasoningTokens
+		pt.CacheReadTokens += e.Stats.CacheReadTokens
+		pt.CacheWriteTokens += e.Stats.CacheWriteTokens
+		pt.SessionCount++
+		s.ProviderTotals[provider] = pt
 	}
 	if s.SessionCount == 0 {
 		return nil

@@ -742,7 +742,7 @@ func TestAggregateUsage_PerProviderTotals(t *testing.T) {
 	}
 }
 
-func TestAggregateUsage_SkipsEntriesWithoutProvider(t *testing.T) {
+func TestAggregateUsage_TracksEntriesWithoutProviderAsUnknown(t *testing.T) {
 	tr := &Trace{Entries: []TraceEntry{
 		{Stats: &SessionStats{InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.01}}, // no provider
 		{Stats: &SessionStats{InputTokens: 200, OutputTokens: 75, TotalTokens: 275, CostUSD: 0.02, Provider: "openai"}},
@@ -752,11 +752,14 @@ func TestAggregateUsage_SkipsEntriesWithoutProvider(t *testing.T) {
 	if s == nil || s.TotalTokens != 425 {
 		t.Fatalf("totals wrong: %+v", s)
 	}
-	if len(s.ProviderTotals) != 1 {
-		t.Errorf("should only have 1 provider, got %d", len(s.ProviderTotals))
+	if len(s.ProviderTotals) != 2 {
+		t.Errorf("should have openai and unknown providers, got %d", len(s.ProviderTotals))
 	}
 	if _, ok := s.ProviderTotals["openai"]; !ok {
 		t.Errorf("openai missing from ProviderTotals")
+	}
+	if unknown := s.ProviderTotals["unknown"]; unknown.TotalTokens != 150 || unknown.SessionCount != 1 {
+		t.Errorf("unknown provider rollup = %+v", unknown)
 	}
 }
 

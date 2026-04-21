@@ -787,6 +787,62 @@ func TestPrintRunSummaryShowsTotals(t *testing.T) {
 	}
 }
 
+func TestPrintRunSummaryUsesEngineUsageForTokensAndCost(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	now := time.Now()
+	result := &pipeline.EngineResult{
+		RunID:  "test-run",
+		Status: pipeline.OutcomeSuccess,
+		Trace: &pipeline.Trace{
+			RunID:     "test-run",
+			StartTime: now,
+			EndTime:   now.Add(30 * time.Second),
+			Entries: []pipeline.TraceEntry{
+				{
+					NodeID: "impl", HandlerName: "codergen", Status: "success",
+					Duration: 20 * time.Second,
+					Stats: &pipeline.SessionStats{
+						Turns:          1,
+						TotalToolCalls: 1,
+						ToolCalls:      map[string]int{"bash": 1},
+					},
+				},
+			},
+		},
+		Usage: &pipeline.UsageSummary{
+			TotalInputTokens:  1000,
+			TotalOutputTokens: 250,
+			TotalTokens:       1250,
+			TotalCostUSD:      0.1234,
+			ProviderTotals: map[string]pipeline.ProviderUsage{
+				"openai": {InputTokens: 1000, OutputTokens: 250, TotalTokens: 1250, CostUSD: 0.1234, SessionCount: 1},
+			},
+		},
+	}
+
+	printRunSummary(result, nil, nil, "test.dot")
+
+	w.Close()
+	os.Stdout = old
+
+	var buf [8192]byte
+	n, _ := r.Read(buf[:])
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "Tokens:       1,000 in / 250 out  ($0.12)") {
+		t.Fatalf("expected total token/cost line from result.Usage, output:\n%s", output)
+	}
+	if !strings.Contains(output, "Tokens by Provider") {
+		t.Fatalf("expected provider token table from result.Usage, output:\n%s", output)
+	}
+	if !strings.Contains(output, "Cost: $0.1234") {
+		t.Fatalf("expected provider cost line from result.Usage, output:\n%s", output)
+	}
+}
+
 func unsetEnvForTest(t *testing.T, key string) {
 	t.Helper()
 

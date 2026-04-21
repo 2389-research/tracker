@@ -211,14 +211,11 @@ func (a *Adapter) handleSSEResponseCompleted(data []byte, ch chan<- llm.StreamEv
 		}
 	}
 	fr := translateFinishReason(evt.Response.Status, hasFunctionCalls, evt.Response.IncompleteDetails)
+	usage := translateUsage(evt.Response.Usage)
 	ch <- llm.StreamEvent{
 		Type:         llm.EventFinish,
 		FinishReason: &fr,
-		Usage: &llm.Usage{
-			InputTokens:  evt.Response.Usage.InputTokens,
-			OutputTokens: evt.Response.Usage.OutputTokens,
-			TotalTokens:  evt.Response.Usage.TotalTokens,
-		},
+		Usage:        &usage,
 	}
 }
 
