@@ -14,7 +14,7 @@ const (
 )
 
 func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, rawJSON string, source string) (failed bool) {
-	writes := pipeline.ParseDeclaredKeys(node.Attrs["writes"])
+	writes := dedupeDeclaredWrites(pipeline.ParseDeclaredKeys(node.Attrs["writes"]))
 	if len(writes) == 0 {
 		return false
 	}
@@ -35,6 +35,22 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 		)
 	}
 	return false
+}
+
+func dedupeDeclaredWrites(writes []string) []string {
+	if len(writes) < 2 {
+		return writes
+	}
+	seen := make(map[string]struct{}, len(writes))
+	deduped := make([]string, 0, len(writes))
+	for _, write := range writes {
+		if _, ok := seen[write]; ok {
+			continue
+		}
+		seen[write] = struct{}{}
+		deduped = append(deduped, write)
+	}
+	return deduped
 }
 
 func formatWritesError(nodeID string, writes []string, source string, parseErr error, raw string) string {

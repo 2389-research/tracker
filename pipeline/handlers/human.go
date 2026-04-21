@@ -796,6 +796,9 @@ func applyInterviewDeclaredWrites(node *pipeline.Node, contextUpdates map[string
 	if result == nil {
 		return false
 	}
+	if len(pipeline.ParseDeclaredKeys(node.Attrs["writes"])) == 0 {
+		return false
+	}
 	raw, err := buildInterviewAnswersObjectJSON(result)
 	if err != nil {
 		contextUpdates[contextKeyWritesError] = fmt.Sprintf("node %q interview answer serialization failed: %v", node.ID, err)
