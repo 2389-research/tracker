@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,7 +106,7 @@ func TestLocalize_RespectsCap(t *testing.T) {
 	dir := t.TempDir()
 	// Create 20 files that all match a path reference — only 10 should be kept.
 	for i := 0; i < 20; i++ {
-		name := filepath.Join("pkg", "config"+string(rune('a'+i))+".go")
+		name := filepath.Join("pkg", fmt.Sprintf("config%02d.go", i))
 		writeFile(t, dir, name, "package pkg\n// irrelevant content\n")
 	}
 
