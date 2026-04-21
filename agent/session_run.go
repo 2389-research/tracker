@@ -21,7 +21,14 @@ func (s *Session) initConversation(userInput string) {
 	} else {
 		s.messages = append(s.messages, llm.SystemMessage(basePrompt))
 	}
-	s.messages = append(s.messages, llm.UserMessage(userInput))
+
+	finalUserInput := userInput
+	if s.config.Localize {
+		if block := localize(s.config.WorkingDir, userInput).Message; block != "" {
+			finalUserInput = block + "\n" + userInput
+		}
+	}
+	s.messages = append(s.messages, llm.UserMessage(finalUserInput))
 }
 
 // drainSteering consumes all pending steering messages and injects them into the conversation.
