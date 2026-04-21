@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,6 +23,18 @@ func (s *Session) initConversation(ctx context.Context, userInput string) {
 		s.messages = append(s.messages, llm.SystemMessage(basePrompt+"\n\n"+s.config.SystemPrompt))
 	} else {
 		s.messages = append(s.messages, llm.SystemMessage(basePrompt))
+	}
+
+	if len(s.config.PriorEpisodeSummaries) > 0 {
+		var b strings.Builder
+		b.WriteString("Prior attempts summary (avoid repeating failed approaches):\n")
+		for i, summary := range s.config.PriorEpisodeSummaries {
+			if strings.TrimSpace(summary) == "" {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("%d. %s\n", i+1, strings.TrimSpace(summary)))
+		}
+		s.messages = append(s.messages, llm.UserMessage(strings.TrimSpace(b.String())))
 	}
 
 	finalUserInput := userInput
@@ -185,6 +198,7 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 		if toolResult.IsError {
 			anyError = true
 		}
+		s.episodeLog.Record(call.Name, string(call.Arguments), toolResult.Content, toolResult.IsError)
 
 		s.emit(Event{
 			Type:         EventToolCallEnd,

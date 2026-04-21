@@ -121,6 +121,76 @@ func TestSessionRunPopulatesProvider(t *testing.T) {
 	}
 }
 
+func TestSession_EpisodeSummaryCapturesToolOutcomes(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c1", Name: "read", Arguments: json.RawMessage(`{"path":"ok.txt"}`)}},
+						{Kind: llm.KindToolCall, ToolCall: &llm.ToolCallData{ID: "c2", Name: "flaky", Arguments: json.RawMessage(`{"target":"x"}`)}},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	sess := mustNewSession(t, client, DefaultConfig(),
+		WithTools(
+			&stubTool{name: "read", output: "all good"},
+			&reflectionErrorTool{name: "flaky", err: fmt.Errorf("boom")},
+		),
+	)
+	result, err := sess.Run(context.Background(), "run tools")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.EpisodeSummary, "read") || !strings.Contains(result.EpisodeSummary, "outcome=success") {
+		t.Fatalf("episode summary missing successful call: %q", result.EpisodeSummary)
+	}
+	if !strings.Contains(result.EpisodeSummary, "flaky") || !strings.Contains(result.EpisodeSummary, "outcome=fail") {
+		t.Fatalf("episode summary missing failed call: %q", result.EpisodeSummary)
+	}
+}
+
+func TestSession_IncludesPriorEpisodeSummariesInInitialMessages(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	var captured []llm.Message
+	client.onComplete = func(req *llm.Request) {
+		captured = append(captured, req.Messages...)
+	}
+
+	cfg := DefaultConfig()
+	cfg.PriorEpisodeSummaries = []string{"1. read args={\"path\":\"a.go\"} outcome=fail summary=file not found"}
+	sess := mustNewSession(t, client, cfg)
+	if _, err := sess.Run(context.Background(), "try again"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var found bool
+	for _, msg := range captured {
+		if msg.Role == llm.RoleUser && strings.Contains(msg.Text(), "Prior attempts summary") && strings.Contains(msg.Text(), "outcome=fail") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected prior episode summary to be injected, messages=%v", captured)
+	}
+}
+
 func TestSessionToolCallLoop(t *testing.T) {
 	toolCallResp := &llm.Response{
 		Message: llm.Message{

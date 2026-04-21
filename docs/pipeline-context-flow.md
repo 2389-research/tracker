@@ -19,6 +19,8 @@ Each node solves a single well-scoped problem. Carrying a full conversation hist
 |---|---|---|
 | `last_response` | agent (codergen) handler | The most recent agent node's final message content |
 | `response.<nodeID>` | agent and human handlers | Per-node response snapshot addressable by node ID |
+| `episode_summary` | agent (codergen) handler | Summary of tool attempts/outcomes from the most recent agent session |
+| `episode_summaries` | agent (codergen) handler | JSON array of accumulated prior `episode_summary` values for retries/resumes |
 | `outcome` | every handler | `success` / `fail` / `retry` / `escalate` for the node that just ran |
 | `preferred_label` | human handler | Label the user selected on a labeled gate |
 | `human_response` | human handler | Freeform text the user typed at a gate |

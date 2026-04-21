@@ -79,6 +79,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if cfgErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q config: %w", node.ID, cfgErr)
 	}
+	priorEpisodes := h.injectPriorEpisodes(runCfg, pctx)
 
 	var collector transcriptCollector
 	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
@@ -92,9 +93,9 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	h.trackExternalBackendUsage(backend, sessResult.Usage)
 
 	if runErr != nil {
-		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector)
+		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector, priorEpisodes)
 	}
-	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector)
+	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector, priorEpisodes)
 }
 
 // trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
@@ -364,7 +365,7 @@ func (h *CodergenHandler) resolveArtifactRoot(pctx *pipeline.PipelineContext) st
 }
 
 // handleRunError processes session run errors, distinguishing fatal from retryable.
-func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
+func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string) (pipeline.Outcome, error) {
 	var cfgErr *llm.ConfigurationError
 	if errors.As(runErr, &cfgErr) {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
@@ -382,6 +383,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		},
 		Stats: buildSessionStats(sessResult),
 	}
+	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
 	responseArtifact := collector.transcript()
 	if responseArtifact == "" {
 		responseArtifact = runErr.Error()
@@ -398,7 +400,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 // through failure edges when present, stops on strict-failure-edge otherwise),
 // OutcomeFail/OutcomeRetry for empty sessions, or OutcomeSuccess for normal
 // completion. auto_status can override any of these.
-func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
+func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string) (pipeline.Outcome, error) {
 	responseText := collector.text()
 	responseArtifact := collector.transcript()
 	if responseArtifact == "" {
@@ -410,7 +412,7 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 		return outcome, err
 	}
 
-	return h.buildSuccessOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult)
+	return h.buildSuccessOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult, priorEpisodes)
 }
 
 // buildEmptyResponseOutcome handles the two empty-response cases and returns
@@ -459,7 +461,7 @@ func emptyResponseStatusMsg(nodeID string, emptyAPIResponse bool) (string, strin
 
 // buildSuccessOutcome handles the normal (non-empty) completion path, including
 // turn-limit exhaustion and auto_status overrides.
-func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult) (pipeline.Outcome, error) {
+func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
 	// Determine status. Turn-limit exhaustion and loop detection default to
 	// OutcomeFail so the engine routes through explicit failure edges (e.g.
 	// "when ctx.outcome = fail"). On nodes without failure edges, the
@@ -486,6 +488,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 		},
 		Stats: buildSessionStats(sessResult),
 	}
+	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
 	if applyDeclaredWrites(node, outcome.ContextUpdates, responseText, "Response JSON") {
 		outcome.Status = pipeline.OutcomeFail
 	}
@@ -502,6 +505,28 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil
+}
+
+func (h *CodergenHandler) injectPriorEpisodes(runCfg pipeline.AgentRunConfig, pctx *pipeline.PipelineContext) []string {
+	sc, ok := runCfg.Extra.(*agent.SessionConfig)
+	if !ok || sc == nil {
+		return nil
+	}
+	raw, ok := pctx.Get(pipeline.ContextKeyEpisodeSummaries)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	sc.PriorEpisodeSummaries = agent.ParseEpisodeSummaries(raw)
+	return append([]string(nil), sc.PriorEpisodeSummaries...)
+}
+
+func (h *CodergenHandler) applyEpisodeContextUpdates(updates map[string]string, sessResult agent.SessionResult, existing []string) {
+	if updates == nil || strings.TrimSpace(sessResult.EpisodeSummary) == "" {
+		return
+	}
+	updates[pipeline.ContextKeyEpisodeSummary] = sessResult.EpisodeSummary
+	summaries := append(append([]string(nil), existing...), sessResult.EpisodeSummary)
+	updates[pipeline.ContextKeyEpisodeSummaries] = agent.SerializeEpisodeSummaries(summaries)
 }
 
 // buildTurnLimitMsg returns a non-empty message when the session hit the turn limit,

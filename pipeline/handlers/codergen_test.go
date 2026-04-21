@@ -34,17 +34,106 @@ func (f *fakeCompleter) Complete(ctx context.Context, req *llm.Request) (*llm.Re
 }
 
 type scriptedCompleter struct {
-	responses []*llm.Response
-	index     int
+	responses  []*llm.Response
+	index      int
+	onComplete func(req *llm.Request)
 }
 
 func (s *scriptedCompleter) Complete(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	if s.onComplete != nil {
+		s.onComplete(req)
+	}
 	if s.index >= len(s.responses) {
 		return nil, context.DeadlineExceeded
 	}
 	resp := s.responses[s.index]
 	s.index++
 	return resp, nil
+}
+
+func TestCodergenHandler_PersistsEpisodeSummary(t *testing.T) {
+	workdir := t.TempDir()
+	client := &scriptedCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"go.mod"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	h := NewCodergenHandler(client, workdir)
+	h.env = agentexec.NewLocalEnvironment(workdir)
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "inspect repo"},
+	}
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(outcome.ContextUpdates[pipeline.ContextKeyEpisodeSummary]) == "" {
+		t.Fatalf("expected %s context update", pipeline.ContextKeyEpisodeSummary)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyEpisodeSummaries]; !strings.Contains(got, "read") {
+		t.Fatalf("expected %s to include episode data, got %q", pipeline.ContextKeyEpisodeSummaries, got)
+	}
+}
+
+func TestCodergenHandler_InjectsPriorEpisodeSummaries(t *testing.T) {
+	workdir := t.TempDir()
+	var captured []llm.Message
+	client := &scriptedCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+		onComplete: func(req *llm.Request) {
+			captured = append(captured, req.Messages...)
+		},
+	}
+	h := NewCodergenHandler(client, workdir)
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "try again"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyEpisodeSummaries, `["1. read args={\"path\":\"x\"} outcome=fail summary=file missing"]`)
+
+	if _, err := h.Execute(context.Background(), node, pctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	found := false
+	for _, msg := range captured {
+		if msg.Role == llm.RoleUser && strings.Contains(msg.Text(), "Prior attempts summary") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected prior episodes to be injected; messages=%v", captured)
+	}
 }
 
 func TestCodergenHandlerName(t *testing.T) {

@@ -68,6 +68,10 @@ type SessionConfig struct {
 	// structured context block before the first LLM turn. Pure text analysis
 	// plus filesystem scan — no LLM calls. Default: false.
 	Localize bool
+
+	// PriorEpisodeSummaries carries summaries from earlier attempts so retries
+	// can avoid repeating known-failing approaches.
+	PriorEpisodeSummaries []string
 }
 
 // Checkpoint defines a message to inject at a specific turn-budget fraction.

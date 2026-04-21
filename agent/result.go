@@ -29,6 +29,7 @@ type SessionResult struct {
 	ToolTimings        map[string]time.Duration
 	CompactionsApplied int
 	LongestTurn        time.Duration
+	EpisodeSummary     string
 	Error              error
 }
 
