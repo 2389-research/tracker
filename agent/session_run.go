@@ -30,6 +30,32 @@ func (s *Session) initConversation(ctx context.Context, userInput string) {
 		s.messages = append(s.messages, llm.SystemMessage(basePrompt))
 	}
 
+	if len(s.config.PriorEpisodeSummaries) > 0 {
+		var b strings.Builder
+		nonEmpty := make([]string, 0, len(s.config.PriorEpisodeSummaries))
+		for _, summary := range s.config.PriorEpisodeSummaries {
+			trimmed := strings.TrimSpace(summary)
+			if trimmed == "" {
+				continue
+			}
+			nonEmpty = append(nonEmpty, trimmed)
+		}
+		if len(nonEmpty) > 0 {
+			b.WriteString("Prior attempts summary (avoid repeating failed approaches):\n")
+			for i, summary := range nonEmpty {
+				b.WriteString(fmt.Sprintf("Attempt %d:\n", i+1))
+				for _, line := range strings.Split(summary, "\n") {
+					trimmedLine := strings.TrimSpace(line)
+					if trimmedLine == "" {
+						continue
+					}
+					b.WriteString(fmt.Sprintf("  - %s\n", trimmedLine))
+				}
+			}
+			s.messages = append(s.messages, llm.UserMessage(strings.TrimSpace(b.String())))
+		}
+	}
+
 	finalUserInput := userInput
 	if s.config.Localize {
 		if block := localize(ctx, s.config.WorkingDir, userInput).Message; block != "" {
@@ -246,6 +272,7 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 		if toolResult.IsError {
 			anyError = true
 		}
+		s.episodeLog.Record(call.Name, string(call.Arguments), toolResult.Content, toolResult.IsError)
 
 		s.emit(Event{
 			Type:         EventToolCallEnd,

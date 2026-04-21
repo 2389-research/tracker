@@ -68,6 +68,7 @@ type Session struct {
 	cache           *toolCache
 	lastCompactTurn int
 	toolTimings     map[string]time.Duration
+	episodeLog      EpisodeLog
 }
 
 // ID returns the session's unique identifier.
@@ -201,6 +202,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	result.ToolTimings = s.toolTimings
 	result.ContextUtilization = tracker.Utilization()
+	result.EpisodeSummary = s.episodeLog.Summary()
 	result.Duration = time.Since(start)
 	return result, nil
 }

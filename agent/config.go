@@ -69,6 +69,9 @@ type SessionConfig struct {
 	// plus filesystem scan — no LLM calls. Default: false.
 	Localize bool
 
+	// PriorEpisodeSummaries carries summaries from earlier attempts so retries
+	// can avoid repeating known-failing approaches.
+	PriorEpisodeSummaries []string
 	// PlanBeforeExecute inserts one planning-only LLM call before the main turn
 	// loop and keeps that plan in conversation context for subsequent turns.
 	// Default: false.

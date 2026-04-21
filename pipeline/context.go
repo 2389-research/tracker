@@ -31,6 +31,14 @@ const (
 	// from turn-limit exhaustion; absent on normal success.
 	ContextKeyTurnLimitMsg = "turn_limit_msg"
 
+	// ContextKeyEpisodeSummary stores the most recent codergen session's episode
+	// summary (tool attempts + outcomes).
+	ContextKeyEpisodeSummary = "episode_summary"
+
+	// ContextKeyEpisodeSummaries stores the running list of prior episode
+	// summaries encoded as a JSON array of strings.
+	ContextKeyEpisodeSummaries = "episode_summaries"
+
 	// Interview mode context keys. Overridable via questions_key/answers_key
 	// node attributes in .dip files. These are the defaults when the attrs
 	// are not specified.

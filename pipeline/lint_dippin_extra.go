@@ -173,7 +173,7 @@ func reservedContextKeys() map[string]bool {
 	return map[string]bool{
 		"goal": true, "outcome": true, "last_response": true,
 		"last_cost": true, "last_turns": true, "human_response": true,
-		"turn_limit_msg": true,
+		"turn_limit_msg": true, "episode_summary": true, "episode_summaries": true,
 	}
 }
 
