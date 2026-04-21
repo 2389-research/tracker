@@ -79,6 +79,8 @@ var skipDirs = map[string]bool{
 	".git": true, "node_modules": true, "vendor": true, "target": true,
 	"dist": true, "build": true, ".venv": true, "venv": true, "__pycache__": true,
 	".idea": true, ".vscode": true, ".next": true, ".cache": true,
+	".tox": true, ".mypy_cache": true, ".pytest_cache": true, ".gradle": true,
+	".terraform": true, ".svn": true, ".hg": true,
 }
 
 // extractRefs pulls candidate file paths, identifiers, and phrases from a prompt.
@@ -257,7 +259,10 @@ func scanFiles(ctx context.Context, root string) []string {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if path != root && (skipDirs[name] || strings.HasPrefix(name, ".")) {
+			// Rely on the explicit skipDirs block/allowlist rather than a
+			// blanket dot-directory skip, so relevant dot-dirs like .github/
+			// remain discoverable when the prompt references workflow files.
+			if path != root && skipDirs[name] {
 				return filepath.SkipDir
 			}
 			return nil
@@ -356,11 +361,24 @@ func looksLikeTextFile(rel string) bool {
 // when the prompt also contains identifier or phrase references.
 func scoreFiles(ctx context.Context, root string, files []string, refs extractedRefs) []candidate {
 	// Normalize path refs: for each, keep the basename and the full form.
+	// Deduplicate so repeated full paths or shared basenames do not
+	// artificially inflate scores during the matching loop below.
 	pathTerms := make([]string, 0, len(refs.Paths)*2)
+	seenPathTerms := make(map[string]struct{}, len(refs.Paths)*2)
+	addTerm := func(t string) {
+		if t == "" {
+			return
+		}
+		if _, ok := seenPathTerms[t]; ok {
+			return
+		}
+		seenPathTerms[t] = struct{}{}
+		pathTerms = append(pathTerms, t)
+	}
 	for _, p := range refs.Paths {
-		pathTerms = append(pathTerms, p)
+		addTerm(p)
 		if base := filepath.Base(p); base != p {
-			pathTerms = append(pathTerms, base)
+			addTerm(base)
 		}
 	}
 
