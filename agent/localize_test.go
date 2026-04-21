@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,7 +71,7 @@ func TestLocalize_FindsFileByName(t *testing.T) {
 	writeFile(t, dir, "auth.go", "package auth\n\nfunc validateToken(t string) error {\n\treturn nil\n}\n")
 	writeFile(t, dir, "unrelated.go", "package foo\n")
 
-	result := localize(dir, "Fix auth.go")
+	result := localize(context.Background(), dir, "Fix auth.go")
 	if len(result.Candidates) == 0 {
 		t.Fatalf("expected at least one candidate, got none")
 	}
@@ -87,7 +88,7 @@ func TestLocalize_FindsFileByErrorString(t *testing.T) {
 	writeFile(t, dir, "handler.go", "package x\n\n// Error: unexpected EOF\nfunc handle() {}\n")
 	writeFile(t, dir, "noise.go", "package x\nfunc noise() {}\n")
 
-	result := localize(dir, `I'm seeing "unexpected EOF" when parsing input`)
+	result := localize(context.Background(), dir, `I'm seeing "unexpected EOF" when parsing input`)
 	if len(result.Candidates) == 0 {
 		t.Fatalf("expected at least one candidate, got none")
 	}
@@ -104,13 +105,20 @@ func TestLocalize_FindsFileByErrorString(t *testing.T) {
 
 func TestLocalize_RespectsCap(t *testing.T) {
 	dir := t.TempDir()
-	// Create 20 files that all match a path reference — only 10 should be kept.
+	// Create 20 files that all contain the prompt identifier "configValue"
+	// and have enough content that injecting snippets for all of them would
+	// exceed localizeMaxInjectBytes. This ensures both caps are exercised:
+	// the 10-file cap and the 2KB byte cap.
+	largeMatch := strings.Repeat("var configValue = 1\n", 64)
 	for i := 0; i < 20; i++ {
 		name := filepath.Join("pkg", fmt.Sprintf("config%02d.go", i))
-		writeFile(t, dir, name, "package pkg\n// irrelevant content\n")
+		writeFile(t, dir, name, "package pkg\n"+largeMatch)
 	}
 
-	result := localize(dir, "update config files across the repo with configValue")
+	result := localize(context.Background(), dir, "update configValue across the repo")
+	if len(result.Candidates) == 0 {
+		t.Fatalf("expected matching candidates, got none")
+	}
 	if len(result.Candidates) > localizeMaxFiles {
 		t.Errorf("expected at most %d candidates, got %d", localizeMaxFiles, len(result.Candidates))
 	}
@@ -119,11 +127,109 @@ func TestLocalize_RespectsCap(t *testing.T) {
 	}
 }
 
+func TestBuildInjection_PathOnlyFallbackWhenSnippetTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	// Single file with a huge matching line — the snippet would exceed the cap,
+	// so the injection should fall back to path-only form and still reference
+	// the file.
+	huge := strings.Repeat("configValue = 1; // padding padding padding padding padding\n", 80)
+	writeFile(t, dir, "big.go", "package x\n"+huge)
+
+	result := localize(context.Background(), dir, "update configValue")
+	if len(result.Message) == 0 {
+		t.Fatalf("expected non-empty message with path-only fallback, got empty")
+	}
+	if len(result.Message) > localizeMaxInjectBytes {
+		t.Errorf("expected message <= %d bytes, got %d", localizeMaxInjectBytes, len(result.Message))
+	}
+	if !strings.Contains(result.Message, "big.go") {
+		t.Errorf("expected big.go in message even under fallback, got:\n%s", result.Message)
+	}
+}
+
+func TestExtractRefs_WindowsPaths(t *testing.T) {
+	refs := extractRefs(`Fix the bug in src\main.go and also src\pkg\handler.go`)
+	hasMain, hasHandler := false, false
+	for _, p := range refs.Paths {
+		if p == "src/main.go" {
+			hasMain = true
+		}
+		if p == "src/pkg/handler.go" {
+			hasHandler = true
+		}
+	}
+	if !hasMain || !hasHandler {
+		t.Errorf("expected normalized Unix paths from Windows-style input, got %v", refs.Paths)
+	}
+}
+
+func TestExtractRefs_AcronymPrefixedIdentifiers(t *testing.T) {
+	refs := extractRefs("The HTTPServer crashes when URLParser encounters a malformed input")
+	hasHTTP, hasURL := false, false
+	for _, id := range refs.Identifiers {
+		if id == "HTTPServer" {
+			hasHTTP = true
+		}
+		if id == "URLParser" {
+			hasURL = true
+		}
+	}
+	if !hasHTTP || !hasURL {
+		t.Errorf("expected acronym-prefixed identifiers, got %v", refs.Identifiers)
+	}
+}
+
+func TestExtractRefs_PhrasesDeduped(t *testing.T) {
+	// Same phrase mentioned via quotes and an error-line pattern — it should
+	// appear only once in refs.Phrases.
+	refs := extractRefs(`Hit "token expired" on login. Error: token expired when retrying.`)
+	count := 0
+	for _, p := range refs.Phrases {
+		if p == "token expired" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected phrase %q deduped to a single entry, got %d occurrences in %v", "token expired", count, refs.Phrases)
+	}
+}
+
+func TestLocalize_SkipsDotfilesAndSecrets(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".env", "SECRET_TOKEN=abc123\nconfigValue=leak\n")
+	writeFile(t, dir, "server.pem", "-----BEGIN PRIVATE KEY-----\nconfigValue leak\n-----END-----\n")
+	writeFile(t, dir, "id_rsa", "configValue leak\n")
+	writeFile(t, dir, "app.go", "package app\nvar configValue = 1\n")
+
+	result := localize(context.Background(), dir, "inspect configValue")
+	for _, c := range result.Candidates {
+		base := filepath.Base(c.Path)
+		if base == ".env" || base == "server.pem" || base == "id_rsa" {
+			t.Errorf("sensitive file %q should have been skipped", c.Path)
+		}
+	}
+	if !strings.Contains(result.Message, "app.go") {
+		t.Errorf("expected app.go in message, got:\n%s", result.Message)
+	}
+}
+
+func TestLocalize_ContextCanceled(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "auth.go", "package x\nfunc validateToken() {}\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := localize(ctx, dir, "Fix validateToken in auth.go")
+	if len(result.Candidates) != 0 || result.Message != "" {
+		t.Errorf("expected empty result on canceled context, got %+v", result)
+	}
+}
+
 func TestLocalize_EmptyWhenNoRefs(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "x.go", "package x\n")
 
-	result := localize(dir, "please help")
+	result := localize(context.Background(), dir, "please help")
 	if len(result.Candidates) != 0 || result.Message != "" {
 		t.Errorf("expected empty result for prompt with no refs, got %+v", result)
 	}
@@ -134,7 +240,7 @@ func TestLocalize_SkipsDependencyDirs(t *testing.T) {
 	writeFile(t, dir, "node_modules/auth.go", "package x\nvar validateToken = 1\n")
 	writeFile(t, dir, "src/auth.go", "package x\nfunc validateToken() {}\n")
 
-	result := localize(dir, "Fix validateToken in auth.go")
+	result := localize(context.Background(), dir, "Fix validateToken in auth.go")
 	for _, c := range result.Candidates {
 		if strings.HasPrefix(c.Path, "node_modules/") {
 			t.Errorf("node_modules file %q should have been skipped", c.Path)
@@ -149,7 +255,7 @@ func TestInitConversation_LocalizeDisabled(t *testing.T) {
 	writeFile(t, cfg.WorkingDir, "auth.go", "package x\n")
 
 	s := &Session{config: cfg}
-	s.initConversation("Fix the bug in auth.go")
+	s.initConversation(context.Background(), "Fix the bug in auth.go")
 
 	if len(s.messages) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(s.messages))
@@ -171,7 +277,7 @@ func TestInitConversation_LocalizeEnabled(t *testing.T) {
 	writeFile(t, cfg.WorkingDir, "auth.go", "package x\nfunc validateToken() {}\n")
 
 	s := &Session{config: cfg}
-	s.initConversation("Fix the bug in auth.go")
+	s.initConversation(context.Background(), "Fix the bug in auth.go")
 
 	if len(s.messages) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(s.messages))

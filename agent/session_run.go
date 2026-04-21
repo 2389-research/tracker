@@ -11,8 +11,10 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
-// initConversation sets up the initial system and user messages.
-func (s *Session) initConversation(userInput string) {
+// initConversation sets up the initial system and user messages. The provided
+// context is honored by the localization pre-processing phase so cancellation
+// or deadlines abort the pre-turn filesystem scan.
+func (s *Session) initConversation(ctx context.Context, userInput string) {
 	basePrompt := "File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative to the working directory. " +
 		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\". " +
 		"Bash commands may use absolute paths when needed."
@@ -24,7 +26,7 @@ func (s *Session) initConversation(userInput string) {
 
 	finalUserInput := userInput
 	if s.config.Localize {
-		if block := localize(s.config.WorkingDir, userInput).Message; block != "" {
+		if block := localize(ctx, s.config.WorkingDir, userInput).Message; block != "" {
 			finalUserInput = block + "\n" + userInput
 		}
 	}

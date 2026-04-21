@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,15 @@ const (
 	localizeMaxFilesToScan  = 2000
 	localizeMaxFileSize     = 256 * 1024 // skip very large files to keep the scan fast
 	localizeMaxPromptTokens = 200        // cap identifier extraction to keep scan bounded
+	localizeMaxPhrases      = 32         // cap on extracted phrases (quoted + error-line)
+	localizeMaxContentScans = 200        // cap on files read for content scoring per localize call
+
+	// scannerInitialBuf is the starting size of the line scanner buffer — large
+	// enough to hold any reasonable source line without growing on typical input.
+	scannerInitialBuf = 64 * 1024
+	// scannerMaxLineBytes is the hard upper bound per line; longer lines are
+	// truncated by bufio.Scanner. Matches the grep tool's per-line ceiling.
+	scannerMaxLineBytes = 1024 * 1024
 )
 
 // extractedRefs holds references extracted from a user prompt.
@@ -32,11 +42,16 @@ type extractedRefs struct {
 	Phrases []string
 }
 
-// File path / basename with extension. Kept conservative to avoid matching version numbers.
-var pathOrFileRE = regexp.MustCompile(`(?:[A-Za-z0-9_./\-]+/)?[A-Za-z0-9_\-]+\.[A-Za-z0-9]{1,8}`)
+// File path / basename with extension. Accepts both Unix (/) and Windows (\)
+// separators so prompts mentioning `src\main.go` are also recognized.
+// Kept conservative to avoid matching version numbers.
+var pathOrFileRE = regexp.MustCompile(`(?:[A-Za-z0-9_./\\\-]+[/\\])?[A-Za-z0-9_\-]+\.[A-Za-z0-9]{1,8}`)
 
-// camelCase / PascalCase identifiers of length >= 4 (e.g. fooBar, FooBar, HTTPServer).
-var camelCaseRE = regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9]*[a-z][A-Z][a-zA-Z0-9]*\b`)
+// camelCase / PascalCase identifiers (e.g. fooBar, FooBar) and acronym-prefixed
+// names (e.g. HTTPServer, URLParser). Two alternations:
+//  1. lowercase→uppercase boundary (fooBar, FooBar)
+//  2. 2+ consecutive uppercase letters followed by a lowercase (HTTPServer)
+var camelCaseRE = regexp.MustCompile(`\b(?:[a-zA-Z][a-zA-Z0-9]*[a-z][A-Z][a-zA-Z0-9]*|[A-Z]{2,}[a-z][a-zA-Z0-9]*)\b`)
 
 // snake_case identifiers with at least one underscore (e.g. foo_bar, handle_request).
 var snakeCaseRE = regexp.MustCompile(`\b[a-z][a-z0-9]+(?:_[a-z0-9]+)+\b`)
@@ -45,6 +60,7 @@ var snakeCaseRE = regexp.MustCompile(`\b[a-z][a-z0-9]+(?:_[a-z0-9]+)+\b`)
 var quotedPhraseRE = regexp.MustCompile("\"([^\"\\n]{3,80})\"|'([^'\\n]{3,80})'|`([^`\\n]{3,80})`")
 
 // Error-style lines: "Error: ...", "error: ...", "FAIL: ...", "panic: ...".
+// Flags: i = case-insensitive, m = multi-line (^ matches after a newline).
 var errorLineRE = regexp.MustCompile(`(?im)(?:^|\b)(?:error|fail|panic|fatal)\s*[:\-]\s*([^\n]{3,120})`)
 
 // Common words that match the identifier heuristics but add no localization signal.
@@ -87,7 +103,8 @@ func extractRefs(prompt string) extractedRefs {
 		if isLikelyVersion(m) {
 			continue
 		}
-		addUnique(&refs.Paths, m)
+		// Normalize Windows-style separators so downstream matching is platform-agnostic.
+		addUnique(&refs.Paths, strings.ReplaceAll(m, `\`, "/"))
 	}
 
 	identSeen := map[string]bool{}
@@ -109,20 +126,24 @@ func extractRefs(prompt string) extractedRefs {
 		addIdent(m)
 	}
 
+	phraseSeen := map[string]bool{}
+	addPhrase := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" || phraseSeen[p] || seen[p] {
+			return
+		}
+		if len(refs.Phrases) >= localizeMaxPhrases {
+			return
+		}
+		phraseSeen[p] = true
+		refs.Phrases = append(refs.Phrases, p)
+	}
 	for _, m := range quotedPhraseRE.FindAllStringSubmatch(prompt, -1) {
-		phrase := firstNonEmpty(m[1], m[2], m[3])
-		if phrase == "" {
-			continue
-		}
-		// Skip phrases that are already captured as paths.
-		if seen[phrase] {
-			continue
-		}
-		refs.Phrases = append(refs.Phrases, phrase)
+		addPhrase(firstNonEmpty(m[1], m[2], m[3]))
 	}
 	for _, m := range errorLineRE.FindAllStringSubmatch(prompt, -1) {
 		if len(m) >= 2 {
-			refs.Phrases = append(refs.Phrases, strings.TrimSpace(m[1]))
+			addPhrase(m[1])
 		}
 	}
 
@@ -174,7 +195,11 @@ type localizeResult struct {
 // localize scans workingDir for files relevant to the prompt and builds a
 // context block capped at localizeMaxFiles / localizeMaxInjectBytes. It never
 // makes an LLM call and returns an empty result when no references match.
-func localize(workingDir, prompt string) localizeResult {
+// If ctx is canceled during the scan, an empty result is returned.
+func localize(ctx context.Context, workingDir, prompt string) localizeResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	refs := extractRefs(prompt)
 	if len(refs.Paths) == 0 && len(refs.Identifiers) == 0 && len(refs.Phrases) == 0 {
 		return localizeResult{}
@@ -185,9 +210,12 @@ func localize(workingDir, prompt string) localizeResult {
 		root = "."
 	}
 
-	files := scanFiles(root)
-	scored := scoreFiles(root, files, refs)
-	if len(scored) == 0 {
+	files := scanFiles(ctx, root)
+	if ctx.Err() != nil {
+		return localizeResult{}
+	}
+	scored := scoreFiles(ctx, root, files, refs)
+	if ctx.Err() != nil || len(scored) == 0 {
 		return localizeResult{}
 	}
 
@@ -209,10 +237,18 @@ func localize(workingDir, prompt string) localizeResult {
 
 // scanFiles walks root and returns candidate file paths (relative to root),
 // capped at localizeMaxFilesToScan. Skips binary-looking files, large files,
-// and known dependency/vcs directories.
-func scanFiles(root string) []string {
+// and known dependency/vcs directories. Aborts early on context cancellation.
+//
+// When the localizeMaxFilesToScan cap is reached, the walk stops and results
+// may be partial — relevant files that would have appeared later in traversal
+// order are silently omitted. This is acceptable for a hint-only phase where
+// predictable latency matters more than exhaustive coverage.
+func scanFiles(ctx context.Context, root string) []string {
 	var out []string
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll
+		}
 		if err != nil {
 			return nil // best-effort
 		}
@@ -243,27 +279,52 @@ func scanFiles(root string) []string {
 	return out
 }
 
-// looksLikeTextFile uses extension heuristics to avoid reading binaries.
-// Files without extensions are accepted (common for scripts / configs).
+// looksLikeTextFile uses extension/name heuristics to avoid reading binaries
+// and to reduce accidental inclusion of credentials. Hidden files (dotfiles
+// such as .env, .npmrc) and common secret-bearing filenames are skipped so
+// their contents are never injected into the LLM context.
 func looksLikeTextFile(rel string) bool {
-	ext := strings.ToLower(filepath.Ext(rel))
-	if ext == "" {
-		return true
+	base := strings.ToLower(filepath.Base(rel))
+
+	// Skip dotfiles — reduces accidental leakage of hidden configuration and
+	// credential files (.env, .netrc, .aws/credentials, etc.).
+	if strings.HasPrefix(base, ".") {
+		return false
 	}
+
+	// Explicit block-list for extensionless secret files.
+	switch base {
+	case "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+		"authorized_keys", "known_hosts":
+		return false
+	}
+
+	ext := strings.ToLower(filepath.Ext(base))
 	switch ext {
-	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
+	// Secret-bearing file extensions.
+	case ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore",
+		".crt", ".cer", ".der",
+		// Binary/media/archive extensions.
+		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
 		".pdf", ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
 		".exe", ".dll", ".so", ".dylib", ".a", ".o", ".bin",
 		".mp3", ".mp4", ".wav", ".ogg", ".mov", ".avi",
 		".class", ".jar", ".wasm", ".pyc":
 		return false
 	}
+	// Extensionless non-dotfile (e.g. "Makefile", "LICENSE") is assumed text.
 	return true
 }
 
 // scoreFiles assigns relevance scores to each candidate file based on refs.
 // Path mentions are heavily weighted; content matches are weighted lower.
-func scoreFiles(root string, files []string, refs extractedRefs) []candidate {
+//
+// To bound I/O on large repos, content is only scanned for files that either
+// (a) already have a path-score signal, or (b) fall within the first
+// localizeMaxContentScans files encountered when no path refs were extracted.
+// This keeps latency predictable even when the prompt has only identifier
+// or phrase references.
+func scoreFiles(ctx context.Context, root string, files []string, refs extractedRefs) []candidate {
 	// Normalize path refs: for each, keep the basename and the full form.
 	pathTerms := make([]string, 0, len(refs.Paths)*2)
 	for _, p := range refs.Paths {
@@ -273,8 +334,15 @@ func scoreFiles(root string, files []string, refs extractedRefs) []candidate {
 		}
 	}
 
+	havePathRefs := len(pathTerms) > 0
+	needsContent := len(refs.Identifiers) > 0 || len(refs.Phrases) > 0
+
 	var results []candidate
+	contentScansDone := 0
 	for _, rel := range files {
+		if ctx.Err() != nil {
+			return results
+		}
 		score := 0
 		baseName := filepath.Base(rel)
 		for _, t := range pathTerms {
@@ -284,8 +352,12 @@ func scoreFiles(root string, files []string, refs extractedRefs) []candidate {
 				score += 20
 			}
 		}
-		// Only read file contents when we have something to search for.
-		if len(refs.Identifiers) > 0 || len(refs.Phrases) > 0 {
+		// Content scanning is expensive (reads the full file). Limit it to:
+		//  - files already flagged by path match (always worthwhile), or
+		//  - the first N files when no path refs were present (bounded cost).
+		shouldScan := needsContent && (score > 0 || (!havePathRefs && contentScansDone < localizeMaxContentScans))
+		if shouldScan {
+			contentScansDone++
 			contentScore := scoreFileContent(filepath.Join(root, rel), refs)
 			score += contentScore
 		}
@@ -322,6 +394,8 @@ func scoreFileContent(abs string, refs extractedRefs) int {
 // buildInjection formats the localization block, capped at localizeMaxInjectBytes.
 // Snippets are the first matching window (localizeSnippetLines lines) containing
 // any identifier or phrase, or the first N lines if no match location is found.
+// If a file's full entry (path + snippet) would exceed the remaining cap, the
+// snippet is dropped so at least the path is preserved as a localization signal.
 func buildInjection(root string, cands []candidate, refs extractedRefs) string {
 	var b strings.Builder
 	b.WriteString("Relevant files identified for this task (localization pre-processing, no LLM calls):\n")
@@ -331,19 +405,32 @@ func buildInjection(root string, cands []candidate, refs extractedRefs) string {
 		snippet := extractSnippet(filepath.Join(root, cands[i].Path), refs)
 		cands[i].Snippet = snippet
 
-		entry := fmt.Sprintf("\n- %s\n", cands[i].Path)
+		pathOnly := fmt.Sprintf("\n- %s\n", cands[i].Path)
+		full := pathOnly
 		if snippet != "" {
-			entry += "```\n" + snippet + "\n```\n"
+			full += "```\n" + snippet + "\n```\n"
 		}
-		// Honor the byte cap: stop adding entries once we would exceed it.
-		if b.Len()+len(entry) > localizeMaxInjectBytes {
-			break
+		// Honor the byte cap. If the full entry doesn't fit, fall back to the
+		// path alone so at least some localization signal is preserved. If even
+		// the path doesn't fit, stop adding entries.
+		switch {
+		case b.Len()+len(full) <= localizeMaxInjectBytes:
+			b.WriteString(full)
+		case b.Len()+len(pathOnly) <= localizeMaxInjectBytes:
+			b.WriteString(pathOnly)
+		default:
+			// No more room for even a bare path — stop early.
+			return finalizeInjection(&b, base)
 		}
-		b.WriteString(entry)
 	}
 
+	return finalizeInjection(&b, base)
+}
+
+// finalizeInjection returns the built string, or "" when nothing was appended
+// past the header (e.g. all entries exceeded the byte cap).
+func finalizeInjection(b *strings.Builder, base int) string {
 	if b.Len() == base {
-		// Nothing fit within the cap (e.g. header alone would exceed).
 		return ""
 	}
 	return b.String()
@@ -361,7 +448,7 @@ func extractSnippet(abs string, refs extractedRefs) string {
 
 	var lines []string
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, scannerInitialBuf), scannerMaxLineBytes)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 		if len(lines) >= 2000 {
