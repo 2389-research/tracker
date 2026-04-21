@@ -145,6 +145,9 @@ func TestSessionPlanBeforeExecute_InjectsPlanningTurn(t *testing.T) {
 	if len(requests[0].Tools) != 0 {
 		t.Fatalf("planning turn should not expose tools, got %d", len(requests[0].Tools))
 	}
+	if len(requests[0].Messages) == 0 {
+		t.Fatal("planning turn request should include messages")
+	}
 	firstUserText := requests[0].Messages[len(requests[0].Messages)-1].Text()
 	if firstUserText != planBeforeExecutePrompt {
 		t.Fatalf("planning turn prompt mismatch: got %q", firstUserText)
