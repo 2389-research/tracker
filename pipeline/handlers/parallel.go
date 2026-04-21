@@ -85,7 +85,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	})
 
 	outcome := pipeline.Outcome{Status: status, Stats: aggregateBranchStats(collected)}
-	if joinID := node.Attrs["parallel_join"]; joinID != "" {
+	if joinID := node.ParallelConfig().JoinID; joinID != "" {
 		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
 	}
 	return outcome, nil
@@ -102,7 +102,7 @@ func (h *ParallelHandler) resolveBranchEdges(node *pipeline.Node) ([]*pipeline.E
 
 // collectBranchEdges builds the edge list from parallel_targets attr or outgoing edges.
 func (h *ParallelHandler) collectBranchEdges(node *pipeline.Node) []*pipeline.Edge {
-	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
+	if targetsAttr := node.ParallelConfig().ParallelTargets; targetsAttr != "" {
 		return edgesFromTargetsAttr(node.ID, targetsAttr)
 	}
 	return h.edgesFromOutgoing(node)
@@ -121,7 +121,7 @@ func edgesFromTargetsAttr(fromID, targetsAttr string) []*pipeline.Edge {
 
 // edgesFromOutgoing returns outgoing edges excluding the join node.
 func (h *ParallelHandler) edgesFromOutgoing(node *pipeline.Node) []*pipeline.Edge {
-	joinID := node.Attrs["parallel_join"]
+	joinID := node.ParallelConfig().JoinID
 	var edges []*pipeline.Edge
 	for _, e := range h.graph.OutgoingEdges(node.ID) {
 		if e.To != joinID {

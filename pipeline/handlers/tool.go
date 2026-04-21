@@ -176,7 +176,7 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 // expandAndValidateCommand expands variables in the tool_command attribute and
 // runs denylist/allowlist validation. Returns the final command string or an error.
 func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeline.PipelineContext) (string, error) {
-	command := node.Attrs["tool_command"]
+	command := node.ToolConfig().Command
 	if command == "" {
 		return "", fmt.Errorf("node %q missing required attribute 'tool_command'", node.ID)
 	}
@@ -239,8 +239,8 @@ func extractGraphAttrsAndParams(pctx *pipeline.PipelineContext) (graphAttrs, par
 // applyWorkingDir prepends a "cd <dir> && " prefix to command if the node has a
 // working_dir attribute. Validates against path traversal and shell metacharacters.
 func (h *ToolHandler) applyWorkingDir(node *pipeline.Node, command string) (string, error) {
-	wd, ok := node.Attrs["working_dir"]
-	if !ok || wd == "" {
+	wd := node.ToolConfig().WorkingDir
+	if wd == "" {
 		return command, nil
 	}
 	if strings.ContainsAny(wd, "`$;|&()<>\n\r") {
