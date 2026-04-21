@@ -119,6 +119,36 @@ func TestDiagnoseMostRecent_SelectsNewestRun(t *testing.T) {
 	}
 }
 
+func TestDiagnoseMostRecent_WarnsOnMalformedCheckpointViaLogWriter(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	if err := os.MkdirAll(filepath.Join(runsDir, "bad"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, "bad", "checkpoint.json"), []byte(`{not json}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runsDir, "good"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, "good", "checkpoint.json"),
+		[]byte(`{"run_id":"good","completed_nodes":["A"],"timestamp":"2026-04-17T11:00:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logBuf bytes.Buffer
+	r, err := DiagnoseMostRecent(context.Background(), workdir, DiagnoseConfig{LogWriter: &logBuf})
+	if err != nil {
+		t.Fatalf("DiagnoseMostRecent: %v", err)
+	}
+	if r.RunID != "good" {
+		t.Fatalf("run_id = %q, want good", r.RunID)
+	}
+	if !strings.Contains(logBuf.String(), "warning: cannot load checkpoint for run bad") {
+		t.Fatalf("expected warning in log writer, got: %q", logBuf.String())
+	}
+}
+
 func TestDiagnose_MalformedStatusWarningContinues(t *testing.T) {
 	runDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(runDir, "checkpoint.json"),

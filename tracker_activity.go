@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -64,6 +65,10 @@ func findRunDirMatchLib(runsDir, runID string) (string, error) {
 // timestamp) under workdir. Returns an error if no runs with valid
 // checkpoints exist.
 func MostRecentRunID(workdir string) (string, error) {
+	return mostRecentRunID(workdir, io.Discard)
+}
+
+func mostRecentRunID(workdir string, logW io.Writer) (string, error) {
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
@@ -82,7 +87,7 @@ func MostRecentRunID(workdir string) (string, error) {
 		cp, err := pipeline.LoadCheckpoint(cpPath)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "warning: cannot load checkpoint for run %s: %v\n", e.Name(), err)
+				fmt.Fprintf(logW, "warning: cannot load checkpoint for run %s: %v\n", e.Name(), err)
 			}
 			// Skip invalid or missing checkpoints — the run directory may be
 			// partially written or belong to a different tool.

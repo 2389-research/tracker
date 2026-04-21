@@ -112,7 +112,7 @@ func TestMostRecentRunID_NoValidCheckpoints(t *testing.T) {
 	}
 }
 
-func TestMostRecentRunID_WarnsOnMalformedCheckpointAndContinues(t *testing.T) {
+func TestMostRecentRunID_SkipsMalformedCheckpointWithoutStderrSideEffects(t *testing.T) {
 	workdir := t.TempDir()
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
 	must(t, os.MkdirAll(filepath.Join(runsDir, "bad"), 0o755))
@@ -132,8 +132,8 @@ func TestMostRecentRunID_WarnsOnMalformedCheckpointAndContinues(t *testing.T) {
 	if got != "good" {
 		t.Fatalf("MostRecentRunID = %q, want good", got)
 	}
-	if !strings.Contains(stderr, "warning: cannot load checkpoint for run bad") {
-		t.Fatalf("expected checkpoint warning on stderr, got: %q", stderr)
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("expected no stderr output, got: %q", stderr)
 	}
 }
 
