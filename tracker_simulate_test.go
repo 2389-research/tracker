@@ -129,3 +129,29 @@ func TestSimulate_GraphAttrsPopulated(t *testing.T) {
 		t.Errorf("graph attrs missing/wrong: %+v", r.GraphAttrs)
 	}
 }
+
+func TestSimulate_OrphanNodesSortedInNodeList(t *testing.T) {
+	src := `digraph pipeline {
+		Start [shape=Mdiamond label="Start"];
+		End [shape=Msquare label="End"];
+		BOrphan [shape=box label="B Orphan"];
+		AOrphan [shape=box label="A Orphan"];
+		Start -> End;
+	}`
+	r, err := Simulate(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Simulate: %v", err)
+	}
+
+	index := make(map[string]int, len(r.Nodes))
+	for i, n := range r.Nodes {
+		index[n.ID] = i
+	}
+
+	if index["AOrphan"] >= index["BOrphan"] {
+		t.Errorf("orphans not sorted in node list: %+v", r.Nodes)
+	}
+	if index["End"] >= index["AOrphan"] {
+		t.Errorf("orphans should appear after reachable nodes: %+v", r.Nodes)
+	}
+}
