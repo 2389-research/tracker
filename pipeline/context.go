@@ -105,6 +105,21 @@ func (c *PipelineContext) Merge(updates map[string]string) {
 	}
 }
 
+// MergeWithoutDirty applies updates to the user-visible context without
+// marking keys as dirty. Used for externally-injected values (e.g. steering
+// channel updates from a supervisor) that should be globally visible but not
+// attributed to any node's scoped namespace.
+func (c *PipelineContext) MergeWithoutDirty(updates map[string]string) {
+	if updates == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, v := range updates {
+		c.values[k] = v
+	}
+}
+
 // Snapshot returns a shallow copy of the user-visible context values.
 func (c *PipelineContext) Snapshot() map[string]string {
 	c.mu.RLock()

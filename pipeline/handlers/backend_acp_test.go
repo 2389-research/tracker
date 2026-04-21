@@ -913,6 +913,47 @@ func TestValidatePathInWorkDir(t *testing.T) {
 	}
 }
 
+func TestValidatePathInWorkDir_SymlinkEscape(t *testing.T) {
+	// Create a real directory structure with a symlink that could escape.
+	realDir := t.TempDir()
+	outsideDir := t.TempDir()
+	workDir := filepath.Join(realDir, "workspace")
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+
+	// Create a symlink inside workDir that points outside. Skip the test
+	// (rather than fail) if the environment doesn't support symlinks —
+	// e.g., some Windows CI runners.
+	if err := os.Symlink(outsideDir, filepath.Join(workDir, "escape")); err != nil {
+		t.Skipf("symlink not available in this environment: %v", err)
+	}
+
+	// A file directly under the symlinked dir should be outside workDir
+	// after symlink resolution.
+	err := validatePathInWorkDir(filepath.Join(workDir, "escape", "secret.txt"), workDir)
+	if err == nil {
+		t.Error("expected error for path through symlink pointing outside workDir")
+	}
+
+	// symlink/../sibling should be rejected (.. after symlink).
+	// Build path manually — filepath.Join collapses ".." lexically.
+	escapePath := workDir + "/escape/../sibling/file.txt"
+	err = validatePathInWorkDir(escapePath, workDir)
+	if err == nil {
+		t.Error("expected error for symlink/../ traversal")
+	}
+}
+
+func TestValidatePathInWorkDir_NestedNonExistent(t *testing.T) {
+	// Deeply nested non-existent paths should be accepted when under workDir.
+	workDir := t.TempDir()
+	err := validatePathInWorkDir(filepath.Join(workDir, "a", "b", "c", "file.txt"), workDir)
+	if err != nil {
+		t.Errorf("expected deeply nested path under workDir to be valid, got: %v", err)
+	}
+}
+
 func TestApplyLineFilter_NegativeValues(t *testing.T) {
 	content := "line1\nline2\nline3\nline4\nline5"
 

@@ -84,7 +84,7 @@ func TestListModels(t *testing.T) {
 		ids[m["id"].(string)] = true
 	}
 
-	expectedIDs := []string{"claude-opus-4-6", "gpt-5.2", "gemini-3-pro-preview"}
+	expectedIDs := []string{"claude-opus-4-6", "gpt-5.2", "gemini-3.1-pro-preview"}
 	for _, expected := range expectedIDs {
 		if !ids[expected] {
 			t.Errorf("expected model ID %q in list", expected)
