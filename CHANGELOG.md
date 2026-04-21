@@ -7,18 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-04-21
+
 ### Added
 
-- **`tracker.SimulateGraph(ctx, graph)`** — graph-in variant of `Simulate` that accepts a pre-parsed `*pipeline.Graph` and returns a `SimulateReport`. Lets callers that already parsed the pipeline (CLI flows that also run `ValidateSource`, tooling that builds a graph programmatically) avoid a second parse. `Simulate(ctx, source)` is now a thin wrapper over `parsePipelineSource` + `SimulateGraph`; signature and behavior unchanged.
-- **Repository localization pre-processing** (agent): optional pre-processing phase that scans the working directory for files relevant to the task prompt and injects a structured context block before the first LLM turn. Pure text analysis + filesystem scan — zero LLM calls. Opt-in via `SessionConfig.Localize` (default `false`). Extracts file paths, camelCase/snake_case identifiers, quoted phrases, and error-line excerpts from the prompt; capped at 10 files / ~2KB injected context with 5-line snippets. Reduces wasted turns on `glob`/`grep` for repository-level tasks.
-- **Agent episodic memory across retries/resumes**: native codergen sessions now record a structured per-tool episode log (`tool`, args, success/fail, summary), publish `episode_summary` and rolling `episode_summaries` context keys at session end, and inject prior summaries into subsequent retry/resume attempts so the model can avoid repeating failed approaches.
-- **Plan-before-execute phase** (agent): optional single planning LLM call before the main execution loop. Opt-in via `SessionConfig.PlanBeforeExecute` (default `false`) or codergen node attrs (`plan_before_execute: "true"` or `plan: "true"`). The generated plan is retained in conversation context for subsequent execution turns.
+- **Declarative `writes:` / `reads:` unified structured output** (closes #85). Agent, human, and tool nodes can now declare the keys they produce and consume. Declared writes are extracted from handler output into the pipeline context and validated — missing required fields fail the node. `reads:` pins fidelity for the keys a node consumes so downstream nodes see consistent data. New helpers: `pipeline/context_writes.go`, `pipeline/handlers/declared_writes.go`. Replaces node-type-specific workarounds previously needed to thread typed outputs through.
+- **`tracker.SimulateGraph(ctx, graph)`** (closes #108) — graph-in variant of `Simulate` that accepts a pre-parsed `*pipeline.Graph` and returns a `SimulateReport`. Lets callers that already parsed the pipeline (CLI flows that also run `ValidateSource`, tooling that builds a graph programmatically) avoid a second parse. `Simulate(ctx, source)` is now a thin wrapper over `parsePipelineSource` + `SimulateGraph`; signature and behavior unchanged.
+- **Repository localization pre-processing** (agent, closes #95): optional pre-processing phase that scans the working directory for files relevant to the task prompt and injects a structured context block before the first LLM turn. Pure text analysis + filesystem scan — zero LLM calls. Opt-in via `SessionConfig.Localize` (default `false`). Extracts file paths, camelCase/snake_case identifiers, quoted phrases, and error-line excerpts from the prompt; capped at 10 files / ~2KB injected context with 5-line snippets. Reduces wasted turns on `glob`/`grep` for repository-level tasks.
+- **Agent episodic memory across retries/resumes** (closes #96): native codergen sessions now record a structured per-tool episode log (`tool`, args, success/fail, summary), publish `episode_summary` and rolling `episode_summaries` context keys at session end, and inject prior summaries into subsequent retry/resume attempts so the model can avoid repeating failed approaches.
+- **Plan-before-execute phase** (agent, closes #97): optional single planning LLM call before the main execution loop. Opt-in via `SessionConfig.PlanBeforeExecute` (default `false`) or codergen node attrs (`plan_before_execute: "true"` or `plan: "true"`). The generated plan is retained in conversation context for subsequent execution turns.
+- **Library API godoc, stability policy, and runnable examples** (closes #110). Package-level `doc.go` now documents pre-1.0 API stability expectations; README gains a stability callout; `tracker_examples_test.go` ships runnable `ExampleDiagnose` / `ExampleAudit` / `ExampleDoctor` examples that double as godoc content.
+- **Test coverage close-out for `Diagnose` / `Audit` / `Doctor`** (closes #107). Covers `DiagnoseMostRecent`, `MostRecentRunID`, `ResolveRunDir` no-match path, corrupted `status.json` warning, `Audit` error paths (missing / malformed / empty run dir), `Doctor` warnings sentinel, and `checkArtifactDirs` non-ENOENT stat errors.
+
+### Changed
+
+- **`tracker simulate` output is now deterministic** (closes #111). Graph-level attributes in the simulate header are now sorted alphabetically; orphan/unreachable nodes in the node table are appended in sorted order. Previously both depended on Go's random map iteration order, producing different diffs on each run.
+- **`MostRecentRunID` no longer writes to `os.Stderr`** from library paths (#107 follow-up). Parse warnings now route through `DiagnoseConfig.LogWriter` so library callers aren't surprised by stray stderr.
 
 ### Fixed
 
 - **`tracker simulate` now parses the pipeline source exactly once** (closes #108). Previously `runSimulateCmd` parsed twice — once for the validation-warnings section, again inside `tracker.Simulate`. That risked a TOCTOU mismatch between the two views, duplicated dippin-lang parser side effects (lint warnings printed twice), and burned extra CPU on large `.dip` files. The CLI now reads the source once, calls `tracker.ValidateSource` for `{Graph, Errors, Warnings}`, and hands the same graph to `tracker.SimulateGraph`. CLI stdout is byte-identical to before; only the duplicated parser-logging lines are gone.
-- Cost accounting and reporting are now consistent across runtime and CLI summaries:
-  -  CLI run summaries now read token/cost totals from `EngineResult.Usage` (trace aggregate) instead of `TokenTracker.TotalUsage().EstimatedCost`, so cost is shown correctly.
+- **Cost accounting and reporting are now consistent across runtime and CLI summaries** (closes #128):
+  - CLI run summaries now read token/cost totals from `EngineResult.Usage` (trace aggregate) instead of `TokenTracker.TotalUsage().EstimatedCost`, so cost is shown correctly.
   - Repair turns now apply the same `EstimateCost` compensation path used by normal turns when providers omit `EstimatedCost`.
   - OpenAI SSE `response.completed` now preserves `ReasoningTokens` in finish usage events.
   - Gemini adapter now falls back to the requested model when `modelVersion` is absent in API responses.
