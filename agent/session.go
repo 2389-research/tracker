@@ -184,7 +184,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		s.emit(Event{Type: EventSessionEnd, SessionID: s.id})
 	}()
 
-	s.initConversation(userInput)
+	s.initConversation(ctx, userInput)
 
 	stoppedNaturally, err := s.runTurnLoop(ctx, start, tracker, &result)
 	if err != nil {
