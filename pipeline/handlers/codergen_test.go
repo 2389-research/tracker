@@ -136,6 +136,58 @@ func TestCodergenHandler_InjectsPriorEpisodeSummaries(t *testing.T) {
 	}
 }
 
+func TestCodergenHandler_CapsEpisodeSummariesGrowth(t *testing.T) {
+	workdir := t.TempDir()
+	client := &scriptedCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "read",
+							Arguments: json.RawMessage(`{"path":"go.mod"}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	h := NewCodergenHandler(client, workdir)
+	h.env = agentexec.NewLocalEnvironment(workdir)
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "inspect repo"},
+	}
+	var prior []string
+	for i := 1; i <= 20; i++ {
+		prior = append(prior, fmt.Sprintf("summary %d", i))
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyEpisodeSummaries, agent.SerializeEpisodeSummaries(prior))
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := agent.ParseEpisodeSummaries(outcome.ContextUpdates[pipeline.ContextKeyEpisodeSummaries])
+	if len(got) > 8 {
+		t.Fatalf("expected capped episode summaries, got %d", len(got))
+	}
+	if !strings.Contains(got[len(got)-1], "read args=") {
+		t.Fatalf("expected latest session summary in capped list, got %#v", got)
+	}
+}
+
 func TestCodergenHandlerName(t *testing.T) {
 	h := NewCodergenHandler(nil, "")
 	if h.Name() != "codergen" {

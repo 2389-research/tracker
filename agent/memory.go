@@ -6,7 +6,11 @@ import (
 	"strings"
 )
 
-const maxEpisodeSummaryLen = 160
+const (
+	maxEpisodeSummaryLen        = 160
+	maxEpisodeSummaryCount      = 8
+	maxEpisodeSummaryTotalRunes = 4000
+)
 
 // EpisodeEntry captures one tool attempt inside a session.
 type EpisodeEntry struct {
@@ -53,6 +57,7 @@ func (l EpisodeLog) Summary() string {
 
 // SerializeEpisodeSummaries encodes episode summaries as a JSON array.
 func SerializeEpisodeSummaries(summaries []string) string {
+	summaries = normalizeEpisodeSummaries(summaries)
 	if len(summaries) == 0 {
 		return "[]"
 	}
@@ -71,10 +76,10 @@ func ParseEpisodeSummaries(raw string) []string {
 	}
 	var summaries []string
 	if err := json.Unmarshal([]byte(raw), &summaries); err == nil {
-		return filterNonEmptySummaries(summaries)
+		return normalizeEpisodeSummaries(summaries)
 	}
 	// Backward/defensive fallback: treat non-JSON value as a single summary.
-	return []string{raw}
+	return normalizeEpisodeSummaries([]string{raw})
 }
 
 func summarizeEpisodeOutput(output string, isError bool) string {
@@ -94,13 +99,24 @@ func summarizeEpisodeOutput(output string, isError bool) string {
 	return text
 }
 
-func filterNonEmptySummaries(in []string) []string {
+func normalizeEpisodeSummaries(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, s := range in {
 		s = strings.TrimSpace(s)
 		if s != "" {
 			out = append(out, s)
 		}
+	}
+	if len(out) > maxEpisodeSummaryCount {
+		out = out[len(out)-maxEpisodeSummaryCount:]
+	}
+	totalRunes := 0
+	for _, s := range out {
+		totalRunes += len([]rune(s))
+	}
+	for len(out) > 1 && totalRunes > maxEpisodeSummaryTotalRunes {
+		totalRunes -= len([]rune(out[0]))
+		out = out[1:]
 	}
 	return out
 }

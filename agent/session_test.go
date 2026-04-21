@@ -191,6 +191,73 @@ func TestSession_IncludesPriorEpisodeSummariesInInitialMessages(t *testing.T) {
 	}
 }
 
+func TestSession_PriorEpisodeSummariesAreRenumberedWithoutGaps(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	var captured []llm.Message
+	client.onComplete = func(req *llm.Request) {
+		captured = append(captured, req.Messages...)
+	}
+
+	cfg := DefaultConfig()
+	cfg.PriorEpisodeSummaries = []string{"first attempt", "   ", "third attempt"}
+	sess := mustNewSession(t, client, cfg)
+	if _, err := sess.Run(context.Background(), "try again"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var priorMsg string
+	for _, msg := range captured {
+		if msg.Role == llm.RoleUser && strings.Contains(msg.Text(), "Prior attempts summary") {
+			priorMsg = msg.Text()
+			break
+		}
+	}
+	if priorMsg == "" {
+		t.Fatal("expected prior attempts summary message")
+	}
+	if !strings.Contains(priorMsg, "1. first attempt") || !strings.Contains(priorMsg, "2. third attempt") {
+		t.Fatalf("expected contiguous numbering, got: %q", priorMsg)
+	}
+	if strings.Contains(priorMsg, "3.") {
+		t.Fatalf("unexpected numbering gap in message: %q", priorMsg)
+	}
+}
+
+func TestSession_DoesNotInjectHeaderOnlyPriorEpisodeMessage(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	var captured []llm.Message
+	client.onComplete = func(req *llm.Request) {
+		captured = append(captured, req.Messages...)
+	}
+
+	cfg := DefaultConfig()
+	cfg.PriorEpisodeSummaries = []string{" ", "\t"}
+	sess := mustNewSession(t, client, cfg)
+	if _, err := sess.Run(context.Background(), "try again"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, msg := range captured {
+		if msg.Role == llm.RoleUser && strings.Contains(msg.Text(), "Prior attempts summary") {
+			t.Fatalf("did not expect header-only prior summary message, got: %q", msg.Text())
+		}
+	}
+}
+
 func TestSessionToolCallLoop(t *testing.T) {
 	toolCallResp := &llm.Response{
 		Message: llm.Message{

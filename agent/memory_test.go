@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestEpisodeLogSummaryAndSerialization(t *testing.T) {
 	var log EpisodeLog
@@ -20,5 +24,33 @@ func TestParseEpisodeSummariesFallback(t *testing.T) {
 	got := ParseEpisodeSummaries("single summary")
 	if len(got) != 1 || got[0] != "single summary" {
 		t.Fatalf("unexpected fallback parse result: %#v", got)
+	}
+}
+
+func TestEpisodeSummariesNormalizationCapsCount(t *testing.T) {
+	var in []string
+	for i := 1; i <= 12; i++ {
+		in = append(in, fmt.Sprintf("summary %d", i))
+	}
+	got := ParseEpisodeSummaries(SerializeEpisodeSummaries(in))
+	if len(got) != maxEpisodeSummaryCount {
+		t.Fatalf("expected %d summaries after cap, got %d", maxEpisodeSummaryCount, len(got))
+	}
+	if got[0] != "summary 5" || got[len(got)-1] != "summary 12" {
+		t.Fatalf("expected to keep newest summaries, got %#v", got)
+	}
+}
+
+func TestEpisodeSummariesNormalizationCapsTotalRunes(t *testing.T) {
+	in := []string{
+		strings.Repeat("a", maxEpisodeSummaryTotalRunes),
+		strings.Repeat("b", maxEpisodeSummaryTotalRunes),
+	}
+	got := ParseEpisodeSummaries(SerializeEpisodeSummaries(in))
+	if len(got) != 1 {
+		t.Fatalf("expected oldest summary to be dropped by rune budget, got %#v", got)
+	}
+	if got[0] != strings.Repeat("b", maxEpisodeSummaryTotalRunes) {
+		t.Fatalf("expected newest summary to remain, got len=%d", len([]rune(got[0])))
 	}
 }
