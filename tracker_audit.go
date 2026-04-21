@@ -25,9 +25,9 @@ type AuditConfig struct {
 
 // AuditReport is the structured result of Audit().
 type AuditReport struct {
-	RunID           string          `json:"run_id"`
-	// Status is one of: "success", "fail", "in_progress".
-	Status          string          `json:"status"`
+	RunID string `json:"run_id"`
+	// Status is one of: "success", "fail".
+	Status string `json:"status"`
 	// TotalDuration is encoded as integer nanoseconds in JSON
 	// ("total_duration_ns"), not as a duration string.
 	TotalDuration   time.Duration   `json:"total_duration_ns"`
@@ -36,22 +36,22 @@ type AuditReport struct {
 	Errors          []ActivityError `json:"errors,omitempty"`
 	Recommendations []string        `json:"recommendations,omitempty"`
 	// CompletedNodes is the number of completed nodes recorded in checkpoint.json.
-	CompletedNodes      int       `json:"completed_nodes"`
+	CompletedNodes int `json:"completed_nodes"`
 	// RestartCount is the checkpoint restart counter for the run.
-	RestartCount        int       `json:"restart_count"`
+	RestartCount int `json:"restart_count"`
 	// CheckpointTimestamp is the last checkpoint write time.
 	CheckpointTimestamp time.Time `json:"checkpoint_timestamp"`
 }
 
 // TimelineEntry is a single entry in the audit timeline.
 type TimelineEntry struct {
-	Timestamp time.Time     `json:"ts"`
-	Type      string        `json:"type"`
-	NodeID    string        `json:"node_id,omitempty"`
-	Message   string        `json:"message,omitempty"`
+	Timestamp time.Time `json:"ts"`
+	Type      string    `json:"type"`
+	NodeID    string    `json:"node_id,omitempty"`
+	Message   string    `json:"message,omitempty"`
 	// Duration is encoded as integer nanoseconds in JSON ("duration_ns"),
 	// not as a duration string.
-	Duration  time.Duration `json:"duration_ns,omitempty"`
+	Duration time.Duration `json:"duration_ns,omitempty"`
 }
 
 // RetryRecord records how many times a node was retried.
@@ -69,17 +69,17 @@ type ActivityError struct {
 
 // RunSummary is a condensed view of a single pipeline run for listing.
 type RunSummary struct {
-	RunID     string        `json:"run_id"`
-	// Status is one of: "success", "fail", "in_progress".
-	Status    string        `json:"status"`
-	Nodes     int           `json:"nodes"`
-	Retries   int           `json:"retries"`
-	Restarts  int           `json:"restarts"`
-	Timestamp time.Time     `json:"timestamp"`
+	RunID string `json:"run_id"`
+	// Status is one of: "success", "fail".
+	Status    string    `json:"status"`
+	Nodes     int       `json:"nodes"`
+	Retries   int       `json:"retries"`
+	Restarts  int       `json:"restarts"`
+	Timestamp time.Time `json:"timestamp"`
 	// Duration is encoded as integer nanoseconds in JSON ("duration_ns"),
 	// not as a duration string.
-	Duration  time.Duration `json:"duration_ns"`
-	FailedAt  string        `json:"failed_at,omitempty"`
+	Duration time.Duration `json:"duration_ns"`
+	FailedAt string        `json:"failed_at,omitempty"`
 }
 
 // Audit reads checkpoint.json and activity.jsonl under runDir and returns a
