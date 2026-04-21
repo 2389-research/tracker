@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +103,39 @@ func TestAudit_CtxCancelledAtEntry(t *testing.T) {
 	_, err := Audit(ctx, "testdata/runs/ok")
 	if err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestAudit_MissingCheckpoint(t *testing.T) {
+	_, err := Audit(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected missing checkpoint error")
+	}
+	if !strings.Contains(err.Error(), "load checkpoint") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAudit_MalformedCheckpointJSON(t *testing.T) {
+	runDir := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(runDir, "checkpoint.json"), []byte(`{not json}`), 0o644))
+
+	_, err := Audit(context.Background(), runDir)
+	if err == nil {
+		t.Fatal("expected malformed checkpoint error")
+	}
+	if !strings.Contains(err.Error(), "load checkpoint") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAudit_EmptyRunDirectory(t *testing.T) {
+	runDir := t.TempDir()
+	_, err := Audit(context.Background(), runDir)
+	if err == nil {
+		t.Fatal("expected error for empty run directory")
+	}
+	if !strings.Contains(err.Error(), "load checkpoint") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

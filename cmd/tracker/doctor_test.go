@@ -34,99 +34,55 @@ func TestRunDoctorWithConfigAllPass(t *testing.T) {
 
 // ---- parseDoctorFlags -------------------------------------------------------
 
-func TestParseFlagsDoctorNoArgs(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
+func TestParseFlagsDoctor(t *testing.T) {
+	tests := []struct {
+		name             string
+		args             []string
+		wantProbe        bool
+		wantPipelineFile string
+		wantWorkdir      string
+		wantBackend      string
+		wantErr          bool
+	}{
+		{name: "no args", args: []string{"tracker", "doctor"}, wantProbe: true},
+		{name: "with probe", args: []string{"tracker", "doctor", "--probe"}, wantProbe: true},
+		{name: "no probe", args: []string{"tracker", "doctor", "--probe=false"}, wantProbe: false},
+		{name: "with pipeline file", args: []string{"tracker", "doctor", "my_pipeline.dip"}, wantProbe: true, wantPipelineFile: "my_pipeline.dip"},
+		{name: "with probe and file", args: []string{"tracker", "doctor", "--probe", "pipeline.dip"}, wantProbe: true, wantPipelineFile: "pipeline.dip"},
+		{name: "with workdir", args: []string{"tracker", "doctor", "--workdir", "/tmp/myproject"}, wantProbe: true, wantWorkdir: "/tmp/myproject"},
+		{name: "with short workdir", args: []string{"tracker", "doctor", "-w", "/tmp/myproject"}, wantProbe: true, wantWorkdir: "/tmp/myproject"},
+		{name: "with backend", args: []string{"tracker", "doctor", "--backend", "claude-code"}, wantProbe: true, wantBackend: "claude-code"},
+		{name: "invalid backend", args: []string{"tracker", "doctor", "--backend", "invalid-backend"}, wantErr: true},
 	}
-	if cfg.mode != modeDoctor {
-		t.Errorf("mode = %q, want doctor", cfg.mode)
-	}
-	if !cfg.probe {
-		t.Error("expected probe=true by default")
-	}
-	if cfg.pipelineFile != "" {
-		t.Error("expected no pipeline file by default")
-	}
-}
 
-func TestParseFlagsDoctorWithProbe(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor", "--probe"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
-	}
-	if !cfg.probe {
-		t.Error("expected probe=true with --probe flag")
-	}
-}
-
-func TestParseFlagsDoctorNoProbe(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor", "--probe=false"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
-	}
-	if cfg.probe {
-		t.Error("expected probe=false with --probe=false flag")
-	}
-}
-
-func TestParseFlagsDoctorWithPipelineFile(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor", "my_pipeline.dip"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
-	}
-	if cfg.pipelineFile != "my_pipeline.dip" {
-		t.Errorf("expected pipelineFile=my_pipeline.dip, got %q", cfg.pipelineFile)
-	}
-}
-
-func TestParseFlagsDoctorWithProbeAndFile(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor", "--probe", "pipeline.dip"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
-	}
-	if !cfg.probe {
-		t.Error("expected probe=true")
-	}
-	if cfg.pipelineFile != "pipeline.dip" {
-		t.Errorf("expected pipelineFile=pipeline.dip, got %q", cfg.pipelineFile)
-	}
-}
-
-func TestParseFlagsDoctorWithWorkdir(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor", "--workdir", "/tmp/myproject"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
-	}
-	if cfg.workdir != "/tmp/myproject" {
-		t.Errorf("expected workdir=/tmp/myproject, got %q", cfg.workdir)
-	}
-}
-
-func TestParseFlagsDoctorWithShortWorkdir(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor", "-w", "/tmp/myproject"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
-	}
-	if cfg.workdir != "/tmp/myproject" {
-		t.Errorf("expected workdir=/tmp/myproject, got %q", cfg.workdir)
-	}
-}
-
-func TestParseFlagsDoctorWithBackend(t *testing.T) {
-	cfg, err := parseFlags([]string{"tracker", "doctor", "--backend", "claude-code"})
-	if err != nil {
-		t.Fatalf("parseFlags error: %v", err)
-	}
-	if cfg.backend != "claude-code" {
-		t.Errorf("expected backend=claude-code, got %q", cfg.backend)
-	}
-}
-
-func TestParseFlagsDoctorInvalidBackend(t *testing.T) {
-	_, err := parseFlags([]string{"tracker", "doctor", "--backend", "invalid-backend"})
-	if err == nil {
-		t.Error("expected error for invalid --backend, got nil")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := parseFlags(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected parseFlags error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseFlags error: %v", err)
+			}
+			if cfg.mode != modeDoctor {
+				t.Errorf("mode = %q, want doctor", cfg.mode)
+			}
+			if cfg.probe != tt.wantProbe {
+				t.Errorf("probe = %v, want %v", cfg.probe, tt.wantProbe)
+			}
+			if cfg.pipelineFile != tt.wantPipelineFile {
+				t.Errorf("pipelineFile = %q, want %q", cfg.pipelineFile, tt.wantPipelineFile)
+			}
+			if cfg.workdir != tt.wantWorkdir {
+				t.Errorf("workdir = %q, want %q", cfg.workdir, tt.wantWorkdir)
+			}
+			if cfg.backend != tt.wantBackend {
+				t.Errorf("backend = %q, want %q", cfg.backend, tt.wantBackend)
+			}
+		})
 	}
 }
 

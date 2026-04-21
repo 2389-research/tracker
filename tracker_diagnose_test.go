@@ -1,7 +1,11 @@
 package tracker
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -85,5 +89,91 @@ func TestDiagnose_CtxCancelled(t *testing.T) {
 	}
 	if err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestDiagnoseMostRecent_SelectsNewestRun(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	if err := os.MkdirAll(filepath.Join(runsDir, "r1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, "r1", "checkpoint.json"),
+		[]byte(`{"run_id":"r1","completed_nodes":["A"],"timestamp":"2026-04-17T10:00:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runsDir, "r2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, "r2", "checkpoint.json"),
+		[]byte(`{"run_id":"r2","completed_nodes":["A","B"],"timestamp":"2026-04-17T11:00:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := DiagnoseMostRecent(context.Background(), workdir)
+	if err != nil {
+		t.Fatalf("DiagnoseMostRecent: %v", err)
+	}
+	if r.RunID != "r2" {
+		t.Fatalf("run_id = %q, want r2", r.RunID)
+	}
+}
+
+func TestDiagnoseMostRecent_WarnsOnMalformedCheckpointViaLogWriter(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	if err := os.MkdirAll(filepath.Join(runsDir, "bad"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, "bad", "checkpoint.json"), []byte(`{not json}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runsDir, "good"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, "good", "checkpoint.json"),
+		[]byte(`{"run_id":"good","completed_nodes":["A"],"timestamp":"2026-04-17T11:00:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logBuf bytes.Buffer
+	r, err := DiagnoseMostRecent(context.Background(), workdir, DiagnoseConfig{LogWriter: &logBuf})
+	if err != nil {
+		t.Fatalf("DiagnoseMostRecent: %v", err)
+	}
+	if r.RunID != "good" {
+		t.Fatalf("run_id = %q, want good", r.RunID)
+	}
+	if !strings.Contains(logBuf.String(), "warning: cannot load checkpoint for run bad") {
+		t.Fatalf("expected warning in log writer, got: %q", logBuf.String())
+	}
+}
+
+func TestDiagnose_MalformedStatusWarningContinues(t *testing.T) {
+	runDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(runDir, "checkpoint.json"),
+		[]byte(`{"run_id":"run-1","completed_nodes":["Build"],"timestamp":"2026-04-17T11:00:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runDir, "Build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "Build", "status.json"), []byte(`{not json}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logBuf bytes.Buffer
+	r, err := Diagnose(context.Background(), runDir, DiagnoseConfig{LogWriter: &logBuf})
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if r.RunID != "run-1" {
+		t.Fatalf("run_id = %q, want run-1", r.RunID)
+	}
+	if len(r.Failures) != 0 {
+		t.Fatalf("failures = %d, want 0", len(r.Failures))
+	}
+	if !strings.Contains(logBuf.String(), "warning: cannot parse") {
+		t.Fatalf("expected malformed status warning, got %q", logBuf.String())
 	}
 }
