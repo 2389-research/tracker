@@ -582,6 +582,21 @@ func TestBuildConfig_PlanBeforeExecute_FromPlanAlias(t *testing.T) {
 	}
 }
 
+func TestBuildConfig_PlanBeforeExecute_ExplicitKeyBeatsAlias(t *testing.T) {
+	h := &CodergenHandler{}
+	node := &pipeline.Node{
+		ID: "test",
+		Attrs: map[string]string{
+			"plan_before_execute": "false",
+			"plan":                "true",
+		},
+	}
+	config := h.buildConfig(node)
+	if config.PlanBeforeExecute {
+		t.Error("expected plan_before_execute to take precedence over plan alias")
+	}
+}
+
 func TestParseClaudeCodeToolAttrsAllowed(t *testing.T) {
 	node := &pipeline.Node{
 		ID: "test",

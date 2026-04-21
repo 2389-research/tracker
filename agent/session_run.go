@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -56,6 +57,12 @@ func (s *Session) maybeRunPlanningTurn(ctx context.Context, result *SessionResul
 	result.Usage = result.Usage.Add(resp.Usage)
 	if resp.Usage.EstimatedCost == 0 {
 		result.Usage.EstimatedCost += llm.EstimateCost(s.config.Model, resp.Usage)
+	}
+	if len(resp.ToolCalls()) > 0 {
+		err := fmt.Errorf("planning turn returned tool calls; expected text-only plan")
+		result.Error = err
+		s.emit(Event{Type: EventError, SessionID: s.id, Err: err})
+		return err
 	}
 	s.messages = append(s.messages, resp.Message)
 	s.messages = append(s.messages, llm.UserMessage(executeAfterPlanPrompt))
@@ -112,7 +119,6 @@ func (s *Session) doPlanningCall(ctx context.Context) (*llm.Response, error) {
 		Provider:        s.config.Provider,
 		Messages:        s.messages,
 		ReasoningEffort: s.config.ReasoningEffort,
-		ResponseFormat:  s.buildResponseFormat(),
 		TraceObservers: []llm.TraceObserver{
 			llm.TraceObserverFunc(func(traceEvt llm.TraceEvent) {
 				s.emitLLMTraceEvent(0, traceEvt)

@@ -213,6 +213,84 @@ func TestSessionPlanBeforeExecute_Disabled_NoPlanningTurn(t *testing.T) {
 	}
 }
 
+func TestSessionPlanBeforeExecute_OmitsStructuredResponseFormatForPlanningCall(t *testing.T) {
+	var requests []llm.Request
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("Plan: do x then y"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+		onComplete: func(req *llm.Request) {
+			copied := *req
+			copied.Messages = append([]llm.Message(nil), req.Messages...)
+			requests = append(requests, copied)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.PlanBeforeExecute = true
+	cfg.MaxTurns = 1
+	cfg.ResponseFormat = "json_schema"
+	cfg.ResponseSchema = `{"type":"object","properties":{"result":{"type":"string"}},"required":["result"]}`
+
+	sess := mustNewSession(t, client, cfg, WithTools(&stubTool{name: "read", output: "ok"}))
+	if _, err := sess.Run(context.Background(), "Fix the bug"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(requests))
+	}
+	if requests[0].ResponseFormat != nil {
+		t.Fatal("planning request should not enforce response format/schema")
+	}
+	if requests[1].ResponseFormat == nil {
+		t.Fatal("execution request should preserve configured response format/schema")
+	}
+}
+
+func TestSessionPlanBeforeExecute_ErrorsOnToolCallsInPlanningResponse(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{
+							Kind: llm.KindToolCall,
+							ToolCall: &llm.ToolCallData{
+								ID:        "plan_call_1",
+								Name:      "read",
+								Arguments: json.RawMessage(`{"path":"foo.txt"}`),
+							},
+						},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.PlanBeforeExecute = true
+	cfg.MaxTurns = 1
+
+	sess := mustNewSession(t, client, cfg, WithTools(&stubTool{name: "read", output: "ok"}))
+	_, err := sess.Run(context.Background(), "Fix the bug")
+	if err == nil {
+		t.Fatal("expected error when planning turn returns tool calls")
+	}
+	if !strings.Contains(err.Error(), "planning turn returned tool calls") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSessionRunPopulatesProvider(t *testing.T) {
 	client := &mockCompleter{
 		responses: []*llm.Response{
