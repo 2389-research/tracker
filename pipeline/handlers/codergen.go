@@ -532,6 +532,7 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	h.applyCacheAndCompaction(&config, node)
 	h.applyReflectOnError(&config, node)
 	h.applyVerifyConfig(&config, node)
+	h.applyPlanningConfig(&config, node)
 
 	return config
 }
@@ -573,6 +574,20 @@ func (h *CodergenHandler) applyVerifyConfig(config *agent.SessionConfig, node *p
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			config.MaxVerifyRetries = n
 		}
+	}
+}
+
+// applyPlanningConfig enables the pre-execution planning phase from graph defaults
+// and node-level overrides. Node-level "plan" is accepted as a shorthand alias
+// only when explicit "plan_before_execute" is not present.
+func (h *CodergenHandler) applyPlanningConfig(config *agent.SessionConfig, node *pipeline.Node) {
+	if v, ok := h.graphAttrs["plan_before_execute"]; ok {
+		config.PlanBeforeExecute = v == "true"
+	}
+	if v, ok := node.Attrs["plan_before_execute"]; ok {
+		config.PlanBeforeExecute = v == "true"
+	} else if v, ok := node.Attrs["plan"]; ok {
+		config.PlanBeforeExecute = v == "true"
 	}
 }
 

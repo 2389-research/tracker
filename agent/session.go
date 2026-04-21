@@ -185,6 +185,10 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	}()
 
 	s.initConversation(ctx, userInput)
+	if err := s.maybeRunPlanningTurn(ctx, &result); err != nil {
+		result.Duration = time.Since(start)
+		return result, err
+	}
 
 	stoppedNaturally, err := s.runTurnLoop(ctx, start, tracker, &result)
 	if err != nil {

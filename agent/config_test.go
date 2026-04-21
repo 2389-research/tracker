@@ -31,6 +31,9 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.Provider != DefaultProvider {
 		t.Errorf("expected Provider %q, got %q", DefaultProvider, cfg.Provider)
 	}
+	if cfg.PlanBeforeExecute {
+		t.Error("expected PlanBeforeExecute=false by default")
+	}
 }
 
 func TestConfigValidation(t *testing.T) {
