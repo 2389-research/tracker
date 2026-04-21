@@ -72,6 +72,10 @@ type SessionConfig struct {
 	// PriorEpisodeSummaries carries summaries from earlier attempts so retries
 	// can avoid repeating known-failing approaches.
 	PriorEpisodeSummaries []string
+	// PlanBeforeExecute inserts one planning-only LLM call before the main turn
+	// loop and keeps that plan in conversation context for subsequent turns.
+	// Default: false.
+	PlanBeforeExecute bool
 }
 
 // Checkpoint defines a message to inject at a specific turn-budget fraction.

@@ -243,6 +243,8 @@ var knownProviders = []providerDef{
 	},
 }
 
+var probeProviderFn = probeProvider
+
 // checkProviders reports on each configured LLM provider. When probe
 // is true, a 1-token API call verifies auth for each configured provider.
 func checkProviders(ctx context.Context, probe bool) CheckResult {
@@ -268,7 +270,7 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 			continue
 		}
 		if probe && p.buildAdapter != nil {
-			ok, probeMsg, isAuth := probeProvider(ctx, p, key)
+			ok, probeMsg, isAuth := probeProviderFn(ctx, p, key)
 			if !ok {
 				detail := CheckDetail{Status: CheckStatusError}
 				if isAuth {

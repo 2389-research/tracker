@@ -131,7 +131,8 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 
 // DiagnoseMostRecent finds the most recent run under workdir and diagnoses it.
 func DiagnoseMostRecent(ctx context.Context, workdir string, opts ...DiagnoseConfig) (*DiagnoseReport, error) {
-	id, err := MostRecentRunID(workdir)
+	cfg := firstDiagnoseConfig(opts)
+	id, err := mostRecentRunID(workdir, logWriterOrDiscard(cfg.LogWriter))
 	if err != nil {
 		return nil, err
 	}
