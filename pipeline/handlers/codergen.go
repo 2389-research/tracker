@@ -521,10 +521,13 @@ func (h *CodergenHandler) injectPriorEpisodes(runCfg pipeline.AgentRunConfig, pc
 }
 
 func (h *CodergenHandler) applyEpisodeContextUpdates(updates map[string]string, sessResult agent.SessionResult, existing []string) {
-	if updates == nil || strings.TrimSpace(sessResult.EpisodeSummary) == "" {
+	if updates == nil {
 		return
 	}
 	updates[pipeline.ContextKeyEpisodeSummary] = sessResult.EpisodeSummary
+	if strings.TrimSpace(sessResult.EpisodeSummary) == "" {
+		return
+	}
 	summaries := append(append([]string(nil), existing...), sessResult.EpisodeSummary)
 	updates[pipeline.ContextKeyEpisodeSummaries] = agent.SerializeEpisodeSummaries(summaries)
 }

@@ -20,6 +20,20 @@ func TestEpisodeLogSummaryAndSerialization(t *testing.T) {
 	}
 }
 
+func TestEpisodeLogSummaryCapsArgsAndRenderedSize(t *testing.T) {
+	var log EpisodeLog
+	for i := 0; i < 64; i++ {
+		log.Record("write", fmt.Sprintf(`{"path":"x","content":"%s"}`, strings.Repeat("c", 500)), "ok", false)
+	}
+	summary := log.Summary()
+	if len([]rune(summary)) > maxEpisodeLogSummaryRunes {
+		t.Fatalf("expected summary length <= %d runes, got %d", maxEpisodeLogSummaryRunes, len([]rune(summary)))
+	}
+	if strings.Contains(summary, strings.Repeat("c", 250)) {
+		t.Fatalf("expected tool args to be truncated in summary: %q", summary)
+	}
+}
+
 func TestParseEpisodeSummariesFallback(t *testing.T) {
 	got := ParseEpisodeSummaries("single summary")
 	if len(got) != 1 || got[0] != "single summary" {
@@ -66,5 +80,16 @@ func TestEpisodeSummariesNormalizationDropsOldestWhenOverRuneBudget(t *testing.T
 	}
 	if got[0] != strings.Repeat("b", 2500) {
 		t.Fatalf("expected oldest summary to be dropped, got len=%d", len([]rune(got[0])))
+	}
+}
+
+func TestEpisodeSummariesNormalizationTruncatesSingleOversizedEntry(t *testing.T) {
+	in := []string{strings.Repeat("x", maxEpisodeSummaryTotalRunes+50)}
+	got := ParseEpisodeSummaries(SerializeEpisodeSummaries(in))
+	if len(got) != 1 {
+		t.Fatalf("expected one summary, got %d", len(got))
+	}
+	if len([]rune(got[0])) > maxEpisodeSummaryTotalRunes {
+		t.Fatalf("expected single summary to be capped at %d runes, got %d", maxEpisodeSummaryTotalRunes, len([]rune(got[0])))
 	}
 }

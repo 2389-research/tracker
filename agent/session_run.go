@@ -43,7 +43,14 @@ func (s *Session) initConversation(ctx context.Context, userInput string) {
 		if len(nonEmpty) > 0 {
 			b.WriteString("Prior attempts summary (avoid repeating failed approaches):\n")
 			for i, summary := range nonEmpty {
-				b.WriteString(fmt.Sprintf("%d. %s\n", i+1, summary))
+				b.WriteString(fmt.Sprintf("Attempt %d:\n", i+1))
+				for _, line := range strings.Split(summary, "\n") {
+					trimmedLine := strings.TrimSpace(line)
+					if trimmedLine == "" {
+						continue
+					}
+					b.WriteString(fmt.Sprintf("  - %s\n", trimmedLine))
+				}
 			}
 			s.messages = append(s.messages, llm.UserMessage(strings.TrimSpace(b.String())))
 		}

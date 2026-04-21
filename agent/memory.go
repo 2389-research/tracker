@@ -8,6 +8,9 @@ import (
 
 const (
 	maxEpisodeSummaryLen        = 160
+	maxEpisodeArgsLen           = 200
+	maxEpisodeLogEntries        = 24
+	maxEpisodeLogSummaryRunes   = 2000
 	maxEpisodeSummaryCount      = 8
 	maxEpisodeSummaryTotalRunes = 4000
 )
@@ -30,7 +33,7 @@ func (l *EpisodeLog) Record(tool, args, output string, isError bool) {
 	statusSummary := summarizeEpisodeOutput(output, isError)
 	l.Entries = append(l.Entries, EpisodeEntry{
 		Tool:    tool,
-		Args:    compactJSON(args),
+		Args:    summarizeEpisodeArgs(args),
 		Success: !isError,
 		Summary: statusSummary,
 	})
@@ -41,18 +44,22 @@ func (l EpisodeLog) Summary() string {
 	if len(l.Entries) == 0 {
 		return ""
 	}
+	entries := l.Entries
+	if len(entries) > maxEpisodeLogEntries {
+		entries = entries[len(entries)-maxEpisodeLogEntries:]
+	}
 	var b strings.Builder
-	for i, e := range l.Entries {
+	for i, e := range entries {
 		status := "success"
 		if !e.Success {
 			status = "fail"
 		}
 		fmt.Fprintf(&b, "%d. %s args=%s outcome=%s summary=%s", i+1, e.Tool, e.Args, status, e.Summary)
-		if i < len(l.Entries)-1 {
+		if i < len(entries)-1 {
 			b.WriteByte('\n')
 		}
 	}
-	return b.String()
+	return truncateRunes(b.String(), maxEpisodeLogSummaryRunes)
 }
 
 // SerializeEpisodeSummaries encodes episode summaries as a JSON array.
@@ -99,12 +106,17 @@ func summarizeEpisodeOutput(output string, isError bool) string {
 	return text
 }
 
+func summarizeEpisodeArgs(args string) string {
+	return truncateRunes(compactJSON(args), maxEpisodeArgsLen)
+}
+
 func normalizeEpisodeSummaries(in []string) []string {
 	out := make([]string, 0, len(in))
 	runeLens := make([]int, 0, len(in))
 	for _, s := range in {
 		s = strings.TrimSpace(s)
 		if s != "" {
+			s = truncateRunes(s, maxEpisodeSummaryTotalRunes)
 			out = append(out, s)
 			runeLens = append(runeLens, len([]rune(s)))
 		}
@@ -123,5 +135,22 @@ func normalizeEpisodeSummaries(in []string) []string {
 		out = out[1:]
 		runeLens = runeLens[1:]
 	}
+	if len(out) == 1 && totalRunes > maxEpisodeSummaryTotalRunes {
+		out[0] = truncateRunes(out[0], maxEpisodeSummaryTotalRunes)
+	}
 	return out
+}
+
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= limit {
+		return s
+	}
+	if limit == 1 {
+		return "…"
+	}
+	return string(r[:limit-1]) + "…"
 }

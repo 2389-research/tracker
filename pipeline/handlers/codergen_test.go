@@ -188,6 +188,39 @@ func TestCodergenHandler_CapsEpisodeSummariesGrowth(t *testing.T) {
 	}
 }
 
+func TestCodergenHandler_ClearsEpisodeSummaryWhenSessionHasNoEpisodes(t *testing.T) {
+	workdir := t.TempDir()
+	client := &scriptedCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	h := NewCodergenHandler(client, workdir)
+	node := &pipeline.Node{
+		ID:      "gen",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs:   map[string]string{"prompt": "no tools needed"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyEpisodeSummary, "stale summary")
+	pctx.Set(pipeline.ContextKeyEpisodeSummaries, `["stale summary"]`)
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyEpisodeSummary]; got != "" {
+		t.Fatalf("expected %s to be cleared, got %q", pipeline.ContextKeyEpisodeSummary, got)
+	}
+	if _, ok := outcome.ContextUpdates[pipeline.ContextKeyEpisodeSummaries]; ok {
+		t.Fatalf("did not expect %s to be appended when summary is empty", pipeline.ContextKeyEpisodeSummaries)
+	}
+}
+
 func TestCodergenHandlerName(t *testing.T) {
 	h := NewCodergenHandler(nil, "")
 	if h.Name() != "codergen" {

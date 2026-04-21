@@ -418,10 +418,13 @@ func TestSession_PriorEpisodeSummariesAreRenumberedWithoutGaps(t *testing.T) {
 	if priorMsg == "" {
 		t.Fatal("expected prior attempts summary message")
 	}
-	if !strings.Contains(priorMsg, "1. first attempt") || !strings.Contains(priorMsg, "2. third attempt") {
-		t.Fatalf("expected contiguous numbering, got: %q", priorMsg)
+	if !strings.Contains(priorMsg, "Attempt 1:") || !strings.Contains(priorMsg, "  - first attempt") {
+		t.Fatalf("expected attempt formatting for first summary, got: %q", priorMsg)
 	}
-	if strings.Contains(priorMsg, "3.") {
+	if !strings.Contains(priorMsg, "Attempt 2:") || !strings.Contains(priorMsg, "  - third attempt") {
+		t.Fatalf("expected attempt formatting for second summary, got: %q", priorMsg)
+	}
+	if strings.Contains(priorMsg, "Attempt 3:") {
 		t.Fatalf("unexpected numbering gap in message: %q", priorMsg)
 	}
 }
@@ -451,6 +454,42 @@ func TestSession_DoesNotInjectHeaderOnlyPriorEpisodeMessage(t *testing.T) {
 		if msg.Role == llm.RoleUser && strings.Contains(msg.Text(), "Prior attempts summary") {
 			t.Fatalf("did not expect header-only prior summary message, got: %q", msg.Text())
 		}
+	}
+}
+
+func TestSession_PriorEpisodeSummariesIndentMultilineContent(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+	var captured []llm.Message
+	client.onComplete = func(req *llm.Request) {
+		captured = append(captured, req.Messages...)
+	}
+
+	cfg := DefaultConfig()
+	cfg.PriorEpisodeSummaries = []string{"1. read args={\"path\":\"a.go\"}\n2. write args={\"path\":\"a.go\"}"}
+	sess := mustNewSession(t, client, cfg)
+	if _, err := sess.Run(context.Background(), "try again"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var priorMsg string
+	for _, msg := range captured {
+		if msg.Role == llm.RoleUser && strings.Contains(msg.Text(), "Prior attempts summary") {
+			priorMsg = msg.Text()
+			break
+		}
+	}
+	if !strings.Contains(priorMsg, "Attempt 1:") {
+		t.Fatalf("expected attempt header, got: %q", priorMsg)
+	}
+	if !strings.Contains(priorMsg, "  - 1. read args=") || !strings.Contains(priorMsg, "  - 2. write args=") {
+		t.Fatalf("expected multiline summaries to be indented bullet lines, got: %q", priorMsg)
 	}
 }
 
