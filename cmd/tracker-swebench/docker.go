@@ -16,10 +16,13 @@ import (
 
 // AgentSummary holds token usage and timing stats extracted from agent-runner output.
 type AgentSummary struct {
-	Turns        int   `json:"turns"`
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	DurationMs   int64 `json:"duration_ms"`
+	Turns             int      `json:"turns"`
+	InputTokens       int64    `json:"input_tokens"`
+	OutputTokens      int64    `json:"output_tokens"`
+	DurationMs        int64    `json:"duration_ms"`
+	TerminationReason string   `json:"termination_reason"`
+	FinalMessage      string   `json:"final_message"`
+	LastToolCalls     []string `json:"last_tool_calls"`
 }
 
 // containerName returns the Docker container name for a given run label and instance ID.
@@ -112,7 +115,7 @@ func parseAgentSummary(output string) AgentSummary {
 		}
 		var summary AgentSummary
 		if err := json.Unmarshal([]byte(line), &summary); err != nil {
-			return AgentSummary{}
+			continue
 		}
 		return summary
 	}

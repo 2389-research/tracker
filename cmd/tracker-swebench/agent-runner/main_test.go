@@ -3,9 +3,12 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/agent"
 )
 
 func TestParseConfig_Defaults(t *testing.T) {
@@ -82,5 +85,42 @@ func TestBuildLLMClient_UnsupportedProvider(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported provider") {
 		t.Errorf("expected 'unsupported provider' in error, got: %v", err)
+	}
+}
+
+func TestClassifyTerminationReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		result agent.SessionResult
+		err    error
+		want   string
+	}{
+		{
+			name: "explicit_finish",
+			want: "explicit_finish",
+		},
+		{
+			name:   "max_turns",
+			result: agent.SessionResult{MaxTurnsUsed: true},
+			want:   "max_turns_reached",
+		},
+		{
+			name: "empty_response",
+			err:  errors.New("agent session failed: 2 consecutive empty API responses"),
+			want: "empty_response",
+		},
+		{
+			name: "generic_error",
+			err:  errors.New("tool failed"),
+			want: "tool_error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyTerminationReason(tt.result, tt.err); got != tt.want {
+				t.Fatalf("classifyTerminationReason() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

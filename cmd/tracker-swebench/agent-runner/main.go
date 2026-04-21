@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	tracker "github.com/2389-research/tracker"
@@ -96,10 +97,13 @@ func parseConfig() runnerConfig {
 }
 
 type agentSummary struct {
-	Turns        int   `json:"turns"`
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	DurationMs   int64 `json:"duration_ms"`
+	Turns             int      `json:"turns"`
+	InputTokens       int64    `json:"input_tokens"`
+	OutputTokens      int64    `json:"output_tokens"`
+	DurationMs        int64    `json:"duration_ms"`
+	TerminationReason string   `json:"termination_reason"`
+	FinalMessage      string   `json:"final_message"`
+	LastToolCalls     []string `json:"last_tool_calls"`
 }
 
 // instancePromptPath is the container-side path where the harness mounts
@@ -164,7 +168,22 @@ func main() {
 	env := agentexec.NewLocalEnvironment(cfg.RepoDir)
 
 	// Log agent events to stderr for transcript visibility.
+	var finalMessage string
+	var toolCalls []string
 	evtHandler := agent.EventHandlerFunc(func(evt agent.Event) {
+		switch evt.Type {
+		case agent.EventTextDelta:
+			if text := strings.TrimSpace(evt.Text); text != "" {
+				finalMessage = text
+			}
+		case agent.EventToolCallStart:
+			if evt.ToolName != "" {
+				toolCalls = append(toolCalls, evt.ToolName)
+				if len(toolCalls) > 3 {
+					toolCalls = toolCalls[len(toolCalls)-3:]
+				}
+			}
+		}
 		log.Printf("[agent:%s] turn=%d %s", evt.Type, evt.Turn, evt.Text)
 	})
 
@@ -181,7 +200,10 @@ func main() {
 	elapsed := time.Since(start)
 
 	summary := agentSummary{
-		DurationMs: elapsed.Milliseconds(),
+		DurationMs:        elapsed.Milliseconds(),
+		TerminationReason: classifyTerminationReason(result, err),
+		FinalMessage:      finalMessage,
+		LastToolCalls:     toolCalls,
 	}
 	if result.Turns > 0 {
 		summary.Turns = result.Turns
@@ -197,6 +219,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("agent session failed: %v", err)
 	}
+}
+
+func classifyTerminationReason(result agent.SessionResult, err error) string {
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "empty api responses") {
+			return "empty_response"
+		}
+		return "tool_error"
+	}
+	if result.MaxTurnsUsed {
+		return "max_turns_reached"
+	}
+	return "explicit_finish"
 }
 
 // buildLLMClient creates a single-provider LLM client with retry middleware.

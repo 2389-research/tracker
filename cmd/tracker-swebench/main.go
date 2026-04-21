@@ -262,6 +262,18 @@ Flags:
 				log.Printf("[%s] write transcript: %v", inst.InstanceID, writeErr)
 			}
 		}
+		if patch == "" {
+			diag := EmptyPatchDiagnostic{
+				InstanceID:        inst.InstanceID,
+				Turns:             summary.Turns,
+				TerminationReason: summary.TerminationReason,
+				FinalMessage:      summary.FinalMessage,
+				LastToolCalls:     summary.LastToolCalls,
+			}
+			if writeErr := WriteEmptyPatchDiagnostic(logsDir, diag); writeErr != nil {
+				log.Printf("[%s] write empty patch diagnostic: %v", inst.InstanceID, writeErr)
+			}
+		}
 
 		// Update stats only after successful prediction write.
 		stats.Completed++
