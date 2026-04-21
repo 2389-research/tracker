@@ -100,7 +100,10 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 // trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
 // Native backend usage is tracked by the middleware automatically — skip to avoid double-counting.
 func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBackend, usage llm.Usage) {
-	if h.tokenTracker == nil || usage.TotalTokens == 0 {
+	if h.tokenTracker == nil {
+		return
+	}
+	if usage.TotalTokens == 0 && usage.InputTokens == 0 && usage.OutputTokens == 0 {
 		return
 	}
 	switch backend.(type) {

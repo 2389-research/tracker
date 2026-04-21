@@ -113,6 +113,9 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	if err != nil {
 		return nil, fmt.Errorf("google: translate response: %w", err)
 	}
+	if resp.Model == "" {
+		resp.Model = req.Model
+	}
 
 	resp.Provider = "gemini"
 	resp.Latency = time.Since(start)

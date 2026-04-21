@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -144,7 +143,7 @@ func formatElapsed(d time.Duration) string {
 
 // printRunSummary outputs a comprehensive run summary with the logo, aggregated
 // session stats, per-node breakdown, token usage, and ASCII pipeline graph.
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker, pipelineFile string) {
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineFile string) {
 	fmt.Println()
 
 	// Logo
@@ -157,13 +156,13 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *
 	printRunHeader(result)
 	printParamOverrideSummary()
 	printRunDuration(result)
-	printRunTotals(result, tracker)
+	printRunTotals(result)
 	printNodeTable(result)
-	printTokensByProvider(tracker)
+	printTokensByProvider(result)
 	printPipelineFlow(result)
 
 	if result != nil && result.Status == pipeline.OutcomeBudgetExceeded {
-		printBudgetHaltBanner(result, tracker)
+		printBudgetHaltBanner(result)
 	} else if pipelineErr != nil {
 		fmt.Println()
 		fmt.Printf("  ERROR: %v\n", pipelineErr)
@@ -214,7 +213,7 @@ func printRunDuration(result *pipeline.EngineResult) {
 }
 
 // printRunTotals prints the aggregated totals section (turns, tool calls, files, tokens).
-func printRunTotals(result *pipeline.EngineResult, tracker *llm.TokenTracker) {
+func printRunTotals(result *pipeline.EngineResult) {
 	if result == nil || result.Trace == nil || len(result.Trace.Entries) == 0 {
 		return
 	}
@@ -224,11 +223,11 @@ func printRunTotals(result *pipeline.EngineResult, tracker *llm.TokenTracker) {
 	}
 	fmt.Println()
 	fmt.Println("─── Totals ────────────────────────────────────────────────")
-	printTotalsBody(agg, tracker)
+	printTotalsBody(result, agg)
 }
 
 // printTotalsBody prints the body rows of the totals section.
-func printTotalsBody(agg aggregatedStats, tracker *llm.TokenTracker) {
+func printTotalsBody(result *pipeline.EngineResult, agg aggregatedStats) {
 	fmt.Printf("  LLM Turns:    %s\n", formatNumber(agg.TotalTurns))
 
 	toolLine := fmt.Sprintf("  Tool Calls:   %s", formatNumber(agg.TotalToolCalls))
@@ -245,28 +244,30 @@ func printTotalsBody(agg aggregatedStats, tracker *llm.TokenTracker) {
 		fmt.Printf("  Compactions:  %d\n", agg.Compactions)
 	}
 
-	printTotalTokens(tracker)
+	printTotalTokens(runUsageSummary(result))
 }
 
 // printTotalTokens prints the inline token totals within the Totals section.
-func printTotalTokens(tracker *llm.TokenTracker) {
-	if tracker == nil {
+func printTotalTokens(usage *pipeline.UsageSummary) {
+	if usage == nil {
 		return
 	}
-	total := tracker.TotalUsage()
-	if total.InputTokens == 0 && total.OutputTokens == 0 {
+	if usage.TotalInputTokens == 0 && usage.TotalOutputTokens == 0 {
 		return
 	}
 	tokenLine := fmt.Sprintf("  Tokens:       %s in / %s out",
-		formatNumber(total.InputTokens), formatNumber(total.OutputTokens))
-	if total.EstimatedCost > 0 {
+		formatNumber(usage.TotalInputTokens), formatNumber(usage.TotalOutputTokens))
+	if usage.TotalCostUSD > 0 {
 		// When all usage is from claude-code (Max subscription), label as
 		// usage estimate since Max is flat-rate, not pay-per-token.
-		providers := tracker.Providers()
-		if len(providers) == 1 && providers[0] == "claude-code" {
-			tokenLine += fmt.Sprintf("  (~$%.2f usage)", total.EstimatedCost)
+		if len(usage.ProviderTotals) == 1 {
+			if _, ok := usage.ProviderTotals["claude-code"]; ok {
+				tokenLine += fmt.Sprintf("  (~$%.2f usage)", usage.TotalCostUSD)
+			} else {
+				tokenLine += fmt.Sprintf("  ($%.2f)", usage.TotalCostUSD)
+			}
 		} else {
-			tokenLine += fmt.Sprintf("  ($%.2f)", total.EstimatedCost)
+			tokenLine += fmt.Sprintf("  ($%.2f)", usage.TotalCostUSD)
 		}
 	}
 	fmt.Println(tokenLine)
@@ -312,29 +313,30 @@ func printNodeTableRow(entry pipeline.TraceEntry) {
 }
 
 // printTokensByProvider prints per-provider token usage breakdown.
-func printTokensByProvider(tracker *llm.TokenTracker) {
-	if tracker == nil {
+func printTokensByProvider(result *pipeline.EngineResult) {
+	usage := runUsageSummary(result)
+	if usage == nil || len(usage.ProviderTotals) == 0 {
 		return
 	}
-	providers := tracker.Providers()
-	if len(providers) == 0 {
-		return
+	providers := make([]string, 0, len(usage.ProviderTotals))
+	for provider := range usage.ProviderTotals {
+		providers = append(providers, provider)
 	}
+	slices.Sort(providers)
 	fmt.Println()
 	fmt.Println("─── Tokens by Provider ────────────────────────────────────")
 	fmt.Printf("  %-12s  %10s  %10s\n", "Provider", "Input", "Output")
 	fmt.Printf("  %-12s  %10s  %10s\n", "────────", "─────", "──────")
 	for _, p := range providers {
-		u := tracker.ProviderUsage(p)
+		u := usage.ProviderTotals[p]
 		fmt.Printf("  %-12s  %10s  %10s\n", p, formatNumber(u.InputTokens), formatNumber(u.OutputTokens))
 	}
-	total := tracker.TotalUsage()
-	fmt.Printf("  %-12s  %10s  %10s\n", "TOTAL", formatNumber(total.InputTokens), formatNumber(total.OutputTokens))
-	if total.EstimatedCost > 0 {
+	fmt.Printf("  %-12s  %10s  %10s\n", "TOTAL", formatNumber(usage.TotalInputTokens), formatNumber(usage.TotalOutputTokens))
+	if usage.TotalCostUSD > 0 {
 		if len(providers) == 1 && providers[0] == "claude-code" {
-			fmt.Printf("  Est. usage: ~$%.4f (Max subscription — no actual charge)\n", total.EstimatedCost)
+			fmt.Printf("  Est. usage: ~$%.4f (Max subscription — no actual charge)\n", usage.TotalCostUSD)
 		} else {
-			fmt.Printf("  Cost: $%.4f\n", total.EstimatedCost)
+			fmt.Printf("  Cost: $%.4f\n", usage.TotalCostUSD)
 		}
 	}
 }
@@ -381,23 +383,46 @@ func printNodeConnector(entries []pipeline.TraceEntry, i int) {
 }
 
 // printBudgetHaltBanner prints a prominent halt notice when a budget limit was exceeded.
-func printBudgetHaltBanner(result *pipeline.EngineResult, tracker *llm.TokenTracker) {
+func printBudgetHaltBanner(result *pipeline.EngineResult) {
 	fmt.Println()
 	fmt.Println("─── HALTED: budget exceeded ───────────────────────────────")
 	if len(result.BudgetLimitsHit) > 0 {
 		fmt.Printf("  reason: %s\n", strings.Join(result.BudgetLimitsHit, ", "))
 	}
-	if tracker != nil {
-		total := tracker.TotalUsage()
-		if total.InputTokens > 0 || total.OutputTokens > 0 {
-			totalToks := total.InputTokens + total.OutputTokens
-			fmt.Printf("  spent:  %s tokens", formatNumber(totalToks))
-			if total.EstimatedCost > 0 {
-				fmt.Printf(", $%.4f", total.EstimatedCost)
-			}
-			fmt.Println()
+	usage := runUsageSummary(result)
+	if usage != nil && (usage.TotalInputTokens > 0 || usage.TotalOutputTokens > 0) {
+		fmt.Printf("  spent:  %s tokens", formatNumber(summaryTotalTokens(usage)))
+		if usage.TotalCostUSD > 0 {
+			fmt.Printf(", $%.4f", usage.TotalCostUSD)
 		}
+		fmt.Println()
 	}
+}
+
+func summaryTotalTokens(usage *pipeline.UsageSummary) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.TotalTokens > 0 {
+		return usage.TotalTokens
+	}
+	return usage.TotalInputTokens + usage.TotalOutputTokens
+}
+
+// runUsageSummary returns the post-run usage source of truth for summary output:
+// prefer EngineResult.Usage (precomputed trace aggregate), fallback to deriving
+// from the trace for callers/tests that populate only Trace.
+func runUsageSummary(result *pipeline.EngineResult) *pipeline.UsageSummary {
+	if result == nil {
+		return nil
+	}
+	if result.Usage != nil {
+		return result.Usage
+	}
+	if result.Trace == nil {
+		return nil
+	}
+	return result.Trace.AggregateUsage()
 }
 
 // printResumeHint shows the resume command when the pipeline didn't complete successfully.

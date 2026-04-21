@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cost accounting and reporting are now consistent across runtime and CLI summaries:
+  - CLI run summaries now read token/cost totals from `EngineResult.Usage` (trace aggregate) instead of `TokenTracker.TotalUsage().EstimatedCost`, so cost is shown correctly.
+  - Repair turns now apply the same `EstimateCost` compensation path used by normal turns when providers omit `EstimatedCost`.
+  - OpenAI SSE `response.completed` now preserves `ReasoningTokens` in finish usage events.
+  - Gemini adapter now falls back to the requested model when `modelVersion` is absent in API responses.
+  - Trace usage aggregation now attributes missing providers to `unknown` instead of dropping those sessions from per-provider totals.
+  - External backend usage tracking now records sessions with non-zero input/output tokens even when `TotalTokens` is zero.
+
 ## [0.20.0] - 2026-04-21
 
 ### Added
