@@ -217,7 +217,7 @@ type ToolNodeConfig struct {
 	OutputLimit int // bytes; 0 means use default
 	WorkingDir  string
 	PassEnv     string        // comma-separated env var names to pass through
-	Timeout     time.Duration // command timeout; 0 means use default
+	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent or unparseable. Consumer validates non-positive values.
 }
 
 // ToolConfig returns the typed tool config for the node.
@@ -233,7 +233,10 @@ func (n *Node) ToolConfig() ToolNodeConfig {
 		}
 	}
 	if v := n.Attrs["timeout"]; v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		// No positivity guard — the accessor exposes whatever parses, so
+		// the field matches the raw attr semantics. ToolHandler.parseTimeout
+		// still rejects non-positive values with an explicit error.
+		if d, err := time.ParseDuration(v); err == nil {
 			cfg.Timeout = d
 		}
 	}
@@ -244,7 +247,7 @@ func (n *Node) ToolConfig() ToolNodeConfig {
 // DefaultChoice resolves "default_choice" with fallback to "default" so
 // callers don't have to check two keys.
 type HumanNodeConfig struct {
-	Mode          string // "" (default), "yes_no", "interview", "freeform"
+	Mode          string // "" or "choice" (default — presents outgoing edge labels), "yes_no", "interview", "freeform"
 	DefaultChoice string // "default_choice" attr, falling back to "default"
 	Prompt        string
 	QuestionsKey  string

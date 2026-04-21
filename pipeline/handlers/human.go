@@ -696,6 +696,14 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 
 // resolveInterviewKeys returns the context keys for questions and answers,
 // using node attrs when set and falling back to pipeline constants.
+//
+// Note on the questions_key default: CLAUDE.md documents the default as
+// last_response, but the actual code (and the test suite) treats
+// interview_questions as the primary default and last_response as a
+// resolveAgentOutput fallback. The latter is load-bearing — tests and
+// production pipelines that write to interview_questions rely on it — so
+// the code stays the source of truth here. The CLAUDE.md line is inaccurate
+// and should be reconciled separately (not in this refactor PR).
 func resolveInterviewKeys(node *pipeline.Node) (questionsKey, answersKey string) {
 	cfg := node.HumanConfig()
 	questionsKey = cfg.QuestionsKey

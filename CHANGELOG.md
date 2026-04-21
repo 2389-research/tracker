@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Human, tool, and parallel handlers now consume typed configs** (closes #145; finishes #19). `human.go` (12 → 3 `node.Attrs[...]` reads), `tool.go` (4 → 2), and `parallel.go` (3 → 0) route through `HumanConfig()`, `ToolConfig()`, and `ParallelConfig()` accessors. The remaining direct reads are semantically distinct: `tool.parseTimeout` / `parseOutputLimit` return errors on malformed values that the silent-default accessor can't express, and the three `human.go` holdouts (`default` vs `default_choice` disambiguation) each have an inline comment explaining why the typed accessor's unified `DefaultChoice` can't be used in that specific call site.
-- **`HumanNodeConfig.DefaultChoice`** now resolves `default_choice` first, then falls back to `default` — centralizes a two-key lookup that was duplicated across the human handler.
-- **`ToolNodeConfig` gains `Timeout time.Duration`** and **`ParallelNodeConfig` gains `JoinID string`** so the remaining tool and parallel reads can go through the typed accessor.
-
 ### Added
 
 - **Typed `NodeConfig` accessors on `*pipeline.Node`** (closes #142, #143, #144; partial #19). New methods `AgentConfig(graphAttrs)`, `ToolConfig()`, `HumanConfig()`, `ParallelConfig()`, and `RetryConfig(graphAttrs)` return typed structs parsed from `Node.Attrs` with the graph-default-then-node-override merge centralized. Numeric parse failures are lenient (zero-value, no panic) to preserve existing permissive behavior. Three-state booleans (e.g. `ReflectOnError`, `VerifyAfterEdit`, `PlanBeforeExecute`, `CacheToolResults`) expose companion `*Set` flags so callers can distinguish "explicitly configured" from "absent".
@@ -21,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Codergen handler now consumes `AgentNodeConfig`** instead of calling 8 separate `apply*` methods that each re-parsed `Node.Attrs` directly. Graph→node override resolution happens once in the accessor; `buildConfig` just copies typed fields into `agent.SessionConfig`. Replaces `applyModelProvider`, `applySessionLimits`, `applyReasoningEffort`, `applyResponseFormat`, `applyCacheAndCompaction`, `applyReflectOnError`, `applyVerifyConfig`, and `applyPlanningConfig` with a single typed consumer. No behavior change; existing codergen tests pass unchanged.
 - **`Engine.maxRetries` uses the typed `RetryConfig` accessor** instead of duplicating `strconv.Atoi` over `node.Attrs["max_retries"]` → `graph.Attrs["default_max_retry"]`. The fallback default (3) is unchanged.
+- **Human, tool, and parallel handlers now consume typed configs** (closes #145; finishes #19). `human.go` (12 → 3 `node.Attrs[...]` reads), `tool.go` (4 → 2), and `parallel.go` (3 → 0) route through `HumanConfig()`, `ToolConfig()`, and `ParallelConfig()` accessors. The remaining direct reads are semantically distinct: `tool.parseTimeout` / `parseOutputLimit` return errors on malformed values that the silent-default accessor can't express, and the three `human.go` holdouts (`default` vs `default_choice` disambiguation) each have an inline comment explaining why the typed accessor's unified `DefaultChoice` can't be used in that specific call site.
+- **`HumanNodeConfig.DefaultChoice`** now resolves `default_choice` first, then falls back to `default` — centralizes a two-key lookup that was duplicated across the human handler.
+- **`ToolNodeConfig` gains `Timeout time.Duration`** and **`ParallelNodeConfig` gains `JoinID string`** so the remaining tool and parallel reads can go through the typed accessor.
 
 ## [0.21.0] - 2026-04-21
 
