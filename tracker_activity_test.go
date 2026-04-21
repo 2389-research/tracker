@@ -3,6 +3,7 @@ package tracker
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,6 +52,88 @@ func TestResolveRunDir_Empty(t *testing.T) {
 	_, err := ResolveRunDir(t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected error for empty run ID")
+	}
+}
+
+func TestResolveRunDir_NoMatch(t *testing.T) {
+	workdir := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(workdir, ".tracker", "runs", "2026-04-17T10-00-00"), 0o755))
+
+	_, err := ResolveRunDir(workdir, "no-match")
+	if err == nil {
+		t.Fatal("expected no-match error")
+	}
+	if !strings.Contains(err.Error(), `no run found matching "no-match"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMostRecentRunID_SelectsLatestCheckpointTimestamp(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	must(t, os.MkdirAll(filepath.Join(runsDir, "r1"), 0o755))
+	must(t, os.WriteFile(filepath.Join(runsDir, "r1", "checkpoint.json"),
+		[]byte(`{"run_id":"r1","timestamp":"2026-04-17T10:00:00Z"}`), 0o644))
+	must(t, os.MkdirAll(filepath.Join(runsDir, "r2"), 0o755))
+	must(t, os.WriteFile(filepath.Join(runsDir, "r2", "checkpoint.json"),
+		[]byte(`{"run_id":"r2","timestamp":"2026-04-17T11:00:00Z"}`), 0o644))
+
+	got, err := MostRecentRunID(workdir)
+	if err != nil {
+		t.Fatalf("MostRecentRunID: %v", err)
+	}
+	if got != "r2" {
+		t.Fatalf("MostRecentRunID = %q, want r2", got)
+	}
+}
+
+func TestMostRecentRunID_NoRunsFound(t *testing.T) {
+	_, err := MostRecentRunID(t.TempDir())
+	if err == nil {
+		t.Fatal("expected no-runs error")
+	}
+	if !strings.Contains(err.Error(), "no runs found — run a pipeline first") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMostRecentRunID_NoValidCheckpoints(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	must(t, os.MkdirAll(filepath.Join(runsDir, "r1"), 0o755))
+	must(t, os.MkdirAll(filepath.Join(runsDir, "r2"), 0o755))
+
+	_, err := MostRecentRunID(workdir)
+	if err == nil {
+		t.Fatal("expected no-valid-checkpoints error")
+	}
+	if !strings.Contains(err.Error(), "no runs found with valid checkpoints") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMostRecentRunID_WarnsOnMalformedCheckpointAndContinues(t *testing.T) {
+	workdir := t.TempDir()
+	runsDir := filepath.Join(workdir, ".tracker", "runs")
+	must(t, os.MkdirAll(filepath.Join(runsDir, "bad"), 0o755))
+	must(t, os.WriteFile(filepath.Join(runsDir, "bad", "checkpoint.json"), []byte(`{not json}`), 0o644))
+	must(t, os.MkdirAll(filepath.Join(runsDir, "good"), 0o755))
+	must(t, os.WriteFile(filepath.Join(runsDir, "good", "checkpoint.json"),
+		[]byte(`{"run_id":"good","timestamp":"2026-04-17T11:00:00Z"}`), 0o644))
+
+	var got string
+	var err error
+	stderr := captureStderr(t, func() {
+		got, err = MostRecentRunID(workdir)
+	})
+	if err != nil {
+		t.Fatalf("MostRecentRunID: %v", err)
+	}
+	if got != "good" {
+		t.Fatalf("MostRecentRunID = %q, want good", got)
+	}
+	if !strings.Contains(stderr, "warning: cannot load checkpoint for run bad") {
+		t.Fatalf("expected checkpoint warning on stderr, got: %q", stderr)
 	}
 }
 

@@ -81,10 +81,11 @@ func MostRecentRunID(workdir string) (string, error) {
 		cpPath := filepath.Join(runsDir, e.Name(), "checkpoint.json")
 		cp, err := pipeline.LoadCheckpoint(cpPath)
 		if err != nil {
-			// Silently skip invalid or missing checkpoints — the run directory
-			// may be partially written or belong to a different tool. Callers
-			// that need diagnostic output should inspect the runs directory
-			// directly.
+			if !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "warning: cannot load checkpoint for run %s: %v\n", e.Name(), err)
+			}
+			// Skip invalid or missing checkpoints — the run directory may be
+			// partially written or belong to a different tool.
 			continue
 		}
 		if cp.Timestamp.After(latestTime) {

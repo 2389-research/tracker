@@ -48,6 +48,35 @@ func TestDoctor_NoProviderKeys(t *testing.T) {
 	}
 }
 
+func TestCheckProviders_ProbeProvidersTrueUsesProbeFunction(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-12345678901234567890")
+	for _, k := range []string{"OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY"} {
+		t.Setenv(k, "")
+	}
+
+	called := false
+	orig := probeProviderFn
+	probeProviderFn = func(_ context.Context, p providerDef, key string) (bool, string, bool) {
+		called = true
+		if p.name != "Anthropic" {
+			t.Fatalf("unexpected provider probed: %s", p.name)
+		}
+		if key == "" {
+			t.Fatal("expected non-empty key")
+		}
+		return true, "", false
+	}
+	t.Cleanup(func() { probeProviderFn = orig })
+
+	r := checkProviders(context.Background(), true)
+	if !called {
+		t.Fatal("expected probe provider function to be called")
+	}
+	if r.Status != CheckStatusOK {
+		t.Fatalf("status = %q, want ok", r.Status)
+	}
+}
+
 func TestDoctor_PipelineFileValidation(t *testing.T) {
 	workdir := t.TempDir()
 	pf := filepath.Join(workdir, "ok.dip")
