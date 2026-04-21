@@ -13,9 +13,12 @@ import (
 )
 
 // runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
-// Format is resolved in this order: explicit formatOverride, then the file
-// extension (.dip / .dot), then content-sniffing inside the library as a
-// fallback for ambiguous inputs. Embedded workflows are always .dip.
+// Format is resolved in this order: explicit formatOverride wins; otherwise,
+// for on-disk files we use the file extension (.dip or .dot via
+// detectPipelineFormat, which defaults to .dip for unknown extensions); for
+// embedded workflows we pin to .dip. The library-internal content-sniff
+// fallback is never reached here — we always pass a concrete format to
+// ValidateSource.
 //
 // The source is read and parsed exactly once — ValidateSource returns the
 // parsed graph alongside any structural errors and lint warnings, and
@@ -30,25 +33,27 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 
 	source, displayName, err := readPipelineSource(resolved, isEmbedded, info)
 	if err != nil {
-		return err
+		return fmt.Errorf("load pipeline: %w", err)
 	}
 
 	// Preserve the prior CLI behavior: format comes from the explicit flag,
-	// otherwise from the file extension. Only content-sniff if neither
-	// source gives us an answer (extension ".dip" for unknown, per
-	// detectPipelineFormat).
+	// otherwise from the file extension for on-disk inputs. Embedded
+	// workflows are always .dip. detectPipelineFormat never returns the
+	// empty string, so format is always concrete by the time we call
+	// ValidateSource.
 	format := formatOverride
-	if format == "" && !isEmbedded {
-		format = detectPipelineFormat(resolved)
+	if format == "" {
+		if isEmbedded {
+			format = "dip"
+		} else {
+			format = detectPipelineFormat(resolved)
+		}
 	}
 	if format == "dot" {
 		emitDOTDeprecationWarning(os.Stderr)
 	}
 
-	var opts []tracker.ValidateOption
-	if format != "" {
-		opts = append(opts, tracker.WithValidateFormat(format))
-	}
+	opts := []tracker.ValidateOption{tracker.WithValidateFormat(format)}
 	result, validateErr := tracker.ValidateSource(source, opts...)
 	if validateErr != nil && (result == nil || result.Graph == nil) {
 		// Unrecoverable parse or structural error — no graph to simulate.

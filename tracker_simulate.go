@@ -84,7 +84,11 @@ func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
 // source string to inspect; the caller can set it if desired.
 //
 // ctx is honored at entry; nil is coalesced to context.Background(). The
-// graph itself is consumed synchronously and reads are O(nodes+edges).
+// graph is consumed synchronously. For graphs built via the library's
+// parsers or Graph.AddEdge, the BFS plan is O(nodes+edges); graphs that
+// populate Graph.Edges directly without AddEdge leave the adjacency index
+// unbuilt, and OutgoingEdges then scans all edges per lookup — callers
+// that construct graphs by hand should prefer AddEdge to keep that bound.
 func SimulateGraph(ctx context.Context, graph *pipeline.Graph) (*SimulateReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
