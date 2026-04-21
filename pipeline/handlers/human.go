@@ -520,10 +520,13 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 
 // dispatchHumanMode routes to the appropriate human input handler based on the node mode.
 func (h *HumanHandler) dispatchHumanMode(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) (pipeline.Outcome, error) {
-	switch node.HumanConfig().Mode {
+	// Parse the config once; reuse Mode and Timeout to avoid the double
+	// map-walk / ParseDuration that was happening when parseHumanTimeout
+	// called HumanConfig() a second time from the interview branch.
+	cfg := node.HumanConfig()
+	switch cfg.Mode {
 	case "interview":
-		timeout := parseHumanTimeout(node)
-		return withTimeoutOutcome(timeout, func() (pipeline.Outcome, error) {
+		return withTimeoutOutcome(cfg.Timeout, func() (pipeline.Outcome, error) {
 			return h.executeInterview(ctx, node, pctx)
 		})
 	case "freeform":

@@ -217,7 +217,7 @@ type ToolNodeConfig struct {
 	OutputLimit int // bytes; 0 means use default
 	WorkingDir  string
 	PassEnv     string        // comma-separated env var names to pass through
-	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent or unparseable. Consumer validates non-positive values.
+	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent, unparseable, or parsed to 0. Consumer validates non-positive values.
 }
 
 // ToolConfig returns the typed tool config for the node.
@@ -288,20 +288,35 @@ func (n *Node) HumanConfig() HumanNodeConfig {
 // ParallelTargets is the comma-separated list of branch target node IDs; the
 // handler still splits and trims. FanInSources mirrors the same for a fan-in
 // node that collects results from multiple upstream branches. JoinID is the
-// fan-in node that branches should reconverge on.
+// fan-in node that branches should reconverge on. MaxConcurrency and
+// BranchTimeout cap concurrent branches and per-branch wall time; zero means
+// unlimited / no timeout.
 type ParallelNodeConfig struct {
 	ParallelTargets string
 	FanInSources    string
 	JoinID          string
+	MaxConcurrency  int
+	BranchTimeout   time.Duration
 }
 
 // ParallelConfig returns the typed parallel/fan-in config for the node.
 func (n *Node) ParallelConfig() ParallelNodeConfig {
-	return ParallelNodeConfig{
+	cfg := ParallelNodeConfig{
 		ParallelTargets: n.Attrs["parallel_targets"],
 		FanInSources:    n.Attrs["fan_in_sources"],
 		JoinID:          n.Attrs["parallel_join"],
 	}
+	if v := n.Attrs["max_concurrency"]; v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			cfg.MaxConcurrency = i
+		}
+	}
+	if v := n.Attrs["branch_timeout"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.BranchTimeout = d
+		}
+	}
+	return cfg
 }
 
 // RetryConfig is a typed view over the retry-related attributes shared

@@ -200,15 +200,36 @@ func TestHumanConfig_DefaultChoicePrefersDefaultChoice(t *testing.T) {
 	}
 }
 
-func TestParallelConfig_JoinID(t *testing.T) {
+func TestParallelConfig_AllFields(t *testing.T) {
 	n := &Node{Attrs: map[string]string{
 		"parallel_targets": "A,B,C",
 		"fan_in_sources":   "X,Y",
 		"parallel_join":    "Converge",
+		"max_concurrency":  "4",
+		"branch_timeout":   "90s",
 	}}
 	cfg := n.ParallelConfig()
-	if cfg.ParallelTargets != "A,B,C" || cfg.FanInSources != "X,Y" || cfg.JoinID != "Converge" {
+	if cfg.ParallelTargets != "A,B,C" || cfg.FanInSources != "X,Y" ||
+		cfg.JoinID != "Converge" || cfg.MaxConcurrency != 4 ||
+		cfg.BranchTimeout != 90*time.Second {
 		t.Errorf("parallel config mismatch: %+v", cfg)
+	}
+}
+
+// Invalid / non-positive values for max_concurrency and branch_timeout fall
+// back to zero (meaning unbounded / no timeout), matching the previous
+// parseSemaphore/parseBranchTimeout behavior.
+func TestParallelConfig_RejectsNonPositiveValues(t *testing.T) {
+	n := &Node{Attrs: map[string]string{
+		"max_concurrency": "0",
+		"branch_timeout":  "-1s",
+	}}
+	cfg := n.ParallelConfig()
+	if cfg.MaxConcurrency != 0 {
+		t.Errorf("max_concurrency=0 should stay 0, got %d", cfg.MaxConcurrency)
+	}
+	if cfg.BranchTimeout != 0 {
+		t.Errorf("negative branch_timeout should stay 0, got %v", cfg.BranchTimeout)
 	}
 }
 
