@@ -198,6 +198,11 @@ func TestClassifyRunError(t *testing.T) {
 			err:  fmt.Errorf("create container: docker create: Cannot connect to the Docker daemon"),
 			want: runErrorHarness,
 		},
+		{
+			name: "large_error_payload_uses_prefix_classification",
+			err:  fmt.Errorf("clone repo: %s", strings.Repeat("x", classifyErrorScanLimit*2)),
+			want: runErrorSetup,
+		},
 	}
 
 	for _, tt := range tests {

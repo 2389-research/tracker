@@ -132,6 +132,27 @@ const (
 	runErrorPatch
 )
 
+const classifyErrorScanLimit = 8 * 1024
+
+func containsFold(s, sub string) bool {
+	if sub == "" {
+		return true
+	}
+	if len(sub) > len(s) {
+		return false
+	}
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(sub)], sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPrefixFold(s, prefix string) bool {
+	return len(prefix) <= len(s) && strings.EqualFold(s[:len(prefix)], prefix)
+}
+
 // classifyRunError maps run failures to setup, patch, or harness classes.
 // Nil errors are treated as harness failures as a defensive fallback.
 func classifyRunError(err error) runErrorClass {
@@ -140,20 +161,23 @@ func classifyRunError(err error) runErrorClass {
 		return runErrorHarness
 	}
 
-	msg := strings.ToLower(err.Error())
+	msg := err.Error()
+	if len(msg) > classifyErrorScanLimit {
+		msg = msg[:classifyErrorScanLimit]
+	}
 
-	if strings.Contains(msg, "git apply") ||
-		strings.Contains(msg, "patch does not apply") ||
-		strings.Contains(msg, "corrupt patch") ||
-		strings.Contains(msg, "malformed patch") {
+	if containsFold(msg, "git apply") ||
+		containsFold(msg, "patch does not apply") ||
+		containsFold(msg, "corrupt patch") ||
+		containsFold(msg, "malformed patch") {
 		return runErrorPatch
 	}
 
-	if strings.Contains(msg, "clone repo:") ||
-		strings.Contains(msg, "checkout commit:") ||
-		strings.Contains(msg, "pip install") ||
-		(strings.Contains(msg, "exit status 128") &&
-			(strings.Contains(msg, "git") || strings.Contains(msg, "fatal:"))) {
+	if hasPrefixFold(msg, "clone repo:") ||
+		hasPrefixFold(msg, "checkout commit:") ||
+		containsFold(msg, "pip install") ||
+		(containsFold(msg, "exit status 128") &&
+			(containsFold(msg, "git") || containsFold(msg, "fatal:"))) {
 		return runErrorSetup
 	}
 
