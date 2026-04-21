@@ -110,9 +110,9 @@ func normalizeEpisodeSummaries(in []string) []string {
 		}
 	}
 	if len(out) > maxEpisodeSummaryCount {
-		trimmed := len(out) - maxEpisodeSummaryCount
-		out = out[len(out)-maxEpisodeSummaryCount:]
-		runeLens = runeLens[trimmed:]
+		start := len(out) - maxEpisodeSummaryCount
+		out = out[start:]
+		runeLens = runeLens[start:]
 	}
 	totalRunes := 0
 	for _, n := range runeLens {

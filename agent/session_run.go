@@ -27,19 +27,19 @@ func (s *Session) initConversation(ctx context.Context, userInput string) {
 
 	if len(s.config.PriorEpisodeSummaries) > 0 {
 		var b strings.Builder
-		count := 0
+		nonEmpty := make([]string, 0, len(s.config.PriorEpisodeSummaries))
 		for _, summary := range s.config.PriorEpisodeSummaries {
 			trimmed := strings.TrimSpace(summary)
 			if trimmed == "" {
 				continue
 			}
-			if count == 0 {
-				b.WriteString("Prior attempts summary (avoid repeating failed approaches):\n")
-			}
-			count++
-			b.WriteString(fmt.Sprintf("%d. %s\n", count, trimmed))
+			nonEmpty = append(nonEmpty, trimmed)
 		}
-		if count > 0 {
+		if len(nonEmpty) > 0 {
+			b.WriteString("Prior attempts summary (avoid repeating failed approaches):\n")
+			for i, summary := range nonEmpty {
+				b.WriteString(fmt.Sprintf("%d. %s\n", i+1, summary))
+			}
 			s.messages = append(s.messages, llm.UserMessage(strings.TrimSpace(b.String())))
 		}
 	}
