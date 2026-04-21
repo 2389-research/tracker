@@ -392,16 +392,22 @@ func printBudgetHaltBanner(result *pipeline.EngineResult) {
 	}
 	usage := runUsageSummary(result)
 	if usage != nil && (usage.TotalInputTokens > 0 || usage.TotalOutputTokens > 0) {
-		totalTokens := usage.TotalTokens
-		if totalTokens == 0 {
-			totalTokens = usage.TotalInputTokens + usage.TotalOutputTokens
-		}
-		fmt.Printf("  spent:  %s tokens", formatNumber(totalTokens))
+		fmt.Printf("  spent:  %s tokens", formatNumber(summaryTotalTokens(usage)))
 		if usage.TotalCostUSD > 0 {
 			fmt.Printf(", $%.4f", usage.TotalCostUSD)
 		}
 		fmt.Println()
 	}
+}
+
+func summaryTotalTokens(usage *pipeline.UsageSummary) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.TotalTokens > 0 {
+		return usage.TotalTokens
+	}
+	return usage.TotalInputTokens + usage.TotalOutputTokens
 }
 
 // runUsageSummary returns the post-run usage source of truth for summary output:

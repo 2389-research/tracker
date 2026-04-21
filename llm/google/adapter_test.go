@@ -397,7 +397,7 @@ func TestAdapterComplete(t *testing.T) {
 		t.Errorf("expected 'Hello from Gemini!', got %q", resp.Text())
 	}
 	if resp.Provider != "gemini" {
-		t.Errorf("expected provider 'google', got %q", resp.Provider)
+		t.Errorf("expected provider 'gemini', got %q", resp.Provider)
 	}
 }
 
