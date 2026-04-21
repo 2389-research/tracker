@@ -70,12 +70,7 @@ func withTimeoutOutcome(timeout time.Duration, fn func() (pipeline.Outcome, erro
 }
 
 func parseHumanTimeout(node *pipeline.Node) time.Duration {
-	if ts, ok := node.Attrs["timeout"]; ok {
-		if d, err := time.ParseDuration(ts); err == nil {
-			return d
-		}
-	}
-	return 0
+	return node.HumanConfig().Timeout
 }
 
 // Interviewer defines the interface for presenting choices to a human (or automated)
@@ -525,10 +520,13 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 
 // dispatchHumanMode routes to the appropriate human input handler based on the node mode.
 func (h *HumanHandler) dispatchHumanMode(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) (pipeline.Outcome, error) {
-	switch node.Attrs["mode"] {
+	// Parse the config once; reuse Mode and Timeout to avoid the double
+	// map-walk / ParseDuration that was happening when parseHumanTimeout
+	// called HumanConfig() a second time from the interview branch.
+	cfg := node.HumanConfig()
+	switch cfg.Mode {
 	case "interview":
-		timeout := parseHumanTimeout(node)
-		return withTimeoutOutcome(timeout, func() (pipeline.Outcome, error) {
+		return withTimeoutOutcome(cfg.Timeout, func() (pipeline.Outcome, error) {
 			return h.executeInterview(ctx, node, pctx)
 		})
 	case "freeform":
@@ -542,7 +540,8 @@ func (h *HumanHandler) dispatchHumanMode(ctx context.Context, node *pipeline.Nod
 
 // handleHumanTimeout returns the appropriate outcome when a human gate times out.
 func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome {
-	action := node.Attrs["timeout_action"]
+	cfg := node.HumanConfig()
+	action := cfg.TimeoutAction
 	if action == "" {
 		action = "default"
 	}
@@ -551,10 +550,7 @@ func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome 
 			pipeline.ContextKeyHumanResponse: "timed out",
 		}}
 	}
-	def := node.Attrs["default_choice"]
-	if def == "" {
-		def = node.Attrs["default"]
-	}
+	def := cfg.DefaultChoice
 	if def == "" {
 		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out (no default)",
@@ -609,8 +605,12 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	}
 
 	labels := collectEdgeLabels(h.graph, node.ID)
+	cfg := node.HumanConfig()
+	// Freeform mode specifically wants the bare "default" attr (not
+	// default_choice) because freeform labels map to edge labels, not to
+	// labeled-choice indices; keep the legacy semantic.
 	defaultLabel := node.Attrs["default"]
-	timeout := parseHumanTimeout(node)
+	timeout := cfg.Timeout
 
 	response, err := askFreeformWithTimeout(fi, prompt, labels, defaultLabel, timeout)
 	if err != nil {
@@ -666,6 +666,9 @@ func matchFreeformLabel(graph *pipeline.Graph, node *pipeline.Node, response str
 			return e.Label
 		}
 	}
+	// matchFreeformLabel compares against the bare "default" attr (not
+	// DefaultChoice) because this is only used for label matching in
+	// freeform mode, which keys on edge labels.
 	if defLabel := node.Attrs["default"]; defLabel != "" {
 		if strings.ToLower(defLabel) == normalized {
 			return defLabel
@@ -696,12 +699,21 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 
 // resolveInterviewKeys returns the context keys for questions and answers,
 // using node attrs when set and falling back to pipeline constants.
+//
+// Note on the questions_key default: CLAUDE.md documents the default as
+// last_response, but the actual code (and the test suite) treats
+// interview_questions as the primary default and last_response as a
+// resolveAgentOutput fallback. The latter is load-bearing — tests and
+// production pipelines that write to interview_questions rely on it — so
+// the code stays the source of truth here. The CLAUDE.md line is inaccurate
+// and should be reconciled separately (not in this refactor PR).
 func resolveInterviewKeys(node *pipeline.Node) (questionsKey, answersKey string) {
-	questionsKey = node.Attrs["questions_key"]
+	cfg := node.HumanConfig()
+	questionsKey = cfg.QuestionsKey
 	if questionsKey == "" {
 		questionsKey = pipeline.ContextKeyInterviewQuestions
 	}
-	answersKey = node.Attrs["answers_key"]
+	answersKey = cfg.AnswersKey
 	if answersKey == "" {
 		answersKey = pipeline.ContextKeyInterviewAnswers
 	}
@@ -731,7 +743,7 @@ func parseInterviewQuestions(agentOutput string) []Question {
 // executeInterviewFallback handles the zero-questions case by falling back to
 // freeform input and also storing the response under answersKey.
 func (h *HumanHandler) executeInterviewFallback(node *pipeline.Node, pctx *pipeline.PipelineContext, agentOutput, answersKey string) (pipeline.Outcome, error) {
-	prompt := node.Attrs["prompt"]
+	prompt := node.HumanConfig().Prompt
 	if prompt == "" {
 		prompt = node.Label
 	}
@@ -796,7 +808,7 @@ func applyInterviewDeclaredWrites(node *pipeline.Node, contextUpdates map[string
 	if result == nil {
 		return false
 	}
-	if len(pipeline.ParseDeclaredKeys(node.Attrs["writes"])) == 0 {
+	if len(pipeline.ParseDeclaredKeys(node.HumanConfig().Writes)) == 0 {
 		return false
 	}
 	raw, err := buildInterviewAnswersObjectJSON(result)
@@ -869,8 +881,12 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		choices = append(choices, label)
 	}
 
-	timeout := parseHumanTimeout(node)
-	selected, err := withTimeout(timeout, func() (string, error) {
+	cfg := node.HumanConfig()
+	selected, err := withTimeout(cfg.Timeout, func() (string, error) {
+		// Choice mode specifically uses the bare default_choice attr —
+		// HumanConfig.DefaultChoice would fall back to "default", which
+		// is wrong here because "default" means edge-label in freeform
+		// mode. Keep the direct read to preserve that distinction.
 		return h.interviewer.Ask(prompt, choices, node.Attrs["default_choice"])
 	})
 	if err != nil {

@@ -85,7 +85,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	})
 
 	outcome := pipeline.Outcome{Status: status, Stats: aggregateBranchStats(collected)}
-	if joinID := node.Attrs["parallel_join"]; joinID != "" {
+	if joinID := node.ParallelConfig().JoinID; joinID != "" {
 		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
 	}
 	return outcome, nil
@@ -102,7 +102,7 @@ func (h *ParallelHandler) resolveBranchEdges(node *pipeline.Node) ([]*pipeline.E
 
 // collectBranchEdges builds the edge list from parallel_targets attr or outgoing edges.
 func (h *ParallelHandler) collectBranchEdges(node *pipeline.Node) []*pipeline.Edge {
-	if targetsAttr := node.Attrs["parallel_targets"]; targetsAttr != "" {
+	if targetsAttr := node.ParallelConfig().ParallelTargets; targetsAttr != "" {
 		return edgesFromTargetsAttr(node.ID, targetsAttr)
 	}
 	return h.edgesFromOutgoing(node)
@@ -121,7 +121,7 @@ func edgesFromTargetsAttr(fromID, targetsAttr string) []*pipeline.Edge {
 
 // edgesFromOutgoing returns outgoing edges excluding the join node.
 func (h *ParallelHandler) edgesFromOutgoing(node *pipeline.Node) []*pipeline.Edge {
-	joinID := node.Attrs["parallel_join"]
+	joinID := node.ParallelConfig().JoinID
 	var edges []*pipeline.Edge
 	for _, e := range h.graph.OutgoingEdges(node.ID) {
 		if e.To != joinID {
@@ -141,8 +141,9 @@ type branchResultMsg struct {
 func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) []ParallelResult {
 	snapshot := pctx.Snapshot()
 	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
-	sem := parseSemaphore(parallelNode.Attrs["max_concurrency"])
-	branchTimeout := parseBranchTimeout(parallelNode.Attrs["branch_timeout"])
+	cfg := parallelNode.ParallelConfig()
+	sem := makeSemaphore(cfg.MaxConcurrency)
+	branchTimeout := cfg.BranchTimeout
 
 	resultsCh := make(chan branchResultMsg, len(edges))
 	var wg sync.WaitGroup
@@ -171,32 +172,26 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 	return collected
 }
 
-// parseSemaphore creates a concurrency semaphore channel from a string, or nil for unlimited.
-func parseSemaphore(maxStr string) chan struct{} {
-	if maxStr == "" {
+// makeSemaphore returns a buffered channel used as a semaphore with the
+// given capacity, or nil when max == 0 (unbounded concurrency).
+func makeSemaphore(max int) chan struct{} {
+	if max <= 0 {
 		return nil
 	}
-	if n, err := strconv.Atoi(maxStr); err == nil && n > 0 {
-		return make(chan struct{}, n)
-	}
-	return nil
-}
-
-// parseBranchTimeout parses a duration string for per-branch timeout, returning 0 for none.
-func parseBranchTimeout(toStr string) time.Duration {
-	if toStr == "" {
-		return 0
-	}
-	if d, err := time.ParseDuration(toStr); err == nil && d > 0 {
-		return d
-	}
-	return 0
+	return make(chan struct{}, max)
 }
 
 // runBranch executes a single parallel branch in its own goroutine.
 // sem, if non-nil, is a buffered channel used as a semaphore to cap concurrency.
 // branchTimeout, if > 0, is applied as a per-branch context deadline.
 func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
+	// Register wg.Done() up front so every early return path — including
+	// the ctx.Done() branch on the semaphore wait below — still signals
+	// completion. Previously the defer sat after the select, so a
+	// cancellation while blocked on the concurrency slot could skip it
+	// and deadlock wg.Wait() in executeBranches.
+	defer wg.Done()
+
 	if sem != nil {
 		select {
 		case sem <- struct{}{}:
@@ -210,7 +205,6 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 		}
 	}
 
-	defer wg.Done()
 	defer h.recoverBranch(idx, tn, resultsCh)
 
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{

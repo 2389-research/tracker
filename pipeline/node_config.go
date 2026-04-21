@@ -216,7 +216,8 @@ type ToolNodeConfig struct {
 	Command     string
 	OutputLimit int // bytes; 0 means use default
 	WorkingDir  string
-	PassEnv     string // comma-separated env var names to pass through
+	PassEnv     string        // comma-separated env var names to pass through
+	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent, unparseable, or parsed to 0. Consumer validates non-positive values.
 }
 
 // ToolConfig returns the typed tool config for the node.
@@ -231,29 +232,50 @@ func (n *Node) ToolConfig() ToolNodeConfig {
 			cfg.OutputLimit = i
 		}
 	}
+	if v := n.Attrs["timeout"]; v != "" {
+		// No positivity guard — the accessor exposes whatever parses, so
+		// the field matches the raw attr semantics. ToolHandler.parseTimeout
+		// also passes non-positive values through today (behavior preserved
+		// from before the typed-config refactor).
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Timeout = d
+		}
+	}
 	return cfg
 }
 
 // HumanNodeConfig is a typed view over a wait.human node's attributes.
+// DefaultChoice resolves "default_choice" with fallback to "default" so
+// callers don't have to check two keys.
 type HumanNodeConfig struct {
-	Mode          string // "" (default), "yes_no", "interview"
-	DefaultChoice string
+	Mode          string // "" or "choice" (default — presents outgoing edge labels), "yes_no", "interview", "freeform"
+	DefaultChoice string // "default_choice" attr, falling back to "default"
 	Prompt        string
 	QuestionsKey  string
 	AnswersKey    string
 	Timeout       time.Duration
-	TimeoutAction string // "fail" or "auto_continue" or "" (unset)
+	TimeoutAction string // "fail", "default", or "" (unset — treated as "default")
+	// Writes carries the raw "writes:" attr; consumers that need the parsed
+	// key list should still call pipeline.ParseDeclaredKeys.
+	Writes string
 }
 
 // HumanConfig returns the typed human-gate config for the node.
 func (n *Node) HumanConfig() HumanNodeConfig {
 	cfg := HumanNodeConfig{
 		Mode:          n.Attrs["mode"],
-		DefaultChoice: n.Attrs["default"],
 		Prompt:        n.Attrs["prompt"],
 		QuestionsKey:  n.Attrs["questions_key"],
 		AnswersKey:    n.Attrs["answers_key"],
 		TimeoutAction: n.Attrs["timeout_action"],
+		Writes:        n.Attrs["writes"],
+	}
+	// default_choice takes precedence over default (matches pre-existing
+	// handler behavior — e.g. human.go:handleHumanTimeout).
+	if v := n.Attrs["default_choice"]; v != "" {
+		cfg.DefaultChoice = v
+	} else {
+		cfg.DefaultChoice = n.Attrs["default"]
 	}
 	if v := n.Attrs["timeout"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -266,18 +288,36 @@ func (n *Node) HumanConfig() HumanNodeConfig {
 // ParallelNodeConfig is a typed view over a parallel node's attributes.
 // ParallelTargets is the comma-separated list of branch target node IDs; the
 // handler still splits and trims. FanInSources mirrors the same for a fan-in
-// node that collects results from multiple upstream branches.
+// node that collects results from multiple upstream branches. JoinID is the
+// fan-in node that branches should reconverge on. MaxConcurrency and
+// BranchTimeout cap concurrent branches and per-branch wall time; zero means
+// unlimited / no timeout.
 type ParallelNodeConfig struct {
 	ParallelTargets string
 	FanInSources    string
+	JoinID          string
+	MaxConcurrency  int
+	BranchTimeout   time.Duration
 }
 
 // ParallelConfig returns the typed parallel/fan-in config for the node.
 func (n *Node) ParallelConfig() ParallelNodeConfig {
-	return ParallelNodeConfig{
+	cfg := ParallelNodeConfig{
 		ParallelTargets: n.Attrs["parallel_targets"],
 		FanInSources:    n.Attrs["fan_in_sources"],
+		JoinID:          n.Attrs["parallel_join"],
 	}
+	if v := n.Attrs["max_concurrency"]; v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			cfg.MaxConcurrency = i
+		}
+	}
+	if v := n.Attrs["branch_timeout"]; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.BranchTimeout = d
+		}
+	}
+	return cfg
 }
 
 // RetryConfig is a typed view over the retry-related attributes shared

@@ -167,11 +167,69 @@ func TestToolConfig_Basic(t *testing.T) {
 		"output_limit":  "65536",
 		"working_dir":   "/tmp/build",
 		"tool_pass_env": "PATH,HOME",
+		"timeout":       "2m",
 	}}
 	cfg := n.ToolConfig()
 	if cfg.Command != "make test" || cfg.OutputLimit != 65536 ||
-		cfg.WorkingDir != "/tmp/build" || cfg.PassEnv != "PATH,HOME" {
+		cfg.WorkingDir != "/tmp/build" || cfg.PassEnv != "PATH,HOME" ||
+		cfg.Timeout != 2*time.Minute {
 		t.Errorf("tool config mismatch: %+v", cfg)
+	}
+}
+
+// HumanConfig.DefaultChoice should prefer "default_choice" when set and
+// fall back to "default" when not, matching the legacy handler behavior.
+func TestHumanConfig_DefaultChoicePrefersDefaultChoice(t *testing.T) {
+	// default_choice wins when both are set.
+	n := &Node{Attrs: map[string]string{
+		"default_choice": "Approve",
+		"default":        "Reject",
+	}}
+	if got := n.HumanConfig().DefaultChoice; got != "Approve" {
+		t.Errorf("default_choice should win; got %q", got)
+	}
+	// Falls back to "default" when default_choice is absent.
+	n2 := &Node{Attrs: map[string]string{"default": "Skip"}}
+	if got := n2.HumanConfig().DefaultChoice; got != "Skip" {
+		t.Errorf("default should be used when default_choice absent; got %q", got)
+	}
+	// Both empty → empty.
+	n3 := &Node{Attrs: map[string]string{}}
+	if got := n3.HumanConfig().DefaultChoice; got != "" {
+		t.Errorf("no default set should yield empty; got %q", got)
+	}
+}
+
+func TestParallelConfig_AllFields(t *testing.T) {
+	n := &Node{Attrs: map[string]string{
+		"parallel_targets": "A,B,C",
+		"fan_in_sources":   "X,Y",
+		"parallel_join":    "Converge",
+		"max_concurrency":  "4",
+		"branch_timeout":   "90s",
+	}}
+	cfg := n.ParallelConfig()
+	if cfg.ParallelTargets != "A,B,C" || cfg.FanInSources != "X,Y" ||
+		cfg.JoinID != "Converge" || cfg.MaxConcurrency != 4 ||
+		cfg.BranchTimeout != 90*time.Second {
+		t.Errorf("parallel config mismatch: %+v", cfg)
+	}
+}
+
+// Invalid / non-positive values for max_concurrency and branch_timeout fall
+// back to zero (meaning unbounded / no timeout), matching the previous
+// parseSemaphore/parseBranchTimeout behavior.
+func TestParallelConfig_RejectsNonPositiveValues(t *testing.T) {
+	n := &Node{Attrs: map[string]string{
+		"max_concurrency": "0",
+		"branch_timeout":  "-1s",
+	}}
+	cfg := n.ParallelConfig()
+	if cfg.MaxConcurrency != 0 {
+		t.Errorf("max_concurrency=0 should stay 0, got %d", cfg.MaxConcurrency)
+	}
+	if cfg.BranchTimeout != 0 {
+		t.Errorf("negative branch_timeout should stay 0, got %v", cfg.BranchTimeout)
 	}
 }
 

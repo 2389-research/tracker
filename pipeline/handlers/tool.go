@@ -176,7 +176,7 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 // expandAndValidateCommand expands variables in the tool_command attribute and
 // runs denylist/allowlist validation. Returns the final command string or an error.
 func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeline.PipelineContext) (string, error) {
-	command := node.Attrs["tool_command"]
+	command := node.ToolConfig().Command
 	if command == "" {
 		return "", fmt.Errorf("node %q missing required attribute 'tool_command'", node.ID)
 	}
@@ -239,8 +239,8 @@ func extractGraphAttrsAndParams(pctx *pipeline.PipelineContext) (graphAttrs, par
 // applyWorkingDir prepends a "cd <dir> && " prefix to command if the node has a
 // working_dir attribute. Validates against path traversal and shell metacharacters.
 func (h *ToolHandler) applyWorkingDir(node *pipeline.Node, command string) (string, error) {
-	wd, ok := node.Attrs["working_dir"]
-	if !ok || wd == "" {
+	wd := node.ToolConfig().WorkingDir
+	if wd == "" {
 		return command, nil
 	}
 	if strings.ContainsAny(wd, "`$;|&()<>\n\r") {
@@ -254,6 +254,13 @@ func (h *ToolHandler) applyWorkingDir(node *pipeline.Node, command string) (stri
 }
 
 // parseTimeout returns the timeout for the node, preferring the node attr over the default.
+//
+// Note: a zero or negative parsed duration is passed through unchanged. It
+// will reach context.WithTimeout and cause immediate cancellation, which is
+// almost certainly not what a pipeline author writing `timeout: "0"` wants.
+// Tightening this to hard-fail at parse time is tracked separately so it can
+// land with dedicated tests and a CHANGELOG entry describing the behavior
+// change.
 func (h *ToolHandler) parseTimeout(node *pipeline.Node) (time.Duration, error) {
 	timeoutStr, ok := node.Attrs["timeout"]
 	if !ok {
