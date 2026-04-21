@@ -67,6 +67,8 @@ func (t *TokenTracker) WrapComplete(next CompleteHandler) CompleteHandler {
 // AddUsage manually adds token usage for a provider. Used by backends that
 // bypass the LLM client middleware (e.g., claude-code subprocess backend).
 // The model parameter is optional; pass "" to leave the provider's model unchanged.
+// Model strings are normalized through the catalog so versioned provider-returned
+// IDs resolve to canonical pricing entries — matching WrapComplete's behavior.
 func (t *TokenTracker) AddUsage(provider string, usage Usage, model ...string) {
 	if provider == "" {
 		return
@@ -75,7 +77,9 @@ func (t *TokenTracker) AddUsage(provider string, usage Usage, model ...string) {
 	existing := t.usage[provider]
 	t.usage[provider] = existing.Add(usage)
 	if len(model) > 0 && model[0] != "" {
-		t.models[provider] = model[0]
+		if normalized := normalizeModelID(model[0]); normalized != "" {
+			t.models[provider] = normalized
+		}
 	}
 	t.mu.Unlock()
 }

@@ -6,7 +6,7 @@ steers the running child by injecting context mid-execution.
 
 ## Lifecycle
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │  Manager Node (parent pipeline)             │
 │                                             │

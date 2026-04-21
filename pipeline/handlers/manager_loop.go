@@ -226,6 +226,12 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 			cancelChild()
 			waitForChild(resultCh)
 			pctx.Set("stack.child.status", "cancelled")
+			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+				Type:      pipeline.EventStageFailed,
+				Timestamp: time.Now(),
+				NodeID:    node.ID,
+				Message:   fmt.Sprintf("manager_loop: cancelled: %v", ctx.Err()),
+			})
 			return pipeline.Outcome{Status: pipeline.OutcomeFail},
 				fmt.Errorf("manager_loop: cancelled: %w", ctx.Err())
 
@@ -233,6 +239,17 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 			return h.handleChildResult(node.ID, msg, cycles, pctx)
 
 		case <-pollTimer.C:
+			// If the child's result became ready concurrently with this
+			// tick, prefer completion — select among ready cases is
+			// nondeterministic, so without this check a tick could win
+			// the race and trigger max_cycles failure even when the
+			// child already finished.
+			select {
+			case msg := <-resultCh:
+				return h.handleChildResult(node.ID, msg, cycles, pctx)
+			default:
+			}
+
 			cycles++
 			pctx.Set("stack.child.cycles", strconv.Itoa(cycles))
 
@@ -268,6 +285,12 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 					cancelChild()
 					waitForChild(resultCh)
 					pctx.Set("stack.child.status", "stop_condition_invalid")
+					h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+						Type:      pipeline.EventStageFailed,
+						Timestamp: time.Now(),
+						NodeID:    node.ID,
+						Message:   fmt.Sprintf("manager_loop: stop_condition %q is invalid: %v", cfg.stopCondition, condErr),
+					})
 					return pipeline.Outcome{Status: pipeline.OutcomeFail},
 						fmt.Errorf("manager_loop: stop_condition %q is invalid: %w", cfg.stopCondition, condErr)
 				}
@@ -292,6 +315,12 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 					cancelChild()
 					waitForChild(resultCh)
 					pctx.Set("stack.child.status", "steer_condition_invalid")
+					h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+						Type:      pipeline.EventStageFailed,
+						Timestamp: time.Now(),
+						NodeID:    node.ID,
+						Message:   fmt.Sprintf("manager_loop: steer_condition %q is invalid: %v", cfg.steerExpr, condErr),
+					})
 					return pipeline.Outcome{Status: pipeline.OutcomeFail},
 						fmt.Errorf("manager_loop: steer_condition %q is invalid: %w", cfg.steerExpr, condErr)
 				}
@@ -367,12 +396,18 @@ func (h *ManagerLoopHandler) handleChildResult(nodeID string, msg engineResultMs
 	}
 
 	// No result at all — child crashed or panicked before producing one.
+	// Guarantee a non-nil error so callers never see (OutcomeFail, nil):
+	// if the goroutine sent neither result nor err, synthesize one.
+	err := msg.err
+	if err == nil {
+		err = fmt.Errorf("manager_loop: child exited with no result and no error")
+	}
 	pctx.Set("stack.child.status", "error")
 	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageFailed,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
-		Message:   fmt.Sprintf("manager_loop: child error: %v", msg.err),
+		Message:   fmt.Sprintf("manager_loop: child error: %v", err),
 	})
-	return pipeline.Outcome{Status: pipeline.OutcomeFail}, msg.err
+	return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 }
