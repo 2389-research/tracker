@@ -103,8 +103,8 @@ func patchLineCount(patch string) int {
 	return count
 }
 
-// parseAgentSummary extracts the AgentSummary JSON from the last non-empty line of output.
-// Returns zero-value AgentSummary if the last line is not valid JSON.
+// parseAgentSummary scans output backward and returns the first line that parses as AgentSummary JSON.
+// This tolerates trailing non-JSON log lines. Returns zero-value AgentSummary when no JSON line is found.
 func parseAgentSummary(output string) AgentSummary {
 	lines := strings.Split(output, "\n")
 	// Find last non-empty line.

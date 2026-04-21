@@ -124,3 +124,28 @@ func TestClassifyTerminationReason(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeLastToolCalls(t *testing.T) {
+	got := normalizeLastToolCalls(nil)
+	if got == nil {
+		t.Fatal("normalizeLastToolCalls(nil) should return empty slice, not nil")
+	}
+	if len(got) != 0 {
+		t.Fatalf("len(normalizeLastToolCalls(nil)) = %d, want 0", len(got))
+	}
+
+	got = normalizeLastToolCalls([]string{"a", "b", "c", "d"})
+	if len(got) != 3 {
+		t.Fatalf("len(normalizeLastToolCalls(...)) = %d, want 3", len(got))
+	}
+	if got[0] != "b" || got[1] != "c" || got[2] != "d" {
+		t.Fatalf("normalizeLastToolCalls(...) = %#v, want [b c d]", got)
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	got := truncateRunes(strings.Repeat("x", 450), maxFinalMessageRunes)
+	if len([]rune(got)) != maxFinalMessageRunes {
+		t.Fatalf("truncateRunes length = %d, want %d", len([]rune(got)), maxFinalMessageRunes)
+	}
+}

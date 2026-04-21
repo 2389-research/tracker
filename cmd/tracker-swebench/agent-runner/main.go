@@ -106,6 +106,8 @@ type agentSummary struct {
 	LastToolCalls     []string `json:"last_tool_calls"`
 }
 
+const maxFinalMessageRunes = 400
+
 // instancePromptPath is the container-side path where the harness mounts
 // the instance prompt file. Used instead of env vars because multiline
 // prompts break Docker's --env-file format.
@@ -169,12 +171,12 @@ func main() {
 
 	// Log agent events to stderr for transcript visibility.
 	var finalMessage string
-	var toolCalls []string
+	toolCalls := make([]string, 0)
 	evtHandler := agent.EventHandlerFunc(func(evt agent.Event) {
 		switch evt.Type {
 		case agent.EventTextDelta:
 			if text := strings.TrimSpace(evt.Text); text != "" {
-				finalMessage = text
+				finalMessage = truncateRunes(text, maxFinalMessageRunes)
 			}
 		case agent.EventToolCallStart:
 			if evt.ToolName != "" {
@@ -203,7 +205,7 @@ func main() {
 		DurationMs:        elapsed.Milliseconds(),
 		TerminationReason: classifyTerminationReason(result, err),
 		FinalMessage:      finalMessage,
-		LastToolCalls:     toolCalls,
+		LastToolCalls:     normalizeLastToolCalls(toolCalls),
 	}
 	if result.Turns > 0 {
 		summary.Turns = result.Turns
@@ -232,6 +234,29 @@ func classifyTerminationReason(result agent.SessionResult, err error) string {
 		return "max_turns_reached"
 	}
 	return "explicit_finish"
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}
+
+func normalizeLastToolCalls(calls []string) []string {
+	if len(calls) > 3 {
+		calls = calls[len(calls)-3:]
+	}
+	if len(calls) == 0 {
+		return []string{}
+	}
+	out := make([]string, len(calls))
+	copy(out, calls)
+	return out
 }
 
 // buildLLMClient creates a single-provider LLM client with retry middleware.
