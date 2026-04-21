@@ -119,9 +119,6 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 	if s.SessionCount == 0 {
 		return nil
 	}
-	if len(s.ProviderTotals) == 0 {
-		s.ProviderTotals = nil
-	}
 	return s
 }
 

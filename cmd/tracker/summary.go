@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -144,7 +143,7 @@ func formatElapsed(d time.Duration) string {
 
 // printRunSummary outputs a comprehensive run summary with the logo, aggregated
 // session stats, per-node breakdown, token usage, and ASCII pipeline graph.
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, tracker *llm.TokenTracker, pipelineFile string) {
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineFile string) {
 	fmt.Println()
 
 	// Logo

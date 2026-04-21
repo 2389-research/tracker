@@ -168,7 +168,7 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	result, runErr := engine.Run(ctx)
 
 	pipelineErr := interpretRunResult(result, runErr)
-	printRunSummary(result, pipelineErr, tokenTracker, pipelineFile)
+	printRunSummary(result, pipelineErr, pipelineFile)
 	if result != nil && result.RunID != "" {
 		maybeExportBundle(artifactDir, result.RunID)
 	}
@@ -387,7 +387,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		return err
 	}
 
-	printRunSummary(outcome.result, outcome.err, tokenTracker, pipelineFile)
+		printRunSummary(outcome.result, outcome.err, pipelineFile)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
 		maybeExportBundle(artifactDir, outcome.result.RunID)
