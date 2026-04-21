@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Typed `NodeConfig` accessors on `*pipeline.Node`** (closes #142, #143, #144; partial #19). New methods `AgentConfig(graphAttrs)`, `ToolConfig()`, `HumanConfig()`, `ParallelConfig()`, and `RetryConfig(graphAttrs)` return typed structs parsed from `Node.Attrs` with the graph-default-then-node-override merge centralized. Numeric parse failures are lenient (zero-value, no panic) to preserve existing permissive behavior. Three-state booleans (e.g. `ReflectOnError`, `VerifyAfterEdit`, `PlanBeforeExecute`, `CacheToolResults`) expose companion `*Set` flags so callers can distinguish "explicitly configured" from "absent".
+
+### Changed
+
+- **Codergen handler now consumes `AgentNodeConfig`** instead of calling 8 separate `apply*` methods that each re-parsed `Node.Attrs` directly. Graph→node override resolution happens once in the accessor; `buildConfig` just copies typed fields into `agent.SessionConfig`. Replaces `applyModelProvider`, `applySessionLimits`, `applyReasoningEffort`, `applyResponseFormat`, `applyCacheAndCompaction`, `applyReflectOnError`, `applyVerifyConfig`, and `applyPlanningConfig` with a single typed consumer. No behavior change; existing codergen tests pass unchanged.
+- **`Engine.maxRetries` uses the typed `RetryConfig` accessor** instead of duplicating `strconv.Atoi` over `node.Attrs["max_retries"]` → `graph.Attrs["default_max_retry"]`. The fallback default (3) is unchanged.
+
 ## [0.21.0] - 2026-04-21
 
 ### Added

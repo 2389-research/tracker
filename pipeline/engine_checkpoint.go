@@ -124,16 +124,11 @@ func (e *Engine) maxRestartsAllowed() int {
 }
 
 // maxRetries returns the max retry count for a node, checking node attrs then graph default.
+// Goes through the typed RetryConfig accessor so the node→graph fallback and
+// integer parsing live in one place (see pipeline/node_config.go).
 func (e *Engine) maxRetries(node *Node) int {
-	if mr, ok := node.Attrs["max_retries"]; ok {
-		if n, err := strconv.Atoi(mr); err == nil {
-			return n
-		}
-	}
-	if mr, ok := e.graph.Attrs["default_max_retry"]; ok {
-		if n, err := strconv.Atoi(mr); err == nil {
-			return n
-		}
+	if rc := node.RetryConfig(e.graph.Attrs); rc.MaxRetriesSet {
+		return rc.MaxRetries
 	}
 	return 3
 }
