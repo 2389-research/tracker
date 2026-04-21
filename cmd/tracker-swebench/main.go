@@ -209,14 +209,14 @@ Flags:
 		promptFile, promptErr := os.CreateTemp("", "swebench-prompt-*")
 		if promptErr != nil {
 			log.Printf("[%s] create prompt file: %v", inst.InstanceID, promptErr)
-			stats.Errors++
+			stats.addError(runErrorHarness)
 			continue
 		}
 		if _, promptErr = promptFile.WriteString(inst.AgentPrompt()); promptErr != nil {
 			promptFile.Close()
 			os.Remove(promptFile.Name())
 			log.Printf("[%s] write prompt file: %v", inst.InstanceID, promptErr)
-			stats.Errors++
+			stats.addError(runErrorHarness)
 			continue
 		}
 		promptFile.Close()
@@ -229,7 +229,7 @@ Flags:
 		// Write prediction even on error (capture partial patch).
 		if writeErr := rw.WritePrediction(inst.InstanceID, patch); writeErr != nil {
 			log.Printf("[%s] write prediction: %v", inst.InstanceID, writeErr)
-			stats.Errors++
+			stats.addError(runErrorHarness)
 			// Write per-instance log even on prediction write failure.
 			logPath := filepath.Join(logsDir, inst.InstanceID+".log")
 			logContent := fmt.Sprintf("instance_id: %s\nelapsed: %s\nturns: %d\ninput_tokens: %d\noutput_tokens: %d\npatch_lines: %d\n",
@@ -271,7 +271,7 @@ Flags:
 			stats.Patched++
 		}
 		if runErr != nil {
-			stats.Errors++
+			stats.addError(classifyRunError(runErr))
 			if errors.Is(runErr, context.DeadlineExceeded) {
 				stats.TimedOut++
 			}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -109,15 +110,62 @@ func (w *ResultsWriter) Close() error {
 
 // RunStats holds counters and timing for a benchmark run.
 type RunStats struct {
-	Total        int
-	Completed    int
-	Skipped      int
-	Errors       int
-	TimedOut     int
-	Patched      int
-	InputTokens  int64
-	OutputTokens int64
-	StartTime    time.Time
+	Total         int
+	Completed     int
+	Skipped       int
+	SetupErrors   int
+	PatchErrors   int
+	HarnessErrors int
+	Errors        int
+	TimedOut      int
+	Patched       int
+	InputTokens   int64
+	OutputTokens  int64
+	StartTime     time.Time
+}
+
+type runErrorClass int
+
+const (
+	runErrorHarness runErrorClass = iota
+	runErrorSetup
+	runErrorPatch
+)
+
+func classifyRunError(err error) runErrorClass {
+	if err == nil {
+		return runErrorHarness
+	}
+
+	msg := strings.ToLower(err.Error())
+
+	if strings.Contains(msg, "git apply") ||
+		strings.Contains(msg, "patch does not apply") ||
+		strings.Contains(msg, "corrupt patch") ||
+		strings.Contains(msg, "malformed patch") {
+		return runErrorPatch
+	}
+
+	if strings.Contains(msg, "clone repo:") ||
+		strings.Contains(msg, "checkout commit:") ||
+		strings.Contains(msg, "pip install") ||
+		(strings.Contains(msg, "exit status 128") && strings.Contains(msg, "git ")) {
+		return runErrorSetup
+	}
+
+	return runErrorHarness
+}
+
+func (s *RunStats) addError(class runErrorClass) {
+	s.Errors++
+	switch class {
+	case runErrorSetup:
+		s.SetupErrors++
+	case runErrorPatch:
+		s.PatchErrors++
+	default:
+		s.HarnessErrors++
+	}
 }
 
 // Summary returns a human-readable summary of the run.
@@ -136,7 +184,7 @@ func (s *RunStats) Summary() string {
 	inM := float64(s.InputTokens) / 1e6
 	outM := float64(s.OutputTokens) / 1e6
 
-	return fmt.Sprintf(
+	summary := fmt.Sprintf(
 		"Run complete — elapsed: %s\n"+
 			"  Total:     %d\n"+
 			"  Completed: %d (%.1f%%)\n"+
@@ -154,6 +202,18 @@ func (s *RunStats) Summary() string {
 		s.Patched, patchPct,
 		inM, outM,
 	)
+
+	if s.SetupErrors > 0 {
+		summary += fmt.Sprintf("\n  Setup errors:   %d", s.SetupErrors)
+	}
+	if s.PatchErrors > 0 {
+		summary += fmt.Sprintf("\n  Patch errors:   %d", s.PatchErrors)
+	}
+	if s.HarnessErrors > 0 {
+		summary += fmt.Sprintf("\n  Harness errors: %d", s.HarnessErrors)
+	}
+
+	return summary
 }
 
 // RunMeta holds metadata about the benchmark run written to a JSON file at the start.

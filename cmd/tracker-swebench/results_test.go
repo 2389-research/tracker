@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,15 +104,18 @@ func TestResultsWriter_WriteAndResume(t *testing.T) {
 
 func TestRunStats_Summary(t *testing.T) {
 	stats := RunStats{
-		Total:        10,
-		Completed:    7,
-		Skipped:      2,
-		Errors:       1,
-		TimedOut:     1,
-		Patched:      5,
-		InputTokens:  1_500_000,
-		OutputTokens: 300_000,
-		StartTime:    time.Now().Add(-5 * time.Minute),
+		Total:         10,
+		Completed:     7,
+		Skipped:       2,
+		Errors:        3,
+		SetupErrors:   1,
+		PatchErrors:   1,
+		HarnessErrors: 1,
+		TimedOut:      1,
+		Patched:       5,
+		InputTokens:   1_500_000,
+		OutputTokens:  300_000,
+		StartTime:     time.Now().Add(-5 * time.Minute),
 	}
 
 	summary := stats.Summary()
@@ -126,6 +130,72 @@ func TestRunStats_Summary(t *testing.T) {
 	}
 	if !strings.Contains(summary, "Errors") {
 		t.Error("summary should contain Errors label")
+	}
+	if !strings.Contains(summary, "Setup errors") {
+		t.Error("summary should contain setup error breakdown")
+	}
+	if !strings.Contains(summary, "Patch errors") {
+		t.Error("summary should contain patch error breakdown")
+	}
+	if !strings.Contains(summary, "Harness errors") {
+		t.Error("summary should contain harness error breakdown")
+	}
+}
+
+func TestRunStats_Summary_OmitsErrorBreakdownWhenZero(t *testing.T) {
+	stats := RunStats{
+		Total:     1,
+		Completed: 1,
+		StartTime: time.Now().Add(-time.Minute),
+	}
+
+	summary := stats.Summary()
+	if strings.Contains(summary, "Setup errors") ||
+		strings.Contains(summary, "Patch errors") ||
+		strings.Contains(summary, "Harness errors") {
+		t.Fatal("summary should omit error breakdown when all class counters are zero")
+	}
+}
+
+func TestClassifyRunError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want runErrorClass
+	}{
+		{
+			name: "setup clone exit 128",
+			err:  fmt.Errorf("clone repo: docker exec swe: exit status 128\nstderr: fatal: repository not found"),
+			want: runErrorSetup,
+		},
+		{
+			name: "setup pip install failure",
+			err:  fmt.Errorf("agent-runner: pip install failed: no matching distribution found"),
+			want: runErrorSetup,
+		},
+		{
+			name: "patch git apply rejection",
+			err:  fmt.Errorf("agent-runner: git apply --index patch.diff failed: patch does not apply"),
+			want: runErrorPatch,
+		},
+		{
+			name: "harness agent panic",
+			err:  fmt.Errorf("agent-runner: panic: runtime error: invalid memory address or nil pointer dereference"),
+			want: runErrorHarness,
+		},
+		{
+			name: "harness docker daemon issue",
+			err:  fmt.Errorf("create container: docker create: Cannot connect to the Docker daemon"),
+			want: runErrorHarness,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyRunError(tt.err); got != tt.want {
+				t.Fatalf("classifyRunError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
