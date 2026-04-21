@@ -3,9 +3,12 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/agent"
 )
 
 func TestParseConfig_Defaults(t *testing.T) {
@@ -82,5 +85,67 @@ func TestBuildLLMClient_UnsupportedProvider(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported provider") {
 		t.Errorf("expected 'unsupported provider' in error, got: %v", err)
+	}
+}
+
+func TestClassifyTerminationReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		result agent.SessionResult
+		err    error
+		want   string
+	}{
+		{
+			name: "explicit_finish",
+			want: "explicit_finish",
+		},
+		{
+			name:   "max_turns",
+			result: agent.SessionResult{MaxTurnsUsed: true},
+			want:   "max_turns_reached",
+		},
+		{
+			name: "empty_response",
+			err:  errors.New("agent session failed: 2 consecutive empty API responses"),
+			want: "empty_response",
+		},
+		{
+			name: "generic_error",
+			err:  errors.New("tool failed"),
+			want: "tool_error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyTerminationReason(tt.result, tt.err); got != tt.want {
+				t.Fatalf("classifyTerminationReason() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeLastToolCalls(t *testing.T) {
+	got := normalizeLastToolCalls(nil)
+	if got == nil {
+		t.Fatal("normalizeLastToolCalls(nil) should return empty slice, not nil")
+	}
+	if len(got) != 0 {
+		t.Fatalf("len(normalizeLastToolCalls(nil)) = %d, want 0", len(got))
+	}
+
+	got = normalizeLastToolCalls([]string{"a", "b", "c", "d"})
+	if len(got) != 3 {
+		t.Fatalf("len(normalizeLastToolCalls(...)) = %d, want 3", len(got))
+	}
+	if got[0] != "b" || got[1] != "c" || got[2] != "d" {
+		t.Fatalf("normalizeLastToolCalls(...) = %#v, want [b c d]", got)
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	got := truncateRunes(strings.Repeat("x", 450), maxFinalMessageRunes)
+	if len([]rune(got)) != maxFinalMessageRunes {
+		t.Fatalf("truncateRunes length = %d, want %d", len([]rune(got)), maxFinalMessageRunes)
 	}
 }

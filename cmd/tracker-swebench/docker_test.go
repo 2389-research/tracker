@@ -167,7 +167,7 @@ func TestPatchLineCount_Empty(t *testing.T) {
 }
 
 func TestParseAgentSummary(t *testing.T) {
-	output := "some log line\nanother line\n{\"turns\":5,\"input_tokens\":1000,\"output_tokens\":200,\"duration_ms\":3500}\n"
+	output := "some log line\nanother line\n{\"turns\":5,\"input_tokens\":1000,\"output_tokens\":200,\"duration_ms\":3500,\"termination_reason\":\"explicit_finish\",\"final_message\":\"done\",\"last_tool_calls\":[\"glob\",\"read\"]}\n"
 	got := parseAgentSummary(output)
 	if got.Turns != 5 {
 		t.Errorf("Turns = %d, want 5", got.Turns)
@@ -181,6 +181,15 @@ func TestParseAgentSummary(t *testing.T) {
 	if got.DurationMs != 3500 {
 		t.Errorf("DurationMs = %d, want 3500", got.DurationMs)
 	}
+	if got.TerminationReason != "explicit_finish" {
+		t.Errorf("TerminationReason = %q, want explicit_finish", got.TerminationReason)
+	}
+	if got.FinalMessage != "done" {
+		t.Errorf("FinalMessage = %q, want done", got.FinalMessage)
+	}
+	if len(got.LastToolCalls) != 2 || got.LastToolCalls[0] != "glob" || got.LastToolCalls[1] != "read" {
+		t.Errorf("LastToolCalls = %#v, want [glob read]", got.LastToolCalls)
+	}
 }
 
 func TestParseAgentSummary_NoJSON(t *testing.T) {
@@ -188,6 +197,17 @@ func TestParseAgentSummary_NoJSON(t *testing.T) {
 	got := parseAgentSummary(output)
 	if got.Turns != 0 || got.InputTokens != 0 || got.OutputTokens != 0 || got.DurationMs != 0 {
 		t.Errorf("expected zero-value AgentSummary for non-JSON output, got %+v", got)
+	}
+}
+
+func TestParseAgentSummary_JSONBeforeLogTail(t *testing.T) {
+	output := "{\"turns\":3,\"termination_reason\":\"tool_error\"}\n2026/04/21 00:00:00 agent session failed: boom"
+	got := parseAgentSummary(output)
+	if got.Turns != 3 {
+		t.Errorf("Turns = %d, want 3", got.Turns)
+	}
+	if got.TerminationReason != "tool_error" {
+		t.Errorf("TerminationReason = %q, want tool_error", got.TerminationReason)
 	}
 }
 

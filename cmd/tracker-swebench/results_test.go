@@ -334,3 +334,80 @@ func TestWriteRunMeta_OmitsEmptyGateway(t *testing.T) {
 		t.Error("expected gateway_url to be omitted when empty")
 	}
 }
+
+func TestWriteEmptyPatchDiagnostic(t *testing.T) {
+	logsDir := t.TempDir()
+	diag := EmptyPatchDiagnostic{
+		InstanceID:        "django__django-11099",
+		Turns:             12,
+		TerminationReason: "max_turns_reached",
+		FinalMessage:      strings.Repeat("x", 420),
+		LastToolCalls:     []string{"search", "glob", "read", "bash"},
+	}
+
+	if err := WriteEmptyPatchDiagnostic(logsDir, diag); err != nil {
+		t.Fatalf("WriteEmptyPatchDiagnostic: %v", err)
+	}
+
+	path := filepath.Join(logsDir, "django__django-11099.empty-patch.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	var got EmptyPatchDiagnostic
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.InstanceID != diag.InstanceID {
+		t.Errorf("InstanceID = %q, want %q", got.InstanceID, diag.InstanceID)
+	}
+	if got.Turns != diag.Turns {
+		t.Errorf("Turns = %d, want %d", got.Turns, diag.Turns)
+	}
+	if got.TerminationReason != diag.TerminationReason {
+		t.Errorf("TerminationReason = %q, want %q", got.TerminationReason, diag.TerminationReason)
+	}
+	if len([]rune(got.FinalMessage)) != 400 {
+		t.Errorf("FinalMessage rune length = %d, want 400", len([]rune(got.FinalMessage)))
+	}
+	if len(got.LastToolCalls) != 3 {
+		t.Fatalf("LastToolCalls length = %d, want 3", len(got.LastToolCalls))
+	}
+	if got.LastToolCalls[0] != "glob" || got.LastToolCalls[1] != "read" || got.LastToolCalls[2] != "bash" {
+		t.Errorf("LastToolCalls = %#v, want [glob read bash]", got.LastToolCalls)
+	}
+}
+
+func TestWriteEmptyPatchDiagnostic_NormalizesNilToolCalls(t *testing.T) {
+	logsDir := t.TempDir()
+	diag := EmptyPatchDiagnostic{
+		InstanceID:        "django__django-11100",
+		Turns:             1,
+		TerminationReason: "explicit_finish",
+		FinalMessage:      "done",
+	}
+
+	if err := WriteEmptyPatchDiagnostic(logsDir, diag); err != nil {
+		t.Fatalf("WriteEmptyPatchDiagnostic: %v", err)
+	}
+
+	path := filepath.Join(logsDir, "django__django-11100.empty-patch.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	var got EmptyPatchDiagnostic
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.LastToolCalls == nil {
+		t.Fatal("LastToolCalls should be encoded as [] not null")
+	}
+	if len(got.LastToolCalls) != 0 {
+		t.Fatalf("LastToolCalls length = %d, want 0", len(got.LastToolCalls))
+	}
+}
