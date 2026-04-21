@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -109,15 +110,72 @@ func (w *ResultsWriter) Close() error {
 
 // RunStats holds counters and timing for a benchmark run.
 type RunStats struct {
-	Total        int
-	Completed    int
-	Skipped      int
-	Errors       int
-	TimedOut     int
-	Patched      int
-	InputTokens  int64
-	OutputTokens int64
-	StartTime    time.Time
+	Total         int
+	Completed     int
+	Skipped       int
+	SetupErrors   int
+	PatchErrors   int
+	HarnessErrors int
+	Errors        int
+	TimedOut      int
+	Patched       int
+	InputTokens   int64
+	OutputTokens  int64
+	StartTime     time.Time
+}
+
+type runErrorClass int
+
+const (
+	runErrorHarness runErrorClass = iota
+	runErrorSetup
+	runErrorPatch
+)
+
+const classifyErrorScanLimit = 8 * 1024
+
+// classifyRunError maps run failures to setup, patch, or harness classes.
+// Nil errors are treated as harness failures as a defensive fallback.
+func classifyRunError(err error) runErrorClass {
+	if err == nil {
+		// Defensive default: call sites should only classify non-nil errors.
+		return runErrorHarness
+	}
+
+	msg := err.Error()
+	if len(msg) > classifyErrorScanLimit {
+		msg = msg[:classifyErrorScanLimit]
+	}
+	msgFold := strings.ToLower(msg)
+
+	if strings.Contains(msgFold, "git apply") ||
+		strings.Contains(msgFold, "patch does not apply") ||
+		strings.Contains(msgFold, "corrupt patch") ||
+		strings.Contains(msgFold, "malformed patch") {
+		return runErrorPatch
+	}
+
+	if strings.Contains(msgFold, "clone repo:") ||
+		strings.Contains(msgFold, "checkout commit:") ||
+		strings.Contains(msgFold, "pip install") ||
+		(strings.Contains(msgFold, "exit status 128") &&
+			(strings.Contains(msgFold, "git") || strings.Contains(msgFold, "fatal:"))) {
+		return runErrorSetup
+	}
+
+	return runErrorHarness
+}
+
+func (s *RunStats) addError(class runErrorClass) {
+	s.Errors++
+	switch class {
+	case runErrorSetup:
+		s.SetupErrors++
+	case runErrorPatch:
+		s.PatchErrors++
+	default:
+		s.HarnessErrors++
+	}
 }
 
 // Summary returns a human-readable summary of the run.
@@ -136,7 +194,7 @@ func (s *RunStats) Summary() string {
 	inM := float64(s.InputTokens) / 1e6
 	outM := float64(s.OutputTokens) / 1e6
 
-	return fmt.Sprintf(
+	summary := fmt.Sprintf(
 		"Run complete — elapsed: %s\n"+
 			"  Total:     %d\n"+
 			"  Completed: %d (%.1f%%)\n"+
@@ -154,6 +212,18 @@ func (s *RunStats) Summary() string {
 		s.Patched, patchPct,
 		inM, outM,
 	)
+
+	if s.SetupErrors > 0 {
+		summary += fmt.Sprintf("\n  Setup errors:   %d", s.SetupErrors)
+	}
+	if s.PatchErrors > 0 {
+		summary += fmt.Sprintf("\n  Patch errors:   %d", s.PatchErrors)
+	}
+	if s.HarnessErrors > 0 {
+		summary += fmt.Sprintf("\n  Harness errors: %d", s.HarnessErrors)
+	}
+
+	return summary
 }
 
 // RunMeta holds metadata about the benchmark run written to a JSON file at the start.
