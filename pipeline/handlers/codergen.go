@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
@@ -210,9 +209,6 @@ func (h *CodergenHandler) ensureACPBackend() (pipeline.AgentBackend, error) {
 // and placed in Extra instead.
 func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend) (pipeline.AgentRunConfig, error) {
 	sessionCfg := h.buildConfig(node)
-	if wd, ok := node.Attrs["working_dir"]; ok && wd != "" {
-		sessionCfg.WorkingDir = wd
-	}
 
 	cfg := pipeline.AgentRunConfig{
 		Prompt:       prompt,
@@ -545,7 +541,9 @@ func buildTurnLimitMsg(node *pipeline.Node, sessResult agent.SessionResult) stri
 }
 
 // buildConfig constructs a SessionConfig from the node's attributes, using
-// sensible defaults for any unspecified values.
+// sensible defaults for any unspecified values. Reads go through the typed
+// AgentNodeConfig accessor so the graph-default-then-node-override dance is
+// centralized and each field is parsed exactly once.
 func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	config := agent.DefaultConfig()
 
@@ -553,175 +551,79 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		config.WorkingDir = h.workingDir
 	}
 
-	h.applyModelProvider(&config, node)
-	h.applySessionLimits(&config, node)
-	h.applyReasoningEffort(&config, node)
-	h.applyResponseFormat(&config, node)
-	h.applyCacheAndCompaction(&config, node)
-	h.applyReflectOnError(&config, node)
-	h.applyVerifyConfig(&config, node)
-	h.applyPlanningConfig(&config, node)
+	cfg := node.AgentConfig(h.graphAttrs)
+
+	if cfg.WorkingDir != "" {
+		config.WorkingDir = cfg.WorkingDir
+	}
+
+	if cfg.Model != "" {
+		config.Model = cfg.Model
+	}
+	if cfg.Provider != "" {
+		config.Provider = cfg.Provider
+	}
+	if cfg.SystemPrompt != "" {
+		config.SystemPrompt = cfg.SystemPrompt
+	}
+	if cfg.MaxTurns > 0 {
+		config.MaxTurns = cfg.MaxTurns
+	}
+	if cfg.CommandTimeout > 0 {
+		config.CommandTimeout = cfg.CommandTimeout
+	}
+	if cfg.ReasoningEffort != "" {
+		config.ReasoningEffort = cfg.ReasoningEffort
+	}
+	if cfg.ResponseFormat != "" {
+		config.ResponseFormat = cfg.ResponseFormat
+	}
+	if cfg.ResponseSchema != "" {
+		config.ResponseSchema = cfg.ResponseSchema
+	}
+	if cfg.CacheToolResultsSet {
+		config.CacheToolResults = cfg.CacheToolResults
+	}
+	applyTypedCompaction(&config, cfg)
+	if cfg.ReflectOnErrorSet && !cfg.ReflectOnError {
+		config.ReflectOnError = false
+	}
+	if cfg.VerifyAfterEditSet {
+		config.VerifyAfterEdit = cfg.VerifyAfterEdit
+	}
+	if cfg.VerifyCommand != "" {
+		config.VerifyCommand = cfg.VerifyCommand
+	}
+	if cfg.MaxVerifyRetries > 0 {
+		config.MaxVerifyRetries = cfg.MaxVerifyRetries
+	}
+	if cfg.PlanBeforeExecuteSet {
+		config.PlanBeforeExecute = cfg.PlanBeforeExecute
+	}
 
 	return config
 }
 
-// applyReflectOnError disables reflection on tool errors when the node explicitly
-// opts out via reflect_on_error="false".  The default (true) means no attribute is
-// required in existing pipelines to get the improvement.
-func (h *CodergenHandler) applyReflectOnError(config *agent.SessionConfig, node *pipeline.Node) {
-	if v := node.Attrs["reflect_on_error"]; v == "false" {
-		config.ReflectOnError = false
+// applyTypedCompaction applies the context-compaction mode + threshold from
+// the typed AgentNodeConfig. The semantics preserve the previous permissive
+// behavior: "auto" enables compaction with a 0.6 default threshold, any other
+// non-empty value disables it, and an explicit threshold override wins.
+func applyTypedCompaction(config *agent.SessionConfig, cfg pipeline.AgentNodeConfig) {
+	if !cfg.ContextCompactionSet {
+		return
 	}
-}
-
-// applyVerifyConfig sets VerifyAfterEdit, VerifyCommand, and MaxVerifyRetries
-// from graph-level defaults and node-level overrides. All three attributes are
-// supported at both graph and node level; node-level takes precedence.
-func (h *CodergenHandler) applyVerifyConfig(config *agent.SessionConfig, node *pipeline.Node) {
-	// Graph-level defaults (apply to all nodes unless overridden).
-	if v, ok := h.graphAttrs["verify_after_edit"]; ok {
-		config.VerifyAfterEdit = v == "true"
-	}
-	if v, ok := h.graphAttrs["verify_command"]; ok && v != "" {
-		config.VerifyCommand = v
-	}
-	if v, ok := h.graphAttrs["max_verify_retries"]; ok && v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			config.MaxVerifyRetries = n
-		}
-	}
-
-	// Node-level overrides take precedence over graph-level defaults.
-	if v, ok := node.Attrs["verify_after_edit"]; ok {
-		config.VerifyAfterEdit = v == "true"
-	}
-	if v, ok := node.Attrs["verify_command"]; ok && v != "" {
-		config.VerifyCommand = v
-	}
-	if v, ok := node.Attrs["max_verify_retries"]; ok && v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			config.MaxVerifyRetries = n
-		}
-	}
-}
-
-// applyPlanningConfig enables the pre-execution planning phase from graph defaults
-// and node-level overrides. Node-level "plan" is accepted as a shorthand alias
-// only when explicit "plan_before_execute" is not present.
-func (h *CodergenHandler) applyPlanningConfig(config *agent.SessionConfig, node *pipeline.Node) {
-	if v, ok := h.graphAttrs["plan_before_execute"]; ok {
-		config.PlanBeforeExecute = v == "true"
-	}
-	if v, ok := node.Attrs["plan_before_execute"]; ok {
-		config.PlanBeforeExecute = v == "true"
-	} else if v, ok := node.Attrs["plan"]; ok {
-		config.PlanBeforeExecute = v == "true"
-	}
-}
-
-// applyModelProvider sets model and provider from graph-level defaults and node-level overrides.
-func (h *CodergenHandler) applyModelProvider(config *agent.SessionConfig, node *pipeline.Node) {
-	if model, ok := h.graphAttrs["llm_model"]; ok {
-		config.Model = model
-	}
-	if model, ok := node.Attrs["llm_model"]; ok {
-		config.Model = model
-	}
-	if provider, ok := h.graphAttrs["llm_provider"]; ok {
-		config.Provider = provider
-	}
-	if provider, ok := node.Attrs["llm_provider"]; ok {
-		config.Provider = provider
-	}
-}
-
-// applySessionLimits sets system prompt, max turns, and command timeout.
-func (h *CodergenHandler) applySessionLimits(config *agent.SessionConfig, node *pipeline.Node) {
-	if sp := node.Attrs["system_prompt"]; sp != "" {
-		config.SystemPrompt = sp
-	}
-	if mt := node.Attrs["max_turns"]; mt != "" {
-		applyMaxTurns(config, mt)
-	}
-	if ct := node.Attrs["command_timeout"]; ct != "" {
-		applyCommandTimeout(config, ct)
-	}
-}
-
-func applyMaxTurns(config *agent.SessionConfig, raw string) {
-	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-		config.MaxTurns = v
-	}
-}
-
-func applyCommandTimeout(config *agent.SessionConfig, raw string) {
-	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-		config.CommandTimeout = d
-	}
-}
-
-// applyReasoningEffort sets reasoning effort from graph and node attrs.
-func (h *CodergenHandler) applyReasoningEffort(config *agent.SessionConfig, node *pipeline.Node) {
-	if re, ok := h.graphAttrs["reasoning_effort"]; ok && re != "" {
-		config.ReasoningEffort = re
-	}
-	if re, ok := node.Attrs["reasoning_effort"]; ok && re != "" {
-		config.ReasoningEffort = re
-	}
-}
-
-// applyResponseFormat sets structured output format from node attrs.
-// Supported values: "json_object" (any valid JSON) or "json_schema" (with response_schema).
-func (h *CodergenHandler) applyResponseFormat(config *agent.SessionConfig, node *pipeline.Node) {
-	if rf, ok := node.Attrs["response_format"]; ok && rf != "" {
-		config.ResponseFormat = rf
-	}
-	if schema, ok := node.Attrs["response_schema"]; ok && schema != "" {
-		config.ResponseSchema = schema
-	}
-}
-
-// applyCacheAndCompaction configures tool result caching and context compaction.
-func (h *CodergenHandler) applyCacheAndCompaction(config *agent.SessionConfig, node *pipeline.Node) {
-	h.applyCacheConfig(config, node)
-	h.applyCompactionConfig(config, node)
-}
-
-// applyCacheConfig sets CacheToolResults from graph and node attrs.
-func (h *CodergenHandler) applyCacheConfig(config *agent.SessionConfig, node *pipeline.Node) {
-	if v, ok := h.graphAttrs["cache_tool_results"]; ok && v == "true" {
-		config.CacheToolResults = true
-	}
-	if v, ok := node.Attrs["cache_tool_results"]; ok {
-		config.CacheToolResults = (v == "true")
-	}
-}
-
-// applyCompactionConfig sets ContextCompaction and CompactionThreshold from graph and node attrs.
-func (h *CodergenHandler) applyCompactionConfig(config *agent.SessionConfig, node *pipeline.Node) {
-	if v, ok := h.graphAttrs["context_compaction"]; ok && v == "auto" {
+	if cfg.ContextCompaction == "auto" {
 		config.ContextCompaction = agent.CompactionAuto
-		config.CompactionThreshold = 0.6
-	}
-	if v, ok := node.Attrs["context_compaction"]; ok {
-		applyNodeCompaction(config, v)
-	}
-	if v, ok := node.Attrs["context_compaction_threshold"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			config.CompactionThreshold = f
-		}
-	}
-}
-
-// applyNodeCompaction sets compaction mode from a node-level attribute value.
-func applyNodeCompaction(config *agent.SessionConfig, v string) {
-	if v == "auto" {
-		config.ContextCompaction = agent.CompactionAuto
-		if config.CompactionThreshold == 0 {
+		if cfg.CompactionThreshold > 0 {
+			config.CompactionThreshold = cfg.CompactionThreshold
+		} else if config.CompactionThreshold == 0 {
 			config.CompactionThreshold = 0.6
 		}
 	} else {
 		config.ContextCompaction = agent.CompactionNone
+		if cfg.CompactionThreshold > 0 {
+			config.CompactionThreshold = cfg.CompactionThreshold
+		}
 	}
 }
 
