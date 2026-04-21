@@ -9,17 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tracker.SimulateGraph(ctx, graph)`** — graph-in variant of `Simulate` that accepts a pre-parsed `*pipeline.Graph` and returns a `SimulateReport`. Lets callers that already parsed the pipeline (CLI flows that also run `ValidateSource`, tooling that builds a graph programmatically) avoid a second parse. `Simulate(ctx, source)` is now a thin wrapper over `parsePipelineSource` + `SimulateGraph`; signature and behavior unchanged.
 - **Repository localization pre-processing** (agent): optional pre-processing phase that scans the working directory for files relevant to the task prompt and injects a structured context block before the first LLM turn. Pure text analysis + filesystem scan — zero LLM calls. Opt-in via `SessionConfig.Localize` (default `false`). Extracts file paths, camelCase/snake_case identifiers, quoted phrases, and error-line excerpts from the prompt; capped at 10 files / ~2KB injected context with 5-line snippets. Reduces wasted turns on `glob`/`grep` for repository-level tasks.
 
 ### Fixed
 
+- **`tracker simulate` now parses the pipeline source exactly once** (closes #108). Previously `runSimulateCmd` parsed twice — once for the validation-warnings section, again inside `tracker.Simulate`. That risked a TOCTOU mismatch between the two views, duplicated dippin-lang parser side effects (lint warnings printed twice), and burned extra CPU on large `.dip` files. The CLI now reads the source once, calls `tracker.ValidateSource` for `{Graph, Errors, Warnings}`, and hands the same graph to `tracker.SimulateGraph`. CLI stdout is byte-identical to before; only the duplicated parser-logging lines are gone.
 - Cost accounting and reporting are now consistent across runtime and CLI summaries:
-- CLI run summaries now read token/cost totals from `EngineResult.Usage` (trace aggregate) instead of `TokenTracker.TotalUsage().EstimatedCost`, so cost is shown correctly.
-- Repair turns now apply the same `EstimateCost` compensation path used by normal turns when providers omit `EstimatedCost`.
-- OpenAI SSE `response.completed` now preserves `ReasoningTokens` in finish usage events.
-- Gemini adapter now falls back to the requested model when `modelVersion` is absent in API responses.
-- Trace usage aggregation now attributes missing providers to `unknown` instead of dropping those sessions from per-provider totals.
-- External backend usage tracking now records sessions with non-zero input/output tokens even when `TotalTokens` is zero.
+  -  CLI run summaries now read token/cost totals from `EngineResult.Usage` (trace aggregate) instead of `TokenTracker.TotalUsage().EstimatedCost`, so cost is shown correctly.
+  - Repair turns now apply the same `EstimateCost` compensation path used by normal turns when providers omit `EstimatedCost`.
+  - OpenAI SSE `response.completed` now preserves `ReasoningTokens` in finish usage events.
+  - Gemini adapter now falls back to the requested model when `modelVersion` is absent in API responses.
+  - Trace usage aggregation now attributes missing providers to `unknown` instead of dropping those sessions from per-provider totals.
+  - External backend usage tracking now records sessions with non-zero input/output tokens even when `TotalTokens` is zero.
 
 ## [0.20.0] - 2026-04-21
 

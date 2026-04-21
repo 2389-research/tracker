@@ -11,62 +11,108 @@ import (
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
-	"github.com/2389-research/tracker/pipeline"
 )
 
 // runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
-// Auto-detects format based on file extension unless formatOverride is set.
+// Format is resolved in this order: explicit formatOverride wins; otherwise,
+// for on-disk files we use the file extension (.dip or .dot via
+// detectPipelineFormat, which defaults to .dip for unknown extensions); for
+// embedded workflows we pin to .dip. The library-internal content-sniff
+// fallback is never reached here — we always pass a concrete format to
+// ValidateSource.
+//
+// The source is read and parsed exactly once — ValidateSource returns the
+// parsed graph alongside any structural errors and lint warnings, and
+// SimulateGraph consumes that same graph for the structured report. No
+// second os.ReadFile, no duplicated dippin-lang parser side effects, no
+// TOCTOU window between validation and simulation.
 func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
 		return err
 	}
 
-	// Keep the existing graph-level parsing for validation warnings
-	// (library Simulate doesn't currently surface validation warnings).
-	var graph *pipeline.Graph
-	if isEmbedded {
-		graph, err = loadEmbeddedPipeline(info)
-		pipelineFile = info.Name
-	} else {
-		graph, err = loadPipeline(resolved, formatOverride)
-		pipelineFile = resolved
-	}
+	source, displayName, err := readPipelineSource(resolved, isEmbedded, info)
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}
 
-	if validationErr := pipeline.ValidateAll(graph); validationErr != nil && len(validationErr.Errors) > 0 {
+	// Format resolution:
+	//   • explicit --format flag wins for on-disk files
+	//   • embedded workflows are always .dip; an override targeting a
+	//     non-.dip format would be nonsense against the baked-in DIP
+	//     assets, so we ignore it and pin to "dip"
+	//   • otherwise derive from the file extension (detectPipelineFormat
+	//     never returns empty — defaults to "dip" for unknowns)
+	// format is always concrete before we reach ValidateSource, so the
+	// library's content-sniff fallback is never exercised from here.
+	//
+	// The DOT deprecation warning is emitted by the library's parseDOTSource
+	// (via log.Println) when format == "dot"; we deliberately don't emit
+	// a second warning from the CLI to avoid duplicate stderr lines.
+	var format string
+	switch {
+	case isEmbedded:
+		format = "dip"
+	case formatOverride != "":
+		format = formatOverride
+	default:
+		format = detectPipelineFormat(resolved)
+	}
+
+	opts := []tracker.ValidateOption{tracker.WithValidateFormat(format)}
+	result, validateErr := tracker.ValidateSource(source, opts...)
+	if validateErr != nil && (result == nil || result.Graph == nil) {
+		// Unrecoverable parse or structural error — no graph to simulate.
+		return fmt.Errorf("load pipeline: %w", validateErr)
+	}
+
+	// ValidationResult.Errors carries structural problems (unreachable nodes,
+	// bad references, etc.); Warnings carries lint-style advisory items.
+	// The old CLI printed only Errors under a "Validation Warnings" heading
+	// — confusing. We now split them into explicit sections and continue to
+	// simulate either way (matching prior continue-on-errors behavior so
+	// users can still see the plan of a draft pipeline).
+	if len(result.Errors) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "=== Validation Warnings ===")
-		for _, e := range validationErr.Errors {
+		fmt.Fprintln(w, "=== Validation Errors ===")
+		for _, e := range result.Errors {
 			fmt.Fprintf(w, "  ! %s\n", e)
 		}
 	}
-
-	// Re-parse via library for the structured report.
-	var source string
-	if isEmbedded {
-		data, _, oerr := tracker.OpenWorkflow(info.Name)
-		if oerr != nil {
-			return fmt.Errorf("open embedded workflow: %w", oerr)
+	if len(result.Warnings) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "=== Validation Warnings ===")
+		for _, msg := range result.Warnings {
+			fmt.Fprintf(w, "  ~ %s\n", msg)
 		}
-		source = string(data)
-	} else {
-		data, rerr := os.ReadFile(resolved)
-		if rerr != nil {
-			return fmt.Errorf("read pipeline file: %w", rerr)
-		}
-		source = string(data)
 	}
 
-	report, err := tracker.Simulate(context.Background(), source)
+	report, err := tracker.SimulateGraph(context.Background(), result.Graph)
 	if err != nil {
 		return err
 	}
 
-	printSimReport(w, report, pipelineFile)
+	printSimReport(w, report, displayName)
 	return nil
+}
+
+// readPipelineSource returns the raw pipeline source as a string together
+// with a display name for the header. Embedded workflows are opened via
+// tracker.OpenWorkflow; files are read once from disk.
+func readPipelineSource(resolved string, isEmbedded bool, info WorkflowInfo) (source, displayName string, err error) {
+	if isEmbedded {
+		data, _, oerr := tracker.OpenWorkflow(info.Name)
+		if oerr != nil {
+			return "", "", fmt.Errorf("open embedded workflow: %w", oerr)
+		}
+		return string(data), info.Name, nil
+	}
+	data, rerr := os.ReadFile(resolved)
+	if rerr != nil {
+		return "", "", fmt.Errorf("read pipeline file: %w", rerr)
+	}
+	return string(data), resolved, nil
 }
 
 // printSimReport is the top-level entry point for printing a SimulateReport.

@@ -69,8 +69,41 @@ func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse pipeline: %w", err)
 	}
+	report := simulateFromGraph(graph)
+	report.Format = format
+	return report, nil
+}
+
+// SimulateGraph returns a SimulateReport for a pre-parsed graph. It is the
+// graph-in variant of Simulate: callers that already parsed (e.g. the CLI's
+// validate + simulate flow, or tooling that built a graph programmatically)
+// avoid a second parse. Unlike Simulate, Format is left empty — there is no
+// source string to inspect; the caller can set it if desired.
+//
+// ctx is honored at entry; nil is coalesced to context.Background(). The
+// graph is consumed synchronously. For graphs built via the library's
+// parsers or Graph.AddEdge, the BFS plan is O(nodes+edges); graphs that
+// populate Graph.Edges directly without AddEdge leave the adjacency index
+// unbuilt, and OutgoingEdges then scans all edges per lookup — callers
+// that construct graphs by hand should prefer AddEdge to keep that bound.
+func SimulateGraph(ctx context.Context, graph *pipeline.Graph) (*SimulateReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if graph == nil {
+		return nil, fmt.Errorf("SimulateGraph: graph is nil")
+	}
+	return simulateFromGraph(graph), nil
+}
+
+// simulateFromGraph is the shared internal implementation used by both
+// Simulate and SimulateGraph. Callers must pre-check ctx for cancellation;
+// this helper doesn't re-check since the work is bounded and cheap.
+func simulateFromGraph(graph *pipeline.Graph) *SimulateReport {
 	r := &SimulateReport{
-		Format:    format,
 		Name:      graph.Name,
 		StartNode: graph.StartNode,
 		ExitNode:  graph.ExitNode,
@@ -79,7 +112,7 @@ func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
 	r.Nodes = collectSimNodes(graph)
 	r.Edges = collectSimEdges(graph)
 	r.ExecutionPlan, r.Unreachable = buildExecutionPlan(graph)
-	return r, nil
+	return r
 }
 
 func collectSimNodes(graph *pipeline.Graph) []SimNode {
