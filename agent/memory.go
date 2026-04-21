@@ -59,6 +59,9 @@ func (l EpisodeLog) Summary() string {
 			b.WriteByte('\n')
 		}
 	}
+	if b.Len() <= maxEpisodeLogSummaryRunes {
+		return b.String()
+	}
 	return truncateRunes(b.String(), maxEpisodeLogSummaryRunes)
 }
 
@@ -134,9 +137,6 @@ func normalizeEpisodeSummaries(in []string) []string {
 		totalRunes -= runeLens[0]
 		out = out[1:]
 		runeLens = runeLens[1:]
-	}
-	if len(out) == 1 && totalRunes > maxEpisodeSummaryTotalRunes {
-		out[0] = truncateRunes(out[0], maxEpisodeSummaryTotalRunes)
 	}
 	return out
 }
