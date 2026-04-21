@@ -86,7 +86,7 @@ Reading `${ctx.node.<BranchID>.last_response}` after a parallel block will NOT a
 
 ## Returning custom data from a node
 
-Use declarative `writes:` on any node kind (`agent`, `tool`, `human`) to map structured output into first-class context keys.
+Use declarative `writes:` to map structured output into first-class context keys. This works on `agent` and `tool` nodes, and on `human` nodes when `mode: interview`.
 
 ```dip
 agent Planner
@@ -112,6 +112,7 @@ Runtime contract:
 - Backward-compatible built-ins (`last_response`, `tool_stdout`, `interview_answers`, etc.) are still written.
 
 For human interview mode, `writes:` extraction uses the collected interview answers object (question IDs and normalized question-text keys mapped to answers).
+For other human modes (`freeform`, `choice`, `yes_no`), `writes:` extraction is not applied automatically; rely on built-in human response keys unless handler behavior is extended.
 
 ## Fidelity levels
 

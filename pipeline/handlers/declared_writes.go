@@ -10,6 +10,7 @@ import (
 const (
 	contextKeyWritesError   = "writes_error"
 	contextKeyWritesWarning = "writes_warning"
+	maxWritesErrorRawLen    = 512
 )
 
 func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, rawJSON string, source string) (failed bool) {
@@ -37,12 +38,16 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 }
 
 func formatWritesError(nodeID string, writes []string, source string, parseErr error, raw string) string {
+	rawPreview := raw
+	if len(rawPreview) > maxWritesErrorRawLen {
+		rawPreview = fmt.Sprintf("%s… (truncated, %d bytes total)", rawPreview[:maxWritesErrorRawLen], len(raw))
+	}
 	return fmt.Sprintf(
 		"node %q declared writes: [%s]\n%s is not compatible with writes extraction: %v\nRaw output: %s",
 		nodeID,
 		strings.Join(writes, ", "),
 		source,
 		parseErr,
-		raw,
+		rawPreview,
 	)
 }
