@@ -47,3 +47,19 @@ func TestExtractDeclaredWritesInvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid json")
 	}
 }
+
+func TestExtractDeclaredWritesCompactsNonStringValues(t *testing.T) {
+	updates, _, err := ExtractDeclaredWrites(
+		[]string{"files", "meta"},
+		`{ "files": [ "a.go" , "b.go" ], "meta": { "x" : 1 } }`,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := updates["files"]; got != `["a.go","b.go"]` {
+		t.Fatalf("files = %q, want compact json array", got)
+	}
+	if got := updates["meta"]; got != `{"x":1}` {
+		t.Fatalf("meta = %q, want compact json object", got)
+	}
+}

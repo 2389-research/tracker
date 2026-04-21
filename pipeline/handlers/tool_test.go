@@ -127,14 +127,14 @@ func TestToolHandlerFailure(t *testing.T) {
 
 func TestToolHandlerDeclaredWritesExtracted(t *testing.T) {
 	env := toolTestEnv(t, map[string]exec.CommandResult{
-		"echo '{\"commit_sha\":\"abc\",\"branch\":\"main\"}'": {Stdout: "{\"commit_sha\":\"abc\",\"branch\":\"main\"}\n", ExitCode: 0},
+		`printf '%s\n' '{"commit_sha":"abc","branch":"main"}'`: {Stdout: "{\"commit_sha\":\"abc\",\"branch\":\"main\"}\n", ExitCode: 0},
 	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "extract",
 		Shape: "parallelogram",
 		Attrs: map[string]string{
-			"tool_command": "echo '{\"commit_sha\":\"abc\",\"branch\":\"main\"}'",
+			"tool_command": `printf '%s\n' '{"commit_sha":"abc","branch":"main"}'`,
 			"writes":       "commit_sha,branch",
 		},
 	}
