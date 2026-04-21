@@ -26,15 +26,20 @@ type AuditConfig struct {
 // AuditReport is the structured result of Audit().
 type AuditReport struct {
 	RunID           string          `json:"run_id"`
+	// Status is one of: "success", "fail", "in_progress".
 	Status          string          `json:"status"`
+	// TotalDuration is encoded as integer nanoseconds in JSON
+	// ("total_duration_ns"), not as a duration string.
 	TotalDuration   time.Duration   `json:"total_duration_ns"`
 	Timeline        []TimelineEntry `json:"timeline"`
 	Retries         []RetryRecord   `json:"retries,omitempty"`
 	Errors          []ActivityError `json:"errors,omitempty"`
 	Recommendations []string        `json:"recommendations,omitempty"`
-	// Header fields used by the CLI printer.
+	// CompletedNodes is the number of completed nodes recorded in checkpoint.json.
 	CompletedNodes      int       `json:"completed_nodes"`
+	// RestartCount is the checkpoint restart counter for the run.
 	RestartCount        int       `json:"restart_count"`
+	// CheckpointTimestamp is the last checkpoint write time.
 	CheckpointTimestamp time.Time `json:"checkpoint_timestamp"`
 }
 
@@ -44,6 +49,8 @@ type TimelineEntry struct {
 	Type      string        `json:"type"`
 	NodeID    string        `json:"node_id,omitempty"`
 	Message   string        `json:"message,omitempty"`
+	// Duration is encoded as integer nanoseconds in JSON ("duration_ns"),
+	// not as a duration string.
 	Duration  time.Duration `json:"duration_ns,omitempty"`
 }
 
@@ -63,11 +70,14 @@ type ActivityError struct {
 // RunSummary is a condensed view of a single pipeline run for listing.
 type RunSummary struct {
 	RunID     string        `json:"run_id"`
+	// Status is one of: "success", "fail", "in_progress".
 	Status    string        `json:"status"`
 	Nodes     int           `json:"nodes"`
 	Retries   int           `json:"retries"`
 	Restarts  int           `json:"restarts"`
 	Timestamp time.Time     `json:"timestamp"`
+	// Duration is encoded as integer nanoseconds in JSON ("duration_ns"),
+	// not as a duration string.
 	Duration  time.Duration `json:"duration_ns"`
 	FailedAt  string        `json:"failed_at,omitempty"`
 }
@@ -126,6 +136,7 @@ func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
 }
 
 // ListRuns returns all runs under workdir/.tracker/runs, sorted newest first.
+// If the runs directory does not exist, ListRuns returns (nil, nil).
 func ListRuns(workdir string, opts ...AuditConfig) ([]RunSummary, error) {
 	cfg := firstAuditConfig(opts)
 	logW := logWriterOrDiscard(cfg.LogWriter)
