@@ -103,7 +103,7 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 
 		provider := strings.TrimSpace(e.Stats.Provider)
 		if provider == "" {
-			continue
+			provider = unknownProvider
 		}
 		pt := s.ProviderTotals[provider]
 		pt.InputTokens += e.Stats.InputTokens
