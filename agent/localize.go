@@ -27,8 +27,10 @@ const (
 	// scannerInitialBuf is the starting size of the line scanner buffer — large
 	// enough to hold any reasonable source line without growing on typical input.
 	scannerInitialBuf = 64 * 1024
-	// scannerMaxLineBytes is the hard upper bound per line; longer lines are
-	// truncated by bufio.Scanner. Matches the grep tool's per-line ceiling.
+	// scannerMaxLineBytes is the hard upper bound per line; if a line exceeds
+	// this limit, bufio.Scanner stops and scanner.Err() becomes bufio.ErrTooLong.
+	// Snippet extraction tolerates this by returning whatever lines were read
+	// successfully (the first-N-lines fallback still produces a useful signal).
 	scannerMaxLineBytes = 1024 * 1024
 )
 
@@ -56,7 +58,8 @@ var camelCaseRE = regexp.MustCompile(`\b(?:[a-zA-Z][a-zA-Z0-9]*[a-z][A-Z][a-zA-Z
 // snake_case identifiers with at least one underscore (e.g. foo_bar, handle_request).
 var snakeCaseRE = regexp.MustCompile(`\b[a-z][a-z0-9]+(?:_[a-z0-9]+)+\b`)
 
-// Quoted phrases ("...", '...', `...`). Captured group 1 is the phrase text.
+// Quoted phrases ("...", '...', `...`). The phrase text is captured in
+// group 1, 2, or 3 depending on which quote style matched.
 var quotedPhraseRE = regexp.MustCompile("\"([^\"\\n]{3,80})\"|'([^'\\n]{3,80})'|`([^`\\n]{3,80})`")
 
 // Error-style lines: "Error: ...", "error: ...", "FAIL: ...", "panic: ...".
@@ -284,18 +287,18 @@ func scanFiles(ctx context.Context, root string) []string {
 // skipped to reduce accidental leakage of credential files (.env, .netrc,
 // .npmrc, .aws/credentials, etc.).
 var safeDotfiles = map[string]bool{
-	".editorconfig":     true,
-	".gitignore":        true,
-	".gitattributes":    true,
-	".dockerignore":     true,
-	".prettierrc":       true,
-	".eslintrc":         true,
-	".eslintignore":     true,
-	".stylelintrc":      true,
-	".clang-format":     true,
-	".rubocop.yml":      true,
-	".golangci.yml":     true,
-	".golangci.yaml":    true,
+	".editorconfig":          true,
+	".gitignore":             true,
+	".gitattributes":         true,
+	".dockerignore":          true,
+	".prettierrc":            true,
+	".eslintrc":              true,
+	".eslintignore":          true,
+	".stylelintrc":           true,
+	".clang-format":          true,
+	".rubocop.yml":           true,
+	".golangci.yml":          true,
+	".golangci.yaml":         true,
 	".pre-commit-hooks.yaml": true,
 }
 
@@ -346,10 +349,11 @@ func looksLikeTextFile(rel string) bool {
 // Path mentions are heavily weighted; content matches are weighted lower.
 //
 // To bound I/O on large repos, content is only scanned for files that either
-// (a) already have a path-score signal, or (b) fall within the first
-// localizeMaxContentScans files encountered when no path refs were extracted.
-// This keeps latency predictable even when the prompt has only identifier
-// or phrase references.
+// (a) already have a path-score signal (always worthwhile), or (b) fall within
+// the first localizeMaxContentScans files encountered without a path-score
+// signal. The fallback budget applies whether or not path refs were extracted,
+// so related files that don't match any mentioned path can still be surfaced
+// when the prompt also contains identifier or phrase references.
 func scoreFiles(ctx context.Context, root string, files []string, refs extractedRefs) []candidate {
 	// Normalize path refs: for each, keep the basename and the full form.
 	pathTerms := make([]string, 0, len(refs.Paths)*2)
@@ -360,11 +364,10 @@ func scoreFiles(ctx context.Context, root string, files []string, refs extracted
 		}
 	}
 
-	havePathRefs := len(pathTerms) > 0
 	needsContent := len(refs.Identifiers) > 0 || len(refs.Phrases) > 0
 
 	var results []candidate
-	contentScansDone := 0
+	fallbackScansDone := 0
 	for _, rel := range files {
 		if ctx.Err() != nil {
 			return results
@@ -380,12 +383,15 @@ func scoreFiles(ctx context.Context, root string, files []string, refs extracted
 		}
 		// Content scanning is expensive (reads the full file). Limit it to:
 		//  - files already flagged by path match (always worthwhile), or
-		//  - the first N files when no path refs were present (bounded cost).
+		//  - the first localizeMaxContentScans non-path-match files
+		//    (bounded cost), regardless of whether path refs were extracted.
 		hasPathMatch := score > 0
-		fallbackScanAllowed := !havePathRefs && contentScansDone < localizeMaxContentScans
+		fallbackScanAllowed := !hasPathMatch && fallbackScansDone < localizeMaxContentScans
 		shouldScan := needsContent && (hasPathMatch || fallbackScanAllowed)
 		if shouldScan {
-			contentScansDone++
+			if !hasPathMatch {
+				fallbackScansDone++
+			}
 			contentScore := scoreFileContent(filepath.Join(root, rel), refs)
 			score += contentScore
 		}
@@ -397,8 +403,8 @@ func scoreFiles(ctx context.Context, root string, files []string, refs extracted
 }
 
 // scoreFileContent reads the file and returns a score based on identifier/phrase matches.
-// Each unique identifier match contributes up to 3 points (diminishing returns beyond 1 hit).
-// Each phrase match contributes 5 points.
+// Each identifier contributes 3 points at most once per file if it appears anywhere in the content.
+// Each phrase contributes 5 points at most once per file if it appears anywhere in the content.
 func scoreFileContent(abs string, refs extractedRefs) int {
 	data, err := os.ReadFile(abs)
 	if err != nil {
