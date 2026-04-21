@@ -44,10 +44,10 @@ func TestAgentConfig_NodeAttrsWinOverGraph(t *testing.T) {
 
 func TestAgentConfig_ReflectOnErrorThreeState(t *testing.T) {
 	cases := []struct {
-		name          string
-		attrVal       string
-		wantValue     bool
-		wantSet       bool
+		name      string
+		attrVal   string
+		wantValue bool
+		wantSet   bool
 	}{
 		{"unset", "", false, false},
 		{"explicit false", "false", false, true},
@@ -239,5 +239,36 @@ func TestRetryConfig_InvalidMaxRetriesLeavesUnset(t *testing.T) {
 	rc := n.RetryConfig(nil)
 	if rc.MaxRetriesSet {
 		t.Errorf("unparseable max_retries should leave MaxRetriesSet=false; got true")
+	}
+}
+
+// Regression: when node max_retries is present but unparseable, fall through
+// to graph default rather than dropping the whole field. Matches the
+// pre-refactor cascade behavior of Engine.maxRetries. (Codex P2 on PR #148.)
+func TestRetryConfig_UnparseableNodeMaxRetriesCascadesToGraph(t *testing.T) {
+	graph := map[string]string{"default_max_retry": "7"}
+	n := &Node{Attrs: map[string]string{"max_retries": "not-a-number"}}
+	rc := n.RetryConfig(graph)
+	if !rc.MaxRetriesSet || rc.MaxRetries != 7 {
+		t.Errorf("bad node value should cascade to graph default 7; got value=%d set=%v",
+			rc.MaxRetries, rc.MaxRetriesSet)
+	}
+}
+
+// Regression: BaseDelay honors default_base_delay at graph level for contract
+// consistency with PolicyName and MaxRetries. (CodeRabbit major on PR #148.)
+func TestRetryConfig_BaseDelayGraphFallback(t *testing.T) {
+	graph := map[string]string{"default_base_delay": "2s"}
+	n := &Node{Attrs: map[string]string{}}
+	rc := n.RetryConfig(graph)
+	if !rc.BaseDelaySet || rc.BaseDelay != 2*time.Second {
+		t.Errorf("BaseDelay should fall back to graph default; got value=%v set=%v",
+			rc.BaseDelay, rc.BaseDelaySet)
+	}
+	// Node-level value still wins when present.
+	n2 := &Node{Attrs: map[string]string{"base_delay": "500ms"}}
+	rc2 := n2.RetryConfig(graph)
+	if rc2.BaseDelay != 500*time.Millisecond {
+		t.Errorf("node value should override graph default; got %v", rc2.BaseDelay)
 	}
 }

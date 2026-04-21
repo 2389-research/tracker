@@ -193,7 +193,7 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 // execute shell commands and surface stdout/stderr to the pipeline context.
 type ToolNodeConfig struct {
 	Command     string
-	OutputLimit int    // bytes; 0 means use default
+	OutputLimit int // bytes; 0 means use default
 	WorkingDir  string
 	PassEnv     string // comma-separated env var names to pass through
 }
@@ -267,8 +267,8 @@ func (n *Node) ParallelConfig() ParallelNodeConfig {
 // "unset" from "set to zero"; use ResolveRetryPolicy when you need the
 // effective policy to run with.
 type RetryConfig struct {
-	PolicyName    string        // "" means "use graph default or 'standard'"
-	MaxRetries    int           // 0 and MaxRetriesSet=false means "unset"
+	PolicyName    string // "" means "use graph default or 'standard'"
+	MaxRetries    int    // 0 and MaxRetriesSet=false means "unset"
 	MaxRetriesSet bool
 	BaseDelay     time.Duration
 	BaseDelaySet  bool
@@ -276,30 +276,54 @@ type RetryConfig struct {
 
 // RetryConfig returns the typed retry config parsed from node and graph
 // attributes. Node-level values win over graph-level defaults for each field
-// independently.
+// independently. Unparseable node values fall through to the graph default
+// rather than silently dropping the whole field — matching the previous
+// cascading behavior in Engine.maxRetries.
 func (n *Node) RetryConfig(graphAttrs map[string]string) RetryConfig {
 	cfg := RetryConfig{}
+
 	if v, ok := n.Attrs["retry_policy"]; ok && v != "" {
 		cfg.PolicyName = v
 	} else if v, ok := graphAttrs["default_retry_policy"]; ok && v != "" {
 		cfg.PolicyName = v
 	}
+
+	// max_retries: try node first; if present but unparseable, cascade to
+	// graph default rather than leaving MaxRetriesSet=false. Preserves the
+	// old engine_checkpoint.maxRetries fall-through semantics.
 	if v, ok := n.Attrs["max_retries"]; ok && v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
 			cfg.MaxRetries = i
 			cfg.MaxRetriesSet = true
 		}
-	} else if v, ok := graphAttrs["default_max_retry"]; ok && v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.MaxRetries = i
-			cfg.MaxRetriesSet = true
+	}
+	if !cfg.MaxRetriesSet {
+		if v, ok := graphAttrs["default_max_retry"]; ok && v != "" {
+			if i, err := strconv.Atoi(v); err == nil {
+				cfg.MaxRetries = i
+				cfg.MaxRetriesSet = true
+			}
 		}
 	}
+
+	// base_delay: same cascade pattern as max_retries. The graph key
+	// `default_base_delay` is reserved for symmetry with the other retry
+	// attrs even though the current codebase doesn't set it from pipelines
+	// yet — honoring it here keeps the accessor's contract consistent.
 	if v, ok := n.Attrs["base_delay"]; ok && v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.BaseDelay = d
 			cfg.BaseDelaySet = true
 		}
 	}
+	if !cfg.BaseDelaySet {
+		if v, ok := graphAttrs["default_base_delay"]; ok && v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				cfg.BaseDelay = d
+				cfg.BaseDelaySet = true
+			}
+		}
+	}
+
 	return cfg
 }
