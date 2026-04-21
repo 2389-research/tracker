@@ -132,8 +132,11 @@ const (
 	runErrorPatch
 )
 
+// classifyRunError maps run failures to setup, patch, or harness classes.
+// Nil errors are treated as harness failures as a defensive fallback.
 func classifyRunError(err error) runErrorClass {
 	if err == nil {
+		// Defensive default: call sites should only classify non-nil errors.
 		return runErrorHarness
 	}
 
@@ -149,7 +152,8 @@ func classifyRunError(err error) runErrorClass {
 	if strings.Contains(msg, "clone repo:") ||
 		strings.Contains(msg, "checkout commit:") ||
 		strings.Contains(msg, "pip install") ||
-		(strings.Contains(msg, "exit status 128") && strings.Contains(msg, "git ")) {
+		(strings.Contains(msg, "exit status 128") &&
+			(strings.Contains(msg, "git") || strings.Contains(msg, "fatal:"))) {
 		return runErrorSetup
 	}
 

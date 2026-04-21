@@ -164,13 +164,23 @@ func TestClassifyRunError(t *testing.T) {
 		want runErrorClass
 	}{
 		{
-			name: "setup clone exit 128",
+			name: "git_clone_failure_status_128",
 			err:  fmt.Errorf("clone repo: docker exec swe: exit status 128\nstderr: fatal: repository not found"),
+			want: runErrorSetup,
+		},
+		{
+			name: "git_clone_failure_mixed_case",
+			err:  fmt.Errorf("Clone Repo: Docker Exec Swe: Exit Status 128\nstderr: Fatal: repository not found"),
 			want: runErrorSetup,
 		},
 		{
 			name: "setup pip install failure",
 			err:  fmt.Errorf("agent-runner: pip install failed: no matching distribution found"),
+			want: runErrorSetup,
+		},
+		{
+			name: "git_failure_status_128_pattern",
+			err:  fmt.Errorf("agent-runner: command failed: exit status 128\nstderr: fatal: bad object"),
 			want: runErrorSetup,
 		},
 		{
