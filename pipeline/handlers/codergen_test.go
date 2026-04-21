@@ -662,6 +662,59 @@ func TestCodergenHandler_WritesPerNodeResponse(t *testing.T) {
 	}
 }
 
+func TestCodergenHandler_DeclaredWritesExtracted(t *testing.T) {
+	client := &fakeCompleter{responseText: `{"milestone_id":"m1","files":["a.go"]}`}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{
+		ID:      "planner",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "test",
+			"writes": "milestone_id,files",
+		},
+	}
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("status = %q, want success", outcome.Status)
+	}
+	if got := outcome.ContextUpdates["milestone_id"]; got != "m1" {
+		t.Fatalf("milestone_id = %q, want m1", got)
+	}
+	if got := outcome.ContextUpdates["files"]; got != `["a.go"]` {
+		t.Fatalf("files = %q, want [\"a.go\"]", got)
+	}
+}
+
+func TestCodergenHandler_DeclaredWritesMissingKeyFails(t *testing.T) {
+	client := &fakeCompleter{responseText: `{"milestone_id":"m1"}`}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{
+		ID:      "planner",
+		Shape:   "box",
+		Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt": "test",
+			"writes": "milestone_id,files",
+		},
+	}
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Fatalf("status = %q, want fail", outcome.Status)
+	}
+	if outcome.ContextUpdates[contextKeyWritesError] == "" {
+		t.Fatal("expected writes_error to be set")
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if !strings.Contains(s, sub) {

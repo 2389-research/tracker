@@ -820,6 +820,80 @@ func TestHumanHandler_InterviewMode_CustomKeys(t *testing.T) {
 	}
 }
 
+func TestHumanHandler_InterviewMode_DeclaredWritesExtracted(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{
+			"mode":   "interview",
+			"writes": "target_language,deadline",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. target language\n2. deadline")
+	mock := &mockInterviewInterviewer{result: &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "target_language", Text: "target language", Answer: "go"},
+			{ID: "deadline", Text: "deadline", Answer: "2026-05-01"},
+		},
+	}}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("status = %q, want success", outcome.Status)
+	}
+	if got := outcome.ContextUpdates["target_language"]; got != "go" {
+		t.Fatalf("target_language = %q, want go", got)
+	}
+	if got := outcome.ContextUpdates["deadline"]; got != "2026-05-01" {
+		t.Fatalf("deadline = %q, want 2026-05-01", got)
+	}
+}
+
+func TestHumanHandler_InterviewMode_DeclaredWritesMissingKeyFails(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{
+			"mode":   "interview",
+			"writes": "target_language,deadline",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next"})
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set("interview_questions", "1. target language")
+	mock := &mockInterviewInterviewer{result: &InterviewResult{
+		Questions: []InterviewAnswer{
+			{ID: "target_language", Text: "target language", Answer: "go"},
+		},
+	}}
+	h := NewHumanHandler(mock, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Fatalf("status = %q, want fail", outcome.Status)
+	}
+	if outcome.ContextUpdates[contextKeyWritesError] == "" {
+		t.Fatal("expected writes_error to be set")
+	}
+}
+
 func TestHumanHandler_InterviewMode_CanceledZeroAnswers(t *testing.T) {
 	graph := pipeline.NewGraph("test")
 	graph.AddNode(&pipeline.Node{

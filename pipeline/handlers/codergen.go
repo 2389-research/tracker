@@ -483,6 +483,9 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 		},
 		Stats: buildSessionStats(sessResult),
 	}
+	if applyDeclaredWrites(node, outcome.ContextUpdates, responseText, "Response JSON") {
+		outcome.Status = pipeline.OutcomeFail
+	}
 	if turnLimitMsg != "" {
 		outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] = turnLimitMsg
 	}

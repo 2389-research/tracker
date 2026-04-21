@@ -203,6 +203,29 @@ func TestCompactContextSummaryMedium(t *testing.T) {
 	}
 }
 
+func TestCompactContextSummaryMediumPinnedKeys(t *testing.T) {
+	pctx := NewPipelineContext()
+	pctx.Set("outcome", "success")
+	pctx.Set("custom_key", "must-keep")
+	pctx.Set("other_key", "drop")
+
+	result := CompactContextWithPinnedKeys(
+		pctx,
+		[]string{"node1"},
+		FidelitySummaryMedium,
+		"",
+		"run1",
+		[]string{"custom_key"},
+	)
+
+	if got := result["custom_key"]; got != "must-keep" {
+		t.Fatalf("custom_key = %q, want must-keep", got)
+	}
+	if _, ok := result["other_key"]; ok {
+		t.Fatal("expected other_key to be dropped")
+	}
+}
+
 func TestCompactContextSummaryLow(t *testing.T) {
 	pctx := NewPipelineContext()
 	pctx.Set("graph.goal", "build something")

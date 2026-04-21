@@ -119,3 +119,25 @@ func TestResolvePromptCompactFidelity(t *testing.T) {
 		t.Errorf("compact fidelity should NOT include last_response")
 	}
 }
+
+func TestResolvePromptSummaryMediumPinsReads(t *testing.T) {
+	node := &pipeline.Node{
+		ID: "gen",
+		Attrs: map[string]string{
+			"prompt":   "do work",
+			"fidelity": "summary:medium",
+			"reads":    "custom_key",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyOutcome, "success")
+	pctx.Set("custom_key", "keep-me")
+
+	prompt, err := ResolvePrompt(node, pctx, map[string]string{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, "## custom_key\nkeep-me") {
+		t.Fatalf("expected custom_key pinned by reads in prompt summary, got %q", prompt)
+	}
+}
