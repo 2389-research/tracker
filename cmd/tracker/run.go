@@ -387,7 +387,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		return err
 	}
 
-		printRunSummary(outcome.result, outcome.err, pipelineFile)
+	printRunSummary(outcome.result, outcome.err, pipelineFile)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
 		maybeExportBundle(artifactDir, outcome.result.RunID)
