@@ -12,6 +12,24 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
+// childJoinGrace is the maximum time the manager will wait for a child
+// goroutine to finish after cancellation. If the child is stuck in a
+// non-context-aware handler, the manager returns after this grace period
+// rather than blocking indefinitely (the child goroutine becomes orphaned).
+const childJoinGrace = 30 * time.Second
+
+// waitForChild waits for the child goroutine to send on resultCh, with a
+// bounded grace period. Returns true if the child exited, false if the
+// grace period expired.
+func waitForChild(resultCh <-chan engineResultMsg) bool {
+	select {
+	case <-resultCh:
+		return true
+	case <-time.After(childJoinGrace):
+		return false
+	}
+}
+
 // ManagerLoopHandler supervises a child pipeline by launching it asynchronously
 // and polling at intervals until the child completes or max cycles is reached.
 type ManagerLoopHandler struct {
@@ -206,7 +224,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 		select {
 		case <-ctx.Done():
 			cancelChild()
-			<-resultCh // wait for child goroutine to finish
+			waitForChild(resultCh)
 			pctx.Set("stack.child.status", "cancelled")
 			return pipeline.Outcome{Status: pipeline.OutcomeFail},
 				fmt.Errorf("manager_loop: cancelled: %w", ctx.Err())
@@ -227,7 +245,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 
 			if cycles >= cfg.maxCycles {
 				cancelChild()
-				<-resultCh // wait for child goroutine to finish
+				waitForChild(resultCh)
 				pctx.Set("stack.child.status", "max_cycles_exceeded")
 				h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 					Type:      pipeline.EventStageFailed,
@@ -248,14 +266,14 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 				match, condErr := pipeline.EvaluateCondition(cfg.stopCondition, pctx)
 				if condErr != nil {
 					cancelChild()
-					<-resultCh
+					waitForChild(resultCh)
 					pctx.Set("stack.child.status", "stop_condition_invalid")
 					return pipeline.Outcome{Status: pipeline.OutcomeFail},
 						fmt.Errorf("manager_loop: stop_condition %q is invalid: %w", cfg.stopCondition, condErr)
 				}
 				if match {
 					cancelChild()
-					<-resultCh // wait for child goroutine to finish
+					waitForChild(resultCh)
 					pctx.Set("stack.child.status", "stop_condition_met")
 					h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 						Type:      pipeline.EventStageCompleted,
@@ -272,7 +290,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 				match, condErr := pipeline.EvaluateCondition(cfg.steerExpr, pctx)
 				if condErr != nil {
 					cancelChild()
-					<-resultCh
+					waitForChild(resultCh)
 					pctx.Set("stack.child.status", "steer_condition_invalid")
 					return pipeline.Outcome{Status: pipeline.OutcomeFail},
 						fmt.Errorf("manager_loop: steer_condition %q is invalid: %w", cfg.steerExpr, condErr)

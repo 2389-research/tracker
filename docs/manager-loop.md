@@ -64,7 +64,7 @@ func (e *Engine) drainSteering(s *runState) {
         select {
         case update, ok := <-e.steeringCh:
             if !ok { return }
-            s.pctx.Merge(update)
+            s.pctx.MergeWithoutDirty(update)
         default:
             return
         }
@@ -72,20 +72,28 @@ func (e *Engine) drainSteering(s *runState) {
 }
 ```
 
-This mirrors the `agent/session_run.go:drainSteering()` pattern.
+This mirrors the `agent/session_run.go:drainSteering()` pattern. Steering
+updates use `MergeWithoutDirty` so they are not attributed to any node's
+scoped namespace.
 
 ### Goroutine Safety
 
 The child runs in a goroutine with `defer/recover` for panic protection. On
 all early-exit paths (cancel, max_cycles, stop_condition), the manager calls
-`cancelChild()` then `<-resultCh` to wait for the goroutine to finish — no
-leaked goroutines.
+`cancelChild()` then waits for the child with a bounded grace period (30s).
+If the child is stuck in a non-context-aware handler, the manager returns
+after the grace period rather than blocking indefinitely. This is a
+best-effort join — cooperative cancellation from child handlers is required
+for prompt cleanup.
 
 ### Status Preservation
 
-If the child exits with `OutcomeBudgetExceeded`, that status propagates up
-rather than being flattened to `OutcomeFail`. The parent pipeline can route on
-the actual child exit status via `stack.child.exit_status`.
+Non-success child exit statuses (e.g. `OutcomeBudgetExceeded`) are recorded
+in `stack.child.exit_status` for inspection and routing. The handler itself
+always returns `OutcomeFail` for non-success children because handler-level
+outcomes must be from the handler-outcome set (`success`/`fail`/`retry`) —
+engine-level statuses would be misinterpreted by the parent engine's outcome
+switch.
 
 ### Stop Condition Semantics
 
@@ -97,7 +105,7 @@ exit ("I've seen enough"), not a failure. Pipelines can distinguish this via
 
 | Key | Values | Description |
 |-----|--------|-------------|
-| `stack.child.status` | `running`, `success`, `failed`, `error`, `cancelled`, `max_cycles_exceeded`, `stop_condition_met` | Current child lifecycle state |
+| `stack.child.status` | `running`, `success`, `failed`, `error`, `cancelled`, `max_cycles_exceeded`, `stop_condition_met`, `stop_condition_invalid`, `steer_condition_invalid` | Current child lifecycle state |
 | `stack.child.cycles` | integer string | Number of poll ticks elapsed |
 | `stack.child.exit_status` | outcome string | Raw outcome status from child engine |
 

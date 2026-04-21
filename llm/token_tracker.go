@@ -46,6 +46,11 @@ func (t *TokenTracker) WrapComplete(next CompleteHandler) CompleteHandler {
 		if model == "" {
 			model = req.Model
 		}
+		// Normalize to a canonical catalog ID so versioned provider-returned
+		// model strings (e.g. "claude-sonnet-4-5-20250514") resolve to a
+		// known pricing entry. If the model is unknown, keep it as-is so
+		// the fallback resolver can still try.
+		model = normalizeModelID(model)
 
 		t.mu.Lock()
 		existing := t.usage[provider]
@@ -122,6 +127,22 @@ func (t *TokenTracker) ObservedModelResolver(fallback string) ModelResolver {
 		}
 		return fallback
 	}
+}
+
+// normalizeModelID maps a model string to its canonical catalog ID if found.
+// Provider-returned model strings may include version suffixes (e.g.
+// "claude-sonnet-4-5-20250514") that don't match the catalog. If the exact
+// string resolves via GetModelInfo (which checks IDs and aliases), we return
+// the canonical ID. Otherwise we return the input unchanged.
+func normalizeModelID(model string) string {
+	if model == "" {
+		return ""
+	}
+	info := GetModelInfo(model)
+	if info != nil {
+		return info.ID
+	}
+	return model
 }
 
 // Providers returns a sorted slice of provider names that have recorded usage.
