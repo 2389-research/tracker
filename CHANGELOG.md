@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-04-21
+
+### Added
+
+- **`stack.manager_loop` handler — async child-pipeline supervision** (PR #126, Attractor spec 4.11). A supervisor node that launches a child pipeline in a goroutine, polls at a configurable interval, and optionally steers the running child by injecting context mid-execution. New attributes: `subgraph_ref`, `manager.poll_interval`, `manager.max_cycles`, `manager.stop_condition`, `manager.steer_condition`, `manager.steer_context`. Exposes `stack.child.status` / `stack.child.cycles` / `stack.child.exit_status` to parent context. Emits `EventStageStarted` on launch, `EventManagerCycleTick` per poll cycle, and `EventStageCompleted` / `EventStageFailed` on terminal outcomes (success, child fail, child crash, max_cycles exceeded, cancellation, stop/steer condition invalid). Bounded `childJoinGrace` (30 s) protects against non-context-aware child handlers hanging the manager. See `docs/manager-loop.md`.
+- **Engine steering channel** (PR #126): new `pipeline.WithSteeringChan(chan map[string]string)` engine option. Between node executions, the engine drains the channel and merges updates into the run's `PipelineContext`. Used by `manager_loop` to inject context into running children; available to any supervisor. Non-blocking drain; nil channel is a no-op.
+- **`PipelineContext.MergeWithoutDirty`** (PR #126): writes updates without marking keys as dirty, so externally-injected values never leak into any node's per-node scope. Used by the engine's steering drain so injected keys stay in the global/bare namespace.
+- **Accurate cost estimation via catalog + cache token pricing** (PRs #127, #128): `EstimateCost` now resolves prices through the model catalog (`GetModelInfo`) instead of a duplicated hardcoded map. Adds cache token pricing: cache reads at 10% of input rate, cache writes at 25%. `TokenTracker` now records the observed model per provider (`AddUsage` takes an optional model arg, normalized through the catalog to match `WrapComplete`) so per-provider cost estimates use the right rate sheet instead of a global fallback.
+- **Model catalog April 2026 refresh** (PR #128): adds `claude-opus-4-7`, `gpt-5.4-mini` / `gpt-5.4-nano`, `gpt-4.1` family, `o3`, `o4-mini`, GA Gemini 2.5 models, and `gemini-3.1-pro-preview` (replaces the shut-down `gemini-3-pro-preview`). Fixes `claude-opus-4-6` pricing (was incorrectly $15/$75; now $5/$25). Context windows for Sonnet/Opus 4.6 bumped to 1M. `claude-sonnet` / `claude-opus` aliases now point at the latest 4.7 entries. `claude-haiku-4-5`, `gpt-4o`, and `gpt-4o-mini` added (they were in the old pricing map but not the catalog).
+- **`docs/manager-loop.md`**: user-facing documentation for the manager-loop handler — lifecycle diagram, configuration reference, context outputs, event semantics, steering contract, and tuning guidance.
+- **`tracker-swebench` now captures the active provider base-URL override** in `run_meta.json` (`BaseURLOverride`). Derived from `${PROVIDER}_BASE_URL` with hyphens normalized to underscores, so `--provider openai-compat` maps to `OPENAI_COMPAT_BASE_URL` consistently with `ResolveProviderBaseURL`. Useful for reproducing SWE-bench runs that routed through a Cloudflare AI Gateway or custom endpoint.
+
+### Fixed
+
+- **ACP path validation rejects `..` path segments before symlink resolution** (PR #126, security hardening). Previously, a symlink pointing outside the work dir plus a `..` in the target path could escape the sandbox: symlink resolution occurred before the check, and `..` in the resolved path was not filtered. `validatePathInWorkDir` now splits on both `/` and `\` so Windows paths are also protected.
+- **Manager loop: poll timer vs. child-completion race** (PR #126 review): when `pollTimer.C` and `resultCh` are both ready, Go's `select` is nondeterministic. The timer path could trigger `max_cycles` failure even though the child had already finished. The timer case now does a non-blocking drain of `resultCh` first and dispatches to the child-result handler if the child is done.
+- **Manager loop: crash path always returns a non-nil error** (PR #126 review). If the child goroutine delivered neither a result nor an error, the handler synthesizes `"manager_loop: child exited with no result and no error"` so callers never see `(OutcomeFail, nil)`.
+- **Manager loop: config validation now hard-fails on malformed values** (PR #126 review). `manager.poll_interval` and `manager.max_cycles` with invalid or non-positive values now error at parse time instead of silently falling back to defaults (previously: `time.ParseDuration` error swallowed, zero/negative values ignored).
+- **Manager loop: `EvaluateCondition` errors surface for both `stop_condition` and `steer_condition`** (PR #126 review). A malformed expression now fails the loop with a clear error plus an `EventStageFailed` emission, instead of being treated as "never match" until `max_cycles`.
+- **Manager loop: emit `EventStageFailed` on context cancellation and condition-parse errors** (PR #126 review). Parity with other terminal failure paths (max_cycles, child fail, child crash) so the TUI surfaces every failure mode.
+- **Manager loop: `handleChildResult` returns `OutcomeFail` on child failure** (PR #126 review). Handler-level outcome values must be from the handler set (`success`/`fail`/`retry`); engine-level statuses like `OutcomeBudgetExceeded` would have fallen through the outcome switch and been silently treated as success. The real child status remains available via `pctx.Set("stack.child.exit_status", ...)`.
+
 ## [0.19.0] - 2026-04-20
 
 ### Added
