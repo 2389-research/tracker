@@ -68,6 +68,11 @@ type SessionConfig struct {
 	// structured context block before the first LLM turn. Pure text analysis
 	// plus filesystem scan — no LLM calls. Default: false.
 	Localize bool
+
+	// PlanBeforeExecute inserts one planning-only LLM call before the main turn
+	// loop and keeps that plan in conversation context for subsequent turns.
+	// Default: false.
+	PlanBeforeExecute bool
 }
 
 // Checkpoint defines a message to inject at a specific turn-budget fraction.

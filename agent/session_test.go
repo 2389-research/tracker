@@ -95,6 +95,121 @@ func TestSessionTextOnlyResponse(t *testing.T) {
 	}
 }
 
+func TestSessionPlanBeforeExecute_InjectsPlanningTurn(t *testing.T) {
+	var requests []llm.Request
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("Plan: inspect files, then edit and test."),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+				Usage:        llm.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+			},
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{
+						{
+							Kind: llm.KindToolCall,
+							ToolCall: &llm.ToolCallData{
+								ID:        "call_1",
+								Name:      "read",
+								Arguments: json.RawMessage(`{"path":"x.txt"}`),
+							},
+						},
+					},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+				Usage:        llm.Usage{InputTokens: 20, OutputTokens: 10, TotalTokens: 30},
+			},
+		},
+		onComplete: func(req *llm.Request) {
+			copied := *req
+			copied.Messages = append([]llm.Message(nil), req.Messages...)
+			requests = append(requests, copied)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.PlanBeforeExecute = true
+	cfg.MaxTurns = 1
+	sess := mustNewSession(t, client, cfg, WithTools(&stubTool{name: "read", output: "ok"}))
+
+	_, err := sess.Run(context.Background(), "Fix the bug")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 LLM requests (plan + execute), got %d", len(requests))
+	}
+	if len(requests[0].Tools) != 0 {
+		t.Fatalf("planning turn should not expose tools, got %d", len(requests[0].Tools))
+	}
+	firstUserText := requests[0].Messages[len(requests[0].Messages)-1].Text()
+	if firstUserText != planBeforeExecutePrompt {
+		t.Fatalf("planning turn prompt mismatch: got %q", firstUserText)
+	}
+
+	if len(requests[1].Tools) == 0 {
+		t.Fatal("execution turn should include tools")
+	}
+	foundPlan := false
+	foundExecutePrompt := false
+	for _, msg := range requests[1].Messages {
+		if msg.Role == llm.RoleAssistant && strings.Contains(msg.Text(), "inspect files") {
+			foundPlan = true
+		}
+		if msg.Role == llm.RoleUser && msg.Text() == executeAfterPlanPrompt {
+			foundExecutePrompt = true
+		}
+	}
+	if !foundPlan {
+		t.Fatal("expected plan to remain in conversation context for execution turn")
+	}
+	if !foundExecutePrompt {
+		t.Fatal("expected execute-after-plan prompt in execution turn context")
+	}
+}
+
+func TestSessionPlanBeforeExecute_Disabled_NoPlanningTurn(t *testing.T) {
+	var requests []llm.Request
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("done"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+		onComplete: func(req *llm.Request) {
+			copied := *req
+			copied.Messages = append([]llm.Message(nil), req.Messages...)
+			requests = append(requests, copied)
+		},
+	}
+
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 1
+	sess := mustNewSession(t, client, cfg, WithTools(&stubTool{name: "read", output: "ok"}))
+
+	_, err := sess.Run(context.Background(), "Fix the bug")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 LLM request when planning is disabled, got %d", len(requests))
+	}
+	if len(requests[0].Tools) == 0 {
+		t.Fatal("expected tools on normal execution turn")
+	}
+	for _, msg := range requests[0].Messages {
+		text := msg.Text()
+		if strings.Contains(text, planBeforeExecutePrompt) || strings.Contains(text, executeAfterPlanPrompt) {
+			t.Fatalf("unexpected planning message when disabled: %q", text)
+		}
+	}
+}
+
 func TestSessionRunPopulatesProvider(t *testing.T) {
 	client := &mockCompleter{
 		responses: []*llm.Response{

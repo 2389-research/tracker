@@ -11,6 +11,11 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
+const (
+	planBeforeExecutePrompt = "Before you start executing this task, outline your plan: what files to examine, what changes to make, and in what order. Do not call tools yet."
+	executeAfterPlanPrompt  = "Now execute the task using the plan above. Start making progress with tool calls."
+)
+
 // initConversation sets up the initial system and user messages. The provided
 // context is honored by the localization pre-processing phase so cancellation
 // or deadlines abort the pre-turn filesystem scan.
@@ -31,6 +36,30 @@ func (s *Session) initConversation(ctx context.Context, userInput string) {
 		}
 	}
 	s.messages = append(s.messages, llm.UserMessage(finalUserInput))
+}
+
+// maybeRunPlanningTurn performs a single pre-execution planning call when enabled.
+func (s *Session) maybeRunPlanningTurn(ctx context.Context, result *SessionResult) error {
+	if !s.config.PlanBeforeExecute {
+		return nil
+	}
+
+	s.messages = append(s.messages, llm.UserMessage(planBeforeExecutePrompt))
+
+	resp, err := s.doPlanningCall(ctx)
+	if err != nil {
+		result.Error = err
+		s.emit(Event{Type: EventError, SessionID: s.id, Err: err})
+		return err
+	}
+
+	result.Usage = result.Usage.Add(resp.Usage)
+	if resp.Usage.EstimatedCost == 0 {
+		result.Usage.EstimatedCost += llm.EstimateCost(s.config.Model, resp.Usage)
+	}
+	s.messages = append(s.messages, resp.Message)
+	s.messages = append(s.messages, llm.UserMessage(executeAfterPlanPrompt))
+	return nil
 }
 
 // drainSteering consumes all pending steering messages and injects them into the conversation.
@@ -69,6 +98,31 @@ func (s *Session) doLLMCall(ctx context.Context, turn int) (*llm.Response, error
 		Type:      EventLLMRequestPreparing,
 		SessionID: s.id,
 		Turn:      turn,
+		Provider:  s.config.Provider,
+		Model:     s.config.Model,
+	})
+
+	return s.client.Complete(ctx, req)
+}
+
+// doPlanningCall sends one planning-only request without tool definitions.
+func (s *Session) doPlanningCall(ctx context.Context) (*llm.Response, error) {
+	req := &llm.Request{
+		Model:           s.config.Model,
+		Provider:        s.config.Provider,
+		Messages:        s.messages,
+		ReasoningEffort: s.config.ReasoningEffort,
+		TraceObservers: []llm.TraceObserver{
+			llm.TraceObserverFunc(func(traceEvt llm.TraceEvent) {
+				s.emitLLMTraceEvent(0, traceEvt)
+			}),
+		},
+	}
+
+	s.emit(Event{
+		Type:      EventLLMRequestPreparing,
+		SessionID: s.id,
+		Turn:      0,
 		Provider:  s.config.Provider,
 		Model:     s.config.Model,
 	})

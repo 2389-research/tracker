@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`tracker.SimulateGraph(ctx, graph)`** — graph-in variant of `Simulate` that accepts a pre-parsed `*pipeline.Graph` and returns a `SimulateReport`. Lets callers that already parsed the pipeline (CLI flows that also run `ValidateSource`, tooling that builds a graph programmatically) avoid a second parse. `Simulate(ctx, source)` is now a thin wrapper over `parsePipelineSource` + `SimulateGraph`; signature and behavior unchanged.
 - **Repository localization pre-processing** (agent): optional pre-processing phase that scans the working directory for files relevant to the task prompt and injects a structured context block before the first LLM turn. Pure text analysis + filesystem scan — zero LLM calls. Opt-in via `SessionConfig.Localize` (default `false`). Extracts file paths, camelCase/snake_case identifiers, quoted phrases, and error-line excerpts from the prompt; capped at 10 files / ~2KB injected context with 5-line snippets. Reduces wasted turns on `glob`/`grep` for repository-level tasks.
+- **Plan-before-execute phase** (agent): optional single planning LLM call before the main execution loop. Opt-in via `SessionConfig.PlanBeforeExecute` (default `false`) or codergen node attrs (`plan_before_execute: "true"` or `plan: "true"`). The generated plan is retained in conversation context for subsequent execution turns.
 
 ### Fixed
 
