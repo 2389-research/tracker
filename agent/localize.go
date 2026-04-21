@@ -279,16 +279,38 @@ func scanFiles(ctx context.Context, root string) []string {
 	return out
 }
 
+// safeDotfiles are common config/metadata dotfiles that are known to be
+// non-sensitive and useful for localization context. All other dotfiles are
+// skipped to reduce accidental leakage of credential files (.env, .netrc,
+// .npmrc, .aws/credentials, etc.).
+var safeDotfiles = map[string]bool{
+	".editorconfig":     true,
+	".gitignore":        true,
+	".gitattributes":    true,
+	".dockerignore":     true,
+	".prettierrc":       true,
+	".eslintrc":         true,
+	".eslintignore":     true,
+	".stylelintrc":      true,
+	".clang-format":     true,
+	".rubocop.yml":      true,
+	".golangci.yml":     true,
+	".golangci.yaml":    true,
+	".pre-commit-hooks.yaml": true,
+}
+
 // looksLikeTextFile uses extension/name heuristics to avoid reading binaries
 // and to reduce accidental inclusion of credentials. Hidden files (dotfiles
 // such as .env, .npmrc) and common secret-bearing filenames are skipped so
-// their contents are never injected into the LLM context.
+// their contents are never injected into the LLM context. A narrow allowlist
+// of well-known non-sensitive config dotfiles is permitted.
 func looksLikeTextFile(rel string) bool {
 	base := strings.ToLower(filepath.Base(rel))
 
-	// Skip dotfiles — reduces accidental leakage of hidden configuration and
-	// credential files (.env, .netrc, .aws/credentials, etc.).
-	if strings.HasPrefix(base, ".") {
+	// Skip dotfiles by default — reduces accidental leakage of credential
+	// files. Allow a narrow set of well-known config dotfiles that are useful
+	// for localization context.
+	if strings.HasPrefix(base, ".") && !safeDotfiles[base] {
 		return false
 	}
 
@@ -301,7 +323,11 @@ func looksLikeTextFile(rel string) bool {
 
 	ext := strings.ToLower(filepath.Ext(base))
 	switch ext {
-	// Secret-bearing file extensions.
+	// Secret-bearing file extensions. Private-key formats (.pem, .key, .p12,
+	// .pfx, .jks, .keystore) clearly contain secrets. Certificate formats
+	// (.crt, .cer, .der) typically contain only public keys, but we block
+	// them conservatively — a certificate file rarely carries useful source
+	// context, and some tools bundle certificates with private keys.
 	case ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore",
 		".crt", ".cer", ".der",
 		// Binary/media/archive extensions.
@@ -355,7 +381,9 @@ func scoreFiles(ctx context.Context, root string, files []string, refs extracted
 		// Content scanning is expensive (reads the full file). Limit it to:
 		//  - files already flagged by path match (always worthwhile), or
 		//  - the first N files when no path refs were present (bounded cost).
-		shouldScan := needsContent && (score > 0 || (!havePathRefs && contentScansDone < localizeMaxContentScans))
+		hasPathMatch := score > 0
+		fallbackScanAllowed := !havePathRefs && contentScansDone < localizeMaxContentScans
+		shouldScan := needsContent && (hasPathMatch || fallbackScanAllowed)
 		if shouldScan {
 			contentScansDone++
 			contentScore := scoreFileContent(filepath.Join(root, rel), refs)
