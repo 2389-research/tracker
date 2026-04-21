@@ -450,6 +450,9 @@ func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) erro
 
 	// Accumulate usage (repair turns count toward total cost/token usage).
 	result.Usage = result.Usage.Add(resp.Usage)
+	if resp.Usage.EstimatedCost == 0 {
+		result.Usage.EstimatedCost += llm.EstimateCost(s.config.Model, resp.Usage)
+	}
 
 	s.messages = append(s.messages, resp.Message)
 

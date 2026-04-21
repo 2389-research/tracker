@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
@@ -133,7 +134,13 @@ func printSimHeader(w io.Writer, report *tracker.SimulateReport, dotFile string)
 	if len(report.GraphAttrs) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  Graph Attributes:")
-		for k, v := range report.GraphAttrs {
+		keys := make([]string, 0, len(report.GraphAttrs))
+		for k := range report.GraphAttrs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := report.GraphAttrs[k]
 			fmt.Fprintf(w, "    %s = %s\n", k, v)
 		}
 	}

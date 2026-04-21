@@ -54,6 +54,22 @@ func TestCodergenHandlerName(t *testing.T) {
 	}
 }
 
+func TestTrackExternalBackendUsageTracksWhenTotalTokensMissing(t *testing.T) {
+	tracker := llm.NewTokenTracker()
+	h := &CodergenHandler{tokenTracker: tracker}
+
+	h.trackExternalBackendUsage(&ACPBackend{}, llm.Usage{
+		InputTokens:  12,
+		OutputTokens: 8,
+		TotalTokens:  0,
+	})
+
+	got := tracker.ProviderUsage("acp")
+	if got.InputTokens != 12 || got.OutputTokens != 8 {
+		t.Fatalf("acp usage = %+v, want input=12 output=8", got)
+	}
+}
+
 func TestCodergenHandlerMissingPrompt(t *testing.T) {
 	client := &fakeCompleter{responseText: "done"}
 	h := NewCodergenHandler(client, t.TempDir())

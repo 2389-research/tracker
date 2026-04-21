@@ -67,6 +67,8 @@ type ProviderUsage struct {
 	SessionCount     int     `json:"session_count"`
 }
 
+const unknownProvider = "unknown"
+
 // UsageSummary aggregates token usage and cost across all pipeline nodes.
 type UsageSummary struct {
 	TotalInputTokens      int                      `json:"total_input_tokens"`
@@ -98,24 +100,24 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 		s.TotalCacheReadTokens += e.Stats.CacheReadTokens
 		s.TotalCacheWriteTokens += e.Stats.CacheWriteTokens
 		s.SessionCount++
-		if p := e.Stats.Provider; p != "" {
-			pt := s.ProviderTotals[p]
-			pt.InputTokens += e.Stats.InputTokens
-			pt.OutputTokens += e.Stats.OutputTokens
-			pt.TotalTokens += e.Stats.TotalTokens
-			pt.CostUSD += e.Stats.CostUSD
-			pt.ReasoningTokens += e.Stats.ReasoningTokens
-			pt.CacheReadTokens += e.Stats.CacheReadTokens
-			pt.CacheWriteTokens += e.Stats.CacheWriteTokens
-			pt.SessionCount++
-			s.ProviderTotals[p] = pt
+
+		provider := strings.TrimSpace(e.Stats.Provider)
+		if provider == "" {
+			provider = unknownProvider
 		}
+		pt := s.ProviderTotals[provider]
+		pt.InputTokens += e.Stats.InputTokens
+		pt.OutputTokens += e.Stats.OutputTokens
+		pt.TotalTokens += e.Stats.TotalTokens
+		pt.CostUSD += e.Stats.CostUSD
+		pt.ReasoningTokens += e.Stats.ReasoningTokens
+		pt.CacheReadTokens += e.Stats.CacheReadTokens
+		pt.CacheWriteTokens += e.Stats.CacheWriteTokens
+		pt.SessionCount++
+		s.ProviderTotals[provider] = pt
 	}
 	if s.SessionCount == 0 {
 		return nil
-	}
-	if len(s.ProviderTotals) == 0 {
-		s.ProviderTotals = nil
 	}
 	return s
 }
