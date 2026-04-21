@@ -11,7 +11,9 @@ func TestAgentConfig_EmptyNode(t *testing.T) {
 	n := &Node{Attrs: map[string]string{}}
 	cfg := n.AgentConfig(nil)
 
-	// Every field should be zero / empty for an unconfigured node.
+	// Fields without special defaults stay zero / empty for an unconfigured
+	// node. ReflectOnError is the one documented exception (defaults to
+	// true) and is covered by TestAgentConfig_ReflectOnErrorDefaultsTrueWhenAbsent.
 	if cfg.Model != "" || cfg.Provider != "" || cfg.MaxTurns != 0 {
 		t.Errorf("expected zero values, got Model=%q Provider=%q MaxTurns=%d",
 			cfg.Model, cfg.Provider, cfg.MaxTurns)

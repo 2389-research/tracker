@@ -8,10 +8,20 @@ import (
 )
 
 // AgentNodeConfig is a typed view over a codergen (agent) node's attributes.
-// Values are already merged from graph-level defaults into node-level overrides:
-// graphAttrs first, then node.Attrs wins. Fields that were not set at either
-// level use their Go zero value; the companion *Set bool distinguishes
-// "explicitly set" from "absent" for three-state booleans where that matters.
+//
+// For the subset of attrs that support graph-level defaults (llm_model,
+// llm_provider, reasoning_effort, verify_after_edit, verify_command,
+// max_verify_retries, plan_before_execute, cache_tool_results,
+// context_compaction), AgentConfig resolves the value from graphAttrs first,
+// then lets node.Attrs override when the same key is set on the node. The
+// remaining fields are node-only and have no graph fallback.
+//
+// Unless documented otherwise on the specific field, fields absent from their
+// applicable source use the Go zero value. ReflectOnError is the one
+// exception: it defaults to true in the returned struct even when the attr is
+// absent, matching the runtime default. The companion *Set bool on three-
+// state booleans distinguishes "explicitly configured" from "absent" so
+// consumers that want to treat absence as "leave the existing value" can.
 type AgentNodeConfig struct {
 	Backend         string
 	WorkingDir      string
@@ -47,7 +57,11 @@ type AgentNodeConfig struct {
 	CacheToolResults    bool
 	CacheToolResultsSet bool
 
-	ContextCompaction    string // "auto" or "" — kept as string to preserve future extensibility
+	// ContextCompaction carries the raw attr value. "auto" enables automatic
+	// compaction; any other non-empty value (e.g. "none") disables it; ""
+	// means the attr was absent. Kept as string so future modes can be added
+	// without a type change.
+	ContextCompaction    string
 	ContextCompactionSet bool
 	CompactionThreshold  float64
 }
