@@ -235,7 +235,8 @@ func (n *Node) ToolConfig() ToolNodeConfig {
 	if v := n.Attrs["timeout"]; v != "" {
 		// No positivity guard — the accessor exposes whatever parses, so
 		// the field matches the raw attr semantics. ToolHandler.parseTimeout
-		// still rejects non-positive values with an explicit error.
+		// also passes non-positive values through today (behavior preserved
+		// from before the typed-config refactor).
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.Timeout = d
 		}
