@@ -112,6 +112,7 @@ func (s *Session) doPlanningCall(ctx context.Context) (*llm.Response, error) {
 		Provider:        s.config.Provider,
 		Messages:        s.messages,
 		ReasoningEffort: s.config.ReasoningEffort,
+		ResponseFormat:  s.buildResponseFormat(),
 		TraceObservers: []llm.TraceObserver{
 			llm.TraceObserverFunc(func(traceEvt llm.TraceEvent) {
 				s.emitLLMTraceEvent(0, traceEvt)

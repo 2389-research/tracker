@@ -159,7 +159,7 @@ func TestSessionPlanBeforeExecute_InjectsPlanningTurn(t *testing.T) {
 	foundPlan := false
 	foundExecutePrompt := false
 	for _, msg := range requests[1].Messages {
-		if msg.Role == llm.RoleAssistant && strings.Contains(msg.Text(), "inspect files") {
+		if msg.Role == llm.RoleAssistant && msg.Text() == "Plan: inspect files, then edit and test." {
 			foundPlan = true
 		}
 		if msg.Role == llm.RoleUser && msg.Text() == executeAfterPlanPrompt {
