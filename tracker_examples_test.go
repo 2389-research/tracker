@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 
 	tracker "github.com/2389-research/tracker"
 )
@@ -26,8 +27,15 @@ func ExampleDiagnose() {
 }
 
 func ExampleDoctor() {
+	workDir, err := os.MkdirTemp("", "tracker-example-doctor-*")
+	if err != nil {
+		fmt.Println("doctor failed")
+		return
+	}
+	defer os.RemoveAll(workDir)
+
 	report, err := tracker.Doctor(context.Background(), tracker.DoctorConfig{
-		WorkDir: ".",
+		WorkDir: workDir,
 	})
 	if err != nil {
 		fmt.Println("doctor failed")
