@@ -100,9 +100,10 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 		s.TotalCacheReadTokens += e.Stats.CacheReadTokens
 		s.TotalCacheWriteTokens += e.Stats.CacheWriteTokens
 		s.SessionCount++
-		provider := e.Stats.Provider
+
+		provider := strings.TrimSpace(e.Stats.Provider)
 		if provider == "" {
-			provider = unknownProvider
+			continue
 		}
 		pt := s.ProviderTotals[provider]
 		pt.InputTokens += e.Stats.InputTokens
