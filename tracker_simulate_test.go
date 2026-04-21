@@ -3,6 +3,7 @@ package tracker
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -114,9 +115,11 @@ func TestSimulate_CtxCancelledAtEntry(t *testing.T) {
 
 func TestSimulateGraph_AcceptsPrebuiltGraph(t *testing.T) {
 	// Parse once via ValidateSource, then pass the graph to SimulateGraph.
-	// The resulting report's nodes/edges/plan must match what Simulate
-	// produces for the same source — only Format differs (SimulateGraph
-	// leaves it empty because it has no source string to detect from).
+	// The resulting report must deep-equal what Simulate produces for the
+	// same source, except Format (SimulateGraph leaves it empty because it
+	// has no source string to detect from; Simulate fills it). Deep
+	// equality catches regressions in node ordering, label/handler
+	// propagation, and edge label/condition fields.
 	result, err := ValidateSource(simpleSource)
 	if err != nil {
 		t.Fatalf("ValidateSource: %v", err)
@@ -137,18 +140,14 @@ func TestSimulateGraph_AcceptsPrebuiltGraph(t *testing.T) {
 	if viaGraph.Format != "" {
 		t.Errorf("SimulateGraph Format should be empty, got %q", viaGraph.Format)
 	}
-	if viaGraph.StartNode != viaSource.StartNode || viaGraph.ExitNode != viaSource.ExitNode {
-		t.Errorf("start/exit mismatch: graph=(%s,%s) source=(%s,%s)",
-			viaGraph.StartNode, viaGraph.ExitNode, viaSource.StartNode, viaSource.ExitNode)
-	}
-	if len(viaGraph.Nodes) != len(viaSource.Nodes) {
-		t.Errorf("node count: graph=%d source=%d", len(viaGraph.Nodes), len(viaSource.Nodes))
-	}
-	if len(viaGraph.Edges) != len(viaSource.Edges) {
-		t.Errorf("edge count: graph=%d source=%d", len(viaGraph.Edges), len(viaSource.Edges))
-	}
-	if len(viaGraph.ExecutionPlan) != len(viaSource.ExecutionPlan) {
-		t.Errorf("plan length: graph=%d source=%d", len(viaGraph.ExecutionPlan), len(viaSource.ExecutionPlan))
+
+	// Normalize Format on both sides, then deep-compare the rest.
+	viaGraphCopy := *viaGraph
+	viaSourceCopy := *viaSource
+	viaGraphCopy.Format = ""
+	viaSourceCopy.Format = ""
+	if !reflect.DeepEqual(&viaGraphCopy, &viaSourceCopy) {
+		t.Errorf("SimulateGraph and Simulate produced different reports.\n  graph: %+v\n  source: %+v", &viaGraphCopy, &viaSourceCopy)
 	}
 }
 

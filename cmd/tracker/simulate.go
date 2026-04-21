@@ -37,21 +37,27 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		return fmt.Errorf("load pipeline: %w", err)
 	}
 
-	// Preserve the prior CLI behavior: format comes from the explicit flag,
-	// otherwise from the file extension for on-disk inputs. Embedded
-	// workflows are always .dip. detectPipelineFormat never returns the
-	// empty string, so format is always concrete by the time we call
-	// ValidateSource.
-	format := formatOverride
-	if format == "" {
-		if isEmbedded {
-			format = "dip"
-		} else {
-			format = detectPipelineFormat(resolved)
-		}
-	}
-	if format == "dot" {
-		emitDOTDeprecationWarning(os.Stderr)
+	// Format resolution:
+	//   • explicit --format flag wins for on-disk files
+	//   • embedded workflows are always .dip; an override targeting a
+	//     non-.dip format would be nonsense against the baked-in DIP
+	//     assets, so we ignore it and pin to "dip"
+	//   • otherwise derive from the file extension (detectPipelineFormat
+	//     never returns empty — defaults to "dip" for unknowns)
+	// format is always concrete before we reach ValidateSource, so the
+	// library's content-sniff fallback is never exercised from here.
+	//
+	// The DOT deprecation warning is emitted by the library's parseDOTSource
+	// (via log.Println) when format == "dot"; we deliberately don't emit
+	// a second warning from the CLI to avoid duplicate stderr lines.
+	var format string
+	switch {
+	case isEmbedded:
+		format = "dip"
+	case formatOverride != "":
+		format = formatOverride
+	default:
+		format = detectPipelineFormat(resolved)
 	}
 
 	opts := []tracker.ValidateOption{tracker.WithValidateFormat(format)}

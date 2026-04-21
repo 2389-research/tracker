@@ -69,10 +69,7 @@ func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse pipeline: %w", err)
 	}
-	report, err := simulateFromGraph(ctx, graph)
-	if err != nil {
-		return nil, err
-	}
+	report := simulateFromGraph(graph)
 	report.Format = format
 	return report, nil
 }
@@ -99,12 +96,13 @@ func SimulateGraph(ctx context.Context, graph *pipeline.Graph) (*SimulateReport,
 	if graph == nil {
 		return nil, fmt.Errorf("SimulateGraph: graph is nil")
 	}
-	return simulateFromGraph(ctx, graph)
+	return simulateFromGraph(graph), nil
 }
 
 // simulateFromGraph is the shared internal implementation used by both
-// Simulate and SimulateGraph. It assumes ctx is non-nil and not cancelled.
-func simulateFromGraph(_ context.Context, graph *pipeline.Graph) (*SimulateReport, error) {
+// Simulate and SimulateGraph. Callers must pre-check ctx for cancellation;
+// this helper doesn't re-check since the work is bounded and cheap.
+func simulateFromGraph(graph *pipeline.Graph) *SimulateReport {
 	r := &SimulateReport{
 		Name:      graph.Name,
 		StartNode: graph.StartNode,
@@ -114,7 +112,7 @@ func simulateFromGraph(_ context.Context, graph *pipeline.Graph) (*SimulateRepor
 	r.Nodes = collectSimNodes(graph)
 	r.Edges = collectSimEdges(graph)
 	r.ExecutionPlan, r.Unreachable = buildExecutionPlan(graph)
-	return r, nil
+	return r
 }
 
 func collectSimNodes(graph *pipeline.Graph) []SimNode {
