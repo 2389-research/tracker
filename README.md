@@ -567,6 +567,10 @@ Include the `gate_token` value in the `X-Tracker-Gate-Token` header — the call
 
 ### Library API
 
+> ⚠️ **Stability note (pre-v1.0):** tracker's library API is usable now, but
+> breaking changes may still happen between minor releases while the surface is
+> finalized. Check `CHANGELOG.md` before upgrading.
+
 Library consumers set `tracker.Config.WebhookGate` instead of using CLI flags:
 
 ```go
@@ -603,7 +607,11 @@ for _, s := range report.Suggestions {
 }
 ```
 
-`tracker.Audit`, `tracker.DiagnoseMostRecent`, `tracker.Simulate`, and `tracker.Doctor` all accept `context.Context` as their first argument and return JSON-serializable reports. `tracker.ListRuns` and `DiagnoseMostRecent`/`Diagnose` accept an optional config (`AuditConfig`, `DiagnoseConfig`) with a `LogWriter` for non-fatal parse warnings — set it to `io.Discard` to silence warnings in embedded callers. `Audit` and `Simulate` currently take just `ctx` (plus their payload); `Doctor` takes a required `DoctorConfig` plus optional functional options (e.g., `tracker.WithVersionInfo`).
+`tracker.Audit`, `tracker.DiagnoseMostRecent`, `tracker.Simulate`, and `tracker.Doctor` all accept `context.Context` as their first argument and return JSON-serializable reports. `tracker.ListRuns` and `DiagnoseMostRecent`/`Diagnose` accept an optional config (`AuditConfig`, `DiagnoseConfig`) with a `LogWriter` for non-fatal parse warnings; if `LogWriter` is left unset, warnings are discarded, so embedded callers are silent by default. Set `LogWriter` to something like `os.Stderr` (or another writer/logger sink) if you want to receive those warnings. `Audit` and `Simulate` currently take just `ctx` (plus their payload); `Doctor` takes a required `DoctorConfig` plus optional functional options (e.g., `tracker.WithVersionInfo`).
+
+If you currently shell out to `tracker diagnose` and scrape stdout, migrate to
+`tracker.Diagnose()` / `tracker.DiagnoseMostRecent()` and read
+`DiagnoseReport` directly instead of parsing formatted CLI text.
 
 To stream events programmatically in the same NDJSON format as `tracker --json`, use `tracker.NewNDJSONWriter`:
 

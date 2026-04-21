@@ -266,9 +266,17 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 
 	routingHints := captureRoutingHints(pctx)
 
-	fidelity := ResolveFidelity(e.nodeOrDefault(cp.CurrentNode), e.graph.Attrs)
+	currentNode := e.nodeOrDefault(cp.CurrentNode)
+	fidelity := ResolveFidelity(currentNode, e.graph.Attrs)
 	degraded := DegradeFidelity(fidelity)
-	compacted := CompactContext(pctx, cp.CompletedNodes, degraded, e.artifactDir, runID)
+	compacted := CompactContextWithPinnedKeys(
+		pctx,
+		cp.CompletedNodes,
+		degraded,
+		e.artifactDir,
+		runID,
+		ParseDeclaredKeys(currentNode.Attrs["reads"]),
+	)
 
 	replaceContextValues(pctx, compacted)
 	restoreRoutingHints(pctx, routingHints)

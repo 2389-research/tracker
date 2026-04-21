@@ -44,6 +44,8 @@ type NodeFailure struct {
 	Outcome string `json:"outcome"`
 	Handler string `json:"handler,omitempty"`
 	// Duration is the elapsed time for the most recent attempt of the node.
+	// It is encoded as integer nanoseconds in JSON ("duration_ns"), not
+	// as a duration string.
 	Duration time.Duration `json:"duration_ns,omitempty"`
 	// RetryCount is the number of stage_failed events observed for this node
 	// — i.e., the total failure count, not "retries beyond the first attempt."

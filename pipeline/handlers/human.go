@@ -5,6 +5,7 @@ package handlers
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -777,14 +778,79 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		status = pipeline.OutcomeFail
 	}
 
-	return pipeline.Outcome{
+	outcome := pipeline.Outcome{
 		Status: status,
 		ContextUpdates: map[string]string{
 			answersKey:                                  jsonStr,
 			pipeline.ContextKeyHumanResponse:            summary,
 			pipeline.ContextKeyResponsePrefix + node.ID: summary,
 		},
-	}, nil
+	}
+	if applyInterviewDeclaredWrites(node, outcome.ContextUpdates, result) {
+		outcome.Status = pipeline.OutcomeFail
+	}
+	return outcome, nil
+}
+
+func applyInterviewDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, result *InterviewResult) bool {
+	if result == nil {
+		return false
+	}
+	if len(pipeline.ParseDeclaredKeys(node.Attrs["writes"])) == 0 {
+		return false
+	}
+	raw, err := buildInterviewAnswersObjectJSON(result)
+	if err != nil {
+		contextUpdates[contextKeyWritesError] = fmt.Sprintf("node %q interview answer serialization failed: %v", node.ID, err)
+		return true
+	}
+	return applyDeclaredWrites(node, contextUpdates, raw, "Interview answers JSON")
+}
+
+func buildInterviewAnswersObjectJSON(result *InterviewResult) (string, error) {
+	obj := make(map[string]string, len(result.Questions)*2)
+	for _, q := range result.Questions {
+		answer := strings.TrimSpace(q.Answer)
+		if answer == "" {
+			continue
+		}
+		if key := strings.TrimSpace(q.ID); key != "" {
+			if _, exists := obj[key]; !exists {
+				obj[key] = answer
+			}
+		}
+		if key := normalizeInterviewQuestionKey(q.Text); key != "" {
+			if _, exists := obj[key]; !exists {
+				obj[key] = answer
+			}
+		}
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func normalizeInterviewQuestionKey(text string) string {
+	text = strings.TrimSpace(strings.ToLower(text))
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range text {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // executeChoice handles choice mode: presents outgoing edge labels as options.

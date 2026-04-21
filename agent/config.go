@@ -62,6 +62,12 @@ type SessionConfig struct {
 	// the focused VerifyCommand passes. Use this for regression detection
 	// (e.g. run the full test module without -x). Empty means disabled.
 	VerifyBroadCommand string
+
+	// Localize enables a pre-processing localization phase that scans the
+	// working directory for files relevant to the task prompt and injects a
+	// structured context block before the first LLM turn. Pure text analysis
+	// plus filesystem scan — no LLM calls. Default: false.
+	Localize bool
 }
 
 // Checkpoint defines a message to inject at a specific turn-budget fraction.

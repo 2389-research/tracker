@@ -102,6 +102,10 @@ func MostRecentRunID(workdir string) (string, error) {
 // ParseActivityLine — ActivityEntry is not itself a JSON-wire type because
 // tracker has historically used two timestamp formats and time.Time's
 // default unmarshal handles only RFC3339Nano.
+//
+// Marshal/unmarshal contract: do not json.Marshal/json.Unmarshal ActivityEntry
+// directly. Use ParseActivityLine and LoadActivityLog for decoding and map to
+// your own wire type when encoding.
 type ActivityEntry struct {
 	Timestamp time.Time
 	Type      string
