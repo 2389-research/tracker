@@ -218,6 +218,12 @@ in the HTTP status code.
 - `tracker update` — self-update to latest GitHub release. Detects install method (Homebrew/go install/binary), verifies SHA256 checksum, smoke-tests new binary, atomic swap with .bak rollback. Non-blocking update check runs on every `tracker run` (24h cache).
 - `tracker version` — shows commit hash, build time, and which providers are configured. Uses Go VCS metadata for `go install` builds, GoReleaser ldflags for releases.
 
+### Library API equivalents (for embedded integrations)
+- Prefer `tracker.Diagnose(ctx, runDir)` / `tracker.DiagnoseMostRecent(ctx, workDir)` over shelling out to `tracker diagnose` and scraping stdout.
+- Use `tracker.Doctor(ctx, cfg, opts...)` for structured preflight checks in services/tests.
+- Use `tracker.Audit(ctx, runDir)` and `tracker.ListRuns(workDir, ...)` for run inspection.
+- Use `tracker.NewNDJSONWriter(io.Writer)` to get the same stream shape as `tracker --json`.
+
 ### Bare name resolution
 Running `tracker build_product` (no path, no extension) resolves in order:
 1. `build_product.dip` in cwd (local file wins)
