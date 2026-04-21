@@ -54,3 +54,17 @@ func TestEpisodeSummariesNormalizationCapsTotalRunes(t *testing.T) {
 		t.Fatalf("expected newest summary to remain, got len=%d", len([]rune(got[0])))
 	}
 }
+
+func TestEpisodeSummariesNormalizationDropsOldestWhenOverRuneBudget(t *testing.T) {
+	in := []string{
+		strings.Repeat("a", 2500),
+		strings.Repeat("b", 2500),
+	}
+	got := ParseEpisodeSummaries(SerializeEpisodeSummaries(in))
+	if len(got) != 1 {
+		t.Fatalf("expected only newest summary to remain, got %d", len(got))
+	}
+	if got[0] != strings.Repeat("b", 2500) {
+		t.Fatalf("expected oldest summary to be dropped, got len=%d", len([]rune(got[0])))
+	}
+}

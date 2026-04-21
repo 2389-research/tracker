@@ -101,22 +101,27 @@ func summarizeEpisodeOutput(output string, isError bool) string {
 
 func normalizeEpisodeSummaries(in []string) []string {
 	out := make([]string, 0, len(in))
+	runeLens := make([]int, 0, len(in))
 	for _, s := range in {
 		s = strings.TrimSpace(s)
 		if s != "" {
 			out = append(out, s)
+			runeLens = append(runeLens, len([]rune(s)))
 		}
 	}
 	if len(out) > maxEpisodeSummaryCount {
+		trimmed := len(out) - maxEpisodeSummaryCount
 		out = out[len(out)-maxEpisodeSummaryCount:]
+		runeLens = runeLens[trimmed:]
 	}
 	totalRunes := 0
-	for _, s := range out {
-		totalRunes += len([]rune(s))
+	for _, n := range runeLens {
+		totalRunes += n
 	}
 	for len(out) > 1 && totalRunes > maxEpisodeSummaryTotalRunes {
-		totalRunes -= len([]rune(out[0]))
+		totalRunes -= runeLens[0]
 		out = out[1:]
+		runeLens = runeLens[1:]
 	}
 	return out
 }
