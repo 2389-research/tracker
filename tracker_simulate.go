@@ -69,8 +69,39 @@ func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse pipeline: %w", err)
 	}
+	report, err := simulateFromGraph(ctx, graph)
+	if err != nil {
+		return nil, err
+	}
+	report.Format = format
+	return report, nil
+}
+
+// SimulateGraph returns a SimulateReport for a pre-parsed graph. It is the
+// graph-in variant of Simulate: callers that already parsed (e.g. the CLI's
+// validate + simulate flow, or tooling that built a graph programmatically)
+// avoid a second parse. Unlike Simulate, Format is left empty — there is no
+// source string to inspect; the caller can set it if desired.
+//
+// ctx is honored at entry; nil is coalesced to context.Background(). The
+// graph itself is consumed synchronously and reads are O(nodes+edges).
+func SimulateGraph(ctx context.Context, graph *pipeline.Graph) (*SimulateReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if graph == nil {
+		return nil, fmt.Errorf("SimulateGraph: graph is nil")
+	}
+	return simulateFromGraph(ctx, graph)
+}
+
+// simulateFromGraph is the shared internal implementation used by both
+// Simulate and SimulateGraph. It assumes ctx is non-nil and not cancelled.
+func simulateFromGraph(_ context.Context, graph *pipeline.Graph) (*SimulateReport, error) {
 	r := &SimulateReport{
-		Format:    format,
 		Name:      graph.Name,
 		StartNode: graph.StartNode,
 		ExitNode:  graph.ExitNode,

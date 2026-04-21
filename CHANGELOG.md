@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`tracker.SimulateGraph(ctx, graph)`** — graph-in variant of `Simulate` that accepts a pre-parsed `*pipeline.Graph` and returns a `SimulateReport`. Lets callers that already parsed the pipeline (CLI flows that also run `ValidateSource`, tooling that builds a graph programmatically) avoid a second parse. `Simulate(ctx, source)` is now a thin wrapper over `parsePipelineSource` + `SimulateGraph`; signature and behavior unchanged.
+
+### Fixed
+
+- **`tracker simulate` now parses the pipeline source exactly once** (closes #108). Previously `runSimulateCmd` parsed twice — once for the validation-warnings section, again inside `tracker.Simulate`. That risked a TOCTOU mismatch between the two views, duplicated dippin-lang parser side effects (lint warnings printed twice), and burned extra CPU on large `.dip` files. The CLI now reads the source once, calls `tracker.ValidateSource` for `{Graph, Errors, Warnings}`, and hands the same graph to `tracker.SimulateGraph`. CLI stdout is byte-identical to before; only the duplicated parser-logging lines are gone.
+
 ## [0.20.0] - 2026-04-21
 
 ### Added

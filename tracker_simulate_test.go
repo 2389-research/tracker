@@ -112,6 +112,69 @@ func TestSimulate_CtxCancelledAtEntry(t *testing.T) {
 	}
 }
 
+func TestSimulateGraph_AcceptsPrebuiltGraph(t *testing.T) {
+	// Parse once via ValidateSource, then pass the graph to SimulateGraph.
+	// The resulting report's nodes/edges/plan must match what Simulate
+	// produces for the same source — only Format differs (SimulateGraph
+	// leaves it empty because it has no source string to detect from).
+	result, err := ValidateSource(simpleSource)
+	if err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+	if result.Graph == nil {
+		t.Fatal("ValidateSource returned nil graph for valid source")
+	}
+
+	viaGraph, err := SimulateGraph(context.Background(), result.Graph)
+	if err != nil {
+		t.Fatalf("SimulateGraph: %v", err)
+	}
+	viaSource, err := Simulate(context.Background(), simpleSource)
+	if err != nil {
+		t.Fatalf("Simulate: %v", err)
+	}
+
+	if viaGraph.Format != "" {
+		t.Errorf("SimulateGraph Format should be empty, got %q", viaGraph.Format)
+	}
+	if viaGraph.StartNode != viaSource.StartNode || viaGraph.ExitNode != viaSource.ExitNode {
+		t.Errorf("start/exit mismatch: graph=(%s,%s) source=(%s,%s)",
+			viaGraph.StartNode, viaGraph.ExitNode, viaSource.StartNode, viaSource.ExitNode)
+	}
+	if len(viaGraph.Nodes) != len(viaSource.Nodes) {
+		t.Errorf("node count: graph=%d source=%d", len(viaGraph.Nodes), len(viaSource.Nodes))
+	}
+	if len(viaGraph.Edges) != len(viaSource.Edges) {
+		t.Errorf("edge count: graph=%d source=%d", len(viaGraph.Edges), len(viaSource.Edges))
+	}
+	if len(viaGraph.ExecutionPlan) != len(viaSource.ExecutionPlan) {
+		t.Errorf("plan length: graph=%d source=%d", len(viaGraph.ExecutionPlan), len(viaSource.ExecutionPlan))
+	}
+}
+
+func TestSimulateGraph_NilGraph(t *testing.T) {
+	_, err := SimulateGraph(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for nil graph")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Errorf("err = %v, expected to mention nil", err)
+	}
+}
+
+func TestSimulateGraph_CtxCancelledAtEntry(t *testing.T) {
+	result, err := ValidateSource(simpleSource)
+	if err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = SimulateGraph(ctx, result.Graph)
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
 func TestSimulate_GraphAttrsPopulated(t *testing.T) {
 	// Use DOT format to set graph-level attributes reliably without
 	// depending on dippin-lang's specific syntax for workflow-level attrs.
