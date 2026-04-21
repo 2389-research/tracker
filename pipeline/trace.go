@@ -67,6 +67,8 @@ type ProviderUsage struct {
 	SessionCount     int     `json:"session_count"`
 }
 
+const unknownProvider = "unknown"
+
 // UsageSummary aggregates token usage and cost across all pipeline nodes.
 type UsageSummary struct {
 	TotalInputTokens      int                      `json:"total_input_tokens"`
@@ -100,7 +102,7 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 		s.SessionCount++
 		provider := e.Stats.Provider
 		if provider == "" {
-			provider = "unknown"
+			provider = unknownProvider
 		}
 		pt := s.ProviderTotals[provider]
 		pt.InputTokens += e.Stats.InputTokens

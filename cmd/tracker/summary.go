@@ -404,6 +404,9 @@ func printBudgetHaltBanner(result *pipeline.EngineResult) {
 	}
 }
 
+// runUsageSummary returns the post-run usage source of truth for summary output:
+// prefer EngineResult.Usage (precomputed trace aggregate), fallback to deriving
+// from the trace for callers/tests that populate only Trace.
 func runUsageSummary(result *pipeline.EngineResult) *pipeline.UsageSummary {
 	if result == nil {
 		return nil

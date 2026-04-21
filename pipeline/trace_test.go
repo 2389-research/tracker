@@ -758,7 +758,7 @@ func TestAggregateUsage_TracksEntriesWithoutProviderAsUnknown(t *testing.T) {
 	if _, ok := s.ProviderTotals["openai"]; !ok {
 		t.Errorf("openai missing from ProviderTotals")
 	}
-	if unknown := s.ProviderTotals["unknown"]; unknown.TotalTokens != 150 || unknown.SessionCount != 1 {
+	if unknown := s.ProviderTotals[unknownProvider]; unknown.TotalTokens != 150 || unknown.SessionCount != 1 {
 		t.Errorf("unknown provider rollup = %+v", unknown)
 	}
 }
