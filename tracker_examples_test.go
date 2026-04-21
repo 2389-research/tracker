@@ -14,6 +14,10 @@ func ExampleDiagnose() {
 		fmt.Println("diagnose failed")
 		return
 	}
+	if len(report.Failures) == 0 {
+		fmt.Println("no failures")
+		return
+	}
 	fmt.Println("failed node:", report.Failures[0].NodeID)
 	fmt.Println("retry count:", report.Failures[0].RetryCount)
 	// Output:
@@ -47,4 +51,3 @@ func ExampleNewNDJSONWriter() {
 	// Output:
 	// true
 }
-
