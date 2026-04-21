@@ -75,6 +75,25 @@ func TestSimulateShowsGraphAttrs(t *testing.T) {
 	}
 }
 
+func TestSimulateShowsGraphAttrsSorted(t *testing.T) {
+	path := writeTestDOT(t, testDOT)
+	var buf bytes.Buffer
+	err := runSimulateCmd(path, "", &buf)
+	if err != nil {
+		t.Fatalf("runSimulateCmd error: %v", err)
+	}
+
+	output := buf.String()
+	defaultRetryIdx := strings.Index(output, "default_retry_policy = standard")
+	llmModelIdx := strings.Index(output, "llm_model = claude-sonnet-4-6")
+	if defaultRetryIdx == -1 || llmModelIdx == -1 {
+		t.Fatalf("missing graph attrs in output:\n%s", output)
+	}
+	if defaultRetryIdx > llmModelIdx {
+		t.Errorf("graph attrs not sorted:\n%s", output)
+	}
+}
+
 func TestSimulateShowsNodes(t *testing.T) {
 	path := writeTestDOT(t, testDOT)
 	var buf bytes.Buffer

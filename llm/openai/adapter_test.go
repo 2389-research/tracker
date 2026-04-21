@@ -713,7 +713,7 @@ func TestAdapterStream(t *testing.T) {
 		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}`,
 		"",
 		"event: response.completed",
-		`data: {"type":"response.completed","response":{"id":"resp_s1","status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[]}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_s1","status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15,"output_tokens_details":{"reasoning_tokens":3}},"output":[]}}`,
 		"",
 	}, "\n")
 
@@ -757,6 +757,9 @@ func TestAdapterStream(t *testing.T) {
 	}
 	if events[5].Type != llm.EventFinish {
 		t.Errorf("last event should be Finish, got %v", events[5].Type)
+	}
+	if events[5].Usage == nil || events[5].Usage.ReasoningTokens == nil || *events[5].Usage.ReasoningTokens != 3 {
+		t.Fatalf("expected finish usage reasoning tokens 3, got %+v", events[5].Usage)
 	}
 }
 

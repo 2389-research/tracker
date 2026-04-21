@@ -1593,6 +1593,38 @@ func TestVerifyAfterEdit_MaxRetriesExhausted(t *testing.T) {
 	}
 }
 
+func TestRunRepairTurnEstimatesCostWhenMissing(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Model = "gpt-4.1"
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("fixed"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+				Usage: llm.Usage{
+					InputTokens:  100,
+					OutputTokens: 50,
+					TotalTokens:  150,
+				},
+			},
+		},
+	}
+
+	sess := mustNewSession(t, client, cfg)
+	result := &SessionResult{}
+	if err := sess.runRepairTurn(context.Background(), result); err != nil {
+		t.Fatalf("runRepairTurn returned error: %v", err)
+	}
+
+	if result.Usage.InputTokens != 100 || result.Usage.OutputTokens != 50 {
+		t.Fatalf("usage totals wrong: %+v", result.Usage)
+	}
+	wantCost := llm.EstimateCost(cfg.Model, llm.Usage{InputTokens: 100, OutputTokens: 50, TotalTokens: 150})
+	if result.Usage.EstimatedCost != wantCost {
+		t.Fatalf("EstimatedCost = %f, want %f", result.Usage.EstimatedCost, wantCost)
+	}
+}
+
 func TestCheckpointInjection(t *testing.T) {
 	// Set up a mock that tracks injected messages.
 	var capturedMessages []string
