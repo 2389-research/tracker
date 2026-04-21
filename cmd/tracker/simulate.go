@@ -13,13 +13,15 @@ import (
 )
 
 // runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
-// Auto-detects format based on file extension unless formatOverride is set.
+// Format is resolved in this order: explicit formatOverride, then the file
+// extension (.dip / .dot), then content-sniffing inside the library as a
+// fallback for ambiguous inputs. Embedded workflows are always .dip.
 //
-// The source is read and parsed exactly once — ValidateSource returns both
-// the parsed graph and any validation warnings, and SimulateGraph consumes
-// that same graph for the structured report. No second os.ReadFile, no
-// duplicated dippin-lang parser side effects, no TOCTOU window between
-// validation and simulation.
+// The source is read and parsed exactly once — ValidateSource returns the
+// parsed graph alongside any structural errors and lint warnings, and
+// SimulateGraph consumes that same graph for the structured report. No
+// second os.ReadFile, no duplicated dippin-lang parser side effects, no
+// TOCTOU window between validation and simulation.
 func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
@@ -31,9 +33,21 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		return err
 	}
 
+	// Preserve the prior CLI behavior: format comes from the explicit flag,
+	// otherwise from the file extension. Only content-sniff if neither
+	// source gives us an answer (extension ".dip" for unknown, per
+	// detectPipelineFormat).
+	format := formatOverride
+	if format == "" && !isEmbedded {
+		format = detectPipelineFormat(resolved)
+	}
+	if format == "dot" {
+		emitDOTDeprecationWarning(os.Stderr)
+	}
+
 	var opts []tracker.ValidateOption
-	if formatOverride != "" {
-		opts = append(opts, tracker.WithValidateFormat(formatOverride))
+	if format != "" {
+		opts = append(opts, tracker.WithValidateFormat(format))
 	}
 	result, validateErr := tracker.ValidateSource(source, opts...)
 	if validateErr != nil && (result == nil || result.Graph == nil) {
@@ -41,11 +55,24 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		return fmt.Errorf("load pipeline: %w", validateErr)
 	}
 
+	// ValidationResult.Errors carries structural problems (unreachable nodes,
+	// bad references, etc.); Warnings carries lint-style advisory items.
+	// The old CLI printed only Errors under a "Validation Warnings" heading
+	// — confusing. We now split them into explicit sections and continue to
+	// simulate either way (matching prior continue-on-errors behavior so
+	// users can still see the plan of a draft pipeline).
 	if len(result.Errors) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "=== Validation Warnings ===")
+		fmt.Fprintln(w, "=== Validation Errors ===")
 		for _, e := range result.Errors {
 			fmt.Fprintf(w, "  ! %s\n", e)
+		}
+	}
+	if len(result.Warnings) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "=== Validation Warnings ===")
+		for _, msg := range result.Warnings {
+			fmt.Fprintf(w, "  ~ %s\n", msg)
 		}
 	}
 
