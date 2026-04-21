@@ -49,7 +49,7 @@ tracker --artifact-dir /tmp/tracker-runs build_product
 ```
 
 > **What's new in v0.20.0** (2026-04-21): new `stack.manager_loop` supervisor handler for async child-pipeline supervision with stop conditions and steering (Attractor spec 4.11); engine-level steering channel (`WithSteeringChan`) for injecting context into running pipelines; accurate cost estimation via the model catalog with cache-token pricing; April 2026 model catalog refresh (Claude Opus 4.7, GPT-5.4 family, Gemini 2.5 GA, Gemini 3.1 pro preview, corrected Opus 4.6 pricing); ACP sandbox hardening against `..` path traversal. See [CHANGELOG.md](./CHANGELOG.md) and [`docs/manager-loop.md`](./docs/manager-loop.md).
-
+>
 > **Previously in v0.19.0** (2026-04-20): breaking library API changes (ctx-first `Doctor`/`Diagnose`/`Audit`/`Simulate`, `NDJSONEvent` → `StreamEvent`, typed `CheckStatus` / `SuggestionKind`); workflow-level `${params.*}` with `--param` overrides; workflow-level budget ceilings (`max_total_tokens` / `max_cost_cents` / `max_wall_time`) in `defaults:`; per-human-gate `timeout` / `timeout_action`; TUI now pre-populates subgraph children in the sidebar; OpenRouter `invalid_prompt` fix for GLM/Qwen/Kimi; SWE-bench-driven agent defaults lifted benchmark from 59% → 70%.
 
 ## Pipeline Examples
