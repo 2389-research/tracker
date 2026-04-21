@@ -185,6 +185,13 @@ func makeSemaphore(max int) chan struct{} {
 // sem, if non-nil, is a buffered channel used as a semaphore to cap concurrency.
 // branchTimeout, if > 0, is applied as a per-branch context deadline.
 func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
+	// Register wg.Done() up front so every early return path — including
+	// the ctx.Done() branch on the semaphore wait below — still signals
+	// completion. Previously the defer sat after the select, so a
+	// cancellation while blocked on the concurrency slot could skip it
+	// and deadlock wg.Wait() in executeBranches.
+	defer wg.Done()
+
 	if sem != nil {
 		select {
 		case sem <- struct{}{}:
@@ -198,7 +205,6 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 		}
 	}
 
-	defer wg.Done()
 	defer h.recoverBranch(idx, tn, resultsCh)
 
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{

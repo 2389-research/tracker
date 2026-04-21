@@ -254,6 +254,10 @@ func (h *ToolHandler) applyWorkingDir(node *pipeline.Node, command string) (stri
 }
 
 // parseTimeout returns the timeout for the node, preferring the node attr over the default.
+// Rejects non-positive durations because exec.ExecutionEnvironment calls
+// context.WithTimeout(timeout) with the returned value, and a zero or
+// negative timeout there causes immediate cancellation rather than the
+// "no timeout" the user probably intended.
 func (h *ToolHandler) parseTimeout(node *pipeline.Node) (time.Duration, error) {
 	timeoutStr, ok := node.Attrs["timeout"]
 	if !ok {
@@ -262,6 +266,9 @@ func (h *ToolHandler) parseTimeout(node *pipeline.Node) (time.Duration, error) {
 	parsed, err := time.ParseDuration(timeoutStr)
 	if err != nil {
 		return 0, fmt.Errorf("node %q has invalid timeout %q: %w", node.ID, timeoutStr, err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("node %q has non-positive timeout %q: must be > 0", node.ID, timeoutStr)
 	}
 	return parsed, nil
 }
