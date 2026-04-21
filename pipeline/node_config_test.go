@@ -42,6 +42,19 @@ func TestAgentConfig_NodeAttrsWinOverGraph(t *testing.T) {
 	}
 }
 
+// ReflectOnError must default to true even when the attr is absent from the
+// node, matching the documented semantic. Regression for CodeRabbit major on
+// PR #148 where the struct's Go zero value contradicted the documented default.
+func TestAgentConfig_ReflectOnErrorDefaultsTrueWhenAbsent(t *testing.T) {
+	cfg := (&Node{Attrs: map[string]string{}}).AgentConfig(nil)
+	if !cfg.ReflectOnError {
+		t.Errorf("ReflectOnError should default to true when absent; got false")
+	}
+	if cfg.ReflectOnErrorSet {
+		t.Errorf("ReflectOnErrorSet should be false when attr is absent")
+	}
+}
+
 func TestAgentConfig_ReflectOnErrorThreeState(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -49,7 +62,7 @@ func TestAgentConfig_ReflectOnErrorThreeState(t *testing.T) {
 		wantValue bool
 		wantSet   bool
 	}{
-		{"unset", "", false, false},
+		{"unset", "", true, false}, // default-true baseline kicks in
 		{"explicit false", "false", false, true},
 		{"explicit true", "true", true, true},
 		{"any other value counts as set+true", "yes", true, true},
@@ -234,11 +247,15 @@ func TestRetryConfig_GraphDefaultsWhenNodeSilent(t *testing.T) {
 	}
 }
 
-func TestRetryConfig_InvalidMaxRetriesLeavesUnset(t *testing.T) {
+// When node max_retries is unparseable AND no graph default is configured,
+// MaxRetriesSet stays false (engine falls back to its hardcoded default). The
+// cascade case where a graph default IS present is covered by
+// TestRetryConfig_UnparseableNodeMaxRetriesCascadesToGraph below.
+func TestRetryConfig_UnparseableMaxRetries_NoGraphFallback(t *testing.T) {
 	n := &Node{Attrs: map[string]string{"max_retries": "not-a-number"}}
 	rc := n.RetryConfig(nil)
 	if rc.MaxRetriesSet {
-		t.Errorf("unparseable max_retries should leave MaxRetriesSet=false; got true")
+		t.Errorf("unparseable max_retries without graph default should leave MaxRetriesSet=false; got true")
 	}
 }
 

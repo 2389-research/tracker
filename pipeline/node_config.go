@@ -23,8 +23,8 @@ type AgentNodeConfig struct {
 	ACPAgent        string
 
 	AutoStatus        bool
-	ReflectOnError    bool // default true; only overridden when explicit "false"
-	ReflectOnErrorSet bool // true when the attr was present at either level
+	ReflectOnError    bool // initialized to true by AgentConfig; explicit "false" disables
+	ReflectOnErrorSet bool // true when the attr was present on the node
 
 	VerifyAfterEdit    bool
 	VerifyAfterEditSet bool
@@ -58,7 +58,14 @@ type AgentNodeConfig struct {
 // strings fall back to the zero value (matching the previous permissive
 // behavior of the handler apply* methods).
 func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
-	cfg := AgentNodeConfig{}
+	cfg := AgentNodeConfig{
+		// ReflectOnError semantically defaults to true. Setting it here
+		// rather than leaving the zero-value means the struct's value
+		// matches the documented behavior even for the "unset" case —
+		// consumers that copy cfg.ReflectOnError directly don't accidentally
+		// disable reflection on untouched nodes.
+		ReflectOnError: true,
+	}
 	// Non-overridable (node-only) simple strings.
 	cfg.Backend = n.Attrs["backend"]
 	cfg.WorkingDir = n.Attrs["working_dir"]
