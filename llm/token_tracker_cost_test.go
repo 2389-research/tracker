@@ -83,3 +83,25 @@ func TestTokenTracker_CostByProvider_NilResolver(t *testing.T) {
 		t.Errorf("nil resolver should yield $0, got %.4f", breakdown["anthropic"].USD)
 	}
 }
+
+func TestTokenTracker_AddUsage_NormalizesModel(t *testing.T) {
+	// AddUsage must canonicalize the model through the catalog so callers
+	// passing aliases or versioned IDs get the same resolution as WrapComplete.
+	tr := NewTokenTracker()
+	tr.AddUsage("anthropic", Usage{InputTokens: 1000}, "sonnet-4-6")
+
+	if got := tr.ModelForProvider("anthropic"); got != "claude-sonnet-4-6" {
+		t.Errorf("alias not canonicalized: got %q, want %q", got, "claude-sonnet-4-6")
+	}
+}
+
+func TestTokenTracker_AddUsage_UnknownModelPreserved(t *testing.T) {
+	// Unknown models pass through so downstream fallback resolvers get
+	// a chance to use them.
+	tr := NewTokenTracker()
+	tr.AddUsage("anthropic", Usage{InputTokens: 1000}, "claude-custom-2099")
+
+	if got := tr.ModelForProvider("anthropic"); got != "claude-custom-2099" {
+		t.Errorf("unknown model not preserved: got %q", got)
+	}
+}

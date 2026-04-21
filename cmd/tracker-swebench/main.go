@@ -94,14 +94,20 @@ Flags:
 	}
 
 	// Write run metadata.
+	// Record which base URL override is active (if any). Normalize hyphens
+	// to underscores before uppercasing so providers like "openai-compat"
+	// map to OPENAI_COMPAT_BASE_URL, matching how ResolveProviderBaseURL
+	// derives its env var keys.
+	baseURLOverride := os.Getenv(strings.ToUpper(strings.ReplaceAll(*provider, "-", "_")) + "_BASE_URL")
 	meta := RunMeta{
-		Model:      *model,
-		Provider:   *provider,
-		GatewayURL: *gatewayURL,
-		Dataset:    *dataset,
-		MaxTurns:   *maxTurns,
-		Timeout:    timeout.String(),
-		Commit:     buildCommit(),
+		Model:           *model,
+		Provider:        *provider,
+		GatewayURL:      *gatewayURL,
+		BaseURLOverride: baseURLOverride,
+		Dataset:         *dataset,
+		MaxTurns:        *maxTurns,
+		Timeout:         timeout.String(),
+		Commit:          buildCommit(),
 	}
 	metaPath := filepath.Join(absResultsDir, "run_meta.json")
 	if err := WriteRunMeta(metaPath, meta); err != nil {

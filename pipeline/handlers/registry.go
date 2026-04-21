@@ -171,7 +171,6 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	registry.Register(NewExitHandler())
 	registry.Register(NewConditionalHandler())
 	registry.Register(NewFanInHandler())
-	registry.Register(NewManagerLoopHandler())
 
 	// Parallel handler needs the graph and registry for branch dispatch.
 	registry.Register(NewParallelHandler(graph, registry, cfg.pipelineEvents))
@@ -180,6 +179,7 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	registerToolHandler(registry, cfg)
 	registerHumanHandler(registry, cfg, graph)
 	registerSubgraphHandler(registry, cfg, opts)
+	registerManagerLoopHandler(registry, cfg, opts)
 
 	return registry
 }
@@ -256,6 +256,21 @@ func registerSubgraphHandler(registry *pipeline.HandlerRegistry, cfg *registryCo
 		registry.Register(pipeline.NewSubgraphHandler(
 			cfg.subgraphs, registry, cfg.pipelineEvents, factory,
 		))
+	}
+}
+
+// registerManagerLoopHandler registers the manager loop handler. When subgraphs are
+// provided, the handler gets full dependencies for launching child pipelines. Otherwise
+// a fallback handler is registered that returns clear errors at Execute time (keeps
+// the handler name resolvable for conformance tests and validation).
+func registerManagerLoopHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, opts []RegistryOption) {
+	if len(cfg.subgraphs) > 0 {
+		factory := NewRegistryFactory(opts...)
+		registry.Register(NewManagerLoopHandler(
+			cfg.subgraphs, registry, cfg.pipelineEvents, factory,
+		))
+	} else {
+		registry.Register(NewManagerLoopHandler(nil, nil, cfg.pipelineEvents, nil))
 	}
 }
 

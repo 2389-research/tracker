@@ -19,6 +19,7 @@ const (
 	EventCheckpointFailed  PipelineEventType = "checkpoint_failed"
 	EventParallelStarted   PipelineEventType = "parallel_started"
 	EventParallelCompleted PipelineEventType = "parallel_completed"
+	EventManagerCycleTick  PipelineEventType = "manager_cycle_tick"
 	EventLoopRestart       PipelineEventType = "loop_restart"
 	EventWarning           PipelineEventType = "warning"
 	EventEdgeTiebreaker    PipelineEventType = "edge_tiebreaker"
