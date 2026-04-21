@@ -148,10 +148,23 @@ func TestSimulate_OrphanNodesSortedInNodeList(t *testing.T) {
 		index[n.ID] = i
 	}
 
-	if index["AOrphan"] >= index["BOrphan"] {
+	aOrphanIndex, ok := index["AOrphan"]
+	if !ok {
+		t.Fatalf("missing node AOrphan in result: %+v", r.Nodes)
+	}
+	bOrphanIndex, ok := index["BOrphan"]
+	if !ok {
+		t.Fatalf("missing node BOrphan in result: %+v", r.Nodes)
+	}
+	endIndex, ok := index["End"]
+	if !ok {
+		t.Fatalf("missing node End in result: %+v", r.Nodes)
+	}
+
+	if aOrphanIndex >= bOrphanIndex {
 		t.Errorf("orphans not sorted in node list: %+v", r.Nodes)
 	}
-	if index["End"] >= index["AOrphan"] {
+	if endIndex >= aOrphanIndex {
 		t.Errorf("orphans should appear after reachable nodes: %+v", r.Nodes)
 	}
 }
