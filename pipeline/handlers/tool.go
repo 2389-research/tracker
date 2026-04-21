@@ -318,5 +318,8 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 			pipeline.ContextKeyToolStderr: stderr,
 		},
 	}
+	if applyDeclaredWrites(node, outcome.ContextUpdates, stdout, "Tool stdout JSON") {
+		outcome.Status = pipeline.OutcomeFail
+	}
 	return outcome, pipeline.WriteStatusArtifact(artifactRoot, node.ID, outcome)
 }

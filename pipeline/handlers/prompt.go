@@ -29,7 +29,14 @@ func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
 
 	fidelity := pipeline.ResolveFidelity(node, graphAttrs)
 	if fidelity != pipeline.FidelityFull {
-		compacted := pipeline.CompactContext(pctx, nil, fidelity, artifactDir, "")
+		compacted := pipeline.CompactContextWithPinnedKeys(
+			pctx,
+			nil,
+			fidelity,
+			artifactDir,
+			"",
+			pipeline.ParseDeclaredKeys(node.Attrs["reads"]),
+		)
 		prompt = prependContextSummary(prompt, compacted, fidelity)
 	} else {
 		prompt = pipeline.InjectPipelineContext(prompt, pctx)

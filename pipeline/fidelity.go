@@ -98,6 +98,12 @@ func ResolveFidelity(node *Node, graphAttrs map[string]string) Fidelity {
 // CompactContext reads the checkpoint context and optionally artifact files from
 // disk, returning a compacted version based on the fidelity level.
 func CompactContext(ctx *PipelineContext, completedNodes []string, fidelity Fidelity, artifactDir string, runID string) map[string]string {
+	return CompactContextWithPinnedKeys(ctx, completedNodes, fidelity, artifactDir, runID, nil)
+}
+
+// CompactContextWithPinnedKeys is like CompactContext but keeps the provided
+// keys in medium/truncate modes in addition to the built-in medium key set.
+func CompactContextWithPinnedKeys(ctx *PipelineContext, completedNodes []string, fidelity Fidelity, artifactDir string, runID string, pinnedKeys []string) map[string]string {
 	switch fidelity {
 	case FidelityFull:
 		return ctx.Snapshot()
@@ -106,7 +112,7 @@ func CompactContext(ctx *PipelineContext, completedNodes []string, fidelity Fide
 		return compactSummaryHigh(ctx, completedNodes, artifactDir, runID)
 
 	case FidelitySummaryMedium:
-		return compactMedium(ctx, false)
+		return compactMedium(ctx, false, pinnedKeys)
 
 	case FidelitySummaryLow:
 		return compactLow(ctx, completedNodes)
@@ -115,7 +121,7 @@ func CompactContext(ctx *PipelineContext, completedNodes []string, fidelity Fide
 		return compactCompact(ctx)
 
 	case FidelityTruncate:
-		return compactMedium(ctx, true)
+		return compactMedium(ctx, true, pinnedKeys)
 
 	default:
 		return ctx.Snapshot()
@@ -163,7 +169,7 @@ func truncateAtWordBoundary(s string, limit int) string {
 
 // compactMedium returns only medium-fidelity keys. When truncate is true,
 // each value is capped at DefaultTruncateLimit characters, cut at a word boundary.
-func compactMedium(ctx *PipelineContext, truncate bool) map[string]string {
+func compactMedium(ctx *PipelineContext, truncate bool, pinnedKeys []string) map[string]string {
 	result := make(map[string]string)
 	for _, key := range mediumKeys {
 		if val, ok := ctx.Get(key); ok {
@@ -172,6 +178,16 @@ func compactMedium(ctx *PipelineContext, truncate bool) map[string]string {
 			}
 			result[key] = val
 		}
+	}
+	for _, key := range normalizeDeclaredKeys(pinnedKeys) {
+		val, ok := ctx.Get(key)
+		if !ok {
+			continue
+		}
+		if truncate {
+			val = truncateAtWordBoundary(val, DefaultTruncateLimit)
+		}
+		result[key] = val
 	}
 	return result
 }

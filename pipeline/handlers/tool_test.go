@@ -125,6 +125,61 @@ func TestToolHandlerFailure(t *testing.T) {
 	}
 }
 
+func TestToolHandlerDeclaredWritesExtracted(t *testing.T) {
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		`printf '%s\n' '{"commit_sha":"abc","branch":"main"}'`: {Stdout: "{\"commit_sha\":\"abc\",\"branch\":\"main\"}\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "extract",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": `printf '%s\n' '{"commit_sha":"abc","branch":"main"}'`,
+			"writes":       "commit_sha,branch",
+		},
+	}
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("status = %q, want success", outcome.Status)
+	}
+	if got := outcome.ContextUpdates["commit_sha"]; got != "abc" {
+		t.Fatalf("commit_sha = %q, want abc", got)
+	}
+	if got := outcome.ContextUpdates["branch"]; got != "main" {
+		t.Fatalf("branch = %q, want main", got)
+	}
+}
+
+func TestToolHandlerDeclaredWritesInvalidJSONFails(t *testing.T) {
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo nope": {Stdout: "nope\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "extract",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": "echo nope",
+			"writes":       "commit_sha",
+		},
+	}
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Fatalf("status = %q, want fail", outcome.Status)
+	}
+	if outcome.ContextUpdates[contextKeyWritesError] == "" {
+		t.Fatal("expected writes_error to be set")
+	}
+}
+
 func TestToolHandlerMissingCommand(t *testing.T) {
 	env := exec.NewLocalEnvironment(t.TempDir())
 	h := NewToolHandler(env)
