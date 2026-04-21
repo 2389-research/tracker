@@ -27,4 +27,3 @@ func TestFormatWritesError_LeavesShortRawOutput(t *testing.T) {
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }
-
