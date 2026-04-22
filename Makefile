@@ -149,7 +149,7 @@ lint:
 
 doctor:
 	@FAIL=0; \
-	for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip; do \
+	for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip examples/manager_loop_demo.dip; do \
 		GRADE=$$($(DIPPIN) doctor "$$f" 2>&1 | grep 'Grade' | sed 's/.*Grade: //' | sed 's/  .*//'); \
 		SCORE=$$($(DIPPIN) doctor "$$f" 2>&1 | grep 'Score' | sed 's/.*Score: //' | sed 's/\/100//'); \
 		printf "%-50s %s  %s/100\n" "$$(basename $$f)" "$$GRADE" "$$SCORE"; \

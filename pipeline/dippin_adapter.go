@@ -14,11 +14,13 @@ import (
 )
 
 var (
-	ErrNilWorkflow     = errors.New("nil workflow")
-	ErrMissingStart    = errors.New("workflow missing Start node")
-	ErrMissingExit     = errors.New("workflow missing Exit node")
-	ErrUnknownNodeKind = errors.New("unknown node kind")
-	ErrUnknownConfig   = errors.New("unknown config type")
+	ErrNilWorkflow            = errors.New("nil workflow")
+	ErrMissingStart           = errors.New("workflow missing Start node")
+	ErrMissingExit            = errors.New("workflow missing Exit node")
+	ErrUnknownNodeKind        = errors.New("unknown node kind")
+	ErrUnknownConfig          = errors.New("unknown config type")
+	ErrInvalidSteerContextKey = errors.New("steer_context key contains ':' which breaks block-form round-trip through the .dip formatter")
+	ErrMissingManagerLoopCfg  = errors.New("manager_loop node is missing required ir.ManagerLoopConfig")
 )
 
 // FromDippinIR converts a Dippin IR Workflow to a Tracker Graph.
@@ -141,6 +143,16 @@ func convertNode(irNode *ir.Node) (*Node, error) {
 		return nil, fmt.Errorf("%s: %w", irNode.Kind, ErrUnknownNodeKind)
 	}
 
+	// Kind-specific required-config guard. A manager_loop node with a nil
+	// Config would otherwise flow through extractNodeAttrs as a no-op and
+	// produce a graph node without subgraph_ref, surfacing later at Execute
+	// time as a vague runtime error. Fail loudly at build time instead.
+	// Scoped to manager_loop for now — we may extend the same guard to other
+	// kinds as follow-ups if they exhibit the same silent-degrade pattern.
+	if irNode.Kind == ir.NodeManagerLoop && irNode.Config == nil {
+		return nil, fmt.Errorf("node %s: %w", irNode.ID, ErrMissingManagerLoopCfg)
+	}
+
 	gNode := &Node{
 		ID:    irNode.ID,
 		Shape: shape,
@@ -194,7 +206,7 @@ func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool,
 	case ir.ConditionalConfig:
 		// Conditional nodes are pure routing — no config to extract.
 	case ir.ManagerLoopConfig:
-		extractManagerLoopAttrs(cfg, attrs)
+		return true, extractManagerLoopAttrs(cfg, attrs)
 	default:
 		return false, nil
 	}
@@ -453,7 +465,7 @@ func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
 // tracker defaults. If/when the handler grows those modes this extractor is
 // the right place to translate the zero-value IR sentinels into the
 // corresponding handler attrs.
-func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) {
+func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) error {
 	if cfg.SubgraphRef != "" {
 		attrs["subgraph_ref"] = cfg.SubgraphRef
 	}
@@ -469,9 +481,14 @@ func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) 
 	if s := managerLoopConditionText(cfg.SteerCondition); s != "" {
 		attrs["steer_condition"] = s
 	}
-	if s := flattenSteerContext(cfg.SteerContext); s != "" {
+	s, err := flattenSteerContext(cfg.SteerContext)
+	if err != nil {
+		return err
+	}
+	if s != "" {
 		attrs["steer_context"] = s
 	}
+	return nil
 }
 
 // managerLoopConditionText extracts the best textual form of a condition:
@@ -520,17 +537,31 @@ func encodeSteerContextToken(s string) string {
 // characters (',', '=', '%') in keys and values are percent-encoded so the
 // round-trip through DOT → migrate stays lossless.
 //
-// Mirrors dippin-lang v0.22.0 export.flattenSteerContext exactly.
-func flattenSteerContext(m map[string]string) string {
+// Fails loudly when any key contains ':' — the dippin-lang v0.22.0 block-form
+// formatter writes steer_context entries as "key: value" lines, so a colon in
+// the key breaks the .dip→IR→.dip round-trip. The upstream parser silently
+// drops such keys with a diagnostic; we reject at graph-build time instead so
+// the author sees a clear, load-bearing error rather than a pipeline that
+// quietly lost a steering key. The three reserved delimiter chars (',', '=',
+// '%') are percent-encoded rather than rejected because the encoder can
+// round-trip them losslessly.
+//
+// Mirrors dippin-lang v0.22.0 export.flattenSteerContext for the happy path.
+func flattenSteerContext(m map[string]string) (string, error) {
 	if len(m) == 0 {
-		return ""
+		return "", nil
 	}
 	keys := slices.Sorted(maps.Keys(m))
+	for _, k := range keys {
+		if strings.Contains(k, ":") {
+			return "", fmt.Errorf("%w: %q", ErrInvalidSteerContextKey, k)
+		}
+	}
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, encodeSteerContextToken(k)+"="+encodeSteerContextToken(m[k]))
 	}
-	return strings.Join(parts, ",")
+	return strings.Join(parts, ","), nil
 }
 
 // formatManagerLoopCondition re-serializes an ir.ConditionExpr back into its
@@ -689,10 +720,15 @@ func convertEdge(irEdge *ir.Edge) *Edge {
 		Attrs: make(map[string]string),
 	}
 
-	// Serialize condition if present
-	if irEdge.Condition != nil {
-		gEdge.Condition = irEdge.Condition.Raw
-		gEdge.Attrs["condition"] = irEdge.Condition.Raw
+	// Serialize condition if present. We prefer Raw (set by the parser) and
+	// fall back to formatting Parsed on the fly — the same Raw-then-Parsed
+	// preference as managerLoopConditionText so an ir.Edge with only
+	// .Parsed populated (e.g. constructed by tests or simulate without
+	// running the parser) still produces a conditional edge rather than a
+	// silent unconditional one.
+	if cond := managerLoopConditionText(irEdge.Condition); cond != "" {
+		gEdge.Condition = cond
+		gEdge.Attrs["condition"] = cond
 	}
 
 	// Preserve weight

@@ -1,0 +1,21 @@
+workflow ManagerLoopFixture
+  goal: "E2E fixture for the manager_loop adapter path — exercises all 6 flat attrs."
+  start: Supervise
+  exit: Done
+
+  manager_loop Supervise
+    label: "Quality Gate Supervisor"
+    subgraph_ref: child.dip
+    poll_interval: 15s
+    max_cycles: 20
+    stop_condition: stack.child.outcome = success
+    steer_condition: stack.child.cycles = 5
+    steer_context:
+      hint: halfway_through
+      priority: high
+
+  agent Done
+    label: Done
+
+  edges
+    Supervise -> Done

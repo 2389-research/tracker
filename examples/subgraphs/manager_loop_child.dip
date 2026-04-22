@@ -1,0 +1,23 @@
+workflow ManagerLoopChild
+  goal: "Child pipeline supervised by manager_loop_demo.dip — performs one cycle of work per run."
+  start: DoWork
+  exit: Done
+
+  agent DoWork
+    label: "Perform one unit of supervised work."
+    auto_status: true
+    prompt:
+      You are a worker supervised by a manager_loop. Perform one cycle of
+      the assigned task. If the steering hint ${ctx.hint} is set, use it
+      to bias your approach.
+
+      End your response with STATUS: success when the work is complete,
+      or STATUS: fail if another cycle is required.
+
+  agent Done
+    label: "Finalize cycle result."
+    prompt:
+      Briefly summarize this cycle's outcome for the manager.
+
+  edges
+    DoWork -> Done

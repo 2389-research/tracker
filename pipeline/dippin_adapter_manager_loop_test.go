@@ -3,12 +3,15 @@
 package pipeline
 
 import (
+	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/2389-research/dippin-lang/ir"
+	"github.com/2389-research/dippin-lang/parser"
 )
 
 // TestFromDippinIR_ManagerLoopFlatAttrs verifies that all six ManagerLoopConfig
@@ -302,7 +305,10 @@ func TestFlattenSteerContext_Deterministic(t *testing.T) {
 		"a": "first",
 		"m": "middle",
 	}
-	got := flattenSteerContext(m)
+	got, err := flattenSteerContext(m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := "a=first,m=middle,z=last"
 	if got != want {
 		t.Errorf("flattenSteerContext = %q, want %q", got, want)
@@ -312,34 +318,47 @@ func TestFlattenSteerContext_Deterministic(t *testing.T) {
 // TestFlattenSteerContext_EmptyMap documents the empty-map convention:
 // empty input → empty string so callers can suppress the attr entirely.
 func TestFlattenSteerContext_EmptyMap(t *testing.T) {
-	if got := flattenSteerContext(nil); got != "" {
+	got, err := flattenSteerContext(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
 		t.Errorf("flattenSteerContext(nil) = %q, want empty", got)
 	}
-	if got := flattenSteerContext(map[string]string{}); got != "" {
+	got, err = flattenSteerContext(map[string]string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
 		t.Errorf("flattenSteerContext({}) = %q, want empty", got)
 	}
 }
 
 // TestFlattenSteerContext_EncodesReservedInKeysAndValues verifies both keys
-// and values get the three reserved chars escaped. Percent must go first so
-// it isn't double-encoded by the subsequent "," / "=" replacements.
+// and values get the three reserved chars escaped. The three delimiter chars
+// (',', '=', '%') are round-trippable via percent-encoding — only ':' is
+// rejected outright (see TestFlattenSteerContext_RejectsColonInKey).
+//
+// flattenSteerContext sorts the raw map keys before encoding, so the output
+// order reflects raw-key lexicographic order, not encoded-key order.
 func TestFlattenSteerContext_EncodesReservedInKeysAndValues(t *testing.T) {
 	// Key 'k,1' must encode to 'k%2C1'; value '50%off' to '50%25off';
 	// another key with '=' to '...%3D...'. flattenSteerContext sorts the
-	// raw map keys before encoding (slices.Sorted(maps.Keys(m))), so the
-	// output order reflects raw-key lexicographic order, not encoded-key
-	// order — this fixture's inputs happen to sort identically either way
-	// so the test exercises escaping, not ordering policy. If you add a
-	// case where raw and encoded order differ (e.g., '+' vs ','), update
-	// the expected output to match the raw-key sort.
+	// raw (unencoded) map keys before encoding them for emission — so
+	// this fixture's inputs sort as "k,1" < "k=2" < "percent" regardless
+	// of how the encoded form would sort. If you add a case where raw and
+	// encoded order differ (e.g., '+' vs ','), update the expected output
+	// to match the raw-key sort.
 	m := map[string]string{
 		"k,1":     "v1",
 		"k=2":     "v2",
 		"percent": "50%off",
 	}
-	got := flattenSteerContext(m)
-	// Raw keys sort as: "k,1" < "k=2" < "percent" (same order as encoded
-	// keys for this specific fixture).
+	got, err := flattenSteerContext(m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Raw keys sort as: "k,1" < "k=2" < "percent".
 	want := "k%2C1=v1,k%3D2=v2,percent=50%25off"
 	if got != want {
 		t.Errorf("flattenSteerContext = %q, want %q", got, want)
@@ -432,6 +451,263 @@ func TestFormatManagerLoopCondition_EvaluatorCompatibility(t *testing.T) {
 				t.Errorf("EvaluateCondition(%q) = %v, want %v", formatted, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestFromDippinIR_ManagerLoop_CondOrNotFormatting locks in the exact textual
+// form emitted by formatManagerLoopConditionExpr for ir.CondOr and ir.CondNot.
+// The sibling EvaluatorCompatibility test covers semantic round-trip, but this
+// one asserts the literal attr string on graph.Attrs so a typo in the `||` /
+// `not ` emitters (or a regression back to English `or` / `!`) fails a byte
+// comparison instead of slipping past a semantic-only check.
+func TestFromDippinIR_ManagerLoop_CondOrNotFormatting(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "MgrLoopOrNot",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "mgr",
+				Kind: ir.NodeManagerLoop,
+				Config: ir.ManagerLoopConfig{
+					SubgraphRef: "./child.dip",
+					// CondOr of two compare clauses.
+					StopCondition: &ir.Condition{
+						Parsed: ir.CondOr{
+							Left:  ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
+							Right: ir.CondCompare{Variable: "ctx.status", Op: "=", Value: "done"},
+						},
+					},
+					// CondNot wrapping a compare clause.
+					SteerCondition: &ir.Condition{
+						Parsed: ir.CondNot{
+							Inner: ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
+						},
+					},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "mgr"},
+			{From: "mgr", To: "exit"},
+		},
+	}
+
+	g, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	node := g.Nodes["mgr"]
+
+	// Exact textual match — a typo in `||` (e.g. `|` or English `or`) fails here.
+	if got, want := node.Attrs["stop_condition"], "outcome = success || status = done"; got != want {
+		t.Errorf("stop_condition = %q, want %q", got, want)
+	}
+	// Exact textual match — a typo in `not ` (e.g. `!` or English `!=`) fails here.
+	if got, want := node.Attrs["steer_condition"], "not outcome = success"; got != want {
+		t.Errorf("steer_condition = %q, want %q", got, want)
+	}
+}
+
+// TestFromDippinIR_ManagerLoop_RawBeatsParsed pins managerLoopConditionText's
+// preference: when both Raw and Parsed are populated on the same Condition,
+// Raw wins. This mirrors dippin-lang v0.22.0 export.dotManagerLoopConditionText
+// and is load-bearing — Raw preserves author intent (including whitespace and
+// token choice) that the formatter would normalize away.
+func TestFromDippinIR_ManagerLoop_RawBeatsParsed(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "MgrLoopRawBeatsParsed",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "mgr",
+				Kind: ir.NodeManagerLoop,
+				Config: ir.ManagerLoopConfig{
+					SubgraphRef: "./child.dip",
+					StopCondition: &ir.Condition{
+						// Distinctive Raw text the formatter would NOT produce.
+						Raw:    "stack.child.cycles = 7",
+						Parsed: ir.CondCompare{Variable: "ctx.other", Op: "=", Value: "something"},
+					},
+					SteerCondition: &ir.Condition{
+						// Another distinctive Raw string.
+						Raw:    "stack.child.status = running",
+						Parsed: ir.CondCompare{Variable: "ctx.different", Op: "=", Value: "nope"},
+					},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "mgr"},
+			{From: "mgr", To: "exit"},
+		},
+	}
+
+	g, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+	node := g.Nodes["mgr"]
+
+	if got, want := node.Attrs["stop_condition"], "stack.child.cycles = 7"; got != want {
+		t.Errorf("stop_condition = %q, want %q (Raw must beat Parsed)", got, want)
+	}
+	if got, want := node.Attrs["steer_condition"], "stack.child.status = running"; got != want {
+		t.Errorf("steer_condition = %q, want %q (Raw must beat Parsed)", got, want)
+	}
+}
+
+// TestFromDippinIR_ManagerLoop_RejectsColonInSteerContextKey asserts that a
+// colon in a steer_context key is rejected at graph-build time (issue #171).
+// The dippin-lang v0.22.0 block-form formatter writes steer_context entries
+// as "key: value" lines, so a colon in the key breaks .dip→IR→.dip round-trip;
+// we fail loudly here instead of letting the bad key flow through silently.
+func TestFromDippinIR_ManagerLoop_RejectsColonInSteerContextKey(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "MgrLoopBadKey",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "mgr",
+				Kind: ir.NodeManagerLoop,
+				Config: ir.ManagerLoopConfig{
+					SubgraphRef:    "./child.dip",
+					SteerCondition: &ir.Condition{Raw: "stack.child.cycles = 1"},
+					SteerContext: map[string]string{
+						// Valid neighbor to prove rejection is per-key, not all-or-nothing.
+						"ok":      "value",
+						"bad:key": "value",
+					},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "mgr"},
+			{From: "mgr", To: "exit"},
+		},
+	}
+
+	_, err := FromDippinIR(workflow)
+	if err == nil {
+		t.Fatal("expected error for steer_context key containing ':', got nil")
+	}
+	if !errors.Is(err, ErrInvalidSteerContextKey) {
+		t.Errorf("error = %v, want wrapping ErrInvalidSteerContextKey", err)
+	}
+	if !strings.Contains(err.Error(), "bad:key") {
+		t.Errorf("error = %v, want message to include the offending key %q", err, "bad:key")
+	}
+}
+
+// TestFromDippinIR_ManagerLoop_NilConfigRejected asserts that a manager_loop
+// node with a nil Config is rejected at graph-build time (issue #174). Without
+// this guard the adapter would silently produce a node with no subgraph_ref,
+// and the error would surface much later at Execute time with a vague
+// "missing subgraph_ref" message from the handler.
+func TestFromDippinIR_ManagerLoop_NilConfigRejected(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "MgrLoopNilConfig",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			// Manager-loop node with Config intentionally unset.
+			{ID: "mgr", Kind: ir.NodeManagerLoop, Config: nil},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "mgr"},
+			{From: "mgr", To: "exit"},
+		},
+	}
+
+	_, err := FromDippinIR(workflow)
+	if err == nil {
+		t.Fatal("expected error for manager_loop node with nil Config, got nil")
+	}
+	if !errors.Is(err, ErrMissingManagerLoopCfg) {
+		t.Errorf("error = %v, want wrapping ErrMissingManagerLoopCfg", err)
+	}
+	if !strings.Contains(err.Error(), "mgr") {
+		t.Errorf("error = %v, want message to include the node ID", err)
+	}
+}
+
+// TestConvertEdge_ParsedFallback covers the symmetric Raw-then-Parsed
+// preference added to convertEdge (issue #176.6). An ir.Edge carrying only a
+// Parsed condition (no Raw) must still produce a conditional edge. Before the
+// fix, convertEdge read only Raw and silently produced an unconditional edge.
+func TestConvertEdge_ParsedFallback(t *testing.T) {
+	edge := &ir.Edge{
+		From: "a",
+		To:   "b",
+		Condition: &ir.Condition{
+			Parsed: ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
+		},
+	}
+	got := convertEdge(edge)
+	if got.Condition == "" {
+		t.Fatal("convertEdge dropped Parsed-only condition — expected formatted condition text on the edge")
+	}
+	if want := "outcome = success"; got.Condition != want {
+		t.Errorf("edge.Condition = %q, want %q", got.Condition, want)
+	}
+	if got.Attrs["condition"] != got.Condition {
+		t.Errorf("edge.Attrs[condition] = %q, want %q (must mirror Condition)", got.Attrs["condition"], got.Condition)
+	}
+}
+
+// TestDippinAdapter_E2E_ManagerLoop loads a real .dip fixture through the
+// dippin-lang parser, verifying the 6 flat manager_loop attrs land correctly
+// on the produced graph node. This pins the end-to-end path — parser emits
+// ir.ManagerLoopConfig, adapter flattens to graph attrs — so a change on
+// either side fails here rather than in a downstream runtime.
+func TestDippinAdapter_E2E_ManagerLoop(t *testing.T) {
+	source, err := os.ReadFile("testdata/manager_loop.dip")
+	if err != nil {
+		t.Fatalf("failed to read testdata/manager_loop.dip: %v", err)
+	}
+	p := parser.NewParser(string(source), "testdata/manager_loop.dip")
+	workflow, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parser.Parse() failed: %v", err)
+	}
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR() failed: %v", err)
+	}
+
+	node := graph.Nodes["Supervise"]
+	if node == nil {
+		t.Fatal("Supervise node missing from graph")
+	}
+	if node.Handler != "stack.manager_loop" {
+		t.Errorf("Supervise.Handler = %q, want %q", node.Handler, "stack.manager_loop")
+	}
+
+	cases := []struct {
+		key  string
+		want string
+	}{
+		{"subgraph_ref", "child.dip"},
+		{"poll_interval", "15s"},
+		{"max_cycles", "20"},
+		{"stop_condition", "stack.child.outcome = success"},
+		{"steer_condition", "stack.child.cycles = 5"},
+		{"steer_context", "hint=halfway_through,priority=high"},
+	}
+	for _, tc := range cases {
+		if got := node.Attrs[tc.key]; got != tc.want {
+			t.Errorf("Supervise.Attrs[%q] = %q, want %q", tc.key, got, tc.want)
+		}
 	}
 }
 
