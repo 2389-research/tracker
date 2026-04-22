@@ -628,3 +628,244 @@ func TestParseSteerContext(t *testing.T) {
 		}
 	}
 }
+
+// TestParseSteerContext_PercentDecoding verifies the decoder reverses the
+// percent-encoding applied by pipeline.flattenSteerContext (mirroring
+// dippin-lang v0.22.0 export.flattenSteerContext). Required for lossless
+// DOT → IR → adapter → handler round-trips when keys/values contain the
+// three reserved delimiter chars.
+func TestParseSteerContext_PercentDecoding(t *testing.T) {
+	// Encoded form produced by the adapter for keys/values with reserved chars.
+	in := "hint=speed%2Cup,priority=high%3Dcritical,tag=50%25off"
+	got := parseSteerContext(in)
+	want := map[string]string{
+		"hint":     "speed,up",
+		"priority": "high=critical",
+		"tag":      "50%off",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("parseSteerContext[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("parseSteerContext returned %d entries, want %d (%v)", len(got), len(want), got)
+	}
+}
+
+// TestParseSteerContext_LiteralPercentEncodedSequenceIsPreserved proves the
+// decoder does not double-decode a literal `%2C` sequence that the encoder
+// wrote as `%252C`. The encoder replaces `%` first (so `%` becomes `%25`,
+// and `%2C` becomes `%252C`); the decoder uses strings.NewReplacer with
+// non-overlapping left-to-right scanning, so on `%252C` it matches `%25`
+// at position 0, emits `%`, advances past the match, and the trailing `2C`
+// is copied verbatim — result `%2C`, not `,`.
+//
+// This is a regression guard against a re-ordering of the decoder replacer
+// arguments (a Copilot review raised this as a suspected bug in PR #170
+// round-2; the test confirms the current implementation is correct).
+func TestParseSteerContext_LiteralPercentEncodedSequenceIsPreserved(t *testing.T) {
+	// Note `literal=keep%252Cexact`: the source value was `keep%2Cexact`,
+	// encoded to `keep%252Cexact`. The decoder must yield `keep%2Cexact`,
+	// NOT `keep,exact`.
+	in := "hint=speed%2Cup,priority=high%3Dcritical,tag=50%25off,literal=keep%252Cexact"
+	got := parseSteerContext(in)
+	want := map[string]string{
+		"hint":     "speed,up",
+		"priority": "high=critical",
+		"tag":      "50%off",
+		"literal":  "keep%2Cexact",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseSteerContext returned %d entries, want %d (%v)", len(got), len(want), got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("parseSteerContext[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+// TestParseManagerLoopConfig_UnprefixedAttrs verifies the handler reads the
+// unprefixed DOT contract attrs emitted by the v0.22.0 adapter. These are
+// the authoritative names; the legacy "manager.*" forms remain for manually
+// authored DOT files.
+func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
+	cfg, err := parseManagerLoopConfig(map[string]string{
+		"subgraph_ref":    "child",
+		"poll_interval":   "15s",
+		"max_cycles":      "20",
+		"stop_condition":  "stack.child.cycles = 9",
+		"steer_condition": "stack.child.cycles = 3",
+		"steer_context":   "hint=speed%2Cup,priority=high",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.subgraphRef != "child" {
+		t.Errorf("subgraphRef = %q, want %q", cfg.subgraphRef, "child")
+	}
+	if cfg.pollInterval != 15*time.Second {
+		t.Errorf("pollInterval = %v, want 15s", cfg.pollInterval)
+	}
+	if cfg.maxCycles != 20 {
+		t.Errorf("maxCycles = %d, want 20", cfg.maxCycles)
+	}
+	if cfg.stopCondition != "stack.child.cycles = 9" {
+		t.Errorf("stopCondition = %q, want %q", cfg.stopCondition, "stack.child.cycles = 9")
+	}
+	if cfg.steerExpr != "stack.child.cycles = 3" {
+		t.Errorf("steerExpr = %q, want %q", cfg.steerExpr, "stack.child.cycles = 3")
+	}
+	if cfg.steerKeys["hint"] != "speed,up" {
+		t.Errorf("steerKeys[hint] = %q, want %q (expected percent-decoded)", cfg.steerKeys["hint"], "speed,up")
+	}
+	if cfg.steerKeys["priority"] != "high" {
+		t.Errorf("steerKeys[priority] = %q, want %q", cfg.steerKeys["priority"], "high")
+	}
+}
+
+// TestParseManagerLoopConfig_PartialSteeringRejected verifies that supplying
+// only one half of the steering pair (condition without context, or context
+// without condition) is rejected at parse time. A half-configured steering
+// mechanism is inert (channel creation in Execute requires both), so silently
+// accepting the partial config would violate CLAUDE.md's "never silently
+// swallow errors" rule.
+func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
+	t.Run("steer_condition without steer_context", func(t *testing.T) {
+		_, err := parseManagerLoopConfig(map[string]string{
+			"subgraph_ref":    "child",
+			"steer_condition": "stack.child.cycles = 3",
+		})
+		if err == nil {
+			t.Fatal("expected error when steer_condition is set without steer_context")
+		}
+		if !strings.Contains(err.Error(), "steer_condition is set but steer_context is empty") {
+			t.Errorf("error = %q, want message about steer_context being empty", err.Error())
+		}
+	})
+
+	t.Run("steer_context without steer_condition", func(t *testing.T) {
+		_, err := parseManagerLoopConfig(map[string]string{
+			"subgraph_ref":  "child",
+			"steer_context": "hint=go_faster",
+		})
+		if err == nil {
+			t.Fatal("expected error when steer_context is set without steer_condition")
+		}
+		if !strings.Contains(err.Error(), "steer_context is set but steer_condition is empty") {
+			t.Errorf("error = %q, want message about steer_condition being empty", err.Error())
+		}
+	})
+
+	t.Run("malformed steer_context surfaces as invalid, not empty", func(t *testing.T) {
+		// A non-empty value with no `=` pairs parses to nil — the prior
+		// error message conflated this with "unset". The message must now
+		// cite the raw value and call out invalidity.
+		_, err := parseManagerLoopConfig(map[string]string{
+			"subgraph_ref":    "child",
+			"steer_condition": "stack.child.cycles = 3",
+			"steer_context":   "bad",
+		})
+		if err == nil {
+			t.Fatal("expected error for malformed steer_context")
+		}
+		if !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("error = %q, want message to call out invalid steer_context", err.Error())
+		}
+		if !strings.Contains(err.Error(), "\"bad\"") {
+			t.Errorf("error = %q, want message to include the raw invalid value %q", err.Error(), "bad")
+		}
+	})
+
+	t.Run("malformed steer_context is rejected even without steer_condition", func(t *testing.T) {
+		// Edge case: author sets steer_context with malformed content and
+		// no steer_condition. Previously this slipped through both
+		// validation branches (neither fires when both sides are empty
+		// from the validator's perspective) and the malformed input was
+		// silently discarded. The invalid-steer-context check runs
+		// independently of steer_condition, so this must now error.
+		_, err := parseManagerLoopConfig(map[string]string{
+			"subgraph_ref":  "child",
+			"steer_context": "bad",
+		})
+		if err == nil {
+			t.Fatal("expected error for malformed steer_context even without steer_condition")
+		}
+		if !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("error = %q, want message to call out invalid steer_context", err.Error())
+		}
+		if !strings.Contains(err.Error(), "\"bad\"") {
+			t.Errorf("error = %q, want message to include the raw invalid value %q", err.Error(), "bad")
+		}
+	})
+}
+
+// TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed verifies that when an
+// attr is present in both the unprefixed (v0.22.0+) and legacy "manager.*"
+// forms, the unprefixed value is used. This matters for migrated pipelines
+// that may carry leftover "manager.*" attrs — the new contract takes priority.
+func TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed(t *testing.T) {
+	cfg, err := parseManagerLoopConfig(map[string]string{
+		"subgraph_ref":          "child",
+		"poll_interval":         "5s",
+		"manager.poll_interval": "99s",
+		"max_cycles":            "3",
+		"manager.max_cycles":    "999",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.pollInterval != 5*time.Second {
+		t.Errorf("pollInterval = %v, want 5s (unprefixed must win)", cfg.pollInterval)
+	}
+	if cfg.maxCycles != 3 {
+		t.Errorf("maxCycles = %d, want 3 (unprefixed must win)", cfg.maxCycles)
+	}
+}
+
+// TestManagerAttr_EmptyStringPrecedence pins the comma-ok behavior of
+// managerAttr: an explicit empty string on the unprefixed key must win over
+// a non-empty legacy `manager.*` value. This was the issue #173 footgun —
+// the prior zero-value check silently fell through to the legacy prefix,
+// letting authors "accidentally" resurrect legacy values they thought they
+// had cleared.
+func TestManagerAttr_EmptyStringPrecedence(t *testing.T) {
+	t.Run("explicit empty unprefixed beats non-empty legacy", func(t *testing.T) {
+		attrs := map[string]string{
+			"poll_interval":         "",
+			"manager.poll_interval": "60s",
+		}
+		if got := managerAttr(attrs, "poll_interval"); got != "" {
+			t.Errorf("managerAttr = %q, want %q (explicit empty must win over legacy)", got, "")
+		}
+	})
+
+	t.Run("missing entirely returns empty", func(t *testing.T) {
+		attrs := map[string]string{
+			"subgraph_ref": "child",
+		}
+		if got := managerAttr(attrs, "poll_interval"); got != "" {
+			t.Errorf("managerAttr = %q, want %q (missing key)", got, "")
+		}
+	})
+
+	t.Run("only legacy present is returned", func(t *testing.T) {
+		attrs := map[string]string{
+			"manager.poll_interval": "60s",
+		}
+		if got := managerAttr(attrs, "poll_interval"); got != "60s" {
+			t.Errorf("managerAttr = %q, want %q (legacy fallback)", got, "60s")
+		}
+	})
+
+	t.Run("non-empty unprefixed wins over legacy", func(t *testing.T) {
+		attrs := map[string]string{
+			"poll_interval":         "5s",
+			"manager.poll_interval": "60s",
+		}
+		if got := managerAttr(attrs, "poll_interval"); got != "5s" {
+			t.Errorf("managerAttr = %q, want %q (unprefixed wins)", got, "5s")
+		}
+	})
+}

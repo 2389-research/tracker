@@ -45,6 +45,7 @@ Handlers predate the kind enum and dispatch on DOT `shape` attributes. The adapt
 | `NodeFanIn` | `tripleoctagon` | `parallel.fan_in` |
 | `NodeSubgraph` | `tab` | `subgraph` |
 | `NodeConditional` | `diamond` | `conditional` |
+| `NodeManagerLoop` | `house` | `stack.manager_loop` |
 
 Plus two shapes the adapter assigns unconditionally in `ensureStartExitNodes`:
 
@@ -122,6 +123,26 @@ Unknown kinds return `ErrUnknownNodeKind`.
 |----------|----------|
 | `Ref` | `subgraph_ref` |
 | `Params` | `subgraph_params` (sorted `key=value` joined by `,`) |
+
+### `ManagerLoopConfig` (`extractManagerLoopAttrs`, v0.22.0+)
+
+Flattens into the six unprefixed DOT attrs consumed by the
+`stack.manager_loop` handler. Zero/empty fields are omitted so the handler
+applies its own defaults.
+
+| IR field | Attr key | Format |
+|----------|----------|--------|
+| `SubgraphRef` | `subgraph_ref` | raw string (child `.dip` ref, required at runtime) |
+| `PollInterval` | `poll_interval` | `time.Duration.String()`; omitted when `0` (handler defaults to `45s`) |
+| `MaxCycles` | `max_cycles` | decimal int via `strconv.Itoa`; omitted when `0` (handler defaults to `1000`) |
+| `StopCondition` | `stop_condition` | `Condition.Raw` with formatted-`Parsed` fallback via `managerLoopConditionText` |
+| `SteerCondition` | `steer_condition` | same `Raw`/`Parsed` fallback as `stop_condition` |
+| `SteerContext` | `steer_context` | canonical sorted `k=v,k=v` from `flattenSteerContext`; the three reserved chars (`,` `=` `%`) are percent-encoded as `%2C` `%3D` `%25` so round-trips through the handler's `parseSteerContext` are lossless |
+
+Semantic divergence to be aware of: the IR documents `PollInterval == 0` as
+"event-driven" and `MaxCycles == 0` as "unbounded", but tracker has no such
+modes today — both degrade to the handler defaults. Authors who want
+explicit control should set positive values.
 
 ### `ConditionalConfig`
 

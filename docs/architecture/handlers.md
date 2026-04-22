@@ -140,16 +140,17 @@ var shapeHandlerMap = map[string]string{
 | `parallel` | `NodeParallel` | `component` | `parallel` |
 | `fan_in` | `NodeFanIn` | `tripleoctagon` | `parallel.fan_in` |
 | `tool` | `NodeTool` | `parallelogram` | `tool` |
-| `stack.manager_loop` | (DOT-only today — no IR NodeKind; adapter support pending [#162](https://github.com/2389-research/tracker/issues/162)) | `house` | `stack.manager_loop` |
+| `stack.manager_loop` | `NodeManagerLoop` | `house` | `stack.manager_loop` |
 | `subgraph` | `NodeSubgraph` | `tab` | `subgraph` |
 
 The adapter's `nodeKindToShapeMap` in [`pipeline/dippin_adapter.go`](../../pipeline/dippin_adapter.go)
-maps exactly `{NodeAgent, NodeHuman, NodeTool, NodeParallel, NodeFanIn, NodeSubgraph, NodeConditional}`.
+maps exactly `{NodeAgent, NodeHuman, NodeTool, NodeParallel, NodeFanIn, NodeSubgraph, NodeConditional, NodeManagerLoop}`.
 `start` / `exit` are workflow-level fields (not NodeKinds) whose shapes are
-forced by `ensureStartExitNodes`. `stack.manager_loop` is reachable today only
-via DOT graphs or an explicit `type: stack.manager_loop` override; IR-level
-support is pending and tracked in
-[#162](https://github.com/2389-research/tracker/issues/162).
+forced by `ensureStartExitNodes`. `stack.manager_loop` is reachable via the
+`NodeManagerLoop` IR kind (dippin-lang v0.22.0+) — `ir.ManagerLoopConfig` is
+flattened into the six DOT-style attrs the handler consumes by
+[`extractManagerLoopAttrs`](../../pipeline/dippin_adapter.go). Hand-authored
+DOT graphs with a `type: stack.manager_loop` override continue to work.
 
 Two overrides handled by `applyDiamondOverrides` ([`graph.go`](../../pipeline/graph.go)):
 

@@ -29,14 +29,30 @@ steers the running child by injecting context mid-execution.
 
 ## Configuration (node attributes)
 
-| Attribute | Default | Purpose |
-|-----------|---------|---------|
-| `subgraph_ref` | (required) | Name of the child graph to launch |
-| `manager.poll_interval` | `45s` | How often to check conditions |
-| `manager.max_cycles` | `1000` | Safety limit before forced stop |
-| `manager.stop_condition` | (none) | Expression evaluated against parent context each tick |
-| `manager.steer_condition` | (none) | When true, inject steer_context into child |
-| `manager.steer_context` | (none) | `key=value,key=value` pairs sent to child |
+Attribute names are the unprefixed form — the authoritative contract emitted
+by the dippin-lang v0.22.0+ adapter. The legacy `manager.*` prefixed form is
+still accepted for hand-authored DOT files that predate the IR migration;
+when both are present the unprefixed form wins.
+
+| Attribute | Legacy alias | Default | Purpose |
+|-----------|--------------|---------|---------|
+| `subgraph_ref` | — | (required) | Name of the child graph to launch |
+| `poll_interval` | `manager.poll_interval` | `45s` | How often to check conditions |
+| `max_cycles` | `manager.max_cycles` | `1000` | Safety limit before forced stop |
+| `stop_condition` | `manager.stop_condition` | (none) | Expression evaluated against parent context each tick |
+| `steer_condition` | `manager.steer_condition` | (none) | When true, inject `steer_context` into child |
+| `steer_context` | `manager.steer_context` | (none) | `key=value,key=value` pairs sent to child |
+
+`steer_condition` and `steer_context` must be set together or neither —
+partial steering configs are rejected at parse time because one half of the
+pair renders the supervisor inert.
+
+**Percent-encoding for `steer_context` reserved chars.** The three delimiter
+characters used by the flat representation must be percent-encoded when they
+appear inside a key or value: `,` → `%2C`, `=` → `%3D`, `%` → `%25` (the
+escape character itself). The adapter emits this form automatically from
+`ir.ManagerLoopConfig.SteerContext`; hand-authored DOT files need to do the
+encoding manually. Example: a value `speed,up` is written as `speed%2Cup`.
 
 ## Key Design Decisions
 
@@ -110,6 +126,18 @@ exit ("I've seen enough"), not a failure. Pipelines can distinguish this via
 | `stack.child.exit_status` | outcome string | Raw outcome status from child engine |
 
 ## Example `.dip` Usage
+
+```dot
+Manager [shape=house handler="stack.manager_loop"
+         subgraph_ref="agent_loop"
+         poll_interval="30s"
+         max_cycles="20"
+         stop_condition="stack.child.cycles = 10"
+         steer_condition="stack.child.cycles = 5"
+         steer_context="hint=speed_up,priority=high"]
+```
+
+The legacy `manager.*` prefix is equivalent and still accepted:
 
 ```dot
 Manager [shape=house handler="stack.manager_loop"

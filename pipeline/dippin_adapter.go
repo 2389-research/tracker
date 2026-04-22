@@ -123,6 +123,7 @@ var nodeKindToShapeMap = map[ir.NodeKind]string{
 	ir.NodeFanIn:       "tripleoctagon", // → parallel.fan_in
 	ir.NodeSubgraph:    "tab",           // → subgraph
 	ir.NodeConditional: "diamond",       // → conditional (pure routing, no LLM call)
+	ir.NodeManagerLoop: "house",         // → stack.manager_loop (dippin-lang v0.22.0+)
 }
 
 // nodeKindToShape returns the DOT shape for a given NodeKind.
@@ -192,6 +193,8 @@ func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool,
 		extractSubgraphAttrs(cfg, attrs)
 	case ir.ConditionalConfig:
 		// Conditional nodes are pure routing — no config to extract.
+	case ir.ManagerLoopConfig:
+		extractManagerLoopAttrs(cfg, attrs)
 	default:
 		return false, nil
 	}
@@ -217,6 +220,8 @@ func extractPtrNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 	case *ir.ConditionalConfig:
 		// Conditional nodes are pure routing — no config to extract.
 		return nil
+	case *ir.ManagerLoopConfig:
+		return extractNodeAttrsPtr(cfg, attrs)
 	default:
 		return fmt.Errorf("%T: %w", config, ErrUnknownConfig)
 	}
@@ -419,6 +424,168 @@ func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
 		}
 		attrs["subgraph_params"] = strings.Join(pairs, ",")
 	}
+}
+
+// extractManagerLoopAttrs flattens ir.ManagerLoopConfig into the six DOT-style
+// unprefixed attrs that the stack.manager_loop handler consumes (dippin-lang
+// v0.22.0+ contract):
+//
+//   - subgraph_ref    — child .dip path (required at runtime)
+//   - poll_interval   — duration string via time.Duration.String()
+//   - max_cycles      — decimal int via strconv.Itoa
+//   - stop_condition  — raw condition expression; falls back to the formatted
+//     Parsed tree when Raw is empty (dippin-lang's lazy-parse invariant)
+//   - steer_condition — same Raw/Parsed fallback as stop_condition
+//   - steer_context   — canonical sorted "k=v,k=v" with percent-encoding for
+//     the three reserved chars (',', '=', '%') — mirrors dippin-lang v0.22.0
+//     export.flattenSteerContext
+//
+// Zero/empty fields are omitted so the handler can apply its own defaults
+// (45s poll, 1000 cycles). Writing empty strings would override the defaults
+// with "" which the handler treats as "unset" today — but omitting is clearer.
+//
+// IR semantic divergence (contract-alignment follow-up): the dippin-lang IR
+// documents PollInterval=0 as "event-driven" and MaxCycles=0 as "unbounded".
+// Tracker's stack.manager_loop handler has no event-driven mode and no
+// unbounded mode today — both degrade to the handler defaults (45s / 1000)
+// because the zero values are omitted from node.Attrs here. Pipeline authors
+// who want explicit control should set positive values; omitting yields the
+// tracker defaults. If/when the handler grows those modes this extractor is
+// the right place to translate the zero-value IR sentinels into the
+// corresponding handler attrs.
+func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) {
+	if cfg.SubgraphRef != "" {
+		attrs["subgraph_ref"] = cfg.SubgraphRef
+	}
+	if cfg.PollInterval > 0 {
+		attrs["poll_interval"] = cfg.PollInterval.String()
+	}
+	if cfg.MaxCycles > 0 {
+		attrs["max_cycles"] = strconv.Itoa(cfg.MaxCycles)
+	}
+	if s := managerLoopConditionText(cfg.StopCondition); s != "" {
+		attrs["stop_condition"] = s
+	}
+	if s := managerLoopConditionText(cfg.SteerCondition); s != "" {
+		attrs["steer_condition"] = s
+	}
+	if s := flattenSteerContext(cfg.SteerContext); s != "" {
+		attrs["steer_context"] = s
+	}
+}
+
+// managerLoopConditionText extracts the best textual form of a condition:
+// prefers Raw (set by the parser), falls back to formatting Parsed (set
+// lazily by simulate.EnsureConditionsParsed). Returns "" for nil/empty.
+//
+// Mirrors dippin-lang v0.22.0 export.dotManagerLoopConditionText.
+func managerLoopConditionText(c *ir.Condition) string {
+	if c == nil {
+		return ""
+	}
+	if c.Raw != "" {
+		return c.Raw
+	}
+	// Parsed is typically populated by simulate.EnsureConditionsParsed; the
+	// adapter runs before simulate, so in practice Raw will be set. We format
+	// Parsed here as a defensive fallback — if neither is set we return "".
+	if c.Parsed != nil {
+		return formatManagerLoopCondition(c.Parsed)
+	}
+	return ""
+}
+
+// steerContextEncoder mirrors the encoder in dippin-lang v0.22.0
+// export/dot.go. '%' must be replaced first so it is not double-encoded.
+var steerContextEncoder = strings.NewReplacer(
+	"%", "%25",
+	",", "%2C",
+	"=", "%3D",
+)
+
+// encodeSteerContextToken percent-encodes the three reserved characters used
+// as delimiters in the flattened steer_context representation (',', '=')
+// and the escape character itself ('%'). Keeps DOT round-trip lossless even
+// when keys or values contain reserved characters. Mirror of dippin-lang
+// v0.22.0 export.encodeSteerContextToken.
+func encodeSteerContextToken(s string) string {
+	if !strings.ContainsAny(s, ",=%") {
+		return s
+	}
+	return steerContextEncoder.Replace(s)
+}
+
+// flattenSteerContext produces canonical sorted "k=v,k=v" from the map.
+// Empty map returns empty string (caller suppresses the attr). Reserved
+// characters (',', '=', '%') in keys and values are percent-encoded so the
+// round-trip through DOT → migrate stays lossless.
+//
+// Mirrors dippin-lang v0.22.0 export.flattenSteerContext exactly.
+func flattenSteerContext(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	keys := slices.Sorted(maps.Keys(m))
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, encodeSteerContextToken(k)+"="+encodeSteerContextToken(m[k]))
+	}
+	return strings.Join(parts, ",")
+}
+
+// formatManagerLoopCondition re-serializes an ir.ConditionExpr back into its
+// textual form. Mirrors dippin-lang v0.22.0 export.formatCondition with the
+// same precedence rules so round-trips match.
+func formatManagerLoopCondition(expr ir.ConditionExpr) string {
+	return formatManagerLoopConditionExpr(expr, 0)
+}
+
+const (
+	condPrecOr  = 1
+	condPrecAnd = 2
+	condPrecNot = 3
+)
+
+// formatManagerLoopConditionExpr formats a condition expression with the given
+// parent precedence for disambiguation parens.
+//
+// Important: the emitted text feeds directly into `pipeline.EvaluateCondition`,
+// which parses Go-style `&&` / `||` / `not` operators (see pipeline/condition.go).
+// We intentionally diverge from dippin-lang's DOT formatter (which uses
+// English `and` / `or`) because the evaluator has no `and`/`or` tokens — a
+// `.Parsed`-only Condition formatted with English operators would be silently
+// mis-evaluated to a single-clause no-op. The ctx. prefix is still stripped
+// the same way.
+func formatManagerLoopConditionExpr(expr ir.ConditionExpr, parentPrec int) string {
+	switch e := expr.(type) {
+	case ir.CondCompare:
+		// Mirror dippin-lang's formatDOTCompare: strip the "ctx." prefix from
+		// variables (manager_loop conditions reference stack.child.* which
+		// has no prefix to strip, but we preserve the same rule for safety).
+		variable := strings.TrimPrefix(e.Variable, "ctx.")
+		return fmt.Sprintf("%s %s %s", variable, e.Op, e.Value)
+	case ir.CondAnd:
+		return formatManagerLoopBinaryOp(e.Left, e.Right, "&&", condPrecAnd, parentPrec)
+	case ir.CondOr:
+		return formatManagerLoopBinaryOp(e.Left, e.Right, "||", condPrecOr, parentPrec)
+	case ir.CondNot:
+		return "not " + formatManagerLoopConditionExpr(e.Inner, condPrecNot)
+	default:
+		return ""
+	}
+}
+
+// formatManagerLoopBinaryOp formats an and/or expression with optional
+// parenthesization when the parent precedence differs from this op's.
+func formatManagerLoopBinaryOp(left, right ir.ConditionExpr, op string, prec, parentPrec int) string {
+	s := fmt.Sprintf("%s %s %s",
+		formatManagerLoopConditionExpr(left, prec),
+		op,
+		formatManagerLoopConditionExpr(right, prec))
+	if parentPrec != 0 && parentPrec != prec {
+		return "(" + s + ")"
+	}
+	return s
 }
 
 // extractRetryAttrs converts IR RetryConfig to string attributes.
