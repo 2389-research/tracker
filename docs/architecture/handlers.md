@@ -73,7 +73,7 @@ flowchart LR
     cg["codergen<br/>registerCodergenHandler"] --> reg
     tool["tool<br/>registerToolHandler"] --> reg
     hum["wait.human<br/>registerHumanHandler"] --> reg
-    sub["subgraph<br/>registerSubgraphHandler<br/>(only if subgraphs != nil)"] --> reg
+    sub["subgraph<br/>registerSubgraphHandler<br/>(only if len(subgraphs) > 0)"] --> reg
     mgr["stack.manager_loop<br/>registerManagerLoopHandler"] --> reg
 ```
 
@@ -83,13 +83,18 @@ Registration has conditional branches driven by `RegistryOption`:
   `backend: claude-code` or `backend: acp` can still be used as long as
   `WithDefaultBackend` or any node's `backend` attr picks an external
   backend.
-- **`WithExecEnvironment`** — required to register the tool handler (else
-  it becomes a stub for testing).
+- **`WithExecEnvironment`** — registers the real tool handler. If neither
+  `WithExecEnvironment` nor `WithToolExecFunc` is supplied, the `tool`
+  handler is **not registered at all**, and tool nodes will error at
+  dispatch with "handler not found". `WithToolExecFunc` is the test-stub
+  path (used when `execEnv` is nil).
 - **`WithInterviewer`** — required to register the human handler.
-- **`WithSubgraphs`** — enables the `subgraph` handler. The `stack.manager_loop`
-  handler is always registered, but falls back to a clear-error stub when
-  no subgraphs are available (so `tracker validate` and conformance tests
-  can still reach it).
+- **`WithSubgraphs`** — enables the `subgraph` handler when the provided
+  map is non-empty (`len(subgraphs) > 0`). An empty or nil map leaves
+  `subgraph` unregistered. The `stack.manager_loop` handler is always
+  registered, but falls back to a clear-error stub when no subgraphs are
+  available (so `tracker validate` and conformance tests can still reach
+  it).
 - **`WithCodergenFunc` / `WithToolExecFunc` / `WithHumanCallback`** — stub
   overrides for tests.
 - **`WithTokenTracker` / `WithAgentEventHandler` / `WithPipelineEventHandler`** —
@@ -160,7 +165,7 @@ behavior, and invariants. This table is the flat index.
 | `parallel.fan_in` | [`pipeline/handlers/fanin.go`](../../pipeline/handlers/fanin.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Join/aggregation node after a `parallel` dispatch. Reads `parallel.results` JSON; aggregates stats. |
 | `subgraph` | [`pipeline/subgraph.go`](../../pipeline/subgraph.go) | [`handlers/subgraph.md`](./handlers/subgraph.md) | Executes a named child graph inline. Merges `subgraph_params` with child `vars` defaults, runs a child `Engine` with scoped event handlers, propagates the result outcome. |
 | `conditional` | [`pipeline/handlers/conditional.go`](../../pipeline/handlers/conditional.go) | [`handlers/conditional.md`](./handlers/conditional.md) | Pure routing node: returns `OutcomeSuccess` with no writes and lets the engine's edge condition evaluator pick the next node based on existing context. |
-| `stack.manager_loop` | [`pipeline/handlers/manager_loop.go`](../../pipeline/handlers/manager_loop.go) | [`handlers/manager-loop.md`](./handlers/manager-loop.md) (currently [`docs/manager-loop.md`](../manager-loop.md)) | Async child-pipeline supervisor: launches a child in a goroutine, polls at intervals, evaluates `stop_condition`, injects `steer_context` through the engine's steering channel. Attractor spec 4.11. |
+| `stack.manager_loop` | [`pipeline/handlers/manager_loop.go`](../../pipeline/handlers/manager_loop.go) | [`../manager-loop.md`](../manager-loop.md) | Async child-pipeline supervisor: launches a child in a goroutine, polls at intervals, evaluates `stop_condition`, injects `steer_context` through the engine's steering channel. Attractor spec 4.11. Canonical deep-dive lives at `docs/manager-loop.md` today; a dedicated `handlers/manager-loop.md` will land in a later PR. |
 | `start` | [`pipeline/handlers/start.go`](../../pipeline/handlers/start.go) | — | Pass-through entry node. Always returns `OutcomeSuccess` with no writes. Dispatches to whatever edge is selected. |
 | `exit` | [`pipeline/handlers/exit.go`](../../pipeline/handlers/exit.go) | — | Pass-through terminal node. Returns `OutcomeSuccess`; the engine's `handleExitNode` takes over to run the goal-gate retry check and finalize the trace. |
 
@@ -196,4 +201,4 @@ documented in full at
 - [`backends.md`](./backends.md) — how `codergen` delegates to pluggable
   agent backends.
 - [`adapter.md`](./adapter.md) — how dippin-lang IR maps to the shapes
-  this doc tables.
+  this doc describes.

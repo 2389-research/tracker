@@ -48,10 +48,17 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error)
 
 The options are set-once: `WithPipelineEventHandler`, `WithCheckpointPath`,
 `WithStylesheetResolution`, `WithArtifactDir`, `WithInitialContext`,
-`WithBudgetGuard`, `WithGitArtifacts`, `WithSteeringChan`. All are no-ops
-when their arguments are empty/nil, so zero-value engines are valid. The
-engine owns no LLM client, no exec environment, no interviewer — those are
-handler-scoped. Handlers are provided by the registry.
+`WithBudgetGuard`, `WithGitArtifacts`, `WithSteeringChan`. Most are
+effective no-ops when their arguments are empty/nil: an unset
+`checkpointPath` skips `saveCheckpoint`, a nil `BudgetGuard` short-circuits
+to `BudgetOK`, an empty `steeringCh` drains zero updates, and so on. One
+exception: `WithPipelineEventHandler(nil)` overwrites the default
+`PipelineNoopHandler` with a nil interface, which then panics on the first
+`Engine.emit` call. Callers that want to disable event handling should
+either omit the option entirely or pass `pipeline.PipelineNoopHandler`
+explicitly. The engine owns no LLM client, no exec environment, no
+interviewer — those are handler-scoped. Handlers are provided by the
+registry.
 
 `EngineResult` carries `RunID`, `Status` (one of `success`, `fail`,
 `budget_exceeded`), `CompletedNodes`, a full context `Snapshot`, the
@@ -116,17 +123,41 @@ hint from a previous node.
 
 ### Variable expansion
 
-Before dispatch, `prepareExecNode` applies two transforms to the node's attrs:
+Two unrelated expansion syntaxes live in the codebase, applied at different
+call sites:
 
-1. **Graph variable expansion** (`ExpandGraphVariables`) — rewrites
-   `${graph.*}` and `${params.*}` references everywhere.
-2. **Prompt variable expansion** (`ExpandPromptVariables`) — on the `prompt`
-   attr specifically, also expands `${ctx.*}` against the live pipeline
-   context.
+1. **Legacy `$key` syntax** — applied by `prepareExecNode` in
+   [`pipeline/engine_run.go`](../../pipeline/engine_run.go) before every
+   handler dispatch. Two transforms run over each node attr:
+   - `ExpandGraphVariables(text, vars)` rewrites `$key` tokens using the
+     `$key → value` map built by `GraphVarMap` from graph-scoped context
+     keys (`graph.*`). It does NOT touch `${...}` syntax.
+     Source: [`pipeline/transforms.go`](../../pipeline/transforms.go).
+   - `ExpandPromptVariables(prompt, ctx)` substitutes only the bare literal
+     `$goal` on the `prompt` attr. It does NOT expand `${ctx.*}`.
+2. **Namespaced `${ns.key}` syntax** — applied by `ExpandVariables` in
+   [`pipeline/expand.go`](../../pipeline/expand.go). Supports three
+   namespaces: `ctx.*` (pipeline context), `params.*` (subgraph
+   parameters), and `graph.*` (graph attributes). Called from:
+   - `engine_edges.go` when expanding edge `Condition` expressions before
+     evaluation.
+   - `handlers/prompt.go` when a codergen/human handler resolves its
+     `prompt` attr.
+   - `handlers/tool.go` when a tool handler resolves `tool_command` (with
+     `toolCommandMode=true`, which additionally blocks all non-allowlisted
+     `ctx.*` keys to prevent LLM output injection).
+   - `handlers/human.go` when resolving human-gate prompts.
+   - `expand.go` itself when a subgraph injects its `params` into a cloned
+     child graph via `InjectParamsIntoGraph`.
 
-Expansion is single-pass — resolved values are never rescanned, so a context
-value containing `${...}` syntax is left as-is. (See `CLAUDE.md` §Dippin-lang
-compatibility.)
+   The engine's `prepareExecNode` does NOT call `ExpandVariables`; that
+   happens at handler-level, inside the sites listed above. The split is
+   why `${ctx.*}` works in `prompt` / `tool_command` / `condition` but not
+   in arbitrary node attrs.
+
+Both expansion syntaxes are single-pass — resolved values are never
+rescanned, so a context value containing `$key` or `${...}` syntax is left
+as-is. (See `CLAUDE.md` §Dippin-lang compatibility.)
 
 ### Stylesheet resolution
 
@@ -147,8 +178,18 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
   from the live graph so `--param` overrides don't regress to stale
   checkpoint values.
 - **Saved on node outcome**: every successful node outcome and every retry
-  saves the checkpoint. Failures save a checkpoint with the partial context
-  so a resume can see what was written before the error.
+  saves the checkpoint. Most failure paths also save a partial-context
+  checkpoint so a resume can see what was written before the error, with
+  two intentional exceptions:
+  - `checkStrictFailure` (in `engine.go`) returns its fail `loopResult`
+    without calling `saveCheckpoint` — a strict-failure halt is terminal,
+    so no resume would revisit this node.
+  - `handleRetryExhausted` (in `engine_run.go`) with no
+    `fallback_retry_target` attr calls `failResult` directly, skipping
+    the checkpoint save. Retries exhausted with no fallback is also
+    terminal.
+  All non-terminal failure paths (retry with budget remaining, fallback
+  routing, loop-restart cap exceeded, handler error) do save a checkpoint.
 - **Edge selections are replayed**: if `cp.EdgeSelections[nodeID]` is set,
   resume uses the stored target instead of re-evaluating the condition —
   this prevents a condition like `when ctx.outcome = success` from being
@@ -204,8 +245,18 @@ so dippin-lang conditions like `ctx.outcome = success` match tracker's bare
 `outcome` key.
 
 Condition variables are expanded through `ExpandVariables` before
-evaluation. An unresolved `${ctx.x}` warns via `log` rather than silently
-returning an empty string (per CLAUDE.md §Never silently swallow errors).
+evaluation. In the default lenient mode used by the engine
+(`strict=false`), an unresolved `${ctx.x}` expands to an empty string
+**without logging** — see `expandVariablesPass` in
+[`pipeline/expand.go`](../../pipeline/expand.go). The only built-in
+warning path for unresolved variables lives inside
+[`pipeline/condition.go`](../../pipeline/condition.go) at
+`resolveAndWarnVar`: when a condition clause like `ctx.outcome = success`
+references a key the evaluator can't resolve, it logs `warning: unresolved
+condition variable %q ...` via the standard `log` package and treats the
+value as an empty string. `ExpandVariables` with `strict=true` returns an
+error instead of expanding to empty, but no engine call site currently
+uses strict mode.
 
 ### `SuggestedNextNodes` override
 
@@ -353,10 +404,13 @@ sequenceDiagram
 ```
 
 Three dimensions: tokens (`UsageSummary.TotalTokens`), cost (cents computed
-from `TotalCostUSD`), wall-time (since `trace.StartTime`). The first to
-breach wins; `BudgetBreach.Kind.String()` populates
-`EngineResult.BudgetLimitsHit`. Thresholds are inclusive — the exact limit
-is not a breach.
+from `TotalCostUSD`), wall-time (since `trace.StartTime`). `BudgetGuard.Check`
+evaluates them in a **fixed precedence order**: tokens → cost → wall-time.
+When multiple limits are exceeded in the same check, the reported
+`BudgetBreach.Kind` follows this ordering (a simultaneous token + wall-time
+breach reports as `tokens`). `BudgetBreach.Kind.String()` populates
+`EngineResult.BudgetLimitsHit`. Thresholds are **inclusive** — hitting the
+exact limit is not a breach; only strictly exceeding it is.
 
 Configuration flows through `tracker.Config.Budget` or CLI flags
 `--max-tokens`, `--max-cost` (cents), `--max-wall-time`. Reading from
@@ -409,9 +463,15 @@ repo at run start (`gitRepo.Init()` in
 [`pipeline/git_artifacts.go`](../../pipeline/git_artifacts.go)) and commits
 after every terminal node outcome:
 
-- `emitGitCommit(runState, nodeID, traceEntry)` runs `git add -A && git
-  commit -m "<handler>: <nodeID> (<status>)"` with a structured trailer
-  capturing the trace entry.
+- `emitGitCommit(runState, nodeID, traceEntry)` runs `git add . && git
+  commit --allow-empty -m "<msg>"` where `<msg>` has a one-line subject
+  and a structured body. Subject:
+  `node(<nodeID>): <handler> outcome=<status>`. Body (blank line after
+  the subject) is a `key: value` block that callers can grep/parse:
+  `duration: <d>`, `edge_to: <nextNode>` (when set), and
+  `tokens: <n> cost: $<usd>` (when the trace entry carries session
+  stats). Source: `gitArtifactRepo.CommitNode` in
+  [`pipeline/git_artifacts.go`](../../pipeline/git_artifacts.go).
 - `saveCheckpointWithTag` creates a lightweight tag
   `checkpoint/<runID>/<nodeID>` pointing at the most recent commit.
   `checkpoint.json` itself is `.gitignore`d.
@@ -438,10 +498,10 @@ The engine emits `PipelineEvent` values via the handler registered with
 |---|---|
 | `pipeline_started` | `Run` begins after `initRunState`. |
 | `pipeline_completed` | Run reaches exit node successfully. |
-| `pipeline_failed` | Cancellation, max-restart exhaustion, or handler error. |
+| `pipeline_failed` | Context cancellation (`cancelledResult`), max-restart ceiling exceeded (`handleLoopRestart`), or terminal failure built by `failResult` (retry exhausted with no fallback, exit-node goal-gate failure). Handler errors do **not** emit this event — they emit `stage_failed` instead. |
 | `stage_started` | Before each handler is dispatched. |
 | `stage_completed` | Handler returned `success`. |
-| `stage_failed` | Handler returned `fail` (or strict-failure halted the pipeline). |
+| `stage_failed` | Handler returned `fail`, strict-failure halted the pipeline, retries were exhausted, or the handler returned a Go error. |
 | `stage_retrying` | Retry budget remaining; about to loop back to `retry_target`. |
 | `checkpoint_saved` | `saveCheckpoint` succeeded. |
 | `checkpoint_failed` | `saveCheckpoint` wrote error output. |
