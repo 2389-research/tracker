@@ -370,7 +370,27 @@ tracker <span class="flag">--backend</span> acp build_product</code></pre>
         <h4>Declarative <code>writes:</code> / <code>reads:</code></h4>
         <p>Declare the context keys a node produces or consumes. Declared writes are validated after the node runs; <code>reads:</code> pins fidelity for consumed keys. Replaces node-type-specific workarounds for typed output. <span class="badge">v0.21.0</span></p>
       </div>
+      <div class="glass glass-sm">
+        <h4>Manager loops in <code>.dip</code></h4>
+        <p>Declare <code>stack.manager_loop</code> supervisors directly in <code>.dip</code> via <code>ir.NodeManagerLoop</code>. Six flat attrs: <code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>. No more DOT escape hatch. <span class="badge">v0.23.0</span></p>
+      </div>
     </div>
+
+    <h3 style="margin-top: 1.5rem;">Manager loop — native <code>.dip</code> syntax <span class="badge">v0.23.0</span></h3>
+    <p>
+      Declare a supervisor that launches a child pipeline, polls it, and optionally steers it mid-execution.
+      Unprefixed attr names are the v0.22.0 contract; the handler also accepts the legacy <code>manager.*</code> names for backward
+      compatibility (unprefixed wins when both are set). <code>steer_context</code> uses canonical sorted
+      <code>k=v,k=v</code> pairs with percent-encoding for <code>,</code>, <code>=</code>, and <code>%</code>.
+    </p>
+    <pre data-lang="dip"><code><span class="keyword">manager_loop</span> Supervise
+  label: <span class="string">"Watch build attempts"</span>
+  subgraph_ref: <span class="string">"subgraphs/build.dip"</span>
+  poll_interval: 30s
+  max_cycles: 10
+  stop_condition: <span class="string">"stack.child.status = success"</span>
+  steer_condition: <span class="string">"stack.child.cycles &gt; 3"</span>
+  steer_context: <span class="string">"hint=try-alternate-plan,priority=high"</span></code></pre>
   </section>
 
   <div class="divider"></div>

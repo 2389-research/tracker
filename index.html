@@ -38,6 +38,13 @@
       <a href="https://github.com/2389-research/tracker" class="btn btn-primary">View on GitHub</a>
       <a href="cli.html" class="btn btn-ghost">CLI Reference</a>
     </div>
+    <p style="margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.95rem;">
+      <strong><span class="badge">v0.23.0</span> What's new:</strong>
+      <code>stack.manager_loop</code> supervisors are now first-class in <code>.dip</code> via <code>ir.NodeManagerLoop</code> (no more DOT escape hatch), and three new tool-safety flags land on the CLI: <code>--bypass-denylist</code>, <code>--tool-allowlist</code>, and <code>--max-output-limit</code>. See the <a href="changelog.html">changelog</a>.
+    </p>
+    <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
+      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.22.0">v0.22.0</a>: <code>tracker-swebench analyze</code> bulk triage + typed <code>NodeConfig</code> accessors.
+    </p>
   </section>
 
   <!-- ═══ Quick Start ═══ -->
@@ -160,7 +167,7 @@ graph TB
     <div class="glass feature-card">
       <div class="icon">&#x1F500;</div>
       <h3>Parallel & Manager Loops</h3>
-      <p>Fan-out to concurrent branches with git worktree isolation, fan-in to join. <code>stack.manager_loop</code> supervises async child pipelines with polling, stop conditions, and mid-execution steering. <span class="badge">v0.20.0</span></p>
+      <p>Fan-out to concurrent branches with git worktree isolation, fan-in to join. <code>stack.manager_loop</code> supervises async child pipelines with polling, stop conditions, and mid-execution steering &mdash; now declarable natively in <code>.dip</code> via <code>ir.NodeManagerLoop</code>. <span class="badge">v0.23.0</span></p>
     </div>
 
     <div class="glass feature-card">
@@ -306,7 +313,7 @@ tracker doctor
 <span class="comment"># Stay current — checks automatically, or run manually</span>
 tracker update</code></pre>
     <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
-      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.22.0">v0.22.0</a> &middot;
+      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.23.0">v0.23.0</a> &middot;
       <a href="changelog.html">Changelog</a> &middot;
       <a href="cli.html">Full CLI reference</a>
     </p>

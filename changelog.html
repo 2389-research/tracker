@@ -30,6 +30,28 @@
     <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">All GitHub Releases &rarr;</a></p>
   </section>
 
+  <!-- ═══ v0.23.0 ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.23.0" style="color: inherit; text-decoration: none;">v0.23.0</a></h2>
+      <span class="badge">2026-04-22</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.23.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>ir.NodeManagerLoop</code> adapter support + dippin-lang v0.22.0 bump</strong>: <code>.dip</code> authors can now declare <code>stack.manager_loop</code> supervisors directly via the new IR kind instead of reaching for DOT. The adapter maps <code>ir.NodeManagerLoop</code> &rarr; <code>shape=house</code> &rarr; <code>handler=stack.manager_loop</code> and flattens <code>ir.ManagerLoopConfig</code> into six unprefixed attrs: <code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>. <code>steer_context</code> uses canonical sorted <code>k=v,k=v</code> pairs with percent-encoding for <code>,</code>/<code>=</code>/<code>%</code>, matching dippin-lang's <code>export.flattenSteerContext</code> for lossless round-trips. When a manager_loop is the workflow's Start or Exit, shape is overridden to <code>Mdiamond</code>/<code>Msquare</code> but the handler and flat attrs are preserved so the supervisor still executes.</li>
+      <li><strong><code>ManagerLoopHandler</code> accepts both v0.22.0 unprefixed contract names and legacy <code>manager.*</code> prefixed variants</strong>: backward-compatible; unprefixed wins when both are set. <code>parseSteerContext</code> percent-decodes reserved chars so round-trips complete through the handler. Partial steering configs (<code>steer_condition</code> without <code>steer_context</code>, or vice versa) are now rejected at parse time instead of silently rendering the supervisor inert.</li>
+      <li><strong>Three new tool-safety CLI flags</strong>: <code>--bypass-denylist</code> (bool, default <code>false</code>) disables the built-in denylist with a loud stderr warning on startup &mdash; use only in sandboxed environments. <code>--tool-allowlist &lt;pattern&gt;</code> is repeatable and accepts comma-separated glob patterns; every tool command must match at least one allowlist entry when the flag is set. <code>--max-output-limit &lt;bytes&gt;</code> sets the hard ceiling (default 10&nbsp;MB) applied to per-node <code>output_limit:</code> attrs. Allowlists union with the <code>tool_commands_allow</code> graph attr; the denylist always wins.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>formatManagerLoopConditionExpr</code> emits Go-style <code>&amp;&amp;</code> / <code>||</code></strong> instead of English <code>and</code> / <code>or</code> (PR #170 round-2). Parsed-only IR conditions (Raw empty) now evaluate correctly through <code>pipeline.EvaluateCondition</code>. <code>CondNot</code> continues to emit <code>not </code>, matching the evaluator's native negation.</li>
+      <li><strong><code>managerAttr</code> uses comma-ok lookup</strong> so an explicit empty string on the unprefixed key wins over a non-empty legacy <code>manager.*</code> value (closes #173). Previously the zero-value check let authors accidentally resurrect values they thought they had cleared.</li>
+      <li><strong><code>parseManagerLoopConfig</code> distinguishes empty vs. malformed <code>steer_context</code></strong>: error now reports "steer_context %q is invalid" with the raw value if it was non-empty, and "steer_context is empty &mdash; nothing to inject" only when truly unset.</li>
+      <li><strong><code>tool_commands_allow</code> graph attribute wired</strong> (closes #164) so the allowlist is enforceable from a pipeline file as well as the CLI.</li>
+    </ul>
+  </section>
+
   <!-- ═══ v0.22.0 ═══ -->
   <section class="glass" style="border-left: 3px solid var(--orange-600);">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">

@@ -70,7 +70,7 @@ graph TB
           <tr><td><code>parallel.fan_in</code></td><td><code>fan_in</code></td><td>Joins parallel branches. Aggregates <code>SessionStats</code> from branch outcomes into its own trace entry.</td></tr>
           <tr><td><code>conditional</code></td><td><code>conditional</code></td><td>Evaluates conditions without running an LLM. Pure routing node.</td></tr>
           <tr><td><code>subgraph</code></td><td><code>subgraph</code></td><td>Executes a referenced child pipeline. Events propagate to the parent TUI; sidebar pre-populates child nodes at load time. <span class="badge">v0.19.0</span></td></tr>
-          <tr><td><code>stack.manager_loop</code></td><td><code>manager_loop</code></td><td>Async child-pipeline supervisor. Polls at a configurable interval, evaluates stop and steer conditions, injects context mid-execution via the engine steering channel. <span class="badge">v0.20.0</span></td></tr>
+          <tr><td><code>stack.manager_loop</code></td><td><code>manager_loop</code></td><td>Async child-pipeline supervisor. Polls at a configurable interval, evaluates stop and steer conditions, injects context mid-execution via the engine steering channel. Native <code>.dip</code> syntax via <code>ir.NodeManagerLoop</code>. <span class="badge">v0.20.0</span> <span class="badge">v0.23.0</span></td></tr>
           <tr><td><code>wait.human</code></td><td>—</td><td>Pause for a human signal without presenting a gate UI. Typical pattern for external notifiers that unblock via a callback.</td></tr>
         </tbody>
       </table>
@@ -145,6 +145,7 @@ graph LR
           <tr><td><code>ctx.outcome</code></td><td><code>outcome</code></td><td>Namespace prefix stripped at evaluation</td></tr>
           <tr><td><code>ParallelConfig.Targets</code></td><td>Implicit edges</td><td>Adapter synthesizes edges from parallel targets</td></tr>
           <tr><td><code>FanInConfig.Sources</code></td><td>Implicit edges</td><td>Adapter synthesizes edges from fan-in sources</td></tr>
+          <tr><td><code>ir.NodeManagerLoop</code></td><td><code>shape=house</code>, <code>handler=stack.manager_loop</code></td><td>Flattens <code>ir.ManagerLoopConfig</code> into six unprefixed attrs (<code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>). <code>steer_context</code> uses canonical sorted <code>k=v,k=v</code> with percent-encoding for reserved chars. Start/exit nodes override shape to <code>Mdiamond</code>/<code>Msquare</code> but preserve handler + attrs. <span class="badge">v0.23.0</span></td></tr>
         </tbody>
       </table>
     </div>

@@ -214,15 +214,47 @@ tracker update</code></pre>
 
           <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Provider routing &amp; tool safety</th></tr>
           <tr><td><code>--gateway-url</code></td><td>Route every provider through a Cloudflare AI Gateway root URL; equivalent to <code>TRACKER_GATEWAY_URL</code> <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
-          <tr><td><code>--tool-allowlist</code></td><td>Restrict tool commands to a list of patterns (takes priority over denylist only when exact)</td><td>&mdash;</td></tr>
-          <tr><td><code>--bypass-denylist</code></td><td>Disable the built-in denylist for dangerous tool commands (eval, <code>curl | sh</code>, etc.). Explicit opt-in.</td><td>Off</td></tr>
-          <tr><td><code>--max-output-limit</code></td><td>Hard ceiling on per-stream tool output size (override per-node <code>output_limit</code>)</td><td><code>10MB</code></td></tr>
+          <tr><td><code>--tool-allowlist</code></td><td>Restrict tool commands to glob patterns. Repeatable; each value can be a comma-separated list. Additive with the <code>tool_commands_allow</code> graph attr. Never overrides the denylist. <span class="badge">v0.23.0</span></td><td>&mdash;</td></tr>
+          <tr><td><code>--bypass-denylist</code></td><td>Disable the built-in denylist for dangerous tool commands (eval, pipe-to-shell, <code>curl | sh</code>). Loud stderr warning on startup. Use only in sandboxed environments where dangerous patterns are intentional. <span class="badge">v0.23.0</span></td><td>Off</td></tr>
+          <tr><td><code>--max-output-limit</code></td><td>Hard ceiling (bytes) on per-stream tool output size; caps per-node <code>output_limit</code> attrs. <span class="badge">v0.23.0</span></td><td><code>10485760</code> (10&nbsp;MB)</td></tr>
 
           <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Misc</th></tr>
           <tr><td><code>--version</code></td><td>Show version info</td><td>&mdash;</td></tr>
         </tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ═══ Tool safety graph attrs ═══ -->
+  <section class="glass">
+    <h2>Tool safety in <span class="accent">pipeline files</span> <span class="badge">v0.23.0</span></h2>
+    <p class="lead">
+      The denylist, allowlist, and per-stream output ceiling are enforceable from a pipeline file as well as CLI flags.
+      CLI values and graph attrs union; the denylist always wins.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Graph attribute</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>tool_commands_allow</code></td><td>Comma-separated globs restricting every tool node's command to match at least one pattern. Unions with <code>--tool-allowlist</code>; cannot override the denylist.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Example, DOT form:</p>
+    <pre data-lang="dot"><code>digraph G {
+  <span class="comment">// Only git and make commands are allowed in tool nodes.</span>
+  graph [tool_commands_allow=<span class="string">"git *,make *"</span>];
+  Setup [handler=<span class="string">"tool"</span>, tool_command=<span class="string">"git init"</span>];
+  Build [handler=<span class="string">"tool"</span>, tool_command=<span class="string">"make build"</span>];
+  Setup -> Build;
+}</code></pre>
+    <p style="color: var(--text-muted); font-size: 0.9rem;">
+      Dippin-lang's IR does not yet expose this field &mdash; <code>.dip</code> authors must use DOT or the library API
+      (<code>graph.Attrs["tool_commands_allow"]</code>) until upstream ships
+      <code>ir.WorkflowDefaults.ToolCommandsAllow</code>.
+    </p>
   </section>
 
   <!-- ═══ Name Resolution ═══ -->
