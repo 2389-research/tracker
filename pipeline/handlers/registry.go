@@ -4,12 +4,33 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
+
+// GraphAttrToolCommandsAllow is the graph-level attribute key that authors set
+// on a workflow (via DOT `graph [tool_commands_allow="..."]` or programmatically
+// on `Graph.Attrs`) to restrict which tool_command invocations may run.
+//
+// The value is a comma-separated list of glob patterns in the same format as
+// the `--tool-allowlist` CLI flag. registerToolHandler takes the UNION of the
+// CLI-supplied allowlist (ToolHandlerConfig.Allowlist) and the graph attribute
+// — both sources apply. An empty/missing attr means no graph-level restriction.
+//
+// The denylist (checkCommandDenylist) is evaluated BEFORE the allowlist inside
+// CheckToolCommand, so the union never softens the security posture: a graph
+// attr of `*` does not unblock `eval` or `curl | sh`.
+//
+// NOTE: dippin-lang v0.21.0 does not expose this field in
+// ir.WorkflowDefaults — authoring it under `defaults:` in a `.dip` file
+// currently trips the parser's "unknown defaults field" diagnostic. Until the
+// upstream IR ships the field and pipeline/dippin_adapter.go threads it into
+// Graph.Attrs, graph-attr authors must use DOT or set Attrs programmatically.
+const GraphAttrToolCommandsAllow = "tool_commands_allow"
 
 // HandlerFunc is a function that implements the core logic of a pipeline handler.
 // Used by functional option stubs to override built-in handler behavior.
@@ -190,7 +211,7 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	registry.Register(NewParallelHandler(graph, registry, cfg.pipelineEvents))
 
 	registerCodergenHandler(registry, cfg, graph)
-	registerToolHandler(registry, cfg)
+	registerToolHandler(registry, cfg, graph)
 	registerHumanHandler(registry, cfg, graph)
 	registerSubgraphHandler(registry, cfg, opts)
 	registerManagerLoopHandler(registry, cfg, opts)
@@ -245,16 +266,85 @@ func graphHasPerNodeBackend(graph *pipeline.Graph) bool {
 // When WithToolHandlerConfig was supplied, the handler is built with the
 // CLI-provided safety config (denylist bypass, allowlist, output ceiling).
 // Otherwise the default-safe handler is used.
-func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig) {
+//
+// Allowlist source-of-truth is the UNION of:
+//  1. CLI-supplied patterns (ToolHandlerConfig.Allowlist via --tool-allowlist)
+//  2. Graph attribute patterns (graph.Attrs[GraphAttrToolCommandsAllow])
+//
+// A command must match ANY pattern from the combined list to run. Match
+// semantics do not depend on pattern order, but the merged list preserves a
+// deterministic order (CLI patterns first, then graph patterns) because it
+// is user-visible in the allowlist error message via strings.Join. Duplicates
+// are de-duplicated regardless of source. An empty combined list means "no
+// allowlist gate" and all non-denylisted commands pass. The denylist is
+// always evaluated first inside CheckToolCommand — the union never softens it.
+func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, graph *pipeline.Graph) {
 	if cfg.execEnv != nil {
-		if cfg.toolSafetySet {
-			registry.Register(NewToolHandlerWithConfig(cfg.execEnv, cfg.toolSafety))
+		merged := mergeToolAllowlist(cfg.toolSafety.Allowlist, graph)
+		if cfg.toolSafetySet || len(merged) > len(cfg.toolSafety.Allowlist) {
+			safety := cfg.toolSafety
+			safety.Allowlist = merged
+			registry.Register(NewToolHandlerWithConfig(cfg.execEnv, safety))
 		} else {
 			registry.Register(NewToolHandler(cfg.execEnv))
 		}
 	} else if cfg.toolExecFunc != nil {
 		registry.Register(&funcHandler{name: "tool", fn: cfg.toolExecFunc})
 	}
+}
+
+// mergeToolAllowlist returns the union of the CLI-supplied allowlist and the
+// patterns parsed from graph.Attrs[GraphAttrToolCommandsAllow]. The graph attr
+// value is a comma-separated glob list (same format as --tool-allowlist);
+// whitespace around each pattern is trimmed and empty tokens are dropped.
+// De-duplication is order-preserving: CLI patterns retain their position,
+// then new graph patterns append in declaration order. De-dup runs on ALL
+// inputs, including the CLI-only path where the graph attr is empty —
+// duplicates in the CLI list alone are still collapsed.
+func mergeToolAllowlist(cliAllowlist []string, graph *pipeline.Graph) []string {
+	graphPatterns := parseGraphAllowlist(graph)
+	if len(cliAllowlist) == 0 && len(graphPatterns) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(cliAllowlist)+len(graphPatterns))
+	merged := make([]string, 0, len(cliAllowlist)+len(graphPatterns))
+	for _, p := range cliAllowlist {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		merged = append(merged, p)
+	}
+	for _, p := range graphPatterns {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		merged = append(merged, p)
+	}
+	return merged
+}
+
+// parseGraphAllowlist extracts a cleaned pattern list from the
+// tool_commands_allow graph attribute. Comma-separates, trims whitespace, and
+// drops empty tokens. Returns nil when the attr is missing or yields no
+// non-empty tokens.
+func parseGraphAllowlist(graph *pipeline.Graph) []string {
+	if graph == nil || graph.Attrs == nil {
+		return nil
+	}
+	raw, ok := graph.Attrs[GraphAttrToolCommandsAllow]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var patterns []string
+	for _, part := range strings.Split(raw, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			patterns = append(patterns, trimmed)
+		}
+	}
+	return patterns
 }
 
 // registerHumanHandler registers the human gate handler or a stub.
