@@ -6,7 +6,7 @@ Tracker pipelines pass data between nodes through a shared key-value store calle
 
 - **Fresh LLM sessions**: each agent node runs a brand-new conversation with its own system prompt. No chat history leaks between agent nodes.
 - **Shared context store**: all nodes read from and write to a single `PipelineContext` (a string-keyed map) for the whole run.
-- **Per-node scoping** (upcoming — currently on `main`, unreleased): after each node completes, every key it wrote is also copied into `node.<nodeID>.<key>` so later nodes can reference a specific upstream node's output by name.
+- **Per-node scoping**: after each node completes, every key it wrote is also copied into `node.<nodeID>.<key>` so later nodes can reference a specific upstream node's output by name.
 - **Fidelity levels** control how much context an agent node sees in its prompt to prevent context-window bloat.
 
 ## Why sessions are fresh
