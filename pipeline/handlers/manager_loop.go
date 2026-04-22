@@ -298,7 +298,7 @@ func parseSteerContext(s string) map[string]string {
 		return nil
 	}
 	result := make(map[string]string)
-	for _, pair := range strings.Split(s, ",") {
+	for pair := range strings.SplitSeq(s, ",") {
 		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(parts) == 2 {
 			k := decodeSteerContextToken(strings.TrimSpace(parts[0]))

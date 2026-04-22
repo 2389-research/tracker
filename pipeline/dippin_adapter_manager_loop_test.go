@@ -720,7 +720,7 @@ func decodeFlatSteerContextForTest(s string) map[string]string {
 		return out
 	}
 	decoder := strings.NewReplacer("%25", "%", "%2C", ",", "%3D", "=")
-	for _, pair := range strings.Split(s, ",") {
+	for pair := range strings.SplitSeq(s, ",") {
 		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(kv) != 2 {
 			continue
