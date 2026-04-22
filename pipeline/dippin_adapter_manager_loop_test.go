@@ -195,7 +195,7 @@ func TestFromDippinIR_ManagerLoop_ParsedConditionFallback(t *testing.T) {
 	if got, want := node.Attrs["stop_condition"], "stack.child.cycles = 3"; got != want {
 		t.Errorf("stop_condition = %q, want %q", got, want)
 	}
-	if got, want := node.Attrs["steer_condition"], "stack.child.cycles = 1 and stack.child.status = running"; got != want {
+	if got, want := node.Attrs["steer_condition"], "stack.child.cycles = 1 && stack.child.status = running"; got != want {
 		t.Errorf("steer_condition = %q, want %q", got, want)
 	}
 }
@@ -337,6 +337,95 @@ func TestFlattenSteerContext_EncodesReservedInKeysAndValues(t *testing.T) {
 	want := "k%2C1=v1,k%3D2=v2,percent=50%25off"
 	if got != want {
 		t.Errorf("flattenSteerContext = %q, want %q", got, want)
+	}
+}
+
+// TestFormatManagerLoopCondition_EvaluatorCompatibility pins the critical
+// invariant that formatter output is directly parseable by
+// pipeline.EvaluateCondition. A Parsed-only ir.Condition (no Raw) gets
+// formatted on the fly; if the formatter emits English `and`/`or` tokens,
+// the evaluator — which only recognizes Go-style `&&`/`||` — would silently
+// mis-evaluate the expression as a single opaque clause. This test formats
+// each binary + negation case and runs the result through the evaluator to
+// prove the round-trip is correct.
+//
+// Closes part of #172 (CondOr / CondNot coverage) and the Codex P2 finding
+// from PR #170 round-2 review.
+func TestFormatManagerLoopCondition_EvaluatorCompatibility(t *testing.T) {
+	// Seed a context with two keys the compare clauses will read. Note the
+	// formatter strips the "ctx." prefix from variable names, so the
+	// evaluator sees bare `outcome` / `status` lookups.
+	pctx := NewPipelineContext()
+	pctx.Set("outcome", "success")
+	pctx.Set("status", "running")
+
+	cases := []struct {
+		name string
+		expr ir.ConditionExpr
+		want bool
+	}{
+		{
+			name: "CondAnd both true",
+			expr: ir.CondAnd{
+				Left:  ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
+				Right: ir.CondCompare{Variable: "ctx.status", Op: "=", Value: "running"},
+			},
+			want: true,
+		},
+		{
+			name: "CondAnd one false",
+			expr: ir.CondAnd{
+				Left:  ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
+				Right: ir.CondCompare{Variable: "ctx.status", Op: "=", Value: "stopped"},
+			},
+			want: false,
+		},
+		{
+			name: "CondOr first true",
+			expr: ir.CondOr{
+				Left:  ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
+				Right: ir.CondCompare{Variable: "ctx.status", Op: "=", Value: "stopped"},
+			},
+			want: true,
+		},
+		{
+			name: "CondOr both false",
+			expr: ir.CondOr{
+				Left:  ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "fail"},
+				Right: ir.CondCompare{Variable: "ctx.status", Op: "=", Value: "stopped"},
+			},
+			want: false,
+		},
+		{
+			name: "CondNot wrapping CondCompare (true → false)",
+			expr: ir.CondNot{
+				Inner: ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
+			},
+			want: false,
+		},
+		{
+			name: "CondNot wrapping CondCompare (false → true)",
+			expr: ir.CondNot{
+				Inner: ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "fail"},
+			},
+			want: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			formatted := formatManagerLoopCondition(tc.expr)
+			if formatted == "" {
+				t.Fatalf("formatter returned empty for %v", tc.expr)
+			}
+			got, err := EvaluateCondition(formatted, pctx)
+			if err != nil {
+				t.Fatalf("EvaluateCondition(%q) returned error: %v — formatter emitted tokens the evaluator cannot parse", formatted, err)
+			}
+			if got != tc.want {
+				t.Errorf("EvaluateCondition(%q) = %v, want %v", formatted, got, tc.want)
+			}
+		})
 	}
 }
 

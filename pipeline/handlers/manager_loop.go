@@ -114,14 +114,23 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 
 	cfg.stopCondition = managerAttr(attrs, "stop_condition")
 	cfg.steerExpr = managerAttr(attrs, "steer_condition")
-	cfg.steerKeys = parseSteerContext(managerAttr(attrs, "steer_context"))
+	rawSteerContext := managerAttr(attrs, "steer_context")
+	cfg.steerKeys = parseSteerContext(rawSteerContext)
 
 	// Both sides of steering must be set together or neither — a condition
 	// without a context map is inert (nothing to inject) and a context map
 	// without a condition never fires. Either case is almost certainly an
 	// author mistake, so reject at parse time rather than silently producing
 	// a no-op supervisor (violates CLAUDE.md "never silently swallow errors").
+	//
+	// Distinguish "empty" (raw attr unset) from "invalid" (raw set but all
+	// pairs malformed → parser returned nil). The prior single error message
+	// said "steer_context is empty" even when the author had written a
+	// non-empty-but-malformed value, obscuring the real cause.
 	if cfg.steerExpr != "" && len(cfg.steerKeys) == 0 {
+		if rawSteerContext != "" {
+			return cfg, fmt.Errorf("manager_loop: steer_condition is set but steer_context %q is invalid (expected \"k=v,k=v\")", rawSteerContext)
+		}
 		return cfg, fmt.Errorf("manager_loop: steer_condition is set but steer_context is empty — nothing to inject")
 	}
 	if cfg.steerExpr == "" && len(cfg.steerKeys) > 0 {
@@ -134,8 +143,14 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 // managerAttr looks up a manager_loop attribute, preferring the unprefixed
 // dippin-lang v0.22.0 contract key and falling back to the legacy
 // "manager."+key form so hand-authored DOT files keep working.
+//
+// Comma-ok lookup on the unprefixed key is intentional: an explicit empty
+// string means "set, clear the value" and must win over the legacy prefix.
+// Using the zero-value fallthrough (`if v := attrs[key]; v != ""`) would
+// silently defer to the legacy attr even when the author explicitly cleared
+// the new one, violating the "unprefixed wins" contract (issue #173).
 func managerAttr(attrs map[string]string, key string) string {
-	if v := attrs[key]; v != "" {
+	if v, ok := attrs[key]; ok {
 		return v
 	}
 	return attrs["manager."+key]

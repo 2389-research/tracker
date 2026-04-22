@@ -547,8 +547,15 @@ const (
 )
 
 // formatManagerLoopConditionExpr formats a condition expression with the given
-// parent precedence for disambiguation parens. Kept close to dippin-lang's
-// implementation so raw-vs-parsed output is byte-identical.
+// parent precedence for disambiguation parens.
+//
+// Important: the emitted text feeds directly into `pipeline.EvaluateCondition`,
+// which parses Go-style `&&` / `||` / `not` operators (see pipeline/condition.go).
+// We intentionally diverge from dippin-lang's DOT formatter (which uses
+// English `and` / `or`) because the evaluator has no `and`/`or` tokens — a
+// `.Parsed`-only Condition formatted with English operators would be silently
+// mis-evaluated to a single-clause no-op. The ctx. prefix is still stripped
+// the same way.
 func formatManagerLoopConditionExpr(expr ir.ConditionExpr, parentPrec int) string {
 	switch e := expr.(type) {
 	case ir.CondCompare:
@@ -558,9 +565,9 @@ func formatManagerLoopConditionExpr(expr ir.ConditionExpr, parentPrec int) strin
 		variable := strings.TrimPrefix(e.Variable, "ctx.")
 		return fmt.Sprintf("%s %s %s", variable, e.Op, e.Value)
 	case ir.CondAnd:
-		return formatManagerLoopBinaryOp(e.Left, e.Right, "and", condPrecAnd, parentPrec)
+		return formatManagerLoopBinaryOp(e.Left, e.Right, "&&", condPrecAnd, parentPrec)
 	case ir.CondOr:
-		return formatManagerLoopBinaryOp(e.Left, e.Right, "or", condPrecOr, parentPrec)
+		return formatManagerLoopBinaryOp(e.Left, e.Right, "||", condPrecOr, parentPrec)
 	case ir.CondNot:
 		return "not " + formatManagerLoopConditionExpr(e.Inner, condPrecNot)
 	default:

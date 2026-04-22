@@ -47,6 +47,13 @@ when both are present the unprefixed form wins.
 partial steering configs are rejected at parse time because one half of the
 pair renders the supervisor inert.
 
+**Percent-encoding for `steer_context` reserved chars.** The three delimiter
+characters used by the flat representation must be percent-encoded when they
+appear inside a key or value: `,` → `%2C`, `=` → `%3D`, `%` → `%25` (the
+escape character itself). The adapter emits this form automatically from
+`ir.ManagerLoopConfig.SteerContext`; hand-authored DOT files need to do the
+encoding manually. Example: a value `speed,up` is written as `speed%2Cup`.
+
 ## Key Design Decisions
 
 ### Isolation
