@@ -23,8 +23,11 @@ tracker build_product.dip
 # Run fully autonomous with an LLM judge
 tracker --autopilot mid build_product
 
-# Use Claude Code backend for file editing + terminal (coming v0.12.0)
+# Use the Claude Code backend for file editing + terminal (native is the default)
 tracker --backend claude-code build_product
+
+# Or route nodes through an Agent Client Protocol server
+tracker --backend acp build_product
 
 # Check your setup (API keys, dippin binary, working directory)
 tracker doctor
@@ -164,8 +167,23 @@ workflow MyPipeline
 Three namespaces for `${...}` syntax in prompts:
 
 - `${ctx.outcome}` — runtime pipeline context (outcome, last_response, human_response, tool_stdout)
-- `${params.model}` — subgraph parameters passed from parent
+- `${params.model}` — workflow-level `vars` (optionally overridden by `--param key=value` at run time, v0.19.0) and subgraph parameters passed from a parent pipeline
 - `${graph.goal}` — workflow-level attributes
+
+Declare defaults in a top-level `vars` block and override them per-run:
+
+```dip
+workflow MyPipeline
+  vars
+    model: claude-sonnet-4-6
+    retries: 3
+```
+
+```bash
+tracker --param model=claude-opus-4 --param retries=1 MyPipeline
+```
+
+Unknown `--param` keys hard-fail at startup. Lint rules flag undeclared references (DIP120) and declared-but-unused vars (DIP121).
 
 Variables are expanded in a single pass — resolved values are never re-scanned, preventing recursive expansion.
 
@@ -186,6 +204,22 @@ Supported operators: `=`, `!=`, `contains`, `not contains`, `startswith`, `not s
 
 Conditions support the `ctx.` namespace prefix (dippin convention) and `internal.*` references for engine-managed state.
 
+### Declarative Structured Output — `writes:` / `reads:`
+
+Agent, tool, and `mode: interview` human nodes can declare the context keys they produce and consume (v0.21.0):
+
+```dip
+agent Planner
+  response_format: json_object
+  writes:
+    - milestone_id
+    - files
+  reads:
+    - spec_path
+```
+
+The node output must be a valid top-level JSON object; every declared key in `writes:` must be present or the node hard-fails. Extras are allowed (surfaced as warnings), strings are stored verbatim, non-string values are stored as compact JSON. `reads:` pins fidelity for upstream keys so downstream nodes see consistent data. See **[Pipeline Context Flow](docs/pipeline-context-flow.md)** for the full contract, worked examples, and interview-mode semantics.
+
 ### Per-Node Working Directory
 
 For git worktree isolation in parallel implementations:
@@ -201,11 +235,12 @@ The `working_dir` attribute is validated against path traversal and shell metach
 
 ### Human Gates
 
-Four gate modes:
+Five gate modes:
 
 - **Choice mode** (default): presents outgoing edge labels as a radio list. Arrow keys navigate, Enter selects.
 - **Freeform mode** (`mode: freeform`): captures text input. If the response matches an edge label (case-insensitive), it routes to that edge. Otherwise it's stored as `ctx.human_response`.
 - **Hybrid mode** (automatic): when a freeform gate has labeled outgoing edges, the TUI presents a radio list of labels plus an "other" option for custom feedback. Selecting a label submits it directly; selecting "other" opens a textarea for specific instructions.
+- **Yes/No mode** (`mode: yes_no`): fixed two-option prompt. Yes maps to `OutcomeSuccess`, No maps to `OutcomeFail` — route with `when ctx.outcome = success` / `when ctx.outcome = fail` edges. Distinct from choice mode, where the outcome is always success and routing uses `preferred_label`.
 - **Interview mode** (`mode: interview`): structured multi-field form driven by upstream agent output. An agent generates markdown questions with inline options; the handler parses them into individual form fields and presents a fullscreen interview form. Answers are stored as JSON and markdown summary.
 
 Long prompts with labels (e.g., escalation gates with agent output) automatically use a fullscreen **review hybrid view**: glamour-rendered scrollable viewport on top (PgUp/PgDn to scroll), radio label selection in the middle, and an "other" freeform option at the bottom for custom retry instructions. Long prompts without labels use a **split-pane review**: scrollable viewport on top, textarea on bottom.
@@ -311,11 +346,13 @@ Tracker automatically appends the per-provider suffix:
 
 ## Architecture
 
+Tracker is a three-layer stack: an LLM client (provider adapters and token tracking), an agent session (turn loop, tool execution, context compaction), and a pipeline engine (graph execution, edge routing, checkpoints, decision audit, TUI). The dippin adapter converts parsed `.dip` IR into tracker's `Graph` model, and handlers implement per-node behavior.
+
 ```mermaid
 graph TB
     subgraph "Layer 3: Pipeline Engine"
         Engine["Graph Execution<br/>Edge Routing<br/>Checkpoints<br/>Decision Audit"]
-        Handlers["Handlers: codergen, tool,<br/>human, parallel, fan_in,<br/>subgraph, conditional"]
+        Handlers["Handlers: start, exit, codergen, tool,<br/>wait.human, parallel, parallel.fan_in,<br/>conditional, subgraph, stack.manager_loop"]
         Adapter["Dippin Adapter<br/>IR → Graph"]
         TUI["TUI: node list,<br/>activity log, modals"]
     end
@@ -331,6 +368,8 @@ graph TB
     Handlers --> Session
     Session --> Anthropic & OpenAI & Gemini
 ```
+
+For subsystem-level architecture docs, see **[ARCHITECTURE.md](./ARCHITECTURE.md)** and **[`docs/architecture/`](./docs/architecture/)**.
 
 ## TUI
 
@@ -356,6 +395,12 @@ The terminal UI shows:
 
 | Key | Action |
 |-----|--------|
+| v | Cycle log verbosity (all / tools / errors / reasoning) |
+| z | Toggle zen mode (full-width log, sidebar hidden) |
+| / | Search the activity log (n/N next/prev, Esc exits) |
+| ? | Help overlay with all shortcuts |
+| Enter | Drill down into the selected node (Esc exits) |
+| y | Copy the visible log to the clipboard |
 | Ctrl+O | Toggle expand/collapse tool output |
 | Ctrl+S | Submit human gate input |
 | Esc | Cancel (empty) or submit (with content) |
@@ -385,7 +430,7 @@ grep 'decision_outcome' .tracker/runs/<id>/activity.jsonl | python3 -m json.tool
 
 ## Git Integration
 
-When `WithGitArtifacts(true)` is enabled (library) or `--git-artifacts` is set (CLI — see roadmap), the artifact run directory becomes a git repository. Each terminal node outcome creates a commit:
+Enable git artifacts from the library via the `WithGitArtifacts(true)` option on the engine builder; the artifact run directory becomes a git repository and each terminal node outcome creates a commit. (There is no CLI flag for this today — use the `ExportBundle` helper or the `--export-bundle` CLI flag to produce a portable bundle from any run directory.)
 
 ```text
 node(start): start outcome=success
@@ -455,7 +500,6 @@ tracker audit <run-id>
 | "no LLM providers configured" | Missing API keys | `tracker setup` or export env vars |
 | TestMilestone instantly escalates | Stale `fix_attempts` counter | `rm .ai/milestones/fix_attempts` |
 | Node fails with no visible error | Tool stderr not surfaced | `tracker diagnose` shows full output |
-| Human gate shows raw markdown | Old version before glamour fix | Update to v0.9.2+ |
 | Pipeline loops forever | Unconditional fallback to loop target | Ensure fallbacks go to an exit node (Done, escalation gate), not back into the loop |
 | Tool retries same error 5 times | Deterministic command bug | `tracker diagnose` flags identical retries — fix the command in the .dip file |
 | Every milestone needs fixing | known_failures has comments or bad format | Ensure bare test names only, no comments — v0.11.2 strips them automatically |
@@ -500,8 +544,18 @@ remediation guidance.
 `CostSnapshot` with aggregate tokens, dollar cost, per-provider totals,
 and wall-clock elapsed time.
 
-Reading budget limits directly from `.dip` workflow attrs is a follow-up
-tracked in #67.
+Budget ceilings can also be declared inline in the workflow's `defaults:` block (v0.19.0) and act as the fallback when neither `Config.Budget` nor the matching `--max-*` CLI flags are set:
+
+```dip
+workflow MyPipeline
+  defaults
+    model: claude-sonnet-4-6
+    max_total_tokens: 100000
+    max_cost_cents:   500
+    max_wall_time:    30m
+```
+
+Explicit library/CLI values still win over the `.dip` defaults.
 
 ## Headless Execution (Webhook Gate)
 
@@ -638,17 +692,26 @@ tracker doctor                   Preflight health check
 tracker diagnose [runID]         Analyze failures in a run
 tracker audit <runID>            Full audit report for a run
 tracker list                     List recent pipeline runs
+tracker update                   Self-update to the latest GitHub release
 tracker version                  Show version information
 ```
 
 **Flags:**
 - `-w, --workdir` — working directory (default: current)
 - `-r, --resume` — resume a previous run by ID
-- `--format` — pipeline format override: `dip` (default) or `dot` (deprecated)
+- `--format` — pipeline format override: `dip` (default) or `dot` (legacy; emits a deprecation warning)
 - `--json` — stream events as NDJSON to stdout
 - `--no-tui` — disable TUI dashboard, use plain console
 - `--verbose` — show raw provider stream events
-- `--backend` — agent backend: `native` (default) or `claude-code` (coming v0.12.0)
+- `--backend` — agent backend: `native` (default), `claude-code`, or `acp`
+- `--autopilot <persona>` — replace human gates with an LLM judge (`lax` / `mid` / `hard` / `mentor`)
+- `--auto-approve` — deterministically accept every human gate (no LLM)
+- `--param key=value` — override a declared workflow var at run time (repeatable)
+- `--artifact-dir` — override the node state directory (default: `<workdir>/.tracker/runs`)
+- `--max-tokens` — halt if total tokens across the run exceed this value (0 = no limit)
+- `--max-cost` — halt if total cost in cents exceeds this value (0 = no limit)
+- `--max-wall-time` — halt if pipeline wall time exceeds this duration (0 = no limit)
+- `--gateway-url` — Cloudflare AI Gateway root URL (per-provider `*_BASE_URL` env vars win)
 - `--webhook-url` — POST human gate prompts to this URL and wait for callback (headless)
 - `--gate-callback-addr` — local addr for the webhook callback server (default: `:8789`)
 - `--gate-timeout` — per-gate wait timeout when `--webhook-url` is set (default: `10m`)
