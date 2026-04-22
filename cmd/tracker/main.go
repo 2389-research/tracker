@@ -37,6 +37,9 @@ type runConfig struct {
 	webhookAuthHeader string        // Authorization header value for outbound webhook requests
 	exportBundle      string        // path for post-run git bundle export; "" = skip
 	artifactDir       string        // override node state directory; "" = <workdir>/.tracker/runs
+	bypassDenylist    bool          // disable the built-in tool_command denylist (SECURITY escape hatch)
+	toolAllowlist     []string      // additional allowlist patterns for tool_command (repeatable)
+	maxOutputLimit    int           // hard ceiling (bytes) on per-stream tool_command output; 0 = default 10MB
 }
 
 type commandMode string

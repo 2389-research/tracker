@@ -135,6 +135,9 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	if err := validateWebhookFlags(cfg); err != nil {
 		return cfg, err
 	}
+	if err := validateToolSafetyFlags(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
 }
 
@@ -142,6 +145,16 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 func validateBudgetLimits(cfg runConfig) error {
 	if cfg.maxTokens < 0 || cfg.maxCostCents < 0 || cfg.maxWallTime < 0 {
 		return fmt.Errorf("budget limits must be non-negative")
+	}
+	return nil
+}
+
+// validateToolSafetyFlags rejects nonsensical values for the tool safety flags.
+// A negative --max-output-limit is a user error (probably a typo); reject loudly
+// rather than silently coercing to default, to avoid surprise.
+func validateToolSafetyFlags(cfg runConfig) error {
+	if cfg.maxOutputLimit < 0 {
+		return fmt.Errorf("--max-output-limit must be non-negative, got %d", cfg.maxOutputLimit)
 	}
 	return nil
 }
@@ -206,6 +219,9 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.webhookAuthHeader, "webhook-auth", "", "Authorization header value sent on outbound webhook requests (e.g. 'Bearer sk_live_...')")
 	fs.StringVar(&cfg.exportBundle, "export-bundle", "", "After the run completes, write a git bundle of run artifacts to this path")
 	fs.StringVar(&cfg.artifactDir, "artifact-dir", "", "Override node state directory (default: <workdir>/.tracker/runs)")
+	fs.BoolVar(&cfg.bypassDenylist, "bypass-denylist", false, "Disable the built-in tool_command denylist (SECURITY: use only in sandboxed environments)")
+	fs.Var(stringSliceFlag{target: &cfg.toolAllowlist}, "tool-allowlist", "Glob pattern(s) a tool_command must match to execute (repeatable or comma-separated)")
+	fs.IntVar(&cfg.maxOutputLimit, "max-output-limit", 0, "Hard ceiling in bytes on tool_command output per stream (0 = default 10MB)")
 	return fs
 }
 
@@ -240,6 +256,34 @@ func (p paramMapFlag) Set(value string) error {
 		*p.target = make(map[string]string)
 	}
 	(*p.target)[key] = val
+	return nil
+}
+
+// stringSliceFlag is a repeatable flag that appends each value to a target slice.
+// Each invocation may also provide a comma-separated list of values, which are
+// split and appended individually. Empty values (after TrimSpace) are ignored.
+type stringSliceFlag struct {
+	target *[]string
+}
+
+func (s stringSliceFlag) String() string {
+	if s.target == nil || *s.target == nil {
+		return ""
+	}
+	return strings.Join(*s.target, ",")
+}
+
+func (s stringSliceFlag) Set(value string) error {
+	if s.target == nil {
+		return fmt.Errorf("invalid stringSliceFlag target")
+	}
+	for _, part := range strings.Split(value, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		*s.target = append(*s.target, trimmed)
+	}
 	return nil
 }
 
@@ -307,5 +351,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --webhook-auth string     Authorization header for outbound webhook requests\n")
 	fmt.Fprintf(w, "  --export-bundle string    Write a portable git bundle of run artifacts to this path after completion\n")
 	fmt.Fprintf(w, "  --artifact-dir string     Override node state directory (default: <workdir>/.tracker/runs)\n")
+	fmt.Fprintf(w, "  --bypass-denylist         Disable the built-in tool_command denylist (SECURITY: sandboxed use only)\n")
+	fmt.Fprintf(w, "  --tool-allowlist pattern  Glob pattern a tool_command must match to execute (repeatable, comma-separated)\n")
+	fmt.Fprintf(w, "  --max-output-limit bytes  Hard ceiling per tool_command output stream (default: 10MB)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }
