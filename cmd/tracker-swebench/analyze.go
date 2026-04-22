@@ -77,7 +77,9 @@ type EmptyPatchSection struct {
 }
 
 // EmptyPatchEntry is one empty-patch row. FinalMessage is capped at ~200 chars
-// for the human-readable table; the raw diagnostic file on disk is untruncated.
+// for the human-readable table; the corresponding diagnostic written to disk
+// may also contain a truncated message (WriteEmptyPatchDiagnostic trims
+// FinalMessage to 400 runes before persisting).
 type EmptyPatchEntry struct {
 	InstanceID        string   `json:"instance_id"`
 	Turns             int      `json:"turns"`
@@ -118,20 +120,21 @@ type ErrorClassSample struct {
 }
 
 // perInstanceData is the internal per-instance record built from on-disk
-// artifacts. One per known instance_id.
+// artifacts. One per known instance_id. Entries are only created by
+// readPredictions — scanLogsDir only updates existing entries, so every
+// record here is backed by a predictions.jsonl line.
 type perInstanceData struct {
-	InstanceID    string
-	Repo          string
-	HasPrediction bool
-	PatchEmpty    bool
-	Turns         int
-	Elapsed       string
-	ElapsedSecs   int64
-	InputTokens   int64
-	OutputTokens  int64
-	ErrorMsg      string
-	ErrorClass    string // "", "setup", "patch", "harness"
-	Diagnostic    *EmptyPatchDiagnostic
+	InstanceID   string
+	Repo         string
+	PatchEmpty   bool
+	Turns        int
+	Elapsed      string
+	ElapsedSecs  int64
+	InputTokens  int64
+	OutputTokens int64
+	ErrorMsg     string
+	ErrorClass   string // "", "setup", "patch", "harness"
+	Diagnostic   *EmptyPatchDiagnostic
 }
 
 // runAnalyze is the `analyze` subcommand entry point. args is the flag args
@@ -141,6 +144,7 @@ func runAnalyze(args []string, out io.Writer) error {
 	fs.SetOutput(out)
 	emitJSON := fs.Bool("json", false, "emit structured JSON report instead of human-readable text")
 	topN := fs.Int("top", 10, "number of rows in top-N sections (empty-patch, longest-unresolved)")
+	predictionsPath := fs.String("predictions", "", "explicit path to predictions.jsonl (overrides auto-discovery)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(out, `tracker-swebench analyze — bulk triage of a completed run
@@ -150,6 +154,10 @@ Usage:
 
 Reads artifacts produced by a prior tracker-swebench run (predictions.jsonl,
 logs/*.log, logs/*.empty-patch.json) and emits a structured triage report.
+
+predictions.jsonl is auto-discovered: first at <results-dir>/predictions.jsonl,
+then at the sibling path <results-dir>/../predictions.jsonl (matches the default
+output layout). Pass --predictions <path> to point at an arbitrary location.
 
 By default, resolution (resolved vs unresolved) requires an evaluator report
 file in the results dir: either a SWE-bench harness JSON report containing a
@@ -162,6 +170,9 @@ Flags:
 	}
 
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return err
 	}
 	if fs.NArg() < 1 {
@@ -170,7 +181,7 @@ Flags:
 	}
 	resultsDir := fs.Arg(0)
 
-	report, err := BuildAnalyzeReport(resultsDir, *topN)
+	report, err := BuildAnalyzeReportWithPredictions(resultsDir, *topN, *predictionsPath)
 	if err != nil {
 		return err
 	}
@@ -185,7 +196,18 @@ Flags:
 
 // BuildAnalyzeReport is the pure analysis function: given a results dir,
 // produces the AnalyzeReport. Separated from runAnalyze for testability.
+// Equivalent to BuildAnalyzeReportWithPredictions(resultsDir, topN, "").
 func BuildAnalyzeReport(resultsDir string, topN int) (*AnalyzeReport, error) {
+	return BuildAnalyzeReportWithPredictions(resultsDir, topN, "")
+}
+
+// BuildAnalyzeReportWithPredictions is the same as BuildAnalyzeReport but
+// allows the caller to override predictions.jsonl auto-discovery. When
+// predictionsOverride is empty, the function looks at <results-dir>/predictions.jsonl
+// first, then falls back to <results-dir>/../predictions.jsonl (the default
+// `tracker-swebench run` layout writes predictions as a sibling of the results
+// directory).
+func BuildAnalyzeReportWithPredictions(resultsDir string, topN int, predictionsOverride string) (*AnalyzeReport, error) {
 	if topN <= 0 {
 		topN = 10
 	}
@@ -204,16 +226,25 @@ func BuildAnalyzeReport(resultsDir string, topN int) (*AnalyzeReport, error) {
 	report := &AnalyzeReport{ResultsDir: absDir}
 
 	// Optional run metadata.
-	if meta, err := readRunMeta(filepath.Join(absDir, "run_meta.json")); err == nil {
-		report.RunMeta = meta
+	meta, err := readRunMeta(filepath.Join(absDir, "run_meta.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read run_meta.json: %w", err)
 	}
+	report.RunMeta = meta
 
 	// Per-instance dataset, keyed by instance_id.
 	data := make(map[string]*perInstanceData)
 
 	// 1. Read predictions.jsonl — source of truth for which instances
-	//    the harness actually attempted.
-	predPath := filepath.Join(absDir, "predictions.jsonl")
+	//    the harness actually attempted. Discovery order:
+	//      a. --predictions <path> override, if set
+	//      b. <results-dir>/predictions.jsonl
+	//      c. <results-dir>/../predictions.jsonl (default run layout writes
+	//         --output=./predictions.jsonl as a sibling of --results-dir=./results)
+	predPath, err := resolvePredictionsPath(absDir, predictionsOverride)
+	if err != nil {
+		return nil, err
+	}
 	if err := readPredictions(predPath, data); err != nil {
 		return nil, err
 	}
@@ -225,6 +256,8 @@ func BuildAnalyzeReport(resultsDir string, topN int) (*AnalyzeReport, error) {
 		if err := scanLogsDir(logsDir, data); err != nil {
 			return nil, err
 		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("stat logs dir: %w", err)
 	}
 
 	// 3. Optional evaluator report — populates resolved_ids if present.
@@ -258,6 +291,9 @@ func BuildAnalyzeReport(resultsDir string, topN int) (*AnalyzeReport, error) {
 func readRunMeta(path string) (*RunMeta, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var meta RunMeta
@@ -267,15 +303,48 @@ func readRunMeta(path string) (*RunMeta, error) {
 	return &meta, nil
 }
 
+// resolvePredictionsPath returns the path to predictions.jsonl to read.
+// Resolution order mirrors the documented --predictions flag:
+//  1. explicit override, if non-empty — used verbatim; existence is checked so
+//     we fail with a clear message instead of deep inside readPredictions.
+//  2. <absDir>/predictions.jsonl — the "everything inside results-dir" layout.
+//  3. <absDir>/../predictions.jsonl — the default `tracker-swebench run` layout
+//     where --output defaults to ./predictions.jsonl (cwd) and --results-dir
+//     defaults to ./results. The sibling path matches that default.
+//
+// Returns an error with both candidate paths listed when neither exists, so the
+// user can see why discovery failed.
+func resolvePredictionsPath(absDir, override string) (string, error) {
+	if override != "" {
+		if _, err := os.Stat(override); err != nil {
+			if os.IsNotExist(err) {
+				return "", fmt.Errorf("--predictions %q: file not found", override)
+			}
+			return "", fmt.Errorf("--predictions %q: %w", override, err)
+		}
+		return override, nil
+	}
+	primary := filepath.Join(absDir, "predictions.jsonl")
+	if _, err := os.Stat(primary); err == nil {
+		return primary, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat %q: %w", primary, err)
+	}
+	sibling := filepath.Join(filepath.Dir(absDir), "predictions.jsonl")
+	if _, err := os.Stat(sibling); err == nil {
+		return sibling, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat %q: %w", sibling, err)
+	}
+	return "", fmt.Errorf("predictions.jsonl not found — looked in %q and %q (pass --predictions <path> to override)", primary, sibling)
+}
+
 // readPredictions populates data from predictions.jsonl. Each JSONL line is
 // one Prediction. An empty model_patch marks the instance as empty-patch.
 func readPredictions(path string, data map[string]*perInstanceData) error {
 	f, err := os.Open(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("predictions.jsonl not found in %q — is this a tracker-swebench results dir?", filepath.Dir(path))
-		}
-		return fmt.Errorf("open predictions.jsonl: %w", err)
+		return fmt.Errorf("open predictions.jsonl %q: %w", path, err)
 	}
 	defer f.Close()
 
@@ -301,7 +370,6 @@ func readPredictions(path string, data map[string]*perInstanceData) error {
 			d = &perInstanceData{InstanceID: p.InstanceID, Repo: repoFromInstanceID(p.InstanceID)}
 			data[p.InstanceID] = d
 		}
-		d.HasPrediction = true
 		d.PatchEmpty = p.ModelPatch == ""
 	}
 	if err := scanner.Err(); err != nil {
@@ -338,6 +406,13 @@ func repoFromInstanceID(id string) string {
 // turns, elapsed, tokens, errors (from `<id>.log`) and empty-patch diagnostics
 // (from `<id>.empty-patch.json`). `<id>.transcript.log` is ignored — analyze
 // does not re-read transcripts to stay fast.
+//
+// Only instances already present in `data` (from predictions.jsonl) are
+// updated. Orphan log files from a prior partial run without a matching
+// prediction line are skipped so counts/tables reflect exactly the set of
+// instances the harness actually recorded. This matches the Copilot review
+// guidance on `HasPrediction`: predictions.jsonl is the canonical instance
+// set; logs/ augments it.
 func scanLogsDir(logsDir string, data map[string]*perInstanceData) error {
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
@@ -352,7 +427,10 @@ func scanLogsDir(logsDir string, data map[string]*perInstanceData) error {
 		switch {
 		case strings.HasSuffix(name, ".empty-patch.json"):
 			id := strings.TrimSuffix(name, ".empty-patch.json")
-			d := ensureData(data, id)
+			d, ok := data[id]
+			if !ok {
+				continue // orphan diagnostic without a prediction line; skip
+			}
 			diag, err := readEmptyPatchDiagnostic(path)
 			if err == nil {
 				d.Diagnostic = diag
@@ -365,7 +443,10 @@ func scanLogsDir(logsDir string, data map[string]*perInstanceData) error {
 			continue
 		case strings.HasSuffix(name, ".log"):
 			id := strings.TrimSuffix(name, ".log")
-			d := ensureData(data, id)
+			d, ok := data[id]
+			if !ok {
+				continue // orphan log without a prediction line; skip
+			}
 			if err := parseInstanceLog(path, d); err != nil {
 				// Per-file parse failures are warnings, not fatal — other
 				// files may still be readable.
@@ -374,18 +455,6 @@ func scanLogsDir(logsDir string, data map[string]*perInstanceData) error {
 		}
 	}
 	return nil
-}
-
-// ensureData returns the per-instance record for id, creating one if missing.
-// Used when scanning logs discovers an instance not listed in predictions.jsonl
-// (e.g. a crashed run that never wrote a prediction line).
-func ensureData(data map[string]*perInstanceData, id string) *perInstanceData {
-	if d, ok := data[id]; ok {
-		return d
-	}
-	d := &perInstanceData{InstanceID: id, Repo: repoFromInstanceID(id)}
-	data[id] = d
-	return d
 }
 
 // readEmptyPatchDiagnostic unmarshals a `<id>.empty-patch.json` file produced
@@ -541,7 +610,7 @@ func findEvaluatorReport(resultsDir string) (map[string]struct{}, string, error)
 	candidates := []string{}
 	entries, err := os.ReadDir(resultsDir)
 	if err != nil {
-		return nil, "", nil // dir exists (we stat'd it), so this is rare; don't fail the report
+		return nil, "", fmt.Errorf("read results dir %q: %w", resultsDir, err)
 	}
 	for _, e := range entries {
 		if e.IsDir() {
@@ -572,8 +641,12 @@ func findEvaluatorReport(resultsDir string) (map[string]struct{}, string, error)
 				return ids, path, nil
 			}
 		}
+		// Bare-array form. A nil asList means the JSON was not an array at all;
+		// an empty-but-non-nil asList is a valid evaluator report with zero
+		// resolved instances (ResolvedKnown=true, Resolved=0), which must be
+		// distinguished from "no evaluator report".
 		var asList []string
-		if err := json.Unmarshal(raw, &asList); err == nil && len(asList) > 0 {
+		if err := json.Unmarshal(raw, &asList); err == nil && asList != nil {
 			return stringSet(asList), path, nil
 		}
 	}
@@ -867,64 +940,89 @@ func computeErrorClassDistribution(data map[string]*perInstanceData) ErrorClassD
 	return dist
 }
 
+// errWriter wraps an io.Writer and remembers the first error encountered.
+// Subsequent writes after an error are no-ops so callers can freely stream
+// output and only check the error once at the end. Used by WriteAnalyzeText
+// so broken-pipe / short-write failures surface instead of being silently
+// dropped by `fmt.Fprint*`'s unchecked return value.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) printf(format string, args ...any) {
+	if e.err != nil {
+		return
+	}
+	_, e.err = fmt.Fprintf(e.w, format, args...)
+}
+
+func (e *errWriter) println(args ...any) {
+	if e.err != nil {
+		return
+	}
+	_, e.err = fmt.Fprintln(e.w, args...)
+}
+
 // WriteAnalyzeText formats the report as the default human-readable output.
 // Uses plain ASCII tables — no external dependencies, safe for non-TTY pipes.
 func WriteAnalyzeText(w io.Writer, r *AnalyzeReport) error {
-	fmt.Fprintln(w, "tracker-swebench analyze")
-	fmt.Fprintln(w, "========================")
-	fmt.Fprintf(w, "Results dir: %s\n", r.ResultsDir)
+	ew := &errWriter{w: w}
+	ew.println("tracker-swebench analyze")
+	ew.println("========================")
+	ew.printf("Results dir: %s\n", r.ResultsDir)
 	if r.RunMeta != nil {
 		m := r.RunMeta
-		fmt.Fprintf(w, "Model:       %s  (provider: %s", m.Model, m.Provider)
+		ew.printf("Model:       %s  (provider: %s", m.Model, m.Provider)
 		if m.GatewayURL != "" {
-			fmt.Fprintf(w, ", gateway: %s", m.GatewayURL)
+			ew.printf(", gateway: %s", m.GatewayURL)
 		}
-		fmt.Fprintln(w, ")")
-		fmt.Fprintf(w, "Max turns:   %d    Timeout: %s\n", m.MaxTurns, m.Timeout)
+		ew.println(")")
+		ew.printf("Max turns:   %d    Timeout: %s\n", m.MaxTurns, m.Timeout)
 		if m.Commit != "" {
-			fmt.Fprintf(w, "Commit:      %s\n", m.Commit)
+			ew.printf("Commit:      %s\n", m.Commit)
 		}
 	}
 	if r.EvaluatorReportPath != "" {
-		fmt.Fprintf(w, "Evaluator:   %s\n", r.EvaluatorReportPath)
+		ew.printf("Evaluator:   %s\n", r.EvaluatorReportPath)
 	}
-	fmt.Fprintln(w)
+	ew.println()
 
-	writeOverallCounts(w, r.Counts)
-	writePerRepo(w, r.PerRepo)
-	writeTopEmpty(w, r.TopEmptyPatches)
-	writeTopLongest(w, r.TopLongestUnresolved, r.Counts.ResolvedKnown)
-	writeErrorClasses(w, r.ErrorClasses)
-	return nil
+	writeOverallCounts(ew, r.Counts)
+	writePerRepo(ew, r.PerRepo)
+	writeTopEmpty(ew, r.TopEmptyPatches)
+	writeTopLongest(ew, r.TopLongestUnresolved, r.Counts.ResolvedKnown)
+	writeErrorClasses(ew, r.ErrorClasses)
+	return ew.err
 }
 
-func writeOverallCounts(w io.Writer, c AnalyzeCounts) {
-	fmt.Fprintln(w, "## Overall counts")
-	fmt.Fprintln(w)
+func writeOverallCounts(w *errWriter, c AnalyzeCounts) {
+	w.println("## Overall counts")
+	w.println()
 	if c.Total == 0 {
-		fmt.Fprintln(w, "  (no instances found)")
-		fmt.Fprintln(w)
+		w.println("  (no instances found)")
+		w.println()
 		return
 	}
-	fmt.Fprintf(w, "  Total:              %d\n", c.Total)
+	w.printf("  Total:              %d\n", c.Total)
 	if c.ResolvedKnown {
-		fmt.Fprintf(w, "  Resolved:           %d (%.1f%%)\n", c.Resolved, c.ResolvedPct)
-		fmt.Fprintf(w, "  Unresolved:         %d (%.1f%%)\n", c.Unresolved, c.UnresolvedPct)
+		w.printf("  Resolved:           %d (%.1f%%)\n", c.Resolved, c.ResolvedPct)
+		w.printf("  Unresolved:         %d (%.1f%%)\n", c.Unresolved, c.UnresolvedPct)
 	} else {
-		fmt.Fprintf(w, "  Patched (unverified): %d (%.1f%%)\n", c.PatchedUnverified, c.PatchedUnverifiedPct)
-		fmt.Fprintln(w, "  (no evaluator report — resolution status unknown)")
+		w.printf("  Patched (unverified): %d (%.1f%%)\n", c.PatchedUnverified, c.PatchedUnverifiedPct)
+		w.println("  (no evaluator report — resolution status unknown)")
 	}
-	fmt.Fprintf(w, "  Empty:              %d (%.1f%%)\n", c.Empty, c.EmptyPct)
-	fmt.Fprintf(w, "  Errors:             %d (%.1f%%)\n", c.Errors, c.ErrorsPct)
-	fmt.Fprintln(w)
+	w.printf("  Empty:              %d (%.1f%%)\n", c.Empty, c.EmptyPct)
+	w.printf("  Errors:             %d (%.1f%%)\n", c.Errors, c.ErrorsPct)
+	w.println()
 }
 
-func writePerRepo(w io.Writer, rows []RepoBreakdown) {
-	fmt.Fprintln(w, "## Per-repo breakdown")
-	fmt.Fprintln(w)
+func writePerRepo(w *errWriter, rows []RepoBreakdown) {
+	w.println("## Per-repo breakdown")
+	w.println()
 	if len(rows) == 0 {
-		fmt.Fprintln(w, "  (no repos)")
-		fmt.Fprintln(w)
+		w.println("  (no repos)")
+		w.println()
 		return
 	}
 	resolvedKnown := rows[0].ResolvedKnown
@@ -936,67 +1034,67 @@ func writePerRepo(w io.Writer, rows []RepoBreakdown) {
 		}
 	}
 	if resolvedKnown {
-		fmt.Fprintf(w, "  %-*s  %5s  %8s  %10s  %5s  %6s  %5s\n",
+		w.printf("  %-*s  %5s  %8s  %10s  %5s  %6s  %5s\n",
 			repoW, "Repo", "Total", "Resolved", "Unresolved", "Empty", "Errors", "Rate")
-		fmt.Fprintf(w, "  %s\n", strings.Repeat("-", repoW+4+5+2+8+2+10+2+5+2+6+2+5))
+		w.printf("  %s\n", strings.Repeat("-", repoW+4+5+2+8+2+10+2+5+2+6+2+5))
 		for _, r := range rows {
-			fmt.Fprintf(w, "  %-*s  %5d  %8d  %10d  %5d  %6d  %4.1f%%\n",
+			w.printf("  %-*s  %5d  %8d  %10d  %5d  %6d  %4.1f%%\n",
 				repoW, r.Repo, r.Total, r.Resolved, r.Unresolved, r.Empty, r.Errors, r.Rate)
 		}
 	} else {
-		fmt.Fprintf(w, "  %-*s  %5s  %9s  %5s  %6s  %10s\n",
+		w.printf("  %-*s  %5s  %9s  %5s  %6s  %10s\n",
 			repoW, "Repo", "Total", "Patched", "Empty", "Errors", "Patch rate")
-		fmt.Fprintf(w, "  %s\n", strings.Repeat("-", repoW+4+5+2+9+2+5+2+6+2+10))
+		w.printf("  %s\n", strings.Repeat("-", repoW+4+5+2+9+2+5+2+6+2+10))
 		for _, r := range rows {
-			fmt.Fprintf(w, "  %-*s  %5d  %9d  %5d  %6d  %9.1f%%\n",
+			w.printf("  %-*s  %5d  %9d  %5d  %6d  %9.1f%%\n",
 				repoW, r.Repo, r.Total, r.PatchedUnverified, r.Empty, r.Errors, r.Rate)
 		}
 	}
-	fmt.Fprintln(w)
+	w.println()
 }
 
-func writeTopEmpty(w io.Writer, sec EmptyPatchSection) {
-	fmt.Fprintf(w, "## Top empty-patch instances (%d total)\n\n", sec.TotalEmpty)
+func writeTopEmpty(w *errWriter, sec EmptyPatchSection) {
+	w.printf("## Top empty-patch instances (%d total)\n\n", sec.TotalEmpty)
 	if sec.TotalEmpty == 0 {
-		fmt.Fprintln(w, "  (no empty-patch instances)")
-		fmt.Fprintln(w)
+		w.println("  (no empty-patch instances)")
+		w.println()
 		return
 	}
 	if !sec.DiagnosticsAvailable {
-		fmt.Fprintln(w, "  no diagnostic data — run with newer tracker-swebench (>= PR #150)")
-		fmt.Fprintln(w, "  to enable per-instance empty-patch diagnostics.")
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "  Instance IDs (top-N by turns):")
+		w.println("  no diagnostic data — run with newer tracker-swebench (>= PR #150)")
+		w.println("  to enable per-instance empty-patch diagnostics.")
+		w.println()
+		w.println("  Instance IDs (top-N by turns):")
 		for _, e := range sec.Instances {
-			fmt.Fprintf(w, "    - %s (turns: %d)\n", e.InstanceID, e.Turns)
+			w.printf("    - %s (turns: %d)\n", e.InstanceID, e.Turns)
 		}
-		fmt.Fprintln(w)
+		w.println()
 		return
 	}
-	fmt.Fprintf(w, "  diagnostics found for %d/%d empty-patch instances.\n\n", sec.DiagnosticsFound, sec.TotalEmpty)
+	w.printf("  diagnostics found for %d/%d empty-patch instances.\n\n", sec.DiagnosticsFound, sec.TotalEmpty)
 	for i, e := range sec.Instances {
-		fmt.Fprintf(w, "  %d. %s\n", i+1, e.InstanceID)
-		fmt.Fprintf(w, "     turns: %d   termination: %s\n", e.Turns, displayOrDash(e.TerminationReason))
+		w.printf("  %d. %s\n", i+1, e.InstanceID)
+		w.printf("     turns: %d   termination: %s\n", e.Turns, displayOrDash(e.TerminationReason))
 		if len(e.LastToolCalls) > 0 {
-			fmt.Fprintf(w, "     last tools: %s\n", strings.Join(e.LastToolCalls, " → "))
+			w.printf("     last tools: %s\n", strings.Join(e.LastToolCalls, " → "))
 		}
 		if e.FinalMessage != "" {
-			fmt.Fprintf(w, "     final: %s\n", e.FinalMessage)
+			w.printf("     final: %s\n", e.FinalMessage)
 		}
 	}
-	fmt.Fprintln(w)
+	w.println()
 }
 
-func writeTopLongest(w io.Writer, rows []UnresolvedInstance, resolvedKnown bool) {
+func writeTopLongest(w *errWriter, rows []UnresolvedInstance, resolvedKnown bool) {
 	title := "## Top longest unresolved instances"
 	if !resolvedKnown {
 		title = "## Top longest non-resolved-or-empty instances"
 	}
-	fmt.Fprintln(w, title)
-	fmt.Fprintln(w)
+	w.println(title)
+	w.println()
 	if len(rows) == 0 {
-		fmt.Fprintln(w, "  (no candidates)")
-		fmt.Fprintln(w)
+		w.println("  (no candidates)")
+		w.println()
 		return
 	}
 	idW := len("Instance")
@@ -1005,19 +1103,19 @@ func writeTopLongest(w io.Writer, rows []UnresolvedInstance, resolvedKnown bool)
 			idW = len(r.InstanceID)
 		}
 	}
-	fmt.Fprintf(w, "  %-*s  %5s  %9s  %12s  %12s\n",
+	w.printf("  %-*s  %5s  %9s  %12s  %12s\n",
 		idW, "Instance", "Turns", "Elapsed", "Input tokens", "Output tokens")
-	fmt.Fprintf(w, "  %s\n", strings.Repeat("-", idW+2+5+2+9+2+12+2+12))
+	w.printf("  %s\n", strings.Repeat("-", idW+2+5+2+9+2+12+2+12))
 	for _, r := range rows {
 		elapsed := r.Elapsed
 		if elapsed == "" {
 			elapsed = "-"
 		}
-		fmt.Fprintf(w, "  %-*s  %5d  %9s  %12s  %12s\n",
+		w.printf("  %-*s  %5d  %9s  %12s  %12s\n",
 			idW, r.InstanceID, r.Turns, elapsed,
 			formatInt64(r.InputTokens), formatInt64(r.OutputTokens))
 	}
-	fmt.Fprintln(w)
+	w.println()
 }
 
 // formatInt64 returns "-" for zero, otherwise the decimal string. Makes the
@@ -1037,25 +1135,25 @@ func displayOrDash(s string) string {
 	return s
 }
 
-func writeErrorClasses(w io.Writer, d ErrorClassDistribution) {
-	fmt.Fprintln(w, "## Error class distribution")
-	fmt.Fprintln(w)
+func writeErrorClasses(w *errWriter, d ErrorClassDistribution) {
+	w.println("## Error class distribution")
+	w.println()
 	if d.Total == 0 {
-		fmt.Fprintln(w, "  (no errors)")
-		fmt.Fprintln(w)
+		w.println("  (no errors)")
+		w.println()
 		return
 	}
 	total := float64(d.Total)
-	fmt.Fprintf(w, "  Total errors:  %d\n", d.Total)
-	fmt.Fprintf(w, "  Setup:         %d (%.1f%%)\n", d.Setup, pct(d.Setup, total))
-	fmt.Fprintf(w, "  Patch:         %d (%.1f%%)\n", d.Patch, pct(d.Patch, total))
-	fmt.Fprintf(w, "  Harness:       %d (%.1f%%)\n", d.Harness, pct(d.Harness, total))
+	w.printf("  Total errors:  %d\n", d.Total)
+	w.printf("  Setup:         %d (%.1f%%)\n", d.Setup, pct(d.Setup, total))
+	w.printf("  Patch:         %d (%.1f%%)\n", d.Patch, pct(d.Patch, total))
+	w.printf("  Harness:       %d (%.1f%%)\n", d.Harness, pct(d.Harness, total))
 	if len(d.Samples) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "  Samples (up to 3 per class):")
+		w.println()
+		w.println("  Samples (up to 3 per class):")
 		for _, s := range d.Samples {
-			fmt.Fprintf(w, "    [%s] %s\n         %s\n", s.Class, s.InstanceID, s.Message)
+			w.printf("    [%s] %s\n         %s\n", s.Class, s.InstanceID, s.Message)
 		}
 	}
-	fmt.Fprintln(w)
+	w.println()
 }

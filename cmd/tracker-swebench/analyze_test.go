@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -69,23 +70,29 @@ func buildFixture(t *testing.T, withEvaluator bool) string {
 	if err != nil {
 		t.Fatalf("NewResultsWriter: %v", err)
 	}
-	// Resolved (django)
-	_ = w.WritePrediction("django__django-11099", "diff --git a/x.py\n+x")
-	// Unresolved but patched (django)
-	_ = w.WritePrediction("django__django-11100", "diff --git a/y.py\n+y")
-	// Patched (sympy) — would be resolved when evaluator says so
-	_ = w.WritePrediction("sympy__sympy-14396", "diff --git a/z.py\n+z")
-	// Empty patch with diagnostic (matplotlib)
-	_ = w.WritePrediction("matplotlib__matplotlib-25079", "")
-	// Empty patch without diagnostic (sphinx) — to test degraded mode per-instance
-	_ = w.WritePrediction("sphinx-doc__sphinx-8435", "")
-	// Error — setup (sympy)
-	_ = w.WritePrediction("sympy__sympy-11870", "")
-	// Error — patch (django)
-	_ = w.WritePrediction("django__django-11910", "")
-	// Error — harness (scikit)
-	_ = w.WritePrediction("scikit-learn__scikit-learn-13496", "")
-	_ = w.Close()
+	// Fixture predictions covering every report section. Assert each write
+	// so a regression in ResultsWriter surfaces as a test failure here
+	// instead of silently passing with a partial fixture.
+	writes := []struct {
+		id, patch string
+	}{
+		{"django__django-11099", "diff --git a/x.py\n+x"}, // resolved (django)
+		{"django__django-11100", "diff --git a/y.py\n+y"}, // unresolved but patched (django)
+		{"sympy__sympy-14396", "diff --git a/z.py\n+z"},   // patched (sympy) — resolved when evaluator says so
+		{"matplotlib__matplotlib-25079", ""},              // empty patch with diagnostic
+		{"sphinx-doc__sphinx-8435", ""},                   // empty patch without diagnostic — degraded mode per-instance
+		{"sympy__sympy-11870", ""},                        // error — setup (sympy)
+		{"django__django-11910", ""},                      // error — patch (django)
+		{"scikit-learn__scikit-learn-13496", ""},          // error — harness (scikit)
+	}
+	for _, p := range writes {
+		if err := w.WritePrediction(p.id, p.patch); err != nil {
+			t.Fatalf("WritePrediction %q: %v", p.id, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("ResultsWriter.Close: %v", err)
+	}
 
 	// Per-instance .log files.
 	writeInstanceLog(t, logsDir, "django__django-11099", 12, "2m3s", 120000, 4000, "")
@@ -247,10 +254,19 @@ func TestBuildAnalyzeReport_NoDiagnosticsDegradation(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	// Two empty-patch instances, NO diagnostic files.
-	w, _ := NewResultsWriter(filepath.Join(dir, "predictions.jsonl"), "m")
-	_ = w.WritePrediction("django__django-1", "")
-	_ = w.WritePrediction("django__django-2", "")
-	_ = w.Close()
+	w, err := NewResultsWriter(filepath.Join(dir, "predictions.jsonl"), "m")
+	if err != nil {
+		t.Fatalf("NewResultsWriter: %v", err)
+	}
+	if err := w.WritePrediction("django__django-1", ""); err != nil {
+		t.Fatalf("WritePrediction django-1: %v", err)
+	}
+	if err := w.WritePrediction("django__django-2", ""); err != nil {
+		t.Fatalf("WritePrediction django-2: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("ResultsWriter.Close: %v", err)
+	}
 	writeInstanceLog(t, logsDir, "django__django-1", 10, "1m", 0, 0, "")
 	writeInstanceLog(t, logsDir, "django__django-2", 20, "2m", 0, 0, "")
 
@@ -403,11 +419,107 @@ func TestFindEvaluatorReport_BareArrayFormat(t *testing.T) {
 	}
 }
 
-// keys returns the sorted keys of a map — used for test diagnostics.
+// TestFindEvaluatorReport_EmptyResolvedArray verifies that a bare
+// `resolved_ids.json` containing `[]` is recognized as a valid evaluator
+// report with zero resolved instances — distinct from "no evaluator found"
+// (which returns nil). Regression guard for PR #153 review feedback (Codex P2).
+func TestFindEvaluatorReport_EmptyResolvedArray(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "resolved_ids.json"), []byte(`[]`), 0o644); err != nil {
+		t.Fatalf("write ids: %v", err)
+	}
+	ids, path, err := findEvaluatorReport(dir)
+	if err != nil {
+		t.Fatalf("findEvaluatorReport: %v", err)
+	}
+	if ids == nil {
+		t.Fatal("expected non-nil resolved set for empty array (evaluator present, zero resolved)")
+	}
+	if len(ids) != 0 {
+		t.Errorf("len(ids) = %d, want 0", len(ids))
+	}
+	if !strings.HasSuffix(path, "resolved_ids.json") {
+		t.Errorf("path = %q", path)
+	}
+}
+
+// TestBuildAnalyzeReport_SiblingPredictions verifies that
+// BuildAnalyzeReport discovers predictions.jsonl at <results-dir>/../predictions.jsonl
+// (the default `tracker-swebench run` output layout) when it is not present
+// inside the results directory. Regression guard for PR #153 (Codex P1).
+func TestBuildAnalyzeReport_SiblingPredictions(t *testing.T) {
+	parent := t.TempDir()
+	resultsDir := filepath.Join(parent, "results")
+	logsDir := filepath.Join(resultsDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	// Sibling predictions.jsonl — matches --output=./predictions.jsonl with
+	// --results-dir=./results.
+	w, err := NewResultsWriter(filepath.Join(parent, "predictions.jsonl"), "m")
+	if err != nil {
+		t.Fatalf("NewResultsWriter: %v", err)
+	}
+	if err := w.WritePrediction("django__django-1", "diff --git a/x.py\n+x"); err != nil {
+		t.Fatalf("WritePrediction: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	writeInstanceLog(t, logsDir, "django__django-1", 5, "1m", 0, 0, "")
+	r, err := BuildAnalyzeReport(resultsDir, 10)
+	if err != nil {
+		t.Fatalf("BuildAnalyzeReport: %v", err)
+	}
+	if r.Counts.Total != 1 {
+		t.Errorf("Total = %d, want 1 (sibling predictions discovery)", r.Counts.Total)
+	}
+}
+
+// TestBuildAnalyzeReport_ExplicitPredictions verifies the --predictions flag
+// via the BuildAnalyzeReportWithPredictions entry point.
+func TestBuildAnalyzeReport_ExplicitPredictions(t *testing.T) {
+	resultsDir := t.TempDir()
+	predictionsDir := t.TempDir()
+	predPath := filepath.Join(predictionsDir, "custom.jsonl")
+	w, err := NewResultsWriter(predPath, "m")
+	if err != nil {
+		t.Fatalf("NewResultsWriter: %v", err)
+	}
+	if err := w.WritePrediction("django__django-1", "x"); err != nil {
+		t.Fatalf("WritePrediction: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	r, err := BuildAnalyzeReportWithPredictions(resultsDir, 10, predPath)
+	if err != nil {
+		t.Fatalf("BuildAnalyzeReportWithPredictions: %v", err)
+	}
+	if r.Counts.Total != 1 {
+		t.Errorf("Total = %d, want 1", r.Counts.Total)
+	}
+}
+
+// TestRunAnalyze_HelpFlag verifies `analyze -h` returns nil (not
+// flag.ErrHelp) so the caller exits 0 rather than 1.
+func TestRunAnalyze_HelpFlag(t *testing.T) {
+	var buf bytes.Buffer
+	if err := runAnalyze([]string{"-h"}, &buf); err != nil {
+		t.Fatalf("runAnalyze -h should return nil, got %v", err)
+	}
+	if !strings.Contains(buf.String(), "analyze") {
+		t.Errorf("expected usage text in output, got %q", buf.String())
+	}
+}
+
+// keys returns the sorted keys of a map — used for test diagnostics so
+// failure messages are deterministic across Go's random map iteration.
 func keys(m map[string]RepoBreakdown) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }

@@ -20,6 +20,10 @@ import (
 )
 
 func main() {
+	// helpRequested is set when the user passes the bare `help` verb; it's
+	// handled after flag registration so flag.Usage sees the flag set.
+	var helpRequested bool
+
 	// Subcommand dispatch: if the first argument is a known verb, route to
 	// its handler. Otherwise fall through to the default "run" flow so that
 	// existing invocations like `tracker-swebench --dataset ...` keep working.
@@ -31,10 +35,15 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "help", "-h", "--help":
-			// Let the default flag parser print its usage below. We fall
-			// through rather than handling it here so we don't duplicate
-			// the help text.
+		case "help":
+			// Explicitly handle the bare "help" verb: flag.Parse() only
+			// recognizes -h / --help as *flags*, not a positional verb, so
+			// without this branch `tracker-swebench help` would fall through
+			// to flag.Parse() and then to the required-dataset check,
+			// exiting with "--dataset is required" instead of printing
+			// usage. Defer the actual usage print until after flag
+			// registration (flag.Usage captures the registered flags).
+			helpRequested = true
 		}
 	}
 
@@ -73,6 +82,11 @@ Examples:
 Flags:
 `)
 		flag.PrintDefaults()
+	}
+
+	if helpRequested {
+		flag.Usage()
+		return
 	}
 
 	flag.Parse()
