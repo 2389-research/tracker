@@ -108,6 +108,14 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Create GitHub releases with release notes derived from CHANGELOG.md
 - Tag after a coherent batch of work, not after every commit
 - Breaking changes bump MAJOR, new features bump MINOR, fixes bump PATCH
+- **Merging a `release: vX.Y.Z` PR is NOT the release.** The release PR only ships CHANGELOG/README doc updates. The actual release requires `git tag -a vX.Y.Z <merge-commit> -m "release: vX.Y.Z"` followed by `git push origin vX.Y.Z`. The tag push triggers `.github/workflows/release.yml` → GoReleaser, which builds darwin/linux amd64/arm64 binaries for `tracker` and `tracker-conformance` and publishes the GitHub release. Do not consider a release done until the tag is pushed and `gh release view vX.Y.Z` returns the published entry with assets. This was missed on v0.19.0 and v0.20.0 originally — both had to be back-tagged retroactively.
+
+### Website (GitHub Pages)
+- Site is hosted on GitHub Pages at <https://2389-research.github.io/tracker/>
+- Source: `gh-pages` branch in this repo (legacy branch-based Pages, NOT the GitHub Actions deployment type)
+- Contents: 6 hand-written static files — `index.html`, `cli.html`, `workflows.html`, `architecture.html`, `changelog.html`, `style.css`. No static site generator.
+- Refresh workflow: `git fetch origin gh-pages && git worktree add /tmp/tracker-site gh-pages` (or `git checkout gh-pages` if you don't mind switching branches in the main tree), edit the HTML, commit, `git push origin gh-pages`. Pages rebuilds automatically; changes are live in ~1 minute.
+- Each release should include a site refresh as a separate PR/commit on `gh-pages`. The site drifted from v0.14.0 → v0.22.0 once because the release workflow didn't include it; the refresh step is now part of every release's checklist.
 
 ### Version bumps
 - Update go.mod module version on MAJOR bumps
