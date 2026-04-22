@@ -20,6 +20,33 @@ import (
 )
 
 func main() {
+	// helpRequested is set when the user passes the bare `help` verb; it's
+	// handled after flag registration so flag.Usage sees the flag set.
+	var helpRequested bool
+
+	// Subcommand dispatch: if the first argument is a known verb, route to
+	// its handler. Otherwise fall through to the default "run" flow so that
+	// existing invocations like `tracker-swebench --dataset ...` keep working.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "analyze":
+			if err := runAnalyze(os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		case "help":
+			// Explicitly handle the bare "help" verb: flag.Parse() only
+			// recognizes -h / --help as *flags*, not a positional verb, so
+			// without this branch `tracker-swebench help` would fall through
+			// to flag.Parse() and then to the required-dataset check,
+			// exiting with "--dataset is required" instead of printing
+			// usage. Defer the actual usage print until after flag
+			// registration (flag.Usage captures the registered flags).
+			helpRequested = true
+		}
+	}
+
 	dataset := flag.String("dataset", "", "path to JSONL file (required)")
 	model := flag.String("model", "claude-sonnet-4-6", "model name")
 	provider := flag.String("provider", "anthropic", "provider name")
@@ -36,7 +63,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, `tracker-swebench — run tracker's code agent against SWE-bench Lite instances
 
 Usage:
-  tracker-swebench --dataset <path> [flags]
+  tracker-swebench --dataset <path> [flags]          # run a benchmark
+  tracker-swebench analyze <results-dir> [flags]     # triage a completed run
 
 Prerequisites:
   1. Build the Docker image:  cd cmd/tracker-swebench && bash build.sh
@@ -48,10 +76,17 @@ Examples:
   tracker-swebench --dataset swebench_lite.jsonl --instance django__django-11099
   tracker-swebench --dataset swebench_lite.jsonl --model gpt-5.2 --provider openai
   tracker-swebench --dataset swebench_lite.jsonl --force --timeout 30m
+  tracker-swebench analyze ./results
+  tracker-swebench analyze ./results --json > report.json
 
 Flags:
 `)
 		flag.PrintDefaults()
+	}
+
+	if helpRequested {
+		flag.Usage()
+		return
 	}
 
 	flag.Parse()
