@@ -271,10 +271,13 @@ func graphHasPerNodeBackend(graph *pipeline.Graph) bool {
 //  1. CLI-supplied patterns (ToolHandlerConfig.Allowlist via --tool-allowlist)
 //  2. Graph attribute patterns (graph.Attrs[GraphAttrToolCommandsAllow])
 //
-// A command must match ANY pattern from the combined list to run. Ordering is
-// irrelevant; duplicates are de-duplicated. An empty combined list means "no
-// allowlist gate" and all non-denylisted commands pass. The denylist is always
-// evaluated first inside CheckToolCommand — the union never softens it.
+// A command must match ANY pattern from the combined list to run. Match
+// semantics do not depend on pattern order, but the merged list preserves a
+// deterministic order (CLI patterns first, then graph patterns) because it
+// is user-visible in the allowlist error message via strings.Join. Duplicates
+// are de-duplicated regardless of source. An empty combined list means "no
+// allowlist gate" and all non-denylisted commands pass. The denylist is
+// always evaluated first inside CheckToolCommand — the union never softens it.
 func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, graph *pipeline.Graph) {
 	if cfg.execEnv != nil {
 		merged := mergeToolAllowlist(cfg.toolSafety.Allowlist, graph)
@@ -295,14 +298,13 @@ func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig
 // value is a comma-separated glob list (same format as --tool-allowlist);
 // whitespace around each pattern is trimmed and empty tokens are dropped.
 // De-duplication is order-preserving: CLI patterns retain their position,
-// then new graph patterns append in declaration order.
+// then new graph patterns append in declaration order. De-dup runs on ALL
+// inputs, including the CLI-only path where the graph attr is empty —
+// duplicates in the CLI list alone are still collapsed.
 func mergeToolAllowlist(cliAllowlist []string, graph *pipeline.Graph) []string {
 	graphPatterns := parseGraphAllowlist(graph)
-	if len(graphPatterns) == 0 {
-		if len(cliAllowlist) == 0 {
-			return nil
-		}
-		return append([]string(nil), cliAllowlist...)
+	if len(cliAllowlist) == 0 && len(graphPatterns) == 0 {
+		return nil
 	}
 	seen := make(map[string]struct{}, len(cliAllowlist)+len(graphPatterns))
 	merged := make([]string, 0, len(cliAllowlist)+len(graphPatterns))

@@ -93,6 +93,11 @@ func TestMergeToolAllowlist(t *testing.T) {
 		{"union preserves order", []string{"make *"}, "git *", []string{"make *", "git *"}},
 		{"dedup identical", []string{"git *"}, "git *", []string{"git *"}},
 		{"partial overlap", []string{"make *", "git *"}, "go test *,git *", []string{"make *", "git *", "go test *"}},
+		// CLI-only duplicates must still be collapsed even when the graph
+		// attr is absent — reviewers flagged that the early-return path
+		// previously bypassed the dedup pass.
+		{"cli-only duplicates deduped", []string{"git *", "git *"}, "", []string{"git *"}},
+		{"cli-only triple-duplicates deduped", []string{"go *", "git *", "go *", "git *"}, "", []string{"go *", "git *"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
