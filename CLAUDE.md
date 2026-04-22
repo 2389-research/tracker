@@ -126,7 +126,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ### Before committing
 - `go build ./...` — must pass
-- `go test ./... -short` — all 14 packages must pass
+- `go test ./... -short` — all 17 packages must pass
 - `dippin doctor examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip` — must be A grade
 
 ### Before releasing
@@ -150,6 +150,15 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 `pipeline/dippin_adapter.go` converts dippin IR to tracker's Graph model.
 Every naming mismatch between dippin conventions and tracker conventions
 lives here. When dippin-lang adds new IR fields, the adapter needs updating.
+
+### Typed node-config accessors (v0.22.0)
+Node configuration reads go through typed accessors on `*pipeline.Node`:
+`AgentConfig(graphAttrs)`, `ToolConfig()`, `HumanConfig()`, `ParallelConfig()`,
+`RetryConfig(graphAttrs)`. Defined in `pipeline/node_config.go`. Every handler
+that previously read `node.Attrs[...]` directly now calls the typed accessor
+(a handful of strict-parse helpers retain raw reads — look for inline
+comments). When adding a new node attribute, extend the appropriate
+`NodeConfig` struct and its accessor; don't add new `node.Attrs[...]` reads.
 
 ### Structured output (`response_format`)
 The `response_format: json_object` attribute on agent nodes forces JSON output
@@ -200,7 +209,7 @@ per-provider breakdowns (middleware-level) and `EngineResult.Usage` for
 trace-level aggregation. These are independent data sources.
 
 ### Pipeline context isolation
-For the user-facing model of data flow between nodes, context scoping, and fidelity levels, see **[Pipeline Context Flow](docs/pipeline-context-flow.md)**. Per-node scoping (`node.<nodeID>.<key>`) is currently unreleased — it is on `main` and will ship in the next tagged release.
+For the user-facing model of data flow between nodes, context scoping, and fidelity levels, see **[Pipeline Context Flow](docs/pipeline-context-flow.md)**. Per-node scoping (`node.<nodeID>.<key>`) is a stable feature — after each node finishes, its dirty writes are aliased under `node.<nodeID>.<key>` so later nodes can reference a specific upstream node's output by name. Declarative `writes:` (v0.21.0) builds on this: agent/tool/interview-human nodes can declare the keys they produce, and a typed JSON payload is extracted into first-class context keys.
 
 ### Cost governance (v0.17.0+)
 
@@ -212,9 +221,15 @@ after every `emitCostUpdate`. A breach halts the run with
 `pipeline.OutcomeBudgetExceeded`, populates `EngineResult.BudgetLimitsHit`,
 and fires `EventBudgetExceeded` carrying the final `CostSnapshot`.
 
-Configure budgets via `tracker.Config.Budget` or the `--max-tokens`,
-`--max-cost` (cents), `--max-wall-time` CLI flags. Reading them from
-`.dip` workflow attrs is blocked on dippin-lang IR support (issue #67).
+Configure budgets via `tracker.Config.Budget`, the `--max-tokens`,
+`--max-cost` (cents), `--max-wall-time` CLI flags, or a `defaults:` block
+in the `.dip` workflow (v0.19.0, closed #67). The path:
+`WorkflowDefaults.MaxTotalTokens` / `MaxCostCents` / `MaxWallTime` →
+`extractWorkflowDefaults` in `pipeline/dippin_adapter.go` →
+`graph.Attrs["max_total_tokens" | "max_cost_cents" | "max_wall_time"]` →
+`tracker.ResolveBudgetLimits(cfg, graph)` folds the graph values in as
+fallbacks for any field left zero on `Config.Budget` / CLI. CLI flags and
+`Config.Budget` always win over `defaults:`.
 
 ### OpenAI returns errors inside 200 SSE streams
 The Responses API returns HTTP 200 and sends `error` / `response.failed`
