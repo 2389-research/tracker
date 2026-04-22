@@ -303,18 +303,74 @@ tracker init deep_review</code></pre>
 
   <!-- ═══ Backend Agnostic ═══ -->
   <section class="glass" style="border-left: 3px solid var(--orange-600);">
-    <h3>Backend Agnostic <span class="badge">v0.12.0</span></h3>
+    <h3>Backend Agnostic</h3>
     <p>
-      All four built-in workflows work with both the <strong>native</strong> and <strong>claude-code</strong> backends.
-      No changes needed &mdash; just add <code>--backend claude-code</code> to give agents file editing, terminal access,
-      and MCP tool servers. Mix backends per-node by adding <code>backend: claude-code</code> to individual agent definitions
-      in your customized <code>.dip</code> file.
+      All four built-in workflows work with every agent backend: <strong>native</strong>, <strong>claude-code</strong>, and <strong>acp</strong>.
+      Flip globally with <code>--backend</code>, or mix per-node by adding <code>backend:</code> to individual agent definitions
+      in your customized <code>.dip</code> file. Per-node attrs always win over the global flag.
     </p>
-    <pre data-lang="bash"><code><span class="comment"># Same pipeline, supercharged agents</span>
+    <pre data-lang="bash"><code><span class="comment"># Native (default) — pick your own model via provider attr</span>
+tracker build_product
+
+<span class="comment"># Claude Code — file editing, terminal, MCP servers, subscription auth</span>
 tracker <span class="flag">--backend</span> claude-code build_product
 
-<span class="comment"># Or combine with autopilot for fully autonomous + file editing</span>
-tracker <span class="flag">--backend</span> claude-code <span class="flag">--autopilot</span> mid build_product</code></pre>
+<span class="comment"># ACP — bridge to claude-agent-acp / codex-acp / gemini --acp</span>
+tracker <span class="flag">--backend</span> acp build_product</code></pre>
+  </section>
+
+  <!-- ═══ Unattended Operation ═══ -->
+  <section class="glass">
+    <h2>Run them <span class="accent">unattended</span></h2>
+    <p class="lead">
+      All four workflows are designed for hands-on runs and for fully unattended operation.
+      Pick the gate-handling strategy that matches your deployment.
+    </p>
+
+    <div class="grid-3" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Autopilot Personas</h4>
+        <p>An LLM judge answers every human gate. Four personas: <code>lax</code> (forward progress), <code>mid</code> (balanced, default), <code>hard</code> (high bar), <code>mentor</code> (approve with detailed feedback).</p>
+        <pre data-lang="bash" style="margin-top: 0.75rem;"><code>tracker <span class="flag">--autopilot</span> mid build_product</code></pre>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Auto-Approve</h4>
+        <p>Deterministic approval — no LLM call, always picks the default or first option. Best for CI and pipeline-flow tests.</p>
+        <pre data-lang="bash" style="margin-top: 0.75rem;"><code>tracker <span class="flag">--auto-approve</span> build_product</code></pre>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Webhook Gates</h4>
+        <p>Every gate is POSTed as JSON to your URL; the pipeline blocks until a callback arrives. Slack bots, email approval, factory workers, anywhere. Per-gate tokens, configurable timeout. <span class="badge">v0.17.0</span></p>
+        <pre data-lang="bash" style="margin-top: 0.75rem;"><code>tracker <span class="flag">--webhook-url</span> https://... build_product</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Customization ═══ -->
+  <section class="glass">
+    <h2>Workflow <span class="accent">customization</span></h2>
+    <p class="lead">
+      After <code>tracker init &lt;name&gt;</code>, the local <code>.dip</code> file takes precedence on subsequent runs. Tweak per-node
+      models, backends, or prompts without forking the whole pipeline.
+    </p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Workflow Params</h4>
+        <p>Top-level <code>vars</code> become <code>${params.*}</code> graph attrs referenceable in prompts, commands, and conditions. Override at runtime with repeatable <code>--param key=value</code>. Unknown keys hard-fail at startup. <span class="badge">v0.19.0</span></p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Budget Ceilings</h4>
+        <p>Put <code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> in a workflow's <code>defaults:</code> block; CLI flags still override per-run. Halts emit <code>EventBudgetExceeded</code>. <span class="badge">v0.19.0</span></p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Human-Gate Timeouts</h4>
+        <p>Set <code>timeout</code> and <code>timeout_action</code> per human gate so unattended runs keep moving if no one responds. Works with freeform, choice, and interview modes. <span class="badge">v0.19.0</span></p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Declarative <code>writes:</code> / <code>reads:</code></h4>
+        <p>Declare the context keys a node produces or consumes. Declared writes are validated after the node runs; <code>reads:</code> pins fidelity for consumed keys. Replaces node-type-specific workarounds for typed output. <span class="badge">v0.21.0</span></p>
+      </div>
+    </div>
   </section>
 
   <div class="divider"></div>
@@ -347,5 +403,6 @@ dippin test examples/build_product.dip
   <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
 </footer>
 
+<script src="highlight.js"></script>
 </body>
 </html>

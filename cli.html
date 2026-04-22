@@ -97,7 +97,34 @@ tracker update</code></pre>
 
     <div class="cli-cmd">
       <code>tracker simulate &lt;pipeline&gt;</code>
-      <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes. No LLM calls. Supports bare names.</div>
+      <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes, and graph-level attrs (sorted, deterministic). No LLM calls. Supports bare names.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker doctor [pipeline]</code>
+      <div class="desc">Preflight check with optional pipeline lint. Pass a <code>.dip</code> file to run full validation as part of the health check.</div>
+    </div>
+
+    <h3 style="margin-top: 2rem;">Headless &amp; Integration</h3>
+
+    <div class="cli-cmd">
+      <code>tracker --webhook-url &lt;url&gt; &lt;pipeline&gt;</code>
+      <div class="desc">Fully headless. Every human gate is POSTed as JSON to <code>&lt;url&gt;</code>; the pipeline blocks until a callback arrives at the local callback server. Slack bots, email approval, mobile push. Mutually exclusive with <code>--autopilot</code> and <code>--auto-approve</code>. <span class="badge">v0.17.0</span></div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker --param key=value &lt;pipeline&gt;</code>
+      <div class="desc">Override a workflow's top-level <code>vars</code> (available as <code>${params.key}</code>). Repeatable. Unknown keys hard-fail at startup. <span class="badge">v0.19.0</span></div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker --export-bundle &lt;path&gt; &lt;pipeline&gt;</code>
+      <div class="desc">After the pipeline completes, package the full artifact run directory as a portable git bundle (<code>git bundle create --all</code>). Clone with <code>git clone &lt;bundle&gt;</code> on any machine to inspect every commit and checkpoint tag. <span class="badge">v0.17.0</span></div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker --gateway-url &lt;url&gt; &lt;pipeline&gt;</code>
+      <div class="desc">Route every provider through a <a href="https://developers.cloudflare.com/ai-gateway/">Cloudflare AI Gateway</a>. Tracker appends the per-provider suffix (<code>/anthropic</code>, <code>/openai</code>, <code>/google-ai-studio</code>, <code>/compat</code>). Equivalent to <code>TRACKER_GATEWAY_URL</code>. Per-provider <code>*_BASE_URL</code> env vars still win. <span class="badge">v0.17.0</span></div>
     </div>
 
     <h3 style="margin-top: 2rem;">Autopilot</h3>
@@ -162,15 +189,41 @@ tracker update</code></pre>
           <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
         </thead>
         <tbody>
+          <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Execution</th></tr>
           <tr><td><code>-w, --workdir</code></td><td>Working directory for the pipeline run</td><td>Current directory</td></tr>
           <tr><td><code>-r, --resume</code></td><td>Resume a previous run by ID (prefix match)</td><td>&mdash;</td></tr>
+          <tr><td><code>--artifact-dir</code></td><td>Override node state directory <span class="badge">v0.19.0</span></td><td>Derived from run</td></tr>
+          <tr><td><code>--param</code></td><td>Override workflow <code>vars</code> (repeatable): <code>--param key=value</code> <span class="badge">v0.19.0</span></td><td>&mdash;</td></tr>
           <tr><td><code>--format</code></td><td>Pipeline format override: <code>dip</code> or <code>dot</code></td><td>Auto-detect from extension</td></tr>
+          <tr><td><code>--backend</code></td><td>Agent backend: <code>native</code>, <code>claude-code</code>, or <code>acp</code></td><td><code>native</code></td></tr>
+
+          <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Output</th></tr>
           <tr><td><code>--json</code></td><td>Stream events as NDJSON to stdout</td><td>Off</td></tr>
           <tr><td><code>--no-tui</code></td><td>Disable TUI dashboard, use console mode</td><td>TUI on (if TTY)</td></tr>
           <tr><td><code>--verbose</code></td><td>Show raw provider stream events</td><td>Off</td></tr>
+          <tr><td><code>--export-bundle</code></td><td>After the run, write a portable <code>git bundle</code> of run artifacts to the given path <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
+
+          <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Gate handling</th></tr>
           <tr><td><code>--autopilot</code></td><td>LLM judge persona: <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code></td><td>Off (human gates)</td></tr>
           <tr><td><code>--auto-approve</code></td><td>Deterministic auto-approve (no LLM)</td><td>Off</td></tr>
-          <tr><td><code>--backend</code></td><td>Agent backend: <code>native</code> or <code>claude-code</code> <span class="badge">v0.12.0</span></td><td><code>native</code></td></tr>
+          <tr><td><code>--webhook-url</code></td><td>POST gate prompts to this URL and wait for callback <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
+          <tr><td><code>--gate-callback-addr</code></td><td>Local addr for the inbound callback server</td><td><code>:8789</code></td></tr>
+          <tr><td><code>--gate-timeout</code></td><td>How long to wait for a webhook callback per gate</td><td><code>10m</code></td></tr>
+          <tr><td><code>--gate-timeout-action</code></td><td>What to do on gate timeout: <code>fail</code> or <code>success</code></td><td><code>fail</code></td></tr>
+          <tr><td><code>--webhook-auth</code></td><td><code>Authorization</code> header on outbound webhook POSTs</td><td>&mdash;</td></tr>
+
+          <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Budget ceilings <span class="badge">v0.17.0</span></th></tr>
+          <tr><td><code>--max-tokens</code></td><td>Halt if total tokens exceed this</td><td>&mdash;</td></tr>
+          <tr><td><code>--max-cost</code></td><td>Halt if total cost (cents) exceeds this</td><td>&mdash;</td></tr>
+          <tr><td><code>--max-wall-time</code></td><td>Halt if wall-clock runtime exceeds this (e.g. <code>30m</code>)</td><td>&mdash;</td></tr>
+
+          <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Provider routing &amp; tool safety</th></tr>
+          <tr><td><code>--gateway-url</code></td><td>Route every provider through a Cloudflare AI Gateway root URL; equivalent to <code>TRACKER_GATEWAY_URL</code> <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
+          <tr><td><code>--tool-allowlist</code></td><td>Restrict tool commands to a list of patterns (takes priority over denylist only when exact)</td><td>&mdash;</td></tr>
+          <tr><td><code>--bypass-denylist</code></td><td>Disable the built-in denylist for dangerous tool commands (eval, <code>curl | sh</code>, etc.). Explicit opt-in.</td><td>Off</td></tr>
+          <tr><td><code>--max-output-limit</code></td><td>Hard ceiling on per-stream tool output size (override per-node <code>output_limit</code>)</td><td><code>10MB</code></td></tr>
+
+          <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Misc</th></tr>
           <tr><td><code>--version</code></td><td>Show version info</td><td>&mdash;</td></tr>
         </tbody>
       </table>
@@ -321,25 +374,27 @@ tracker <span class="flag">--auto-approve</span> build_product</code></pre>
 
   <!-- ═══ Backends ═══ -->
   <section class="glass">
-    <h2>Agent <span class="accent">backends</span> <span class="badge">v0.12.0</span></h2>
+    <h2>Agent <span class="accent">backends</span></h2>
     <p class="lead">
-      Your agents already work great. Claude Code gives them superpowers when they need it &mdash;
-      file editing, terminal access, and MCP tool servers, with zero changes to your pipeline logic.
+      Three backends, one pipeline. Native is the default and works with every provider. Claude Code gives agents file editing,
+      terminal access, and MCP tool servers (subscription auth, no API key needed). ACP bridges tracker to third-party coding
+      agents like <code>claude-agent-acp</code>, <code>codex-acp</code>, and <code>gemini --acp</code> via JSON-RPC over stdio.
     </p>
 
     <h3 style="margin-top: 1.5rem;">Side-by-Side Comparison</h3>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th></th><th>Native (default)</th><th>Claude Code</th></tr>
+          <tr><th></th><th>Native (default)</th><th>Claude Code <span class="badge">v0.12.0</span></th><th>ACP <span class="badge">v0.16.0</span></th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>How it works</strong></td><td>Wraps <code>agent.Session</code> &mdash; tracker's built-in turn loop</td><td>Spawns <code>claude</code> CLI as a subprocess, parses NDJSON output</td></tr>
-          <tr><td><strong>Providers</strong></td><td>Anthropic, OpenAI, Gemini</td><td>Anthropic (via Claude CLI)</td></tr>
-          <tr><td><strong>Tool access</strong></td><td>Tracker's registered tool set</td><td>File editing, terminal, MCP servers</td></tr>
-          <tr><td><strong>Best for</strong></td><td>Standard LLM calls, multi-provider pipelines, cross-review</td><td>Implementation nodes that need to edit files and run commands</td></tr>
-          <tr><td><strong>Environment</strong></td><td>Full process environment</td><td>Minimal allowlist + <code>SSH_AUTH_SOCK</code></td></tr>
-          <tr><td><strong>Error mapping</strong></td><td>Provider HTTP status + SSE events</td><td>Claude CLI exit codes &rarr; pipeline outcomes</td></tr>
+          <tr><td><strong>How it works</strong></td><td>Wraps <code>agent.Session</code> &mdash; tracker's built-in turn loop</td><td>Spawns <code>claude</code> CLI as a subprocess, parses NDJSON output</td><td>Spawns ACP-compatible agents via JSON-RPC 2.0 over stdio</td></tr>
+          <tr><td><strong>Providers</strong></td><td>Anthropic, OpenAI, Gemini, OpenAI-compat</td><td>Anthropic (via Claude CLI)</td><td>Routed to matching ACP binary per provider</td></tr>
+          <tr><td><strong>Tool access</strong></td><td>Tracker's registered tool set</td><td>File editing, terminal, MCP servers</td><td>Full agent toolset (file ops, terminal via ACP)</td></tr>
+          <tr><td><strong>Best for</strong></td><td>Standard LLM calls, multi-provider pipelines, cross-review</td><td>Implementation nodes that need file editing + terminal</td><td>Hosting third-party ACP coding agents inside a tracker pipeline</td></tr>
+          <tr><td><strong>Environment</strong></td><td>Full process environment</td><td>API keys stripped by default (subscription auth); <code>TRACKER_PASS_API_KEYS=1</code> to keep them</td><td>API keys stripped by default so agents use native auth</td></tr>
+          <tr><td><strong>Error mapping</strong></td><td>Provider HTTP status + SSE events</td><td>Claude CLI exit codes &rarr; pipeline outcomes</td><td>ACP JSON-RPC error codes &rarr; pipeline outcomes</td></tr>
+          <tr><td><strong>Per-node override</strong></td><td><code>backend: native</code></td><td><code>backend: claude-code</code></td><td><code>backend: acp</code> + optional <code>acp_agent:</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -377,7 +432,7 @@ tracker <span class="flag">--backend</span> claude-code <span class="flag">--aut
 tracker build_product</code></pre>
 
     <h3 style="margin-top: 1.5rem;">Per-Node Selection in <code>.dip</code></h3>
-    <p>Mix backends within a single pipeline. Use Claude Code for implementation, native for everything else.</p>
+    <p>Mix backends within a single pipeline. Use Claude Code for implementation, native for everything else. Per-node <code>backend:</code> attrs always override the global <code>--backend</code> flag.</p>
     <pre data-lang="dip"><code><span class="keyword">agent</span> Implement
   label: <span class="string">"Build the feature"</span>
   model: claude-sonnet-4-6
@@ -392,6 +447,41 @@ tracker build_product</code></pre>
   <span class="comment"># No backend attr — uses native (default)</span>
   prompt: |
     Review the implementation for correctness and style.</code></pre>
+
+    <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+      The <code>acp</code> backend (v0.16.0+) spawns ACP-compatible coding agents as subprocesses via JSON-RPC over stdio
+      (<code>claude-agent-acp</code>, <code>codex-acp</code>, <code>gemini --acp</code>). Override the chosen binary per-node via
+      the <code>acp_agent</code> node attribute.
+    </p>
+  </section>
+
+  <!-- ═══ tracker-swebench ═══ -->
+  <section class="glass">
+    <h2><code>tracker-swebench</code> <span class="accent">companion binary</span> <span class="badge">v0.18.0+</span></h2>
+    <p class="lead">
+      Evaluates tracker's agent against the <a href="https://www.swebench.com/">SWE-bench</a> dataset. Orchestrates
+      per-instance Docker containers, a dataset JSONL parser, a resumable results writer, and an in-container
+      <code>agent-runner</code> that captures changes via <code>git diff</code>.
+    </p>
+
+    <div class="cli-cmd">
+      <code>tracker-swebench run &lt;dataset.jsonl&gt; [flags]</code>
+      <div class="desc">Run the harness over a SWE-bench dataset. Supports <code>--env-file</code>, <code>--platform</code>, container resource limits, and forwarding of <code>CF_AIG_TOKEN</code> through the container for gateway auth.</div>
+    </div>
+
+    <div class="cli-cmd">
+      <code>tracker-swebench analyze &lt;results-dir&gt;</code>
+      <div class="desc">Bulk-triage a completed run. Reads <code>predictions.jsonl</code> + run logs + empty-patch diagnostics and emits overall resolved/unresolved/empty/error counts, per-repo breakdown, top-10 empty-patch and longest-unresolved instances, and error-class distribution. Auto-detects SWE-bench evaluator <code>resolved_ids</code>; gracefully degrades when no evaluator report is present. <span class="badge">v0.22.0</span></div>
+    </div>
+
+    <pre data-lang="bash" style="margin-top: 1rem;"><code><span class="comment"># Analyze a completed run, pretty-printed</span>
+tracker-swebench analyze ./swebench-results/
+
+<span class="comment"># Structured JSON for downstream tooling</span>
+tracker-swebench analyze ./swebench-results/ <span class="flag">--json</span> &gt; report.json
+
+<span class="comment"># Evaluate predictions against a specific ID file</span>
+tracker-swebench analyze ./swebench-results/ <span class="flag">--predictions</span> preds.jsonl</code></pre>
   </section>
 
   <!-- ═══ Troubleshooting ═══ -->
@@ -419,14 +509,14 @@ tracker build_product</code></pre>
             <td><code>tracker diagnose</code> shows full output</td>
           </tr>
           <tr>
-            <td>Human gate shows raw markdown</td>
-            <td>Old version before glamour fix</td>
-            <td>Update to v0.9.2+</td>
-          </tr>
-          <tr>
             <td>Pipeline loops forever</td>
             <td>Unconditional fallback to loop target</td>
             <td>Route fallbacks to escalation gates or Done</td>
+          </tr>
+          <tr>
+            <td>Run halted with <code>budget_exceeded</code></td>
+            <td>Hit <code>--max-tokens</code> / <code>--max-cost</code> / <code>--max-wall-time</code></td>
+            <td><code>tracker diagnose</code> prints the per-provider breakdown and the dimension that tripped</td>
           </tr>
           <tr>
             <td>Tool retries same error 5 times</td>
@@ -554,5 +644,6 @@ tracker version                         <span class="comment"># version + config
   <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
 </footer>
 
+<script src="highlight.js"></script>
 </body>
 </html>

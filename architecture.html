@@ -39,14 +39,48 @@
       <div class="mermaid">
 graph TB
     CLI["CLI\ncmd/tracker\nflags, name resolution, TUI, embedded workflows"]
-    Engine["Pipeline Engine\npipeline/\ngraph model, run loop, edge selection, checkpoints, audit trail"]
-    Handlers["Handlers\npipeline/handlers\ncodergen · tool · human · parallel · fan_in · subgraph"]
-    Agent["Agent Session\nagent/\nturn loop, tool registry, context compaction"]
-    LLM["LLM Client\nllm/\nAnthropic · OpenAI · Gemini\nretry middleware, token tracking"]
+    Engine["Pipeline Engine\npipeline/\ngraph model, run loop, edge selection, checkpoints, audit trail, budget guard, steering channel"]
+    Handlers["Handlers\npipeline/handlers\ncodergen · tool · human · parallel · parallel.fan_in · conditional · subgraph · stack.manager_loop"]
+    Backends["Agent Backends\npipeline/backend.go\nnative · claude-code · acp"]
+    Agent["Agent Session\nagent/\nturn loop, tool registry, context compaction, plan-before-execute, episodic memory, verify-after-edit"]
+    LLM["LLM Client\nllm/\nAnthropic · OpenAI · Gemini · OpenAI-compat\nretry middleware, token tracking, cost estimation"]
 
-    CLI --> Engine --> Handlers --> Agent --> LLM
+    CLI --> Engine --> Handlers --> Backends --> Agent --> LLM
       </div>
     </div>
+  </section>
+
+  <!-- ═══ Handler Types ═══ -->
+  <section class="glass">
+    <h2>Handler <span class="accent">types</span></h2>
+    <p class="lead">
+      Every node resolves to a handler. The engine calls <code>Execute()</code> and reads the outcome; it has
+      no special-case code for any handler type. New handlers can be registered without touching the run loop.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Handler</th><th>Node kind</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>codergen</code></td><td><code>agent</code></td><td>Runs an LLM session via the selected backend (native / claude-code / acp). Emits <code>agent.Event</code> stream.</td></tr>
+          <tr><td><code>tool</code></td><td><code>tool</code></td><td>Shell command execution with per-node timeout, output limits, env scoping, denylist/allowlist, and comment/blank stripping for LLM-written lists.</td></tr>
+          <tr><td><code>human</code></td><td><code>human</code></td><td>Choice, freeform, hybrid, yes/no, and interview gates. Pluggable via <code>Interviewer</code> for autopilot, auto-approve, or webhook routing.</td></tr>
+          <tr><td><code>parallel</code></td><td><code>parallel</code></td><td>Dispatches branches from <code>parallel_targets</code> in goroutines. Honors <code>max_concurrency</code> and <code>branch_timeout</code>. Points the engine at a fan-in via <code>suggested_next_nodes</code>.</td></tr>
+          <tr><td><code>parallel.fan_in</code></td><td><code>fan_in</code></td><td>Joins parallel branches. Aggregates <code>SessionStats</code> from branch outcomes into its own trace entry.</td></tr>
+          <tr><td><code>conditional</code></td><td><code>conditional</code></td><td>Evaluates conditions without running an LLM. Pure routing node.</td></tr>
+          <tr><td><code>subgraph</code></td><td><code>subgraph</code></td><td>Executes a referenced child pipeline. Events propagate to the parent TUI; sidebar pre-populates child nodes at load time. <span class="badge">v0.19.0</span></td></tr>
+          <tr><td><code>stack.manager_loop</code></td><td><code>manager_loop</code></td><td>Async child-pipeline supervisor. Polls at a configurable interval, evaluates stop and steer conditions, injects context mid-execution via the engine steering channel. <span class="badge">v0.20.0</span></td></tr>
+          <tr><td><code>wait.human</code></td><td>—</td><td>Pause for a human signal without presenting a gate UI. Typical pattern for external notifiers that unblock via a callback.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+      <code>ensureStartExitNodes</code> only converts bare <code>codergen</code> nodes with no prompt into passthrough
+      start/exit nodes. Every other handler type is preserved, so <code>tool</code>, <code>human</code>,
+      <code>parallel</code>, <code>conditional</code>, <code>subgraph</code>, <code>stack.manager_loop</code>, and
+      <code>wait.human</code> nodes can all serve as start or exit.
+    </p>
   </section>
 
   <!-- ═══ Engine ═══ -->
@@ -175,46 +209,77 @@ graph LR
 
   <!-- ═══ Backend Abstraction ═══ -->
   <section class="glass">
-    <h2>Agent <span class="accent">backends</span> <span class="badge">v0.12.0</span></h2>
+    <h2>Agent <span class="accent">backends</span></h2>
     <p class="lead">
-      Your agents already work great with the native backend. The backend abstraction lets you swap
-      in Claude Code when agents need file editing, terminal access, and MCP tool servers &mdash; without
-      changing any pipeline logic.
+      <code>AgentBackend</code> in <code>pipeline/backend.go</code> is a minimal contract &mdash; one method that executes a node
+      and returns an <code>agent.Event</code> stream. The engine doesn't know which backend is running; it just routes edges
+      based on the outcome.
     </p>
 
     <div class="diagram">
       <div class="mermaid">
 graph TB
     CH["CodergenHandler"] --> SB["selectBackend()"]
-    SB -->|"default"| NB["NativeBackend\nagent.Session\n(existing behavior)"]
-    SB -->|"backend: claude-code"| CC["ClaudeCodeBackend\nsubprocess + NDJSON"]
+    SB -->|"default"| NB["NativeBackend\nagent.Session\nturn loop + tool registry"]
+    SB -->|"backend: claude-code"| CC["ClaudeCodeBackend\nclaude CLI subprocess\nNDJSON stdout"]
+    SB -->|"backend: acp"| AC["ACPBackend\nJSON-RPC over stdio\nclaude-agent-acp / codex-acp / gemini --acp"]
     NB --> Events["agent.Event stream"]
     CC --> Events
+    AC --> Events
       </div>
     </div>
 
     <div class="grid-2" style="margin-top: 1.5rem;">
       <div class="glass glass-sm">
-        <h4>Engine Doesn't Know</h4>
-        <p>The pipeline engine sees the same <code>agent.Event</code> stream regardless of backend. CodergenHandler encapsulates backend selection &mdash; the engine just executes handlers and routes edges.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Per-Node or Global</h4>
-        <p>Set <code>backend: claude-code</code> on individual nodes in <code>.dip</code> files for surgical precision, or use <code>--backend claude-code</code> on the CLI to switch every agent node at once.</p>
+        <h4>Per-Node Priority</h4>
+        <p>A node with <code>backend: native</code> always uses native even under <code>--backend claude-code</code>. Priority: per-node attr &gt; global flag &gt; default native. Enables mixed-backend pipelines &mdash; implementation on Claude Code, cross-review on OpenAI native.</p>
       </div>
       <div class="glass glass-sm">
         <h4>Native Backend</h4>
-        <p>Wraps <code>agent.Session</code> &mdash; the existing turn loop with tool registry and context compaction. This is the default and works with all three LLM providers.</p>
+        <p>Wraps <code>agent.Session</code> &mdash; the canonical turn loop with tool registry, context compaction, optional plan-before-execute, episodic memory across retries, and structured reflection on tool failure. Works with Anthropic, OpenAI, Gemini, and OpenAI-Compat.</p>
       </div>
       <div class="glass glass-sm">
-        <h4>Claude Code Backend</h4>
-        <p>Spawns <code>claude</code> as a subprocess and parses its NDJSON output stream. Gets file editing, terminal execution, and MCP tool servers for free. Environment is scoped to a minimal allowlist with <code>SSH_AUTH_SOCK</code> passed through.</p>
+        <h4>Claude Code Backend <span class="badge">v0.12.0</span></h4>
+        <p>Spawns <code>claude</code> as a subprocess and parses NDJSON. Gets file editing, terminal execution, and MCP tool servers for free. API keys stripped by default so the CLI uses subscription auth (Max/Pro OAuth). Exit codes map to pipeline outcomes.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>ACP Backend <span class="badge">v0.16.0</span></h4>
+        <p>Spawns any agent speaking the <a href="https://agentclientprotocol.com/">Agent Client Protocol</a> over stdio. Provider-based default routing (<code>anthropic</code>&nbsp;&rarr;&nbsp;<code>claude-agent-acp</code>, <code>openai</code>&nbsp;&rarr;&nbsp;<code>codex-acp</code>, <code>gemini</code>&nbsp;&rarr;&nbsp;<code>gemini --acp</code>); override via <code>acp_agent</code> node attr. Full terminal and file-ops RPC surface.</p>
       </div>
     </div>
 
     <div class="glass glass-sm" style="margin-top: 1rem; border-left: 3px solid var(--orange-600);">
       <h4>Design Note</h4>
-      <p>The <code>AgentBackend</code> interface in <code>pipeline/backend.go</code> is intentionally minimal &mdash; one method to execute a node and return an event stream. Claude CLI exit codes are mapped to pipeline outcomes (success, fail, escalate). The killer combo: <code>tracker --backend claude-code --autopilot mid build_product</code> runs fully autonomous with file editing superpowers.</p>
+      <p>Lazy LLM client: <code>buildLLMClient()</code> failure is non-fatal when the global <code>--backend</code> is not <code>native</code>. The native client is only required for nodes that actually need it, so you can run a pipeline with no API keys at all if every node is on <code>claude-code</code> (subscription auth) or <code>acp</code> (bridge native auth).</p>
+    </div>
+  </section>
+
+  <!-- ═══ Context & Steering ═══ -->
+  <section class="glass">
+    <h2>Context &amp; <span class="accent">steering</span></h2>
+    <p class="lead">
+      The <code>PipelineContext</code> is the typed key-value store shared across nodes. Variable expansion resolves
+      <code>${ctx.*}</code>, <code>${params.*}</code>, <code>${graph.*}</code>, and <code>${ctx.node.&lt;id&gt;.*}</code> in prompts, tool commands,
+      and edge conditions &mdash; single-pass, never re-scanning resolved values.
+    </p>
+
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Per-node scoping <span class="badge">v0.17.0</span></h4>
+        <p>After each node runs, every key it wrote is also copied into <code>node.&lt;nodeID&gt;.&lt;key&gt;</code>. Downstream nodes read <code>${ctx.node.ReadSpec.last_response}</code> to reference a specific upstream output instead of the latest one. Bare keys keep last-writer-wins global semantics.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Declarative <code>writes:</code> / <code>reads:</code> <span class="badge">v0.21.0</span></h4>
+        <p>Nodes can declare the keys they produce and consume. Declared writes are validated into the context after the handler runs &mdash; missing required fields fail the node. <code>reads:</code> pins fidelity for keys a node consumes so downstream data is consistent.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Steering channel <span class="badge">v0.20.0</span></h4>
+        <p><code>pipeline.WithSteeringChan(chan map[string]string)</code> lets a supervisor push updates between node executions. <code>MergeWithoutDirty</code> writes into the global namespace without leaking into any node's per-node scope. Used by <code>stack.manager_loop</code> to steer child pipelines mid-run.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Budget governance <span class="badge">v0.17.0</span></h4>
+        <p>The <code>BudgetGuard</code> evaluates between every pair of nodes. A trip on <code>max_total_tokens</code>, <code>max_cost_cents</code>, or <code>max_wall_time</code> halts the run with <code>OutcomeBudgetExceeded</code> and fires <code>EventBudgetExceeded</code> with a full <code>CostSnapshot</code>. Limits come from <code>Config.Budget</code>, CLI flags, or workflow <code>defaults:</code>.</p>
+      </div>
     </div>
   </section>
 
@@ -237,5 +302,6 @@ graph TB
   <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
 </footer>
 
+<script src="highlight.js"></script>
 </body>
 </html>

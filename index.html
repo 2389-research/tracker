@@ -58,28 +58,37 @@ tracker <span class="flag">--backend</span> claude-code build_product
 <span class="comment"># Run fully autonomous overnight</span>
 tracker <span class="flag">--autopilot</span> mid build_product
 
+<span class="comment"># Headless — POST gates to a webhook, resume on callback</span>
+tracker <span class="flag">--webhook-url</span> https://factory.example.com/gate build_product
+
+<span class="comment"># Override workflow params at runtime</span>
+tracker <span class="flag">--param</span> model=claude-opus-4-7 <span class="flag">--param</span> retries=3 build_product
+
+<span class="comment"># Cap a run's budget — token, dollar, wall-time ceilings</span>
+tracker <span class="flag">--max-tokens</span> 100000 <span class="flag">--max-cost</span> 500 <span class="flag">--max-wall-time</span> 30m build_product
+
 <span class="comment"># Check your LLM providers</span>
 tracker doctor</code></pre>
-    <p>Three flagship pipelines are <strong>embedded in the binary</strong>. No cloning, no examples directory. <code>go install</code> and go.</p>
+    <p>Four flagship pipelines are <strong>embedded in the binary</strong>. No cloning, no examples directory. <code>go install</code> and go.</p>
   </section>
 
   <!-- ═══ Stats ═══ -->
   <div class="glass" style="padding: 2rem;">
     <div class="stat-row">
       <div class="stat">
-        <div class="number">3</div>
+        <div class="number">4</div>
         <div class="label">Built-in Workflows</div>
       </div>
       <div class="stat">
-        <div class="number">3</div>
+        <div class="number">4</div>
         <div class="label">LLM Providers</div>
       </div>
       <div class="stat">
-        <div class="number">2</div>
+        <div class="number">3</div>
         <div class="label">Agent Backends</div>
       </div>
       <div class="stat">
-        <div class="number">8</div>
+        <div class="number">10</div>
         <div class="label">Node Types</div>
       </div>
       <div class="stat">
@@ -139,73 +148,79 @@ graph TB
   <div class="divider"></div>
 
   <!-- ═══ Features Grid ═══ -->
-  <h2 style="text-align:center; margin-bottom: 1.5rem;">11 key <span class="accent">features</span></h2>
+  <h2 style="text-align:center; margin-bottom: 1.5rem;">12 key <span class="accent">features</span></h2>
   <div class="grid-3">
 
     <div class="glass feature-card">
       <div class="icon">&#x1F4CB;</div>
       <h3>Dippin Language</h3>
-      <p>Define pipelines in <code>.dip</code> files — human-readable, version-controlled, lintable. Conditional edges, variable interpolation, per-node models.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F916;</div>
-      <h3>Multi-Provider</h3>
-      <p>Anthropic, OpenAI, and Gemini in one pipeline. Cross-review with three models. Infra-level retries for transient errors.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F3AE;</div>
-      <h3>TUI Dashboard</h3>
-      <p>Real-time node status, activity streaming, modal human gates. See every LLM turn, tool call, and decision as it happens.</p>
+      <p>Define pipelines in <code>.dip</code> files — human-readable, version-controlled, lintable. Conditional edges, variable interpolation, per-node models. Workflow <code>${params.*}</code> with runtime <code>--param</code> overrides. <span class="badge">v0.19.0</span></p>
     </div>
 
     <div class="glass feature-card">
       <div class="icon">&#x1F500;</div>
-      <h3>Parallel Execution</h3>
-      <p>Fan-out to concurrent branches with git worktree isolation. Fan-in joins results. The engine has no special-case parallel code.</p>
+      <h3>Parallel & Manager Loops</h3>
+      <p>Fan-out to concurrent branches with git worktree isolation, fan-in to join. <code>stack.manager_loop</code> supervises async child pipelines with polling, stop conditions, and mid-execution steering. <span class="badge">v0.20.0</span></p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F4E4;</div>
+      <h3>Typed Structured Output</h3>
+      <p>Declarative <code>writes:</code> / <code>reads:</code> per node. Declared writes are validated into the pipeline context; <code>reads:</code> pins fidelity for consumed keys. Plus per-node context scoping via <code>node.&lt;id&gt;.&lt;key&gt;</code>. <span class="badge">v0.21.0</span></p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F916;</div>
+      <h3>Pluggable Backends</h3>
+      <p>Native, <code>claude-code</code>, and <code>acp</code> agent backends. Mix per-node for surgical control, or flip globally with <code>--backend</code>. Same <code>agent.Event</code> stream regardless of backend — your pipeline doesn't change.</p>
     </div>
 
     <div class="glass feature-card">
       <div class="icon">&#x1F6E1;</div>
       <h3>Human-in-the-Loop</h3>
-      <p>Choice, freeform, and hybrid gates. Review modals with glamour-rendered markdown. Split escalation gates for context-specific decisions.</p>
+      <p>Choice, freeform, hybrid, yes/no, and interview gates. Glamour-rendered markdown in review modals. Per-gate <code>timeout</code> and <code>timeout_action</code> to keep unattended runs moving. <span class="badge">v0.19.0</span></p>
     </div>
 
     <div class="glass feature-card">
-      <div class="icon">&#x1F4BE;</div>
-      <h3>Checkpoint Resume</h3>
-      <p>Every node completion is checkpointed. Resume from where you stopped — the engine replays completed nodes and picks up at the failure point.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F50D;</div>
-      <h3>Decision Audit Trail</h3>
-      <p>Every edge selection, condition evaluation, and context snapshot logged to <code>activity.jsonl</code>. Full post-hoc routing reconstruction.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F3D7;</div>
-      <h3>Embedded Workflows</h3>
-      <p>Three flagship pipelines baked into the binary. <code>tracker build_product</code> works anywhere, for anyone, without cloning the repo.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F9EA;</div>
-      <h3>Simulation Testing</h3>
-      <p>23 dippin tests verify every edge of <code>build_product.dip</code>. <code>preferred_label</code>, <code>immediately_after</code>, <code>path_contains</code> assertions.</p>
+      <div class="icon">&#x1F310;</div>
+      <h3>Webhook Gates</h3>
+      <p>Fully headless — <code>--webhook-url</code> POSTs gate prompts to an external service and blocks on a callback. Per-gate HMAC tokens, configurable timeout, outbound <code>Authorization</code> header. Slack bots, email approval, mobile push. <span class="badge">v0.17.0</span></p>
     </div>
 
     <div class="glass feature-card">
       <div class="icon">&#x1F680;</div>
-      <h3>Autopilot Mode</h3>
-      <p>Replace human gates with LLM judges. Four personas: <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code>. Run fully autonomous overnight or in CI.</p>
+      <h3>Autopilot Personas</h3>
+      <p>Replace human gates with LLM judges. Four personas — <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code> — for overnight runs and CI. Routes through the claude CLI under <code>--backend claude-code</code>, no API key needed.</p>
     </div>
 
     <div class="glass feature-card">
-      <div class="icon">&#x1F50C;</div>
-      <h3>Pluggable Backends</h3>
-      <p>Your agents already work great. Switch to <code>claude-code</code> when they need file editing, terminal access, and MCP tools. Per-node or global <code>--backend</code> flag.</p>
+      <div class="icon">&#x1F4B0;</div>
+      <h3>Budget Governance</h3>
+      <p><code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> ceilings via CLI flags, library config, or workflow <code>defaults:</code>. Breach halts the run and fires <code>EventBudgetExceeded</code>. Per-provider cost rollup on <code>Result.Cost</code>. <span class="badge">v0.17.0</span></p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F4D2;</div>
+      <h3>Library API</h3>
+      <p>Embed tracker in Go code. <code>tracker.Run</code> plus context-aware <code>Diagnose</code> / <code>Audit</code> / <code>Doctor</code> / <code>Simulate</code> returning typed reports. NDJSON event streaming via <code>NewNDJSONWriter</code>. <span class="badge">v0.18.0</span></p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F9E0;</div>
+      <h3>Smarter Agents</h3>
+      <p>Episodic memory across retries, plan-before-execute phase, repository localization before the first turn, structured reflection on tool failure, and two-phase verify-after-edit. SWE-bench Lite 59% &rarr; 70% baseline. <span class="badge">v0.21.0</span></p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F4BE;</div>
+      <h3>Checkpoint & Bundle</h3>
+      <p>Every node completion is checkpointed. With <code>WithGitArtifacts</code>, the artifact dir becomes a git repo with per-node commits and checkpoint tags; <code>--export-bundle</code> produces a portable <code>.bundle</code> you can <code>git clone</code> anywhere.</p>
+    </div>
+
+    <div class="glass feature-card">
+      <div class="icon">&#x1F50D;</div>
+      <h3>Diagnose & Audit</h3>
+      <p>Every edge selection, condition evaluation, and outcome logged to <code>activity.jsonl</code>. <code>tracker diagnose</code> classifies deterministic vs. flaky failures; <code>tracker-swebench analyze</code> triages bulk SWE-bench results. <span class="badge">v0.22.0</span></p>
     </div>
 
   </div>
@@ -214,20 +229,24 @@ graph TB
 
   <!-- ═══ Providers ═══ -->
   <section class="glass">
-    <h2>Three <span class="accent">providers</span>, one pipeline</h2>
-    <p class="lead">Mix models freely. Use Opus for deep analysis, Sonnet for fast iteration, GPT for cross-review, Gemini for alternative perspectives.</p>
-    <div class="grid-3" style="margin-top: 1.5rem;">
+    <h2>Four <span class="accent">providers</span>, one pipeline</h2>
+    <p class="lead">Mix models freely. Route everything through <a href="https://developers.cloudflare.com/ai-gateway/">Cloudflare AI Gateway</a> with <code>--gateway-url</code> for central analytics, caching, and 429 relief.</p>
+    <div class="grid-2" style="margin-top: 1.5rem;">
       <div class="glass glass-sm" style="text-align:center;">
         <h3 style="color: var(--orange-300);">Anthropic</h3>
-        <p style="margin:0;"><code>claude-opus-4-6</code><br><code>claude-sonnet-4-6</code></p>
+        <p style="margin:0;"><code>claude-opus-4-7</code><br><code>claude-sonnet-4-6</code><br><code>claude-haiku-4-5</code></p>
       </div>
       <div class="glass glass-sm" style="text-align:center;">
         <h3 style="color: var(--orange-300);">OpenAI</h3>
-        <p style="margin:0;"><code>gpt-5.4</code><br><code>o3</code></p>
+        <p style="margin:0;"><code>gpt-5.4</code> / <code>gpt-5.4-mini</code><br><code>gpt-4.1</code><br><code>o3</code> / <code>o4-mini</code></p>
       </div>
       <div class="glass glass-sm" style="text-align:center;">
         <h3 style="color: var(--orange-300);">Gemini</h3>
-        <p style="margin:0;"><code>gemini-2.5-pro</code><br><code>gemini-2.5-flash</code></p>
+        <p style="margin:0;"><code>gemini-3.1-pro-preview</code><br><code>gemini-2.5-pro</code><br><code>gemini-2.5-flash</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align:center;">
+        <h3 style="color: var(--orange-300);">OpenAI-Compat</h3>
+        <p style="margin:0;">Any OpenAI-compatible endpoint<br><em>OpenRouter, vLLM, local proxies</em></p>
       </div>
     </div>
   </section>
@@ -253,7 +272,7 @@ graph TB
 
   <span class="keyword">agent</span> Implement
     label: <span class="string">"Build It"</span>
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     prompt:
       The user wants: ${ctx.human_response}
       Implement it following the project's conventions.
@@ -287,7 +306,7 @@ tracker doctor
 <span class="comment"># Stay current — checks automatically, or run manually</span>
 tracker update</code></pre>
     <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
-      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.12.0">v0.12.0</a> &middot;
+      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.22.0">v0.22.0</a> &middot;
       <a href="changelog.html">Changelog</a> &middot;
       <a href="cli.html">Full CLI reference</a>
     </p>
@@ -311,5 +330,6 @@ tracker update</code></pre>
   <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
 </footer>
 
+<script src="highlight.js"></script>
 </body>
 </html>

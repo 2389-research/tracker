@@ -363,6 +363,31 @@ pre .keyword { color: #fdba74; }
 pre .string  { color: #86efac; }
 pre .flag    { color: #fb923c; }
 
+/* ─── Auto-highlighter (hl-* classes emitted by highlight.js) ─── */
+/* Mapped to tracker's orange/amber/stone palette.
+   Goal: auto-highlighted blocks read the same as hand-annotated
+   ones (keyword/string/comment/flag) above. */
+.hl-kw     { color: #fdba74; }           /* matches .keyword — workflow/agent/edges */
+.hl-node   { color: #fcd34d; }           /* amber-300 — node names */
+.hl-str    { color: #86efac; }           /* matches .string */
+.hl-field  { color: #fdba74; }           /* field keys — orange-300 */
+.hl-op     { color: #e7e5e4; }           /* arrows/ops — body text */
+.hl-cmt    { color: #a8a29e; font-style: italic; } /* matches .comment */
+.hl-bool   { color: #fb923c; }           /* orange-400 */
+.hl-num    { color: #fb923c; }           /* orange-400 */
+.hl-cond   { color: #fdba74; }           /* when/and/or — orange-300 */
+.hl-prompt { color: #86efac; font-weight: 600; } /* $ prompt — green */
+.hl-cmd    { color: #fdba74; }           /* command name — orange-300 */
+.hl-flag   { color: #fb923c; }           /* matches .flag */
+.hl-file   { color: #fcd34d; }           /* file paths — amber-300 */
+.hl-pass   { color: #86efac; font-weight: 600; } /* PASS — green */
+.hl-warn   { color: #fcd34d; font-weight: 600; } /* warning — amber */
+.hl-fail   { color: #fca5a5; font-weight: 600; } /* FAIL — rose-300, muted red */
+.hl-dim    { color: #78716c; }           /* stone-500 — help/source lines */
+.hl-shcmd  { color: #e7e5e4; }           /* shell command body */
+.hl-shvar  { color: #fcd34d; }           /* $VAR / ${var} — amber */
+.hl-shkw   { color: #fdba74; }           /* if/then/for — orange-300 */
+
 pre::before {
   content: attr(data-lang);
   position: absolute;
