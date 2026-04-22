@@ -255,9 +255,11 @@ func (h *ToolHandler) applyWorkingDir(node *pipeline.Node, command string) (stri
 
 // parseTimeout returns the timeout for the node, preferring the node attr over the default.
 //
-// Zero and negative durations are rejected at parse time with an error naming
-// the node and the offending value. Previously such values were passed through
-// to context.WithTimeout and caused immediate cancellation with a confusing
+// Zero and negative durations are rejected with an error naming the node and
+// the offending value. This runs when the tool node executes (inside
+// ToolHandler.Execute, before the command is dispatched) rather than at
+// workflow load time. Previously such values were passed through to
+// context.WithTimeout and caused immediate cancellation with a confusing
 // "command timed out" error; hard-failing here surfaces the misconfiguration
 // to the pipeline author instead.
 func (h *ToolHandler) parseTimeout(node *pipeline.Node) (time.Duration, error) {
