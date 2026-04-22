@@ -116,6 +116,18 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 	cfg.steerExpr = managerAttr(attrs, "steer_condition")
 	cfg.steerKeys = parseSteerContext(managerAttr(attrs, "steer_context"))
 
+	// Both sides of steering must be set together or neither — a condition
+	// without a context map is inert (nothing to inject) and a context map
+	// without a condition never fires. Either case is almost certainly an
+	// author mistake, so reject at parse time rather than silently producing
+	// a no-op supervisor (violates CLAUDE.md "never silently swallow errors").
+	if cfg.steerExpr != "" && len(cfg.steerKeys) == 0 {
+		return cfg, fmt.Errorf("manager_loop: steer_condition is set but steer_context is empty — nothing to inject")
+	}
+	if cfg.steerExpr == "" && len(cfg.steerKeys) > 0 {
+		return cfg, fmt.Errorf("manager_loop: steer_context is set but steer_condition is empty — no trigger for injection")
+	}
+
 	return cfg, nil
 }
 

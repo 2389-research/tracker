@@ -443,6 +443,16 @@ func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
 // Zero/empty fields are omitted so the handler can apply its own defaults
 // (45s poll, 1000 cycles). Writing empty strings would override the defaults
 // with "" which the handler treats as "unset" today — but omitting is clearer.
+//
+// IR semantic divergence (contract-alignment follow-up): the dippin-lang IR
+// documents PollInterval=0 as "event-driven" and MaxCycles=0 as "unbounded".
+// Tracker's stack.manager_loop handler has no event-driven mode and no
+// unbounded mode today — both degrade to the handler defaults (45s / 1000)
+// because the zero values are omitted from node.Attrs here. Pipeline authors
+// who want explicit control should set positive values; omitting yields the
+// tracker defaults. If/when the handler grows those modes this extractor is
+// the right place to translate the zero-value IR sentinels into the
+// corresponding handler attrs.
 func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) {
 	if cfg.SubgraphRef != "" {
 		attrs["subgraph_ref"] = cfg.SubgraphRef

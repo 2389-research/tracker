@@ -692,6 +692,40 @@ func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
 	}
 }
 
+// TestParseManagerLoopConfig_PartialSteeringRejected verifies that supplying
+// only one half of the steering pair (condition without context, or context
+// without condition) is rejected at parse time. A half-configured steering
+// mechanism is inert (channel creation in Execute requires both), so silently
+// accepting the partial config would violate CLAUDE.md's "never silently
+// swallow errors" rule.
+func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
+	t.Run("steer_condition without steer_context", func(t *testing.T) {
+		_, err := parseManagerLoopConfig(map[string]string{
+			"subgraph_ref":    "child",
+			"steer_condition": "stack.child.cycles = 3",
+		})
+		if err == nil {
+			t.Fatal("expected error when steer_condition is set without steer_context")
+		}
+		if !strings.Contains(err.Error(), "steer_condition is set but steer_context is empty") {
+			t.Errorf("error = %q, want message about steer_context being empty", err.Error())
+		}
+	})
+
+	t.Run("steer_context without steer_condition", func(t *testing.T) {
+		_, err := parseManagerLoopConfig(map[string]string{
+			"subgraph_ref":  "child",
+			"steer_context": "hint=go_faster",
+		})
+		if err == nil {
+			t.Fatal("expected error when steer_context is set without steer_condition")
+		}
+		if !strings.Contains(err.Error(), "steer_context is set but steer_condition is empty") {
+			t.Errorf("error = %q, want message about steer_condition being empty", err.Error())
+		}
+	})
+}
+
 // TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed verifies that when an
 // attr is present in both the unprefixed (v0.22.0+) and legacy "manager.*"
 // forms, the unprefixed value is used. This matters for migrated pipelines
