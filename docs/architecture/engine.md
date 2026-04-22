@@ -177,10 +177,17 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
   `EdgeSelections`, `FallbackTaken`. Graph attrs (`graph.*`) are re-seeded
   from the live graph so `--param` overrides don't regress to stale
   checkpoint values.
-- **Saved on node outcome**: every successful node outcome and every retry
-  saves the checkpoint. Most failure paths also save a partial-context
-  checkpoint so a resume can see what was written before the error, with
-  two intentional exceptions:
+- **Saved on node outcome**: every successful non-terminal node outcome
+  and every retry saves the checkpoint. Most failure paths also save a
+  partial-context checkpoint so a resume can see what was written before
+  the error, with three intentional exceptions:
+  - `handleExitNode` (in `engine_run.go`) on the plain success path
+    records the trace entry, emits git/cost/budget events, and returns
+    without calling `saveCheckpoint` / `saveCheckpointWithTag` — the
+    exit node is the end of the run, so there is nothing to resume.
+    (The goal-gate retry and fallback branches inside `handleExitNode`
+    still call `saveCheckpointWithTag`, since those redirect to
+    another node.)
   - `checkStrictFailure` (in `engine.go`) returns its fail `loopResult`
     without calling `saveCheckpoint` — a strict-failure halt is terminal,
     so no resume would revisit this node.
@@ -261,10 +268,18 @@ uses strict mode.
 ### `SuggestedNextNodes` override
 
 The parallel handler uses this to direct post-dispatch control flow to the
-fan-in join node: after spawning branches, it returns with
-`SuggestedNextNodes: []string{joinID}`, and the engine routes there
-regardless of the graph's outgoing edges. This is how the engine supports
-parallel execution without knowing what parallel execution is.
+fan-in join node. After spawning branches, it records the join hint in its
+`Outcome.ContextUpdates` as `suggested_next_nodes: <joinID>` (see
+[`pipeline/handlers/parallel.go`](../../pipeline/handlers/parallel.go)
+writing `pipeline.ContextKeySuggestedNextNodes` into `ContextUpdates`). The
+engine's edge selector reads the value from the pipeline context via
+`pctx.Get(ContextKeySuggestedNextNodes)` in
+[`engine_edges.go`](../../pipeline/engine_edges.go), not from the
+`Outcome.SuggestedNextNodes` struct field, so the edge is chosen regardless
+of the graph's outgoing edges. This is how the engine supports parallel
+execution without knowing what parallel execution is. (`applyOutcome` does
+also mirror a non-empty `Outcome.SuggestedNextNodes` slice into the same
+context key — parallel just happens to route through `ContextUpdates`.)
 
 ### Strict failure edges
 

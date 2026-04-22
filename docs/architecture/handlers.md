@@ -86,8 +86,10 @@ Registration has conditional branches driven by `RegistryOption`:
 - **`WithExecEnvironment`** — registers the real tool handler. If neither
   `WithExecEnvironment` nor `WithToolExecFunc` is supplied, the `tool`
   handler is **not registered at all**, and tool nodes will error at
-  dispatch with "handler not found". `WithToolExecFunc` is the test-stub
-  path (used when `execEnv` is nil).
+  dispatch with `no handler registered for "tool" (node "<nodeID>")`
+  (from `HandlerRegistry.Execute` in
+  [`pipeline/handler.go`](../../pipeline/handler.go)).
+  `WithToolExecFunc` is the test-stub path (used when `execEnv` is nil).
 - **`WithInterviewer`** — required to register the human handler.
 - **`WithSubgraphs`** — enables the `subgraph` handler when the provided
   map is non-empty (`len(subgraphs) > 0`). An empty or nil map leaves
@@ -130,16 +132,24 @@ var shapeHandlerMap = map[string]string{
 
 | `.dip` keyword | IR NodeKind | Shape | Handler name |
 |---|---|---|---|
-| `start` | `start` | `Mdiamond` | `start` |
-| `exit` | `exit` | `Msquare` | `exit` |
-| `agent` | `agent` | `box` | `codergen` |
-| `human` | `human` | `hexagon` | `wait.human` |
-| `conditional` | `conditional` | `diamond` | `conditional` |
-| `parallel` | `parallel` | `component` | `parallel` |
-| `fan_in` | `fan_in` | `tripleoctagon` | `parallel.fan_in` |
-| `tool` | `tool` | `parallelogram` | `tool` |
-| `stack.manager_loop` | `stack_manager_loop` | `house` | `stack.manager_loop` |
-| `subgraph` | `subgraph` | `tab` | `subgraph` |
+| `start` | (no IR NodeKind — workflow-level `ir.Workflow.Start` field; shape forced by `ensureStartExitNodes` in the adapter) | `Mdiamond` | `start` |
+| `exit` | (no IR NodeKind — workflow-level `ir.Workflow.Exit` field; shape forced by `ensureStartExitNodes` in the adapter) | `Msquare` | `exit` |
+| `agent` | `NodeAgent` | `box` | `codergen` |
+| `human` | `NodeHuman` | `hexagon` | `wait.human` |
+| `conditional` | `NodeConditional` | `diamond` | `conditional` |
+| `parallel` | `NodeParallel` | `component` | `parallel` |
+| `fan_in` | `NodeFanIn` | `tripleoctagon` | `parallel.fan_in` |
+| `tool` | `NodeTool` | `parallelogram` | `tool` |
+| `stack.manager_loop` | (DOT-only today — no IR NodeKind; adapter support pending [#162](https://github.com/2389-research/tracker/issues/162)) | `house` | `stack.manager_loop` |
+| `subgraph` | `NodeSubgraph` | `tab` | `subgraph` |
+
+The adapter's `nodeKindToShapeMap` in [`pipeline/dippin_adapter.go`](../../pipeline/dippin_adapter.go)
+maps exactly `{NodeAgent, NodeHuman, NodeTool, NodeParallel, NodeFanIn, NodeSubgraph, NodeConditional}`.
+`start` / `exit` are workflow-level fields (not NodeKinds) whose shapes are
+forced by `ensureStartExitNodes`. `stack.manager_loop` is reachable today only
+via DOT graphs or an explicit `type: stack.manager_loop` override; IR-level
+support lands when dippin-lang v0.22.0 adds the corresponding NodeKind
+(tracked in [#162](https://github.com/2389-research/tracker/issues/162)).
 
 Two overrides handled by `applyDiamondOverrides` ([`graph.go`](../../pipeline/graph.go)):
 
@@ -161,11 +171,11 @@ behavior, and invariants. This table is the flat index.
 | `codergen` | [`pipeline/handlers/codergen.go`](../../pipeline/handlers/codergen.go) | [`handlers/codergen.md`](./handlers/codergen.md) | LLM agent sessions: resolves prompt, picks backend, runs a session, captures response into `last_response` / `response.<nodeID>`, optionally parses `STATUS:` tokens. |
 | `tool` | [`pipeline/handlers/tool.go`](../../pipeline/handlers/tool.go) | [`handlers/tool.md`](./handlers/tool.md) | Shell command execution with safe-key variable expansion, timeouts, output caps, denylist/allowlist enforcement, and sensitive-env stripping. |
 | `wait.human` | [`pipeline/handlers/human.go`](../../pipeline/handlers/human.go) | [`handlers/human.md`](./handlers/human.md) | Blocking human gate: choice, freeform, yes/no, interview, hybrid review modes. Routed through a pluggable interviewer (TUI, autopilot, webhook). |
-| `parallel` | [`pipeline/handlers/parallel.go`](../../pipeline/handlers/parallel.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Concurrent fan-out over `parallel_targets`. Spawns one goroutine per branch with an isolated context snapshot; hints the engine toward the fan-in join via `SuggestedNextNodes`. |
+| `parallel` | [`pipeline/handlers/parallel.go`](../../pipeline/handlers/parallel.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Concurrent fan-out over `parallel_targets`. Spawns one goroutine per branch with an isolated context snapshot; records the fan-in join hint in `Outcome.ContextUpdates` as `suggested_next_nodes` (the engine's edge selector reads it from the context, not the `Outcome.SuggestedNextNodes` struct field). |
 | `parallel.fan_in` | [`pipeline/handlers/fanin.go`](../../pipeline/handlers/fanin.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Join/aggregation node after a `parallel` dispatch. Reads `parallel.results` JSON; aggregates stats. |
 | `subgraph` | [`pipeline/subgraph.go`](../../pipeline/subgraph.go) | [`handlers/subgraph.md`](./handlers/subgraph.md) | Executes a named child graph inline. Merges `subgraph_params` with child `vars` defaults, runs a child `Engine` with scoped event handlers, propagates the result outcome. |
 | `conditional` | [`pipeline/handlers/conditional.go`](../../pipeline/handlers/conditional.go) | [`handlers/conditional.md`](./handlers/conditional.md) | Pure routing node: returns `OutcomeSuccess` with no writes and lets the engine's edge condition evaluator pick the next node based on existing context. |
-| `stack.manager_loop` | [`pipeline/handlers/manager_loop.go`](../../pipeline/handlers/manager_loop.go) | [`../manager-loop.md`](../manager-loop.md) | Async child-pipeline supervisor: launches a child in a goroutine, polls at intervals, evaluates `stop_condition`, injects `steer_context` through the engine's steering channel. Attractor spec 4.11. Canonical deep-dive lives at `docs/manager-loop.md` today; a dedicated `handlers/manager-loop.md` will land in a later PR. |
+| `stack.manager_loop` | [`pipeline/handlers/manager_loop.go`](../../pipeline/handlers/manager_loop.go) | [`../manager-loop.md`](../manager-loop.md) | Async child-pipeline supervisor: launches a child in a goroutine, polls at intervals, evaluates `manager.steer_condition`, and injects the `manager.steer_context` map through the engine's steering channel. Attractor spec 4.11. Canonical deep-dive lives at [`docs/manager-loop.md`](../manager-loop.md) today; a dedicated `docs/architecture/handlers/manager-loop.md` will land in a later PR (tracked in [#165](https://github.com/2389-research/tracker/issues/165)). |
 | `start` | [`pipeline/handlers/start.go`](../../pipeline/handlers/start.go) | — | Pass-through entry node. Always returns `OutcomeSuccess` with no writes. Dispatches to whatever edge is selected. |
 | `exit` | [`pipeline/handlers/exit.go`](../../pipeline/handlers/exit.go) | — | Pass-through terminal node. Returns `OutcomeSuccess`; the engine's `handleExitNode` takes over to run the goal-gate retry check and finalize the trace. |
 
