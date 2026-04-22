@@ -34,6 +34,8 @@ type registryConfig struct {
 	subgraphs      map[string]*pipeline.Graph
 	defaultBackend string
 	tokenTracker   *llm.TokenTracker
+	toolSafety     ToolHandlerConfig
+	toolSafetySet  bool
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -113,6 +115,18 @@ func WithTokenTracker(tracker *llm.TokenTracker) RegistryOption {
 func WithSubgraphs(graphs map[string]*pipeline.Graph) RegistryOption {
 	return func(c *registryConfig) {
 		c.subgraphs = graphs
+	}
+}
+
+// WithToolHandlerConfig supplies security configuration for the tool handler:
+// denylist bypass, allowlist patterns, and the hard output-limit ceiling. These
+// values thread from CLI flags into NewToolHandlerWithConfig. When this option
+// is not supplied, the tool handler is built with NewToolHandler (default safe
+// behavior: denylist active, no allowlist restriction, 10MB output ceiling).
+func WithToolHandlerConfig(cfg ToolHandlerConfig) RegistryOption {
+	return func(c *registryConfig) {
+		c.toolSafety = cfg
+		c.toolSafetySet = true
 	}
 }
 
@@ -228,9 +242,16 @@ func graphHasPerNodeBackend(graph *pipeline.Graph) bool {
 }
 
 // registerToolHandler registers the tool handler or a stub.
+// When WithToolHandlerConfig was supplied, the handler is built with the
+// CLI-provided safety config (denylist bypass, allowlist, output ceiling).
+// Otherwise the default-safe handler is used.
 func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig) {
 	if cfg.execEnv != nil {
-		registry.Register(NewToolHandler(cfg.execEnv))
+		if cfg.toolSafetySet {
+			registry.Register(NewToolHandlerWithConfig(cfg.execEnv, cfg.toolSafety))
+		} else {
+			registry.Register(NewToolHandler(cfg.execEnv))
+		}
 	} else if cfg.toolExecFunc != nil {
 		registry.Register(&funcHandler{name: "tool", fn: cfg.toolExecFunc})
 	}

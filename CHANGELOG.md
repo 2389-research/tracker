@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--bypass-denylist`, `--tool-allowlist`, `--max-output-limit` CLI flags for tool command sandboxing.** The underlying denylist, allowlist, and per-stream output ceiling were already enforced by `pipeline/handlers/tool_safety.go` and `ToolHandlerConfig`, but only via node-attr and library APIs — the CLI paths were missing. `--bypass-denylist` (bool, default `false`) disables the built-in denylist and prints a loud stderr warning on startup; use only in sandboxed environments where dangerous patterns (eval, pipe-to-shell, curl|sh) are intentional. `--tool-allowlist <pattern>` is repeatable and accepts comma-separated glob patterns; every tool command statement must match at least one allowlist entry when the flag is set. Allowlist entries are additive with any `tool_commands_allow` graph attr and never override the denylist. `--max-output-limit <bytes>` sets the hard ceiling (default 10MB) applied to per-node `output_limit:` attrs. Node-attr and graph-attr paths remain unchanged; these flags are additive CLI surface.
+
 ## [0.22.0] - 2026-04-22
 
 ### Added

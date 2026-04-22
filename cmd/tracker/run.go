@@ -70,6 +70,12 @@ var activeWebhookGate *webhookGateCfg
 // Set by executeRun before calling run/runTUI. Empty means default (<workdir>/.tracker/runs).
 var activeArtifactDir string
 
+// activeToolSafety holds the tool handler security config for the current run.
+// Set by executeRun from the --bypass-denylist, --tool-allowlist, and
+// --max-output-limit CLI flags. The zero value is the default-safe config
+// (denylist active, no allowlist, 10MB ceiling).
+var activeToolSafety handlers.ToolHandlerConfig
+
 // webhookGateCfg holds just the webhook gate settings needed by chooseInterviewer.
 type webhookGateCfg struct {
 	webhookURL        string
@@ -158,6 +164,7 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
 		handlers.WithTokenTracker(tokenTracker),
+		handlers.WithToolHandlerConfig(activeToolSafety),
 	)
 
 	engine := pipeline.NewEngine(graph, registry, engineOpts...)
@@ -525,6 +532,7 @@ func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir stri
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
 		handlers.WithTokenTracker(tokenTracker),
+		handlers.WithToolHandlerConfig(activeToolSafety),
 	)
 }
 

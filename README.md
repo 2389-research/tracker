@@ -718,6 +718,9 @@ tracker version                  Show version information
 - `--gate-timeout-action` — what to do on gate timeout: `fail` (default) or `success`
 - `--webhook-auth` — `Authorization` header for outbound webhook requests
 - `--export-bundle` — write a portable git bundle of run artifacts to the given path after completion
+- `--bypass-denylist` — disable the built-in tool command denylist (prints a stderr warning; sandboxed use only)
+- `--tool-allowlist <pattern>` — glob pattern a tool command must match to execute (repeatable or comma-separated)
+- `--max-output-limit <bytes>` — hard ceiling per tool command output stream (default: 10MB)
 
 ## Development
 

@@ -269,6 +269,12 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	}
 	activeRunParams = maps.Clone(cfg.params)
 	activeEffectiveRunParams = nil
+	// Store tool handler safety config for the registry (called from run/runTUI).
+	activeToolSafety = handlers.ToolHandlerConfig{
+		BypassDenylist: cfg.bypassDenylist,
+		Allowlist:      append([]string(nil), cfg.toolAllowlist...),
+		MaxOutputLimit: cfg.maxOutputLimit,
+	}
 	// Apply --gateway-url before buildLLMClient is called.
 	// Timing is correct: executeRun sets the env var here, then calls
 	// selectAndRunMode → run/runTUI → buildLLMClient → buildProviderConstructors,
@@ -316,7 +322,25 @@ func printRunPreamble(cfg runConfig) error {
 	} else if cfg.autoApprove {
 		fmt.Fprintln(os.Stderr, "Running in auto-approve mode — all human gates auto-approved")
 	}
+	printToolSafetyPreamble(cfg)
 	return nil
+}
+
+// printToolSafetyPreamble surfaces tool-command safety overrides to stderr so
+// operators can't accidentally forget they asked the denylist to be bypassed.
+// The denylist warning is deliberately loud — it's a security escape hatch.
+func printToolSafetyPreamble(cfg runConfig) {
+	if cfg.bypassDenylist {
+		fmt.Fprintln(os.Stderr, "WARNING: --bypass-denylist active — built-in tool_command denylist is DISABLED")
+		fmt.Fprintln(os.Stderr, "         Only run this in sandboxed or trusted environments.")
+	}
+	if len(cfg.toolAllowlist) > 0 {
+		fmt.Fprintf(os.Stderr, "Tool command allowlist active (%d pattern(s)): %s\n",
+			len(cfg.toolAllowlist), strings.Join(cfg.toolAllowlist, ", "))
+	}
+	if cfg.maxOutputLimit > 0 {
+		fmt.Fprintf(os.Stderr, "Tool command output ceiling: %d bytes per stream\n", cfg.maxOutputLimit)
+	}
 }
 
 // resolveRunCheckpoint returns the checkpoint path for a resume run, or "" for new runs.
