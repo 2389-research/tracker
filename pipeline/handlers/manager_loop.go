@@ -162,8 +162,13 @@ func managerAttr(attrs map[string]string, key string) string {
 }
 
 // steerContextDecoder reverses the encoder in pipeline/dippin_adapter.go
-// (which mirrors dippin-lang v0.22.0 export.flattenSteerContext). Sequences
-// are listed longest-first so the replacer matches greedily.
+// (which mirrors dippin-lang v0.22.0 export.flattenSteerContext).
+// strings.NewReplacer scans left-to-right and does not overlap matches, and
+// all three tokens are the same length here so pattern order is not a
+// correctness requirement — but %25 is listed first by convention because
+// literal percent signs in decoded output should never alias back into a
+// delimiter token on a second pass, which makes the read order easier to
+// reason about.
 var steerContextDecoder = strings.NewReplacer(
 	"%25", "%",
 	"%2C", ",",

@@ -325,15 +325,21 @@ func TestFlattenSteerContext_EmptyMap(t *testing.T) {
 // it isn't double-encoded by the subsequent "," / "=" replacements.
 func TestFlattenSteerContext_EncodesReservedInKeysAndValues(t *testing.T) {
 	// Key 'k,1' must encode to 'k%2C1'; value '50%off' to '50%25off';
-	// another key with '=' to '...%3D...'. Sort order is by the ENCODED key
-	// (matches dippin-lang's exporter).
+	// another key with '=' to '...%3D...'. flattenSteerContext sorts the
+	// raw map keys before encoding (slices.Sorted(maps.Keys(m))), so the
+	// output order reflects raw-key lexicographic order, not encoded-key
+	// order — this fixture's inputs happen to sort identically either way
+	// so the test exercises escaping, not ordering policy. If you add a
+	// case where raw and encoded order differ (e.g., '+' vs ','), update
+	// the expected output to match the raw-key sort.
 	m := map[string]string{
 		"k,1":     "v1",
 		"k=2":     "v2",
 		"percent": "50%off",
 	}
 	got := flattenSteerContext(m)
-	// Encoded keys sort as: "k%2C1" < "k%3D2" < "percent"
+	// Raw keys sort as: "k,1" < "k=2" < "percent" (same order as encoded
+	// keys for this specific fixture).
 	want := "k%2C1=v1,k%3D2=v2,percent=50%25off"
 	if got != want {
 		t.Errorf("flattenSteerContext = %q, want %q", got, want)
