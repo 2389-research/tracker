@@ -100,11 +100,6 @@ tracker update</code></pre>
       <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes, and graph-level attrs (sorted, deterministic). No LLM calls. Supports bare names.</div>
     </div>
 
-    <div class="cli-cmd">
-      <code>tracker doctor [pipeline]</code>
-      <div class="desc">Preflight check with optional pipeline lint. Pass a <code>.dip</code> file to run full validation as part of the health check.</div>
-    </div>
-
     <h3 style="margin-top: 2rem;">Headless &amp; Integration</h3>
 
     <div class="cli-cmd">
@@ -142,13 +137,13 @@ tracker update</code></pre>
     <h3 style="margin-top: 2rem;">Diagnostics</h3>
 
     <div class="cli-cmd">
-      <code>tracker doctor</code>
-      <div class="desc">Preflight health check. Verifies API keys (masked), dippin binary, working directory access. Run before your first pipeline.</div>
+      <code>tracker doctor [pipeline]</code>
+      <div class="desc">Preflight health check. Per-provider API key validation (masked), dippin binary version, <code>.ai/</code> writability, disk space, <code>.gitignore</code> hygiene, dangerous env var warnings. Pass <code>--probe</code> for live auth validation with a 1-token call per provider. Optional pipeline arg runs full lint. Exit code 2 on warnings-only. <span class="badge">v0.17.0</span></div>
     </div>
 
     <div class="cli-cmd">
       <code>tracker diagnose [runID]</code>
-      <div class="desc">Deep failure analysis. Reads status.json + activity.jsonl. Shows tool output, stderr, errors, timing anomalies, actionable suggestions. Without ID, analyzes the most recent run.</div>
+      <div class="desc">Deep failure analysis. Reads <code>status.json</code> + <code>activity.jsonl</code>. Shows tool output, stderr, errors, timing anomalies, actionable suggestions (deterministic failure pattern, escalation hit, suspicious timing, budget halt). Without ID, analyzes the most recent run.</div>
     </div>
 
     <div class="cli-cmd">

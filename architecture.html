@@ -290,9 +290,49 @@ graph TB
       Every node completion saves a checkpoint with completed nodes, context snapshot, and
       edge selections. Resume replays the checkpoint and picks up at the failure point.
     </p>
-    <div class="glass glass-sm" style="margin-top: 1rem; border-left: 3px solid var(--orange-600);">
-      <h4>Known Limitation</h4>
-      <p>The restart counter is global across the entire run. A fix loop on milestone 1 consumes restart budget that milestone 10 needs. The <code>build_product</code> pipeline works around this with per-milestone circuit breakers (<code>fix_attempts</code> file on disk).</p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Git Artifacts <span class="badge">v0.17.0</span></h4>
+        <p>With <code>WithGitArtifacts(true)</code>, the artifact run directory becomes a git repo. Every terminal node creates a commit (<code>node(&lt;id&gt;): &lt;handler&gt; outcome=&lt;status&gt;</code>) with duration, edge, and token/cost metadata. Successful advances add a lightweight <code>checkpoint/&lt;runID&gt;/&lt;nodeID&gt;</code> tag. <code>git log</code> is a human-readable audit trail.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Portable Bundle <span class="badge">v0.17.0</span></h4>
+        <p><code>ExportBundle(runDir, outPath)</code> wraps <code>git bundle create --all</code> to produce a single self-contained file capturing every commit and tag. Clone with <code>git clone &lt;bundle&gt;</code> anywhere, no network needed. The canonical way for a remote factory worker to hand a run back.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Library Resume</h4>
+        <p><code>tracker.Config.ResumeRunID</code> lets library consumers resume by ID without hand-resolving the checkpoint path; <code>tracker.ResolveRunDir(workDir, runID)</code> exposes the resolution directly.</p>
+      </div>
+      <div class="glass glass-sm" style="border-left: 3px solid var(--orange-600);">
+        <h4>Known Limitation</h4>
+        <p>The restart counter is global across the entire run. A fix loop on milestone 1 consumes restart budget that milestone 10 needs. The <code>build_product</code> pipeline works around this with per-milestone circuit breakers (<code>fix_attempts</code> file on disk). <code>tracker diagnose</code> surfaces stale counters.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Library API ═══ -->
+  <section class="glass">
+    <h2>Library <span class="accent">API</span> <span class="badge">v0.18.0</span></h2>
+    <p class="lead">
+      Tracker is also a Go library. The CLI is a thin printer over the same APIs library consumers use.
+    </p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Structured Reports</h4>
+        <p><code>tracker.Diagnose</code>, <code>DiagnoseMostRecent</code>, <code>Audit</code>, <code>Doctor</code>, and <code>Simulate</code> return typed reports. Typed enums for <code>CheckStatus</code> (<code>ok</code> / <code>warn</code> / <code>error</code> / <code>hint</code>) and <code>SuggestionKind</code> (<code>retry_pattern</code>, <code>escalate_limit</code>, <code>no_output</code>, <code>shell_command</code>, <code>go_test</code>, <code>suspicious_timing</code>, <code>budget</code>). <span class="badge">v0.19.0</span></p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>NDJSON Streaming</h4>
+        <p><code>tracker.NewNDJSONWriter(io.Writer)</code> produces the same wire format as <code>--json</code>. Factory methods return handlers that plug into <code>Config.EventHandler</code>, <code>Config.AgentEvents</code>, and the LLM trace hook. Write failures recover per-writer so one misbehaving sink can't crash the caller or silence other writers.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Context-first</h4>
+        <p>All library entry points accept <code>context.Context</code> as the first argument, honored by provider probes and binary version lookups. <code>DiagnoseConfig.LogWriter</code> / <code>AuditConfig.LogWriter</code> route non-fatal parse warnings; nil writers are discarded. <span class="badge">v0.19.0</span></p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Typed <code>NodeConfig</code> Accessors <span class="badge">v0.22.0</span></h4>
+        <p><code>*pipeline.Node</code> exposes typed accessors: <code>AgentConfig(graphAttrs)</code>, <code>ToolConfig()</code>, <code>HumanConfig()</code>, <code>ParallelConfig()</code>, <code>RetryConfig(graphAttrs)</code>. Graph-default-then-node-override merge happens once inside the accessor; handlers consume typed structs instead of re-parsing <code>Node.Attrs</code> map reads.</p>
+      </div>
     </div>
   </section>
 
