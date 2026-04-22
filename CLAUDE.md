@@ -133,8 +133,11 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Run `dippin doctor` on ALL example .dip files — aim for A grade across the board
 - Run `dippin simulate -all-paths` on the three core pipelines
 - Update CHANGELOG.md and README.md
-- Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
-- Create GitHub release
+- After the `release: vX.Y.Z` PR merges, tag the merge commit and push:
+  - `git tag -a vX.Y.Z <merge-commit-sha> -m "release: vX.Y.Z"`
+  - `git push origin vX.Y.Z`
+  - The tag push triggers `.github/workflows/release.yml` → GoReleaser, which builds binaries and creates the GitHub release entry. Merging the release PR alone does not create a release (see Critical Rules § Releases).
+- Refresh the website (`gh-pages` branch — see Critical Rules § Website)
 
 ### dippin-lang updates
 - NEVER run `go install github.com/2389-research/dippin-lang/cmd/dippin@...` — the user installs dippin from their local development checkout
