@@ -275,11 +275,15 @@ writing `pipeline.ContextKeySuggestedNextNodes` into `ContextUpdates`). The
 engine's edge selector reads the value from the pipeline context via
 `pctx.Get(ContextKeySuggestedNextNodes)` in
 [`engine_edges.go`](../../pipeline/engine_edges.go), not from the
-`Outcome.SuggestedNextNodes` struct field, so the edge is chosen regardless
-of the graph's outgoing edges. This is how the engine supports parallel
-execution without knowing what parallel execution is. (`applyOutcome` does
-also mirror a non-empty `Outcome.SuggestedNextNodes` slice into the same
-context key — parallel just happens to route through `ContextUpdates`.)
+`Outcome.SuggestedNextNodes` struct field, and uses it as a priority hint
+when selecting among the current node's existing outgoing edges — the
+selector matches each suggested ID against `edge.To` and picks the first
+match. This is a routing **hint**, not an override that can jump to
+arbitrary nodes outside the graph's edge set. It's how the engine supports
+parallel execution without knowing what parallel execution is, while still
+respecting the declared graph. (`applyOutcome` does also mirror a non-empty
+`Outcome.SuggestedNextNodes` slice into the same context key — parallel
+just happens to route through `ContextUpdates`.)
 
 ### Strict failure edges
 

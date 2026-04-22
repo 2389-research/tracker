@@ -148,8 +148,8 @@ maps exactly `{NodeAgent, NodeHuman, NodeTool, NodeParallel, NodeFanIn, NodeSubg
 `start` / `exit` are workflow-level fields (not NodeKinds) whose shapes are
 forced by `ensureStartExitNodes`. `stack.manager_loop` is reachable today only
 via DOT graphs or an explicit `type: stack.manager_loop` override; IR-level
-support lands when dippin-lang v0.22.0 adds the corresponding NodeKind
-(tracked in [#162](https://github.com/2389-research/tracker/issues/162)).
+support is pending and tracked in
+[#162](https://github.com/2389-research/tracker/issues/162).
 
 Two overrides handled by `applyDiamondOverrides` ([`graph.go`](../../pipeline/graph.go)):
 
@@ -171,7 +171,7 @@ behavior, and invariants. This table is the flat index.
 | `codergen` | [`pipeline/handlers/codergen.go`](../../pipeline/handlers/codergen.go) | [`handlers/codergen.md`](./handlers/codergen.md) | LLM agent sessions: resolves prompt, picks backend, runs a session, captures response into `last_response` / `response.<nodeID>`, optionally parses `STATUS:` tokens. |
 | `tool` | [`pipeline/handlers/tool.go`](../../pipeline/handlers/tool.go) | [`handlers/tool.md`](./handlers/tool.md) | Shell command execution with safe-key variable expansion, timeouts, output caps, denylist/allowlist enforcement, and sensitive-env stripping. |
 | `wait.human` | [`pipeline/handlers/human.go`](../../pipeline/handlers/human.go) | [`handlers/human.md`](./handlers/human.md) | Blocking human gate: choice, freeform, yes/no, interview, hybrid review modes. Routed through a pluggable interviewer (TUI, autopilot, webhook). |
-| `parallel` | [`pipeline/handlers/parallel.go`](../../pipeline/handlers/parallel.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Concurrent fan-out over `parallel_targets`. Spawns one goroutine per branch with an isolated context snapshot; records the fan-in join hint in `Outcome.ContextUpdates` as `suggested_next_nodes` (the engine's edge selector reads it from the context, not the `Outcome.SuggestedNextNodes` struct field). |
+| `parallel` | [`pipeline/handlers/parallel.go`](../../pipeline/handlers/parallel.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Concurrent fan-out over `parallel_targets`. Spawns one goroutine per branch with an isolated context snapshot; records the fan-in join hint in `Outcome.ContextUpdates` as `suggested_next_nodes` (the engine's edge selector reads it from the context). The two hinting paths converge: `applyOutcome` mirrors any non-empty `Outcome.SuggestedNextNodes` slice into the same context key, so parallel just skips the struct and writes the key directly. |
 | `parallel.fan_in` | [`pipeline/handlers/fanin.go`](../../pipeline/handlers/fanin.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Join/aggregation node after a `parallel` dispatch. Reads `parallel.results` JSON; aggregates stats. |
 | `subgraph` | [`pipeline/subgraph.go`](../../pipeline/subgraph.go) | [`handlers/subgraph.md`](./handlers/subgraph.md) | Executes a named child graph inline. Merges `subgraph_params` with child `vars` defaults, runs a child `Engine` with scoped event handlers, propagates the result outcome. |
 | `conditional` | [`pipeline/handlers/conditional.go`](../../pipeline/handlers/conditional.go) | [`handlers/conditional.md`](./handlers/conditional.md) | Pure routing node: returns `OutcomeSuccess` with no writes and lets the engine's edge condition evaluator pick the next node based on existing context. |
