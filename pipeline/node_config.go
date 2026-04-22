@@ -217,7 +217,7 @@ type ToolNodeConfig struct {
 	OutputLimit int // bytes; 0 means use default
 	WorkingDir  string
 	PassEnv     string        // comma-separated env var names to pass through
-	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent, unparseable, or parsed to 0. Consumer validates non-positive values.
+	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent, unparseable, or parsed to 0. ToolHandler.parseTimeout rejects non-positive values at execution time.
 }
 
 // ToolConfig returns the typed tool config for the node.
@@ -233,10 +233,10 @@ func (n *Node) ToolConfig() ToolNodeConfig {
 		}
 	}
 	if v := n.Attrs["timeout"]; v != "" {
-		// No positivity guard — the accessor exposes whatever parses, so
-		// the field matches the raw attr semantics. ToolHandler.parseTimeout
-		// also passes non-positive values through today (behavior preserved
-		// from before the typed-config refactor).
+		// No positivity guard here — the accessor exposes whatever parses,
+		// so the field matches the raw attr semantics. Non-positive values
+		// are rejected at execution time by ToolHandler.parseTimeout, which
+		// returns an error naming the node and the offending value.
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.Timeout = d
 		}

@@ -513,3 +513,78 @@ func TestToolHandler_DenylistBlocks(t *testing.T) {
 		t.Errorf("error = %q, want 'denied pattern'", err)
 	}
 }
+
+// TestToolHandler_ParseTimeout exercises parseTimeout directly to cover the
+// absent / positive / zero / negative / unparseable cases.
+func TestToolHandler_ParseTimeout(t *testing.T) {
+	env := exec.NewLocalEnvironment(t.TempDir())
+	defaultTimeout := 7 * time.Second
+	h := NewToolHandlerWithTimeout(env, defaultTimeout)
+
+	t.Run("absent uses default", func(t *testing.T) {
+		node := &pipeline.Node{ID: "t", Attrs: map[string]string{}}
+		got, err := h.parseTimeout(node)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != defaultTimeout {
+			t.Errorf("expected default %v, got %v", defaultTimeout, got)
+		}
+	})
+
+	t.Run("valid positive duration", func(t *testing.T) {
+		node := &pipeline.Node{ID: "t", Attrs: map[string]string{"timeout": "30s"}}
+		got, err := h.parseTimeout(node)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != 30*time.Second {
+			t.Errorf("expected 30s, got %v", got)
+		}
+	})
+
+	t.Run("zero rejected", func(t *testing.T) {
+		node := &pipeline.Node{ID: "zero-node", Attrs: map[string]string{"timeout": "0"}}
+		_, err := h.parseTimeout(node)
+		if err == nil {
+			t.Fatal("expected error for timeout=0")
+		}
+		if !strings.Contains(err.Error(), "non-positive timeout") {
+			t.Errorf("error = %q, want 'non-positive timeout'", err)
+		}
+		if !strings.Contains(err.Error(), "zero-node") {
+			t.Errorf("error = %q, want to mention node ID 'zero-node'", err)
+		}
+		if !strings.Contains(err.Error(), `"0"`) {
+			t.Errorf("error = %q, want to mention offending value %q", err, "0")
+		}
+	})
+
+	t.Run("negative rejected", func(t *testing.T) {
+		node := &pipeline.Node{ID: "neg-node", Attrs: map[string]string{"timeout": "-5s"}}
+		_, err := h.parseTimeout(node)
+		if err == nil {
+			t.Fatal("expected error for negative timeout")
+		}
+		if !strings.Contains(err.Error(), "non-positive timeout") {
+			t.Errorf("error = %q, want 'non-positive timeout'", err)
+		}
+		if !strings.Contains(err.Error(), "neg-node") {
+			t.Errorf("error = %q, want to mention node ID 'neg-node'", err)
+		}
+		if !strings.Contains(err.Error(), `"-5s"`) {
+			t.Errorf("error = %q, want to mention offending value %q", err, "-5s")
+		}
+	})
+
+	t.Run("unparseable still errors", func(t *testing.T) {
+		node := &pipeline.Node{ID: "bad", Attrs: map[string]string{"timeout": "not-a-duration"}}
+		_, err := h.parseTimeout(node)
+		if err == nil {
+			t.Fatal("expected error for unparseable timeout")
+		}
+		if !strings.Contains(err.Error(), "invalid timeout") {
+			t.Errorf("error = %q, want 'invalid timeout'", err)
+		}
+	})
+}
