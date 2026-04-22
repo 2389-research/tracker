@@ -71,6 +71,14 @@ type managerLoopConfig struct {
 }
 
 // parseManagerLoopConfig extracts manager loop configuration from node attributes.
+//
+// Two attr namings are supported: the unprefixed DOT-export contract used by
+// dippin-lang v0.22.0+ (`poll_interval`, `max_cycles`, `stop_condition`,
+// `steer_condition`, `steer_context`) and the legacy `manager.*` prefixed
+// variants authored directly in DOT before the IR migration. When both are
+// present the unprefixed form wins — it is the authoritative contract going
+// forward, so a migrated pipeline with leftover `manager.*` attrs still gets
+// the new values.
 func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) {
 	cfg := managerLoopConfig{
 		pollInterval: 45 * time.Second,
@@ -82,37 +90,69 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 		return cfg, fmt.Errorf("manager_loop: missing required attribute \"subgraph_ref\"")
 	}
 
-	if v := attrs["manager.poll_interval"]; v != "" {
+	if v := managerAttr(attrs, "poll_interval"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
-			return cfg, fmt.Errorf("manager_loop: invalid manager.poll_interval %q: %w", v, err)
+			return cfg, fmt.Errorf("manager_loop: invalid poll_interval %q: %w", v, err)
 		}
 		if d <= 0 {
-			return cfg, fmt.Errorf("manager_loop: manager.poll_interval must be > 0, got %q", v)
+			return cfg, fmt.Errorf("manager_loop: poll_interval must be > 0, got %q", v)
 		}
 		cfg.pollInterval = d
 	}
 
-	if v := attrs["manager.max_cycles"]; v != "" {
+	if v := managerAttr(attrs, "max_cycles"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return cfg, fmt.Errorf("manager_loop: invalid manager.max_cycles %q: %w", v, err)
+			return cfg, fmt.Errorf("manager_loop: invalid max_cycles %q: %w", v, err)
 		}
 		if n <= 0 {
-			return cfg, fmt.Errorf("manager_loop: manager.max_cycles must be > 0, got %q", v)
+			return cfg, fmt.Errorf("manager_loop: max_cycles must be > 0, got %q", v)
 		}
 		cfg.maxCycles = n
 	}
 
-	cfg.stopCondition = attrs["manager.stop_condition"]
-	cfg.steerExpr = attrs["manager.steer_condition"]
-	cfg.steerKeys = parseSteerContext(attrs["manager.steer_context"])
+	cfg.stopCondition = managerAttr(attrs, "stop_condition")
+	cfg.steerExpr = managerAttr(attrs, "steer_condition")
+	cfg.steerKeys = parseSteerContext(managerAttr(attrs, "steer_context"))
 
 	return cfg, nil
 }
 
-// parseSteerContext parses a comma-separated "key=value,key=value" string into a map.
-// Empty input returns nil.
+// managerAttr looks up a manager_loop attribute, preferring the unprefixed
+// dippin-lang v0.22.0 contract key and falling back to the legacy
+// "manager."+key form so hand-authored DOT files keep working.
+func managerAttr(attrs map[string]string, key string) string {
+	if v := attrs[key]; v != "" {
+		return v
+	}
+	return attrs["manager."+key]
+}
+
+// steerContextDecoder reverses the encoder in pipeline/dippin_adapter.go
+// (which mirrors dippin-lang v0.22.0 export.flattenSteerContext). Sequences
+// are listed longest-first so the replacer matches greedily.
+var steerContextDecoder = strings.NewReplacer(
+	"%25", "%",
+	"%2C", ",",
+	"%3D", "=",
+)
+
+// decodeSteerContextToken reverses encodeSteerContextToken. Returns the input
+// unchanged when it contains no percent-encoded sequences.
+func decodeSteerContextToken(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	return steerContextDecoder.Replace(s)
+}
+
+// parseSteerContext parses a comma-separated "key=value,key=value" string into
+// a map. Reserved characters (',', '=', '%') in keys or values appear as
+// percent-encoded tokens (`%2C`, `%3D`, `%25`) and are decoded back to their
+// originals — see flattenSteerContext in pipeline/dippin_adapter.go.
+// Empty input returns nil. Malformed pairs are silently skipped, matching
+// dippin-lang's migrate.parseFlattenedSteerContext behavior.
 func parseSteerContext(s string) map[string]string {
 	if s == "" {
 		return nil
@@ -121,7 +161,9 @@ func parseSteerContext(s string) map[string]string {
 	for _, pair := range strings.Split(s, ",") {
 		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(parts) == 2 {
-			result[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			k := decodeSteerContextToken(strings.TrimSpace(parts[0]))
+			v := decodeSteerContextToken(strings.TrimSpace(parts[1]))
+			result[k] = v
 		}
 	}
 	if len(result) == 0 {

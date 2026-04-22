@@ -628,3 +628,89 @@ func TestParseSteerContext(t *testing.T) {
 		}
 	}
 }
+
+// TestParseSteerContext_PercentDecoding verifies the decoder reverses the
+// percent-encoding applied by pipeline.flattenSteerContext (mirroring
+// dippin-lang v0.22.0 export.flattenSteerContext). Required for lossless
+// DOT → IR → adapter → handler round-trips when keys/values contain the
+// three reserved delimiter chars.
+func TestParseSteerContext_PercentDecoding(t *testing.T) {
+	// Encoded form produced by the adapter for keys/values with reserved chars.
+	in := "hint=speed%2Cup,priority=high%3Dcritical,tag=50%25off"
+	got := parseSteerContext(in)
+	want := map[string]string{
+		"hint":     "speed,up",
+		"priority": "high=critical",
+		"tag":      "50%off",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("parseSteerContext[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("parseSteerContext returned %d entries, want %d (%v)", len(got), len(want), got)
+	}
+}
+
+// TestParseManagerLoopConfig_UnprefixedAttrs verifies the handler reads the
+// unprefixed DOT contract attrs emitted by the v0.22.0 adapter. These are
+// the authoritative names; the legacy "manager.*" forms remain for manually
+// authored DOT files.
+func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
+	cfg, err := parseManagerLoopConfig(map[string]string{
+		"subgraph_ref":    "child",
+		"poll_interval":   "15s",
+		"max_cycles":      "20",
+		"stop_condition":  "stack.child.cycles = 9",
+		"steer_condition": "stack.child.cycles = 3",
+		"steer_context":   "hint=speed%2Cup,priority=high",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.subgraphRef != "child" {
+		t.Errorf("subgraphRef = %q, want %q", cfg.subgraphRef, "child")
+	}
+	if cfg.pollInterval != 15*time.Second {
+		t.Errorf("pollInterval = %v, want 15s", cfg.pollInterval)
+	}
+	if cfg.maxCycles != 20 {
+		t.Errorf("maxCycles = %d, want 20", cfg.maxCycles)
+	}
+	if cfg.stopCondition != "stack.child.cycles = 9" {
+		t.Errorf("stopCondition = %q, want %q", cfg.stopCondition, "stack.child.cycles = 9")
+	}
+	if cfg.steerExpr != "stack.child.cycles = 3" {
+		t.Errorf("steerExpr = %q, want %q", cfg.steerExpr, "stack.child.cycles = 3")
+	}
+	if cfg.steerKeys["hint"] != "speed,up" {
+		t.Errorf("steerKeys[hint] = %q, want %q (expected percent-decoded)", cfg.steerKeys["hint"], "speed,up")
+	}
+	if cfg.steerKeys["priority"] != "high" {
+		t.Errorf("steerKeys[priority] = %q, want %q", cfg.steerKeys["priority"], "high")
+	}
+}
+
+// TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed verifies that when an
+// attr is present in both the unprefixed (v0.22.0+) and legacy "manager.*"
+// forms, the unprefixed value is used. This matters for migrated pipelines
+// that may carry leftover "manager.*" attrs — the new contract takes priority.
+func TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed(t *testing.T) {
+	cfg, err := parseManagerLoopConfig(map[string]string{
+		"subgraph_ref":          "child",
+		"poll_interval":         "5s",
+		"manager.poll_interval": "99s",
+		"max_cycles":            "3",
+		"manager.max_cycles":    "999",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.pollInterval != 5*time.Second {
+		t.Errorf("pollInterval = %v, want 5s (unprefixed must win)", cfg.pollInterval)
+	}
+	if cfg.maxCycles != 3 {
+		t.Errorf("maxCycles = %d, want 3 (unprefixed must win)", cfg.maxCycles)
+	}
+}
