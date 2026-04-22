@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-04-22
+
 ### Fixed
 
 - **`formatManagerLoopConditionExpr` now emits `&&` / `||` instead of English `and` / `or`** (PR #170 round-2 review; closes part of #172). The formatter is called when an `ir.Condition` has only `Parsed` populated (Raw empty), producing the text that flows into `pipeline.EvaluateCondition`. The evaluator only recognizes Go-style boolean operators, so a Parsed-only fallback was silently mis-evaluated as a single opaque clause. Programmatically-built IR workflows that didn't populate `Raw` are now correctly evaluated. `CondNot` continues to emit `not ` (the evaluator's native negation). New test `TestFormatManagerLoopCondition_EvaluatorCompatibility` pins the formatter→evaluator round-trip for `CondAnd`, `CondOr`, and `CondNot`.
