@@ -777,6 +777,28 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 			t.Errorf("error = %q, want message to include the raw invalid value %q", err.Error(), "bad")
 		}
 	})
+
+	t.Run("malformed steer_context is rejected even without steer_condition", func(t *testing.T) {
+		// Edge case: author sets steer_context with malformed content and
+		// no steer_condition. Previously this slipped through both
+		// validation branches (neither fires when both sides are empty
+		// from the validator's perspective) and the malformed input was
+		// silently discarded. The invalid-steer-context check runs
+		// independently of steer_condition, so this must now error.
+		_, err := parseManagerLoopConfig(map[string]string{
+			"subgraph_ref":  "child",
+			"steer_context": "bad",
+		})
+		if err == nil {
+			t.Fatal("expected error for malformed steer_context even without steer_condition")
+		}
+		if !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("error = %q, want message to call out invalid steer_context", err.Error())
+		}
+		if !strings.Contains(err.Error(), "\"bad\"") {
+			t.Errorf("error = %q, want message to include the raw invalid value %q", err.Error(), "bad")
+		}
+	})
 }
 
 // TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed verifies that when an

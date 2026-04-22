@@ -117,20 +117,25 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 	rawSteerContext := managerAttr(attrs, "steer_context")
 	cfg.steerKeys = parseSteerContext(rawSteerContext)
 
-	// Both sides of steering must be set together or neither — a condition
-	// without a context map is inert (nothing to inject) and a context map
-	// without a condition never fires. Either case is almost certainly an
-	// author mistake, so reject at parse time rather than silently producing
-	// a no-op supervisor (violates CLAUDE.md "never silently swallow errors").
+	// Two independent checks:
 	//
-	// Distinguish "empty" (raw attr unset) from "invalid" (raw set but all
-	// pairs malformed → parser returned nil). The prior single error message
-	// said "steer_context is empty" even when the author had written a
-	// non-empty-but-malformed value, obscuring the real cause.
+	// 1. If the author wrote anything for steer_context, it must parse
+	//    cleanly — malformed input is never silently treated as an empty
+	//    map, regardless of whether steer_condition is also set.
+	//    Previously this only fired when steer_condition was non-empty;
+	//    with an empty condition, a malformed map slipped through as if
+	//    the attr were unset.
+	//
+	// 2. Both sides of steering must be set together or neither — a
+	//    condition without a context map is inert (nothing to inject) and
+	//    a context map without a condition never fires. Either case is
+	//    almost certainly an author mistake.
+	//
+	// Rejecting at parse time honors CLAUDE.md "never silently swallow errors".
+	if rawSteerContext != "" && len(cfg.steerKeys) == 0 {
+		return cfg, fmt.Errorf("manager_loop: steer_context %q is invalid (expected \"k=v,k=v\")", rawSteerContext)
+	}
 	if cfg.steerExpr != "" && len(cfg.steerKeys) == 0 {
-		if rawSteerContext != "" {
-			return cfg, fmt.Errorf("manager_loop: steer_condition is set but steer_context %q is invalid (expected \"k=v,k=v\")", rawSteerContext)
-		}
 		return cfg, fmt.Errorf("manager_loop: steer_condition is set but steer_context is empty — nothing to inject")
 	}
 	if cfg.steerExpr == "" && len(cfg.steerKeys) > 0 {
