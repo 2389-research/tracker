@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-04-22
+
 ### Added
 
 - **`tracker-swebench analyze <results-dir>` subcommand** (closes #141). Bulk-triage tool for completed SWE-bench runs: reads `predictions.jsonl`, `logs/*.log`, and the optional empty-patch diagnostic files from PR #150, then emits a structured report covering (1) overall resolved/unresolved/empty/error counts with percentages, (2) per-repo breakdown matching the #116 baseline table, (3) top-10 empty-patch instances with termination reason and final-message snippets from #139 diagnostics, (4) top-10 longest unresolved instances sorted by turns and elapsed time, and (5) error class distribution consuming the setup/patch/harness split from #140. Auto-detects a SWE-bench evaluator JSON report (`resolved_ids` field) to distinguish resolved from unresolved; gracefully degrades to "patched but unverified" classification when no evaluator report is present. Gracefully degrades on missing empty-patch diagnostics with a one-line note pointing to the PR #150 runtime. `--json` emits the structured `AnalyzeReport` for downstream tools. Pure artifact analysis — does not require access to the SWE-bench dataset.
