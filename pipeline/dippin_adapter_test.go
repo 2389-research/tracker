@@ -492,15 +492,16 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 		Start: "start",
 		Exit:  "exit",
 		Defaults: ir.WorkflowDefaults{
-			Model:         "gpt-4",
-			Provider:      "openai",
-			RetryPolicy:   "standard",
-			MaxRetries:    3,
-			Fidelity:      "strict",
-			MaxRestarts:   10,
-			RestartTarget: "start",
-			CacheTools:    true,
-			Compaction:    "conservative",
+			Model:             "gpt-4",
+			Provider:          "openai",
+			RetryPolicy:       "standard",
+			MaxRetries:        3,
+			Fidelity:          "strict",
+			MaxRestarts:       10,
+			RestartTarget:     "start",
+			CacheTools:        true,
+			Compaction:        "conservative",
+			ToolCommandsAllow: "git *,make *",
 		},
 		Nodes: []*ir.Node{
 			{
@@ -538,6 +539,7 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 		{"restart_target", "start"},
 		{"cache_tool_results", "true"},
 		{"context_compaction", "conservative"},
+		{"tool_commands_allow", "git *,make *"},
 	}
 
 	for _, tt := range tests {
