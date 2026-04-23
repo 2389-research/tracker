@@ -33,9 +33,14 @@ import (
 // lower (closer to 3) so real usage may modestly exceed the estimate.
 const acpTokenEstimateRatio = 4
 
-// ACPUsageMarker is the shape written into llm.Usage.Raw for ACP sessions so
-// downstream consumers (CLI summaries, budget diagnostics) can distinguish
-// estimated ACP usage from real middleware-tracked usage.
+// ACPUsageMarker is written into llm.Usage.Raw on ACP-backed SessionResults
+// so a consumer that inspects the raw field directly can recognize the tokens
+// as estimates. No in-tree consumer reads it today — llm.Usage.Add and
+// pipeline/handlers/transcript.go:buildSessionStats both drop Usage.Raw, so
+// by the time usage reaches the TokenTracker aggregate, the trace entries,
+// UsageSummary, or the CLI summary, this marker is gone. Treat the shape as
+// an implementation detail that may change or disappear once a real "this
+// was estimated" channel is plumbed through SessionStats/ProviderUsage.
 type ACPUsageMarker struct {
 	Estimated bool   `json:"estimated"`
 	Source    string `json:"source"` // always "acp-chars-heuristic"
@@ -71,8 +76,9 @@ var acpAgentArgs = map[string][]string{
 //
 // The acp_agent node attribute overrides the binary name.
 type ACPBackend struct {
-	agentPaths map[string]string // cached: agent name → resolved binary path
-	mu         sync.Mutex
+	agentPaths   map[string]string // cached: agent name → resolved binary path
+	mu           sync.Mutex
+	estimateOnce sync.Once // guards the once-per-backend "tokens are estimates" log line
 }
 
 // NewACPBackend creates an ACPBackend with empty path cache.
@@ -134,8 +140,13 @@ func (b *ACPBackend) sendPromptAndCollect(ctx context.Context, conn *acp.ClientS
 	forceKilled := waitForProcess(proc.cmd, proc.stdin)
 	result := buildACPResult(handler, promptResp, cfg)
 	if result.Usage.TotalTokens > 0 {
-		log.Printf("[acp] %s usage is estimated from character counts (ACP protocol has no native token surface): in≈%d out≈%d total≈%d",
-			agentName, result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.TotalTokens)
+		// Announce the approximation once per backend instance. Per-session
+		// token numbers already land in cost_updated events / activity.jsonl,
+		// so repeating them in a log line per prompt is pure noise for
+		// pipelines with many ACP nodes.
+		b.estimateOnce.Do(func() {
+			log.Printf("[acp] token/cost numbers for ACP sessions are character-count estimates (ACP protocol has no native token surface); accuracy varies — see docs/architecture/backends.md")
+		})
 	}
 
 	if promptErr != nil {
@@ -391,30 +402,32 @@ func buildACPPromptBlocks(cfg pipeline.AgentRunConfig) []acp.ContentBlock {
 // estimateACPUsage) since the ACP protocol does not surface real token counts.
 func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse, cfg pipeline.AgentRunConfig) agent.SessionResult {
 	handler.mu.Lock()
-	defer handler.mu.Unlock()
-
-	result := agent.SessionResult{
-		Turns:     handler.turnCount,
-		Provider:  "acp",
-		ToolCalls: make(map[string]int),
-	}
-
-	// Count tool calls by name.
-	for _, name := range handler.toolNames {
-		result.ToolCalls[name]++
-	}
-
-	// Estimate turns: at minimum 1 if we got any response.
-	if result.Turns == 0 && (len(handler.textParts) > 0 || handler.toolCount > 0) {
-		result.Turns = 1
-	}
-
-	// Sum rune counts across textParts without allocating a joined string —
-	// holding handler.mu across an O(totalOutputSize) copy would be wasteful,
-	// and len(string) would count bytes (wrong for multibyte UTF-8).
+	// Snapshot everything we need from handler state under the lock. Rune
+	// counting is O(totalOutputSize) over handler.textParts, but iteration
+	// over a string with utf8.RuneCountInString doesn't allocate — unlike
+	// strings.Join, which would copy the whole output. Model-catalog
+	// lookups (llm.EstimateCost) happen below, after the lock is released.
+	turns := handler.turnCount
+	toolCount := handler.toolCount
+	textPartsLen := len(handler.textParts)
 	outputRunes := 0
 	for _, part := range handler.textParts {
 		outputRunes += utf8.RuneCountInString(part)
+	}
+	toolNames := make(map[string]int, len(handler.toolNames))
+	for _, name := range handler.toolNames {
+		toolNames[name]++
+	}
+	handler.mu.Unlock()
+
+	result := agent.SessionResult{
+		Turns:     turns,
+		Provider:  "acp",
+		ToolCalls: toolNames,
+	}
+	// Estimate turns: at minimum 1 if we got any response.
+	if result.Turns == 0 && (textPartsLen > 0 || toolCount > 0) {
+		result.Turns = 1
 	}
 	result.Usage = estimateACPUsage(cfg, outputRunes)
 
@@ -438,8 +451,8 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, outputRunes int) llm.Usage {
 		return llm.Usage{}
 	}
 
-	inTokens := ceilDivMin1(inputRunes, acpTokenEstimateRatio)
-	outTokens := ceilDivMin1(outputRunes, acpTokenEstimateRatio)
+	inTokens := ceilDiv(inputRunes, acpTokenEstimateRatio)
+	outTokens := ceilDiv(outputRunes, acpTokenEstimateRatio)
 
 	usage := llm.Usage{
 		InputTokens:  inTokens,
@@ -455,19 +468,16 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, outputRunes int) llm.Usage {
 	return usage
 }
 
-// ceilDivMin1 returns 0 when runes is 0, otherwise max(1, ceil(runes/ratio)).
-// The min-1 floor matters for short inputs: chars÷4 of a 1–3-rune prompt
-// rounds to 0 under floor division, and a zero-token Usage is treated as
-// "nothing to track" by trackExternalBackendUsage.
-func ceilDivMin1(runes, ratio int) int {
+// ceilDiv returns 0 when runes is 0, otherwise ceil(runes/ratio). The ceiling
+// matters for short inputs: chars÷4 of a 1–3-rune prompt rounds to 0 under
+// floor division, and a zero-token Usage is treated as "nothing to track" by
+// trackExternalBackendUsage. Callers must pass ratio ≥ 1; with runes ≥ 1 the
+// result is always ≥ 1, so no additional clamp is needed.
+func ceilDiv(runes, ratio int) int {
 	if runes <= 0 {
 		return 0
 	}
-	tokens := (runes + ratio - 1) / ratio
-	if tokens < 1 {
-		return 1
-	}
-	return tokens
+	return (runes + ratio - 1) / ratio
 }
 
 // buildACPMcpServers converts the AgentRunConfig's MCP server list (if any)

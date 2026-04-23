@@ -727,8 +727,8 @@ func TestEstimateACPUsage(t *testing.T) {
 		},
 		{
 			// Regression: len() counts bytes, not runes — would overcount CJK 3x.
-			// 10 Japanese runes = 30 UTF-8 bytes; with rune counting we get
-			// ceil(10/4) = 3 tokens, not ceil(30/4) = 8.
+			// 11 Japanese runes = 33 UTF-8 bytes; with rune counting we get
+			// ceil(11/4) = 3 tokens, not ceil(33/4) = 9.
 			name:            "multibyte UTF-8 counted by runes, not bytes",
 			cfg:             pipeline.AgentRunConfig{Prompt: "こんにちは世界です。え"}, // 11 runes, 33 bytes
 			outputRunes:     0,
@@ -792,6 +792,85 @@ func TestBuildACPResult_PopulatesUsage(t *testing.T) {
 	if _, ok := result.Usage.Raw.(ACPUsageMarker); !ok {
 		t.Fatalf("Usage.Raw = %T, want ACPUsageMarker so downstream consumers can flag estimates", result.Usage.Raw)
 	}
+}
+
+// TestACPUsage_DownstreamPropagation walks an ACP session's estimated usage
+// through the same path the engine uses at runtime —
+// buildACPResult → buildSessionStats → pipeline.Trace → AggregateUsage — and
+// asserts (a) the usage lands in ProviderTotals["acp"] (not "unknown"), and
+// (b) both tokens and dollar cost survive the round-trip. This is the
+// integration test that distinguishes "the estimator works in a unit test"
+// from "a real pipeline actually attributes ACP spend correctly".
+func TestACPUsage_DownstreamPropagation(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"the quick brown fox jumps over the lazy dog"},
+		turnCount: 2,
+		toolNames: make(map[string]string),
+	}
+	cfg := pipeline.AgentRunConfig{
+		Prompt:       "tell me a story about a dog in 30 words",
+		SystemPrompt: "be concise",
+		Model:        "claude-sonnet-4-5", // real catalog entry so EstimatedCost is non-zero
+	}
+
+	result := buildACPResult(handler, acp.PromptResponse{}, cfg)
+	if result.Provider != "acp" {
+		t.Fatalf("Provider = %q, want \"acp\"", result.Provider)
+	}
+	if result.Usage.TotalTokens == 0 {
+		t.Fatal("expected non-zero estimated tokens")
+	}
+	if result.Usage.EstimatedCost == 0 {
+		t.Fatal("expected non-zero EstimatedCost for a known catalog model")
+	}
+
+	stats := buildSessionStats(result)
+	if stats.Provider != "acp" {
+		t.Errorf("SessionStats.Provider = %q, want \"acp\" (buildSessionStats must preserve Provider)", stats.Provider)
+	}
+	if stats.TotalTokens != result.Usage.TotalTokens {
+		t.Errorf("SessionStats.TotalTokens = %d, want %d", stats.TotalTokens, result.Usage.TotalTokens)
+	}
+	if stats.CostUSD != result.Usage.EstimatedCost {
+		t.Errorf("SessionStats.CostUSD = %f, want %f", stats.CostUSD, result.Usage.EstimatedCost)
+	}
+
+	trace := &pipeline.Trace{
+		Entries: []pipeline.TraceEntry{{
+			NodeID:      "ACPNode",
+			HandlerName: "codergen",
+			Status:      "success",
+			Stats:       stats,
+		}},
+	}
+	summary := trace.AggregateUsage()
+	if summary == nil {
+		t.Fatal("AggregateUsage returned nil")
+	}
+	acp, ok := summary.ProviderTotals["acp"]
+	if !ok {
+		t.Fatalf("ProviderTotals missing \"acp\" bucket; keys = %v", keysOfProviderTotals(summary.ProviderTotals))
+	}
+	if _, hasUnknown := summary.ProviderTotals["unknown"]; hasUnknown {
+		t.Errorf("ProviderTotals contains \"unknown\" bucket — SessionStats.Provider must carry through")
+	}
+	if acp.TotalTokens != result.Usage.TotalTokens {
+		t.Errorf("ProviderTotals[acp].TotalTokens = %d, want %d", acp.TotalTokens, result.Usage.TotalTokens)
+	}
+	if acp.CostUSD != result.Usage.EstimatedCost {
+		t.Errorf("ProviderTotals[acp].CostUSD = %f, want %f", acp.CostUSD, result.Usage.EstimatedCost)
+	}
+	if acp.SessionCount != 1 {
+		t.Errorf("ProviderTotals[acp].SessionCount = %d, want 1", acp.SessionCount)
+	}
+}
+
+func keysOfProviderTotals(m map[string]pipeline.ProviderUsage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func TestBuildACPMcpServers(t *testing.T) {
