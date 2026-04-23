@@ -8,7 +8,7 @@ workflow ManagerLoopFixture
     subgraph_ref: child.dip
     poll_interval: 15s
     max_cycles: 20
-    stop_condition: stack.child.outcome = success
+    stop_condition: stack.child.status = success
     steer_condition: stack.child.cycles = 5
     steer_context:
       hint: halfway_through

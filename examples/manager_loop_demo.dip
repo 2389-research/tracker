@@ -12,7 +12,7 @@ workflow ManagerLoopDemo
     subgraph_ref: subgraphs/manager_loop_child.dip
     poll_interval: 30s
     max_cycles: 12
-    stop_condition: stack.child.status = success
+    stop_condition: stack.child.cycles = 10
     steer_condition: stack.child.cycles = 5
     steer_context:
       hint: halfway_through

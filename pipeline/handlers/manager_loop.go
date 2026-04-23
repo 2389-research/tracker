@@ -164,11 +164,11 @@ var stackChildObservables = map[string]struct{}{
 	"stack.child.exit_status": {},
 }
 
-// stackChildKeyPattern matches `stack.child.<word>` occurrences in a condition
-// expression. It is intentionally forgiving (`\w+` for the tail) so we catch
+// extractStackChildKeys identifies `stack.child.<word>` occurrences in a
+// condition expression. It is intentionally forgiving for the tail so we catch
 // typos like `stack.child.cylce` or `stack.child.stats`. Deliberately does NOT
-// match deeper keys (e.g. `stack.child.foo.bar`) — those would need a more
-// involved extractor and are outside the narrow scope of this warning.
+// match deeper keys (e.g. `stack.child.foo.bar`) — those are outside the
+// narrow scope of this warning.
 
 // warnUnknownStackChildKeys scans expr for `stack.child.<word>` references and
 // logs one diagnostic per unknown subkey. Safe for empty/unset expressions
