@@ -31,14 +31,6 @@ Ground truth:
 
 Typed accessor: [`Node.HumanConfig`](../../../pipeline/node_config.go).
 
-> **CLAUDE.md drift note**: the project memory claims `questions_key` defaults
-> to `last_response`, but `resolveInterviewKeys` in
-> [human.go](../../../pipeline/handlers/human.go) uses
-> `interview_questions` as the primary default and falls back to
-> `last_response` inside `resolveAgentOutput`. The code is load-bearing and
-> stays the source of truth; CLAUDE.md is inaccurate on this point. Flagged
-> for follow-up.
-
 ## Mode dispatch
 
 ```mermaid
@@ -333,7 +325,7 @@ top-level context keys via `writes`.
   — answer serialization
 - [`tui/`](../../../tui/) — interactive modals (HybridContent,
   ReviewHybridContent, ReviewContent)
-- [Pipeline Context Flow](../../pipeline-context-flow.md) —
+- [Pipeline Context Flow](../context-flow.md) —
   `human_response` / `preferred_label` semantics
 - `CLAUDE.md` §§ `Human gate UX`, `Yes/No mode`, `Interview mode`,
   `Autopilot mode`

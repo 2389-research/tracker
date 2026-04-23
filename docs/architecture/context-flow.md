@@ -21,7 +21,7 @@ Each node solves a single well-scoped problem. Carrying a full conversation hist
 | `response.<nodeID>` | agent and human handlers | Per-node response snapshot addressable by node ID |
 | `episode_summary` | agent (codergen) handler | Summary of tool attempts/outcomes from the most recent agent session |
 | `episode_summaries` | agent (codergen) handler | JSON array of accumulated prior `episode_summary` values for retries/resumes |
-| `outcome` | every handler | `success` / `fail` / `retry` / `escalate` for the node that just ran |
+| `outcome` | every handler | `success` / `fail` / `retry` for the node that just ran (engine-level runs can also terminate with `budget_exceeded`). "Escalation" is not an outcome — it's a routing convention on top of `fail`; see [`engine.md#escalate`](./engine.md#escalate). |
 | `preferred_label` | human handler | Label the user selected on a labeled gate |
 | `human_response` | human handler | Freeform text the user typed at a gate |
 | `tool_stdout` / `tool_stderr` | tool handler | Subprocess output captured from `tool_command` |

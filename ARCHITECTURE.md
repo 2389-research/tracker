@@ -209,7 +209,7 @@ namespaces:
 - **`internal.*`** — engine bookkeeping (artifact directory, retry state);
   not visible to prompts.
 
-See [`docs/pipeline-context-flow.md`](docs/pipeline-context-flow.md) for the
+See [`docs/architecture/context-flow.md`](docs/architecture/context-flow.md) for the
 user-facing model. Per-node scoping is the key detail distinguishing
 sequential data flow from parallel (parallel branches do NOT populate
 `node.<branchID>.*` — they write a single `parallel.results` JSON blob).
@@ -245,7 +245,7 @@ an index to all subsystem docs. From there:
   [`handlers.md`](docs/architecture/handlers.md), then the per-handler files
   under `docs/architecture/handlers/`.
 - For data flow between nodes, read
-  [`docs/pipeline-context-flow.md`](docs/pipeline-context-flow.md).
+  [`docs/architecture/context-flow.md`](docs/architecture/context-flow.md).
 - For the `.dip` → `Graph` bridge, read
   [`adapter.md`](docs/architecture/adapter.md).
 - For agent internals (turn loop, tools, compaction, memory, planning),

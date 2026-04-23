@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.23.0] - 2026-04-22
+### Changed
+
+- **Docs relocated under `docs/architecture/`** (closes #165). `docs/pipeline-context-flow.md` → `docs/architecture/context-flow.md` and `docs/manager-loop.md` → `docs/architecture/handlers/manager-loop.md`. Every inbound link in `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`, `CHANGELOG.md`, and the `docs/architecture/` tree is updated; the `handlers.md` "tracked in #165 for a later PR" placeholder is removed and `architecture/README.md`'s "may move under `architecture/` in a later PR" note is retired.
+
+### Fixed
+
+- **CLAUDE.md `questions_key` default matches code** (closes #163). CLAUDE.md § Interview mode now accurately states `questions_key` defaults to `interview_questions` with `last_response` as a read-time fallback inside `resolveAgentOutput`. Previously claimed `last_response` as the primary default, which contradicted `resolveInterviewKeys` in `pipeline/handlers/human.go`. The drift-note block in `docs/architecture/handlers/human.md` flagging this mismatch is removed.
+- **"Escalation" terminology reconciled across docs** (closes #166). CLAUDE.md § Claude Code backend no longer lists `escalate` as a pipeline outcome (actual outcomes: `success`, `fail`, `retry`, plus engine-level `budget_exceeded`) and cross-links to `docs/architecture/engine.md#escalate` for the routing-convention framing. The outcome table in `context-flow.md` is updated to match. This completes the audit started in `engine.md:370` which already had the canonical "not a distinct outcome status" framing.
 
 ### Fixed
 
@@ -69,12 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`stack.manager_loop` handler — async child-pipeline supervision** (PR #126, Attractor spec 4.11). A supervisor node that launches a child pipeline in a goroutine, polls at a configurable interval, and optionally steers the running child by injecting context mid-execution. New attributes: `subgraph_ref`, `manager.poll_interval`, `manager.max_cycles`, `manager.stop_condition`, `manager.steer_condition`, `manager.steer_context`. Exposes `stack.child.status` / `stack.child.cycles` / `stack.child.exit_status` to parent context. Emits `EventStageStarted` on launch, `EventManagerCycleTick` per poll cycle, and `EventStageCompleted` / `EventStageFailed` on terminal outcomes (success, child fail, child crash, max_cycles exceeded, cancellation, stop/steer condition invalid). Bounded `childJoinGrace` (30 s) protects against non-context-aware child handlers hanging the manager. See `docs/manager-loop.md`.
+- **`stack.manager_loop` handler — async child-pipeline supervision** (PR #126, Attractor spec 4.11). A supervisor node that launches a child pipeline in a goroutine, polls at a configurable interval, and optionally steers the running child by injecting context mid-execution. New attributes: `subgraph_ref`, `manager.poll_interval`, `manager.max_cycles`, `manager.stop_condition`, `manager.steer_condition`, `manager.steer_context`. Exposes `stack.child.status` / `stack.child.cycles` / `stack.child.exit_status` to parent context. Emits `EventStageStarted` on launch, `EventManagerCycleTick` per poll cycle, and `EventStageCompleted` / `EventStageFailed` on terminal outcomes (success, child fail, child crash, max_cycles exceeded, cancellation, stop/steer condition invalid). Bounded `childJoinGrace` (30 s) protects against non-context-aware child handlers hanging the manager. See `docs/architecture/handlers/manager-loop.md`.
 - **Engine steering channel** (PR #126): new `pipeline.WithSteeringChan(chan map[string]string)` engine option. Between node executions, the engine drains the channel and merges updates into the run's `PipelineContext`. Used by `manager_loop` to inject context into running children; available to any supervisor. Non-blocking drain; nil channel is a no-op.
 - **`PipelineContext.MergeWithoutDirty`** (PR #126): writes updates without marking keys as dirty, so externally-injected values never leak into any node's per-node scope. Used by the engine's steering drain so injected keys stay in the global/bare namespace.
 - **Accurate cost estimation via catalog + cache token pricing** (PRs #127, #128): `EstimateCost` now resolves prices through the model catalog (`GetModelInfo`) instead of a duplicated hardcoded map. Adds cache token pricing: cache reads at 10% of input rate, cache writes at 25%. `TokenTracker` now records the observed model per provider (`AddUsage` takes an optional model arg, normalized through the catalog to match `WrapComplete`) so per-provider cost estimates use the right rate sheet instead of a global fallback.
 - **Model catalog April 2026 refresh** (PR #128): adds `claude-opus-4-7`, `gpt-5.4-mini` / `gpt-5.4-nano`, `gpt-4.1` family, `o3`, `o4-mini`, GA Gemini 2.5 models, and `gemini-3.1-pro-preview` (replaces the shut-down `gemini-3-pro-preview`). Fixes `claude-opus-4-6` pricing (was incorrectly $15/$75; now $5/$25). Context windows for Sonnet/Opus 4.6 bumped to 1M. `claude-sonnet` / `claude-opus` aliases now point at the latest 4.7 entries. `claude-haiku-4-5`, `gpt-4o`, and `gpt-4o-mini` added (they were in the old pricing map but not the catalog).
-- **`docs/manager-loop.md`**: user-facing documentation for the manager-loop handler — lifecycle diagram, configuration reference, context outputs, event semantics, steering contract, and tuning guidance.
+- **`docs/architecture/handlers/manager-loop.md`**: user-facing documentation for the manager-loop handler — lifecycle diagram, configuration reference, context outputs, event semantics, steering contract, and tuning guidance.
 - **`tracker-swebench` now captures the active provider base-URL override** in `run_meta.json` (`BaseURLOverride`). Derived from `${PROVIDER}_BASE_URL` with hyphens normalized to underscores, so `--provider openai-compat` maps to `OPENAI_COMPAT_BASE_URL` consistently with `ResolveProviderBaseURL`. Useful for reproducing SWE-bench runs that routed through a Cloudflare AI Gateway or custom endpoint.
 
 ### Fixed

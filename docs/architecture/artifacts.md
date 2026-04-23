@@ -236,5 +236,5 @@ The bundle is stand-alone: no network access, no remote repo. This is the canoni
 - [../ARCHITECTURE.md](../../ARCHITECTURE.md) — where the artifact layer sits in the stack.
 - [./engine.md](./engine.md) — engine lifecycle that emits events written here.
 - [./handlers.md](./handlers.md) — handlers that produce node-level prompts and responses.
-- [../pipeline-context-flow.md](../pipeline-context-flow.md) — context snapshot model (the same snapshot written to `checkpoint.json`).
+- [./context-flow.md](./context-flow.md) — context snapshot model (the same snapshot written to `checkpoint.json`).
 - [./tui.md](./tui.md) — the TUI reads the same event stream live via the `tea.Program.Send` path.

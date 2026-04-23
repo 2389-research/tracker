@@ -300,4 +300,4 @@ Two invariants from CLAUDE.md that the adapter's shape supports:
 - [../ARCHITECTURE.md](../../ARCHITECTURE.md) — top-level system view showing where the adapter sits in the load-to-execute pipeline.
 - [./handlers.md](./handlers.md) — handlers that read the attrs this adapter writes.
 - [./engine.md](./engine.md) — engine traversal that expects synthesized edges to exist.
-- [../pipeline-context-flow.md](../pipeline-context-flow.md) — `${ctx.*}` / `${params.*}` / `${graph.*}` namespaces the adapter's attrs feed into.
+- [./context-flow.md](./context-flow.md) — `${ctx.*}` / `${params.*}` / `${graph.*}` namespaces the adapter's attrs feed into.

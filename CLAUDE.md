@@ -68,7 +68,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Questions with "other" variants in options are filtered — the UI always provides its own "Other" escape hatch
 - One question shown at a time with progress bar, answered summary above, and selection feedback (filled dot + checkmark)
 - Canceled interviews return `OutcomeFail`, not `OutcomeSuccess` — pipeline edges can route on cancellation
-- `questions_key` defaults to `last_response`; `answers_key` defaults to `interview_answers`
+- `questions_key` defaults to `interview_questions` (with `last_response` as a read-time fallback inside `resolveAgentOutput`); `answers_key` defaults to `interview_answers`
 - Zero parsed questions falls back to freeform with the node's `prompt` attribute
 - Enter confirms selection and advances; Ctrl+S submits all; Esc cancels
 - Empty API responses (0 content parts, 0 output tokens, 0 prior tool calls) trigger session-level retry with diagnostic logging
@@ -209,7 +209,7 @@ per-provider breakdowns (middleware-level) and `EngineResult.Usage` for
 trace-level aggregation. These are independent data sources.
 
 ### Pipeline context isolation
-For the user-facing model of data flow between nodes, context scoping, and fidelity levels, see **[Pipeline Context Flow](docs/pipeline-context-flow.md)**. Per-node scoping (`node.<nodeID>.<key>`) is a stable feature — after each node finishes, its dirty writes are aliased under `node.<nodeID>.<key>` so later nodes can reference a specific upstream node's output by name. Declarative `writes:` (v0.21.0) builds on this: agent/tool/interview-human nodes can declare the keys they produce, and a typed JSON payload is extracted into first-class context keys.
+For the user-facing model of data flow between nodes, context scoping, and fidelity levels, see **[Pipeline Context Flow](docs/architecture/context-flow.md)**. Per-node scoping (`node.<nodeID>.<key>`) is a stable feature — after each node finishes, its dirty writes are aliased under `node.<nodeID>.<key>` so later nodes can reference a specific upstream node's output by name. Declarative `writes:` (v0.21.0) builds on this: agent/tool/interview-human nodes can declare the keys they produce, and a typed JSON payload is extracted into first-class context keys.
 
 ### Cost governance (v0.17.0+)
 
@@ -296,7 +296,7 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - Per-node `backend` attr takes priority over the global `--backend` flag: a node with `backend: native` uses native even when `--backend claude-code` is set globally
 - With `--backend claude-code` and no per-node override, nodes route through the claude CLI — non-Anthropic model names are stripped so the CLI uses its default
 - `buildLLMClient()` is lazy: failure is non-fatal with `--backend claude-code` (native client only needed for native backend nodes)
-- Error classification: Claude CLI exit codes are mapped to pipeline outcomes (success, fail, escalate); credit balance errors logged with actionable guidance
+- Error classification: Claude CLI exit codes are mapped to pipeline outcomes (success, fail); credit balance errors logged with actionable guidance. "Escalation" is a routing convention built on top of `OutcomeFail` edges, not a distinct outcome status — see `docs/architecture/engine.md#escalate`.
 - The engine and TUI see the same `agent.Event` stream regardless of backend — no special-case code needed
 - All three built-in workflows are backend-agnostic: they work with both native and claude-code
 

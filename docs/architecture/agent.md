@@ -268,4 +268,4 @@ Categorical events a consumer typically cares about:
 - [./llm.md](./llm.md) — the `Completer` this package consumes.
 - [./backends.md](./backends.md) — how the pipeline picks between native, claude-code, and ACP.
 - [./handlers.md](./handlers.md) — the codergen handler that wraps this package inside pipelines.
-- [../pipeline-context-flow.md](../pipeline-context-flow.md) — how agent outputs (`last_response`, `episode_summary`) land in pipeline context.
+- [./context-flow.md](./context-flow.md) — how agent outputs (`last_response`, `episode_summary`) land in pipeline context.

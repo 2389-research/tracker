@@ -204,7 +204,7 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
 - **Fidelity-aware compaction**: on resume, completed-node context is
   compacted to the node's declared fidelity level (preserving declared
   `reads:` keys pinned at full fidelity). See `pipeline/fidelity.go` and
-  [`docs/pipeline-context-flow.md`](../pipeline-context-flow.md).
+  [`context-flow.md`](./context-flow.md).
 
 ## Outcomes and routing
 
@@ -547,7 +547,7 @@ stream via `PipelineMultiHandler`.
 
 - [`handlers.md`](./handlers.md) — every built-in handler and its
   responsibilities at outcome time.
-- [`../pipeline-context-flow.md`](../pipeline-context-flow.md) — user-facing
+- [`context-flow.md`](./context-flow.md) — user-facing
   model of the data flow the engine mediates.
 - [`artifacts.md`](./artifacts.md) — what the engine writes to disk during
   and after a run.
