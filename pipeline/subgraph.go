@@ -109,24 +109,54 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 		childRegistry = h.registryFactory(subGraphWithParams, node.ID)
 	}
 
-	// Create a sub-engine with scoped events and the parent's context snapshot.
-	engine := NewEngine(subGraphWithParams, childRegistry,
+	// Build child-engine options, starting with the usual context snapshot
+	// + scoped event handler. Then, if the parent engine stashed a budget
+	// guard + usage baseline on ctx, propagate both to the child so:
+	//   (a) the child engine halts if combined parent+child spend breaches
+	//       a --max-tokens / --max-cost ceiling mid-subgraph, and
+	//   (b) child usage still flows back via Outcome.ChildUsage below,
+	//       closing the between-node rollup.
+	// Prior to #183 neither was done, which made subgraphs a full bypass
+	// of operator-configured budgets.
+	childOpts := []EngineOption{
 		WithInitialContext(pctx.Snapshot()),
 		WithPipelineEventHandler(scopedPipeline),
-	)
+	}
+	if runCtx := ChildRunContextFromContext(ctx); runCtx != nil {
+		if runCtx.BudgetGuard != nil {
+			childOpts = append(childOpts, WithBudgetGuard(runCtx.BudgetGuard))
+		}
+		if runCtx.Baseline != nil {
+			childOpts = append(childOpts, WithBaselineUsage(runCtx.Baseline))
+		}
+	}
+
+	engine := NewEngine(subGraphWithParams, childRegistry, childOpts...)
 	result, err := engine.Run(ctx)
 	if err != nil {
 		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q execution failed: %w", ref, err)
 	}
 
-	// Map engine result status to outcome.
+	// Map engine result status to outcome. A child-side budget halt is not
+	// translated to OutcomeFail: the parent's own between-node budget
+	// check will see the rolled-up ChildUsage (appended below) and fire
+	// with the correct OutcomeBudgetExceeded status. Mapping it to fail
+	// here would trip the engine's strict-failure-edges rule before the
+	// parent's budget check runs, masking the real reason for the halt.
 	status := OutcomeSuccess
-	if result.Status != OutcomeSuccess {
+	switch result.Status {
+	case OutcomeSuccess, OutcomeBudgetExceeded:
+		status = OutcomeSuccess
+	default:
 		status = OutcomeFail
 	}
 
+	// Propagate the child's aggregated usage up to the parent trace so
+	// BudgetGuard checks between parent nodes, per-provider CLI rollups,
+	// and library-level EngineResult.Usage all see subgraph spend.
 	return Outcome{
 		Status:         status,
 		ContextUpdates: result.Context,
+		ChildUsage:     result.Usage,
 	}, nil
 }

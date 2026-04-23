@@ -363,3 +363,286 @@ func TestSubgraphHandler_ShapeMapping(t *testing.T) {
 		t.Errorf("expected 'tab' to map to 'subgraph', got %q", handler)
 	}
 }
+
+// TestSubgraph_BudgetBypass_Fix_UsageRollup pins the core #183 rollup: a
+// subgraph-nested node that reports Stats with tokens must have that usage
+// appear in the parent's EngineResult.Usage.ProviderTotals, not vanish into
+// the child engine's own trace.
+//
+// Pre-fix: AggregateUsage at the parent level saw only the subgraph node's
+// own Stats (nil), so child spend disappeared entirely from operator-visible
+// summaries and from any BudgetGuard check the parent ran.
+func TestSubgraph_BudgetBypass_Fix_UsageRollup(t *testing.T) {
+	const childTokens = 500
+	const childCost = 0.05
+
+	// Build a child pipeline whose single "expensive" box emits Stats.
+	sub := NewGraph("sub")
+	sub.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	sub.AddNode(&Node{ID: "expensive", Shape: "box"})
+	sub.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	sub.AddEdge(&Edge{From: "s", To: "expensive"})
+	sub.AddEdge(&Edge{From: "expensive", To: "e"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if node.ID == "expensive" {
+				return Outcome{
+					Status: OutcomeSuccess,
+					Stats: &SessionStats{
+						InputTokens:  childTokens / 2,
+						OutputTokens: childTokens / 2,
+						TotalTokens:  childTokens,
+						CostUSD:      childCost,
+						Provider:     "anthropic",
+					},
+				}, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"child": sub},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	// Parent: start -> sg -> exit.
+	g := NewGraph("parent")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "sg"})
+	g.AddEdge(&Edge{From: "sg", To: "e"})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Usage == nil {
+		t.Fatal("result.Usage is nil; want child spend rolled up")
+	}
+	if result.Usage.TotalTokens != childTokens {
+		t.Errorf("TotalTokens = %d, want %d (child spend must fold into parent)", result.Usage.TotalTokens, childTokens)
+	}
+	got := result.Usage.ProviderTotals["anthropic"]
+	if got.TotalTokens != childTokens {
+		t.Errorf("ProviderTotals[anthropic].TotalTokens = %d, want %d", got.TotalTokens, childTokens)
+	}
+	if got.CostUSD != childCost {
+		t.Errorf("ProviderTotals[anthropic].CostUSD = %f, want %f", got.CostUSD, childCost)
+	}
+	if _, hasUnknown := result.Usage.ProviderTotals["unknown"]; hasUnknown {
+		t.Errorf("ProviderTotals contains \"unknown\"; child Stats.Provider should carry through")
+	}
+}
+
+// TestSubgraph_BudgetBypass_Fix_ParentGuardHaltsAfterOverspend verifies that
+// when subgraph-nested work overspends the parent's budget, the parent's
+// BudgetGuard fires on the between-node check that follows the subgraph node.
+// This is the "delayed enforcement" half of the fix — compare with
+// TestSubgraph_BudgetBypass_Fix_ChildGuardHaltsMidSubgraph below for the
+// mid-subgraph enforcement case.
+func TestSubgraph_BudgetBypass_Fix_ParentGuardHaltsAfterOverspend(t *testing.T) {
+	sub := NewGraph("sub")
+	sub.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	sub.AddNode(&Node{ID: "burn", Shape: "box"})
+	sub.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	sub.AddEdge(&Edge{From: "s", To: "burn"})
+	sub.AddEdge(&Edge{From: "burn", To: "e"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if node.ID == "burn" {
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{
+					TotalTokens: 10_000,
+					Provider:    "anthropic",
+				}}, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"child": sub},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	g := NewGraph("parent")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	g.AddNode(&Node{ID: "follow", Shape: "box"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "sg"})
+	g.AddEdge(&Edge{From: "sg", To: "follow"})
+	g.AddEdge(&Edge{From: "follow", To: "e"})
+
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 100})
+	engine := NewEngine(g, reg, WithBudgetGuard(guard))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeBudgetExceeded {
+		t.Fatalf("Status = %q, want %q (parent should halt after subgraph overspends)", result.Status, OutcomeBudgetExceeded)
+	}
+	if len(result.BudgetLimitsHit) == 0 {
+		t.Error("BudgetLimitsHit is empty; want tokens breach recorded")
+	}
+	// "follow" node must never have run — the guard halts before it.
+	for _, id := range result.CompletedNodes {
+		if id == "follow" {
+			t.Error("completed node 'follow' after subgraph budget overspend; guard did not halt")
+		}
+	}
+}
+
+// TestSubgraph_BudgetBypass_Fix_ChildGuardHaltsMidSubgraph verifies the
+// mid-subgraph half of the fix: when a parent's baseline usage plus a
+// partial child accumulation exceeds the limit, the *child* engine's
+// between-node check fires and halts before the child finishes. Without
+// baseline propagation, the child guard would only see child-local spend
+// and the effective ceiling inside the subgraph would grow by whatever
+// the parent already spent.
+func TestSubgraph_BudgetBypass_Fix_ChildGuardHaltsMidSubgraph(t *testing.T) {
+	sub := NewGraph("sub")
+	sub.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	sub.AddNode(&Node{ID: "burn1", Shape: "box"})
+	sub.AddNode(&Node{ID: "burn2", Shape: "box"})
+	sub.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	sub.AddEdge(&Edge{From: "s", To: "burn1"})
+	sub.AddEdge(&Edge{From: "burn1", To: "burn2"})
+	sub.AddEdge(&Edge{From: "burn2", To: "e"})
+
+	reg := newTestRegistry()
+	// parent_pre burns 50 tokens, burn1 burns 60 more (total 110 > limit 100),
+	// burn2 would burn 40 more but must never run.
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			switch node.ID {
+			case "parent_pre":
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+			case "burn1":
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+			case "burn2":
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 40, Provider: "anthropic"}}, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"child": sub},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	g := NewGraph("parent")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "parent_pre", Shape: "box"})
+	g.AddNode(&Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "parent_pre"})
+	g.AddEdge(&Edge{From: "parent_pre", To: "sg"})
+	g.AddEdge(&Edge{From: "sg", To: "e"})
+
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 100})
+	engine := NewEngine(g, reg, WithBudgetGuard(guard))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeBudgetExceeded {
+		t.Fatalf("Status = %q, want %q (child guard should halt mid-subgraph on combined 50+60=110)", result.Status, OutcomeBudgetExceeded)
+	}
+	// burn2 must never run — baseline + burn1 already breaches the limit.
+	// Check via the child's trace entries propagated through ChildUsage:
+	// SessionCount should be 1 (only burn1), not 2.
+	if result.Usage == nil {
+		t.Fatal("result.Usage is nil")
+	}
+	// Parent_pre (1 session) + child burn1 (1 session) = 2.
+	if result.Usage.SessionCount != 2 {
+		t.Errorf("Usage.SessionCount = %d, want 2 (parent_pre + burn1 only; burn2 must not run)", result.Usage.SessionCount)
+	}
+}
+
+// TestSubgraph_BudgetBypass_Fix_NestedSubgraph verifies two-level nesting:
+// a grandparent subgraph wrapping a parent subgraph wrapping a leaf burn.
+// Usage must roll up all the way to the grandparent.
+func TestSubgraph_BudgetBypass_Fix_NestedSubgraph(t *testing.T) {
+	// Leaf: single burn node.
+	leaf := NewGraph("leaf")
+	leaf.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	leaf.AddNode(&Node{ID: "burn", Shape: "box"})
+	leaf.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	leaf.AddEdge(&Edge{From: "s", To: "burn"})
+	leaf.AddEdge(&Edge{From: "burn", To: "e"})
+
+	// Middle: subgraph that invokes the leaf.
+	middle := NewGraph("middle")
+	middle.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	middle.AddNode(&Node{ID: "inner", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "leaf"}})
+	middle.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	middle.AddEdge(&Edge{From: "s", To: "inner"})
+	middle.AddEdge(&Edge{From: "inner", To: "e"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if node.ID == "burn" {
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{
+					TotalTokens: 777,
+					CostUSD:     0.12,
+					Provider:    "openai",
+				}}, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"leaf": leaf, "middle": middle},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	// Grandparent: single subgraph ref to middle.
+	g := NewGraph("grandparent")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "outer", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "middle"}})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "outer"})
+	g.AddEdge(&Edge{From: "outer", To: "e"})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Usage == nil {
+		t.Fatal("result.Usage is nil; want leaf spend rolled up two levels")
+	}
+	if result.Usage.TotalTokens != 777 {
+		t.Errorf("TotalTokens = %d, want 777 (leaf spend must roll up through middle + grandparent)", result.Usage.TotalTokens)
+	}
+	if got := result.Usage.ProviderTotals["openai"]; got.TotalTokens != 777 {
+		t.Errorf("ProviderTotals[openai].TotalTokens = %d, want 777", got.TotalTokens)
+	}
+	if got := result.Usage.ProviderTotals["openai"]; got.CostUSD != 0.12 {
+		t.Errorf("ProviderTotals[openai].CostUSD = %f, want 0.12", got.CostUSD)
+	}
+}

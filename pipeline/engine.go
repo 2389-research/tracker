@@ -25,6 +25,41 @@ type EngineResult struct {
 // OutcomeBudgetExceeded signals that a BudgetGuard halted the run.
 const OutcomeBudgetExceeded = "budget_exceeded"
 
+// ChildRunContext is the execution context a handler may need when it
+// launches a child run (subgraph, manager_loop). Carries the parent
+// engine's BudgetGuard and a snapshot of usage already consumed so the
+// child can enforce limits combined with the parent's running total.
+// Retrieved via ChildRunContextFromContext.
+type ChildRunContext struct {
+	// BudgetGuard is the parent engine's budget guard. Child runs should
+	// pass it via WithBudgetGuard so the same limits enforce within the
+	// child. Nil when the parent has no budget configured.
+	BudgetGuard *BudgetGuard
+
+	// Baseline is an immutable snapshot of the parent's aggregated usage
+	// at the moment the child was launched. Child runs should pass it via
+	// WithBaselineUsage so the child's budget check folds baseline + its
+	// own trace aggregate before comparing to limits. Without this, a
+	// nested budget check would only see child-local spend and the
+	// effective ceiling inside a subgraph would grow by the parent's
+	// already-consumed amount.
+	Baseline *UsageSummary
+}
+
+// childRunContextKey is the unexported ctx.Value key for ChildRunContext.
+type childRunContextKey struct{}
+
+// ChildRunContextFromContext returns the ChildRunContext stashed on ctx by
+// the engine before dispatching a handler, or nil when no such value
+// exists (top-level contexts outside a running engine).
+func ChildRunContextFromContext(ctx context.Context) *ChildRunContext {
+	if ctx == nil {
+		return nil
+	}
+	v, _ := ctx.Value(childRunContextKey{}).(*ChildRunContext)
+	return v
+}
+
 // Engine executes a pipeline graph by traversing nodes, dispatching handlers,
 // selecting edges, and managing retries and checkpoints.
 type Engine struct {
@@ -36,6 +71,7 @@ type Engine struct {
 	initialContext    map[string]string
 	artifactDir       string
 	budgetGuard       *BudgetGuard
+	baselineUsage     *UsageSummary // usage already consumed by a parent run; folded into budget checks
 	gitArtifacts      bool
 	steeringCh        <-chan map[string]string
 }
@@ -84,6 +120,16 @@ func WithInitialContext(ctx map[string]string) EngineOption {
 // node outcome. Nil guards are no-ops.
 func WithBudgetGuard(guard *BudgetGuard) EngineOption {
 	return func(e *Engine) { e.budgetGuard = guard }
+}
+
+// WithBaselineUsage pre-loads the engine's BudgetGuard with usage already
+// consumed by a parent run. Used by subgraph execution so the child's guard
+// check sees parent spend + child trace combined, preventing the "subgraph
+// sandbox" escape where an operator's --max-tokens / --max-cost ceiling
+// would otherwise be silently non-binding for nodes nested in a subgraph.
+// Nil baselines are no-ops; zero-token baselines are treated as no-ops.
+func WithBaselineUsage(baseline *UsageSummary) EngineOption {
+	return func(e *Engine) { e.baselineUsage = baseline }
 }
 
 // WithGitArtifacts enables git-backed artifact tracking. When enabled, the

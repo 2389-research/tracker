@@ -40,6 +40,11 @@ type TraceEntry struct {
 	EdgeTo      string        `json:"edge_to,omitempty"`
 	Error       string        `json:"error,omitempty"`
 	Stats       *SessionStats `json:"stats,omitempty"`
+	// ChildUsage is the aggregated usage of a child run that executed under
+	// this node (subgraph, manager_loop). Populated when the handler's
+	// Outcome carries child-run totals so AggregateUsage can include them
+	// in the parent's rollup. Omitted from JSON when nil.
+	ChildUsage *UsageSummary `json:"child_usage,omitempty"`
 }
 
 // Trace captures the full execution history of a pipeline run.
@@ -82,44 +87,86 @@ type UsageSummary struct {
 	ProviderTotals        map[string]ProviderUsage `json:"provider_totals,omitempty"`
 }
 
-// AggregateUsage sums token usage and cost from all trace entries with session stats.
+// AggregateUsage sums token usage and cost from all trace entries with
+// session stats and any child-run rollups. Child usage is folded in so that
+// subgraph/manager_loop spend is visible in the parent's budget snapshots
+// and CLI summaries rather than disappearing into the child engine's own
+// trace. Without this fold, BudgetGuard evaluating on the parent's trace
+// could never see child spend and --max-tokens / --max-cost would be
+// silently non-binding for any node that runs a child pipeline.
 func (tr *Trace) AggregateUsage() *UsageSummary {
 	if tr == nil {
 		return nil
 	}
 	s := &UsageSummary{ProviderTotals: make(map[string]ProviderUsage)}
 	for _, e := range tr.Entries {
-		if e.Stats == nil {
-			continue
+		if e.Stats != nil {
+			foldStatsIntoSummary(s, e.Stats)
 		}
-		s.TotalInputTokens += e.Stats.InputTokens
-		s.TotalOutputTokens += e.Stats.OutputTokens
-		s.TotalTokens += e.Stats.TotalTokens
-		s.TotalCostUSD += e.Stats.CostUSD
-		s.TotalReasoningTokens += e.Stats.ReasoningTokens
-		s.TotalCacheReadTokens += e.Stats.CacheReadTokens
-		s.TotalCacheWriteTokens += e.Stats.CacheWriteTokens
-		s.SessionCount++
-
-		provider := strings.TrimSpace(e.Stats.Provider)
-		if provider == "" {
-			provider = unknownProvider
+		if e.ChildUsage != nil {
+			foldChildUsageIntoSummary(s, e.ChildUsage)
 		}
-		pt := s.ProviderTotals[provider]
-		pt.InputTokens += e.Stats.InputTokens
-		pt.OutputTokens += e.Stats.OutputTokens
-		pt.TotalTokens += e.Stats.TotalTokens
-		pt.CostUSD += e.Stats.CostUSD
-		pt.ReasoningTokens += e.Stats.ReasoningTokens
-		pt.CacheReadTokens += e.Stats.CacheReadTokens
-		pt.CacheWriteTokens += e.Stats.CacheWriteTokens
-		pt.SessionCount++
-		s.ProviderTotals[provider] = pt
 	}
 	if s.SessionCount == 0 {
 		return nil
 	}
 	return s
+}
+
+// foldStatsIntoSummary adds a single node's SessionStats to the running
+// totals and the matching per-provider bucket.
+func foldStatsIntoSummary(s *UsageSummary, stats *SessionStats) {
+	s.TotalInputTokens += stats.InputTokens
+	s.TotalOutputTokens += stats.OutputTokens
+	s.TotalTokens += stats.TotalTokens
+	s.TotalCostUSD += stats.CostUSD
+	s.TotalReasoningTokens += stats.ReasoningTokens
+	s.TotalCacheReadTokens += stats.CacheReadTokens
+	s.TotalCacheWriteTokens += stats.CacheWriteTokens
+	s.SessionCount++
+
+	provider := strings.TrimSpace(stats.Provider)
+	if provider == "" {
+		provider = unknownProvider
+	}
+	pt := s.ProviderTotals[provider]
+	pt.InputTokens += stats.InputTokens
+	pt.OutputTokens += stats.OutputTokens
+	pt.TotalTokens += stats.TotalTokens
+	pt.CostUSD += stats.CostUSD
+	pt.ReasoningTokens += stats.ReasoningTokens
+	pt.CacheReadTokens += stats.CacheReadTokens
+	pt.CacheWriteTokens += stats.CacheWriteTokens
+	pt.SessionCount++
+	s.ProviderTotals[provider] = pt
+}
+
+// foldChildUsageIntoSummary adds a child run's pre-aggregated UsageSummary
+// to the running totals, preserving per-provider attribution. SessionCount
+// from the child contributes to the parent's SessionCount so rollups
+// accurately reflect how many billable sessions participated.
+func foldChildUsageIntoSummary(s *UsageSummary, child *UsageSummary) {
+	s.TotalInputTokens += child.TotalInputTokens
+	s.TotalOutputTokens += child.TotalOutputTokens
+	s.TotalTokens += child.TotalTokens
+	s.TotalCostUSD += child.TotalCostUSD
+	s.TotalReasoningTokens += child.TotalReasoningTokens
+	s.TotalCacheReadTokens += child.TotalCacheReadTokens
+	s.TotalCacheWriteTokens += child.TotalCacheWriteTokens
+	s.SessionCount += child.SessionCount
+
+	for provider, cpu := range child.ProviderTotals {
+		pt := s.ProviderTotals[provider]
+		pt.InputTokens += cpu.InputTokens
+		pt.OutputTokens += cpu.OutputTokens
+		pt.TotalTokens += cpu.TotalTokens
+		pt.CostUSD += cpu.CostUSD
+		pt.ReasoningTokens += cpu.ReasoningTokens
+		pt.CacheReadTokens += cpu.CacheReadTokens
+		pt.CacheWriteTokens += cpu.CacheWriteTokens
+		pt.SessionCount += cpu.SessionCount
+		s.ProviderTotals[provider] = pt
+	}
 }
 
 // AggregateToolCalls sums tool call counts from all trace entries with session stats.
