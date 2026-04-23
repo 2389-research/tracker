@@ -337,7 +337,7 @@ func TestFlattenSteerContext_EmptyMap(t *testing.T) {
 // TestFlattenSteerContext_EncodesReservedInKeysAndValues verifies both keys
 // and values get the three reserved chars escaped. The three delimiter chars
 // (',', '=', '%') are round-trippable via percent-encoding — only ':' is
-// rejected outright (see TestFlattenSteerContext_RejectsColonInKey).
+// rejected outright (see TestFromDippinIR_ManagerLoop_RejectsColonInSteerContextKey).
 //
 // flattenSteerContext sorts the raw map keys before encoding, so the output
 // order reflects raw-key lexicographic order, not encoded-key order.
@@ -653,7 +653,10 @@ func TestConvertEdge_ParsedFallback(t *testing.T) {
 			Parsed: ir.CondCompare{Variable: "ctx.outcome", Op: "=", Value: "success"},
 		},
 	}
-	got := convertEdge(edge)
+	got, err := convertEdge(edge)
+	if err != nil {
+		t.Fatalf("convertEdge returned error: %v", err)
+	}
 	if got.Condition == "" {
 		t.Fatal("convertEdge dropped Parsed-only condition — expected formatted condition text on the edge")
 	}
@@ -662,6 +665,93 @@ func TestConvertEdge_ParsedFallback(t *testing.T) {
 	}
 	if got.Attrs["condition"] != got.Condition {
 		t.Errorf("edge.Attrs[condition] = %q, want %q (must mirror Condition)", got.Attrs["condition"], got.Condition)
+	}
+}
+
+// TestConvertEdge_ParsedFallback_FlatAndOr verifies that a Parsed-only edge
+// with a flat all-AND (or all-OR) tree formats without parens and is accepted
+// as a conditional edge. This is the happy path the evaluator handles fine.
+func TestConvertEdge_ParsedFallback_FlatAndOr(t *testing.T) {
+	// a = 1 && b = 2 — no parens emitted at top level.
+	edge := &ir.Edge{
+		From: "src",
+		To:   "dst",
+		Condition: &ir.Condition{
+			Parsed: ir.CondAnd{
+				Left:  ir.CondCompare{Variable: "ctx.a", Op: "=", Value: "1"},
+				Right: ir.CondCompare{Variable: "ctx.b", Op: "=", Value: "2"},
+			},
+		},
+	}
+	got, err := convertEdge(edge)
+	if err != nil {
+		t.Fatalf("convertEdge returned unexpected error: %v", err)
+	}
+	if want := "a = 1 && b = 2"; got.Condition != want {
+		t.Errorf("edge.Condition = %q, want %q", got.Condition, want)
+	}
+}
+
+// TestConvertEdge_ParsedFallback_MixedPrecedenceRejected asserts that a
+// Parsed-only edge formatting to a paren-containing expression is rejected
+// at adapter time with ErrParenthesizedParsedCondition. The pipeline edge
+// evaluator does not understand parentheses — letting a mixed-precedence
+// expression through would trade a silent "unconditional edge" bug (the
+// pre-#176.6 behavior) for a runtime "invalid variable name (b" bug, which
+// is still silent from the author's point of view.
+func TestConvertEdge_ParsedFallback_MixedPrecedenceRejected(t *testing.T) {
+	// a = 1 || (b = 2 && c = 3) — the inner AND has higher precedence than
+	// the outer OR, so formatManagerLoopBinaryOp wraps it in parens.
+	edge := &ir.Edge{
+		From: "src",
+		To:   "dst",
+		Condition: &ir.Condition{
+			Parsed: ir.CondOr{
+				Left: ir.CondCompare{Variable: "ctx.a", Op: "=", Value: "1"},
+				Right: ir.CondAnd{
+					Left:  ir.CondCompare{Variable: "ctx.b", Op: "=", Value: "2"},
+					Right: ir.CondCompare{Variable: "ctx.c", Op: "=", Value: "3"},
+				},
+			},
+		},
+	}
+	_, err := convertEdge(edge)
+	if err == nil {
+		t.Fatal("expected error for paren-containing Parsed fallback, got nil")
+	}
+	if !errors.Is(err, ErrParenthesizedParsedCondition) {
+		t.Errorf("error = %v, want wrapping ErrParenthesizedParsedCondition", err)
+	}
+	if !strings.Contains(err.Error(), "src -> dst") {
+		t.Errorf("error = %v, want message to include the edge endpoints", err)
+	}
+}
+
+// TestConvertEdge_RawWinsOverParsed_WithParens ensures that a Condition whose
+// Raw is populated is trusted as-is even if the author's Raw happens to contain
+// parens. The paren rejection only targets the Parsed-only fallback path —
+// Raw is authored text, and the evaluator may ignore or reinterpret it.
+func TestConvertEdge_RawWinsOverParsed_WithParens(t *testing.T) {
+	edge := &ir.Edge{
+		From: "src",
+		To:   "dst",
+		Condition: &ir.Condition{
+			Raw: "ctx.outcome = success",
+			Parsed: ir.CondOr{
+				Left: ir.CondCompare{Variable: "ctx.a", Op: "=", Value: "1"},
+				Right: ir.CondAnd{
+					Left:  ir.CondCompare{Variable: "ctx.b", Op: "=", Value: "2"},
+					Right: ir.CondCompare{Variable: "ctx.c", Op: "=", Value: "3"},
+				},
+			},
+		},
+	}
+	got, err := convertEdge(edge)
+	if err != nil {
+		t.Fatalf("convertEdge returned unexpected error for Raw-populated edge: %v", err)
+	}
+	if got.Condition != "ctx.outcome = success" {
+		t.Errorf("edge.Condition = %q, want Raw value %q", got.Condition, "ctx.outcome = success")
 	}
 }
 
@@ -700,7 +790,7 @@ func TestDippinAdapter_E2E_ManagerLoop(t *testing.T) {
 		{"subgraph_ref", "child.dip"},
 		{"poll_interval", "15s"},
 		{"max_cycles", "20"},
-		{"stop_condition", "stack.child.outcome = success"},
+		{"stop_condition", "stack.child.status = success"},
 		{"steer_condition", "stack.child.cycles = 5"},
 		{"steer_context", "hint=halfway_through,priority=high"},
 	}

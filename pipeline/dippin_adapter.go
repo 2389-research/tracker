@@ -21,6 +21,14 @@ var (
 	ErrUnknownConfig          = errors.New("unknown config type")
 	ErrInvalidSteerContextKey = errors.New("steer_context key contains ':' which breaks block-form round-trip through the .dip formatter")
 	ErrMissingManagerLoopCfg  = errors.New("manager_loop node is missing required ir.ManagerLoopConfig")
+	// ErrParenthesizedParsedCondition is returned by convertEdge when a Parsed-only
+	// ir.Condition formats to an expression containing parentheses. The pipeline
+	// edge evaluator (pipeline/condition.go) does not support parens — it tokenizes
+	// on plain strings.Split("||") and strings.Split("&&"), so `a || (b && c)`
+	// would become tokens `(b` and `c)` which are invalid variable names at
+	// runtime. Authors should populate Condition.Raw with a flat form (e.g.
+	// `a=1 || b=2 || c=3`) or simplify the Parsed tree so no parens are emitted.
+	ErrParenthesizedParsedCondition = errors.New("formatted Parsed condition uses parentheses, which the pipeline edge evaluator does not support")
 )
 
 // FromDippinIR converts a Dippin IR Workflow to a Tracker Graph.
@@ -55,7 +63,9 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	if err := addIRNodes(g, workflow.Nodes); err != nil {
 		return nil, err
 	}
-	addIREdges(g, workflow.Edges)
+	if err := addIREdges(g, workflow.Edges); err != nil {
+		return nil, err
+	}
 
 	// Synthesize implicit edges from parallel fan-out targets and fan-in sources.
 	synthesizeImplicitEdges(g, workflow)
@@ -105,13 +115,21 @@ func addIRNodes(g *Graph, irNodes []*ir.Node) error {
 }
 
 // addIREdges converts IR edges and adds them to the graph.
-func addIREdges(g *Graph, irEdges []*ir.Edge) {
+// Propagates convertEdge errors (e.g. ErrParenthesizedParsedCondition) so
+// adapter-time rejection surfaces to the caller rather than silently losing
+// or mis-evaluating the edge at runtime.
+func addIREdges(g *Graph, irEdges []*ir.Edge) error {
 	for _, irEdge := range irEdges {
 		if irEdge == nil {
 			continue
 		}
-		g.AddEdge(convertEdge(irEdge))
+		gEdge, err := convertEdge(irEdge)
+		if err != nil {
+			return err
+		}
+		g.AddEdge(gEdge)
 	}
+	return nil
 }
 
 // nodeKindToShapeMap maps IR NodeKind to DOT shape strings.
@@ -149,8 +167,11 @@ func convertNode(irNode *ir.Node) (*Node, error) {
 	// time as a vague runtime error. Fail loudly at build time instead.
 	// Scoped to manager_loop for now — we may extend the same guard to other
 	// kinds as follow-ups if they exhibit the same silent-degrade pattern.
+	//
+	// Return the sentinel bare — addIRNodes wraps all convertNode errors with
+	// `node <id>: ...`, so wrapping here too would produce `node mgr: node mgr: ...`.
 	if irNode.Kind == ir.NodeManagerLoop && irNode.Config == nil {
-		return nil, fmt.Errorf("node %s: %w", irNode.ID, ErrMissingManagerLoopCfg)
+		return nil, ErrMissingManagerLoopCfg
 	}
 
 	gNode := &Node{
@@ -712,7 +733,15 @@ func setIfNonEmpty(attrs map[string]string, key, value string) {
 
 // convertEdge transforms an IR Edge to a Graph Edge.
 // Serializes the parsed Condition back to a raw string for the tracker engine.
-func convertEdge(irEdge *ir.Edge) *Edge {
+//
+// Returns ErrParenthesizedParsedCondition when the condition only has .Parsed
+// populated and the formatted text contains parentheses. The pipeline edge
+// evaluator has no paren support — a mixed-precedence Parsed tree like
+// `a=1 || (b=2 && c=3)` would tokenize to garbage (`(b`, `c)`) at runtime.
+// Flat all-AND / all-OR Parsed trees are still accepted because they don't
+// require parens. Authors hitting this should populate Condition.Raw (the
+// parser does this natively) or simplify the Parsed tree.
+func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 	gEdge := &Edge{
 		From:  irEdge.From,
 		To:    irEdge.To,
@@ -727,6 +756,16 @@ func convertEdge(irEdge *ir.Edge) *Edge {
 	// running the parser) still produces a conditional edge rather than a
 	// silent unconditional one.
 	if cond := managerLoopConditionText(irEdge.Condition); cond != "" {
+		// Parsed fallback without Raw may emit parens for mixed-precedence
+		// expressions. The edge evaluator can't parse those — reject at
+		// adapter time with a clear, actionable error rather than let a
+		// garbage token like `(b` fail at runtime. Raw-sourced conditions
+		// are trusted as-is (authors wrote them, and the evaluator is the
+		// same one the parser targets).
+		if irEdge.Condition != nil && irEdge.Condition.Raw == "" && strings.ContainsAny(cond, "()") {
+			return nil, fmt.Errorf("edge %s -> %s: %w: formatted as %q; populate Condition.Raw with a flat form (e.g. 'a=1 || b=2 || c=3') or simplify the Parsed tree",
+				irEdge.From, irEdge.To, ErrParenthesizedParsedCondition, cond)
+		}
 		gEdge.Condition = cond
 		gEdge.Attrs["condition"] = cond
 	}
@@ -741,7 +780,7 @@ func convertEdge(irEdge *ir.Edge) *Edge {
 		gEdge.Attrs["restart"] = "true"
 	}
 
-	return gEdge
+	return gEdge, nil
 }
 
 // serializeStylesheet converts IR stylesheet rules to the CSS-like format
