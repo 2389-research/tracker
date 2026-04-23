@@ -675,25 +675,10 @@ func extractNodeIO(io ir.NodeIO, attrs map[string]string) {
 
 // extractWorkflowDefaults maps IR WorkflowDefaults to graph-level attributes.
 // These provide fallback values for nodes that don't specify per-node config.
-//
-// NOTE (tracker issue #164 / upstream dippin-lang gap): the tool-command
-// allowlist graph attribute (`tool_commands_allow`, consumed by
-// handlers.registerToolHandler) is intentionally not mapped here — the
-// dippin-lang v0.21.0 IR does not expose a ToolCommandsAllow field on
-// WorkflowDefaults, and the parser emits an "unknown defaults field"
-// diagnostic when a `.dip` author writes it. Authors who need a graph-level
-// allowlist today must use DOT (`graph [tool_commands_allow="git *,make *"]`)
-// or set Graph.Attrs["tool_commands_allow"] programmatically via the library
-// API. When dippin-lang adds the IR field, set it here with:
-//
-//	setIfNonEmpty(attrs, handlers.GraphAttrToolCommandsAllow, defaults.ToolCommandsAllow)
-//
-// Keeping the consumer side (registry.go) ready means that wiring this up
-// after upstream lands is a one-liner in the adapter, with no behavior change
-// needed in the handler.
 func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]string) {
 	setIfNonEmpty(attrs, "llm_model", defaults.Model)
 	setIfNonEmpty(attrs, "llm_provider", defaults.Provider)
+	setIfNonEmpty(attrs, "tool_commands_allow", defaults.ToolCommandsAllow)
 	setIfNonEmpty(attrs, "default_retry_policy", defaults.RetryPolicy)
 	if defaults.MaxRetries > 0 {
 		attrs["default_max_retry"] = strconv.Itoa(defaults.MaxRetries)

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **dippin-lang dependency bumped v0.22.0 → v0.23.0**. Upstream ships [DIP28 tool-safety defaults](https://github.com/2389-research/dippin-lang/releases/tag/v0.23.0): `ir.WorkflowDefaults` now exposes `ToolCommandsAllow` and `ToolDenylistAdd` fields so `.dip` authors can declare tool-safety constraints at the workflow level instead of reaching for DOT or the library API. `extractWorkflowDefaults` in `pipeline/dippin_adapter.go` wires `WorkflowDefaults.ToolCommandsAllow` → `graph.Attrs["tool_commands_allow"]` (the consumer side has been ready since #164). Closes the adapter-side follow-up noted in v0.23.0's own #164 entry. `ToolDenylistAdd` wiring is deferred until the matching `--tool-denylist-add` CLI flag lands (#168).
 - **Docs relocated under `docs/architecture/`** (closes #165). `docs/pipeline-context-flow.md` → `docs/architecture/context-flow.md` and `docs/manager-loop.md` → `docs/architecture/handlers/manager-loop.md`. Every inbound link in `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`, `CHANGELOG.md`, and the `docs/architecture/` tree is updated; the `handlers.md` "tracked in #165 for a later PR" placeholder is removed and `architecture/README.md`'s "may move under `architecture/` in a later PR" note is retired.
 
 ### Fixed
