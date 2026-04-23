@@ -296,7 +296,7 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - Per-node `backend` attr takes priority over the global `--backend` flag: a node with `backend: native` uses native even when `--backend claude-code` is set globally
 - With `--backend claude-code` and no per-node override, nodes route through the claude CLI — non-Anthropic model names are stripped so the CLI uses its default
 - `buildLLMClient()` is lazy: failure is non-fatal with `--backend claude-code` (native client only needed for native backend nodes)
-- Error classification: Claude CLI exit codes are mapped to pipeline outcomes (success, fail); credit balance errors logged with actionable guidance. "Escalation" is a routing convention built on top of `OutcomeFail` edges, not a distinct outcome status — see `docs/architecture/engine.md#escalate`.
+- Error classification: `classifyError` in `backend_claudecode.go` maps Claude CLI stderr/exit codes to `OutcomeSuccess` / `OutcomeFail` / `OutcomeRetry` — rate-limit and network errors classify as `retry`; auth, credit-balance, budget-limit, and SIGKILL (exit 137) classify as `fail`; credit-balance errors also log actionable guidance to unset `ANTHROPIC_API_KEY` for Max subscription auth. "Escalation" is a routing convention built on top of `OutcomeFail` edges, not a distinct outcome status — see `docs/architecture/engine.md#escalate`.
 - The engine and TUI see the same `agent.Event` stream regardless of backend — no special-case code needed
 - All three built-in workflows are backend-agnostic: they work with both native and claude-code
 
