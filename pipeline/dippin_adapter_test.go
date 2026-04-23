@@ -1507,7 +1507,10 @@ func TestExtractToolAttrs_ZeroValueFieldsOmitted(t *testing.T) {
 
 func TestConvertEdge_WeightAndRestart(t *testing.T) {
 	irEdge := &ir.Edge{From: "a", To: "b", Weight: 5, Restart: true}
-	gEdge := convertEdge(irEdge)
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge returned error: %v", err)
+	}
 	if gEdge.Attrs["weight"] != "5" {
 		t.Errorf("weight = %q, want %q", gEdge.Attrs["weight"], "5")
 	}
@@ -1518,7 +1521,10 @@ func TestConvertEdge_WeightAndRestart(t *testing.T) {
 
 func TestConvertEdge_ZeroWeightOmitted(t *testing.T) {
 	irEdge := &ir.Edge{From: "a", To: "b"}
-	gEdge := convertEdge(irEdge)
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge returned error: %v", err)
+	}
 	if _, ok := gEdge.Attrs["weight"]; ok {
 		t.Error("zero weight should not be in attrs")
 	}

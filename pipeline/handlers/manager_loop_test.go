@@ -350,32 +350,71 @@ func TestManagerLoopHandler_EventsEmitted(t *testing.T) {
 		t.Fatal("expected at least one event")
 	}
 
-	// Verify we got a stage_started event for the child launch.
-	var hasStarted, hasCompleted, hasCycleTick bool
+	// Upgrade to ordered slice assertion (issue #176.5): the prior boolean
+	// flags accepted any interleaving, so a regression firing
+	// EventStageCompleted before EventStageStarted or duplicating
+	// EventStageStarted would slip past. Collect the relevant event types in
+	// order and assert exact position / count invariants:
+	//
+	//   1. The first relevant event is EventStageStarted (child launch).
+	//   2. Exactly one EventStageStarted (no duplicate-launch regression).
+	//   3. Exactly one EventStageCompleted (terminal completion event).
+	//   4. EventStageCompleted is the LAST relevant event (no tick/started
+	//      events after completion).
+	//   5. At least one EventManagerCycleTick between started and completed.
+	//
+	// Filter to the MANAGER node's own events (NodeID = "mgr"). The child
+	// engine also emits StageStarted/StageCompleted per inner node and those
+	// are scoped through NodeScopedPipelineHandler but still land on the same
+	// collector — they'd drown out the manager's own lifecycle.
+	var seq []pipeline.PipelineEventType
 	for _, evt := range events {
+		if evt.NodeID != node.ID {
+			continue
+		}
 		switch evt.Type {
-		case pipeline.EventStageStarted:
-			hasStarted = true
-		case pipeline.EventStageCompleted:
-			hasCompleted = true
-		case pipeline.EventManagerCycleTick:
-			hasCycleTick = true
+		case pipeline.EventStageStarted,
+			pipeline.EventManagerCycleTick,
+			pipeline.EventStageCompleted:
+			seq = append(seq, evt.Type)
 		}
 	}
-	if !hasStarted {
-		t.Error("expected EventStageStarted event")
+	if len(seq) < 2 {
+		t.Fatalf("expected at least started+completed events, got %v", seq)
 	}
-	if !hasCompleted {
-		t.Error("expected EventStageCompleted event")
+	if seq[0] != pipeline.EventStageStarted {
+		t.Errorf("expected first relevant event to be EventStageStarted, got %q (full seq: %v)", seq[0], seq)
 	}
-	if !hasCycleTick {
-		t.Error("expected at least one EventManagerCycleTick event")
+	if seq[len(seq)-1] != pipeline.EventStageCompleted {
+		t.Errorf("expected last relevant event to be EventStageCompleted, got %q (full seq: %v)", seq[len(seq)-1], seq)
+	}
+	// Count occurrences — starting or completing more than once would
+	// indicate a handler-level duplication bug.
+	var startedCount, completedCount, tickCount int
+	for _, typ := range seq {
+		switch typ {
+		case pipeline.EventStageStarted:
+			startedCount++
+		case pipeline.EventStageCompleted:
+			completedCount++
+		case pipeline.EventManagerCycleTick:
+			tickCount++
+		}
+	}
+	if startedCount != 1 {
+		t.Errorf("EventStageStarted count = %d, want 1 (full seq: %v)", startedCount, seq)
+	}
+	if completedCount != 1 {
+		t.Errorf("EventStageCompleted count = %d, want 1 (full seq: %v)", completedCount, seq)
+	}
+	if tickCount < 1 {
+		t.Errorf("EventManagerCycleTick count = %d, want >= 1 (full seq: %v)", tickCount, seq)
 	}
 }
 
 func TestManagerLoopHandler_DefaultConfig(t *testing.T) {
 	// Verify default parsing when no attrs are specified (except subgraph_ref).
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref": "test",
 	})
 	if err != nil {
@@ -393,7 +432,7 @@ func TestManagerLoopHandler_DefaultConfig(t *testing.T) {
 }
 
 func TestManagerLoopHandler_CustomConfig(t *testing.T) {
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref":            "my_child",
 		"manager.poll_interval":   "10s",
 		"manager.max_cycles":      "50",
@@ -691,7 +730,7 @@ func TestParseSteerContext_LiteralPercentEncodedSequenceIsPreserved(t *testing.T
 // the authoritative names; the legacy "manager.*" forms remain for manually
 // authored DOT files.
 func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref":    "child",
 		"poll_interval":   "15s",
 		"max_cycles":      "20",
@@ -733,7 +772,7 @@ func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
 // swallow errors" rule.
 func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 	t.Run("steer_condition without steer_context", func(t *testing.T) {
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":    "child",
 			"steer_condition": "stack.child.cycles = 3",
 		})
@@ -746,7 +785,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 	})
 
 	t.Run("steer_context without steer_condition", func(t *testing.T) {
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":  "child",
 			"steer_context": "hint=go_faster",
 		})
@@ -762,7 +801,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 		// A non-empty value with no `=` pairs parses to nil — the prior
 		// error message conflated this with "unset". The message must now
 		// cite the raw value and call out invalidity.
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":    "child",
 			"steer_condition": "stack.child.cycles = 3",
 			"steer_context":   "bad",
@@ -785,7 +824,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 		// from the validator's perspective) and the malformed input was
 		// silently discarded. The invalid-steer-context check runs
 		// independently of steer_condition, so this must now error.
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":  "child",
 			"steer_context": "bad",
 		})
@@ -806,7 +845,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 // forms, the unprefixed value is used. This matters for migrated pipelines
 // that may carry leftover "manager.*" attrs — the new contract takes priority.
 func TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed(t *testing.T) {
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref":          "child",
 		"poll_interval":         "5s",
 		"manager.poll_interval": "99s",

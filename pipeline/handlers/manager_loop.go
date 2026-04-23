@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -79,7 +80,7 @@ type managerLoopConfig struct {
 // present the unprefixed form wins — it is the authoritative contract going
 // forward, so a migrated pipeline with leftover `manager.*` attrs still gets
 // the new values.
-func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) {
+func parseManagerLoopConfig(nodeID string, attrs map[string]string) (managerLoopConfig, error) {
 	cfg := managerLoopConfig{
 		pollInterval: 45 * time.Second,
 		maxCycles:    1000,
@@ -114,6 +115,8 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 
 	cfg.stopCondition = managerAttr(attrs, "stop_condition")
 	cfg.steerExpr = managerAttr(attrs, "steer_condition")
+	warnUnknownStackChildKeys(nodeID, "stop_condition", cfg.stopCondition)
+	warnUnknownStackChildKeys(nodeID, "steer_condition", cfg.steerExpr)
 	rawSteerContext := managerAttr(attrs, "steer_context")
 	cfg.steerKeys = parseSteerContext(rawSteerContext)
 
@@ -145,6 +148,89 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 	return cfg, nil
 }
 
+// stackChildObservables enumerates the canonical `stack.child.*` context keys
+// written by ManagerLoopHandler.Execute each cycle. Conditions that reference
+// a `stack.child.*` key not in this set are almost certainly a typo —
+// warnUnknownStackChildKeys fires a one-line diagnostic in that case.
+//
+// Intentionally narrow: we only warn on keys under the `stack.child.*`
+// namespace that tracker itself owns. Bare keys (e.g., `outcome`, `status`)
+// are left alone because they are commonly set by the parent pipeline and
+// referenced by conditions — flagging them would false-positive on the happy
+// path. Issue #176.2.
+var stackChildObservables = map[string]struct{}{
+	"stack.child.status":      {},
+	"stack.child.cycles":      {},
+	"stack.child.exit_status": {},
+}
+
+// warnUnknownStackChildKeys scans expr for `stack.child.<word>` references and
+// logs one diagnostic per unknown subkey, tagged with the owning node's ID so
+// authors can locate the offending attr in a larger graph. Safe for
+// empty/unset expressions (early return on empty input). Called from
+// parseManagerLoopConfig so the warning fires once at graph-build /
+// handler-parse time, not on every cycle.
+func warnUnknownStackChildKeys(nodeID, attrName, expr string) {
+	if expr == "" {
+		return
+	}
+	seen := map[string]struct{}{}
+	for _, key := range extractStackChildKeys(expr) {
+		if _, known := stackChildObservables[key]; known {
+			continue
+		}
+		if _, alreadyWarned := seen[key]; alreadyWarned {
+			continue
+		}
+		seen[key] = struct{}{}
+		log.Printf("[manager_loop] warning: node %q %s references %q which is not a known observable; known keys: stack.child.status, stack.child.cycles, stack.child.exit_status",
+			nodeID, attrName, key)
+	}
+}
+
+// extractStackChildKeys returns every `stack.child.<word>` token in expr, in
+// source order with duplicates preserved. Pulled out of warnUnknownStackChildKeys
+// so the scanner stays cheap and the caller's conditional policy stays small.
+func extractStackChildKeys(expr string) []string {
+	const marker = "stack.child."
+	var keys []string
+	rest := expr
+	for {
+		idx := strings.Index(rest, marker)
+		if idx < 0 {
+			return keys
+		}
+		tail := rest[idx+len(marker):]
+		end := identifierEnd(tail)
+		if end > 0 {
+			keys = append(keys, marker+tail[:end])
+		}
+		rest = tail[end:]
+	}
+}
+
+// identifierEnd returns the index of the first non-identifier byte in s, i.e.
+// the length of the leading identifier token. Returns 0 when s starts with a
+// non-identifier byte. `strings.IndexFunc` with a single "is NOT identifier"
+// predicate keeps the function under the project complexity budget.
+func identifierEnd(s string) int {
+	i := strings.IndexFunc(s, func(r rune) bool { return !isIdentifierRune(r) })
+	if i < 0 {
+		return len(s)
+	}
+	return i
+}
+
+// isIdentifierRune reports whether r is an ASCII identifier rune
+// (letter, digit, or underscore). Condition identifiers in dippin-lang are
+// ASCII-only, so we do not need Unicode letter support here.
+func isIdentifierRune(r rune) bool {
+	return r == '_' ||
+		(r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9')
+}
+
 // managerAttr looks up a manager_loop attribute, preferring the unprefixed
 // dippin-lang v0.22.0 contract key and falling back to the legacy
 // "manager."+key form so hand-authored DOT files keep working.
@@ -154,11 +240,29 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 // Using the zero-value fallthrough (`if v := attrs[key]; v != ""`) would
 // silently defer to the legacy attr even when the author explicitly cleared
 // the new one, violating the "unprefixed wins" contract (issue #173).
+//
+// When both forms are present on the same node a one-line diagnostic is
+// emitted (issue #176.1) so an author who migrated from the legacy form but
+// forgot to delete the old attr learns of the shadowing rather than silently
+// running with the unprefixed value. Log-only — the value returned is still
+// the unprefixed one, keeping the contract intact.
 func managerAttr(attrs map[string]string, key string) string {
-	if v, ok := attrs[key]; ok {
-		return v
+	prefixed := "manager." + key
+	unprefixedVal, unprefixedSet := attrs[key]
+	legacyVal, legacySet := attrs[prefixed]
+	if unprefixedSet && legacySet {
+		// Log keys only, never values: manager_loop attrs are author-controlled
+		// today, but a future use could carry sensitive material (URLs with
+		// tokens, paths, etc.) and leaking those into logs would be a
+		// regression. Keys are enough to point the author at the offending
+		// attr; the author can inspect the values themselves.
+		log.Printf("[manager_loop] warning: both %q and %q are set; unprefixed wins — delete %q to silence this warning",
+			key, prefixed, prefixed)
 	}
-	return attrs["manager."+key]
+	if unprefixedSet {
+		return unprefixedVal
+	}
+	return legacyVal
 }
 
 // steerContextDecoder reverses the encoder in pipeline/dippin_adapter.go
@@ -195,7 +299,7 @@ func parseSteerContext(s string) map[string]string {
 		return nil
 	}
 	result := make(map[string]string)
-	for _, pair := range strings.Split(s, ",") {
+	for pair := range strings.SplitSeq(s, ",") {
 		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(parts) == 2 {
 			k := decodeSteerContextToken(strings.TrimSpace(parts[0]))
@@ -218,7 +322,7 @@ type engineResultMsg struct {
 // Execute runs the manager loop: launches a child pipeline in a goroutine,
 // polls at intervals, and returns when the child completes or limits are hit.
 func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	cfg, err := parseManagerLoopConfig(node.Attrs)
+	cfg, err := parseManagerLoopConfig(node.ID, node.Attrs)
 	if err != nil {
 		return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 	}

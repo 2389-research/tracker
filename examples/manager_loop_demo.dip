@@ -1,0 +1,31 @@
+workflow ManagerLoopDemo
+  goal: "Showcase the manager_loop supervisor: launch a child pipeline, poll for completion, steer mid-flight, and stop on a condition."
+  start: Supervise
+  exit: Done
+
+  defaults
+    model: claude-sonnet-4-6
+    provider: anthropic
+
+  manager_loop Supervise
+    label: "Supervise child pipeline"
+    subgraph_ref: subgraphs/manager_loop_child.dip
+    poll_interval: 30s
+    max_cycles: 12
+    stop_condition: stack.child.cycles = 10
+    steer_condition: stack.child.cycles = 5
+    steer_context:
+      hint: halfway_through
+      priority: high
+
+  agent Done
+    label: "Summarize the supervised run."
+    prompt:
+      The manager loop completed.
+      Final child status: ${ctx.stack.child.status}
+      Cycles elapsed: ${ctx.stack.child.cycles}
+
+      Summarize the outcome in one paragraph.
+
+  edges
+    Supervise -> Done

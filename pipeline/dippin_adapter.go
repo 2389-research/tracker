@@ -14,11 +14,25 @@ import (
 )
 
 var (
-	ErrNilWorkflow     = errors.New("nil workflow")
-	ErrMissingStart    = errors.New("workflow missing Start node")
-	ErrMissingExit     = errors.New("workflow missing Exit node")
-	ErrUnknownNodeKind = errors.New("unknown node kind")
-	ErrUnknownConfig   = errors.New("unknown config type")
+	ErrNilWorkflow            = errors.New("nil workflow")
+	ErrMissingStart           = errors.New("workflow missing Start node")
+	ErrMissingExit            = errors.New("workflow missing Exit node")
+	ErrUnknownNodeKind        = errors.New("unknown node kind")
+	ErrUnknownConfig          = errors.New("unknown config type")
+	ErrInvalidSteerContextKey = errors.New("steer_context key contains ':' which breaks block-form round-trip through the .dip formatter")
+	ErrMissingManagerLoopCfg  = errors.New("manager_loop node is missing required ir.ManagerLoopConfig")
+	// ErrParenthesizedParsedCondition is returned by convertEdge when a Parsed-only
+	// ir.Condition formats to an expression containing parentheses. The pipeline
+	// edge evaluator (pipeline/condition.go) does not support parens — it tokenizes
+	// on plain strings.Split("||") and strings.Split("&&"), so `a || (b && c)`
+	// would become tokens like `(b` and `c)`. In EvaluateCondition, those are not
+	// hard runtime errors: they are treated as unknown variable names, a warning is
+	// logged, and they evaluate as empty strings, which can silently produce false
+	// or otherwise incorrect results. The adapter rejects these expressions up
+	// front to avoid that mis-evaluation. Authors should populate Condition.Raw
+	// with a flat form (e.g. `a=1 || b=2 || c=3`) or simplify the Parsed tree so
+	// no parens are emitted.
+	ErrParenthesizedParsedCondition = errors.New("formatted Parsed condition uses parentheses, which the pipeline edge evaluator does not support")
 )
 
 // FromDippinIR converts a Dippin IR Workflow to a Tracker Graph.
@@ -53,7 +67,9 @@ func FromDippinIR(workflow *ir.Workflow) (*Graph, error) {
 	if err := addIRNodes(g, workflow.Nodes); err != nil {
 		return nil, err
 	}
-	addIREdges(g, workflow.Edges)
+	if err := addIREdges(g, workflow.Edges); err != nil {
+		return nil, err
+	}
 
 	// Synthesize implicit edges from parallel fan-out targets and fan-in sources.
 	synthesizeImplicitEdges(g, workflow)
@@ -103,13 +119,21 @@ func addIRNodes(g *Graph, irNodes []*ir.Node) error {
 }
 
 // addIREdges converts IR edges and adds them to the graph.
-func addIREdges(g *Graph, irEdges []*ir.Edge) {
+// Propagates convertEdge errors (e.g. ErrParenthesizedParsedCondition) so
+// adapter-time rejection surfaces to the caller rather than silently losing
+// or mis-evaluating the edge at runtime.
+func addIREdges(g *Graph, irEdges []*ir.Edge) error {
 	for _, irEdge := range irEdges {
 		if irEdge == nil {
 			continue
 		}
-		g.AddEdge(convertEdge(irEdge))
+		gEdge, err := convertEdge(irEdge)
+		if err != nil {
+			return err
+		}
+		g.AddEdge(gEdge)
 	}
+	return nil
 }
 
 // nodeKindToShapeMap maps IR NodeKind to DOT shape strings.
@@ -139,6 +163,19 @@ func convertNode(irNode *ir.Node) (*Node, error) {
 	shape, ok := nodeKindToShape(irNode.Kind)
 	if !ok {
 		return nil, fmt.Errorf("%s: %w", irNode.Kind, ErrUnknownNodeKind)
+	}
+
+	// Kind-specific required-config guard. A manager_loop node with a nil
+	// Config would otherwise flow through extractNodeAttrs as a no-op and
+	// produce a graph node without subgraph_ref, surfacing later at Execute
+	// time as a vague runtime error. Fail loudly at build time instead.
+	// Scoped to manager_loop for now — we may extend the same guard to other
+	// kinds as follow-ups if they exhibit the same silent-degrade pattern.
+	//
+	// Return the sentinel bare — addIRNodes wraps all convertNode errors with
+	// `node <id>: ...`, so wrapping here too would produce `node mgr: node mgr: ...`.
+	if irNode.Kind == ir.NodeManagerLoop && irNode.Config == nil {
+		return nil, ErrMissingManagerLoopCfg
 	}
 
 	gNode := &Node{
@@ -194,7 +231,7 @@ func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool,
 	case ir.ConditionalConfig:
 		// Conditional nodes are pure routing — no config to extract.
 	case ir.ManagerLoopConfig:
-		extractManagerLoopAttrs(cfg, attrs)
+		return true, extractManagerLoopAttrs(cfg, attrs)
 	default:
 		return false, nil
 	}
@@ -453,7 +490,7 @@ func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
 // tracker defaults. If/when the handler grows those modes this extractor is
 // the right place to translate the zero-value IR sentinels into the
 // corresponding handler attrs.
-func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) {
+func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) error {
 	if cfg.SubgraphRef != "" {
 		attrs["subgraph_ref"] = cfg.SubgraphRef
 	}
@@ -469,9 +506,14 @@ func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) 
 	if s := managerLoopConditionText(cfg.SteerCondition); s != "" {
 		attrs["steer_condition"] = s
 	}
-	if s := flattenSteerContext(cfg.SteerContext); s != "" {
+	s, err := flattenSteerContext(cfg.SteerContext)
+	if err != nil {
+		return err
+	}
+	if s != "" {
 		attrs["steer_context"] = s
 	}
+	return nil
 }
 
 // managerLoopConditionText extracts the best textual form of a condition:
@@ -520,17 +562,31 @@ func encodeSteerContextToken(s string) string {
 // characters (',', '=', '%') in keys and values are percent-encoded so the
 // round-trip through DOT → migrate stays lossless.
 //
-// Mirrors dippin-lang v0.22.0 export.flattenSteerContext exactly.
-func flattenSteerContext(m map[string]string) string {
+// Fails loudly when any key contains ':' — the dippin-lang v0.22.0 block-form
+// formatter writes steer_context entries as "key: value" lines, so a colon in
+// the key breaks the .dip→IR→.dip round-trip. The upstream parser silently
+// drops such keys with a diagnostic; we reject at graph-build time instead so
+// the author sees a clear, load-bearing error rather than a pipeline that
+// quietly lost a steering key. The three reserved delimiter chars (',', '=',
+// '%') are percent-encoded rather than rejected because the encoder can
+// round-trip them losslessly.
+//
+// Mirrors dippin-lang v0.22.0 export.flattenSteerContext for the happy path.
+func flattenSteerContext(m map[string]string) (string, error) {
 	if len(m) == 0 {
-		return ""
+		return "", nil
 	}
 	keys := slices.Sorted(maps.Keys(m))
+	for _, k := range keys {
+		if strings.Contains(k, ":") {
+			return "", fmt.Errorf("%w: %q", ErrInvalidSteerContextKey, k)
+		}
+	}
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
 		parts = append(parts, encodeSteerContextToken(k)+"="+encodeSteerContextToken(m[k]))
 	}
-	return strings.Join(parts, ",")
+	return strings.Join(parts, ","), nil
 }
 
 // formatManagerLoopCondition re-serializes an ir.ConditionExpr back into its
@@ -681,7 +737,15 @@ func setIfNonEmpty(attrs map[string]string, key, value string) {
 
 // convertEdge transforms an IR Edge to a Graph Edge.
 // Serializes the parsed Condition back to a raw string for the tracker engine.
-func convertEdge(irEdge *ir.Edge) *Edge {
+//
+// Returns ErrParenthesizedParsedCondition when the condition only has .Parsed
+// populated and the formatted text contains parentheses. The pipeline edge
+// evaluator has no paren support — a mixed-precedence Parsed tree like
+// `a=1 || (b=2 && c=3)` would tokenize to garbage (`(b`, `c)`) at runtime.
+// Flat all-AND / all-OR Parsed trees are still accepted because they don't
+// require parens. Authors hitting this should populate Condition.Raw (the
+// parser does this natively) or simplify the Parsed tree.
+func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 	gEdge := &Edge{
 		From:  irEdge.From,
 		To:    irEdge.To,
@@ -689,10 +753,25 @@ func convertEdge(irEdge *ir.Edge) *Edge {
 		Attrs: make(map[string]string),
 	}
 
-	// Serialize condition if present
-	if irEdge.Condition != nil {
-		gEdge.Condition = irEdge.Condition.Raw
-		gEdge.Attrs["condition"] = irEdge.Condition.Raw
+	// Serialize condition if present. We prefer Raw (set by the parser) and
+	// fall back to formatting Parsed on the fly — the same Raw-then-Parsed
+	// preference as managerLoopConditionText so an ir.Edge with only
+	// .Parsed populated (e.g. constructed by tests or simulate without
+	// running the parser) still produces a conditional edge rather than a
+	// silent unconditional one.
+	if cond := managerLoopConditionText(irEdge.Condition); cond != "" {
+		// Parsed fallback without Raw may emit parens for mixed-precedence
+		// expressions. The edge evaluator can't parse those — reject at
+		// adapter time with a clear, actionable error rather than let a
+		// garbage token like `(b` fail at runtime. Raw-sourced conditions
+		// are trusted as-is (authors wrote them, and the evaluator is the
+		// same one the parser targets).
+		if irEdge.Condition != nil && irEdge.Condition.Raw == "" && strings.ContainsAny(cond, "()") {
+			return nil, fmt.Errorf("edge %s -> %s: %w: formatted as %q; populate Condition.Raw with a flat form (e.g. 'a=1 || b=2 || c=3') or simplify the Parsed tree",
+				irEdge.From, irEdge.To, ErrParenthesizedParsedCondition, cond)
+		}
+		gEdge.Condition = cond
+		gEdge.Attrs["condition"] = cond
 	}
 
 	// Preserve weight
@@ -705,7 +784,7 @@ func convertEdge(irEdge *ir.Edge) *Edge {
 		gEdge.Attrs["restart"] = "true"
 	}
 
-	return gEdge
+	return gEdge, nil
 }
 
 // serializeStylesheet converts IR stylesheet rules to the CSS-like format
