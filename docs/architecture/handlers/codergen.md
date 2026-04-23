@@ -391,7 +391,7 @@ subprocess with a planning turn and a verify loop tied to `go build`.
   `AgentNodeConfig`
 - [`agent/session.go`](../../../agent/session.go) — native session runtime
 - [`llm/`](../../../llm/) — provider translators
-- [Pipeline Context Flow](../../pipeline-context-flow.md) — how
+- [Pipeline Context Flow](../context-flow.md) — how
   `last_response` / `response.<id>` / `episode_summary` are consumed
 - `CLAUDE.md` §§ `Structured output`, `Claude Code backend`,
   `Strict failure edges`, `Tool node safety`

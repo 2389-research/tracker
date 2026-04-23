@@ -176,7 +176,7 @@ behavior, and invariants. This table is the flat index.
 | `parallel.fan_in` | [`pipeline/handlers/fanin.go`](../../pipeline/handlers/fanin.go) | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Join/aggregation node after a `parallel` dispatch. Reads `parallel.results` JSON; aggregates stats. |
 | `subgraph` | [`pipeline/subgraph.go`](../../pipeline/subgraph.go) | [`handlers/subgraph.md`](./handlers/subgraph.md) | Executes a named child graph inline. Merges `subgraph_params` with child `vars` defaults, runs a child `Engine` with scoped event handlers, propagates the result outcome. |
 | `conditional` | [`pipeline/handlers/conditional.go`](../../pipeline/handlers/conditional.go) | [`handlers/conditional.md`](./handlers/conditional.md) | Pure routing node: returns `OutcomeSuccess` with no writes and lets the engine's edge condition evaluator pick the next node based on existing context. |
-| `stack.manager_loop` | [`pipeline/handlers/manager_loop.go`](../../pipeline/handlers/manager_loop.go) | [`../manager-loop.md`](../manager-loop.md) | Async child-pipeline supervisor: launches a child in a goroutine, polls at intervals, evaluates `manager.steer_condition`, and injects the `manager.steer_context` map through the engine's steering channel. Attractor spec 4.11. Canonical deep-dive lives at [`docs/manager-loop.md`](../manager-loop.md) today; a dedicated `docs/architecture/handlers/manager-loop.md` will land in a later PR (tracked in [#165](https://github.com/2389-research/tracker/issues/165)). |
+| `stack.manager_loop` | [`pipeline/handlers/manager_loop.go`](../../pipeline/handlers/manager_loop.go) | [`handlers/manager-loop.md`](./handlers/manager-loop.md) | Async child-pipeline supervisor: launches a child in a goroutine, polls at intervals, evaluates `steer_condition`, and injects the `steer_context` map through the engine's steering channel (legacy `manager.*`-prefixed aliases are still accepted; the unprefixed names win when both are set). Attractor spec 4.11. |
 | `start` | [`pipeline/handlers/start.go`](../../pipeline/handlers/start.go) | — | Pass-through entry node. Always returns `OutcomeSuccess` with no writes. Dispatches to whatever edge is selected. |
 | `exit` | [`pipeline/handlers/exit.go`](../../pipeline/handlers/exit.go) | — | Pass-through terminal node. Returns `OutcomeSuccess`; the engine's `handleExitNode` takes over to run the goal-gate retry check and finalize the trace. |
 
@@ -201,13 +201,13 @@ support declarative `writes:` and `reads:` attributes for structured I/O:
 The user-facing model (including examples, `response_format: json_object`
 integration, and the safe-key restrictions on tool `command:` fields) is
 documented in full at
-[`docs/pipeline-context-flow.md`](../pipeline-context-flow.md#returning-custom-data-from-a-node).
+[`context-flow.md`](./context-flow.md#returning-custom-data-from-a-node).
 
 ## Related docs
 
 - [`engine.md`](./engine.md) — how the engine invokes handlers and consumes
   outcomes.
-- [`../pipeline-context-flow.md`](../pipeline-context-flow.md) — how
+- [`context-flow.md`](./context-flow.md) — how
   handlers write and read the shared context.
 - [`backends.md`](./backends.md) — how `codergen` delegates to pluggable
   agent backends.

@@ -217,6 +217,6 @@ LLM content crosses the shell.
 - [`pipeline/node_config.go`](../../../pipeline/node_config.go) —
   `ToolNodeConfig`
 - [`agent/exec`](../../../agent/exec/) — `ExecCommandWithLimit`
-- [Pipeline Context Flow](../../pipeline-context-flow.md) — how
+- [Pipeline Context Flow](../context-flow.md) — how
   `tool_stdout` / `tool_stderr` are consumed by downstream nodes
 - `CLAUDE.md` § `Tool node safety — LLM output as shell input`

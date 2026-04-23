@@ -304,6 +304,6 @@ ceiling.
   — synthesized edges from `ParallelConfig.Targets`
 - [Conditional (edge evaluator)](./conditional.md) — how
   `suggested_next_nodes` is matched during edge selection
-- [Pipeline Context Flow](../../pipeline-context-flow.md) — the
+- [Pipeline Context Flow](../context-flow.md) — the
   `parallel.results` key shape
 - `CLAUDE.md` § `Parallel execution`

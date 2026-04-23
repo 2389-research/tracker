@@ -57,7 +57,7 @@ tracker --artifact-dir /tmp/tracker-runs build_product
 >
 > **Previously in v0.21.0** (2026-04-21): declarative `writes:` / `reads:` unified structured output for agent/human/tool nodes; `tracker.SimulateGraph` graph-in variant; repository localization pre-processing; agent episodic memory across retries; plan-before-execute phase; accurate cost accounting fixes.
 >
-> **Previously in v0.20.0** (2026-04-21): `stack.manager_loop` supervisor handler (Attractor spec 4.11); engine-level steering channel; accurate cost estimation via catalog with cache-token pricing; April 2026 model catalog refresh (Claude Opus 4.7, GPT-5.4 family, Gemini 2.5 GA, Gemini 3.1 pro preview); ACP sandbox hardening against `..` path traversal. See [CHANGELOG.md](./CHANGELOG.md) and [`docs/manager-loop.md`](./docs/manager-loop.md).
+> **Previously in v0.20.0** (2026-04-21): `stack.manager_loop` supervisor handler (Attractor spec 4.11); engine-level steering channel; accurate cost estimation via catalog with cache-token pricing; April 2026 model catalog refresh (Claude Opus 4.7, GPT-5.4 family, Gemini 2.5 GA, Gemini 3.1 pro preview); ACP sandbox hardening against `..` path traversal. See [CHANGELOG.md](./CHANGELOG.md) and [`docs/architecture/handlers/manager-loop.md`](./docs/architecture/handlers/manager-loop.md).
 
 ## Pipeline Examples
 
@@ -189,7 +189,7 @@ Unknown `--param` keys hard-fail at startup. Lint rules flag undeclared referenc
 
 Variables are expanded in a single pass — resolved values are never re-scanned, preventing recursive expansion.
 
-**Important**: Each agent node runs a fresh LLM session. Data flows between nodes via context keys, not conversation history. Per-node scoping (`${ctx.node.<nodeID>.<key>}`) lets you reference a specific earlier node's output without relying on the last-writer-wins `last_response` key. See **[Pipeline Context Flow](docs/pipeline-context-flow.md)** for the full model, fidelity levels, and parallel-branch patterns.
+**Important**: Each agent node runs a fresh LLM session. Data flows between nodes via context keys, not conversation history. Per-node scoping (`${ctx.node.<nodeID>.<key>}`) lets you reference a specific earlier node's output without relying on the last-writer-wins `last_response` key. See **[Pipeline Context Flow](docs/architecture/context-flow.md)** for the full model, fidelity levels, and parallel-branch patterns.
 
 ### Edge Conditions
 
@@ -220,7 +220,7 @@ agent Planner
     - spec_path
 ```
 
-The node output must be a valid top-level JSON object; every declared key in `writes:` must be present or the node hard-fails. Extras are allowed (surfaced as warnings), strings are stored verbatim, non-string values are stored as compact JSON. `reads:` pins fidelity for upstream keys so downstream nodes see consistent data. See **[Pipeline Context Flow](docs/pipeline-context-flow.md)** for the full contract, worked examples, and interview-mode semantics.
+The node output must be a valid top-level JSON object; every declared key in `writes:` must be present or the node hard-fails. Extras are allowed (surfaced as warnings), strings are stored verbatim, non-string values are stored as compact JSON. `reads:` pins fidelity for upstream keys so downstream nodes see consistent data. See **[Pipeline Context Flow](docs/architecture/context-flow.md)** for the full contract, worked examples, and interview-mode semantics.
 
 ### Per-Node Working Directory
 

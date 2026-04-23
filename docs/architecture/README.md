@@ -22,11 +22,11 @@ transitions.
 | [`handlers/parallel-fan-in.md`](./handlers/parallel-fan-in.md) | Fan-out (`parallel` / `component`) and join (`parallel.fan_in` / `tripleoctagon`): branch dispatch, `suggested_next_nodes`, branch overrides, `parallel.results` JSON. |
 | [`handlers/subgraph.md`](./handlers/subgraph.md) | Sub-pipeline composition (`subgraph` / `tab`): named graph reference resolution, `subgraph_params` passing, scoped events. |
 | [`handlers/conditional.md`](./handlers/conditional.md) | Routing-only diamond nodes (`conditional` / `diamond`): no-op handler that delegates to edge condition evaluation. |
-| [`../manager-loop.md`](../manager-loop.md) | Async child-pipeline supervisor (`stack.manager_loop` / `house`). Canonical location today; a dedicated `handlers/manager-loop.md` deep-dive will land in a later PR. |
+| [`handlers/manager-loop.md`](./handlers/manager-loop.md) | Async child-pipeline supervisor (`stack.manager_loop` / `house`). |
 | [`agent.md`](./agent.md) | Session turn loop, tool registry, context compaction, episodic memory, plan-before-execute, repository localization, steering. |
 | [`llm.md`](./llm.md) | `llm.Client`, middleware stack, `TokenTracker`, cost estimator via model catalog, and the four provider adapters (`anthropic`, `openai`, `google` / Gemini, `openaicompat`). |
 | [`adapter.md`](./adapter.md) | `pipeline/dippin_adapter.go` — the bridge from dippin-lang IR to tracker's `Graph` model. Documents every field mapping and naming convention. |
-| [`../pipeline-context-flow.md`](../pipeline-context-flow.md) | User-facing model of context, fidelity, scoping, declared `reads:`/`writes:`, and safe-key restrictions. Canonical location today; may move under `architecture/` in a later PR. |
+| [`context-flow.md`](./context-flow.md) | User-facing model of context, fidelity, scoping, declared `reads:`/`writes:`, and safe-key restrictions. |
 | [`tui.md`](./tui.md) | Bubbletea state machine, sidebar, activity log, modal content types (hybrid, review, interview), verbosity cycling, zen mode, search. |
 | [`backends.md`](./backends.md) | `AgentBackend` interface and the three implementations: native (`agent.Session`), claude-code (subprocess + NDJSON), ACP (Agent Client Protocol). Environment scoping and per-node override semantics. |
 | [`artifacts.md`](./artifacts.md) | Workdir layout, `checkpoint.json`, `activity.jsonl`, `status.json` per node, stage `prompt.md` / `response.md`, git-backed history, bundle export. |
@@ -40,7 +40,7 @@ Three reading orders, depending on what you want to learn:
   relevant to the node type you're looking at, then
   [`artifacts.md`](./artifacts.md) to see what lands on disk.
 - **"How does data move between nodes?"** — start at
-  [`../pipeline-context-flow.md`](../pipeline-context-flow.md) (authoritative
+  [`context-flow.md`](./context-flow.md) (authoritative
   user-facing doc), then [`engine.md#outcomes-and-routing`](./engine.md#outcomes-and-routing)
   for routing decisions, then [`adapter.md`](./adapter.md) for how prompt /
   condition variables are declared upstream in dippin-lang.
