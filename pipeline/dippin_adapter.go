@@ -25,9 +25,13 @@ var (
 	// ir.Condition formats to an expression containing parentheses. The pipeline
 	// edge evaluator (pipeline/condition.go) does not support parens — it tokenizes
 	// on plain strings.Split("||") and strings.Split("&&"), so `a || (b && c)`
-	// would become tokens `(b` and `c)` which are invalid variable names at
-	// runtime. Authors should populate Condition.Raw with a flat form (e.g.
-	// `a=1 || b=2 || c=3`) or simplify the Parsed tree so no parens are emitted.
+	// would become tokens like `(b` and `c)`. In EvaluateCondition, those are not
+	// hard runtime errors: they are treated as unknown variable names, a warning is
+	// logged, and they evaluate as empty strings, which can silently produce false
+	// or otherwise incorrect results. The adapter rejects these expressions up
+	// front to avoid that mis-evaluation. Authors should populate Condition.Raw
+	// with a flat form (e.g. `a=1 || b=2 || c=3`) or simplify the Parsed tree so
+	// no parens are emitted.
 	ErrParenthesizedParsedCondition = errors.New("formatted Parsed condition uses parentheses, which the pipeline edge evaluator does not support")
 )
 

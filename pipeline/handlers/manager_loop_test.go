@@ -414,7 +414,7 @@ func TestManagerLoopHandler_EventsEmitted(t *testing.T) {
 
 func TestManagerLoopHandler_DefaultConfig(t *testing.T) {
 	// Verify default parsing when no attrs are specified (except subgraph_ref).
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref": "test",
 	})
 	if err != nil {
@@ -432,7 +432,7 @@ func TestManagerLoopHandler_DefaultConfig(t *testing.T) {
 }
 
 func TestManagerLoopHandler_CustomConfig(t *testing.T) {
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref":            "my_child",
 		"manager.poll_interval":   "10s",
 		"manager.max_cycles":      "50",
@@ -730,7 +730,7 @@ func TestParseSteerContext_LiteralPercentEncodedSequenceIsPreserved(t *testing.T
 // the authoritative names; the legacy "manager.*" forms remain for manually
 // authored DOT files.
 func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref":    "child",
 		"poll_interval":   "15s",
 		"max_cycles":      "20",
@@ -772,7 +772,7 @@ func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
 // swallow errors" rule.
 func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 	t.Run("steer_condition without steer_context", func(t *testing.T) {
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":    "child",
 			"steer_condition": "stack.child.cycles = 3",
 		})
@@ -785,7 +785,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 	})
 
 	t.Run("steer_context without steer_condition", func(t *testing.T) {
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":  "child",
 			"steer_context": "hint=go_faster",
 		})
@@ -801,7 +801,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 		// A non-empty value with no `=` pairs parses to nil — the prior
 		// error message conflated this with "unset". The message must now
 		// cite the raw value and call out invalidity.
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":    "child",
 			"steer_condition": "stack.child.cycles = 3",
 			"steer_context":   "bad",
@@ -824,7 +824,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 		// from the validator's perspective) and the malformed input was
 		// silently discarded. The invalid-steer-context check runs
 		// independently of steer_condition, so this must now error.
-		_, err := parseManagerLoopConfig(map[string]string{
+		_, err := parseManagerLoopConfig("Supervise", map[string]string{
 			"subgraph_ref":  "child",
 			"steer_context": "bad",
 		})
@@ -845,7 +845,7 @@ func TestParseManagerLoopConfig_PartialSteeringRejected(t *testing.T) {
 // forms, the unprefixed value is used. This matters for migrated pipelines
 // that may carry leftover "manager.*" attrs — the new contract takes priority.
 func TestParseManagerLoopConfig_UnprefixedWinsOverPrefixed(t *testing.T) {
-	cfg, err := parseManagerLoopConfig(map[string]string{
+	cfg, err := parseManagerLoopConfig("Supervise", map[string]string{
 		"subgraph_ref":          "child",
 		"poll_interval":         "5s",
 		"manager.poll_interval": "99s",

@@ -697,8 +697,10 @@ func TestConvertEdge_ParsedFallback_FlatAndOr(t *testing.T) {
 // at adapter time with ErrParenthesizedParsedCondition. The pipeline edge
 // evaluator does not understand parentheses — letting a mixed-precedence
 // expression through would trade a silent "unconditional edge" bug (the
-// pre-#176.6 behavior) for a runtime "invalid variable name (b" bug, which
-// is still silent from the author's point of view.
+// pre-#176.6 behavior) for a different silent failure mode where a token
+// like "(b" is treated as an unknown variable, resolved to "" with a
+// warning, and the clause may then evaluate incorrectly from the author's
+// point of view.
 func TestConvertEdge_ParsedFallback_MixedPrecedenceRejected(t *testing.T) {
 	// a = 1 || (b = 2 && c = 3) — the inner AND has higher precedence than
 	// the outer OR, so formatManagerLoopBinaryOp wraps it in parens.
@@ -728,15 +730,19 @@ func TestConvertEdge_ParsedFallback_MixedPrecedenceRejected(t *testing.T) {
 }
 
 // TestConvertEdge_RawWinsOverParsed_WithParens ensures that a Condition whose
-// Raw is populated is trusted as-is even if the author's Raw happens to contain
-// parens. The paren rejection only targets the Parsed-only fallback path —
-// Raw is authored text, and the evaluator may ignore or reinterpret it.
+// Raw is populated is trusted as-is even when Raw itself contains parens. The
+// paren rejection only targets the Parsed-only fallback path — Raw is authored
+// text that the adapter passes through verbatim (the pipeline evaluator will
+// handle or ignore it on its own). Using a Raw value that actually contains
+// parentheses makes this test's guarantee match its name; a paren-free Raw
+// would prove nothing beyond "Raw wins over Parsed".
 func TestConvertEdge_RawWinsOverParsed_WithParens(t *testing.T) {
+	const rawWithParens = "(ctx.a = 1 || ctx.b = 2) && ctx.c = 3"
 	edge := &ir.Edge{
 		From: "src",
 		To:   "dst",
 		Condition: &ir.Condition{
-			Raw: "ctx.outcome = success",
+			Raw: rawWithParens,
 			Parsed: ir.CondOr{
 				Left: ir.CondCompare{Variable: "ctx.a", Op: "=", Value: "1"},
 				Right: ir.CondAnd{
@@ -750,8 +756,8 @@ func TestConvertEdge_RawWinsOverParsed_WithParens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convertEdge returned unexpected error for Raw-populated edge: %v", err)
 	}
-	if got.Condition != "ctx.outcome = success" {
-		t.Errorf("edge.Condition = %q, want Raw value %q", got.Condition, "ctx.outcome = success")
+	if got.Condition != rawWithParens {
+		t.Errorf("edge.Condition = %q, want Raw value %q (verbatim passthrough)", got.Condition, rawWithParens)
 	}
 }
 

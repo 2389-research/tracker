@@ -80,7 +80,7 @@ type managerLoopConfig struct {
 // present the unprefixed form wins — it is the authoritative contract going
 // forward, so a migrated pipeline with leftover `manager.*` attrs still gets
 // the new values.
-func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) {
+func parseManagerLoopConfig(nodeID string, attrs map[string]string) (managerLoopConfig, error) {
 	cfg := managerLoopConfig{
 		pollInterval: 45 * time.Second,
 		maxCycles:    1000,
@@ -115,8 +115,8 @@ func parseManagerLoopConfig(attrs map[string]string) (managerLoopConfig, error) 
 
 	cfg.stopCondition = managerAttr(attrs, "stop_condition")
 	cfg.steerExpr = managerAttr(attrs, "steer_condition")
-	warnUnknownStackChildKeys("stop_condition", cfg.stopCondition)
-	warnUnknownStackChildKeys("steer_condition", cfg.steerExpr)
+	warnUnknownStackChildKeys(nodeID, "stop_condition", cfg.stopCondition)
+	warnUnknownStackChildKeys(nodeID, "steer_condition", cfg.steerExpr)
 	rawSteerContext := managerAttr(attrs, "steer_context")
 	cfg.steerKeys = parseSteerContext(rawSteerContext)
 
@@ -164,17 +164,13 @@ var stackChildObservables = map[string]struct{}{
 	"stack.child.exit_status": {},
 }
 
-// extractStackChildKeys identifies `stack.child.<word>` occurrences in a
-// condition expression. It is intentionally forgiving for the tail so we catch
-// typos like `stack.child.cylce` or `stack.child.stats`. Deliberately does NOT
-// match deeper keys (e.g. `stack.child.foo.bar`) — those are outside the
-// narrow scope of this warning.
-
 // warnUnknownStackChildKeys scans expr for `stack.child.<word>` references and
-// logs one diagnostic per unknown subkey. Safe for empty/unset expressions
-// (early return on empty input). Called from parseManagerLoopConfig so the
-// warning fires once at graph-build / handler-parse time, not on every cycle.
-func warnUnknownStackChildKeys(attrName, expr string) {
+// logs one diagnostic per unknown subkey, tagged with the owning node's ID so
+// authors can locate the offending attr in a larger graph. Safe for
+// empty/unset expressions (early return on empty input). Called from
+// parseManagerLoopConfig so the warning fires once at graph-build /
+// handler-parse time, not on every cycle.
+func warnUnknownStackChildKeys(nodeID, attrName, expr string) {
 	if expr == "" {
 		return
 	}
@@ -187,8 +183,8 @@ func warnUnknownStackChildKeys(attrName, expr string) {
 			continue
 		}
 		seen[key] = struct{}{}
-		log.Printf("[manager_loop] warning: %s references %q which is not a known observable; known keys: stack.child.status, stack.child.cycles, stack.child.exit_status",
-			attrName, key)
+		log.Printf("[manager_loop] warning: node %q %s references %q which is not a known observable; known keys: stack.child.status, stack.child.cycles, stack.child.exit_status",
+			nodeID, attrName, key)
 	}
 }
 
@@ -255,8 +251,13 @@ func managerAttr(attrs map[string]string, key string) string {
 	unprefixedVal, unprefixedSet := attrs[key]
 	legacyVal, legacySet := attrs[prefixed]
 	if unprefixedSet && legacySet {
-		log.Printf("[manager_loop] warning: both %q=%q and %q=%q are set; unprefixed wins — delete %q to silence this warning",
-			key, unprefixedVal, prefixed, legacyVal, prefixed)
+		// Log keys only, never values: manager_loop attrs are author-controlled
+		// today, but a future use could carry sensitive material (URLs with
+		// tokens, paths, etc.) and leaking those into logs would be a
+		// regression. Keys are enough to point the author at the offending
+		// attr; the author can inspect the values themselves.
+		log.Printf("[manager_loop] warning: both %q and %q are set; unprefixed wins — delete %q to silence this warning",
+			key, prefixed, prefixed)
 	}
 	if unprefixedSet {
 		return unprefixedVal
@@ -321,7 +322,7 @@ type engineResultMsg struct {
 // Execute runs the manager loop: launches a child pipeline in a goroutine,
 // polls at intervals, and returns when the child completes or limits are hit.
 func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	cfg, err := parseManagerLoopConfig(node.Attrs)
+	cfg, err := parseManagerLoopConfig(node.ID, node.Attrs)
 	if err != nil {
 		return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 	}
