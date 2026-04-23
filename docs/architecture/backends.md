@@ -49,7 +49,7 @@ One method. One struct. Backends put their own rich config in `Extra`:
 | API-key env in subprocess | n/a | **stripped** by default | **passed through** by default |
 | Opt-out / opt-in | n/a | `TRACKER_PASS_API_KEYS=1` passes keys | `TRACKER_STRIP_ACP_KEYS=1` strips keys |
 | Tool registry | tracker's built-ins + custom | claude CLI's built-ins | agent's built-ins |
-| Cost accounting | `llm.Usage` via middleware | Parsed from NDJSON `result` message | `toolCount` / `turnCount` from handler |
+| Cost accounting | `llm.Usage` via middleware | Parsed from NDJSON `result` message | **Character-count estimate** (`estimateACPUsage` in `backend_acp.go`): `llm.Usage.InputTokens` / `OutputTokens` approximated as chars ÷ 4 for `cfg.Prompt`+`cfg.SystemPrompt` and collected output text. ACP protocol exposes no native usage surface (`PromptResponse` only carries `StopReason`+`Meta`; no `SessionUpdate` subtype reports tokens). `Usage.Raw` is tagged with `ACPUsageMarker{Estimated:true, Source:"acp-chars-heuristic"}` so downstream consumers can distinguish estimates from real middleware usage. Budget guards (`--max-tokens`, `--max-cost`) enforce against the estimate. |
 | Supported models | any provider in tracker's catalog | Anthropic (non-Claude names stripped) | Depends on agent |
 | Response format / schema | full `response_format` support | not exposed via CLI flag | agent-dependent |
 | MCP servers | not supported directly | `--mcpServers` JSON | `McpServer` via `NewSession` |

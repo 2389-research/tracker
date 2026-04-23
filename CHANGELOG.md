@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ACP backend surfaces approximate per-prompt token usage** (closes #167). The Agent Client Protocol spec (github.com/coder/acp-go-sdk v0.6.x) has no usage surface — `PromptResponse` carries only `StopReason`+`Meta`, and no `SessionUpdate` subtype reports tokens — so ACP-backed nodes previously returned `SessionResult.Usage` zero-valued. `CodergenHandler.trackExternalBackendUsage` already routes ACP usage to `llm.TokenTracker.AddUsage("acp", ...)`, so the gap was purely in `buildACPResult`. `estimateACPUsage` now synthesizes `llm.Usage` from character counts (chars÷4 heuristic applied to `cfg.Prompt`+`cfg.SystemPrompt` as input and the handler's collected agent text as output), populates `EstimatedCost` via `llm.EstimateCost`, and tags `Usage.Raw` with `ACPUsageMarker{Estimated:true, Source:"acp-chars-heuristic", Ratio:4}` so downstream consumers (CLI summaries, budget diagnostics) can flag approximate values. A one-line `log.Printf` per ACP session announces the estimate and the approximate totals. Budget guards (`--max-tokens`, `--max-cost`) now enforce against ACP nodes too. `docs/architecture/backends.md`'s comparison table is updated to reflect actual behavior; until a bridge-specific `Meta` extension exposes real tokens, this heuristic is the best available signal.
+
 ### Changed
 
 - **dippin-lang dependency bumped v0.22.0 → v0.23.0**. Upstream ships [DIP28 tool-safety defaults](https://github.com/2389-research/dippin-lang/releases/tag/v0.23.0): `ir.WorkflowDefaults` now exposes `ToolCommandsAllow` and `ToolDenylistAdd` fields so `.dip` authors can declare tool-safety constraints at the workflow level instead of reaching for DOT or the library API. `extractWorkflowDefaults` in `pipeline/dippin_adapter.go` wires `WorkflowDefaults.ToolCommandsAllow` → `graph.Attrs["tool_commands_allow"]` (the consumer side has been ready since #164). Closes the adapter-side follow-up noted in v0.23.0's own #164 entry. `ToolDenylistAdd` wiring is deferred until the matching `--tool-denylist-add` CLI flag lands (#168).

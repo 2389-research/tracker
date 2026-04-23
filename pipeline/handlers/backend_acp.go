@@ -17,8 +17,29 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
+
+// acpTokenEstimateRatio is the characters-per-token heuristic used to synthesize
+// approximate token counts for ACP-backed sessions. The ACP protocol
+// (github.com/coder/acp-go-sdk v0.6.x) has no usage surface — PromptResponse
+// carries only StopReason + Meta, and no SessionUpdate subtype reports tokens —
+// so tracker cannot observe real usage for ACP runs. A character-count estimate
+// lets the existing TokenTracker / budget guard path still function for ACP
+// nodes; accuracy is intentionally approximate. 4 is the conventional
+// chars-per-token figure for English prose; code and structured output skew
+// lower (closer to 3) so real usage may modestly exceed the estimate.
+const acpTokenEstimateRatio = 4
+
+// ACPUsageMarker is the shape written into llm.Usage.Raw for ACP sessions so
+// downstream consumers (CLI summaries, budget diagnostics) can distinguish
+// estimated ACP usage from real middleware-tracked usage.
+type ACPUsageMarker struct {
+	Estimated bool   `json:"estimated"`
+	Source    string `json:"source"` // always "acp-chars-heuristic"
+	Ratio     int    `json:"chars_per_token"`
+}
 
 // providerToAgent maps LLM provider names to ACP-compatible binary names.
 // The official ACP bridge/agent packages are:
@@ -110,7 +131,11 @@ func (b *ACPBackend) sendPromptAndCollect(ctx context.Context, conn *acp.ClientS
 	})
 
 	forceKilled := waitForProcess(proc.cmd, proc.stdin)
-	result := buildACPResult(handler, promptResp)
+	result := buildACPResult(handler, promptResp, cfg)
+	if result.Usage.TotalTokens > 0 {
+		log.Printf("[acp] %s usage is estimated from character counts (ACP protocol has no native token surface): in≈%d out≈%d total≈%d",
+			agentName, result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.TotalTokens)
+	}
 
 	if promptErr != nil {
 		logStderr(agentName, "prompt", &proc.stderr)
@@ -361,7 +386,9 @@ func buildACPPromptBlocks(cfg pipeline.AgentRunConfig) []acp.ContentBlock {
 }
 
 // buildACPResult constructs a SessionResult from the handler's accumulated state.
-func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse) agent.SessionResult {
+// Usage is populated with a character-count-derived estimate (see
+// estimateACPUsage) since the ACP protocol does not surface real token counts.
+func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse, cfg pipeline.AgentRunConfig) agent.SessionResult {
 	handler.mu.Lock()
 	defer handler.mu.Unlock()
 
@@ -380,7 +407,39 @@ func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse) agent.Se
 		result.Turns = 1
 	}
 
+	result.Usage = estimateACPUsage(cfg, strings.Join(handler.textParts, ""))
+
 	return result
+}
+
+// estimateACPUsage synthesizes an approximate llm.Usage from character counts
+// of the input prompt (system + user) and the collected output text. The ACP
+// spec exposes no native usage surface, so a heuristic is the only option.
+// The caller owns prompt/system-prompt strings via cfg; output comes from the
+// handler's collected text (already locked by buildACPResult). Returns a
+// zero-valued Usage when there is no input and no output (nothing to bill).
+func estimateACPUsage(cfg pipeline.AgentRunConfig, output string) llm.Usage {
+	inputChars := len(cfg.Prompt) + len(cfg.SystemPrompt)
+	outputChars := len(output)
+	if inputChars == 0 && outputChars == 0 {
+		return llm.Usage{}
+	}
+
+	inTokens := inputChars / acpTokenEstimateRatio
+	outTokens := outputChars / acpTokenEstimateRatio
+
+	usage := llm.Usage{
+		InputTokens:  inTokens,
+		OutputTokens: outTokens,
+		TotalTokens:  inTokens + outTokens,
+		Raw: ACPUsageMarker{
+			Estimated: true,
+			Source:    "acp-chars-heuristic",
+			Ratio:     acpTokenEstimateRatio,
+		},
+	}
+	usage.EstimatedCost = llm.EstimateCost(cfg.Model, usage)
+	return usage
 }
 
 // buildACPMcpServers converts the AgentRunConfig's MCP server list (if any)

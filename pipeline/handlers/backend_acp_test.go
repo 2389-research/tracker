@@ -659,7 +659,7 @@ func TestBuildACPResult(t *testing.T) {
 		turnCount: 3,
 		toolNames: map[string]string{"t1": "bash", "t2": "read"},
 	}
-	result := buildACPResult(handler, acp.PromptResponse{})
+	result := buildACPResult(handler, acp.PromptResponse{}, pipeline.AgentRunConfig{})
 	if result.Turns != 3 {
 		t.Errorf("Turns = %d, want 3", result.Turns)
 	}
@@ -677,9 +677,99 @@ func TestBuildACPResult_MinOneTurn(t *testing.T) {
 		turnCount: 0,
 		toolNames: make(map[string]string),
 	}
-	result := buildACPResult(handler, acp.PromptResponse{})
+	result := buildACPResult(handler, acp.PromptResponse{}, pipeline.AgentRunConfig{})
 	if result.Turns != 1 {
 		t.Errorf("Turns = %d, want 1 (minimum when text present)", result.Turns)
+	}
+}
+
+func TestEstimateACPUsage(t *testing.T) {
+	tests := []struct {
+		name           string
+		cfg            pipeline.AgentRunConfig
+		output         string
+		wantInputMin   int
+		wantOutputMin  int
+		wantTotalGt    int
+		wantEstimated  bool
+		wantZeroTokens bool
+	}{
+		{
+			name:          "populates estimate and marker from chars",
+			cfg:           pipeline.AgentRunConfig{Prompt: strings.Repeat("a", 40), SystemPrompt: strings.Repeat("b", 40)},
+			output:        strings.Repeat("c", 400),
+			wantInputMin:  20,  // (40+40)/4 = 20
+			wantOutputMin: 100, // 400/4 = 100
+			wantTotalGt:   100,
+			wantEstimated: true,
+		},
+		{
+			name:           "nothing in, nothing out → zero usage",
+			cfg:            pipeline.AgentRunConfig{},
+			output:         "",
+			wantZeroTokens: true,
+		},
+		{
+			name:          "prompt only, empty output — still estimated",
+			cfg:           pipeline.AgentRunConfig{Prompt: strings.Repeat("x", 100)},
+			output:        "",
+			wantInputMin:  25, // 100/4 = 25
+			wantOutputMin: 0,
+			wantTotalGt:   20,
+			wantEstimated: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateACPUsage(tt.cfg, tt.output)
+			if tt.wantZeroTokens {
+				if got.TotalTokens != 0 || got.InputTokens != 0 || got.OutputTokens != 0 {
+					t.Errorf("want zero-token usage, got %+v", got)
+				}
+				if got.Raw != nil {
+					t.Errorf("want nil Raw for zero usage, got %+v", got.Raw)
+				}
+				return
+			}
+			if got.InputTokens < tt.wantInputMin {
+				t.Errorf("InputTokens = %d, want ≥ %d", got.InputTokens, tt.wantInputMin)
+			}
+			if got.OutputTokens < tt.wantOutputMin {
+				t.Errorf("OutputTokens = %d, want ≥ %d", got.OutputTokens, tt.wantOutputMin)
+			}
+			if got.TotalTokens <= tt.wantTotalGt {
+				t.Errorf("TotalTokens = %d, want > %d", got.TotalTokens, tt.wantTotalGt)
+			}
+			marker, ok := got.Raw.(ACPUsageMarker)
+			if !ok {
+				t.Fatalf("Raw = %T, want ACPUsageMarker", got.Raw)
+			}
+			if marker.Estimated != tt.wantEstimated {
+				t.Errorf("marker.Estimated = %v, want %v", marker.Estimated, tt.wantEstimated)
+			}
+			if marker.Source != "acp-chars-heuristic" {
+				t.Errorf("marker.Source = %q, want acp-chars-heuristic", marker.Source)
+			}
+			if marker.Ratio != 4 {
+				t.Errorf("marker.Ratio = %d, want 4", marker.Ratio)
+			}
+		})
+	}
+}
+
+func TestBuildACPResult_PopulatesUsage(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"the quick brown fox jumps over the lazy dog"},
+		turnCount: 1,
+		toolNames: make(map[string]string),
+	}
+	cfg := pipeline.AgentRunConfig{Prompt: "tell me a story about a dog", SystemPrompt: "be concise"}
+	result := buildACPResult(handler, acp.PromptResponse{}, cfg)
+	if result.Usage.TotalTokens == 0 {
+		t.Fatal("expected non-zero estimated Usage on a session with prompt + output")
+	}
+	if _, ok := result.Usage.Raw.(ACPUsageMarker); !ok {
+		t.Fatalf("Usage.Raw = %T, want ACPUsageMarker so downstream consumers can flag estimates", result.Usage.Raw)
 	}
 }
 
@@ -864,7 +954,7 @@ func TestBuildACPResult_EmptyHandler(t *testing.T) {
 	handler := &acpClientHandler{
 		toolNames: make(map[string]string),
 	}
-	result := buildACPResult(handler, acp.PromptResponse{})
+	result := buildACPResult(handler, acp.PromptResponse{}, pipeline.AgentRunConfig{})
 	if result.Turns != 0 {
 		t.Errorf("Turns = %d, want 0 for empty handler", result.Turns)
 	}
