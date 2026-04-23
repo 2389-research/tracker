@@ -13,12 +13,39 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
+
+// acpTokenEstimateRatio is the characters-per-token heuristic used to synthesize
+// approximate token counts for ACP-backed sessions. The ACP protocol
+// (github.com/coder/acp-go-sdk v0.6.x) has no usage surface — PromptResponse
+// carries only StopReason + Meta, and no SessionUpdate subtype reports tokens —
+// so tracker cannot observe real usage for ACP runs. A character-count estimate
+// lets the existing TokenTracker / budget guard path still function for ACP
+// nodes; accuracy is intentionally approximate. 4 is the conventional
+// chars-per-token figure for English prose; code and structured output skew
+// lower (closer to 3) so real usage may modestly exceed the estimate.
+const acpTokenEstimateRatio = 4
+
+// ACPUsageMarker is written into llm.Usage.Raw on ACP-backed SessionResults
+// so a consumer that inspects the raw field directly can recognize the tokens
+// as estimates. No in-tree consumer reads it today — llm.Usage.Add and
+// pipeline/handlers/transcript.go:buildSessionStats both drop Usage.Raw, so
+// by the time usage reaches the TokenTracker aggregate, the trace entries,
+// UsageSummary, or the CLI summary, this marker is gone. Treat the shape as
+// an implementation detail that may change or disappear once a real "this
+// was estimated" channel is plumbed through SessionStats/ProviderUsage.
+type ACPUsageMarker struct {
+	Estimated bool   `json:"estimated"`
+	Source    string `json:"source"` // always "acp-chars-heuristic"
+	Ratio     int    `json:"chars_per_token"`
+}
 
 // providerToAgent maps LLM provider names to ACP-compatible binary names.
 // The official ACP bridge/agent packages are:
@@ -49,8 +76,9 @@ var acpAgentArgs = map[string][]string{
 //
 // The acp_agent node attribute overrides the binary name.
 type ACPBackend struct {
-	agentPaths map[string]string // cached: agent name → resolved binary path
-	mu         sync.Mutex
+	agentPaths   map[string]string // cached: agent name → resolved binary path
+	mu           sync.Mutex
+	estimateOnce sync.Once // guards the once-per-backend "tokens are estimates" log line
 }
 
 // NewACPBackend creates an ACPBackend with empty path cache.
@@ -110,7 +138,16 @@ func (b *ACPBackend) sendPromptAndCollect(ctx context.Context, conn *acp.ClientS
 	})
 
 	forceKilled := waitForProcess(proc.cmd, proc.stdin)
-	result := buildACPResult(handler, promptResp)
+	result := buildACPResult(handler, promptResp, cfg)
+	if result.Usage.TotalTokens > 0 {
+		// Announce the approximation once per backend instance. Per-session
+		// token numbers already land in cost_updated events / activity.jsonl,
+		// so repeating them in a log line per prompt is pure noise for
+		// pipelines with many ACP nodes.
+		b.estimateOnce.Do(func() {
+			log.Printf("[acp] token/cost numbers for ACP sessions are character-count estimates (ACP protocol has no native token surface); accuracy varies — see docs/architecture/backends.md")
+		})
+	}
 
 	if promptErr != nil {
 		logStderr(agentName, "prompt", &proc.stderr)
@@ -361,26 +398,86 @@ func buildACPPromptBlocks(cfg pipeline.AgentRunConfig) []acp.ContentBlock {
 }
 
 // buildACPResult constructs a SessionResult from the handler's accumulated state.
-func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse) agent.SessionResult {
+// Usage is populated with a character-count-derived estimate (see
+// estimateACPUsage) since the ACP protocol does not surface real token counts.
+func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse, cfg pipeline.AgentRunConfig) agent.SessionResult {
 	handler.mu.Lock()
-	defer handler.mu.Unlock()
+	// Snapshot everything we need from handler state under the lock. Rune
+	// counting is O(totalOutputSize) over handler.textParts, but iteration
+	// over a string with utf8.RuneCountInString doesn't allocate — unlike
+	// strings.Join, which would copy the whole output. Model-catalog
+	// lookups (llm.EstimateCost) happen below, after the lock is released.
+	turns := handler.turnCount
+	toolCount := handler.toolCount
+	textPartsLen := len(handler.textParts)
+	outputRunes := 0
+	for _, part := range handler.textParts {
+		outputRunes += utf8.RuneCountInString(part)
+	}
+	toolNames := make(map[string]int, len(handler.toolNames))
+	for _, name := range handler.toolNames {
+		toolNames[name]++
+	}
+	handler.mu.Unlock()
 
 	result := agent.SessionResult{
-		Turns:     handler.turnCount,
-		ToolCalls: make(map[string]int),
+		Turns:     turns,
+		Provider:  "acp",
+		ToolCalls: toolNames,
 	}
-
-	// Count tool calls by name.
-	for _, name := range handler.toolNames {
-		result.ToolCalls[name]++
-	}
-
 	// Estimate turns: at minimum 1 if we got any response.
-	if result.Turns == 0 && (len(handler.textParts) > 0 || handler.toolCount > 0) {
+	if result.Turns == 0 && (textPartsLen > 0 || toolCount > 0) {
 		result.Turns = 1
 	}
+	result.Usage = estimateACPUsage(cfg, outputRunes)
 
 	return result
+}
+
+// estimateACPUsage synthesizes an approximate llm.Usage from rune counts of
+// the input prompt (system + user) and the collected output text. The ACP
+// spec exposes no native usage surface, so a heuristic is the only option.
+// The caller owns prompt/system-prompt strings via cfg; output comes from
+// the handler's collected text (already locked by buildACPResult) as a
+// pre-computed rune count so we don't allocate a joined string under lock.
+// Returns a zero-valued Usage when there is no input and no output.
+// Token counts use ceiling division with a 1-token floor for any non-empty
+// side: this prevents 1–3-rune prompts from rounding to zero, which would
+// otherwise defeat TokenTracker's early-return on zero totals and leave the
+// session untracked for budget enforcement.
+func estimateACPUsage(cfg pipeline.AgentRunConfig, outputRunes int) llm.Usage {
+	inputRunes := utf8.RuneCountInString(cfg.Prompt) + utf8.RuneCountInString(cfg.SystemPrompt)
+	if inputRunes == 0 && outputRunes == 0 {
+		return llm.Usage{}
+	}
+
+	inTokens := ceilDiv(inputRunes, acpTokenEstimateRatio)
+	outTokens := ceilDiv(outputRunes, acpTokenEstimateRatio)
+
+	usage := llm.Usage{
+		InputTokens:  inTokens,
+		OutputTokens: outTokens,
+		TotalTokens:  inTokens + outTokens,
+		Raw: ACPUsageMarker{
+			Estimated: true,
+			Source:    "acp-chars-heuristic",
+			Ratio:     acpTokenEstimateRatio,
+		},
+	}
+	usage.EstimatedCost = llm.EstimateCost(cfg.Model, usage)
+	return usage
+}
+
+// ceilDiv returns 0 when runes is 0, otherwise ceil(runes/ratio). The ceiling
+// matters for short inputs: chars÷4 of a 1–3-rune prompt rounds to 0 under
+// floor division, and a zero-token Usage is treated as "nothing to track" by
+// trackExternalBackendUsage. Callers must pass ratio ≥ 1; with runes ≥ 1 the
+// result is always ≥ 1, so no additional clamp is needed.
+func ceilDiv(runes, ratio int) int {
+	if runes <= 0 {
+		return 0
+	}
+	return (runes + ratio - 1) / ratio
 }
 
 // buildACPMcpServers converts the AgentRunConfig's MCP server list (if any)

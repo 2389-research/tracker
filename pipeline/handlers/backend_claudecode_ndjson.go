@@ -142,7 +142,8 @@ func storeResult(msg ndjsonMessage, state *runState) {
 		turns = msg.Turns
 	}
 	result := &agent.SessionResult{
-		Turns: turns,
+		Turns:    turns,
+		Provider: "claude-code",
 	}
 
 	result.ToolCalls = make(map[string]int, len(state.toolUseIDs))

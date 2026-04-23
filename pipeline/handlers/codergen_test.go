@@ -236,7 +236,7 @@ func TestTrackExternalBackendUsageTracksWhenTotalTokensMissing(t *testing.T) {
 		InputTokens:  12,
 		OutputTokens: 8,
 		TotalTokens:  0,
-	})
+	}, "claude-sonnet-4-5")
 
 	got := tracker.ProviderUsage("acp")
 	if got.InputTokens != 12 || got.OutputTokens != 8 {

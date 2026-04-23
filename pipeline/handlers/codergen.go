@@ -89,7 +89,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	artifactRoot := h.resolveArtifactRoot(pctx)
 	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
-	h.trackExternalBackendUsage(backend, sessResult.Usage)
+	h.trackExternalBackendUsage(backend, sessResult.Usage, runCfg.Model)
 
 	if runErr != nil {
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector, priorEpisodes)
@@ -99,7 +99,12 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 // trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
 // Native backend usage is tracked by the middleware automatically — skip to avoid double-counting.
-func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBackend, usage llm.Usage) {
+// The model is threaded through so TokenTracker.CostByProvider can resolve
+// per-provider cost directly instead of falling back to graph.Attrs["llm_model"]
+// (which is often empty for workflows that set the model per-node), which would
+// leave ProviderTotals["claude-code"|"acp"].USD = 0 and silently break --max-cost
+// enforcement for these backends.
+func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBackend, usage llm.Usage, model string) {
 	if h.tokenTracker == nil {
 		return
 	}
@@ -108,9 +113,9 @@ func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBacken
 	}
 	switch backend.(type) {
 	case *ClaudeCodeBackend:
-		h.tokenTracker.AddUsage("claude-code", usage)
+		h.tokenTracker.AddUsage("claude-code", usage, model)
 	case *ACPBackend:
-		h.tokenTracker.AddUsage("acp", usage)
+		h.tokenTracker.AddUsage("acp", usage, model)
 	}
 }
 

@@ -659,7 +659,7 @@ func TestBuildACPResult(t *testing.T) {
 		turnCount: 3,
 		toolNames: map[string]string{"t1": "bash", "t2": "read"},
 	}
-	result := buildACPResult(handler, acp.PromptResponse{})
+	result := buildACPResult(handler, acp.PromptResponse{}, pipeline.AgentRunConfig{})
 	if result.Turns != 3 {
 		t.Errorf("Turns = %d, want 3", result.Turns)
 	}
@@ -677,10 +677,200 @@ func TestBuildACPResult_MinOneTurn(t *testing.T) {
 		turnCount: 0,
 		toolNames: make(map[string]string),
 	}
-	result := buildACPResult(handler, acp.PromptResponse{})
+	result := buildACPResult(handler, acp.PromptResponse{}, pipeline.AgentRunConfig{})
 	if result.Turns != 1 {
 		t.Errorf("Turns = %d, want 1 (minimum when text present)", result.Turns)
 	}
+}
+
+func TestEstimateACPUsage(t *testing.T) {
+	tests := []struct {
+		name            string
+		cfg             pipeline.AgentRunConfig
+		outputRunes     int
+		wantInputTokens int
+		wantOutputTok   int
+		wantEstimated   bool
+		wantZeroTokens  bool
+	}{
+		{
+			name:            "populates estimate and marker from rune counts",
+			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("a", 40), SystemPrompt: strings.Repeat("b", 40)},
+			outputRunes:     400,
+			wantInputTokens: 20,  // ceil(80/4) = 20
+			wantOutputTok:   100, // ceil(400/4) = 100
+			wantEstimated:   true,
+		},
+		{
+			name:           "nothing in, nothing out → zero usage",
+			cfg:            pipeline.AgentRunConfig{},
+			outputRunes:    0,
+			wantZeroTokens: true,
+		},
+		{
+			name:            "prompt only, empty output — still estimated",
+			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("x", 100)},
+			outputRunes:     0,
+			wantInputTokens: 25, // ceil(100/4) = 25
+			wantOutputTok:   0,
+			wantEstimated:   true,
+		},
+		{
+			// Regression: floor division produced 0 tokens for short non-empty
+			// prompts, causing trackExternalBackendUsage to skip the session.
+			name:            "short prompt clamps to ≥1 token instead of floor-rounding to 0",
+			cfg:             pipeline.AgentRunConfig{Prompt: "hi"},
+			outputRunes:     3,
+			wantInputTokens: 1, // ceil(2/4) = 1
+			wantOutputTok:   1, // ceil(3/4) = 1
+			wantEstimated:   true,
+		},
+		{
+			// Regression: len() counts bytes, not runes — would overcount CJK 3x.
+			// 11 Japanese runes = 33 UTF-8 bytes; with rune counting we get
+			// ceil(11/4) = 3 tokens, not ceil(33/4) = 9.
+			name:            "multibyte UTF-8 counted by runes, not bytes",
+			cfg:             pipeline.AgentRunConfig{Prompt: "こんにちは世界です。え"}, // 11 runes, 33 bytes
+			outputRunes:     0,
+			wantInputTokens: 3, // ceil(11/4) = 3
+			wantOutputTok:   0,
+			wantEstimated:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateACPUsage(tt.cfg, tt.outputRunes)
+			if tt.wantZeroTokens {
+				if got.TotalTokens != 0 || got.InputTokens != 0 || got.OutputTokens != 0 {
+					t.Errorf("want zero-token usage, got %+v", got)
+				}
+				if got.Raw != nil {
+					t.Errorf("want nil Raw for zero usage, got %+v", got.Raw)
+				}
+				return
+			}
+			if got.InputTokens != tt.wantInputTokens {
+				t.Errorf("InputTokens = %d, want %d", got.InputTokens, tt.wantInputTokens)
+			}
+			if got.OutputTokens != tt.wantOutputTok {
+				t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, tt.wantOutputTok)
+			}
+			if got.TotalTokens != tt.wantInputTokens+tt.wantOutputTok {
+				t.Errorf("TotalTokens = %d, want %d", got.TotalTokens, tt.wantInputTokens+tt.wantOutputTok)
+			}
+			marker, ok := got.Raw.(ACPUsageMarker)
+			if !ok {
+				t.Fatalf("Raw = %T, want ACPUsageMarker", got.Raw)
+			}
+			if marker.Estimated != tt.wantEstimated {
+				t.Errorf("marker.Estimated = %v, want %v", marker.Estimated, tt.wantEstimated)
+			}
+			if marker.Source != "acp-chars-heuristic" {
+				t.Errorf("marker.Source = %q, want acp-chars-heuristic", marker.Source)
+			}
+			if marker.Ratio != 4 {
+				t.Errorf("marker.Ratio = %d, want 4", marker.Ratio)
+			}
+		})
+	}
+}
+
+func TestBuildACPResult_PopulatesUsage(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"the quick brown fox", " jumps over the lazy dog"},
+		turnCount: 1,
+		toolNames: make(map[string]string),
+	}
+	cfg := pipeline.AgentRunConfig{Prompt: "tell me a story about a dog", SystemPrompt: "be concise"}
+	result := buildACPResult(handler, acp.PromptResponse{}, cfg)
+	if result.Provider != "acp" {
+		t.Errorf("Provider = %q, want %q (otherwise AggregateUsage buckets ACP under 'unknown')", result.Provider, "acp")
+	}
+	if result.Usage.TotalTokens == 0 {
+		t.Fatal("expected non-zero estimated Usage on a session with prompt + output")
+	}
+	if _, ok := result.Usage.Raw.(ACPUsageMarker); !ok {
+		t.Fatalf("Usage.Raw = %T, want ACPUsageMarker so downstream consumers can flag estimates", result.Usage.Raw)
+	}
+}
+
+// TestACPUsage_DownstreamPropagation walks an ACP session's estimated usage
+// through the same path the engine uses at runtime —
+// buildACPResult → buildSessionStats → pipeline.Trace → AggregateUsage — and
+// asserts (a) the usage lands in ProviderTotals["acp"] (not "unknown"), and
+// (b) both tokens and dollar cost survive the round-trip. This is the
+// integration test that distinguishes "the estimator works in a unit test"
+// from "a real pipeline actually attributes ACP spend correctly".
+func TestACPUsage_DownstreamPropagation(t *testing.T) {
+	handler := &acpClientHandler{
+		textParts: []string{"the quick brown fox jumps over the lazy dog"},
+		turnCount: 2,
+		toolNames: make(map[string]string),
+	}
+	cfg := pipeline.AgentRunConfig{
+		Prompt:       "tell me a story about a dog in 30 words",
+		SystemPrompt: "be concise",
+		Model:        "claude-sonnet-4-5", // real catalog entry so EstimatedCost is non-zero
+	}
+
+	result := buildACPResult(handler, acp.PromptResponse{}, cfg)
+	if result.Provider != "acp" {
+		t.Fatalf("Provider = %q, want \"acp\"", result.Provider)
+	}
+	if result.Usage.TotalTokens == 0 {
+		t.Fatal("expected non-zero estimated tokens")
+	}
+	if result.Usage.EstimatedCost == 0 {
+		t.Fatal("expected non-zero EstimatedCost for a known catalog model")
+	}
+
+	stats := buildSessionStats(result)
+	if stats.Provider != "acp" {
+		t.Errorf("SessionStats.Provider = %q, want \"acp\" (buildSessionStats must preserve Provider)", stats.Provider)
+	}
+	if stats.TotalTokens != result.Usage.TotalTokens {
+		t.Errorf("SessionStats.TotalTokens = %d, want %d", stats.TotalTokens, result.Usage.TotalTokens)
+	}
+	if stats.CostUSD != result.Usage.EstimatedCost {
+		t.Errorf("SessionStats.CostUSD = %f, want %f", stats.CostUSD, result.Usage.EstimatedCost)
+	}
+
+	trace := &pipeline.Trace{
+		Entries: []pipeline.TraceEntry{{
+			NodeID:      "ACPNode",
+			HandlerName: "codergen",
+			Status:      "success",
+			Stats:       stats,
+		}},
+	}
+	summary := trace.AggregateUsage()
+	if summary == nil {
+		t.Fatal("AggregateUsage returned nil")
+	}
+	acp, ok := summary.ProviderTotals["acp"]
+	if !ok {
+		t.Fatalf("ProviderTotals missing \"acp\" bucket; keys = %v", keysOfProviderTotals(summary.ProviderTotals))
+	}
+	if _, hasUnknown := summary.ProviderTotals["unknown"]; hasUnknown {
+		t.Errorf("ProviderTotals contains \"unknown\" bucket — SessionStats.Provider must carry through")
+	}
+	if acp.TotalTokens != result.Usage.TotalTokens {
+		t.Errorf("ProviderTotals[acp].TotalTokens = %d, want %d", acp.TotalTokens, result.Usage.TotalTokens)
+	}
+	if acp.CostUSD != result.Usage.EstimatedCost {
+		t.Errorf("ProviderTotals[acp].CostUSD = %f, want %f", acp.CostUSD, result.Usage.EstimatedCost)
+	}
+	if acp.SessionCount != 1 {
+		t.Errorf("ProviderTotals[acp].SessionCount = %d, want 1", acp.SessionCount)
+	}
+}
+
+func keysOfProviderTotals(m map[string]pipeline.ProviderUsage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func TestBuildACPMcpServers(t *testing.T) {
@@ -864,7 +1054,7 @@ func TestBuildACPResult_EmptyHandler(t *testing.T) {
 	handler := &acpClientHandler{
 		toolNames: make(map[string]string),
 	}
-	result := buildACPResult(handler, acp.PromptResponse{})
+	result := buildACPResult(handler, acp.PromptResponse{}, pipeline.AgentRunConfig{})
 	if result.Turns != 0 {
 		t.Errorf("Turns = %d, want 0 for empty handler", result.Turns)
 	}
