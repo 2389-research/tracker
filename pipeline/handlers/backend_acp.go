@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -394,6 +395,7 @@ func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse, cfg pipe
 
 	result := agent.SessionResult{
 		Turns:     handler.turnCount,
+		Provider:  "acp",
 		ToolCalls: make(map[string]int),
 	}
 
@@ -407,26 +409,37 @@ func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse, cfg pipe
 		result.Turns = 1
 	}
 
-	result.Usage = estimateACPUsage(cfg, strings.Join(handler.textParts, ""))
+	// Sum rune counts across textParts without allocating a joined string —
+	// holding handler.mu across an O(totalOutputSize) copy would be wasteful,
+	// and len(string) would count bytes (wrong for multibyte UTF-8).
+	outputRunes := 0
+	for _, part := range handler.textParts {
+		outputRunes += utf8.RuneCountInString(part)
+	}
+	result.Usage = estimateACPUsage(cfg, outputRunes)
 
 	return result
 }
 
-// estimateACPUsage synthesizes an approximate llm.Usage from character counts
-// of the input prompt (system + user) and the collected output text. The ACP
+// estimateACPUsage synthesizes an approximate llm.Usage from rune counts of
+// the input prompt (system + user) and the collected output text. The ACP
 // spec exposes no native usage surface, so a heuristic is the only option.
-// The caller owns prompt/system-prompt strings via cfg; output comes from the
-// handler's collected text (already locked by buildACPResult). Returns a
-// zero-valued Usage when there is no input and no output (nothing to bill).
-func estimateACPUsage(cfg pipeline.AgentRunConfig, output string) llm.Usage {
-	inputChars := len(cfg.Prompt) + len(cfg.SystemPrompt)
-	outputChars := len(output)
-	if inputChars == 0 && outputChars == 0 {
+// The caller owns prompt/system-prompt strings via cfg; output comes from
+// the handler's collected text (already locked by buildACPResult) as a
+// pre-computed rune count so we don't allocate a joined string under lock.
+// Returns a zero-valued Usage when there is no input and no output.
+// Token counts use ceiling division with a 1-token floor for any non-empty
+// side: this prevents 1–3-rune prompts from rounding to zero, which would
+// otherwise defeat TokenTracker's early-return on zero totals and leave the
+// session untracked for budget enforcement.
+func estimateACPUsage(cfg pipeline.AgentRunConfig, outputRunes int) llm.Usage {
+	inputRunes := utf8.RuneCountInString(cfg.Prompt) + utf8.RuneCountInString(cfg.SystemPrompt)
+	if inputRunes == 0 && outputRunes == 0 {
 		return llm.Usage{}
 	}
 
-	inTokens := inputChars / acpTokenEstimateRatio
-	outTokens := outputChars / acpTokenEstimateRatio
+	inTokens := ceilDivMin1(inputRunes, acpTokenEstimateRatio)
+	outTokens := ceilDivMin1(outputRunes, acpTokenEstimateRatio)
 
 	usage := llm.Usage{
 		InputTokens:  inTokens,
@@ -440,6 +453,21 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, output string) llm.Usage {
 	}
 	usage.EstimatedCost = llm.EstimateCost(cfg.Model, usage)
 	return usage
+}
+
+// ceilDivMin1 returns 0 when runes is 0, otherwise max(1, ceil(runes/ratio)).
+// The min-1 floor matters for short inputs: chars÷4 of a 1–3-rune prompt
+// rounds to 0 under floor division, and a zero-token Usage is treated as
+// "nothing to track" by trackExternalBackendUsage.
+func ceilDivMin1(runes, ratio int) int {
+	if runes <= 0 {
+		return 0
+	}
+	tokens := (runes + ratio - 1) / ratio
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
 }
 
 // buildACPMcpServers converts the AgentRunConfig's MCP server list (if any)

@@ -685,43 +685,61 @@ func TestBuildACPResult_MinOneTurn(t *testing.T) {
 
 func TestEstimateACPUsage(t *testing.T) {
 	tests := []struct {
-		name           string
-		cfg            pipeline.AgentRunConfig
-		output         string
-		wantInputMin   int
-		wantOutputMin  int
-		wantTotalGt    int
-		wantEstimated  bool
-		wantZeroTokens bool
+		name            string
+		cfg             pipeline.AgentRunConfig
+		outputRunes     int
+		wantInputTokens int
+		wantOutputTok   int
+		wantEstimated   bool
+		wantZeroTokens  bool
 	}{
 		{
-			name:          "populates estimate and marker from chars",
-			cfg:           pipeline.AgentRunConfig{Prompt: strings.Repeat("a", 40), SystemPrompt: strings.Repeat("b", 40)},
-			output:        strings.Repeat("c", 400),
-			wantInputMin:  20,  // (40+40)/4 = 20
-			wantOutputMin: 100, // 400/4 = 100
-			wantTotalGt:   100,
-			wantEstimated: true,
+			name:            "populates estimate and marker from rune counts",
+			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("a", 40), SystemPrompt: strings.Repeat("b", 40)},
+			outputRunes:     400,
+			wantInputTokens: 20,  // ceil(80/4) = 20
+			wantOutputTok:   100, // ceil(400/4) = 100
+			wantEstimated:   true,
 		},
 		{
 			name:           "nothing in, nothing out → zero usage",
 			cfg:            pipeline.AgentRunConfig{},
-			output:         "",
+			outputRunes:    0,
 			wantZeroTokens: true,
 		},
 		{
-			name:          "prompt only, empty output — still estimated",
-			cfg:           pipeline.AgentRunConfig{Prompt: strings.Repeat("x", 100)},
-			output:        "",
-			wantInputMin:  25, // 100/4 = 25
-			wantOutputMin: 0,
-			wantTotalGt:   20,
-			wantEstimated: true,
+			name:            "prompt only, empty output — still estimated",
+			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("x", 100)},
+			outputRunes:     0,
+			wantInputTokens: 25, // ceil(100/4) = 25
+			wantOutputTok:   0,
+			wantEstimated:   true,
+		},
+		{
+			// Regression: floor division produced 0 tokens for short non-empty
+			// prompts, causing trackExternalBackendUsage to skip the session.
+			name:            "short prompt clamps to ≥1 token instead of floor-rounding to 0",
+			cfg:             pipeline.AgentRunConfig{Prompt: "hi"},
+			outputRunes:     3,
+			wantInputTokens: 1, // ceil(2/4) = 1
+			wantOutputTok:   1, // ceil(3/4) = 1
+			wantEstimated:   true,
+		},
+		{
+			// Regression: len() counts bytes, not runes — would overcount CJK 3x.
+			// 10 Japanese runes = 30 UTF-8 bytes; with rune counting we get
+			// ceil(10/4) = 3 tokens, not ceil(30/4) = 8.
+			name:            "multibyte UTF-8 counted by runes, not bytes",
+			cfg:             pipeline.AgentRunConfig{Prompt: "こんにちは世界です。え"}, // 11 runes, 33 bytes
+			outputRunes:     0,
+			wantInputTokens: 3, // ceil(11/4) = 3
+			wantOutputTok:   0,
+			wantEstimated:   true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := estimateACPUsage(tt.cfg, tt.output)
+			got := estimateACPUsage(tt.cfg, tt.outputRunes)
 			if tt.wantZeroTokens {
 				if got.TotalTokens != 0 || got.InputTokens != 0 || got.OutputTokens != 0 {
 					t.Errorf("want zero-token usage, got %+v", got)
@@ -731,14 +749,14 @@ func TestEstimateACPUsage(t *testing.T) {
 				}
 				return
 			}
-			if got.InputTokens < tt.wantInputMin {
-				t.Errorf("InputTokens = %d, want ≥ %d", got.InputTokens, tt.wantInputMin)
+			if got.InputTokens != tt.wantInputTokens {
+				t.Errorf("InputTokens = %d, want %d", got.InputTokens, tt.wantInputTokens)
 			}
-			if got.OutputTokens < tt.wantOutputMin {
-				t.Errorf("OutputTokens = %d, want ≥ %d", got.OutputTokens, tt.wantOutputMin)
+			if got.OutputTokens != tt.wantOutputTok {
+				t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, tt.wantOutputTok)
 			}
-			if got.TotalTokens <= tt.wantTotalGt {
-				t.Errorf("TotalTokens = %d, want > %d", got.TotalTokens, tt.wantTotalGt)
+			if got.TotalTokens != tt.wantInputTokens+tt.wantOutputTok {
+				t.Errorf("TotalTokens = %d, want %d", got.TotalTokens, tt.wantInputTokens+tt.wantOutputTok)
 			}
 			marker, ok := got.Raw.(ACPUsageMarker)
 			if !ok {
@@ -759,12 +777,15 @@ func TestEstimateACPUsage(t *testing.T) {
 
 func TestBuildACPResult_PopulatesUsage(t *testing.T) {
 	handler := &acpClientHandler{
-		textParts: []string{"the quick brown fox jumps over the lazy dog"},
+		textParts: []string{"the quick brown fox", " jumps over the lazy dog"},
 		turnCount: 1,
 		toolNames: make(map[string]string),
 	}
 	cfg := pipeline.AgentRunConfig{Prompt: "tell me a story about a dog", SystemPrompt: "be concise"}
 	result := buildACPResult(handler, acp.PromptResponse{}, cfg)
+	if result.Provider != "acp" {
+		t.Errorf("Provider = %q, want %q (otherwise AggregateUsage buckets ACP under 'unknown')", result.Provider, "acp")
+	}
 	if result.Usage.TotalTokens == 0 {
 		t.Fatal("expected non-zero estimated Usage on a session with prompt + output")
 	}
