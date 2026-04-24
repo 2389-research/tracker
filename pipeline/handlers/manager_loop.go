@@ -368,6 +368,19 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 	if steeringCh != nil {
 		engineOpts = append(engineOpts, pipeline.WithSteeringChan(steeringCh))
 	}
+	// Propagate the parent engine's BudgetGuard + baseline-usage snapshot
+	// stashed on ctx at handler dispatch time. Without this, the child
+	// engine's between-node checks are no-ops and --max-tokens /
+	// --max-cost ceilings become silently non-binding for any work that
+	// runs inside a manager_loop supervisor (#188, sibling of #183).
+	if runCtx := pipeline.ChildRunContextFromContext(ctx); runCtx != nil {
+		if runCtx.BudgetGuard != nil {
+			engineOpts = append(engineOpts, pipeline.WithBudgetGuard(runCtx.BudgetGuard))
+		}
+		if runCtx.Baseline != nil {
+			engineOpts = append(engineOpts, pipeline.WithBaselineUsage(runCtx.Baseline))
+		}
+	}
 	engine := pipeline.NewEngine(childGraph, childRegistry, engineOpts...)
 
 	// Launch child pipeline in a goroutine.
@@ -531,6 +544,9 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 // handleChildResult processes the child engine's result and returns the appropriate outcome.
 // The engine may return both a result and an error (e.g. strict failure edges), so we
 // prioritize the result when available over treating the error as a bare crash.
+// result.Usage (when populated) is always propagated up via Outcome.ChildUsage so the
+// parent's Trace.AggregateUsage can fold child spend into per-provider rollups and
+// BudgetGuard checks at the next between-node boundary.
 func (h *ManagerLoopHandler) handleChildResult(nodeID string, msg engineResultMsg, cycles int, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	pctx.Set("stack.child.cycles", strconv.Itoa(cycles))
 
@@ -550,6 +566,7 @@ func (h *ManagerLoopHandler) handleChildResult(nodeID string, msg engineResultMs
 			return pipeline.Outcome{
 				Status:         pipeline.OutcomeSuccess,
 				ContextUpdates: result.Context,
+				ChildUsage:     result.Usage,
 			}, nil
 		}
 
@@ -572,9 +589,20 @@ func (h *ManagerLoopHandler) handleChildResult(nodeID string, msg engineResultMs
 			NodeID:    nodeID,
 			Message:   fmt.Sprintf("manager_loop: child completed with status %q", childStatus),
 		})
+		// A child-side budget halt is mapped to parent OutcomeSuccess (not
+		// OutcomeFail) so the parent's own between-node budget check can
+		// fire with the correct OutcomeBudgetExceeded status after folding
+		// in the child's ChildUsage. Returning OutcomeFail here would trip
+		// the engine's strict-failure-edges rule before the parent's
+		// budget check runs — same reasoning as SubgraphHandler (#183 fix).
+		handlerStatus := pipeline.OutcomeFail
+		if childStatus == pipeline.OutcomeBudgetExceeded {
+			handlerStatus = pipeline.OutcomeSuccess
+		}
 		return pipeline.Outcome{
-			Status:         pipeline.OutcomeFail,
+			Status:         handlerStatus,
 			ContextUpdates: result.Context,
+			ChildUsage:     result.Usage,
 		}, nil
 	}
 
