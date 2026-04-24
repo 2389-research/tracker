@@ -340,8 +340,15 @@ func printToolSafetyPreamble(cfg runConfig) {
 			len(cfg.toolAllowlist), strings.Join(cfg.toolAllowlist, ", "))
 	}
 	if len(cfg.toolDenylistAdd) > 0 {
-		fmt.Fprintf(os.Stderr, "Tool command extra denylist active (%d pattern(s)): %s\n",
-			len(cfg.toolDenylistAdd), strings.Join(cfg.toolDenylistAdd, ", "))
+		// --bypass-denylist disables both built-in and user-added patterns,
+		// so call that out explicitly — "active" would be misleading when
+		// nothing is actually being enforced.
+		state := "active"
+		if cfg.bypassDenylist {
+			state = "configured but bypassed (--bypass-denylist disables these too)"
+		}
+		fmt.Fprintf(os.Stderr, "Tool command extra denylist %s (%d pattern(s)): %s\n",
+			state, len(cfg.toolDenylistAdd), strings.Join(cfg.toolDenylistAdd, ", "))
 	}
 	if cfg.maxOutputLimit > 0 {
 		fmt.Fprintf(os.Stderr, "Tool command output ceiling: %d bytes per stream\n", cfg.maxOutputLimit)

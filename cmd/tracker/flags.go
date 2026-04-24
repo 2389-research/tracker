@@ -354,7 +354,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --artifact-dir string     Override node state directory (default: <workdir>/.tracker/runs)\n")
 	fmt.Fprintf(w, "  --bypass-denylist         Disable the built-in tool_command denylist (SECURITY: sandboxed use only)\n")
 	fmt.Fprintf(w, "  --tool-allowlist pattern  Glob pattern a tool_command must match to execute (repeatable, comma-separated)\n")
-	fmt.Fprintf(w, "  --tool-denylist-add pat   Extra glob pattern added to built-in denylist (defense in depth; --bypass-denylist overrides)\n")
+	fmt.Fprintf(w, "  --tool-denylist-add pat   Extra glob pattern(s) added to built-in denylist (repeatable, comma-separated, additive; --bypass-denylist disables built-in + added patterns)\n")
 	fmt.Fprintf(w, "  --max-output-limit bytes  Hard ceiling per tool_command output stream (default: 10MB)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

@@ -1,5 +1,5 @@
 // ABOUTME: Security checks for tool_command execution: denylist and allowlist pattern matching.
-// ABOUTME: Denylist is always active and non-overridable by .dip files. Allowlist is opt-in.
+// ABOUTME: Built-in denylist patterns are always active; .dip files can extend but not shrink them. Allowlist is opt-in.
 package handlers
 
 import (
@@ -8,9 +8,14 @@ import (
 	"strings"
 )
 
-// defaultDenyPatterns are blocked in all tool_command executions.
-// Cannot be overridden by .dip graph attrs. Only --bypass-denylist CLI flag disables them.
-// Patterns use * as wildcard. Matching is case-insensitive, per-statement.
+// defaultDenyPatterns are blocked in all tool_command executions by default.
+// Built-in patterns cannot be removed — .dip files (via the `tool_denylist_add`
+// graph attr) and operators (via `--tool-denylist-add`) can *extend* the list,
+// but never shrink it. The only switch that disables the defaults is the
+// all-or-nothing `--bypass-denylist` CLI flag, which also disables any
+// user-added patterns (it is the intentional escape hatch for sandboxed
+// environments). Patterns use * as wildcard. Matching is case-insensitive,
+// per-statement.
 var defaultDenyPatterns = []string{
 	"eval *",
 	"exec *",
