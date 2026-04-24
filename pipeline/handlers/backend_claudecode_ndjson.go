@@ -76,11 +76,20 @@ func (c *ndjsonContent) contentString() string {
 	return string(c.Content)
 }
 
-// ndjsonUsage represents token usage from a result message.
+// ndjsonUsage represents token usage from a result message. The cache
+// fields are Anthropic-native — the Claude CLI reports them directly
+// in the NDJSON result envelope, so we read real counts (not estimates)
+// and forward them to llm.EstimateCost which prices cache reads at
+// 10% and cache writes at 25% of the input rate. Pre-fix, these
+// fields were silently dropped and heavy-cache workloads (Sonnet +
+// CLAUDE.md injection on every turn) were charged ~3× the real input
+// rate because all input tokens were treated as fresh.
 type ndjsonUsage struct {
-	InputTokens  int     `json:"input_tokens,omitempty"`
-	OutputTokens int     `json:"output_tokens,omitempty"`
-	CostUSD      float64 `json:"cost_usd,omitempty"`
+	InputTokens              int     `json:"input_tokens,omitempty"`
+	OutputTokens             int     `json:"output_tokens,omitempty"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens,omitempty"`
+	CostUSD                  float64 `json:"cost_usd,omitempty"`
 }
 
 // parseMessage converts a raw NDJSON message into zero or more agent.Event objects.
@@ -152,11 +161,25 @@ func storeResult(msg ndjsonMessage, state *runState) {
 	}
 
 	if msg.Usage != nil {
+		// TotalTokens stays fresh-input + output to match the convention
+		// in llm/anthropic/translate_response.go:54 — cache tokens are
+		// tracked separately via the *int fields and priced independently
+		// by llm.EstimateCost. Diverging here would make BudgetGuard's
+		// --max-tokens semantics differ by backend, which is exactly
+		// what we're trying to avoid.
 		result.Usage = llm.Usage{
 			InputTokens:   msg.Usage.InputTokens,
 			OutputTokens:  msg.Usage.OutputTokens,
 			TotalTokens:   msg.Usage.InputTokens + msg.Usage.OutputTokens,
 			EstimatedCost: msg.TotalCostUSD,
+		}
+		if msg.Usage.CacheReadInputTokens > 0 {
+			v := msg.Usage.CacheReadInputTokens
+			result.Usage.CacheReadTokens = &v
+		}
+		if msg.Usage.CacheCreationInputTokens > 0 {
+			v := msg.Usage.CacheCreationInputTokens
+			result.Usage.CacheWriteTokens = &v
 		}
 	}
 

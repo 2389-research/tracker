@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +34,44 @@ import (
 // chars-per-token figure for English prose; code and structured output skew
 // lower (closer to 3) so real usage may modestly exceed the estimate.
 const acpTokenEstimateRatio = 4
+
+// acpCacheReadRatioEnv is the env var operators can set to tell
+// estimateACPUsage what fraction of the estimated input tokens to bill as
+// cache-read (priced at 10% of the input rate by llm.EstimateCost)
+// instead of fresh input. Values must be in (0, 1] — anything outside
+// that range is treated as "no split". Default (unset or invalid) means
+// the whole input is priced as fresh, which over-reports spend for
+// heavy-cache workloads but never under-reports it, so budgets stay
+// conservative.
+const acpCacheReadRatioEnv = "TRACKER_ACP_CACHE_READ_RATIO"
+
+// acpCacheRatioWarned dedupes the "ratio out of range" warning so a
+// long-running pipeline with many ACP nodes doesn't spam the log with
+// the same misconfiguration on every prompt.
+var acpCacheRatioWarned sync.Once
+
+// parseACPCacheReadRatio reads and sanitizes the cache-read fraction.
+// Returns 0 when the env var is unset, malformed, or out of (0, 1].
+// A single warning is logged the first time an invalid value is seen.
+func parseACPCacheReadRatio() float64 {
+	raw := os.Getenv(acpCacheReadRatioEnv)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	// NaN must be explicitly rejected: strconv.ParseFloat("NaN", 64)
+	// returns math.NaN() with err=nil, and NaN fails every comparison
+	// silently (NaN <= 0 and NaN > 1 are both false), so without the
+	// IsNaN/IsInf guard we'd slip through the range check and return
+	// NaN as a "valid" ratio, disabling the split without warning.
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 || v > 1 {
+		acpCacheRatioWarned.Do(func() {
+			log.Printf("[acp] %s=%q is outside (0, 1] or unparseable — ignoring; input will be priced as fresh", acpCacheReadRatioEnv, raw)
+		})
+		return 0
+	}
+	return v
+}
 
 // ACPUsageMarker is written into llm.Usage.Raw on ACP-backed SessionResults
 // so buildSessionStats in this package can derive SessionStats.Estimated
@@ -475,6 +515,27 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, counts acpRuneCounts) llm.Usa
 	inTokens := ceilDiv(inputRunes, acpTokenEstimateRatio)
 	outTokens := ceilDiv(outputRunes, acpTokenEstimateRatio)
 
+	// Optional operator tuning: TRACKER_ACP_CACHE_READ_RATIO splits the
+	// estimated input tokens between fresh InputTokens and CacheReadTokens
+	// so llm.EstimateCost can price cache reads at 10% of the input rate.
+	// Defaults to 0 (no split, all input priced as fresh). Typical values
+	// for stable-context Claude workloads (CLAUDE.md + tool defs on every
+	// turn with good caching): 0.5–0.8. See docs/architecture/backends.md.
+	cacheReadRatio := parseACPCacheReadRatio()
+	cacheReadTokens := 0
+	if cacheReadRatio > 0 && inTokens > 0 {
+		cacheReadTokens = int(float64(inTokens) * cacheReadRatio)
+		if cacheReadTokens > inTokens {
+			cacheReadTokens = inTokens
+		}
+		inTokens -= cacheReadTokens
+	}
+
+	// TotalTokens stays fresh-input + output (no cache tokens) to match
+	// the convention in llm/anthropic/translate_response.go:54 so
+	// BudgetGuard's --max-tokens semantics are consistent across
+	// backends. Cache-read tokens are tracked separately and priced
+	// independently by llm.EstimateCost.
 	usage := llm.Usage{
 		InputTokens:  inTokens,
 		OutputTokens: outTokens,
@@ -484,6 +545,9 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, counts acpRuneCounts) llm.Usa
 			Source:    "acp-chars-heuristic",
 			Ratio:     acpTokenEstimateRatio,
 		},
+	}
+	if cacheReadTokens > 0 {
+		usage.CacheReadTokens = &cacheReadTokens
 	}
 	if reasoningTokens := ceilDiv(counts.Reasoning, acpTokenEstimateRatio); reasoningTokens > 0 {
 		usage.ReasoningTokens = &reasoningTokens

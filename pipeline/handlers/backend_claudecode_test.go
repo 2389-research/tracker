@@ -360,6 +360,78 @@ func TestParseNDJSONResultMessage(t *testing.T) {
 	}
 }
 
+// TestParseNDJSONResultMessage_CacheTokens pins the #185 Track A fix:
+// when Claude CLI's NDJSON result envelope reports cache_read_input_tokens
+// and/or cache_creation_input_tokens, storeResult must populate the
+// optional pointer fields on llm.Usage so llm.EstimateCost can price
+// cache reads at 10% and cache writes at 25% of the input rate. Pre-fix,
+// these fields were silently dropped and heavy-cache workloads (Sonnet +
+// CLAUDE.md injection every turn) were charged ~3× the real input cost.
+// TotalTokens stays fresh input + output only — cache tokens are tracked
+// separately per the cross-provider convention in
+// llm/anthropic/translate_response.go:54 so BudgetGuard's --max-tokens
+// semantics don't drift between backends.
+func TestParseNDJSONResultMessage_CacheTokens(t *testing.T) {
+	msg := `{"type":"result","num_turns":3,"total_cost_usd":0.012,"usage":{"input_tokens":200,"output_tokens":100,"cache_read_input_tokens":8000,"cache_creation_input_tokens":500}}`
+	state := &runState{toolUseIDs: make(map[string]string)}
+	events := parseMessage(json.RawMessage(msg), state)
+	if len(events) != 0 {
+		t.Errorf("expected 0 events for result message, got %d", len(events))
+	}
+	if state.lastResult == nil {
+		t.Fatal("expected lastResult to be populated")
+	}
+	got := state.lastResult.Usage
+	if got.InputTokens != 200 {
+		t.Errorf("InputTokens = %d, want 200 (fresh input only)", got.InputTokens)
+	}
+	if got.OutputTokens != 100 {
+		t.Errorf("OutputTokens = %d, want 100", got.OutputTokens)
+	}
+	if got.CacheReadTokens == nil {
+		t.Fatal("CacheReadTokens is nil; want *8000 populated from cache_read_input_tokens")
+	}
+	if *got.CacheReadTokens != 8000 {
+		t.Errorf("CacheReadTokens = %d, want 8000", *got.CacheReadTokens)
+	}
+	if got.CacheWriteTokens == nil {
+		t.Fatal("CacheWriteTokens is nil; want *500 populated from cache_creation_input_tokens")
+	}
+	if *got.CacheWriteTokens != 500 {
+		t.Errorf("CacheWriteTokens = %d, want 500", *got.CacheWriteTokens)
+	}
+	// TotalTokens stays fresh-input + output to match the cross-provider
+	// convention (llm/anthropic/translate_response.go:54); cache tokens
+	// are tracked separately via the *int fields above and priced
+	// independently by llm.EstimateCost.
+	if got.TotalTokens != 200+100 {
+		t.Errorf("TotalTokens = %d, want %d (fresh input + output only; cache tokens tracked separately per provider convention)", got.TotalTokens, 200+100)
+	}
+}
+
+// TestParseNDJSONResultMessage_NoCacheTokens pins that the cache-token
+// pointer fields stay nil when the NDJSON envelope omits them — avoids
+// the fix introducing false-positive &0 pointers that could confuse
+// downstream consumers branching on "is CacheReadTokens populated".
+func TestParseNDJSONResultMessage_NoCacheTokens(t *testing.T) {
+	msg := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"usage":{"input_tokens":100,"output_tokens":50}}`
+	state := &runState{toolUseIDs: make(map[string]string)}
+	parseMessage(json.RawMessage(msg), state)
+	if state.lastResult == nil {
+		t.Fatal("expected lastResult")
+	}
+	if state.lastResult.Usage.CacheReadTokens != nil {
+		t.Errorf("CacheReadTokens = %v, want nil (no cache_read_input_tokens in message)", *state.lastResult.Usage.CacheReadTokens)
+	}
+	if state.lastResult.Usage.CacheWriteTokens != nil {
+		t.Errorf("CacheWriteTokens = %v, want nil", *state.lastResult.Usage.CacheWriteTokens)
+	}
+	// TotalTokens falls back to InputTokens + OutputTokens when cache fields are absent.
+	if state.lastResult.Usage.TotalTokens != 150 {
+		t.Errorf("TotalTokens = %d, want 150", state.lastResult.Usage.TotalTokens)
+	}
+}
+
 func TestParseNDJSONUnknownType(t *testing.T) {
 	msg := `{"type":"something_unknown","data":"whatever"}`
 	state := &runState{toolUseIDs: make(map[string]string)}

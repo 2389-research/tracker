@@ -684,6 +684,11 @@ func TestBuildACPResult_MinOneTurn(t *testing.T) {
 }
 
 func TestEstimateACPUsage(t *testing.T) {
+	// Hermeticity: explicitly clear TRACKER_ACP_CACHE_READ_RATIO so a
+	// developer or CI with the env var set doesn't break the baseline
+	// expectations below (which assume the default all-fresh pricing).
+	// Each subtest inherits this via t.Setenv's automatic restoration.
+	t.Setenv(acpCacheReadRatioEnv, "")
 	tests := []struct {
 		name            string
 		cfg             pipeline.AgentRunConfig
@@ -792,6 +797,130 @@ func TestEstimateACPUsage(t *testing.T) {
 			}
 			if marker.Ratio != 4 {
 				t.Errorf("marker.Ratio = %d, want 4", marker.Ratio)
+			}
+		})
+	}
+}
+
+// TestEstimateACPUsage_CacheReadRatio pins the #185 Track B optional
+// tuning knob: TRACKER_ACP_CACHE_READ_RATIO, when set to a value in
+// (0, 1], splits the estimated input tokens between fresh InputTokens
+// and CacheReadTokens. Unset, zero, or out-of-range → no split and
+// all input is priced as fresh (conservative default — never
+// under-reports spend). llm.EstimateCost prices CacheReadTokens at
+// 10% of the input rate, so this lets operators running stable-context
+// Claude workloads dial in a more realistic cost estimate.
+func TestEstimateACPUsage_CacheReadRatio(t *testing.T) {
+	tests := []struct {
+		name         string
+		envVal       string
+		inputRunes   int // routed via cfg.Prompt
+		wantFresh    int
+		wantCacheRd  int
+		wantCacheSet bool
+	}{
+		{
+			name:         "default (unset) — all fresh",
+			envVal:       "",
+			inputRunes:   400,
+			wantFresh:    100, // ceil(400/4)
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "80% cache-read splits input",
+			envVal:       "0.8",
+			inputRunes:   400,
+			wantFresh:    20, // 100 - int(100*0.8) = 100 - 80
+			wantCacheRd:  80,
+			wantCacheSet: true,
+		},
+		{
+			name:         "50% cache-read splits input",
+			envVal:       "0.5",
+			inputRunes:   400,
+			wantFresh:    50,
+			wantCacheRd:  50,
+			wantCacheSet: true,
+		},
+		{
+			name:         "100% cache-read routes all input to cache",
+			envVal:       "1.0",
+			inputRunes:   400,
+			wantFresh:    0,
+			wantCacheRd:  100,
+			wantCacheSet: true,
+		},
+		{
+			name:         "negative — ignored, fall back to no split",
+			envVal:       "-0.3",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "> 1 — ignored",
+			envVal:       "1.5",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "non-numeric — ignored",
+			envVal:       "eighty-percent",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			// strconv.ParseFloat("NaN") succeeds but every comparison
+			// with NaN is false, so without an explicit IsNaN guard
+			// the ratio would silently slip through as NaN.
+			name:         "NaN — ignored",
+			envVal:       "NaN",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "Inf — ignored",
+			envVal:       "Inf",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(acpCacheReadRatioEnv, tt.envVal)
+			cfg := pipeline.AgentRunConfig{Prompt: strings.Repeat("p", tt.inputRunes)}
+			usage := estimateACPUsage(cfg, acpRuneCounts{MessageOutput: 4})
+			if usage.InputTokens != tt.wantFresh {
+				t.Errorf("InputTokens = %d, want %d", usage.InputTokens, tt.wantFresh)
+			}
+			if tt.wantCacheSet {
+				if usage.CacheReadTokens == nil {
+					t.Fatalf("CacheReadTokens = nil; want *%d", tt.wantCacheRd)
+				}
+				if *usage.CacheReadTokens != tt.wantCacheRd {
+					t.Errorf("CacheReadTokens = %d, want %d", *usage.CacheReadTokens, tt.wantCacheRd)
+				}
+			} else if usage.CacheReadTokens != nil {
+				t.Errorf("CacheReadTokens = *%d; want nil for no-split case", *usage.CacheReadTokens)
+			}
+			// TotalTokens follows the shared provider convention: fresh
+			// input + output only; cache-read tokens live in
+			// Usage.CacheReadTokens and are priced independently by
+			// llm.EstimateCost. Keeping it consistent across backends
+			// means BudgetGuard's --max-tokens semantics are uniform.
+			wantTotal := tt.wantFresh + 1 // ceil(4/4) = 1 output token
+			if usage.TotalTokens != wantTotal {
+				t.Errorf("TotalTokens = %d, want %d (fresh input + output only)", usage.TotalTokens, wantTotal)
 			}
 		})
 	}
