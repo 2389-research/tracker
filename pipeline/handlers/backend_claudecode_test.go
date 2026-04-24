@@ -367,8 +367,10 @@ func TestParseNDJSONResultMessage(t *testing.T) {
 // cache reads at 10% and cache writes at 25% of the input rate. Pre-fix,
 // these fields were silently dropped and heavy-cache workloads (Sonnet +
 // CLAUDE.md injection every turn) were charged ~3× the real input cost.
-// TotalTokens includes the cache tokens so operators reading "total" see
-// the full billable footprint.
+// TotalTokens stays fresh input + output only — cache tokens are tracked
+// separately per the cross-provider convention in
+// llm/anthropic/translate_response.go:54 so BudgetGuard's --max-tokens
+// semantics don't drift between backends.
 func TestParseNDJSONResultMessage_CacheTokens(t *testing.T) {
 	msg := `{"type":"result","num_turns":3,"total_cost_usd":0.012,"usage":{"input_tokens":200,"output_tokens":100,"cache_read_input_tokens":8000,"cache_creation_input_tokens":500}}`
 	state := &runState{toolUseIDs: make(map[string]string)}
