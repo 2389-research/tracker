@@ -58,10 +58,13 @@ func (e *Engine) saveCheckpointWithTag(cp *Checkpoint, pctx *PipelineContext, ru
 }
 
 // emitCostUpdate emits an EventCostUpdated carrying the current aggregate
-// usage from the trace. Safe to call when no LLM activity has occurred yet —
-// AggregateUsage returns nil and the event is suppressed.
+// usage. For child engines running under a parent (subgraph), this is the
+// combined parent-baseline + child-trace snapshot that BudgetGuard also
+// sees, so operator-facing cost events match the numbers that actually
+// trigger budget halts. Safe to call when no LLM activity has occurred yet —
+// combinedUsageForBudget returns nil and the event is suppressed.
 func (e *Engine) emitCostUpdate(s *runState) {
-	summary := s.trace.AggregateUsage()
+	summary := e.combinedUsageForBudget(s)
 	if summary == nil {
 		return
 	}
@@ -80,18 +83,26 @@ func (e *Engine) emitCostUpdate(s *runState) {
 
 // haltForBudget produces the terminal loopResult emitted when a BudgetGuard
 // trips. It saves the checkpoint (so restarts skip already-completed nodes),
-// sets the trace end time, emits EventBudgetExceeded, and packages
-// an EngineResult with Status=OutcomeBudgetExceeded and BudgetLimitsHit.
+// sets the trace end time, emits EventBudgetExceeded with the same combined
+// usage snapshot the guard used to detect the breach (so diagnostics report
+// the actual trigger value, not a child-local sub-total that sits below the
+// ceiling), and packages an EngineResult with Status=OutcomeBudgetExceeded.
+//
+// EngineResult.Usage intentionally holds the child-local aggregate only,
+// not the combined snapshot. The subgraph handler copies this onto
+// Outcome.ChildUsage and the parent trace's AggregateUsage folds it back
+// in; using the combined value here would double-count the parent's own
+// spend once the parent aggregates a second time.
 func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
-	summary := s.trace.AggregateUsage()
+	combined := e.combinedUsageForBudget(s)
 	var costSnap *CostSnapshot
-	if summary != nil {
+	if combined != nil {
 		costSnap = &CostSnapshot{
-			TotalTokens:    summary.TotalTokens,
-			TotalCostUSD:   summary.TotalCostUSD,
-			ProviderTotals: summary.ProviderTotals,
+			TotalTokens:    combined.TotalTokens,
+			TotalCostUSD:   combined.TotalCostUSD,
+			ProviderTotals: combined.ProviderTotals,
 			WallElapsed:    time.Since(s.trace.StartTime),
 		}
 	}
@@ -110,7 +121,7 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 			CompletedNodes:  s.cp.CompletedNodes,
 			Context:         s.pctx.Snapshot(),
 			Trace:           s.trace,
-			Usage:           summary,
+			Usage:           s.trace.AggregateUsage(),
 			BudgetLimitsHit: []string{breach.Kind.String()},
 		},
 	}

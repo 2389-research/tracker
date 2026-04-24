@@ -646,3 +646,92 @@ func TestSubgraph_BudgetBypass_Fix_NestedSubgraph(t *testing.T) {
 		t.Errorf("ProviderTotals[openai].CostUSD = %f, want 0.12", got.CostUSD)
 	}
 }
+
+// TestSubgraph_BudgetExceededEvent_ReportsCombinedSnapshot verifies that when
+// a child engine halts mid-subgraph on a combined baseline+local breach, the
+// EventBudgetExceeded's CostSnapshot reports the *combined* value — the one
+// that actually tripped the guard — rather than just the child-local trace
+// aggregate. Without this, diagnostics would show a sub-ceiling number
+// alongside a "budget exceeded" message, which is confusing. See PR #187
+// review (Copilot).
+func TestSubgraph_BudgetExceededEvent_ReportsCombinedSnapshot(t *testing.T) {
+	sub := NewGraph("sub")
+	sub.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	sub.AddNode(&Node{ID: "burn1", Shape: "box"})
+	sub.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	sub.AddEdge(&Edge{From: "s", To: "burn1"})
+	sub.AddEdge(&Edge{From: "burn1", To: "e"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			switch node.ID {
+			case "parent_pre":
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+			case "burn1":
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"child": sub},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	g := NewGraph("parent")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "parent_pre", Shape: "box"})
+	g.AddNode(&Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "parent_pre"})
+	g.AddEdge(&Edge{From: "parent_pre", To: "sg"})
+	g.AddEdge(&Edge{From: "sg", To: "e"})
+
+	var budgetEvents []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventBudgetExceeded {
+			budgetEvents = append(budgetEvents, evt)
+		}
+	})
+
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 100})
+	engine := NewEngine(g, reg, WithBudgetGuard(guard), WithPipelineEventHandler(handler))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeBudgetExceeded {
+		t.Fatalf("Status = %q, want %q", result.Status, OutcomeBudgetExceeded)
+	}
+
+	// The child engine halts first on combined 50+60=110 > 100 and emits its
+	// own EventBudgetExceeded with the combined snapshot. The parent's
+	// between-node check also fires afterward with its own emission. We
+	// assert that at least one event reports the combined total (≥110).
+	if len(budgetEvents) == 0 {
+		t.Fatal("no EventBudgetExceeded emitted")
+	}
+	var sawCombined bool
+	for _, evt := range budgetEvents {
+		if evt.Cost == nil {
+			continue
+		}
+		if evt.Cost.TotalTokens >= 110 {
+			sawCombined = true
+			break
+		}
+	}
+	if !sawCombined {
+		for _, evt := range budgetEvents {
+			if evt.Cost != nil {
+				t.Logf("EventBudgetExceeded Cost.TotalTokens = %d", evt.Cost.TotalTokens)
+			}
+		}
+		t.Errorf("no EventBudgetExceeded reported the combined total (want ≥110 = 50 baseline + 60 child); child-local sub-snapshot was emitted instead")
+	}
+}
