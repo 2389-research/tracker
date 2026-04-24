@@ -684,6 +684,11 @@ func TestBuildACPResult_MinOneTurn(t *testing.T) {
 }
 
 func TestEstimateACPUsage(t *testing.T) {
+	// Hermeticity: explicitly clear TRACKER_ACP_CACHE_READ_RATIO so a
+	// developer or CI with the env var set doesn't break the baseline
+	// expectations below (which assume the default all-fresh pricing).
+	// Each subtest inherits this via t.Setenv's automatic restoration.
+	t.Setenv(acpCacheReadRatioEnv, "")
 	tests := []struct {
 		name            string
 		cfg             pipeline.AgentRunConfig
@@ -870,6 +875,25 @@ func TestEstimateACPUsage_CacheReadRatio(t *testing.T) {
 			wantCacheRd:  0,
 			wantCacheSet: false,
 		},
+		{
+			// strconv.ParseFloat("NaN") succeeds but every comparison
+			// with NaN is false, so without an explicit IsNaN guard
+			// the ratio would silently slip through as NaN.
+			name:         "NaN — ignored",
+			envVal:       "NaN",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "Inf — ignored",
+			envVal:       "Inf",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -889,12 +913,14 @@ func TestEstimateACPUsage_CacheReadRatio(t *testing.T) {
 			} else if usage.CacheReadTokens != nil {
 				t.Errorf("CacheReadTokens = *%d; want nil for no-split case", *usage.CacheReadTokens)
 			}
-			// TotalTokens always covers the full billable footprint: fresh
-			// input + cache read + output. This is what budget guards
-			// compare against.
-			wantTotal := tt.wantFresh + tt.wantCacheRd + 1 // ceil(4/4) = 1 output token
+			// TotalTokens follows the shared provider convention: fresh
+			// input + output only; cache-read tokens live in
+			// Usage.CacheReadTokens and are priced independently by
+			// llm.EstimateCost. Keeping it consistent across backends
+			// means BudgetGuard's --max-tokens semantics are uniform.
+			wantTotal := tt.wantFresh + 1 // ceil(4/4) = 1 output token
 			if usage.TotalTokens != wantTotal {
-				t.Errorf("TotalTokens = %d, want %d", usage.TotalTokens, wantTotal)
+				t.Errorf("TotalTokens = %d, want %d (fresh input + output only)", usage.TotalTokens, wantTotal)
 			}
 		})
 	}

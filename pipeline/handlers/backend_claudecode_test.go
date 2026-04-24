@@ -398,9 +398,12 @@ func TestParseNDJSONResultMessage_CacheTokens(t *testing.T) {
 	if *got.CacheWriteTokens != 500 {
 		t.Errorf("CacheWriteTokens = %d, want 500", *got.CacheWriteTokens)
 	}
-	// TotalTokens covers the full billable footprint.
-	if got.TotalTokens != 200+100+8000+500 {
-		t.Errorf("TotalTokens = %d, want %d (fresh input + output + cache read + cache write)", got.TotalTokens, 200+100+8000+500)
+	// TotalTokens stays fresh-input + output to match the cross-provider
+	// convention (llm/anthropic/translate_response.go:54); cache tokens
+	// are tracked separately via the *int fields above and priced
+	// independently by llm.EstimateCost.
+	if got.TotalTokens != 200+100 {
+		t.Errorf("TotalTokens = %d, want %d (fresh input + output only; cache tokens tracked separately per provider convention)", got.TotalTokens, 200+100)
 	}
 }
 

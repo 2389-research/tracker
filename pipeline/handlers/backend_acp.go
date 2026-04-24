@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -58,7 +59,12 @@ func parseACPCacheReadRatio() float64 {
 		return 0
 	}
 	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v <= 0 || v > 1 {
+	// NaN must be explicitly rejected: strconv.ParseFloat("NaN", 64)
+	// returns math.NaN() with err=nil, and NaN fails every comparison
+	// silently (NaN <= 0 and NaN > 1 are both false), so without the
+	// IsNaN/IsInf guard we'd slip through the range check and return
+	// NaN as a "valid" ratio, disabling the split without warning.
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 || v > 1 {
 		acpCacheRatioWarned.Do(func() {
 			log.Printf("[acp] %s=%q is outside (0, 1] or unparseable — ignoring; input will be priced as fresh", acpCacheReadRatioEnv, raw)
 		})
@@ -525,10 +531,15 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, counts acpRuneCounts) llm.Usa
 		inTokens -= cacheReadTokens
 	}
 
+	// TotalTokens stays fresh-input + output (no cache tokens) to match
+	// the convention in llm/anthropic/translate_response.go:54 so
+	// BudgetGuard's --max-tokens semantics are consistent across
+	// backends. Cache-read tokens are tracked separately and priced
+	// independently by llm.EstimateCost.
 	usage := llm.Usage{
 		InputTokens:  inTokens,
 		OutputTokens: outTokens,
-		TotalTokens:  inTokens + outTokens + cacheReadTokens,
+		TotalTokens:  inTokens + outTokens,
 		Raw: ACPUsageMarker{
 			Estimated: true,
 			Source:    "acp-chars-heuristic",

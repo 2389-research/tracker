@@ -161,14 +161,16 @@ func storeResult(msg ndjsonMessage, state *runState) {
 	}
 
 	if msg.Usage != nil {
-		// TotalTokens includes cache tokens because operators reading
-		// "total" expect the full billable footprint, not just fresh
-		// input + output. llm.EstimateCost prices the cache lines
-		// separately via the *int fields below.
+		// TotalTokens stays fresh-input + output to match the convention
+		// in llm/anthropic/translate_response.go:54 — cache tokens are
+		// tracked separately via the *int fields and priced independently
+		// by llm.EstimateCost. Diverging here would make BudgetGuard's
+		// --max-tokens semantics differ by backend, which is exactly
+		// what we're trying to avoid.
 		result.Usage = llm.Usage{
 			InputTokens:   msg.Usage.InputTokens,
 			OutputTokens:  msg.Usage.OutputTokens,
-			TotalTokens:   msg.Usage.InputTokens + msg.Usage.OutputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens,
+			TotalTokens:   msg.Usage.InputTokens + msg.Usage.OutputTokens,
 			EstimatedCost: msg.TotalCostUSD,
 		}
 		if msg.Usage.CacheReadInputTokens > 0 {
