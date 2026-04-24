@@ -838,6 +838,47 @@ func TestACPHandler_AccumulatesChannelRunes(t *testing.T) {
 	}
 }
 
+// TestCountToolResultRunes_CombinedContentAndRawOutput pins that the
+// billing-path helper counts BOTH Content blocks AND RawOutput when both
+// are present, rather than treating RawOutput as a fallback-only field.
+// extractToolCallOutput (the display helper) drops RawOutput when Content
+// is non-empty; using that for billing would silently undercount any ACP
+// update that ships structured content + a larger raw payload.
+func TestCountToolResultRunes_CombinedContentAndRawOutput(t *testing.T) {
+	content := []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(strings.Repeat("c", 40)))}
+	rawOutput := map[string]any{"stdout": strings.Repeat("r", 100)}
+
+	got := countToolResultRunes(content, rawOutput)
+
+	// Content contributes 40 runes; rawOutput JSON-serializes to
+	// `{"stdout":"rrrrr..."}` which is 100 + ~12 framing characters.
+	// Require at minimum both sources together, i.e. strictly > 100.
+	if got <= 100 {
+		t.Errorf("countToolResultRunes = %d; want > 100 (must include both Content ≈40 and RawOutput ≈112)", got)
+	}
+	if got < 140 {
+		t.Errorf("countToolResultRunes = %d; want ≥ 140 (~40 from Content + ~100 from RawOutput JSON body)", got)
+	}
+}
+
+// TestCountToolCallContentRunes_DiffCountsFullText pins that a diff content
+// item contributes its full NewText + OldText + Path rune count — not just
+// "diff <path>" as the display formatter would produce. Diffs are a common
+// tool-call shape for editing workflows, and the pre-fix code collapsed
+// them to a label, silently missing the actual byte volume that round-trips
+// through the model.
+func TestCountToolCallContentRunes_DiffCountsFullText(t *testing.T) {
+	newText := strings.Repeat("n", 300)
+	oldText := strings.Repeat("o", 200)
+	diff := acp.ToolDiffContent("some/long/path.go", newText, oldText)
+	got := countToolCallContentRunes(diff)
+
+	// NewText 300 + OldText 200 + Path 17 = 517.
+	if got != 517 {
+		t.Errorf("countToolCallContentRunes = %d; want 517 (NewText 300 + OldText 200 + Path 17) — not just the \"diff <path>\" label", got)
+	}
+}
+
 // TestBuildACPResult_CountsAllChannels threads the handler-level accumulation
 // through buildACPResult and asserts the resulting Usage reflects reasoning
 // + tool args on the output side, tool results on the input side, and

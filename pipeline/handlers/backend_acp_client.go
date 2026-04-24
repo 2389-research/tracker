@@ -152,7 +152,11 @@ func (h *acpClientHandler) handleToolCallStart(tc *acp.SessionUpdateToolCall, no
 // (or error body) is what the ACP bridge feeds back into the model's
 // context on the next turn, so it's billable as input and tracked under
 // toolResultRunes — counted even on failed tool calls since the failure
-// payload still round-trips through the model.
+// payload still round-trips through the model. The rune count uses the
+// full billable payload (all Content blocks INCLUDING diff NewText/OldText
+// + RawOutput when present) rather than the display-oriented
+// extractToolCallOutput, which drops RawOutput whenever Content exists
+// and reduces diffs to a one-line label.
 func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, now time.Time) {
 	if tc.Status == nil {
 		return
@@ -161,22 +165,64 @@ func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, n
 	if status != acp.ToolCallStatusCompleted && status != acp.ToolCallStatusFailed {
 		return
 	}
-	output := extractToolCallOutput(tc.Content, tc.RawOutput)
-	outputRunes := utf8.RuneCountInString(output)
+	billableRunes := countToolResultRunes(tc.Content, tc.RawOutput)
 
 	h.mu.Lock()
 	name := h.toolNames[string(tc.ToolCallId)]
 	h.turnCount++ // each tool round-trip counts as a turn
-	h.toolResultRunes += outputRunes
+	h.toolResultRunes += billableRunes
 	h.mu.Unlock()
 
+	// Display path uses the existing summary formatter — humans reading the
+	// event stream don't need the full diff bytes, just a "diff <path>"
+	// marker. The billing path above uses the full payload.
+	displayOutput := extractToolCallOutput(tc.Content, tc.RawOutput)
 	evt := agent.Event{Type: agent.EventToolCallEnd, Timestamp: now, ToolName: name}
 	if status == acp.ToolCallStatusFailed {
-		evt.ToolError = output
+		evt.ToolError = displayOutput
 	} else {
-		evt.ToolOutput = output
+		evt.ToolOutput = displayOutput
 	}
 	h.safeEmit(evt)
+}
+
+// countToolResultRunes sums rune counts across every billable field of a
+// tool-call completion payload: text content blocks, diff NewText/OldText/
+// Path, terminal IDs, and RawOutput (JSON-serialized when non-nil). Unlike
+// the display formatter extractToolCallOutput, this counts Content and
+// RawOutput independently — not as fallbacks — because the bridge may send
+// both, and both round-trip through the model as next-turn input context.
+// Diff items contribute their full before/after text, not just the path,
+// since the bridge re-sends the diff payload to the model.
+func countToolResultRunes(content []acp.ToolCallContent, rawOutput any) int {
+	total := 0
+	for _, c := range content {
+		total += countToolCallContentRunes(c)
+	}
+	if rawOutput != nil {
+		total += utf8.RuneCountInString(formatRawInput(rawOutput))
+	}
+	return total
+}
+
+// countToolCallContentRunes sums rune counts across all billable fields of
+// a single ToolCallContent item.
+func countToolCallContentRunes(c acp.ToolCallContent) int {
+	total := 0
+	if c.Content != nil {
+		total += utf8.RuneCountInString(extractContentText(c.Content.Content))
+	}
+	if c.Diff != nil {
+		total += utf8.RuneCountInString(c.Diff.NewText)
+		total += utf8.RuneCountInString(c.Diff.Path)
+		if c.Diff.OldText != nil {
+			total += utf8.RuneCountInString(*c.Diff.OldText)
+		}
+	}
+	if c.Terminal != nil {
+		total += utf8.RuneCountInString(c.Terminal.TerminalId)
+	}
+	return total
 }
 
 // RequestPermission auto-approves all permission requests by selecting the
