@@ -687,7 +687,7 @@ func TestEstimateACPUsage(t *testing.T) {
 	tests := []struct {
 		name            string
 		cfg             pipeline.AgentRunConfig
-		outputRunes     int
+		counts          acpRuneCounts
 		wantInputTokens int
 		wantOutputTok   int
 		wantEstimated   bool
@@ -696,7 +696,7 @@ func TestEstimateACPUsage(t *testing.T) {
 		{
 			name:            "populates estimate and marker from rune counts",
 			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("a", 40), SystemPrompt: strings.Repeat("b", 40)},
-			outputRunes:     400,
+			counts:          acpRuneCounts{MessageOutput: 400},
 			wantInputTokens: 20,  // ceil(80/4) = 20
 			wantOutputTok:   100, // ceil(400/4) = 100
 			wantEstimated:   true,
@@ -704,13 +704,13 @@ func TestEstimateACPUsage(t *testing.T) {
 		{
 			name:           "nothing in, nothing out → zero usage",
 			cfg:            pipeline.AgentRunConfig{},
-			outputRunes:    0,
+			counts:         acpRuneCounts{},
 			wantZeroTokens: true,
 		},
 		{
 			name:            "prompt only, empty output — still estimated",
 			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("x", 100)},
-			outputRunes:     0,
+			counts:          acpRuneCounts{},
 			wantInputTokens: 25, // ceil(100/4) = 25
 			wantOutputTok:   0,
 			wantEstimated:   true,
@@ -720,7 +720,7 @@ func TestEstimateACPUsage(t *testing.T) {
 			// prompts, causing trackExternalBackendUsage to skip the session.
 			name:            "short prompt clamps to ≥1 token instead of floor-rounding to 0",
 			cfg:             pipeline.AgentRunConfig{Prompt: "hi"},
-			outputRunes:     3,
+			counts:          acpRuneCounts{MessageOutput: 3},
 			wantInputTokens: 1, // ceil(2/4) = 1
 			wantOutputTok:   1, // ceil(3/4) = 1
 			wantEstimated:   true,
@@ -731,15 +731,37 @@ func TestEstimateACPUsage(t *testing.T) {
 			// ceil(11/4) = 3 tokens, not ceil(33/4) = 9.
 			name:            "multibyte UTF-8 counted by runes, not bytes",
 			cfg:             pipeline.AgentRunConfig{Prompt: "こんにちは世界です。え"}, // 11 runes, 33 bytes
-			outputRunes:     0,
+			counts:          acpRuneCounts{},
 			wantInputTokens: 3, // ceil(11/4) = 3
 			wantOutputTok:   0,
+			wantEstimated:   true,
+		},
+		{
+			// Reasoning counts as output (priced at output rate today) AND
+			// is exposed via Usage.ReasoningTokens for future per-reasoning
+			// pricing. Tool-arg runes (LLM-produced invocations) also fold
+			// into output.
+			name:            "reasoning + tool args fold into output side, populate ReasoningTokens",
+			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("p", 40)},
+			counts:          acpRuneCounts{MessageOutput: 40, Reasoning: 80, ToolArgs: 40},
+			wantInputTokens: 10, // ceil(40/4) = 10
+			wantOutputTok:   40, // ceil((40+80+40)/4) = 40
+			wantEstimated:   true,
+		},
+		{
+			// Tool results fold into the INPUT side — the bridge re-sends
+			// tool output as next-turn input context.
+			name:            "tool results fold into input side",
+			cfg:             pipeline.AgentRunConfig{Prompt: strings.Repeat("p", 40)},
+			counts:          acpRuneCounts{MessageOutput: 40, ToolResults: 200},
+			wantInputTokens: 60, // ceil((40+200)/4) = 60
+			wantOutputTok:   10, // ceil(40/4) = 10
 			wantEstimated:   true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := estimateACPUsage(tt.cfg, tt.outputRunes)
+			got := estimateACPUsage(tt.cfg, tt.counts)
 			if tt.wantZeroTokens {
 				if got.TotalTokens != 0 || got.InputTokens != 0 || got.OutputTokens != 0 {
 					t.Errorf("want zero-token usage, got %+v", got)
@@ -772,6 +794,85 @@ func TestEstimateACPUsage(t *testing.T) {
 				t.Errorf("marker.Ratio = %d, want 4", marker.Ratio)
 			}
 		})
+	}
+}
+
+// TestACPHandler_AccumulatesChannelRunes pins that the acpClientHandler's
+// three new rune counters (reasoningRunes, toolArgRunes, toolResultRunes)
+// advance when the corresponding SessionUpdate types fire. Without this,
+// a refactor that silently drops one of the append paths would be invisible
+// to the unit tests above, which consume counts directly.
+func TestACPHandler_AccumulatesChannelRunes(t *testing.T) {
+	h := &acpClientHandler{
+		emit:      func(agent.Event) {},
+		toolNames: make(map[string]string),
+	}
+
+	thoughtText := strings.Repeat("t", 40)
+	toolArgs := map[string]any{"cmd": strings.Repeat("c", 50)}
+	toolResult := strings.Repeat("r", 120)
+
+	_ = h.SessionUpdate(context.Background(), acp.SessionNotification{
+		Update: acp.UpdateAgentThoughtText(thoughtText),
+	})
+	_ = h.SessionUpdate(context.Background(), acp.SessionNotification{
+		Update: acp.StartToolCall("t1", "bash", acp.WithStartRawInput(toolArgs)),
+	})
+	_ = h.SessionUpdate(context.Background(), acp.SessionNotification{
+		Update: acp.UpdateToolCall("t1",
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			acp.WithUpdateContent([]acp.ToolCallContent{acp.ToolContent(acp.TextBlock(toolResult))}),
+		),
+	})
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.reasoningRunes != 40 {
+		t.Errorf("reasoningRunes = %d, want 40", h.reasoningRunes)
+	}
+	if h.toolArgRunes == 0 {
+		t.Error("toolArgRunes = 0; want non-zero from JSON-formatted args")
+	}
+	if h.toolResultRunes != 120 {
+		t.Errorf("toolResultRunes = %d, want 120", h.toolResultRunes)
+	}
+}
+
+// TestBuildACPResult_CountsAllChannels threads the handler-level accumulation
+// through buildACPResult and asserts the resulting Usage reflects reasoning
+// + tool args on the output side, tool results on the input side, and
+// Usage.ReasoningTokens is populated. Previously (#184) these channels were
+// silently ignored — a multi-turn tool-heavy session would report a token
+// total that missed tens of thousands of real tokens.
+func TestBuildACPResult_CountsAllChannels(t *testing.T) {
+	h := &acpClientHandler{
+		textParts:       []string{strings.Repeat("m", 40)},
+		reasoningRunes:  80,
+		toolArgRunes:    40,
+		toolResultRunes: 200,
+		turnCount:       2,
+		toolNames:       map[string]string{"t1": "bash"},
+	}
+	cfg := pipeline.AgentRunConfig{
+		Prompt:       strings.Repeat("p", 40),
+		SystemPrompt: strings.Repeat("s", 40),
+		Model:        "claude-sonnet-4-5",
+	}
+	result := buildACPResult(h, acp.PromptResponse{}, cfg)
+
+	// input = (prompt 40 + systemPrompt 40 + toolResults 200) / 4 = 70
+	// output = (message 40 + reasoning 80 + toolArgs 40) / 4 = 40
+	if result.Usage.InputTokens != 70 {
+		t.Errorf("InputTokens = %d, want 70 (prompt + systemPrompt + tool results)", result.Usage.InputTokens)
+	}
+	if result.Usage.OutputTokens != 40 {
+		t.Errorf("OutputTokens = %d, want 40 (message + reasoning + tool args)", result.Usage.OutputTokens)
+	}
+	if result.Usage.ReasoningTokens == nil {
+		t.Fatal("ReasoningTokens is nil; want populated from reasoningRunes")
+	}
+	if *result.Usage.ReasoningTokens != 20 {
+		t.Errorf("ReasoningTokens = %d, want 20 (ceil(80/4))", *result.Usage.ReasoningTokens)
 	}
 }
 

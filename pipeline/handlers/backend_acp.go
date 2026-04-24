@@ -397,6 +397,19 @@ func buildACPPromptBlocks(cfg pipeline.AgentRunConfig) []acp.ContentBlock {
 	return blocks
 }
 
+// acpRuneCounts bundles the four rune-count channels that flow into the ACP
+// usage estimate. Splitting them explicitly (instead of passing a single
+// pre-summed output count) lets estimateACPUsage attribute reasoning to
+// Usage.ReasoningTokens and route tool-result payloads to the input side
+// where they're actually billed — the bridge re-sends tool output as
+// next-turn input context.
+type acpRuneCounts struct {
+	MessageOutput int // handler.textParts — visible assistant text (billable output)
+	Reasoning     int // handler.reasoningRunes — thought-chunk text (billable output + ReasoningTokens)
+	ToolArgs      int // handler.toolArgRunes — LLM-produced tool invocations (billable output)
+	ToolResults   int // handler.toolResultRunes — tool output fed back to the model (billable input)
+}
+
 // buildACPResult constructs a SessionResult from the handler's accumulated state.
 // Usage is populated with a character-count-derived estimate (see
 // estimateACPUsage) since the ACP protocol does not surface real token counts.
@@ -410,9 +423,13 @@ func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse, cfg pipe
 	turns := handler.turnCount
 	toolCount := handler.toolCount
 	textPartsLen := len(handler.textParts)
-	outputRunes := 0
+	counts := acpRuneCounts{
+		Reasoning:   handler.reasoningRunes,
+		ToolArgs:    handler.toolArgRunes,
+		ToolResults: handler.toolResultRunes,
+	}
 	for _, part := range handler.textParts {
-		outputRunes += utf8.RuneCountInString(part)
+		counts.MessageOutput += utf8.RuneCountInString(part)
 	}
 	toolNames := make(map[string]int, len(handler.toolNames))
 	for _, name := range handler.toolNames {
@@ -429,24 +446,25 @@ func buildACPResult(handler *acpClientHandler, resp acp.PromptResponse, cfg pipe
 	if result.Turns == 0 && (textPartsLen > 0 || toolCount > 0) {
 		result.Turns = 1
 	}
-	result.Usage = estimateACPUsage(cfg, outputRunes)
+	result.Usage = estimateACPUsage(cfg, counts)
 
 	return result
 }
 
 // estimateACPUsage synthesizes an approximate llm.Usage from rune counts of
-// the input prompt (system + user) and the collected output text. The ACP
-// spec exposes no native usage surface, so a heuristic is the only option.
-// The caller owns prompt/system-prompt strings via cfg; output comes from
-// the handler's collected text (already locked by buildACPResult) as a
-// pre-computed rune count so we don't allocate a joined string under lock.
-// Returns a zero-valued Usage when there is no input and no output.
-// Token counts use ceiling division with a 1-token floor for any non-empty
-// side: this prevents 1–3-rune prompts from rounding to zero, which would
-// otherwise defeat TokenTracker's early-return on zero totals and leave the
-// session untracked for budget enforcement.
-func estimateACPUsage(cfg pipeline.AgentRunConfig, outputRunes int) llm.Usage {
-	inputRunes := utf8.RuneCountInString(cfg.Prompt) + utf8.RuneCountInString(cfg.SystemPrompt)
+// the input prompt (system + user + tool-result payloads fed back to the
+// model) and the collected output channels (message text + reasoning +
+// tool-call arguments). The ACP spec exposes no native usage surface, so a
+// heuristic is the only option. Reasoning gets its own ReasoningTokens
+// field AND counts in OutputTokens, matching how providers price extended
+// thinking today (output rate). Returns a zero-valued Usage when every
+// channel is empty. Token counts use ceiling division so 1–3-rune inputs
+// round to 1 token rather than 0, preventing TokenTracker's
+// zero-early-return from dropping the session.
+func estimateACPUsage(cfg pipeline.AgentRunConfig, counts acpRuneCounts) llm.Usage {
+	promptRunes := utf8.RuneCountInString(cfg.Prompt) + utf8.RuneCountInString(cfg.SystemPrompt)
+	inputRunes := promptRunes + counts.ToolResults
+	outputRunes := counts.MessageOutput + counts.Reasoning + counts.ToolArgs
 	if inputRunes == 0 && outputRunes == 0 {
 		return llm.Usage{}
 	}
@@ -463,6 +481,9 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, outputRunes int) llm.Usage {
 			Source:    "acp-chars-heuristic",
 			Ratio:     acpTokenEstimateRatio,
 		},
+	}
+	if reasoningTokens := ceilDiv(counts.Reasoning, acpTokenEstimateRatio); reasoningTokens > 0 {
+		usage.ReasoningTokens = &reasoningTokens
 	}
 	usage.EstimatedCost = llm.EstimateCost(cfg.Model, usage)
 	return usage

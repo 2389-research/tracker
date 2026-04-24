@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -24,16 +25,32 @@ import (
 // acpClientHandler implements acp.Client, translating ACP session updates into
 // agent.Event objects via the emit callback and handling agent requests for
 // file operations, terminal commands, and permission approval.
+//
+// The rune-count fields below feed estimateACPUsage. Each is an O(input) sum
+// accumulated as notifications arrive — we store counts, not text, so a
+// session with megabytes of tool output or reasoning costs O(1) memory per
+// channel rather than buffering the raw content. The three channels map
+// onto token-usage lines:
+//
+//   - reasoningRunes → llm.Usage.ReasoningTokens (priced at output rate
+//     by providers today; also folded into OutputTokens for EstimateCost).
+//   - toolArgRunes   → tool-call arguments the model produced, billable as
+//     output alongside message chunks.
+//   - toolResultRunes → tool-call output the bridge feeds back as input
+//     context on the next model turn; counts on the input side.
 type acpClientHandler struct {
 	emit       func(agent.Event)
 	workingDir string
 
-	mu        sync.Mutex
-	terminals map[string]*terminalState
-	textParts []string
-	toolNames map[string]string // toolCallId → title
-	toolCount int
-	turnCount int
+	mu              sync.Mutex
+	terminals       map[string]*terminalState
+	textParts       []string
+	toolNames       map[string]string // toolCallId → title
+	toolCount       int
+	turnCount       int
+	reasoningRunes  int
+	toolArgRunes    int
+	toolResultRunes int
 }
 
 // terminalState tracks a running subprocess created via CreateTerminal.
@@ -99,29 +116,43 @@ func (h *acpClientHandler) handleMessageChunk(chunk *acp.SessionUpdateAgentMessa
 	h.safeEmit(agent.Event{Type: agent.EventTextDelta, Timestamp: now, Text: text})
 }
 
-// handleThoughtChunk processes an agent reasoning/thought chunk.
+// handleThoughtChunk processes an agent reasoning/thought chunk. The chunk
+// text is billed as output (and recorded in llm.Usage.ReasoningTokens); see
+// estimateACPUsage for how reasoningRunes flows into the heuristic.
 func (h *acpClientHandler) handleThoughtChunk(chunk *acp.SessionUpdateAgentThoughtChunk, now time.Time) {
 	text := extractContentText(chunk.Content)
-	if text != "" {
-		h.safeEmit(agent.Event{Type: agent.EventLLMReasoning, Timestamp: now, Text: text})
+	if text == "" {
+		return
 	}
+	h.mu.Lock()
+	h.reasoningRunes += utf8.RuneCountInString(text)
+	h.mu.Unlock()
+	h.safeEmit(agent.Event{Type: agent.EventLLMReasoning, Timestamp: now, Text: text})
 }
 
-// handleToolCallStart processes a new tool call notification.
+// handleToolCallStart processes a new tool call notification. The tool-call
+// arguments (the JSON the model produced to invoke the tool) are billable
+// output alongside text message chunks.
 func (h *acpClientHandler) handleToolCallStart(tc *acp.SessionUpdateToolCall, now time.Time) {
+	argStr := formatRawInput(tc.RawInput)
 	h.mu.Lock()
 	h.toolNames[string(tc.ToolCallId)] = tc.Title
 	h.toolCount++
+	h.toolArgRunes += utf8.RuneCountInString(argStr)
 	h.mu.Unlock()
 	h.safeEmit(agent.Event{
 		Type:      agent.EventToolCallStart,
 		Timestamp: now,
 		ToolName:  tc.Title,
-		ToolInput: formatRawInput(tc.RawInput),
+		ToolInput: argStr,
 	})
 }
 
-// handleToolCallUpdate processes a tool call status update.
+// handleToolCallUpdate processes a tool call status update. The tool output
+// (or error body) is what the ACP bridge feeds back into the model's
+// context on the next turn, so it's billable as input and tracked under
+// toolResultRunes — counted even on failed tool calls since the failure
+// payload still round-trips through the model.
 func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, now time.Time) {
 	if tc.Status == nil {
 		return
@@ -130,13 +161,16 @@ func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, n
 	if status != acp.ToolCallStatusCompleted && status != acp.ToolCallStatusFailed {
 		return
 	}
+	output := extractToolCallOutput(tc.Content, tc.RawOutput)
+	outputRunes := utf8.RuneCountInString(output)
+
 	h.mu.Lock()
 	name := h.toolNames[string(tc.ToolCallId)]
 	h.turnCount++ // each tool round-trip counts as a turn
+	h.toolResultRunes += outputRunes
 	h.mu.Unlock()
 
 	evt := agent.Event{Type: agent.EventToolCallEnd, Timestamp: now, ToolName: name}
-	output := extractToolCallOutput(tc.Content, tc.RawOutput)
 	if status == acp.ToolCallStatusFailed {
 		evt.ToolError = output
 	} else {
