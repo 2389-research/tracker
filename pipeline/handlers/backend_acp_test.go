@@ -797,6 +797,109 @@ func TestEstimateACPUsage(t *testing.T) {
 	}
 }
 
+// TestEstimateACPUsage_CacheReadRatio pins the #185 Track B optional
+// tuning knob: TRACKER_ACP_CACHE_READ_RATIO, when set to a value in
+// (0, 1], splits the estimated input tokens between fresh InputTokens
+// and CacheReadTokens. Unset, zero, or out-of-range → no split and
+// all input is priced as fresh (conservative default — never
+// under-reports spend). llm.EstimateCost prices CacheReadTokens at
+// 10% of the input rate, so this lets operators running stable-context
+// Claude workloads dial in a more realistic cost estimate.
+func TestEstimateACPUsage_CacheReadRatio(t *testing.T) {
+	tests := []struct {
+		name         string
+		envVal       string
+		inputRunes   int // routed via cfg.Prompt
+		wantFresh    int
+		wantCacheRd  int
+		wantCacheSet bool
+	}{
+		{
+			name:         "default (unset) — all fresh",
+			envVal:       "",
+			inputRunes:   400,
+			wantFresh:    100, // ceil(400/4)
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "80% cache-read splits input",
+			envVal:       "0.8",
+			inputRunes:   400,
+			wantFresh:    20, // 100 - int(100*0.8) = 100 - 80
+			wantCacheRd:  80,
+			wantCacheSet: true,
+		},
+		{
+			name:         "50% cache-read splits input",
+			envVal:       "0.5",
+			inputRunes:   400,
+			wantFresh:    50,
+			wantCacheRd:  50,
+			wantCacheSet: true,
+		},
+		{
+			name:         "100% cache-read routes all input to cache",
+			envVal:       "1.0",
+			inputRunes:   400,
+			wantFresh:    0,
+			wantCacheRd:  100,
+			wantCacheSet: true,
+		},
+		{
+			name:         "negative — ignored, fall back to no split",
+			envVal:       "-0.3",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "> 1 — ignored",
+			envVal:       "1.5",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+		{
+			name:         "non-numeric — ignored",
+			envVal:       "eighty-percent",
+			inputRunes:   400,
+			wantFresh:    100,
+			wantCacheRd:  0,
+			wantCacheSet: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(acpCacheReadRatioEnv, tt.envVal)
+			cfg := pipeline.AgentRunConfig{Prompt: strings.Repeat("p", tt.inputRunes)}
+			usage := estimateACPUsage(cfg, acpRuneCounts{MessageOutput: 4})
+			if usage.InputTokens != tt.wantFresh {
+				t.Errorf("InputTokens = %d, want %d", usage.InputTokens, tt.wantFresh)
+			}
+			if tt.wantCacheSet {
+				if usage.CacheReadTokens == nil {
+					t.Fatalf("CacheReadTokens = nil; want *%d", tt.wantCacheRd)
+				}
+				if *usage.CacheReadTokens != tt.wantCacheRd {
+					t.Errorf("CacheReadTokens = %d, want %d", *usage.CacheReadTokens, tt.wantCacheRd)
+				}
+			} else if usage.CacheReadTokens != nil {
+				t.Errorf("CacheReadTokens = *%d; want nil for no-split case", *usage.CacheReadTokens)
+			}
+			// TotalTokens always covers the full billable footprint: fresh
+			// input + cache read + output. This is what budget guards
+			// compare against.
+			wantTotal := tt.wantFresh + tt.wantCacheRd + 1 // ceil(4/4) = 1 output token
+			if usage.TotalTokens != wantTotal {
+				t.Errorf("TotalTokens = %d, want %d", usage.TotalTokens, wantTotal)
+			}
+		})
+	}
+}
+
 // TestACPHandler_AccumulatesChannelRunes pins that the acpClientHandler's
 // three new rune counters (reasoningRunes, toolArgRunes, toolResultRunes)
 // advance when the corresponding SessionUpdate types fire. Without this,
