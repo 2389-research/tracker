@@ -908,3 +908,190 @@ func TestManagerAttr_EmptyStringPrecedence(t *testing.T) {
 		}
 	})
 }
+
+// buildManagerLoopParentGraph constructs a parent graph containing a
+// house-shape node that references a child subgraph. Used by the #188
+// budget-bypass regression suite to exercise the full parent-engine →
+// ChildRunContextFromContext → manager_loop handler → child engine path.
+func buildManagerLoopParentGraph() *pipeline.Graph {
+	g := pipeline.NewGraph("parent")
+	g.AddNode(&pipeline.Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&pipeline.Node{ID: "mgr", Shape: "house", Attrs: map[string]string{
+		"subgraph_ref":  "child",
+		"poll_interval": "1ms",
+		"max_cycles":    "1000",
+	}})
+	g.AddNode(&pipeline.Node{ID: "follow", Shape: "box", Attrs: map[string]string{}})
+	g.AddNode(&pipeline.Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&pipeline.Edge{From: "s", To: "mgr"})
+	g.AddEdge(&pipeline.Edge{From: "mgr", To: "follow"})
+	g.AddEdge(&pipeline.Edge{From: "follow", To: "e"})
+	g.Nodes["mgr"].Handler = "stack.manager_loop"
+	g.Nodes["follow"].Handler = "codergen"
+	return g
+}
+
+// TestManagerLoop_BudgetBypass_Fix_UsageRollup pins that a codergen node
+// nested under a stack.manager_loop supervisor contributes its Stats to
+// the parent's EngineResult.Usage.ProviderTotals. Pre-fix, the child
+// engine's trace ran in isolation and its usage never reached the parent.
+func TestManagerLoop_BudgetBypass_Fix_UsageRollup(t *testing.T) {
+	const childTokens = 500
+	const childCost = 0.05
+
+	childGraph := buildChildGraph("codergen")
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(NewStartHandler())
+	registry.Register(NewExitHandler())
+	registry.Register(&stubHandler{
+		name: "codergen",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			if node.ID == "step" {
+				return pipeline.Outcome{
+					Status: pipeline.OutcomeSuccess,
+					Stats: &pipeline.SessionStats{
+						InputTokens:  childTokens / 2,
+						OutputTokens: childTokens / 2,
+						TotalTokens:  childTokens,
+						CostUSD:      childCost,
+						Provider:     "anthropic",
+					},
+				}, nil
+			}
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+	graphs := map[string]*pipeline.Graph{"child": childGraph}
+	registry.Register(NewManagerLoopHandler(graphs, registry, pipeline.PipelineNoopHandler, nil))
+
+	g := buildManagerLoopParentGraph()
+	engine := pipeline.NewEngine(g, registry)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Usage == nil {
+		t.Fatal("result.Usage is nil; want child spend rolled up")
+	}
+	if result.Usage.TotalTokens != childTokens {
+		t.Errorf("TotalTokens = %d, want %d (child spend must fold into parent)", result.Usage.TotalTokens, childTokens)
+	}
+	got := result.Usage.ProviderTotals["anthropic"]
+	if got.TotalTokens != childTokens {
+		t.Errorf("ProviderTotals[anthropic].TotalTokens = %d, want %d", got.TotalTokens, childTokens)
+	}
+	if got.CostUSD != childCost {
+		t.Errorf("ProviderTotals[anthropic].CostUSD = %f, want %f", got.CostUSD, childCost)
+	}
+	if _, hasUnknown := result.Usage.ProviderTotals["unknown"]; hasUnknown {
+		t.Errorf("ProviderTotals contains \"unknown\"; child Stats.Provider should carry through")
+	}
+}
+
+// TestManagerLoop_BudgetBypass_Fix_ParentGuardHaltsAfterOverspend pins that
+// a manager_loop supervisor that overspends the parent's budget causes the
+// parent's between-node check to halt the run before the following node
+// runs. Pre-fix the parent guard never saw the child's spend at all.
+func TestManagerLoop_BudgetBypass_Fix_ParentGuardHaltsAfterOverspend(t *testing.T) {
+	childGraph := buildChildGraph("codergen")
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(NewStartHandler())
+	registry.Register(NewExitHandler())
+	registry.Register(&stubHandler{
+		name: "codergen",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			if node.ID == "step" {
+				return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: &pipeline.SessionStats{
+					TotalTokens: 10_000,
+					Provider:    "anthropic",
+				}}, nil
+			}
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+	graphs := map[string]*pipeline.Graph{"child": childGraph}
+	registry.Register(NewManagerLoopHandler(graphs, registry, pipeline.PipelineNoopHandler, nil))
+
+	g := buildManagerLoopParentGraph()
+	guard := pipeline.NewBudgetGuard(pipeline.BudgetLimits{MaxTotalTokens: 100})
+	engine := pipeline.NewEngine(g, registry, pipeline.WithBudgetGuard(guard))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != pipeline.OutcomeBudgetExceeded {
+		t.Fatalf("Status = %q, want %q (parent should halt after manager_loop overspends)", result.Status, pipeline.OutcomeBudgetExceeded)
+	}
+	if len(result.BudgetLimitsHit) == 0 {
+		t.Error("BudgetLimitsHit is empty; want tokens breach recorded")
+	}
+	for _, id := range result.CompletedNodes {
+		if id == "follow" {
+			t.Error("completed node 'follow' after manager_loop budget overspend; parent guard did not halt")
+		}
+	}
+}
+
+// TestManagerLoop_BudgetBypass_Fix_ChildGuardHaltsMidLoop pins the mid-loop
+// enforcement path: parent consumes 50 in parent_pre, manager_loop child
+// consumes 60 (combined 110 > 100), child's guard halts the child engine
+// mid-run with OutcomeBudgetExceeded. Manager_loop maps that to parent
+// OutcomeSuccess + ChildUsage so the parent's own check fires with the
+// correct OutcomeBudgetExceeded status — same mapping as SubgraphHandler
+// in #187.
+func TestManagerLoop_BudgetBypass_Fix_ChildGuardHaltsMidLoop(t *testing.T) {
+	childGraph := buildChildGraph("codergen")
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(NewStartHandler())
+	registry.Register(NewExitHandler())
+	registry.Register(&stubHandler{
+		name: "codergen",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			switch node.ID {
+			case "parent_pre":
+				return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: &pipeline.SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+			case "step":
+				return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: &pipeline.SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+			}
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+	graphs := map[string]*pipeline.Graph{"child": childGraph}
+	registry.Register(NewManagerLoopHandler(graphs, registry, pipeline.PipelineNoopHandler, nil))
+
+	// Parent: start -> parent_pre -> mgr -> exit.
+	g := pipeline.NewGraph("parent")
+	g.AddNode(&pipeline.Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&pipeline.Node{ID: "parent_pre", Shape: "box"})
+	g.AddNode(&pipeline.Node{ID: "mgr", Shape: "house", Attrs: map[string]string{
+		"subgraph_ref":  "child",
+		"poll_interval": "1ms",
+		"max_cycles":    "1000",
+	}})
+	g.AddNode(&pipeline.Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&pipeline.Edge{From: "s", To: "parent_pre"})
+	g.AddEdge(&pipeline.Edge{From: "parent_pre", To: "mgr"})
+	g.AddEdge(&pipeline.Edge{From: "mgr", To: "e"})
+	g.Nodes["parent_pre"].Handler = "codergen"
+	g.Nodes["mgr"].Handler = "stack.manager_loop"
+
+	guard := pipeline.NewBudgetGuard(pipeline.BudgetLimits{MaxTotalTokens: 100})
+	engine := pipeline.NewEngine(g, registry, pipeline.WithBudgetGuard(guard))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != pipeline.OutcomeBudgetExceeded {
+		t.Fatalf("Status = %q, want %q (child guard should halt on combined 50+60=110)", result.Status, pipeline.OutcomeBudgetExceeded)
+	}
+	if result.Usage == nil {
+		t.Fatal("result.Usage is nil")
+	}
+	// Parent_pre (1 session) + child step (1 session) = 2.
+	if result.Usage.SessionCount != 2 {
+		t.Errorf("Usage.SessionCount = %d, want 2 (parent_pre + one child session)", result.Usage.SessionCount)
+	}
+}
