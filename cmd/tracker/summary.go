@@ -248,6 +248,11 @@ func printTotalsBody(result *pipeline.EngineResult, agg aggregatedStats) {
 }
 
 // printTotalTokens prints the inline token totals within the Totals section.
+// Rules for the cost marker:
+//   - `~$X.XX usage` when every contributing provider is claude-code (Max
+//     subscription — flat-rate, not pay-per-token) OR when any contributing
+//     provider reported heuristic-derived usage (Estimated=true).
+//   - plain `($X.XX)` otherwise.
 func printTotalTokens(usage *pipeline.UsageSummary) {
 	if usage == nil {
 		return
@@ -258,19 +263,24 @@ func printTotalTokens(usage *pipeline.UsageSummary) {
 	tokenLine := fmt.Sprintf("  Tokens:       %s in / %s out",
 		formatNumber(usage.TotalInputTokens), formatNumber(usage.TotalOutputTokens))
 	if usage.TotalCostUSD > 0 {
-		// When all usage is from claude-code (Max subscription), label as
-		// usage estimate since Max is flat-rate, not pay-per-token.
-		if len(usage.ProviderTotals) == 1 {
-			if _, ok := usage.ProviderTotals["claude-code"]; ok {
-				tokenLine += fmt.Sprintf("  (~$%.2f usage)", usage.TotalCostUSD)
-			} else {
-				tokenLine += fmt.Sprintf("  ($%.2f)", usage.TotalCostUSD)
-			}
+		if isClaudeCodeOnly(usage) || usage.Estimated {
+			tokenLine += fmt.Sprintf("  (~$%.2f usage)", usage.TotalCostUSD)
 		} else {
 			tokenLine += fmt.Sprintf("  ($%.2f)", usage.TotalCostUSD)
 		}
 	}
 	fmt.Println(tokenLine)
+}
+
+// isClaudeCodeOnly reports whether the only contributing provider is
+// claude-code (Max subscription — flat-rate, not pay-per-token). Used to
+// decide whether to render cost as an estimate marker.
+func isClaudeCodeOnly(usage *pipeline.UsageSummary) bool {
+	if usage == nil || len(usage.ProviderTotals) != 1 {
+		return false
+	}
+	_, ok := usage.ProviderTotals["claude-code"]
+	return ok
 }
 
 // printNodeTable prints the per-node timing table with turns and tools columns.
@@ -325,17 +335,24 @@ func printTokensByProvider(result *pipeline.EngineResult) {
 	slices.Sort(providers)
 	fmt.Println()
 	fmt.Println("─── Tokens by Provider ────────────────────────────────────")
-	fmt.Printf("  %-12s  %10s  %10s\n", "Provider", "Input", "Output")
-	fmt.Printf("  %-12s  %10s  %10s\n", "────────", "─────", "──────")
+	fmt.Printf("  %-20s  %10s  %10s\n", "Provider", "Input", "Output")
+	fmt.Printf("  %-20s  %10s  %10s\n", "────────", "─────", "──────")
 	for _, p := range providers {
 		u := usage.ProviderTotals[p]
-		fmt.Printf("  %-12s  %10s  %10s\n", p, formatNumber(u.InputTokens), formatNumber(u.OutputTokens))
+		label := p
+		if u.Estimated {
+			label = p + " (estimated)"
+		}
+		fmt.Printf("  %-20s  %10s  %10s\n", label, formatNumber(u.InputTokens), formatNumber(u.OutputTokens))
 	}
-	fmt.Printf("  %-12s  %10s  %10s\n", "TOTAL", formatNumber(usage.TotalInputTokens), formatNumber(usage.TotalOutputTokens))
+	fmt.Printf("  %-20s  %10s  %10s\n", "TOTAL", formatNumber(usage.TotalInputTokens), formatNumber(usage.TotalOutputTokens))
 	if usage.TotalCostUSD > 0 {
-		if len(providers) == 1 && providers[0] == "claude-code" {
+		switch {
+		case len(providers) == 1 && providers[0] == "claude-code":
 			fmt.Printf("  Est. usage: ~$%.4f (Max subscription — no actual charge)\n", usage.TotalCostUSD)
-		} else {
+		case usage.Estimated:
+			fmt.Printf("  Cost: ~$%.4f  (estimated — heuristic spend on at least one provider)\n", usage.TotalCostUSD)
+		default:
 			fmt.Printf("  Cost: $%.4f\n", usage.TotalCostUSD)
 		}
 	}

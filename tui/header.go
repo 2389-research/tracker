@@ -93,7 +93,11 @@ func (h *Header) buildRightSegment(elapsed time.Duration) string {
 	}
 	if usage.EstimatedCost > 0 {
 		costLabel := fmt.Sprintf("$%.2f", usage.EstimatedCost)
-		if h.isClaudeCodeOnly() {
+		if h.isClaudeCodeOnly() || h.hasEstimatedProvider() {
+			// Claude Code Max subscription is flat-rate (no actual charge),
+			// and the ACP backend reports heuristic rune-count estimates;
+			// both cases render the cost with the "~$X usage" marker so
+			// operators don't read the header figure as a metered total.
 			costLabel = fmt.Sprintf("~$%.2f usage", usage.EstimatedCost)
 		}
 		right = lipgloss.NewStyle().Foreground(ColorAmber).Render(costLabel) + "  " + right
@@ -108,6 +112,24 @@ func (h *Header) isClaudeCodeOnly() bool {
 	}
 	providers := h.store.Tokens.Providers()
 	return len(providers) == 1 && providers[0] == "claude-code"
+}
+
+// hasEstimatedProvider returns true if any provider contributing to the
+// running token total reports heuristic-derived (non-metered) usage.
+// Today: the ACP backend — its per-prompt token counts are rune-based
+// estimates, and mixing them with real provider spend in the header would
+// silently misrepresent the mixed figure as metered. Future estimated
+// providers should be added to this check.
+func (h *Header) hasEstimatedProvider() bool {
+	if h.store == nil || h.store.Tokens == nil {
+		return false
+	}
+	for _, p := range h.store.Tokens.Providers() {
+		if p == "acp" {
+			return true
+		}
+	}
+	return false
 }
 
 // formatTokenCount formats a token count for display.

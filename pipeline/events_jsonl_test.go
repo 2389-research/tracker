@@ -274,6 +274,38 @@ func TestBuildLogEntry_CostSnapshot(t *testing.T) {
 	if entry.ProviderTotals == nil || entry.ProviderTotals["anthropic"].InputTokens != 1000 {
 		t.Errorf("ProviderTotals[anthropic] = %+v", entry.ProviderTotals["anthropic"])
 	}
+	if entry.Estimated {
+		t.Error("Estimated = true for a cost snapshot with Estimated:false; want false")
+	}
+}
+
+// TestBuildLogEntry_CostSnapshot_Estimated pins the #186 NDJSON surface:
+// when CostSnapshot.Estimated is true, the activity.jsonl entry carries
+// `estimated: true` so external consumers (dashboards, tracker diagnose,
+// embedded integrations) can distinguish heuristic spend from metered
+// spend without re-deriving the flag from ProviderTotals.
+func TestBuildLogEntry_CostSnapshot_Estimated(t *testing.T) {
+	evt := PipelineEvent{
+		Type:      EventCostUpdated,
+		Timestamp: time.Unix(100, 0),
+		RunID:     "run-1",
+		Cost: &CostSnapshot{
+			TotalTokens:  300,
+			TotalCostUSD: 0.0125,
+			ProviderTotals: map[string]ProviderUsage{
+				"acp": {InputTokens: 200, OutputTokens: 100, CostUSD: 0.0125, SessionCount: 1, Estimated: true},
+			},
+			WallElapsed: 250 * time.Millisecond,
+			Estimated:   true,
+		},
+	}
+	entry := buildLogEntry(evt)
+	if !entry.Estimated {
+		t.Error("Estimated = false; want true (CostSnapshot.Estimated=true)")
+	}
+	if !entry.ProviderTotals["acp"].Estimated {
+		t.Error("ProviderTotals[acp].Estimated = false; want true (per-bucket flag lost)")
+	}
 }
 
 func TestBuildLogEntry_NilCost(t *testing.T) {

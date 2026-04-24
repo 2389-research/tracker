@@ -299,7 +299,12 @@ func aggregateBranchStats(results []ParallelResult) *pipeline.SessionStats {
 	return agg
 }
 
-// mergeSessionStats adds src fields into dst in-place.
+// mergeSessionStats adds src fields into dst in-place. OR-propagates
+// Estimated so that a heuristic-derived branch (e.g. ACP-backed) taints
+// the aggregated parallel-node stats — otherwise downstream surfaces
+// would render mixed metered+estimated parallel output as fully metered.
+// EstimateSource is carried forward from the first estimated contributor;
+// a later metered branch doesn't clear it.
 func mergeSessionStats(dst, src *pipeline.SessionStats) {
 	dst.Turns += src.Turns
 	dst.TotalToolCalls += src.TotalToolCalls
@@ -317,6 +322,12 @@ func mergeSessionStats(dst, src *pipeline.SessionStats) {
 	dst.FilesCreated = append(dst.FilesCreated, src.FilesCreated...)
 	for name, count := range src.ToolCalls {
 		dst.ToolCalls[name] += count
+	}
+	if src.Estimated {
+		dst.Estimated = true
+		if dst.EstimateSource == "" {
+			dst.EstimateSource = src.EstimateSource
+		}
 	}
 }
 

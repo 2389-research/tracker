@@ -43,6 +43,11 @@ type jsonlLogEntry struct {
 	TotalCostUSD   float64                  `json:"total_cost_usd,omitempty"`
 	ProviderTotals map[string]ProviderUsage `json:"provider_totals,omitempty"`
 	WallElapsedMs  int64                    `json:"wall_elapsed_ms,omitempty"`
+	// Estimated is true when any session contributing to this cost snapshot
+	// was heuristic-derived (currently: ACP rune-count estimator). External
+	// NDJSON consumers read this to distinguish metered from estimated
+	// spend — see cmd/tracker/summary.go for the equivalent CLI surface.
+	Estimated bool `json:"estimated,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a file.
@@ -115,6 +120,7 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 		entry.TotalCostUSD = evt.Cost.TotalCostUSD
 		entry.ProviderTotals = evt.Cost.ProviderTotals
 		entry.WallElapsedMs = evt.Cost.WallElapsed.Milliseconds()
+		entry.Estimated = evt.Cost.Estimated
 	}
 	return entry
 }
