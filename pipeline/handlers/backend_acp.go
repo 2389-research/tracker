@@ -34,13 +34,16 @@ import (
 const acpTokenEstimateRatio = 4
 
 // ACPUsageMarker is written into llm.Usage.Raw on ACP-backed SessionResults
-// so a consumer that inspects the raw field directly can recognize the tokens
-// as estimates. No in-tree consumer reads it today — llm.Usage.Add and
-// pipeline/handlers/transcript.go:buildSessionStats both drop Usage.Raw, so
-// by the time usage reaches the TokenTracker aggregate, the trace entries,
-// UsageSummary, or the CLI summary, this marker is gone. Treat the shape as
-// an implementation detail that may change or disappear once a real "this
-// was estimated" channel is plumbed through SessionStats/ProviderUsage.
+// so buildSessionStats in this package can derive SessionStats.Estimated
+// and SessionStats.EstimateSource before Usage.Raw is dropped by later
+// llm.Usage.Add calls. Once the marker reaches SessionStats, it's preserved
+// through Trace.AggregateUsage into ProviderUsage.Estimated and
+// UsageSummary.Estimated, and the CLI summary / TUI header / NDJSON
+// cost_updated event surface the flag so operators can distinguish
+// heuristic spend from metered spend. Treat the shape as an implementation
+// detail — the canonical "this was estimated" channel is SessionStats
+// going forward; direct Usage.Raw type-assertions outside
+// extractEstimateMarker are not supported.
 type ACPUsageMarker struct {
 	Estimated bool   `json:"estimated"`
 	Source    string `json:"source"` // always "acp-chars-heuristic"

@@ -638,6 +638,85 @@ func TestTraceAggregateUsage(t *testing.T) {
 	})
 }
 
+// TestTraceAggregateUsage_EstimatedPropagation pins that the Estimated
+// flag OR-propagates through AggregateUsage: any single session tagged as
+// estimated taints both its per-provider bucket and the summary-level
+// flag. This is what the CLI / TUI / diagnose surfaces read to decide
+// whether to render "(estimated)" markers on mixed metered+estimated
+// runs.
+func TestTraceAggregateUsage_EstimatedPropagation(t *testing.T) {
+	t.Run("single estimated session taints summary and provider bucket", func(t *testing.T) {
+		tr := &Trace{Entries: []TraceEntry{
+			{Stats: &SessionStats{TotalTokens: 100, Provider: "acp", Estimated: true, EstimateSource: "acp-chars-heuristic"}},
+		}}
+		s := tr.AggregateUsage()
+		if !s.Estimated {
+			t.Error("UsageSummary.Estimated = false; want true")
+		}
+		if !s.ProviderTotals["acp"].Estimated {
+			t.Error("ProviderTotals[acp].Estimated = false; want true")
+		}
+	})
+
+	t.Run("mixed metered + estimated: summary tainted, providers keep attribution", func(t *testing.T) {
+		tr := &Trace{Entries: []TraceEntry{
+			{Stats: &SessionStats{TotalTokens: 1000, Provider: "anthropic"}},
+			{Stats: &SessionStats{TotalTokens: 200, Provider: "acp", Estimated: true}},
+		}}
+		s := tr.AggregateUsage()
+		if !s.Estimated {
+			t.Error("UsageSummary.Estimated = false; want true (any estimated session taints)")
+		}
+		if s.ProviderTotals["anthropic"].Estimated {
+			t.Error("ProviderTotals[anthropic].Estimated = true; want false (metered)")
+		}
+		if !s.ProviderTotals["acp"].Estimated {
+			t.Error("ProviderTotals[acp].Estimated = false; want true")
+		}
+	})
+
+	t.Run("child rollup propagates Estimated into parent", func(t *testing.T) {
+		child := &UsageSummary{
+			TotalTokens:  500,
+			SessionCount: 1,
+			ProviderTotals: map[string]ProviderUsage{
+				"acp": {TotalTokens: 500, SessionCount: 1, Estimated: true},
+			},
+			Estimated: true,
+		}
+		tr := &Trace{Entries: []TraceEntry{
+			{Stats: &SessionStats{TotalTokens: 100, Provider: "anthropic"}},
+			{ChildUsage: child},
+		}}
+		s := tr.AggregateUsage()
+		if !s.Estimated {
+			t.Error("UsageSummary.Estimated = false; want true (child rollup estimated)")
+		}
+		if !s.ProviderTotals["acp"].Estimated {
+			t.Error("ProviderTotals[acp].Estimated = false; want true (came from child)")
+		}
+		if s.ProviderTotals["anthropic"].Estimated {
+			t.Error("ProviderTotals[anthropic].Estimated = true; want false")
+		}
+	})
+
+	t.Run("all metered: summary and providers stay unmarked", func(t *testing.T) {
+		tr := &Trace{Entries: []TraceEntry{
+			{Stats: &SessionStats{TotalTokens: 100, Provider: "anthropic"}},
+			{Stats: &SessionStats{TotalTokens: 200, Provider: "openai"}},
+		}}
+		s := tr.AggregateUsage()
+		if s.Estimated {
+			t.Error("UsageSummary.Estimated = true; want false (all metered)")
+		}
+		for name, pu := range s.ProviderTotals {
+			if pu.Estimated {
+				t.Errorf("ProviderTotals[%s].Estimated = true; want false", name)
+			}
+		}
+	})
+}
+
 func TestEngineTraceRecordsHandlerErrors(t *testing.T) {
 	g := NewGraph("trace_handler_err_test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})

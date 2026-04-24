@@ -80,12 +80,16 @@ func derefInt(p *int) int {
 }
 
 // buildSessionStats converts an agent.SessionResult into a pipeline.SessionStats
-// for inclusion in the trace entry.
+// for inclusion in the trace entry. Estimated is derived from r.Usage.Raw
+// when it carries a known marker (today: ACPUsageMarker) so the CLI, TUI,
+// and diagnose surfaces can distinguish heuristic spend from metered spend
+// even after Usage.Raw is dropped by later Usage.Add calls.
 func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 	toolCalls := make(map[string]int, len(r.ToolCalls))
 	for k, v := range r.ToolCalls {
 		toolCalls[k] = v
 	}
+	estimated, source := extractEstimateMarker(r.Usage.Raw)
 	return &pipeline.SessionStats{
 		Turns:            r.Turns,
 		ToolCalls:        toolCalls,
@@ -104,5 +108,18 @@ func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 		CacheReadTokens:  derefInt(r.Usage.CacheReadTokens),
 		CacheWriteTokens: derefInt(r.Usage.CacheWriteTokens),
 		Provider:         r.Provider,
+		Estimated:        estimated,
+		EstimateSource:   source,
 	}
+}
+
+// extractEstimateMarker inspects llm.Usage.Raw for an estimator marker and
+// returns (estimated, source) when found. Currently recognizes the ACP
+// rune-count heuristic via ACPUsageMarker; additional estimator types can
+// add cases here rather than changing the SessionStats contract.
+func extractEstimateMarker(raw any) (bool, string) {
+	if m, ok := raw.(ACPUsageMarker); ok && m.Estimated {
+		return true, m.Source
+	}
+	return false, ""
 }

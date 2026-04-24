@@ -37,12 +37,16 @@ const (
 
 // CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.
 // It is a point-in-time view of the run's aggregate token usage, cost, and
-// wall-clock elapsed time.
+// wall-clock elapsed time. Estimated is true when any session contributing
+// to this snapshot was heuristic-derived (e.g. ACP rune-count estimator);
+// per-provider detail is carried inside ProviderTotals via
+// ProviderUsage.Estimated.
 type CostSnapshot struct {
 	TotalTokens    int
 	TotalCostUSD   float64
 	ProviderTotals map[string]ProviderUsage
 	WallElapsed    time.Duration
+	Estimated      bool
 }
 
 // DecisionDetail carries structured data about a pipeline decision point.

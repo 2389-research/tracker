@@ -28,6 +28,16 @@ type SessionStats struct {
 	CacheReadTokens  int            `json:"cache_read_tokens"`
 	CacheWriteTokens int            `json:"cache_write_tokens"`
 	Provider         string         `json:"provider,omitempty"`
+	// Estimated is true when the token/cost numbers come from a heuristic
+	// rather than metered usage (e.g. the ACP backend's rune-count
+	// estimator). Downstream consumers — CLI summary, TUI header, tracker
+	// diagnose — use this to mark provider rollups with an "(estimated)"
+	// suffix so operators don't confuse approximate spend with metered
+	// spend. EstimateSource names the heuristic (e.g. "acp-chars-heuristic")
+	// and is reserved for future per-source reporting. Derived in
+	// buildSessionStats from llm.Usage.Raw.
+	Estimated      bool   `json:"estimated,omitempty"`
+	EstimateSource string `json:"estimate_source,omitempty"`
 }
 
 // TraceEntry records the execution of a single pipeline node.
@@ -61,6 +71,10 @@ func (tr *Trace) AddEntry(entry TraceEntry) {
 }
 
 // ProviderUsage is the per-provider rollup embedded in UsageSummary.
+// Estimated is true when at least one contributing session reported
+// heuristic-derived usage (e.g. the ACP rune-count estimator). A mixed
+// bucket — some sessions metered, some estimated — still flags Estimated
+// so the operator knows the total is not fully trustworthy.
 type ProviderUsage struct {
 	InputTokens      int     `json:"input_tokens"`
 	OutputTokens     int     `json:"output_tokens"`
@@ -70,11 +84,16 @@ type ProviderUsage struct {
 	CacheReadTokens  int     `json:"cache_read_tokens"`
 	CacheWriteTokens int     `json:"cache_write_tokens"`
 	SessionCount     int     `json:"session_count"`
+	Estimated        bool    `json:"estimated,omitempty"`
 }
 
 const unknownProvider = "unknown"
 
 // UsageSummary aggregates token usage and cost across all pipeline nodes.
+// Estimated is true when any contributing session was heuristic-derived.
+// CLI / TUI / diagnose surfaces render the run total with an "~" or
+// "(estimated)" marker when this is set, so operators don't interpret
+// mixed metered+estimated totals as fully metered.
 type UsageSummary struct {
 	TotalInputTokens      int                      `json:"total_input_tokens"`
 	TotalOutputTokens     int                      `json:"total_output_tokens"`
@@ -85,6 +104,7 @@ type UsageSummary struct {
 	TotalCacheWriteTokens int                      `json:"total_cache_write_tokens"`
 	SessionCount          int                      `json:"session_count"`
 	ProviderTotals        map[string]ProviderUsage `json:"provider_totals,omitempty"`
+	Estimated             bool                     `json:"estimated,omitempty"`
 }
 
 // AggregateUsage sums token usage and cost from all trace entries with
@@ -114,7 +134,10 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 }
 
 // foldStatsIntoSummary adds a single node's SessionStats to the running
-// totals and the matching per-provider bucket.
+// totals and the matching per-provider bucket. Estimated propagates with
+// OR semantics so any heuristic session "taints" both the provider bucket
+// and the summary-level flag, letting downstream surfaces show an
+// "(estimated)" marker on mixed metered+estimated runs.
 func foldStatsIntoSummary(s *UsageSummary, stats *SessionStats) {
 	s.TotalInputTokens += stats.InputTokens
 	s.TotalOutputTokens += stats.OutputTokens
@@ -124,6 +147,9 @@ func foldStatsIntoSummary(s *UsageSummary, stats *SessionStats) {
 	s.TotalCacheReadTokens += stats.CacheReadTokens
 	s.TotalCacheWriteTokens += stats.CacheWriteTokens
 	s.SessionCount++
+	if stats.Estimated {
+		s.Estimated = true
+	}
 
 	provider := strings.TrimSpace(stats.Provider)
 	if provider == "" {
@@ -138,13 +164,18 @@ func foldStatsIntoSummary(s *UsageSummary, stats *SessionStats) {
 	pt.CacheReadTokens += stats.CacheReadTokens
 	pt.CacheWriteTokens += stats.CacheWriteTokens
 	pt.SessionCount++
+	if stats.Estimated {
+		pt.Estimated = true
+	}
 	s.ProviderTotals[provider] = pt
 }
 
 // foldChildUsageIntoSummary adds a child run's pre-aggregated UsageSummary
 // to the running totals, preserving per-provider attribution. SessionCount
 // from the child contributes to the parent's SessionCount so rollups
-// accurately reflect how many billable sessions participated.
+// accurately reflect how many billable sessions participated. Estimated
+// propagates with OR semantics (same rule as foldStatsIntoSummary) so a
+// subgraph or manager_loop nesting estimated sessions taints the parent.
 func foldChildUsageIntoSummary(s *UsageSummary, child *UsageSummary) {
 	s.TotalInputTokens += child.TotalInputTokens
 	s.TotalOutputTokens += child.TotalOutputTokens
@@ -154,6 +185,9 @@ func foldChildUsageIntoSummary(s *UsageSummary, child *UsageSummary) {
 	s.TotalCacheReadTokens += child.TotalCacheReadTokens
 	s.TotalCacheWriteTokens += child.TotalCacheWriteTokens
 	s.SessionCount += child.SessionCount
+	if child.Estimated {
+		s.Estimated = true
+	}
 
 	for provider, cpu := range child.ProviderTotals {
 		pt := s.ProviderTotals[provider]
@@ -165,6 +199,9 @@ func foldChildUsageIntoSummary(s *UsageSummary, child *UsageSummary) {
 		pt.CacheReadTokens += cpu.CacheReadTokens
 		pt.CacheWriteTokens += cpu.CacheWriteTokens
 		pt.SessionCount += cpu.SessionCount
+		if cpu.Estimated {
+			pt.Estimated = true
+		}
 		s.ProviderTotals[provider] = pt
 	}
 }

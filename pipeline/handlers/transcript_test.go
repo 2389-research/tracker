@@ -125,3 +125,48 @@ func TestBuildSessionStatsZeroUsage(t *testing.T) {
 		t.Errorf("expected CostUSD=0, got %f", stats.CostUSD)
 	}
 }
+
+// TestBuildSessionStats_PropagatesACPEstimatedMarker pins that when a
+// SessionResult carries llm.Usage.Raw tagged as ACPUsageMarker{Estimated:
+// true}, buildSessionStats copies the flag onto SessionStats.Estimated
+// (and source name). Without this, the CLI summary / TUI header / tracker
+// diagnose surfaces cannot distinguish heuristic ACP spend from metered
+// spend once Usage.Raw is dropped by later llm.Usage.Add calls.
+func TestBuildSessionStats_PropagatesACPEstimatedMarker(t *testing.T) {
+	r := agent.SessionResult{
+		Turns:    1,
+		Provider: "acp",
+		Usage: llm.Usage{
+			InputTokens:  10,
+			OutputTokens: 20,
+			TotalTokens:  30,
+			Raw: ACPUsageMarker{
+				Estimated: true,
+				Source:    "acp-chars-heuristic",
+				Ratio:     4,
+			},
+		},
+	}
+	stats := buildSessionStats(r)
+	if !stats.Estimated {
+		t.Error("Estimated = false; want true (Raw carried ACPUsageMarker{Estimated:true})")
+	}
+	if stats.EstimateSource != "acp-chars-heuristic" {
+		t.Errorf("EstimateSource = %q, want %q", stats.EstimateSource, "acp-chars-heuristic")
+	}
+}
+
+func TestBuildSessionStats_NoMarker_NotEstimated(t *testing.T) {
+	r := agent.SessionResult{
+		Turns:    1,
+		Provider: "anthropic",
+		Usage:    llm.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+	}
+	stats := buildSessionStats(r)
+	if stats.Estimated {
+		t.Error("Estimated = true; want false (no marker on Raw)")
+	}
+	if stats.EstimateSource != "" {
+		t.Errorf("EstimateSource = %q, want empty (no marker)", stats.EstimateSource)
+	}
+}

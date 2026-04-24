@@ -77,6 +77,7 @@ func (e *Engine) emitCostUpdate(s *runState) {
 			TotalCostUSD:   summary.TotalCostUSD,
 			ProviderTotals: summary.ProviderTotals,
 			WallElapsed:    time.Since(s.trace.StartTime),
+			Estimated:      summary.Estimated,
 		},
 	})
 }
@@ -104,6 +105,7 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 			TotalCostUSD:   combined.TotalCostUSD,
 			ProviderTotals: combined.ProviderTotals,
 			WallElapsed:    time.Since(s.trace.StartTime),
+			Estimated:      combined.Estimated,
 		}
 	}
 	e.emit(PipelineEvent{
