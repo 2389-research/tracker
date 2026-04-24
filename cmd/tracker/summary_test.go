@@ -13,8 +13,15 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// captureStdout runs fn with os.Stdout redirected to a buffer and returns
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
 // the captured output. Used to assert print* helpers emit the right text.
+//
+// Cleanup is deferred so a panic/t.Fatal inside fn still restores stdout
+// and closes both pipe ends — otherwise a test package panic could leave
+// the process-wide os.Stdout pointing at a closed pipe, which breaks
+// every later test in the package. t.Cleanup covers the belt-and-braces
+// case where a helper like this is extended and a later code path forgets
+// to reach the explicit close.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	orig := os.Stdout
@@ -23,15 +30,16 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
 	done := make(chan string, 1)
 	go func() {
 		var buf bytes.Buffer
 		_, _ = io.Copy(&buf, r)
+		_ = r.Close()
 		done <- buf.String()
 	}()
 	fn()
 	_ = w.Close()
-	os.Stdout = orig
 	return <-done
 }
 

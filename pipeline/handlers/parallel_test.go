@@ -797,3 +797,58 @@ func TestParallelHandlerBranchTimeoutNoEffect(t *testing.T) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 }
+
+// TestMergeSessionStats_PropagatesEstimatedFlag pins the #192 review
+// finding: parallel fan-out aggregates branch SessionStats via
+// mergeSessionStats, which previously dropped Estimated. Any
+// ACP-backed branch inside a parallel block would have its heuristic
+// flag lost before aggregation, causing CLI/TUI surfaces to render
+// the combined parallel stats as fully metered.
+func TestMergeSessionStats_PropagatesEstimatedFlag(t *testing.T) {
+	t.Run("estimated branch taints aggregated stats", func(t *testing.T) {
+		dst := &pipeline.SessionStats{ToolCalls: map[string]int{}}
+		mergeSessionStats(dst, &pipeline.SessionStats{
+			TotalTokens: 100,
+			Provider:    "anthropic",
+			ToolCalls:   map[string]int{},
+		})
+		mergeSessionStats(dst, &pipeline.SessionStats{
+			TotalTokens:    200,
+			Provider:       "acp",
+			Estimated:      true,
+			EstimateSource: "acp-chars-heuristic",
+			ToolCalls:      map[string]int{},
+		})
+		if !dst.Estimated {
+			t.Error("Estimated = false; want true (one estimated branch taints aggregate)")
+		}
+		if dst.EstimateSource != "acp-chars-heuristic" {
+			t.Errorf("EstimateSource = %q, want %q", dst.EstimateSource, "acp-chars-heuristic")
+		}
+	})
+
+	t.Run("all metered stays unmarked", func(t *testing.T) {
+		dst := &pipeline.SessionStats{ToolCalls: map[string]int{}}
+		mergeSessionStats(dst, &pipeline.SessionStats{TotalTokens: 100, ToolCalls: map[string]int{}})
+		mergeSessionStats(dst, &pipeline.SessionStats{TotalTokens: 200, ToolCalls: map[string]int{}})
+		if dst.Estimated {
+			t.Error("Estimated = true on all-metered merge; want false")
+		}
+	})
+
+	t.Run("later metered branch does not clear EstimateSource", func(t *testing.T) {
+		dst := &pipeline.SessionStats{ToolCalls: map[string]int{}}
+		mergeSessionStats(dst, &pipeline.SessionStats{
+			Estimated:      true,
+			EstimateSource: "acp-chars-heuristic",
+			ToolCalls:      map[string]int{},
+		})
+		mergeSessionStats(dst, &pipeline.SessionStats{TotalTokens: 50, ToolCalls: map[string]int{}})
+		if !dst.Estimated {
+			t.Error("Estimated cleared by later metered merge; want sticky")
+		}
+		if dst.EstimateSource != "acp-chars-heuristic" {
+			t.Errorf("EstimateSource = %q, want sticky at %q", dst.EstimateSource, "acp-chars-heuristic")
+		}
+	})
+}
