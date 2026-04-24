@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -24,16 +25,32 @@ import (
 // acpClientHandler implements acp.Client, translating ACP session updates into
 // agent.Event objects via the emit callback and handling agent requests for
 // file operations, terminal commands, and permission approval.
+//
+// The rune-count fields below feed estimateACPUsage. Each is an O(input) sum
+// accumulated as notifications arrive — we store counts, not text, so a
+// session with megabytes of tool output or reasoning costs O(1) memory per
+// channel rather than buffering the raw content. The three channels map
+// onto token-usage lines:
+//
+//   - reasoningRunes → llm.Usage.ReasoningTokens (priced at output rate
+//     by providers today; also folded into OutputTokens for EstimateCost).
+//   - toolArgRunes   → tool-call arguments the model produced, billable as
+//     output alongside message chunks.
+//   - toolResultRunes → tool-call output the bridge feeds back as input
+//     context on the next model turn; counts on the input side.
 type acpClientHandler struct {
 	emit       func(agent.Event)
 	workingDir string
 
-	mu        sync.Mutex
-	terminals map[string]*terminalState
-	textParts []string
-	toolNames map[string]string // toolCallId → title
-	toolCount int
-	turnCount int
+	mu              sync.Mutex
+	terminals       map[string]*terminalState
+	textParts       []string
+	toolNames       map[string]string // toolCallId → title
+	toolCount       int
+	turnCount       int
+	reasoningRunes  int
+	toolArgRunes    int
+	toolResultRunes int
 }
 
 // terminalState tracks a running subprocess created via CreateTerminal.
@@ -99,29 +116,47 @@ func (h *acpClientHandler) handleMessageChunk(chunk *acp.SessionUpdateAgentMessa
 	h.safeEmit(agent.Event{Type: agent.EventTextDelta, Timestamp: now, Text: text})
 }
 
-// handleThoughtChunk processes an agent reasoning/thought chunk.
+// handleThoughtChunk processes an agent reasoning/thought chunk. The chunk
+// text is billed as output (and recorded in llm.Usage.ReasoningTokens); see
+// estimateACPUsage for how reasoningRunes flows into the heuristic.
 func (h *acpClientHandler) handleThoughtChunk(chunk *acp.SessionUpdateAgentThoughtChunk, now time.Time) {
 	text := extractContentText(chunk.Content)
-	if text != "" {
-		h.safeEmit(agent.Event{Type: agent.EventLLMReasoning, Timestamp: now, Text: text})
+	if text == "" {
+		return
 	}
+	h.mu.Lock()
+	h.reasoningRunes += utf8.RuneCountInString(text)
+	h.mu.Unlock()
+	h.safeEmit(agent.Event{Type: agent.EventLLMReasoning, Timestamp: now, Text: text})
 }
 
-// handleToolCallStart processes a new tool call notification.
+// handleToolCallStart processes a new tool call notification. The tool-call
+// arguments (the JSON the model produced to invoke the tool) are billable
+// output alongside text message chunks.
 func (h *acpClientHandler) handleToolCallStart(tc *acp.SessionUpdateToolCall, now time.Time) {
+	argStr := formatRawInput(tc.RawInput)
 	h.mu.Lock()
 	h.toolNames[string(tc.ToolCallId)] = tc.Title
 	h.toolCount++
+	h.toolArgRunes += utf8.RuneCountInString(argStr)
 	h.mu.Unlock()
 	h.safeEmit(agent.Event{
 		Type:      agent.EventToolCallStart,
 		Timestamp: now,
 		ToolName:  tc.Title,
-		ToolInput: formatRawInput(tc.RawInput),
+		ToolInput: argStr,
 	})
 }
 
-// handleToolCallUpdate processes a tool call status update.
+// handleToolCallUpdate processes a tool call status update. The tool output
+// (or error body) is what the ACP bridge feeds back into the model's
+// context on the next turn, so it's billable as input and tracked under
+// toolResultRunes — counted even on failed tool calls since the failure
+// payload still round-trips through the model. The rune count uses the
+// full billable payload (all Content blocks INCLUDING diff NewText/OldText
+// + RawOutput when present) rather than the display-oriented
+// extractToolCallOutput, which drops RawOutput whenever Content exists
+// and reduces diffs to a one-line label.
 func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, now time.Time) {
 	if tc.Status == nil {
 		return
@@ -130,19 +165,64 @@ func (h *acpClientHandler) handleToolCallUpdate(tc *acp.SessionToolCallUpdate, n
 	if status != acp.ToolCallStatusCompleted && status != acp.ToolCallStatusFailed {
 		return
 	}
+	billableRunes := countToolResultRunes(tc.Content, tc.RawOutput)
+
 	h.mu.Lock()
 	name := h.toolNames[string(tc.ToolCallId)]
 	h.turnCount++ // each tool round-trip counts as a turn
+	h.toolResultRunes += billableRunes
 	h.mu.Unlock()
 
+	// Display path uses the existing summary formatter — humans reading the
+	// event stream don't need the full diff bytes, just a "diff <path>"
+	// marker. The billing path above uses the full payload.
+	displayOutput := extractToolCallOutput(tc.Content, tc.RawOutput)
 	evt := agent.Event{Type: agent.EventToolCallEnd, Timestamp: now, ToolName: name}
-	output := extractToolCallOutput(tc.Content, tc.RawOutput)
 	if status == acp.ToolCallStatusFailed {
-		evt.ToolError = output
+		evt.ToolError = displayOutput
 	} else {
-		evt.ToolOutput = output
+		evt.ToolOutput = displayOutput
 	}
 	h.safeEmit(evt)
+}
+
+// countToolResultRunes sums rune counts across every billable field of a
+// tool-call completion payload: text content blocks, diff NewText/OldText/
+// Path, terminal IDs, and RawOutput (JSON-serialized when non-nil). Unlike
+// the display formatter extractToolCallOutput, this counts Content and
+// RawOutput independently — not as fallbacks — because the bridge may send
+// both, and both round-trip through the model as next-turn input context.
+// Diff items contribute their full before/after text, not just the path,
+// since the bridge re-sends the diff payload to the model.
+func countToolResultRunes(content []acp.ToolCallContent, rawOutput any) int {
+	total := 0
+	for _, c := range content {
+		total += countToolCallContentRunes(c)
+	}
+	if rawOutput != nil {
+		total += utf8.RuneCountInString(formatRawInput(rawOutput))
+	}
+	return total
+}
+
+// countToolCallContentRunes sums rune counts across all billable fields of
+// a single ToolCallContent item.
+func countToolCallContentRunes(c acp.ToolCallContent) int {
+	total := 0
+	if c.Content != nil {
+		total += utf8.RuneCountInString(extractContentText(c.Content.Content))
+	}
+	if c.Diff != nil {
+		total += utf8.RuneCountInString(c.Diff.NewText)
+		total += utf8.RuneCountInString(c.Diff.Path)
+		if c.Diff.OldText != nil {
+			total += utf8.RuneCountInString(*c.Diff.OldText)
+		}
+	}
+	if c.Terminal != nil {
+		total += utf8.RuneCountInString(c.Terminal.TerminalId)
+	}
+	return total
 }
 
 // RequestPermission auto-approves all permission requests by selecting the
