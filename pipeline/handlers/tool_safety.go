@@ -1,5 +1,5 @@
 // ABOUTME: Security checks for tool_command execution: denylist and allowlist pattern matching.
-// ABOUTME: Denylist is always active and non-overridable by .dip files. Allowlist is opt-in.
+// ABOUTME: Built-in denylist patterns are always active; .dip files can extend but not shrink them. Allowlist is opt-in.
 package handlers
 
 import (
@@ -8,9 +8,14 @@ import (
 	"strings"
 )
 
-// defaultDenyPatterns are blocked in all tool_command executions.
-// Cannot be overridden by .dip graph attrs. Only --bypass-denylist CLI flag disables them.
-// Patterns use * as wildcard. Matching is case-insensitive, per-statement.
+// defaultDenyPatterns are blocked in all tool_command executions by default.
+// Built-in patterns cannot be removed — .dip files (via the `tool_denylist_add`
+// graph attr) and operators (via `--tool-denylist-add`) can *extend* the list,
+// but never shrink it. The only switch that disables the defaults is the
+// all-or-nothing `--bypass-denylist` CLI flag, which also disables any
+// user-added patterns (it is the intentional escape hatch for sandboxed
+// environments). Patterns use * as wildcard. Matching is case-insensitive,
+// per-statement.
 var defaultDenyPatterns = []string{
 	"eval *",
 	"exec *",
@@ -64,11 +69,19 @@ func globMatch(pattern, s string) bool {
 	return re.MatchString(s)
 }
 
-// checkCommandDenylist checks each statement against the default deny patterns.
-// Returns (denied, matchedPattern) for the first match.
-func checkCommandDenylist(cmd string) (bool, string) {
+// checkCommandDenylist checks each statement against the default deny
+// patterns plus any user-supplied patterns (from --tool-denylist-add or
+// the tool_denylist_add graph attr). User patterns are additive — they
+// cannot remove a default pattern; they can only add more. Returns
+// (denied, matchedPattern) for the first match.
+func checkCommandDenylist(cmd string, extraDenyPatterns []string) (bool, string) {
 	for _, stmt := range splitCommandStatements(cmd) {
 		for _, pattern := range defaultDenyPatterns {
+			if globMatch(pattern, stmt) {
+				return true, pattern
+			}
+		}
+		for _, pattern := range extraDenyPatterns {
 			if globMatch(pattern, stmt) {
 				return true, pattern
 			}
@@ -94,11 +107,15 @@ func checkCommandAllowlist(cmd string, allowlist []string) bool {
 	return true
 }
 
-// CheckToolCommand validates a command against the denylist and optional allowlist.
-// Returns an error if the command is blocked.
-func CheckToolCommand(cmd, nodeID string, allowlist []string, bypassDenylist bool) error {
+// CheckToolCommand validates a command against the denylist (built-in +
+// user-added) and optional allowlist. Returns an error if the command is
+// blocked. --bypass-denylist disables both the built-in and user-added
+// denylist patterns — by design, since the flag is the intentional
+// escape hatch for sandboxed environments. The allowlist is still
+// enforced when bypass is set.
+func CheckToolCommand(cmd, nodeID string, allowlist, extraDenyPatterns []string, bypassDenylist bool) error {
 	if !bypassDenylist {
-		if denied, pattern := checkCommandDenylist(cmd); denied {
+		if denied, pattern := checkCommandDenylist(cmd, extraDenyPatterns); denied {
 			return fmt.Errorf(
 				"tool_command for node %q matches denied pattern %q — "+
 					"this command pattern is blocked for security. "+

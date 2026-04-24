@@ -273,6 +273,7 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	activeToolSafety = handlers.ToolHandlerConfig{
 		BypassDenylist: cfg.bypassDenylist,
 		Allowlist:      append([]string(nil), cfg.toolAllowlist...),
+		DenylistAdd:    append([]string(nil), cfg.toolDenylistAdd...),
 		MaxOutputLimit: cfg.maxOutputLimit,
 	}
 	// Apply --gateway-url before buildLLMClient is called.
@@ -337,6 +338,17 @@ func printToolSafetyPreamble(cfg runConfig) {
 	if len(cfg.toolAllowlist) > 0 {
 		fmt.Fprintf(os.Stderr, "Tool command allowlist active (%d pattern(s)): %s\n",
 			len(cfg.toolAllowlist), strings.Join(cfg.toolAllowlist, ", "))
+	}
+	if len(cfg.toolDenylistAdd) > 0 {
+		// --bypass-denylist disables both built-in and user-added patterns,
+		// so call that out explicitly — "active" would be misleading when
+		// nothing is actually being enforced.
+		state := "active"
+		if cfg.bypassDenylist {
+			state = "configured but bypassed (--bypass-denylist disables these too)"
+		}
+		fmt.Fprintf(os.Stderr, "Tool command extra denylist %s (%d pattern(s)): %s\n",
+			state, len(cfg.toolDenylistAdd), strings.Join(cfg.toolDenylistAdd, ", "))
 	}
 	if cfg.maxOutputLimit > 0 {
 		fmt.Fprintf(os.Stderr, "Tool command output ceiling: %d bytes per stream\n", cfg.maxOutputLimit)

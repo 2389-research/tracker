@@ -39,6 +39,7 @@ type runConfig struct {
 	artifactDir       string        // override node state directory; "" = <workdir>/.tracker/runs
 	bypassDenylist    bool          // disable the built-in tool_command denylist (SECURITY escape hatch)
 	toolAllowlist     []string      // additional allowlist patterns for tool_command (repeatable)
+	toolDenylistAdd   []string      // user-added denylist patterns that join the built-in denylist (repeatable)
 	maxOutputLimit    int           // hard ceiling (bytes) on per-stream tool_command output; 0 = default 10MB
 }
 

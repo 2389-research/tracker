@@ -221,6 +221,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.artifactDir, "artifact-dir", "", "Override node state directory (default: <workdir>/.tracker/runs)")
 	fs.BoolVar(&cfg.bypassDenylist, "bypass-denylist", false, "Disable the built-in tool_command denylist (SECURITY: use only in sandboxed environments)")
 	fs.Var(stringSliceFlag{target: &cfg.toolAllowlist}, "tool-allowlist", "Glob pattern(s) a tool_command must match to execute (repeatable or comma-separated)")
+	fs.Var(stringSliceFlag{target: &cfg.toolDenylistAdd}, "tool-denylist-add", "Extra glob pattern(s) added to the built-in tool_command denylist (defense in depth; additive, cannot remove built-ins; --bypass-denylist disables these too)")
 	fs.IntVar(&cfg.maxOutputLimit, "max-output-limit", 0, "Hard ceiling in bytes on tool_command output per stream (0 = default 10MB)")
 	return fs
 }
@@ -353,6 +354,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --artifact-dir string     Override node state directory (default: <workdir>/.tracker/runs)\n")
 	fmt.Fprintf(w, "  --bypass-denylist         Disable the built-in tool_command denylist (SECURITY: sandboxed use only)\n")
 	fmt.Fprintf(w, "  --tool-allowlist pattern  Glob pattern a tool_command must match to execute (repeatable, comma-separated)\n")
+	fmt.Fprintf(w, "  --tool-denylist-add pat   Extra glob pattern(s) added to built-in denylist (repeatable, comma-separated, additive; --bypass-denylist disables built-in + added patterns)\n")
 	fmt.Fprintf(w, "  --max-output-limit bytes  Hard ceiling per tool_command output stream (default: 10MB)\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

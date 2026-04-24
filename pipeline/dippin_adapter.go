@@ -679,6 +679,7 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 	setIfNonEmpty(attrs, "llm_model", defaults.Model)
 	setIfNonEmpty(attrs, "llm_provider", defaults.Provider)
 	setIfNonEmpty(attrs, "tool_commands_allow", defaults.ToolCommandsAllow)
+	setIfNonEmpty(attrs, "tool_denylist_add", defaults.ToolDenylistAdd)
 	setIfNonEmpty(attrs, "default_retry_policy", defaults.RetryPolicy)
 	if defaults.MaxRetries > 0 {
 		attrs["default_max_retry"] = strconv.Itoa(defaults.MaxRetries)

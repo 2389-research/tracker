@@ -23,10 +23,15 @@ const (
 )
 
 // ToolHandlerConfig holds security configuration for tool command execution.
+// DenylistAdd is additive — patterns join the built-in denylist but cannot
+// remove any built-in pattern. --bypass-denylist disables both the built-in
+// and DenylistAdd patterns (the bypass flag is the intentional all-or-
+// nothing escape hatch for sandboxed environments).
 type ToolHandlerConfig struct {
 	OutputLimit    int
 	MaxOutputLimit int
 	Allowlist      []string
+	DenylistAdd    []string
 	BypassDenylist bool
 }
 
@@ -79,6 +84,7 @@ type ToolHandler struct {
 	outputLimit    int
 	maxOutputLimit int
 	allowlist      []string
+	denylistAdd    []string
 	bypassDenylist bool
 }
 
@@ -111,6 +117,7 @@ func NewToolHandlerWithConfig(env exec.ExecutionEnvironment, cfg ToolHandlerConf
 		outputLimit:    outputLimit,
 		maxOutputLimit: maxLimit,
 		allowlist:      cfg.Allowlist,
+		denylistAdd:    cfg.DenylistAdd,
 		bypassDenylist: cfg.BypassDenylist,
 	}
 }
@@ -200,7 +207,7 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 
 	// Layer 2: Denylist/allowlist check on the user-authored command (before working_dir prepend,
 	// so allowlist patterns don't need to account for the injected "cd" prefix).
-	if err := CheckToolCommand(command, node.ID, h.allowlist, h.bypassDenylist); err != nil {
+	if err := CheckToolCommand(command, node.ID, h.allowlist, h.denylistAdd, h.bypassDenylist); err != nil {
 		return "", err
 	}
 	return command, nil
