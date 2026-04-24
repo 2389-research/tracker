@@ -58,10 +58,13 @@ func (e *Engine) saveCheckpointWithTag(cp *Checkpoint, pctx *PipelineContext, ru
 }
 
 // emitCostUpdate emits an EventCostUpdated carrying the current aggregate
-// usage from the trace. Safe to call when no LLM activity has occurred yet —
-// AggregateUsage returns nil and the event is suppressed.
+// usage. For child engines running under a parent (subgraph), this is the
+// combined parent-baseline + child-trace snapshot that BudgetGuard also
+// sees, so operator-facing cost events match the numbers that actually
+// trigger budget halts. Safe to call when no LLM activity has occurred yet —
+// combinedUsageForBudget returns nil and the event is suppressed.
 func (e *Engine) emitCostUpdate(s *runState) {
-	summary := s.trace.AggregateUsage()
+	summary := e.combinedUsageForBudget(s)
 	if summary == nil {
 		return
 	}
@@ -80,18 +83,26 @@ func (e *Engine) emitCostUpdate(s *runState) {
 
 // haltForBudget produces the terminal loopResult emitted when a BudgetGuard
 // trips. It saves the checkpoint (so restarts skip already-completed nodes),
-// sets the trace end time, emits EventBudgetExceeded, and packages
-// an EngineResult with Status=OutcomeBudgetExceeded and BudgetLimitsHit.
+// sets the trace end time, emits EventBudgetExceeded with the same combined
+// usage snapshot the guard used to detect the breach (so diagnostics report
+// the actual trigger value, not a child-local sub-total that sits below the
+// ceiling), and packages an EngineResult with Status=OutcomeBudgetExceeded.
+//
+// EngineResult.Usage intentionally holds the child-local aggregate only,
+// not the combined snapshot. The subgraph handler copies this onto
+// Outcome.ChildUsage and the parent trace's AggregateUsage folds it back
+// in; using the combined value here would double-count the parent's own
+// spend once the parent aggregates a second time.
 func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
-	summary := s.trace.AggregateUsage()
+	combined := e.combinedUsageForBudget(s)
 	var costSnap *CostSnapshot
-	if summary != nil {
+	if combined != nil {
 		costSnap = &CostSnapshot{
-			TotalTokens:    summary.TotalTokens,
-			TotalCostUSD:   summary.TotalCostUSD,
-			ProviderTotals: summary.ProviderTotals,
+			TotalTokens:    combined.TotalTokens,
+			TotalCostUSD:   combined.TotalCostUSD,
+			ProviderTotals: combined.ProviderTotals,
 			WallElapsed:    time.Since(s.trace.StartTime),
 		}
 	}
@@ -110,22 +121,54 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 			CompletedNodes:  s.cp.CompletedNodes,
 			Context:         s.pctx.Snapshot(),
 			Trace:           s.trace,
-			Usage:           summary,
+			Usage:           s.trace.AggregateUsage(),
 			BudgetLimitsHit: []string{breach.Kind.String()},
 		},
 	}
 }
 
 // checkBudgetAfterEmit runs the BudgetGuard against the current aggregate
-// usage. Returns a non-nil loopResult when a breach halts the run, or nil
-// to continue.
+// usage (combined with any baseline from a parent run). Returns a non-nil
+// loopResult when a breach halts the run, or nil to continue.
 func (e *Engine) checkBudgetAfterEmit(s *runState) *loopResult {
-	breach := e.budgetGuard.Check(s.trace.AggregateUsage(), s.trace.StartTime)
+	breach := e.budgetGuard.Check(e.combinedUsageForBudget(s), s.trace.StartTime)
 	if breach.Kind == BudgetOK {
 		return nil
 	}
 	lr := e.haltForBudget(s, breach)
 	return &lr
+}
+
+// combinedUsageForBudget returns the usage snapshot that BudgetGuard sees.
+// Child engines run with a baseline loaded from the parent's trace so the
+// guard enforces against combined parent+child spend. When no baseline is
+// set (top-level runs, or subgraph runs without an attached guard), the
+// local trace aggregate is returned unchanged.
+func (e *Engine) combinedUsageForBudget(s *runState) *UsageSummary {
+	local := s.trace.AggregateUsage()
+	if e.baselineUsage == nil {
+		return local
+	}
+	merged := cloneUsageSummary(e.baselineUsage)
+	if local != nil {
+		foldChildUsageIntoSummary(merged, local)
+	}
+	return merged
+}
+
+// cloneUsageSummary returns a deep-enough copy that mutations on the result
+// do not affect the input. Used so combinedUsageForBudget can fold a trace
+// aggregate into a baseline without corrupting the baseline on repeat calls.
+func cloneUsageSummary(u *UsageSummary) *UsageSummary {
+	if u == nil {
+		return &UsageSummary{ProviderTotals: make(map[string]ProviderUsage)}
+	}
+	clone := *u
+	clone.ProviderTotals = make(map[string]ProviderUsage, len(u.ProviderTotals))
+	for k, v := range u.ProviderTotals {
+		clone.ProviderTotals[k] = v
+	}
+	return &clone
 }
 
 // checkBudgetHaltForExit is a thin wrapper used by handleExitNode, which has
@@ -397,7 +440,24 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	})
 
 	handlerStart := time.Now()
-	outcome, err := e.registry.Execute(ctx, execNode, s.pctx)
+	// Stash the engine's budget guard + current usage snapshot on ctx so
+	// handlers that launch child runs (subgraph, manager_loop) can
+	// propagate them to the child engine. Without this, the child's
+	// BudgetGuard.Check runs only against child-local spend and the
+	// operator's --max-tokens / --max-cost ceiling becomes an effective
+	// ceiling *per nesting level*, not per run. See #183.
+	//
+	// Skip entirely when no guard is configured: there's nothing to
+	// propagate, and computing combinedUsageForBudget on every handler
+	// dispatch would burn clones/folds for no benefit.
+	execCtx := ctx
+	if e.budgetGuard != nil {
+		execCtx = context.WithValue(ctx, childRunContextKey{}, &ChildRunContext{
+			BudgetGuard: e.budgetGuard,
+			Baseline:    e.combinedUsageForBudget(s),
+		})
+	}
+	outcome, err := e.registry.Execute(execCtx, execNode, s.pctx)
 	handlerDuration := time.Since(handlerStart)
 
 	traceEntry := TraceEntry{
@@ -426,6 +486,7 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 
 	traceEntry.Status = outcome.Status
 	traceEntry.Stats = outcome.Stats
+	traceEntry.ChildUsage = outcome.ChildUsage
 	return &outcome, traceEntry, nil
 }
 

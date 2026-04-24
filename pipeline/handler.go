@@ -20,6 +20,13 @@ type Outcome struct {
 	PreferredLabel     string
 	SuggestedNextNodes []string
 	Stats              *SessionStats // optional, populated by codergen handler
+	// ChildUsage is the aggregated usage of a child run that executed under
+	// this node (subgraph, manager_loop). When non-nil, Trace.AggregateUsage
+	// folds it into totals and per-provider rollups so the parent trace
+	// reflects spend that happened inside the child. Required for
+	// BudgetGuard enforcement to see child spend once control returns to
+	// the parent.
+	ChildUsage *UsageSummary
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has
