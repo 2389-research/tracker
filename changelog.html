@@ -30,6 +30,25 @@
     <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">All GitHub Releases &rarr;</a></p>
   </section>
 
+  <!-- ═══ v0.24.1 ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1" style="color: inherit; text-decoration: none;">v0.24.1</a></h2>
+      <span class="badge">2026-04-24</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>claude-code backend now parses cache-token usage from the NDJSON result envelope</strong> (closes #185 Track A): the Claude CLI already emits <code>cache_read_input_tokens</code> and <code>cache_creation_input_tokens</code> in its <code>result</code> message, but <code>storeResult</code> was silently dropping both. For heavy-cache Sonnet workloads (typically 60&ndash;90% cache-read), that meant ~3&times; input-cost overcount because <code>llm.EstimateCost</code> priced every input token at the fresh rate. Fix populates <code>*int</code> pointers on <code>llm.Usage</code> so <code>EstimateCost</code> prices cache reads at 10% and cache writes at 25% of the input rate (Anthropic pricing convention). <code>TotalTokens</code> stays fresh-input + output per the cross-provider convention so <code>BudgetGuard</code>'s <code>--max-tokens</code> semantics stay uniform.</li>
+    </ul>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>TRACKER_ACP_CACHE_READ_RATIO</code> env var for ACP cost-estimate tuning</strong> (closes #185 Track B): ACP protocol doesn't expose cache tokens, so the estimator defaulted to pricing all estimated input as fresh. Conservative but up to ~3&times; high for bridges that keep a stable prompt cache. Setting <code>TRACKER_ACP_CACHE_READ_RATIO</code> to a value in <code>(0, 1]</code> routes that fraction of estimated input to <code>Usage.CacheReadTokens</code>. Typical values for stable-context Claude workloads: 0.5&ndash;0.8. NaN/Inf/out-of-range ignored with a one-time warning.</li>
+      <li><strong><code>--tool-denylist-add &lt;glob&gt;</code> CLI flag + <code>tool_denylist_add</code> graph attribute</strong> (closes #168): operators and workflow authors can extend the built-in tool-command denylist with additional glob patterns for defense in depth. User patterns are strictly additive &mdash; cannot remove a built-in; <code>--bypass-denylist</code> still disables everything (built-in + user-added); allowlist and user-denylist are independent gates (both must pass). Completes the deferred <code>WorkflowDefaults.ToolDenylistAdd</code> adapter wiring from v0.24.0's dippin v0.23.0 bump.</li>
+      <li><strong>Estimated-usage flag plumbed from ACP backend through trace &rarr; CLI &rarr; TUI &rarr; NDJSON</strong> (closes #186): <code>ACPUsageMarker</code> on <code>llm.Usage.Raw</code> is now preserved by a new <code>extractEstimateMarker</code> helper that populates <code>SessionStats.Estimated</code> + <code>EstimateSource</code> before <code>Usage.Raw</code> gets dropped. <code>Trace.AggregateUsage</code> OR-propagates the flag across sessions and child rollups, so any estimated session taints the per-provider bucket and summary. CLI "Tokens by Provider" table suffixes estimated providers with <code>(estimated)</code>, total-cost line renders as <code>~$X.XXXX (estimated)</code>, TUI header cost badge prefixes with <code>~</code>, and NDJSON <code>cost_updated</code>/<code>budget_exceeded</code> events carry <code>CostSnapshot.Estimated</code>. Mixed native+ACP runs no longer misleadingly present heuristic spend as metered.</li>
+    </ul>
+  </section>
+
   <!-- ═══ v0.24.0 ═══ -->
   <section class="glass" style="border-left: 3px solid var(--orange-600);">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
