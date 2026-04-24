@@ -32,6 +32,24 @@ import (
 // Graph.Attrs, graph-attr authors must use DOT or set Attrs programmatically.
 const GraphAttrToolCommandsAllow = "tool_commands_allow"
 
+// GraphAttrToolDenylistAdd is the graph-level attribute key that authors set
+// on a workflow (via DOT `graph [tool_denylist_add="..."]`, via a `defaults:
+// tool_denylist_add:` block in a `.dip` file once dippin-lang v0.23.0 routes
+// it into WorkflowDefaults, or programmatically on `Graph.Attrs`) to add
+// extra patterns to the tool_command denylist. Patterns are additive —
+// they cannot remove any built-in pattern; they can only extend the
+// block list for defense in depth.
+//
+// The value is a comma-separated list of glob patterns in the same format
+// as the `--tool-denylist-add` CLI flag. registerToolHandler takes the
+// UNION of the CLI-supplied patterns (ToolHandlerConfig.DenylistAdd) and
+// the graph attribute — both sources apply.
+//
+// `--bypass-denylist` still disables both the built-in denylist AND these
+// user-added patterns (it's the intentional all-or-nothing escape hatch
+// for sandboxed environments).
+const GraphAttrToolDenylistAdd = "tool_denylist_add"
+
 // HandlerFunc is a function that implements the core logic of a pipeline handler.
 // Used by functional option stubs to override built-in handler behavior.
 type HandlerFunc func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error)
@@ -280,10 +298,14 @@ func graphHasPerNodeBackend(graph *pipeline.Graph) bool {
 // always evaluated first inside CheckToolCommand — the union never softens it.
 func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig, graph *pipeline.Graph) {
 	if cfg.execEnv != nil {
-		merged := mergeToolAllowlist(cfg.toolSafety.Allowlist, graph)
-		if cfg.toolSafetySet || len(merged) > len(cfg.toolSafety.Allowlist) {
+		mergedAllow := mergeToolAllowlist(cfg.toolSafety.Allowlist, graph)
+		mergedDenyAdd := mergeToolDenylistAdd(cfg.toolSafety.DenylistAdd, graph)
+		graphInjected := len(mergedAllow) > len(cfg.toolSafety.Allowlist) ||
+			len(mergedDenyAdd) > len(cfg.toolSafety.DenylistAdd)
+		if cfg.toolSafetySet || graphInjected {
 			safety := cfg.toolSafety
-			safety.Allowlist = merged
+			safety.Allowlist = mergedAllow
+			safety.DenylistAdd = mergedDenyAdd
 			registry.Register(NewToolHandlerWithConfig(cfg.execEnv, safety))
 		} else {
 			registry.Register(NewToolHandler(cfg.execEnv))
@@ -330,10 +352,25 @@ func mergeToolAllowlist(cliAllowlist []string, graph *pipeline.Graph) []string {
 // drops empty tokens. Returns nil when the attr is missing or yields no
 // non-empty tokens.
 func parseGraphAllowlist(graph *pipeline.Graph) []string {
+	return parseGraphCommaList(graph, GraphAttrToolCommandsAllow)
+}
+
+// parseGraphDenylistAdd extracts the user-added denylist patterns from the
+// tool_denylist_add graph attribute. Same format + trim semantics as
+// parseGraphAllowlist.
+func parseGraphDenylistAdd(graph *pipeline.Graph) []string {
+	return parseGraphCommaList(graph, GraphAttrToolDenylistAdd)
+}
+
+// parseGraphCommaList is the shared comma-separated-glob parser for tool
+// safety graph attrs. Factored out so the allowlist and denylist-add paths
+// apply the same trim-and-drop-empty semantics — avoids the second site
+// from silently diverging on whitespace handling.
+func parseGraphCommaList(graph *pipeline.Graph, key string) []string {
 	if graph == nil || graph.Attrs == nil {
 		return nil
 	}
-	raw, ok := graph.Attrs[GraphAttrToolCommandsAllow]
+	raw, ok := graph.Attrs[key]
 	if !ok || strings.TrimSpace(raw) == "" {
 		return nil
 	}
@@ -345,6 +382,37 @@ func parseGraphAllowlist(graph *pipeline.Graph) []string {
 		}
 	}
 	return patterns
+}
+
+// mergeToolDenylistAdd returns the union of the CLI-supplied user-denylist
+// patterns and the patterns parsed from graph.Attrs[GraphAttrToolDenylistAdd].
+// Same order-preserving de-dup rules as mergeToolAllowlist: CLI patterns
+// first, then graph patterns in declaration order; duplicates collapse.
+// These augment the built-in denylist — they never remove any built-in
+// pattern, and --bypass-denylist still disables them alongside the
+// built-ins.
+func mergeToolDenylistAdd(cliPatterns []string, graph *pipeline.Graph) []string {
+	graphPatterns := parseGraphDenylistAdd(graph)
+	if len(cliPatterns) == 0 && len(graphPatterns) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(cliPatterns)+len(graphPatterns))
+	merged := make([]string, 0, len(cliPatterns)+len(graphPatterns))
+	for _, p := range cliPatterns {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		merged = append(merged, p)
+	}
+	for _, p := range graphPatterns {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		merged = append(merged, p)
+	}
+	return merged
 }
 
 // registerHumanHandler registers the human gate handler or a stub.

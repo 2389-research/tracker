@@ -502,6 +502,7 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 			CacheTools:        true,
 			Compaction:        "conservative",
 			ToolCommandsAllow: "git *,make *",
+			ToolDenylistAdd:   "rm -rf *,dd *",
 		},
 		Nodes: []*ir.Node{
 			{
@@ -540,6 +541,7 @@ func TestFromDippinIR_WorkflowDefaults(t *testing.T) {
 		{"cache_tool_results", "true"},
 		{"context_compaction", "conservative"},
 		{"tool_commands_allow", "git *,make *"},
+		{"tool_denylist_add", "rm -rf *,dd *"},
 	}
 
 	for _, tt := range tests {

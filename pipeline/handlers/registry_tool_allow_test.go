@@ -120,10 +120,10 @@ func TestGraphAttrOnlyAllowsCommand(t *testing.T) {
 	reg := NewDefaultRegistry(g, WithExecEnvironment(env))
 	th := registryToolHandler(t, reg)
 
-	if err := CheckToolCommand("git status", "tool1", th.allowlist, th.bypassDenylist); err != nil {
+	if err := CheckToolCommand("git status", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err != nil {
 		t.Errorf("git status should be allowed via graph attr: %v", err)
 	}
-	if err := CheckToolCommand("make install", "tool1", th.allowlist, th.bypassDenylist); err == nil {
+	if err := CheckToolCommand("make install", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err == nil {
 		t.Error("make install should be blocked (not in allowlist)")
 	}
 }
@@ -141,13 +141,13 @@ func TestCLIAndGraphAttrUnion(t *testing.T) {
 	)
 	th := registryToolHandler(t, reg)
 
-	if err := CheckToolCommand("git status", "tool1", th.allowlist, th.bypassDenylist); err != nil {
+	if err := CheckToolCommand("git status", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err != nil {
 		t.Errorf("git status should be allowed via graph attr: %v", err)
 	}
-	if err := CheckToolCommand("make install", "tool1", th.allowlist, th.bypassDenylist); err != nil {
+	if err := CheckToolCommand("make install", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err != nil {
 		t.Errorf("make install should be allowed via CLI allowlist: %v", err)
 	}
-	if err := CheckToolCommand("rm -rf /tmp/foo", "tool1", th.allowlist, th.bypassDenylist); err == nil {
+	if err := CheckToolCommand("rm -rf /tmp/foo", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err == nil {
 		t.Error("rm should be blocked (matches neither allowlist source)")
 	}
 }
@@ -170,7 +170,7 @@ func TestDenylistWinsOverGraphAttr(t *testing.T) {
 	}
 	for _, cmd := range denied {
 		t.Run(cmd, func(t *testing.T) {
-			err := CheckToolCommand(cmd, "tool1", th.allowlist, th.bypassDenylist)
+			err := CheckToolCommand(cmd, "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist)
 			if err == nil {
 				t.Errorf("denylisted command %q unexpectedly passed — denylist-wins invariant broken", cmd)
 			}
@@ -178,7 +178,7 @@ func TestDenylistWinsOverGraphAttr(t *testing.T) {
 	}
 
 	// Sanity: non-denied commands still run under "*".
-	if err := CheckToolCommand("echo hello", "tool1", th.allowlist, th.bypassDenylist); err != nil {
+	if err := CheckToolCommand("echo hello", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err != nil {
 		t.Errorf("echo hello should pass under '*' allow: %v", err)
 	}
 }
@@ -196,11 +196,11 @@ func TestEmptyGraphAttrUnchangedBehavior(t *testing.T) {
 		t.Errorf("allowlist = %#v, want empty with no CLI or graph-attr config", th.allowlist)
 	}
 	// Any non-denylisted command should pass because allowlist is inactive.
-	if err := CheckToolCommand("npm install", "tool1", th.allowlist, th.bypassDenylist); err != nil {
+	if err := CheckToolCommand("npm install", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err != nil {
 		t.Errorf("npm install should pass with inactive allowlist: %v", err)
 	}
 	// Denylist still active by default.
-	if err := CheckToolCommand("eval $(x)", "tool1", th.allowlist, th.bypassDenylist); err == nil {
+	if err := CheckToolCommand("eval $(x)", "tool1", th.allowlist, th.denylistAdd, th.bypassDenylist); err == nil {
 		t.Error("denylist must remain active even when no allowlist is configured")
 	}
 }
@@ -224,10 +224,10 @@ func TestWhitespaceToleranceGraphAttr(t *testing.T) {
 
 	// Sanity check: both forms allow the same commands.
 	for _, cmd := range []string{"git status", "make build"} {
-		if err := CheckToolCommand(cmd, "tool1", thPadded.allowlist, thPadded.bypassDenylist); err != nil {
+		if err := CheckToolCommand(cmd, "tool1", thPadded.allowlist, thPadded.denylistAdd, thPadded.bypassDenylist); err != nil {
 			t.Errorf("padded: %q should be allowed: %v", cmd, err)
 		}
-		if err := CheckToolCommand(cmd, "tool1", thCompact.allowlist, thCompact.bypassDenylist); err != nil {
+		if err := CheckToolCommand(cmd, "tool1", thCompact.allowlist, thCompact.denylistAdd, thCompact.bypassDenylist); err != nil {
 			t.Errorf("compact: %q should be allowed: %v", cmd, err)
 		}
 	}
@@ -241,7 +241,76 @@ func TestCheckToolCommandOrderDenylistBeforeAllowlist(t *testing.T) {
 	// still fails. If the implementation checked allowlist first and returned on
 	// match, denied commands would slip through.
 	allow := []string{"*"}
-	if err := CheckToolCommand("eval foo", "n", allow, false); err == nil {
+	if err := CheckToolCommand("eval foo", "n", allow, nil, false); err == nil {
 		t.Fatal("denylist must be evaluated before allowlist: 'eval foo' should fail even with '*' allow")
+	}
+}
+
+// testGraphWithDenylistAddAttr builds a minimal graph with the
+// tool_denylist_add graph attr. Mirrors testGraphWithAllowAttr so the
+// denylist-add tests exercise the same registry-wiring path.
+func testGraphWithDenylistAddAttr(denyAdd string) *pipeline.Graph {
+	g := pipeline.NewGraph("test")
+	g.StartNode = "start"
+	g.ExitNode = "exit"
+	if denyAdd != "" {
+		g.Attrs[GraphAttrToolDenylistAdd] = denyAdd
+	}
+	g.AddNode(&pipeline.Node{ID: "start", Shape: "circle", Attrs: map[string]string{}})
+	g.AddNode(&pipeline.Node{ID: "tool1", Shape: "parallelogram", Attrs: map[string]string{
+		"tool_command": "git status",
+	}})
+	g.AddNode(&pipeline.Node{ID: "exit", Shape: "doublecircle", Attrs: map[string]string{}})
+	return g
+}
+
+// TestParseGraphDenylistAdd mirrors TestParseGraphAllowlist: the two
+// helpers delegate to the shared parseGraphCommaList, so the behavior
+// must match — this test prevents drift if one call site's semantics
+// diverge in a future refactor.
+func TestParseGraphDenylistAdd(t *testing.T) {
+	tests := []struct {
+		name string
+		attr string
+		want []string
+	}{
+		{"empty attr", "", nil},
+		{"single pattern", "rm -rf *", []string{"rm -rf *"}},
+		{"two comma-separated", "rm -rf *,sudo *", []string{"rm -rf *", "sudo *"}},
+		{"padded whitespace", " rm -rf * , sudo * ", []string{"rm -rf *", "sudo *"}},
+		{"empty tokens dropped", "rm -rf *,,sudo *,", []string{"rm -rf *", "sudo *"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := testGraphWithDenylistAddAttr(tt.attr)
+			if got := parseGraphDenylistAdd(g); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseGraphDenylistAdd(%q) = %#v, want %#v", tt.attr, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMergeToolDenylistAdd pins union semantics + order-preserving dedup
+// for the user-added denylist. Mirrors TestMergeToolAllowlist.
+func TestMergeToolDenylistAdd(t *testing.T) {
+	tests := []struct {
+		name  string
+		cli   []string
+		graph *pipeline.Graph
+		want  []string
+	}{
+		{"both empty", nil, testGraphWithDenylistAddAttr(""), nil},
+		{"cli only", []string{"rm -rf *"}, testGraphWithDenylistAddAttr(""), []string{"rm -rf *"}},
+		{"graph only", nil, testGraphWithDenylistAddAttr("sudo *"), []string{"sudo *"}},
+		{"union with no overlap", []string{"rm -rf *"}, testGraphWithDenylistAddAttr("sudo *"), []string{"rm -rf *", "sudo *"}},
+		{"dedup across sources", []string{"rm -rf *", "sudo *"}, testGraphWithDenylistAddAttr("sudo *,dd *"), []string{"rm -rf *", "sudo *", "dd *"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeToolDenylistAdd(tt.cli, tt.graph)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("mergeToolDenylistAdd(cli=%#v, graph=%q) = %#v, want %#v", tt.cli, tt.graph.Attrs[GraphAttrToolDenylistAdd], got, tt.want)
+			}
+		})
 	}
 }

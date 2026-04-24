@@ -266,3 +266,66 @@ func mustGetToolHandler(t *testing.T, reg *pipeline.HandlerRegistry) pipeline.Ha
 func containsIgnoreCase(haystack, needle string) bool {
 	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
+
+// TestParseFlagsToolDenylistAddSingle verifies one --tool-denylist-add
+// invocation populates the slice.
+func TestParseFlagsToolDenylistAddSingle(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--tool-denylist-add", "rm -rf *", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if len(cfg.toolDenylistAdd) != 1 || cfg.toolDenylistAdd[0] != "rm -rf *" {
+		t.Fatalf("toolDenylistAdd = %#v, want [%q]", cfg.toolDenylistAdd, "rm -rf *")
+	}
+}
+
+// TestParseFlagsToolDenylistAddRepeatable verifies multiple flags accumulate.
+func TestParseFlagsToolDenylistAddRepeatable(t *testing.T) {
+	cfg, err := parseFlags([]string{
+		"tracker",
+		"--tool-denylist-add", "rm -rf *",
+		"--tool-denylist-add", "sudo *",
+		"pipeline.dip",
+	})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if len(cfg.toolDenylistAdd) != 2 {
+		t.Fatalf("toolDenylistAdd len = %d, want 2: %#v", len(cfg.toolDenylistAdd), cfg.toolDenylistAdd)
+	}
+	if cfg.toolDenylistAdd[0] != "rm -rf *" || cfg.toolDenylistAdd[1] != "sudo *" {
+		t.Fatalf("toolDenylistAdd = %#v", cfg.toolDenylistAdd)
+	}
+}
+
+// TestParseFlagsToolDenylistAddCommaSeparated verifies comma-separated values.
+func TestParseFlagsToolDenylistAddCommaSeparated(t *testing.T) {
+	cfg, err := parseFlags([]string{
+		"tracker",
+		"--tool-denylist-add", "rm -rf *,sudo *, dd *",
+		"pipeline.dip",
+	})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	want := []string{"rm -rf *", "sudo *", "dd *"}
+	if len(cfg.toolDenylistAdd) != len(want) {
+		t.Fatalf("toolDenylistAdd = %#v, want %#v", cfg.toolDenylistAdd, want)
+	}
+	for i, p := range want {
+		if cfg.toolDenylistAdd[i] != p {
+			t.Fatalf("toolDenylistAdd[%d] = %q, want %q", i, cfg.toolDenylistAdd[i], p)
+		}
+	}
+}
+
+// TestParseFlagsToolDenylistAddDefault verifies absent flag yields empty slice.
+func TestParseFlagsToolDenylistAddDefault(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if len(cfg.toolDenylistAdd) != 0 {
+		t.Fatalf("toolDenylistAdd default = %#v, want empty", cfg.toolDenylistAdd)
+	}
+}

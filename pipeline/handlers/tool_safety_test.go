@@ -24,7 +24,7 @@ func TestCheckCommandDenylist(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			denied, pattern := checkCommandDenylist(tt.cmd)
+			denied, pattern := checkCommandDenylist(tt.cmd, nil)
 			if denied != tt.denied {
 				t.Errorf("checkCommandDenylist(%q) denied=%v, want %v", tt.cmd, denied, tt.denied)
 			}
@@ -78,24 +78,74 @@ func TestSplitCommandStatements(t *testing.T) {
 }
 
 func TestCheckToolCommand_DenylistNotBypassable(t *testing.T) {
-	err := CheckToolCommand("eval foo", "node1", nil, false)
+	err := CheckToolCommand("eval foo", "node1", nil, nil, false)
 	if err == nil {
 		t.Fatal("expected error for denied command")
 	}
 	// With bypass flag
-	err = CheckToolCommand("eval foo", "node1", nil, true)
+	err = CheckToolCommand("eval foo", "node1", nil, nil, true)
 	if err != nil {
 		t.Fatalf("bypass-denylist should allow: %v", err)
 	}
 }
 
 func TestCheckToolCommand_AllowlistRestricts(t *testing.T) {
-	err := CheckToolCommand("npm install", "node1", []string{"make *"}, false)
+	err := CheckToolCommand("npm install", "node1", []string{"make *"}, nil, false)
 	if err == nil {
 		t.Fatal("expected error for command not in allowlist")
 	}
-	err = CheckToolCommand("make build", "node1", []string{"make *"}, false)
+	err = CheckToolCommand("make build", "node1", []string{"make *"}, nil, false)
 	if err != nil {
 		t.Fatalf("make should be allowed: %v", err)
+	}
+}
+
+// TestCheckToolCommand_DenylistAddBlocksOtherwiseAllowed pins the #168
+// semantics: user-added denylist patterns block commands that would
+// otherwise pass (nothing built-in matches, no allowlist, no bypass).
+// This is the "defense in depth" case — operators can narrow the safety
+// envelope without forking the built-in list.
+func TestCheckToolCommand_DenylistAddBlocksOtherwiseAllowed(t *testing.T) {
+	err := CheckToolCommand("rm -rf /tmp/foo", "node1", nil, []string{"rm -rf *"}, false)
+	if err == nil {
+		t.Fatal("expected error — 'rm -rf *' was user-added to denylist")
+	}
+	// Without the user-added pattern the same command passes (no built-in
+	// matches rm -rf today).
+	err = CheckToolCommand("rm -rf /tmp/foo", "node1", nil, nil, false)
+	if err != nil {
+		t.Fatalf("command should pass with empty user denylist: %v", err)
+	}
+}
+
+// TestCheckToolCommand_BypassOverridesDenylistAdd pins the escape-hatch
+// contract: --bypass-denylist is the explicit all-or-nothing flag, so it
+// disables user-added patterns too. Operators who want defense-in-depth
+// but also want to bypass need to restructure into a sandboxed run
+// without the added patterns.
+func TestCheckToolCommand_BypassOverridesDenylistAdd(t *testing.T) {
+	err := CheckToolCommand("rm -rf /tmp/foo", "node1", nil, []string{"rm -rf *"}, true)
+	if err != nil {
+		t.Fatalf("bypass should disable user-added denylist too: %v", err)
+	}
+}
+
+// TestCheckToolCommand_AllowlistANDDenylistAdd pins the interaction:
+// a command must pass BOTH the (built-in + user-added) denylist AND
+// the allowlist. User-added patterns are a separate gate from the
+// allowlist — they narrow what's allowed even among commands that the
+// allowlist matches.
+func TestCheckToolCommand_AllowlistANDDenylistAdd(t *testing.T) {
+	allowlist := []string{"rm *"}
+	extraDeny := []string{"rm -rf *"}
+	// rm -rf /tmp matches allowlist BUT is user-denied → blocked.
+	err := CheckToolCommand("rm -rf /tmp/foo", "node1", allowlist, extraDeny, false)
+	if err == nil {
+		t.Fatal("expected block — user denylist should reject even allowlist-matching command")
+	}
+	// rm /tmp/foo matches allowlist and is NOT user-denied → passes.
+	err = CheckToolCommand("rm /tmp/foo", "node1", allowlist, extraDeny, false)
+	if err != nil {
+		t.Fatalf("non-recursive rm should pass: %v", err)
 	}
 }
