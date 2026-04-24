@@ -127,7 +127,7 @@ func WithBudgetGuard(guard *BudgetGuard) EngineOption {
 // check sees parent spend + child trace combined, preventing the "subgraph
 // sandbox" escape where an operator's --max-tokens / --max-cost ceiling
 // would otherwise be silently non-binding for nodes nested in a subgraph.
-// Nil baselines are no-ops; zero-token baselines are treated as no-ops.
+// Nil baselines are no-ops.
 func WithBaselineUsage(baseline *UsageSummary) EngineOption {
 	return func(e *Engine) { e.baselineUsage = baseline }
 }

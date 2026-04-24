@@ -435,11 +435,18 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	// BudgetGuard.Check runs only against child-local spend and the
 	// operator's --max-tokens / --max-cost ceiling becomes an effective
 	// ceiling *per nesting level*, not per run. See #183.
-	childRunCtx := context.WithValue(ctx, childRunContextKey{}, &ChildRunContext{
-		BudgetGuard: e.budgetGuard,
-		Baseline:    e.combinedUsageForBudget(s),
-	})
-	outcome, err := e.registry.Execute(childRunCtx, execNode, s.pctx)
+	//
+	// Skip entirely when no guard is configured: there's nothing to
+	// propagate, and computing combinedUsageForBudget on every handler
+	// dispatch would burn clones/folds for no benefit.
+	execCtx := ctx
+	if e.budgetGuard != nil {
+		execCtx = context.WithValue(ctx, childRunContextKey{}, &ChildRunContext{
+			BudgetGuard: e.budgetGuard,
+			Baseline:    e.combinedUsageForBudget(s),
+		})
+	}
+	outcome, err := e.registry.Execute(execCtx, execNode, s.pctx)
 	handlerDuration := time.Since(handlerStart)
 
 	traceEntry := TraceEntry{
