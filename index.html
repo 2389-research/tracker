@@ -39,11 +39,11 @@
       <a href="cli.html" class="btn btn-ghost">CLI Reference</a>
     </div>
     <p style="margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.95rem;">
-      <strong><span class="badge">v0.23.0</span> What's new:</strong>
-      <code>stack.manager_loop</code> supervisors are now first-class in <code>.dip</code> via <code>ir.NodeManagerLoop</code> (no more DOT escape hatch), and three new tool-safety flags land on the CLI: <code>--bypass-denylist</code>, <code>--tool-allowlist</code>, and <code>--max-output-limit</code>. See the <a href="changelog.html">changelog</a>.
+      <strong><span class="badge">v0.24.0</span> What's new:</strong>
+      Two P1 budget-bypass fixes &mdash; <code>subgraph</code> and <code>stack.manager_loop</code> nodes no longer ignore <code>--max-tokens</code>/<code>--max-cost</code> (child engines now inherit the parent's budget guard + baseline usage, and their spend rolls up through <code>Outcome.ChildUsage</code> so parent guards fire between nodes). Plus: ACP backend surfaces approximate per-prompt token usage from rune counts across six channels (prompt, system, assistant text, reasoning, tool args, tool results). See the <a href="changelog.html">changelog</a>.
     </p>
     <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
-      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.22.0">v0.22.0</a>: <code>tracker-swebench analyze</code> bulk triage + typed <code>NodeConfig</code> accessors.
+      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.23.0">v0.23.0</a>: <code>stack.manager_loop</code> first-class in <code>.dip</code> via <code>ir.NodeManagerLoop</code> + three tool-safety CLI flags.
     </p>
   </section>
 
@@ -313,7 +313,7 @@ tracker doctor
 <span class="comment"># Stay current — checks automatically, or run manually</span>
 tracker update</code></pre>
     <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
-      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.23.0">v0.23.0</a> &middot;
+      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0">v0.24.0</a> &middot;
       <a href="changelog.html">Changelog</a> &middot;
       <a href="cli.html">Full CLI reference</a>
     </p>
