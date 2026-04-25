@@ -118,7 +118,7 @@ func parseManagerLoopConfig(nodeID string, attrs map[string]string) (managerLoop
 	warnUnknownStackChildKeys(nodeID, "stop_condition", cfg.stopCondition)
 	warnUnknownStackChildKeys(nodeID, "steer_condition", cfg.steerExpr)
 	rawSteerContext := managerAttr(attrs, "steer_context")
-	cfg.steerKeys = parseSteerContext(rawSteerContext)
+	cfg.steerKeys = namespaceSteerKeys(parseSteerContext(rawSteerContext))
 
 	// Two independent checks:
 	//
@@ -288,12 +288,51 @@ func decodeSteerContextToken(s string) string {
 	return steerContextDecoder.Replace(s)
 }
 
+// SteerContextKeyPrefix is the namespace under which manager_loop steer_context
+// keys are injected into the child pipeline's context. So an author-written
+// `steer_context: { outcome: "fail" }` lands as `steer.outcome` in the child's
+// PipelineContext, not bare `outcome`.
+//
+// This namespacing is the option-B fix from #177: it makes it impossible for
+// a steered value to collide with the four safe-allowlisted bare ctx keys
+// (`outcome`, `preferred_label`, `human_response`, `interview_answers`) that
+// tool_command variable expansion permits. Even if a future feature lets
+// steer_context values be built from LLM output, those values cannot reach
+// shell commands via the safe-key path because the keys live under `steer.*`,
+// which is not in the allowlist. Authors who want to read steered values in
+// non-shell contexts (prompts, conditions) reference `${ctx.steer.<key>}`.
+const SteerContextKeyPrefix = "steer."
+
+// namespaceSteerKeys rewrites a parsed steer_context map so every key is
+// prefixed with SteerContextKeyPrefix. Idempotent — keys already in the
+// namespace are not double-prefixed (so re-parsing a previously-namespaced
+// dump round-trips cleanly). Returns nil for nil input so callers can use
+// the empty-map check unchanged.
+func namespaceSteerKeys(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return m
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if strings.HasPrefix(k, SteerContextKeyPrefix) {
+			out[k] = v
+		} else {
+			out[SteerContextKeyPrefix+k] = v
+		}
+	}
+	return out
+}
+
 // parseSteerContext parses a comma-separated "key=value,key=value" string into
 // a map. Reserved characters (',', '=', '%') in keys or values appear as
 // percent-encoded tokens (`%2C`, `%3D`, `%25`) and are decoded back to their
 // originals — see flattenSteerContext in pipeline/dippin_adapter.go.
 // Empty input returns nil. Malformed pairs are silently skipped, matching
 // dippin-lang's migrate.parseFlattenedSteerContext behavior.
+//
+// Returned keys are bare; callers that intend to inject the values into a
+// child pipeline context should pass the result through namespaceSteerKeys
+// first to apply the SteerContextKeyPrefix safety namespace.
 func parseSteerContext(s string) map[string]string {
 	if s == "" {
 		return nil

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`stack.manager_loop` `steer_context` keys are now namespaced under `steer.*`** (closes #177). Previously a manager_loop's `steer_context: { outcome: "fail" }` injected a bare `outcome` key into the running child's `PipelineContext`, which collided with the four safe-allowlisted bare ctx keys (`outcome`, `preferred_label`, `human_response`, `interview_answers`) that `tool_command` variable expansion permits. The threat: today `steer_context` is static at `.dip` parse time so collisions are author-controlled, but if a future feature lets steer values come from LLM output an attacker-controlled value could reach a shell command via `${ctx.outcome}`. Fix is option B from the issue: a new `namespaceSteerKeys` helper in `pipeline/handlers/manager_loop.go` rewrites every parsed key with the `SteerContextKeyPrefix = "steer."` prefix before it lands in `cfg.steerKeys`, so the collision is impossible by construction — bare safe-allowlist keys stay reserved for legitimate node-level outcomes, steered values flow through `steer.*` and are blocked from tool_command expansion (the namespace isn't on the allowlist). The transform is idempotent (already-namespaced keys aren't double-prefixed) and applies uniformly via `parseManagerLoopConfig`. Authors who want to read steered values in prompts / conditions / `--max-cost` lookups now reference `${ctx.steer.<key>}`. **Behavior change:** any pipeline that today reads a steer-injected value via the bare-key form (e.g. `${ctx.hint}` after `steer_context: { hint: "..." }`) needs updating to `${ctx.steer.hint}`. Three new regression tests pin (a) bare keys get prefixed, (b) the transform is idempotent and nil-safe, and (c) attempting to steer one of the four safe-allowlist keys lands as `steer.<safekey>` so the bypass is closed end-to-end.
+
 ## [0.24.1] - 2026-04-24
 
 ### Fixed

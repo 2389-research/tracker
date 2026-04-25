@@ -54,6 +54,23 @@ escape character itself). The adapter emits this form automatically from
 `ir.ManagerLoopConfig.SteerContext`; hand-authored DOT files need to do the
 encoding manually. Example: a value `speed,up` is written as `speed%2Cup`.
 
+**`steer.*` namespacing on injection (#177 option B).** Every steer_context
+key is rewritten with a `steer.` prefix before it lands in the child's
+`PipelineContext`. So an author-written
+`steer_context: { hint: "speed_up", outcome: "fail" }` becomes
+`steer.hint = "speed_up"` and `steer.outcome = "fail"` in the child run —
+*never* bare `hint` or `outcome`. This is a security gate, not a stylistic
+choice: the four safe-allowlisted bare ctx keys that `tool_command` variable
+expansion permits (`outcome`, `preferred_label`, `human_response`,
+`interview_answers`) live in the global namespace, and a bare-key steer
+write would let an attacker-controlled value reach a shell command via
+`${ctx.outcome}` etc. Putting steered keys under `steer.*` makes the
+collision impossible by construction. The transform happens in
+`pipeline/handlers/manager_loop.go:namespaceSteerKeys` at
+`parseManagerLoopConfig` time and is idempotent (already-namespaced keys
+aren't double-prefixed). Authors who want to read steered values in
+prompts or conditions reference them as `${ctx.steer.<key>}`.
+
 ## Key Design Decisions
 
 ### Isolation

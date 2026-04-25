@@ -458,11 +458,20 @@ func TestManagerLoopHandler_CustomConfig(t *testing.T) {
 	if cfg.steerExpr != "stack.child.cycles = 3" {
 		t.Errorf("steerExpr = %q, want %q", cfg.steerExpr, "stack.child.cycles = 3")
 	}
-	if cfg.steerKeys["hint"] != "speed_up" {
-		t.Errorf("steerKeys[hint] = %q, want %q", cfg.steerKeys["hint"], "speed_up")
+	// Keys are namespaced under "steer." per #177 option B so steered values
+	// can never collide with the safe-allowlisted bare ctx keys
+	// (`outcome`, `preferred_label`, `human_response`, `interview_answers`)
+	// that tool_command variable expansion permits.
+	if cfg.steerKeys["steer.hint"] != "speed_up" {
+		t.Errorf("steerKeys[steer.hint] = %q, want %q", cfg.steerKeys["steer.hint"], "speed_up")
 	}
-	if cfg.steerKeys["priority"] != "high" {
-		t.Errorf("steerKeys[priority] = %q, want %q", cfg.steerKeys["priority"], "high")
+	if cfg.steerKeys["steer.priority"] != "high" {
+		t.Errorf("steerKeys[steer.priority] = %q, want %q", cfg.steerKeys["steer.priority"], "high")
+	}
+	// The bare-key form must NOT be present — that's the whole point of the
+	// namespacing.
+	if _, bare := cfg.steerKeys["hint"]; bare {
+		t.Error("steerKeys contains bare 'hint' key; want only 'steer.hint' (#177 namespacing)")
 	}
 }
 
@@ -588,8 +597,14 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 	registry.Register(&stubHandler{
 		name: "step2_handler",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-			// By now the engine has drained the steering channel (between step1 and step2).
-			val, _ := pctx.Get("hint")
+			// By now the engine has drained the steering channel (between
+			// step1 and step2). Steered keys land under the "steer."
+			// namespace per #177 option B — never bare — so a future
+			// dynamic steer_context can never collide with the safe-
+			// allowlisted bare ctx keys (outcome / preferred_label /
+			// human_response / interview_answers) that tool_command
+			// expansion permits.
+			val, _ := pctx.Get("steer.hint")
 			childSawHint = val
 			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
@@ -756,11 +771,12 @@ func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
 	if cfg.steerExpr != "stack.child.cycles = 3" {
 		t.Errorf("steerExpr = %q, want %q", cfg.steerExpr, "stack.child.cycles = 3")
 	}
-	if cfg.steerKeys["hint"] != "speed,up" {
-		t.Errorf("steerKeys[hint] = %q, want %q (expected percent-decoded)", cfg.steerKeys["hint"], "speed,up")
+	// Namespaced under "steer." per #177 option B (safe-key collision fix).
+	if cfg.steerKeys["steer.hint"] != "speed,up" {
+		t.Errorf("steerKeys[steer.hint] = %q, want %q (expected percent-decoded)", cfg.steerKeys["steer.hint"], "speed,up")
 	}
-	if cfg.steerKeys["priority"] != "high" {
-		t.Errorf("steerKeys[priority] = %q, want %q", cfg.steerKeys["priority"], "high")
+	if cfg.steerKeys["steer.priority"] != "high" {
+		t.Errorf("steerKeys[steer.priority] = %q, want %q", cfg.steerKeys["steer.priority"], "high")
 	}
 }
 
@@ -1093,5 +1109,95 @@ func TestManagerLoop_BudgetBypass_Fix_ChildGuardHaltsMidLoop(t *testing.T) {
 	// Parent_pre (1 session) + child step (1 session) = 2.
 	if result.Usage.SessionCount != 2 {
 		t.Errorf("Usage.SessionCount = %d, want 2 (parent_pre + one child session)", result.Usage.SessionCount)
+	}
+}
+
+// TestParseSteerContext_NamespacePrefix and friends pin the #177 option B
+// fix: steer_context keys MUST land under the "steer." namespace before
+// they reach the child engine's PipelineContext. Without this, a future
+// feature that lets steer_context values come from LLM output could
+// collide with the four safe-allowlisted bare ctx keys (outcome,
+// preferred_label, human_response, interview_answers) that tool_command
+// variable expansion permits — letting attacker-controlled values reach
+// shell commands.
+
+func TestNamespaceSteerKeys_PrefixesBareKeys(t *testing.T) {
+	bare := map[string]string{
+		"outcome":        "fail",     // collides with safe-key allowlist!
+		"hint":           "speed_up", // benign author key
+		"human_response": "all yes",  // also collides
+	}
+	got := namespaceSteerKeys(bare)
+	want := map[string]string{
+		"steer.outcome":        "fail",
+		"steer.hint":           "speed_up",
+		"steer.human_response": "all yes",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("namespaceSteerKeys[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+	// The bare-key forms must NOT be present — that's the security gate.
+	for k := range bare {
+		if _, ok := got[k]; ok {
+			t.Errorf("namespaceSteerKeys leaked bare key %q (would collide with safe-key allowlist)", k)
+		}
+	}
+}
+
+func TestNamespaceSteerKeys_Idempotent(t *testing.T) {
+	already := map[string]string{
+		"steer.hint": "speed_up",
+	}
+	got := namespaceSteerKeys(already)
+	if got["steer.hint"] != "speed_up" {
+		t.Errorf("namespaceSteerKeys re-prefixed an already-namespaced key; got=%v", got)
+	}
+	// No "steer.steer.hint" double-prefix.
+	if _, dbl := got["steer.steer.hint"]; dbl {
+		t.Error("namespaceSteerKeys produced double-prefixed key 'steer.steer.hint'")
+	}
+}
+
+func TestNamespaceSteerKeys_NilEmpty(t *testing.T) {
+	if got := namespaceSteerKeys(nil); got != nil {
+		t.Errorf("namespaceSteerKeys(nil) = %v, want nil", got)
+	}
+	if got := namespaceSteerKeys(map[string]string{}); len(got) != 0 {
+		t.Errorf("namespaceSteerKeys({}) = %v, want empty", got)
+	}
+}
+
+// TestParseManagerLoopConfig_SteerKeysCannotCollideWithSafeAllowlist is the
+// end-to-end pin for #177: an author-written steer_context attempting to
+// inject a value under one of the four safe-allowlisted ctx keys
+// (outcome / preferred_label / human_response / interview_answers) lands
+// in the namespaced form, never bare. A downstream tool_command using
+// `${ctx.outcome}` reads the legitimate node-level outcome, not the
+// steered value — closing the bypass that #177 was filed to prevent.
+func TestParseManagerLoopConfig_SteerKeysCannotCollideWithSafeAllowlist(t *testing.T) {
+	attrs := map[string]string{
+		"subgraph_ref":    "child",
+		"steer_condition": "stack.child.cycles = 1",
+		"steer_context":   "outcome=fail,human_response=approved,preferred_label=Yes",
+	}
+	cfg, err := parseManagerLoopConfig("mgr", attrs)
+	if err != nil {
+		t.Fatalf("parseManagerLoopConfig: %v", err)
+	}
+	for _, safe := range []string{"outcome", "human_response", "preferred_label"} {
+		if _, leaked := cfg.steerKeys[safe]; leaked {
+			t.Errorf("cfg.steerKeys[%q] was set to a bare safe-allowlist key — this is the #177 bypass we're trying to close", safe)
+		}
+	}
+	if cfg.steerKeys["steer.outcome"] != "fail" {
+		t.Errorf("cfg.steerKeys[steer.outcome] = %q, want %q", cfg.steerKeys["steer.outcome"], "fail")
+	}
+	if cfg.steerKeys["steer.human_response"] != "approved" {
+		t.Errorf("cfg.steerKeys[steer.human_response] = %q", cfg.steerKeys["steer.human_response"])
+	}
+	if cfg.steerKeys["steer.preferred_label"] != "Yes" {
+		t.Errorf("cfg.steerKeys[steer.preferred_label] = %q", cfg.steerKeys["steer.preferred_label"])
 	}
 }
