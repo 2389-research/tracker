@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -118,7 +119,11 @@ func parseManagerLoopConfig(nodeID string, attrs map[string]string) (managerLoop
 	warnUnknownStackChildKeys(nodeID, "stop_condition", cfg.stopCondition)
 	warnUnknownStackChildKeys(nodeID, "steer_condition", cfg.steerExpr)
 	rawSteerContext := managerAttr(attrs, "steer_context")
-	cfg.steerKeys = namespaceSteerKeys(parseSteerContext(rawSteerContext))
+	steerKeys, err := namespaceSteerKeys(parseSteerContext(rawSteerContext))
+	if err != nil {
+		return cfg, fmt.Errorf("manager_loop: steer_context: %w", err)
+	}
+	cfg.steerKeys = steerKeys
 
 	// Two independent checks:
 	//
@@ -308,9 +313,25 @@ const SteerContextKeyPrefix = "steer."
 // namespace are not double-prefixed (so re-parsing a previously-namespaced
 // dump round-trips cleanly). Returns nil for nil input so callers can use
 // the empty-map check unchanged.
-func namespaceSteerKeys(m map[string]string) map[string]string {
+//
+// Rejects ambiguous inputs: if the source map contains both a bare key and
+// the same key already namespaced (e.g., both "hint" and "steer.hint"),
+// the function returns ErrAmbiguousSteerKey instead of silently picking a
+// winner. Go map iteration order is randomized, so a "winner" picked
+// without explicit precedence would be nondeterministic across runs —
+// failing loud is safer than letting the same .dip file inject different
+// values on different invocations.
+func namespaceSteerKeys(m map[string]string) (map[string]string, error) {
 	if len(m) == 0 {
-		return m
+		return m, nil
+	}
+	for k := range m {
+		if strings.HasPrefix(k, SteerContextKeyPrefix) {
+			continue
+		}
+		if _, dup := m[SteerContextKeyPrefix+k]; dup {
+			return nil, fmt.Errorf("%w: %q and %q both present", ErrAmbiguousSteerKey, k, SteerContextKeyPrefix+k)
+		}
 	}
 	out := make(map[string]string, len(m))
 	for k, v := range m {
@@ -320,8 +341,12 @@ func namespaceSteerKeys(m map[string]string) map[string]string {
 			out[SteerContextKeyPrefix+k] = v
 		}
 	}
-	return out
+	return out, nil
 }
+
+// ErrAmbiguousSteerKey is returned by namespaceSteerKeys when the input
+// map contains both a bare key and its already-namespaced form.
+var ErrAmbiguousSteerKey = errors.New("manager_loop: steer_context contains both bare and steer-prefixed forms of the same key — pick one")
 
 // parseSteerContext parses a comma-separated "key=value,key=value" string into
 // a map. Reserved characters (',', '=', '%') in keys or values appear as
