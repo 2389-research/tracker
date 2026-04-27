@@ -1238,7 +1238,7 @@ func TestParseManagerLoopConfig_SteerKeysCannotCollideWithSafeAllowlist(t *testi
 		t.Errorf("cfg.steerKeys[steer.outcome] = %q, want %q", cfg.steerKeys["steer.outcome"], "fail")
 	}
 	if cfg.steerKeys["steer.human_response"] != "approved" {
-		t.Errorf("cfg.steerKeys[steer.human_response] = %q", cfg.steerKeys["steer.human_response"])
+		t.Errorf("cfg.steerKeys[steer.human_response] = %q, want %q", cfg.steerKeys["steer.human_response"], "approved")
 	}
 	if cfg.steerKeys["steer.preferred_label"] != "Yes" {
 		t.Errorf("cfg.steerKeys[steer.preferred_label] = %q", cfg.steerKeys["steer.preferred_label"])

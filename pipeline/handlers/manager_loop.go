@@ -345,8 +345,11 @@ func namespaceSteerKeys(m map[string]string) (map[string]string, error) {
 }
 
 // ErrAmbiguousSteerKey is returned by namespaceSteerKeys when the input
-// map contains both a bare key and its already-namespaced form.
-var ErrAmbiguousSteerKey = errors.New("manager_loop: steer_context contains both bare and steer-prefixed forms of the same key — pick one")
+// map contains both a bare key and its already-namespaced form. The
+// message is intentionally context-free — callers (parseManagerLoopConfig)
+// add the "manager_loop: steer_context:" prefix when wrapping, so that
+// the final user-facing error doesn't duplicate the source location.
+var ErrAmbiguousSteerKey = errors.New("contains both bare and steer-prefixed forms of the same key — pick one")
 
 // parseSteerContext parses a comma-separated "key=value,key=value" string into
 // a map. Reserved characters (',', '=', '%') in keys or values appear as
