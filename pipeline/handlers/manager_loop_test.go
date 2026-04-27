@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -458,11 +459,20 @@ func TestManagerLoopHandler_CustomConfig(t *testing.T) {
 	if cfg.steerExpr != "stack.child.cycles = 3" {
 		t.Errorf("steerExpr = %q, want %q", cfg.steerExpr, "stack.child.cycles = 3")
 	}
-	if cfg.steerKeys["hint"] != "speed_up" {
-		t.Errorf("steerKeys[hint] = %q, want %q", cfg.steerKeys["hint"], "speed_up")
+	// Keys are namespaced under "steer." per #177 option B so steered values
+	// can never collide with the safe-allowlisted bare ctx keys
+	// (`outcome`, `preferred_label`, `human_response`, `interview_answers`)
+	// that tool_command variable expansion permits.
+	if cfg.steerKeys["steer.hint"] != "speed_up" {
+		t.Errorf("steerKeys[steer.hint] = %q, want %q", cfg.steerKeys["steer.hint"], "speed_up")
 	}
-	if cfg.steerKeys["priority"] != "high" {
-		t.Errorf("steerKeys[priority] = %q, want %q", cfg.steerKeys["priority"], "high")
+	if cfg.steerKeys["steer.priority"] != "high" {
+		t.Errorf("steerKeys[steer.priority] = %q, want %q", cfg.steerKeys["steer.priority"], "high")
+	}
+	// The bare-key form must NOT be present — that's the whole point of the
+	// namespacing.
+	if _, bare := cfg.steerKeys["hint"]; bare {
+		t.Error("steerKeys contains bare 'hint' key; want only 'steer.hint' (#177 namespacing)")
 	}
 }
 
@@ -588,8 +598,14 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 	registry.Register(&stubHandler{
 		name: "step2_handler",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-			// By now the engine has drained the steering channel (between step1 and step2).
-			val, _ := pctx.Get("hint")
+			// By now the engine has drained the steering channel (between
+			// step1 and step2). Steered keys land under the "steer."
+			// namespace per #177 option B — never bare — so a future
+			// dynamic steer_context can never collide with the safe-
+			// allowlisted bare ctx keys (outcome / preferred_label /
+			// human_response / interview_answers) that tool_command
+			// expansion permits.
+			val, _ := pctx.Get("steer.hint")
 			childSawHint = val
 			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
@@ -756,11 +772,12 @@ func TestParseManagerLoopConfig_UnprefixedAttrs(t *testing.T) {
 	if cfg.steerExpr != "stack.child.cycles = 3" {
 		t.Errorf("steerExpr = %q, want %q", cfg.steerExpr, "stack.child.cycles = 3")
 	}
-	if cfg.steerKeys["hint"] != "speed,up" {
-		t.Errorf("steerKeys[hint] = %q, want %q (expected percent-decoded)", cfg.steerKeys["hint"], "speed,up")
+	// Namespaced under "steer." per #177 option B (safe-key collision fix).
+	if cfg.steerKeys["steer.hint"] != "speed,up" {
+		t.Errorf("steerKeys[steer.hint] = %q, want %q (expected percent-decoded)", cfg.steerKeys["steer.hint"], "speed,up")
 	}
-	if cfg.steerKeys["priority"] != "high" {
-		t.Errorf("steerKeys[priority] = %q, want %q", cfg.steerKeys["priority"], "high")
+	if cfg.steerKeys["steer.priority"] != "high" {
+		t.Errorf("steerKeys[steer.priority] = %q, want %q", cfg.steerKeys["steer.priority"], "high")
 	}
 }
 
@@ -1093,5 +1110,140 @@ func TestManagerLoop_BudgetBypass_Fix_ChildGuardHaltsMidLoop(t *testing.T) {
 	// Parent_pre (1 session) + child step (1 session) = 2.
 	if result.Usage.SessionCount != 2 {
 		t.Errorf("Usage.SessionCount = %d, want 2 (parent_pre + one child session)", result.Usage.SessionCount)
+	}
+}
+
+// TestNamespaceSteerKeys_* pin the #177 option B fix: steer_context keys
+// MUST land under the "steer." namespace before they reach the child
+// engine's PipelineContext. Without this, a future feature that lets
+// steer_context values come from LLM output could collide with the four
+// safe-allowlisted bare ctx keys (outcome, preferred_label,
+// human_response, interview_answers) that tool_command variable
+// expansion permits — letting attacker-controlled values reach shell
+// commands.
+
+func TestNamespaceSteerKeys_PrefixesBareKeys(t *testing.T) {
+	bare := map[string]string{
+		"outcome":        "fail",     // collides with safe-key allowlist!
+		"hint":           "speed_up", // benign author key
+		"human_response": "all yes",  // also collides
+	}
+	got, err := namespaceSteerKeys(bare)
+	if err != nil {
+		t.Fatalf("namespaceSteerKeys: %v", err)
+	}
+	want := map[string]string{
+		"steer.outcome":        "fail",
+		"steer.hint":           "speed_up",
+		"steer.human_response": "all yes",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("namespaceSteerKeys[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+	// The bare-key forms must NOT be present — that's the security gate.
+	for k := range bare {
+		if _, ok := got[k]; ok {
+			t.Errorf("namespaceSteerKeys leaked bare key %q (would collide with safe-key allowlist)", k)
+		}
+	}
+}
+
+func TestNamespaceSteerKeys_Idempotent(t *testing.T) {
+	already := map[string]string{
+		"steer.hint": "speed_up",
+	}
+	got, err := namespaceSteerKeys(already)
+	if err != nil {
+		t.Fatalf("namespaceSteerKeys: %v", err)
+	}
+	if got["steer.hint"] != "speed_up" {
+		t.Errorf("namespaceSteerKeys re-prefixed an already-namespaced key; got=%v", got)
+	}
+	// No "steer.steer.hint" double-prefix.
+	if _, dbl := got["steer.steer.hint"]; dbl {
+		t.Error("namespaceSteerKeys produced double-prefixed key 'steer.steer.hint'")
+	}
+}
+
+func TestNamespaceSteerKeys_NilEmpty(t *testing.T) {
+	got, err := namespaceSteerKeys(nil)
+	if err != nil {
+		t.Errorf("namespaceSteerKeys(nil) error = %v", err)
+	}
+	if got != nil {
+		t.Errorf("namespaceSteerKeys(nil) = %v, want nil", got)
+	}
+	got, err = namespaceSteerKeys(map[string]string{})
+	if err != nil {
+		t.Errorf("namespaceSteerKeys({}) error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("namespaceSteerKeys({}) = %v, want empty", got)
+	}
+}
+
+// TestNamespaceSteerKeys_RejectsAmbiguousCollision pins the deterministic-
+// failure contract: when the input contains both a bare key and the same
+// key already namespaced (e.g., "hint" + "steer.hint"), Go map iteration
+// order would otherwise pick a nondeterministic winner. Returning
+// ErrAmbiguousSteerKey forces the author to disambiguate up front rather
+// than letting two runs of the same .dip silently inject different
+// values.
+func TestNamespaceSteerKeys_RejectsAmbiguousCollision(t *testing.T) {
+	conflict := map[string]string{
+		"hint":       "from_bare",
+		"steer.hint": "from_namespaced",
+	}
+	got, err := namespaceSteerKeys(conflict)
+	if err == nil {
+		t.Fatalf("expected ErrAmbiguousSteerKey, got nil and result=%v", got)
+	}
+	if !errors.Is(err, ErrAmbiguousSteerKey) {
+		t.Errorf("error = %v, want ErrAmbiguousSteerKey", err)
+	}
+	if got != nil {
+		t.Errorf("got = %v, want nil on error", got)
+	}
+}
+
+// TestParseManagerLoopConfig_SteerKeysCannotCollideWithSafeAllowlist is the
+// end-to-end pin for #177: an author-written steer_context attempting to
+// inject a value under one of the four safe-allowlisted ctx keys
+// (outcome / preferred_label / human_response / interview_answers) lands
+// in the namespaced form, never bare. A downstream tool_command using
+// `${ctx.outcome}` reads the legitimate node-level outcome, not the
+// steered value — closing the bypass that #177 was filed to prevent.
+func TestParseManagerLoopConfig_SteerKeysCannotCollideWithSafeAllowlist(t *testing.T) {
+	attrs := map[string]string{
+		"subgraph_ref":    "child",
+		"steer_condition": "stack.child.cycles = 1",
+		// All four safe-allowlist keys exercised end-to-end so the
+		// regression covers the full attack surface, not just three of
+		// them. Adding a key here also asserts it lands in the steer.*
+		// namespace below.
+		"steer_context": "outcome=fail,human_response=approved,preferred_label=Yes,interview_answers=q1=A;q2=B",
+	}
+	cfg, err := parseManagerLoopConfig("mgr", attrs)
+	if err != nil {
+		t.Fatalf("parseManagerLoopConfig: %v", err)
+	}
+	for _, safe := range []string{"outcome", "human_response", "preferred_label", "interview_answers"} {
+		if _, leaked := cfg.steerKeys[safe]; leaked {
+			t.Errorf("cfg.steerKeys[%q] was set to a bare safe-allowlist key — this is the #177 bypass we're trying to close", safe)
+		}
+	}
+	if cfg.steerKeys["steer.outcome"] != "fail" {
+		t.Errorf("cfg.steerKeys[steer.outcome] = %q, want %q", cfg.steerKeys["steer.outcome"], "fail")
+	}
+	if cfg.steerKeys["steer.human_response"] != "approved" {
+		t.Errorf("cfg.steerKeys[steer.human_response] = %q, want %q", cfg.steerKeys["steer.human_response"], "approved")
+	}
+	if cfg.steerKeys["steer.preferred_label"] != "Yes" {
+		t.Errorf("cfg.steerKeys[steer.preferred_label] = %q", cfg.steerKeys["steer.preferred_label"])
+	}
+	if got := cfg.steerKeys["steer.interview_answers"]; got == "" {
+		t.Errorf("cfg.steerKeys[steer.interview_answers] is empty; want a populated value")
 	}
 }
