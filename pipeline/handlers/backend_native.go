@@ -4,9 +4,11 @@ package handlers
 
 import (
 	"context"
+	"os"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/agent/tools"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -41,6 +43,46 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	}
 	if b.env != nil {
 		opts = append(opts, agent.WithEnvironment(b.env))
+	}
+
+	// Register generate_code tool if a cheap model is configured via env.
+	if cheapModel := os.Getenv("TRACKER_CODEGEN_MODEL"); cheapModel != "" {
+		cheapProvider := os.Getenv("TRACKER_CODEGEN_PROVIDER")
+		if cheapProvider == "" {
+			cheapProvider = "openai"
+		}
+		genOpts := []tools.GenerateCodeOption{
+			tools.WithGenerateModel(cheapModel),
+			tools.WithGenerateProvider(cheapProvider),
+		}
+		workDir := sessionCfg.WorkingDir
+		if workDir == "" {
+			workDir = cfg.WorkingDir
+		}
+		if workDir != "" {
+			genOpts = append(genOpts, tools.WithGenerateWorkDir(workDir))
+		}
+		opts = append(opts, agent.WithTools(tools.NewGenerateCodeTool(b.client, genOpts...)))
+	}
+
+	// Register write_enriched_sprint tool if a sprint-writer model is configured via env.
+	if sprintModel := os.Getenv("TRACKER_SPRINT_WRITER_MODEL"); sprintModel != "" {
+		sprintProvider := os.Getenv("TRACKER_SPRINT_WRITER_PROVIDER")
+		if sprintProvider == "" {
+			sprintProvider = "anthropic"
+		}
+		swOpts := []tools.WriteEnrichedSprintOption{
+			tools.WithSprintWriterModel(sprintModel),
+			tools.WithSprintWriterProvider(sprintProvider),
+		}
+		workDir := sessionCfg.WorkingDir
+		if workDir == "" {
+			workDir = cfg.WorkingDir
+		}
+		if workDir != "" {
+			swOpts = append(swOpts, tools.WithSprintWriterWorkDir(workDir))
+		}
+		opts = append(opts, agent.WithTools(tools.NewWriteEnrichedSprintTool(b.client, swOpts...)))
 	}
 
 	sess, err := agent.NewSession(b.client, sessionCfg, opts...)
