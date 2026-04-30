@@ -304,6 +304,117 @@ The following is a complete enriched sprint at the target density and structure.
 
 `
 
+const auditSystemPrompt = `You are auditing a draft enriched sprint specification produced by a sibling author model. You receive: the project-wide contract, the per-sprint description from the architect, and the author's draft. Your job is narrow: detect ambiguity-class issues that would cause the local code-generator (qwen3.6:35b or similar) to produce broken output. If you find issues, emit precise SEARCH/REPLACE patches. If the draft is clean, declare PASS.
+
+There is no third pass after you. Be decisive and minimal — preserve everything in the draft that's correct; patch surgically.
+
+# OUTPUT FORMAT — TWO ALTERNATIVES
+
+Your output starts with EXACTLY one of these markers on the first line:
+
+## Option A: ` + "`AUDIT-VERDICT: PASS`" + `
+
+The draft is clean; no patches needed. Output ONLY this single line and nothing else.
+
+## Option B: ` + "`AUDIT-VERDICT: PATCHED`" + `
+
+One or more issues were found. Follow the verdict line with one or more SEARCH/REPLACE blocks describing surgical edits to apply to the draft. Each block has this exact form (Aider-style):
+
+` + "```" + `
+<<<<<<< SEARCH
+<exact text from the draft to find>
+=======
+<replacement text>
+>>>>>>> REPLACE
+` + "```" + `
+
+Critical block rules:
+- The SEARCH section MUST match the draft EXACTLY — every character including whitespace, indentation, and line breaks. The tool does byte-exact matching; whitespace drift breaks the patch.
+- Include enough context lines around the change to make the SEARCH text unique within the draft. 3-5 surrounding lines is usually enough.
+- For pure inserts (e.g., adding a new Rule line), the SEARCH text is a unique anchor (the line before or after the insertion point) and the REPLACE text is the anchor + the new content.
+- Multiple non-adjacent edits → multiple blocks. Each block applies independently, in order.
+- Do NOT rewrite the whole file. Do NOT emit a full ` + "`# Sprint NNN — Title`" + ` markdown header. Emit only the SEARCH/REPLACE blocks.
+
+After your last block, output nothing — no commentary, no "FIXED:" notes, no audit summary.
+
+# WHEN TO PASS vs PATCH
+
+**PATCH only when the issue is CLEAR and ambiguity-class** — the local generator would produce broken output without the fix. Examples:
+- Path parameter typed as ` + "`str`" + ` where it should be ` + "`uuid.UUID`" + ` (defect class 7)
+- Test assertion uses ` + "`body[\"detail\"][\"error_code\"]`" + ` but contract pins flat shape (defect class 14)
+- Imports list missing a symbol the Algorithm references (defect class 2)
+- Schema construction missing the "do NOT pass any other field" guard (defect class 8)
+
+**PASS when uncertain or when the issue is stylistic.** The auditor is for catching CLEAR ambiguity-class issues, not for stylistic improvements. If you cannot decide, PASS.
+
+# AUDIT CHECKLIST
+
+Run through every category. For each: if the draft satisfies it, leave that section unchanged. If not, patch the relevant section minimally.
+
+## Pattern coverage (within-sprint)
+
+- Tricky semantics rules each have a WHY (what runtime symptom occurs without that rule)
+- Every collection-side relationship has ` + "`lazy=\"selectin\"`" + ` (or contract-pinned equivalent)
+- Bidirectional relationships have ` + "`back_populates`" + ` on BOTH sides with matching names
+- Path/query parameters annotated with real Python types (` + "`uuid.UUID`" + `, ` + "`date`" + `, etc.) — never default to ` + "`str`" + `
+- Collection routes use empty-string path ` + "`\"\"`" + ` (not ` + "`\"/\"`" + `) — trailing-slash form causes 307 redirects
+- Static-path routes declared BEFORE parameterized routes that share their prefix — IN BOTH the rule AND the API contract table (structural-section consistency)
+- When the algorithm constructs a Read schema explicitly, the EXACT field set is listed with "do NOT pass any other field"
+- Imports lists for each file cover EVERY symbol the Algorithm references (full Python statements, not bare module names; address class-vs-module collisions like ` + "`datetime`" + ` / ` + "`date`" + ` / ` + "`time`" + ` explicitly)
+- Test contract assertion paths match the contract's pinned exception handler shape (flat ` + "`body[\"error_code\"]`" + ` vs nested ` + "`body[\"detail\"][\"error_code\"]`" + ` — verify by checking the contract)
+- Tests creating second instances with unique constraints specify EXACT distinguishing values (e.g., second_volunteer email/phone given verbatim, not "different value")
+- Dates/times/UUIDs in JSON request bodies use ` + "`.isoformat()`" + ` / ` + "`str(...)`" + ` serialization
+- String UUIDs from ` + "`response.json()[\"id\"]`" + ` are parsed via ` + "`uuid.UUID(...)`" + ` before ORM queries
+- No invented schema fields (e.g., ` + "`Shift.station_id`" + ` when not in the contract's data model)
+
+## Architect-discipline meta-rules
+
+- Structural sections embody structural rules (table order matches the Rule's stated order)
+- Concrete choices made (no "you may use X or Y", no "choose based on preference")
+- Exact field sets pinned (no partial examples with "...etc.")
+- contract.md's FROZEN list and pinned conventions respected — for sprints other than the foundation, ` + "`## Modified files: (none)`" + ` is the expected output
+- Trivial files have verbatim content blocks (even empty files show ` + "```python\n```" + `)
+
+## Cross-section consistency
+
+- Imports lists cover every symbol the Algorithm sections reference
+- Test fixture parameters match what the test bodies actually use
+- API contract route order matches Algorithm subsection order
+- "New files" bullets and "Expected Artifacts" agree
+
+# PATCHING DISCIPLINE
+
+When emitting SEARCH/REPLACE blocks:
+- Preserve every section the draft got right.
+- Patch the smallest unit that closes the issue (a Rule line, a table row, an algorithm step, an imports list).
+- Do NOT introduce new ambiguities while patching. If you patch a Rule, the structural sections must still match (per M-1) — emit additional blocks for any structural sections that need updating.
+- Each block must be self-contained: the SEARCH text must be unique within the draft (include 3-5 lines of surrounding context if needed for uniqueness).
+
+# EXAMPLE OF A CORRECT PATCHED RESPONSE
+
+Suppose the draft has this in the API contract table:
+
+` + "```" + `
+| GET | /shifts/{shift_id} | none | — | ShiftRead (200) | 404 NOT_FOUND |
+| GET | /shifts/browse     | none | — | list[ShiftRead] (200) | — |
+` + "```" + `
+
+…but the spec's Rule says "static routes before parameterized." The auditor patches:
+
+` + "```" + `
+AUDIT-VERDICT: PATCHED
+<<<<<<< SEARCH
+| GET | /shifts/{shift_id} | none | — | ShiftRead (200) | 404 NOT_FOUND |
+| GET | /shifts/browse     | none | — | list[ShiftRead] (200) | — |
+=======
+| GET | /shifts/browse     | none | — | list[ShiftRead] (200) | — |
+| GET | /shifts/{shift_id} | none | — | ShiftRead (200) | 404 NOT_FOUND |
+>>>>>>> REPLACE
+` + "```" + `
+
+That's a 5-line patch (2 SEARCH lines, 2 REPLACE lines, plus markers) instead of regenerating the whole spec.
+`
+
 func (t *WriteEnrichedSprintTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
 	var args struct {
 		Path         string `json:"path"`
@@ -348,9 +459,9 @@ func (t *WriteEnrichedSprintTool) Execute(ctx context.Context, input json.RawMes
 		args.OutputDir = filepath.Join(t.workDir, args.OutputDir)
 	}
 
-	systemPrompt := sprintSystemPromptHeader + enrichedSprintExample
+	authorSystemPrompt := sprintSystemPromptHeader + enrichedSprintExample
 
-	userPrompt := fmt.Sprintf(
+	authorUserPrompt := fmt.Sprintf(
 		"CONTRACT (project-wide architectural map shared across all sprints):\n\n%s\n\n"+
 			"SPRINT TO WRITE: %s\n\n"+
 			"Per-sprint description from the architect:\n%s\n\n"+
@@ -359,28 +470,205 @@ func (t *WriteEnrichedSprintTool) Execute(ctx context.Context, input json.RawMes
 		contract, args.Path, args.Description,
 	)
 
-	resp, err := t.client.Complete(ctx, &llm.Request{
+	// PASS 1 — Author. Produces the draft.
+	authorResp, err := t.client.Complete(ctx, &llm.Request{
 		Model:    t.model,
 		Provider: t.provider,
 		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: []llm.ContentPart{{Kind: llm.KindText, Text: systemPrompt}}},
-			llm.UserMessage(userPrompt),
+			{Role: llm.RoleSystem, Content: []llm.ContentPart{{Kind: llm.KindText, Text: authorSystemPrompt}}},
+			llm.UserMessage(authorUserPrompt),
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("write_enriched_sprint: failed writing %s: %w", args.Path, err)
+		return "", fmt.Errorf("write_enriched_sprint: author pass failed for %s: %w", args.Path, err)
 	}
 
-	content := resp.Text()
-	content = trimEnclosingMarkdownFence(content)
+	draft := trimEnclosingMarkdownFence(authorResp.Text())
+
+	// PASS 2 — Auditor. Reviews the draft against the within-sprint patterns; either
+	// returns the draft verbatim (AUDIT-VERDICT: PASS) or a patched version (AUDIT-VERDICT: PATCHED).
+	// Different system prompt narrows the auditor's role; lower temperature makes the
+	// audit deterministic.
+	auditTemperature := 0.2
+	auditUserPrompt := fmt.Sprintf(
+		"CONTRACT (project-wide architectural map shared across all sprints):\n\n%s\n\n"+
+			"SPRINT BEING AUDITED: %s\n\n"+
+			"Per-sprint description from the architect:\n%s\n\n"+
+			"DRAFT (the author's first attempt) — audit this against the within-sprint patterns:\n\n"+
+			"---BEGIN DRAFT---\n%s\n---END DRAFT---\n\n"+
+			"Output: first line `AUDIT-VERDICT: PASS` (return draft verbatim) OR `AUDIT-VERDICT: PATCHED` (return patched version). "+
+			"Second line must be the `# Sprint NNN — Title (enriched spec)` heading. No commentary outside the markdown.",
+		contract, args.Path, args.Description, draft,
+	)
+
+	auditResp, err := t.client.Complete(ctx, &llm.Request{
+		Model:       t.model,
+		Provider:    t.provider,
+		Temperature: &auditTemperature,
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: []llm.ContentPart{{Kind: llm.KindText, Text: auditSystemPrompt}}},
+			llm.UserMessage(auditUserPrompt),
+		},
+	})
+	if err != nil {
+		// Audit failure is non-fatal — fall back to draft.
+		// The author pass already produced something usable; an audit failure shouldn't lose it.
+		fmt.Fprintf(os.Stderr, "write_enriched_sprint: audit pass failed for %s (using draft as-is): %v\n", args.Path, err)
+		auditResp = nil
+	}
+
+	verdict := "PASS"
+	final := draft
+	patchesApplied := 0
+	auditInTokens, auditOutTokens := 0, 0
+	if auditResp != nil {
+		auditText := trimEnclosingMarkdownFence(auditResp.Text())
+		v, blocks, parseErr := parseAuditResponse(auditText)
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "write_enriched_sprint: audit response malformed for %s (using draft as-is): %v\n", args.Path, parseErr)
+			verdict = "PASS-FALLBACK-MALFORMED"
+		} else {
+			verdict = v
+			if v == "PATCHED" && len(blocks) > 0 {
+				patched, applyErr := applySRBlocks(draft, blocks)
+				if applyErr != nil {
+					// One or more blocks failed to match. Fall back to draft (don't ship a half-patched spec).
+					fmt.Fprintf(os.Stderr, "write_enriched_sprint: audit patch apply failed for %s (using draft as-is): %v\n", args.Path, applyErr)
+					verdict = "PASS-FALLBACK-NOMATCH"
+				} else {
+					final = patched
+					patchesApplied = len(blocks)
+				}
+			}
+		}
+		auditInTokens = auditResp.Usage.InputTokens
+		auditOutTokens = auditResp.Usage.OutputTokens
+	}
 
 	path := filepath.Join(args.OutputDir, args.Path)
-	if err := writeSprintFile(path, content); err != nil {
+	if err := writeSprintFile(path, final); err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("Wrote %s (%d bytes). Model: %s. Tokens: %d in / %d out.",
-		args.Path, len(content), t.model, resp.Usage.InputTokens, resp.Usage.OutputTokens), nil
+	return fmt.Sprintf("Wrote %s (%d bytes, audit=%s, patches=%d). Model: %s. Tokens: author %d in / %d out, audit %d in / %d out.",
+		args.Path, len(final), verdict, patchesApplied, t.model,
+		authorResp.Usage.InputTokens, authorResp.Usage.OutputTokens,
+		auditInTokens, auditOutTokens), nil
+}
+
+// srBlock is one Aider-style SEARCH/REPLACE patch.
+type srBlock struct {
+	Search  string
+	Replace string
+}
+
+// parseAuditResponse parses the auditor's output. The first non-empty line must be
+// `AUDIT-VERDICT: PASS` or `AUDIT-VERDICT: PATCHED`. For PATCHED, the rest of the body
+// is one or more SEARCH/REPLACE blocks in Aider format:
+//
+//	<<<<<<< SEARCH
+//	<old text>
+//	=======
+//	<new text>
+//	>>>>>>> REPLACE
+//
+// Returns the verdict, the parsed blocks, and an error if the response is malformed.
+func parseAuditResponse(s string) (verdict string, blocks []srBlock, err error) {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return "", nil, fmt.Errorf("empty audit response")
+	}
+	lines := strings.SplitN(trimmed, "\n", 2)
+	first := strings.TrimSpace(lines[0])
+	const prefix = "AUDIT-VERDICT:"
+	if !strings.HasPrefix(first, prefix) {
+		return "", nil, fmt.Errorf("first line does not start with %q: got %q", prefix, first)
+	}
+	verdict = strings.TrimSpace(strings.TrimPrefix(first, prefix))
+	if verdict != "PASS" && verdict != "PATCHED" {
+		return "", nil, fmt.Errorf("unrecognized verdict: %q", verdict)
+	}
+	if verdict == "PASS" {
+		return "PASS", nil, nil
+	}
+	// PATCHED — parse SR blocks from the remaining body
+	if len(lines) < 2 {
+		return verdict, nil, fmt.Errorf("PATCHED verdict but no blocks in body")
+	}
+	body := lines[1]
+	blocks, err = parseSRBlocks(body)
+	if err != nil {
+		return verdict, nil, err
+	}
+	if len(blocks) == 0 {
+		return verdict, nil, fmt.Errorf("PATCHED verdict but zero SR blocks parsed")
+	}
+	return verdict, blocks, nil
+}
+
+// parseSRBlocks extracts Aider-style SEARCH/REPLACE blocks from a body of text.
+// Surrounding fences (e.g., ```) are tolerated and ignored. Returns blocks in source order.
+func parseSRBlocks(body string) ([]srBlock, error) {
+	const (
+		searchMarker  = "<<<<<<< SEARCH"
+		divideMarker  = "======="
+		replaceMarker = ">>>>>>> REPLACE"
+	)
+	var blocks []srBlock
+	rest := body
+	for {
+		startIdx := strings.Index(rest, searchMarker)
+		if startIdx < 0 {
+			break
+		}
+		afterStart := rest[startIdx+len(searchMarker):]
+		// Skip the rest of the marker line (handles "<<<<<<< SEARCH\n" and "<<<<<<< SEARCH something\n").
+		if nlIdx := strings.IndexByte(afterStart, '\n'); nlIdx >= 0 {
+			afterStart = afterStart[nlIdx+1:]
+		} else {
+			return blocks, fmt.Errorf("malformed block: SEARCH marker without following newline")
+		}
+		divIdx := strings.Index(afterStart, divideMarker)
+		if divIdx < 0 {
+			return blocks, fmt.Errorf("malformed block: SEARCH without ======= divider")
+		}
+		searchText := strings.TrimRight(afterStart[:divIdx], "\n")
+		afterDiv := afterStart[divIdx+len(divideMarker):]
+		if nlIdx := strings.IndexByte(afterDiv, '\n'); nlIdx >= 0 {
+			afterDiv = afterDiv[nlIdx+1:]
+		} else {
+			return blocks, fmt.Errorf("malformed block: ======= divider without following newline")
+		}
+		endIdx := strings.Index(afterDiv, replaceMarker)
+		if endIdx < 0 {
+			return blocks, fmt.Errorf("malformed block: ======= without >>>>>>> REPLACE marker")
+		}
+		replaceText := strings.TrimRight(afterDiv[:endIdx], "\n")
+		blocks = append(blocks, srBlock{Search: searchText, Replace: replaceText})
+		rest = afterDiv[endIdx+len(replaceMarker):]
+	}
+	return blocks, nil
+}
+
+// applySRBlocks applies the given blocks to the draft in source order. Each block's
+// SEARCH text MUST appear EXACTLY ONCE in the draft for the patch to apply (this catches
+// ambiguous matches early). Returns the patched text or an error if any block fails.
+func applySRBlocks(draft string, blocks []srBlock) (string, error) {
+	out := draft
+	for i, b := range blocks {
+		if b.Search == "" {
+			return "", fmt.Errorf("block %d: empty SEARCH text not supported (use a unique anchor for inserts)", i)
+		}
+		count := strings.Count(out, b.Search)
+		if count == 0 {
+			return "", fmt.Errorf("block %d: SEARCH text not found in draft", i)
+		}
+		if count > 1 {
+			return "", fmt.Errorf("block %d: SEARCH text matched %d times (must be unique — add more surrounding context)", i, count)
+		}
+		out = strings.Replace(out, b.Search, b.Replace, 1)
+	}
+	return out, nil
 }
 
 // trimEnclosingMarkdownFence removes a single pair of markdown fences wrapping
