@@ -125,11 +125,22 @@ Every enriched sprint MUST contain these sections, in this order:
 # DENSITY AND STYLE RULES
 
 - Use code syntax, not prose. Write actual Go/TypeScript/Python/SQL, not English descriptions of them.
-- For non-trivial logic, embed verbatim code blocks the executor can copy directly.
 - Use exact import paths, exact field names, exact constants — no placeholders.
 - For seed data and fixtures, list the exact values, not "example values".
-- Target ~200-500 lines per sprint; longer is fine if the sprint is large.
+- Target ~200-500 lines per sprint; longer is fine if the sprint is large (foundation sprints with full schemas often run 600-1000 lines).
 - Match the language and library choices declared in the contract — never introduce a library the contract doesn't list.
+
+# DENSITY: signatures + algorithm prose vs verbatim full bodies
+
+Two density modes are acceptable, picked by file type:
+
+1. **Verbatim full text** — required for tiny data-shaped files where exact text matters more than logic: ` + "`pyproject.toml`" + `, ` + "`package.json`" + `, build-system manifests, framework config files (` + "`tsconfig.json`" + `, ` + "`vite.config.ts`" + `, ` + "`alembic.ini`" + `, etc.), small exception/error-code constants files, the auto-discovery app factory (e.g., a FastAPI ` + "`main.py`" + ` with ` + "`pkgutil.iter_modules`" + ` router discovery), small async runners (` + "`init_db.py`" + `), all empty package markers.
+
+2. **Signatures + algorithm prose** — preferred for substantive code (routers, services, business logic, test files). Provide every type signature in ` + "`## Interface contract`" + `; provide every per-route or per-function logic flow in ` + "`## Algorithm notes`" + ` as numbered prose steps that name types/exceptions/symbols by exact identifier; provide per-file imports as full statements. The local model writes idiomatic bodies that match the contract.
+
+The empirical reason for mode 2 (validated end-to-end Apr 30 2026): when the architect writes verbatim bodies for a complex route handler, the bodies tend to carry stale unused imports, dead branches (` + "`if False`" + `), or impl-grade bugs that the local model faithfully transcribes. Numbered prose is more robust because the local model writes a clean body that obeys the contract.
+
+When in doubt: prefer mode 2. Use mode 1 only when EXACT TEXT is what matters (config blocks, manifest pinning).
 
 # VERBATIM-CONTENT RULE FOR NON-CODE FILES (LOAD-BEARING)
 
@@ -184,6 +195,100 @@ Bullets in both sections share the same format and are parsed by an awk/sed extr
 Other inline backticks in the descriptive tail are fine; the parser only takes the first.
 
 If the architect's description does not categorize a file, default rule: a file is NEW if no prior sprint owns it (per the contract's file-ownership map); otherwise it is MODIFIED.
+
+# WITHIN-SPRINT PATTERNS TO APPLY (load-bearing — read before producing the sprint)
+
+These patterns are the architect-side rules that close gaps the local code generator would otherwise fill in wrong. They are NOT a checklist to mechanically tick off — they are pattern categories to recognize and close in your spec output. The contract.md you receive will pin cross-sprint conventions; the patterns below are the within-sprint application.
+
+## P-1. Per-file imports as complete Python/Go/TS statements
+
+Every entry in ` + "`## New files`" + ` includes the EXACT imports list — full language statements, never bare module names. For class-vs-module collisions (Python: ` + "`datetime`" + `, ` + "`date`" + `, ` + "`time`" + `, ` + "`decimal.Decimal`" + `; TS/JS: relative path extensions), use the unambiguous import form explicitly.
+
+Why: the local model treats a bare ` + "`datetime`" + ` token as ` + "`import datetime`" + ` (the module). Subsequent ` + "`Mapped[datetime]`" + ` annotations then crash because the type needs the CLASS, not the module.
+
+## P-2. Route discipline (within a router file)
+
+- Path/query parameters annotated with real Python types (` + "`uuid.UUID`" + `, ` + "`date`" + `, etc.) — never default to ` + "`str`" + `. Without the annotation, FastAPI doesn't auto-parse and downstream type-bound code crashes.
+- Collection routes use empty-string path ` + "`\"\"`" + ` (not ` + "`\"/\"`" + `). Trailing-slash form causes 307 redirects when tests call without the slash.
+- Static-path routes declared BEFORE parameterized routes that share their prefix. FastAPI matches in declaration order.
+- The route order in the API contract table MUST match the declaration order in the router file (this is the structural-section rule below — prose alone won't work).
+
+## P-3. Schema construction discipline
+
+When the algorithm constructs a Read schema explicitly (e.g., ` + "`ShiftRead(...)`" + ` with a derived field), list the EXACT field set in the algorithm step: "construct ShiftRead with EXACTLY these fields and no others: id, location_id, ... — do NOT pass any other field." Plus a Rule reinforcement.
+
+Pydantic / Pydantic-equivalent Read schemas have exactly the fields declared in contract.md's data contract; do NOT invent fields based on "what should be there." (e.g., ` + "`Shift`" + ` has no ` + "`station_id`" + ` field — that lives on ` + "`Assignment`" + ` — even though the local model might infer one given the relationship between shifts and stations.)
+
+## P-4. Test fixture usage
+
+Tests take fixtures (` + "`client`" + `, ` + "`db_session`" + `, ` + "`auth_headers`" + `, etc.) as **function parameters**. Test files contain only test functions; they NEVER construct ` + "`AsyncClient`" + `, engines, or sessions inline. The conftest.py is pinned in contract.md (foundation sprint owns it).
+
+## P-5. Test data serialization
+
+For HTTP request bodies (httpx ` + "`json=`" + ` argument or equivalent):
+- ` + "`date`" + ` / ` + "`time`" + ` / ` + "`datetime`" + ` → ` + "`.isoformat()`" + ` before passing
+- ` + "`uuid.UUID`" + ` → ` + "`str(...)`" + ` before passing
+- Other primitives pass through as-is
+
+For ORM queries that filter on UUID columns from JSON-string ids:
+` + "```python\nreg_id = uuid.UUID(response.json()[\"id\"])\nresult = await db_session.execute(select(Registration).where(Registration.id == reg_id))\n```" + `
+
+For test assertions on error responses, USE THE EXACT JSON PATH that contract.md's error handler shape produces. If contract.md pins a flat ` + "`{\"detail\": str, \"error_code\": str}`" + ` shape, tests assert ` + "`body[\"error_code\"]`" + `; do NOT assert ` + "`body[\"detail\"][\"error_code\"]`" + `.
+
+## P-6. Tests need second-instance values pinned
+
+When a test needs a second instance of a model with unique constraints (second volunteer with different email/phone, second location, etc.), specify EXACT values in the test contract that don't collide with the fixture's primary instance. Example: "Construct other_volunteer with email='other@example.com', phone='+15559999999'."
+
+If you say "use a different value" without pinning what, the local model picks unpredictably and may collide with other tests.
+
+## P-7. Idempotent endpoint test patterns
+
+When testing idempotent endpoints (waiver/sign, orientation/complete), the test contract names what to capture and what to compare:
+
+> Sign once; capture ` + "`signed_at_1`" + `; sign again; capture ` + "`signed_at_2`" + `. Both 201; ` + "`signed_at_1 == signed_at_2`" + ` (same row, no new insert).
+
+# ARCHITECT-DISCIPLINE META-RULES
+
+## M-1. Structural sections must embody structural rules
+
+When you state a structural rule (e.g., "static routes before parameterized routes"), the structured sections MUST reflect it. The API contract table, signature blocks, algorithm subsections — all of them. The local model replicates the structure of the spec, not the prose rules. If a Rule says X but the table shows Y, the local model writes Y.
+
+## M-2. Make concrete choices
+
+Where the per-sprint description is ambiguous, commit to one answer. Don't hedge with "you may use X or Y." Don't write "choose based on your preference." The local model has no preference — it needs one answer.
+
+## M-3. Pin exact field sets
+
+When defining types, schemas, or constructed objects, list every field with its type. Never write partial examples with "...etc." The local model invents fields when given an incomplete shape.
+
+## M-4. Respect contract.md's FROZEN list and pinned conventions
+
+contract.md may declare a list of FROZEN files (under the front-loaded foundation pattern: ` + "`app/main.py`" + `, ` + "`app/models.py`" + `, ` + "`app/schemas.py`" + `, ` + "`app/exceptions.py`" + `, ` + "`app/database.py`" + `, ` + "`app/config.py`" + `, ` + "`tests/conftest.py`" + `). For sprints other than the foundation, ` + "`## Modified files: (none)`" + ` is the expected output — the foundation owns those files and the auto-discovery main.py picks up new router files automatically.
+
+If the contract pins a specific exception-handler JSON shape (flat vs nested), every test's error-response assertion in this sprint MUST match that shape.
+
+If the contract pins async loading strategy (` + "`lazy=\"selectin\"`" + ` on collection-side relationships), every relationship in any model this sprint touches MUST honor it.
+
+# TWO-PASS REVIEW
+
+After producing the SPRINT-NNN.md (Pass 1 — convert into the speedrun format applying the patterns above), run **Pass 2** before saving:
+
+Read the spec as if you were the local code-generator — what could you misinterpret?
+
+- Does each Tricky semantics rule have a WHY (what runtime symptom occurs without it)?
+- Does every collection-side relationship have ` + "`lazy=\"selectin\"`" + ` (or contract-pinned equivalent)?
+- Are path/query parameter types annotated everywhere with real Python types, not ` + "`str`" + `?
+- Are static routes ordered before parameterized routes in the API table?
+- When constructing a schema explicitly, is the EXACT field set listed?
+- Do the Imports lists for each file actually cover every symbol the Algorithm references?
+- Does the Test contract's response-shape assertions match contract.md's pinned exception handler shape (flat ` + "`body[\"error_code\"]`" + ` vs nested ` + "`body[\"detail\"][\"error_code\"]`" + `)?
+- When a test creates a second instance with unique constraints, are EXACT distinguishing values specified?
+- Does the API contract's route order match the implied algorithm-section order?
+- Are dates/times/UUIDs in JSON bodies serialized correctly (` + "`.isoformat()`" + ` / ` + "`str()`" + `)?
+- Are FROZEN files cross-referenced consistently with contract.md?
+- Are there fields that look like "common sense additions" the local model might invent? (Pin against them with explicit "no other fields" rules.)
+
+If you find an ambiguity, patch the spec. The point isn't perfection — it's making the local generator's output deterministic enough to be reliable.
 
 # OUTPUT FORMAT
 
