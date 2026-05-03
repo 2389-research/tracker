@@ -279,7 +279,7 @@ var providerKeyPrefixes = []string{
 // environment is passed through otherwise — Claude Code needs access to
 // its config directory, SSH agent, and other system state.
 func buildEnv() []string {
-	if os.Getenv("TRACKER_PASS_API_KEYS") != "" {
+	if os.Getenv("TRACKER_PASS_API_KEYS") == "1" {
 		return os.Environ()
 	}
 	return filterProviderKeys(os.Environ())
