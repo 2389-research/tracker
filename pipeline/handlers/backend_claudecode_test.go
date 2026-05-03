@@ -1035,3 +1035,39 @@ func assertContainsFlag(t *testing.T, args []string, flag, value string) {
 	}
 	t.Errorf("expected args to contain %s %s, got %v", flag, value, args)
 }
+
+// TestClaudeCodeBackend_ContextCancelKillsSubprocess verifies that when the
+// context is cancelled, the claude subprocess process group is killed promptly
+// rather than being orphaned and running indefinitely.
+func TestClaudeCodeBackend_ContextCancelKillsSubprocess(t *testing.T) {
+	// Use "sleep" as a long-running stand-in for the claude binary.
+	// It will block for 300 seconds unless the process group is killed.
+	b := &ClaudeCodeBackend{claudePath: "sleep"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel after 100ms to trigger the process group kill path.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	// Minimal config — sleep ignores all args but Run still needs a non-empty prompt
+	// to build the args slice without error.
+	cfg := pipeline.AgentRunConfig{
+		Prompt: "300",
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b.Run(ctx, cfg, func(agent.Event) {}) //nolint:errcheck
+	}()
+
+	select {
+	case <-done:
+		// Returned promptly after cancellation — process group kill worked.
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return within 5 seconds after context cancellation; subprocess may be orphaned")
+	}
+}

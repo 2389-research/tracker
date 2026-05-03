@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/pipeline"
@@ -79,6 +81,12 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 
 	cmd := exec.Command(b.claudePath, args...)
 	cmd.Env = buildEnv()
+	// Use process group for clean kill on cancellation.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 
 	if cfg.WorkingDir != "" {
 		cmd.Dir = cfg.WorkingDir
