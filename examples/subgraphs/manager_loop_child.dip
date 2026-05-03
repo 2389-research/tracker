@@ -8,7 +8,7 @@ workflow ManagerLoopChild
     auto_status: true
     prompt:
       You are a worker supervised by a manager_loop. Perform one cycle of
-      the assigned task. If the steering hint ${ctx.hint} is set, use it
+      the assigned task. If the steering hint ${ctx.steer.hint} is set, use it
       to bias your approach.
 
       End your response with STATUS: success when the work is complete,
