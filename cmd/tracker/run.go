@@ -562,6 +562,13 @@ type pipelineOutcome struct {
 func runPipelineAsync(engine *pipeline.Engine, ctx context.Context, prog *tea.Program) chan pipelineOutcome {
 	outcomeCh := make(chan pipelineOutcome, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				pipelineErr := fmt.Errorf("pipeline panicked: %v", r)
+				outcomeCh <- pipelineOutcome{err: pipelineErr}
+				prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
+			}
+		}()
 		result, pipelineErr := engine.Run(ctx)
 		if pipelineErr == nil && result.Status != pipeline.OutcomeSuccess {
 			pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
