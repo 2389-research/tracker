@@ -1473,8 +1473,8 @@ func TestCreateTerminal_DenylistedCommand(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *acp.RequestError, got %T: %v", err, err)
 	}
-	if reqErr.Code != -32600 {
-		t.Errorf("expected error code -32600, got %d", reqErr.Code)
+	if reqErr.Code != -32602 {
+		t.Errorf("expected error code -32602, got %d", reqErr.Code)
 	}
 }
 
@@ -1497,7 +1497,29 @@ func TestCreateTerminal_CwdOutsideWorkDir(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *acp.RequestError, got %T: %v", err, err)
 	}
-	if reqErr.Code != -32600 {
-		t.Errorf("expected error code -32600, got %d", reqErr.Code)
+	if reqErr.Code != -32602 {
+		t.Errorf("expected error code -32602, got %d", reqErr.Code)
+	}
+}
+
+func TestCreateTerminal_BareEvalBlocked(t *testing.T) {
+	h := &acpClientHandler{
+		workingDir: t.TempDir(),
+		toolNames:  make(map[string]string),
+	}
+	// "eval" with no args must be blocked by the bare-command denylist check.
+	_, err := h.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "eval",
+		Args:    nil,
+	})
+	if err == nil {
+		t.Fatal("expected error for bare denylisted command 'eval' with no args")
+	}
+	reqErr, ok := err.(*acp.RequestError)
+	if !ok {
+		t.Fatalf("expected *acp.RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Code != -32602 {
+		t.Errorf("expected error code -32602, got %d", reqErr.Code)
 	}
 }

@@ -397,12 +397,23 @@ func (h *acpClientHandler) WriteTextFile(_ context.Context, p acp.WriteTextFileR
 
 // CreateTerminal spawns a subprocess and tracks it for future output/wait/kill.
 func (h *acpClientHandler) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
-	// Build the full command string for denylist checking.
-	fullCmd := strings.Join(append([]string{p.Command}, p.Args...), " ")
-	if denied, pattern := checkCommandDenylist(fullCmd, nil); denied {
+	// Check the bare command name first to catch "eval" / "exec" / "source"
+	// with no args (the denylist patterns like "eval *" require a trailing
+	// argument and would miss the bare invocation without this check).
+	if denied, pattern := checkCommandDenylist(p.Command+" _", nil); denied {
 		return acp.CreateTerminalResponse{}, &acp.RequestError{
-			Code:    -32600,
+			Code:    -32602,
 			Message: fmt.Sprintf("command matches denied pattern %q", pattern),
+		}
+	}
+	// Also check the full command string with args for pipe-to-shell patterns.
+	if len(p.Args) > 0 {
+		fullCmd := strings.Join(append([]string{p.Command}, p.Args...), " ")
+		if denied, pattern := checkCommandDenylist(fullCmd, nil); denied {
+			return acp.CreateTerminalResponse{}, &acp.RequestError{
+				Code:    -32602,
+				Message: fmt.Sprintf("command matches denied pattern %q", pattern),
+			}
 		}
 	}
 
@@ -410,7 +421,7 @@ func (h *acpClientHandler) CreateTerminal(_ context.Context, p acp.CreateTermina
 	cwd := h.workingDir
 	if p.Cwd != nil && *p.Cwd != "" {
 		if err := validatePathInWorkDir(*p.Cwd, h.workingDir); err != nil {
-			return acp.CreateTerminalResponse{}, &acp.RequestError{Code: -32600, Message: err.Error()}
+			return acp.CreateTerminalResponse{}, &acp.RequestError{Code: -32602, Message: err.Error()}
 		}
 		cwd = *p.Cwd
 	}
