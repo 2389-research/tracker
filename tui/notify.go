@@ -29,7 +29,9 @@ func SendNotification(title, body string) {
 	go func() { _ = cmd.Run() }()
 }
 
-// escapeOsascript escapes double quotes and backslashes for osascript strings.
+// escapeOsascript escapes double quotes, backslashes, and newlines for
+// osascript strings. Newlines are replaced with a space; carriage returns
+// are stripped to prevent injection via multi-line input.
 func escapeOsascript(s string) string {
 	var out []byte
 	for i := 0; i < len(s); i++ {
@@ -38,6 +40,10 @@ func escapeOsascript(s string) string {
 			out = append(out, '\\', '"')
 		case '\\':
 			out = append(out, '\\', '\\')
+		case '\n':
+			out = append(out, ' ')
+		case '\r':
+			// skip
 		default:
 			out = append(out, s[i])
 		}
