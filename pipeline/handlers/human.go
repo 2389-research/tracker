@@ -80,6 +80,14 @@ type Interviewer interface {
 	Ask(prompt string, choices []string, defaultChoice string) (string, error)
 }
 
+// ContextSetter is an optional interface for interviewers that can receive a
+// pipeline context for cancellation and timeout propagation. The human handler
+// calls SetPipelineContext via type assertion before invoking any interviewer
+// methods, so that LLM-backed interviewers can respect pipeline cancellation.
+type ContextSetter interface {
+	SetPipelineContext(ctx context.Context)
+}
+
 // FreeformInterviewer extends Interviewer with open-ended text input.
 // Used by human gate nodes with mode="freeform" to capture arbitrary user input
 // instead of presenting fixed choices.
@@ -520,6 +528,12 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 
 // dispatchHumanMode routes to the appropriate human input handler based on the node mode.
 func (h *HumanHandler) dispatchHumanMode(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) (pipeline.Outcome, error) {
+	// Propagate pipeline context to LLM-backed interviewers so that pipeline
+	// cancellation (ctrl-C, budget breach) stops autopilot LLM calls promptly.
+	if cs, ok := h.interviewer.(ContextSetter); ok {
+		cs.SetPipelineContext(ctx)
+	}
+
 	// Parse the config once; reuse Mode and Timeout to avoid the double
 	// map-walk / ParseDuration that was happening when parseHumanTimeout
 	// called HumanConfig() a second time from the interview branch.

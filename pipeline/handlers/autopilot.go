@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/2389-research/tracker/llm"
@@ -77,10 +78,11 @@ type autopilotDecision struct {
 	Reasoning string `json:"reasoning"`
 }
 
-// Compile-time assertions: AutopilotInterviewer implements both LabeledFreeformInterviewer
-// and InterviewInterviewer.
+// Compile-time assertions: AutopilotInterviewer implements both LabeledFreeformInterviewer,
+// InterviewInterviewer, and ContextSetter.
 var _ LabeledFreeformInterviewer = (*AutopilotInterviewer)(nil)
 var _ InterviewInterviewer = (*AutopilotInterviewer)(nil)
+var _ ContextSetter = (*AutopilotInterviewer)(nil)
 
 // AutopilotInterviewer implements LabeledFreeformInterviewer using an LLM
 // to make gate decisions instead of a human.
@@ -88,6 +90,9 @@ type AutopilotInterviewer struct {
 	client  *llm.Client
 	persona Persona
 	model   string // override model; empty = use default
+
+	mu          sync.RWMutex
+	pipelineCtx context.Context // set by SetPipelineContext before each gate; nil = use Background
 }
 
 // AutopilotOption configures an AutopilotInterviewer.
@@ -110,6 +115,26 @@ func NewAutopilotInterviewer(client *llm.Client, persona Persona, opts ...Autopi
 		opt(ai)
 	}
 	return ai
+}
+
+// SetPipelineContext stores the pipeline execution context so that LLM calls
+// respect pipeline cancellation (ctrl-C, budget breach, etc.). Called by the
+// human handler via the ContextSetter interface before any gate method is invoked.
+func (a *AutopilotInterviewer) SetPipelineContext(ctx context.Context) {
+	a.mu.Lock()
+	a.pipelineCtx = ctx
+	a.mu.Unlock()
+}
+
+// parentContext returns the stored pipeline context, or context.Background() if none is set.
+func (a *AutopilotInterviewer) parentContext() context.Context {
+	a.mu.RLock()
+	ctx := a.pipelineCtx
+	a.mu.RUnlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 // Ask handles choice-mode gates by selecting from the given options.
@@ -175,7 +200,7 @@ func (a *AutopilotInterviewer) callLLM(prompt string, options []string, defaultO
 	// Provider errors (quota, auth, model not found) must hard-fail per CLAUDE.md.
 	// The infra retry middleware already handles transient errors (502, 503, 429).
 	// We only retry on parse failures (LLM returned non-JSON).
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(a.parentContext(), 30*time.Second)
 	resp, err := a.client.Complete(ctx, req)
 	cancel()
 	if err != nil {
@@ -185,7 +210,7 @@ func (a *AutopilotInterviewer) callLLM(prompt string, options []string, defaultO
 	decision, parseErr := parseDecision(resp.Message.Text())
 	if parseErr != nil {
 		// Retry once on parse failure — LLM may produce valid JSON on second try.
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx2, cancel2 := context.WithTimeout(a.parentContext(), 30*time.Second)
 		resp2, err2 := a.client.Complete(ctx2, req)
 		cancel2()
 		if err2 != nil {
@@ -345,7 +370,7 @@ func buildInterviewPromptWithHistory(questions []Question, prev *InterviewResult
 
 // callInterviewLLM calls the LLM and retries once on parse failure.
 func (a *AutopilotInterviewer) callInterviewLLM(req *llm.Request, questions []Question) (*InterviewResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(a.parentContext(), 30*time.Second)
 	resp, err := a.client.Complete(ctx, req)
 	cancel()
 	if err != nil {
@@ -358,7 +383,7 @@ func (a *AutopilotInterviewer) callInterviewLLM(req *llm.Request, questions []Qu
 	}
 
 	// Retry once on parse failure.
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx2, cancel2 := context.WithTimeout(a.parentContext(), 30*time.Second)
 	resp2, err2 := a.client.Complete(ctx2, req)
 	cancel2()
 	if err2 != nil {
