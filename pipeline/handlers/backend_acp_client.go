@@ -397,12 +397,25 @@ func (h *acpClientHandler) WriteTextFile(_ context.Context, p acp.WriteTextFileR
 
 // CreateTerminal spawns a subprocess and tracks it for future output/wait/kill.
 func (h *acpClientHandler) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
-	cmd := exec.Command(p.Command, p.Args...)
+	// Build the full command string for denylist checking.
+	fullCmd := strings.Join(append([]string{p.Command}, p.Args...), " ")
+	if denied, pattern := checkCommandDenylist(fullCmd, nil); denied {
+		return acp.CreateTerminalResponse{}, &acp.RequestError{
+			Code:    -32600,
+			Message: fmt.Sprintf("command matches denied pattern %q", pattern),
+		}
+	}
 
+	// Validate cwd stays within the working directory.
 	cwd := h.workingDir
 	if p.Cwd != nil && *p.Cwd != "" {
+		if err := validatePathInWorkDir(*p.Cwd, h.workingDir); err != nil {
+			return acp.CreateTerminalResponse{}, &acp.RequestError{Code: -32600, Message: err.Error()}
+		}
 		cwd = *p.Cwd
 	}
+
+	cmd := exec.Command(p.Command, p.Args...)
 	cmd.Dir = cwd
 
 	// Apply environment variables from the request. Use buildEnvForACP() to
