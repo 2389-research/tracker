@@ -658,13 +658,13 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 
 	default:
 		e.emit(PipelineEvent{
-			Type:      EventWarning,
+			Type:      EventStageFailed,
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    currentNodeID,
-			Message:   fmt.Sprintf("unknown outcome status %q from node %q; treating as success", status, currentNodeID),
+			Message:   fmt.Sprintf("node %q returned unknown outcome status %q; treating as failure", currentNodeID, status),
 		})
-		s.cp.MarkCompleted(currentNodeID)
+		s.pctx.Set(ContextKeyOutcome, OutcomeFail)
 	}
 }
 

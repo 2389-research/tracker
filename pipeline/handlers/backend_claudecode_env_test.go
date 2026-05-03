@@ -142,6 +142,18 @@ func TestBuildEnv_StripsOpenAICompatKey(t *testing.T) {
 	}
 }
 
+func TestBuildEnv_PassAPIKeysFalseDoesNotPassthrough(t *testing.T) {
+	t.Setenv("TRACKER_PASS_API_KEYS", "false")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
+
+	env := buildEnv()
+	for _, e := range env {
+		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") {
+			t.Error("TRACKER_PASS_API_KEYS=false should NOT pass through API keys")
+		}
+	}
+}
+
 func TestBuildEnvNoKeysNoop(t *testing.T) {
 	// Ensure no API keys are set.
 	os.Unsetenv("ANTHROPIC_API_KEY")

@@ -85,7 +85,7 @@ type Checkpoint struct {
 }
 
 const (
-	DefaultModel    = "claude-sonnet-4-5"
+	DefaultModel    = "claude-sonnet-4-6"
 	DefaultProvider = "anthropic"
 )
 

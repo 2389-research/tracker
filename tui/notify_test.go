@@ -4,6 +4,7 @@ package tui
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +13,14 @@ func TestNotificationSuppressed(t *testing.T) {
 	defer os.Unsetenv("TRACKER_NO_NOTIFY")
 	// Should not panic or send anything.
 	SendNotification("Test", "Body")
+}
+
+func TestEscapeOsascript_Newlines(t *testing.T) {
+	input := "done\nevil command"
+	escaped := escapeOsascript(input)
+	if strings.Contains(escaped, "\n") {
+		t.Error("newlines should be escaped in osascript strings")
+	}
 }
 
 func TestEscapeOsascript(t *testing.T) {

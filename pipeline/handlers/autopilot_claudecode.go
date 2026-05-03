@@ -9,6 +9,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 	// parseDecision, matchChoice, personaPrompts, buildUserPrompt
 	// are reused from autopilot.go in this package.
@@ -21,6 +22,9 @@ import (
 type ClaudeCodeAutopilotInterviewer struct {
 	persona    Persona
 	claudePath string
+
+	mu          sync.RWMutex
+	pipelineCtx context.Context // set by SetPipelineContext before each gate; nil = use Background
 }
 
 // NewClaudeCodeAutopilotInterviewer creates an autopilot interviewer that
@@ -34,6 +38,26 @@ func NewClaudeCodeAutopilotInterviewer(persona Persona) (*ClaudeCodeAutopilotInt
 		persona:    persona,
 		claudePath: path,
 	}, nil
+}
+
+// SetPipelineContext stores the pipeline execution context so that subprocess
+// spawns respect pipeline cancellation (ctrl-C, budget breach, etc.). Called
+// by the human handler via the ContextSetter interface before any gate method.
+func (a *ClaudeCodeAutopilotInterviewer) SetPipelineContext(ctx context.Context) {
+	a.mu.Lock()
+	a.pipelineCtx = ctx
+	a.mu.Unlock()
+}
+
+// parentContext returns the stored pipeline context, or context.Background() if none is set.
+func (a *ClaudeCodeAutopilotInterviewer) parentContext() context.Context {
+	a.mu.RLock()
+	ctx := a.pipelineCtx
+	a.mu.RUnlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 // Ask handles choice-mode gates by selecting from the given options.
@@ -81,7 +105,7 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 	userPrompt := buildUserPrompt(prompt, options, defaultOption)
 	fullPrompt := systemPrompt + "\n\n" + userPrompt
 
-	responseText, err := runClaudeSubprocess(a.claudePath, fullPrompt)
+	responseText, err := runClaudeSubprocess(a.parentContext(), a.claudePath, fullPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -94,8 +118,8 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 }
 
 // runClaudeSubprocess spawns the claude CLI and returns its trimmed stdout.
-func runClaudeSubprocess(claudePath, fullPrompt string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+func runClaudeSubprocess(parentCtx context.Context, claudePath, fullPrompt string) (string, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, claudePath,
@@ -147,8 +171,9 @@ func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev
 	systemPrompt := personaPrompts[a.persona]
 	fullPrompt := systemPrompt + "\n\n" + prompt
 
+	parentCtx := a.parentContext()
 	for attempt := 0; attempt < 2; attempt++ {
-		result, parseErr, fatalErr := a.runInterviewAttempt(fullPrompt, questions)
+		result, parseErr, fatalErr := a.runInterviewAttempt(parentCtx, fullPrompt, questions)
 		if fatalErr != nil {
 			return nil, fatalErr
 		}
@@ -166,8 +191,8 @@ func (a *ClaudeCodeAutopilotInterviewer) AskInterview(questions []Question, prev
 }
 
 // runInterviewAttempt executes one claude CLI call and returns parsed result, parse error, or fatal error.
-func (a *ClaudeCodeAutopilotInterviewer) runInterviewAttempt(fullPrompt string, questions []Question) (*InterviewResult, error, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+func (a *ClaudeCodeAutopilotInterviewer) runInterviewAttempt(parentCtx context.Context, fullPrompt string, questions []Question) (*InterviewResult, error, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
 
 	cmd := exec.CommandContext(ctx, a.claudePath,
 		"--print",
@@ -196,9 +221,11 @@ func (a *ClaudeCodeAutopilotInterviewer) runInterviewAttempt(fullPrompt string, 
 	return result, parseErr, nil
 }
 
-// Compile-time assertions: ClaudeCodeAutopilotInterviewer implements both interfaces.
+// Compile-time assertions: ClaudeCodeAutopilotInterviewer implements both interfaces
+// and ContextSetter.
 var _ LabeledFreeformInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
 var _ InterviewInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
+var _ ContextSetter = (*ClaudeCodeAutopilotInterviewer)(nil)
 
 // fallback returns the default option, or the first option, or empty string.
 func (a *ClaudeCodeAutopilotInterviewer) fallback(options []string, defaultOption string) string {

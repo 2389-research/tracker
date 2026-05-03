@@ -1455,3 +1455,71 @@ func TestReadTextFile_RejectsPathOutsideWorkDir(t *testing.T) {
 		t.Errorf("error = %q, want 'outside working directory'", err)
 	}
 }
+
+func TestCreateTerminal_DenylistedCommand(t *testing.T) {
+	h := &acpClientHandler{
+		workingDir: t.TempDir(),
+		toolNames:  make(map[string]string),
+	}
+	// "eval" is in the built-in denylist as "eval *".
+	_, err := h.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "eval",
+		Args:    []string{"rm -rf /"},
+	})
+	if err == nil {
+		t.Fatal("expected error for denylisted command 'eval'")
+	}
+	reqErr, ok := err.(*acp.RequestError)
+	if !ok {
+		t.Fatalf("expected *acp.RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Code != -32602 {
+		t.Errorf("expected error code -32602, got %d", reqErr.Code)
+	}
+}
+
+func TestCreateTerminal_CwdOutsideWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	outsideDir := t.TempDir()
+	h := &acpClientHandler{
+		workingDir: workDir,
+		toolNames:  make(map[string]string),
+	}
+	_, err := h.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "echo",
+		Args:    []string{"hello"},
+		Cwd:     &outsideDir,
+	})
+	if err == nil {
+		t.Fatal("expected error for cwd outside working directory")
+	}
+	reqErr, ok := err.(*acp.RequestError)
+	if !ok {
+		t.Fatalf("expected *acp.RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Code != -32602 {
+		t.Errorf("expected error code -32602, got %d", reqErr.Code)
+	}
+}
+
+func TestCreateTerminal_BareEvalBlocked(t *testing.T) {
+	h := &acpClientHandler{
+		workingDir: t.TempDir(),
+		toolNames:  make(map[string]string),
+	}
+	// "eval" with no args must be blocked by the bare-command denylist check.
+	_, err := h.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "eval",
+		Args:    nil,
+	})
+	if err == nil {
+		t.Fatal("expected error for bare denylisted command 'eval' with no args")
+	}
+	reqErr, ok := err.(*acp.RequestError)
+	if !ok {
+		t.Fatalf("expected *acp.RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Code != -32602 {
+		t.Errorf("expected error code -32602, got %d", reqErr.Code)
+	}
+}

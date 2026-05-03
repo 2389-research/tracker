@@ -1449,3 +1449,28 @@ func TestEngine_HaltsOnBudgetBreachDuringRetry(t *testing.T) {
 		t.Error("expected at least one EventBudgetExceeded, got none")
 	}
 }
+
+func TestEngine_UnknownOutcomeFailsNode(t *testing.T) {
+	g := NewGraph("unknown_outcome_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "bogus", Shape: "box", Label: "Bogus"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "bogus"})
+	g.AddEdge(&Edge{From: "bogus", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: "totally_bogus_status"}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+
+	if err == nil && result.Status == OutcomeSuccess {
+		t.Fatal("expected unknown outcome to NOT be treated as success")
+	}
+}
