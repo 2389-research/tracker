@@ -3,6 +3,7 @@
 package tracker
 
 import (
+	"bufio"
 	"context"
 	"os"
 	"path/filepath"
@@ -245,4 +246,36 @@ func TestCheckArtifactDirs_NonENOENTStatError(t *testing.T) {
 			t.Errorf("detail %q hides the real permission error", d.Message)
 		}
 	}
+}
+
+// TestPinnedDippinVersionMatchesGoMod verifies that PinnedDippinVersion is kept
+// in sync with the actual dippin-lang version declared in go.mod.
+func TestPinnedDippinVersionMatchesGoMod(t *testing.T) {
+	f, err := os.Open("go.mod")
+	if err != nil {
+		t.Fatalf("open go.mod: %v", err)
+	}
+	defer f.Close()
+
+	const prefix = "\tgithub.com/2389-research/dippin-lang "
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, prefix) {
+			goModVersion := strings.TrimPrefix(line, prefix)
+			// Strip any indirect annotation (e.g. " // indirect")
+			if idx := strings.Index(goModVersion, " "); idx >= 0 {
+				goModVersion = goModVersion[:idx]
+			}
+			if goModVersion != PinnedDippinVersion {
+				t.Errorf("PinnedDippinVersion = %q, but go.mod has dippin-lang %q; update PinnedDippinVersion in tracker_doctor.go",
+					PinnedDippinVersion, goModVersion)
+			}
+			return
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan go.mod: %v", err)
+	}
+	t.Fatal("dippin-lang not found in go.mod")
 }

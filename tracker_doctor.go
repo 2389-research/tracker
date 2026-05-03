@@ -22,7 +22,7 @@ import (
 
 // PinnedDippinVersion is the dippin-lang version from go.mod.
 // Keep in sync with the require line in go.mod.
-const PinnedDippinVersion = "v0.21.0"
+const PinnedDippinVersion = "v0.23.0"
 
 // DoctorConfig configures a Doctor() run.
 type DoctorConfig struct {
@@ -170,7 +170,7 @@ func checkEnvWarnings() CheckResult {
 	}
 	var found []string
 	for envVar, desc := range dangerousVars {
-		if os.Getenv(envVar) != "" {
+		if os.Getenv(envVar) == "1" {
 			found = append(found, fmt.Sprintf("%s (%s)", envVar, desc))
 		}
 	}
