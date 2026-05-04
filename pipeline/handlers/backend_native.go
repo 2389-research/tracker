@@ -82,7 +82,9 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 		if workDir != "" {
 			swOpts = append(swOpts, tools.WithSprintWriterWorkDir(workDir))
 		}
-		opts = append(opts, agent.WithTools(tools.NewWriteEnrichedSprintTool(b.client, swOpts...)))
+		writer := tools.NewWriteEnrichedSprintTool(b.client, swOpts...)
+		opts = append(opts, agent.WithTools(writer))
+		opts = append(opts, agent.WithTools(tools.NewDispatchSprintsTool(writer, workDir)))
 	}
 
 	sess, err := agent.NewSession(b.client, sessionCfg, opts...)

@@ -259,9 +259,9 @@ func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tr
 		return done, stop, err
 	}
 
-	stopped := s.handleToolCalls(ctx, toolCalls, resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts)
-	if stopped {
-		return false, true, nil
+	stop, naturally := s.handleToolCalls(ctx, toolCalls, resp, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result, ts)
+	if stop {
+		return naturally, true, nil
 	}
 
 	// Run the verify-after-edit loop if any edit tools were called this turn.
@@ -309,8 +309,11 @@ func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Tim
 }
 
 // handleToolCalls processes a turn where the LLM returned tool calls.
-// Returns true if the loop should stop (loop detected).
-func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, resp *llm.Response, turn int, turnStart time.Time, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult, ts *turnState) bool {
+// Returns:
+//   - stop: the outer loop should break.
+//   - naturally: the stop was a clean end (terminal-tool success), as opposed
+//     to a loop-detection abort. Only meaningful when stop=true.
+func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, resp *llm.Response, turn int, turnStart time.Time, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult, ts *turnState) (stop, naturally bool) {
 	signature := s.computeToolSignature(toolCalls)
 	if signature == ts.lastToolSignature {
 		ts.consecutiveLoopCount++
@@ -325,14 +328,14 @@ func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallD
 		result.LoopDetected = true
 		s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 		s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
-		return true
+		return true, false
 	}
 
-	hadErrors := s.executeToolCalls(ctx, toolCalls, result)
+	hadErrors, terminate := s.executeToolCalls(ctx, toolCalls, result)
 	s.maybeInjectReflection(hadErrors, ts)
 	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
-	return false
+	return terminate, terminate
 }
 
 // maybeInjectReflection appends the structured reflection prompt when tool errors
@@ -467,7 +470,7 @@ func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) erro
 		return nil // LLM responded with text only (e.g. "I fixed it")
 	}
 
-	s.executeToolCalls(ctx, toolCalls, result)
+	_, _ = s.executeToolCalls(ctx, toolCalls, result)
 	return nil
 }
 

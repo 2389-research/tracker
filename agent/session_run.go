@@ -261,18 +261,30 @@ func (s *Session) computeToolSignature(toolCalls []llm.ToolCallData) string {
 	return strings.Join(toolSigs, ",")
 }
 
-// executeToolCalls runs each tool call sequentially and appends results to messages.
-// It returns true if any tool call resulted in an error.
-func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) bool {
+// executeToolCalls runs each tool call sequentially and appends results to
+// messages. Returns:
+//   - hadErrors: any tool call in the batch errored (used to drive reflection).
+//   - terminate: a tool implementing TerminalTool succeeded; the caller should
+//     break out of the agent loop.
+//
+// On terminal-tool success the loop short-circuits: later tool calls in the
+// same batch are skipped. Running them would feed results to a session that
+// the model never gets a chance to react to.
+func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) (hadErrors, terminate bool) {
 	var toolResults []llm.ContentPart
-	anyError := false
 	for _, call := range toolCalls {
 		toolResult, toolDuration := s.executeSingleTool(ctx, call)
 		result.ToolCalls[call.Name]++
 		if toolResult.IsError {
-			anyError = true
+			hadErrors = true
 		}
 		s.episodeLog.Record(call.Name, string(call.Arguments), toolResult.Content, toolResult.IsError)
+
+		if !toolResult.IsError {
+			if tool := s.registry.Get(call.Name); tool != nil && tools.IsToolTerminal(tool) {
+				terminate = true
+			}
+		}
 
 		s.emit(Event{
 			Type:         EventToolCallEnd,
@@ -287,13 +299,17 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 			Kind:       llm.KindToolResult,
 			ToolResult: &toolResult,
 		})
+
+		if terminate {
+			break
+		}
 	}
 
 	s.messages = append(s.messages, llm.Message{
 		Role:    llm.RoleTool,
 		Content: toolResults,
 	})
-	return anyError
+	return hadErrors, terminate
 }
 
 // executeSingleTool runs a single tool call, handling caching.
