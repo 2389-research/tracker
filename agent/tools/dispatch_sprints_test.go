@@ -58,13 +58,19 @@ func writeJSONL(t *testing.T, dir string, lines []dispatchEntry) string {
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close plan: %v", err)
+		}
+	}()
 	for _, e := range lines {
 		b, err := json.Marshal(e)
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		fmt.Fprintln(f, string(b))
+		if _, err := fmt.Fprintln(f, string(b)); err != nil {
+			t.Fatalf("write plan: %v", err)
+		}
 	}
 	return path
 }

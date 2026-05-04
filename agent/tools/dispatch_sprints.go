@@ -92,7 +92,11 @@ func readDispatchPlan(path string) ([]dispatchEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "dispatch_sprints: close %s: %v\n", path, cerr)
+		}
+	}()
 
 	var entries []dispatchEntry
 	sc := bufio.NewScanner(f)
