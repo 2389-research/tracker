@@ -30,6 +30,34 @@
     <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">All GitHub Releases &rarr;</a></p>
   </section>
 
+  <!-- ═══ v0.24.2 ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--red-500, #ef4444);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2" style="color: inherit; text-decoration: none;">v0.24.2</a></h2>
+      <span class="badge">2026-05-03</span>
+      <span class="badge" style="background: rgba(239,68,68,0.15); color: #ef4444;">security</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Security and correctness fixes from a 13-expert panel audit of v0.24.1.</p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>ACP <code>CreateTerminal</code> now validates commands against the built-in denylist and constrains <code>cwd</code> to the working directory</strong> (PR #197): previously an LLM-directed ACP agent could execute arbitrary commands, completely bypassing the denylist that protects <code>tool_command</code>. Bare denylisted commands (e.g. <code>eval</code> with no args) are also blocked.</li>
+      <li><strong>Claude Code backend kills subprocess process group on pipeline cancellation</strong> (PR #197): added <code>SysProcAttr.Setpgid</code> + <code>cmd.Cancel</code> (SIGKILL to process group) to prevent orphaned <code>claude</code> subprocesses consuming API credits after ctrl-C or budget breach.</li>
+      <li><strong><code>TRACKER_PASS_API_KEYS</code> now requires <code>=1</code></strong> instead of any non-empty value (PR #197): previously <code>TRACKER_PASS_API_KEYS=false</code> or <code>=0</code> silently leaked all API keys to the claude subprocess. <code>tracker doctor</code> env warning updated to match.</li>
+      <li><strong>Engine fails on unknown outcome status instead of treating as success</strong> (PR #197): the <code>default:</code> case in <code>handleOutcomeStatus</code> previously called <code>MarkCompleted</code>, silently promoting handler bugs to success. Now emits <code>EventStageFailed</code> and sets <code>OutcomeFail</code>.</li>
+      <li><strong>Pipeline goroutine panic recovery</strong> (PR #197): <code>runPipelineAsync</code> now has <code>defer/recover</code> so a handler panic produces a clean error instead of crashing the TUI.</li>
+      <li><strong><code>PinnedDippinVersion</code> updated to <code>v0.23.0</code></strong> to match <code>go.mod</code> (PR #197).</li>
+      <li><strong><code>DefaultModel</code> updated to <code>claude-sonnet-4-6</code></strong> (PR #197).</li>
+      <li><strong>Autopilot LLM calls now respect pipeline context cancellation</strong> (PR #197): all call sites used <code>context.Background()</code> &mdash; pipeline cancellation had no effect on in-flight autopilot requests.</li>
+      <li><strong>Example <code>manager_loop_child.dip</code> updated for <code>steer.*</code> namespace</strong> (PR #197).</li>
+      <li><strong><code>escapeOsascript</code> now escapes newlines</strong> to prevent injection in macOS notification strings (PR #197).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>stack.manager_loop</code> <code>steer_context</code> keys namespaced under <code>steer.*</code></strong> (closes #177): prevents collision with safe-allowlisted bare ctx keys used in <code>tool_command</code> variable expansion. <strong>Behavior change:</strong> pipelines reading steer values via <code>${ctx.hint}</code> must update to <code>${ctx.steer.hint}</code>.</li>
+    </ul>
+  </section>
+
   <!-- ═══ v0.24.1 ═══ -->
   <section class="glass" style="border-left: 3px solid var(--orange-600);">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">

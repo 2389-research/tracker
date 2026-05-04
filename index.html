@@ -39,11 +39,11 @@
       <a href="cli.html" class="btn btn-ghost">CLI Reference</a>
     </div>
     <p style="margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.95rem;">
-      <strong><span class="badge">v0.24.1</span> What's new:</strong>
-      Cost-accounting + observability polish on top of v0.24.0. claude-code now parses <code>cache_read_input_tokens</code> + <code>cache_creation_input_tokens</code> from NDJSON (pre-fix: silently dropped, ~3&times; input-cost overcount on heavy-cache Sonnet workloads). New <code>TRACKER_ACP_CACHE_READ_RATIO</code> env var tunes ACP cache pricing. New <code>--tool-denylist-add</code> CLI flag + <code>tool_denylist_add</code> graph attr extend the built-in tool-command denylist for defense in depth. <code>Estimated</code> flag now plumbs end-to-end so mixed native+ACP runs correctly render <code>(estimated)</code> suffixes instead of mixing metered + heuristic silently. See the <a href="changelog.html">changelog</a>.
+      <strong><span class="badge">v0.24.2</span> What's new:</strong>
+      Security and correctness fixes from a 13-expert panel audit. ACP <code>CreateTerminal</code> now validates commands against the denylist. Claude Code subprocess gets process-group kill on cancellation. <code>TRACKER_PASS_API_KEYS</code> requires <code>=1</code> (not just non-empty). Unknown engine outcomes fail instead of silently succeeding. Autopilot respects pipeline context cancellation. Plus <code>steer.*</code> namespace for <code>steer_context</code> keys (#177). See the <a href="changelog.html">changelog</a>.
     </p>
     <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
-      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0">v0.24.0</a>: two P1 budget-bypass fixes (subgraph + manager_loop) + ACP per-prompt token usage estimate.
+      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1">v0.24.1</a>: cost-accounting + observability polish. <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0">v0.24.0</a>: two P1 budget-bypass fixes + ACP token usage estimate.
     </p>
   </section>
 
@@ -313,7 +313,7 @@ tracker doctor
 <span class="comment"># Stay current — checks automatically, or run manually</span>
 tracker update</code></pre>
     <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
-      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1">v0.24.1</a> &middot;
+      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2">v0.24.2</a> &middot;
       <a href="changelog.html">Changelog</a> &middot;
       <a href="cli.html">Full CLI reference</a>
     </p>
