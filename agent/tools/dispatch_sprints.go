@@ -133,6 +133,13 @@ func readDispatchPlan(path string) ([]dispatchEntry, error) {
 }
 
 func (t *DispatchSprintsTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
+	// Defensive guard: a misregistered tool (nil receiver or nil inner) would
+	// otherwise panic at the first method call. Surface as a tool error so
+	// the agent loop sees the failure cleanly.
+	if t == nil || t.inner == nil {
+		return "", errors.New("dispatch_sprints: misconfigured tool (inner WriteEnrichedSprintTool is nil)")
+	}
+
 	var args struct {
 		DescriptionsFile string `json:"descriptions_file"`
 		ContractFile     string `json:"contract_file"`
