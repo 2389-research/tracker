@@ -6,7 +6,7 @@
   <title>Architecture — Tracker</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#fff7ed', primaryTextColor: '#1c1917', primaryBorderColor: '#ea580c', lineColor: '#a8a29e', secondaryColor: '#ffedd5', tertiaryColor: '#fef7f0', background: 'transparent', mainBkg: '#fff7ed', nodeBorder: '#ea580c', clusterBkg: '#ffedd566', clusterBorder: '#ea580c44', titleColor: '#9a3412', edgeLabelBackground: '#fef7f0', nodeTextColor: '#1c1917', actorTextColor: '#1c1917', signalTextColor: '#1c1917', labelTextColor: '#9a3412' }});</script>
+  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#fff7ed', primaryTextColor: '#1c1917', primaryBorderColor: '#ea580c', lineColor: '#a8a29e', secondaryColor: '#ffedd5', tertiaryColor: '#fef7f0', background: 'transparent', mainBkg: '#fff7ed', nodeBorder: '#ea580c', clusterBkg: '#ffedd566', clusterBorder: '#ea580c44', titleColor: '#7c2d12', edgeLabelBackground: '#fef7f0', nodeTextColor: '#1c1917', actorTextColor: '#1c1917', signalTextColor: '#1c1917', labelTextColor: '#7c2d12' }});</script>
 </head>
 <body>
 
@@ -65,19 +65,18 @@ graph TB
         <tbody>
           <tr><td><code>codergen</code></td><td><code>agent</code></td><td>Runs an LLM session via the selected backend (native / claude-code / acp). Emits <code>agent.Event</code> stream.</td></tr>
           <tr><td><code>tool</code></td><td><code>tool</code></td><td>Shell command execution with per-node timeout, output limits, env scoping, denylist/allowlist, and comment/blank stripping for LLM-written lists.</td></tr>
-          <tr><td><code>human</code></td><td><code>human</code></td><td>Choice, freeform, hybrid, yes/no, and interview gates. Pluggable via <code>Interviewer</code> for autopilot, auto-approve, or webhook routing.</td></tr>
+          <tr><td><code>wait.human</code></td><td><code>human</code></td><td>Choice, freeform, hybrid, yes/no, and interview gates. Pluggable via <code>Interviewer</code> for autopilot, auto-approve, or webhook routing. Registered name is <code>wait.human</code>; the <code>human</code> kind in <code>.dip</code> resolves to the same handler.</td></tr>
           <tr><td><code>parallel</code></td><td><code>parallel</code></td><td>Dispatches branches from <code>parallel_targets</code> in goroutines. Honors <code>max_concurrency</code> and <code>branch_timeout</code>. Points the engine at a fan-in via <code>suggested_next_nodes</code>.</td></tr>
           <tr><td><code>parallel.fan_in</code></td><td><code>fan_in</code></td><td>Joins parallel branches. Aggregates <code>SessionStats</code> from branch outcomes into its own trace entry.</td></tr>
           <tr><td><code>conditional</code></td><td><code>conditional</code></td><td>Evaluates conditions without running an LLM. Pure routing node.</td></tr>
           <tr><td><code>subgraph</code></td><td><code>subgraph</code></td><td>Executes a referenced child pipeline. Events propagate to the parent TUI; sidebar pre-populates child nodes at load time. <span class="badge">v0.19.0</span></td></tr>
           <tr><td><code>stack.manager_loop</code></td><td><code>manager_loop</code></td><td>Async child-pipeline supervisor. Polls at a configurable interval, evaluates stop and steer conditions, injects context mid-execution via the engine steering channel. Native <code>.dip</code> syntax via <code>ir.NodeManagerLoop</code>. <span class="badge">v0.20.0</span> <span class="badge">v0.23.0</span></td></tr>
-          <tr><td><code>wait.human</code></td><td>—</td><td>Pause for a human signal without presenting a gate UI. Typical pattern for external notifiers that unblock via a callback.</td></tr>
         </tbody>
       </table>
     </div>
     <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
       <code>ensureStartExitNodes</code> only converts bare <code>codergen</code> nodes with no prompt into passthrough
-      start/exit nodes. Every other handler type is preserved, so <code>tool</code>, <code>human</code>,
+      start/exit nodes. Every other handler type is preserved, so <code>tool</code>,
       <code>parallel</code>, <code>conditional</code>, <code>subgraph</code>, <code>stack.manager_loop</code>, and
       <code>wait.human</code> nodes can all serve as start or exit.
     </p>

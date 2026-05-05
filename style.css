@@ -215,7 +215,7 @@ main {
   letter-spacing: -0.04em;
   line-height: 1.1;
   margin-bottom: 1.25rem;
-  background: linear-gradient(135deg, var(--orange-500), var(--orange-600), var(--orange-800));
+  background: linear-gradient(135deg, var(--orange-500), var(--orange-600), var(--orange-700));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -266,7 +266,7 @@ main {
 
 .btn-ghost {
   background: rgba(249, 115, 22, 0.08);
-  color: var(--orange-300);
+  color: var(--orange-800);
   border: 1px solid rgba(249, 115, 22, 0.2);
 }
 
@@ -276,8 +276,15 @@ main {
 }
 
 /* ─── Typography ────────────────────────────────────────── */
-h1, h2, h3, h4, h5, h6 {
-  color: var(--text-primary);
+h1, h2, h3, h5, h6 {
+  /* Warm dark — harmonizes with the creamsicle palette.
+     8.82:1 on cream, 9.17:1 on .glass — still AAA. */
+  color: var(--orange-900);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+h4 {
   letter-spacing: -0.02em;
   line-height: 1.25;
 }
@@ -300,7 +307,7 @@ h4 {
   font-size: 1.05rem;
   font-weight: 600;
   margin-bottom: 0.5rem;
-  color: var(--orange-300);
+  color: var(--orange-700);
 }
 
 p {
@@ -315,16 +322,16 @@ p.lead {
 }
 
 a {
-  color: var(--orange-600);
+  color: var(--orange-700);
   text-decoration: none;
   transition: color 0.2s;
 }
 
 a:hover {
-  color: var(--orange-300);
+  color: var(--orange-600);
 }
 
-strong { color: var(--text-primary); font-weight: 600; }
+strong { color: var(--orange-900); font-weight: 600; }
 
 /* ─── Code ──────────────────────────────────────────────── */
 code {
@@ -492,7 +499,7 @@ thead th {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--orange-600);
+  color: var(--orange-700);
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(249, 115, 22, 0.04);
 }
@@ -541,7 +548,7 @@ tbody tr:hover td {
   font-weight: 600;
   border-radius: 6px;
   background: rgba(249, 115, 22, 0.12);
-  color: var(--orange-600);
+  color: var(--orange-800);
   border: 1px solid rgba(249, 115, 22, 0.2);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -559,7 +566,7 @@ tbody tr:hover td {
   font-family: 'JetBrains Mono', monospace;
   font-size: 1rem;
   font-weight: 600;
-  color: var(--orange-300);
+  color: var(--orange-700);
 }
 
 .workflow-card .wf-display {

@@ -6,7 +6,7 @@
   <title>Tracker — Multi-Agent Pipeline Orchestration</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#fff7ed', primaryTextColor: '#1c1917', primaryBorderColor: '#ea580c', lineColor: '#a8a29e', secondaryColor: '#ffedd5', tertiaryColor: '#fef7f0', background: 'transparent', mainBkg: '#fff7ed', nodeBorder: '#ea580c', clusterBkg: '#ffedd566', clusterBorder: '#ea580c44', titleColor: '#9a3412', edgeLabelBackground: '#fef7f0', nodeTextColor: '#1c1917', actorTextColor: '#1c1917', signalTextColor: '#1c1917', labelTextColor: '#9a3412' }});</script>
+  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#fff7ed', primaryTextColor: '#1c1917', primaryBorderColor: '#ea580c', lineColor: '#a8a29e', secondaryColor: '#ffedd5', tertiaryColor: '#fef7f0', background: 'transparent', mainBkg: '#fff7ed', nodeBorder: '#ea580c', clusterBkg: '#ffedd566', clusterBorder: '#ea580c44', titleColor: '#7c2d12', edgeLabelBackground: '#fef7f0', nodeTextColor: '#1c1917', actorTextColor: '#1c1917', signalTextColor: '#1c1917', labelTextColor: '#7c2d12' }});</script>
 </head>
 <body>
 
@@ -99,7 +99,7 @@ tracker doctor</code></pre>
         <div class="label">Node Types</div>
       </div>
       <div class="stat">
-        <div class="number">14</div>
+        <div class="number">17</div>
         <div class="label">Test Packages</div>
       </div>
       <div class="stat">
@@ -240,19 +240,19 @@ graph TB
     <p class="lead">Mix models freely. Route everything through <a href="https://developers.cloudflare.com/ai-gateway/">Cloudflare AI Gateway</a> with <code>--gateway-url</code> for central analytics, caching, and 429 relief.</p>
     <div class="grid-2" style="margin-top: 1.5rem;">
       <div class="glass glass-sm" style="text-align:center;">
-        <h3 style="color: var(--orange-300);">Anthropic</h3>
+        <h3>Anthropic</h3>
         <p style="margin:0;"><code>claude-opus-4-7</code><br><code>claude-sonnet-4-6</code><br><code>claude-haiku-4-5</code></p>
       </div>
       <div class="glass glass-sm" style="text-align:center;">
-        <h3 style="color: var(--orange-300);">OpenAI</h3>
+        <h3>OpenAI</h3>
         <p style="margin:0;"><code>gpt-5.4</code> / <code>gpt-5.4-mini</code><br><code>gpt-4.1</code><br><code>o3</code> / <code>o4-mini</code></p>
       </div>
       <div class="glass glass-sm" style="text-align:center;">
-        <h3 style="color: var(--orange-300);">Gemini</h3>
+        <h3>Gemini</h3>
         <p style="margin:0;"><code>gemini-3.1-pro-preview</code><br><code>gemini-2.5-pro</code><br><code>gemini-2.5-flash</code></p>
       </div>
       <div class="glass glass-sm" style="text-align:center;">
-        <h3 style="color: var(--orange-300);">OpenAI-Compat</h3>
+        <h3>OpenAI-Compat</h3>
         <p style="margin:0;">Any OpenAI-compatible endpoint<br><em>OpenRouter, vLLM, local proxies</em></p>
       </div>
     </div>
