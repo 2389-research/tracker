@@ -111,13 +111,22 @@ func ExtractJSONFromText(text string) (string, bool) {
 	return "", false
 }
 
-// fencedBlockRE matches a Markdown-style fenced code block. The opening
-// fence is followed by an optional language tag (alphanumerics, '_', '-',
-// '+', '.') and trailing whitespace up to a newline — this strict shape
-// distinguishes a real opening fence from stray backticks in prose like
-// "Use ``` to denote code". (?s) lets `.` cross newlines; the `+?` is
-// non-greedy so we capture the smallest body up to the next ```.
-var fencedBlockRE = regexp.MustCompile("(?s)```[A-Za-z0-9_+.\\-]*[ \\t]*\\r?\\n(.+?)```")
+// fencedBlockRE matches a Markdown-style fenced code block. The opener
+// must sit at the start of input or follow a newline (with optional
+// leading whitespace), then ``` followed by an optional language tag
+// (alphanumerics, '_', '-', '+', '.') and trailing whitespace up to a
+// newline — this strict shape distinguishes a real opening fence from
+// stray backticks in prose like "Use ``` to denote code". (?s) lets `.`
+// cross newlines; the `+?` is non-greedy so we capture the smallest body
+// up to the next ```.
+//
+// LIMITATION: a JSON string value containing the literal sequence ```
+// will truncate the body at that occurrence, since the regex isn't
+// JSON-aware. The cascade in ExtractJSONFromText falls through to
+// extractBracedJSON in that case, which IS JSON-aware (tracks string
+// state via matchBalancedBrace) and recovers the object. Pinned by
+// TestExtractFencedJSON_TripleBacktickInsideStringFallsThroughToBraces.
+var fencedBlockRE = regexp.MustCompile("(?s)(?:^|\\n)[ \\t]*```[A-Za-z0-9_+.\\-]*[ \\t]*\\r?\\n(.+?)```")
 
 // extractFencedJSON walks every ```...``` fenced code block in text and
 // returns the first one whose content parses as a JSON object. Iterating

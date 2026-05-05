@@ -227,6 +227,62 @@ func TestExtractFencedJSON_StrayBackticksRejectedAsOpener(t *testing.T) {
 	}
 }
 
+// White-box: with two valid fenced JSON blocks, the FIRST is returned.
+// Pins the documented "first valid fence wins" semantic so a future
+// "last fence wins" preference change can't sneak in unnoticed.
+func TestExtractFencedJSON_TwoValidFences_FirstWins(t *testing.T) {
+	text := "First answer:\n```json\n{\"first\": true}\n```\n\nRevised:\n```json\n{\"second\": true}\n```\n"
+	got := extractFencedJSON(text)
+	if got != `{"first": true}` {
+		t.Fatalf("expected first valid fence to win, got %q", got)
+	}
+}
+
+// LIMITATION test: a literal ``` inside a JSON string value truncates
+// the regex body, so extractFencedJSON itself fails. The cascade in
+// ExtractJSONFromText is supposed to fall through to extractBracedJSON
+// (which IS string-aware) and recover the object. Pin both halves.
+func TestExtractFencedJSON_TripleBacktickInsideStringFallsThroughToBraces(t *testing.T) {
+	text := "```json\n{\"snippet\": \"use ``` to fence\", \"k\": 1}\n```"
+
+	// Half 1: extractFencedJSON itself can't handle this — confirm it returns "".
+	if got := extractFencedJSON(text); got != "" {
+		t.Errorf("extractFencedJSON not expected to handle ``` inside string; got %q", got)
+	}
+
+	// Half 2: ExtractJSONFromText cascade rescues via extractBracedJSON.
+	// Note: the prefix "json" before the JSON object IS in the text — but
+	// the braced scanner finds the first balanced {…} span, which IS the
+	// real object.
+	got, ok := ExtractJSONFromText(text)
+	if !ok {
+		t.Fatal("expected cascade to fall through to braced scan and succeed")
+	}
+	want := `{"snippet": "use ` + "```" + ` to fence", "k": 1}`
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// Truncated fenced block (open fence with no closer): regex won't match,
+// braced scan attempts the body. Pin the deterministic outcome so a
+// future change can't accidentally start matching runaway spans.
+func TestExtractJSONFromText_TruncatedFenceFallsThrough(t *testing.T) {
+	text := "```json\n{\"k\": 1}\nno-close-fence-and-no-other-json"
+	// extractFencedJSON returns "" because there's no closing fence.
+	if got := extractFencedJSON(text); got != "" {
+		t.Fatalf("extractFencedJSON should return empty on unclosed fence, got %q", got)
+	}
+	// The cascade should still find the {"k": 1} object via braced scan.
+	got, ok := ExtractJSONFromText(text)
+	if !ok {
+		t.Fatal("expected braced fallback to recover the object")
+	}
+	if got != `{"k": 1}` {
+		t.Fatalf("got %q, want braced-recovered object", got)
+	}
+}
+
 // Braces inside string values must not throw off depth counting.
 func TestExtractJSONFromText_BracesInsideStringValue(t *testing.T) {
 	text := `Done: {"path": "/tmp/dir/{name}.txt", "ok": true} extra`
