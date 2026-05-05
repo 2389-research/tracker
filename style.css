@@ -9,6 +9,13 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  /* Light-only design — opt out of browser auto-dark-mode (Chrome's
+     "auto dark mode for web contents", Safari's color-scheme heuristics,
+     extensions like Dark Reader honor this hint). The creamsicle palette
+     is calibrated for a light surface; force-darkening produces dark-on-
+     dark heading text. */
+  color-scheme: light;
+
   /* Orange palette */
   --orange-50:  #fff7ed;
   --orange-100: #ffedd5;
@@ -215,6 +222,10 @@ main {
   letter-spacing: -0.04em;
   line-height: 1.1;
   margin-bottom: 1.25rem;
+  /* Bright fallback if -webkit-background-clip:text fails (extensions,
+     reader mode, force-dark). Without this it inherits the dark
+     --orange-900 from the heading rule and reads as dark-on-dark. */
+  color: var(--orange-600);
   background: linear-gradient(135deg, var(--orange-500), var(--orange-600), var(--orange-700));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
