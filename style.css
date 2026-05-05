@@ -624,6 +624,38 @@ tbody tr:hover td {
   min-height: 500px;
 }
 
+/* ─── System layers diagram ────────────────────────────── */
+/* Three lines per box, each with a distinct treatment.
+   Mermaid renders HTML labels inside <foreignObject>; these classes
+   target the spans we emit in architecture.html. */
+.layers-key {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.diagram-layers .ly-name {
+  font-weight: 700;
+  color: var(--orange-900);
+}
+
+.diagram-layers .ly-path {
+  display: inline-block;
+  margin: 0.15em 0;
+  padding: 0.05em 0.4em;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.82em;
+  color: var(--orange-800);
+  background: rgba(254, 215, 170, 0.45);
+  border-radius: 3px;
+}
+
+.diagram-layers .ly-desc {
+  font-size: 0.86em;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
 /* ─── Section Divider ───────────────────────────────────── */
 .divider {
   height: 1px;

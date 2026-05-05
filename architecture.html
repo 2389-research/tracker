@@ -50,18 +50,18 @@
   <!-- ═══ Layer Diagram ═══ -->
   <section class="glass" id="layers">
     <h2>System <span class="accent">layers</span></h2>
-    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+    <p class="layers-key">
       Each box: <strong>layer name</strong> &middot; <code>source path</code> &middot; what it owns.
     </p>
-    <div class="diagram">
+    <div class="diagram diagram-layers">
       <div class="mermaid">
 graph TB
-    CLI["<b>CLI</b><br/><span style='font-family:monospace;font-size:0.85em;color:#9a3412;'>cmd/tracker</span><br/><span style='font-size:0.88em;color:#57534e;'>flags &middot; name resolution &middot; TUI &middot; embedded workflows</span>"]
-    Engine["<b>Pipeline Engine</b><br/><span style='font-family:monospace;font-size:0.85em;color:#9a3412;'>pipeline/</span><br/><span style='font-size:0.88em;color:#57534e;'>run loop &middot; edge selection &middot; checkpoints &middot; budget guard &middot; steering channel</span>"]
-    Handlers["<b>Handlers</b><br/><span style='font-family:monospace;font-size:0.85em;color:#9a3412;'>pipeline/handlers</span><br/><span style='font-size:0.88em;color:#57534e;'>codergen &middot; tool &middot; human &middot; parallel &middot; fan_in &middot; conditional &middot; subgraph &middot; manager_loop</span>"]
-    Backends["<b>Agent Backends</b><br/><span style='font-family:monospace;font-size:0.85em;color:#9a3412;'>pipeline/backend.go</span><br/><span style='font-size:0.88em;color:#57534e;'>native &middot; claude-code &middot; acp</span>"]
-    Agent["<b>Agent Session</b><br/><span style='font-family:monospace;font-size:0.85em;color:#9a3412;'>agent/</span><br/><span style='font-size:0.88em;color:#57534e;'>turn loop &middot; tool registry &middot; context compaction &middot; episodic memory &middot; verify-after-edit</span>"]
-    LLM["<b>LLM Client</b><br/><span style='font-family:monospace;font-size:0.85em;color:#9a3412;'>llm/</span><br/><span style='font-size:0.88em;color:#57534e;'>Anthropic &middot; OpenAI &middot; Gemini &middot; OpenAI-compat &middot; retry &middot; cost estimation</span>"]
+    CLI["<span class='ly-name'>CLI</span><br/><span class='ly-path'>cmd/tracker</span><br/><span class='ly-desc'>flags &middot; name resolution &middot; TUI &middot; embedded workflows</span>"]
+    Engine["<span class='ly-name'>Pipeline Engine</span><br/><span class='ly-path'>pipeline/</span><br/><span class='ly-desc'>run loop &middot; edge selection &middot; checkpoints &middot; budget guard &middot; steering channel</span>"]
+    Handlers["<span class='ly-name'>Handlers</span><br/><span class='ly-path'>pipeline/handlers</span><br/><span class='ly-desc'>codergen &middot; tool &middot; human &middot; parallel &middot; fan_in &middot; conditional &middot; subgraph &middot; manager_loop</span>"]
+    Backends["<span class='ly-name'>Agent Backends</span><br/><span class='ly-path'>pipeline/backend.go</span><br/><span class='ly-desc'>native &middot; claude-code &middot; acp</span>"]
+    Agent["<span class='ly-name'>Agent Session</span><br/><span class='ly-path'>agent/</span><br/><span class='ly-desc'>turn loop &middot; tool registry &middot; context compaction &middot; episodic memory &middot; verify-after-edit</span>"]
+    LLM["<span class='ly-name'>LLM Client</span><br/><span class='ly-path'>llm/</span><br/><span class='ly-desc'>Anthropic &middot; OpenAI &middot; Gemini &middot; OpenAI-compat &middot; retry &middot; cost estimation</span>"]
 
     CLI --> Engine --> Handlers --> Backends --> Agent --> LLM
       </div>
