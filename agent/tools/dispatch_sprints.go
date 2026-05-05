@@ -269,12 +269,12 @@ func (t *DispatchSprintsTool) runOneWithRetry(ctx context.Context, contract stri
 
 // isRetryableError returns true when the error chain contains a provider
 // error that the llm package marks retryable (rate limits, 5xx, timeouts,
-// transient network errors).
+// transient network errors). Uses errors.As so joined-error chains are
+// handled correctly.
 func isRetryableError(err error) bool {
-	for cur := err; cur != nil; cur = errors.Unwrap(cur) {
-		if pe, ok := cur.(llm.ProviderErrorInterface); ok {
-			return pe.Retryable()
-		}
+	var pe llm.ProviderErrorInterface
+	if errors.As(err, &pe) {
+		return pe.Retryable()
 	}
 	return false
 }

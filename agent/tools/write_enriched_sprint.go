@@ -582,8 +582,7 @@ func (t *WriteEnrichedSprintTool) RunOne(ctx context.Context, contract, path, de
 			"Per-sprint description from the architect:\n%s\n\n"+
 			"DRAFT (the author's first attempt) — audit this against the within-sprint patterns:\n\n"+
 			"---BEGIN DRAFT---\n%s\n---END DRAFT---\n\n"+
-			"Output: first line `AUDIT-VERDICT: PASS` (return draft verbatim) OR `AUDIT-VERDICT: PATCHED` (return patched version). "+
-			"Second line must be the `# Sprint NNN — Title (enriched spec)` heading. No commentary outside the markdown.",
+			"Output exactly per the system prompt: `AUDIT-VERDICT: PASS` alone (single line, nothing else) OR `AUDIT-VERDICT: PATCHED` followed by SEARCH/REPLACE blocks. No sprint heading, no commentary, no summary.",
 		contract, path, description, draft,
 	)
 
@@ -598,8 +597,11 @@ func (t *WriteEnrichedSprintTool) RunOne(ctx context.Context, contract, path, de
 		},
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "write_enriched_sprint: audit pass failed for %s (using draft as-is): %v\n", path, err)
-		auditResp = nil
+		// Provider errors hard-fail per CLAUDE.md — silently shipping an
+		// unaudited draft would be indistinguishable from a real auditor PASS
+		// and could mask quota/auth problems for hours. The author-pass
+		// (above) already returns on error; mirror that here.
+		return nil, fmt.Errorf("write_enriched_sprint: audit pass failed for %s: %w", path, err)
 	}
 
 	verdict := "PASS"

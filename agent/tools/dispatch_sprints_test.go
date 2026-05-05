@@ -305,6 +305,11 @@ func (m *retryMockCompleter) Complete(ctx context.Context, req *llm.Request) (*l
 		}
 		return b.resp, nil
 	}
+	if m.fallback == nil {
+		// Surface overrun as a clean error instead of nil-deref panicking
+		// the test. Tests with a fixed call count should never reach here.
+		return nil, fmt.Errorf("retryMockCompleter: call %d exhausted scripted behaviors and no fallback set", idx+1)
+	}
 	return m.fallback, nil
 }
 

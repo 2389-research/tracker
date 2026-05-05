@@ -14,10 +14,10 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
-// Completer is the interface needed from the LLM client.
-type Completer interface {
-	Complete(ctx context.Context, req *llm.Request) (*llm.Response, error)
-}
+// Completer is the interface needed from the LLM client. It's an alias of
+// tools.Completer so both packages refer to the same type — preventing
+// silent divergence if either side grows new methods.
+type Completer = tools.Completer
 
 // SessionOption configures a Session.
 type SessionOption func(*Session)

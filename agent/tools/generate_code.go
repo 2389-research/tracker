@@ -13,11 +13,6 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
-// Completer is the interface for making LLM calls.
-type Completer interface {
-	Complete(ctx context.Context, req *llm.Request) (*llm.Response, error)
-}
-
 // GenerateCodeTool calls a cheap LLM to generate code from a structured contract.
 type GenerateCodeTool struct {
 	client   Completer
@@ -45,10 +40,14 @@ func WithGenerateWorkDir(dir string) GenerateCodeOption {
 }
 
 // NewGenerateCodeTool creates a tool that generates code via a cheap model.
+// Callers should override the model with WithGenerateModel — there is no
+// universally-correct default. The env-gated registration in
+// pipeline/handlers/backend_native.go always supplies one, so this default
+// only matters for direct construction.
 func NewGenerateCodeTool(client Completer, opts ...GenerateCodeOption) *GenerateCodeTool {
 	t := &GenerateCodeTool{
 		client:   client,
-		model:    "gpt-5.4-nano",
+		model:    "gpt-4o-mini",
 		provider: "openai",
 	}
 	for _, opt := range opts {
@@ -161,7 +160,12 @@ func (t *GenerateCodeTool) generateSequential(ctx context.Context, contract, out
 		// Strip markdown fences if the model wrapped them
 		code = stripMarkdownFences(code)
 
-		path := filepath.Join(outputDir, f.Path)
+		// Validate the LLM-supplied path stays under outputDir — `..`
+		// segments or absolute paths that escape would otherwise be honored.
+		path, err := resolveUnderRoot(outputDir, f.Path)
+		if err != nil {
+			return "", fmt.Errorf("generate_code: file path %q: %w", f.Path, err)
+		}
 		if err := writeFile(path, code); err != nil {
 			return "", err
 		}
@@ -196,7 +200,12 @@ func (t *GenerateCodeTool) generateSingleCall(ctx context.Context, contract, out
 	files := parseFiles(code)
 
 	if len(files) == 0 {
-		path := filepath.Join(outputDir, "generated.py")
+		// "generated.py" is a static name with no traversal risk; routed
+		// through the same helper for consistency with the multi-file branch.
+		path, err := resolveUnderRoot(outputDir, "generated.py")
+		if err != nil {
+			return "", err
+		}
 		if err := writeFile(path, code); err != nil {
 			return "", err
 		}
@@ -206,7 +215,13 @@ func (t *GenerateCodeTool) generateSingleCall(ctx context.Context, contract, out
 
 	var summary []string
 	for _, f := range files {
-		path := filepath.Join(outputDir, f.name)
+		// File names come from the model's `# === FILE: name ===` headers in
+		// the LLM output. Validate before writing — `..` segments or absolute
+		// paths that escape outputDir would otherwise be honored.
+		path, err := resolveUnderRoot(outputDir, f.name)
+		if err != nil {
+			return "", fmt.Errorf("generate_code: file %q: %w", f.name, err)
+		}
 		if err := writeFile(path, f.content); err != nil {
 			return "", err
 		}
