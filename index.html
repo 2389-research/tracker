@@ -57,7 +57,9 @@
   <!-- ═══ Install + run (above the fold reachability) ═══ -->
   <section class="glass" id="install">
     <h2>Install + run in <span class="accent">60 seconds</span></h2>
-    <pre data-lang="bash"><code><span class="comment"># 1. Install</span>
+    <pre data-lang="bash"><code><span class="comment"># 1. Install — pick one</span>
+<span class="keyword">brew install</span> 2389-research/tap/tracker
+<span class="comment"># or</span>
 <span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
 
 <span class="comment"># 2. Run a built-in workflow (no file needed)</span>
@@ -68,10 +70,7 @@ tracker diagnose</code></pre>
 
     <details class="more-cmds">
       <summary>More commands</summary>
-      <pre data-lang="bash"><code><span class="comment"># Homebrew</span>
-<span class="keyword">brew install</span> 2389-research/tap/tracker
-
-<span class="comment"># Verify your providers + tools</span>
+      <pre data-lang="bash"><code><span class="comment"># Verify your providers + tools</span>
 tracker doctor
 
 <span class="comment"># Run with the Claude Code agent backend</span>
@@ -169,8 +168,8 @@ tracker <span class="flag">--json</span> build_product</code></pre>
       </div>
 
       <div class="glass glass-sm outcome-card">
-        <h3>Pass JSON between steps without prompt-stuffing.</h3>
-        <p>Declarative <code>writes:</code> on agent nodes validates output JSON into the pipeline context. Self-healing extraction cascade catches the common &ldquo;LLM returned prose&rdquo; failure modes.</p>
+        <h3>Steps pass typed JSON to each other &mdash; no glue code.</h3>
+        <p>Declare what an agent produces with <code>writes: [field, field]</code>; downstream steps read those fields as typed values. The runtime validates the output, and a self-healing cascade rescues the common &ldquo;LLM returned prose around the JSON&rdquo; case.</p>
       </div>
 
       <div class="glass glass-sm outcome-card">
@@ -179,6 +178,18 @@ tracker <span class="flag">--json</span> build_product</code></pre>
       </div>
 
     </div>
+  </section>
+
+  <!-- ═══ Stream to your own UI ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <h3 style="margin-top: 0;">Stream pipeline status to your own users.</h3>
+    <p style="margin-bottom: 0.75rem;">
+      Every event &mdash; node started, gate hit, cost updated, run completed &mdash; lands in
+      <code>activity.jsonl</code> on disk and on stdout via <code>tracker --json</code>. Pipe it to your
+      customer dashboard, Slack bot, or status page. Webhook gates POST to your URL on every
+      human-decision point so approvals can render in your own app, not just the TUI.
+    </p>
+    <pre data-lang="bash" style="margin: 0;"><code>tracker <span class="flag">--json</span> build_product | <span class="comment"># pipe into your event bus / SSE relay / dashboard</span></code></pre>
   </section>
 
   <!-- ═══ Providers (kept, slimmer) ═══ -->
