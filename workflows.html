@@ -382,6 +382,7 @@ tracker <span class="flag">--backend</span> acp build_product</code></pre>
       Unprefixed attr names are the v0.22.0 contract; the handler also accepts the legacy <code>manager.*</code> names for backward
       compatibility (unprefixed wins when both are set). <code>steer_context</code> uses canonical sorted
       <code>k=v,k=v</code> pairs with percent-encoding for <code>,</code>, <code>=</code>, and <code>%</code>.
+      Steered values land under <code>${ctx.steer.&lt;key&gt;}</code> on the child since v0.24.2.
     </p>
     <pre data-lang="dip"><code><span class="keyword">manager_loop</span> Supervise
   label: <span class="string">"Watch build attempts"</span>
@@ -391,6 +392,40 @@ tracker <span class="flag">--backend</span> acp build_product</code></pre>
   stop_condition: <span class="string">"stack.child.status = success"</span>
   steer_condition: <span class="string">"stack.child.cycles &gt; 3"</span>
   steer_context: <span class="string">"hint=try-alternate-plan,priority=high"</span></code></pre>
+  </section>
+
+  <!-- ═══ Architect tooling ═══ -->
+  <section class="glass" id="architect-tooling">
+    <h2>Architect tooling <span class="accent">(v0.25.0)</span></h2>
+    <p class="lead">
+      For local-codegen runs, agents can be enriched with three architect-tier tools that
+      register on demand via env vars. They're orthogonal to the four built-in workflows above &mdash;
+      drop into any pipeline that uses the native backend.
+    </p>
+    <div class="grid-3" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4><code>dispatch_sprints</code></h4>
+        <p>Reads a JSONL plan and runs the per-sprint author + audit pipeline once per line.
+        Deterministic in-tool loop with bounded retry+backoff for transient provider errors.
+        Uses the <code>TerminalTool</code> primitive so the agent loop ends the moment the
+        plan is fully dispatched.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>write_enriched_sprint</code></h4>
+        <p>Mid-tier model (default Sonnet) writes a sprint with a 4-strategy SEARCH/REPLACE
+        matcher and partial-apply semantics. Set <code>TRACKER_SPRINT_WRITER_MODEL</code> to
+        register this tool.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>generate_code</code></h4>
+        <p>Cheap/fast model expands a contract into one or more files. Set
+        <code>TRACKER_CODEGEN_MODEL</code> to register; defaults to <code>gpt-4o-mini</code>.</p>
+      </div>
+    </div>
+    <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+      Mechanics &amp; safety details live on the
+      <a href="architecture.html#agent-tools">architecture page</a>.
+    </p>
   </section>
 
   <div class="divider"></div>

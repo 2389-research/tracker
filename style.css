@@ -540,6 +540,45 @@ tbody tr:hover td {
   margin: 3rem 0;
 }
 
+/* ─── In-page Table of Contents ─────────────────────────── */
+.page-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  align-items: baseline;
+  padding: 0.85rem 1.25rem;
+  margin: 0 0 1.75rem;
+  background: rgba(249, 115, 22, 0.05);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.page-toc strong {
+  color: var(--orange-900);
+  margin-right: 0.4rem;
+  font-weight: 700;
+}
+
+.page-toc a {
+  color: var(--orange-700);
+  text-decoration: none;
+}
+
+.page-toc a:hover {
+  color: var(--orange-600);
+  text-decoration: underline;
+}
+
+/* Anchored headings should not be hidden by the fixed nav. */
+section[id],
+h2[id],
+h3[id],
+h4[id] {
+  scroll-margin-top: calc(var(--nav-height) + 1rem);
+}
+
 /* ─── Badge ─────────────────────────────────────────────── */
 .badge {
   display: inline-block;

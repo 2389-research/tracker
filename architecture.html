@@ -32,8 +32,23 @@
     <p class="subtitle">Three layers, clean boundaries, no magic. The engine doesn't know about parallel execution. The LLM client doesn't know about pipelines.</p>
   </section>
 
+  <nav class="page-toc" aria-label="On this page">
+    <strong>On this page:</strong>
+    <a href="#layers">System layers</a>
+    <a href="#handlers">Handlers</a>
+    <a href="#engine">Engine run loop</a>
+    <a href="#adapter">Dippin adapter</a>
+    <a href="#llm-client">LLM client</a>
+    <a href="#tui">TUI model</a>
+    <a href="#backends">Agent backends</a>
+    <a href="#agent-tools">Agent-runtime tools</a>
+    <a href="#context">Context &amp; steering</a>
+    <a href="#checkpoint">Checkpoint resume</a>
+    <a href="#library-api">Library API</a>
+  </nav>
+
   <!-- ═══ Layer Diagram ═══ -->
-  <section class="glass">
+  <section class="glass" id="layers">
     <h2>System <span class="accent">layers</span></h2>
     <div class="diagram">
       <div class="mermaid">
@@ -51,7 +66,7 @@ graph TB
   </section>
 
   <!-- ═══ Handler Types ═══ -->
-  <section class="glass">
+  <section class="glass" id="handlers">
     <h2>Handler <span class="accent">types</span></h2>
     <p class="lead">
       Every node resolves to a handler. The engine calls <code>Execute()</code> and reads the outcome; it has
@@ -83,7 +98,7 @@ graph TB
   </section>
 
   <!-- ═══ Engine ═══ -->
-  <section class="glass">
+  <section class="glass" id="engine">
     <h2>The engine <span class="accent">run loop</span></h2>
     <p class="lead">
       The engine treats every node the same: execute the handler, evaluate outgoing edges,
@@ -126,7 +141,7 @@ graph LR
   </section>
 
   <!-- ═══ Adapter ═══ -->
-  <section class="glass">
+  <section class="glass" id="adapter">
     <h2>The dippin <span class="accent">adapter</span></h2>
     <p class="lead">
       <code>pipeline/dippin_adapter.go</code> is the bridge between dippin-lang's IR and tracker's Graph model.
@@ -144,14 +159,14 @@ graph LR
           <tr><td><code>ctx.outcome</code></td><td><code>outcome</code></td><td>Namespace prefix stripped at evaluation</td></tr>
           <tr><td><code>ParallelConfig.Targets</code></td><td>Implicit edges</td><td>Adapter synthesizes edges from parallel targets</td></tr>
           <tr><td><code>FanInConfig.Sources</code></td><td>Implicit edges</td><td>Adapter synthesizes edges from fan-in sources</td></tr>
-          <tr><td><code>ir.NodeManagerLoop</code></td><td><code>shape=house</code>, <code>handler=stack.manager_loop</code></td><td>Flattens <code>ir.ManagerLoopConfig</code> into six unprefixed attrs (<code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>). <code>steer_context</code> uses canonical sorted <code>k=v,k=v</code> with percent-encoding for reserved chars. Start/exit nodes override shape to <code>Mdiamond</code>/<code>Msquare</code> but preserve handler + attrs. <span class="badge">v0.23.0</span></td></tr>
+          <tr><td><code>ir.NodeManagerLoop</code></td><td><code>shape=house</code>, <code>handler=stack.manager_loop</code></td><td>Flattens <code>ir.ManagerLoopConfig</code> into six unprefixed attrs (<code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>). <code>steer_context</code> uses canonical sorted <code>k=v,k=v</code> with percent-encoding for reserved chars. Start/exit nodes override shape to <code>Mdiamond</code>/<code>Msquare</code> but preserve handler + attrs. <span class="badge">v0.23.0</span><br><strong>v0.24.2:</strong> <code>steer_context</code> keys are auto-prefixed with <code>steer.</code> on the wire so they cannot collide with the <code>tool_command</code> safe-key allowlist. Pipelines reading steered values must use <code>${ctx.steer.&lt;key&gt;}</code> rather than <code>${ctx.&lt;key&gt;}</code>.</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
   <!-- ═══ LLM Client ═══ -->
-  <section class="glass">
+  <section class="glass" id="llm-client">
     <h2>LLM client <span class="accent">middleware</span></h2>
     <p class="lead">
       The client is provider-agnostic. Middleware wraps every request for cross-cutting concerns.
@@ -181,7 +196,7 @@ graph LR
   </section>
 
   <!-- ═══ TUI ═══ -->
-  <section class="glass">
+  <section class="glass" id="tui">
     <h2>TUI <span class="accent">model</span></h2>
     <p class="lead">
       Built with <a href="https://github.com/charmbracelet/bubbletea">bubbletea</a>.
@@ -208,7 +223,7 @@ graph LR
   </section>
 
   <!-- ═══ Backend Abstraction ═══ -->
-  <section class="glass">
+  <section class="glass" id="backends">
     <h2>Agent <span class="accent">backends</span></h2>
     <p class="lead">
       <code>AgentBackend</code> in <code>pipeline/backend.go</code> is a minimal contract &mdash; one method that executes a node
@@ -254,8 +269,54 @@ graph TB
     </div>
   </section>
 
+  <!-- ═══ Agent-runtime tools ═══ -->
+  <section class="glass" id="agent-tools">
+    <h2>Agent-runtime <span class="accent">tools</span> <span class="badge">v0.25.0</span></h2>
+    <p class="lead">
+      The native backend ships an extensible tool registry. v0.25.0 adds an architect-tier
+      primitive plus three tools registered on demand via env vars. They live in
+      <code>agent/tools/</code> and register from <code>pipeline/handlers/backend_native.go</code>
+      &mdash; a tool only joins the registry if its env var is set.
+    </p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4><code>TerminalTool</code></h4>
+        <p>Agent-runtime primitive (interface). When a tool flagged terminal succeeds, the
+        runtime breaks the session loop after the same turn's tool batch &mdash; before the
+        next LLM call &mdash; so dispatch tools don't waste a post-dispatch turn.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>dispatch_sprints</code></h4>
+        <p>Reads a <code>{path, description}</code> JSONL plan and runs the per-sprint
+        author + audit pipeline once per line via a deterministic in-tool loop with bounded
+        retry+backoff for transient provider errors (5xx, rate-limit, timeout, network).
+        Non-retryable errors bubble out so the agent can react.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>write_enriched_sprint</code></h4>
+        <p>Calls a mid-tier LLM (Sonnet by default; override via
+        <code>TRACKER_SPRINT_WRITER_MODEL</code>) with a 4-strategy SEARCH/REPLACE matcher
+        (exact &rarr; indent-preserving &rarr; whitespace-insensitive &rarr; fuzzy with
+        Levenshtein ratio &ge; 0.9), partial-apply semantics that distinguish
+        <code>PATCHED-PARTIAL</code> from clean <code>PATCHED</code>, and a tolerant
+        audit-verdict parser.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>generate_code</code></h4>
+        <p>Calls a cheap/fast model (default <code>gpt-4o-mini</code>; override via
+        <code>TRACKER_CODEGEN_MODEL</code>) to expand a contract into one or more files.
+        Companion to <code>write_enriched_sprint</code> in the architect-side flow.</p>
+      </div>
+    </div>
+    <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+      Validated end-to-end on Notebook synthetic (41/41 pytest, ~$2, 28 min) and NIFB
+      architect-only (16 sprints, ~$5, 47 min). Tools also include path-traversal guards
+      via the <code>resolveUnderRoot</code> helper with symlink evaluation.
+    </p>
+  </section>
+
   <!-- ═══ Context & Steering ═══ -->
-  <section class="glass">
+  <section class="glass" id="context">
     <h2>Context &amp; <span class="accent">steering</span></h2>
     <p class="lead">
       The <code>PipelineContext</code> is the typed key-value store shared across nodes. Variable expansion resolves
@@ -278,13 +339,17 @@ graph TB
       </div>
       <div class="glass glass-sm">
         <h4>Budget governance <span class="badge">v0.17.0</span></h4>
-        <p>The <code>BudgetGuard</code> evaluates between every pair of nodes. A trip on <code>max_total_tokens</code>, <code>max_cost_cents</code>, or <code>max_wall_time</code> halts the run with <code>OutcomeBudgetExceeded</code> and fires <code>EventBudgetExceeded</code> with a full <code>CostSnapshot</code>. Limits come from <code>Config.Budget</code>, CLI flags, or workflow <code>defaults:</code>.</p>
+        <p>The <code>BudgetGuard</code> evaluates between every pair of nodes. A trip on <code>max_total_tokens</code>, <code>max_cost_cents</code>, or <code>max_wall_time</code> halts the run with <code>OutcomeBudgetExceeded</code> and fires <code>EventBudgetExceeded</code> with a full <code>CostSnapshot</code>. Limits come from <code>Config.Budget</code>, CLI flags, or workflow <code>defaults:</code>. <strong>v0.24.0:</strong> subgraph and <code>stack.manager_loop</code> children inherit the parent guard plus baseline usage, so ceilings bind through nested execution.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Cost-accounting fidelity <span class="badge">v0.24.1</span></h4>
+        <p>Per-call usage now carries an <code>Estimated</code> flag that propagates by OR through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. The claude-code backend now parses <code>cache_read_input_tokens</code> and <code>cache_creation_input_tokens</code> from the CLI's NDJSON envelope &mdash; cache reads are priced at 10% of input, cache writes at 25%, fixing a ~3&times; input-cost overcount on heavy-cache Sonnet workloads.</p>
       </div>
     </div>
   </section>
 
   <!-- ═══ Checkpoint ═══ -->
-  <section class="glass">
+  <section class="glass" id="checkpoint">
     <h2>Checkpoint <span class="accent">resume</span></h2>
     <p class="lead">
       Every node completion saves a checkpoint with completed nodes, context snapshot, and
@@ -311,7 +376,7 @@ graph TB
   </section>
 
   <!-- ═══ Library API ═══ -->
-  <section class="glass">
+  <section class="glass" id="library-api">
     <h2>Library <span class="accent">API</span> <span class="badge">v0.18.0</span></h2>
     <p class="lead">
       Tracker is also a Go library. The CLI is a thin printer over the same APIs library consumers use.

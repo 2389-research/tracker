@@ -30,8 +30,24 @@
     <p class="subtitle">Every command, flag, and resolution rule. Install and operate tracker from the terminal.</p>
   </section>
 
+  <nav class="page-toc" aria-label="On this page">
+    <strong>On this page:</strong>
+    <a href="#install">Install</a>
+    <a href="#commands">Commands</a>
+    <a href="#flags">Flags</a>
+    <a href="#tool-safety">Tool safety</a>
+    <a href="#name-resolution">Name resolution</a>
+    <a href="#env-vars">Environment variables</a>
+    <a href="#autopilot">Autopilot</a>
+    <a href="#backends">Backends</a>
+    <a href="#swebench"><code>tracker-swebench</code></a>
+    <a href="#troubleshooting">Troubleshooting</a>
+    <a href="#diagnose">Diagnose intelligence</a>
+    <a href="#quick-reference">Quick reference</a>
+  </nav>
+
   <!-- ═══ Install ═══ -->
-  <section class="glass">
+  <section class="glass" id="install">
     <h2><span class="accent">Install</span></h2>
     <pre data-lang="bash"><code><span class="comment"># Go install (binary includes embedded workflows)</span>
 <span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
@@ -51,7 +67,7 @@ tracker update</code></pre>
   </section>
 
   <!-- ═══ Commands ═══ -->
-  <section class="glass">
+  <section class="glass" id="commands">
     <h2>Commands</h2>
 
     <h3 style="margin-top: 1.5rem;">Running Pipelines</h3>
@@ -175,7 +191,7 @@ tracker update</code></pre>
   </section>
 
   <!-- ═══ Flags ═══ -->
-  <section class="glass">
+  <section class="glass" id="flags">
     <h2>Flags</h2>
     <p>Flags can appear before or after the pipeline argument.</p>
     <div class="table-wrap">
@@ -213,7 +229,7 @@ tracker update</code></pre>
           <tr><td><code>--max-wall-time</code></td><td>Halt if wall-clock runtime exceeds this (e.g. <code>30m</code>)</td><td>&mdash;</td></tr>
 
           <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Provider routing &amp; tool safety</th></tr>
-          <tr><td><code>--gateway-url</code></td><td>Route every provider through a Cloudflare AI Gateway root URL; equivalent to <code>TRACKER_GATEWAY_URL</code> <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
+          <tr><td><code>--gateway-url</code></td><td>Route every provider through a Cloudflare AI Gateway root URL; equivalent to <code>TRACKER_GATEWAY_URL</code>. See the <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md">Bedrock Gateway integration guide</a> for the AWS Bedrock recipe. <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
           <tr><td><code>--tool-allowlist</code></td><td>Restrict tool commands to glob patterns. Repeatable; each value can be a comma-separated list. Additive with the <code>tool_commands_allow</code> graph attr. Never overrides the denylist. <span class="badge">v0.23.0</span></td><td>&mdash;</td></tr>
           <tr><td><code>--tool-denylist-add</code></td><td>Extend the built-in tool-command denylist with extra glob patterns. Repeatable; each value can be a comma-separated list. Additive only &mdash; cannot remove built-ins. Pairs with the <code>tool_denylist_add</code> graph attr. <code>--bypass-denylist</code> still disables everything. <span class="badge">v0.24.1</span></td><td>&mdash;</td></tr>
           <tr><td><code>--bypass-denylist</code></td><td>Disable the built-in denylist for dangerous tool commands (eval, pipe-to-shell, <code>curl | sh</code>). Loud stderr warning on startup. Use only in sandboxed environments where dangerous patterns are intentional. <span class="badge">v0.23.0</span></td><td>Off</td></tr>
@@ -227,7 +243,7 @@ tracker update</code></pre>
   </section>
 
   <!-- ═══ Tool safety graph attrs ═══ -->
-  <section class="glass">
+  <section class="glass" id="tool-safety">
     <h2>Tool safety in <span class="accent">pipeline files</span> <span class="badge">v0.23.0</span></h2>
     <p class="lead">
       The denylist, allowlist, and per-stream output ceiling are enforceable from a pipeline file as well as CLI flags.
@@ -260,7 +276,7 @@ tracker update</code></pre>
   </section>
 
   <!-- ═══ Name Resolution ═══ -->
-  <section class="glass">
+  <section class="glass" id="name-resolution">
     <h2>Name <span class="accent">resolution</span></h2>
     <p class="lead">
       When you run <code>tracker build_product</code> (bare name, no path, no extension), the resolver
@@ -292,8 +308,9 @@ tracker update</code></pre>
   </section>
 
   <!-- ═══ Env Vars ═══ -->
-  <section class="glass">
+  <section class="glass" id="env-vars">
     <h2>Environment <span class="accent">variables</span></h2>
+    <h3 style="margin-top: 0.75rem;">Provider keys</h3>
     <div class="table-wrap">
       <table>
         <thead>
@@ -315,10 +332,26 @@ tracker update</code></pre>
       <code>~/.config/2389/tracker/.env</code> (XDG config), then <code>.env</code> in the working directory.
       Shell env vars are never overwritten.
     </p>
+
+    <h3 style="margin-top: 2rem;">Tracker runtime knobs</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Variable</th><th>Default</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>TRACKER_GATEWAY_URL</code></td><td>&mdash;</td><td>Equivalent to <code>--gateway-url</code>. Tracker appends per-provider suffixes (<code>/anthropic</code>, <code>/openai</code>, <code>/google-ai-studio</code>, <code>/compat</code>). Per-provider <code>*_BASE_URL</code> still wins. <span class="badge">v0.17.0</span></td></tr>
+          <tr><td><code>TRACKER_PASS_API_KEYS</code></td><td>unset</td><td>Set to <code>1</code> to keep <code>*_API_KEY</code> in the subprocess env when using <code>--backend claude-code</code> or <code>--backend acp</code>. Default behavior strips them so the subprocess uses subscription / native auth. <span class="badge">v0.12.0</span></td></tr>
+          <tr><td><code>TRACKER_PASS_ENV</code></td><td>unset</td><td>Set to <code>1</code> to disable the sensitive-env scrub on tool subprocesses (<code>*_API_KEY</code>, <code>*_SECRET</code>, <code>*_TOKEN</code>, <code>*_PASSWORD</code>). Default scrubs them out. Use only when a tool genuinely needs a secret.</td></tr>
+          <tr><td><code>TRACKER_SPRINT_WRITER_MODEL</code></td><td>Sonnet</td><td>Model used by the <code>write_enriched_sprint</code> agent-runtime tool. When set, the tool registers in the native backend's tool registry. Pair with <code>TRACKER_CODEGEN_MODEL</code> for the full architect-side flow. <span class="badge">v0.25.0</span></td></tr>
+          <tr><td><code>TRACKER_CODEGEN_MODEL</code></td><td><code>gpt-4o-mini</code></td><td>Model used by the <code>generate_code</code> tool to expand a contract into files. Setting this also registers <code>dispatch_sprints</code>. <span class="badge">v0.25.0</span></td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <!-- ═══ Autopilot ═══ -->
-  <section class="glass">
+  <section class="glass" id="autopilot">
     <h2>Autopilot <span class="accent">mode</span></h2>
     <p class="lead">
       Run pipelines fully autonomous. Human gates are answered by an LLM judge
@@ -402,7 +435,7 @@ tracker <span class="flag">--auto-approve</span> build_product</code></pre>
   </section>
 
   <!-- ═══ Backends ═══ -->
-  <section class="glass">
+  <section class="glass" id="backends">
     <h2>Agent <span class="accent">backends</span></h2>
     <p class="lead">
       Three backends, one pipeline. Native is the default and works with every provider. Claude Code gives agents file editing,
@@ -485,7 +518,7 @@ tracker build_product</code></pre>
   </section>
 
   <!-- ═══ tracker-swebench ═══ -->
-  <section class="glass">
+  <section class="glass" id="swebench">
     <h2><code>tracker-swebench</code> <span class="accent">companion binary</span> <span class="badge">v0.18.0+</span></h2>
     <p class="lead">
       Evaluates tracker's agent against the <a href="https://www.swebench.com/">SWE-bench</a> dataset. Orchestrates
@@ -514,7 +547,7 @@ tracker-swebench analyze ./swebench-results/ <span class="flag">--predictions</s
   </section>
 
   <!-- ═══ Troubleshooting ═══ -->
-  <section class="glass">
+  <section class="glass" id="troubleshooting">
     <h2>Troubleshooting</h2>
     <div class="table-wrap">
       <table>
@@ -558,7 +591,7 @@ tracker-swebench analyze ./swebench-results/ <span class="flag">--predictions</s
   </section>
 
   <!-- ═══ Diagnose Deep Dive ═══ -->
-  <section class="glass">
+  <section class="glass" id="diagnose">
     <h2>Diagnose <span class="accent">intelligence</span></h2>
     <p class="lead">
       <code>tracker diagnose</code> doesn't just dump errors &mdash; it analyzes failure patterns
@@ -635,7 +668,7 @@ tracker-swebench analyze ./swebench-results/ <span class="flag">--predictions</s
   </section>
 
   <!-- ═══ Quick Reference ═══ -->
-  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+  <section class="glass" id="quick-reference" style="border-left: 3px solid var(--orange-600);">
     <h2>Quick <span class="accent">reference</span></h2>
     <p style="color: var(--text-secondary); margin-bottom: 1rem;">The commands you'll use most, at a glance.</p>
     <pre data-lang="bash"><code><span class="comment"># First time</span>

@@ -206,11 +206,11 @@ graph TB
       <p><code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> ceilings via CLI flags, library config, or workflow <code>defaults:</code>. Breach halts the run and fires <code>EventBudgetExceeded</code>. Per-provider cost rollup on <code>Result.Cost</code>. <span class="badge">v0.17.0</span></p>
     </div>
 
-    <div class="glass feature-card">
+    <a href="architecture.html#library-api" class="glass feature-card" style="text-decoration: none; color: inherit; display: block;">
       <div class="icon">&#x1F4D2;</div>
       <h3>Library API</h3>
       <p>Embed tracker in Go code. <code>tracker.Run</code> plus context-aware <code>Diagnose</code> / <code>Audit</code> / <code>Doctor</code> / <code>Simulate</code> returning typed reports. NDJSON event streaming via <code>NewNDJSONWriter</code>. <span class="badge">v0.18.0</span></p>
-    </div>
+    </a>
 
     <div class="glass feature-card">
       <div class="icon">&#x1F9E0;</div>
