@@ -179,27 +179,46 @@ func TestApplyDeclaredWrites_ExtractedJSONMissingKeyHardFails(t *testing.T) {
 }
 
 // Defense against a workflow author declaring a writes key that collides
-// with the tool_command safe-key allowlist. Without this guard, an LLM could
-// land arbitrary content in `outcome` / `human_response` etc, bypassing
-// the sanitization that exists exactly for shell input.
-func TestApplyDeclaredWrites_RejectsSafeKeyCollision(t *testing.T) {
-	for _, key := range []string{"outcome", "preferred_label", "human_response", "interview_answers"} {
-		t.Run(key, func(t *testing.T) {
+// with a reserved name. Two sets are reserved:
+//
+//   - Tool_command safe-key allowlist (outcome, preferred_label,
+//     human_response, interview_answers) — security: shell-interpolation
+//     gate must not be bypassed by an LLM landing prose under those names.
+//   - Writes signal keys (writes_error, writes_warning) — integrity:
+//     runtime owns these; spoofing them would mislead `tracker diagnose`
+//     and downstream branch-on-error logic.
+//
+// The check fires before any value is written, so the rejection is
+// fail-closed: the safe key never sees content even on the failing path.
+func TestApplyDeclaredWrites_RejectsReservedKeyCollision(t *testing.T) {
+	cases := []struct {
+		key      string
+		category string
+	}{
+		{"outcome", "tool_command safe-key"},
+		{"preferred_label", "tool_command safe-key"},
+		{"human_response", "tool_command safe-key"},
+		{"interview_answers", "tool_command safe-key"},
+		{"writes_error", "writes signal"},
+		{"writes_warning", "writes signal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
 			node := &pipeline.Node{
 				ID:    "n1",
-				Attrs: map[string]string{"writes": key},
+				Attrs: map[string]string{"writes": tc.key},
 			}
 			ctx := map[string]string{}
-			failed := applyDeclaredWrites(node, ctx, `{"`+key+`": "x"}`, "Response JSON")
+			failed := applyDeclaredWrites(node, ctx, `{"`+tc.key+`": "x"}`, "Response JSON")
 			if !failed {
-				t.Fatalf("expected failure for writes-key collision with %q", key)
+				t.Fatalf("expected failure for writes-key collision with %q (%s)", tc.key, tc.category)
 			}
-			if _, ok := ctx[key]; ok {
-				t.Fatalf("expected %q to NOT be written; collision must be rejected before any value lands", key)
+			if got, ok := ctx[tc.key]; ok && got == "x" {
+				t.Fatalf("expected %q to NOT carry the LLM-supplied value; collision must be rejected before any value lands", tc.key)
 			}
 			msg := ctx[contextKeyWritesError]
-			if !strings.Contains(msg, "safe-key allowlist") {
-				t.Fatalf("expected error to mention safe-key allowlist, got: %s", msg)
+			if !strings.Contains(msg, "reserved name") {
+				t.Fatalf("expected error to mention reserved name, got: %s", msg)
 			}
 		})
 	}

@@ -25,17 +25,26 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 		return false
 	}
 
-	// Reject writes-key collisions with the tool_command safe-key allowlist.
-	// The allowlist (outcome, preferred_label, human_response,
-	// interview_answers) is enforced fail-closed in tool_command expansion to
-	// keep LLM output out of shell input. A workflow that declared
-	// `writes: outcome` would funnel LLM-controlled content into the reserved
-	// name and bypass the gate — refuse the node rather than silently land
-	// the data.
+	// Reject writes-key collisions with two reserved sets:
+	//
+	//   1. The tool_command safe-key allowlist (outcome, preferred_label,
+	//      human_response, interview_answers) — enforced fail-closed in
+	//      tool_command expansion to keep LLM output out of shell input. A
+	//      workflow declaring `writes: outcome` would funnel LLM-controlled
+	//      content into the reserved name and bypass the gate.
+	//
+	//   2. The declared-writes signal keys (writes_error, writes_warning) —
+	//      these are runtime observability keys set by this function for
+	//      `tracker diagnose` and downstream nodes to branch on. Allowing a
+	//      workflow to set them via writes would let an LLM spoof a failure
+	//      / healed-warning signal that wasn't real, undermining diagnose UX.
+	//
+	// Either collision is treated as an authoring error: refuse the node
+	// rather than silently land the data.
 	for _, key := range writes {
-		if pipeline.IsToolCommandSafeCtxKey(key) {
+		if pipeline.IsToolCommandSafeCtxKey(key) || isReservedWritesSignalKey(key) {
 			contextUpdates[contextKeyWritesError] = fmt.Sprintf(
-				"node %q: declared writes key %q collides with the tool_command safe-key allowlist; reserved keys cannot be set from declared writes",
+				"node %q: declared writes key %q collides with a reserved name; tool_command safe-key allowlist (outcome/preferred_label/human_response/interview_answers) and writes signal keys (writes_error/writes_warning) cannot be set from declared writes",
 				node.ID, key,
 			)
 			return true
@@ -97,6 +106,14 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 		)
 	}
 	return false
+}
+
+// isReservedWritesSignalKey reports whether key is one of the runtime
+// observability signal names used by applyDeclaredWrites itself. Workflow
+// authors must not declare these as writes targets — the runtime owns
+// them, and letting an LLM set them would spoof the signal.
+func isReservedWritesSignalKey(key string) bool {
+	return key == contextKeyWritesError || key == contextKeyWritesWarning
 }
 
 func dedupeDeclaredWrites(writes []string) []string {

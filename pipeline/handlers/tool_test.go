@@ -182,6 +182,11 @@ func TestToolHandlerDeclaredWritesSingleKeyFallsBackToRaw(t *testing.T) {
 	if outcome.ContextUpdates[contextKeyWritesWarning] == "" {
 		t.Fatal("expected writes_warning to be set for fallback")
 	}
+	// tool_stdout must still be published regardless of the writes
+	// cascade outcome — `tracker diagnose` and the engine rely on it.
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]; got != "nope" {
+		t.Fatalf("tool_stdout = %q, want %q (must be set independently of writes processing)", got, "nope")
+	}
 }
 
 func TestToolHandlerDeclaredWritesMultiKeyInvalidJSONFails(t *testing.T) {
@@ -207,6 +212,12 @@ func TestToolHandlerDeclaredWritesMultiKeyInvalidJSONFails(t *testing.T) {
 	}
 	if outcome.ContextUpdates[contextKeyWritesError] == "" {
 		t.Fatal("expected writes_error to be set")
+	}
+	// tool_stdout must still be published even when writes processing
+	// hard-fails — `tracker diagnose` needs the raw command output to
+	// help the user debug what went wrong.
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]; got != "nope" {
+		t.Fatalf("tool_stdout = %q, want %q (must be set independently of writes processing)", got, "nope")
 	}
 }
 
