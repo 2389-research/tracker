@@ -87,6 +87,72 @@ func normalizeDeclaredKeys(keys []string) []string {
 	return out
 }
 
+// ExtractJSONFromText tries to find a valid JSON object embedded in text.
+// It first looks for ```json fenced blocks, then falls back to finding the
+// outermost { ... } substring. Returns the extracted JSON string and true
+// if a valid JSON object was found, or ("", false) otherwise.
+func ExtractJSONFromText(text string) (string, bool) {
+	// Try fenced JSON blocks first (```json ... ``` or ``` ... ```)
+	if extracted := extractFencedJSON(text); extracted != "" {
+		return extracted, true
+	}
+	// Try outermost braces
+	if extracted := extractOutermostJSON(text); extracted != "" {
+		return extracted, true
+	}
+	return "", false
+}
+
+// extractFencedJSON looks for a ```json or ``` fenced block containing valid JSON.
+func extractFencedJSON(text string) string {
+	fence := "```"
+	start := strings.Index(text, fence)
+	if start < 0 {
+		return ""
+	}
+	// Skip past the opening fence and any language tag on the same line
+	contentStart := strings.Index(text[start+len(fence):], "\n")
+	if contentStart < 0 {
+		return ""
+	}
+	contentStart += start + len(fence) + 1 // +1 for the newline
+
+	// Find closing fence
+	end := strings.Index(text[contentStart:], fence)
+	if end < 0 {
+		return ""
+	}
+	candidate := strings.TrimSpace(text[contentStart : contentStart+end])
+	if candidate == "" {
+		return ""
+	}
+	// Validate it's a JSON object
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(candidate), &obj); err != nil {
+		return ""
+	}
+	return candidate
+}
+
+// extractOutermostJSON finds the first '{' and last '}' in the text and
+// checks whether the substring between them is a valid JSON object.
+func extractOutermostJSON(text string) string {
+	first := strings.IndexByte(text, '{')
+	if first < 0 {
+		return ""
+	}
+	last := strings.LastIndexByte(text, '}')
+	if last <= first {
+		return ""
+	}
+	candidate := text[first : last+1]
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(candidate), &obj); err != nil {
+		return ""
+	}
+	return candidate
+}
+
 func rawJSONValueToContext(raw json.RawMessage) string {
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {

@@ -19,7 +19,28 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 		return false
 	}
 
+	// Try direct JSON parse first.
 	updates, extras, err := pipeline.ExtractDeclaredWrites(writes, rawJSON)
+
+	// If direct parse failed, try extracting JSON embedded in the text.
+	if err != nil {
+		if extracted, ok := pipeline.ExtractJSONFromText(rawJSON); ok {
+			updates, extras, err = pipeline.ExtractDeclaredWrites(writes, extracted)
+		}
+	}
+
+	// If still failed and single write key, fall back to using the raw
+	// response as the value. This handles the common case where an LLM
+	// writes to a file and responds with prose instead of JSON.
+	if err != nil && len(writes) == 1 {
+		contextUpdates[writes[0]] = rawJSON
+		contextUpdates[contextKeyWritesWarning] = fmt.Sprintf(
+			"node %q: writes extraction fell back to raw response for key %q (no JSON found in output)",
+			node.ID, writes[0],
+		)
+		return false
+	}
+
 	if err != nil {
 		contextUpdates[contextKeyWritesError] = formatWritesError(node.ID, writes, source, err, rawJSON)
 		return true

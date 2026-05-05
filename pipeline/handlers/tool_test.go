@@ -154,7 +154,7 @@ func TestToolHandlerDeclaredWritesExtracted(t *testing.T) {
 	}
 }
 
-func TestToolHandlerDeclaredWritesInvalidJSONFails(t *testing.T) {
+func TestToolHandlerDeclaredWritesSingleKeyFallsBackToRaw(t *testing.T) {
 	env := toolTestEnv(t, map[string]exec.CommandResult{
 		"echo nope": {Stdout: "nope\n", ExitCode: 0},
 	})
@@ -165,6 +165,36 @@ func TestToolHandlerDeclaredWritesInvalidJSONFails(t *testing.T) {
 		Attrs: map[string]string{
 			"tool_command": "echo nope",
 			"writes":       "commit_sha",
+		},
+	}
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Single-key writes with non-JSON output falls back to raw value with warning.
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("status = %q, want success (single-key fallback)", outcome.Status)
+	}
+	if got := outcome.ContextUpdates["commit_sha"]; got != "nope" {
+		t.Fatalf("commit_sha = %q, want %q", got, "nope")
+	}
+	if outcome.ContextUpdates[contextKeyWritesWarning] == "" {
+		t.Fatal("expected writes_warning to be set for fallback")
+	}
+}
+
+func TestToolHandlerDeclaredWritesMultiKeyInvalidJSONFails(t *testing.T) {
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo nope": {Stdout: "nope\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "extract",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": "echo nope",
+			"writes":       "commit_sha, branch",
 		},
 	}
 
