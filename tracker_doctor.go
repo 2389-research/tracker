@@ -363,7 +363,7 @@ func probeProvider(ctx context.Context, p providerDef, key string) (bool, string
 	defer client.Close()
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	maxTok := 1
+	maxTok := 16
 	req := &llm.Request{
 		Model:     p.defaultModel,
 		Messages:  []llm.Message{llm.UserMessage("ping")},
