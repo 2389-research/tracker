@@ -29,7 +29,29 @@
 
   <section class="hero glass" style="padding: 3rem 2rem;">
     <h1>Built-in Workflows</h1>
-    <p class="subtitle">Four pipelines embedded in the binary. Run by name, customize with <code>tracker init</code>.</p>
+    <p class="subtitle">Four pipelines embedded in the binary. Run by name; customize with <code>tracker init</code>.</p>
+  </section>
+
+  <nav class="page-toc" aria-label="On this page">
+    <strong>On this page:</strong>
+    <a href="#build-product"><code>build_product</code></a>
+    <a href="#ask-and-execute"><code>ask_and_execute</code></a>
+    <a href="#superspec"><code>build_product_with_superspec</code></a>
+    <a href="#deep-review"><code>deep_review</code></a>
+    <a href="#unattended">Run unattended</a>
+    <a href="#customize">Customize</a>
+    <a href="#testing">Testing</a>
+  </nav>
+
+  <!-- ═══ Honest framing ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <p style="margin: 0;">
+      All four embedded workflows are <strong>coding-flavored</strong> &mdash; they shipped with
+      the binary because they were the original use case. The pipeline framework itself is
+      general: any sequence of LLM calls plus parallel branches plus human gates fits the
+      same <code>.dip</code> shape. RAG, eval, content moderation, agent triage are all doable;
+      we just haven&rsquo;t shipped opinionated templates for them yet. Pull requests welcome.
+    </p>
   </section>
 
   <!-- ═══ build_product ═══ -->
@@ -38,7 +60,7 @@
     <h2 style="margin-top: 0.75rem;"><code>build_product</code></h2>
     <p class="lead">
       Read a SPEC.md, decompose into milestones, implement each with verification loops,
-      cross-review the complete result with three models, verify full spec compliance.
+      cross-review the complete result with three models, verify spec compliance.
     </p>
 
     <div class="diagram">
@@ -91,34 +113,13 @@ graph TB
       </div>
     </div>
 
-    <h3>Key Design Decisions</h3>
-    <div class="grid-2" style="margin-top: 1rem;">
-      <div class="glass glass-sm">
-        <h4>Split Escalation Gates</h4>
-        <p><strong>EscalateMilestone</strong> (mid-build): mark done, retry, accept, abandon. Defaults to "mark done" so you can override flaky tests without aborting the build.</p>
-        <p><strong>EscalateReview</strong> (post-build): accept, retry, abandon. Defaults to "accept" for shipping.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Tests Run Before Counter</h4>
-        <p>TestMilestone runs the test suite <em>before</em> checking the attempt counter. If a milestone was genuinely fixed on attempt 4, it succeeds instead of escalating.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Per-Milestone Circuit Breaker</h4>
-        <p>A <code>fix_attempts</code> file on disk limits retries per milestone to 3. Persists across pipeline restarts. Reset by MarkMilestoneDone.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Three-Model Cross-Review</h4>
-        <p>Claude, Codex, and Gemini independently review the complete implementation. Reviews are synthesized to find consensus vs disputed findings.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Defensive Shell Scripts</h4>
-        <p>Tool nodes never <code>eval</code> LLM-generated content. Milestone headers are matched flexibly (handles <code>##</code>, <code>###</code>, with or without colons). Empty-file guards fail loudly. Known-failures strips comments before building patterns.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Autopilot Compatible</h4>
-        <p>Run with <code>--autopilot mid</code> for fully autonomous execution. All human gates (ApprovePlan, EscalateMilestone, EscalateReview) have default edges and descriptive prompts that the LLM judge can reason about.</p>
-      </div>
-    </div>
+    <h3>Why it&rsquo;s shaped this way</h3>
+    <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 0.65rem;">
+      <li><strong>Split escalation gates.</strong> <code>EscalateMilestone</code> handles mid-build stuck-ness (mark done / retry / accept / abandon, defaults to mark-done). <code>EscalateReview</code> handles post-build failure (accept / retry / abandon, defaults to accept). One gate would conflate two different decisions.</li>
+      <li><strong>Per-milestone circuit breaker.</strong> A <code>fix_attempts</code> file on disk caps retries per milestone to 3 and persists across pipeline restarts. Reset only by <code>MarkMilestoneDone</code>. The engine&rsquo;s global restart counter would otherwise let a stuck milestone 1 burn through milestone 10&rsquo;s budget.</li>
+      <li><strong>Three-model cross-review.</strong> Claude, Codex, and Gemini review independently. Reviews are synthesized to surface consensus vs. disputed findings &mdash; cheaper than asking a single model to argue with itself.</li>
+      <li><strong>Defensive shell scripts.</strong> Tool nodes never <code>eval</code> LLM output. Milestone headers are matched flexibly. Empty-file guards fail loudly so an empty patch file doesn&rsquo;t silently no-op the build.</li>
+    </ul>
 
     <pre data-lang="bash" style="margin-top: 1.5rem;"><code><span class="comment"># Run it</span>
 tracker build_product
@@ -134,8 +135,8 @@ tracker build_product.dip</code></pre>
     <span class="badge">Competitive Fan-Out</span>
     <h2 style="margin-top: 0.75rem;"><code>ask_and_execute</code></h2>
     <p class="lead">
-      Ask the user what to build, explore and spec it, fan out to 3 isolated implementations
-      via git worktrees, cross-critique, select the best, apply it, clean up the rest.
+      Ask the user what to build, explore and spec it, fan out to three implementations
+      in isolated git worktrees, cross-critique, pick the winner, apply it, clean up the rest.
     </p>
 
     <div class="diagram">
@@ -158,31 +159,20 @@ graph TB
 
     J --> Crit["Cross-Critique"]
     Crit --> Pick["Pick Best"]
-    Pick --> Apply["Apply & Commit"]
+    Pick --> Apply["Apply &amp; Commit"]
     Apply --> Clean["Clean Worktrees"]
     Clean --> Done([Done])
       </div>
     </div>
 
-    <h3>How It Works</h3>
-    <ol class="steps">
-      <li>
-        <h4>Understand</h4>
-        <p>Human describes the task. An exploration agent maps the codebase. A spec agent produces a detailed implementation plan.</p>
-      </li>
-      <li>
-        <h4>Implement in Isolation</h4>
-        <p>Three agents (Claude, OpenAI, Gemini) each implement the spec in their own git worktree. Full isolation, no interference.</p>
-      </li>
-      <li>
-        <h4>Cross-Critique &amp; Select</h4>
-        <p>Each implementation is reviewed by all three models. A judge selects the best one based on aggregate scores.</p>
-      </li>
-      <li>
-        <h4>Apply &amp; Clean</h4>
-        <p>The winning implementation is merged to main. Losing worktrees are deleted.</p>
-      </li>
-    </ol>
+    <p style="margin-top: 1rem;">
+      Each model implements the same spec in its own git worktree &mdash; full filesystem
+      isolation, no interference. Each implementation is reviewed by all three models;
+      a judge selects the winner from aggregate scores; the winning branch is merged
+      and the others are deleted.
+    </p>
+
+    <pre data-lang="bash"><code>tracker ask_and_execute</code></pre>
   </section>
 
   <!-- ═══ build_product_with_superspec ═══ -->
@@ -190,9 +180,9 @@ graph TB
     <span class="badge">Parallel Streams</span>
     <h2 style="margin-top: 0.75rem;"><code>build_product_with_superspec</code></h2>
     <p class="lead">
-      For large structured specs with parallel work streams and dependency graphs. Executes
-      independent streams concurrently, enforces quality gates between phases, cross-reviews,
-      and audits full traceability.
+      For large structured specs with parallel work streams and dependency graphs.
+      Independent streams run concurrently; mechanical quality gates between phases;
+      cross-review at the end; full traceability audit.
     </p>
 
     <div class="diagram">
@@ -212,21 +202,12 @@ graph TB
       </div>
     </div>
 
-    <h3>Designed For</h3>
-    <div class="grid-3" style="margin-top: 1rem;">
-      <div class="glass glass-sm">
-        <h4>Large Specs</h4>
-        <p>Multi-stream specs with explicit dependency graphs between work streams.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Mechanical Quality Gates</h4>
-        <p>Build + test + lint + coverage + complexity checked at each phase boundary. Not LLM-judged.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Traceability Audit</h4>
-        <p>Final gate verifies every spec requirement maps to implementation and test coverage.</p>
-      </div>
-    </div>
+    <p style="margin-top: 1rem;">
+      Quality gates are <strong>mechanical, not LLM-judged</strong> &mdash; build, test, lint,
+      coverage, complexity. The final gate verifies every spec requirement maps to
+      implementation and test coverage. Designed for specs big enough that a single
+      milestone-builder run would lose the plot.
+    </p>
   </section>
 
   <!-- ═══ deep_review ═══ -->
@@ -234,8 +215,9 @@ graph TB
     <span class="badge">Interview-Driven</span>
     <h2 style="margin-top: 0.75rem;"><code>deep_review</code></h2>
     <p class="lead">
-      Structured codebase review powered by interview mode. Three rounds of targeted questions
-      (scope, findings, priorities) drive parallel analysis and produce an actionable remediation plan.
+      Structured codebase review powered by interview mode. Three rounds of targeted
+      questions (scope, findings, priorities) drive parallel analysis and produce
+      an actionable remediation plan.
     </p>
 
     <div class="diagram">
@@ -266,125 +248,74 @@ graph TB
       </div>
     </div>
 
-    <h3>Three Interview Gates</h3>
-    <div class="grid-3" style="margin-top: 1rem;">
-      <div class="glass glass-sm">
-        <h4>Scope Interview</h4>
-        <p>After codebase exploration, structured questions narrow the review to what matters: primary concern, target area, deployment context, known incidents.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Findings Interview</h4>
-        <p>After parallel analysis, each finding is presented as a question with options: intentional, known bug, or needs investigation. Your context eliminates false positives.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Priority Interview</h4>
-        <p>Confirmed issues get prioritization questions: timeline, fix approach, dependencies, who reviews. Drives the remediation plan structure.</p>
-      </div>
-    </div>
-
-    <h3 style="margin-top: 1.5rem;">Interview Mode UX</h3>
-    <p>
-      Each interview gate presents a fullscreen form parsed from the agent's markdown questions.
-      Questions with inline options like <code>Auth model? (API key, OAuth, JWT)</code> become select fields.
-      Yes/no questions become toggles. Open-ended questions become text areas.
-      Navigate with arrow keys, Tab for elaboration, Ctrl+S to submit, PgUp/PgDn for pagination.
-      Previous answers pre-fill on retry.
+    <p style="margin-top: 1rem;">
+      Three interview gates narrow down the work: <strong>scope</strong> (primary concern,
+      target area, deployment context), <strong>findings</strong> (each finding presented
+      as intentional / known bug / needs investigation &mdash; your context kills false
+      positives), <strong>priorities</strong> (timeline, fix approach, dependencies). The
+      output is a remediation plan, not a wall of nitpicks.
     </p>
 
-    <pre data-lang="bash" style="margin-top: 1.5rem;"><code><span class="comment"># Review any codebase</span>
+    <pre data-lang="bash" style="margin-top: 1rem;"><code><span class="comment"># Review any codebase</span>
 tracker deep_review
 
-<span class="comment"># Fully autonomous review (LLM answers the interviews)</span>
-tracker <span class="flag">--autopilot</span> mid deep_review
-
-<span class="comment"># Copy and customize the review pipeline</span>
-tracker init deep_review</code></pre>
+<span class="comment"># Fully autonomous (LLM answers the interviews)</span>
+tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
   </section>
 
-  <!-- ═══ Backend Agnostic ═══ -->
-  <section class="glass" style="border-left: 3px solid var(--orange-600);">
-    <h3>Backend Agnostic</h3>
-    <p>
-      All four built-in workflows work with every agent backend: <strong>native</strong>, <strong>claude-code</strong>, and <strong>acp</strong>.
-      Flip globally with <code>--backend</code>, or mix per-node by adding <code>backend:</code> to individual agent definitions
-      in your customized <code>.dip</code> file. Per-node attrs always win over the global flag.
-    </p>
-    <pre data-lang="bash"><code><span class="comment"># Native (default) — pick your own model via provider attr</span>
-tracker build_product
-
-<span class="comment"># Claude Code — file editing, terminal, MCP servers, subscription auth</span>
-tracker <span class="flag">--backend</span> claude-code build_product
-
-<span class="comment"># ACP — bridge to claude-agent-acp / codex-acp / gemini --acp</span>
-tracker <span class="flag">--backend</span> acp build_product</code></pre>
-  </section>
-
-  <!-- ═══ Unattended Operation ═══ -->
-  <section class="glass">
+  <!-- ═══ Run unattended ═══ -->
+  <section class="glass" id="unattended">
     <h2>Run them <span class="accent">unattended</span></h2>
     <p class="lead">
-      All four workflows are designed for hands-on runs and for fully unattended operation.
-      Pick the gate-handling strategy that matches your deployment.
+      Every workflow is designed for hands-on AND fully unattended operation. Pick the
+      gate-handling strategy that matches your deployment.
     </p>
-
     <div class="grid-3" style="margin-top: 1rem;">
       <div class="glass glass-sm">
-        <h4>Autopilot Personas</h4>
-        <p>An LLM judge answers every human gate. Four personas: <code>lax</code> (forward progress), <code>mid</code> (balanced, default), <code>hard</code> (high bar), <code>mentor</code> (approve with detailed feedback).</p>
-        <pre data-lang="bash" style="margin-top: 0.75rem;"><code>tracker <span class="flag">--autopilot</span> mid build_product</code></pre>
+        <h4>Autopilot personas</h4>
+        <p>An LLM judge answers every gate. Four personas: <code>lax</code> (forward progress), <code>mid</code> (balanced, default), <code>hard</code> (high bar), <code>mentor</code> (approve with feedback).</p>
+        <pre data-lang="bash" style="margin-top: 0.5rem;"><code>tracker <span class="flag">--autopilot</span> mid build_product</code></pre>
       </div>
       <div class="glass glass-sm">
-        <h4>Auto-Approve</h4>
-        <p>Deterministic approval — no LLM call, always picks the default or first option. Best for CI and pipeline-flow tests.</p>
-        <pre data-lang="bash" style="margin-top: 0.75rem;"><code>tracker <span class="flag">--auto-approve</span> build_product</code></pre>
+        <h4>Auto-approve</h4>
+        <p>Deterministic &mdash; no LLM call, always picks the default or first option. Best for CI and pipeline-flow tests.</p>
+        <pre data-lang="bash" style="margin-top: 0.5rem;"><code>tracker <span class="flag">--auto-approve</span> build_product</code></pre>
       </div>
       <div class="glass glass-sm">
-        <h4>Webhook Gates</h4>
-        <p>Every gate is POSTed as JSON to your URL; the pipeline blocks until a callback arrives. Slack bots, email approval, factory workers, anywhere. Per-gate tokens, configurable timeout. <span class="badge">v0.17.0</span></p>
-        <pre data-lang="bash" style="margin-top: 0.75rem;"><code>tracker <span class="flag">--webhook-url</span> https://... build_product</code></pre>
+        <h4>Webhook gates</h4>
+        <p>POST every gate to your URL; pipeline blocks on the callback. Slack bots, email approval, mobile push, factory workers. Per-gate tokens, configurable timeout.</p>
+        <pre data-lang="bash" style="margin-top: 0.5rem;"><code>tracker <span class="flag">--webhook-url</span> https://... build_product</code></pre>
       </div>
     </div>
   </section>
 
-  <!-- ═══ Customization ═══ -->
-  <section class="glass">
+  <!-- ═══ Customize ═══ -->
+  <section class="glass" id="customize">
     <h2>Workflow <span class="accent">customization</span></h2>
     <p class="lead">
-      After <code>tracker init &lt;name&gt;</code>, the local <code>.dip</code> file takes precedence on subsequent runs. Tweak per-node
-      models, backends, or prompts without forking the whole pipeline.
+      After <code>tracker init &lt;name&gt;</code>, the local <code>.dip</code> file takes precedence on subsequent runs.
+      Tweak per-node models, backends, or prompts without forking the whole pipeline.
     </p>
     <div class="grid-2" style="margin-top: 1rem;">
       <div class="glass glass-sm">
-        <h4>Workflow Params</h4>
-        <p>Top-level <code>vars</code> become <code>${params.*}</code> graph attrs referenceable in prompts, commands, and conditions. Override at runtime with repeatable <code>--param key=value</code>. Unknown keys hard-fail at startup. <span class="badge">v0.19.0</span></p>
+        <h4>Workflow params</h4>
+        <p>Top-level <code>vars</code> become <code>${params.*}</code> graph attrs referenceable in prompts, commands, and conditions. Override at runtime with <code>--param key=value</code>; unknown keys hard-fail at startup.</p>
       </div>
       <div class="glass glass-sm">
-        <h4>Budget Ceilings</h4>
-        <p>Put <code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> in a workflow's <code>defaults:</code> block; CLI flags still override per-run. Halts emit <code>EventBudgetExceeded</code>. <span class="badge">v0.19.0</span></p>
+        <h4>Budget ceilings</h4>
+        <p>Put <code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> in a workflow&rsquo;s <code>defaults:</code> block; CLI flags override per-run. Halts emit <code>EventBudgetExceeded</code>.</p>
       </div>
       <div class="glass glass-sm">
-        <h4>Human-Gate Timeouts</h4>
-        <p>Set <code>timeout</code> and <code>timeout_action</code> per human gate so unattended runs keep moving if no one responds. Works with freeform, choice, and interview modes. <span class="badge">v0.19.0</span></p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Declarative <code>writes:</code> / <code>reads:</code></h4>
-        <p>Declare the context keys a node produces or consumes. Declared writes are validated after the node runs; <code>reads:</code> pins fidelity for consumed keys. Replaces node-type-specific workarounds for typed output. <span class="badge">v0.21.0</span></p>
+        <h4>Human-gate timeouts</h4>
+        <p>Set <code>timeout</code> and <code>timeout_action</code> per human gate so unattended runs keep moving if no one responds. Works with freeform, choice, and interview modes.</p>
       </div>
       <div class="glass glass-sm">
         <h4>Manager loops in <code>.dip</code></h4>
-        <p>Declare <code>stack.manager_loop</code> supervisors directly in <code>.dip</code> via <code>ir.NodeManagerLoop</code>. Six flat attrs: <code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>. No more DOT escape hatch. <span class="badge">v0.23.0</span></p>
+        <p>Declare <code>stack.manager_loop</code> supervisors directly via <code>ir.NodeManagerLoop</code>. Six flat attrs &mdash; no DOT escape hatch. Snippet below.</p>
       </div>
     </div>
 
-    <h3 style="margin-top: 1.5rem;">Manager loop — native <code>.dip</code> syntax <span class="badge">v0.23.0</span></h3>
-    <p>
-      Declare a supervisor that launches a child pipeline, polls it, and optionally steers it mid-execution.
-      Unprefixed attr names are the v0.22.0 contract; the handler also accepts the legacy <code>manager.*</code> names for backward
-      compatibility (unprefixed wins when both are set). <code>steer_context</code> uses canonical sorted
-      <code>k=v,k=v</code> pairs with percent-encoding for <code>,</code>, <code>=</code>, and <code>%</code>.
-      Steered values land under <code>${ctx.steer.&lt;key&gt;}</code> on the child since v0.24.2.
-    </p>
-    <pre data-lang="dip"><code><span class="keyword">manager_loop</span> Supervise
+    <pre data-lang="dip" style="margin-top: 1.5rem;"><code><span class="keyword">manager_loop</span> Supervise
   label: <span class="string">"Watch build attempts"</span>
   subgraph_ref: <span class="string">"subgraphs/build.dip"</span>
   poll_interval: 30s
@@ -392,50 +323,21 @@ tracker <span class="flag">--backend</span> acp build_product</code></pre>
   stop_condition: <span class="string">"stack.child.status = success"</span>
   steer_condition: <span class="string">"stack.child.cycles &gt; 3"</span>
   steer_context: <span class="string">"hint=try-alternate-plan,priority=high"</span></code></pre>
-  </section>
 
-  <!-- ═══ Architect tooling ═══ -->
-  <section class="glass" id="architect-tooling">
-    <h2>Architect tooling <span class="accent">(v0.25.0)</span></h2>
-    <p class="lead">
-      For local-codegen runs, agents can be enriched with three architect-tier tools that
-      register on demand via env vars. They're orthogonal to the four built-in workflows above &mdash;
-      drop into any pipeline that uses the native backend.
-    </p>
-    <div class="grid-3" style="margin-top: 1rem;">
-      <div class="glass glass-sm">
-        <h4><code>dispatch_sprints</code></h4>
-        <p>Reads a JSONL plan and runs the per-sprint author + audit pipeline once per line.
-        Deterministic in-tool loop with bounded retry+backoff for transient provider errors.
-        Uses the <code>TerminalTool</code> primitive so the agent loop ends the moment the
-        plan is fully dispatched.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4><code>write_enriched_sprint</code></h4>
-        <p>Mid-tier model (default Sonnet) writes a sprint with a 4-strategy SEARCH/REPLACE
-        matcher and partial-apply semantics. Set <code>TRACKER_SPRINT_WRITER_MODEL</code> to
-        register this tool.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4><code>generate_code</code></h4>
-        <p>Cheap/fast model expands a contract into one or more files. Set
-        <code>TRACKER_CODEGEN_MODEL</code> to register; defaults to <code>gpt-4o-mini</code>.</p>
-      </div>
-    </div>
     <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
-      Mechanics &amp; safety details live on the
-      <a href="architecture.html#agent-tools">architecture page</a>.
+      Backend selection is per-pipeline or per-node:
+      <code>tracker --backend claude-code build_product</code> flips globally; per-node
+      <code>backend: claude-code</code> attrs win over the global flag. All four built-in
+      workflows work with every backend.
     </p>
   </section>
-
-  <div class="divider"></div>
 
   <!-- ═══ Testing ═══ -->
-  <section class="glass">
+  <section class="glass" id="testing">
     <h2>Pipeline <span class="accent">testing</span></h2>
     <p class="lead">
-      Every edge from every gate is tested with dippin simulation tests. Scenario overrides
-      inject specific conditions; assertions verify the exact routing path.
+      Every edge from every gate is tested with dippin simulation tests &mdash; scenario
+      overrides inject conditions, assertions verify the routing path. No LLM calls.
     </p>
     <pre data-lang="json"><code>{
   <span class="string">"name"</span>: <span class="string">"milestone escalation — mark done continues build"</span>,
@@ -447,15 +349,21 @@ tracker <span class="flag">--backend</span> acp build_product</code></pre>
     <span class="string">"immediately_after"</span>: {<span class="string">"EscalateMilestone"</span>: <span class="string">"MarkMilestoneDone"</span>}
   }
 }</code></pre>
-    <pre data-lang="bash"><code><span class="comment"># Run all pipeline tests</span>
-dippin test examples/build_product.dip
+    <pre data-lang="bash"><code>dippin test examples/build_product.dip
 <span class="comment"># 23 tests: 23 passed, 0 failed</span></code></pre>
   </section>
 
 </main>
 
 <footer class="footer">
-  <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
+  <p>
+    Built by <a href="https://2389.ai">2389.ai</a>
+    &middot; <a href="https://github.com/2389-research/tracker">GitHub</a>
+    &middot; <a href="architecture.html">Architecture</a>
+    &middot; <a href="cli.html">CLI</a>
+    &middot; <a href="changelog.html">Changelog</a>
+    &middot; <a href="https://github.com/2389-research/tracker/releases">Releases</a>
+  </p>
 </footer>
 
 <script src="highlight.js"></script>
