@@ -223,11 +223,15 @@ main {
 }
 
 .hero h1 {
-  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  /* Scaled down from 4.5rem max — the longer "won't surprise you on the
+     bill" headline reads as a sentence, not a slogan; smaller cap keeps
+     it from dominating the viewport and lets the bullets breathe. */
+  font-size: clamp(2rem, 4.5vw, 3.25rem);
   font-weight: 900;
-  letter-spacing: -0.04em;
-  line-height: 1.1;
-  margin-bottom: 1.25rem;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  max-width: 880px;
+  margin: 0 auto 1.25rem;
   /* Bright fallback if -webkit-background-clip:text fails (extensions,
      reader mode, force-dark). Without this it inherits the dark
      --orange-900 from the heading rule and reads as dark-on-dark. */
@@ -258,13 +262,156 @@ main {
   font-size: 0.95rem;
   color: var(--text-secondary);
   max-width: 720px;
-  margin: 0 auto 2rem;
+  margin: 2.5rem auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-subtle);
   line-height: 1.7;
 }
 
 .hero-meta strong {
   color: var(--orange-900);
   font-weight: 600;
+}
+
+/* ─── Hero eyebrow + bullets (the new lede) ─────────────── */
+.hero-eyebrow {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  color: var(--orange-700);
+  margin-bottom: 0.85rem;
+  text-transform: uppercase;
+}
+
+.hero-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0 auto 2rem;
+  max-width: 720px;
+  text-align: left;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.hero-bullets li {
+  position: relative;
+  padding: 0.85rem 1rem 0.85rem 2.5rem;
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.hero-bullets li::before {
+  content: "→";
+  position: absolute;
+  left: 1rem;
+  top: 0.85rem;
+  color: var(--orange-700);
+  font-weight: 700;
+}
+
+.hero-bullets strong {
+  color: var(--orange-900);
+  font-weight: 600;
+}
+
+.hero-bullets code {
+  font-size: 0.8em;
+}
+
+/* ─── <details> "more commands" ─────────────────────────── */
+details.more-cmds {
+  margin-top: 1.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0;
+  background: rgba(254, 215, 170, 0.15);
+}
+
+details.more-cmds summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.85rem 1.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--orange-700);
+  user-select: none;
+}
+
+details.more-cmds summary::-webkit-details-marker {
+  display: none;
+}
+
+details.more-cmds summary::before {
+  content: "+ ";
+  display: inline-block;
+  width: 1em;
+  font-weight: 700;
+  color: var(--orange-700);
+  transition: transform 0.15s ease;
+}
+
+details.more-cmds[open] summary::before {
+  content: "− ";
+}
+
+details.more-cmds summary:hover {
+  color: var(--orange-600);
+}
+
+details.more-cmds summary:focus-visible {
+  outline: 2px solid var(--orange-600);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+details.more-cmds pre {
+  margin: 0;
+  border-radius: 0 0 10px 10px;
+  border-top: 1px solid var(--border-subtle);
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+}
+
+/* ─── Outcome cards (replaces 12-grid) ──────────────────── */
+.outcome-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1.5rem;
+}
+
+.outcome-card h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--orange-900);
+  margin: 0;
+}
+
+.outcome-card p {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.outcome-card .outcome-cli {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  font-size: 0.8rem;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.outcome-card .outcome-cli code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.95em;
+  color: var(--orange-800);
 }
 
 /* ─── Release card (hero "what's new") ──────────────────── */

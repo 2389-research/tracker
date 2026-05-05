@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tracker — Multi-Agent Pipeline Orchestration</title>
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-  <script>mermaid.initialize({ theme: 'base', themeVariables: { fontSize: '16px', primaryColor: '#fff7ed', primaryTextColor: '#1c1917', primaryBorderColor: '#ea580c', lineColor: '#a8a29e', secondaryColor: '#ffedd5', tertiaryColor: '#fef7f0', background: 'transparent', mainBkg: '#fff7ed', nodeBorder: '#ea580c', clusterBkg: '#ffedd566', clusterBorder: '#ea580c44', titleColor: '#7c2d12', edgeLabelBackground: '#fef7f0', nodeTextColor: '#1c1917', actorTextColor: '#1c1917', signalTextColor: '#1c1917', labelTextColor: '#7c2d12' }});</script>
 </head>
 <body>
 
@@ -29,329 +27,208 @@
 
   <!-- ═══ Hero ═══ -->
   <section class="hero glass">
-    <h1>Wire it up. Let it rip.</h1>
+    <p class="hero-eyebrow">Wire it up. Let it rip.</p>
+    <h1>Multi-agent LLM pipelines that won&rsquo;t surprise you on the bill.</h1>
     <p class="subtitle">
-      Pipeline orchestration for multi-agent LLM workflows. Define pipelines in
-      <code>.dip</code> files, execute with parallel agents, watch progress in a TUI dashboard.
+      Define workflows in a small text file. Run them locally with budget caps,
+      parallel branches in git worktrees, and a live TUI. Every run is a git
+      commit you can diff and replay.
     </p>
+
+    <ul class="hero-bullets">
+      <li><strong>Hard cost ceilings.</strong> <code>--max-cost 500 --max-tokens 100k --max-wall-time 30m</code>. Halts mid-run with a snapshot.</li>
+      <li><strong>Parallel branches in worktrees.</strong> Three model variants race in isolated checkouts. No filesystem stomping.</li>
+      <li><strong>Every run is a git commit.</strong> Replay any past run, diff the artifacts, export as a portable bundle.</li>
+    </ul>
+
+    <div class="hero-actions">
+      <a href="#install" class="btn btn-primary">Install + run</a>
+      <a href="https://github.com/2389-research/tracker" class="btn btn-ghost">GitHub</a>
+    </div>
+
     <p class="hero-meta">
       Three agent backends &mdash; <strong>native</strong> (Anthropic / OpenAI / Gemini / OpenAI-compat),
       <strong>Claude&nbsp;Code</strong> (subscription auth, file editing, terminal),
       and <strong>ACP</strong> (claude-agent-acp&nbsp;/ codex-acp&nbsp;/ gemini --acp). Mix per node.
+      &middot; Latest: <a href="changelog.html#v0-25-0">v0.25.0</a>
     </p>
-    <div class="hero-actions">
-      <a href="https://github.com/2389-research/tracker" class="btn btn-primary">View on GitHub</a>
-      <a href="cli.html" class="btn btn-ghost">CLI Reference</a>
-    </div>
-
-    <div class="release-card">
-      <div class="release-card-head">
-        <span class="badge">v0.25.0</span>
-        <span class="release-card-title">Architect-side machinery for local codegen</span>
-        <a class="release-card-link" href="changelog.html#v0-25-0">changelog &rarr;</a>
-      </div>
-      <ul class="release-card-list">
-        <li>New <code>TerminalTool</code> primitive ends the agent loop the moment a flagged tool succeeds &mdash; no wasted post-dispatch turns.</li>
-        <li>Three architect tools: <code>dispatch_sprints</code>, <code>write_enriched_sprint</code>, <code>generate_code</code> &mdash; opt in via env vars.</li>
-        <li>Self-healing extraction for <code>writes:</code> declarations &mdash; 4-step JSON cascade with reserved-key collision rejection.</li>
-        <li>New <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md">Bedrock Gateway integration guide</a> for routing through AWS Bedrock.</li>
-      </ul>
-      <p class="release-card-prev">
-        Previously: <a href="changelog.html#v0-24-2">v0.24.2</a> security audit pass &middot;
-        <a href="changelog.html#v0-24-1">v0.24.1</a> cost-accounting polish &middot;
-        <a href="changelog.html#v0-24-0">v0.24.0</a> budget-guard fixes.
-      </p>
-    </div>
   </section>
 
-  <!-- ═══ Quick Start ═══ -->
-  <section class="glass">
-    <h2>Get running in <span class="accent">60 seconds</span></h2>
-    <pre data-lang="bash"><code><span class="comment"># Install</span>
+  <!-- ═══ Install + run (above the fold reachability) ═══ -->
+  <section class="glass" id="install">
+    <h2>Install + run in <span class="accent">60 seconds</span></h2>
+    <pre data-lang="bash"><code><span class="comment"># 1. Install</span>
 <span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
 
-<span class="comment"># See what's built in</span>
-tracker workflows
-
-<span class="comment"># Run a pipeline by name — no file needed</span>
+<span class="comment"># 2. Run a built-in workflow (no file needed)</span>
 tracker build_product
 
-<span class="comment"># Supercharge agents with Claude Code</span>
-tracker <span class="flag">--backend</span> claude-code build_product
+<span class="comment"># 3. Inspect what happened</span>
+tracker diagnose</code></pre>
 
-<span class="comment"># Run fully autonomous overnight</span>
-tracker <span class="flag">--autopilot</span> mid build_product
-
-<span class="comment"># Headless — POST gates to a webhook, resume on callback</span>
-tracker <span class="flag">--webhook-url</span> https://factory.example.com/gate build_product
-
-<span class="comment"># Override workflow params at runtime</span>
-tracker <span class="flag">--param</span> model=claude-opus-4-7 <span class="flag">--param</span> retries=3 build_product
-
-<span class="comment"># Cap a run's budget — token, dollar, wall-time ceilings</span>
-tracker <span class="flag">--max-tokens</span> 100000 <span class="flag">--max-cost</span> 500 <span class="flag">--max-wall-time</span> 30m build_product
-
-<span class="comment"># Check your LLM providers</span>
-tracker doctor</code></pre>
-    <p>Four flagship pipelines are <strong>embedded in the binary</strong>. No cloning, no examples directory. <code>go install</code> and go.</p>
-  </section>
-
-  <!-- ═══ Stats ═══ -->
-  <div class="glass" style="padding: 2rem;">
-    <div class="stat-row">
-      <div class="stat">
-        <div class="number">4</div>
-        <div class="label">Built-in Workflows</div>
-      </div>
-      <div class="stat">
-        <div class="number">4</div>
-        <div class="label">LLM Providers</div>
-      </div>
-      <div class="stat">
-        <div class="number">3</div>
-        <div class="label">Agent Backends</div>
-      </div>
-      <div class="stat">
-        <div class="number">8</div>
-        <div class="label">Node Types</div>
-      </div>
-      <div class="stat">
-        <div class="number">17</div>
-        <div class="label">Test Packages</div>
-      </div>
-      <div class="stat">
-        <div class="number">32</div>
-        <div class="label">Pipeline Tests</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ Core Concepts ═══ -->
-  <section class="glass">
-    <h2>How it <span class="accent">works</span></h2>
-    <p class="lead">
-      Pipelines are directed graphs of <strong>agents</strong>, <strong>tools</strong>, and
-      <strong>human gates</strong>. The engine walks the graph, executes each node, evaluates
-      edge conditions, and routes to the next node. Checkpoints enable resume on failure.
-    </p>
-    <div class="diagram" style="min-height: 500px;">
-      <div class="mermaid">
-graph TB
-    S([Start]) --> Setup["Setup Workspace"]
-    Setup --> Read["Read & Analyze Spec"]
-    Read --> Plan["Decompose into Milestones"]
-    Plan --> Approve{{"Approve Plan?"}}
-    Approve -->|reject| D([Done])
-    Approve -->|approve| Loop["Pick Next Milestone"]
-
-    subgraph build ["Build Loop"]
-      Loop -->|"milestone N"| Impl["Implement"]
-      Impl --> Test["Test Milestone"]
-      Test -->|pass| Verify["Verify Completion"]
-      Verify -->|pass| Mark["Mark Done"]
-      Mark --> Loop
-      Test -->|fail| Fix["Fix Issues"]
-      Fix --> Test
-    end
-
-    Test -->|escalate| Esc{{"Milestone Stuck"}}
-    Esc -->|mark done| Mark
-    Esc -->|retry| Impl
-    Esc -->|accept| Cleanup
-
-    Loop -->|all done| Review["Cross-Review<br/>(3 models)"]
-    Review --> Final["Final Build & Test"]
-    Final --> Cleanup["Cleanup"] --> D
-      </div>
-    </div>
-    <p style="text-align:center; color: var(--text-muted); font-size: 0.85rem;">
-      The <code>build_product</code> pipeline — milestone builder with verification loops and split escalation gates.
-    </p>
-  </section>
-
-  <div class="divider"></div>
-
-  <!-- ═══ Features Grid ═══ -->
-  <h2 style="text-align:center; margin-bottom: 1.5rem;">12 key <span class="accent">features</span></h2>
-  <div class="grid-3">
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F4CB;</div>
-      <h3>Dippin Language</h3>
-      <p>Define pipelines in <code>.dip</code> files — human-readable, version-controlled, lintable. Conditional edges, variable interpolation, per-node models. Workflow <code>${params.*}</code> with runtime <code>--param</code> overrides. <span class="badge">v0.19.0</span></p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F500;</div>
-      <h3>Parallel & Manager Loops</h3>
-      <p>Fan-out to concurrent branches with git worktree isolation, fan-in to join. <code>stack.manager_loop</code> supervises async child pipelines with polling, stop conditions, and mid-execution steering &mdash; now declarable natively in <code>.dip</code> via <code>ir.NodeManagerLoop</code>. <span class="badge">v0.23.0</span></p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F4E4;</div>
-      <h3>Typed Structured Output</h3>
-      <p>Declarative <code>writes:</code> / <code>reads:</code> per node. Declared writes are validated into the pipeline context; <code>reads:</code> pins fidelity for consumed keys. Plus per-node context scoping via <code>node.&lt;id&gt;.&lt;key&gt;</code>. <span class="badge">v0.21.0</span></p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F916;</div>
-      <h3>Pluggable Backends</h3>
-      <p>Native, <code>claude-code</code>, and <code>acp</code> agent backends. Mix per-node for surgical control, or flip globally with <code>--backend</code>. Same <code>agent.Event</code> stream regardless of backend — your pipeline doesn't change.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F6E1;</div>
-      <h3>Human-in-the-Loop</h3>
-      <p>Choice, freeform, hybrid, yes/no, and interview gates. Glamour-rendered markdown in review modals. Per-gate <code>timeout</code> and <code>timeout_action</code> to keep unattended runs moving. <span class="badge">v0.19.0</span></p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F310;</div>
-      <h3>Webhook Gates</h3>
-      <p>Fully headless — <code>--webhook-url</code> POSTs gate prompts to an external service and blocks on a callback. Per-gate HMAC tokens, configurable timeout, outbound <code>Authorization</code> header. Slack bots, email approval, mobile push. <span class="badge">v0.17.0</span></p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F680;</div>
-      <h3>Autopilot Personas</h3>
-      <p>Replace human gates with LLM judges. Four personas — <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code> — for overnight runs and CI. Routes through the claude CLI under <code>--backend claude-code</code>, no API key needed.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F4B0;</div>
-      <h3>Budget Governance</h3>
-      <p><code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> ceilings via CLI flags, library config, or workflow <code>defaults:</code>. Breach halts the run and fires <code>EventBudgetExceeded</code>. Per-provider cost rollup on <code>Result.Cost</code>. <span class="badge">v0.17.0</span></p>
-    </div>
-
-    <a href="architecture.html#library-api" class="glass feature-card" style="text-decoration: none; color: inherit; display: block;">
-      <div class="icon">&#x1F4D2;</div>
-      <h3>Library API</h3>
-      <p>Embed tracker in Go code. <code>tracker.Run</code> plus context-aware <code>Diagnose</code> / <code>Audit</code> / <code>Doctor</code> / <code>Simulate</code> returning typed reports. NDJSON event streaming via <code>NewNDJSONWriter</code>. <span class="badge">v0.18.0</span></p>
-    </a>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F9E0;</div>
-      <h3>Smarter Agents</h3>
-      <p>Episodic memory across retries, plan-before-execute phase, repository localization before the first turn, structured reflection on tool failure, and two-phase verify-after-edit. SWE-bench Lite 59% &rarr; 70% baseline. <span class="badge">v0.21.0</span></p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F4BE;</div>
-      <h3>Checkpoint & Bundle</h3>
-      <p>Every node completion is checkpointed. With <code>WithGitArtifacts</code>, the artifact dir becomes a git repo with per-node commits and checkpoint tags; <code>--export-bundle</code> produces a portable <code>.bundle</code> you can <code>git clone</code> anywhere.</p>
-    </div>
-
-    <div class="glass feature-card">
-      <div class="icon">&#x1F50D;</div>
-      <h3>Diagnose & Audit</h3>
-      <p>Every edge selection, condition evaluation, and outcome logged to <code>activity.jsonl</code>. <code>tracker diagnose</code> classifies deterministic vs. flaky failures; <code>tracker-swebench analyze</code> triages bulk SWE-bench results. <span class="badge">v0.22.0</span></p>
-    </div>
-
-  </div>
-
-  <div class="divider"></div>
-
-  <!-- ═══ Providers ═══ -->
-  <section class="glass">
-    <h2>Four <span class="accent">providers</span>, one pipeline</h2>
-    <p class="lead">Mix models freely. Route everything through <a href="https://developers.cloudflare.com/ai-gateway/">Cloudflare AI Gateway</a> with <code>--gateway-url</code> for central analytics, caching, and 429 relief.</p>
-    <div class="grid-2" style="margin-top: 1.5rem;">
-      <div class="glass glass-sm" style="text-align:center;">
-        <h3>Anthropic</h3>
-        <p style="margin:0;"><code>claude-opus-4-7</code><br><code>claude-sonnet-4-6</code><br><code>claude-haiku-4-5</code></p>
-      </div>
-      <div class="glass glass-sm" style="text-align:center;">
-        <h3>OpenAI</h3>
-        <p style="margin:0;"><code>gpt-5.4</code> / <code>gpt-5.4-mini</code><br><code>gpt-4.1</code><br><code>o3</code> / <code>o4-mini</code></p>
-      </div>
-      <div class="glass glass-sm" style="text-align:center;">
-        <h3>Gemini</h3>
-        <p style="margin:0;"><code>gemini-3.1-pro-preview</code><br><code>gemini-2.5-pro</code><br><code>gemini-2.5-flash</code></p>
-      </div>
-      <div class="glass glass-sm" style="text-align:center;">
-        <h3>OpenAI-Compat</h3>
-        <p style="margin:0;">Any OpenAI-compatible endpoint<br><em>OpenRouter, vLLM, local proxies</em></p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ Dippin Example ═══ -->
-  <section class="glass">
-    <h2>Pipeline as <span class="accent">code</span></h2>
-    <pre data-lang="dip"><code><span class="keyword">workflow</span> MyPipeline
-  <span class="keyword">goal:</span> <span class="string">"Build something great"</span>
-  <span class="keyword">start:</span> Begin
-  <span class="keyword">exit:</span> Done
-
-  <span class="keyword">defaults</span>
-    model: claude-sonnet-4-6
-    provider: anthropic
-
-  <span class="keyword">agent</span> Begin
-    label: Start
-
-  <span class="keyword">human</span> AskUser
-    label: <span class="string">"What should we build?"</span>
-    mode: freeform
-
-  <span class="keyword">agent</span> Implement
-    label: <span class="string">"Build It"</span>
-    model: claude-opus-4-7
-    prompt:
-      The user wants: ${ctx.human_response}
-      Implement it following the project's conventions.
-
-  <span class="keyword">agent</span> Done
-    label: Done
-
-  <span class="keyword">edges</span>
-    Begin -> AskUser
-    AskUser -> Implement
-    Implement -> Done</code></pre>
-  </section>
-
-  <div class="divider"></div>
-
-  <!-- ═══ Install ═══ -->
-  <section class="glass">
-    <h2>Install <span class="accent">tracker</span></h2>
-    <pre data-lang="bash"><code><span class="comment"># Option 1: Go (includes embedded workflows)</span>
-<span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
-
-<span class="comment"># Option 2: Homebrew</span>
+    <details class="more-cmds">
+      <summary>More commands</summary>
+      <pre data-lang="bash"><code><span class="comment"># Homebrew</span>
 <span class="keyword">brew install</span> 2389-research/tap/tracker
 
-<span class="comment"># Option 3: Download binary from GitHub Releases</span>
-<span class="comment"># https://github.com/2389-research/tracker/releases</span>
-
-<span class="comment"># Verify your setup</span>
+<span class="comment"># Verify your providers + tools</span>
 tracker doctor
 
-<span class="comment"># Stay current — checks automatically, or run manually</span>
-tracker update</code></pre>
-    <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
-      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.25.0">v0.25.0</a> &middot;
-      <a href="changelog.html">Changelog</a> &middot;
-      <a href="cli.html">Full CLI reference</a>
+<span class="comment"># Run with the Claude Code agent backend</span>
+tracker <span class="flag">--backend</span> claude-code build_product
+
+<span class="comment"># Run autonomously — LLM judges every gate</span>
+tracker <span class="flag">--autopilot</span> mid build_product
+
+<span class="comment"># Headless — POST gates to your service</span>
+tracker <span class="flag">--webhook-url</span> https://factory.example.com/gate build_product
+
+<span class="comment"># Override workflow params + cap budget</span>
+tracker <span class="flag">--param</span> model=claude-opus-4-7 \
+        <span class="flag">--max-cost</span> 500 <span class="flag">--max-wall-time</span> 30m build_product
+
+<span class="comment"># Drive from any language: tracker --json | jq + parse activity.jsonl</span>
+tracker <span class="flag">--json</span> build_product</code></pre>
+    </details>
+
+    <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 1rem; margin-bottom: 0;">
+      Four flagship workflows are <strong>embedded in the binary</strong> &mdash; no cloning, no examples directory.
+      Or write your own in a <code>.dip</code> file (<a href="#snippet">see below</a>).
     </p>
   </section>
 
-  <div class="divider"></div>
+  <!-- ═══ How is this different? ═══ -->
+  <section class="glass">
+    <h2>How is this <span class="accent">different</span>?</h2>
+    <p class="lead">
+      Tracker is not a replacement for Temporal or Airflow &mdash; those are
+      excellent general workflow schedulers but they don&rsquo;t model what LLM
+      pipelines actually need (tokens, dollars, parallel branches with
+      filesystem isolation, gates that resume from a webhook). And it&rsquo;s not a
+      Python library like LangGraph or LangChain &mdash; you don&rsquo;t wire your own
+      observability or eat your own surprise bills.
+    </p>
+    <p>
+      It&rsquo;s the local-first, pipelines-as-text-in-git tool you reach for when
+      <strong>&ldquo;just run it&rdquo; means &ldquo;run it inside a budget, with a live TUI,
+      and let me diff what happened later.&rdquo;</strong>
+    </p>
+  </section>
+
+  <!-- ═══ What a pipeline looks like ═══ -->
+  <section class="glass" id="snippet">
+    <h2>What a pipeline <span class="accent">looks like</span></h2>
+    <p class="lead">
+      Pipelines are <code>.dip</code> files. Yes, it&rsquo;s a small DSL &mdash; the whole grammar
+      fits on one page; the snippet below is most of what you need.
+    </p>
+
+    <pre data-lang="dip"><code><span class="keyword">agent</span> Draft
+  model: claude-sonnet-4-6
+  prompt: <span class="string">"Draft a brief on ${params.topic}."</span>
+
+<span class="keyword">human</span> Review
+  mode: yes_no
+
+<span class="keyword">edges</span>
+  Draft -&gt; Review
+  Review -&gt; Done <span class="cond">when</span> ctx.outcome = success</code></pre>
+
+    <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0;">
+      <strong>Driving from Python or another language?</strong> Run the binary
+      with <code>tracker --json</code> and parse <code>activity.jsonl</code>.
+      A Go library API is available for in-process embedding.
+    </p>
+  </section>
+
+  <!-- ═══ What you get ═══ -->
+  <section class="glass">
+    <h2>What you <span class="accent">get</span></h2>
+    <div class="grid-3" style="margin-top: 1.5rem;">
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Kill a runaway agent at $5, not $500.</h3>
+        <p>Hard caps on tokens, cost (cents), and wall-time as CLI flags or workflow defaults. The engine checks between every node and halts with a <code>CostSnapshot</code> on breach.</p>
+        <p class="outcome-cli"><code>--max-cost 500 --max-tokens 100k --max-wall-time 30m</code></p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Race four model variants in parallel; pick the winner.</h3>
+        <p>Fan out to concurrent branches in isolated git worktrees, fan in to a join. Built-in pattern for cross-model races without filesystem stomping.</p>
+        <p class="outcome-cli"><code>tracker ask_and_execute</code></p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>See every token, tool call, and gate in a live TUI.</h3>
+        <p>Bubble-tea dashboard, append-only activity log, per-node streams, search, drilldown. Every event also lands in <code>activity.jsonl</code> for grep + post-hoc analysis.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Pause for human approval; resume from a webhook.</h3>
+        <p>Choice, freeform, hybrid, yes/no, and interview gates. Or POST the gate to your service and block on the callback. Per-gate timeout and outbound auth.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Pass JSON between steps without prompt-stuffing.</h3>
+        <p>Declarative <code>writes:</code> on agent nodes validates output JSON into the pipeline context. Self-healing extraction cascade catches the common &ldquo;LLM returned prose&rdquo; failure modes.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3><code>tracker diagnose</code> tells you which node burned the budget.</h3>
+        <p>Deterministic vs. flaky retries, escalation patterns, stalled loops. Run it after any failure for a triage report. Available as a Go library call too.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ Providers (kept, slimmer) ═══ -->
+  <section class="glass">
+    <h2>Four <span class="accent">providers</span>, one pipeline</h2>
+    <p class="lead">Mix models freely. Route everything through a <a href="https://developers.cloudflare.com/ai-gateway/">Cloudflare AI Gateway</a> with <code>--gateway-url</code> for central analytics, caching, and 429 relief.</p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>Anthropic</h3>
+        <p style="margin: 0;"><code>claude-opus-4-7</code> &middot; <code>claude-sonnet-4-6</code> &middot; <code>claude-haiku-4-5</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>OpenAI</h3>
+        <p style="margin: 0;"><code>gpt-5.4</code> &middot; <code>gpt-5.4-mini</code> &middot; <code>gpt-4.1</code> &middot; <code>o3</code> &middot; <code>o4-mini</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>Gemini</h3>
+        <p style="margin: 0;"><code>gemini-3.1-pro-preview</code> &middot; <code>gemini-2.5-pro</code> &middot; <code>gemini-2.5-flash</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>OpenAI-Compat</h3>
+        <p style="margin: 0;">Any OpenAI-compatible endpoint<br><em>OpenRouter, vLLM, local proxies</em></p>
+      </div>
+    </div>
+  </section>
 
   <!-- ═══ CTA ═══ -->
   <section class="glass" style="text-align: center; padding: 3.5rem;">
     <h2>Ready to <span class="accent">build</span>?</h2>
-    <p class="lead" style="margin-bottom: 2rem;">Install tracker, write a SPEC.md, and let the agents handle the rest.</p>
+    <p class="lead" style="margin-bottom: 2rem; max-width: 560px; margin-left: auto; margin-right: auto;">
+      Install, run a built-in workflow, watch the TUI. If it survives <code>tracker diagnose</code>,
+      write your own pipeline next.
+    </p>
     <div class="hero-actions">
-      <a href="workflows.html" class="btn btn-primary">Explore Workflows</a>
-      <a href="architecture.html" class="btn btn-ghost">See Architecture</a>
+      <a href="#install" class="btn btn-primary">Install + run</a>
+      <a href="workflows.html" class="btn btn-ghost">Explore workflows</a>
     </div>
   </section>
 
 </main>
 
 <footer class="footer">
-  <p>Built by <a href="https://2389.ai">2389.ai</a> &middot; <a href="https://github.com/2389-research/tracker">GitHub</a></p>
+  <p>
+    Built by <a href="https://2389.ai">2389.ai</a>
+    &middot; <a href="https://github.com/2389-research/tracker">GitHub</a>
+    &middot; <a href="architecture.html">Architecture</a>
+    &middot; <a href="cli.html">CLI</a>
+    &middot; <a href="changelog.html">Changelog</a>
+    &middot; <a href="https://github.com/2389-research/tracker/releases">Releases</a>
+  </p>
 </footer>
 
 <script src="highlight.js"></script>
