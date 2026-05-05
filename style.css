@@ -190,7 +190,9 @@ main {
   border: 1px solid var(--border-subtle);
   border-radius: 16px;
   padding: 2.5rem;
-  margin-bottom: 2rem;
+  /* Bigger gap between top-level sections so the page breathes
+     and individual cards stop competing for attention. */
+  margin-bottom: 2.75rem;
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -200,8 +202,12 @@ main {
 }
 
 .glass-sm {
+  /* Nested glass tiles: lighter weight than the parent so the
+     page doesn't read as glass-on-glass-on-glass. */
   padding: 1.5rem;
   border-radius: 12px;
+  background: rgba(255, 255, 255, 0.4);
+  border-color: rgba(234, 88, 12, 0.12);
 }
 
 .glass-flush {
@@ -246,6 +252,74 @@ main {
   gap: 1rem;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.hero-meta {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  max-width: 720px;
+  margin: 0 auto 2rem;
+  line-height: 1.7;
+}
+
+.hero-meta strong {
+  color: var(--orange-900);
+  font-weight: 600;
+}
+
+/* ─── Release card (hero "what's new") ──────────────────── */
+.release-card {
+  margin: 2.5rem auto 0;
+  padding: 1.25rem 1.5rem;
+  background: rgba(249, 115, 22, 0.05);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  text-align: left;
+  max-width: 760px;
+}
+
+.release-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.release-card-title {
+  font-weight: 600;
+  color: var(--orange-900);
+  font-size: 0.95rem;
+}
+
+.release-card-link {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--orange-700);
+}
+
+.release-card-list {
+  margin: 0 0 0.85rem;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.release-card-list li {
+  margin-bottom: 0.4rem;
+}
+
+.release-card-list li:last-child {
+  margin-bottom: 0;
+}
+
+.release-card-prev {
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
 /* ─── Buttons ───────────────────────────────────────────── */
@@ -303,7 +377,8 @@ h4 {
 h2 {
   font-size: 2rem;
   font-weight: 800;
-  margin-bottom: 1rem;
+  /* More breathing room under section headings. */
+  margin-bottom: 1.25rem;
 }
 
 h2 .accent { color: var(--orange-600); }
@@ -312,7 +387,11 @@ h3 {
   font-size: 1.35rem;
   font-weight: 700;
   margin-bottom: 0.75rem;
+  /* Subsections within a section get a clear top break. */
+  margin-top: 1.5rem;
 }
+
+h3:first-child { margin-top: 0; }
 
 h4 {
   font-size: 1.05rem;
@@ -348,11 +427,12 @@ strong { color: var(--orange-900); font-weight: 600; }
 code {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.875em;
-  background: #ffedd5;
-  padding: 0.15em 0.45em;
-  border-radius: 5px;
-  color: #9a3412;
-  border: 1px solid rgba(234, 88, 12, 0.12);
+  /* Softer inline-code chips — dense pages had tons of these and they
+     fought the prose for attention. Lower-contrast bg + no border. */
+  background: rgba(254, 215, 170, 0.45);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  color: #7c2d12;
 }
 
 pre {

@@ -34,17 +34,34 @@
       Pipeline orchestration for multi-agent LLM workflows. Define pipelines in
       <code>.dip</code> files, execute with parallel agents, watch progress in a TUI dashboard.
     </p>
+    <p class="hero-meta">
+      Three agent backends &mdash; <strong>native</strong> (Anthropic / OpenAI / Gemini / OpenAI-compat),
+      <strong>Claude&nbsp;Code</strong> (subscription auth, file editing, terminal),
+      and <strong>ACP</strong> (claude-agent-acp&nbsp;/ codex-acp&nbsp;/ gemini --acp). Mix per node.
+    </p>
     <div class="hero-actions">
       <a href="https://github.com/2389-research/tracker" class="btn btn-primary">View on GitHub</a>
       <a href="cli.html" class="btn btn-ghost">CLI Reference</a>
     </div>
-    <p style="margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.95rem;">
-      <strong><span class="badge">v0.25.0</span> What's new:</strong>
-      Architect-side machinery for local codegen. New agent-runtime primitive <code>TerminalTool</code> ends the session immediately when a tool flagged terminal succeeds &mdash; no wasted post-dispatch turns. Three new tools: <code>dispatch_sprints</code> runs a deterministic in-tool loop over a JSONL plan with retry+backoff for transient provider errors; <code>write_enriched_sprint</code> calls a mid-tier LLM with a 4-strategy SEARCH/REPLACE matcher and partial-apply semantics; <code>generate_code</code> expands a contract into files via a cheap/fast model. Plus self-healing JSON extraction for <code>writes:</code> declarations &mdash; 4-step cascade (direct &rarr; fenced regex &rarr; balanced-brace scan &rarr; 8 KiB-capped raw fallback) with reserved-key collision rejection. <code>tracker doctor</code> probe restored to <code>maxTok=16</code> (a regression had been breaking OpenAI keys). New <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md">Bedrock Gateway integration guide</a>. See the <a href="changelog.html">changelog</a>.
-    </p>
-    <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
-      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2">v0.24.2</a>: 10-finding security audit pass (ACP <code>CreateTerminal</code> denylist, subprocess cancel, <code>steer.*</code> namespace). <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1">v0.24.1</a>: cost-accounting + observability polish. <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0">v0.24.0</a>: two P1 budget-bypass fixes.
-    </p>
+
+    <div class="release-card">
+      <div class="release-card-head">
+        <span class="badge">v0.25.0</span>
+        <span class="release-card-title">Architect-side machinery for local codegen</span>
+        <a class="release-card-link" href="changelog.html#v0-25-0">changelog &rarr;</a>
+      </div>
+      <ul class="release-card-list">
+        <li>New <code>TerminalTool</code> primitive ends the agent loop the moment a flagged tool succeeds &mdash; no wasted post-dispatch turns.</li>
+        <li>Three architect tools: <code>dispatch_sprints</code>, <code>write_enriched_sprint</code>, <code>generate_code</code> &mdash; opt in via env vars.</li>
+        <li>Self-healing extraction for <code>writes:</code> declarations &mdash; 4-step JSON cascade with reserved-key collision rejection.</li>
+        <li>New <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md">Bedrock Gateway integration guide</a> for routing through AWS Bedrock.</li>
+      </ul>
+      <p class="release-card-prev">
+        Previously: <a href="changelog.html#v0-24-2">v0.24.2</a> security audit pass &middot;
+        <a href="changelog.html#v0-24-1">v0.24.1</a> cost-accounting polish &middot;
+        <a href="changelog.html#v0-24-0">v0.24.0</a> budget-guard fixes.
+      </p>
+    </div>
   </section>
 
   <!-- ═══ Quick Start ═══ -->
