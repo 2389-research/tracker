@@ -107,11 +107,17 @@ tool ExtractMeta
 
 Runtime contract:
 
-- If `writes:` is declared, the node output must be valid top-level JSON object for extraction.
-- Every declared key must be present; missing keys hard-fail the node.
+- If `writes:` is declared, the runner runs an extraction cascade against the node's output:
+    1. **Direct JSON parse** — the response IS a top-level JSON object. The fast path.
+    2. **Fenced-block extraction** — the response contains one or more ```...``` blocks; the runner walks every fence pair and accepts the first whose content parses as a JSON object. A non-JSON preamble fence (`text`, `bash`, etc.) does not block discovery of a later `json` fence.
+    3. **Balanced-brace scan** — no fences, but a top-level `{…}` span exists in mixed prose. The scanner finds the first balanced span (skipping `{` inside `[…]` arrays and inside JSON string values) that parses as a JSON object.
+    4. **Single-key prose fallback** — only when no JSON object was found by any prior step AND the node declares exactly one writes key, the raw response is stored under that key with a `writes_warning` set in the context. The fallback value is capped at 8 KiB. Multi-key writes do not fall back — prose can't be distributed across multiple keys.
+- Every declared key must be present in the extracted JSON. A model that returns valid JSON missing the declared key hard-fails the node with a specific `writes_error` ("contained extractable JSON but failed the writes contract") — the prose fallback does NOT fire in this case, since the model intentionally produced JSON.
+- `writes:` keys cannot collide with the `tool_command` safe-key allowlist (`outcome`, `preferred_label`, `human_response`, `interview_answers`). The runner rejects such declarations at runtime to prevent LLM output from landing in reserved names that bypass shell-input sanitization.
 - String fields are stored as plain strings; non-strings are stored as compact JSON text.
-- Extra produced fields are allowed and surfaced as warnings.
-- Backward-compatible built-ins (`last_response`, `tool_stdout`, `interview_answers`, etc.) are still written.
+- Extra produced fields (in the JSON but not declared) are allowed and surfaced via `writes_warning`.
+- Two reserved context keys carry the cascade signal: `writes_error` (hard failure — the node returned `OutcomeFail`) and `writes_warning` (cascade healed but with caveats — extras present, fallback used). Both are plain context keys; downstream nodes can branch on them via `${ctx.writes_error}` / `${ctx.writes_warning}`.
+- Backward-compatible built-ins (`last_response`, `tool_stdout`, `interview_answers`, etc.) are still written regardless of the cascade outcome.
 
 For human interview mode, `writes:` extraction uses the collected interview answers object (question IDs and normalized question-text keys mapped to answers).
 For other human modes (`freeform`, `choice`, `yes_no`), `writes:` extraction is not applied automatically; rely on built-in human response keys unless handler behavior is extended.

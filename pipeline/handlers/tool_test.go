@@ -154,7 +154,7 @@ func TestToolHandlerDeclaredWritesExtracted(t *testing.T) {
 	}
 }
 
-func TestToolHandlerDeclaredWritesInvalidJSONFails(t *testing.T) {
+func TestToolHandlerDeclaredWritesSingleKeyFallsBackToRaw(t *testing.T) {
 	env := toolTestEnv(t, map[string]exec.CommandResult{
 		"echo nope": {Stdout: "nope\n", ExitCode: 0},
 	})
@@ -172,11 +172,52 @@ func TestToolHandlerDeclaredWritesInvalidJSONFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// Single-key writes with non-JSON output falls back to raw value with warning.
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("status = %q, want success (single-key fallback)", outcome.Status)
+	}
+	if got := outcome.ContextUpdates["commit_sha"]; got != "nope" {
+		t.Fatalf("commit_sha = %q, want %q", got, "nope")
+	}
+	if outcome.ContextUpdates[contextKeyWritesWarning] == "" {
+		t.Fatal("expected writes_warning to be set for fallback")
+	}
+	// tool_stdout must still be published regardless of the writes
+	// cascade outcome — `tracker diagnose` and the engine rely on it.
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]; got != "nope" {
+		t.Fatalf("tool_stdout = %q, want %q (must be set independently of writes processing)", got, "nope")
+	}
+}
+
+func TestToolHandlerDeclaredWritesMultiKeyInvalidJSONFails(t *testing.T) {
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		"echo nope": {Stdout: "nope\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "extract",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": "echo nope",
+			"writes":       "commit_sha, branch",
+		},
+	}
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if outcome.Status != pipeline.OutcomeFail {
 		t.Fatalf("status = %q, want fail", outcome.Status)
 	}
 	if outcome.ContextUpdates[contextKeyWritesError] == "" {
 		t.Fatal("expected writes_error to be set")
+	}
+	// tool_stdout must still be published even when writes processing
+	// hard-fails — `tracker diagnose` needs the raw command output to
+	// help the user debug what went wrong.
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]; got != "nope" {
+		t.Fatalf("tool_stdout = %q, want %q (must be set independently of writes processing)", got, "nope")
 	}
 }
 

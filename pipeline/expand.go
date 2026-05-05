@@ -17,6 +17,16 @@ var toolCommandSafeCtxKeys = map[string]bool{
 	"interview_answers": true,
 }
 
+// IsToolCommandSafeCtxKey reports whether key is on the tool_command safe-key
+// allowlist. The allowlist exists so that LLM-origin ctx.* keys cannot be
+// expanded into shell input. Workflow authors that declare a `writes:` key
+// colliding with this list would funnel LLM output into a reserved name and
+// bypass the sanitization gate; declared-writes processing uses this to
+// reject such collisions before they're written.
+func IsToolCommandSafeCtxKey(key string) bool {
+	return toolCommandSafeCtxKeys[key]
+}
+
 // ExpandVariables replaces ${namespace.key} patterns with values from the provided sources.
 // Supports three namespaces:
 //   - ctx: runtime context (from PipelineContext)

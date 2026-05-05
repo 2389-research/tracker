@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Self-healing JSON extraction cascade for declared writes** (PR #201). When an LLM responds with prose instead of valid JSON for a node with `writes:`, the runner now attempts: (1) direct JSON parse; (2) extraction of any ```...``` fenced block whose content parses as a JSON object — iterating fences so a `text`/`bash` preamble doesn't block discovery of a later `json` fence; (3) balanced-brace scan for the first top-level `{…}` span that parses as an object (handles prose with stray brace pairs around real JSON without picking the wrong span); (4) single-key fallback to the raw response with a `writes_warning` (not `writes_error`) so the pipeline survives. Multi-key writes still hard-fail since prose can't be distributed. The fallback is gated on "no extractable JSON found" — a model that returned valid JSON missing the declared key gets a hard contract failure with a specific error, not a silent fallback. Fallback values are capped at 8 KiB to keep large tool stdout out of `status.json` / `activity.jsonl` / checkpoints.
+
+### Changed
+
+- **`writes:` declarations are rejected when they collide with the `tool_command` safe-key allowlist** (`outcome`, `preferred_label`, `human_response`, `interview_answers`) (PR #201). Previously a workflow author could declare `writes: outcome` on an agent or tool node and funnel LLM-controlled content into a reserved name, bypassing the sanitization that exists exactly to keep LLM output out of shell input. The new `pipeline.IsToolCommandSafeCtxKey` accessor is checked before any value is written; collision sets `writes_error` and fails the node. No existing pipelines used these collisions.
+
 ## [0.24.2] - 2026-05-03
 
 ### Fixed

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -85,6 +86,179 @@ func normalizeDeclaredKeys(keys []string) []string {
 		out = append(out, key)
 	}
 	return out
+}
+
+// ExtractJSONFromText tries to find a valid JSON OBJECT embedded in text. It
+// iterates ```...``` fenced blocks first (returning the first whose content
+// parses as a JSON object — so a non-JSON fence ahead of a valid JSON fence
+// doesn't block discovery), then falls back to scanning for top-level {…}
+// spans (preferring the first balanced span that parses, not the
+// outermost-brace shortcut, which fails when prose contains stray brace
+// pairs around real JSON).
+//
+// Returns the extracted JSON string and true if a valid JSON object was
+// found, or ("", false) otherwise.
+//
+// Intended for use by pipeline handlers; the Go-package boundary requires
+// it to be exported, but it isn't part of the stable embedder API.
+func ExtractJSONFromText(text string) (string, bool) {
+	if extracted := extractFencedJSON(text); extracted != "" {
+		return extracted, true
+	}
+	if extracted := extractBracedJSON(text); extracted != "" {
+		return extracted, true
+	}
+	return "", false
+}
+
+// fencedBlockRE matches a Markdown-style fenced code block. The opener
+// must sit at the start of input or follow a newline (with optional
+// leading whitespace), then ``` followed by an optional language tag
+// (alphanumerics, '_', '-', '+', '.') and trailing whitespace up to a
+// newline — this strict shape distinguishes a real opening fence from
+// stray backticks in prose like "Use ``` to denote code". (?s) lets `.`
+// cross newlines; the `+?` is non-greedy so we capture the smallest body
+// up to the next ```.
+//
+// LIMITATION: a JSON string value containing the literal sequence ```
+// will truncate the body at that occurrence, since the regex isn't
+// JSON-aware. The cascade in ExtractJSONFromText falls through to
+// extractBracedJSON in that case, which IS JSON-aware (tracks string
+// state via matchBalancedBrace) and recovers the object. Pinned by
+// TestExtractFencedJSON_TripleBacktickInsideStringFallsThroughToBraces.
+var fencedBlockRE = regexp.MustCompile("(?s)(?:^|\\n)[ \\t]*```[A-Za-z0-9_+.\\-]*[ \\t]*\\r?\\n(.+?)```")
+
+// extractFencedJSON walks every ```...``` fenced code block in text and
+// returns the first one whose content parses as a JSON object. Iterating
+// (rather than stopping at the first match) is necessary because LLMs
+// commonly emit a ```text or ```bash preamble before the answer; stopping
+// at the first fence would silently drop the real result.
+//
+// The opening fence is required to have the canonical "fence + optional
+// language tag + newline" shape, so stray inline backticks in prose don't
+// kick off extraction in the wrong place. (Without that constraint, an
+// odd number of stray fences in the input would misalign every subsequent
+// pair.)
+func extractFencedJSON(text string) string {
+	for _, m := range fencedBlockRE.FindAllStringSubmatch(text, -1) {
+		if c := strings.TrimSpace(m[1]); c != "" && isJSONObject(c) {
+			return c
+		}
+	}
+	return ""
+}
+
+// extractBracedJSON scans text for the first balanced top-level {…} span
+// that parses as a JSON object. Unlike a first-`{` / last-`}` shortcut,
+// this handles prose like:
+//
+//	"Wrote {file1} and {file2}, then produced {\"x\": 1}. Done."
+//
+// where the outermost-brace approach picks an invalid span and returns
+// nothing even though a real JSON object is present.
+//
+// Top-level JSON arrays are NOT decomposed: `[{"a":1}]` returns "" because
+// the user supplied an array, not an object. Inner braces inside string
+// literals and arrays are skipped via state tracking so they can't kick off
+// an extraction.
+func extractBracedJSON(text string) string {
+	inString := false
+	escaped := false
+	arrayDepth := 0
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[':
+			arrayDepth++
+		case ']':
+			if arrayDepth > 0 {
+				arrayDepth--
+			}
+		case '{':
+			if arrayDepth > 0 {
+				// Inside a JSON array — skip; we don't decompose arrays.
+				continue
+			}
+			end, ok := matchBalancedBrace(text, i)
+			if !ok {
+				continue
+			}
+			candidate := text[i : end+1]
+			if isJSONObject(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+// matchBalancedBrace returns the index of the '}' that closes the '{' at
+// start, or (0, false) if the braces are unbalanced. JSON-string content
+// is honored — a '{' or '}' inside a "..." string doesn't affect the depth.
+func matchBalancedBrace(text string, start int) (int, bool) {
+	if start >= len(text) || text[start] != '{' {
+		return 0, false
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(text); i++ {
+		c := text[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// isJSONObject reports whether s parses as a JSON object (not an array,
+// scalar, or null). Used to gate extraction-helper return values.
+func isJSONObject(s string) bool {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "{") {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(s), &obj); err != nil {
+		return false
+	}
+	return obj != nil
 }
 
 func rawJSONValueToContext(raw json.RawMessage) string {
