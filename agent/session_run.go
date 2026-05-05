@@ -261,18 +261,38 @@ func (s *Session) computeToolSignature(toolCalls []llm.ToolCallData) string {
 	return strings.Join(toolSigs, ",")
 }
 
-// executeToolCalls runs each tool call sequentially and appends results to messages.
-// It returns true if any tool call resulted in an error.
-func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) bool {
+// executeToolCalls runs each tool call sequentially and appends results to
+// messages. Returns:
+//   - hadErrors: any tool call in the batch errored (used to drive reflection).
+//   - terminate: a tool implementing TerminalTool succeeded; the caller should
+//     break out of the agent loop.
+//
+// On terminal-tool success the loop also breaks immediately, skipping any
+// remaining tool calls in the same LLM response. This is intentional: once
+// a terminal tool has done its job, subsequent calls in the same turn are
+// either redundant or could perform unwanted side-effects after the "final
+// step" (e.g., a model emitting `[dispatch_sprints, write_summary_doc]`
+// shouldn't run write_summary_doc once dispatch_sprints succeeded).
+func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) (hadErrors, terminate bool) {
 	var toolResults []llm.ContentPart
-	anyError := false
 	for _, call := range toolCalls {
 		toolResult, toolDuration := s.executeSingleTool(ctx, call)
 		result.ToolCalls[call.Name]++
 		if toolResult.IsError {
-			anyError = true
+			hadErrors = true
 		}
 		s.episodeLog.Record(call.Name, string(call.Arguments), toolResult.Content, toolResult.IsError)
+
+		// Terminal-tool check: a successful invocation of a tool that
+		// flags itself terminal ends the agent session. Errors keep the
+		// loop alive so the model can react to the failure.
+		thisIsTerminal := false
+		if !toolResult.IsError {
+			if tool := s.registry.Get(call.Name); tool != nil && tools.IsToolTerminal(tool) {
+				terminate = true
+				thisIsTerminal = true
+			}
+		}
 
 		s.emit(Event{
 			Type:         EventToolCallEnd,
@@ -287,13 +307,17 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 			Kind:       llm.KindToolResult,
 			ToolResult: &toolResult,
 		})
+
+		if thisIsTerminal {
+			break
+		}
 	}
 
 	s.messages = append(s.messages, llm.Message{
 		Role:    llm.RoleTool,
 		Content: toolResults,
 	})
-	return anyError
+	return hadErrors, terminate
 }
 
 // executeSingleTool runs a single tool call, handling caching.

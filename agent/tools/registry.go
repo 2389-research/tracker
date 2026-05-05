@@ -45,6 +45,30 @@ func GetCachePolicy(t Tool) CachePolicy {
 	return CachePolicyNone
 }
 
+// TerminalTool is implemented by tools whose successful invocation should end
+// the agent session immediately. The agent runtime checks this flag after
+// executing the tool's call: if the call succeeded (no error) AND the tool
+// is terminal, the session loop breaks before requesting another LLM turn.
+//
+// On tool error the loop continues normally so the model can react to the
+// failure (fix args, retry, give up by emitting text-only).
+//
+// Use this for deterministic last-step tools that have no meaningful follow-up
+// for the agent — e.g., tools that complete a multi-step pipeline phase.
+type TerminalTool interface {
+	IsTerminal() bool
+}
+
+// IsToolTerminal reports whether the given tool implements TerminalTool and
+// has flagged itself as terminal. Returns false for tools that don't implement
+// the interface.
+func IsToolTerminal(t Tool) bool {
+	if tt, ok := t.(TerminalTool); ok {
+		return tt.IsTerminal()
+	}
+	return false
+}
+
 // Registry holds registered tools and dispatches execution requests.
 type Registry struct {
 	tools        map[string]Tool
