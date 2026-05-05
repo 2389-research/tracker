@@ -267,9 +267,12 @@ func (s *Session) computeToolSignature(toolCalls []llm.ToolCallData) string {
 //   - terminate: a tool implementing TerminalTool succeeded; the caller should
 //     break out of the agent loop.
 //
-// On terminal-tool success the loop short-circuits: later tool calls in the
-// same batch are skipped. Running them would feed results to a session that
-// the model never gets a chance to react to.
+// On terminal-tool success the loop also breaks immediately, skipping any
+// remaining tool calls in the same LLM response. This is intentional: once
+// a terminal tool has done its job, subsequent calls in the same turn are
+// either redundant or could perform unwanted side-effects after the "final
+// step" (e.g., a model emitting `[dispatch_sprints, write_summary_doc]`
+// shouldn't run write_summary_doc once dispatch_sprints succeeded).
 func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) (hadErrors, terminate bool) {
 	var toolResults []llm.ContentPart
 	for _, call := range toolCalls {
@@ -280,9 +283,14 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 		}
 		s.episodeLog.Record(call.Name, string(call.Arguments), toolResult.Content, toolResult.IsError)
 
+		// Terminal-tool check: a successful invocation of a tool that
+		// flags itself terminal ends the agent session. Errors keep the
+		// loop alive so the model can react to the failure.
+		thisIsTerminal := false
 		if !toolResult.IsError {
 			if tool := s.registry.Get(call.Name); tool != nil && tools.IsToolTerminal(tool) {
 				terminate = true
+				thisIsTerminal = true
 			}
 		}
 
@@ -300,7 +308,7 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 			ToolResult: &toolResult,
 		})
 
-		if terminate {
+		if thisIsTerminal {
 			break
 		}
 	}

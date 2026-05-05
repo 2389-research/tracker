@@ -432,18 +432,59 @@ type SprintRunResult struct {
 
 // LoadContract reads the contract file from disk. Resolves relative paths
 // against workDir. Empty contractFile defaults to ".ai/contract.md".
+//
+// When a workDir is set, validates that the resolved path stays inside it.
+// The contract content is shipped to the LLM provider as prompt context, so
+// a traversal here is a data-exfiltration vector. Both relative paths with
+// ".." segments and absolute paths pointing outside workDir are rejected.
 func (t *WriteEnrichedSprintTool) LoadContract(contractFile string) (string, error) {
 	if contractFile == "" {
 		contractFile = ".ai/contract.md"
 	}
-	if !filepath.IsAbs(contractFile) && t.workDir != "" {
-		contractFile = filepath.Join(t.workDir, contractFile)
-	}
-	data, err := os.ReadFile(contractFile)
+	resolved, err := t.resolveUnderWorkDir(contractFile)
 	if err != nil {
-		return "", fmt.Errorf("read contract from %s: %w (write the contract file first)", contractFile, err)
+		return "", fmt.Errorf("contract_file %q: %w", contractFile, err)
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", fmt.Errorf("read contract from %s: %w (write the contract file first)", resolved, err)
 	}
 	return string(data), nil
+}
+
+// resolveUnderWorkDir takes a path argument (absolute or relative) and returns
+// the absolute resolved path. When workDir is set, validates that the result
+// is inside workDir and rejects paths that escape via "..", absolute paths
+// outside workDir, or symlink-like trickery. When workDir is empty (e.g., in
+// tests that don't set one), passes through with cleaning only.
+func (t *WriteEnrichedSprintTool) resolveUnderWorkDir(p string) (string, error) {
+	cleaned := filepath.Clean(p)
+	var resolved string
+	if filepath.IsAbs(cleaned) {
+		resolved = cleaned
+	} else if t.workDir != "" {
+		resolved = filepath.Join(t.workDir, cleaned)
+	} else {
+		resolved = cleaned
+	}
+	absResolved, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", p, err)
+	}
+	if t.workDir != "" {
+		absWorkDir, err := filepath.Abs(t.workDir)
+		if err != nil {
+			return "", fmt.Errorf("resolve workDir: %w", err)
+		}
+		rel, err := filepath.Rel(absWorkDir, absResolved)
+		if err != nil {
+			return "", fmt.Errorf("compute relative path: %w", err)
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("path resolves outside workDir %q (rel=%q)", t.workDir, rel)
+		}
+	}
+	return absResolved, nil
 }
 
 // resolveOutputDir applies the same defaulting rules Execute uses.
@@ -469,6 +510,29 @@ func (t *WriteEnrichedSprintTool) RunOne(ctx context.Context, contract, path, de
 	}
 	if description == "" {
 		return nil, fmt.Errorf("description is required")
+	}
+	// Path traversal guard: validate that filepath.Join(outputDir, path) stays
+	// inside outputDir. dispatch_sprints' readDispatchPlan already enforces a
+	// stricter ^SPRINT-NNN\.md$ regex, but Execute() (callable directly by an
+	// agent with arbitrary path input) has only this guard.
+	if filepath.IsAbs(path) {
+		return nil, fmt.Errorf("path must be relative to output_dir, got absolute %q", path)
+	}
+	cleanedPath := filepath.Clean(path)
+	if cleanedPath == ".." || strings.HasPrefix(cleanedPath, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("path %q resolves outside output_dir", path)
+	}
+	absOutput, err := filepath.Abs(outputDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve output_dir: %w", err)
+	}
+	absResolved, err := filepath.Abs(filepath.Join(outputDir, cleanedPath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+	rel, err := filepath.Rel(absOutput, absResolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("path %q escapes output_dir %q", path, outputDir)
 	}
 
 	authorSystemPrompt := sprintSystemPromptHeader + enrichedSprintExample
@@ -844,7 +908,7 @@ func trySRWhitespace(content, search, replace string) (string, bool) {
 	for i := 0; i <= len(contentLines)-n; i++ {
 		chunk := strings.Join(contentLines[i:i+n], "")
 		if collapseWhitespace(chunk) == needle {
-			return strings.Replace(content, chunk, replace, 1), true
+			return replaceLineWindow(content, contentLines, i, n, replace), true
 		}
 	}
 	return content, false
@@ -881,8 +945,7 @@ func trySRIndent(content, search, replace string) (string, bool) {
 			// chunk's column space.
 			dedentedReplace := dedentLines(replace, sIndent)
 			indentedReplace := indentLines(dedentedReplace, chunkIndent)
-			chunkRStripped := strings.TrimRight(chunk, "\n")
-			return strings.Replace(content, chunkRStripped, indentedReplace, 1), true
+			return replaceLineWindow(content, contentLines, i, n, indentedReplace), true
 		}
 	}
 	return content, false
@@ -914,12 +977,31 @@ func trySRFuzzy(content, search, replace string) (string, bool) {
 	if bestIdx < 0 || bestRatio < threshold {
 		return content, false
 	}
-	chunk := strings.Join(contentLines[bestIdx:bestIdx+n], "")
-	rep := replace
-	if !strings.HasSuffix(rep, "\n") && strings.HasSuffix(chunk, "\n") {
-		rep += "\n"
+	return replaceLineWindow(content, contentLines, bestIdx, n, replace), true
+}
+
+// replaceLineWindow replaces the byte range occupied by contentLines[start:start+n]
+// in content with replace. Position-based (not first-occurrence-based) so the
+// windowed SR strategies can't accidentally patch an earlier identical-looking
+// chunk when the matched line range appears more than once in the document.
+//
+// Preserves trailing-newline behavior: if the matched window ended in '\n' but
+// the replacement doesn't, an LF is appended to keep the surrounding line
+// structure intact.
+func replaceLineWindow(content string, contentLines []string, start, n int, replace string) string {
+	startByte := 0
+	for j := 0; j < start; j++ {
+		startByte += len(contentLines[j])
 	}
-	return strings.Replace(content, chunk, rep, 1), true
+	endByte := startByte
+	for j := start; j < start+n; j++ {
+		endByte += len(contentLines[j])
+	}
+	finalReplace := replace
+	if endByte > 0 && content[endByte-1] == '\n' && !strings.HasSuffix(finalReplace, "\n") {
+		finalReplace += "\n"
+	}
+	return content[:startByte] + finalReplace + content[endByte:]
 }
 
 // collapseWhitespace returns s with all runs of whitespace collapsed to a single
