@@ -969,7 +969,7 @@ All test functions are `async def`. None have decorators. All take `client` from
 |---|---|---|
 | `test_create_location_returns_201(client)` | POST `/locations` `{"name": "Main", "address": "1 Test St"}` | 201, body has `id`, `name == "Main"` |
 | `test_list_locations_empty(client)` | GET `/locations` | 200, `body == []` |
-| `test_list_locations_nonempty(client, test_location)` | GET `/locations` | 200, `len(body) == 1`, body[0]["id"] == str(test_location.id) |
+| `test_list_locations_nonempty(client, test_location)` | GET `/locations` | 200, `len(body) == 1`, `body[0]["id"] == str(test_location.id)` |
 | `test_get_location_by_id(client, test_location)` | GET `/locations/{test_location.id}` | 200, `body["name"] == test_location.name` |
 | `test_get_location_not_found_404(client)` | GET `/locations/{uuid.uuid4()}` | 404, `error_code == "NOT_FOUND"` |
 | `test_create_station_for_location(client, test_location)` | POST `/locations/{test_location.id}/stations` `{"name":"Sorting","max_capacity":10,"environment_type":"indoor","labor_condition":"standing"}` | 201, body has `id`, `location_id == str(test_location.id)` |
@@ -995,7 +995,7 @@ All test functions are `async def`. None have decorators. All take `client` from
 | `test_register_nonexistent_shift_returns_404(client, auth_headers)` | POST `/registrations` `{"shift_id": str(uuid.uuid4())}`, headers=auth_headers | 404, `error_code == "NOT_FOUND"` |
 | `test_register_duplicate_returns_409(client, auth_headers, test_shift)` | Register once successfully; then POST `/registrations` again with the same shift_id | 409, `error_code == "DUPLICATE_REGISTRATION"` |
 | `test_register_full_shift_returns_409_capacity_full(client, auth_headers, test_shift, db_session)` | Insert `test_shift.max_volunteers` `Registration` rows directly via `db_session` (different volunteer_ids), commit; then attempt to register the auth user | 409, `error_code == "SHIFT_FULL"` |
-| `test_list_my_registrations(client, auth_headers, test_shift)` | Register; then GET `/registrations/me`, headers=auth_headers | 200, `len(body) == 1`, body[0]["shift_id"] == str(test_shift.id) |
+| `test_list_my_registrations(client, auth_headers, test_shift)` | Register; then GET `/registrations/me`, headers=auth_headers | 200, `len(body) == 1`, `body[0]["shift_id"] == str(test_shift.id)` |
 | `test_cancel_registration_returns_204(client, auth_headers, test_shift)` | Register; then DELETE `/registrations/{registration_id}`, headers=auth_headers | 204 (empty body) |
 | `test_cancel_sets_status_cancelled(client, auth_headers, test_shift, db_session)` | Register; cancel; query the row via `db_session` | `registration.status == RegistrationStatus.cancelled` |
 | `test_cancelled_registration_does_not_count_toward_capacity(client, auth_headers, test_shift, db_session)` | Insert `test_shift.max_volunteers` `Registration` rows then cancel one; attempt to register | 201 (capacity has room because cancelled doesn't count) |

@@ -150,9 +150,9 @@ func TestApplySRBlocks_EmptySearchSkipped(t *testing.T) {
 func TestApplySRBlocks_PartialApply(t *testing.T) {
 	draft := "alpha\nbeta\ngamma\n"
 	blocks := []srBlock{
-		{Search: "alpha", Replace: "ALPHA"},                      // applies
+		{Search: "alpha", Replace: "ALPHA"},                       // applies
 		{Search: "this text is not in the draft", Replace: "ZZZ"}, // skipped
-		{Search: "gamma", Replace: "GAMMA"},                      // applies
+		{Search: "gamma", Replace: "GAMMA"},                       // applies
 	}
 	patched, applied, skipped := applySRBlocks(draft, blocks)
 	if applied != 2 {

@@ -163,7 +163,10 @@ func (t *DispatchSprintsTool) Execute(ctx context.Context, input json.RawMessage
 	if args.OutputDir == "" {
 		args.OutputDir = ".ai/sprints"
 	}
-	outputDir := t.inner.resolveOutputDir(args.OutputDir)
+	outputDir, err := t.inner.resolveOutputDir(args.OutputDir)
+	if err != nil {
+		return "", fmt.Errorf("dispatch_sprints: %w", err)
+	}
 
 	contract, err := t.inner.LoadContract(args.ContractFile)
 	if err != nil {
@@ -176,13 +179,13 @@ func (t *DispatchSprintsTool) Execute(ctx context.Context, input json.RawMessage
 	}
 
 	var (
-		perSprint   []string
-		failures    []string
-		passes      int
-		patched     int
-		fallbacks   int
-		totalIn     int
-		totalOut    int
+		perSprint []string
+		failures  []string
+		passes    int
+		patched   int
+		fallbacks int
+		totalIn   int
+		totalOut  int
 	)
 
 	for _, e := range entries {

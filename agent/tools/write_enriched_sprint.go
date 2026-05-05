@@ -453,52 +453,47 @@ func (t *WriteEnrichedSprintTool) LoadContract(contractFile string) (string, err
 }
 
 // resolveUnderWorkDir takes a path argument (absolute or relative) and returns
-// the absolute resolved path. When workDir is set, validates that the result
-// is inside workDir and rejects paths that escape via "..", absolute paths
-// outside workDir, or symlink-like trickery. When workDir is empty (e.g., in
-// tests that don't set one), passes through with cleaning only.
+// the absolute resolved path. When workDir is set, delegates to
+// resolveUnderRoot which evaluates symlinks before the containment check —
+// that prevents a symlink inside workDir pointing outside from being used to
+// escape (which a pure string-prefix check would miss). When workDir is
+// empty (e.g., in tests that don't set one), passes through with cleaning
+// only.
 func (t *WriteEnrichedSprintTool) resolveUnderWorkDir(p string) (string, error) {
-	cleaned := filepath.Clean(p)
-	var resolved string
-	if filepath.IsAbs(cleaned) {
-		resolved = cleaned
-	} else if t.workDir != "" {
-		resolved = filepath.Join(t.workDir, cleaned)
-	} else {
-		resolved = cleaned
+	if t.workDir == "" {
+		return filepath.Clean(p), nil
 	}
-	absResolved, err := filepath.Abs(resolved)
-	if err != nil {
-		return "", fmt.Errorf("resolve %q: %w", p, err)
-	}
-	if t.workDir != "" {
-		absWorkDir, err := filepath.Abs(t.workDir)
-		if err != nil {
-			return "", fmt.Errorf("resolve workDir: %w", err)
-		}
-		rel, err := filepath.Rel(absWorkDir, absResolved)
-		if err != nil {
-			return "", fmt.Errorf("compute relative path: %w", err)
-		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("path resolves outside workDir %q (rel=%q)", t.workDir, rel)
-		}
-	}
-	return absResolved, nil
+	return resolveUnderRoot(t.workDir, p)
 }
 
-// resolveOutputDir applies the same defaulting rules Execute uses.
-func (t *WriteEnrichedSprintTool) resolveOutputDir(outputDir string) string {
+// resolveOutputDir applies the same defaulting rules Execute uses, then
+// confines the result under workDir when one is configured. An LLM-supplied
+// absolute outputDir like "/tmp/outside" would otherwise become the new
+// write root for every per-file resolveUnderRoot call — escaping the
+// configured workspace entirely.
+//
+// Returns the absolute output path (or an error if it can't be confined to
+// workDir). When workDir is empty (untested-config path), the existing
+// behavior is preserved.
+func (t *WriteEnrichedSprintTool) resolveOutputDir(outputDir string) (string, error) {
 	if outputDir == "" || outputDir == "." {
 		outputDir = t.workDir
 	}
 	if outputDir == "" {
 		outputDir = "."
 	}
-	if !filepath.IsAbs(outputDir) && t.workDir != "" {
-		outputDir = filepath.Join(t.workDir, outputDir)
+	if t.workDir == "" {
+		// No workspace to anchor to; preserve historical behavior.
+		if !filepath.IsAbs(outputDir) {
+			abs, err := filepath.Abs(outputDir)
+			if err != nil {
+				return "", err
+			}
+			return abs, nil
+		}
+		return outputDir, nil
 	}
-	return outputDir
+	return resolveUnderRoot(t.workDir, outputDir)
 }
 
 // RunOne authors + audits + writes one sprint file. Caller supplies the contract
@@ -679,7 +674,10 @@ func (t *WriteEnrichedSprintTool) Execute(ctx context.Context, input json.RawMes
 		}
 		contract = c
 	}
-	outputDir := t.resolveOutputDir(args.OutputDir)
+	outputDir, err := t.resolveOutputDir(args.OutputDir)
+	if err != nil {
+		return "", fmt.Errorf("write_enriched_sprint: %w", err)
+	}
 
 	r, err := t.RunOne(ctx, contract, args.Path, args.Description, outputDir)
 	if err != nil {

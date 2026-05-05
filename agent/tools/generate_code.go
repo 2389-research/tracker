@@ -113,8 +113,22 @@ func (t *GenerateCodeTool) Execute(ctx context.Context, input json.RawMessage) (
 	if args.OutputDir == "" {
 		args.OutputDir = "."
 	}
-	if !filepath.IsAbs(args.OutputDir) && t.workDir != "" {
-		args.OutputDir = filepath.Join(t.workDir, args.OutputDir)
+	// Confine output_dir under workDir so an LLM-supplied absolute path like
+	// "/tmp/outside" can't become the new write root for every per-file
+	// resolveUnderRoot call. When workDir is empty (test-only path) we fall
+	// back to filepath.Abs.
+	if t.workDir != "" {
+		clamped, err := resolveUnderRoot(t.workDir, args.OutputDir)
+		if err != nil {
+			return "", fmt.Errorf("generate_code: output_dir %q: %w", args.OutputDir, err)
+		}
+		args.OutputDir = clamped
+	} else {
+		abs, err := filepath.Abs(args.OutputDir)
+		if err != nil {
+			return "", fmt.Errorf("generate_code: output_dir %q: %w", args.OutputDir, err)
+		}
+		args.OutputDir = abs
 	}
 
 	// Sequential mode: one LLM call per file
@@ -196,7 +210,11 @@ func (t *GenerateCodeTool) generateSingleCall(ctx context.Context, contract, out
 		return "", fmt.Errorf("generate_code: llm call failed: %w", err)
 	}
 
-	code := resp.Text()
+	// Strip enclosing markdown fences if the model wrapped its whole response
+	// in a fenced block. The sequential branch already does this per-file;
+	// without it here, a fenced wrap leaks the fence into the last parsed
+	// file or into the entire fallback "generated.py".
+	code := stripMarkdownFences(resp.Text())
 	files := parseFiles(code)
 
 	if len(files) == 0 {
