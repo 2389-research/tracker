@@ -30,6 +30,30 @@
     <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">All GitHub Releases &rarr;</a></p>
   </section>
 
+  <!-- ═══ v0.25.0 ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.25.0" style="color: inherit; text-decoration: none;">v0.25.0</a></h2>
+      <span class="badge">2026-05-05</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.25.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Architect-side machinery for local codegen + self-healing declared writes.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Architect-side machinery for local codegen</strong> (PR #198): new agent-runtime primitive <code>TerminalTool</code> ends the session loop the moment a tool flagged terminal succeeds &mdash; no wasted post-dispatch turns. Three new tools land via env-gated registration (<code>TRACKER_SPRINT_WRITER_MODEL</code> / <code>TRACKER_CODEGEN_MODEL</code>): <code>dispatch_sprints</code> reads a <code>{path, description}</code> JSONL plan and runs the per-sprint author+audit pipeline once per line via a deterministic in-tool loop with bounded retry+backoff for transient provider errors (5xx, rate-limit, timeout, network); <code>write_enriched_sprint</code> calls a mid-tier LLM once per sprint with a 4-strategy SEARCH/REPLACE matcher (exact &rarr; indent-preserving &rarr; whitespace-insensitive &rarr; fuzzy with Levenshtein ratio &ge; 0.9), partial-apply semantics distinguishing <code>PATCHED-PARTIAL</code> from clean <code>PATCHED</code>, and a tolerant audit-verdict parser; <code>generate_code</code> expands a contract into one or more files via a cheap/fast model. Validated end-to-end on Notebook synthetic (41/41 pytest passing, ~$2, 28min) and NIFB architect-only (16 sprints, ~$5, 47min).</li>
+      <li><strong>Self-healing JSON extraction cascade for declared writes</strong> (PR #201): when an LLM responds with prose instead of valid JSON for a node with <code>writes:</code>, the runner now attempts (1) direct JSON parse; (2) extraction of any <code>```...```</code> fenced block via a strict-shape regex (so a <code>text</code>/<code>bash</code> preamble and stray inline backticks don't fool it); (3) balanced-brace scan for the first top-level <code>{&hellip;}</code> span that parses as an object (handles prose with stray brace pairs around real JSON; <code>{</code> inside JSON-string values and inside <code>[&hellip;]</code> arrays correctly skipped); (4) single-key fallback to the raw response with <code>writes_warning</code>, capped at 8 KiB. Multi-key writes still hard-fail. Fallback is gated on "no extractable JSON found" &mdash; a model that returned valid JSON missing the declared key gets a hard contract failure with a specific error.</li>
+      <li><strong>Bedrock Gateway integration guide</strong> (PR #200): new <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md"><code>docs/bedrock-gateway.md</code></a> walks through pointing tracker at the 2389 Cloudflare Worker &mdash; per-provider <code>*_BASE_URL</code> recipes, provider compatibility matrix, authentication via Cloudflare AI Gateway tokens, and verification guidance.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>writes:</code> declarations are rejected when they collide with reserved key names</strong> (PR #201): two reserved sets &mdash; (a) the <code>tool_command</code> safe-key allowlist (<code>outcome</code>, <code>preferred_label</code>, <code>human_response</code>, <code>interview_answers</code>); allowing <code>writes: outcome</code> would funnel LLM-controlled content into a reserved name and bypass the sanitization that keeps LLM output out of shell input. (b) the writes-signal keys (<code>writes_error</code>, <code>writes_warning</code>); allowing them via writes would let an LLM spoof a failure/healed signal that <code>tracker diagnose</code> and <code>when ctx.writes_error != ""</code> edges branch on. Collision rejection runs before any value is written. No existing pipelines used these collisions.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker doctor</code> provider probe restored to 16-token max output</strong> (PR #199, mdagost): the probe had been using <code>maxTok := 1</code>, but OpenAI's Responses API requires <code>max_output_tokens &ge; 16</code> and returns HTTP 400 (<code>Invalid 'max_output_tokens': integer below minimum</code>) below that &mdash; breaking <code>tracker doctor</code> for OpenAI keys entirely.</li>
+    </ul>
+  </section>
+
   <!-- ═══ v0.24.2 ═══ -->
   <section class="glass" style="border-left: 3px solid var(--red-500, #ef4444);">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">

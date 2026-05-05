@@ -39,11 +39,11 @@
       <a href="cli.html" class="btn btn-ghost">CLI Reference</a>
     </div>
     <p style="margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.95rem;">
-      <strong><span class="badge">v0.24.2</span> What's new:</strong>
-      Security and correctness fixes from a 13-expert panel audit. ACP <code>CreateTerminal</code> now validates commands against the denylist. Claude Code subprocess gets process-group kill on cancellation. <code>TRACKER_PASS_API_KEYS</code> requires <code>=1</code> (not just non-empty). Unknown engine outcomes fail instead of silently succeeding. Autopilot respects pipeline context cancellation. Plus <code>steer.*</code> namespace for <code>steer_context</code> keys (#177). See the <a href="changelog.html">changelog</a>.
+      <strong><span class="badge">v0.25.0</span> What's new:</strong>
+      Architect-side machinery for local codegen. New agent-runtime primitive <code>TerminalTool</code> ends the session immediately when a tool flagged terminal succeeds &mdash; no wasted post-dispatch turns. Three new tools: <code>dispatch_sprints</code> runs a deterministic in-tool loop over a JSONL plan with retry+backoff for transient provider errors; <code>write_enriched_sprint</code> calls a mid-tier LLM with a 4-strategy SEARCH/REPLACE matcher and partial-apply semantics; <code>generate_code</code> expands a contract into files via a cheap/fast model. Plus self-healing JSON extraction for <code>writes:</code> declarations &mdash; 4-step cascade (direct &rarr; fenced regex &rarr; balanced-brace scan &rarr; 8 KiB-capped raw fallback) with reserved-key collision rejection. <code>tracker doctor</code> probe restored to <code>maxTok=16</code> (a regression had been breaking OpenAI keys). New <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md">Bedrock Gateway integration guide</a>. See the <a href="changelog.html">changelog</a>.
     </p>
     <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
-      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1">v0.24.1</a>: cost-accounting + observability polish. <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0">v0.24.0</a>: two P1 budget-bypass fixes + ACP token usage estimate.
+      Previously in <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2">v0.24.2</a>: 10-finding security audit pass (ACP <code>CreateTerminal</code> denylist, subprocess cancel, <code>steer.*</code> namespace). <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1">v0.24.1</a>: cost-accounting + observability polish. <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0">v0.24.0</a>: two P1 budget-bypass fixes.
     </p>
   </section>
 
@@ -313,7 +313,7 @@ tracker doctor
 <span class="comment"># Stay current — checks automatically, or run manually</span>
 tracker update</code></pre>
     <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.85rem;">
-      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2">v0.24.2</a> &middot;
+      Latest: <a href="https://github.com/2389-research/tracker/releases/tag/v0.25.0">v0.25.0</a> &middot;
       <a href="changelog.html">Changelog</a> &middot;
       <a href="cli.html">Full CLI reference</a>
     </p>
