@@ -4,7 +4,7 @@ The [2389 Bedrock Gateway](https://github.com/2389-research/gateway) is a
 Cloudflare Worker that accepts native Anthropic, OpenAI, and Gemini SDK
 requests and routes them to AWS Bedrock via Cloudflare AI Gateway. Live URL:
 
-```
+```text
 https://bedrock-gateway.2389-research-inc.workers.dev
 ```
 
@@ -33,11 +33,11 @@ Tracker has a `--gateway-url` flag (and `TRACKER_GATEWAY_URL` env var)
 designed for Cloudflare AI Gateway's *native* routing format, where the
 gateway URL has provider segments appended:
 
-```
-<gateway>/anthropic     → forwards to api.anthropic.com
-<gateway>/openai        → forwards to api.openai.com
-<gateway>/google-ai-studion → forwards to Gemini
-<gateway>/compat        → OpenAI-compatible passthrough
+```text
+<gateway>/anthropic        → forwards to api.anthropic.com
+<gateway>/openai           → forwards to api.openai.com
+<gateway>/google-ai-studio → forwards to Gemini
+<gateway>/compat           → OpenAI-compatible passthrough
 ```
 
 The Bedrock Gateway worker does **not** use that layout — it exposes the
@@ -83,7 +83,10 @@ from the conventional provider env vars, so set them to your CF AIG token:
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `openai-compat` | `OPENAI_COMPAT_API_KEY` |
 
-Need a token? Ask Dylan.
+CF AI Gateway tokens for the 2389 worker are provisioned through the
+2389 Cloudflare account; ask in `#ai-platform` (or whoever currently
+owns the gateway) for one if you don't already have access. The token
+is the same value regardless of which SDK header it goes in.
 
 A normal Anthropic / OpenAI key will be rejected by the gateway — it
 forwards the value as `cf-aig-authorization`, not as a provider key.
@@ -145,20 +148,36 @@ Gemini API by setting `ANTHROPIC_BASE_URL` but not `GEMINI_BASE_URL`.
 
 ## Verifying it's working
 
-```bash
-tracker doctor
-```
+Tracker doesn't surface the resolved provider URL in `tracker doctor`
+or in the activity log — both report only the provider name and key
+status. There's no in-tool way to confirm the gateway is being hit
+short of inspecting the Cloudflare AI Gateway dashboard's request log
+(or running with `TRACKER_DEBUG=1`, which prints diagnostic detail
+on empty/failed responses but not on the happy path).
 
-This prints, per provider, whether a key is set and which base URL is in
-effect. With the gateway configured you should see something like:
+A short, reliable check sequence:
 
-```
-anthropic: API key set, base URL: https://bedrock-gateway.2389-research-inc.workers.dev
-```
+1. **Confirm the env vars are set** in the shell tracker will run in:
 
-For a quick end-to-end check, run any built-in workflow with a one-shot
-agent node — the activity log will show the request hitting the gateway,
-and `tracker diagnose` exposes any non-2xx responses.
+   ```bash
+   echo "$ANTHROPIC_API_KEY" | head -c 12; echo
+   echo "$ANTHROPIC_BASE_URL"
+   ```
+
+   `tracker doctor` will tell you whether the API key passes
+   validation against the gateway (because doctor's auth probe goes
+   through the configured base URL), but it does not echo the URL
+   back at you.
+
+2. **Run a one-shot agent node** against a trivial pipeline and check
+   the [Cloudflare AI Gateway dashboard](https://dash.cloudflare.com/?to=/:account/ai/ai-gateway)
+   for a request matching the timing — that's the authoritative
+   confirmation that traffic actually flowed through the gateway.
+
+3. If a call fails, `tracker diagnose` surfaces the error body the
+   provider returned, which carries gateway-specific phrasing (e.g.
+   "Bedrock model not found") that distinguishes a gateway-routed
+   failure from a direct-API one.
 
 ## Gateway limitations to know about
 
