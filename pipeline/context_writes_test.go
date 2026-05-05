@@ -213,6 +213,20 @@ func TestExtractJSONFromText_NDJSONReturnsFirstObject(t *testing.T) {
 	}
 }
 
+// White-box test: prove extractFencedJSON itself handles stray inline
+// backticks in prose. Without this, TestExtractJSONFromText_StrayBackticksBeforeFence
+// passes only because extractBracedJSON rescues it, leaving the bug in
+// the fenced helper invisible. The regex requires the language-tag-then-
+// newline shape, so stray "Use ``` to denote code" backticks are rejected
+// as opening fences.
+func TestExtractFencedJSON_StrayBackticksRejectedAsOpener(t *testing.T) {
+	text := "We use ``` to denote code in this codebase. The result:\n```json\n{\"answer\": 42}\n```\n"
+	got := extractFencedJSON(text)
+	if got != `{"answer": 42}` {
+		t.Fatalf("extractFencedJSON should find the real fenced block past the stray backticks, got %q", got)
+	}
+}
+
 // Braces inside string values must not throw off depth counting.
 func TestExtractJSONFromText_BracesInsideStringValue(t *testing.T) {
 	text := `Done: {"path": "/tmp/dir/{name}.txt", "ok": true} extra`

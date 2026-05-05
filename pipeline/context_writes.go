@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -110,35 +111,32 @@ func ExtractJSONFromText(text string) (string, bool) {
 	return "", false
 }
 
-// extractFencedJSON walks every ```...``` fenced block in text and returns
-// the first one whose content parses as a JSON object. Iterating (rather
-// than stopping at the first fence) is necessary because LLMs commonly
-// emit a ```text or ```bash preamble before the answer, and stopping at
-// the first fence would silently drop the real result.
+// fencedBlockRE matches a Markdown-style fenced code block. The opening
+// fence is followed by an optional language tag (alphanumerics, '_', '-',
+// '+', '.') and trailing whitespace up to a newline — this strict shape
+// distinguishes a real opening fence from stray backticks in prose like
+// "Use ``` to denote code". (?s) lets `.` cross newlines; the `+?` is
+// non-greedy so we capture the smallest body up to the next ```.
+var fencedBlockRE = regexp.MustCompile("(?s)```[A-Za-z0-9_+.\\-]*[ \\t]*\\r?\\n(.+?)```")
+
+// extractFencedJSON walks every ```...``` fenced code block in text and
+// returns the first one whose content parses as a JSON object. Iterating
+// (rather than stopping at the first match) is necessary because LLMs
+// commonly emit a ```text or ```bash preamble before the answer; stopping
+// at the first fence would silently drop the real result.
+//
+// The opening fence is required to have the canonical "fence + optional
+// language tag + newline" shape, so stray inline backticks in prose don't
+// kick off extraction in the wrong place. (Without that constraint, an
+// odd number of stray fences in the input would misalign every subsequent
+// pair.)
 func extractFencedJSON(text string) string {
-	const fence = "```"
-	rest := text
-	for {
-		// Skip to and past the next opening fence.
-		_, after, ok := strings.Cut(rest, fence)
-		if !ok {
-			return ""
-		}
-		// Skip the language-tag line (everything up to the first newline).
-		_, body, ok := strings.Cut(after, "\n")
-		if !ok {
-			return ""
-		}
-		// Take content up to the next fence as the candidate.
-		candidate, tail, ok := strings.Cut(body, fence)
-		if !ok {
-			return ""
-		}
-		if c := strings.TrimSpace(candidate); c != "" && isJSONObject(c) {
+	for _, m := range fencedBlockRE.FindAllStringSubmatch(text, -1) {
+		if c := strings.TrimSpace(m[1]); c != "" && isJSONObject(c) {
 			return c
 		}
-		rest = tail
 	}
+	return ""
 }
 
 // extractBracedJSON scans text for the first balanced top-level {…} span
