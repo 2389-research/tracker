@@ -87,70 +87,171 @@ func normalizeDeclaredKeys(keys []string) []string {
 	return out
 }
 
-// ExtractJSONFromText tries to find a valid JSON object embedded in text.
-// It first looks for ```json fenced blocks, then falls back to finding the
-// outermost { ... } substring. Returns the extracted JSON string and true
-// if a valid JSON object was found, or ("", false) otherwise.
+// ExtractJSONFromText tries to find a valid JSON OBJECT embedded in text. It
+// iterates ```...``` fenced blocks first (returning the first whose content
+// parses as a JSON object — so a non-JSON fence ahead of a valid JSON fence
+// doesn't block discovery), then falls back to scanning for top-level {…}
+// spans (preferring the first balanced span that parses, not the
+// outermost-brace shortcut, which fails when prose contains stray brace
+// pairs around real JSON).
+//
+// Returns the extracted JSON string and true if a valid JSON object was
+// found, or ("", false) otherwise.
+//
+// Intended for use by pipeline handlers; the Go-package boundary requires
+// it to be exported, but it isn't part of the stable embedder API.
 func ExtractJSONFromText(text string) (string, bool) {
-	// Try fenced JSON blocks first (```json ... ``` or ``` ... ```)
 	if extracted := extractFencedJSON(text); extracted != "" {
 		return extracted, true
 	}
-	// Try outermost braces
-	if extracted := extractOutermostJSON(text); extracted != "" {
+	if extracted := extractBracedJSON(text); extracted != "" {
 		return extracted, true
 	}
 	return "", false
 }
 
-// extractFencedJSON looks for a ```json or ``` fenced block containing valid JSON.
+// extractFencedJSON walks every ```...``` fenced block in text and returns
+// the first one whose content parses as a JSON object. Iterating (rather
+// than stopping at the first fence) is necessary because LLMs commonly
+// emit a ```text or ```bash preamble before the answer, and stopping at
+// the first fence would silently drop the real result.
 func extractFencedJSON(text string) string {
-	fence := "```"
-	start := strings.Index(text, fence)
-	if start < 0 {
-		return ""
+	const fence = "```"
+	rest := text
+	for {
+		// Skip to and past the next opening fence.
+		_, after, ok := strings.Cut(rest, fence)
+		if !ok {
+			return ""
+		}
+		// Skip the language-tag line (everything up to the first newline).
+		_, body, ok := strings.Cut(after, "\n")
+		if !ok {
+			return ""
+		}
+		// Take content up to the next fence as the candidate.
+		candidate, tail, ok := strings.Cut(body, fence)
+		if !ok {
+			return ""
+		}
+		if c := strings.TrimSpace(candidate); c != "" && isJSONObject(c) {
+			return c
+		}
+		rest = tail
 	}
-	// Skip past the opening fence and any language tag on the same line
-	contentStart := strings.Index(text[start+len(fence):], "\n")
-	if contentStart < 0 {
-		return ""
-	}
-	contentStart += start + len(fence) + 1 // +1 for the newline
-
-	// Find closing fence
-	end := strings.Index(text[contentStart:], fence)
-	if end < 0 {
-		return ""
-	}
-	candidate := strings.TrimSpace(text[contentStart : contentStart+end])
-	if candidate == "" {
-		return ""
-	}
-	// Validate it's a JSON object
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(candidate), &obj); err != nil {
-		return ""
-	}
-	return candidate
 }
 
-// extractOutermostJSON finds the first '{' and last '}' in the text and
-// checks whether the substring between them is a valid JSON object.
-func extractOutermostJSON(text string) string {
-	first := strings.IndexByte(text, '{')
-	if first < 0 {
-		return ""
+// extractBracedJSON scans text for the first balanced top-level {…} span
+// that parses as a JSON object. Unlike a first-`{` / last-`}` shortcut,
+// this handles prose like:
+//
+//	"Wrote {file1} and {file2}, then produced {\"x\": 1}. Done."
+//
+// where the outermost-brace approach picks an invalid span and returns
+// nothing even though a real JSON object is present.
+//
+// Top-level JSON arrays are NOT decomposed: `[{"a":1}]` returns "" because
+// the user supplied an array, not an object. Inner braces inside string
+// literals and arrays are skipped via state tracking so they can't kick off
+// an extraction.
+func extractBracedJSON(text string) string {
+	inString := false
+	escaped := false
+	arrayDepth := 0
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[':
+			arrayDepth++
+		case ']':
+			if arrayDepth > 0 {
+				arrayDepth--
+			}
+		case '{':
+			if arrayDepth > 0 {
+				// Inside a JSON array — skip; we don't decompose arrays.
+				continue
+			}
+			end, ok := matchBalancedBrace(text, i)
+			if !ok {
+				continue
+			}
+			candidate := text[i : end+1]
+			if isJSONObject(candidate) {
+				return candidate
+			}
+		}
 	}
-	last := strings.LastIndexByte(text, '}')
-	if last <= first {
-		return ""
+	return ""
+}
+
+// matchBalancedBrace returns the index of the '}' that closes the '{' at
+// start, or (0, false) if the braces are unbalanced. JSON-string content
+// is honored — a '{' or '}' inside a "..." string doesn't affect the depth.
+func matchBalancedBrace(text string, start int) (int, bool) {
+	if start >= len(text) || text[start] != '{' {
+		return 0, false
 	}
-	candidate := text[first : last+1]
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(text); i++ {
+		c := text[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// isJSONObject reports whether s parses as a JSON object (not an array,
+// scalar, or null). Used to gate extraction-helper return values.
+func isJSONObject(s string) bool {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "{") {
+		return false
+	}
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(candidate), &obj); err != nil {
-		return ""
+	if err := json.Unmarshal([]byte(s), &obj); err != nil {
+		return false
 	}
-	return candidate
+	return obj != nil
 }
 
 func rawJSONValueToContext(raw json.RawMessage) string {

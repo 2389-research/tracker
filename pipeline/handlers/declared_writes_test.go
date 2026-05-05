@@ -148,6 +148,88 @@ func TestApplyDeclaredWrites_DirectJSONStillWorks(t *testing.T) {
 	}
 }
 
+// Regression for CodeRabbit's "single-key fallback masks contract failures"
+// finding. When ExtractJSONFromText surfaces valid JSON that simply lacks the
+// declared key, the old code fell back to raw — silently shipping the entire
+// prose response under a name it didn't fit. The fix gates the fallback on
+// !foundExtractableJSON; this test pins it.
+func TestApplyDeclaredWrites_ExtractedJSONMissingKeyHardFails(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "n1",
+		Attrs: map[string]string{"writes": "spec_analysis"},
+	}
+	// Prose containing valid JSON, but the JSON has the wrong key.
+	raw := "Result: {\"other_key\": \"x\"} done."
+	ctx := map[string]string{}
+	failed := applyDeclaredWrites(node, ctx, raw, "Response JSON")
+	if !failed {
+		t.Fatal("expected failure when extracted JSON lacks the declared key")
+	}
+	if _, ok := ctx[contextKeyWritesError]; !ok {
+		t.Fatal("expected writes_error to be set")
+	}
+	if _, ok := ctx["spec_analysis"]; ok {
+		t.Fatal("expected spec_analysis to NOT be set (raw fallback should be inhibited)")
+	}
+	// Error message should reflect the actual failure mode.
+	msg := ctx[contextKeyWritesError]
+	if !strings.Contains(msg, "extractable JSON but failed the writes contract") {
+		t.Fatalf("expected specific error referencing extractable-but-noncontract JSON, got: %s", msg)
+	}
+}
+
+// Defense against a workflow author declaring a writes key that collides
+// with the tool_command safe-key allowlist. Without this guard, an LLM could
+// land arbitrary content in `outcome` / `human_response` etc, bypassing
+// the sanitization that exists exactly for shell input.
+func TestApplyDeclaredWrites_RejectsSafeKeyCollision(t *testing.T) {
+	for _, key := range []string{"outcome", "preferred_label", "human_response", "interview_answers"} {
+		t.Run(key, func(t *testing.T) {
+			node := &pipeline.Node{
+				ID:    "n1",
+				Attrs: map[string]string{"writes": key},
+			}
+			ctx := map[string]string{}
+			failed := applyDeclaredWrites(node, ctx, `{"`+key+`": "x"}`, "Response JSON")
+			if !failed {
+				t.Fatalf("expected failure for writes-key collision with %q", key)
+			}
+			if _, ok := ctx[key]; ok {
+				t.Fatalf("expected %q to NOT be written; collision must be rejected before any value lands", key)
+			}
+			msg := ctx[contextKeyWritesError]
+			if !strings.Contains(msg, "safe-key allowlist") {
+				t.Fatalf("expected error to mention safe-key allowlist, got: %s", msg)
+			}
+		})
+	}
+}
+
+// Regression for the correctness reviewer's "uncapped fallback bloats
+// artifacts" finding. A 50KB raw response landing in a single context key
+// would propagate to status.json, activity.jsonl, checkpoints, and downstream
+// prompts. Cap is enforced at maxFallbackValueBytes.
+func TestApplyDeclaredWrites_FallbackValueIsCapped(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "n1",
+		Attrs: map[string]string{"writes": "blob"},
+	}
+	// Build a >maxFallbackValueBytes raw response with no JSON anywhere.
+	raw := strings.Repeat("a", maxFallbackValueBytes*3)
+	ctx := map[string]string{}
+	failed := applyDeclaredWrites(node, ctx, raw, "Response JSON")
+	if failed {
+		t.Fatalf("expected single-key prose fallback to succeed, got: %s", ctx[contextKeyWritesError])
+	}
+	got := ctx["blob"]
+	if len(got) >= len(raw) {
+		t.Fatalf("expected fallback to be truncated, got len=%d (raw len=%d)", len(got), len(raw))
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Fatal("expected truncation marker in capped fallback")
+	}
+}
+
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }

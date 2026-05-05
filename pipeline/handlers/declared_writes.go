@@ -11,6 +11,12 @@ const (
 	contextKeyWritesError   = "writes_error"
 	contextKeyWritesWarning = "writes_warning"
 	maxWritesErrorRawLen    = 512
+	// maxFallbackValueBytes caps the size of the raw-response fallback value
+	// that lands in a context key. Without a cap, a 10MB tool stdout (the
+	// hard ceiling) or unbounded LLM response would be persisted into
+	// status.json, activity.jsonl, checkpoints, and inlined into downstream
+	// prompts.
+	maxFallbackValueBytes = 8192
 )
 
 func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, rawJSON string, source string) (failed bool) {
@@ -19,21 +25,45 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 		return false
 	}
 
-	// Try direct JSON parse first.
+	// Reject writes-key collisions with the tool_command safe-key allowlist.
+	// The allowlist (outcome, preferred_label, human_response,
+	// interview_answers) is enforced fail-closed in tool_command expansion to
+	// keep LLM output out of shell input. A workflow that declared
+	// `writes: outcome` would funnel LLM-controlled content into the reserved
+	// name and bypass the gate — refuse the node rather than silently land
+	// the data.
+	for _, key := range writes {
+		if pipeline.IsToolCommandSafeCtxKey(key) {
+			contextUpdates[contextKeyWritesError] = fmt.Sprintf(
+				"node %q: declared writes key %q collides with the tool_command safe-key allowlist; reserved keys cannot be set from declared writes",
+				node.ID, key,
+			)
+			return true
+		}
+	}
+
+	// Healing cascade: direct JSON → embedded JSON → raw fallback.
 	updates, extras, err := pipeline.ExtractDeclaredWrites(writes, rawJSON)
 
 	// If direct parse failed, try extracting JSON embedded in the text.
+	// Track whether extraction surfaced any JSON object — even if that JSON
+	// turned out to be missing the declared key, we don't want to silently
+	// fall back to raw prose (that would mask a real contract failure).
+	foundExtractableJSON := false
 	if err != nil {
 		if extracted, ok := pipeline.ExtractJSONFromText(rawJSON); ok {
+			foundExtractableJSON = true
 			updates, extras, err = pipeline.ExtractDeclaredWrites(writes, extracted)
 		}
 	}
 
-	// If still failed and single write key, fall back to using the raw
-	// response as the value. This handles the common case where an LLM
-	// writes to a file and responds with prose instead of JSON.
-	if err != nil && len(writes) == 1 {
-		contextUpdates[writes[0]] = rawJSON
+	// Single-key fallback: only when no JSON was extractable AT ALL. A model
+	// that returned valid JSON missing the declared key gets a hard contract
+	// failure (below) rather than silently shipping the entire raw response
+	// under a name it doesn't fit. Cap the fallback value size so tool
+	// stdout or long LLM responses don't bloat downstream artifacts.
+	if err != nil && len(writes) == 1 && !foundExtractableJSON {
+		contextUpdates[writes[0]] = capFallbackValue(rawJSON)
 		contextUpdates[contextKeyWritesWarning] = fmt.Sprintf(
 			"node %q: writes extraction fell back to raw response for key %q (no JSON found in output)",
 			node.ID, writes[0],
@@ -42,7 +72,18 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 	}
 
 	if err != nil {
-		contextUpdates[contextKeyWritesError] = formatWritesError(node.ID, writes, source, err, rawJSON)
+		// If we DID find extractable JSON but it failed the contract, the
+		// generic "raw output not parseable as JSON" message would mislead.
+		// Distinguish the two failure modes so `tracker diagnose` can guide
+		// the user to the actual problem.
+		if foundExtractableJSON {
+			contextUpdates[contextKeyWritesError] = fmt.Sprintf(
+				"node %q declared writes: [%s]\n%s contained extractable JSON but failed the writes contract: %v",
+				node.ID, strings.Join(writes, ", "), source, err,
+			)
+		} else {
+			contextUpdates[contextKeyWritesError] = formatWritesError(node.ID, writes, source, err, rawJSON)
+		}
 		return true
 	}
 
@@ -72,6 +113,21 @@ func dedupeDeclaredWrites(writes []string) []string {
 		deduped = append(deduped, write)
 	}
 	return deduped
+}
+
+// capFallbackValue caps a raw-response fallback value at maxFallbackValueBytes.
+// Without a cap, a multi-megabyte tool stdout or long LLM response would land
+// in a context key and from there into status.json, activity.jsonl,
+// checkpoints, and downstream prompts. Truncation marker tells the user the
+// stored value isn't the whole response.
+func capFallbackValue(s string) string {
+	if len(s) <= maxFallbackValueBytes {
+		return s
+	}
+	return fmt.Sprintf(
+		"%s\n\n…(truncated at %d bytes; original was %d bytes)",
+		s[:maxFallbackValueBytes], maxFallbackValueBytes, len(s),
+	)
 }
 
 func formatWritesError(nodeID string, writes []string, source string, parseErr error, raw string) string {
