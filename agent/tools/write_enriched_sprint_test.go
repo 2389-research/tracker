@@ -184,6 +184,14 @@ func TestSimilarityRatio_KnownPairs(t *testing.T) {
 		{"foo", "completely different", 0.0, 0.2},
 		{"", "", 1.0, 1.0},
 		{"", "x", 0.0, 0.0},
+		// Non-ASCII regression: em-dash is 3 bytes / 1 rune. Two 18-rune
+		// strings differing by exactly one rune (em-dash → en-dash) should
+		// score ~0.944 (1 - 1/18). With byte-length divisor (22 bytes each)
+		// the ratio collapses to ~0.954 with one edit but to ~0.864 if the
+		// edit is across a multi-byte rune boundary — this case asserts the
+		// rune-correct divisor is in use.
+		{"sprint 001 — title", "sprint 001 – title", 0.94, 0.95},
+		{"abc—xyz", "abc—xyz", 1.0, 1.0},
 	}
 	for _, tc := range cases {
 		got := similarityRatio(tc.a, tc.b)

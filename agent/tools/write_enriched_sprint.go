@@ -1107,12 +1107,17 @@ func indentLines(s, indent string) string {
 // use case (catching minor character drift in audit SR blocks) the two metrics
 // agree closely on whether two strings are "approximately equal" at threshold
 // 0.9.
+//
+// Lengths are measured in runes — levenshteinDistance operates on runes too,
+// so divisor and dividend are in the same unit. Using byte lengths here would
+// understate the ratio for any non-ASCII content (em-dashes, smart quotes,
+// CJK), which is common in sprint specs.
 func similarityRatio(a, b string) float64 {
 	if a == b {
 		return 1.0
 	}
-	la := len(a)
-	lb := len(b)
+	la := len([]rune(a))
+	lb := len([]rune(b))
 	if la == 0 && lb == 0 {
 		return 1.0
 	}
