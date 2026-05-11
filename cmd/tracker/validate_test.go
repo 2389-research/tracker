@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
 const validDOT = `digraph test {
@@ -112,6 +114,31 @@ func TestParseFlagsValidate(t *testing.T) {
 	}
 	if cfg.pipelineFile != "pipeline.dot" {
 		t.Errorf("pipelineFile = %q, want pipeline.dot", cfg.pipelineFile)
+	}
+}
+
+// TestValidateDipxBundle is the regression test for the Task 5 dispatch
+// path on validate. After validate.go was migrated to route through
+// loadPipelineAndBundle, a future refactor that re-routed it back to a
+// plain file-read + ValidateSource pair would silently break .dipx
+// validation. Pack a real bundle and assert the command exits clean with
+// "valid" in the output.
+func TestValidateDipxBundle(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.dip")
+	if err := os.WriteFile(entry, []byte(dipxtest.MinimalDip("validate_dipx", "start", "exit")), 0o644); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entry)
+
+	var buf bytes.Buffer
+	if err := runValidateCmd(bundlePath, "", &buf); err != nil {
+		t.Fatalf("runValidateCmd on .dipx: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "valid") {
+		t.Errorf("expected 'valid' in .dipx output, got:\n%s", output)
 	}
 }
 
