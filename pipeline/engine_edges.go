@@ -14,35 +14,69 @@ import (
 func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error) {
 	ctxSnap := e.routingContextSnapshot(pctx)
 
-	if edge, err := e.selectByCondition(edges, pctx, ctxSnap); edge != nil || err != nil {
+	edge, conditionsTried, err := e.selectByCondition(edges, pctx, ctxSnap)
+	if edge != nil || err != nil {
 		return edge, err
 	}
 
+	// All conditionals (if any) evaluated false. If any *did* exist, the
+	// fallback path we take next is a "stated-intent miss" — emit
+	// EventConditionalFallthrough so `tracker diagnose` can correlate
+	// with EventToolOutputTruncated (issue #208).
+	emitFallthrough := func(selected *Edge, priority string) {
+		if len(conditionsTried) == 0 || selected == nil {
+			return
+		}
+		e.emit(PipelineEvent{
+			Type:      EventConditionalFallthrough,
+			Timestamp: time.Now(),
+			NodeID:    selected.From,
+			Message:   fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false, fell back to %s edge -> %q", selected.From, len(conditionsTried), priority, selected.To),
+			Decision: &DecisionDetail{
+				EdgeFrom:        selected.From,
+				EdgeTo:          selected.To,
+				EdgePriority:    priority,
+				ContextSnapshot: ctxSnap,
+				ConditionsTried: conditionsTried,
+			},
+		})
+	}
+
 	if edge := e.selectByLabel(edges, pctx, ctxSnap); edge != nil {
+		emitFallthrough(edge, "label")
 		return edge, nil
 	}
 
 	if edge := e.selectBySuggested(edges, pctx, ctxSnap); edge != nil {
+		emitFallthrough(edge, "suggested")
 		return edge, nil
 	}
 
-	return e.selectByWeight(edges, pctx, ctxSnap)
+	edge, err = e.selectByWeight(edges, pctx, ctxSnap)
+	if err == nil && edge != nil {
+		emitFallthrough(edge, "weight")
+	}
+	return edge, err
 }
 
-// selectByCondition evaluates condition expressions on edges, returning the first match.
-func (e *Engine) selectByCondition(edges []*Edge, pctx *PipelineContext, ctxSnap map[string]string) (*Edge, error) {
+// selectByCondition evaluates condition expressions on edges, returning the
+// first match. Also returns the list of conditionals that evaluated false
+// (in declaration order) so the caller can emit a fallthrough signal if
+// routing ends up picking an unconditional fallback.
+func (e *Engine) selectByCondition(edges []*Edge, pctx *PipelineContext, ctxSnap map[string]string) (*Edge, []ConditionEval, error) {
 	params := ExtractParamsFromGraphAttrs(e.graph.Attrs)
+	var triedFalse []ConditionEval
 	for _, edge := range edges {
 		if edge.Condition == "" {
 			continue
 		}
 		expandedCondition, err := ExpandVariables(edge.Condition, pctx, params, e.graph.Attrs, false)
 		if err != nil {
-			return nil, fmt.Errorf("expand condition on edge %s->%s: %w", edge.From, edge.To, err)
+			return nil, nil, fmt.Errorf("expand condition on edge %s->%s: %w", edge.From, edge.To, err)
 		}
 		match, err := EvaluateCondition(expandedCondition, pctx)
 		if err != nil {
-			return nil, fmt.Errorf("evaluate condition on edge %s->%s: %w", edge.From, edge.To, err)
+			return nil, nil, fmt.Errorf("evaluate condition on edge %s->%s: %w", edge.From, edge.To, err)
 		}
 		e.emit(PipelineEvent{
 			Type:      EventDecisionCondition,
@@ -59,10 +93,11 @@ func (e *Engine) selectByCondition(edges []*Edge, pctx *PipelineContext, ctxSnap
 		})
 		if match {
 			e.emitEdgeSelected(edge, "condition", ctxSnap)
-			return edge, nil
+			return edge, nil, nil
 		}
+		triedFalse = append(triedFalse, ConditionEval{EdgeTo: edge.To, Condition: edge.Condition})
 	}
-	return nil, nil
+	return nil, triedFalse, nil
 }
 
 // selectByLabel matches edges by the preferred label stored in context.

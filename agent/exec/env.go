@@ -8,10 +8,21 @@ import (
 )
 
 // CommandResult holds the output and exit status of an executed command.
+//
+// When the command was run via ExecCommandWithLimit and a stream exceeded
+// the per-stream cap, StdoutTruncated / StderrTruncated are set and the
+// matching BytesDropped field carries how many bytes were elided from the
+// head of the stream. The captured strings always contain the tail of the
+// stream up to the cap. Truncation flags default to false / 0 when the
+// stream did not overflow or when ExecCommand (unbounded) was used.
 type CommandResult struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
+	Stdout             string
+	Stderr             string
+	ExitCode           int
+	StdoutTruncated    bool
+	StdoutBytesDropped int
+	StderrTruncated    bool
+	StderrBytesDropped int
 }
 
 // ExecutionEnvironment abstracts filesystem and process operations so that

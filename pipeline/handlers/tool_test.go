@@ -629,3 +629,76 @@ func TestToolHandler_ParseTimeout(t *testing.T) {
 		}
 	})
 }
+
+// Direct regression test for issue #208: a tool command that emits a
+// flood of stdout followed by a trailing routing marker must produce an
+// Outcome whose ctx.tool_stdout ends with the marker, so a conditional
+// edge can route correctly. Pre-fix this would silently keep the head
+// 64KB and drop the marker. Also asserts that the Outcome carries a
+// stdout TruncationDetail so the engine can emit
+// EventToolOutputTruncated. Skips when sh is unavailable.
+func TestToolHandler_RoutingMarkerPastHeadWindow_208(t *testing.T) {
+	if _, err := osexec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "RunTests",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": "head -c 120000 /dev/zero | tr '\\0' '.'; printf 'tests-fail-cloud'",
+			"output_limit": "65536",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
+	if !strings.HasSuffix(stdout, "tests-fail-cloud") {
+		t.Errorf("routing marker must survive tail-window capture; got tail = %q", stdout[len(stdout)-40:])
+	}
+	if len(outcome.Truncations) != 1 {
+		t.Fatalf("expected 1 truncation entry, got %d", len(outcome.Truncations))
+	}
+	td := outcome.Truncations[0]
+	if td.Stream != "stdout" {
+		t.Errorf("Stream = %q, want %q", td.Stream, "stdout")
+	}
+	if td.Limit != 65536 {
+		t.Errorf("Limit = %d, want 65536", td.Limit)
+	}
+	if td.DroppedBytes == 0 {
+		t.Error("DroppedBytes = 0, want >0 since 120KB+marker > 64KB limit")
+	}
+	if td.TotalBytes != td.CapturedBytes+td.DroppedBytes {
+		t.Errorf("TotalBytes (%d) != CapturedBytes (%d) + DroppedBytes (%d)", td.TotalBytes, td.CapturedBytes, td.DroppedBytes)
+	}
+}
+
+// Asserts that when neither stream overflows, Outcome.Truncations is
+// nil/empty so the engine does not emit a spurious EventToolOutputTruncated.
+func TestToolHandler_NoTruncationWhenWithinLimit(t *testing.T) {
+	if _, err := osexec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	env := exec.NewLocalEnvironment(t.TempDir())
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "small",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": "printf 'tests-pass'"},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcome.Truncations) != 0 {
+		t.Errorf("expected no truncations on small output, got %d entries", len(outcome.Truncations))
+	}
+}

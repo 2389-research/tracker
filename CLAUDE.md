@@ -272,6 +272,30 @@ This applies to `tracker validate`, `tracker simulate`, and `tracker run` unifor
 - `autopilotCfg` in `cmd/tracker/run.go` threads the config to `chooseInterviewer`
 - For fully headless execution without an LLM judge, use `--webhook-url` instead — gates are POSTed to an external service and blocked on a callback (Closes #63, #86)
 
+### Tool output capture (v0.25.2+)
+
+- `ctx.tool_stdout` and `ctx.tool_stderr` carry the **tail** of the
+  stream up to the per-stream cap (default 64KB, `output_limit` per-node
+  override). Head bytes are elided when the stream overflows. Routing
+  markers emitted at end-of-output via `printf` survive truncation by
+  construction. This matches the documented "right-trimmed so edge
+  conditions match reliably" contract that pre-#208 the runtime
+  violated by keeping the head.
+- When a stream overflows, the runtime emits `EventToolOutputTruncated`
+  with `TruncationDetail{stream, limit, captured_bytes, dropped_bytes}`.
+  `tracker diagnose` surfaces this as a suggestion. The captured value
+  itself contains **only** the tail payload — no in-band marker string
+  is appended (pre-#208 a `"...(output truncated at N bytes)"` suffix
+  was embedded, which could clobber routing-relevant trailing tokens).
+- When a node's outgoing edges include conditional predicates AND all
+  conditionals evaluate false AND routing falls through to an
+  unconditional edge, the engine emits `EventConditionalFallthrough`
+  with the list of conditions that missed. This does NOT fire on
+  intentional unconditional-only routing — it specifically marks
+  "stated routing intent missed." `tracker diagnose` correlates this
+  with truncation events to surface "your routing marker may have been
+  dropped" when both fire on the same node.
+
 ### Tool node safety — LLM output as shell input
 - NEVER `eval` content extracted from LLM-written files (arbitrary command execution)
 - Variable expansion in tool_command uses a safe-key allowlist for `ctx.*` keys: only `outcome`, `preferred_label`, `human_response`, `interview_answers` can be interpolated. All `graph.*` and `params.*` keys are always allowed (author-controlled). All LLM-origin `ctx.*` keys (`last_response`, `tool_stdout`, `response.*`, etc.) are blocked. `manager_loop` steer_context keys are namespaced under `steer.*` (#177 option B) so they can never collide with the safe-allowlisted bare keys above — even if a future feature lets steer_context values come from LLM output, those values reach the child as `steer.<key>` and are blocked from tool_command expansion by virtue of not being on the allowlist.

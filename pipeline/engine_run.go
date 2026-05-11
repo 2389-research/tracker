@@ -489,6 +489,24 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	traceEntry.Status = outcome.Status
 	traceEntry.Stats = outcome.Stats
 	traceEntry.ChildUsage = outcome.ChildUsage
+
+	// Surface tool-output truncation as structured events so `tracker
+	// diagnose`, the TUI activity log, and NDJSON consumers can correlate
+	// routing misses with dropped output (issue #208). One event per
+	// truncated stream — stdout and stderr can both fire if both
+	// overflowed the per-stream cap.
+	for i := range outcome.Truncations {
+		td := outcome.Truncations[i]
+		e.emit(PipelineEvent{
+			Type:       EventToolOutputTruncated,
+			Timestamp:  time.Now(),
+			RunID:      s.runID,
+			NodeID:     currentNodeID,
+			Message:    fmt.Sprintf("tool node %q: %s truncated — captured last %d bytes, dropped %d bytes from head (limit %d)", currentNodeID, td.Stream, td.CapturedBytes, td.DroppedBytes, td.Limit),
+			Truncation: &td,
+		})
+	}
+
 	return &outcome, traceEntry, nil
 }
 

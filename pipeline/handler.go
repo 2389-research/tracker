@@ -27,6 +27,12 @@ type Outcome struct {
 	// BudgetGuard enforcement to see child spend once control returns to
 	// the parent.
 	ChildUsage *UsageSummary
+	// Truncations records output streams that exceeded their per-stream
+	// cap during this node's execution. The engine emits one
+	// EventToolOutputTruncated per entry so `tracker diagnose` and the
+	// audit log can correlate routing misses with truncation (issue #208).
+	// Currently populated only by the tool handler.
+	Truncations []TruncationDetail
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

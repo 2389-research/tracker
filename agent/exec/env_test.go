@@ -132,11 +132,24 @@ func TestExecCommandWithLimit_Truncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.Stdout) > 1100 {
-		t.Errorf("stdout len = %d, want <= ~1100", len(result.Stdout))
+	if len(result.Stdout) != 1024 {
+		t.Errorf("stdout len = %d, want exactly 1024 (tail window)", len(result.Stdout))
 	}
-	if !strings.Contains(result.Stdout, "...(output truncated") {
-		t.Error("expected truncation marker in stdout")
+	if !result.StdoutTruncated {
+		t.Error("expected StdoutTruncated=true")
+	}
+	if result.StdoutBytesDropped != 200000-1024 {
+		t.Errorf("StdoutBytesDropped = %d, want %d", result.StdoutBytesDropped, 200000-1024)
+	}
+	// `yes hello | head -c 200000` cuts a "hello\n"-repeating stream at an
+	// arbitrary byte boundary, so the kept tail may end mid-line. Sanity
+	// check: every byte in the captured tail must come from the alphabet
+	// of "hello\n", proving no garbage and that the ring wrap is coherent.
+	for i, b := range []byte(result.Stdout) {
+		if !strings.ContainsRune("hello\n", rune(b)) {
+			t.Errorf("byte %d = %q not in 'hello\\n' alphabet", i, b)
+			break
+		}
 	}
 }
 
@@ -149,8 +162,64 @@ func TestExecCommandWithLimit_NoTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(result.Stdout, "truncated") {
-		t.Error("small output should not be truncated")
+	if result.StdoutTruncated {
+		t.Error("small output should not set StdoutTruncated")
+	}
+	if result.StdoutBytesDropped != 0 {
+		t.Errorf("StdoutBytesDropped = %d, want 0", result.StdoutBytesDropped)
+	}
+	if result.Stdout != "hello\n" {
+		t.Errorf("got %q, want %q", result.Stdout, "hello\n")
+	}
+}
+
+// Direct regression test for issue #208: a routing marker emitted after a
+// flood of stdout must survive capture so downstream conditional edges can
+// match on it. Mirrors the notebook_smoke failure shape (pytest stack
+// traces followed by a trailing `printf` of the routing token).
+func TestExecCommandWithLimit_RoutingMarkerSurvivesFlood(t *testing.T) {
+	env := NewLocalEnvironment(t.TempDir())
+	result, err := env.ExecCommandWithLimit(
+		context.Background(), "sh",
+		[]string{"-c", "head -c 120000 /dev/zero | tr '\\0' '.'; printf 'tests-fail-cloud'"},
+		5*time.Second, 65536,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.StdoutTruncated {
+		t.Error("expected StdoutTruncated=true for 120KB+marker output")
+	}
+	if !strings.HasSuffix(result.Stdout, "tests-fail-cloud") {
+		t.Errorf("routing marker must appear at end of captured tail; got tail = %q", result.Stdout[len(result.Stdout)-40:])
+	}
+}
+
+// Stderr parity: closes a pre-existing coverage gap. Tail-window semantics
+// must apply identically to stderr because conditional edges can route on
+// `ctx.tool_stderr`.
+func TestExecCommandWithLimit_StderrTailParity(t *testing.T) {
+	env := NewLocalEnvironment(t.TempDir())
+	result, err := env.ExecCommandWithLimit(
+		context.Background(), "sh",
+		[]string{"-c", "head -c 120000 /dev/zero | tr '\\0' '.' 1>&2; printf 'stderr-marker' 1>&2"},
+		5*time.Second, 65536,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.StderrTruncated {
+		t.Error("expected StderrTruncated=true")
+	}
+	if result.StderrBytesDropped == 0 {
+		t.Error("expected StderrBytesDropped > 0")
+	}
+	if !strings.HasSuffix(result.Stderr, "stderr-marker") {
+		t.Errorf("stderr marker must survive truncation; got tail = %q", result.Stderr[len(result.Stderr)-40:])
+	}
+	// Stdout was never written to; its truncation flag must be false.
+	if result.StdoutTruncated {
+		t.Error("StdoutTruncated must remain false when only stderr was written")
 	}
 }
 

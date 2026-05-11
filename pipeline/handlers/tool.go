@@ -336,6 +336,29 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 			pipeline.ContextKeyToolStderr: stderr,
 		},
 	}
+	// Surface truncation as structured outcome metadata so the engine can
+	// emit EventToolOutputTruncated and `tracker diagnose` can correlate
+	// routing misses with dropped output (issue #208). Tail-window capture
+	// preserves the routing-relevant trailing bytes; the event tells
+	// operators that earlier bytes were elided.
+	if result.StdoutTruncated {
+		outcome.Truncations = append(outcome.Truncations, pipeline.TruncationDetail{
+			Stream:        "stdout",
+			Limit:         outputLimit,
+			CapturedBytes: len(result.Stdout),
+			DroppedBytes:  result.StdoutBytesDropped,
+			TotalBytes:    len(result.Stdout) + result.StdoutBytesDropped,
+		})
+	}
+	if result.StderrTruncated {
+		outcome.Truncations = append(outcome.Truncations, pipeline.TruncationDetail{
+			Stream:        "stderr",
+			Limit:         outputLimit,
+			CapturedBytes: len(result.Stderr),
+			DroppedBytes:  result.StderrBytesDropped,
+			TotalBytes:    len(result.Stderr) + result.StderrBytesDropped,
+		})
+	}
 	if applyDeclaredWrites(node, outcome.ContextUpdates, stdout, "Tool stdout JSON") {
 		outcome.Status = pipeline.OutcomeFail
 	}

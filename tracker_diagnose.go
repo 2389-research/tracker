@@ -88,6 +88,14 @@ const (
 	SuggestionGoTest           SuggestionKind = "go_test"
 	SuggestionSuspiciousTiming SuggestionKind = "suspicious_timing"
 	SuggestionBudget           SuggestionKind = "budget"
+	// SuggestionToolOutputTruncated fires when a tool node's output stream
+	// exceeded its per-stream cap. Surfaces actionable copy pointing at
+	// output_limit and at the canonical authoring pattern. Issue #208.
+	SuggestionToolOutputTruncated SuggestionKind = "tool_output_truncated"
+	// SuggestionConditionalFallthrough fires when a node's conditional
+	// routing edges all evaluated false and routing fell back to an
+	// unconditional edge. Issue #208.
+	SuggestionConditionalFallthrough SuggestionKind = "conditional_fallthrough"
 )
 
 // Diagnose analyzes a run directory and returns a structured report.
@@ -119,14 +127,37 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 		CompletedNodes: len(cp.CompletedNodes),
 	}
 	failures := collectNodeFailures(runDir, logW)
-	halt, err := enrichFromActivity(ctx, runDir, failures, logW)
+	halt, anomalies, err := enrichFromActivity(ctx, runDir, failures, logW)
 	if err != nil {
 		return nil, err
 	}
 	report.BudgetHalt = halt
 	report.Failures = sortedFailures(failures)
-	report.Suggestions = buildSuggestions(report.Failures, report.BudgetHalt)
+	report.Suggestions = buildSuggestions(report.Failures, report.BudgetHalt, anomalies)
 	return report, nil
+}
+
+// runtimeAnomalies are non-failure events that nonetheless warrant a
+// surfaced suggestion in the diagnose report. Today: tool stdout/stderr
+// truncations (#208) and conditional-edge fallthroughs (#208 Tier 2).
+type runtimeAnomalies struct {
+	Truncations  []truncObservation
+	Fallthroughs []fallthroughObservation
+}
+
+type truncObservation struct {
+	NodeID        string
+	Stream        string
+	Limit         int
+	CapturedBytes int
+	DroppedBytes  int
+	TotalBytes    int
+}
+
+type fallthroughObservation struct {
+	NodeID          string
+	EdgeTo          string
+	ConditionsTried []pipeline.ConditionEval
 }
 
 // DiagnoseMostRecent finds the most recent run under workdir and diagnoses it.
@@ -209,6 +240,17 @@ type diagnoseEntry struct {
 	TotalTokens   int     `json:"total_tokens"`
 	TotalCostUSD  float64 `json:"total_cost_usd"`
 	WallElapsedMs int64   `json:"wall_elapsed_ms"`
+
+	// Truncation event fields (#208).
+	TruncStream   string `json:"trunc_stream"`
+	TruncLimit    int    `json:"trunc_limit"`
+	TruncCaptured int    `json:"trunc_captured_bytes"`
+	TruncDropped  int    `json:"trunc_dropped_bytes"`
+	TruncTotal    int    `json:"trunc_total_bytes"`
+
+	// Conditional-fallthrough event fields (#208).
+	EdgeTo          string                    `json:"edge_to"`
+	ConditionsTried []pipeline.ConditionEval  `json:"conditions_tried"`
 }
 
 // enrichFromActivity streams activity.jsonl, populating failures + detecting
@@ -217,27 +259,28 @@ type diagnoseEntry struct {
 // mid-parse, and scanner.Err() if the scanner aborts (buffer overflow at
 // 1 MB, I/O error) — both surface truncation to the caller so partial
 // analysis is never silently treated as authoritative.
-func enrichFromActivity(ctx context.Context, runDir string, failures map[string]*NodeFailure, logW io.Writer) (*BudgetHalt, error) {
+func enrichFromActivity(ctx context.Context, runDir string, failures map[string]*NodeFailure, logW io.Writer) (*BudgetHalt, runtimeAnomalies, error) {
 	path := filepath.Join(runDir, "activity.jsonl")
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, runtimeAnomalies{}, nil
 		}
-		return nil, fmt.Errorf("open activity log: %w", err)
+		return nil, runtimeAnomalies{}, fmt.Errorf("open activity log: %w", err)
 	}
 	defer f.Close()
 
 	stageStarts := map[string]time.Time{}
 	failSignatures := map[string][]string{}
 	var halt *BudgetHalt
+	var anomalies runtimeAnomalies
 
 	scanner := bufio.NewScanner(f)
 	// Match LoadActivityLog: allow 1 MB lines.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, runtimeAnomalies{}, err
 		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -247,22 +290,38 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		if entry.Type == "budget_exceeded" {
+		switch entry.Type {
+		case "budget_exceeded":
 			halt = &BudgetHalt{
 				TotalTokens:   entry.TotalTokens,
 				TotalCostUSD:  entry.TotalCostUSD,
 				WallElapsedMs: entry.WallElapsedMs,
 				Message:       entry.Message,
 			}
+		case "tool_output_truncated":
+			anomalies.Truncations = append(anomalies.Truncations, truncObservation{
+				NodeID:        entry.NodeID,
+				Stream:        entry.TruncStream,
+				Limit:         entry.TruncLimit,
+				CapturedBytes: entry.TruncCaptured,
+				DroppedBytes:  entry.TruncDropped,
+				TotalBytes:    entry.TruncTotal,
+			})
+		case "conditional_fallthrough":
+			anomalies.Fallthroughs = append(anomalies.Fallthroughs, fallthroughObservation{
+				NodeID:          entry.NodeID,
+				EdgeTo:          entry.EdgeTo,
+				ConditionsTried: entry.ConditionsTried,
+			})
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(logW, "warning: activity log scanner stopped at %s: %v\n", path, err)
-		return nil, fmt.Errorf("scan activity log: %w", err)
+		return nil, runtimeAnomalies{}, fmt.Errorf("scan activity log: %w", err)
 	}
 	applyRetryAnalysis(failures, failSignatures)
-	return halt, nil
+	return halt, anomalies, nil
 }
 
 func enrichFromEntry(entry diagnoseEntry, failures map[string]*NodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string) {
@@ -344,7 +403,7 @@ func sortedFailures(m map[string]*NodeFailure) []NodeFailure {
 	return out
 }
 
-func buildSuggestions(failures []NodeFailure, halt *BudgetHalt) []Suggestion {
+func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtimeAnomalies) []Suggestion {
 	var out []Suggestion
 	for _, f := range failures {
 		out = append(out, suggestionsForNodeFailure(f)...)
@@ -353,6 +412,49 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt) []Suggestion {
 		out = append(out, Suggestion{
 			Kind:    SuggestionBudget,
 			Message: "Raise the relevant --max-tokens, --max-cost, or --max-wall-time flag, or remove the Config.Budget value",
+		})
+	}
+	// Index fallthroughs by node so we can correlate with truncations and
+	// produce a richer "your routing marker may have been dropped" hint
+	// when both events fire on the same node (issue #208 root case).
+	fallthroughByNode := map[string]fallthroughObservation{}
+	for _, fb := range anomalies.Fallthroughs {
+		fallthroughByNode[fb.NodeID] = fb
+	}
+	for _, tr := range anomalies.Truncations {
+		msg := fmt.Sprintf("%s: %s truncated — captured last %d bytes of ~%d (dropped %d from head; limit %d). If this tool emits a routing marker at end-of-output, the tail-window capture preserved it. Raise the per-node `output_limit` attribute if you need more context retained.",
+			tr.NodeID, tr.Stream, tr.CapturedBytes, tr.TotalBytes, tr.DroppedBytes, tr.Limit)
+		if fb, ok := fallthroughByNode[tr.NodeID]; ok {
+			var tried []string
+			for _, c := range fb.ConditionsTried {
+				tried = append(tried, c.Condition)
+			}
+			msg += fmt.Sprintf(" Note: routing on this node also fell through to %q after %d conditional edge(s) evaluated false (%s) — verify the captured tail is what you expect.",
+				fb.EdgeTo, len(fb.ConditionsTried), strings.Join(tried, "; "))
+		}
+		out = append(out, Suggestion{
+			NodeID: tr.NodeID, Kind: SuggestionToolOutputTruncated, Message: msg,
+		})
+	}
+	// Fallthroughs without an accompanying truncation: surface as their
+	// own suggestion so users see "stated routing intent missed" even
+	// when truncation wasn't the cause.
+	truncByNode := map[string]bool{}
+	for _, tr := range anomalies.Truncations {
+		truncByNode[tr.NodeID] = true
+	}
+	for _, fb := range anomalies.Fallthroughs {
+		if truncByNode[fb.NodeID] {
+			continue
+		}
+		var tried []string
+		for _, c := range fb.ConditionsTried {
+			tried = append(tried, c.Condition)
+		}
+		out = append(out, Suggestion{
+			NodeID: fb.NodeID, Kind: SuggestionConditionalFallthrough,
+			Message: fmt.Sprintf("%s: %d conditional edge(s) all evaluated false (%s); routing fell back to %q. If this was unintentional, check the routing context — `ctx.outcome`, `ctx.tool_stdout`, or whatever your conditions reference.",
+				fb.NodeID, len(fb.ConditionsTried), strings.Join(tried, "; "), fb.EdgeTo),
 		})
 	}
 	return out

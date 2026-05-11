@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tool stdout/stderr truncation now keeps the tail, not the head** (closes
+  [#208](https://github.com/2389-research/tracker/issues/208)). Pre-fix, the
+  per-stream 64KB cap in `agent/exec/local.go` kept the *first* 64KB of
+  output, which silently dropped routing markers (`printf 'tests-pass'`)
+  past the boundary — pipeline routing then fell through the unconditional
+  fallback edge and could ship broken code as if it had passed. The
+  notebook_smoke pipeline reproduced this twice in one day. New
+  `tailBuffer` ring-buffer keeps the trailing `limit` bytes (O(1) amortized
+  per-byte cost, single `limit`-sized allocation, exact tail match
+  regardless of write boundaries). `CommandResult` gains structured
+  `StdoutTruncated` / `StdoutBytesDropped` / `StderrTruncated` /
+  `StderrBytesDropped` fields so callers no longer have to pattern-match
+  on an in-band sentinel string. Symmetric for stderr — closes a
+  pre-existing zero-stderr-truncation-tests coverage gap. The in-band
+  `"...(output truncated at N bytes)"` suffix is gone; consumers must
+  read the new flags (or the new `EventToolOutputTruncated` event,
+  below) to detect truncation. Drops the unintended-defense head pattern
+  surfaced by the security reviewer (head-keep accidentally defended
+  against a different attack — see follow-up issue
+  [#212](https://github.com/2389-research/tracker/issues/212) for the
+  reserved routing-sentinel hardening that closes the new threat-model
+  delta).
+
+### Added
+
+- **`EventToolOutputTruncated` activity event** ([#208](https://github.com/2389-research/tracker/issues/208) Tier 1).
+  Emitted once per truncated stream after each tool node, with
+  `TruncationDetail{Stream, Limit, CapturedBytes, DroppedBytes,
+  TotalBytes}`. Written to `activity.jsonl` so `tracker diagnose`,
+  `tracker.Audit`, and NDJSON consumers can detect truncation
+  retrospectively. `tracker diagnose` surfaces a
+  `SuggestionToolOutputTruncated` suggestion explaining the elision,
+  pointing at `output_limit` as the escape hatch, and noting the
+  tail-window preserves trailing routing markers by construction.
+
+- **`EventConditionalFallthrough` activity event** ([#208](https://github.com/2389-research/tracker/issues/208) Tier 2).
+  Fires when at least one conditional outgoing edge from a node was
+  evaluated, all evaluated false, and routing fell through to a
+  fallback (`label`, `suggested`, or `weight`). Carries the list of
+  `ConditionEval{EdgeTo, Condition}` entries that missed. Does NOT
+  fire on intentional all-unconditional routing — distinguishes
+  "stated routing intent missed" from "fallback is the only option."
+  `tracker diagnose` correlates this with `EventToolOutputTruncated`
+  on the same node and surfaces a combined suggestion when both
+  fire — the canonical diagnostic narrative for the #208 failure
+  shape ("your routing marker may have been dropped").
+
+- **Five follow-up issues filed for the broader hardening surface**
+  ([#210](https://github.com/2389-research/tracker/issues/210) marker_grep
+  primitive · [#211](https://github.com/2389-research/tracker/issues/211)
+  validate-time lint for risky stdout-routing patterns ·
+  [#212](https://github.com/2389-research/tracker/issues/212) `_TRACKER_ROUTE`
+  reserved sentinel · [#213](https://github.com/2389-research/tracker/issues/213)
+  activity.jsonl integrity ·
+  [#214](https://github.com/2389-research/tracker/issues/214) property tests
+  via `pgregory.net/rapid`). Each came out of the 6-expert design panel that
+  reviewed the #208 proposed fixes.
+
 ## [0.25.1] - 2026-05-11
 
 ### Changed

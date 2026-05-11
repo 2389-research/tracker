@@ -136,39 +136,110 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	return result, nil
 }
 
-// limitedBuffer caps the amount of data that can be written. When the limit
-// is reached, excess data is silently discarded and the truncated flag is set.
-type limitedBuffer struct {
-	mu        sync.Mutex
-	buf       bytes.Buffer
-	limit     int
-	truncated bool
+// tailBuffer keeps the last `limit` bytes written to it. Excess bytes from
+// the head of the stream are silently discarded; the tail is preserved.
+// Used for capturing subprocess output where the trailing region carries
+// the routing-relevant signal (a shell script that emits a routing marker
+// at end of stream — see issue #208). Concurrent-safe via an internal
+// mutex.
+//
+// Memory is bounded at `limit` bytes; per-byte amortized cost is O(1).
+// The buffer is implemented as a fixed-size ring with a write index that
+// wraps around once `limit` bytes have been written.
+type tailBuffer struct {
+	mu      sync.Mutex
+	buf     []byte // fixed-size, allocated lazily on first Write
+	limit   int
+	pos     int   // next write index in [0, limit)
+	wrapped bool  // true once total bytes written >= limit (head bytes dropped)
+	total   int64 // total bytes ever Write'd, for accurate dropped-byte count
 }
 
-func (lb *limitedBuffer) Write(p []byte) (int, error) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	remaining := lb.limit - lb.buf.Len()
-	if remaining <= 0 {
-		lb.truncated = true
-		return len(p), nil
-	}
-	if len(p) > remaining {
-		lb.truncated = true
-		lb.buf.Write(p[:remaining])
-		return len(p), nil // report full length to avoid io.ErrShortWrite
-	}
-	return lb.buf.Write(p)
+func newTailBuffer(limit int) *tailBuffer {
+	return &tailBuffer{limit: limit}
 }
 
-func (lb *limitedBuffer) String() string {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	s := lb.buf.String()
-	if lb.truncated {
-		s += fmt.Sprintf("\n...(output truncated at %d bytes)", lb.limit)
+func (tb *tailBuffer) Write(p []byte) (int, error) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	n := len(p)
+	if n == 0 {
+		return 0, nil
 	}
-	return s
+	if tb.limit <= 0 {
+		// Defensive: callers should not construct a tailBuffer with non-positive
+		// limit. Treat as discard so io.ErrShortWrite is not raised.
+		tb.total += int64(n)
+		return n, nil
+	}
+	if tb.buf == nil {
+		tb.buf = make([]byte, tb.limit)
+	}
+	tb.total += int64(n)
+
+	// Fast path for a single write larger than the ring: only the trailing
+	// `limit` bytes of this write matter.
+	if n >= tb.limit {
+		copy(tb.buf, p[n-tb.limit:])
+		tb.pos = 0
+		tb.wrapped = true
+		return n, nil
+	}
+
+	// Common path: copy `n` bytes starting at pos, wrapping if needed.
+	end := tb.pos + n
+	if end <= tb.limit {
+		copy(tb.buf[tb.pos:], p)
+		tb.pos = end
+		if tb.pos == tb.limit {
+			tb.pos = 0
+			tb.wrapped = true
+		}
+	} else {
+		first := tb.limit - tb.pos
+		copy(tb.buf[tb.pos:], p[:first])
+		copy(tb.buf, p[first:])
+		tb.pos = n - first
+		tb.wrapped = true
+	}
+	return n, nil
+}
+
+func (tb *tailBuffer) String() string {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	if tb.buf == nil || tb.total == 0 {
+		return ""
+	}
+	if !tb.wrapped {
+		return string(tb.buf[:tb.pos])
+	}
+	// Wrapped: oldest kept byte is at pos, newest is at pos-1 (mod limit).
+	out := make([]byte, tb.limit)
+	copy(out, tb.buf[tb.pos:])
+	copy(out[tb.limit-tb.pos:], tb.buf[:tb.pos])
+	return string(out)
+}
+
+// Truncated reports whether the buffer has elided any head bytes — i.e.
+// whether more than `limit` bytes were ever written.
+func (tb *tailBuffer) Truncated() bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	return tb.total > int64(tb.limit)
+}
+
+// BytesDropped reports how many head bytes were elided. Zero when the
+// total written did not exceed `limit`.
+func (tb *tailBuffer) BytesDropped() int {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if tb.total <= int64(tb.limit) {
+		return 0
+	}
+	return int(tb.total - int64(tb.limit))
 }
 
 // ExecCommandWithLimit runs a command with output capped at outputLimit bytes per stream.
@@ -207,15 +278,26 @@ func (e *LocalEnvironment) runUnlimited(ctx context.Context, cmd *exec.Cmd, time
 	return result, translateExecError(ctx, err, &result, timeout)
 }
 
-// runLimited runs cmd with limited output buffers and translates the error.
+// runLimited runs cmd with tail-window output buffers and translates the
+// error. When either stream overflows the per-stream cap, the head is
+// dropped and the truncation flags on CommandResult are set so callers
+// (e.g. the tool handler) can emit a structured truncation event without
+// pattern-matching on an in-band sentinel string.
 func (e *LocalEnvironment) runLimited(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, outputLimit int) (CommandResult, error) {
-	stdoutBuf := &limitedBuffer{limit: outputLimit}
-	stderrBuf := &limitedBuffer{limit: outputLimit}
+	stdoutBuf := newTailBuffer(outputLimit)
+	stderrBuf := newTailBuffer(outputLimit)
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
 	err := cmd.Run()
 	reapProcessGroup(cmd)
-	result := CommandResult{Stdout: stdoutBuf.String(), Stderr: stderrBuf.String()}
+	result := CommandResult{
+		Stdout:             stdoutBuf.String(),
+		Stderr:             stderrBuf.String(),
+		StdoutTruncated:    stdoutBuf.Truncated(),
+		StdoutBytesDropped: stdoutBuf.BytesDropped(),
+		StderrTruncated:    stderrBuf.Truncated(),
+		StderrBytesDropped: stderrBuf.BytesDropped(),
+	}
 	return result, translateExecError(ctx, err, &result, timeout)
 }
 

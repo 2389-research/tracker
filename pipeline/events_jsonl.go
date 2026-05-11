@@ -48,6 +48,21 @@ type jsonlLogEntry struct {
 	// NDJSON consumers read this to distinguish metered from estimated
 	// spend — see cmd/tracker/summary.go for the equivalent CLI surface.
 	Estimated bool `json:"estimated,omitempty"`
+
+	// Truncation fields — populated for tool_output_truncated events.
+	// Stream is "stdout" or "stderr"; CapturedBytes / DroppedBytes /
+	// TotalBytes record the per-stream byte accounting at the time of
+	// truncation. Issue #208.
+	TruncStream   string `json:"trunc_stream,omitempty"`
+	TruncLimit    int    `json:"trunc_limit,omitempty"`
+	TruncCaptured int    `json:"trunc_captured_bytes,omitempty"`
+	TruncDropped  int    `json:"trunc_dropped_bytes,omitempty"`
+	TruncTotal    int    `json:"trunc_total_bytes,omitempty"`
+
+	// Conditional-fallthrough fields — populated for
+	// conditional_fallthrough events. Lists routing intents that
+	// evaluated false on the way to a fallback selection.
+	ConditionsTried []ConditionEval `json:"conditions_tried,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a file.
@@ -122,6 +137,13 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 		entry.WallElapsedMs = evt.Cost.WallElapsed.Milliseconds()
 		entry.Estimated = evt.Cost.Estimated
 	}
+	if evt.Truncation != nil {
+		entry.TruncStream = evt.Truncation.Stream
+		entry.TruncLimit = evt.Truncation.Limit
+		entry.TruncCaptured = evt.Truncation.CapturedBytes
+		entry.TruncDropped = evt.Truncation.DroppedBytes
+		entry.TruncTotal = evt.Truncation.TotalBytes
+	}
 	return entry
 }
 
@@ -145,6 +167,7 @@ func applyDecisionFields(entry *jsonlLogEntry, d *DecisionDetail) {
 	entry.ClearedNodes = d.ClearedNodes
 	entry.TokenInput = d.TokenInput
 	entry.TokenOutput = d.TokenOutput
+	entry.ConditionsTried = d.ConditionsTried
 }
 
 // WriteAgentEvent logs an agent event to the activity log.

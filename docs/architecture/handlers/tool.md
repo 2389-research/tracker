@@ -130,8 +130,14 @@ around `<cleaned>` protects path values with spaces.
   `--max-output-limit`).
 
 Limits apply per stream (stdout and stderr are capped independently). When a
-stream exceeds the limit, `exec.LocalEnvironment.ExecCommandWithLimit`
-truncates — the handler does not re-read after truncation.
+stream exceeds the limit, `exec.LocalEnvironment.ExecCommandWithLimit` keeps
+the **last** `limit` bytes (the tail) and discards the head. This matches
+the routing convention where conditional edges read the trailing region of
+the captured output for a marker like `printf 'tests-pass'`; pre-#208 the
+runtime kept the head instead, which silently dropped trailing routing
+markers under verbose output. The tool handler surfaces truncation via the
+structured `EventToolOutputTruncated` event so `tracker diagnose` can
+correlate routing misses with dropped bytes.
 
 ## Sensitive environment variable stripping
 
@@ -151,8 +157,8 @@ filtered env, because they have their own isolation model (sandbox, container).
 | Field | Value |
 |-------|-------|
 | `Status` | `OutcomeSuccess` on exit code 0, `OutcomeFail` on any non-zero exit. |
-| `ContextUpdates.tool_stdout` | Right-trimmed stdout (trailing whitespace / newlines stripped so edge conditions match reliably). |
-| `ContextUpdates.tool_stderr` | Right-trimmed stderr. |
+| `ContextUpdates.tool_stdout` | Right-trimmed *tail* of stdout, capped at `output_limit` bytes (default 64KB). Trailing whitespace / newlines are stripped so edge conditions match reliably; if the stream exceeded the cap, head bytes were elided (see `EventToolOutputTruncated`). |
+| `ContextUpdates.tool_stderr` | Right-trimmed tail of stderr, same cap and truncation behavior as stdout. |
 | `ContextUpdates.response.<nodeID>` | Not written by tool handler. |
 
 [`applyDeclaredWrites`](../../../pipeline/handlers/declared_writes.go) — if
