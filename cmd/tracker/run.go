@@ -118,7 +118,7 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-	graph, subgraphs, _, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
@@ -154,13 +154,14 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		activityLog, llmClient, verbose, jsonOut,
 	)
 
-	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler, graph)
+	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler, graph, bundleInfo.Identity)
 	registry := handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agentEventHandler),
 		handlers.WithPipelineEventHandler(pipelineEventHandler),
+		handlers.WithHandlerBundleIdentity(bundleInfo.Identity),
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
 		handlers.WithTokenTracker(tokenTracker),
@@ -209,7 +210,13 @@ func wireLLMTraceToLog(llmClient *llm.Client, activityLog *pipeline.JSONLEventHa
 // Budget limits are the effective merge of activeBudgetLimits (CLI --max-*
 // flags) over workflow-level defaults from graph.Attrs (populated by the
 // dippin adapter from WorkflowDefaults.Max*). CLI flags always win.
-func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler, graph *pipeline.Graph) []pipeline.EngineOption {
+//
+// bundleIdentity is the content-addressed identity of the .dipx bundle the
+// run was started against (empty for plain .dip runs / embedded workflows).
+// When non-empty it is threaded to pipeline.WithBundleIdentity so engine
+// emissions are stamped — the registry-side companion stamping for handler
+// emissions is wired separately via handlers.WithHandlerBundleIdentity.
+func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler, graph *pipeline.Graph, bundleIdentity string) []pipeline.EngineOption {
 	opts := []pipeline.EngineOption{
 		pipeline.WithArtifactDir(artifactDir),
 		pipeline.WithPipelineEventHandler(evtHandler),
@@ -217,6 +224,9 @@ func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.Pipe
 	}
 	if checkpoint != "" {
 		opts = append(opts, pipeline.WithCheckpointPath(checkpoint))
+	}
+	if bundleIdentity != "" {
+		opts = append(opts, pipeline.WithBundleIdentity(bundleIdentity))
 	}
 	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
 	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {
@@ -352,7 +362,7 @@ func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[
 }
 
 func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
-	graph, subgraphs, _, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
@@ -391,9 +401,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	pipelineCombo := buildTUIPipelineHandler(prog, activityLog, verbose, llmClient)
 
-	registry := buildTUIRegistry(graph, llmClient, workdir, execEnv, interviewer, activityLog, pipelineCombo, subgraphs, backend, tokenTracker, prog)
+	registry := buildTUIRegistry(graph, llmClient, workdir, execEnv, interviewer, activityLog, pipelineCombo, subgraphs, backend, tokenTracker, prog, bundleInfo.Identity)
 
-	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo)
+	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo, bundleInfo.Identity)
 
 	outcome, err := runTUIWithEngine(engine, prog)
 	if err != nil {
@@ -519,7 +529,12 @@ func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEvent
 }
 
 // buildTUIRegistry builds the handler registry for TUI mode.
-func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir string, execEnv *exec.LocalEnvironment, interviewer handlers.LabeledFreeformInterviewer, activityLog *pipeline.JSONLEventHandler, pipelineCombo pipeline.PipelineEventHandler, subgraphs map[string]*pipeline.Graph, backend string, tokenTracker *llm.TokenTracker, prog *tea.Program) *pipeline.HandlerRegistry {
+//
+// bundleIdentity is the .dipx bundle identity threaded into
+// handlers.WithHandlerBundleIdentity so handler-package emissions
+// (parallel, manager_loop) get stamped to match engine emissions. Empty
+// for plain .dip runs / embedded workflows is a no-op.
+func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir string, execEnv *exec.LocalEnvironment, interviewer handlers.LabeledFreeformInterviewer, activityLog *pipeline.JSONLEventHandler, pipelineCombo pipeline.PipelineEventHandler, subgraphs map[string]*pipeline.Graph, backend string, tokenTracker *llm.TokenTracker, prog *tea.Program, bundleIdentity string) *pipeline.HandlerRegistry {
 	return handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
@@ -535,6 +550,7 @@ func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir stri
 			activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 		})),
 		handlers.WithPipelineEventHandler(pipelineCombo),
+		handlers.WithHandlerBundleIdentity(bundleIdentity),
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
 		handlers.WithTokenTracker(tokenTracker),
@@ -543,13 +559,20 @@ func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir stri
 }
 
 // buildTUIEngine creates and configures the pipeline engine for TUI mode.
-func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, artifactDir, checkpoint string, pipelineCombo pipeline.PipelineEventHandler) *pipeline.Engine {
+//
+// bundleIdentity is the .dipx bundle identity threaded into
+// pipeline.WithBundleIdentity so engine-stamped events carry provenance.
+// Empty for plain .dip runs / embedded workflows is a no-op.
+func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, artifactDir, checkpoint string, pipelineCombo pipeline.PipelineEventHandler, bundleIdentity string) *pipeline.Engine {
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
 	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineCombo))
 	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
+	}
+	if bundleIdentity != "" {
+		engineOpts = append(engineOpts, pipeline.WithBundleIdentity(bundleIdentity))
 	}
 	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
 	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {
