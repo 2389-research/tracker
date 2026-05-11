@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Gemini SSE parser coalesces split finish + usage chunks into a single
+  `EventFinish`.** Follow-up polish to the earlier trailing-usage fix:
+  when an upstream emits the finish reason and the `usageMetadata` in
+  two separate chunks (the 2389 Bedrock Gateway does this; real Google
+  can too), the parser now buffers the finish reason in
+  `geminiStreamState.pendingFinish` instead of emitting it immediately.
+  When the trailing usage chunk arrives, both are emitted together as
+  one event. If the stream ends with a buffered finish but no usage
+  chunk (real Google's typical pattern, plus truncated upstreams), the
+  parser flushes the deferred finish on scanner exit so callers still
+  see a terminal event. Net effect: the `llm finish` trace line now
+  prints exactly once per turn regardless of upstream chunking shape,
+  fixing the duplicate-line cosmetic artifact called out in the
+  previous Fixed entry. Two new regression tests pin the behavior end
+  to end (`TestAdapterStreamTrailingUsageChunkEmitsSingleFinish` for
+  the split case; `TestAdapterStreamFinishWithoutUsageChunk` for the
+  no-trailing-usage case). Also extracts a `usageFromMeta` helper since
+  the same `geminiUsageMeta` → `*llm.Usage` conversion now happens at
+  three call sites.
+
 ### Fixed
 
 - **Gemini token usage no longer reports 0 when the upstream emits
