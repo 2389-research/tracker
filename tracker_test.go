@@ -873,3 +873,55 @@ func TestRun_Config_BundleIdentity_WiresHandlerRegistry(t *testing.T) {
 		}
 	}
 }
+
+// TestRun_Result_BundleIdentity_PopulatedFromConfig pins the contract that
+// tracker.Result.BundleIdentity mirrors Config.BundleIdentity after a
+// successful Run. Library callers can read provenance off the returned
+// Result without inspecting checkpoints.
+func TestRun_Result_BundleIdentity_PopulatedFromConfig(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	want := "sha256:result_test"
+	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:         "dot",
+		LLMClient:      client,
+		CheckpointDir:  filepath.Join(t.TempDir(), "checkpoint.json"),
+		BundleIdentity: want,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.BundleIdentity != want {
+		t.Errorf("Result.BundleIdentity = %q, want %q", result.BundleIdentity, want)
+	}
+}
+
+// TestRun_Result_BundleIdentity_EmptyWhenNotSet pins the no-op semantics:
+// when Config.BundleIdentity is unset, Result.BundleIdentity stays empty —
+// matching plain .dip behavior.
+func TestRun_Result_BundleIdentity_EmptyWhenNotSet(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:        "dot",
+		LLMClient:     client,
+		CheckpointDir: filepath.Join(t.TempDir(), "checkpoint.json"),
+		// BundleIdentity intentionally left empty.
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.BundleIdentity != "" {
+		t.Errorf("Result.BundleIdentity should be empty when Config.BundleIdentity unset, got %q", result.BundleIdentity)
+	}
+}

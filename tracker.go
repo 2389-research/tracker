@@ -111,16 +111,21 @@ type Result struct {
 	// BundlePath is the path of the exported git bundle. Populated only when
 	// ExportBundle is invoked by the caller after Run completes.
 	BundlePath string
+	// BundleIdentity is the content-addressed identity ("sha256:<hex>") of
+	// the .dipx bundle the run was loaded from, mirrored from Config.BundleIdentity
+	// for the caller's convenience. Empty for plain .dip runs.
+	BundleIdentity string
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
 type Engine struct {
-	inner        *pipeline.Engine
-	client       *llm.Client // nil if caller provided their own Completer
-	tokenTracker *llm.TokenTracker
-	closeOnce    sync.Once
-	closeErr     error
-	artifactDir  string // base artifact directory; "" if not set
+	inner          *pipeline.Engine
+	client         *llm.Client // nil if caller provided their own Completer
+	tokenTracker   *llm.TokenTracker
+	closeOnce      sync.Once
+	closeErr       error
+	artifactDir    string // base artifact directory; "" if not set
+	bundleIdentity string // mirrored from Config.BundleIdentity for Result population
 }
 
 // NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
@@ -217,10 +222,11 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 
 	built = true
 	return &Engine{
-		inner:        inner,
-		client:       client,
-		tokenTracker: tokenTracker,
-		artifactDir:  cfg.ArtifactDir,
+		inner:          inner,
+		client:         client,
+		tokenTracker:   tokenTracker,
+		artifactDir:    cfg.ArtifactDir,
+		bundleIdentity: cfg.BundleIdentity,
 	}, nil
 }
 
@@ -646,6 +652,7 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	if e.artifactDir != "" && result.RunID != "" {
 		result.ArtifactRunDir = filepath.Join(e.artifactDir, result.RunID)
 	}
+	result.BundleIdentity = e.bundleIdentity
 	return result, nil
 }
 
