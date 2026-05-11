@@ -59,6 +59,22 @@ type Config struct {
 	// env var is the fallback when GatewayURL is empty.
 	GatewayURL  string
 	WebhookGate *WebhookGateConfig // optional: post human gates to an HTTP webhook and wait for callback
+	// BundleIdentity is the content-addressed identity ("sha256:<hex>") of
+	// the .dipx bundle this run was loaded from. The CLI loader sets this
+	// automatically from the bundle on disk; library callers (embedded
+	// integrations like the Pipelines team's use case) can set it directly
+	// to thread provenance through Result, Checkpoint, and stamped events.
+	// Empty (the default) is a no-op and matches the behavior for plain
+	// .dip runs.
+	//
+	// When non-empty, the engine receives it via pipeline.WithBundleIdentity
+	// so every PipelineEvent the engine emits and every checkpoint save is
+	// stamped with the identity. The library API does not own the activity
+	// log (JSONLEventHandler) — callers that construct one separately
+	// should also call activityLog.SetBundleIdentity(cfg.BundleIdentity) so
+	// agent/llm events written outside the engine event chain carry the
+	// same provenance.
+	BundleIdentity string
 }
 
 // WebhookGateConfig controls headless webhook-based human gate handling.
@@ -371,6 +387,9 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 	budget := ResolveBudgetLimits(cfg.Budget, graph)
 	if guard := pipeline.NewBudgetGuard(budget); guard != nil {
 		opts = append(opts, pipeline.WithBudgetGuard(guard))
+	}
+	if cfg.BundleIdentity != "" {
+		opts = append(opts, pipeline.WithBundleIdentity(cfg.BundleIdentity))
 	}
 	opts = append(opts, pipeline.WithStylesheetResolution(true))
 	return opts

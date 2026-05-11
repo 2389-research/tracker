@@ -750,3 +750,73 @@ func TestResolveBudgetLimits_NilGraph(t *testing.T) {
 		t.Errorf("nil graph should pass cfg through, got %+v", got)
 	}
 }
+
+// TestRun_Config_BundleIdentity_FlowsToEngine pins the library-API contract
+// that Config.BundleIdentity is threaded into the engine via
+// pipeline.WithBundleIdentity, so embedded integrations (callers that do
+// NOT go through the CLI) can stamp .dipx bundle provenance onto every
+// checkpoint save. The round trip is verified by loading the checkpoint
+// after the run and asserting Checkpoint.BundleIdentity matches.
+func TestRun_Config_BundleIdentity_FlowsToEngine(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+	want := "sha256:librunidentity"
+
+	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:         "dot",
+		LLMClient:      client,
+		CheckpointDir:  cpPath,
+		BundleIdentity: want,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Status != "success" {
+		t.Fatalf("expected status=success, got %q", result.Status)
+	}
+
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.BundleIdentity != want {
+		t.Errorf("Config.BundleIdentity did not flow to Checkpoint: got %q, want %q", cp.BundleIdentity, want)
+	}
+}
+
+// TestRun_Config_BundleIdentity_EmptyByDefault pins the no-op semantics:
+// when Config.BundleIdentity is unset, the engine does not stamp anything,
+// so Checkpoint.BundleIdentity stays empty (matches plain .dip behavior).
+func TestRun_Config_BundleIdentity_EmptyByDefault(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+
+	if _, err := Run(context.Background(), simpleDOT, Config{
+		Format:        "dot",
+		LLMClient:     client,
+		CheckpointDir: cpPath,
+		// BundleIdentity intentionally left empty.
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.BundleIdentity != "" {
+		t.Errorf("expected empty BundleIdentity on checkpoint, got %q", cp.BundleIdentity)
+	}
+}
