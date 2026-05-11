@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
 const testDOT = `digraph pipeline {
@@ -249,5 +251,64 @@ func TestExecuteCommandSimulateMissingPipelineFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "usage") {
 		t.Errorf("expected usage error, got: %v", err)
+	}
+}
+
+// TestSimulateDipxBundle is the regression test for the Task 5 spec-review
+// gap: simulate.go used to feed ZIP bytes through ValidateSource with
+// format "dip", which failed parse with "validation error(s) in inline.dip".
+// The fix routes .dipx through loadPipelineAndBundle → SimulateGraph; this
+// test packs a minimal bundle and asserts the end-to-end run produces the
+// expected report sections.
+func TestSimulateDipxBundle(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.dip")
+	if err := os.WriteFile(entry, []byte(dipxtest.MinimalDip("simulate_dipx", "start", "exit")), 0o644); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entry)
+
+	var buf bytes.Buffer
+	if err := runSimulateCmd(bundlePath, "", &buf); err != nil {
+		t.Fatalf("runSimulateCmd on .dipx: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Pipeline Simulation") {
+		t.Errorf("missing simulation header in .dipx output:\n%s", output)
+	}
+	if !strings.Contains(output, "Execution Plan") {
+		t.Errorf("missing execution plan section in .dipx output:\n%s", output)
+	}
+	// MinimalDip produces a start → exit two-node graph; both should appear
+	// as steps in the BFS plan.
+	if !strings.Contains(output, "start") {
+		t.Errorf("missing start node in .dipx output:\n%s", output)
+	}
+	if !strings.Contains(output, "exit") {
+		t.Errorf("missing exit node in .dipx output:\n%s", output)
+	}
+}
+
+// TestSimulateDipxBundleSkipsValidateSourcePreamble guards against a
+// regression where the .dipx path would accidentally re-enter the
+// .dip preamble (and crash trying to feed ZIP bytes through the source
+// parser). The preamble emits "Validation Errors" or "Validation
+// Warnings" headers; a clean bundle should never produce either.
+func TestSimulateDipxBundleSkipsValidateSourcePreamble(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.dip")
+	if err := os.WriteFile(entry, []byte(dipxtest.MinimalDip("simulate_dipx_clean", "start", "exit")), 0o644); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entry)
+
+	var buf bytes.Buffer
+	if err := runSimulateCmd(bundlePath, "", &buf); err != nil {
+		t.Fatalf("runSimulateCmd on .dipx: %v", err)
+	}
+	output := buf.String()
+	if strings.Contains(output, "Validation Errors") {
+		t.Errorf(".dipx path emitted Validation Errors preamble (should be skipped):\n%s", output)
 	}
 }

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
@@ -30,6 +32,16 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
 		return err
+	}
+
+	// .dipx bundles are ZIP archives, not text source — they can't be fed
+	// through the source-string path (ValidateSource expects .dip text or
+	// .dot text). Route them through loadPipelineAndBundle to get a fully
+	// resolved *pipeline.Graph (the bundle's dippin-lang validator already
+	// ran at pack time, and LoadDipxBundle re-validates on load), then drive
+	// SimulateGraph directly. Plain .dip / .dot flow is unchanged.
+	if !isEmbedded && strings.EqualFold(filepath.Ext(resolved), ".dipx") {
+		return runSimulateBundle(resolved, formatOverride, w)
 	}
 
 	source, displayName, err := readPipelineSource(resolved, isEmbedded, info)
@@ -88,11 +100,33 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		}
 	}
 
-	report, err := tracker.SimulateGraph(context.Background(), result.Graph)
+	return simulateGraphAndPrint(w, result.Graph, displayName)
+}
+
+// runSimulateBundle is the .dipx variant of runSimulateCmd. It loads the
+// sealed bundle (verifying SHA-256 hashes and converting the entry workflow
+// to a *pipeline.Graph along the way), then drives SimulateGraph with the
+// pre-parsed graph. Skips the validate-section preamble that the .dip path
+// emits — bundle integrity and dippin-lang validation are enforced by
+// LoadDipxBundle, so anything that survives load is structurally sound for
+// the purposes of simulation. The format override is accepted for CLI
+// surface parity but ignored: a .dipx is unambiguously a bundle.
+func runSimulateBundle(resolved, _ string, w io.Writer) error {
+	graph, _, _, err := loadPipelineAndBundle(resolved, "")
+	if err != nil {
+		return fmt.Errorf("load pipeline: %w", err)
+	}
+	return simulateGraphAndPrint(w, graph, resolved)
+}
+
+// simulateGraphAndPrint runs SimulateGraph on a pre-loaded graph and prints
+// the report. Shared by runSimulateCmd (post-ValidateSource) and
+// runSimulateBundle (post-LoadDipxBundle).
+func simulateGraphAndPrint(w io.Writer, graph *pipeline.Graph, displayName string) error {
+	report, err := tracker.SimulateGraph(context.Background(), graph)
 	if err != nil {
 		return err
 	}
-
 	printSimReport(w, report, displayName)
 	return nil
 }
