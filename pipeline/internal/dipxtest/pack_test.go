@@ -14,7 +14,7 @@ import (
 func TestPackTestBundle_ProducesValidBundle(t *testing.T) {
 	dir := t.TempDir()
 	entryPath := filepath.Join(dir, "entry.dip")
-	if err := os.WriteFile(entryPath, []byte(minimalDip("entry", "start", "exit")), 0o644); err != nil {
+	if err := os.WriteFile(entryPath, []byte(MinimalDip("entry", "start", "exit")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -31,23 +31,4 @@ func TestPackTestBundle_ProducesValidBundle(t *testing.T) {
 	if bundle.Manifest().Entry == "" {
 		t.Errorf("bundle manifest has no entry")
 	}
-}
-
-// minimalDip returns a tiny valid .dip source with the given workflow name,
-// start node, and exit node. The two named nodes are bare codergen agents
-// wired by a single edge from start to exit.
-func minimalDip(name, start, exit string) string {
-	return `workflow ` + name + `
-  start: ` + start + `
-  exit: ` + exit + `
-
-  agent ` + start + `
-    label: "Start"
-
-  agent ` + exit + `
-    label: "Exit"
-
-  edges
-    ` + start + ` -> ` + exit + `
-`
 }
