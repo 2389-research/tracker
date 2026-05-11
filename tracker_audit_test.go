@@ -3,10 +3,14 @@ package tracker
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestAudit_CompletedRun(t *testing.T) {
@@ -137,5 +141,59 @@ func TestAudit_EmptyRunDirectory(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "load checkpoint") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestListRuns_PopulatesBundleIdentity(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "test-run-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cp := &pipeline.Checkpoint{
+		RunID:          "test-run-1",
+		BundleIdentity: "sha256:listruns_test",
+		Timestamp:      time.Now(),
+	}
+	if err := pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := ListRuns(workdir, AuditConfig{LogWriter: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("want 1 run, got %d", len(runs))
+	}
+	if runs[0].BundleIdentity != "sha256:listruns_test" {
+		t.Errorf("BundleIdentity not populated: %q", runs[0].BundleIdentity)
+	}
+}
+
+func TestListRuns_EmptyBundleIdentity_ForPlainDipRuns(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "plain-dip-run")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cp := &pipeline.Checkpoint{
+		RunID:     "plain-dip-run",
+		Timestamp: time.Now(),
+		// BundleIdentity intentionally left empty (plain .dip)
+	}
+	if err := pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := ListRuns(workdir, AuditConfig{LogWriter: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("want 1 run, got %d", len(runs))
+	}
+	if runs[0].BundleIdentity != "" {
+		t.Errorf("BundleIdentity should be empty for plain .dip run, got %q", runs[0].BundleIdentity)
 	}
 }

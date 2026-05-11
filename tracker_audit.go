@@ -80,6 +80,10 @@ type RunSummary struct {
 	// not as a duration string.
 	Duration time.Duration `json:"duration_ns"`
 	FailedAt string        `json:"failed_at,omitempty"`
+	// BundleIdentity is the content-addressed identity ("sha256:<hex>") of
+	// the .dipx bundle the run was executed against. Read from the run's
+	// checkpoint at summary-build time. Empty for runs from a plain .dip file.
+	BundleIdentity string `json:"bundle_identity,omitempty"`
 }
 
 // Audit reads checkpoint.json and activity.jsonl under runDir and returns a
@@ -283,13 +287,14 @@ func buildRunSummary(runsDir, name string, logW io.Writer) (RunSummary, bool) {
 		dur = activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
 	}
 	rs := RunSummary{
-		RunID:     name,
-		Status:    status,
-		Nodes:     len(cp.CompletedNodes),
-		Retries:   totalRetries,
-		Restarts:  cp.RestartCount,
-		Timestamp: cp.Timestamp,
-		Duration:  dur,
+		RunID:          name,
+		Status:         status,
+		Nodes:          len(cp.CompletedNodes),
+		Retries:        totalRetries,
+		Restarts:       cp.RestartCount,
+		Timestamp:      cp.Timestamp,
+		Duration:       dur,
+		BundleIdentity: cp.BundleIdentity,
 	}
 	if status == "fail" {
 		rs.FailedAt = cp.CurrentNode
