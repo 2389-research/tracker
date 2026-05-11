@@ -12,7 +12,7 @@ import (
 
 // resolvePipelineSource resolves a pipeline name to either a filesystem path
 // or an embedded built-in workflow. Resolution order:
-//  1. Contains "/" or "\" (forward or back slash), or ends in .dip/.dot → filesystem path as-is
+//  1. Contains "/" or "\" (forward or back slash), or ends in .dip/.dipx/.dot → filesystem path as-is
 //  2. name.dip exists in cwd → local file wins
 //  3. name exists as a file → return that path
 //  4. Built-in workflow by name → embedded
@@ -42,9 +42,9 @@ func resolvePipelineSource(name string) (path string, embedded bool, info Workfl
 	return "", false, WorkflowInfo{}, buildPipelineNotFoundError(name)
 }
 
-// isExplicitFilePath returns true if name is a file path (contains / or has a .dip/.dot extension).
+// isExplicitFilePath returns true if name is a file path (contains / or has a .dip/.dipx/.dot extension).
 func isExplicitFilePath(name string) bool {
-	return strings.ContainsAny(name, "/\\") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dot")
+	return strings.ContainsAny(name, "/\\") || strings.HasSuffix(name, ".dip") || strings.HasSuffix(name, ".dipx") || strings.HasSuffix(name, ".dot")
 }
 
 // buildPipelineNotFoundError builds an error message listing available built-ins.

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/2389-research/tracker/pipeline/internal/dipxtest"
+	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
 func TestLoadDipxBundle_HappyPath(t *testing.T) {

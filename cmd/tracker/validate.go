@@ -26,6 +26,7 @@ func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 }
 
 // loadPipelineForValidation resolves and loads a pipeline, returning the graph and display name.
+// Dispatches through loadPipelineAndBundle so .dipx bundles are handled alongside .dip files.
 func loadPipelineForValidation(pipelineFile, formatOverride string) (*pipeline.Graph, string, error) {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
@@ -38,7 +39,7 @@ func loadPipelineForValidation(pipelineFile, formatOverride string) (*pipeline.G
 		graph, err = loadEmbeddedPipeline(info)
 		displayName = info.Name
 	} else {
-		graph, err = loadPipeline(resolved, formatOverride)
+		graph, _, _, err = loadPipelineAndBundle(resolved, formatOverride)
 		displayName = resolved
 	}
 	if err != nil {

@@ -118,7 +118,7 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, _, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
@@ -310,43 +310,49 @@ func buildPlainEventHandlers(
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
 // loadAndValidatePipeline loads, validates, and resolves subgraphs for a pipeline.
-// Supports filesystem paths and bare workflow names via resolvePipelineSource.
-func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[string]*pipeline.Graph, error) {
+// Supports filesystem paths and bare workflow names via resolvePipelineSource,
+// plus sealed .dipx bundles via loadPipelineAndBundle. The returned BundleInfo
+// is zero-valued for .dip files and embedded workflows; for .dipx bundles it
+// carries the content-addressed identity, entry path, and manifest.
+func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, pipeline.BundleInfo{}, err
 	}
 
-	var graph *pipeline.Graph
+	var (
+		graph     *pipeline.Graph
+		subgraphs map[string]*pipeline.Graph
+		bundle    pipeline.BundleInfo
+	)
 	if isEmbedded {
+		// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
 		graph, err = loadEmbeddedPipeline(info)
+		if err != nil {
+			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
+		}
+		subgraphs, err = loadSubgraphs(graph, info.File)
+		if err != nil {
+			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load subgraphs: %w", err)
+		}
 	} else {
-		graph, err = loadPipeline(resolved, format)
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("load pipeline: %w", err)
-	}
-	if err := pipeline.Validate(graph); err != nil {
-		return nil, nil, fmt.Errorf("validate pipeline: %w", err)
+		graph, subgraphs, bundle, err = loadPipelineAndBundle(resolved, format)
+		if err != nil {
+			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
+		}
 	}
 
-	// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
-	parentFile := resolved
-	if isEmbedded {
-		parentFile = info.File
-	}
-	subgraphs, err := loadSubgraphs(graph, parentFile)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load subgraphs: %w", err)
+	if err := pipeline.Validate(graph); err != nil {
+		return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("validate pipeline: %w", err)
 	}
 	if err := validateSubgraphRefs(graph, subgraphs); err != nil {
-		return nil, nil, fmt.Errorf("subgraph validation: %w", err)
+		return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("subgraph validation: %w", err)
 	}
-	return graph, subgraphs, nil
+	return graph, subgraphs, bundle, nil
 }
 
 func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
-	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, _, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
