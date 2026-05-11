@@ -5,7 +5,7 @@ go 1.25.5
 require github.com/awalterschulze/gographviz v2.0.3+incompatible
 
 require (
-	github.com/2389-research/dippin-lang v0.23.0
+	github.com/2389-research/dippin-lang v0.24.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
@@ -46,6 +46,6 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
