@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	tracker "github.com/2389-research/tracker"
@@ -28,8 +29,8 @@ func listRuns(workdir string) error {
 // printRunList prints the formatted run listing table.
 func printRunList(runs []tracker.RunSummary) {
 	fmt.Println()
-	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "Run ID", "Status", "Nodes", "Retries", "Duration", "Failed At")
-	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %s\n", "──────", "──────", "─────", "───────", "────────", "─────────")
+	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %-26s  %s\n", "Run ID", "Status", "Nodes", "Retries", "Duration", "Bundle", "Failed At")
+	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %-26s  %s\n", "──────", "──────", "─────", "───────", "────────", "──────", "─────────")
 
 	for _, r := range runs {
 		icon := "+"
@@ -43,12 +44,30 @@ func printRunList(runs []tracker.RunSummary) {
 		if r.Duration > 0 {
 			durStr = formatElapsed(r.Duration)
 		}
-		fmt.Printf("  %-14s  %-8s  %-6d  %-8d  %-10s  %s\n",
-			r.RunID[:min(14, len(r.RunID))], icon, r.Nodes, r.Retries, durStr, r.FailedAt)
+		fmt.Printf("  %-14s  %-8s  %-6d  %-8d  %-10s  %-26s  %s\n",
+			r.RunID[:min(14, len(r.RunID))], icon, r.Nodes, r.Retries, durStr, truncateBundleIdentity(r.BundleIdentity), r.FailedAt)
 	}
 
 	fmt.Printf("\n  %d runs total\n", len(runs))
 	fmt.Printf("  Inspect a run: tracker audit <runID>\n\n")
+}
+
+// truncateBundleIdentity shortens a "sha256:<hex>" identity for display.
+// Returns empty string for empty input; full identity for short inputs;
+// "sha256:<16-hex>..." for normal-length identities.
+func truncateBundleIdentity(id string) string {
+	if id == "" {
+		return ""
+	}
+	const prefix = "sha256:"
+	if !strings.HasPrefix(id, prefix) {
+		return id
+	}
+	hex := id[len(prefix):]
+	if len(hex) <= 16 {
+		return id
+	}
+	return prefix + hex[:16] + "..."
 }
 
 // runAudit loads run artifacts and prints a structured audit report.
