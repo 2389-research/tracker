@@ -1,4 +1,4 @@
-// ABOUTME: Tests for stampingHandler — registry-side BundleIdentity stamping
+// ABOUTME: Tests for BundleIdentityStamper — registry-side BundleIdentity stamping
 // ABOUTME: that mirrors Engine.emit for handler-package emissions.
 package handlers
 
@@ -8,34 +8,34 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// TestStampingHandler_StampsEmptyIdentity pins the contract that an
+// TestBundleIdentityStamper_StampsEmptyIdentity pins the contract that an
 // emission with empty BundleIdentity gets stamped with the configured
 // identity — matching Engine.emit's behavior, which is the whole point
 // of this wrapper (handler-package emissions bypass Engine.emit but land
 // in the same activity.jsonl writer).
-func TestStampingHandler_StampsEmptyIdentity(t *testing.T) {
+func TestBundleIdentityStamper_StampsEmptyIdentity(t *testing.T) {
 	var captured pipeline.PipelineEvent
 	inner := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
 		captured = evt
 	})
-	s := &stampingHandler{inner: inner, identity: "sha256:abc"}
+	s := &BundleIdentityStamper{Inner: inner, Identity: "sha256:abc"}
 	s.HandlePipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventStageStarted})
 	if captured.BundleIdentity != "sha256:abc" {
 		t.Errorf("identity not stamped: got %q want %q", captured.BundleIdentity, "sha256:abc")
 	}
 }
 
-// TestStampingHandler_PreservesCallerIdentity pins the contract that an
+// TestBundleIdentityStamper_PreservesCallerIdentity pins the contract that an
 // emission whose BundleIdentity is already set is left alone. Matches
 // the `if evt.BundleIdentity == ""` guard in Engine.emit so identities
 // stamped upstream (e.g., by NodeScopedPipelineHandler chains) survive
 // the registry-side wrapper.
-func TestStampingHandler_PreservesCallerIdentity(t *testing.T) {
+func TestBundleIdentityStamper_PreservesCallerIdentity(t *testing.T) {
 	var captured pipeline.PipelineEvent
 	inner := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
 		captured = evt
 	})
-	s := &stampingHandler{inner: inner, identity: "sha256:abc"}
+	s := &BundleIdentityStamper{Inner: inner, Identity: "sha256:abc"}
 	s.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:           pipeline.EventStageStarted,
 		BundleIdentity: "sha256:xyz",
@@ -59,8 +59,8 @@ func TestWithHandlerBundleIdentity_AssignsField(t *testing.T) {
 
 // TestRegistryWrapBranch_FiresWhenIdentitySet emulates the conditional
 // inside NewDefaultRegistry and confirms that a non-empty identity plus
-// a non-nil handler produces a stampingHandler wrapper. We do this in
-// isolation from NewDefaultRegistry so the test stays focused on the
+// a non-nil handler produces a BundleIdentityStamper wrapper. We do this
+// in isolation from NewDefaultRegistry so the test stays focused on the
 // wrap logic — the integration coverage (full registry execution of
 // parallel/manager_loop emitting stamped events) belongs to Task 16.
 func TestRegistryWrapBranch_FiresWhenIdentitySet(t *testing.T) {
@@ -71,18 +71,18 @@ func TestRegistryWrapBranch_FiresWhenIdentitySet(t *testing.T) {
 
 	// Mirror the exact branch in NewDefaultRegistry.
 	if cfg.bundleIdentity != "" && cfg.pipelineEvents != nil {
-		cfg.pipelineEvents = &stampingHandler{
-			inner:    cfg.pipelineEvents,
-			identity: cfg.bundleIdentity,
+		cfg.pipelineEvents = &BundleIdentityStamper{
+			Inner:    cfg.pipelineEvents,
+			Identity: cfg.bundleIdentity,
 		}
 	}
 
-	wrapper, ok := cfg.pipelineEvents.(*stampingHandler)
+	wrapper, ok := cfg.pipelineEvents.(*BundleIdentityStamper)
 	if !ok {
-		t.Fatalf("expected *stampingHandler, got %T", cfg.pipelineEvents)
+		t.Fatalf("expected *BundleIdentityStamper, got %T", cfg.pipelineEvents)
 	}
-	if wrapper.identity != "sha256:wrapped" {
-		t.Errorf("wrapper identity = %q, want sha256:wrapped", wrapper.identity)
+	if wrapper.Identity != "sha256:wrapped" {
+		t.Errorf("wrapper identity = %q, want sha256:wrapped", wrapper.Identity)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestRegistryWrapBranch_NoOpWhenIdentityEmpty(t *testing.T) {
 	if cfg.bundleIdentity != "" && cfg.pipelineEvents != nil {
 		t.Fatalf("wrap branch should not fire for empty identity")
 	}
-	if _, isStamp := cfg.pipelineEvents.(*stampingHandler); isStamp {
+	if _, isStamp := cfg.pipelineEvents.(*BundleIdentityStamper); isStamp {
 		t.Fatalf("pipelineEvents should not be wrapped when identity is empty")
 	}
 }

@@ -147,6 +147,11 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	}
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
 	defer activityLog.Close()
+	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
+	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
+	// registry's BundleIdentityStamper). Empty identity is a no-op for
+	// plain .dip runs.
+	activityLog.SetBundleIdentity(bundleInfo.Identity)
 
 	wireLLMTraceToLog(llmClient, activityLog)
 
@@ -391,6 +396,11 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		return err
 	}
 	defer activityLog.Close()
+	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
+	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
+	// registry's BundleIdentityStamper). Empty identity is a no-op for
+	// plain .dip runs.
+	activityLog.SetBundleIdentity(bundleInfo.Identity)
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
 	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)

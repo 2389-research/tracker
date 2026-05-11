@@ -1,29 +1,30 @@
 // ABOUTME: Wraps a PipelineEventHandler to stamp .dipx bundle identity onto
-// ABOUTME: handler-package emissions that bypass Engine.emit's chokepoint.
+// ABOUTME: emissions that bypass Engine.emit's chokepoint (handler package + external).
 package handlers
 
 import "github.com/2389-research/tracker/pipeline"
 
-// stampingHandler wraps a PipelineEventHandler and injects BundleIdentity
-// onto every emitted event whose identity is currently empty.
+// BundleIdentityStamper wraps a PipelineEventHandler and injects the
+// .dipx bundle identity onto every emitted event whose identity is
+// currently empty. Used by the handler registry to stamp emissions
+// that bypass the engine's emit chokepoint (parallel, manager_loop),
+// and available for library callers that build their own registries.
 //
-// This is the registry-side analogue of Engine.emit's stamping behavior —
-// handler-package emissions (parallel.go, manager_loop.go) bypass
-// Engine.emit but share the same destination JSONL writer, so they need
-// their own stamping pass to keep activity.jsonl provenance complete.
+// Empty identity is a no-op: plain .dip runs see no change.
+// Non-empty caller-set identities are preserved (the guard matches
+// Engine.emit's behavior).
 //
-// Empty inner.identity is a no-op: plain .dip runs see no change. The
-// `if evt.BundleIdentity == ""` guard matches the engine so caller-set
-// identities are preserved (matters when a sub-emission is itself
-// already stamped via NodeScopedPipelineHandler or similar wrappers).
-type stampingHandler struct {
-	inner    pipeline.PipelineEventHandler
-	identity string
+// Fields are exported so external callers can construct the wrapper
+// directly. The type is small enough that field-access is fine and
+// avoids needing a constructor function.
+type BundleIdentityStamper struct {
+	Inner    pipeline.PipelineEventHandler
+	Identity string
 }
 
-func (s *stampingHandler) HandlePipelineEvent(evt pipeline.PipelineEvent) {
+func (s *BundleIdentityStamper) HandlePipelineEvent(evt pipeline.PipelineEvent) {
 	if evt.BundleIdentity == "" {
-		evt.BundleIdentity = s.identity
+		evt.BundleIdentity = s.Identity
 	}
-	s.inner.HandlePipelineEvent(evt)
+	s.Inner.HandlePipelineEvent(evt)
 }

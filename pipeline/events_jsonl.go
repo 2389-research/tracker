@@ -56,15 +56,30 @@ type jsonlLogEntry struct {
 // directory to derive the path: <artifactDir>/<runID>/activity.jsonl.
 // Safe for concurrent use from multiple goroutines.
 type JSONLEventHandler struct {
-	mu          sync.Mutex
-	artifactDir string
-	file        *os.File
+	mu             sync.Mutex
+	artifactDir    string
+	file           *os.File
+	bundleIdentity string
 }
 
 // NewJSONLEventHandler creates a JSONL event logger that writes to
 // <artifactDir>/<runID>/activity.jsonl. The file is opened lazily on first event.
 func NewJSONLEventHandler(artifactDir string) *JSONLEventHandler {
 	return &JSONLEventHandler{artifactDir: artifactDir}
+}
+
+// SetBundleIdentity sets the .dipx bundle identity ("sha256:<hex>") that
+// will be stamped onto subsequent WriteAgentEvent and WriteLLMEvent
+// writes. Empty (the default) is a no-op so plain .dip runs see no
+// change. Called once at run-start after the handler is constructed.
+//
+// Note: events that flow through HandlePipelineEvent already get stamped
+// at the engine and registry levels; this setter only affects the
+// JSONL writes that bypass those chokepoints (agent and llm events).
+func (h *JSONLEventHandler) SetBundleIdentity(id string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.bundleIdentity = id
 }
 
 // openFile creates the activity log file on first use.
@@ -186,6 +201,13 @@ func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutpu
 			entry.Error = errMsg
 		}
 	}
+	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
+	// Engine.emit and the registry's BundleIdentityStamper — these writes
+	// bypass both chokepoints, so the stamping has to happen here for
+	// activity.jsonl provenance to stay complete for agent events.
+	if entry.BundleIdentity == "" {
+		entry.BundleIdentity = h.bundleIdentity
+	}
 	h.writeEntry(entry)
 }
 
@@ -206,6 +228,13 @@ func (h *JSONLEventHandler) WriteLLMEvent(kind, provider, model, toolName, previ
 		Model:     model,
 		ToolName:  toolName,
 		Content:   preview,
+	}
+	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
+	// Engine.emit and the registry's BundleIdentityStamper — these writes
+	// bypass both chokepoints, so the stamping has to happen here for
+	// activity.jsonl provenance to stay complete for llm trace events.
+	if entry.BundleIdentity == "" {
+		entry.BundleIdentity = h.bundleIdentity
 	}
 	h.writeEntry(entry)
 }

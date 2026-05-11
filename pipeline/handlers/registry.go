@@ -77,8 +77,8 @@ type registryConfig struct {
 	toolSafetySet  bool
 	// bundleIdentity is the content-addressed identity of the .dipx bundle
 	// the run was started against. When non-empty, cfg.pipelineEvents is
-	// wrapped in a stampingHandler so handler-package emissions (parallel,
-	// manager_loop) that bypass Engine.emit still carry provenance.
+	// wrapped in a BundleIdentityStamper so handler-package emissions
+	// (parallel, manager_loop) that bypass Engine.emit still carry provenance.
 	bundleIdentity string
 }
 
@@ -142,7 +142,8 @@ func WithPipelineEventHandler(handler pipeline.PipelineEventHandler) RegistryOpt
 
 // WithHandlerBundleIdentity sets the .dipx bundle identity to be stamped onto
 // every event emitted by handlers that bypass the engine's emit chokepoint
-// (parallel, manager_loop). For consistency with pipeline.WithBundleIdentity,
+// (parallel, manager_loop). Wired by wrapping cfg.pipelineEvents in a
+// BundleIdentityStamper. For consistency with pipeline.WithBundleIdentity,
 // callers should pass the same identity to both — the engine stamps emissions
 // it owns; this option stamps emissions the engine doesn't see. Empty (the
 // default) is a no-op and preserves plain .dip run behavior.
@@ -240,9 +241,9 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	// events would land in activity.jsonl without BundleIdentity. The
 	// wrapper is a no-op when identity is empty.
 	if cfg.bundleIdentity != "" && cfg.pipelineEvents != nil {
-		cfg.pipelineEvents = &stampingHandler{
-			inner:    cfg.pipelineEvents,
-			identity: cfg.bundleIdentity,
+		cfg.pipelineEvents = &BundleIdentityStamper{
+			Inner:    cfg.pipelineEvents,
+			Identity: cfg.bundleIdentity,
 		}
 	}
 
