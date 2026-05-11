@@ -34,6 +34,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pins the trailing-chunk case end-to-end through
   `StreamAccumulator.Response()`.
 
+### Changed
+
+- **Bedrock Gateway integration guide refreshed** for upstream gateway fixes
+  [#4](https://github.com/2389-research/gateway/issues/4) and
+  [#5](https://github.com/2389-research/gateway/issues/5) (closed
+  2026-04-30). The gateway now accepts both Cloudflare AI Gateway native
+  routing prefixes (`/anthropic`, `/openai`, `/google-ai-studio`,
+  `/compat`) and Gemini's `/v1beta/models/...` paths, so tracker's
+  `--gateway-url` flag works end-to-end against
+  `https://bedrock-gateway.2389-research-inc.workers.dev` and
+  `provider: gemini` is no longer broken. Smoke-tested with a
+  single-agent dip pipeline: `provider: anthropic` and `provider: gemini`
+  both completed against the live gateway. `docs/bedrock-gateway.md`
+  rewritten to lead with the recommended `--gateway-url` recipe; the old
+  "Why not `--gateway-url`?" section removed; the compatibility matrix
+  flips Gemini to working; the "404 on every request" and "Gemini
+  `/v1beta` 404" troubleshooting entries dropped. The `provider: openai`
+  (Responses API) row stays as broken pending gateway
+  [#3](https://github.com/2389-research/gateway/issues/3), which was
+  reopened after we discovered it had been auto-closed by an unrelated
+  commit's "Fix #3" wording referring to a bot-review item, not the
+  GitHub issue.
+
 ## [0.25.0] - 2026-05-05
 
 ### Added
