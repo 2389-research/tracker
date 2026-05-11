@@ -183,6 +183,20 @@ type geminiStreamState struct {
 	pendingFinish *llm.FinishReason
 }
 
+// flushPendingFinish emits any buffered finish reason as a terminal
+// EventFinish and clears the buffer. Called before every early-return
+// path (scan error, JSON parse error, clean stream exit) so callers see
+// a terminal finish even when no trailing usage chunk arrives. Emit
+// order matters: flush before any EventError so accumulators record the
+// finish reason for the work that completed before the stream broke.
+func (s *geminiStreamState) flushPendingFinish(ch chan<- llm.StreamEvent) {
+	if s.pendingFinish == nil {
+		return
+	}
+	ch <- llm.StreamEvent{Type: llm.EventFinish, FinishReason: s.pendingFinish}
+	s.pendingFinish = nil
+}
+
 func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
@@ -201,17 +215,15 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 	}
 
 	if err := scanner.Err(); err != nil && !isContextError(err) {
+		state.flushPendingFinish(ch)
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: SSE scan error: %w", err)}
 		return
 	}
 
 	// Stream ended cleanly with a buffered finish reason but no usage chunk
 	// ever arrived (e.g. real Google API without split chunks, or a truncated
-	// upstream). Emit the deferred finish so callers see a terminal event.
-	if state.pendingFinish != nil {
-		ch <- llm.StreamEvent{Type: llm.EventFinish, FinishReason: state.pendingFinish}
-		state.pendingFinish = nil
-	}
+	// upstream). Flush the deferred finish so callers see a terminal event.
+	state.flushPendingFinish(ch)
 }
 
 // processSSELine handles a single SSE data line. Returns true if scanning should stop.
@@ -222,6 +234,7 @@ func (a *Adapter) processSSELine(data []byte, ch chan<- llm.StreamEvent, state *
 
 	var chunk geminiResponse
 	if err := json.Unmarshal(data, &chunk); err != nil {
+		state.flushPendingFinish(ch)
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: parse SSE chunk: %w", err)}
 		return true
 	}
@@ -265,6 +278,11 @@ func (a *Adapter) processCandidate(candidate geminiCandidate, chunk *geminiRespo
 		fr := translateFinishReason(candidate.FinishReason, hasToolCallParts(candidate.Content.Parts))
 		if chunk.UsageMetadata != nil {
 			// Combined upstream: reason + usage in the same chunk. Emit now.
+			// Clear any earlier-buffered finish so the stream-end flush
+			// doesn't emit a duplicate terminal event (defensive — only
+			// reachable if an upstream emits split-then-combined finish
+			// chunks in the same stream).
+			state.pendingFinish = nil
 			ch <- llm.StreamEvent{Type: llm.EventFinish, FinishReason: &fr, Usage: usageFromMeta(chunk.UsageMetadata)}
 			return
 		}
