@@ -4,8 +4,12 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
 func TestVerifyResumeBundle_MatchesIdentity(t *testing.T) {
@@ -65,5 +69,59 @@ func TestVerifyResumeBundle_NeitherSideHasIdentity(t *testing.T) {
 	err := verifyResumeBundle("", "", false)
 	if err != nil {
 		t.Errorf("no-identity-either-side should pass unchanged: %v", err)
+	}
+}
+
+// TestCurrentBundleIdentity_RealDipxBundle exercises the dipx.Open path and
+// verifies the returned identity matches the "sha256:<64-hex>" shape.
+func TestCurrentBundleIdentity_RealDipxBundle(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.dip")
+	if err := os.WriteFile(entry, []byte(dipxtest.MinimalDip("ident_test", "start", "exit")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entry)
+
+	id, err := currentBundleIdentity(bundlePath)
+	if err != nil {
+		t.Fatalf("currentBundleIdentity: %v", err)
+	}
+	if !strings.HasPrefix(id, "sha256:") {
+		t.Errorf("expected sha256: prefix, got %q", id)
+	}
+	if len(id) != len("sha256:")+64 {
+		t.Errorf("expected len 71 (sha256: + 64 hex), got %d (%q)", len(id), id)
+	}
+}
+
+// TestCurrentBundleIdentity_NonDipxExtensions verifies that non-.dipx paths
+// short-circuit to an empty identity without touching the filesystem.
+func TestCurrentBundleIdentity_NonDipxExtensions(t *testing.T) {
+	cases := []string{"foo.dip", "foo.dot", "foo", "foo.txt"}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			id, err := currentBundleIdentity(name)
+			if err != nil {
+				t.Errorf("expected nil err for %q, got %v", name, err)
+			}
+			if id != "" {
+				t.Errorf("expected empty identity for %q, got %q", name, id)
+			}
+		})
+	}
+}
+
+// TestCurrentBundleIdentity_MissingDipxFile verifies the dipx.Open error is
+// wrapped with the "resume verification" prefix so operators can trace it.
+func TestCurrentBundleIdentity_MissingDipxFile(t *testing.T) {
+	id, err := currentBundleIdentity(filepath.Join(t.TempDir(), "missing.dipx"))
+	if err == nil {
+		t.Fatal("expected error for missing .dipx, got nil")
+	}
+	if !strings.Contains(err.Error(), "resume verification") {
+		t.Errorf("error should be wrapped with 'resume verification', got: %v", err)
+	}
+	if id != "" {
+		t.Errorf("expected empty id on error, got %q", id)
 	}
 }

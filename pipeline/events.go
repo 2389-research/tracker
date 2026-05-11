@@ -37,6 +37,7 @@ const (
 	// EventBundleMismatchForced is emitted when resume proceeds despite a
 	// bundle-identity mismatch because --force-bundle-mismatch was set. It
 	// records the override in activity.jsonl for post-hoc audit.
+	// TODO(task-16): wire the actual emission via the engine after construction in resolveRunCheckpoint.
 	EventBundleMismatchForced PipelineEventType = "bundle_mismatch_forced"
 )
 
