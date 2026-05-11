@@ -568,6 +568,186 @@ func TestAdapterStreamTrailingUsageChunk(t *testing.T) {
 	}
 }
 
+// Even when an upstream splits the finish chunk and the usageMetadata
+// chunk, the parser should coalesce them into a single EventFinish so
+// downstream observers (trace log, NDJSON cost events) don't see a
+// duplicate "llm finish" entry. The combined event must carry both the
+// finish reason and the usage.
+func TestAdapterStreamTrailingUsageChunkEmitsSingleFinish(t *testing.T) {
+	sseData := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"index":0}]}`,
+		"",
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}]}`,
+		"",
+		`data: {"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":4,"totalTokenCount":13}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gemini-2.5-pro",
+		Messages: []llm.Message{llm.UserMessage("Say ok")},
+	})
+
+	var finishEvents []llm.StreamEvent
+	for evt := range ch {
+		if evt.Type == llm.EventFinish {
+			finishEvents = append(finishEvents, evt)
+		}
+	}
+
+	if len(finishEvents) != 1 {
+		t.Fatalf("expected exactly 1 EventFinish, got %d: %+v", len(finishEvents), finishEvents)
+	}
+	fe := finishEvents[0]
+	if fe.FinishReason == nil || fe.FinishReason.Reason != "stop" {
+		t.Errorf("expected finish reason 'stop' on the single event, got %+v", fe.FinishReason)
+	}
+	if fe.Usage == nil {
+		t.Fatal("expected usage on the single finish event")
+	}
+	if fe.Usage.InputTokens != 9 || fe.Usage.OutputTokens != 4 || fe.Usage.TotalTokens != 13 {
+		t.Errorf("usage mismatch: got %+v, want In=9 Out=4 Total=13", fe.Usage)
+	}
+}
+
+// Defensive: if the stream ends with a buffered finish reason and no
+// trailing usage chunk ever arrives, the parser must still emit a final
+// EventFinish carrying the reason (with nil usage) so callers see a
+// terminal event.
+func TestAdapterStreamFinishWithoutUsageChunk(t *testing.T) {
+	sseData := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"index":0}]}`,
+		"",
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}]}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gemini-2.5-pro",
+		Messages: []llm.Message{llm.UserMessage("Say ok")},
+	})
+
+	var finishEvents []llm.StreamEvent
+	for evt := range ch {
+		if evt.Type == llm.EventFinish {
+			finishEvents = append(finishEvents, evt)
+		}
+	}
+
+	if len(finishEvents) != 1 {
+		t.Fatalf("expected exactly 1 EventFinish, got %d", len(finishEvents))
+	}
+	if finishEvents[0].FinishReason == nil || finishEvents[0].FinishReason.Reason != "stop" {
+		t.Errorf("expected finish reason 'stop', got %+v", finishEvents[0].FinishReason)
+	}
+}
+
+// Defensive: if a split-style chunk buffers a finish reason and then a
+// later candidate chunk emits a combined (reason + usage) finish, the
+// buffered reason must be cleared so the stream-end flush doesn't emit
+// a duplicate EventFinish.
+func TestAdapterStreamCombinedAfterSplitClearsPending(t *testing.T) {
+	sseData := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}]}`,
+		"",
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":4,"totalTokenCount":13}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gemini-2.5-pro",
+		Messages: []llm.Message{llm.UserMessage("Say ok")},
+	})
+
+	var finishEvents []llm.StreamEvent
+	for evt := range ch {
+		if evt.Type == llm.EventFinish {
+			finishEvents = append(finishEvents, evt)
+		}
+	}
+
+	if len(finishEvents) != 1 {
+		t.Fatalf("expected exactly 1 EventFinish, got %d", len(finishEvents))
+	}
+}
+
+// When an SSE chunk fails to parse after a finish reason was buffered,
+// the parser must flush the buffered finish before emitting the error,
+// so callers (StreamAccumulator, trace observers) still see a terminal
+// EventFinish for the work that completed before the stream broke.
+func TestAdapterStreamParseErrorFlushesPendingFinish(t *testing.T) {
+	sseData := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}]}`,
+		"",
+		`data: {not-valid-json`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gemini-2.5-pro",
+		Messages: []llm.Message{llm.UserMessage("Say ok")},
+	})
+
+	var events []llm.StreamEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+
+	finishIdx, errIdx := -1, -1
+	for i, e := range events {
+		if e.Type == llm.EventFinish && finishIdx < 0 {
+			finishIdx = i
+		}
+		if e.Type == llm.EventError && errIdx < 0 {
+			errIdx = i
+		}
+	}
+	if finishIdx < 0 {
+		t.Fatalf("expected an EventFinish before EventError, got events: %+v", events)
+	}
+	if errIdx < 0 {
+		t.Fatalf("expected an EventError after the bad chunk, got events: %+v", events)
+	}
+	if finishIdx > errIdx {
+		t.Errorf("EventFinish (idx %d) must precede EventError (idx %d)", finishIdx, errIdx)
+	}
+	if events[finishIdx].FinishReason == nil || events[finishIdx].FinishReason.Reason != "stop" {
+		t.Errorf("expected flushed finish reason 'stop', got %+v", events[finishIdx].FinishReason)
+	}
+}
+
 func TestAdapterStreamToolCall(t *testing.T) {
 	sseData := strings.Join([]string{
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read_file","args":{"path":"test.go"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}`,
