@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -39,14 +40,8 @@ func TestLoadDippinWorkflowFromIR_ProducesSameGraphAsLoadDippinWorkflow(t *testi
 		t.Fatalf("LoadDippinWorkflowFromIR: %v", err)
 	}
 
-	if graphViaSource.Name != graphViaIR.Name {
-		t.Errorf("graph name mismatch: source=%q ir=%q", graphViaSource.Name, graphViaIR.Name)
-	}
-	if graphViaSource.StartNode != graphViaIR.StartNode {
-		t.Errorf("start mismatch: source=%q ir=%q", graphViaSource.StartNode, graphViaIR.StartNode)
-	}
-	if len(graphViaSource.Nodes) != len(graphViaIR.Nodes) {
-		t.Errorf("node count: source=%d ir=%d", len(graphViaSource.Nodes), len(graphViaIR.Nodes))
+	if !reflect.DeepEqual(graphViaSource, graphViaIR) {
+		t.Errorf("graph divergence between source path and IR path:\n  source: %+v\n  ir:     %+v", graphViaSource, graphViaIR)
 	}
 	if !graphViaIR.DippinValidated {
 		t.Errorf("IR path did not mark DippinValidated")
