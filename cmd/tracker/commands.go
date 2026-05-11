@@ -3,12 +3,15 @@
 package main
 
 import (
+	"context"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/dippin-lang/dipx"
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
@@ -356,11 +359,55 @@ func printToolSafetyPreamble(cfg runConfig) {
 }
 
 // resolveRunCheckpoint returns the checkpoint path for a resume run, or "" for new runs.
+//
+// For resumes, it also verifies the checkpoint's stored bundle identity
+// against the current pipeline source. Any mismatch (including .dipx-to-.dip
+// downgrades and .dip-to-.dipx upgrades) aborts the resume unless the user
+// explicitly passes --force-bundle-mismatch.
 func resolveRunCheckpoint(cfg runConfig) (string, error) {
 	if cfg.resumeID == "" {
 		return "", nil
 	}
-	return resolveCheckpoint(cfg.workdir, cfg.resumeID)
+	cpPath, err := resolveCheckpoint(cfg.workdir, cfg.resumeID)
+	if err != nil {
+		return "", err
+	}
+
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		return "", fmt.Errorf("load checkpoint for bundle verification: %w", err)
+	}
+
+	currentIdentity, err := currentBundleIdentity(cfg.pipelineFile)
+	if err != nil {
+		return "", err
+	}
+
+	if err := verifyResumeBundle(cp.BundleIdentity, currentIdentity, cfg.forceBundleMismatch); err != nil {
+		return "", err
+	}
+
+	if cp.BundleIdentity != currentIdentity && cfg.forceBundleMismatch {
+		fmt.Fprintf(os.Stderr, "WARNING: bundle identity mismatch forced via --force-bundle-mismatch\n  original: %s\n  current:  %s\n",
+			displayIdentity(cp.BundleIdentity), displayIdentity(currentIdentity))
+	}
+
+	return cpPath, nil
+}
+
+// currentBundleIdentity returns the content-addressed identity of the current
+// pipeline source, or "" for plain .dip files. Used by resolveRunCheckpoint
+// to compare against the checkpoint's stored identity on resume.
+func currentBundleIdentity(pipelineFile string) (string, error) {
+	if !strings.EqualFold(filepath.Ext(pipelineFile), ".dipx") {
+		return "", nil
+	}
+	bundle, err := dipx.Open(context.Background(), pipelineFile)
+	if err != nil {
+		return "", fmt.Errorf("resume verification: open bundle %s: %w", pipelineFile, err)
+	}
+	id := bundle.Identity()
+	return "sha256:" + hex.EncodeToString(id[:]), nil
 }
 
 // selectAndRunMode picks TUI or plain console mode and starts the pipeline.

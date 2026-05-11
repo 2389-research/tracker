@@ -33,6 +33,11 @@ const (
 	// Cost governance events — emitted after each completed node and when a budget is exceeded.
 	EventCostUpdated    PipelineEventType = "cost_updated"
 	EventBudgetExceeded PipelineEventType = "budget_exceeded"
+
+	// EventBundleMismatchForced is emitted when resume proceeds despite a
+	// bundle-identity mismatch because --force-bundle-mismatch was set. It
+	// records the override in activity.jsonl for post-hoc audit.
+	EventBundleMismatchForced PipelineEventType = "bundle_mismatch_forced"
 )
 
 // CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.
