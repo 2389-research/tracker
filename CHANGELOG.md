@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Native `.dipx` bundle support** (closes the `docs/requests/native-dipx-bundle-support.md` request from the pipelines team). Tracker now accepts content-addressed `.dipx` bundles (produced by `dippin pack`) anywhere it accepts a pipeline file: `tracker validate`, `tracker simulate`, `tracker run`, and `tracker -r <runID>` resume. Pre-fix, tracker read the bundle's ZIP bytes as `.dip` source and failed with bogus `DIP001`/`DIP002` validation errors — the runtime didn't share dippin's understanding of the format, so the integrity guarantees, single-artifact distribution, and audit-trail provenance value of `.dipx` only landed at lint time. New `pipeline.LoadDipxBundle` opens the bundle via `dipx.Open` (SHA-256 verifies every file in `manifest.json` before any content reaches the parser), uses the bundle's pre-parsed `*ir.Workflow` directly (no re-parse of bundled sources), and bypasses the filesystem subgraph walker entirely since dipx already verifies ref closure + acyclicity on `Open`. The bundle's content-addressed identity (`sha256:<hex>`) is stamped onto every line of `activity.jsonl` (engine emissions, parallel/manager_loop emissions that bypass the engine's emit chokepoint, and agent/llm JSONL writes that bypass both — three composable layers so every line of audit output carries provenance), persisted into `checkpoint.json` for resume verification, and surfaced in `tracker list` (new `Bundle` column) and `tracker audit` (new `Bundle:` header line). Bundle identity is exposed on `tracker.Result.BundleIdentity` and `tracker.RunSummary.BundleIdentity` for embedded library callers. Resume against a `.dipx` strictly verifies the stored identity matches the one being resumed — mismatch aborts with both hashes shown so the operator can pick the right artifact; `--force-bundle-mismatch` is the escape hatch (loud warning to stderr). Bare-name resolution (`tracker build_product`) still resolves `.dip` first, then file, then built-in — `.dipx` is dispatched explicitly by extension on full paths. Because the identity is computed deterministically over manifest bytes and verified on every `Open`, a `tracker validate` pass on a CI bundle gives the same answer as the production run.
+
+### Changed
+
+- **dippin-lang dependency bumped v0.23.0 → v0.24.0** for the new `dipx` package (`Open`, `Bundle.Workflow`, `Bundle.Identity`). `PinnedDippinVersion` in `tracker_doctor.go` updated to match so `tracker doctor`'s version-mismatch check reflects the new pin.
+
 ## [0.25.0] - 2026-05-05
 
 ### Added
