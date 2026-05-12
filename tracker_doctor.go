@@ -927,13 +927,46 @@ func checkPipelineBundle(bundlePath string) CheckResult {
 			Message: d.String(),
 		})
 	}
+	// Run tracker's semantic validation + lint on the bundled entry graph
+	// so .dipx gets the same coverage as the .dip path in checkPipelineFile.
+	// dipx.Open + LoadDippinWorkflowFromIR already covered structural
+	// validation; this layer adds tracker's handler-aware checks.
+	registry := buildDoctorValidationRegistry()
+	tracerWarnings := 0
+	if ve := pipeline.ValidateAllWithLint(entry, registry); ve != nil {
+		for _, e := range ve.Errors {
+			out.Details = append(out.Details, CheckDetail{
+				Status:  CheckStatusError,
+				Message: fmt.Sprintf("error: %s", e),
+			})
+		}
+		for _, w := range ve.Warnings {
+			out.Details = append(out.Details, CheckDetail{
+				Status:  CheckStatusWarn,
+				Message: w,
+			})
+		}
+		if len(ve.Errors) > 0 {
+			out.Status = CheckStatusError
+			out.Message = fmt.Sprintf("%s failed validation (%d error(s))", bundlePath, len(ve.Errors))
+			out.Hint = "run `tracker validate " + bundlePath + "` for full details"
+			return out
+		}
+		tracerWarnings = len(ve.Warnings)
+	}
+	totalWarnings := len(diags) + tracerWarnings
 	out.Details = append(out.Details, CheckDetail{
 		Status: CheckStatusOK,
 		Message: fmt.Sprintf("%s valid (%d nodes, %d edges, %d subgraph(s), identity %s)",
 			bundlePath, len(entry.Nodes), len(entry.Edges), len(subgraphs), info.Identity),
 	})
-	out.Status = CheckStatusOK
-	out.Message = fmt.Sprintf("%s is valid", bundlePath)
+	if totalWarnings > 0 {
+		out.Status = CheckStatusWarn
+		out.Message = fmt.Sprintf("%s valid with %d warning(s)", bundlePath, totalWarnings)
+	} else {
+		out.Status = CheckStatusOK
+		out.Message = fmt.Sprintf("%s is valid", bundlePath)
+	}
 	return out
 }
 

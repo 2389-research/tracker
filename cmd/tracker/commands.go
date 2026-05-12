@@ -232,14 +232,14 @@ func buildUnknownWorkflowError(name string) error {
 
 func executeValidate(cfg runConfig) error {
 	if cfg.pipelineFile == "" {
-		return fmt.Errorf("usage: tracker validate <pipeline.dip|bundle.dipx>")
+		return fmt.Errorf("usage: tracker validate <pipeline.dip|pipeline.dot|bundle.dipx>")
 	}
 	return runValidateCmd(cfg.pipelineFile, cfg.format, os.Stdout)
 }
 
 func executeSimulate(cfg runConfig) error {
 	if cfg.pipelineFile == "" {
-		return fmt.Errorf("usage: tracker simulate <pipeline.dip|bundle.dipx>")
+		return fmt.Errorf("usage: tracker simulate <pipeline.dip|pipeline.dot|bundle.dipx>")
 	}
 	return runSimulateCmd(cfg.pipelineFile, cfg.format, os.Stdout)
 }
