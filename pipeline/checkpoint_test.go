@@ -183,3 +183,38 @@ func TestCheckpointIncrementRetry(t *testing.T) {
 		t.Errorf("expected 2 after second increment, got %d", cp.RetryCount("node1"))
 	}
 }
+
+func TestCheckpoint_BundleIdentity_Roundtrip(t *testing.T) {
+	cp := &Checkpoint{
+		RunID:          "test-run",
+		BundleIdentity: "sha256:efb5648d28e6c250dfad5411651d427f4f62ca24e185ce6cfc51478a4c6711ab",
+		Timestamp:      time.Now(),
+	}
+	path := filepath.Join(t.TempDir(), "cp.json")
+	if err := SaveCheckpoint(cp, path); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	loaded, err := LoadCheckpoint(path)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if loaded.BundleIdentity != cp.BundleIdentity {
+		t.Errorf("BundleIdentity not preserved: got %q want %q", loaded.BundleIdentity, cp.BundleIdentity)
+	}
+}
+
+func TestCheckpoint_BundleIdentity_BackwardCompat(t *testing.T) {
+	// Old-format JSON without bundle_identity should load with empty string.
+	path := filepath.Join(t.TempDir(), "old.json")
+	old := `{"run_id":"old-run","current_node":"a","completed_nodes":["start"],"retry_counts":{},"context":{},"timestamp":"2026-05-01T00:00:00Z","restart_count":0}`
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadCheckpoint(path)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if loaded.BundleIdentity != "" {
+		t.Errorf("expected empty BundleIdentity on old checkpoint, got %q", loaded.BundleIdentity)
+	}
+}

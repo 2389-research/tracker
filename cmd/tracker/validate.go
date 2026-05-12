@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -26,6 +28,11 @@ func runValidateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 }
 
 // loadPipelineForValidation resolves and loads a pipeline, returning the graph and display name.
+// .dipx bundles dispatch through loadDipxPipeline (the bundle loader verifies
+// hashes + canonicalizes subgraph refs); .dip and .dot files go through the
+// plain loadPipeline path that does NOT eagerly walk subgraph references —
+// preserving the pre-.dipx behavior where validate only validates the entry
+// file. Subgraph ref validation for .dip happens at run time, not validate time.
 func loadPipelineForValidation(pipelineFile, formatOverride string) (*pipeline.Graph, string, error) {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
@@ -34,10 +41,14 @@ func loadPipelineForValidation(pipelineFile, formatOverride string) (*pipeline.G
 
 	var graph *pipeline.Graph
 	var displayName string
-	if isEmbedded {
+	switch {
+	case isEmbedded:
 		graph, err = loadEmbeddedPipeline(info)
 		displayName = info.Name
-	} else {
+	case strings.EqualFold(filepath.Ext(resolved), ".dipx"):
+		graph, _, _, err = loadDipxPipeline(resolved)
+		displayName = resolved
+	default:
 		graph, err = loadPipeline(resolved, formatOverride)
 		displayName = resolved
 	}

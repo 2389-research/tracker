@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -748,5 +749,179 @@ func TestResolveBudgetLimits_NilGraph(t *testing.T) {
 	got := ResolveBudgetLimits(cfg, nil)
 	if got.MaxTotalTokens != 100 {
 		t.Errorf("nil graph should pass cfg through, got %+v", got)
+	}
+}
+
+// TestRun_Config_BundleIdentity_FlowsToEngine pins the library-API contract
+// that Config.BundleIdentity is threaded into the engine via
+// pipeline.WithBundleIdentity, so embedded integrations (callers that do
+// NOT go through the CLI) can stamp .dipx bundle provenance onto every
+// checkpoint save. The round trip is verified by loading the checkpoint
+// after the run and asserting Checkpoint.BundleIdentity matches.
+func TestRun_Config_BundleIdentity_FlowsToEngine(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+	want := "sha256:librunidentity"
+
+	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:         "dot",
+		LLMClient:      client,
+		CheckpointDir:  cpPath,
+		BundleIdentity: want,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Status != "success" {
+		t.Fatalf("expected status=success, got %q", result.Status)
+	}
+
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.BundleIdentity != want {
+		t.Errorf("Config.BundleIdentity did not flow to Checkpoint: got %q, want %q", cp.BundleIdentity, want)
+	}
+}
+
+// TestRun_Config_BundleIdentity_EmptyByDefault pins the no-op semantics:
+// when Config.BundleIdentity is unset, the engine does not stamp anything,
+// so Checkpoint.BundleIdentity stays empty (matches plain .dip behavior).
+func TestRun_Config_BundleIdentity_EmptyByDefault(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+
+	if _, err := Run(context.Background(), simpleDOT, Config{
+		Format:        "dot",
+		LLMClient:     client,
+		CheckpointDir: cpPath,
+		// BundleIdentity intentionally left empty.
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.BundleIdentity != "" {
+		t.Errorf("expected empty BundleIdentity on checkpoint, got %q", cp.BundleIdentity)
+	}
+}
+
+// TestRun_Config_BundleIdentity_WiresHandlerRegistry pins the contract that
+// Config.BundleIdentity is threaded through buildRegistry via
+// handlers.WithHandlerBundleIdentity, so handler-package emissions
+// (parallel/manager_loop bypass paths) carry identity when received by
+// cfg.EventHandler. Without this wiring, embedded integrations would see
+// unstamped EventStage* events on their handler — re-introducing the
+// bypass closed at the CLI in Task 7.
+//
+// Mirrors TestRegistryWrapBranch_FiresWhenIdentitySet but at the library
+// API surface: even with a minimal simpleDOT graph (no parallel node),
+// every event delivered to cfg.EventHandler must carry the identity if
+// the full stamping chain (engine + handler registry) is wired correctly.
+func TestRun_Config_BundleIdentity_WiresHandlerRegistry(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	var mu sync.Mutex
+	var captured []pipeline.PipelineEvent
+	handler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		captured = append(captured, evt)
+	})
+
+	want := "sha256:registry_wiring_test"
+	_, err := Run(context.Background(), simpleDOT, Config{
+		Format:         "dot",
+		LLMClient:      client,
+		CheckpointDir:  filepath.Join(t.TempDir(), "checkpoint.json"),
+		BundleIdentity: want,
+		EventHandler:   handler,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) == 0 {
+		t.Fatal("no events captured on cfg.EventHandler")
+	}
+	for _, evt := range captured {
+		if evt.BundleIdentity != want {
+			t.Errorf("event %v: BundleIdentity = %q, want %q", evt.Type, evt.BundleIdentity, want)
+		}
+	}
+}
+
+// TestRun_Result_BundleIdentity_PopulatedFromConfig pins the contract that
+// tracker.Result.BundleIdentity mirrors Config.BundleIdentity after a
+// successful Run. Library callers can read provenance off the returned
+// Result without inspecting checkpoints.
+func TestRun_Result_BundleIdentity_PopulatedFromConfig(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	want := "sha256:result_test"
+	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:         "dot",
+		LLMClient:      client,
+		CheckpointDir:  filepath.Join(t.TempDir(), "checkpoint.json"),
+		BundleIdentity: want,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.BundleIdentity != want {
+		t.Errorf("Result.BundleIdentity = %q, want %q", result.BundleIdentity, want)
+	}
+}
+
+// TestRun_Result_BundleIdentity_EmptyWhenNotSet pins the no-op semantics:
+// when Config.BundleIdentity is unset, Result.BundleIdentity stays empty —
+// matching plain .dip behavior.
+func TestRun_Result_BundleIdentity_EmptyWhenNotSet(t *testing.T) {
+	client := &stubCompleter{
+		response: &llm.Response{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+		},
+	}
+
+	result, err := Run(context.Background(), simpleDOT, Config{
+		Format:        "dot",
+		LLMClient:     client,
+		CheckpointDir: filepath.Join(t.TempDir(), "checkpoint.json"),
+		// BundleIdentity intentionally left empty.
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.BundleIdentity != "" {
+		t.Errorf("Result.BundleIdentity should be empty when Config.BundleIdentity unset, got %q", result.BundleIdentity)
 	}
 }

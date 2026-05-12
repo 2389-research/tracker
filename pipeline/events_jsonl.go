@@ -4,25 +4,29 @@ package pipeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/2389-research/tracker/internal/bundleid"
 )
 
 // jsonlLogEntry is the on-disk format for one activity log line.
 type jsonlLogEntry struct {
-	Timestamp string `json:"ts"`
-	Source    string `json:"source"` // "pipeline", "agent", "llm"
-	Type      string `json:"type"`
-	RunID     string `json:"run_id,omitempty"`
-	NodeID    string `json:"node_id,omitempty"`
-	Message   string `json:"message,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Provider  string `json:"provider,omitempty"`
-	Model     string `json:"model,omitempty"`
-	ToolName  string `json:"tool_name,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Timestamp      string `json:"ts"`
+	Source         string `json:"source"` // "pipeline" (engine emissions) | "agent" (LLM session) | "llm" (raw provider events) | "cli" (CLI-level audit, e.g. bundle_mismatch_forced)
+	Type           string `json:"type"`
+	RunID          string `json:"run_id,omitempty"`
+	NodeID         string `json:"node_id,omitempty"`
+	Message        string `json:"message,omitempty"`
+	Error          string `json:"error,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model,omitempty"`
+	ToolName       string `json:"tool_name,omitempty"`
+	Content        string `json:"content,omitempty"`
+	BundleIdentity string `json:"bundle_identity,omitempty"`
 
 	// Decision audit trail fields.
 	EdgeFrom        string            `json:"edge_from,omitempty"`
@@ -55,15 +59,30 @@ type jsonlLogEntry struct {
 // directory to derive the path: <artifactDir>/<runID>/activity.jsonl.
 // Safe for concurrent use from multiple goroutines.
 type JSONLEventHandler struct {
-	mu          sync.Mutex
-	artifactDir string
-	file        *os.File
+	mu             sync.Mutex
+	artifactDir    string
+	file           *os.File
+	bundleIdentity string
 }
 
 // NewJSONLEventHandler creates a JSONL event logger that writes to
 // <artifactDir>/<runID>/activity.jsonl. The file is opened lazily on first event.
 func NewJSONLEventHandler(artifactDir string) *JSONLEventHandler {
 	return &JSONLEventHandler{artifactDir: artifactDir}
+}
+
+// SetBundleIdentity sets the .dipx bundle identity ("sha256:<hex>") that
+// will be stamped onto subsequent WriteAgentEvent and WriteLLMEvent
+// writes. Empty (the default) is a no-op so plain .dip runs see no
+// change. Called once at run-start after the handler is constructed.
+//
+// Note: events that flow through HandlePipelineEvent already get stamped
+// at the engine and registry levels; this setter only affects the
+// JSONL writes that bypass those chokepoints (agent and llm events).
+func (h *JSONLEventHandler) SetBundleIdentity(id string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.bundleIdentity = id
 }
 
 // openFile creates the activity log file on first use.
@@ -102,12 +121,13 @@ func (h *JSONLEventHandler) HandlePipelineEvent(evt PipelineEvent) {
 // buildLogEntry converts a PipelineEvent to a jsonlLogEntry.
 func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	entry := jsonlLogEntry{
-		Timestamp: evt.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-		Source:    "pipeline",
-		Type:      string(evt.Type),
-		RunID:     evt.RunID,
-		NodeID:    evt.NodeID,
-		Message:   evt.Message,
+		Timestamp:      evt.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+		Source:         "pipeline",
+		Type:           string(evt.Type),
+		RunID:          evt.RunID,
+		NodeID:         evt.NodeID,
+		Message:        evt.Message,
+		BundleIdentity: evt.BundleIdentity,
 	}
 	if evt.Err != nil {
 		entry.Error = evt.Err.Error()
@@ -184,6 +204,13 @@ func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutpu
 			entry.Error = errMsg
 		}
 	}
+	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
+	// Engine.emit and the registry's BundleIdentityStamper — these writes
+	// bypass both chokepoints, so the stamping has to happen here for
+	// activity.jsonl provenance to stay complete for agent events.
+	if entry.BundleIdentity == "" {
+		entry.BundleIdentity = h.bundleIdentity
+	}
 	h.writeEntry(entry)
 }
 
@@ -204,6 +231,55 @@ func (h *JSONLEventHandler) WriteLLMEvent(kind, provider, model, toolName, previ
 		Model:     model,
 		ToolName:  toolName,
 		Content:   preview,
+	}
+	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
+	// Engine.emit and the registry's BundleIdentityStamper — these writes
+	// bypass both chokepoints, so the stamping has to happen here for
+	// activity.jsonl provenance to stay complete for llm trace events.
+	if entry.BundleIdentity == "" {
+		entry.BundleIdentity = h.bundleIdentity
+	}
+	h.writeEntry(entry)
+}
+
+// WriteBundleMismatchForced records a forced bundle-identity override on
+// resume. Called once at run-start (before the engine fires any pipeline
+// events) when --force-bundle-mismatch allowed resume despite a mismatch
+// between the checkpoint's stored identity and the current bundle's
+// identity. Both identities are preserved in the log entry so post-hoc
+// auditors can see what was overridden.
+//
+// The entry's bundle_identity field is stamped with the CURRENT identity
+// (what the run actually executes against), so post-hoc scans grouping
+// activity.jsonl lines by bundle see this override clustered with the
+// rest of the run.
+//
+// runID is needed to open the activity log file lazily — this is the
+// first event the handler ever writes, so the file isn't open yet
+// (HandlePipelineEvent's lazy openFile hasn't run). Pass the resume run
+// ID here.
+func (h *JSONLEventHandler) WriteBundleMismatchForced(runID, originalIdentity, currentIdentity string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.file == nil && runID != "" {
+		_ = h.openFile(runID)
+	}
+	if h.file == nil {
+		return
+	}
+
+	entry := jsonlLogEntry{
+		Timestamp:      time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
+		Source:         "cli",
+		Type:           string(EventBundleMismatchForced),
+		RunID:          runID,
+		BundleIdentity: currentIdentity,
+		Message: fmt.Sprintf(
+			"bundle identity mismatch forced via --force-bundle-mismatch (original: %s, current: %s)",
+			bundleid.DisplayForLog(originalIdentity),
+			bundleid.DisplayForLog(currentIdentity),
+		),
 	}
 	h.writeEntry(entry)
 }

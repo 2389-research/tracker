@@ -37,6 +37,12 @@ func (e *Engine) saveCheckpoint(cp *Checkpoint, pctx *PipelineContext, runID str
 	cp.RunID = runID
 	cp.Context = pctx.Snapshot()
 	cp.Timestamp = time.Now()
+	// Stamp the engine's bundle identity (set via WithBundleIdentity) onto
+	// every checkpoint save. Empty string for plain .dip runs; the
+	// `omitempty` JSON tag on Checkpoint.BundleIdentity keeps the field
+	// out of checkpoint.json in that case. This is what strict-resume
+	// verification reads to fail-fast on bundle drift.
+	cp.BundleIdentity = e.bundleIdentity
 	if err := SaveCheckpoint(cp, e.checkpointPath); err != nil {
 		e.emit(PipelineEvent{
 			Type:      EventCheckpointFailed,

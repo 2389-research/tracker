@@ -33,8 +33,14 @@ func TestResolveUnderRoot_AcceptsAbsoluteInside(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected absolute path inside root to be accepted, got: %v", err)
 	}
-	if !strings.HasPrefix(got, dir) {
-		t.Errorf("resolved path %q should start with root %q", got, dir)
+	// macOS resolves /var → /private/var; compare against the symlink-evaluated
+	// form of dir to match what resolveUnderRoot returns.
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("eval symlinks on tempdir: %v", err)
+	}
+	if !strings.HasPrefix(got, resolvedDir) {
+		t.Errorf("resolved path %q should start with root %q", got, resolvedDir)
 	}
 }
 
@@ -74,7 +80,13 @@ func TestResolveUnderRoot_AcceptsNonexistentInRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nonexistent path under root to be accepted, got: %v", err)
 	}
-	if !strings.HasPrefix(got, root) {
-		t.Errorf("resolved path %q should start with root %q", got, root)
+	// macOS resolves /var → /private/var; compare against the symlink-evaluated
+	// form of root to match what resolveUnderRoot returns.
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("eval symlinks on tempdir: %v", err)
+	}
+	if !strings.HasPrefix(got, resolvedRoot) {
+		t.Errorf("resolved path %q should start with root %q", got, resolvedRoot)
 	}
 }

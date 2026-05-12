@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
 func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
@@ -107,6 +109,50 @@ func TestDoctor_PipelineFileValidation(t *testing.T) {
 	}
 	if pipelineCheck == nil {
 		t.Fatal("Pipeline File check missing when PipelineFile set")
+	}
+}
+
+// TestDoctor_PipelineFileBundle exercises the .dipx branch of checkPipelineFile.
+// A real bundle is packed via dipxtest.PackTestBundle and handed to Doctor;
+// the result must be a successful "Pipeline File" check with no warnings about
+// unrecognized extensions or parse errors. Regression guard for the bug where
+// doctor rejected .dipx as "not a .dip or .dot file" and then tried to parse
+// the ZIP bytes as text.
+func TestDoctor_PipelineFileBundle(t *testing.T) {
+	workdir := t.TempDir()
+	srcDir := t.TempDir()
+	entryPath := filepath.Join(srcDir, "entry.dip")
+	must(t, os.WriteFile(entryPath, []byte(dipxtest.MinimalDip("doctor_bundle", "start", "exit")), 0o644))
+	bundlePath := dipxtest.PackTestBundle(t, entryPath)
+
+	r, err := Doctor(context.Background(), DoctorConfig{WorkDir: workdir, PipelineFile: bundlePath, ProbeProviders: false})
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	var pipelineCheck *CheckResult
+	for i := range r.Checks {
+		if r.Checks[i].Name == "Pipeline File" {
+			pipelineCheck = &r.Checks[i]
+		}
+	}
+	if pipelineCheck == nil {
+		t.Fatal("Pipeline File check missing when PipelineFile set to a .dipx")
+	}
+	if pipelineCheck.Status != CheckStatusOK {
+		t.Errorf("Pipeline File status = %q, want ok; details=%+v message=%q",
+			pipelineCheck.Status, pipelineCheck.Details, pipelineCheck.Message)
+	}
+	// The pre-fix warning leaked through as a detail or message — guard against it.
+	for _, d := range pipelineCheck.Details {
+		if strings.Contains(d.Message, "not a .dip") {
+			t.Errorf("bundle should not produce extension warning, got detail: %q", d.Message)
+		}
+		if strings.Contains(d.Message, "parse error") {
+			t.Errorf("bundle should not produce parse error (ZIP read as text), got detail: %q", d.Message)
+		}
+	}
+	if strings.Contains(pipelineCheck.Message, "parse error") {
+		t.Errorf("bundle should not produce parse error, got message: %q", pipelineCheck.Message)
 	}
 }
 
