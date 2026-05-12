@@ -72,6 +72,7 @@ Sources:
 - `source: "pipeline"` — engine lifecycle events (stage started/completed/failed/retrying, edge decisions, checkpoint saved/failed, cost updated, budget exceeded, pipeline completed/failed).
 - `source: "agent"` — `agent.Event` values forwarded via `WriteAgentEvent` (tool calls, text deltas, LLM request/finish, errors).
 - `source: "llm"` — provider-level trace (`TraceRequestStart`, `TraceFinish`, etc.).
+- `source: "cli"` — CLI-level audit entries that precede engine emissions (`bundle_mismatch_forced` when resume proceeds past a bundle-identity mismatch via `--force-bundle-mismatch`).
 
 Each entry carries `ts`, `type`, optional `run_id` / `node_id` / `message` / `error`, and type-specific fields:
 
@@ -79,6 +80,7 @@ Each entry carries `ts`, `type`, optional `run_id` / `node_id` / `message` / `er
 - **Cost snapshots**: `total_tokens`, `total_cost_usd`, `provider_totals`, `wall_elapsed_ms`.
 - **Tokens per request**: `token_input`, `token_output`.
 - **Tool output**: `tool_name`, `content`, `provider`, `model`.
+- **Bundle identity** (v0.26.0+): `bundle_identity` (`sha256:<hex>`) on every line when the run was started against a `.dipx` bundle. Empty for plain `.dip` runs. Stamped via three composable layers in `pipeline/handlers/stamping.go` (engine emit, parallel/manager_loop emissions, raw agent/llm JSONL writes) so post-hoc auditors can group activity by bundle.
 
 `tracker.ParseActivityLine` ([tracker_activity.go](../../tracker_activity.go)) is the canonical decoder. It handles two timestamp formats (RFC3339Nano and `2006-01-02T15:04:05.000Z07:00`) because the file has both historically — do not feed `ActivityEntry` through `json.Unmarshal` directly.
 
@@ -97,6 +99,7 @@ type Checkpoint struct {
     RestartCount   int
     EdgeSelections map[string]string // nodeID → selected edge target
     FallbackTaken  map[string]bool   // goal-gate fallback tracking
+    BundleIdentity string            // sha256:<hex>, empty for non-.dipx runs (v0.26.0+)
 }
 ```
 
