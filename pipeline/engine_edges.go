@@ -19,12 +19,16 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		return edge, err
 	}
 
-	// All conditionals (if any) evaluated false. If any *did* exist, the
-	// fallback path we take next is a "stated-intent miss" — emit
-	// EventConditionalFallthrough so `tracker diagnose` can correlate
-	// with EventToolOutputTruncated (issue #208).
+	// All conditionals (if any) evaluated false. If any *did* exist AND the
+	// fallback path we take next is an unconditional edge, the routing is a
+	// "stated-intent miss" — emit EventConditionalFallthrough so
+	// `tracker diagnose` can correlate with EventToolOutputTruncated (#208).
+	// Skip the event when the selected edge still has a Condition (label and
+	// suggested matchers can pick a conditional edge whose condition evaluated
+	// false — that's not a fallthrough, it's a re-selection by other criteria,
+	// and labeling it fallthrough would trigger misleading diagnose guidance).
 	emitFallthrough := func(selected *Edge, priority string) {
-		if len(conditionsTried) == 0 || selected == nil {
+		if len(conditionsTried) == 0 || selected == nil || selected.Condition != "" {
 			return
 		}
 		e.emit(PipelineEvent{
@@ -52,9 +56,9 @@ func (e *Engine) selectEdge(edges []*Edge, pctx *PipelineContext) (*Edge, error)
 		return edge, nil
 	}
 
-	edge, err = e.selectByWeight(edges, pctx, ctxSnap)
+	edge, weightPriority, err := e.selectByWeight(edges, pctx, ctxSnap)
 	if err == nil && edge != nil {
-		emitFallthrough(edge, "weight")
+		emitFallthrough(edge, weightPriority)
 	}
 	return edge, err
 }
@@ -132,8 +136,11 @@ func (e *Engine) selectBySuggested(edges []*Edge, pctx *PipelineContext, ctxSnap
 	return nil
 }
 
-// selectByWeight picks the highest-weight unconditional edge, breaking ties lexically.
-func (e *Engine) selectByWeight(edges []*Edge, pctx *PipelineContext, ctxSnap map[string]string) (*Edge, error) {
+// selectByWeight picks the highest-weight unconditional edge, breaking ties
+// lexically. Returns the selected edge plus the priority label used
+// ("weight" or "lexical"); the caller needs the priority to keep the
+// fallthrough event consistent with the edge-selected event.
+func (e *Engine) selectByWeight(edges []*Edge, pctx *PipelineContext, ctxSnap map[string]string) (*Edge, string, error) {
 	var unconditional []*Edge
 	for _, edge := range edges {
 		if edge.Condition == "" {
@@ -141,7 +148,7 @@ func (e *Engine) selectByWeight(edges []*Edge, pctx *PipelineContext, ctxSnap ma
 		}
 	}
 	if len(unconditional) == 0 {
-		return nil, e.noMatchingEdgesError(edges, pctx)
+		return nil, "", e.noMatchingEdgesError(edges, pctx)
 	}
 
 	sort.SliceStable(unconditional, func(i, j int) bool {
@@ -165,7 +172,7 @@ func (e *Engine) selectByWeight(edges []*Edge, pctx *PipelineContext, ctxSnap ma
 	}
 
 	e.emitEdgeSelected(unconditional[0], priority, ctxSnap)
-	return unconditional[0], nil
+	return unconditional[0], priority, nil
 }
 
 // noMatchingEdgesError builds a diagnostic error when all edges have false conditions.

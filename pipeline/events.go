@@ -37,7 +37,7 @@ const (
 	// EventToolOutputTruncated fires after a tool node when one or both of
 	// its output streams exceeded the per-stream cap and head bytes were
 	// elided. Carries TruncationDetail. Surfaced by `tracker diagnose` so
-	// operators can correlate routing miss-matches with truncation (issue
+	// operators can correlate routing mismatches with truncation (issue
 	// #208).
 	EventToolOutputTruncated PipelineEventType = "tool_output_truncated"
 
@@ -115,11 +115,11 @@ type DecisionDetail struct {
 // event. Attached to PipelineEvent via the Truncation field when a tool
 // stream's tail-window cap was hit. Issue #208.
 type TruncationDetail struct {
-	Stream         string `json:"stream"`          // "stdout" or "stderr"
-	Limit          int    `json:"limit"`           // per-stream cap in effect
-	CapturedBytes  int    `json:"captured_bytes"`  // bytes preserved in the captured tail
-	DroppedBytes   int    `json:"dropped_bytes"`   // bytes elided from the head
-	TotalBytes     int    `json:"total_bytes"`     // CapturedBytes + DroppedBytes for convenience
+	Stream        string `json:"stream"`         // "stdout" or "stderr"
+	Limit         int    `json:"limit"`          // per-stream cap in effect
+	CapturedBytes int    `json:"captured_bytes"` // bytes preserved in the captured tail
+	DroppedBytes  int    `json:"dropped_bytes"`  // bytes elided from the head
+	TotalBytes    int    `json:"total_bytes"`    // CapturedBytes + DroppedBytes for convenience
 }
 
 // PipelineEvent carries data about a single pipeline lifecycle occurrence.

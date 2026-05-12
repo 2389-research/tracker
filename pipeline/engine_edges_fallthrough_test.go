@@ -37,13 +37,6 @@ func buildFallthroughGraph(t *testing.T, branchOutcome Outcome, conditionalEdgeO
 
 	var mu sync.Mutex
 	var events []PipelineEvent
-	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
-		mu.Lock()
-		events = append(events, evt)
-		mu.Unlock()
-	})
-	_ = handler // assigned below by callers via NewEngine
-
 	return g, reg, &events, &mu
 }
 

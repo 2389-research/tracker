@@ -214,7 +214,7 @@ edges
 
 Supported operators: `=`, `!=`, `contains`, `not contains`, `startswith`, `not startswith`, `endswith`, `not endswith`, `in`, `not in`, `&&`, `||`, `not`.
 
-`ctx.tool_stdout` and `ctx.tool_stderr` capture the **tail** of a tool node's output (default cap 64KB per stream, configurable per-node via `output_limit: 256KB` or globally via `--max-output-limit`). Routing markers emitted at end-of-output via `printf` survive truncation by construction; `tracker diagnose` surfaces a `tool_output_truncated` suggestion when a stream was clipped so you know to raise the limit if the captured tail isn't what you expected.
+`ctx.tool_stdout` and `ctx.tool_stderr` capture the **tail** of a tool node's output (default cap 64KB per stream, configurable per-node via `output_limit: 256KB`; `--max-output-limit` is a hard global ceiling, default 10MB, that caps how high a per-node `output_limit` can go). Routing markers emitted at end-of-output via `printf` survive truncation by construction; `tracker diagnose` surfaces a `tool_output_truncated` suggestion when a stream was clipped so you know to raise the limit if the captured tail isn't what you expected.
 
 Conditions support the `ctx.` namespace prefix (dippin convention) and `internal.*` references for engine-managed state.
 

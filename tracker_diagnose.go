@@ -249,8 +249,8 @@ type diagnoseEntry struct {
 	TruncTotal    int    `json:"trunc_total_bytes"`
 
 	// Conditional-fallthrough event fields (#208).
-	EdgeTo          string                    `json:"edge_to"`
-	ConditionsTried []pipeline.ConditionEval  `json:"conditions_tried"`
+	EdgeTo          string                   `json:"edge_to"`
+	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
 }
 
 // enrichFromActivity streams activity.jsonl, populating failures + detecting
@@ -290,15 +290,15 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		switch entry.Type {
-		case "budget_exceeded":
+		switch pipeline.PipelineEventType(entry.Type) {
+		case pipeline.EventBudgetExceeded:
 			halt = &BudgetHalt{
 				TotalTokens:   entry.TotalTokens,
 				TotalCostUSD:  entry.TotalCostUSD,
 				WallElapsedMs: entry.WallElapsedMs,
 				Message:       entry.Message,
 			}
-		case "tool_output_truncated":
+		case pipeline.EventToolOutputTruncated:
 			anomalies.Truncations = append(anomalies.Truncations, truncObservation{
 				NodeID:        entry.NodeID,
 				Stream:        entry.TruncStream,
@@ -307,7 +307,7 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 				DroppedBytes:  entry.TruncDropped,
 				TotalBytes:    entry.TruncTotal,
 			})
-		case "conditional_fallthrough":
+		case pipeline.EventConditionalFallthrough:
 			anomalies.Fallthroughs = append(anomalies.Fallthroughs, fallthroughObservation{
 				NodeID:          entry.NodeID,
 				EdgeTo:          entry.EdgeTo,
@@ -422,7 +422,7 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 		fallthroughByNode[fb.NodeID] = fb
 	}
 	for _, tr := range anomalies.Truncations {
-		msg := fmt.Sprintf("%s: %s truncated — captured last %d bytes of ~%d (dropped %d from head; limit %d). If this tool emits a routing marker at end-of-output, the tail-window capture preserved it. Raise the per-node `output_limit` attribute if you need more context retained.",
+		msg := fmt.Sprintf("%s: %s truncated — captured last %d bytes of ~%d (dropped %d from head; limit %d). The tail-window capture is designed to preserve a routing marker emitted at end-of-output (as long as the marker fits within the limit). Raise the per-node `output_limit` attribute if you need more context retained or if the marker itself is larger than the cap.",
 			tr.NodeID, tr.Stream, tr.CapturedBytes, tr.TotalBytes, tr.DroppedBytes, tr.Limit)
 		if fb, ok := fallthroughByNode[tr.NodeID]; ok {
 			var tried []string

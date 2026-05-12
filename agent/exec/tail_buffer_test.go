@@ -193,8 +193,12 @@ func TestTailBuffer_WriteBoundaryAtLimit(t *testing.T) {
 			b := bytes.Repeat([]byte("B"), tc.secondWrite)
 			all = append(all, a...)
 			all = append(all, b...)
-			tb.Write(a)
-			tb.Write(b)
+			if _, err := tb.Write(a); err != nil {
+				t.Fatalf("write a: %v", err)
+			}
+			if _, err := tb.Write(b); err != nil {
+				t.Fatalf("write b: %v", err)
+			}
 			want := all
 			if len(all) > limit {
 				want = all[len(all)-limit:]
@@ -225,7 +229,10 @@ func TestTailBuffer_ConcurrentWrites_Safe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				tb.Write([]byte("xyz"))
+				if _, err := tb.Write([]byte("xyz")); err != nil {
+					t.Errorf("concurrent write: %v", err)
+					return
+				}
 			}
 		}()
 	}
