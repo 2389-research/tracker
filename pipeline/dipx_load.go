@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"os"
 
 	"github.com/2389-research/dippin-lang/dipx"
 	"github.com/2389-research/dippin-lang/validator"
@@ -34,23 +33,29 @@ type BundleInfo struct {
 // After IR-to-Graph conversion, every subgraph_ref attr on every loaded graph
 // is rewritten from the author's source ref (e.g., "sub.dip") to the canonical
 // bundle path (e.g., "workflows/sub.dip") so refs match the subgraphs map keys.
-func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph, BundleInfo, error) {
+//
+// Diagnostics from the bundled IR (lint warnings; DIP126 "subgraph ref does
+// not exist" is filtered since dipx already verified ref closure) are
+// returned for the caller to log. The library deliberately does not write to
+// os.Stderr here so embedded callers can route output through their own
+// logger; the CLI wrapper prints them to stderr, mirroring the .dip path.
+func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph, BundleInfo, []validator.Diagnostic, error) {
 	bundle, err := dipx.Open(ctx, path)
 	if err != nil {
-		return nil, nil, BundleInfo{}, fmt.Errorf("load bundle %s: %w", path, err)
+		return nil, nil, BundleInfo{}, nil, fmt.Errorf("load bundle %s: %w", path, err)
 	}
 	manifest := bundle.Manifest()
 
+	var diagnostics []validator.Diagnostic
+
 	entry := bundle.Entry()
 	entryGraph, diags, err := LoadDippinWorkflowFromIR(entry, manifest.Entry)
-	for _, d := range filterBundleLintNoise(diags) {
-		fmt.Fprintln(os.Stderr, d.String())
-	}
+	diagnostics = append(diagnostics, filterBundleLintNoise(diags)...)
 	if err != nil {
-		return nil, nil, BundleInfo{}, fmt.Errorf("load bundle %s: entry %s: %w", path, manifest.Entry, err)
+		return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: entry %s: %w", path, manifest.Entry, err)
 	}
 	if err := canonicalizeSubgraphRefs(entryGraph, bundle, manifest.Entry); err != nil {
-		return nil, nil, BundleInfo{}, fmt.Errorf("load bundle %s: entry %s: %w", path, manifest.Entry, err)
+		return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: entry %s: %w", path, manifest.Entry, err)
 	}
 
 	subgraphs := make(map[string]*Graph)
@@ -60,17 +65,15 @@ func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph
 		}
 		wf, err := bundle.Lookup(file.Path)
 		if err != nil {
-			return nil, nil, BundleInfo{}, fmt.Errorf("load bundle %s: lookup %s: %w", path, file.Path, err)
+			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: lookup %s: %w", path, file.Path, err)
 		}
 		sub, subDiags, err := LoadDippinWorkflowFromIR(wf, file.Path)
-		for _, d := range filterBundleLintNoise(subDiags) {
-			fmt.Fprintln(os.Stderr, d.String())
-		}
+		diagnostics = append(diagnostics, filterBundleLintNoise(subDiags)...)
 		if err != nil {
-			return nil, nil, BundleInfo{}, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
+			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
 		}
 		if err := canonicalizeSubgraphRefs(sub, bundle, file.Path); err != nil {
-			return nil, nil, BundleInfo{}, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
+			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
 		}
 		subgraphs[file.Path] = sub
 	}
@@ -81,7 +84,7 @@ func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph
 		EntryPath: manifest.Entry,
 		Manifest:  manifest,
 	}
-	return entryGraph, subgraphs, info, nil
+	return entryGraph, subgraphs, info, diagnostics, nil
 }
 
 // filterBundleLintNoise drops diagnostics that don't apply when the source is

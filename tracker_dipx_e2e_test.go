@@ -16,10 +16,18 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// TestE2E_DipxIdentityFlowsThroughAllAuditSurfaces drives a real .dipx bundle
-// through tracker.Run and asserts the content-addressed identity appears on
-// every audit surface: Result.BundleIdentity, Checkpoint.BundleIdentity,
-// EVERY line of activity.jsonl, and RunSummary.BundleIdentity (via ListRuns).
+// TestE2E_DipxIdentityFlowsThroughAllAuditSurfaces packs a real .dipx bundle
+// and asserts the content-addressed identity flows through every audit
+// surface: Result.BundleIdentity, Checkpoint.BundleIdentity, EVERY line of
+// activity.jsonl, and RunSummary.BundleIdentity (via ListRuns).
+//
+// Note on scope: the run itself is driven from dipSource (raw .dip text)
+// rather than the bundle bytes — the test exercises the *stamping* path
+// (Config.BundleIdentity → engine → handlers → checkpoint → list/audit)
+// in isolation. Coverage that the bundle loader actually executes the
+// bundled IR is in TestLoadDipxBundle_* (pipeline/dipx_load_test.go) and
+// the CLI integration tests; this test pins the cross-surface identity
+// propagation that those finer-grained tests don't cover.
 //
 // The pipeline is the minimal start→exit passthrough produced by
 // dipxtest.MinimalDip, so it completes without any LLM calls (the bare
@@ -44,7 +52,7 @@ func TestE2E_DipxIdentityFlowsThroughAllAuditSurfaces(t *testing.T) {
 	// 2. Compute the canonical bundle identity by opening the .dipx —
 	//    this is exactly what the CLI loader does at run start, so
 	//    we're feeding the same value into tracker.Run.
-	_, _, info, err := pipeline.LoadDipxBundle(context.Background(), bundlePath)
+	_, _, info, _, err := pipeline.LoadDipxBundle(context.Background(), bundlePath)
 	if err != nil {
 		t.Fatalf("LoadDipxBundle: %v", err)
 	}

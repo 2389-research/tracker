@@ -14,6 +14,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **dippin-lang dependency bumped v0.23.0 → v0.24.0** for the new `dipx` package (`Open`, `Bundle.Workflow`, `Bundle.Identity`). `PinnedDippinVersion` in `tracker_doctor.go` updated to match so `tracker doctor`'s version-mismatch check reflects the new pin.
+- **`pipeline.LoadDipxBundle` now returns diagnostics instead of writing to `os.Stderr`.** The library API no longer prints to the process-global stderr; the signature gains a `[]validator.Diagnostic` return so embedded callers can route them through their own logger. CLI callers (`cmd/tracker/loadDipxPipeline`, `tracker doctor`'s bundle check) print to stderr as before. Mirrors the existing `pipeline.LoadDippinWorkflow` contract for the `.dip` path.
+
+## [0.25.1] - 2026-05-11
+
+### Changed
+
+- **Gemini SSE parser coalesces split finish + usage chunks into a single
+  `EventFinish`.** Follow-up polish to the earlier trailing-usage fix:
+  when an upstream emits the finish reason and the `usageMetadata` in
+  two separate chunks (the 2389 Bedrock Gateway does this; real Google
+  can too), the parser now buffers the finish reason in
+  `geminiStreamState.pendingFinish` instead of emitting it immediately.
+  When the trailing usage chunk arrives, both are emitted together as
+  one event. A `flushPendingFinish` helper on `*geminiStreamState`
+  guarantees the buffered reason is emitted before every early-return
+  path — clean stream exit, scanner error, and JSON parse error — so
+  partial-failure streams still produce a terminal `EventFinish` ahead
+  of the `EventError`, preserving the prior behavior for accumulator
+  bookkeeping. The combined-chunk path also defensively clears
+  `pendingFinish` to guard against a hypothetical split-then-combined
+  upstream emitting a duplicate finish at stream end. Net effect: the
+  `llm finish` trace line now prints exactly once per turn regardless of
+  upstream chunking shape, fixing the duplicate-line cosmetic artifact
+  called out in the Fixed entry below. Four new regression tests pin the
+  behavior end to end (`TestAdapterStreamTrailingUsageChunkEmitsSingleFinish`
+  for the split case; `TestAdapterStreamFinishWithoutUsageChunk` for the
+  no-trailing-usage case; `TestAdapterStreamCombinedAfterSplitClearsPending`
+  for the defensive pending-clear; `TestAdapterStreamParseErrorFlushesPendingFinish`
+  for the parse-error flush ordering). Also extracts a `usageFromMeta`
+  helper since the same `geminiUsageMeta` → `*llm.Usage` conversion now
+  happens at three call sites.
+
+- **Bedrock Gateway integration guide refreshed** for upstream gateway fixes
+  [#4](https://github.com/2389-research/gateway/issues/4) and
+  [#5](https://github.com/2389-research/gateway/issues/5) (closed
+  2026-04-30). The gateway now accepts both Cloudflare AI Gateway native
+  routing prefixes (`/anthropic`, `/openai`, `/google-ai-studio`,
+  `/compat`) and Gemini's `/v1beta/models/...` paths, so tracker's
+  `--gateway-url` flag works end-to-end against
+  `https://bedrock-gateway.2389-research-inc.workers.dev` and
+  `provider: gemini` is no longer broken. Smoke-tested with a
+  single-agent dip pipeline: `provider: anthropic` and `provider: gemini`
+  both completed against the live gateway. `docs/bedrock-gateway.md`
+  rewritten to lead with the recommended `--gateway-url` recipe; the old
+  "Why not `--gateway-url`?" section removed; the compatibility matrix
+  flips Gemini to working; the "404 on every request" and "Gemini
+  `/v1beta` 404" troubleshooting entries dropped. The `provider: openai`
+  (Responses API) row stays as broken pending gateway
+  [#3](https://github.com/2389-research/gateway/issues/3), which was
+  reopened after we discovered it had been auto-closed by an unrelated
+  commit's "Fix #3" wording referring to a bot-review item, not the
+  GitHub issue.
+
+### Fixed
+
+- **Gemini token usage no longer reports 0 when the upstream emits
+  `usageMetadata` as a standalone trailing SSE chunk.** Tracker's
+  `llm/google/adapter.go` SSE parser bailed on any chunk with no
+  `candidates` array, which dropped trailing usage-only chunks on the
+  floor — so `StreamAccumulator` only saw the candidate chunks (with no
+  usage attached) and the final `Usage{}` came out empty. Surfaced while
+  smoke-testing tracker against the [2389 Bedrock Gateway](https://github.com/2389-research/gateway)
+  where the gateway's `:streamGenerateContent?alt=sse` reply is three
+  chunks: text → `finishReason:"STOP"` → `usageMetadata`. The accumulator
+  contract already supports `processFinish` being called twice (first
+  sets `finishReason`, second updates `usage` without overwriting
+  reason), so the fix is a 10-line patch in `processSSELine`: when a
+  candidate-less chunk carries `UsageMetadata`, emit a usage-only
+  `EventFinish`. End-to-end verified against the live bedrock gateway —
+  a single-agent `provider: gemini` smoke run now reports
+  `1,408 in / 4 out` instead of `0 in / 0 out`, and tracker's
+  per-provider cost rollup is correct (no double-counting because
+  `AggregateUsage` folds per-node `SessionStats`, not per `TraceEvent`).
+  Net visible artifact: the `llm finish` trace line now prints twice on
+  affected gateways — first with `reason=stop` and no tokens, second
+  with `tokens=N/N` and no reason — but the final accumulated state is
+  correct. New regression test `TestAdapterStreamTrailingUsageChunk`
+  pins the trailing-chunk case end-to-end through
+  `StreamAccumulator.Response()`.
 
 ## [0.25.0] - 2026-05-05
 

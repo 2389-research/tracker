@@ -4,12 +4,12 @@ package pipeline
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/2389-research/dippin-lang/validator"
 	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
@@ -21,7 +21,7 @@ func TestLoadDipxBundle_HappyPath(t *testing.T) {
 	}
 	bundlePath := dipxtest.PackTestBundle(t, entryPath)
 
-	graph, subgraphs, info, err := LoadDipxBundle(context.Background(), bundlePath)
+	graph, subgraphs, info, _, err := LoadDipxBundle(context.Background(), bundlePath)
 	if err != nil {
 		t.Fatalf("LoadDipxBundle: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestLoadDipxBundle_NotAValidBundle(t *testing.T) {
 	if err := os.WriteFile(fake, []byte(dipxtest.MinimalDip("not_a_bundle", "start", "exit")), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err := LoadDipxBundle(context.Background(), fake)
+	_, _, _, _, err := LoadDipxBundle(context.Background(), fake)
 	if err == nil {
 		t.Fatal("expected error on non-ZIP .dipx, got nil")
 	}
@@ -86,7 +86,7 @@ func TestLoadDipxBundle_HashMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, err = LoadDipxBundle(context.Background(), bundlePath)
+	_, _, _, _, err = LoadDipxBundle(context.Background(), bundlePath)
 	if err == nil {
 		t.Fatal("expected error on tampered bundle, got nil")
 	}
@@ -136,7 +136,7 @@ func TestLoadDipxBundle_WithSubgraph(t *testing.T) {
 
 	bundlePath := dipxtest.PackTestBundle(t, entryPath)
 
-	graph, subgraphs, info, err := LoadDipxBundle(context.Background(), bundlePath)
+	graph, subgraphs, info, _, err := LoadDipxBundle(context.Background(), bundlePath)
 	if err != nil {
 		t.Fatalf("LoadDipxBundle: %v", err)
 	}
@@ -235,30 +235,14 @@ func TestLoadDipxBundle_SuppressesDIP126(t *testing.T) {
 	}
 	bundlePath := dipxtest.PackTestBundle(t, entryPath)
 
-	// Capture stderr during the load.
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldStderr := os.Stderr
-	os.Stderr = w
-	t.Cleanup(func() { os.Stderr = oldStderr })
-
-	_, _, _, loadErr := LoadDipxBundle(context.Background(), bundlePath)
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("close stderr pipe writer: %v", err)
-	}
-	captured, readErr := io.ReadAll(r)
-	if readErr != nil {
-		t.Fatalf("read captured stderr: %v", readErr)
-	}
-
+	_, _, _, diags, loadErr := LoadDipxBundle(context.Background(), bundlePath)
 	if loadErr != nil {
 		t.Fatalf("LoadDipxBundle: %v", loadErr)
 	}
-	if strings.Contains(string(captured), "DIP126") {
-		t.Errorf("DIP126 should be suppressed for bundle loads; got stderr: %s", captured)
+	for _, d := range diags {
+		if d.Code == validator.DIP126 {
+			t.Errorf("DIP126 should be suppressed for bundle loads; got: %s", d.String())
+		}
 	}
 }
 

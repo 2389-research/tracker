@@ -178,9 +178,16 @@ func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
 }
 
 // loadDipxPipeline reads a .dipx bundle, verifies hashes, and converts the
-// entry + every transitively-referenced workflow to tracker Graphs.
+// entry + every transitively-referenced workflow to tracker Graphs. Lint
+// diagnostics from the bundled IR are printed to stderr here so the library
+// (pipeline.LoadDipxBundle) stays free of os.Stderr side effects; this
+// mirrors what loadDippinPipeline does for the .dip path.
 func loadDipxPipeline(filename string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
-	return pipeline.LoadDipxBundle(context.Background(), filename)
+	graph, subgraphs, info, diags, err := pipeline.LoadDipxBundle(context.Background(), filename)
+	for _, d := range diags {
+		fmt.Fprintln(os.Stderr, d.String())
+	}
+	return graph, subgraphs, info, err
 }
 
 // loadPipelineAndBundle is the loader entry point that handles both .dip

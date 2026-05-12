@@ -914,12 +914,18 @@ func checkPipelineFile(pipelineFile string) CheckResult {
 // the pipeline.
 func checkPipelineBundle(bundlePath string) CheckResult {
 	out := CheckResult{Name: "Pipeline File"}
-	entry, subgraphs, info, err := pipeline.LoadDipxBundle(context.Background(), bundlePath)
+	entry, subgraphs, info, diags, err := pipeline.LoadDipxBundle(context.Background(), bundlePath)
 	if err != nil {
 		out.Status = CheckStatusError
 		out.Message = fmt.Sprintf("%s: bundle load failed: %v", bundlePath, err)
 		out.Hint = "run `tracker validate " + bundlePath + "` for full details"
 		return out
+	}
+	for _, d := range diags {
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusWarn,
+			Message: d.String(),
+		})
 	}
 	out.Details = append(out.Details, CheckDetail{
 		Status: CheckStatusOK,
