@@ -29,7 +29,7 @@ transitions.
 | [`context-flow.md`](./context-flow.md) | User-facing model of context, fidelity, scoping, declared `reads:`/`writes:`, and safe-key restrictions. |
 | [`tui.md`](./tui.md) | Bubbletea state machine, sidebar, activity log, modal content types (hybrid, review, interview), verbosity cycling, zen mode, search. |
 | [`backends.md`](./backends.md) | `AgentBackend` interface and the three implementations: native (`agent.Session`), claude-code (subprocess + NDJSON), ACP (Agent Client Protocol). Environment scoping and per-node override semantics. |
-| [`artifacts.md`](./artifacts.md) | Workdir layout, `checkpoint.json`, `activity.jsonl`, `status.json` per node, stage `prompt.md` / `response.md`, git-backed history, bundle export. |
+| [`artifacts.md`](./artifacts.md) | Workdir layout, `checkpoint.json`, `activity.jsonl`, `status.json` per node, stage `prompt.md` / `response.md`, git-backed history, bundle export, `.dipx` bundle identity stamping (v0.26.0+). |
 
 ## Where to start
 
