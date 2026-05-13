@@ -13,6 +13,7 @@ import (
 
 func TestJSONLEventHandlerWritesEvents(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	defer h.Close()
 
@@ -57,6 +58,7 @@ func TestJSONLEventHandlerWritesEvents(t *testing.T) {
 
 func TestJSONLEventHandlerRecordsErrors(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	defer h.Close()
 
@@ -86,6 +88,7 @@ func TestJSONLEventHandlerRecordsErrors(t *testing.T) {
 
 func TestJSONLEventHandlerNoopWithoutRunID(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	defer h.Close()
 
@@ -103,6 +106,7 @@ func TestJSONLEventHandlerNoopWithoutRunID(t *testing.T) {
 
 func TestJSONLEventHandlerCloseWithoutEvents(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	// Close without writing any events should not panic
 	if err := h.Close(); err != nil {
@@ -112,6 +116,7 @@ func TestJSONLEventHandlerCloseWithoutEvents(t *testing.T) {
 
 func TestJSONLEventHandlerWritesPipelineSource(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	defer h.Close()
 
@@ -138,6 +143,7 @@ func TestJSONLEventHandlerWritesPipelineSource(t *testing.T) {
 
 func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 
 	// Open the file by sending a pipeline event first (to get run ID).
@@ -182,6 +188,7 @@ func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
 
 func TestJSONLEventHandlerWritesLLMEvents(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 
 	h.HandlePipelineEvent(PipelineEvent{
@@ -222,6 +229,7 @@ func TestJSONLEventHandlerWritesLLMEvents(t *testing.T) {
 
 func TestJSONLEventHandlerAgentErrorCombining(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 
 	h.HandlePipelineEvent(PipelineEvent{
@@ -358,6 +366,7 @@ func TestPipelineEvent_BundleIdentity_OmittedWhenEmpty(t *testing.T) {
 // land without bundle provenance.
 func TestJSONLEventHandler_WriteAgentEvent_StampsBundleIdentity(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	h.SetBundleIdentity("sha256:abc123")
 
@@ -394,6 +403,7 @@ func TestJSONLEventHandler_WriteAgentEvent_StampsBundleIdentity(t *testing.T) {
 // in activity.jsonl would land without bundle provenance.
 func TestJSONLEventHandler_WriteLLMEvent_StampsBundleIdentity(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	h.SetBundleIdentity("sha256:abc123")
 
@@ -431,6 +441,7 @@ func TestJSONLEventHandler_WriteLLMEvent_StampsBundleIdentity(t *testing.T) {
 // pins the same surface for pipeline-source lines.
 func TestJSONLEventHandler_NoStampingWhenIdentityEmpty(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 	// Intentionally no SetBundleIdentity call.
 
@@ -487,6 +498,7 @@ func TestJSONLEventHandler_PreservesCallerSetBundleIdentity(t *testing.T) {
 // both identities for post-hoc forensics.
 func TestJSONLEventHandler_WriteBundleMismatchForced(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 
 	originalID := "sha256:" + strings.Repeat("a", 64)
@@ -532,6 +544,7 @@ func TestJSONLEventHandler_WriteBundleMismatchForced(t *testing.T) {
 // can distinguish "no bundle was claimed" from "wrong bundle".
 func TestJSONLEventHandler_WriteBundleMismatchForced_EmptyOriginal(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 
 	currentID := "sha256:" + strings.Repeat("c", 64)
@@ -561,6 +574,7 @@ func TestJSONLEventHandler_WriteBundleMismatchForced_EmptyOriginal(t *testing.T)
 // HandlePipelineEvent's defensive guard for events without RunID.
 func TestJSONLEventHandler_WriteBundleMismatchForced_NoOpWithoutRunID(t *testing.T) {
 	dir := t.TempDir()
+	isolateSecureLog(t)
 	h := NewJSONLEventHandler(dir)
 
 	h.WriteBundleMismatchForced("", "sha256:aa", "sha256:bb")
@@ -697,6 +711,18 @@ func TestJSONLEventHandler_SnapshotOverwritesAttackerScratch(t *testing.T) {
 	if !strings.Contains(string(got), "pipeline_started") {
 		t.Errorf("snapshot missing the real runtime event: %q", string(got))
 	}
+}
+
+// isolateSecureLog pins TRACKER_AUDIT_DIR to a per-test tmp dir so
+// tests using shared/hardcoded runIDs (abc123, def456, etc.) don't
+// collide on the user's $HOME-based default secure path. Without this,
+// CI hosts where many tests run in the same process and use the same
+// runID would see appended/aliased writes across test cases. Also
+// clears XDG_STATE_HOME so the override unambiguously wins.
+func isolateSecureLog(t *testing.T) {
+	t.Helper()
+	t.Setenv(auditDirEnvVar, t.TempDir())
+	t.Setenv(xdgStateHomeEnvVar, "")
 }
 
 type testErr struct{ msg string }
