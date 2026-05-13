@@ -254,11 +254,13 @@ type diagnoseEntry struct {
 }
 
 // enrichFromActivity streams activity.jsonl, populating failures + detecting
-// budget halt events. Returns (nil, nil) if activity.jsonl does not exist
-// (runs that never started). Returns ctx.Err() if cancellation fires
-// mid-parse, and scanner.Err() if the scanner aborts (buffer overflow at
-// 1 MB, I/O error) — both surface truncation to the caller so partial
-// analysis is never silently treated as authoritative.
+// budget halt events and runtime anomalies (tool-output truncations,
+// conditional fallthroughs). Returns (nil, runtimeAnomalies{}, nil) if
+// activity.jsonl does not exist (runs that never started). Returns
+// ctx.Err() if cancellation fires mid-parse, and scanner.Err() if the
+// scanner aborts (buffer overflow at 1 MB, I/O error) — both surface
+// truncation to the caller so partial analysis is never silently treated
+// as authoritative.
 func enrichFromActivity(ctx context.Context, runDir string, failures map[string]*NodeFailure, logW io.Writer) (*BudgetHalt, runtimeAnomalies, error) {
 	path := filepath.Join(runDir, "activity.jsonl")
 	f, err := os.Open(path)
@@ -422,7 +424,7 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 		fallthroughByNode[fb.NodeID] = fb
 	}
 	for _, tr := range anomalies.Truncations {
-		msg := fmt.Sprintf("%s: %s truncated — captured last %d bytes of ~%d (dropped %d from head; limit %d). The tail-window capture is designed to preserve a routing marker emitted at end-of-output (as long as the marker fits within the limit). Raise the per-node `output_limit` attribute if you need more context retained or if the marker itself is larger than the cap.",
+		msg := fmt.Sprintf("%s: %s truncated — captured last %d bytes of %d (dropped %d from head; limit %d). The tail-window capture is designed to preserve a routing marker emitted at end-of-output (as long as the marker fits within the limit). Raise the per-node `output_limit` attribute if you need more context retained or if the marker itself is larger than the cap.",
 			tr.NodeID, tr.Stream, tr.CapturedBytes, tr.TotalBytes, tr.DroppedBytes, tr.Limit)
 		if fb, ok := fallthroughByNode[tr.NodeID]; ok {
 			var tried []string
