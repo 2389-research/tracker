@@ -96,6 +96,11 @@ const (
 	// routing edges all evaluated false and routing fell back to an
 	// unconditional edge. Issue #208.
 	SuggestionConditionalFallthrough SuggestionKind = "conditional_fallthrough"
+	// SuggestionToolMarkerMissing fires when a tool node declared
+	// marker_grep but the regex matched nothing (or failed to compile).
+	// Surfaces the configured pattern, the captured stdout tail, and the
+	// recommended fix. Issue #210.
+	SuggestionToolMarkerMissing SuggestionKind = "tool_marker_missing"
 )
 
 // Diagnose analyzes a run directory and returns a structured report.
@@ -139,14 +144,24 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 
 // runtimeAnomalies are non-failure events that nonetheless warrant a
 // surfaced suggestion in the diagnose report. Today: tool stdout/stderr
-// truncations (#208) and conditional-edge fallthroughs (#208 Tier 2).
+// truncations (#208), conditional-edge fallthroughs (#208 Tier 2), and
+// tool_marker_missing events (#210).
 type runtimeAnomalies struct {
-	Truncations  []truncObservation
-	Fallthroughs []fallthroughObservation
+	Truncations    []truncObservation
+	Fallthroughs   []fallthroughObservation
+	MarkerMissings []markerMissingObservation
 	// VisitStarts records per-node stage_started events so the
 	// suggestion builder can flush stale pending truncations from a
 	// prior visit as orphans before pairing within the new visit.
 	VisitStarts []visitBoundary
+}
+
+type markerMissingObservation struct {
+	Seq          int
+	NodeID       string
+	Pattern      string
+	CapturedTail string
+	Error        string
 }
 
 // Seq is a monotonically-increasing scan position shared across all
@@ -275,6 +290,11 @@ type diagnoseEntry struct {
 	// Conditional-fallthrough event fields (#208).
 	EdgeTo          string                   `json:"edge_to"`
 	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
+
+	// Tool-marker-missing event fields (#210).
+	MarkerPattern string `json:"marker_pattern"`
+	MarkerTail    string `json:"marker_tail"`
+	MarkerError   string `json:"marker_error"`
 }
 
 // enrichFromActivity streams activity.jsonl, populating failures + detecting
@@ -360,6 +380,15 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 					NodeID: entry.NodeID,
 				})
 			}
+		case pipeline.EventToolMarkerMissing:
+			anomalySeq++
+			anomalies.MarkerMissings = append(anomalies.MarkerMissings, markerMissingObservation{
+				Seq:          anomalySeq,
+				NodeID:       entry.NodeID,
+				Pattern:      entry.MarkerPattern,
+				CapturedTail: entry.MarkerTail,
+				Error:        entry.MarkerError,
+			})
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
@@ -571,6 +600,27 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			emitTruncs(trs, nil)
 			emitted[tr.NodeID] = true
 		}
+	}
+	// Emit one suggestion per marker_grep failure. These don't pair
+	// with anything (the node already failed); they exist to give the
+	// operator the configured pattern + captured tail so the routing
+	// shape is debuggable from a post-mortem alone.
+	for _, mm := range anomalies.MarkerMissings {
+		var msg string
+		switch {
+		case mm.Error != "":
+			msg = fmt.Sprintf("%s: marker_grep regex %q failed to compile: %s. Fix the regex on the node's marker_grep attribute.",
+				mm.NodeID, mm.Pattern, mm.Error)
+		case mm.CapturedTail != "":
+			msg = fmt.Sprintf("%s: marker_grep %q matched nothing in captured stdout (tail: %q). Either the tool didn't emit the expected routing marker, or the regex is wrong. Tools should emit the marker at end-of-output via `printf '<marker>\\n'`.",
+				mm.NodeID, mm.Pattern, mm.CapturedTail)
+		default:
+			msg = fmt.Sprintf("%s: marker_grep %q matched nothing in captured stdout. The tool produced no output, or the regex doesn't match what was emitted.",
+				mm.NodeID, mm.Pattern)
+		}
+		out = append(out, Suggestion{
+			NodeID: mm.NodeID, Kind: SuggestionToolMarkerMissing, Message: msg,
+		})
 	}
 	return out
 }

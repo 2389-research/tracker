@@ -71,10 +71,14 @@ const (
 // raw regex declared on the node's marker_grep attribute; CapturedTail is
 // up to 256 bytes from the end of the captured stdout for diagnostic
 // context (the operator needs to see what didn't match without the audit
-// log carrying arbitrarily large tool output).
+// log carrying arbitrarily large tool output). Error is non-empty when
+// the failure was a regex-compile error rather than a missing-match —
+// the node fails either way, but the surface in `tracker diagnose`
+// differs (broken pipeline definition vs. unexpected tool output).
 type MarkerDetail struct {
 	Pattern      string `json:"pattern"`
 	CapturedTail string `json:"captured_tail,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.

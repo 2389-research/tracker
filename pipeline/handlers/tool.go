@@ -154,17 +154,25 @@ func parseByteSize(s string) (int, error) {
 // earlier output can never accidentally match a routing-marker shape.
 // "Last line wins" so a tool that prints progress before its final
 // marker still routes correctly.
+//
+// The scan uses strings.IndexByte to walk newline boundaries without
+// allocating a full slice — tool stdout is capped at 10MB and a tool
+// that emits millions of short lines should not balloon allocations
+// during marker extraction. Trailing `\r` on each line is stripped so
+// CRLF (Windows-style) output doesn't break anchored regexes like
+// `^tests-pass$`.
 func extractToolMarker(pattern, stdout string) (string, bool, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return "", false, fmt.Errorf("marker_grep regex %q: %w", pattern, err)
 	}
 	var last []string
-	for _, line := range strings.Split(stdout, "\n") {
+	walkLines(stdout, func(line string) {
+		line = strings.TrimSuffix(line, "\r")
 		if m := re.FindStringSubmatch(line); m != nil {
 			last = m
 		}
-	}
+	})
 	if last == nil {
 		return "", true, nil
 	}
@@ -172,6 +180,24 @@ func extractToolMarker(pattern, stdout string) (string, bool, error) {
 		return last[1], false, nil
 	}
 	return last[0], false, nil
+}
+
+// walkLines iterates over s line by line (separator "\n"), calling fn
+// for each line including the final trailing line if it has no newline.
+// Allocation-free: each line is a sub-string of s, no full slice
+// materialized.
+func walkLines(s string, fn func(line string)) {
+	for {
+		i := strings.IndexByte(s, '\n')
+		if i < 0 {
+			if s != "" {
+				fn(s)
+			}
+			return
+		}
+		fn(s[:i])
+		s = s[i+1:]
+	}
 }
 
 // tailForDiag returns up to n bytes from the end of s for inclusion in
@@ -419,15 +445,28 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 	// unconditional edge — the whole point of marker_grep is to remove
 	// that foot-gun (the #208 root cause).
 	if pattern := node.ToolConfig().MarkerGrep; pattern != "" {
+		// Reset marker-related keys at the start of every marker_grep-
+		// declaring node so a prior node's value can't leak into this
+		// node's routing context on the missing-match or compile-error
+		// paths (where only some branches set the key).
+		outcome.ContextUpdates[pipeline.ContextKeyToolMarker] = ""
+		outcome.ContextUpdates["tool_marker_error"] = ""
+
 		marker, missing, err := extractToolMarker(pattern, stdout)
 		switch {
 		case err != nil:
 			// Bad regex on the node — author error, fail loud at runtime
 			// (validate-time lint #211 will catch this earlier when it
-			// lands). Surface the regex error in the outcome message so
-			// `tracker diagnose` shows it.
+			// lands). The compile error is surfaced both via
+			// MissingMarker.Error (so EventToolMarkerMissing carries it
+			// into activity.jsonl + tracker diagnose) and via
+			// ctx.tool_marker_error so routing conditions can read it.
 			outcome.Status = pipeline.OutcomeFail
 			outcome.ContextUpdates["tool_marker_error"] = err.Error()
+			outcome.MissingMarker = &pipeline.MarkerDetail{
+				Pattern: pattern,
+				Error:   err.Error(),
+			}
 		case missing:
 			outcome.Status = pipeline.OutcomeFail
 			outcome.MissingMarker = &pipeline.MarkerDetail{

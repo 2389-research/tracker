@@ -67,6 +67,15 @@ type jsonlLogEntry struct {
 	// conditional_fallthrough events. Lists routing intents that
 	// evaluated false on the way to a fallback selection.
 	ConditionsTried []ConditionEval `json:"conditions_tried,omitempty"`
+
+	// Marker fields — populated for tool_marker_missing events
+	// (issue #210). Pattern is the configured marker_grep regex;
+	// MarkerTail is up to 256 bytes from end of captured stdout for
+	// diagnosis; MarkerError is the regex-compile error when the
+	// failure was a bad regex rather than a missing match.
+	MarkerPattern string `json:"marker_pattern,omitempty"`
+	MarkerTail    string `json:"marker_tail,omitempty"`
+	MarkerError   string `json:"marker_error,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a file.
@@ -163,6 +172,11 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 		entry.TruncCaptured = evt.Truncation.CapturedBytes
 		entry.TruncDropped = evt.Truncation.DroppedBytes
 		entry.TruncTotal = evt.Truncation.TotalBytes
+	}
+	if evt.Marker != nil {
+		entry.MarkerPattern = evt.Marker.Pattern
+		entry.MarkerTail = evt.Marker.CapturedTail
+		entry.MarkerError = evt.Marker.Error
 	}
 	return entry
 }

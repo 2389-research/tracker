@@ -710,13 +710,16 @@ func TestToolHandler_NoTruncationWhenWithinLimit(t *testing.T) {
 // marker_grep happy path: regex matches the last line, ctx.tool_marker
 // is populated with capture group 1, and Status stays OutcomeSuccess.
 func TestToolHandler_MarkerGrep_HappyPath(t *testing.T) {
-	env := toolTestEnv(t, nil)
+	cmd := `printf 'test 1 ok\ntest 2 ok\ntests-pass\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "test 1 ok\ntest 2 ok\ntests-pass\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "RunTests",
 		Shape: "parallelogram",
 		Attrs: map[string]string{
-			"tool_command": `printf 'test 1 ok\ntest 2 ok\ntests-pass\n'`,
+			"tool_command": cmd,
 			"marker_grep":  `^tests-(pass|fail)$`,
 		},
 	}
@@ -739,13 +742,16 @@ func TestToolHandler_MarkerGrep_HappyPath(t *testing.T) {
 
 // marker_grep with no capture groups: ctx.tool_marker gets the full match.
 func TestToolHandler_MarkerGrep_NoCaptureGroup(t *testing.T) {
-	env := toolTestEnv(t, nil)
+	cmd := `printf 'some prelude\nDONE\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "some prelude\nDONE\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "Echo",
 		Shape: "parallelogram",
 		Attrs: map[string]string{
-			"tool_command": `printf 'some prelude\nDONE\n'`,
+			"tool_command": cmd,
 			"marker_grep":  `^DONE$`,
 		},
 	}
@@ -762,14 +768,19 @@ func TestToolHandler_MarkerGrep_NoCaptureGroup(t *testing.T) {
 
 // marker_grep last-line-wins: multiple matches in stdout, the trailing
 // one takes precedence (progress markers + final routing decision).
+// Also asserts OutcomeFail propagates from exit 1 so exit handling
+// can't regress silently while marker extraction is exercised.
 func TestToolHandler_MarkerGrep_LastLineWins(t *testing.T) {
-	env := toolTestEnv(t, nil)
+	cmd := `printf 'tests-pass\nsome more\ntests-fail\n'; exit 1`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "tests-pass\nsome more\ntests-fail\n", ExitCode: 1},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "RunTests",
 		Shape: "parallelogram",
 		Attrs: map[string]string{
-			"tool_command": `printf 'tests-pass\nsome more\ntests-fail\n'; exit 1`,
+			"tool_command": cmd,
 			"marker_grep":  `^tests-(pass|fail)$`,
 		},
 	}
@@ -782,21 +793,57 @@ func TestToolHandler_MarkerGrep_LastLineWins(t *testing.T) {
 	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; got != "fail" {
 		t.Errorf("ctx.tool_marker = %q, want last-match %q", got, "fail")
 	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("Status = %q, want %q (exit 1 must propagate even when marker matched)",
+			outcome.Status, pipeline.OutcomeFail)
+	}
+}
+
+// marker_grep with CRLF line endings: anchored regexes still match
+// because the runtime trims a trailing \r per line before applying
+// the pattern. Windows-style tool output is the canonical case.
+func TestToolHandler_MarkerGrep_CRLFLineEndings(t *testing.T) {
+	cmd := `printf 'test 1\r\ntests-pass\r\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "test 1\r\ntests-pass\r\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "RunTests",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": cmd,
+			"marker_grep":  `^tests-(pass|fail)$`,
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; got != "pass" {
+		t.Errorf("ctx.tool_marker = %q, want %q (CRLF \\r must be trimmed per-line before anchored regex)", got, "pass")
+	}
 }
 
 // marker_grep with no match: Status flips to OutcomeFail and
 // MissingMarker is populated for the engine to emit
 // EventToolMarkerMissing. This is the foot-gun-removal: a routing
 // node without a marker can no longer silently fall through to an
-// unconditional edge.
+// unconditional edge. ctx.tool_marker is also cleared (empty string)
+// so a prior node's value can't leak into routing.
 func TestToolHandler_MarkerGrep_MissingFailsNode(t *testing.T) {
-	env := toolTestEnv(t, nil)
+	cmd := `printf 'no marker here\nnothing useful\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "no marker here\nnothing useful\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "RunTests",
 		Shape: "parallelogram",
 		Attrs: map[string]string{
-			"tool_command": `printf 'no marker here\nnothing useful\n'`,
+			"tool_command": cmd,
 			"marker_grep":  `^tests-(pass|fail)$`,
 		},
 	}
@@ -819,22 +866,26 @@ func TestToolHandler_MarkerGrep_MissingFailsNode(t *testing.T) {
 	if outcome.MissingMarker.CapturedTail == "" {
 		t.Error("MissingMarker.CapturedTail empty; want diagnostic tail")
 	}
-	if _, set := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; set {
-		t.Error("ctx.tool_marker must not be set when marker is missing")
+	if got, set := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; !set || got != "" {
+		t.Errorf("ctx.tool_marker = %q (set=%v); want empty-string clear so prior-node value cannot leak into routing", got, set)
 	}
 }
 
 // marker_grep with a bad regex: Status fails, the regex error is
-// surfaced via outcome.ContextUpdates["tool_marker_error"] so
-// `tracker diagnose` can show it.
+// surfaced both via outcome.MissingMarker.Error (so the engine emits
+// EventToolMarkerMissing carrying it for tracker diagnose) AND via
+// ctx.tool_marker_error (so routing conditions can read it).
 func TestToolHandler_MarkerGrep_BadRegexFails(t *testing.T) {
-	env := toolTestEnv(t, nil)
+	cmd := `printf 'anything\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "anything\n", ExitCode: 0},
+	})
 	h := NewToolHandler(env)
 	node := &pipeline.Node{
 		ID:    "BadRegex",
 		Shape: "parallelogram",
 		Attrs: map[string]string{
-			"tool_command": `printf 'anything\n'`,
+			"tool_command": cmd,
 			"marker_grep":  `(unclosed`,
 		},
 	}
@@ -849,5 +900,11 @@ func TestToolHandler_MarkerGrep_BadRegexFails(t *testing.T) {
 	}
 	if got := outcome.ContextUpdates["tool_marker_error"]; got == "" {
 		t.Error("ctx.tool_marker_error empty; want regex-compile error")
+	}
+	if outcome.MissingMarker == nil {
+		t.Fatal("MissingMarker nil; want populated payload so engine emits EventToolMarkerMissing")
+	}
+	if outcome.MissingMarker.Error == "" {
+		t.Error("MissingMarker.Error empty; want regex-compile error echoed for diagnose")
 	}
 }
