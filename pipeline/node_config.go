@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -219,15 +220,36 @@ type ToolNodeConfig struct {
 	PassEnv     string        // comma-separated env var names to pass through
 	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent, unparseable, or parsed to 0. ToolHandler.parseTimeout rejects non-positive values at execution time.
 	MarkerGrep  string        // regex applied to captured stdout to extract a routing marker into ctx.tool_marker (issue #210). Empty disables. If non-empty and no match, the node fails with OutcomeFail and an EventToolMarkerMissing audit event is emitted.
+	// RouteRequired is true when the node MUST receive a _TRACKER_ROUTE=
+	// sentinel line in its captured stdout (issue #212). Sentinel
+	// extraction itself runs unconditionally; this flag controls whether
+	// the absence of a match fails the node. When true, no match →
+	// OutcomeFail + EventToolRouteMissing. Symmetric to marker_grep's
+	// failure path, but the matcher is built-in (no per-node regex).
+	RouteRequired bool
+}
+
+// parseBoolAttr returns true if v is one of the accepted truthy spellings
+// for a tracker node attribute: "true", "1", "yes", "y", "on", "TRUE", etc.
+// All other values (including empty string) return false. Used by typed
+// node-config accessors to read boolean attrs without per-call ParseBool
+// boilerplate.
+func parseBoolAttr(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "yes", "y", "on":
+		return true
+	}
+	return false
 }
 
 // ToolConfig returns the typed tool config for the node.
 func (n *Node) ToolConfig() ToolNodeConfig {
 	cfg := ToolNodeConfig{
-		Command:    n.Attrs["tool_command"],
-		WorkingDir: n.Attrs["working_dir"],
-		PassEnv:    n.Attrs["tool_pass_env"],
-		MarkerGrep: n.Attrs["marker_grep"],
+		Command:       n.Attrs["tool_command"],
+		WorkingDir:    n.Attrs["working_dir"],
+		PassEnv:       n.Attrs["tool_pass_env"],
+		MarkerGrep:    n.Attrs["marker_grep"],
+		RouteRequired: parseBoolAttr(n.Attrs["route_required"]),
 	}
 	if v := n.Attrs["output_limit"]; v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {

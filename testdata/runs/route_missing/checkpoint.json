@@ -1,0 +1,8 @@
+{
+  "run_id": "route-missing-run",
+  "completed_nodes": ["Start"],
+  "current_node": "",
+  "retry_counts": {},
+  "restart_count": 0,
+  "timestamp": "2026-05-13T20:30:00Z"
+}

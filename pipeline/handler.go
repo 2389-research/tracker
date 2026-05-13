@@ -39,6 +39,13 @@ type Outcome struct {
 	// sets Status = OutcomeFail so routing does not silently fall through
 	// to an unconditional edge. Populated only by the tool handler.
 	MissingMarker *MarkerDetail
+	// MissingRoute records the absence of a _TRACKER_ROUTE= sentinel
+	// in captured stdout when the node had route_required: true
+	// (#212). Same flow as MissingMarker: handler sets Status = Fail,
+	// engine emits EventToolRouteMissing. Sentinel extraction itself
+	// runs unconditionally; this field is populated only when the
+	// missing-sentinel + route_required combination triggers a fail.
+	MissingRoute *RouteDetail
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

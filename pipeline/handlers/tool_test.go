@@ -871,6 +871,142 @@ func TestToolHandler_MarkerGrep_MissingFailsNode(t *testing.T) {
 	}
 }
 
+// _TRACKER_ROUTE= sentinel: happy path. Tool emits the sentinel,
+// runtime extracts it into ctx.tool_route. No node attribute needed.
+func TestToolHandler_RouteSentinel_HappyPath(t *testing.T) {
+	cmd := `printf 'progress line\n_TRACKER_ROUTE=tests-pass\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "progress line\n_TRACKER_ROUTE=tests-pass\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "RunTests",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": cmd},
+	}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("Status = %q, want success", outcome.Status)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolRoute]; got != "tests-pass" {
+		t.Errorf("ctx.tool_route = %q, want %q", got, "tests-pass")
+	}
+}
+
+// Last sentinel line wins (mirror of marker_grep semantics).
+func TestToolHandler_RouteSentinel_LastLineWins(t *testing.T) {
+	cmd := `printf '_TRACKER_ROUTE=first\nmore output\n_TRACKER_ROUTE=second\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "_TRACKER_ROUTE=first\nmore output\n_TRACKER_ROUTE=second\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{ID: "n", Shape: "parallelogram", Attrs: map[string]string{"tool_command": cmd}}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolRoute]; got != "second" {
+		t.Errorf("ctx.tool_route = %q, want last %q", got, "second")
+	}
+}
+
+// Anchoring: a non-anchored _TRACKER_ROUTE substring inside another
+// line does NOT match. The pattern is `^\s*_TRACKER_ROUTE=`.
+func TestToolHandler_RouteSentinel_AnchoredOnly(t *testing.T) {
+	cmd := `printf 'echoing _TRACKER_ROUTE=fake from middle of line\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "echoing _TRACKER_ROUTE=fake from middle of line\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{ID: "n", Shape: "parallelogram", Attrs: map[string]string{"tool_command": cmd}}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolRoute]; got != "" {
+		t.Errorf("ctx.tool_route = %q, want empty (non-anchored substring must NOT match)", got)
+	}
+}
+
+// route_required: true + no sentinel → OutcomeFail + MissingRoute
+// payload populated for the engine to emit EventToolRouteMissing.
+func TestToolHandler_RouteSentinel_RouteRequiredFails(t *testing.T) {
+	cmd := `printf 'tool ran but did not emit sentinel\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "tool ran but did not emit sentinel\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "Strict",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command":   cmd,
+			"route_required": "true",
+		},
+	}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("Status = %q, want fail (route_required + no sentinel)", outcome.Status)
+	}
+	if outcome.MissingRoute == nil {
+		t.Fatal("MissingRoute = nil, want populated payload")
+	}
+	if outcome.MissingRoute.CapturedTail == "" {
+		t.Error("MissingRoute.CapturedTail empty; want stdout tail for diagnosis")
+	}
+}
+
+// route_required without the flag: no sentinel + Status stays success.
+// The handler still clears ctx.tool_route (no stale leak from prior nodes).
+func TestToolHandler_RouteSentinel_NoFlagNoFail(t *testing.T) {
+	cmd := `printf 'no sentinel here\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "no sentinel here\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "Permissive",
+		Shape: "parallelogram",
+		Attrs: map[string]string{"tool_command": cmd},
+	}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("Status = %q, want success (no flag → no fail)", outcome.Status)
+	}
+	if outcome.MissingRoute != nil {
+		t.Errorf("MissingRoute = %+v, want nil (no flag → no failure event)", outcome.MissingRoute)
+	}
+	if got, set := outcome.ContextUpdates[pipeline.ContextKeyToolRoute]; !set || got != "" {
+		t.Errorf("ctx.tool_route = %q (set=%v); want empty-string clear", got, set)
+	}
+}
+
+// CRLF tolerance: Windows-style line endings still extract correctly.
+func TestToolHandler_RouteSentinel_CRLF(t *testing.T) {
+	cmd := `printf 'progress\r\n_TRACKER_ROUTE=done\r\n'`
+	env := toolTestEnv(t, map[string]exec.CommandResult{
+		cmd: {Stdout: "progress\r\n_TRACKER_ROUTE=done\r\n", ExitCode: 0},
+	})
+	h := NewToolHandler(env)
+	node := &pipeline.Node{ID: "n", Shape: "parallelogram", Attrs: map[string]string{"tool_command": cmd}}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolRoute]; got != "done" {
+		t.Errorf("ctx.tool_route = %q, want %q (CRLF must be tolerated per-line)", got, "done")
+	}
+}
+
 // marker_grep with a bad regex: Status fails, the regex error is
 // surfaced both via outcome.MissingMarker.Error (so the engine emits
 // EventToolMarkerMissing carrying it for tracker diagnose) AND via

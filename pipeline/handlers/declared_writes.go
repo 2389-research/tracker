@@ -44,7 +44,7 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 	for _, key := range writes {
 		if pipeline.IsToolCommandSafeCtxKey(key) || isReservedWritesSignalKey(key) {
 			contextUpdates[contextKeyWritesError] = fmt.Sprintf(
-				"node %q: declared writes key %q collides with a reserved name; tool_command safe-key allowlist (outcome/preferred_label/human_response/interview_answers), writes signal keys (writes_error/writes_warning), and marker_grep keys (tool_marker/tool_marker_error) cannot be set from declared writes",
+				"node %q: declared writes key %q collides with a reserved name; tool_command safe-key allowlist (outcome/preferred_label/human_response/interview_answers), writes signal keys (writes_error/writes_warning), marker_grep keys (tool_marker/tool_marker_error), and route sentinel key (tool_route) cannot be set from declared writes",
 				node.ID, key,
 			)
 			return true
@@ -110,17 +110,19 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 
 // isReservedWritesSignalKey reports whether key is one of the runtime
 // observability signal names used by applyDeclaredWrites itself OR a
-// marker_grep-owned key (tool_marker / tool_marker_error, #210). The
-// runtime owns all of these; letting an LLM set them via declared
-// writes would spoof routing signals or runtime diagnostics. Note
-// that this is checked BEFORE applyDeclaredWrites runs — a node that
-// also has marker_grep configured would already have those keys
+// marker_grep-owned key (tool_marker / tool_marker_error, #210) OR
+// the route sentinel key (tool_route, #212). The runtime owns all of
+// these; letting an LLM set them via declared writes would spoof
+// routing signals or runtime diagnostics. Note that this is checked
+// BEFORE applyDeclaredWrites runs — a node that also has marker_grep
+// or route extraction configured would already have those keys
 // pre-cleared by the tool handler, but reservation here means the
 // LLM cannot subvert the clear via a writes-driven overwrite.
 func isReservedWritesSignalKey(key string) bool {
 	switch key {
 	case contextKeyWritesError, contextKeyWritesWarning,
-		pipeline.ContextKeyToolMarker, pipeline.ContextKeyToolMarkerError:
+		pipeline.ContextKeyToolMarker, pipeline.ContextKeyToolMarkerError,
+		pipeline.ContextKeyToolRoute:
 		return true
 	}
 	return false
