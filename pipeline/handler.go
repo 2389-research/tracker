@@ -33,6 +33,12 @@ type Outcome struct {
 	// audit log can correlate routing misses with truncation (issue #208).
 	// Currently populated only by the tool handler.
 	Truncations []TruncationDetail
+	// MissingMarker records a marker_grep regex that produced no match
+	// (issue #210). When non-nil the engine emits EventToolMarkerMissing
+	// before the engine's normal post-node accounting; the handler also
+	// sets Status = OutcomeFail so routing does not silently fall through
+	// to an unconditional edge. Populated only by the tool handler.
+	MissingMarker *MarkerDetail
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

@@ -1,0 +1,7 @@
+{"ts":"2026-05-13T17:00:00Z","type":"pipeline_started"}
+{"ts":"2026-05-13T17:00:01Z","type":"stage_started","node_id":"RunTests"}
+{"ts":"2026-05-13T17:00:02Z","type":"tool_marker_missing","node_id":"RunTests","message":"tool node \"RunTests\": marker_grep \"^tests-(pass|fail)$\" matched nothing in captured stdout — failing node to avoid silent fallback","marker_pattern":"^tests-(pass|fail)$","marker_tail":"first attempt no marker\n"}
+{"ts":"2026-05-13T17:00:03Z","type":"stage_started","node_id":"RunTests"}
+{"ts":"2026-05-13T17:00:04Z","type":"tool_marker_missing","node_id":"RunTests","message":"tool node \"RunTests\": marker_grep \"^tests-(pass|fail)$\" matched nothing in captured stdout — failing node to avoid silent fallback","marker_pattern":"^tests-(pass|fail)$","marker_tail":"second attempt still no marker\n"}
+{"ts":"2026-05-13T17:00:05Z","type":"stage_started","node_id":"BadRegex"}
+{"ts":"2026-05-13T17:00:06Z","type":"tool_marker_missing","node_id":"BadRegex","message":"tool node \"BadRegex\": marker_grep regex \"(unclosed\" failed to compile: error parsing regexp: missing closing ): `(unclosed`","marker_pattern":"(unclosed","marker_error":"error parsing regexp: missing closing ): `(unclosed`"}

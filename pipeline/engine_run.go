@@ -507,6 +507,33 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 		})
 	}
 
+	// Surface marker_grep no-match as a typed audit event so `tracker
+	// diagnose` can call out exactly why a node failed (issue #210).
+	// The tool handler already set Status = OutcomeFail; this is the
+	// audit-trail companion. Emit before returning so the event ordering
+	// matches the rest of the per-node emissions. The message branches
+	// on MissingMarker.Error: a populated Error means the regex itself
+	// was invalid (author error), an empty Error means the regex was
+	// fine but matched nothing in the captured stdout.
+	if outcome.MissingMarker != nil {
+		var msg string
+		if outcome.MissingMarker.Error != "" {
+			msg = fmt.Sprintf("tool node %q: marker_grep regex %q failed to compile: %s — failing node to avoid silent fallback",
+				currentNodeID, outcome.MissingMarker.Pattern, outcome.MissingMarker.Error)
+		} else {
+			msg = fmt.Sprintf("tool node %q: marker_grep %q matched nothing in captured stdout — failing node to avoid silent fallback",
+				currentNodeID, outcome.MissingMarker.Pattern)
+		}
+		e.emit(PipelineEvent{
+			Type:      EventToolMarkerMissing,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    currentNodeID,
+			Message:   msg,
+			Marker:    outcome.MissingMarker,
+		})
+	}
+
 	return &outcome, traceEntry, nil
 }
 

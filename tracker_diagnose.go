@@ -96,6 +96,11 @@ const (
 	// routing edges all evaluated false and routing fell back to an
 	// unconditional edge. Issue #208.
 	SuggestionConditionalFallthrough SuggestionKind = "conditional_fallthrough"
+	// SuggestionToolMarkerMissing fires when a tool node declared
+	// marker_grep but the regex matched nothing (or failed to compile).
+	// Surfaces the configured pattern, the captured stdout tail, and the
+	// recommended fix. Issue #210.
+	SuggestionToolMarkerMissing SuggestionKind = "tool_marker_missing"
 )
 
 // Diagnose analyzes a run directory and returns a structured report.
@@ -137,16 +142,39 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 	return report, nil
 }
 
-// runtimeAnomalies are non-failure events that nonetheless warrant a
-// surfaced suggestion in the diagnose report. Today: tool stdout/stderr
-// truncations (#208) and conditional-edge fallthroughs (#208 Tier 2).
+// runtimeAnomalies collects runtime events that warrant a surfaced
+// suggestion in the diagnose report — separate from the per-node
+// failures list so the suggestion builder can reason about them as
+// their own typed signals. Today: tool stdout/stderr truncations
+// (#208), conditional-edge fallthroughs (#208 Tier 2), and
+// tool_marker_missing events (#210).
+//
+// Routing-flow semantics differ by event type:
+//
+//   - Truncations & fallthroughs are non-failure events on their own
+//     — the node may still have succeeded, and the suggestion explains
+//     why routing picked the fallback edge.
+//   - Marker misses are failures by construction: the tool handler
+//     sets OutcomeFail to prevent the silent-fallback foot-gun that
+//     marker_grep exists to remove. There is no fallback edge to
+//     explain; the suggestion explains why the node failed and what
+//     the operator needs to fix.
 type runtimeAnomalies struct {
-	Truncations  []truncObservation
-	Fallthroughs []fallthroughObservation
+	Truncations    []truncObservation
+	Fallthroughs   []fallthroughObservation
+	MarkerMissings []markerMissingObservation
 	// VisitStarts records per-node stage_started events so the
 	// suggestion builder can flush stale pending truncations from a
 	// prior visit as orphans before pairing within the new visit.
 	VisitStarts []visitBoundary
+}
+
+type markerMissingObservation struct {
+	Seq          int
+	NodeID       string
+	Pattern      string
+	CapturedTail string
+	Error        string
 }
 
 // Seq is a monotonically-increasing scan position shared across all
@@ -275,6 +303,11 @@ type diagnoseEntry struct {
 	// Conditional-fallthrough event fields (#208).
 	EdgeTo          string                   `json:"edge_to"`
 	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
+
+	// Tool-marker-missing event fields (#210).
+	MarkerPattern string `json:"marker_pattern"`
+	MarkerTail    string `json:"marker_tail"`
+	MarkerError   string `json:"marker_error"`
 }
 
 // enrichFromActivity streams activity.jsonl, populating failures + detecting
@@ -360,6 +393,15 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 					NodeID: entry.NodeID,
 				})
 			}
+		case pipeline.EventToolMarkerMissing:
+			anomalySeq++
+			anomalies.MarkerMissings = append(anomalies.MarkerMissings, markerMissingObservation{
+				Seq:          anomalySeq,
+				NodeID:       entry.NodeID,
+				Pattern:      entry.MarkerPattern,
+				CapturedTail: entry.MarkerTail,
+				Error:        entry.MarkerError,
+			})
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
 	}
@@ -571,6 +613,51 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			emitTruncs(trs, nil)
 			emitted[tr.NodeID] = true
 		}
+	}
+	// Emit at most one suggestion per node for marker_grep failures.
+	// In runs with retries / loops the same node can emit
+	// tool_marker_missing multiple times; spamming the diagnose
+	// output with the same suggestion N times makes the report
+	// harder to scan. Keep the LAST observation per node (highest
+	// Seq), which is the most recent failure shape the operator
+	// would see — and include a "(N occurrences)" hint when there
+	// were multiple so the retry signal is not lost.
+	lastByNode := map[string]markerMissingObservation{}
+	countByNode := map[string]int{}
+	for _, mm := range anomalies.MarkerMissings {
+		countByNode[mm.NodeID]++
+		if prev, ok := lastByNode[mm.NodeID]; !ok || mm.Seq > prev.Seq {
+			lastByNode[mm.NodeID] = mm
+		}
+	}
+	// Iterate the original slice (not the map) for deterministic
+	// suggestion order, emitting each node only once.
+	emittedMarker := map[string]bool{}
+	for _, mm := range anomalies.MarkerMissings {
+		if emittedMarker[mm.NodeID] {
+			continue
+		}
+		emittedMarker[mm.NodeID] = true
+		latest := lastByNode[mm.NodeID]
+		count := countByNode[mm.NodeID]
+		var msg string
+		switch {
+		case latest.Error != "":
+			msg = fmt.Sprintf("%s: marker_grep regex %q failed to compile: %s. Fix the regex on the node's marker_grep attribute.",
+				latest.NodeID, latest.Pattern, latest.Error)
+		case latest.CapturedTail != "":
+			msg = fmt.Sprintf("%s: marker_grep %q matched nothing in captured stdout (tail: %q). Either the tool didn't emit the expected routing marker, or the regex is wrong. Tools should emit the marker at end-of-output via `printf '<marker>\\n'`.",
+				latest.NodeID, latest.Pattern, latest.CapturedTail)
+		default:
+			msg = fmt.Sprintf("%s: marker_grep %q matched nothing in captured stdout. The tool produced no output, or the regex doesn't match what was emitted.",
+				latest.NodeID, latest.Pattern)
+		}
+		if count > 1 {
+			msg += fmt.Sprintf(" (%d occurrences across retries/loop; showing the most recent)", count)
+		}
+		out = append(out, Suggestion{
+			NodeID: latest.NodeID, Kind: SuggestionToolMarkerMissing, Message: msg,
+		})
 	}
 	return out
 }
