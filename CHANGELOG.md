@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Property-based tests for `tailBuffer`** (closes [#214](https://github.com/2389-research/tracker/issues/214)). New dev dep `pgregory.net/rapid` v1.3.0 and `agent/exec/tail_buffer_property_test.go` cover the tail-window invariant across arbitrary write sequences: for any sequence of `Write` calls with total `N` bytes and `limit` `L`, `tb.String()` equals the last `min(N, L)` bytes of the concatenation. A second property pins `Truncated()` and `BytesDropped()` against the same invariant. Generalizes the ~12 hand-rolled example-based boundary tests in `tail_buffer_test.go` to the full state space — catches off-by-one boundary errors, write-boundary state corruption, and ring-buffer wrap-around bugs (the class of bugs PR #215 went through several iterations to get right). 100 random cases per property; fast (< 2ms per property).
+
 ## [0.27.0] - 2026-05-13
 
 ### Fixed

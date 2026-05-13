@@ -14,6 +14,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-isatty v0.0.20
 	golang.org/x/term v0.41.0
+	pgregory.net/rapid v1.3.0
 )
 
 require (
