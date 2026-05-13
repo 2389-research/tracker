@@ -151,19 +151,23 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 // suggestion in the diagnose report — separate from the per-node
 // failures list so the suggestion builder can reason about them as
 // their own typed signals. Today: tool stdout/stderr truncations
-// (#208), conditional-edge fallthroughs (#208 Tier 2), and
-// tool_marker_missing events (#210).
+// (#208), conditional-edge fallthroughs (#208 Tier 2),
+// tool_marker_missing events (#210), and tool_route_missing events
+// (#212).
 //
 // Routing-flow semantics differ by event type:
 //
 //   - Truncations & fallthroughs are non-failure events on their own
 //     — the node may still have succeeded, and the suggestion explains
 //     why routing picked the fallback edge.
-//   - Marker misses are failures by construction: the tool handler
-//     sets OutcomeFail to prevent the silent-fallback foot-gun that
-//     marker_grep exists to remove. There is no fallback edge to
-//     explain; the suggestion explains why the node failed and what
-//     the operator needs to fix.
+//   - Marker misses and route misses are failures by construction:
+//     the tool handler sets OutcomeFail to prevent the silent-
+//     fallback foot-gun that marker_grep / route_required exist to
+//     remove. There is no fallback edge to explain; the suggestion
+//     explains why the node failed and what the operator needs to
+//     fix (different mechanisms, same shape: marker_grep is the
+//     attribute-declared regex channel, route sentinel is the
+//     convention-based stdout-line channel).
 type runtimeAnomalies struct {
 	Truncations    []truncObservation
 	Fallthroughs   []fallthroughObservation
