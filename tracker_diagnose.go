@@ -145,7 +145,14 @@ type runtimeAnomalies struct {
 	Fallthroughs []fallthroughObservation
 }
 
+// Seq is a monotonically-increasing scan position shared across all
+// runtime anomaly observation types, assigned in chronological order
+// during the activity.jsonl scan. The suggestion builder uses it to
+// merge truncations and fallthroughs into a single ordered stream so
+// that loops/restarts don't mis-correlate a truncation on visit N with
+// a fallthrough on visit M.
 type truncObservation struct {
+	Seq           int
 	NodeID        string
 	Stream        string
 	Limit         int
@@ -155,6 +162,7 @@ type truncObservation struct {
 }
 
 type fallthroughObservation struct {
+	Seq             int
 	NodeID          string
 	EdgeTo          string
 	ConditionsTried []pipeline.ConditionEval
@@ -276,6 +284,12 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 	failSignatures := map[string][]string{}
 	var halt *BudgetHalt
 	var anomalies runtimeAnomalies
+	// anomalySeq increments on every truncation or fallthrough so the
+	// suggestion builder can merge the two slices into a single
+	// chronologically-ordered stream — required to correctly pair the
+	// truncation and fallthrough from the same node-visit when the
+	// pipeline loops through that node multiple times.
+	anomalySeq := 0
 
 	scanner := bufio.NewScanner(f)
 	// Match LoadActivityLog: allow 1 MB lines.
@@ -301,7 +315,9 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 				Message:       entry.Message,
 			}
 		case pipeline.EventToolOutputTruncated:
+			anomalySeq++
 			anomalies.Truncations = append(anomalies.Truncations, truncObservation{
+				Seq:           anomalySeq,
 				NodeID:        entry.NodeID,
 				Stream:        entry.TruncStream,
 				Limit:         entry.TruncLimit,
@@ -310,7 +326,9 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 				TotalBytes:    entry.TruncTotal,
 			})
 		case pipeline.EventConditionalFallthrough:
+			anomalySeq++
 			anomalies.Fallthroughs = append(anomalies.Fallthroughs, fallthroughObservation{
+				Seq:             anomalySeq,
 				NodeID:          entry.NodeID,
 				EdgeTo:          entry.EdgeTo,
 				ConditionsTried: entry.ConditionsTried,
@@ -416,66 +434,96 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			Message: "Raise the relevant --max-tokens, --max-cost, or --max-wall-time flag, or remove the Config.Budget value",
 		})
 	}
-	// Pair truncations with fallthroughs by chronological order of
-	// appearance in activity.jsonl. Both slices are appended during a
-	// single forward scan of the log, so they preserve event order;
-	// per-node FIFO queues then give correct pairing for runs that visit
-	// the same node multiple times (loops, restarts). For each
-	// truncation we pop the next fallthrough on that node (if any) and
-	// pair them in the combined suggestion; any fallthroughs left
-	// unpaired after the truncation loop get their own standalone
-	// suggestion. Issue #208 root case is the same-node-same-visit
-	// combined firing — pairing in order is the safest primitive
-	// without per-event timestamps on the observations.
-	fallthroughsByNode := map[string][]fallthroughObservation{}
-	for _, fb := range anomalies.Fallthroughs {
-		fallthroughsByNode[fb.NodeID] = append(fallthroughsByNode[fb.NodeID], fb)
+	// Merge truncations and fallthroughs into a single chronological
+	// stream using the Seq counter populated during the activity.jsonl
+	// scan, then walk it with a per-node state machine to correlate
+	// events from the same node-visit. The order within a single visit
+	// is always truncation-then-fallthrough (engine_run.go emits the
+	// truncation event right after tool execution; selectEdge emits
+	// the fallthrough event during edge selection), so a pending
+	// truncation pairs with the next fallthrough on the same node IF
+	// no other truncation on that node falls in between. Anything
+	// unpaired emits as its own standalone suggestion. This is the
+	// minimum machinery needed to keep loops + restarts from
+	// mis-correlating events across iterations (#208 follow-up).
+	type pendingTrunc struct {
+		ok bool
+		tr truncObservation
 	}
-	popFallthrough := func(nodeID string) (fallthroughObservation, bool) {
-		q := fallthroughsByNode[nodeID]
-		if len(q) == 0 {
-			return fallthroughObservation{}, false
-		}
-		head := q[0]
-		fallthroughsByNode[nodeID] = q[1:]
-		return head, true
+	pending := map[string]pendingTrunc{}
+	type combined struct {
+		seq int
+		tr  *truncObservation // exactly one of tr/fb is non-nil
+		fb  *fallthroughObservation
 	}
-	for _, tr := range anomalies.Truncations {
+	merged := make([]combined, 0, len(anomalies.Truncations)+len(anomalies.Fallthroughs))
+	for i := range anomalies.Truncations {
+		t := &anomalies.Truncations[i]
+		merged = append(merged, combined{seq: t.Seq, tr: t})
+	}
+	for i := range anomalies.Fallthroughs {
+		f := &anomalies.Fallthroughs[i]
+		merged = append(merged, combined{seq: f.Seq, fb: f})
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].seq < merged[j].seq })
+
+	emitTrunc := func(tr truncObservation, paired *fallthroughObservation) {
 		msg := fmt.Sprintf("%s: %s truncated — captured last %d bytes of %d (dropped %d from head; limit %d). The tail-window capture is designed to preserve a routing marker emitted at end-of-output (as long as the marker fits within the limit). Raise the per-node `output_limit` attribute if you need more context retained or if the marker itself is larger than the cap.",
 			tr.NodeID, tr.Stream, tr.CapturedBytes, tr.TotalBytes, tr.DroppedBytes, tr.Limit)
-		if fb, ok := popFallthrough(tr.NodeID); ok {
+		if paired != nil {
 			var tried []string
-			for _, c := range fb.ConditionsTried {
+			for _, c := range paired.ConditionsTried {
 				tried = append(tried, c.Condition)
 			}
 			msg += fmt.Sprintf(" Note: routing on this node also fell through to %q after %d conditional edge(s) evaluated false (%s) — verify the captured tail is what you expect.",
-				fb.EdgeTo, len(fb.ConditionsTried), strings.Join(tried, "; "))
+				paired.EdgeTo, len(paired.ConditionsTried), strings.Join(tried, "; "))
 		}
 		out = append(out, Suggestion{
 			NodeID: tr.NodeID, Kind: SuggestionToolOutputTruncated, Message: msg,
 		})
 	}
-	// Iterate Fallthroughs (not the map) to preserve activity-log order
-	// across nodes — map iteration order is randomized and would shuffle
-	// the resulting suggestion list otherwise.
-	for _, fb := range anomalies.Fallthroughs {
-		q := fallthroughsByNode[fb.NodeID]
-		if len(q) == 0 {
-			continue
-		}
-		// Pop the head (which is fb if no truncation consumed it; otherwise
-		// the next leftover for this node).
-		head := q[0]
-		fallthroughsByNode[fb.NodeID] = q[1:]
+	emitFt := func(fb fallthroughObservation) {
 		var tried []string
-		for _, c := range head.ConditionsTried {
+		for _, c := range fb.ConditionsTried {
 			tried = append(tried, c.Condition)
 		}
 		out = append(out, Suggestion{
-			NodeID: head.NodeID, Kind: SuggestionConditionalFallthrough,
+			NodeID: fb.NodeID, Kind: SuggestionConditionalFallthrough,
 			Message: fmt.Sprintf("%s: %d conditional edge(s) all evaluated false (%s); routing fell back to %q. If this was unintentional, check the routing context — `ctx.outcome`, `ctx.tool_stdout`, or whatever your conditions reference.",
-				head.NodeID, len(head.ConditionsTried), strings.Join(tried, "; "), head.EdgeTo),
+				fb.NodeID, len(fb.ConditionsTried), strings.Join(tried, "; "), fb.EdgeTo),
 		})
+	}
+
+	for _, ev := range merged {
+		switch {
+		case ev.tr != nil:
+			// New truncation on this node — flush any prior unpaired
+			// truncation on the same node (orphan from a previous visit)
+			// before stashing this one as the new pending.
+			if p, ok := pending[ev.tr.NodeID]; ok && p.ok {
+				emitTrunc(p.tr, nil)
+			}
+			pending[ev.tr.NodeID] = pendingTrunc{ok: true, tr: *ev.tr}
+		case ev.fb != nil:
+			// Fallthrough on this node — pair with the pending truncation
+			// if one exists; otherwise emit standalone (a fallthrough can
+			// only pair with a *prior* truncation in the same visit).
+			if p, ok := pending[ev.fb.NodeID]; ok && p.ok {
+				emitTrunc(p.tr, ev.fb)
+				delete(pending, ev.fb.NodeID)
+			} else {
+				emitFt(*ev.fb)
+			}
+		}
+	}
+	// Flush any pending truncations that never got a matching fallthrough.
+	// Iterate the original slice (not the map) so output order is
+	// deterministic across runs.
+	for _, tr := range anomalies.Truncations {
+		if p, ok := pending[tr.NodeID]; ok && p.ok && p.tr.Seq == tr.Seq {
+			emitTrunc(p.tr, nil)
+			delete(pending, tr.NodeID)
+		}
 	}
 	return out
 }
