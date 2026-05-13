@@ -69,12 +69,22 @@ func TestLintTRK101_SkipsWhenOutputLimitSet(t *testing.T) {
 
 // Skip condition 3: node also routes on ctx.outcome (exit-code primary signal).
 func TestLintTRK101_SkipsWhenAlsoRoutingOnOutcome(t *testing.T) {
-	g := buildTRK101DangerousGraph()
-	// Replace the unconditional fallback with an outcome-driven edge.
-	g.Edges = g.Edges[:0]
+	// Build a fresh graph rather than mutating the dangerous-shape
+	// fixture — Graph maintains an outgoing-adjacency index that
+	// AddEdge updates but slicing g.Edges does not clear, so reusing
+	// the fixture and adding edges would silently union with the
+	// original tool_stdout conditional + unconditional fallback.
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "RunTests",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "go test ./... 2>&1; printf 'tests-pass'"},
+	})
+	g.AddNode(&Node{ID: "Pass", Handler: "tool", Attrs: map[string]string{"tool_command": "true"}})
+	g.AddNode(&Node{ID: "Fail", Handler: "tool", Attrs: map[string]string{"tool_command": "true"}})
 	g.AddEdge(&Edge{From: "RunTests", To: "Pass", Condition: "ctx.tool_stdout = tests-pass"})
 	g.AddEdge(&Edge{From: "RunTests", To: "Fail", Condition: "ctx.outcome = fail"})
-	g.AddEdge(&Edge{From: "RunTests", To: "Fail"}) // still has fallback, but outcome routing now present
+	g.AddEdge(&Edge{From: "RunTests", To: "Fail"}) // unconditional fallback — present, but outcome routing also present
 	warnings := LintTrackerRules(g)
 	if containsWarning(warnings, "TRK101", "") {
 		t.Errorf("unexpected TRK101: outcome routing should suppress: %v", warnings)
@@ -94,10 +104,18 @@ func TestLintTRK101_SkipsWhenMultipleStdoutConditionals(t *testing.T) {
 
 // Skip condition 5: no unconditional fallback (all edges conditional).
 func TestLintTRK101_SkipsWhenNoUnconditionalFallback(t *testing.T) {
-	g := buildTRK101DangerousGraph()
-	// Remove the unconditional fallback edge.
-	g.Edges = g.Edges[:0]
+	// Build a fresh graph — see TestLintTRK101_SkipsWhenAlsoRoutingOnOutcome
+	// for why mutating the fixture via g.Edges = g.Edges[:0] doesn't work
+	// (Graph's outgoing-adjacency index is not cleared by slicing).
+	g := NewGraph("test")
+	g.AddNode(&Node{
+		ID:      "RunTests",
+		Handler: "tool",
+		Attrs:   map[string]string{"tool_command": "go test ./... 2>&1; printf 'tests-pass'"},
+	})
+	g.AddNode(&Node{ID: "Pass", Handler: "tool", Attrs: map[string]string{"tool_command": "true"}})
 	g.AddEdge(&Edge{From: "RunTests", To: "Pass", Condition: "ctx.tool_stdout = tests-pass"})
+	// No unconditional fallback — every edge is conditional.
 	warnings := LintTrackerRules(g)
 	if containsWarning(warnings, "TRK101", "") {
 		t.Errorf("unexpected TRK101: no unconditional fallback should suppress: %v", warnings)
