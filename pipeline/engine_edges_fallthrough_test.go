@@ -10,9 +10,10 @@ import (
 )
 
 // buildFallthroughGraph wires: start -> branch (with conditional edge to A,
-// unconditional edge to B) -> end. The branch handler's outcome is
-// configurable via the returned handler-set closure so each test case can
-// flip whether the conditional matches.
+// unconditional edge to B) -> end. The branch handler emits branchOutcome
+// directly so each test case can flip whether the conditional matches.
+// Set conditionalEdgeOnly to drop the unconditional fallback edge — used to
+// exercise the all-conditionals-false failure path.
 func buildFallthroughGraph(t *testing.T, branchOutcome Outcome, conditionalEdgeOnly bool) (*Graph, *HandlerRegistry, *[]PipelineEvent, *sync.Mutex) {
 	t.Helper()
 	g := NewGraph("test")

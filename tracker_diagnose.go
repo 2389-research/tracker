@@ -416,17 +416,34 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			Message: "Raise the relevant --max-tokens, --max-cost, or --max-wall-time flag, or remove the Config.Budget value",
 		})
 	}
-	// Index fallthroughs by node so we can correlate with truncations and
-	// produce a richer "your routing marker may have been dropped" hint
-	// when both events fire on the same node (issue #208 root case).
-	fallthroughByNode := map[string]fallthroughObservation{}
+	// Pair truncations with fallthroughs by chronological order of
+	// appearance in activity.jsonl. Both slices are appended during a
+	// single forward scan of the log, so they preserve event order;
+	// per-node FIFO queues then give correct pairing for runs that visit
+	// the same node multiple times (loops, restarts). For each
+	// truncation we pop the next fallthrough on that node (if any) and
+	// pair them in the combined suggestion; any fallthroughs left
+	// unpaired after the truncation loop get their own standalone
+	// suggestion. Issue #208 root case is the same-node-same-visit
+	// combined firing — pairing in order is the safest primitive
+	// without per-event timestamps on the observations.
+	fallthroughsByNode := map[string][]fallthroughObservation{}
 	for _, fb := range anomalies.Fallthroughs {
-		fallthroughByNode[fb.NodeID] = fb
+		fallthroughsByNode[fb.NodeID] = append(fallthroughsByNode[fb.NodeID], fb)
+	}
+	popFallthrough := func(nodeID string) (fallthroughObservation, bool) {
+		q := fallthroughsByNode[nodeID]
+		if len(q) == 0 {
+			return fallthroughObservation{}, false
+		}
+		head := q[0]
+		fallthroughsByNode[nodeID] = q[1:]
+		return head, true
 	}
 	for _, tr := range anomalies.Truncations {
 		msg := fmt.Sprintf("%s: %s truncated — captured last %d bytes of %d (dropped %d from head; limit %d). The tail-window capture is designed to preserve a routing marker emitted at end-of-output (as long as the marker fits within the limit). Raise the per-node `output_limit` attribute if you need more context retained or if the marker itself is larger than the cap.",
 			tr.NodeID, tr.Stream, tr.CapturedBytes, tr.TotalBytes, tr.DroppedBytes, tr.Limit)
-		if fb, ok := fallthroughByNode[tr.NodeID]; ok {
+		if fb, ok := popFallthrough(tr.NodeID); ok {
 			var tried []string
 			for _, c := range fb.ConditionsTried {
 				tried = append(tried, c.Condition)
@@ -438,25 +455,26 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			NodeID: tr.NodeID, Kind: SuggestionToolOutputTruncated, Message: msg,
 		})
 	}
-	// Fallthroughs without an accompanying truncation: surface as their
-	// own suggestion so users see "stated routing intent missed" even
-	// when truncation wasn't the cause.
-	truncByNode := map[string]bool{}
-	for _, tr := range anomalies.Truncations {
-		truncByNode[tr.NodeID] = true
-	}
+	// Iterate Fallthroughs (not the map) to preserve activity-log order
+	// across nodes — map iteration order is randomized and would shuffle
+	// the resulting suggestion list otherwise.
 	for _, fb := range anomalies.Fallthroughs {
-		if truncByNode[fb.NodeID] {
+		q := fallthroughsByNode[fb.NodeID]
+		if len(q) == 0 {
 			continue
 		}
+		// Pop the head (which is fb if no truncation consumed it; otherwise
+		// the next leftover for this node).
+		head := q[0]
+		fallthroughsByNode[fb.NodeID] = q[1:]
 		var tried []string
-		for _, c := range fb.ConditionsTried {
+		for _, c := range head.ConditionsTried {
 			tried = append(tried, c.Condition)
 		}
 		out = append(out, Suggestion{
-			NodeID: fb.NodeID, Kind: SuggestionConditionalFallthrough,
+			NodeID: head.NodeID, Kind: SuggestionConditionalFallthrough,
 			Message: fmt.Sprintf("%s: %d conditional edge(s) all evaluated false (%s); routing fell back to %q. If this was unintentional, check the routing context — `ctx.outcome`, `ctx.tool_stdout`, or whatever your conditions reference.",
-				fb.NodeID, len(fb.ConditionsTried), strings.Join(tried, "; "), fb.EdgeTo),
+				head.NodeID, len(head.ConditionsTried), strings.Join(tried, "; "), head.EdgeTo),
 		})
 	}
 	return out

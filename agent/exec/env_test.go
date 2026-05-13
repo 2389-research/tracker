@@ -191,7 +191,7 @@ func TestExecCommandWithLimit_RoutingMarkerSurvivesFlood(t *testing.T) {
 		t.Error("expected StdoutTruncated=true for 120KB+marker output")
 	}
 	if !strings.HasSuffix(result.Stdout, "tests-fail-cloud") {
-		t.Errorf("routing marker must appear at end of captured tail; got tail = %q", result.Stdout[len(result.Stdout)-40:])
+		t.Errorf("routing marker must appear at end of captured tail; got tail = %q", tailPreview(result.Stdout, 40))
 	}
 }
 
@@ -215,7 +215,7 @@ func TestExecCommandWithLimit_StderrTailParity(t *testing.T) {
 		t.Error("expected StderrBytesDropped > 0")
 	}
 	if !strings.HasSuffix(result.Stderr, "stderr-marker") {
-		t.Errorf("stderr marker must survive truncation; got tail = %q", result.Stderr[len(result.Stderr)-40:])
+		t.Errorf("stderr marker must survive truncation; got tail = %q", tailPreview(result.Stderr, 40))
 	}
 	// Stdout was never written to; its truncation flag must be false.
 	if result.StdoutTruncated {

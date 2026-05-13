@@ -659,7 +659,11 @@ func TestToolHandler_RoutingMarkerPastHeadWindow_208(t *testing.T) {
 	}
 	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
 	if !strings.HasSuffix(stdout, "tests-fail-cloud") {
-		t.Errorf("routing marker must survive tail-window capture; got tail = %q", stdout[len(stdout)-40:])
+		preview := stdout
+		if len(preview) > 40 {
+			preview = preview[len(preview)-40:]
+		}
+		t.Errorf("routing marker must survive tail-window capture; got tail = %q", preview)
 	}
 	if len(outcome.Truncations) != 1 {
 		t.Fatalf("expected 1 truncation entry, got %d", len(outcome.Truncations))
