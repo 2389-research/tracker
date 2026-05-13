@@ -898,7 +898,7 @@ func TestToolHandler_MarkerGrep_BadRegexFails(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("Status = %q, want %q", outcome.Status, pipeline.OutcomeFail)
 	}
-	if got := outcome.ContextUpdates["tool_marker_error"]; got == "" {
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError]; got == "" {
 		t.Error("ctx.tool_marker_error empty; want regex-compile error")
 	}
 	if outcome.MissingMarker == nil {

@@ -147,11 +147,18 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 // failures list so the suggestion builder can reason about them as
 // their own typed signals. Today: tool stdout/stderr truncations
 // (#208), conditional-edge fallthroughs (#208 Tier 2), and
-// tool_marker_missing events (#210). Truncations and fallthroughs
-// are non-failure (the node may still have succeeded); marker
-// misses always pair with an OutcomeFail at the node level, but
-// the *anomaly* surface is what tracker diagnose narrates ("why
-// did the routing pick the fallback edge").
+// tool_marker_missing events (#210).
+//
+// Routing-flow semantics differ by event type:
+//
+//   - Truncations & fallthroughs are non-failure events on their own
+//     — the node may still have succeeded, and the suggestion explains
+//     why routing picked the fallback edge.
+//   - Marker misses are failures by construction: the tool handler
+//     sets OutcomeFail to prevent the silent-fallback foot-gun that
+//     marker_grep exists to remove. There is no fallback edge to
+//     explain; the suggestion explains why the node failed and what
+//     the operator needs to fix.
 type runtimeAnomalies struct {
 	Truncations    []truncObservation
 	Fallthroughs   []fallthroughObservation
@@ -607,25 +614,49 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			emitted[tr.NodeID] = true
 		}
 	}
-	// Emit one suggestion per marker_grep failure. These don't pair
-	// with anything (the node already failed); they exist to give the
-	// operator the configured pattern + captured tail so the routing
-	// shape is debuggable from a post-mortem alone.
+	// Emit at most one suggestion per node for marker_grep failures.
+	// In runs with retries / loops the same node can emit
+	// tool_marker_missing multiple times; spamming the diagnose
+	// output with the same suggestion N times makes the report
+	// harder to scan. Keep the LAST observation per node (highest
+	// Seq), which is the most recent failure shape the operator
+	// would see — and include a "(N occurrences)" hint when there
+	// were multiple so the retry signal is not lost.
+	lastByNode := map[string]markerMissingObservation{}
+	countByNode := map[string]int{}
 	for _, mm := range anomalies.MarkerMissings {
+		countByNode[mm.NodeID]++
+		if prev, ok := lastByNode[mm.NodeID]; !ok || mm.Seq > prev.Seq {
+			lastByNode[mm.NodeID] = mm
+		}
+	}
+	// Iterate the original slice (not the map) for deterministic
+	// suggestion order, emitting each node only once.
+	emittedMarker := map[string]bool{}
+	for _, mm := range anomalies.MarkerMissings {
+		if emittedMarker[mm.NodeID] {
+			continue
+		}
+		emittedMarker[mm.NodeID] = true
+		latest := lastByNode[mm.NodeID]
+		count := countByNode[mm.NodeID]
 		var msg string
 		switch {
-		case mm.Error != "":
+		case latest.Error != "":
 			msg = fmt.Sprintf("%s: marker_grep regex %q failed to compile: %s. Fix the regex on the node's marker_grep attribute.",
-				mm.NodeID, mm.Pattern, mm.Error)
-		case mm.CapturedTail != "":
+				latest.NodeID, latest.Pattern, latest.Error)
+		case latest.CapturedTail != "":
 			msg = fmt.Sprintf("%s: marker_grep %q matched nothing in captured stdout (tail: %q). Either the tool didn't emit the expected routing marker, or the regex is wrong. Tools should emit the marker at end-of-output via `printf '<marker>\\n'`.",
-				mm.NodeID, mm.Pattern, mm.CapturedTail)
+				latest.NodeID, latest.Pattern, latest.CapturedTail)
 		default:
 			msg = fmt.Sprintf("%s: marker_grep %q matched nothing in captured stdout. The tool produced no output, or the regex doesn't match what was emitted.",
-				mm.NodeID, mm.Pattern)
+				latest.NodeID, latest.Pattern)
+		}
+		if count > 1 {
+			msg += fmt.Sprintf(" (%d occurrences across retries/loop; showing the most recent)", count)
 		}
 		out = append(out, Suggestion{
-			NodeID: mm.NodeID, Kind: SuggestionToolMarkerMissing, Message: msg,
+			NodeID: latest.NodeID, Kind: SuggestionToolMarkerMissing, Message: msg,
 		})
 	}
 	return out

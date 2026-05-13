@@ -25,7 +25,12 @@ const (
 	// match otherwise). LLM-origin (the tool subprocess emitted it), so
 	// NOT in the tool_command safe-key allowlist; conditions can read it,
 	// tool_command interpolation cannot.
-	ContextKeyToolMarker         = "tool_marker"
+	ContextKeyToolMarker = "tool_marker"
+	// ContextKeyToolMarkerError carries the regex-compile error message
+	// when marker_grep is configured with an invalid pattern. The runtime
+	// owns this key; declared writes cannot collide with it (same model
+	// as writes_error / writes_warning).
+	ContextKeyToolMarkerError    = "tool_marker_error"
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 
 	// ContextKeyResponsePrefix is prepended to a node ID to form a per-node

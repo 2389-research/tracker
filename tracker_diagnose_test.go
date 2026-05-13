@@ -181,7 +181,12 @@ func TestDiagnose_MalformedStatusWarningContinues(t *testing.T) {
 // TestDiagnose_ToolMarkerMissing verifies that the activity.jsonl parser
 // picks up tool_marker_missing events and that the suggestion builder
 // emits SuggestionToolMarkerMissing with distinct copy for the
-// no-match vs. compile-error paths (#210). The fixture has one of each.
+// no-match vs. compile-error paths (#210), AND that it de-dupes per
+// node when the same node emits the event multiple times (retry/loop
+// scenario). The fixture has RunTests emitting twice (retry) plus
+// BadRegex emitting once — so the suggestion list should have exactly
+// 2 entries, with the RunTests entry noting the occurrence count and
+// surfacing the LATEST captured tail.
 func TestDiagnose_ToolMarkerMissing(t *testing.T) {
 	r, err := Diagnose(context.Background(), "testdata/runs/marker_missing")
 	if err != nil {
@@ -195,7 +200,7 @@ func TestDiagnose_ToolMarkerMissing(t *testing.T) {
 		}
 	}
 	if len(markerSuggestions) != 2 {
-		t.Fatalf("got %d marker-missing suggestions, want 2 (one per fixture event)", len(markerSuggestions))
+		t.Fatalf("got %d marker-missing suggestions, want 2 (one per node — RunTests retry de-duped)", len(markerSuggestions))
 	}
 
 	byNode := map[string]Suggestion{}
@@ -210,11 +215,14 @@ func TestDiagnose_ToolMarkerMissing(t *testing.T) {
 	if !strings.Contains(runTests.Message, "matched nothing") {
 		t.Errorf("RunTests suggestion missing 'matched nothing' copy: %q", runTests.Message)
 	}
-	if !strings.Contains(runTests.Message, "some output") {
-		t.Errorf("RunTests suggestion should include CapturedTail content: %q", runTests.Message)
+	if !strings.Contains(runTests.Message, "second attempt") {
+		t.Errorf("RunTests suggestion should include the LATEST CapturedTail (retry surface), got: %q", runTests.Message)
 	}
 	if !strings.Contains(runTests.Message, `^tests-(pass|fail)$`) {
 		t.Errorf("RunTests suggestion should echo the configured pattern: %q", runTests.Message)
+	}
+	if !strings.Contains(runTests.Message, "2 occurrences") {
+		t.Errorf("RunTests suggestion should note the retry count, got: %q", runTests.Message)
 	}
 
 	badRegex, ok := byNode["BadRegex"]
@@ -226,5 +234,8 @@ func TestDiagnose_ToolMarkerMissing(t *testing.T) {
 	}
 	if !strings.Contains(badRegex.Message, "missing closing") {
 		t.Errorf("BadRegex suggestion should include the regex compile error detail: %q", badRegex.Message)
+	}
+	if strings.Contains(badRegex.Message, "occurrences") {
+		t.Errorf("BadRegex (single occurrence) should not have a retry-count suffix, got: %q", badRegex.Message)
 	}
 }

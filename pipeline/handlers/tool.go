@@ -147,7 +147,7 @@ func parseByteSize(s string) (int, error) {
 // the value of group 1 is returned; otherwise the full match string is
 // returned. Returns missing=true when nothing matched. Returns a non-nil
 // error only on regex-compile failure (author error, surfaced via
-// outcome.ContextUpdates["tool_marker_error"]).
+// outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError]).
 //
 // Line-oriented scan instead of byte-oriented: matchers like
 // `^tests-(pass|fail)$` are anchored against the line, and arbitrary
@@ -164,7 +164,12 @@ func parseByteSize(s string) (int, error) {
 func extractToolMarker(pattern, stdout string) (string, bool, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return "", false, fmt.Errorf("marker_grep regex %q: %w", pattern, err)
+		// Return the raw compile error; the pattern is already echoed
+		// separately by callers (MarkerDetail.Pattern, the engine's
+		// EventToolMarkerMissing message, and the `tracker diagnose`
+		// suggestion copy) so repeating it here would just duplicate
+		// the pattern text in every surface.
+		return "", false, err
 	}
 	var last []string
 	walkLines(stdout, func(line string) {
@@ -450,7 +455,7 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 		// node's routing context on the missing-match or compile-error
 		// paths (where only some branches set the key).
 		outcome.ContextUpdates[pipeline.ContextKeyToolMarker] = ""
-		outcome.ContextUpdates["tool_marker_error"] = ""
+		outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = ""
 
 		marker, missing, err := extractToolMarker(pattern, stdout)
 		switch {
@@ -462,7 +467,7 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 			// into activity.jsonl + tracker diagnose) and via
 			// ctx.tool_marker_error so routing conditions can read it.
 			outcome.Status = pipeline.OutcomeFail
-			outcome.ContextUpdates["tool_marker_error"] = err.Error()
+			outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = err.Error()
 			outcome.MissingMarker = &pipeline.MarkerDetail{
 				Pattern: pattern,
 				Error:   err.Error(),
