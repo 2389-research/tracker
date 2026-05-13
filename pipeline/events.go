@@ -50,6 +50,13 @@ const (
 	// been dropped" (issue #208). It does NOT fire on intentional
 	// unconditional-only routing.
 	EventConditionalFallthrough PipelineEventType = "conditional_fallthrough"
+
+	// EventBundleMismatchForced is emitted to activity.jsonl when resume
+	// proceeds despite a bundle-identity mismatch because --force-bundle-mismatch
+	// was set. Records both the original (checkpoint) and current identities
+	// in the entry's Message field for post-hoc audit. Emitted once per run by
+	// JSONLEventHandler.WriteBundleMismatchForced before any engine work begins.
+	EventBundleMismatchForced PipelineEventType = "bundle_mismatch_forced"
 )
 
 // CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.
@@ -133,6 +140,12 @@ type PipelineEvent struct {
 	Decision   *DecisionDetail   // non-nil for decision audit trail events
 	Cost       *CostSnapshot     // non-nil for EventCostUpdated and EventBudgetExceeded events
 	Truncation *TruncationDetail // non-nil for EventToolOutputTruncated
+
+	// BundleIdentity is the content-addressed identity of the .dipx bundle
+	// the run was started against ("sha256:<hex>"). Empty for runs from a
+	// plain .dip file. The engine stamps this on every emitted event so
+	// activity.jsonl carries provenance on every line.
+	BundleIdentity string
 }
 
 // PipelineEventHandler receives pipeline events for observability purposes.

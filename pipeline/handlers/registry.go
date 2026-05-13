@@ -75,6 +75,11 @@ type registryConfig struct {
 	tokenTracker   *llm.TokenTracker
 	toolSafety     ToolHandlerConfig
 	toolSafetySet  bool
+	// bundleIdentity is the content-addressed identity of the .dipx bundle
+	// the run was started against. When non-empty, cfg.pipelineEvents is
+	// wrapped in a BundleIdentityStamper so handler-package emissions
+	// (parallel, manager_loop) that bypass Engine.emit still carry provenance.
+	bundleIdentity string
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -132,6 +137,19 @@ func WithAgentEventHandler(handler agent.EventHandler) RegistryOption {
 func WithPipelineEventHandler(handler pipeline.PipelineEventHandler) RegistryOption {
 	return func(c *registryConfig) {
 		c.pipelineEvents = handler
+	}
+}
+
+// WithHandlerBundleIdentity sets the .dipx bundle identity to be stamped onto
+// every event emitted by handlers that bypass the engine's emit chokepoint
+// (parallel, manager_loop). Wired by wrapping cfg.pipelineEvents in a
+// BundleIdentityStamper. For consistency with pipeline.WithBundleIdentity,
+// callers should pass the same identity to both — the engine stamps emissions
+// it owns; this option stamps emissions the engine doesn't see. Empty (the
+// default) is a no-op and preserves plain .dip run behavior.
+func WithHandlerBundleIdentity(id string) RegistryOption {
+	return func(c *registryConfig) {
+		c.bundleIdentity = id
 	}
 }
 
@@ -215,6 +233,18 @@ func NewDefaultRegistry(graph *pipeline.Graph, opts ...RegistryOption) *pipeline
 	cfg := &registryConfig{}
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	// Wrap the pipeline-event handler with a stamping pass when a bundle
+	// identity is configured. Handler-package emissions (parallel,
+	// manager_loop) bypass Engine.emit, so without this wrapper their
+	// events would land in activity.jsonl without BundleIdentity. The
+	// wrapper is a no-op when identity is empty.
+	if cfg.bundleIdentity != "" && cfg.pipelineEvents != nil {
+		cfg.pipelineEvents = &BundleIdentityStamper{
+			Inner:    cfg.pipelineEvents,
+			Identity: cfg.bundleIdentity,
+		}
 	}
 
 	registry := pipeline.NewHandlerRegistry()

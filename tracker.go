@@ -59,6 +59,15 @@ type Config struct {
 	// env var is the fallback when GatewayURL is empty.
 	GatewayURL  string
 	WebhookGate *WebhookGateConfig // optional: post human gates to an HTTP webhook and wait for callback
+	// BundleIdentity is the content-addressed identity ("sha256:<hex>") of
+	// the .dipx bundle this run was loaded from. Stamped onto every emitted
+	// PipelineEvent and persisted to the checkpoint for resume verification.
+	// Empty (the default) is a no-op and matches plain .dip behavior.
+	//
+	// Callers that build their own JSONLEventHandler should also call
+	// activityLog.SetBundleIdentity(cfg.BundleIdentity) so agent/llm writes
+	// outside the engine event chain carry the same provenance.
+	BundleIdentity string
 }
 
 // WebhookGateConfig controls headless webhook-based human gate handling.
@@ -102,16 +111,21 @@ type Result struct {
 	// BundlePath is the path of the exported git bundle. Populated only when
 	// ExportBundle is invoked by the caller after Run completes.
 	BundlePath string
+	// BundleIdentity is the content-addressed identity ("sha256:<hex>") of
+	// the .dipx bundle the run was loaded from, mirrored from Config.BundleIdentity
+	// for the caller's convenience. Empty for plain .dip runs.
+	BundleIdentity string
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
 type Engine struct {
-	inner        *pipeline.Engine
-	client       *llm.Client // nil if caller provided their own Completer
-	tokenTracker *llm.TokenTracker
-	closeOnce    sync.Once
-	closeErr     error
-	artifactDir  string // base artifact directory; "" if not set
+	inner          *pipeline.Engine
+	client         *llm.Client // nil if caller provided their own Completer
+	tokenTracker   *llm.TokenTracker
+	closeOnce      sync.Once
+	closeErr       error
+	artifactDir    string // base artifact directory; "" if not set
+	bundleIdentity string // mirrored from Config.BundleIdentity for Result population
 }
 
 // NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
@@ -208,10 +222,11 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 
 	built = true
 	return &Engine{
-		inner:        inner,
-		client:       client,
-		tokenTracker: tokenTracker,
-		artifactDir:  cfg.ArtifactDir,
+		inner:          inner,
+		client:         client,
+		tokenTracker:   tokenTracker,
+		artifactDir:    cfg.ArtifactDir,
+		bundleIdentity: cfg.BundleIdentity,
 	}, nil
 }
 
@@ -261,6 +276,9 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 	}
 	if cfg.EventHandler != nil {
 		registryOpts = append(registryOpts, handlers.WithPipelineEventHandler(cfg.EventHandler))
+	}
+	if cfg.BundleIdentity != "" {
+		registryOpts = append(registryOpts, handlers.WithHandlerBundleIdentity(cfg.BundleIdentity))
 	}
 	if cfg.Backend != "" {
 		registryOpts = append(registryOpts, handlers.WithDefaultBackend(cfg.Backend))
@@ -371,6 +389,9 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 	budget := ResolveBudgetLimits(cfg.Budget, graph)
 	if guard := pipeline.NewBudgetGuard(budget); guard != nil {
 		opts = append(opts, pipeline.WithBudgetGuard(guard))
+	}
+	if cfg.BundleIdentity != "" {
+		opts = append(opts, pipeline.WithBundleIdentity(cfg.BundleIdentity))
 	}
 	opts = append(opts, pipeline.WithStylesheetResolution(true))
 	return opts
@@ -631,6 +652,7 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	if e.artifactDir != "" && result.RunID != "" {
 		result.ArtifactRunDir = filepath.Join(e.artifactDir, result.RunID)
 	}
+	result.BundleIdentity = e.bundleIdentity
 	return result, nil
 }
 

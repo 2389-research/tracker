@@ -78,6 +78,144 @@ func TestEngineSimplePipeline(t *testing.T) {
 	}
 }
 
+// TestEngine_StampsBundleIdentityOnEmittedEvents pins the contract that
+// WithBundleIdentity stamps every PipelineEvent the engine emits. This is
+// how `.dipx` bundle provenance reaches every line of activity.jsonl.
+func TestEngine_StampsBundleIdentityOnEmittedEvents(t *testing.T) {
+	g := NewGraph("bundle_id_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "end"})
+
+	reg := newTestRegistry()
+
+	// Guard against future concurrent emission paths: parallel/manager_loop
+	// handlers can fire events from goroutines, and the engine reserves the
+	// right to do so. This simple graph doesn't trigger that today, but the
+	// mutex keeps the test correct under `go test -race` if it ever does.
+	var capturedMu sync.Mutex
+	var captured []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		capturedMu.Lock()
+		defer capturedMu.Unlock()
+		captured = append(captured, evt)
+	})
+
+	engine := NewEngine(g, reg,
+		WithBundleIdentity("sha256:abcdef0123"),
+		WithPipelineEventHandler(handler),
+	)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Fatalf("expected success, got %q", result.Status)
+	}
+	capturedMu.Lock()
+	defer capturedMu.Unlock()
+	if len(captured) == 0 {
+		t.Fatal("no events captured — engine should at minimum emit started/completed")
+	}
+	for _, evt := range captured {
+		if evt.BundleIdentity != "sha256:abcdef0123" {
+			t.Errorf("event %s has wrong BundleIdentity: got %q want %q", evt.Type, evt.BundleIdentity, "sha256:abcdef0123")
+		}
+	}
+}
+
+// TestEngine_BundleIdentityEmptyByDefault pins the no-op contract: an
+// engine constructed without WithBundleIdentity emits events whose
+// BundleIdentity is the empty string, so plain .dip runs do not leak a
+// stray "bundle_identity" field into activity.jsonl.
+func TestEngine_BundleIdentityEmptyByDefault(t *testing.T) {
+	g := NewGraph("bundle_id_default_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "end"})
+
+	reg := newTestRegistry()
+
+	// See TestEngine_StampsBundleIdentityOnEmittedEvents for rationale.
+	var capturedMu sync.Mutex
+	var captured []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		capturedMu.Lock()
+		defer capturedMu.Unlock()
+		captured = append(captured, evt)
+	})
+
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler))
+	if _, err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	capturedMu.Lock()
+	defer capturedMu.Unlock()
+	if len(captured) == 0 {
+		t.Fatal("no events captured")
+	}
+	for _, evt := range captured {
+		if evt.BundleIdentity != "" {
+			t.Errorf("event %s has non-empty BundleIdentity without WithBundleIdentity: %q", evt.Type, evt.BundleIdentity)
+		}
+	}
+}
+
+// TestEngine_PersistsBundleIdentityToCheckpoint pins the contract that the
+// engine's configured bundleIdentity (via WithBundleIdentity) is written
+// into Checkpoint.BundleIdentity on every save. This is what Task 15's
+// strict-resume verification reads back to fail-fast on bundle drift.
+func TestEngine_PersistsBundleIdentityToCheckpoint(t *testing.T) {
+	g := NewGraph("bundle_id_persist_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "end"})
+
+	reg := newTestRegistry()
+	cpPath := filepath.Join(t.TempDir(), "cp.json")
+	engine := NewEngine(g, reg,
+		WithCheckpointPath(cpPath),
+		WithBundleIdentity("sha256:bundleid_test"),
+	)
+	if _, err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	cp, err := LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.BundleIdentity != "sha256:bundleid_test" {
+		t.Errorf("BundleIdentity not persisted: got %q want %q", cp.BundleIdentity, "sha256:bundleid_test")
+	}
+}
+
+// TestEngine_OmitsBundleIdentity_WhenNotSet pins the no-op contract: an
+// engine constructed without WithBundleIdentity writes an empty
+// BundleIdentity into the checkpoint, so plain .dip runs do not pollute
+// checkpoint.json with a stray "bundle_identity" field.
+func TestEngine_OmitsBundleIdentity_WhenNotSet(t *testing.T) {
+	g := NewGraph("bundle_id_omit_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "end"})
+
+	reg := newTestRegistry()
+	cpPath := filepath.Join(t.TempDir(), "cp.json")
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath))
+	if _, err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	cp, err := LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.BundleIdentity != "" {
+		t.Errorf("BundleIdentity should be empty when not set: got %q", cp.BundleIdentity)
+	}
+}
+
 func TestEngineDiamondPipeline(t *testing.T) {
 	dot, err := os.ReadFile("testdata/diamond.dot")
 	if err != nil {

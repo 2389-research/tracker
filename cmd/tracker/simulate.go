@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // runSimulateCmd parses a pipeline file and prints the execution plan without running anything.
@@ -30,6 +32,16 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
 		return err
+	}
+
+	// .dipx bundles are ZIP archives, not text source — they can't be fed
+	// through the source-string path (ValidateSource expects .dip text or
+	// .dot text). Route them through loadPipelineAndBundle to get a fully
+	// resolved *pipeline.Graph (the bundle's dippin-lang validator already
+	// ran at pack time, and LoadDipxBundle re-validates on load), then drive
+	// SimulateGraph directly. Plain .dip / .dot flow is unchanged.
+	if !isEmbedded && strings.EqualFold(filepath.Ext(resolved), ".dipx") {
+		return runSimulateBundle(resolved, formatOverride, w)
 	}
 
 	source, displayName, err := readPipelineSource(resolved, isEmbedded, info)
@@ -88,11 +100,62 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		}
 	}
 
-	report, err := tracker.SimulateGraph(context.Background(), result.Graph)
+	return simulateGraphAndPrint(w, result.Graph, displayName)
+}
+
+// runSimulateBundle is the .dipx variant of runSimulateCmd. It loads the
+// sealed bundle (verifying SHA-256 hashes and converting the entry workflow
+// to a *pipeline.Graph along the way), then drives SimulateGraph with the
+// pre-parsed graph. The format override is accepted for CLI surface parity
+// but ignored: a .dipx is unambiguously a bundle.
+//
+// Structural errors cannot reach this point — LoadDipxBundle re-validates
+// the entry workflow on load and refuses bundles that fail. Lint warnings
+// (DIP101–DIP133), however, are advisory and DO survive into the loaded
+// graph: surfacing them here gives parity with the .dip path's
+// "Validation Warnings" section and is especially useful when inspecting
+// a third-party bundle whose source you don't control.
+func runSimulateBundle(resolved, _ string, w io.Writer) error {
+	graph, _, _, err := loadPipelineAndBundle(resolved, "")
+	if err != nil {
+		return fmt.Errorf("load pipeline: %w", err)
+	}
+
+	// Run the same validation+lint pass the .dip path triggers via
+	// tracker.ValidateSource, plus the semantic lint that validate.go uses.
+	// Errors are not expected here (the bundle was validated at pack time
+	// and again on load), but we still print them defensively so a future
+	// regression in LoadDipxBundle that surfaces a malformed graph would
+	// be visible instead of silently fed into the simulator.
+	registry := buildValidationRegistry()
+	if vresult := pipeline.ValidateAllWithLint(graph, registry); vresult != nil {
+		if len(vresult.Errors) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "=== Validation Errors ===")
+			for _, e := range vresult.Errors {
+				fmt.Fprintf(w, "  ! %s\n", e)
+			}
+		}
+		if len(vresult.Warnings) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "=== Validation Warnings ===")
+			for _, msg := range vresult.Warnings {
+				fmt.Fprintf(w, "  ~ %s\n", msg)
+			}
+		}
+	}
+
+	return simulateGraphAndPrint(w, graph, resolved)
+}
+
+// simulateGraphAndPrint runs SimulateGraph on a pre-loaded graph and prints
+// the report. Shared by runSimulateCmd (post-ValidateSource) and
+// runSimulateBundle (post-LoadDipxBundle).
+func simulateGraphAndPrint(w io.Writer, graph *pipeline.Graph, displayName string) error {
+	report, err := tracker.SimulateGraph(context.Background(), graph)
 	if err != nil {
 		return err
 	}
-
 	printSimReport(w, report, displayName)
 	return nil
 }

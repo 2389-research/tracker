@@ -74,6 +74,7 @@ type Engine struct {
 	baselineUsage     *UsageSummary // usage already consumed by a parent run; folded into budget checks
 	gitArtifacts      bool
 	steeringCh        <-chan map[string]string
+	bundleIdentity    string // stamped on every emitted PipelineEvent; empty for non-bundle runs
 }
 
 // EngineOption configures optional Engine behavior.
@@ -152,6 +153,15 @@ func WithGitArtifacts(enabled bool) EngineOption {
 // selection and the next node's prompt expansion. Nil channels are no-ops.
 func WithSteeringChan(ch <-chan map[string]string) EngineOption {
 	return func(e *Engine) { e.steeringCh = ch }
+}
+
+// WithBundleIdentity stamps every PipelineEvent the engine emits with the
+// given content-addressed identity string (typically "sha256:<hex>"). Used
+// to thread .dipx bundle identity into the activity log so every line of
+// activity.jsonl carries provenance. Empty string (the default) is a no-op
+// and matches the behavior for plain .dip runs.
+func WithBundleIdentity(id string) EngineOption {
+	return func(e *Engine) { e.bundleIdentity = id }
 }
 
 // NewEngine creates a pipeline engine for the given graph and handler registry.
@@ -480,8 +490,14 @@ func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) 
 	}, fmt.Errorf("pipeline cancelled: %w", err)
 }
 
-// emit sends a pipeline event to the configured handler.
+// emit sends a pipeline event to the configured handler. The configured
+// bundle identity (via WithBundleIdentity) is stamped onto every event
+// before forwarding, so downstream handlers (notably the JSONL activity
+// log writer) see provenance on every line.
 func (e *Engine) emit(evt PipelineEvent) {
+	if evt.BundleIdentity == "" {
+		evt.BundleIdentity = e.bundleIdentity
+	}
 	e.eventHandler.HandlePipelineEvent(evt)
 }
 

@@ -68,7 +68,7 @@ func TestTailBuffer_RoutingMarkerAfterFlood(t *testing.T) {
 	}
 	got := tb.String()
 	if !strings.HasSuffix(got, "tests-fail-cloud") {
-		t.Errorf("expected captured tail to end with marker, got tail = %q", got[len(got)-32:])
+		t.Errorf("expected captured tail to end with marker, got tail = %q", tailPreview(got, 32))
 	}
 	if !tb.Truncated() {
 		t.Error("expected Truncated=true")
@@ -90,11 +90,21 @@ func TestTailBuffer_MarkerSpansWriteBoundary(t *testing.T) {
 	}
 	got := tb.String()
 	if !strings.HasSuffix(got, "ROUTE-OK-MARKER!") {
-		t.Errorf("marker must appear contiguously at end; tail = %q", got[len(got)-32:])
+		t.Errorf("marker must appear contiguously at end; tail = %q", tailPreview(got, 32))
 	}
 	if len(got) != 1024 {
 		t.Errorf("captured length = %d, want 1024", len(got))
 	}
+}
+
+// tailPreview returns the last n bytes of s for failure-message previews,
+// returning s unchanged when len(s) <= n to avoid an out-of-range panic
+// when an assertion fails on a short input.
+func tailPreview(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
 
 // Marker placed across the ring-wrap boundary via two writes must still

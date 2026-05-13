@@ -30,6 +30,11 @@ type Checkpoint struct {
 	// the guard survives checkpoint save/restore cycles.
 	FallbackTaken map[string]bool `json:"fallback_taken,omitempty"`
 
+	// BundleIdentity is the content-addressed identity of the .dipx bundle
+	// the run was started against ("sha256:<hex>"). Empty for runs started
+	// from a plain .dip file. Used for strict resume verification.
+	BundleIdentity string `json:"bundle_identity,omitempty"`
+
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
 	completedSet map[string]bool `json:"-"`

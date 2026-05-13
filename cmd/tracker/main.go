@@ -41,6 +41,11 @@ type runConfig struct {
 	toolAllowlist     []string      // additional allowlist patterns for tool_command (repeatable)
 	toolDenylistAdd   []string      // user-added denylist patterns that join the built-in denylist (repeatable)
 	maxOutputLimit    int           // hard ceiling (bytes) on per-stream tool_command output; 0 = default 10MB
+	// forceBundleMismatch allows resume to proceed even when the .dipx
+	// bundle's content-addressed identity differs from the original run.
+	// Consumed by resume identity verification to allow an explicit
+	// operator override when bundle identities differ.
+	forceBundleMismatch bool
 }
 
 type commandMode string

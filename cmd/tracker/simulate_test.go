@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
 const testDOT = `digraph pipeline {
@@ -249,5 +251,119 @@ func TestExecuteCommandSimulateMissingPipelineFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "usage") {
 		t.Errorf("expected usage error, got: %v", err)
+	}
+}
+
+// TestSimulateDipxBundle is the regression test for the Task 5 spec-review
+// gap: simulate.go used to feed ZIP bytes through ValidateSource with
+// format "dip", which failed parse with "validation error(s) in inline.dip".
+// The fix routes .dipx through loadPipelineAndBundle → SimulateGraph; this
+// test packs a minimal bundle and asserts the end-to-end run produces the
+// expected report sections.
+func TestSimulateDipxBundle(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.dip")
+	if err := os.WriteFile(entry, []byte(dipxtest.MinimalDip("simulate_dipx", "start", "exit")), 0o644); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entry)
+
+	var buf bytes.Buffer
+	if err := runSimulateCmd(bundlePath, "", &buf); err != nil {
+		t.Fatalf("runSimulateCmd on .dipx: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Pipeline Simulation") {
+		t.Errorf("missing simulation header in .dipx output:\n%s", output)
+	}
+	if !strings.Contains(output, "Execution Plan") {
+		t.Errorf("missing execution plan section in .dipx output:\n%s", output)
+	}
+	// MinimalDip produces a start → exit two-node graph; both should appear
+	// as steps in the BFS plan.
+	if !strings.Contains(output, "start") {
+		t.Errorf("missing start node in .dipx output:\n%s", output)
+	}
+	if !strings.Contains(output, "exit") {
+		t.Errorf("missing exit node in .dipx output:\n%s", output)
+	}
+}
+
+// TestSimulateDipxBundleNoValidationErrors guards the invariant that a
+// well-formed bundle never trips the "Validation Errors" preamble.
+// Structural errors are caught at pack time by dippin-lang and re-checked
+// by LoadDipxBundle on the way in, so anything reaching the simulator is
+// known-good; surfacing a "Validation Errors" section on such a bundle
+// would mean a regression in those upstream validators or in the
+// CLI plumbing that routes .dipx through them. Lint WARNINGS may still
+// appear — those are covered by TestSimulateDipxBundleShowsLintWarnings.
+func TestSimulateDipxBundleNoValidationErrors(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.dip")
+	if err := os.WriteFile(entry, []byte(dipxtest.MinimalDip("simulate_dipx_clean", "start", "exit")), 0o644); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entry)
+
+	var buf bytes.Buffer
+	if err := runSimulateCmd(bundlePath, "", &buf); err != nil {
+		t.Fatalf("runSimulateCmd on .dipx: %v", err)
+	}
+	output := buf.String()
+	if strings.Contains(output, "Validation Errors") {
+		t.Errorf(".dipx path emitted Validation Errors preamble on a clean bundle:\n%s", output)
+	}
+}
+
+// TestSimulateDipxBundleShowsLintWarnings asserts that dippin lint
+// warnings on the loaded graph reach stdout when simulating a .dipx —
+// parity with what the .dip path emits via tracker.ValidateSource.
+// Skipping this preamble on the assumption that "the bundle was validated
+// at pack time" is wrong: errors are caught, but lint warnings (DIP101–
+// DIP133) are advisory and remain meaningful at inspect time, especially
+// for a bundle you didn't author.
+//
+// The trigger here is DIP110 (empty agent prompt) on a middle codergen
+// node. Start and exit are exempt because the adapter retypes bare
+// agent-shaped start/exit nodes to the dedicated start/exit handlers
+// (see pipeline/dippin_adapter_edges.go), so we need a third agent in
+// the middle to land a codergen handler with no prompt in the loaded
+// graph.
+func TestSimulateDipxBundleShowsLintWarnings(t *testing.T) {
+	dir := t.TempDir()
+	entrySource := `workflow simulate_dipx_lint
+  start: a
+  exit: c
+
+  agent a
+    label: "Start"
+
+  agent b
+    label: "Middle"
+
+  agent c
+    label: "Exit"
+
+  edges
+    a -> b
+    b -> c
+`
+	entry := filepath.Join(dir, "entry.dip")
+	if err := os.WriteFile(entry, []byte(entrySource), 0o644); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entry)
+
+	var buf bytes.Buffer
+	if err := runSimulateCmd(bundlePath, "", &buf); err != nil {
+		t.Fatalf("runSimulateCmd on .dipx: %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "Validation Warnings") {
+		t.Errorf("expected Validation Warnings preamble on lint-triggering bundle, got:\n%s", output)
+	}
+	if !strings.Contains(output, "DIP110") {
+		t.Errorf("expected DIP110 warning for empty agent prompt, got:\n%s", output)
 	}
 }

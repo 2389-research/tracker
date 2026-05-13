@@ -76,6 +76,13 @@ var activeArtifactDir string
 // (denylist active, no allowlist, 10MB ceiling).
 var activeToolSafety handlers.ToolHandlerConfig
 
+// activeResumeInfo carries resume-time metadata from resolveRunCheckpoint
+// through to run/runTUI. The forced-mismatch detail in particular has to
+// reach the activity log handler (constructed inside run/runTUI) so the
+// override can be recorded as a bundle_mismatch_forced entry before the
+// engine fires. The zero value is the new (non-resume) run case.
+var activeResumeInfo resumeInfo
+
 // webhookGateCfg holds just the webhook gate settings needed by chooseInterviewer.
 type webhookGateCfg struct {
 	webhookURL        string
@@ -118,7 +125,7 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
@@ -147,6 +154,18 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	}
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
 	defer activityLog.Close()
+	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
+	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
+	// registry's BundleIdentityStamper). Empty identity is a no-op for
+	// plain .dip runs.
+	activityLog.SetBundleIdentity(bundleInfo.Identity)
+
+	// If this resume only proceeded because --force-bundle-mismatch was
+	// passed, record the override in activity.jsonl now — the engine
+	// hasn't fired yet, so without this the audit trail would lack the
+	// signal that the run executed against a different bundle than its
+	// checkpoint claimed. No-op when no resume / no forced mismatch.
+	emitForcedBundleMismatch(activityLog, activeResumeInfo)
 
 	wireLLMTraceToLog(llmClient, activityLog)
 
@@ -154,13 +173,14 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		activityLog, llmClient, verbose, jsonOut,
 	)
 
-	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler, graph)
+	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler, graph, bundleInfo.Identity)
 	registry := handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
 		handlers.WithInterviewer(interviewer, graph),
 		handlers.WithAgentEventHandler(agentEventHandler),
 		handlers.WithPipelineEventHandler(pipelineEventHandler),
+		handlers.WithHandlerBundleIdentity(bundleInfo.Identity),
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
 		handlers.WithTokenTracker(tokenTracker),
@@ -196,6 +216,17 @@ func prepareNativeLLMClient(tokenTracker *llm.TokenTracker, backend string) (*ll
 	return client, nil
 }
 
+// emitForcedBundleMismatch writes the bundle_mismatch_forced audit entry to
+// activity.jsonl when --force-bundle-mismatch allowed resume despite a
+// .dipx bundle identity change. No-op for new runs and for resumes whose
+// bundle identity matched (the common case).
+func emitForcedBundleMismatch(activityLog *pipeline.JSONLEventHandler, info resumeInfo) {
+	if !info.BundleMismatchForced {
+		return
+	}
+	activityLog.WriteBundleMismatchForced(info.RunID, info.OriginalIdentity, info.CurrentIdentity)
+}
+
 // wireLLMTraceToLog registers a trace observer that writes LLM events to the activity log.
 func wireLLMTraceToLog(llmClient *llm.Client, activityLog *pipeline.JSONLEventHandler) {
 	if llmClient != nil {
@@ -209,7 +240,13 @@ func wireLLMTraceToLog(llmClient *llm.Client, activityLog *pipeline.JSONLEventHa
 // Budget limits are the effective merge of activeBudgetLimits (CLI --max-*
 // flags) over workflow-level defaults from graph.Attrs (populated by the
 // dippin adapter from WorkflowDefaults.Max*). CLI flags always win.
-func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler, graph *pipeline.Graph) []pipeline.EngineOption {
+//
+// bundleIdentity is the content-addressed identity of the .dipx bundle the
+// run was started against (empty for plain .dip runs / embedded workflows).
+// When non-empty it is threaded to pipeline.WithBundleIdentity so engine
+// emissions are stamped — the registry-side companion stamping for handler
+// emissions is wired separately via handlers.WithHandlerBundleIdentity.
+func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler, graph *pipeline.Graph, bundleIdentity string) []pipeline.EngineOption {
 	opts := []pipeline.EngineOption{
 		pipeline.WithArtifactDir(artifactDir),
 		pipeline.WithPipelineEventHandler(evtHandler),
@@ -217,6 +254,9 @@ func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.Pipe
 	}
 	if checkpoint != "" {
 		opts = append(opts, pipeline.WithCheckpointPath(checkpoint))
+	}
+	if bundleIdentity != "" {
+		opts = append(opts, pipeline.WithBundleIdentity(bundleIdentity))
 	}
 	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
 	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {
@@ -310,43 +350,49 @@ func buildPlainEventHandlers(
 // terminal; the pipeline runs in a background goroutine; human gates open modal
 // overlays on the dashboard.
 // loadAndValidatePipeline loads, validates, and resolves subgraphs for a pipeline.
-// Supports filesystem paths and bare workflow names via resolvePipelineSource.
-func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[string]*pipeline.Graph, error) {
+// Supports filesystem paths and bare workflow names via resolvePipelineSource,
+// plus sealed .dipx bundles via loadPipelineAndBundle. The returned BundleInfo
+// is zero-valued for .dip files and embedded workflows; for .dipx bundles it
+// carries the content-addressed identity, entry path, and manifest.
+func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
 	resolved, isEmbedded, info, err := resolvePipelineSource(pipelineFile)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, pipeline.BundleInfo{}, err
 	}
 
-	var graph *pipeline.Graph
+	var (
+		graph     *pipeline.Graph
+		subgraphs map[string]*pipeline.Graph
+		bundle    pipeline.BundleInfo
+	)
 	if isEmbedded {
+		// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
 		graph, err = loadEmbeddedPipeline(info)
+		if err != nil {
+			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
+		}
+		subgraphs, err = loadSubgraphs(graph, info.File)
+		if err != nil {
+			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load subgraphs: %w", err)
+		}
 	} else {
-		graph, err = loadPipeline(resolved, format)
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("load pipeline: %w", err)
-	}
-	if err := pipeline.Validate(graph); err != nil {
-		return nil, nil, fmt.Errorf("validate pipeline: %w", err)
+		graph, subgraphs, bundle, err = loadPipelineAndBundle(resolved, format)
+		if err != nil {
+			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
+		}
 	}
 
-	// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
-	parentFile := resolved
-	if isEmbedded {
-		parentFile = info.File
-	}
-	subgraphs, err := loadSubgraphs(graph, parentFile)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load subgraphs: %w", err)
+	if err := pipeline.Validate(graph); err != nil {
+		return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("validate pipeline: %w", err)
 	}
 	if err := validateSubgraphRefs(graph, subgraphs); err != nil {
-		return nil, nil, fmt.Errorf("subgraph validation: %w", err)
+		return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("subgraph validation: %w", err)
 	}
-	return graph, subgraphs, nil
+	return graph, subgraphs, bundle, nil
 }
 
 func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
-	graph, subgraphs, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
@@ -375,6 +421,18 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		return err
 	}
 	defer activityLog.Close()
+	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
+	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
+	// registry's BundleIdentityStamper). Empty identity is a no-op for
+	// plain .dip runs.
+	activityLog.SetBundleIdentity(bundleInfo.Identity)
+
+	// If this resume only proceeded because --force-bundle-mismatch was
+	// passed, record the override in activity.jsonl now — the engine
+	// hasn't fired yet, so without this the audit trail would lack the
+	// signal that the run executed against a different bundle than its
+	// checkpoint claimed. No-op when no resume / no forced mismatch.
+	emitForcedBundleMismatch(activityLog, activeResumeInfo)
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
 	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
@@ -385,9 +443,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	pipelineCombo := buildTUIPipelineHandler(prog, activityLog, verbose, llmClient)
 
-	registry := buildTUIRegistry(graph, llmClient, workdir, execEnv, interviewer, activityLog, pipelineCombo, subgraphs, backend, tokenTracker, prog)
+	registry := buildTUIRegistry(graph, llmClient, workdir, execEnv, interviewer, activityLog, pipelineCombo, subgraphs, backend, tokenTracker, prog, bundleInfo.Identity)
 
-	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo)
+	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo, bundleInfo.Identity)
 
 	outcome, err := runTUIWithEngine(engine, prog)
 	if err != nil {
@@ -513,7 +571,12 @@ func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEvent
 }
 
 // buildTUIRegistry builds the handler registry for TUI mode.
-func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir string, execEnv *exec.LocalEnvironment, interviewer handlers.LabeledFreeformInterviewer, activityLog *pipeline.JSONLEventHandler, pipelineCombo pipeline.PipelineEventHandler, subgraphs map[string]*pipeline.Graph, backend string, tokenTracker *llm.TokenTracker, prog *tea.Program) *pipeline.HandlerRegistry {
+//
+// bundleIdentity is the .dipx bundle identity threaded into
+// handlers.WithHandlerBundleIdentity so handler-package emissions
+// (parallel, manager_loop) get stamped to match engine emissions. Empty
+// for plain .dip runs / embedded workflows is a no-op.
+func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir string, execEnv *exec.LocalEnvironment, interviewer handlers.LabeledFreeformInterviewer, activityLog *pipeline.JSONLEventHandler, pipelineCombo pipeline.PipelineEventHandler, subgraphs map[string]*pipeline.Graph, backend string, tokenTracker *llm.TokenTracker, prog *tea.Program, bundleIdentity string) *pipeline.HandlerRegistry {
 	return handlers.NewDefaultRegistry(graph,
 		handlers.WithLLMClient(llmClient, workdir),
 		handlers.WithExecEnvironment(execEnv),
@@ -529,6 +592,7 @@ func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir stri
 			activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 		})),
 		handlers.WithPipelineEventHandler(pipelineCombo),
+		handlers.WithHandlerBundleIdentity(bundleIdentity),
 		handlers.WithSubgraphs(subgraphs),
 		handlers.WithDefaultBackend(backend),
 		handlers.WithTokenTracker(tokenTracker),
@@ -537,13 +601,20 @@ func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir stri
 }
 
 // buildTUIEngine creates and configures the pipeline engine for TUI mode.
-func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, artifactDir, checkpoint string, pipelineCombo pipeline.PipelineEventHandler) *pipeline.Engine {
+//
+// bundleIdentity is the .dipx bundle identity threaded into
+// pipeline.WithBundleIdentity so engine-stamped events carry provenance.
+// Empty for plain .dip runs / embedded workflows is a no-op.
+func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, artifactDir, checkpoint string, pipelineCombo pipeline.PipelineEventHandler, bundleIdentity string) *pipeline.Engine {
 	var engineOpts []pipeline.EngineOption
 	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
 	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineCombo))
 	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
 	if checkpoint != "" {
 		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
+	}
+	if bundleIdentity != "" {
+		engineOpts = append(engineOpts, pipeline.WithBundleIdentity(bundleIdentity))
 	}
 	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
 	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {

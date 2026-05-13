@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -174,4 +175,38 @@ func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
 		return nil, err
 	}
 	return graph, nil
+}
+
+// loadDipxPipeline reads a .dipx bundle, verifies hashes, and converts the
+// entry + every transitively-referenced workflow to tracker Graphs. Lint
+// diagnostics from the bundled IR are printed to stderr here so the library
+// (pipeline.LoadDipxBundle) stays free of os.Stderr side effects; this
+// mirrors what loadDippinPipeline does for the .dip path.
+func loadDipxPipeline(filename string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
+	graph, subgraphs, info, diags, err := pipeline.LoadDipxBundle(context.Background(), filename)
+	for _, d := range diags {
+		fmt.Fprintln(os.Stderr, d.String())
+	}
+	return graph, subgraphs, info, err
+}
+
+// loadPipelineAndBundle is the loader entry point that handles both .dip
+// (filesystem + recursive subgraph walker) and .dipx (sealed bundle, pre-
+// resolved subgraphs). Always returns the subgraphs map and BundleInfo;
+// .dip callers see an empty BundleInfo and a subgraph map populated from
+// disk, while .dipx callers see a populated BundleInfo and subgraphs
+// pre-resolved by dipx.
+func loadPipelineAndBundle(filename, formatOverride string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
+	if strings.EqualFold(filepath.Ext(filename), ".dipx") {
+		return loadDipxPipeline(filename)
+	}
+	graph, err := loadPipeline(filename, formatOverride)
+	if err != nil {
+		return nil, nil, pipeline.BundleInfo{}, err
+	}
+	subgraphs, err := loadSubgraphs(graph, filename)
+	if err != nil {
+		return nil, nil, pipeline.BundleInfo{}, err
+	}
+	return graph, subgraphs, pipeline.BundleInfo{}, nil
 }
