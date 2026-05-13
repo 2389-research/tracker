@@ -12,13 +12,13 @@ import (
 
 // Built-in context keys used by the engine and handlers.
 const (
-	ContextKeyOutcome            = "outcome"
-	ContextKeyPreferredLabel     = "preferred_label"
-	ContextKeyGoal               = "graph.goal"
-	ContextKeyLastResponse       = "last_response"
-	ContextKeyHumanResponse      = "human_response"
-	ContextKeyToolStdout         = "tool_stdout"
-	ContextKeyToolStderr         = "tool_stderr"
+	ContextKeyOutcome        = "outcome"
+	ContextKeyPreferredLabel = "preferred_label"
+	ContextKeyGoal           = "graph.goal"
+	ContextKeyLastResponse   = "last_response"
+	ContextKeyHumanResponse  = "human_response"
+	ContextKeyToolStdout     = "tool_stdout"
+	ContextKeyToolStderr     = "tool_stderr"
 	// ContextKeyToolMarker holds the routing marker extracted from a tool
 	// node's stdout via the marker_grep attr (#210). The value is the last
 	// regex match in stdout (capture group 1 if the regex has groups, full
