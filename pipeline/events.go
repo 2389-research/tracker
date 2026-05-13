@@ -57,7 +57,25 @@ const (
 	// in the entry's Message field for post-hoc audit. Emitted once per run by
 	// JSONLEventHandler.WriteBundleMismatchForced before any engine work begins.
 	EventBundleMismatchForced PipelineEventType = "bundle_mismatch_forced"
+
+	// EventToolMarkerMissing fires when a tool node declared marker_grep
+	// but the regex matched nothing in captured stdout. The node fails
+	// with OutcomeFail rather than silently falling through to an
+	// unconditional edge — the whole point of marker_grep is to remove
+	// the silent-fallback foot-gun the #208 root cause exploited.
+	// Carries MarkerDetail with the configured regex pattern (#210).
+	EventToolMarkerMissing PipelineEventType = "tool_marker_missing"
 )
+
+// MarkerDetail is the payload for EventToolMarkerMissing. Pattern is the
+// raw regex declared on the node's marker_grep attribute; CapturedTail is
+// up to 256 bytes from the end of the captured stdout for diagnostic
+// context (the operator needs to see what didn't match without the audit
+// log carrying arbitrarily large tool output).
+type MarkerDetail struct {
+	Pattern      string `json:"pattern"`
+	CapturedTail string `json:"captured_tail,omitempty"`
+}
 
 // CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.
 // It is a point-in-time view of the run's aggregate token usage, cost, and
@@ -140,6 +158,7 @@ type PipelineEvent struct {
 	Decision   *DecisionDetail   // non-nil for decision audit trail events
 	Cost       *CostSnapshot     // non-nil for EventCostUpdated and EventBudgetExceeded events
 	Truncation *TruncationDetail // non-nil for EventToolOutputTruncated
+	Marker     *MarkerDetail     // non-nil for EventToolMarkerMissing
 
 	// BundleIdentity is the content-addressed identity of the .dipx bundle
 	// the run was started against ("sha256:<hex>"). Empty for runs from a

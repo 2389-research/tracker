@@ -19,6 +19,13 @@ const (
 	ContextKeyHumanResponse      = "human_response"
 	ContextKeyToolStdout         = "tool_stdout"
 	ContextKeyToolStderr         = "tool_stderr"
+	// ContextKeyToolMarker holds the routing marker extracted from a tool
+	// node's stdout via the marker_grep attr (#210). The value is the last
+	// regex match in stdout (capture group 1 if the regex has groups, full
+	// match otherwise). LLM-origin (the tool subprocess emitted it), so
+	// NOT in the tool_command safe-key allowlist; conditions can read it,
+	// tool_command interpolation cannot.
+	ContextKeyToolMarker         = "tool_marker"
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 
 	// ContextKeyResponsePrefix is prepended to a node ID to form a per-node

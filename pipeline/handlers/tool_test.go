@@ -706,3 +706,148 @@ func TestToolHandler_NoTruncationWhenWithinLimit(t *testing.T) {
 		t.Errorf("expected no truncations on small output, got %d entries", len(outcome.Truncations))
 	}
 }
+
+// marker_grep happy path: regex matches the last line, ctx.tool_marker
+// is populated with capture group 1, and Status stays OutcomeSuccess.
+func TestToolHandler_MarkerGrep_HappyPath(t *testing.T) {
+	env := toolTestEnv(t, nil)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "RunTests",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": `printf 'test 1 ok\ntest 2 ok\ntests-pass\n'`,
+			"marker_grep":  `^tests-(pass|fail)$`,
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeSuccess {
+		t.Errorf("Status = %q, want %q", outcome.Status, pipeline.OutcomeSuccess)
+	}
+	if outcome.MissingMarker != nil {
+		t.Errorf("MissingMarker = %+v, want nil", outcome.MissingMarker)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; got != "pass" {
+		t.Errorf("ctx.tool_marker = %q, want %q", got, "pass")
+	}
+}
+
+// marker_grep with no capture groups: ctx.tool_marker gets the full match.
+func TestToolHandler_MarkerGrep_NoCaptureGroup(t *testing.T) {
+	env := toolTestEnv(t, nil)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "Echo",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": `printf 'some prelude\nDONE\n'`,
+			"marker_grep":  `^DONE$`,
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; got != "DONE" {
+		t.Errorf("ctx.tool_marker = %q, want full-match %q", got, "DONE")
+	}
+}
+
+// marker_grep last-line-wins: multiple matches in stdout, the trailing
+// one takes precedence (progress markers + final routing decision).
+func TestToolHandler_MarkerGrep_LastLineWins(t *testing.T) {
+	env := toolTestEnv(t, nil)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "RunTests",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": `printf 'tests-pass\nsome more\ntests-fail\n'; exit 1`,
+			"marker_grep":  `^tests-(pass|fail)$`,
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; got != "fail" {
+		t.Errorf("ctx.tool_marker = %q, want last-match %q", got, "fail")
+	}
+}
+
+// marker_grep with no match: Status flips to OutcomeFail and
+// MissingMarker is populated for the engine to emit
+// EventToolMarkerMissing. This is the foot-gun-removal: a routing
+// node without a marker can no longer silently fall through to an
+// unconditional edge.
+func TestToolHandler_MarkerGrep_MissingFailsNode(t *testing.T) {
+	env := toolTestEnv(t, nil)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "RunTests",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": `printf 'no marker here\nnothing useful\n'`,
+			"marker_grep":  `^tests-(pass|fail)$`,
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("Status = %q, want %q (must fail loudly, not silently fall through)",
+			outcome.Status, pipeline.OutcomeFail)
+	}
+	if outcome.MissingMarker == nil {
+		t.Fatal("MissingMarker is nil, want populated MarkerDetail")
+	}
+	if outcome.MissingMarker.Pattern != `^tests-(pass|fail)$` {
+		t.Errorf("MissingMarker.Pattern = %q, want regex echo", outcome.MissingMarker.Pattern)
+	}
+	if outcome.MissingMarker.CapturedTail == "" {
+		t.Error("MissingMarker.CapturedTail empty; want diagnostic tail")
+	}
+	if _, set := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; set {
+		t.Error("ctx.tool_marker must not be set when marker is missing")
+	}
+}
+
+// marker_grep with a bad regex: Status fails, the regex error is
+// surfaced via outcome.ContextUpdates["tool_marker_error"] so
+// `tracker diagnose` can show it.
+func TestToolHandler_MarkerGrep_BadRegexFails(t *testing.T) {
+	env := toolTestEnv(t, nil)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "BadRegex",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": `printf 'anything\n'`,
+			"marker_grep":  `(unclosed`,
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("Status = %q, want %q", outcome.Status, pipeline.OutcomeFail)
+	}
+	if got := outcome.ContextUpdates["tool_marker_error"]; got == "" {
+		t.Error("ctx.tool_marker_error empty; want regex-compile error")
+	}
+}

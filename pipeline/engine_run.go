@@ -507,6 +507,22 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 		})
 	}
 
+	// Surface marker_grep no-match as a typed audit event so `tracker
+	// diagnose` can call out exactly why a node failed (issue #210).
+	// The tool handler already set Status = OutcomeFail; this is the
+	// audit-trail companion. Emit before returning so the event ordering
+	// matches the rest of the per-node emissions.
+	if outcome.MissingMarker != nil {
+		e.emit(PipelineEvent{
+			Type:      EventToolMarkerMissing,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    currentNodeID,
+			Message:   fmt.Sprintf("tool node %q: marker_grep %q matched nothing in captured stdout — failing node to avoid silent fallback", currentNodeID, outcome.MissingMarker.Pattern),
+			Marker:    outcome.MissingMarker,
+		})
+	}
+
 	return &outcome, traceEntry, nil
 }
 
