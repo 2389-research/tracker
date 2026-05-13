@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-05-13
+
 ### Fixed
 
 - **Tool stdout/stderr truncation now keeps the tail, not the head** (closes
