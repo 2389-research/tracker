@@ -142,10 +142,16 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 	return report, nil
 }
 
-// runtimeAnomalies are non-failure events that nonetheless warrant a
-// surfaced suggestion in the diagnose report. Today: tool stdout/stderr
-// truncations (#208), conditional-edge fallthroughs (#208 Tier 2), and
-// tool_marker_missing events (#210).
+// runtimeAnomalies collects runtime events that warrant a surfaced
+// suggestion in the diagnose report — separate from the per-node
+// failures list so the suggestion builder can reason about them as
+// their own typed signals. Today: tool stdout/stderr truncations
+// (#208), conditional-edge fallthroughs (#208 Tier 2), and
+// tool_marker_missing events (#210). Truncations and fallthroughs
+// are non-failure (the node may still have succeeded); marker
+// misses always pair with an OutcomeFail at the node level, but
+// the *anomaly* surface is what tracker diagnose narrates ("why
+// did the routing pick the fallback edge").
 type runtimeAnomalies struct {
 	Truncations    []truncObservation
 	Fallthroughs   []fallthroughObservation

@@ -177,3 +177,54 @@ func TestDiagnose_MalformedStatusWarningContinues(t *testing.T) {
 		t.Fatalf("expected malformed status warning, got %q", logBuf.String())
 	}
 }
+
+// TestDiagnose_ToolMarkerMissing verifies that the activity.jsonl parser
+// picks up tool_marker_missing events and that the suggestion builder
+// emits SuggestionToolMarkerMissing with distinct copy for the
+// no-match vs. compile-error paths (#210). The fixture has one of each.
+func TestDiagnose_ToolMarkerMissing(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/marker_missing")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+
+	var markerSuggestions []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionToolMarkerMissing {
+			markerSuggestions = append(markerSuggestions, s)
+		}
+	}
+	if len(markerSuggestions) != 2 {
+		t.Fatalf("got %d marker-missing suggestions, want 2 (one per fixture event)", len(markerSuggestions))
+	}
+
+	byNode := map[string]Suggestion{}
+	for _, s := range markerSuggestions {
+		byNode[s.NodeID] = s
+	}
+
+	runTests, ok := byNode["RunTests"]
+	if !ok {
+		t.Fatal("missing suggestion for RunTests (no-match path)")
+	}
+	if !strings.Contains(runTests.Message, "matched nothing") {
+		t.Errorf("RunTests suggestion missing 'matched nothing' copy: %q", runTests.Message)
+	}
+	if !strings.Contains(runTests.Message, "some output") {
+		t.Errorf("RunTests suggestion should include CapturedTail content: %q", runTests.Message)
+	}
+	if !strings.Contains(runTests.Message, `^tests-(pass|fail)$`) {
+		t.Errorf("RunTests suggestion should echo the configured pattern: %q", runTests.Message)
+	}
+
+	badRegex, ok := byNode["BadRegex"]
+	if !ok {
+		t.Fatal("missing suggestion for BadRegex (compile-error path)")
+	}
+	if !strings.Contains(badRegex.Message, "failed to compile") {
+		t.Errorf("BadRegex suggestion missing 'failed to compile' copy: %q", badRegex.Message)
+	}
+	if !strings.Contains(badRegex.Message, "missing closing") {
+		t.Errorf("BadRegex suggestion should include the regex compile error detail: %q", badRegex.Message)
+	}
+}
