@@ -30,7 +30,18 @@ const (
 	// when marker_grep is configured with an invalid pattern. The runtime
 	// owns this key; declared writes cannot collide with it (same model
 	// as writes_error / writes_warning).
-	ContextKeyToolMarkerError    = "tool_marker_error"
+	ContextKeyToolMarkerError = "tool_marker_error"
+	// ContextKeyToolRoute is the convention-based routing channel
+	// (issue #212): the tool handler scans captured stdout for lines
+	// matching `^\s*_TRACKER_ROUTE=(.+?)\s*$` and populates this key
+	// with the LAST match's captured value (anchored, so an arbitrary
+	// "_TRACKER_ROUTE" substring in the middle of another line does
+	// not match). The complement to marker_grep (#210): same routing
+	// channel idea, but author opts in by emitting the sentinel line
+	// instead of declaring a regex on the node. LLM-origin (the
+	// subprocess emitted the value), so NOT in the tool_command
+	// safe-key allowlist and reserved from declared writes.
+	ContextKeyToolRoute          = "tool_route"
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 
 	// ContextKeyResponsePrefix is prepended to a node ID to form a per-node

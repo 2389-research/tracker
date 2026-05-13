@@ -65,6 +65,15 @@ const (
 	// the silent-fallback foot-gun the #208 root cause exploited.
 	// Carries MarkerDetail with the configured regex pattern (#210).
 	EventToolMarkerMissing PipelineEventType = "tool_marker_missing"
+
+	// EventToolRouteMissing fires when a tool node declared
+	// route_required: true but no _TRACKER_ROUTE= sentinel line was
+	// present in captured stdout (#212). Same shape as
+	// EventToolMarkerMissing, different mechanism: route_required is
+	// the strictness flag for the convention-based sentinel channel;
+	// marker_grep is the strictness flag for the regex-attribute
+	// channel. Carries RouteDetail with the captured stdout tail.
+	EventToolRouteMissing PipelineEventType = "tool_route_missing"
 )
 
 // MarkerDetail is the payload for EventToolMarkerMissing. Pattern is the
@@ -79,6 +88,13 @@ type MarkerDetail struct {
 	Pattern      string `json:"pattern"`
 	CapturedTail string `json:"captured_tail,omitempty"`
 	Error        string `json:"error,omitempty"`
+}
+
+// RouteDetail is the payload for EventToolRouteMissing (#212). The
+// matcher itself is built-in (^\s*_TRACKER_ROUTE=(.+?)\s*$) so there
+// is no Pattern field — just the captured stdout tail for diagnosis.
+type RouteDetail struct {
+	CapturedTail string `json:"captured_tail,omitempty"`
 }
 
 // CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.
@@ -163,6 +179,7 @@ type PipelineEvent struct {
 	Cost       *CostSnapshot     // non-nil for EventCostUpdated and EventBudgetExceeded events
 	Truncation *TruncationDetail // non-nil for EventToolOutputTruncated
 	Marker     *MarkerDetail     // non-nil for EventToolMarkerMissing
+	Route      *RouteDetail      // non-nil for EventToolRouteMissing
 
 	// BundleIdentity is the content-addressed identity of the .dipx bundle
 	// the run was started against ("sha256:<hex>"). Empty for runs from a

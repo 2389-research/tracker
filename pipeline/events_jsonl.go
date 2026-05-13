@@ -76,6 +76,11 @@ type jsonlLogEntry struct {
 	MarkerPattern string `json:"marker_pattern,omitempty"`
 	MarkerTail    string `json:"marker_tail,omitempty"`
 	MarkerError   string `json:"marker_error,omitempty"`
+
+	// Route fields — populated for tool_route_missing events (#212).
+	// The matcher is built-in so there is no Pattern field; just the
+	// captured stdout tail for diagnosis.
+	RouteTail string `json:"route_tail,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a file.
@@ -177,6 +182,9 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 		entry.MarkerPattern = evt.Marker.Pattern
 		entry.MarkerTail = evt.Marker.CapturedTail
 		entry.MarkerError = evt.Marker.Error
+	}
+	if evt.Route != nil {
+		entry.RouteTail = evt.Route.CapturedTail
 	}
 	return entry
 }

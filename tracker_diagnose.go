@@ -101,6 +101,11 @@ const (
 	// Surfaces the configured pattern, the captured stdout tail, and the
 	// recommended fix. Issue #210.
 	SuggestionToolMarkerMissing SuggestionKind = "tool_marker_missing"
+	// SuggestionToolRouteMissing fires when a tool node had
+	// route_required: true but no _TRACKER_ROUTE= sentinel line was
+	// emitted to stdout. Surfaces the captured stdout tail and the
+	// recommended author pattern. Issue #212.
+	SuggestionToolRouteMissing SuggestionKind = "tool_route_missing"
 )
 
 // Diagnose analyzes a run directory and returns a structured report.
@@ -146,23 +151,28 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 // suggestion in the diagnose report — separate from the per-node
 // failures list so the suggestion builder can reason about them as
 // their own typed signals. Today: tool stdout/stderr truncations
-// (#208), conditional-edge fallthroughs (#208 Tier 2), and
-// tool_marker_missing events (#210).
+// (#208), conditional-edge fallthroughs (#208 Tier 2),
+// tool_marker_missing events (#210), and tool_route_missing events
+// (#212).
 //
 // Routing-flow semantics differ by event type:
 //
 //   - Truncations & fallthroughs are non-failure events on their own
 //     — the node may still have succeeded, and the suggestion explains
 //     why routing picked the fallback edge.
-//   - Marker misses are failures by construction: the tool handler
-//     sets OutcomeFail to prevent the silent-fallback foot-gun that
-//     marker_grep exists to remove. There is no fallback edge to
-//     explain; the suggestion explains why the node failed and what
-//     the operator needs to fix.
+//   - Marker misses and route misses are failures by construction:
+//     the tool handler sets OutcomeFail to prevent the silent-
+//     fallback foot-gun that marker_grep / route_required exist to
+//     remove. There is no fallback edge to explain; the suggestion
+//     explains why the node failed and what the operator needs to
+//     fix (different mechanisms, same shape: marker_grep is the
+//     attribute-declared regex channel, route sentinel is the
+//     convention-based stdout-line channel).
 type runtimeAnomalies struct {
 	Truncations    []truncObservation
 	Fallthroughs   []fallthroughObservation
 	MarkerMissings []markerMissingObservation
+	RouteMissings  []routeMissingObservation
 	// VisitStarts records per-node stage_started events so the
 	// suggestion builder can flush stale pending truncations from a
 	// prior visit as orphans before pairing within the new visit.
@@ -175,6 +185,12 @@ type markerMissingObservation struct {
 	Pattern      string
 	CapturedTail string
 	Error        string
+}
+
+type routeMissingObservation struct {
+	Seq          int
+	NodeID       string
+	CapturedTail string
 }
 
 // Seq is a monotonically-increasing scan position shared across all
@@ -308,6 +324,9 @@ type diagnoseEntry struct {
 	MarkerPattern string `json:"marker_pattern"`
 	MarkerTail    string `json:"marker_tail"`
 	MarkerError   string `json:"marker_error"`
+
+	// Tool-route-missing event fields (#212).
+	RouteTail string `json:"route_tail"`
 }
 
 // enrichFromActivity streams activity.jsonl, populating failures + detecting
@@ -401,6 +420,13 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 				Pattern:      entry.MarkerPattern,
 				CapturedTail: entry.MarkerTail,
 				Error:        entry.MarkerError,
+			})
+		case pipeline.EventToolRouteMissing:
+			anomalySeq++
+			anomalies.RouteMissings = append(anomalies.RouteMissings, routeMissingObservation{
+				Seq:          anomalySeq,
+				NodeID:       entry.NodeID,
+				CapturedTail: entry.RouteTail,
 			})
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
@@ -614,6 +640,36 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			emitted[tr.NodeID] = true
 		}
 	}
+	// Emit at most one suggestion per node for route sentinel failures.
+	// Same de-dupe shape as marker_grep below — a node that fails on
+	// retry/loop emits one tool_route_missing event per attempt but
+	// gets one combined suggestion with an occurrence count.
+	lastRouteByNode := map[string]routeMissingObservation{}
+	routeCountByNode := map[string]int{}
+	for _, rm := range anomalies.RouteMissings {
+		routeCountByNode[rm.NodeID]++
+		if prev, ok := lastRouteByNode[rm.NodeID]; !ok || rm.Seq > prev.Seq {
+			lastRouteByNode[rm.NodeID] = rm
+		}
+	}
+	emittedRoute := map[string]bool{}
+	for _, rm := range anomalies.RouteMissings {
+		if emittedRoute[rm.NodeID] {
+			continue
+		}
+		emittedRoute[rm.NodeID] = true
+		latest := lastRouteByNode[rm.NodeID]
+		count := routeCountByNode[rm.NodeID]
+		msg := fmt.Sprintf("%s: route_required is set but no _TRACKER_ROUTE= sentinel was emitted in captured stdout (tail: %q). Have the tool emit `printf '_TRACKER_ROUTE=<value>\\n'` once it knows the routing decision, then route via `when ctx.tool_route = <value>`.",
+			latest.NodeID, latest.CapturedTail)
+		if count > 1 {
+			msg += fmt.Sprintf(" (%d occurrences across retries/loop; showing the most recent)", count)
+		}
+		out = append(out, Suggestion{
+			NodeID: latest.NodeID, Kind: SuggestionToolRouteMissing, Message: msg,
+		})
+	}
+
 	// Emit at most one suggestion per node for marker_grep failures.
 	// In runs with retries / loops the same node can emit
 	// tool_marker_missing multiple times; spamming the diagnose

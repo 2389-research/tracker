@@ -239,3 +239,38 @@ func TestDiagnose_ToolMarkerMissing(t *testing.T) {
 		t.Errorf("BadRegex (single occurrence) should not have a retry-count suffix, got: %q", badRegex.Message)
 	}
 }
+
+// TestDiagnose_ToolRouteMissing pins activity.jsonl parsing and the
+// SuggestionToolRouteMissing emission for the route sentinel (#212).
+// Mirrors TestDiagnose_ToolMarkerMissing in shape but the underlying
+// mechanism is different (built-in sentinel vs. node-attribute regex).
+func TestDiagnose_ToolRouteMissing(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/route_missing")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+
+	var routeSuggestions []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionToolRouteMissing {
+			routeSuggestions = append(routeSuggestions, s)
+		}
+	}
+	if len(routeSuggestions) != 1 {
+		t.Fatalf("got %d route-missing suggestions, want 1", len(routeSuggestions))
+	}
+
+	s := routeSuggestions[0]
+	if s.NodeID != "StrictRunTests" {
+		t.Errorf("NodeID = %q, want StrictRunTests", s.NodeID)
+	}
+	if !strings.Contains(s.Message, "_TRACKER_ROUTE=") {
+		t.Errorf("suggestion should mention the sentinel format, got: %q", s.Message)
+	}
+	if !strings.Contains(s.Message, "no sentinel") {
+		t.Errorf("suggestion should include the CapturedTail content, got: %q", s.Message)
+	}
+	if !strings.Contains(s.Message, "ctx.tool_route") {
+		t.Errorf("suggestion should mention the ctx.tool_route routing pattern, got: %q", s.Message)
+	}
+}

@@ -534,6 +534,21 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 		})
 	}
 
+	// Same shape as the MissingMarker emission above, different
+	// mechanism: route_required: true was set on the node but no
+	// _TRACKER_ROUTE= sentinel was present in captured stdout (#212).
+	if outcome.MissingRoute != nil {
+		e.emit(PipelineEvent{
+			Type:      EventToolRouteMissing,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    currentNodeID,
+			Message: fmt.Sprintf("tool node %q: route_required is set but no _TRACKER_ROUTE= sentinel line was emitted to stdout — failing node to avoid silent fallback",
+				currentNodeID),
+			Route: outcome.MissingRoute,
+		})
+	}
+
 	return &outcome, traceEntry, nil
 }
 

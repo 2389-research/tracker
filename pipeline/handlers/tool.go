@@ -187,6 +187,30 @@ func extractToolMarker(pattern, stdout string) (string, bool, error) {
 	return last[0], false, nil
 }
 
+// toolRouteSentinelPattern is the reserved sentinel regex for the
+// convention-based routing channel (#212). Anchored on both ends so an
+// arbitrary "_TRACKER_ROUTE" appearance inside other text doesn't match;
+// optional leading/trailing whitespace tolerates accidental indentation;
+// non-greedy capture + trailing whitespace gobbler keeps trailing
+// spaces out of the captured value.
+var toolRouteSentinelPattern = regexp.MustCompile(`^\s*_TRACKER_ROUTE=(.+?)\s*$`)
+
+// extractToolRoute scans stdout for _TRACKER_ROUTE= sentinel lines and
+// returns the captured value of the LAST matching line (or "" if none).
+// CRLF handling, line-oriented scan, and allocation-free walk all
+// mirror extractToolMarker — the runtime guarantees consistent
+// semantics across both marker_grep (#210) and route sentinel (#212).
+func extractToolRoute(stdout string) string {
+	var last string
+	walkLines(stdout, func(line string) {
+		line = strings.TrimSuffix(line, "\r")
+		if m := toolRouteSentinelPattern.FindStringSubmatch(line); m != nil {
+			last = m[1]
+		}
+	})
+	return last
+}
+
 // walkLines iterates over s line by line (separator "\n"), calling fn
 // for each line including the final trailing line if it has no newline.
 // Allocation-free: each line is a sub-string of s, no full slice
@@ -482,6 +506,26 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 			outcome.ContextUpdates[pipeline.ContextKeyToolMarker] = marker
 		}
 	}
+
+	// _TRACKER_ROUTE= sentinel scanning is always-on for tool nodes
+	// (issue #212). The author opts in by emitting the sentinel line
+	// from the tool; no per-node attribute required. The last matching
+	// line wins, value goes to ctx.tool_route. Always-clear before
+	// extract so a prior node's value doesn't leak into routing.
+	// When route_required: true is set on the node AND no sentinel
+	// was extracted, the node fails (symmetric to marker_grep's
+	// missing-match handling). The matcher is built-in so there is
+	// no regex-compile error path; only the missing-sentinel path.
+	outcome.ContextUpdates[pipeline.ContextKeyToolRoute] = ""
+	if route := extractToolRoute(stdout); route != "" {
+		outcome.ContextUpdates[pipeline.ContextKeyToolRoute] = route
+	} else if node.ToolConfig().RouteRequired {
+		outcome.Status = pipeline.OutcomeFail
+		outcome.MissingRoute = &pipeline.RouteDetail{
+			CapturedTail: tailForDiag(stdout, 256),
+		}
+	}
+
 	if applyDeclaredWrites(node, outcome.ContextUpdates, stdout, "Tool stdout JSON") {
 		outcome.Status = pipeline.OutcomeFail
 	}
