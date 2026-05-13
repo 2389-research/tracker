@@ -7,8 +7,10 @@ import (
 	"strings"
 )
 
-// LintDippinRules runs all Dippin semantic lint checks (DIP101-DIP112, DIP120-DIP121).
-// Returns a list of warning messages. Warnings don't block execution but should be reviewed.
+// LintDippinRules runs all Dippin semantic lint checks (DIP101-DIP112,
+// DIP120-DIP121) plus tracker-specific lint checks (TRK1XX, see
+// lint_tracker.go). Returns a list of warning messages. Warnings
+// don't block execution but should be reviewed.
 func LintDippinRules(g *Graph) []string {
 	var warnings []string
 
@@ -26,6 +28,9 @@ func LintDippinRules(g *Graph) []string {
 	warnings = append(warnings, lintDIP109(g)...)
 	warnings = append(warnings, lintDIP120(g)...)
 	warnings = append(warnings, lintDIP121(g)...)
+
+	// Tracker-specific rules (TRK1XX).
+	warnings = append(warnings, LintTrackerRules(g)...)
 
 	return warnings
 }
