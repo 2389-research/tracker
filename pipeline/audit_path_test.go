@@ -69,6 +69,70 @@ func TestSecureActivityLogPath_EmptyRunID(t *testing.T) {
 	}
 }
 
+// TestSecureActivityLogPath_RejectsTraversal pins runID validation:
+// a tampered checkpoint must not be able to escape the secure base
+// via path-traversal forms in the run_id field.
+func TestSecureActivityLogPath_RejectsTraversal(t *testing.T) {
+	t.Setenv(auditDirEnvVar, "/tmp/audit-base")
+	cases := []string{
+		"..",
+		".",
+		"../escape",
+		"foo/bar",
+		`foo\bar`,
+		"../../etc/passwd",
+		"./local",
+	}
+	for _, runID := range cases {
+		t.Run(runID, func(t *testing.T) {
+			if _, err := SecureActivityLogPath(runID); err == nil {
+				t.Errorf("SecureActivityLogPath(%q) accepted; want rejection", runID)
+			}
+		})
+	}
+}
+
+// TestSecureActivityLogPath_AcceptsCleanRunIDs pins the positive
+// shape: random hex (the default generateRunID format) and other
+// clean single-element strings are accepted.
+func TestSecureActivityLogPath_AcceptsCleanRunIDs(t *testing.T) {
+	t.Setenv(auditDirEnvVar, "/tmp/audit-base")
+	cases := []string{
+		"abc123",
+		"deadbeef0123",
+		"run-1",
+		"2026-05-13T10-00-00",
+	}
+	for _, runID := range cases {
+		t.Run(runID, func(t *testing.T) {
+			if _, err := SecureActivityLogPath(runID); err != nil {
+				t.Errorf("SecureActivityLogPath(%q) rejected: %v", runID, err)
+			}
+		})
+	}
+}
+
+// TestSecureActivityLogBase_IgnoresRelativeEnv pins that a relative
+// TRACKER_AUDIT_DIR / XDG_STATE_HOME silently falls through to the
+// next candidate. The threat is that a misconfigured value like
+// "TRACKER_AUDIT_DIR=.tracker/runs" would land the "secure" log
+// inside the process CWD — defeating the relocation defense.
+func TestSecureActivityLogBase_IgnoresRelativeEnv(t *testing.T) {
+	t.Setenv(auditDirEnvVar, "relative/path")
+	t.Setenv(xdgStateHomeEnvVar, ".local/state")
+	t.Setenv("HOME", "/Users/alice")
+
+	got, err := SecureActivityLogPath("run-abc")
+	if err != nil {
+		t.Fatalf("SecureActivityLogPath: %v", err)
+	}
+	// Both relative env vars must be ignored; HOME default wins.
+	want := filepath.Join("/Users/alice", ".local", "state", "tracker", "runs", "run-abc", "activity.jsonl")
+	if got != want {
+		t.Errorf("path = %q, want %q (relative env vars must be ignored)", got, want)
+	}
+}
+
 // TestActivityLogSentinel pins the exact byte sequence. Changing it is
 // a wire-format break that requires a migration plan.
 func TestActivityLogSentinel(t *testing.T) {

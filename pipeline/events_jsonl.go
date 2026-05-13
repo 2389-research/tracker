@@ -146,7 +146,13 @@ func (h *JSONLEventHandler) openFile(runID string) error {
 	if err := os.MkdirAll(secureDir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(securePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	// O_NOFOLLOW (unix builds) refuses to open the path if it's a
+	// symlink — same threat as the snapshot's destination, narrower
+	// window. Even though the secure path lives outside cmd.Dir and a
+	// new run's runID is random, an out-of-band same-UID process can
+	// in principle pre-plant a symlink at securePath; this catches
+	// that. On Windows snapshotNoFollow is 0 (no-op).
+	f, err := os.OpenFile(securePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND|snapshotNoFollow, 0o600)
 	if err != nil {
 		return err
 	}
@@ -398,6 +404,24 @@ func (h *JSONLEventHandler) Close() error {
 	return err
 }
 
+// refuseIfSymlink errors when path exists and is a symlink. Missing
+// paths are OK (the snapshot creates them). Any other error from Lstat
+// propagates so the snapshot bails out rather than continuing on
+// uncertain state.
+func refuseIfSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink", path)
+	}
+	return nil
+}
+
 // writeSnapshot copies the secure log to <artifactDir>/<runID>/activity.jsonl
 // with sentinel prefixes stripped, so existing tooling (bundle export,
 // git_artifacts, anything that greps run dirs) continues to find a
@@ -411,6 +435,19 @@ func (h *JSONLEventHandler) writeSnapshot() error {
 		return nil
 	}
 	legacyDir := filepath.Join(h.artifactDir, h.runID)
+	// Pre-flight: if a tool subprocess swapped <artifactDir>/<runID>
+	// for a symlink during the run, MkdirAll would silently follow it
+	// and OpenFile's O_NOFOLLOW only guards the final component — the
+	// snapshot would land at the attacker's chosen target. Lstat catches
+	// that. TOCTOU window between this check and MkdirAll is small and
+	// the snapshot is best-effort: refusing on suspicion is safer than
+	// silently mirroring elsewhere. Same defense for artifactDir itself.
+	if err := refuseIfSymlink(h.artifactDir); err != nil {
+		return fmt.Errorf("snapshot dest unsafe: %w", err)
+	}
+	if err := refuseIfSymlink(legacyDir); err != nil {
+		return fmt.Errorf("snapshot dest unsafe: %w", err)
+	}
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
 		return fmt.Errorf("snapshot mkdir: %w", err)
 	}

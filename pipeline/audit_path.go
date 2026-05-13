@@ -47,10 +47,20 @@ const xdgStateHomeEnvVar = "XDG_STATE_HOME"
 //  4. %LOCALAPPDATA%\tracker\runs\<runID>\activity.jsonl — Windows fallback.
 //  5. os.TempDir()/tracker-audit/<runID>/activity.jsonl — last-resort when no $HOME (containers, restricted envs).
 //
-// runID must be non-empty.
+// runID must be a single clean path element — no separators, no "..",
+// no ".". This guards against tampered checkpoints that could try to
+// escape the secure base via path traversal (the resume path reads
+// runID from <workDir>/.tracker/runs/<runID>/checkpoint.json, which is
+// attacker-reachable).
+//
+// $TRACKER_AUDIT_DIR and $XDG_STATE_HOME must be absolute paths. A
+// relative value would re-anchor the "secure" path to the process CWD
+// — defeating the relocation entirely — so a relative env value is
+// silently ignored and the resolver falls through to the next
+// candidate.
 func SecureActivityLogPath(runID string) (string, error) {
-	if runID == "" {
-		return "", fmt.Errorf("secure activity log path: empty runID")
+	if err := validateRunID(runID); err != nil {
+		return "", err
 	}
 	base, err := secureActivityLogBase()
 	if err != nil {
@@ -59,24 +69,60 @@ func SecureActivityLogPath(runID string) (string, error) {
 	return filepath.Join(base, runID, "activity.jsonl"), nil
 }
 
+// validateRunID enforces that runID is safe to interpolate into the
+// secure path. Allowed: non-empty, equals its own filepath.Base,
+// contains no separator, no "..", no ".". On Windows we also reject
+// drive-letter forms and any backslash since filepath.Base behaves
+// differently across OSes.
+func validateRunID(runID string) error {
+	if runID == "" {
+		return fmt.Errorf("secure activity log path: empty runID")
+	}
+	if strings.ContainsAny(runID, `/\`) {
+		return fmt.Errorf("secure activity log path: runID %q must not contain path separators", runID)
+	}
+	if runID == "." || runID == ".." {
+		return fmt.Errorf("secure activity log path: runID %q is a path traversal", runID)
+	}
+	if filepath.Base(runID) != runID {
+		return fmt.Errorf("secure activity log path: runID %q is not a single path element", runID)
+	}
+	return nil
+}
+
 func secureActivityLogBase() (string, error) {
-	if v := strings.TrimSpace(os.Getenv(auditDirEnvVar)); v != "" {
+	if v := absEnv(auditDirEnvVar); v != "" {
 		return v, nil
 	}
-	if v := strings.TrimSpace(os.Getenv(xdgStateHomeEnvVar)); v != "" {
+	if v := absEnv(xdgStateHomeEnvVar); v != "" {
 		return filepath.Join(v, "tracker", "runs"), nil
 	}
 	if runtime.GOOS == "windows" {
-		if v := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); v != "" {
+		if v := absEnv("LOCALAPPDATA"); v != "" {
 			return filepath.Join(v, "tracker", "runs"), nil
 		}
 	}
 	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
+	if err == nil && home != "" && filepath.IsAbs(home) {
 		return filepath.Join(home, ".local", "state", "tracker", "runs"), nil
 	}
-	// $HOME unresolvable (e.g. some minimal containers). Fall back to a
-	// per-user-ish temp dir. This still keeps the log outside cmd.Dir,
-	// which is the load-bearing property for the relative-path threat.
+	// $HOME unresolvable or non-absolute (e.g. some minimal containers).
+	// Fall back to a per-user-ish temp dir under os.TempDir(), which is
+	// always absolute by the platform contract. This still keeps the log
+	// outside cmd.Dir, which is the load-bearing property for the
+	// relative-path threat.
 	return filepath.Join(os.TempDir(), "tracker-audit"), nil
+}
+
+// absEnv reads an env var and returns it only if it's a non-empty
+// absolute path. Relative values are silently ignored so a
+// misconfiguration like TRACKER_AUDIT_DIR=.tracker/runs can't re-land
+// the secure log under the process CWD where tool subprocesses with
+// cmd.Dir = workDir could reach it.
+func absEnv(name string) string {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" || !filepath.IsAbs(v) {
+		return ""
+	}
+	return v
 }
