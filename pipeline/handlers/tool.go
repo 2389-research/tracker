@@ -341,11 +341,19 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 	// routing misses with dropped output (issue #208). Tail-window capture
 	// preserves the routing-relevant trailing bytes; the event tells
 	// operators that earlier bytes were elided.
+	//
+	// CapturedBytes reports the size of the *trimmed* string written to
+	// ctx.tool_stdout / ctx.tool_stderr — the value routing conditions
+	// evaluate against — so it always matches the captured payload the
+	// operator sees. DroppedBytes is from the exec layer (pre-trim), so
+	// TotalBytes is computed from the original captured length plus
+	// dropped to preserve the pre-trim "what the process actually
+	// produced" total.
 	if result.StdoutTruncated {
 		outcome.Truncations = append(outcome.Truncations, pipeline.TruncationDetail{
 			Stream:        "stdout",
 			Limit:         outputLimit,
-			CapturedBytes: len(result.Stdout),
+			CapturedBytes: len(stdout),
 			DroppedBytes:  result.StdoutBytesDropped,
 			TotalBytes:    len(result.Stdout) + result.StdoutBytesDropped,
 		})
@@ -354,7 +362,7 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 		outcome.Truncations = append(outcome.Truncations, pipeline.TruncationDetail{
 			Stream:        "stderr",
 			Limit:         outputLimit,
-			CapturedBytes: len(result.Stderr),
+			CapturedBytes: len(stderr),
 			DroppedBytes:  result.StderrBytesDropped,
 			TotalBytes:    len(result.Stderr) + result.StderrBytesDropped,
 		})
