@@ -15,6 +15,12 @@ import (
 const defaultMaxCollapsedLines = 4
 const maxLogLines = 10000
 
+// maxPartialRows caps how many terminal rows an in-progress (partial) line may
+// occupy in the viewport. Without a cap, a large streaming blob that arrives
+// without newlines accumulates in the partial buffer and "pins" a tall text
+// block to the bottom of the activity log, crowding out scroll history above.
+const maxPartialRows = 5
+
 // nodeStream holds per-node streaming state.
 type nodeStream struct {
 	current     strings.Builder // in-progress line (no newline yet)
@@ -407,6 +413,25 @@ func termLines(s string, width int) int {
 	return n
 }
 
+// capPartialText caps s to fit within maxRows terminal rows at the given width.
+// Partial lines have no embedded newlines, so wrapping is purely by column
+// count. When truncated, the result is prefixed with "…" so the user can see
+// that earlier content was cut off.
+func capPartialText(s string, width, maxRows int) string {
+	if width <= 0 {
+		width = 80
+	}
+	runes := []rune(s)
+	// Maximum runes that fit without truncation: maxRows * width.
+	// When we do truncate, "…" occupies one column, so the tail can be at most
+	// (maxRows*width - 1) runes, giving a total of exactly maxRows*width runes.
+	tailCapacity := maxRows*width - 1
+	if len(runes) <= tailCapacity+1 { // tailCapacity+1 == maxRows*width (no truncation needed)
+		return s
+	}
+	return "…" + string(runes[len(runes)-tailCapacity:])
+}
+
 // activeNodeIndicators builds a multi-line indicator showing all currently
 // active nodes (thinking, running tools, waiting for provider).
 func (al *AgentLog) activeNodeIndicators() string {
@@ -536,6 +561,8 @@ func (al *AgentLog) View() string {
 
 // buildPartials collects in-progress partial lines from active node streams and
 // returns them along with the total bottom row count (partials + indicator).
+// Each partial is capped to maxPartialRows terminal rows to prevent a long
+// streaming blob from consuming the entire viewport.
 func (al *AgentLog) buildPartials(indicator string, width int) ([]string, int) {
 	bottomRows := termLines(indicator, width)
 	var partials []string
@@ -545,7 +572,8 @@ func (al *AgentLog) buildPartials(indicator string, width int) ([]string, int) {
 			if len(al.streams) > 1 {
 				prefix = Styles.Muted.Render(nodeID+": ") + ""
 			}
-			line := prefix + Styles.PrimaryText.Render(s.current.String())
+			raw := capPartialText(s.current.String(), width, maxPartialRows)
+			line := prefix + Styles.PrimaryText.Render(raw)
 			partials = append(partials, line)
 			bottomRows += termLines(line, width)
 		}
