@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Built-in workflows no longer run an unconstrained agent in `Start` / `Done`** (#230). `workflows/ask_and_execute.dip`, `workflows/build_product.dip`, and `workflows/build_product_with_superspec.dip` (and their `examples/` mirrors) defined Start/Done as `agent` nodes with `prompt: Initialize pipeline.` / `prompt: Pipeline complete.`. Because the prompt attribute was present, `ensureStartExitNodes` skipped the passthrough handler and these nodes became real codergen sessions — system message limited to the file-path reminder, full tool access (read/write/bash/glob/edit/grep_search), no per-node turn cap. A real `build_product` run was observed spending ~10 minutes and ~39k output tokens inside `Start`, implementing an entire separate Go project from a SPEC.md found on disk, before getting `context canceled` and being classified `outcome: retry`. Dropping the prompt lines makes Start/Done passthroughs (matching `deep_review.dip`, which was already correct). `dippin doctor` scores went A → 100/100 on both `build_product` files; `ask_and_execute` stays at 95 (unrelated warning). The broader engine policy gaps surfaced by this incident — `outcome: retry` on cancellation, no default `max_turns` cap, runaway nodes invisible to `tracker diagnose`, missing tool-call args in `activity.jsonl`, suspect per-node token accounting — are tracked in #230 for separate follow-up.
+
 ## [0.28.1] - 2026-05-14
 
 Maintenance release picking up dippin-lang v0.25.0's bundle-load fixes. No tracker-side feature changes; no breaking changes.
