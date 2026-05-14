@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang dependency bumped v0.24.0 → v0.25.0**. Picks up the v1.1 `.dipx` format clarifications and three bug fixes that affect tracker's bundle-load path: cycle detection now walks every manifest-listed workflow (was: only entry-reachable, could miss cycles in unreachable workflows that `parseAllWorkflows` had already loaded); `dipx.Open` enriches `ErrManifestInvalid` / `ErrUnsupportedFormatVersion` errors with the bundle path; `dipx.Pack` correctly classifies subgraph parse failures as `ErrSubgraphParse` instead of `ErrEntryParse`. Also adds context-cancellation checks through Open/Pack hot paths. `Source.Workflow` gained a `ctx` parameter (breaking for `Source`-interface consumers); tracker uses `Bundle.Entry()` / `Bundle.Lookup()` directly so no code change needed at the call sites. `PinnedDippinVersion` constant updated to match.
+
 ## [0.28.0] - 2026-05-13
 
 This release closes the five-issue follow-up arc from the [#208](https://github.com/2389-research/tracker/issues/208) design review. All additions are backward-compatible: the activity-log relocation (#213) falls back to the legacy path for archived runs, and the new lint (#211) / routing channels (#210, #212) are opt-in.
