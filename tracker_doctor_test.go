@@ -455,4 +455,3 @@ func mustGitInitForDoctor(t *testing.T, dir string) {
 		t.Fatalf("git init in %s: %v: %s", dir, err, out)
 	}
 }
-
