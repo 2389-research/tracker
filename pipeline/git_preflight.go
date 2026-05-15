@@ -5,7 +5,11 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 )
 
 // GitPreflight is the resolved preflight policy passed to Preflight.
@@ -66,6 +70,50 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 	// Filled in by a later task.
 	_ = ctx
 	_ = cfg
+	return nil
+}
+
+// safetyLatches refuses `git init` for unsafe locations.
+// Returns a wrapped ErrGitAutoInitRefused on refusal.
+//
+// Refusals:
+//   - workDir is the user's $HOME
+//   - workDir is the filesystem root
+//   - workDir is already inside any git repo, including bare repos and
+//     linked worktrees (detected via `git -C workDir rev-parse --git-dir`
+//     rather than walking parents for a `.git` directory — the directory
+//     form misses worktrees (.git is a file) and bare repos (no .git at all))
+func safetyLatches(workDir string) error {
+	abs, err := filepath.Abs(workDir)
+	if err != nil {
+		return fmt.Errorf("%w: resolve absolute path: %v", ErrGitAutoInitRefused, err)
+	}
+	if home, err := os.UserHomeDir(); err == nil && abs == filepath.Clean(home) {
+		return fmt.Errorf("%w: workdir equals $HOME (%s)", ErrGitAutoInitRefused, home)
+	}
+	if abs == string(filepath.Separator) {
+		return fmt.Errorf("%w: workdir is filesystem root", ErrGitAutoInitRefused)
+	}
+	// Nested-repo detection via git itself. If git is missing the caller would
+	// have hit ErrGitNotInstalled before reaching this point; defend anyway
+	// and treat lookup failure as "not nested" so we don't false-positive
+	// on a no-git host.
+	if _, lerr := exec.LookPath("git"); lerr != nil {
+		return nil
+	}
+	cmd := exec.Command("git", "-C", abs, "rev-parse", "--git-dir")
+	cmd.Env = gitSafeEnv()
+	if out, err := cmd.Output(); err == nil && len(out) > 0 {
+		// Inside some kind of repo. Distinguish bare vs work-tree for a
+		// clearer error message.
+		bareCmd := exec.Command("git", "-C", abs, "rev-parse", "--is-bare-repository")
+		bareCmd.Env = gitSafeEnv()
+		bareOut, _ := bareCmd.Output()
+		if strings.TrimSpace(string(bareOut)) == "true" {
+			return fmt.Errorf("%w: workdir is inside a bare git repository", ErrGitAutoInitRefused)
+		}
+		return fmt.Errorf("%w: workdir is inside a parent git repository", ErrGitAutoInitRefused)
+	}
 	return nil
 }
 
