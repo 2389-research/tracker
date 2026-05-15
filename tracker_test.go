@@ -929,12 +929,30 @@ func TestRun_Result_BundleIdentity_EmptyWhenNotSet(t *testing.T) {
 }
 
 // preflightTestPipeline is a minimal .dip source used by NewEngine preflight
-// tests. It deliberately does NOT declare `requires:` (which dippin-lang
-// v0.25.0 can't parse yet) — preflight is forced via Policy=Require in
-// the test instead. Once dippin v0.26.0 lands, an additional test
-// using the `requires: git` source-level form should be added.
+// tests. It deliberately does NOT declare `requires:` — preflight is forced
+// via Policy=Require so this fixture exercises the CLI-override path. The
+// source-level `requires: git` path is exercised by preflightTestPipelineRequiresGit.
 const preflightTestPipeline = `workflow PreflightFixture
   goal: "test fixture"
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Done
+`
+
+// preflightTestPipelineRequiresGit declares `requires: git` in the workflow
+// header. Exercises the full source → dippin parser → adapter → graph.Attrs
+// → Graph.RequiredDeps → Preflight path. Requires dippin-lang v0.26.0+.
+const preflightTestPipelineRequiresGit = `workflow PreflightFixture
+  goal: "test fixture"
+  requires: git
   start: Start
   exit: Done
 
@@ -991,6 +1009,37 @@ func TestNewEngine_PreflightBypassedWithGitOff(t *testing.T) {
 	_, err := NewEngine(preflightTestPipeline, cfg)
 	if err != nil && errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
 		t.Errorf("--git=off should bypass preflight, got %v", err)
+	}
+}
+
+// TestNewEngine_PreflightFailsFromSourceLevelRequires exercises the full
+// path: source string → dippin parser → adapter → graph.Attrs["requires"]
+// → Graph.RequiredDeps → Preflight. The non-repo workdir should trip
+// ErrGitWorkdirNotRepo without any CLI override (auto policy honors
+// workflow's declared requires).
+func TestNewEngine_PreflightFailsFromSourceLevelRequires(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{WorkingDir: dir} // auto policy
+	_, err := NewEngine(preflightTestPipelineRequiresGit, cfg)
+	if err == nil {
+		t.Fatalf("expected preflight failure on non-repo workdir with requires:git")
+	}
+	if !errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
+		t.Errorf("want ErrGitWorkdirNotRepo, got %v", err)
+	}
+}
+
+func TestNewEngine_PreflightPassesFromSourceLevelRequiresAfterInit(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = dir
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("git init: %v: %s", runErr, out)
+	}
+	cfg := Config{WorkingDir: dir}
+	_, err := NewEngine(preflightTestPipelineRequiresGit, cfg)
+	if err != nil && errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
+		t.Fatalf("preflight should pass after git init, got %v", err)
 	}
 }
 

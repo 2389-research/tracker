@@ -328,12 +328,29 @@ func TestPinnedDippinVersionMatchesGoMod(t *testing.T) {
 }
 
 // preflightDoctorPipeline is a fixture .dip source for the Git Requires
-// checks. Source-level `requires: git` is dippin-lang#35-blocked, so we
-// force the check via WithGitConfig(Require, ...) instead. Once dippin
-// v0.26.0 lands, an additional fixture asserting source-level discovery
-// should be added.
+// checks WITHOUT a source-level `requires:` declaration — exercises the
+// CLI-override (WithGitConfig(Require/Off, ...)) path.
 const preflightDoctorPipeline = `workflow PreflightDoctor
   goal: "doctor preflight test"
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Done
+`
+
+// preflightDoctorPipelineRequiresGit declares `requires: git` in the
+// workflow header. Exercises the full source → dippin parser → adapter
+// → graph.Attrs → Doctor decision matrix path (dippin-lang v0.26.0+).
+const preflightDoctorPipelineRequiresGit = `workflow PreflightDoctorReq
+  goal: "doctor preflight test with requires"
+  requires: git
   start: Start
   exit: Done
 
@@ -444,6 +461,46 @@ func TestDoctor_GitRequires_ForceRequire_AfterGitInit_Passes(t *testing.T) {
 	gr := findCheck(rep, "Git Requires")
 	if gr == nil || gr.Status != CheckStatusOK {
 		t.Fatalf("want ok after git init, got %v", gr)
+	}
+}
+
+// TestDoctor_GitRequires_SourceLevelDetected exercises the workflow header's
+// `requires: git` declaration end-to-end through Doctor — no CLI override.
+// Confirms the dippin v0.26.0 syntax flows through the adapter to where
+// Doctor reads it.
+func TestDoctor_GitRequires_SourceLevelDetected(t *testing.T) {
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusError {
+		t.Fatalf("workflow declares requires:git in a non-repo dir, want error; got %v", gr)
+	}
+	if !strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint must include 'git init': %v", gr.Hint)
+	}
+}
+
+func TestDoctor_GitRequires_SourceLevelSatisfied(t *testing.T) {
+	dir := t.TempDir()
+	mustGitInitForDoctor(t, dir)
+	pf := filepath.Join(dir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusOK {
+		t.Fatalf("workflow declares requires:git in a repo dir, want OK; got %v", gr)
 	}
 }
 
