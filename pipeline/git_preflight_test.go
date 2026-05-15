@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,6 +127,60 @@ func TestSafetyLatches_CleanDirAllowed(t *testing.T) {
 	dir := t.TempDir()
 	if err := safetyLatches(dir); err != nil {
 		t.Fatalf("unexpected refusal for clean dir: %v", err)
+	}
+}
+
+func TestRunAutoInit_Success(t *testing.T) {
+	dir := t.TempDir()
+	if err := runAutoInit(dir, true, false, nil); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("expected .git after init: %v", err)
+	}
+}
+
+func TestRunAutoInit_RefusedByLatch_Nested(t *testing.T) {
+	parent := t.TempDir()
+	mustGitInit(t, parent)
+	child := filepath.Join(parent, "sub")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := runAutoInit(child, true, false, nil)
+	if !errors.Is(err, ErrGitAutoInitRefused) {
+		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
+	}
+}
+
+func TestRunAutoInit_NeedsAllowInit_NonInteractive(t *testing.T) {
+	dir := t.TempDir()
+	err := runAutoInit(dir, false /*allowInit*/, false /*interactive*/, nil)
+	if !errors.Is(err, ErrGitAutoInitRefused) {
+		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "--allow-init") {
+		t.Fatalf("error must mention --allow-init: %v", err)
+	}
+}
+
+func TestRunAutoInit_InteractiveYesAccepted(t *testing.T) {
+	dir := t.TempDir()
+	yes := func(string) bool { return true }
+	if err := runAutoInit(dir, false /*allowInit*/, true /*interactive*/, yes); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("expected .git after init: %v", err)
+	}
+}
+
+func TestRunAutoInit_InteractiveNoRejected(t *testing.T) {
+	dir := t.TempDir()
+	no := func(string) bool { return false }
+	err := runAutoInit(dir, false, true, no)
+	if !errors.Is(err, ErrGitAutoInitRefused) {
+		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
 	}
 }
 

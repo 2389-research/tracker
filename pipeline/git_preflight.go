@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -71,6 +72,54 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 	_ = ctx
 	_ = cfg
 	return nil
+}
+
+// runAutoInit performs `git init` after running safety latches.
+//
+// Required latches:
+//   - allowInit == true OR interactive prompt answered "yes"
+//   - safetyLatches(workDir) passes
+//
+// Returns a wrapped ErrGitAutoInitRefused if any latch fires.
+func runAutoInit(workDir string, allowInit bool, interactive bool, promptYN func(prompt string) bool) error {
+	// Latch 1: explicit consent. --allow-init is required in non-interactive
+	// mode. In interactive mode, the [Y/n] prompt substitutes.
+	if !allowInit {
+		if !interactive {
+			return fmt.Errorf("%w: --git=init requires --allow-init in non-interactive runs", ErrGitAutoInitRefused)
+		}
+		if promptYN == nil {
+			promptYN = defaultPromptYN
+		}
+		if !promptYN(fmt.Sprintf("Initialize a git repository in %s? [Y/n] ", workDir)) {
+			return fmt.Errorf("%w: user declined interactive prompt", ErrGitAutoInitRefused)
+		}
+	}
+	// Latch 2: location safety.
+	if err := safetyLatches(workDir); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "-C", workDir, "init", "-q")
+	cmd.Env = gitSafeEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git init failed: %w: %s", err, out)
+	}
+	return nil
+}
+
+// defaultPromptYN reads a line from stdin and returns true unless the user
+// types something starting with "n" or "N". Empty input defaults to yes.
+func defaultPromptYN(prompt string) bool {
+	fmt.Fprint(os.Stderr, prompt)
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return true // EOF → default yes
+	}
+	answer := strings.TrimSpace(scanner.Text())
+	if answer == "" {
+		return true
+	}
+	return !strings.HasPrefix(strings.ToLower(answer), "n")
 }
 
 // safetyLatches refuses `git init` for unsafe locations.
