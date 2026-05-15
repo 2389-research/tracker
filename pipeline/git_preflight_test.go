@@ -158,6 +158,59 @@ func TestSafetyLatches_NestedRefused_BareRepo(t *testing.T) {
 	}
 }
 
+// TestSafetyLatches_NestedRefused_Submodule pins the PR #235 review case:
+// the README/spec promise submodule coverage. Inside a submodule's working
+// dir, `.git` is a FILE (containing `gitdir: ../.git/modules/<name>`), not
+// a directory — so a parent-walk for a `.git` directory would have missed
+// this. safetyLatches uses `git rev-parse --git-dir` which correctly resolves
+// the file pointer, so the submodule path is refused like any other
+// nested-repo case.
+func TestSafetyLatches_NestedRefused_Submodule(t *testing.T) {
+	requireGit(t)
+	root := t.TempDir()
+
+	// Build the submodule's source repo.
+	submodSrc := filepath.Join(root, "submod-src")
+	if err := os.MkdirAll(submodSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, submodSrc, "init", "-q")
+	if err := os.WriteFile(filepath.Join(submodSrc, "README"), []byte("submod\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, submodSrc, "add", "README")
+	mustGit(t, submodSrc, "commit", "-q", "-m", "init")
+
+	// Build the parent repo.
+	parent := filepath.Join(root, "parent")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, parent, "init", "-q")
+	if err := os.WriteFile(filepath.Join(parent, "README"), []byte("parent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, parent, "add", "README")
+	mustGit(t, parent, "commit", "-q", "-m", "init")
+	// Use the local file:// path with `protocol.file.allow=always` to satisfy
+	// modern git's CVE-2022-39253 file:// fetch restriction inside test runs.
+	mustGit(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", "../submod-src", "sub")
+
+	subWorktree := filepath.Join(parent, "sub")
+	// Sanity: confirm sub/.git is a FILE (the submodule .git pointer), not a directory.
+	info, err := os.Stat(filepath.Join(subWorktree, ".git"))
+	if err != nil {
+		t.Fatalf("submodule .git pointer not present: %v", err)
+	}
+	if info.IsDir() {
+		t.Fatalf("expected submodule .git to be a FILE pointer (the regression case), got dir")
+	}
+
+	if err := safetyLatches(subWorktree); err == nil {
+		t.Fatalf("expected refusal inside a submodule worktree")
+	}
+}
+
 func TestSafetyLatches_CleanDirAllowed(t *testing.T) {
 	dir := t.TempDir()
 	if err := safetyLatches(dir); err != nil {
@@ -247,6 +300,7 @@ func TestPreflight_HappyPath_RequiresGit_InRepo(t *testing.T) {
 }
 
 func TestPreflight_HardFail_RequiresGit_NotRepo(t *testing.T) {
+	requireGit(t)
 	dir := t.TempDir()
 	err := Preflight(context.Background(), PreflightConfig{
 		WorkDir:  dir,
@@ -262,6 +316,7 @@ func TestPreflight_HardFail_RequiresGit_NotRepo(t *testing.T) {
 }
 
 func TestPreflight_Warn_RequiresGit_NotRepo(t *testing.T) {
+	requireGit(t)
 	dir := t.TempDir()
 	var warnings []string
 	err := Preflight(context.Background(), PreflightConfig{
@@ -294,12 +349,53 @@ func TestPreflight_OffBypass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("want nil err under off policy, got %v", err)
 	}
+	// With only `git` declared, off is silent — the dep is recognized,
+	// just not enforced. Unrecognized deps still warn (covered by the
+	// dedicated test TestPreflight_OffStillWarnsForUnrecognizedDeps).
 	if len(warnings) != 0 {
-		t.Fatalf("--git=off must be silent, got: %v", warnings)
+		t.Fatalf("--git=off with only git in requires must be silent, got: %v", warnings)
+	}
+}
+
+// TestPreflight_OffStillWarnsForUnrecognizedDeps pins the PR #235 review fix
+// from Copilot: --git=off disables git ENFORCEMENT, not diagnostics. Authors
+// who forward-declare deps the current tracker version doesn't recognize
+// (e.g. `requires: docker`) should still see the "not yet implemented"
+// warning — that's the whole point of forward-compatibility. Pre-fix, the
+// off bypass returned before the requires scan ran, silencing those warnings.
+func TestPreflight_OffStillWarnsForUnrecognizedDeps(t *testing.T) {
+	dir := t.TempDir()
+	var warnings []string
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"git", "docker", "jq"},
+		Policy:   GitPreflightOff,
+		Warner: func(format string, args ...any) {
+			warnings = append(warnings, fmt.Sprintf(format, args...))
+		},
+	})
+	if err != nil {
+		t.Fatalf("want nil err under off policy, got %v", err)
+	}
+	dockerWarn, jqWarn := false, false
+	for _, w := range warnings {
+		if strings.Contains(w, "docker") && strings.Contains(w, "not yet implemented") {
+			dockerWarn = true
+		}
+		if strings.Contains(w, "jq") && strings.Contains(w, "not yet implemented") {
+			jqWarn = true
+		}
+	}
+	if !dockerWarn {
+		t.Errorf("expected 'docker not yet implemented' warning under --git=off, got %v", warnings)
+	}
+	if !jqWarn {
+		t.Errorf("expected 'jq not yet implemented' warning under --git=off, got %v", warnings)
 	}
 }
 
 func TestPreflight_RequireOverrideNoRequires(t *testing.T) {
+	requireGit(t)
 	dir := t.TempDir()
 	err := Preflight(context.Background(), PreflightConfig{
 		WorkDir:  dir,

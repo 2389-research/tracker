@@ -80,10 +80,11 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 		cfg.Policy = GitPreflightAuto
 	}
 
-	if cfg.Policy == GitPreflightOff {
-		return nil
-	}
-
+	// Scan declared deps and warn on unrecognized entries BEFORE checking
+	// the off bypass. `--git=off` disables git enforcement; it should not
+	// silence diagnostic warnings about other forward-declared deps the
+	// current tracker version doesn't yet implement (those warnings are
+	// the whole reason the requires: keyword is forward-compatible).
 	requiresGit := false
 	for _, dep := range cfg.Requires {
 		switch strings.ToLower(strings.TrimSpace(dep)) {
@@ -94,6 +95,10 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 		default:
 			warn("tracker: requires %q is not yet implemented; ignoring", dep)
 		}
+	}
+
+	if cfg.Policy == GitPreflightOff {
+		return nil
 	}
 
 	// --git=require forces the check even if the workflow doesn't declare it.
@@ -243,7 +248,12 @@ func safetyLatches(workDir string) error {
 	if home, err := os.UserHomeDir(); err == nil && abs == filepath.Clean(home) {
 		return fmt.Errorf("%w: workdir equals $HOME (%s)", ErrGitAutoInitRefused, home)
 	}
-	if abs == string(filepath.Separator) {
+	// Filesystem-root refusal must be volume-aware for Windows. On Unix,
+	// filepath.VolumeName("/") returns "" and the equality reduces to
+	// abs == "/". On Windows, filepath.Abs("C:\\") returns "C:\" and the
+	// equality compares against "C:\\" (VolumeName "C:" + separator "\\"),
+	// matching the documented "/" refusal across platforms.
+	if abs == filepath.VolumeName(abs)+string(filepath.Separator) {
 		return fmt.Errorf("%w: workdir is filesystem root", ErrGitAutoInitRefused)
 	}
 	// Nested-repo detection via git itself. If git is missing the caller would
