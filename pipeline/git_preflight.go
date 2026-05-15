@@ -43,8 +43,6 @@ var (
 	ErrGitWorkdirNotRepo = errors.New("workdir is not a git repository")
 	// ErrGitAutoInitRefused — --git=init requested but a safety latch fired (home, root, nested).
 	ErrGitAutoInitRefused = errors.New("auto-init refused by safety latch")
-	// ErrGitDependencyUnsatisfied — a `requires:` entry is recognized but the env check failed.
-	ErrGitDependencyUnsatisfied = errors.New("workflow dependency not satisfied")
 )
 
 // PreflightConfig captures everything Preflight needs to make a decision.
@@ -68,7 +66,6 @@ type PreflightConfig struct {
 // Safe to call multiple times — only side effect is the optional `git init`
 // triggered by --git=init.
 func Preflight(ctx context.Context, cfg PreflightConfig) error {
-	_ = ctx // reserved for future timeout/cancellation
 	warn := cfg.Warner
 	if warn == nil {
 		warn = func(string, ...any) {}
@@ -111,7 +108,13 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 		return nil
 	}
 
-	installed, isRepo, err := checkGit(cfg.WorkDir)
+	// Honor ctx cancellation before each subprocess so a canceled run aborts
+	// instead of running git probes or — worse — performing the --git=init
+	// side effect.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("preflight cancelled: %w", err)
+	}
+	installed, isRepo, err := checkGit(ctx, cfg.WorkDir)
 	if err != nil {
 		return fmt.Errorf("git check: %w", err)
 	}
@@ -125,7 +128,10 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 	}
 	if !isRepo {
 		if cfg.Policy == GitPreflightInit {
-			if err := runAutoInit(cfg.WorkDir, cfg.AllowInit, cfg.InteractiveTTY, cfg.PromptYN); err != nil {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("preflight cancelled before auto-init: %w", err)
+			}
+			if err := runAutoInit(ctx, cfg.WorkDir, cfg.AllowInit, cfg.InteractiveTTY, cfg.PromptYN); err != nil {
 				return err
 			}
 			return nil
@@ -165,7 +171,7 @@ func buildWorkdirNotRepoMessage(workDir string) string {
 		"    git init",
 		"",
 		"  Or have tracker do it:",
-		"    tracker run <workflow> --git=init --allow-init",
+		"    tracker <workflow> --git=init --allow-init",
 		"",
 		"  Or pass --git=off to bypass this check if you're sure git isn't needed.",
 	}, "\n")
@@ -174,12 +180,13 @@ func buildWorkdirNotRepoMessage(workDir string) string {
 // SafetyLatches returns a wrapped ErrGitAutoInitRefused when auto-init would
 // be unsafe at workDir, or nil if it would proceed. Exported so the tracker
 // doctor preview check can model --git=init --allow-init behavior without
-// duplicating the latch logic.
+// duplicating the latch logic. Doctor callers can pass context.Background()
+// or a real ctx; cancellation aborts the git subprocess.
 //
 // Refusal cases — see safetyLatches for the full list. This is a thin
 // public alias.
-func SafetyLatches(workDir string) error {
-	return safetyLatches(workDir)
+func SafetyLatches(ctx context.Context, workDir string) error {
+	return safetyLatches(ctx, workDir)
 }
 
 // runAutoInit performs `git init` after running safety latches.
@@ -189,25 +196,25 @@ func SafetyLatches(workDir string) error {
 //   - safetyLatches(workDir) passes
 //
 // Returns a wrapped ErrGitAutoInitRefused if any latch fires.
-func runAutoInit(workDir string, allowInit bool, interactive bool, promptYN func(prompt string) bool) error {
+func runAutoInit(ctx context.Context, workDir string, allowInit bool, interactive bool, promptYN func(prompt string) bool) error {
 	// Latch 1: explicit consent. --allow-init is required in non-interactive
 	// mode. In interactive mode, the [Y/n] prompt substitutes.
 	if !allowInit {
 		if !interactive {
-			return fmt.Errorf("%w: --git=init requires --allow-init in non-interactive runs", ErrGitAutoInitRefused)
+			return fmt.Errorf("%w: --git=init requires --allow-init in non-interactive runs.\n\n  Pass --allow-init to acknowledge that tracker may run `git init` in this directory, or run `git init` manually first.", ErrGitAutoInitRefused)
 		}
 		if promptYN == nil {
 			promptYN = defaultPromptYN
 		}
 		if !promptYN(fmt.Sprintf("Initialize a git repository in %s? [Y/n] ", workDir)) {
-			return fmt.Errorf("%w: user declined interactive prompt", ErrGitAutoInitRefused)
+			return fmt.Errorf("%w: user declined interactive prompt.\n\n  Re-run with --git=off to bypass the check, --git=warn to downgrade to a warning, or run `git init` manually if this is the right working directory.", ErrGitAutoInitRefused)
 		}
 	}
 	// Latch 2: location safety.
-	if err := safetyLatches(workDir); err != nil {
+	if err := safetyLatches(ctx, workDir); err != nil {
 		return err
 	}
-	cmd := exec.Command("git", "-C", workDir, "init", "-q")
+	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "init", "-q")
 	cmd.Env = gitSafeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git init failed: %w: %s", err, out)
@@ -240,13 +247,13 @@ func defaultPromptYN(prompt string) bool {
 //     linked worktrees (detected via `git -C workDir rev-parse --git-dir`
 //     rather than walking parents for a `.git` directory — the directory
 //     form misses worktrees (.git is a file) and bare repos (no .git at all))
-func safetyLatches(workDir string) error {
+func safetyLatches(ctx context.Context, workDir string) error {
 	abs, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("%w: resolve absolute path: %v", ErrGitAutoInitRefused, err)
 	}
 	if home, err := os.UserHomeDir(); err == nil && abs == filepath.Clean(home) {
-		return fmt.Errorf("%w: workdir equals $HOME (%s)", ErrGitAutoInitRefused, home)
+		return fmt.Errorf("%w: workdir equals $HOME (%s).\n\n  Initializing a repo at $HOME would place every file under your home tree into the repo's tracking space. cd into a project subdirectory first, or run `git init` here manually if this really is what you want.", ErrGitAutoInitRefused, home)
 	}
 	// Filesystem-root refusal must be volume-aware for Windows. On Unix,
 	// filepath.VolumeName("/") returns "" and the equality reduces to
@@ -254,25 +261,29 @@ func safetyLatches(workDir string) error {
 	// equality compares against "C:\\" (VolumeName "C:" + separator "\\"),
 	// matching the documented "/" refusal across platforms.
 	if abs == filepath.VolumeName(abs)+string(filepath.Separator) {
-		return fmt.Errorf("%w: workdir is filesystem root", ErrGitAutoInitRefused)
+		return fmt.Errorf("%w: workdir is filesystem root (%s).\n\n  cd into a project subdirectory first.", ErrGitAutoInitRefused, abs)
 	}
-	// Nested-repo detection via git itself. If git is missing the caller would
-	// have hit ErrGitNotInstalled before reaching this point; defend anyway
-	// and treat lookup failure as "not nested" so we don't false-positive
-	// on a no-git host.
+	// Use safetyLatches's `--git-dir` check (NOT `--is-inside-work-tree` like
+	// the requires:git satisfaction probe in checkGit) because we want to
+	// catch bare repos, linked worktrees, and submodules — all three resolve
+	// a git dir even though work-tree-only operations would later fail.
+	// Different questions: checkGit asks "would `git commit` work here?"
+	// (work-tree required), safetyLatches asks "is this any kind of nested
+	// git context where running `git init` would create a confusing
+	// duplicate?" (any git-dir resolution counts).
 	if _, lerr := exec.LookPath("git"); lerr != nil {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", abs, "rev-parse", "--git-dir")
+	cmd := exec.CommandContext(ctx, "git", "-C", abs, "rev-parse", "--git-dir")
 	cmd.Env = gitSafeEnv()
 	if out, err := cmd.Output(); err == nil && len(out) > 0 {
 		// Inside some kind of repo. Distinguish bare vs work-tree for a
 		// clearer error message.
-		bareCmd := exec.Command("git", "-C", abs, "rev-parse", "--is-bare-repository")
+		bareCmd := exec.CommandContext(ctx, "git", "-C", abs, "rev-parse", "--is-bare-repository")
 		bareCmd.Env = gitSafeEnv()
 		bareOut, _ := bareCmd.Output()
 		if strings.TrimSpace(string(bareOut)) == "true" {
-			return fmt.Errorf("%w: workdir is inside a bare git repository", ErrGitAutoInitRefused)
+			return fmt.Errorf("%w: workdir is inside a bare git repository.\n\n  Bare repositories have no working tree, so workflows that need to commit/branch/merge can't run here. cd into a checkout of this repo (e.g. clone or worktree) and run from there.", ErrGitAutoInitRefused)
 		}
 		return fmt.Errorf("%w: workdir is inside a parent git repository", ErrGitAutoInitRefused)
 	}
@@ -295,12 +306,12 @@ func safetyLatches(workDir string) error {
 // operation must be run in a work tree`. Reporting isRepo=true for a bare
 // repo would defer that failure to mid-run instead of catching it here,
 // which is the bug the preflight is meant to prevent.
-func checkGit(workDir string) (installed bool, isRepo bool, err error) {
+func checkGit(ctx context.Context, workDir string) (installed bool, isRepo bool, err error) {
 	if _, lerr := exec.LookPath("git"); lerr != nil {
 		return false, false, nil
 	}
 	installed = true
-	cmd := exec.Command("git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
+	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
 	cmd.Env = gitSafeEnv()
 	out, runErr := cmd.Output()
 	// Exits non-zero (and writes to stderr) when not inside a repo. Inside a

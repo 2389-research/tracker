@@ -190,6 +190,16 @@ func (r *gitArtifactRepo) git(args ...string) (string, error) {
 	return out.String(), err
 }
 
+// GitSafeEnv returns a copy of the current environment with sensitive
+// variables (API keys, secrets, tokens, passwords) stripped before
+// passing to a git subprocess. Exported so external callers (tracker
+// doctor's probeGitForDoctor) can match the runtime preflight's
+// sanitized-environment posture without duplicating the helper.
+// Honors the TRACKER_PASS_ENV=1 escape hatch.
+func GitSafeEnv() []string {
+	return gitSafeEnv()
+}
+
 // gitSafeEnv returns a copy of the current environment with sensitive variables
 // stripped to avoid leaking credentials into the git subprocess.
 // Mirrors the filterSensitiveEnv logic used by the tool handler, including

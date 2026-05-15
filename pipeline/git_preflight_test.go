@@ -45,7 +45,7 @@ func mustGitInit(t *testing.T, dir string) {
 
 func TestCheckGit_Installed(t *testing.T) {
 	requireGit(t)
-	installed, _, err := checkGit(t.TempDir())
+	installed, _, err := checkGit(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestCheckGit_Installed(t *testing.T) {
 
 func TestCheckGit_NotRepo(t *testing.T) {
 	dir := t.TempDir()
-	_, isRepo, err := checkGit(dir)
+	_, isRepo, err := checkGit(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestCheckGit_NotRepo(t *testing.T) {
 func TestCheckGit_IsRepo(t *testing.T) {
 	dir := t.TempDir()
 	mustGitInit(t, dir)
-	_, isRepo, err := checkGit(dir)
+	_, isRepo, err := checkGit(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestCheckGit_BareRepoIsNotRepo(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v: %s", err, out)
 	}
-	installed, isRepo, err := checkGit(bare)
+	installed, isRepo, err := checkGit(context.Background(), bare)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -108,14 +108,14 @@ func TestSafetyLatches_HomeRefused(t *testing.T) {
 	if err != nil {
 		t.Skipf("no home dir on this system: %v", err)
 	}
-	if err := safetyLatches(home); err == nil {
+	if err := safetyLatches(context.Background(), home); err == nil {
 		t.Fatalf("expected refusal for home dir")
 	}
 }
 
 func TestSafetyLatches_RootRefused(t *testing.T) {
 	root := string(filepath.Separator)
-	if err := safetyLatches(root); err == nil {
+	if err := safetyLatches(context.Background(), root); err == nil {
 		t.Fatalf("expected refusal for root dir")
 	}
 }
@@ -127,7 +127,7 @@ func TestSafetyLatches_NestedRefused(t *testing.T) {
 	if err := os.MkdirAll(child, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := safetyLatches(child); err == nil {
+	if err := safetyLatches(context.Background(), child); err == nil {
 		t.Fatalf("expected refusal for nested-repo dir")
 	}
 }
@@ -141,7 +141,7 @@ func TestSafetyLatches_NestedRefused_Worktree(t *testing.T) {
 	wt := filepath.Join(filepath.Dir(parent), "wt-"+filepath.Base(parent))
 	mustGit(t, parent, "worktree", "add", wt, "-b", "wtb")
 	t.Cleanup(func() { _ = os.RemoveAll(wt) })
-	if err := safetyLatches(wt); err == nil {
+	if err := safetyLatches(context.Background(), wt); err == nil {
 		t.Fatalf("expected refusal for worktree dir")
 	}
 }
@@ -153,7 +153,7 @@ func TestSafetyLatches_NestedRefused_BareRepo(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v: %s", err, out)
 	}
-	if err := safetyLatches(bare); err == nil {
+	if err := safetyLatches(context.Background(), bare); err == nil {
 		t.Fatalf("expected refusal for bare repo dir")
 	}
 }
@@ -206,14 +206,14 @@ func TestSafetyLatches_NestedRefused_Submodule(t *testing.T) {
 		t.Fatalf("expected submodule .git to be a FILE pointer (the regression case), got dir")
 	}
 
-	if err := safetyLatches(subWorktree); err == nil {
+	if err := safetyLatches(context.Background(), subWorktree); err == nil {
 		t.Fatalf("expected refusal inside a submodule worktree")
 	}
 }
 
 func TestSafetyLatches_CleanDirAllowed(t *testing.T) {
 	dir := t.TempDir()
-	if err := safetyLatches(dir); err != nil {
+	if err := safetyLatches(context.Background(), dir); err != nil {
 		t.Fatalf("unexpected refusal for clean dir: %v", err)
 	}
 }
@@ -221,7 +221,7 @@ func TestSafetyLatches_CleanDirAllowed(t *testing.T) {
 func TestRunAutoInit_Success(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
-	if err := runAutoInit(dir, true, false, nil); err != nil {
+	if err := runAutoInit(context.Background(), dir, true, false, nil); err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
@@ -236,7 +236,7 @@ func TestRunAutoInit_RefusedByLatch_Nested(t *testing.T) {
 	if err := os.MkdirAll(child, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := runAutoInit(child, true, false, nil)
+	err := runAutoInit(context.Background(), child, true, false, nil)
 	if !errors.Is(err, ErrGitAutoInitRefused) {
 		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
 	}
@@ -244,7 +244,7 @@ func TestRunAutoInit_RefusedByLatch_Nested(t *testing.T) {
 
 func TestRunAutoInit_NeedsAllowInit_NonInteractive(t *testing.T) {
 	dir := t.TempDir()
-	err := runAutoInit(dir, false /*allowInit*/, false /*interactive*/, nil)
+	err := runAutoInit(context.Background(), dir, false /*allowInit*/, false /*interactive*/, nil)
 	if !errors.Is(err, ErrGitAutoInitRefused) {
 		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
 	}
@@ -257,7 +257,7 @@ func TestRunAutoInit_InteractiveYesAccepted(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
 	yes := func(string) bool { return true }
-	if err := runAutoInit(dir, false /*allowInit*/, true /*interactive*/, yes); err != nil {
+	if err := runAutoInit(context.Background(), dir, false /*allowInit*/, true /*interactive*/, yes); err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
@@ -268,7 +268,7 @@ func TestRunAutoInit_InteractiveYesAccepted(t *testing.T) {
 func TestRunAutoInit_InteractiveNoRejected(t *testing.T) {
 	dir := t.TempDir()
 	no := func(string) bool { return false }
-	err := runAutoInit(dir, false, true, no)
+	err := runAutoInit(context.Background(), dir, false, true, no)
 	if !errors.Is(err, ErrGitAutoInitRefused) {
 		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
 	}
@@ -425,6 +425,7 @@ func TestPreflight_AutoInit_Success(t *testing.T) {
 }
 
 func TestPreflight_AutoInit_RefusedNoLatch(t *testing.T) {
+	requireGit(t)
 	dir := t.TempDir()
 	err := Preflight(context.Background(), PreflightConfig{
 		WorkDir:        dir,
@@ -514,7 +515,6 @@ func TestPreflightErrorSentinels(t *testing.T) {
 		ErrGitNotInstalled,
 		ErrGitWorkdirNotRepo,
 		ErrGitAutoInitRefused,
-		ErrGitDependencyUnsatisfied,
 	}
 	for _, s := range sentinels {
 		if s == nil {
