@@ -875,11 +875,23 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		return out
 	}
 
+	// Walk declared deps: classify each, and surface unrecognized deps as
+	// CheckDetail warnings so the doctor preview matches what runtime
+	// pipeline.Preflight will emit on stderr at run start. Pre-fix Doctor
+	// silently dropped these; a workflow declaring `requires: docker` looked
+	// clean in `tracker doctor` while `tracker run` would still warn.
 	requiresGit := false
 	for _, d := range deps {
-		if strings.EqualFold(strings.TrimSpace(d), "git") {
+		switch strings.ToLower(strings.TrimSpace(d)) {
+		case "":
+			// empty entry; skip
+		case "git":
 			requiresGit = true
-			break
+		default:
+			out.Details = append(out.Details, CheckDetail{
+				Status:  CheckStatusWarn,
+				Message: fmt.Sprintf("requires %q is not yet implemented; runtime will warn and continue", d),
+			})
 		}
 	}
 	if policy == GitPreflightRequire || policy == GitPreflightInit {
@@ -907,7 +919,7 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		// --git=init --allow-init in a clean dir gets the accurate
 		// preview (OK with hint) rather than a misleading Error.
 		if policy == GitPreflightInit && cfg.gitCfg.allowInit {
-			if latchErr := pipeline.SafetyLatches(cfg.WorkDir); latchErr != nil {
+			if latchErr := pipeline.SafetyLatches(ctx, cfg.WorkDir); latchErr != nil {
 				out.Status = CheckStatusError
 				out.Message = fmt.Sprintf("auto-init would refuse: %v", latchErr)
 				out.Hint = "cd into a project subdirectory, or run `git init` manually"
@@ -915,12 +927,12 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 			}
 			out.Status = CheckStatusOK
 			out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start", cfg.WorkDir)
-			out.Hint = "tracker run will create .git here before the first node executes"
+			out.Hint = ".git will be created here at run start, before the first node executes"
 			return out
 		}
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
-		out.Hint = "run `git init` here, or `tracker run <wf> --git=init --allow-init`"
+		out.Hint = "run `git init` here, or `tracker <workflow> --git=init --allow-init`"
 		return out
 	}
 	out.Status = CheckStatusOK
@@ -982,6 +994,11 @@ func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isR
 		return false, false
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
+	// Strip sensitive env (API keys, tokens, secrets, passwords) before
+	// invoking git — matches pipeline.checkGit's posture. Without this,
+	// Doctor would pass provider credentials into the git process
+	// unnecessarily (TRACKER_PASS_ENV=1 is the documented escape hatch).
+	cmd.Env = pipeline.GitSafeEnv()
 	out, rerr := cmd.Output()
 	if rerr == nil && strings.TrimSpace(string(out)) == "true" {
 		return true, true

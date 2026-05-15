@@ -418,16 +418,20 @@ func TestDoctor_GitRequires_ForceRequire_MissingFail(t *testing.T) {
 	}
 }
 
-func TestDoctor_GitRequires_ForceWarn_Downgrades(t *testing.T) {
+// TestDoctor_GitRequires_WarnDoesNotForce verifies that `--git=warn`
+// does NOT secretly force the check when the workflow has no `requires:`
+// declaration. Warn only downgrades a hard failure to a warning when
+// some OTHER signal would have caused the failure. With nothing
+// declared and warn policy, the result is OK. (Previously named
+// ForceWarn_Downgrades, which described the opposite of what the
+// test actually pins; renamed per PR #235 round-3 Copilot review.)
+func TestDoctor_GitRequires_WarnDoesNotForce(t *testing.T) {
 	dir, pf := writeDoctorFixture(t)
 	rep, _ := Doctor(context.Background(), DoctorConfig{
 		WorkDir:      dir,
 		PipelineFile: pf,
 	}, WithGitConfig(GitPreflightWarn, false))
 	gr := findCheck(rep, "Git Requires")
-	// --git=warn alone doesn't force the check (the workflow doesn't
-	// declare requires:git), so result is OK. Confirms warn doesn't
-	// secretly force.
 	if gr == nil || gr.Status != CheckStatusOK {
 		t.Fatalf("warn without force should be OK (no requires:git), got %v", gr)
 	}
@@ -510,16 +514,10 @@ func TestDoctor_GitRequires_InitAllowInitPreviewsOK(t *testing.T) {
 	}
 }
 
-// TestDoctor_GitRequires_BareRepoReportsError pins the PR #235 Copilot fix:
-// a bare repo passes `git rev-parse --git-dir` but has no work tree, so
-// `git commit` / `git merge` (the operations `requires: git` workflows
-// actually use) would fail. Doctor must report Error (or Warn under warn
-// policy), not OK, so the user gets the actionable remediation before
-// running the workflow.
 // TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires pins the
 // PR #235 review case from Codex P2 + Copilot: when the user passes a
 // `.dipx` bundle to `tracker doctor`, the Git Requires check should
-// preview the entry workflow's `requires:` exactly as `tracker run`
+// preview the entry workflow's `requires:` exactly as runtime preflight
 // would. Pre-fix, doctor read raw ZIP bytes via parsePipelineSource,
 // failed to parse, and silently Skip'd — bundles got no preview at all.
 func TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires(t *testing.T) {
@@ -550,6 +548,12 @@ func TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires(t *testing.T) 
 	}
 }
 
+// TestDoctor_GitRequires_BareRepoReportsError pins the PR #235 Copilot fix:
+// a bare repo passes `git rev-parse --git-dir` but has no work tree, so
+// `git commit` / `git merge` (the operations `requires: git` workflows
+// actually use) would fail. Doctor must report Error (or Warn under warn
+// policy), not OK, so the user gets the actionable remediation before
+// running the workflow.
 func TestDoctor_GitRequires_BareRepoReportsError(t *testing.T) {
 	requireGit(t)
 	tmp := t.TempDir()

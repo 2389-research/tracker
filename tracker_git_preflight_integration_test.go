@@ -60,7 +60,7 @@ func TestIntegration_Preflight_NoRepoFailsBeforeNodeExecutes(t *testing.T) {
 	for _, want := range []string{
 		"git init",
 		"--git=off",
-		"tracker run",
+		"tracker <workflow>",
 		dir,
 	} {
 		if !strings.Contains(msg, want) {

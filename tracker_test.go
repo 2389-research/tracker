@@ -1001,17 +1001,28 @@ func TestNewEngine_PreflightPassesAfterGitInit(t *testing.T) {
 	}
 }
 
+// TestNewEngine_PreflightBypassedWithGitOff exercises the escape hatch:
+// even when the workflow source declares `requires: git` AND the workdir
+// is not a repo, `--git=off` bypasses the check. Uses
+// preflightTestPipelineRequiresGit (not preflightTestPipeline) so the
+// fixture actually has something to bypass — otherwise auto policy
+// would also pass with no check applied, and the test wouldn't be
+// exercising what its name promises. (PR #235 round-3 Copilot review.)
+//
+// No requireGit guard — off must work on hosts without git installed
+// (that's literally the point of the escape hatch).
 func TestNewEngine_PreflightBypassedWithGitOff(t *testing.T) {
-	// Off should bypass even when git isn't installed — no requireGit guard.
 	dir := t.TempDir()
 	cfg := Config{
 		WorkingDir: dir,
 		Git:        &GitConfig{Preflight: GitPreflightOff},
 	}
-	// Even though we'd otherwise hit ErrGitWorkdirNotRepo, --git=off bypasses.
-	_, err := NewEngine(preflightTestPipeline, cfg)
+	// Without --git=off this fixture would hit ErrGitWorkdirNotRepo
+	// because the workflow source declares requires:git and dir is a
+	// non-repo tempdir.
+	_, err := NewEngine(preflightTestPipelineRequiresGit, cfg)
 	if err != nil && errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
-		t.Errorf("--git=off should bypass preflight, got %v", err)
+		t.Errorf("--git=off should bypass preflight even with source-level requires:git, got %v", err)
 	}
 }
 
