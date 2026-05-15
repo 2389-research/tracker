@@ -166,6 +166,17 @@ func buildWorkdirNotRepoMessage(workDir string) string {
 	}, "\n")
 }
 
+// SafetyLatches returns a wrapped ErrGitAutoInitRefused when auto-init would
+// be unsafe at workDir, or nil if it would proceed. Exported so the tracker
+// doctor preview check can model --git=init --allow-init behavior without
+// duplicating the latch logic.
+//
+// Refusal cases — see safetyLatches for the full list. This is a thin
+// public alias.
+func SafetyLatches(workDir string) error {
+	return safetyLatches(workDir)
+}
+
 // runAutoInit performs `git init` after running safety latches.
 //
 // Required latches:
@@ -260,20 +271,32 @@ func safetyLatches(workDir string) error {
 
 // checkGit runs two cheap probes:
 //  1. `git --version` — does git exist on PATH?
-//  2. `git -C <workDir> rev-parse --git-dir` — are we inside a repo?
+//  2. `git -C <workDir> rev-parse --is-inside-work-tree` — are we inside a
+//     repo with a work tree?
 //
 // installed reports the first probe; isRepo reports the second. Returns an
 // error only on unexpected I/O failure; "not installed" and "not a repo"
-// are returned as installed=false / isRepo=false with err==nil. rev-parse
-// exits non-zero when not inside a repo, which is not an error condition.
+// are returned as installed=false / isRepo=false with err==nil.
+//
+// We use `--is-inside-work-tree`, NOT `--git-dir`, so bare repositories
+// don't count as a "repo" for preflight purposes: workflows that declare
+// `requires: git` need to run `git commit` / `git merge`, both of which
+// require a work tree and would fail in a bare repo with `fatal: this
+// operation must be run in a work tree`. Reporting isRepo=true for a bare
+// repo would defer that failure to mid-run instead of catching it here,
+// which is the bug the preflight is meant to prevent.
 func checkGit(workDir string) (installed bool, isRepo bool, err error) {
 	if _, lerr := exec.LookPath("git"); lerr != nil {
 		return false, false, nil
 	}
 	installed = true
-	cmd := exec.Command("git", "-C", workDir, "rev-parse", "--git-dir")
+	cmd := exec.Command("git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
 	cmd.Env = gitSafeEnv()
-	if runErr := cmd.Run(); runErr == nil {
+	out, runErr := cmd.Output()
+	// Exits non-zero (and writes to stderr) when not inside a repo. Inside a
+	// bare repo, exits 0 but prints "false". Inside a normal repo or linked
+	// worktree, exits 0 and prints "true".
+	if runErr == nil && strings.TrimSpace(string(out)) == "true" {
 		isRepo = true
 	}
 	return installed, isRepo, nil

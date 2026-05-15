@@ -71,6 +71,31 @@ func TestCheckGit_IsRepo(t *testing.T) {
 	}
 }
 
+// TestCheckGit_BareRepoIsNotRepo pins the PR #235 review fix from Copilot:
+// `git rev-parse --git-dir` returns success inside a bare repository, but
+// bare repos have no work tree so `git commit` / `git merge` (the operations
+// `requires: git` workflows actually use) will fail. checkGit now uses
+// `--is-inside-work-tree` so bare repos correctly classify as isRepo=false,
+// and `requires: git` workflows fail fast at preflight with the same
+// remediation message as a plain non-repo directory.
+func TestCheckGit_BareRepoIsNotRepo(t *testing.T) {
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	cmd := exec.Command("git", "init", "--bare", "-q", bare)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	installed, isRepo, err := checkGit(bare)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !installed {
+		t.Fatal("expected installed=true")
+	}
+	if isRepo {
+		t.Fatalf("expected isRepo=false for bare repo (no work tree → git commit/merge will fail)")
+	}
+}
+
 func TestSafetyLatches_HomeRefused(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

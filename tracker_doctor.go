@@ -169,7 +169,7 @@ func Doctor(ctx context.Context, cfg DoctorConfig, opts ...DoctorOption) (*Docto
 	if cfg.PipelineFile != "" {
 		r.Checks = append(r.Checks,
 			checkPipelineFile(cfg.PipelineFile),
-			checkGitRequires(cfg),
+			checkGitRequires(ctx, cfg),
 		)
 	}
 
@@ -838,7 +838,20 @@ func isDirWritable(dir string) bool {
 // current environment and the resolved --git= policy. Runs only when a
 // pipeline file is provided. The result mirrors what would happen at
 // `tracker run` time, so users can preview the gate without burning spend.
-func checkGitRequires(cfg DoctorConfig) CheckResult {
+//
+// Policy modeling matches pipeline.Preflight:
+//   - off  → Skip (bypass)
+//   - auto + workflow doesn't require git → OK
+//   - require / init → forces the check regardless of workflow
+//   - missing git → Error (downgraded to Warn under warn policy)
+//   - missing repo + policy != init → Error (downgraded to Warn under warn)
+//   - missing repo + policy == init: model the auto-init outcome:
+//       safety latches would pass → OK with hint ("auto-init would
+//       create .git here at run start")
+//       safety latches would refuse → Error with the latch reason
+//     This avoids the false-positive Error the previous implementation
+//     reported when --git=init --allow-init would actually succeed.
+func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 	out := CheckResult{Name: "Git Requires"}
 
 	if cfg.PipelineFile == "" {
@@ -884,7 +897,7 @@ func checkGitRequires(cfg DoctorConfig) CheckResult {
 		return out
 	}
 
-	installed, isRepo := probeGitForDoctor(cfg.WorkDir)
+	installed, isRepo := probeGitForDoctor(ctx, cfg.WorkDir)
 	if !installed {
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = "workflow requires git, but git is not in PATH"
@@ -892,6 +905,25 @@ func checkGitRequires(cfg DoctorConfig) CheckResult {
 		return out
 	}
 	if !isRepo {
+		// Auto-init preview: under --git=init, runtime would call
+		// runAutoInit which gates on (a) --allow-init or interactive
+		// confirmation, and (b) safety latches. Doctor doesn't have
+		// interactivity, so a non-interactive run effectively requires
+		// allowInit=true. Model that here so a user who passes
+		// --git=init --allow-init in a clean dir gets the accurate
+		// preview (OK with hint) rather than a misleading Error.
+		if policy == GitPreflightInit && cfg.gitCfg.allowInit {
+			if latchErr := pipeline.SafetyLatches(cfg.WorkDir); latchErr != nil {
+				out.Status = CheckStatusError
+				out.Message = fmt.Sprintf("auto-init would refuse: %v", latchErr)
+				out.Hint = "cd into a project subdirectory, or run `git init` manually"
+				return out
+			}
+			out.Status = CheckStatusOK
+			out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start", cfg.WorkDir)
+			out.Hint = "tracker run will create .git here before the first node executes"
+			return out
+		}
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
 		out.Hint = "run `git init` here, or `tracker run <wf> --git=init --allow-init`"
@@ -914,12 +946,18 @@ func doctorStatusForPolicy(policy GitPreflight, hardStatus CheckStatus) CheckSta
 // probeGitForDoctor performs the same two probes as pipeline.checkGit but
 // without reaching into the pipeline-internal helper. Local copy keeps the
 // doctor file's dependency surface clean.
-func probeGitForDoctor(workDir string) (installed bool, isRepo bool) {
+//
+// Uses `--is-inside-work-tree` (NOT `--git-dir`) so bare repositories don't
+// count as "repo OK": workflows that declare `requires: git` need a work
+// tree for `git commit`/`git merge`, both of which fail in a bare repo.
+// Matches the pipeline.checkGit fix from the same review pass.
+func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isRepo bool) {
 	if _, lerr := exec.LookPath("git"); lerr != nil {
 		return false, false
 	}
-	cmd := exec.Command("git", "-C", workDir, "rev-parse", "--git-dir")
-	if rerr := cmd.Run(); rerr == nil {
+	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
+	out, rerr := cmd.Output()
+	if rerr == nil && strings.TrimSpace(string(out)) == "true" {
 		return true, true
 	}
 	return true, false
