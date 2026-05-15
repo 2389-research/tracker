@@ -3,14 +3,9 @@
 package pipeline
 
 import (
-	"bufio"
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 )
 
 // GitPreflight is the resolved preflight policy passed to Preflight.
@@ -68,14 +63,29 @@ type PreflightConfig struct {
 // Safe to call multiple times — only side effect is the optional `git init`
 // triggered by --git=init.
 func Preflight(ctx context.Context, cfg PreflightConfig) error {
-	// Filled in by Task 1.5.
+	// Filled in by a later task.
 	_ = ctx
 	_ = cfg
-	_ = bufio.NewScanner    // reserved for defaultPromptYN
-	_ = fmt.Sprintf         // reserved
-	_ = os.Stdin            // reserved
-	_ = exec.LookPath       // reserved
-	_ = filepath.Abs        // reserved
-	_ = strings.TrimSpace   // reserved
 	return nil
+}
+
+// checkGit runs two cheap probes:
+//  1. `git --version` — does git exist on PATH?
+//  2. `git -C <workDir> rev-parse --git-dir` — are we inside a repo?
+//
+// installed reports the first probe; isRepo reports the second. Returns an
+// error only on unexpected I/O failure; "not installed" and "not a repo"
+// are returned as installed=false / isRepo=false with err==nil. rev-parse
+// exits non-zero when not inside a repo, which is not an error condition.
+func checkGit(workDir string) (installed bool, isRepo bool, err error) {
+	if _, lerr := exec.LookPath("git"); lerr != nil {
+		return false, false, nil
+	}
+	installed = true
+	cmd := exec.Command("git", "-C", workDir, "rev-parse", "--git-dir")
+	cmd.Env = gitSafeEnv()
+	if runErr := cmd.Run(); runErr == nil {
+		isRepo = true
+	}
+	return installed, isRepo, nil
 }
