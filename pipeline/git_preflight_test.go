@@ -3,7 +3,9 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -181,6 +183,152 @@ func TestRunAutoInit_InteractiveNoRejected(t *testing.T) {
 	err := runAutoInit(dir, false, true, no)
 	if !errors.Is(err, ErrGitAutoInitRefused) {
 		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
+	}
+}
+
+func TestPreflight_HappyPath_NoRequires_NoCheck(t *testing.T) {
+	dir := t.TempDir()
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: nil,
+		Policy:   GitPreflightAuto,
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+}
+
+func TestPreflight_HappyPath_RequiresGit_InRepo(t *testing.T) {
+	dir := t.TempDir()
+	mustGitInit(t, dir)
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"git"},
+		Policy:   GitPreflightAuto,
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+}
+
+func TestPreflight_HardFail_RequiresGit_NotRepo(t *testing.T) {
+	dir := t.TempDir()
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"git"},
+		Policy:   GitPreflightAuto,
+	})
+	if !errors.Is(err, ErrGitWorkdirNotRepo) {
+		t.Fatalf("want ErrGitWorkdirNotRepo, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "git init") {
+		t.Fatalf("error must include remediation 'git init': %v", err)
+	}
+}
+
+func TestPreflight_Warn_RequiresGit_NotRepo(t *testing.T) {
+	dir := t.TempDir()
+	var warnings []string
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"git"},
+		Policy:   GitPreflightWarn,
+		Warner: func(format string, args ...any) {
+			warnings = append(warnings, fmt.Sprintf(format, args...))
+		},
+	})
+	if err != nil {
+		t.Fatalf("want nil err under warn policy, got %v", err)
+	}
+	if len(warnings) == 0 {
+		t.Fatalf("expected at least one warning")
+	}
+}
+
+func TestPreflight_OffBypass(t *testing.T) {
+	dir := t.TempDir()
+	var warnings []string
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"git"},
+		Policy:   GitPreflightOff,
+		Warner: func(format string, args ...any) {
+			warnings = append(warnings, fmt.Sprintf(format, args...))
+		},
+	})
+	if err != nil {
+		t.Fatalf("want nil err under off policy, got %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("--git=off must be silent, got: %v", warnings)
+	}
+}
+
+func TestPreflight_RequireOverrideNoRequires(t *testing.T) {
+	dir := t.TempDir()
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: nil,
+		Policy:   GitPreflightRequire,
+	})
+	if !errors.Is(err, ErrGitWorkdirNotRepo) {
+		t.Fatalf("want ErrGitWorkdirNotRepo (CLI override), got %v", err)
+	}
+}
+
+func TestPreflight_AutoInit_Success(t *testing.T) {
+	dir := t.TempDir()
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:   dir,
+		Requires:  []string{"git"},
+		Policy:    GitPreflightInit,
+		AllowInit: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("expected .git after auto-init: %v", err)
+	}
+}
+
+func TestPreflight_AutoInit_RefusedNoLatch(t *testing.T) {
+	dir := t.TempDir()
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:        dir,
+		Requires:       []string{"git"},
+		Policy:         GitPreflightInit,
+		AllowInit:      false,
+		InteractiveTTY: false,
+	})
+	if !errors.Is(err, ErrGitAutoInitRefused) {
+		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
+	}
+}
+
+func TestPreflight_UnrecognizedRequiresWarns(t *testing.T) {
+	dir := t.TempDir()
+	mustGitInit(t, dir)
+	var warnings []string
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"docker"},
+		Policy:   GitPreflightAuto,
+		Warner: func(format string, args ...any) {
+			warnings = append(warnings, fmt.Sprintf(format, args...))
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "docker") && strings.Contains(w, "not yet implemented") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected 'docker not yet implemented' warning, got %v", warnings)
 	}
 }
 

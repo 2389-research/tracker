@@ -68,10 +68,102 @@ type PreflightConfig struct {
 // Safe to call multiple times — only side effect is the optional `git init`
 // triggered by --git=init.
 func Preflight(ctx context.Context, cfg PreflightConfig) error {
-	// Filled in by a later task.
-	_ = ctx
-	_ = cfg
+	_ = ctx // reserved for future timeout/cancellation
+	warn := cfg.Warner
+	if warn == nil {
+		warn = func(string, ...any) {}
+	}
+
+	if !ValidPreflight(cfg.Policy) {
+		// Unknown policy is treated as auto rather than failing the run.
+		warn("tracker: unknown --git policy %q; treating as auto", string(cfg.Policy))
+		cfg.Policy = GitPreflightAuto
+	}
+
+	if cfg.Policy == GitPreflightOff {
+		return nil
+	}
+
+	requiresGit := false
+	for _, dep := range cfg.Requires {
+		switch strings.ToLower(strings.TrimSpace(dep)) {
+		case "":
+			// empty entry; skip
+		case "git":
+			requiresGit = true
+		default:
+			warn("tracker: requires %q is not yet implemented; ignoring", dep)
+		}
+	}
+
+	// --git=require forces the check even if the workflow doesn't declare it.
+	// --git=init also implies the check.
+	if cfg.Policy == GitPreflightRequire || cfg.Policy == GitPreflightInit {
+		requiresGit = true
+	}
+
+	if !requiresGit {
+		return nil
+	}
+
+	installed, isRepo, err := checkGit(cfg.WorkDir)
+	if err != nil {
+		return fmt.Errorf("git check: %w", err)
+	}
+	if !installed {
+		msg := buildGitNotInstalledMessage(cfg.WorkDir)
+		if cfg.Policy == GitPreflightWarn {
+			warn("%s", msg)
+			return nil
+		}
+		return fmt.Errorf("%w: %s", ErrGitNotInstalled, msg)
+	}
+	if !isRepo {
+		if cfg.Policy == GitPreflightInit {
+			if err := runAutoInit(cfg.WorkDir, cfg.AllowInit, cfg.InteractiveTTY, cfg.PromptYN); err != nil {
+				return err
+			}
+			return nil
+		}
+		msg := buildWorkdirNotRepoMessage(cfg.WorkDir)
+		if cfg.Policy == GitPreflightWarn {
+			warn("%s", msg)
+			return nil
+		}
+		return fmt.Errorf("%w: %s", ErrGitWorkdirNotRepo, msg)
+	}
 	return nil
+}
+
+func buildGitNotInstalledMessage(workDir string) string {
+	return strings.Join([]string{
+		"this workflow requires git, but git was not found in PATH.",
+		"",
+		"  Working directory: " + workDir,
+		"",
+		"  Install git:",
+		"    macOS:   brew install git",
+		"    Linux:   apt install git  (or your distro's equivalent)",
+		"    Windows: https://git-scm.com/download/win",
+		"",
+		"  Or pass --git=off to bypass this check if you're sure git isn't needed.",
+	}, "\n")
+}
+
+func buildWorkdirNotRepoMessage(workDir string) string {
+	return strings.Join([]string{
+		"this workflow requires a git repository, but the current directory is not inside one.",
+		"",
+		"  Working directory: " + workDir,
+		"",
+		"  Initialize a repo here:",
+		"    git init",
+		"",
+		"  Or have tracker do it:",
+		"    tracker run <workflow> --git=init --allow-init",
+		"",
+		"  Or pass --git=off to bypass this check if you're sure git isn't needed.",
+	}, "\n")
 }
 
 // runAutoInit performs `git init` after running safety latches.
