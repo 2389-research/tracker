@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -869,18 +870,14 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 
 	deps := graph.RequiredDeps()
 	policy := cfg.gitCfg.policy
-	if policy == GitPreflightOff {
-		out.Status = CheckStatusSkip
-		out.Message = "--git=off; bypassing"
-		return out
-	}
 
-	// Walk declared deps: classify each, and surface unrecognized deps as
-	// CheckDetail warnings so the doctor preview matches what runtime
-	// pipeline.Preflight will emit on stderr at run start. Pre-fix Doctor
-	// silently dropped these; a workflow declaring `requires: docker` looked
-	// clean in `tracker doctor` while `tracker run` would still warn.
+	// Walk declared deps FIRST: classify each and surface unrecognized deps
+	// as CheckDetail warnings so the doctor preview matches what runtime
+	// pipeline.Preflight will emit on stderr. The off-bypass below must
+	// not silence these — runtime preflight scans deps before its own off
+	// bypass for the same reason (forward-declared deps stay visible).
 	requiresGit := false
+	hasUnknownDeps := false
 	for _, d := range deps {
 		switch strings.ToLower(strings.TrimSpace(d)) {
 		case "":
@@ -888,22 +885,54 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		case "git":
 			requiresGit = true
 		default:
+			hasUnknownDeps = true
 			out.Details = append(out.Details, CheckDetail{
 				Status:  CheckStatusWarn,
 				Message: fmt.Sprintf("requires %q is not yet implemented; runtime will warn and continue", d),
 			})
 		}
 	}
+
+	// Off-bypass comes AFTER the dep scan so unrecognized-dep warnings
+	// still surface under --git=off. Top-level Status escalates to Warn
+	// when any details warn, so `tracker doctor`'s exit code reflects
+	// the diagnostic (Doctor() counts CheckResult.Status, not Details).
+	if policy == GitPreflightOff {
+		if hasUnknownDeps {
+			out.Status = CheckStatusWarn
+			out.Message = "--git=off; bypassing git check (unrecognized requires: entries surfaced as warnings)"
+		} else {
+			out.Status = CheckStatusSkip
+			out.Message = "--git=off; bypassing"
+		}
+		return out
+	}
+
 	if policy == GitPreflightRequire || policy == GitPreflightInit {
 		requiresGit = true
 	}
 	if !requiresGit {
-		out.Status = CheckStatusOK
-		out.Message = "workflow does not require git"
+		// No git required, but unknown deps may still warrant a top-level Warn.
+		if hasUnknownDeps {
+			out.Status = CheckStatusWarn
+			out.Message = "workflow does not require git; unrecognized requires: entries surfaced as warnings"
+		} else {
+			out.Status = CheckStatusOK
+			out.Message = "workflow does not require git"
+		}
 		return out
 	}
 
-	installed, isRepo := probeGitForDoctor(ctx, cfg.WorkDir)
+	installed, isRepo, probeErr := probeGitForDoctor(ctx, cfg.WorkDir)
+	if probeErr != nil {
+		// ctx cancellation or unexpected execution failure. Treat as Error
+		// so the operator sees the actual cause rather than a misleading
+		// "not a repo" preview.
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("git probe failed: %v", probeErr)
+		out.Hint = "if the context was cancelled, retry; otherwise investigate the PATH/permissions"
+		return out
+	}
 	if !installed {
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = "workflow requires git, but git is not in PATH"
@@ -935,8 +964,15 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		out.Hint = "run `git init` here, or `tracker <workflow> --git=init --allow-init`"
 		return out
 	}
-	out.Status = CheckStatusOK
-	out.Message = "workflow requires git; env satisfies it"
+	if hasUnknownDeps {
+		// Git satisfied but unknown deps still warrant a top-level Warn
+		// so `tracker doctor`'s exit code reflects the diagnostic.
+		out.Status = CheckStatusWarn
+		out.Message = "workflow requires git; env satisfies it (unrecognized requires: entries surfaced as warnings)"
+	} else {
+		out.Status = CheckStatusOK
+		out.Message = "workflow requires git; env satisfies it"
+	}
 	return out
 }
 
@@ -989,9 +1025,18 @@ func doctorStatusForPolicy(policy GitPreflight, hardStatus CheckStatus) CheckSta
 // count as "repo OK": workflows that declare `requires: git` need a work
 // tree for `git commit`/`git merge`, both of which fail in a bare repo.
 // Matches the pipeline.checkGit fix from the same review pass.
-func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isRepo bool) {
+// probeGitForDoctor returns (installed, isRepo, err) where err is non-nil
+// only on cancellation or unexpected execution failure. A normal "not a
+// repo" exit yields (true, false, nil); a missing-git PATH yields
+// (false, false, nil); everything else (cancellation, permission failures,
+// unexpected git crashes) propagates so Doctor doesn't silently report
+// a repository miss when the caller actually canceled or hit IO.
+func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isRepo bool, err error) {
 	if _, lerr := exec.LookPath("git"); lerr != nil {
-		return false, false
+		if errors.Is(lerr, exec.ErrNotFound) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("locate git in PATH: %w", lerr)
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
 	// Strip sensitive env (API keys, tokens, secrets, passwords) before
@@ -999,11 +1044,18 @@ func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isR
 	// Doctor would pass provider credentials into the git process
 	// unnecessarily (TRACKER_PASS_ENV=1 is the documented escape hatch).
 	cmd.Env = pipeline.GitSafeEnv()
-	out, rerr := cmd.Output()
-	if rerr == nil && strings.TrimSpace(string(out)) == "true" {
-		return true, true
+	out, runErr := cmd.Output()
+	if runErr == nil {
+		return true, strings.TrimSpace(string(out)) == "true", nil
 	}
-	return true, false
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return true, false, ctxErr
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		return true, false, nil // expected — workdir is not a repo
+	}
+	return true, false, fmt.Errorf("git rev-parse --is-inside-work-tree: %w", runErr)
 }
 
 // checkPipelineFile parses and validates a pipeline file.

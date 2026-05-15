@@ -171,7 +171,23 @@ type Engine struct {
 // sources starting with "digraph" or "strict digraph" are treated as DOT,
 // everything else as .dip.
 // The caller must call Close() when done to release resources.
+//
+// This wrapper exists for backward compatibility: it uses
+// context.Background() for the v0.29.0 git preflight. New callers that
+// want to support cancellation of the preflight (especially with
+// `--git=init` which has a `git init` side effect) should use
+// NewEngineWithContext instead.
 func NewEngine(source string, cfg Config) (*Engine, error) {
+	return NewEngineWithContext(context.Background(), source, cfg)
+}
+
+// NewEngineWithContext is the context-aware form of NewEngine. The supplied
+// ctx threads into the v0.29.0 git preflight check; a canceled context
+// aborts preflight (including the `--git=init` `git init` side effect)
+// rather than letting it complete before Engine.Run(ctx) observes the
+// cancellation. tracker.Run(ctx, ...) calls this form so library callers
+// who pass a real ctx get end-to-end cancellation coverage.
+func NewEngineWithContext(ctx context.Context, source string, cfg Config) (*Engine, error) {
 	graph, err := parsePipelineSource(source, cfg.Format)
 	if err != nil {
 		return nil, err
@@ -186,7 +202,7 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
-	if err := runPreflight(graph, cfg, workDir); err != nil {
+	if err := runPreflight(ctx, graph, cfg, workDir); err != nil {
 		return nil, err
 	}
 
@@ -207,9 +223,9 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 // forcing the check), or if the policy downgrades the check to a warning.
 // Library callers default to non-interactive; the CLI overrides via its
 // own preflight call (cmd/tracker/run.go) where stdin TTY detection lives.
-func runPreflight(graph *pipeline.Graph, cfg Config, workDir string) error {
+func runPreflight(ctx context.Context, graph *pipeline.Graph, cfg Config, workDir string) error {
 	policy, allowInit := ResolveGitConfig(cfg)
-	return pipeline.Preflight(context.Background(), pipeline.PreflightConfig{
+	return pipeline.Preflight(ctx, pipeline.PreflightConfig{
 		WorkDir:        workDir,
 		Requires:       graph.RequiredDeps(),
 		Policy:         policy,
@@ -826,7 +842,7 @@ func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, e
 // Run parses a pipeline source, auto-wires all internals, executes, and returns the result.
 // This is the one-call convenience function. It handles Close() automatically.
 func Run(ctx context.Context, source string, cfg Config) (*Result, error) {
-	engine, err := NewEngine(source, cfg)
+	engine, err := NewEngineWithContext(ctx, source, cfg)
 	if err != nil {
 		return nil, err
 	}

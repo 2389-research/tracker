@@ -467,6 +467,56 @@ func TestDoctor_GitRequires_WarnDowngradesSourceLevelRequires(t *testing.T) {
 	}
 }
 
+// TestDoctor_GitRequires_OffStillWarnsForUnknownDeps pins the PR #235
+// round-4 fix from Copilot: --git=off bypasses git enforcement but must
+// still surface "requires: docker not yet implemented" warnings so the
+// doctor preview matches runtime preflight behavior. Top-level Status
+// promotes to Warn (not Skip) when warning details are present so
+// `tracker doctor`'s exit code reflects the diagnostic.
+func TestDoctor_GitRequires_OffStillWarnsForUnknownDeps(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "wf.dip")
+	// Fixture with `requires: git, docker` — docker is the forward-declared
+	// dep that should warn under any policy.
+	const src = `workflow OffWarnsTest
+  goal: "test"
+  requires: git, docker
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+  agent Done
+    label: Done
+  edges
+    Start -> Done
+`
+	if err := os.WriteFile(pf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightOff, false))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusWarn {
+		t.Fatalf("want Warn (off bypass + docker warning), got %s: %s", gr.Status, gr.Message)
+	}
+	foundDocker := false
+	for _, d := range gr.Details {
+		if d.Status == CheckStatusWarn && strings.Contains(d.Message, "docker") {
+			foundDocker = true
+		}
+	}
+	if !foundDocker {
+		t.Errorf("expected a Warn detail for docker, got details: %+v", gr.Details)
+	}
+}
+
 // TestDoctor_GitRequires_OffSkipsSourceLevel re-pins the off-policy skip path,
 // matching what the misleading old test actually verified.
 func TestDoctor_GitRequires_OffSkipsSourceLevel(t *testing.T) {
@@ -558,7 +608,7 @@ func TestDoctor_GitRequires_BareRepoReportsError(t *testing.T) {
 	requireGit(t)
 	tmp := t.TempDir()
 	bare := filepath.Join(tmp, "bare.git")
-	cmd := exec.Command("git", "init", "--bare", "-q", bare)
+	cmd := exec.CommandContext(context.Background(), "git", "init", "--bare", "-q", bare)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v: %s", err, out)
 	}
@@ -633,7 +683,7 @@ func TestDoctor_GitRequires_SourceLevelSatisfied(t *testing.T) {
 func mustGitInitForDoctor(t *testing.T, dir string) {
 	t.Helper()
 	requireGit(t)
-	cmd := exec.Command("git", "init", "-q")
+	cmd := exec.CommandContext(context.Background(), "git", "init", "-q")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init in %s: %v: %s", dir, err, out)
