@@ -4,6 +4,8 @@
 
 **Goal:** Add a `requires:` workflow header keyword plus a `--git=auto|off|warn|require|init` CLI flag so workflows that need git fail in seconds with a copy-pasteable remediation instead of burning $20–$100 of LLM spend before dying at the first `git commit`.
 
+**Tracking issues:** tracker#234 (this work) blocked by dippin-lang#35 (upstream `requires:` IR field).
+
 **Architecture:** A single `pipeline.Preflight(ctx, PreflightConfig)` function runs once at the library/CLI boundary before any node executes. It reads `graph.Attrs["requires"]` (populated by the dippin adapter from a new `*ir.Workflow.Requires` field) and the resolved policy (CLI flag > library config > workflow default `auto`). The function decides: error, warn, skip, or auto-init. Subgraph / manager_loop child engines do NOT re-run preflight — the parent run satisfies it.
 
 **Tech Stack:** Go 1.24+, the dippin-lang IR (upstream PR required), the existing `exec.LookPath("git")` and `os/exec` pattern from `pipeline/git_artifacts.go`, the existing `tracker.CheckResult` shape from `tracker_doctor.go`, the existing `flag.FlagSet` style from `cmd/tracker/flags.go`.
@@ -84,33 +86,9 @@ Released as dippin-lang v0.26.0. Tracker's Phase 2 bumps to it.
 
 **This is upstream work in the dippin-lang repo, not tracker.** Skip to Phase 2 once the dippin-lang v0.26.0 tag is published.
 
-- [ ] **Step 1: File issue at github.com/2389-research/dippin-lang**
+- [x] **Step 1: File issue at github.com/2389-research/dippin-lang** — **DONE: dippin-lang#35**
 
-Title: "Add `requires:` workflow header for declaring environmental dependencies"
-
-Body:
-```
-Tracker (issue #<file-in-tracker>) is adding a `--git=` preflight check
-that hard-fails workflows in seconds when their environment doesn't
-satisfy a declared dependency, instead of burning $20–$100 in LLM spend
-before failing at the first `git commit`.
-
-The mechanism is a generic `requires: <list>` workflow header keyword:
-
-    workflow BuildProduct
-      goal: "..."
-      requires: git
-      start: Start
-      exit: Done
-
-Tracker will check the list against the env and act on the resolved
-`--git=` (or future `--docker=`, `--gh=`, etc.) policy. Unknown entries
-warn-and-continue so workflow authors can forward-declare against newer
-tracker versions.
-
-Scope of this dippin-lang change: parse + format the keyword. Semantics
-live entirely in downstream consumers.
-```
+Issue body and acceptance criteria are at https://github.com/2389-research/dippin-lang/issues/35. Tracker-side companion: tracker#234.
 
 - [ ] **Step 2: Implement the upstream PR**
 
@@ -362,7 +340,7 @@ Expected: PASS.
 
 ```bash
 git add pipeline/git_preflight.go pipeline/git_preflight_test.go
-git commit -m "feat(pipeline): scaffold git preflight error sentinels and config (refs #<git-preflight-issue>)
+git commit -m "feat(pipeline): scaffold git preflight error sentinels and config (refs #234)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -2700,7 +2678,7 @@ Insert at the top under `[Unreleased]` (or create the `v0.29.0` section if the p
 ## [Unreleased]
 
 ### Added
-- **Workflow header `requires: <list>` for environmental dependencies.** Workflows can now declare prerequisites at the top of the `.dip` file. v0.29.0 implements `git` (`requires: git` makes tracker verify git is installed and the workdir is a git repo before any LLM call). Unrecognized entries warn and continue so workflow authors can forward-declare dependencies that future tracker versions will check.
+- **Workflow header `requires: <list>` for environmental dependencies.** Workflows can now declare prerequisites at the top of the `.dip` file. v0.29.0 implements `git` (`requires: git` makes tracker verify git is installed and the workdir is a git repo before any LLM call). Unrecognized entries warn and continue so workflow authors can forward-declare dependencies that future tracker versions will check. Closes #234.
 - **`--git=off|warn|require|init` CLI flag** to override the policy per run. Default `auto` respects the workflow's `requires:` block. `--git=init` (with mandatory `--allow-init` latch) auto-runs `git init` in the workdir, with safety refusals for `$HOME`, `/`, bare repos, linked worktrees, and submodules.
 - **`tracker doctor` Git Requires check** previews what would happen at run start for the current dir + workflow + flags.
 - **Built-in workflows** that commit mid-run (`build_product`, `build_product_with_superspec`) now declare `requires: git`. Running them in a non-git directory fails in seconds with a copy-paste remediation, instead of burning hours of LLM spend.
