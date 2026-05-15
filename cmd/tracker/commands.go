@@ -119,6 +119,8 @@ func executeDoctor(cfg runConfig) error {
 		probe:        cfg.probe,
 		pipelineFile: cfg.pipelineFile,
 		backend:      cfg.backend,
+		git:          cfg.git,
+		allowInit:    cfg.allowInit,
 	}
 	return runDoctorWithConfig(cfg.workdir, doctorCfg)
 }

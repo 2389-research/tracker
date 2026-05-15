@@ -40,6 +40,17 @@ type DoctorConfig struct {
 	// versionInfo is populated by WithVersionInfo. Unexported so callers
 	// use the functional option rather than setting CLI-specific fields.
 	versionInfo versionInfo
+	// gitCfg is populated by WithGitConfig. Drives the Git Requires check.
+	// Unexported; zero value (set=false) implies GitPreflightAuto.
+	gitCfg doctorGitConfig
+}
+
+// doctorGitConfig carries the resolved --git/--allow-init values into the
+// Git Requires check.
+type doctorGitConfig struct {
+	policy    GitPreflight
+	allowInit bool
+	set       bool
 }
 
 // versionInfo carries CLI-provided build metadata into a Doctor run.
@@ -57,6 +68,16 @@ type DoctorOption func(*DoctorConfig)
 func WithVersionInfo(version, commit string) DoctorOption {
 	return func(c *DoctorConfig) {
 		c.versionInfo = versionInfo{version: version, commit: commit}
+	}
+}
+
+// WithGitConfig sets the git preflight policy considered by the Git Requires
+// check. Library callers that don't set this get GitPreflightAuto behavior
+// (respect workflow `requires:`). CLI doctor mode passes --git/--allow-init
+// through this option.
+func WithGitConfig(policy GitPreflight, allowInit bool) DoctorOption {
+	return func(c *DoctorConfig) {
+		c.gitCfg = doctorGitConfig{policy: policy, allowInit: allowInit, set: true}
 	}
 }
 
@@ -146,7 +167,10 @@ func Doctor(ctx context.Context, cfg DoctorConfig, opts ...DoctorOption) (*Docto
 		checkDiskSpace(cfg.WorkDir),
 	)
 	if cfg.PipelineFile != "" {
-		r.Checks = append(r.Checks, checkPipelineFile(cfg.PipelineFile))
+		r.Checks = append(r.Checks,
+			checkPipelineFile(cfg.PipelineFile),
+			checkGitRequires(cfg),
+		)
 	}
 
 	r.OK = true
@@ -809,6 +833,97 @@ func isDirWritable(dir string) bool {
 // checkDiskSpace warns when available disk space under workdir is low.
 // The implementation is platform-specific; see tracker_doctor_unix.go and
 // tracker_doctor_windows.go.
+
+// checkGitRequires evaluates the workflow's `requires:` list against the
+// current environment and the resolved --git= policy. Runs only when a
+// pipeline file is provided. The result mirrors what would happen at
+// `tracker run` time, so users can preview the gate without burning spend.
+func checkGitRequires(cfg DoctorConfig) CheckResult {
+	out := CheckResult{Name: "Git Requires"}
+
+	if cfg.PipelineFile == "" {
+		out.Status = CheckStatusSkip
+		out.Message = "no pipeline file provided"
+		return out
+	}
+
+	fileBytes, err := os.ReadFile(cfg.PipelineFile)
+	if err != nil {
+		out.Status = CheckStatusSkip
+		out.Message = fmt.Sprintf("cannot read %s: %v", cfg.PipelineFile, err)
+		return out
+	}
+	graph, err := parsePipelineSource(string(fileBytes), detectSourceFormat(string(fileBytes)))
+	if err != nil {
+		out.Status = CheckStatusSkip
+		out.Message = fmt.Sprintf("cannot parse %s: %v", cfg.PipelineFile, err)
+		return out
+	}
+
+	deps := graph.RequiredDeps()
+	policy := cfg.gitCfg.policy
+	if policy == GitPreflightOff {
+		out.Status = CheckStatusSkip
+		out.Message = "--git=off; bypassing"
+		return out
+	}
+
+	requiresGit := false
+	for _, d := range deps {
+		if strings.EqualFold(strings.TrimSpace(d), "git") {
+			requiresGit = true
+			break
+		}
+	}
+	if policy == GitPreflightRequire || policy == GitPreflightInit {
+		requiresGit = true
+	}
+	if !requiresGit {
+		out.Status = CheckStatusOK
+		out.Message = "workflow does not require git"
+		return out
+	}
+
+	installed, isRepo := probeGitForDoctor(cfg.WorkDir)
+	if !installed {
+		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+		out.Message = "workflow requires git, but git is not in PATH"
+		out.Hint = "install git (brew install git / apt install git / https://git-scm.com)"
+		return out
+	}
+	if !isRepo {
+		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
+		out.Hint = "run `git init` here, or `tracker run <wf> --git=init --allow-init`"
+		return out
+	}
+	out.Status = CheckStatusOK
+	out.Message = "workflow requires git; env satisfies it"
+	return out
+}
+
+// doctorStatusForPolicy maps preflight policy to a CheckStatus, downgrading
+// to warn when policy == warn.
+func doctorStatusForPolicy(policy GitPreflight, hardStatus CheckStatus) CheckStatus {
+	if policy == GitPreflightWarn {
+		return CheckStatusWarn
+	}
+	return hardStatus
+}
+
+// probeGitForDoctor performs the same two probes as pipeline.checkGit but
+// without reaching into the pipeline-internal helper. Local copy keeps the
+// doctor file's dependency surface clean.
+func probeGitForDoctor(workDir string) (installed bool, isRepo bool) {
+	if _, lerr := exec.LookPath("git"); lerr != nil {
+		return false, false
+	}
+	cmd := exec.Command("git", "-C", workDir, "rev-parse", "--git-dir")
+	if rerr := cmd.Run(); rerr == nil {
+		return true, true
+	}
+	return true, false
+}
 
 // checkPipelineFile parses and validates a pipeline file.
 func checkPipelineFile(pipelineFile string) CheckResult {

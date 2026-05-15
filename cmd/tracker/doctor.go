@@ -32,6 +32,8 @@ type DoctorConfig struct {
 	probe        bool
 	pipelineFile string
 	backend      string
+	git          string // v0.29.0 preflight policy; empty = auto
+	allowInit    bool   // v0.29.0 --allow-init latch
 }
 
 // DoctorResult retains counts exposed to older tests. The authoritative
@@ -80,7 +82,10 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 		Backend:        cfg.backend,
 		ProbeProviders: cfg.probe,
 		PipelineFile:   cfg.pipelineFile,
-	}, tracker.WithVersionInfo(version, commit))
+	},
+		tracker.WithVersionInfo(version, commit),
+		tracker.WithGitConfig(tracker.GitPreflight(cfg.git), cfg.allowInit),
+	)
 	if err != nil {
 		return err
 	}
