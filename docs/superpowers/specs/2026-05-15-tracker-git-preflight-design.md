@@ -44,7 +44,7 @@ workflow BuildProduct
 
 ### CLI flags
 
-```
+```text
 --git=auto|off|warn|require|init   Preflight policy (default: auto)
 --allow-init                       Second latch required by --git=init
 ```
@@ -175,11 +175,11 @@ All error messages MUST follow the CLAUDE.md "must include actionable setup inst
 
 ### `ErrGitNotInstalled`
 
-```
+```text
 tracker: this workflow requires git, but git was not found in PATH.
 
   Workflow: build_product
-  Requires: [git]
+  Requires: git
 
   Install git:
     macOS:   brew install git
@@ -191,12 +191,12 @@ tracker: this workflow requires git, but git was not found in PATH.
 
 ### `ErrGitWorkdirNotRepo`
 
-```
+```text
 tracker: this workflow requires a git repository, but the current directory is not inside one.
 
   Workflow: build_product
   Working directory: /home/user/scratch
-  Requires: [git]
+  Requires: git
 
   Initialize a repo here:
     git init
@@ -209,7 +209,7 @@ tracker: this workflow requires a git repository, but the current directory is n
 
 ### `ErrGitAutoInitRefused` (e.g., $HOME)
 
-```
+```text
 tracker: refusing to run `git init` in your home directory.
 
   Working directory: /home/user
@@ -224,7 +224,7 @@ tracker: refusing to run `git init` in your home directory.
 
 ### `ErrGitAutoInitRefused` (nested repo)
 
-```
+```text
 tracker: refusing to run `git init` here — a parent directory is already a git repository.
 
   Working directory: /home/user/project/subdir

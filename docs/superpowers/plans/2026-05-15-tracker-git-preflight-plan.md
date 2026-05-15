@@ -2597,7 +2597,7 @@ Note any workflow that surfaces git but whose authors didn't intend a hard requi
 
 Edit `workflows/build_product.dip` lines 1-4:
 
-```
+```dippin
 workflow BuildProduct
   goal: "Read a SPEC.md, decompose into milestones, implement each with verification loops, cross-review the complete result, and verify full spec compliance."
   requires: git
@@ -2721,7 +2721,7 @@ grep -n "workflow\|requires\|defaults\|## " README.md | head -30
 
 Add after the existing workflow header documentation:
 
-```markdown
+````markdown
 ### Declaring environmental dependencies
 
 Workflows can declare what they need from the host environment with a
@@ -2739,7 +2739,7 @@ workflow BuildProduct
 the run fails in seconds with a copy-paste remediation instead of burning
 LLM spend before the first failure. Override per-run with `--git=auto|off|warn|require|init`.
 v0.29.0 implements `git`; unrecognized entries warn and continue.
-```
+````
 
 - [ ] **Step 3: Commit**
 
@@ -2879,7 +2879,7 @@ Expected: every package's `PASS` line in the tail.
 | Spec section | Task(s) covering it |
 |---|---|
 | Workflow header `requires:` | Phase 0 (upstream), Task 2.1 (adapter), Task 7.1 (built-ins) |
-| `--git=auto|off|warn|require|init` flag | Task 4.1 |
+| `--git=auto\|off\|warn\|require\|init` flag | Task 4.1 |
 | `--allow-init` latch | Task 4.1, Task 1.4 |
 | Library `Config.Git` + `GitConfig` | Task 3.1, Task 3.2 |
 | `tracker.Preflight` (in `pipeline/git_preflight.go`) | Tasks 1.1–1.5 |

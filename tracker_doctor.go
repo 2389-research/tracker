@@ -846,9 +846,9 @@ func isDirWritable(dir string) bool {
 //   - missing git → Error (downgraded to Warn under warn policy)
 //   - missing repo + policy != init → Error (downgraded to Warn under warn)
 //   - missing repo + policy == init: model the auto-init outcome:
-//       safety latches would pass → OK with hint ("auto-init would
-//       create .git here at run start")
-//       safety latches would refuse → Error with the latch reason
+//     safety latches would pass → OK with hint ("auto-init would
+//     create .git here at run start")
+//     safety latches would refuse → Error with the latch reason
 //     This avoids the false-positive Error the previous implementation
 //     reported when --git=init --allow-init would actually succeed.
 func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
