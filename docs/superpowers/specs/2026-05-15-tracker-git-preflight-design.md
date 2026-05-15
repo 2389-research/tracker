@@ -112,11 +112,15 @@ The check's `Hint` field carries the exact remediation command (`git init`, `Ins
 // Preflight performs the git environment check declared by the workflow.
 // Returns nil if checks pass or are bypassed; returns a typed error otherwise.
 //
-// Errors:
+// Errors (wrapped via errors.Is):
 //   - ErrGitNotInstalled — git missing from PATH
 //   - ErrGitWorkdirNotRepo — workdir is not inside a git repository
 //   - ErrGitAutoInitRefused — --git=init was requested but a safety latch fired
-//   - ErrGitDependencyUnsatisfied — workflow declares a dep we can't yet check
+//
+// Note: PR-review revision dropped an `ErrGitDependencyUnsatisfied` parent
+// sentinel that originally appeared in this spec — it was never returned by
+// the implementation, so exposing it would have misled callers. The three
+// concrete sentinels above are the authoritative set.
 func Preflight(ctx context.Context, cfg PreflightConfig) error
 
 type PreflightConfig struct {
