@@ -474,6 +474,13 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	if err != nil {
 		traceEntry.Status = "error"
 		traceEntry.Error = err.Error()
+		// Preserve ChildUsage even on handler error so that cancelled child
+		// runs (e.g. manager_loop ctx-cancellation) still contribute their
+		// accumulated spend to the parent trace's AggregateUsage and
+		// BudgetGuard rollup. Without this, any handler that returns both a
+		// non-nil ChildUsage and a non-nil error (e.g. cancellation path)
+		// would silently drop the child's token/cost data from the parent.
+		traceEntry.ChildUsage = outcome.ChildUsage
 		s.trace.AddEntry(traceEntry)
 		e.emit(PipelineEvent{
 			Type:      EventStageFailed,

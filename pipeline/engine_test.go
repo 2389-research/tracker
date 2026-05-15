@@ -500,6 +500,70 @@ func TestEngineHandlerError(t *testing.T) {
 	}
 }
 
+// TestEngineHandlerError_ChildUsagePreservedOnError verifies that when a handler
+// returns both a non-nil ChildUsage and a non-nil error, executeNode still
+// captures ChildUsage into the trace entry. This is required for cancelled
+// child runs (e.g. manager_loop cancellation path) to contribute their
+// accumulated spend to the parent's AggregateUsage and BudgetGuard rollup.
+func TestEngineHandlerError_ChildUsagePreservedOnError(t *testing.T) {
+	g := NewGraph("child_usage_error_test")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "child", Shape: "box", Label: "Child"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "child"})
+	g.AddEdge(&Edge{From: "child", To: "end"})
+
+	childUsage := &UsageSummary{
+		TotalInputTokens:  100,
+		TotalOutputTokens: 50,
+		TotalTokens:       150,
+		TotalCostUSD:      0.01,
+		SessionCount:      1,
+		ProviderTotals: map[string]ProviderUsage{
+			"anthropic": {InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.01, SessionCount: 1},
+		},
+	}
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:     OutcomeFail,
+				ChildUsage: childUsage,
+			}, fmt.Errorf("handler cancelled: %w", context.Canceled)
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error from handler to propagate")
+	}
+
+	// Verify ChildUsage is in the trace entry for the "child" node.
+	if result == nil {
+		t.Fatal("expected non-nil result even on error")
+	}
+	var childEntry *TraceEntry
+	for i := range result.Trace.Entries {
+		if result.Trace.Entries[i].NodeID == "child" {
+			childEntry = &result.Trace.Entries[i]
+			break
+		}
+	}
+	if childEntry == nil {
+		t.Fatal("expected trace entry for 'child' node")
+	}
+	if childEntry.ChildUsage == nil {
+		t.Fatal("expected ChildUsage to be preserved in trace entry even when handler returns error")
+	}
+	if childEntry.ChildUsage.TotalTokens != 150 {
+		t.Errorf("expected TotalTokens=150, got %d", childEntry.ChildUsage.TotalTokens)
+	}
+}
+
 func TestEngineContextCancellation(t *testing.T) {
 	g := NewGraph("cancel_test")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
