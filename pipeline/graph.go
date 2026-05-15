@@ -2,6 +2,8 @@
 // ABOUTME: Provides shape-to-handler mapping and graph traversal helpers.
 package pipeline
 
+import "strings"
+
 // shapeHandlerMap maps DOT node shapes to handler names.
 var shapeHandlerMap = map[string]string{
 	"Mdiamond":      "start",
@@ -177,6 +179,30 @@ func (g *Graph) IncomingEdges(nodeID string) []*Edge {
 		}
 	}
 	return result
+}
+
+// RequiredDeps returns the parsed comma-separated list from
+// g.Attrs["requires"]. Whitespace around each entry is trimmed; empty
+// entries are dropped. Returns nil for empty/missing attrs.
+//
+// The "requires" attr is populated by the dippin adapter from the
+// workflow header's `requires:` field (dippin-lang v0.26.0+). The
+// pipeline.Preflight function consumes this list to decide whether
+// to run environment checks at run start.
+func (g *Graph) RequiredDeps() []string {
+	raw, ok := g.Attrs["requires"]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		s := strings.TrimSpace(p)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Node represents a single step in the pipeline.

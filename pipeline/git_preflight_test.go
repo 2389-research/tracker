@@ -306,6 +306,36 @@ func TestPreflight_AutoInit_RefusedNoLatch(t *testing.T) {
 	}
 }
 
+func TestGraph_RequiredDeps_Empty(t *testing.T) {
+	g := NewGraph("test")
+	if got := g.RequiredDeps(); len(got) != 0 {
+		t.Fatalf("want empty, got %v", got)
+	}
+}
+
+func TestGraph_RequiredDeps_Parsed(t *testing.T) {
+	g := NewGraph("test")
+	g.Attrs["requires"] = "git, docker , jq"
+	got := g.RequiredDeps()
+	want := []string{"git", "docker", "jq"}
+	if len(got) != len(want) {
+		t.Fatalf("want %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("idx %d: want %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
+func TestGraph_RequiredDeps_WhitespaceOnly(t *testing.T) {
+	g := NewGraph("test")
+	g.Attrs["requires"] = "   "
+	if got := g.RequiredDeps(); len(got) != 0 {
+		t.Fatalf("want empty for whitespace-only, got %v", got)
+	}
+}
+
 func TestPreflight_UnrecognizedRequiresWarns(t *testing.T) {
 	dir := t.TempDir()
 	mustGitInit(t, dir)
