@@ -925,3 +925,45 @@ func TestRun_Result_BundleIdentity_EmptyWhenNotSet(t *testing.T) {
 		t.Errorf("Result.BundleIdentity should be empty when Config.BundleIdentity unset, got %q", result.BundleIdentity)
 	}
 }
+
+func TestGitConfig_ZeroValueIsAuto(t *testing.T) {
+	cfg := Config{}
+	policy, allowInit := ResolveGitConfig(cfg)
+	if policy != GitPreflightAuto {
+		t.Errorf("want auto policy on zero Config, got %q", policy)
+	}
+	if allowInit {
+		t.Errorf("want AllowInit=false on zero Config")
+	}
+}
+
+func TestGitConfig_ExplicitWins(t *testing.T) {
+	cfg := Config{Git: &GitConfig{Preflight: GitPreflightWarn, AllowInit: true}}
+	policy, allowInit := ResolveGitConfig(cfg)
+	if policy != GitPreflightWarn {
+		t.Errorf("want warn, got %q", policy)
+	}
+	if !allowInit {
+		t.Errorf("want AllowInit=true")
+	}
+}
+
+func TestGitConfig_AliasesPreservePipelineSemantics(t *testing.T) {
+	// The library-side GitPreflight aliases must be equal to their pipeline
+	// counterparts so they assignment-compatible with pipeline.PreflightConfig.
+	if GitPreflightAuto != pipeline.GitPreflightAuto {
+		t.Errorf("alias mismatch: GitPreflightAuto")
+	}
+	if GitPreflightOff != pipeline.GitPreflightOff {
+		t.Errorf("alias mismatch: GitPreflightOff")
+	}
+	if GitPreflightWarn != pipeline.GitPreflightWarn {
+		t.Errorf("alias mismatch: GitPreflightWarn")
+	}
+	if GitPreflightRequire != pipeline.GitPreflightRequire {
+		t.Errorf("alias mismatch: GitPreflightRequire")
+	}
+	if GitPreflightInit != pipeline.GitPreflightInit {
+		t.Errorf("alias mismatch: GitPreflightInit")
+	}
+}

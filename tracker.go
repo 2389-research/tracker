@@ -68,6 +68,43 @@ type Config struct {
 	// activityLog.SetBundleIdentity(cfg.BundleIdentity) so agent/llm writes
 	// outside the engine event chain carry the same provenance.
 	BundleIdentity string
+	// Git configures the v0.29.0 git preflight check. Nil = auto, which
+	// respects the workflow's `requires:` block. See GitConfig.
+	Git *GitConfig
+}
+
+// GitPreflight is the resolved preflight policy that controls the v0.29.0
+// git environment check. Type alias to pipeline.GitPreflight so callers
+// don't have to import the pipeline package for this single value.
+type GitPreflight = pipeline.GitPreflight
+
+// GitPreflight values re-exported from pipeline for caller convenience.
+const (
+	GitPreflightAuto    = pipeline.GitPreflightAuto
+	GitPreflightOff     = pipeline.GitPreflightOff
+	GitPreflightWarn    = pipeline.GitPreflightWarn
+	GitPreflightRequire = pipeline.GitPreflightRequire
+	GitPreflightInit    = pipeline.GitPreflightInit
+)
+
+// GitConfig configures the git preflight check that runs before any node
+// executes. Zero value (or nil *GitConfig on Config.Git) resolves to
+// GitPreflightAuto, which respects the workflow's `requires:` block.
+//
+// AllowInit is required when Preflight == GitPreflightInit and stdin is
+// not a TTY — it is the second safety latch on automatic `git init`.
+type GitConfig struct {
+	Preflight GitPreflight
+	AllowInit bool
+}
+
+// ResolveGitConfig returns the (policy, allowInit) pair to apply for this
+// run, considering Config.Git. The zero value resolves to (auto, false).
+func ResolveGitConfig(cfg Config) (GitPreflight, bool) {
+	if cfg.Git == nil {
+		return GitPreflightAuto, false
+	}
+	return cfg.Git.Preflight, cfg.Git.AllowInit
 }
 
 // WebhookGateConfig controls headless webhook-based human gate handling.
