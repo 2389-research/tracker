@@ -50,6 +50,45 @@ func TestWorkflows_ReturnsCopy(t *testing.T) {
 	}
 }
 
+// TestWorkflows_RequiresSliceIsDeepCopy pins the PR #235 review fix from
+// Copilot: WorkflowInfo.Requires is a slice, and shallow-copying the struct
+// shares the backing array with the cached catalog. A caller that mutates
+// info.Requires[0] would corrupt the global catalog for the rest of the
+// process. Workflows() and LookupWorkflow() now deep-copy via
+// cloneWorkflowInfo.
+func TestWorkflows_RequiresSliceIsDeepCopy(t *testing.T) {
+	first := Workflows()
+	var target int = -1
+	for i := range first {
+		if len(first[i].Requires) > 0 {
+			target = i
+			break
+		}
+	}
+	if target < 0 {
+		t.Skip("no built-in workflow declares requires: — nothing to mutate")
+	}
+	originalFirstDep := first[target].Requires[0]
+	first[target].Requires[0] = "mutated"
+
+	// Same workflow re-read: must be the pristine value, not "mutated".
+	second := Workflows()
+	if got := second[target].Requires[0]; got != originalFirstDep {
+		t.Errorf("Workflows() shared the Requires backing array: mutation leaked (%q → %q)", originalFirstDep, got)
+	}
+
+	// Also via LookupWorkflow.
+	info, ok := LookupWorkflow(second[target].Name)
+	if !ok {
+		t.Fatalf("LookupWorkflow(%q) missing", second[target].Name)
+	}
+	info.Requires[0] = "mutated-via-lookup"
+	info2, _ := LookupWorkflow(second[target].Name)
+	if info2.Requires[0] != originalFirstDep {
+		t.Errorf("LookupWorkflow shared the Requires backing array: mutation leaked (%q → %q)", originalFirstDep, info2.Requires[0])
+	}
+}
+
 func TestLookupWorkflow_Known(t *testing.T) {
 	info, ok := LookupWorkflow("build_product")
 	if !ok {

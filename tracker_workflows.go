@@ -125,22 +125,43 @@ func parseWorkflowHeaderReader(r io.Reader) (displayName, goal string, requires 
 	return displayName, goal, requires
 }
 
+// cloneWorkflowInfo deep-copies a WorkflowInfo so callers can't mutate the
+// cached catalog through the returned value's slice field. The struct's
+// scalar fields are value-copied for free by the assignment; only Requires
+// needs explicit handling because it's a slice. Defensive: pre-v0.29.0
+// WorkflowInfo had no slice fields and a shallow copy was safe.
+func cloneWorkflowInfo(info WorkflowInfo) WorkflowInfo {
+	if len(info.Requires) > 0 {
+		reqCopy := make([]string, len(info.Requires))
+		copy(reqCopy, info.Requires)
+		info.Requires = reqCopy
+	}
+	return info
+}
+
 // Workflows returns the list of workflows embedded in the tracker binary,
 // sorted by name. Library consumers can use this to show users the available
-// built-ins without shelling out to `tracker workflows`.
+// built-ins without shelling out to `tracker workflows`. Returned values
+// share no mutable state with the cached catalog.
 func Workflows() []WorkflowInfo {
 	loadWorkflowCatalog()
 	out := make([]WorkflowInfo, len(catalog))
-	copy(out, catalog)
+	for i, info := range catalog {
+		out[i] = cloneWorkflowInfo(info)
+	}
 	return out
 }
 
 // LookupWorkflow returns the WorkflowInfo for a built-in workflow by bare name,
-// or (zero, false) if no built-in matches.
+// or (zero, false) if no built-in matches. The returned value shares no
+// mutable state with the cached catalog.
 func LookupWorkflow(name string) (WorkflowInfo, bool) {
 	loadWorkflowCatalog()
 	info, ok := catalogMap[name]
-	return info, ok
+	if !ok {
+		return WorkflowInfo{}, false
+	}
+	return cloneWorkflowInfo(info), true
 }
 
 // OpenWorkflow returns the raw source bytes of a built-in workflow by bare

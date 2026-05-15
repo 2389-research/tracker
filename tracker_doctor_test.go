@@ -403,6 +403,7 @@ func TestDoctor_GitRequires_NoForce_NoRequiresInWorkflow(t *testing.T) {
 }
 
 func TestDoctor_GitRequires_ForceRequire_MissingFail(t *testing.T) {
+	requireGit(t)
 	dir, pf := writeDoctorFixture(t)
 	rep, _ := Doctor(context.Background(), DoctorConfig{
 		WorkDir:      dir,
@@ -440,6 +441,7 @@ func TestDoctor_GitRequires_ForceWarn_Downgrades(t *testing.T) {
 // and asserted Skip. This is the real warn-downgrade coverage now that
 // dippin v0.26.0 allows source-level `requires: git`.)
 func TestDoctor_GitRequires_WarnDowngradesSourceLevelRequires(t *testing.T) {
+	requireGit(t)
 	dir := t.TempDir()
 	pf := filepath.Join(dir, "wf.dip")
 	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
@@ -486,6 +488,7 @@ func TestDoctor_GitRequires_OffSkipsSourceLevel(t *testing.T) {
 // now models the auto-init path: if pipeline.SafetyLatches passes, Doctor
 // reports OK with a hint explaining what would happen at run start.
 func TestDoctor_GitRequires_InitAllowInitPreviewsOK(t *testing.T) {
+	requireGit(t)
 	dir := t.TempDir()
 	pf := filepath.Join(dir, "wf.dip")
 	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
@@ -513,6 +516,40 @@ func TestDoctor_GitRequires_InitAllowInitPreviewsOK(t *testing.T) {
 // actually use) would fail. Doctor must report Error (or Warn under warn
 // policy), not OK, so the user gets the actionable remediation before
 // running the workflow.
+// TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires pins the
+// PR #235 review case from Codex P2 + Copilot: when the user passes a
+// `.dipx` bundle to `tracker doctor`, the Git Requires check should
+// preview the entry workflow's `requires:` exactly as `tracker run`
+// would. Pre-fix, doctor read raw ZIP bytes via parsePipelineSource,
+// failed to parse, and silently Skip'd — bundles got no preview at all.
+func TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires(t *testing.T) {
+	requireGit(t)
+	tmp := t.TempDir()
+
+	// Build a fixture .dip and pack it into a .dipx.
+	srcDir := t.TempDir()
+	entryPath := filepath.Join(srcDir, "entry.dip")
+	if err := os.WriteFile(entryPath, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entryPath)
+
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      tmp, // non-repo
+		PipelineFile: bundlePath,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusError {
+		t.Fatalf("bundle with requires:git in a non-repo dir should report Error, got %s: %s", gr.Status, gr.Message)
+	}
+	if !strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint must include 'git init': %v", gr.Hint)
+	}
+}
+
 func TestDoctor_GitRequires_BareRepoReportsError(t *testing.T) {
 	requireGit(t)
 	tmp := t.TempDir()
@@ -553,6 +590,7 @@ func TestDoctor_GitRequires_ForceRequire_AfterGitInit_Passes(t *testing.T) {
 // Confirms the dippin v0.26.0 syntax flows through the adapter to where
 // Doctor reads it.
 func TestDoctor_GitRequires_SourceLevelDetected(t *testing.T) {
+	requireGit(t)
 	dir := t.TempDir()
 	pf := filepath.Join(dir, "wf.dip")
 	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {

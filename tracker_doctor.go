@@ -860,16 +860,10 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		return out
 	}
 
-	fileBytes, err := os.ReadFile(cfg.PipelineFile)
-	if err != nil {
+	graph, loadMsg, ok := loadGraphForGitRequires(ctx, cfg.PipelineFile)
+	if !ok {
 		out.Status = CheckStatusSkip
-		out.Message = fmt.Sprintf("cannot read %s: %v", cfg.PipelineFile, err)
-		return out
-	}
-	graph, err := parsePipelineSource(string(fileBytes), detectSourceFormat(string(fileBytes)))
-	if err != nil {
-		out.Status = CheckStatusSkip
-		out.Message = fmt.Sprintf("cannot parse %s: %v", cfg.PipelineFile, err)
+		out.Message = loadMsg
 		return out
 	}
 
@@ -932,6 +926,38 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 	out.Status = CheckStatusOK
 	out.Message = "workflow requires git; env satisfies it"
 	return out
+}
+
+// loadGraphForGitRequires loads the entry graph from a `.dip` source file
+// OR a `.dipx` bundle, returning the same `*pipeline.Graph` shape either
+// way. The doctor's Git Requires check needs `graph.RequiredDeps()` and
+// nothing else — running tracker's full bundle validation would duplicate
+// what checkPipelineBundle already covers. Returns (nil, "...", false)
+// when the file can't be loaded; the caller maps that to CheckStatusSkip.
+//
+// .dipx bundles are routed through pipeline.LoadDipxBundle so a
+// `tracker doctor <bundle.dipx>` invocation accurately previews what
+// runtime preflight (which also goes through LoadDipxBundle internally
+// in the loader path) would see. Pre-fix the .dipx branch fell through
+// to parsePipelineSource which choked on ZIP bytes and silently Skip'd
+// — bundle inputs got no Git Requires preview at all.
+func loadGraphForGitRequires(ctx context.Context, pipelineFile string) (*pipeline.Graph, string, bool) {
+	if strings.EqualFold(filepath.Ext(pipelineFile), ".dipx") {
+		entry, _, _, _, err := pipeline.LoadDipxBundle(ctx, pipelineFile)
+		if err != nil {
+			return nil, fmt.Sprintf("cannot load bundle %s: %v", pipelineFile, err), false
+		}
+		return entry, "", true
+	}
+	fileBytes, err := os.ReadFile(pipelineFile)
+	if err != nil {
+		return nil, fmt.Sprintf("cannot read %s: %v", pipelineFile, err), false
+	}
+	graph, err := parsePipelineSource(string(fileBytes), detectSourceFormat(string(fileBytes)))
+	if err != nil {
+		return nil, fmt.Sprintf("cannot parse %s: %v", pipelineFile, err), false
+	}
+	return graph, "", true
 }
 
 // doctorStatusForPolicy maps preflight policy to a CheckStatus, downgrading
