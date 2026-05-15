@@ -134,3 +134,21 @@ func TestParseWorkflowHeader_RequiresStopsAtStart(t *testing.T) {
 		t.Errorf("expected empty requires (declared after start:), got %v", requires)
 	}
 }
+
+func TestParseWorkflowHeader_RequiresDeduplicates(t *testing.T) {
+	_, _, requires := parseWorkflowHeaderForTest([]byte(`workflow Foo
+  goal: "test"
+  requires: git, docker, git, docker, jq
+  start: Start
+  exit: Done
+`))
+	want := []string{"git", "docker", "jq"}
+	if len(requires) != len(want) {
+		t.Fatalf("requires: want %v (deduped), got %v", want, requires)
+	}
+	for i := range want {
+		if requires[i] != want[i] {
+			t.Errorf("idx %d: want %q, got %q", i, want[i], requires[i])
+		}
+	}
+}

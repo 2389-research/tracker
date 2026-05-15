@@ -103,11 +103,17 @@ func parseWorkflowHeaderReader(r io.Reader) (displayName, goal string, requires 
 		}
 		if strings.HasPrefix(trimmed, "requires:") {
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "requires:"))
+			seen := map[string]struct{}{}
 			for _, part := range strings.Split(raw, ",") {
 				s := strings.TrimSpace(part)
-				if s != "" {
-					requires = append(requires, s)
+				if s == "" {
+					continue
 				}
+				if _, dup := seen[s]; dup {
+					continue
+				}
+				seen[s] = struct{}{}
+				requires = append(requires, s)
 			}
 			continue
 		}

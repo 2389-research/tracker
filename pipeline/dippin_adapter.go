@@ -727,12 +727,24 @@ func extractRequires(requires []string, attrs map[string]string) {
 	if len(requires) == 0 {
 		return
 	}
+	// Trim, drop empties, and deduplicate while preserving declaration order.
+	// Authors who write `requires: git, git, git` get a clean `git` in the
+	// graph attr. Order preservation matters for the warn-on-unrecognized
+	// path in pipeline.Preflight, which iterates the list and emits one
+	// warning per entry — without dedup, duplicates would produce duplicate
+	// warnings for the same dep.
+	seen := make(map[string]struct{}, len(requires))
 	cleaned := make([]string, 0, len(requires))
 	for _, r := range requires {
 		s := strings.TrimSpace(r)
-		if s != "" {
-			cleaned = append(cleaned, s)
+		if s == "" {
+			continue
 		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		cleaned = append(cleaned, s)
 	}
 	if len(cleaned) == 0 {
 		return

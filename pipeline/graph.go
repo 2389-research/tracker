@@ -183,24 +183,34 @@ func (g *Graph) IncomingEdges(nodeID string) []*Edge {
 
 // RequiredDeps returns the parsed comma-separated list from
 // g.Attrs["requires"]. Whitespace around each entry is trimmed; empty
-// entries are dropped. Returns nil for empty/missing attrs.
+// entries are dropped; duplicates are removed in declaration order.
+// Returns nil for empty/missing attrs.
 //
 // The "requires" attr is populated by the dippin adapter from the
 // workflow header's `requires:` field (dippin-lang v0.26.0+). The
-// pipeline.Preflight function consumes this list to decide whether
-// to run environment checks at run start.
+// adapter's extractRequires also deduplicates, so RequiredDeps is
+// defensive: a caller that synthesizes a Graph directly (or reads
+// pre-v0.29.0 attrs) still gets a clean list. pipeline.Preflight
+// consumes this list and emits one warning per unrecognized dep —
+// without dedup, duplicates would surface duplicate warnings.
 func (g *Graph) RequiredDeps() []string {
 	raw, ok := g.Attrs["requires"]
 	if !ok || strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	parts := strings.Split(raw, ",")
+	seen := make(map[string]struct{}, len(parts))
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		s := strings.TrimSpace(p)
-		if s != "" {
-			out = append(out, s)
+		if s == "" {
+			continue
 		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
 	}
 	return out
 }

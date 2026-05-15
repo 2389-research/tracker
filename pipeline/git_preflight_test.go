@@ -372,6 +372,21 @@ func TestGraph_RequiredDeps_WhitespaceOnly(t *testing.T) {
 	}
 }
 
+func TestGraph_RequiredDeps_Deduplicates(t *testing.T) {
+	g := NewGraph("test")
+	g.Attrs["requires"] = "git, docker, git, jq, docker"
+	got := g.RequiredDeps()
+	want := []string{"git", "docker", "jq"}
+	if len(got) != len(want) {
+		t.Fatalf("want %v (deduped, order preserved), got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("idx %d: want %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
 func TestPreflight_UnrecognizedRequiresWarns(t *testing.T) {
 	dir := t.TempDir()
 	mustGitInit(t, dir)
