@@ -98,7 +98,7 @@ Added as `tracker.Config.Git *GitConfig`. Zero value (nil) is identical to `&Git
 - **Error** — workflow requires git, env doesn't satisfy, AND `--git=auto|require` is set
 - **Skip** — `--git=off`
 
-The check's `Suggestion` field carries the exact remediation command (`git init`, `Install git from https://git-scm.com`, etc.).
+The check's `Hint` field carries the exact remediation command (`git init`, `Install git from https://git-scm.com`, etc.).
 
 `tracker doctor` is documented in `cmd/tracker/doctor.go` already; this check slots into the existing `[]CheckResult` produced by `tracker.Doctor`.
 
@@ -208,7 +208,7 @@ tracker: this workflow requires a git repository, but the current directory is n
     git init
 
   Or have tracker do it:
-    tracker run build_product --git=init --allow-init
+    tracker build_product --git=init --allow-init
 
   Or pass --git=off to bypass this check if you're sure git isn't needed.
 ```

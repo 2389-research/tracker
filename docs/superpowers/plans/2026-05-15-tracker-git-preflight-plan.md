@@ -14,6 +14,20 @@
 
 ---
 
+> **Historical note (added post-PR-review):** Implementation snippets below
+> show the original `checkGit` using `git rev-parse --git-dir`. PR review
+> caught a bare-repo false positive in that approach (bare repos have no
+> work tree, so `git commit`/`git merge` still fail) and the shipped
+> implementation uses `git rev-parse --is-inside-work-tree` for the
+> requires:git satisfaction probe. `safetyLatches` (the auto-init refusal
+> path) keeps `--git-dir` because it asks a different question — "is this
+> any kind of git context where `git init` would create a confusing
+> duplicate?" — and `--git-dir` correctly catches bare repos, linked
+> worktrees, and submodules. The CHANGELOG documents both probes; the
+> snippets below are kept as a record of what the original plan proposed.
+> Future agents following this plan should consult the shipped code in
+> `pipeline/git_preflight.go` rather than mirror the snippets verbatim.
+
 ## Investigation findings (resolves the spec's Open Questions)
 
 1. **dippin-lang `requires:` in `*ir.Workflow` — NOT present in v0.25.0.** Verified at `~/go/pkg/mod/github.com/2389-research/dippin-lang@v0.25.0/ir/ir.go:11-23` (no `Requires` field) and `parser/parser.go:97-108` (`dispatchWorkflowSimpleField` switches on `goal | start | exit | defaults | vars`; unknown identifiers emit `"unexpected top-level identifier: requires"` at parser/parser.go:141). **A dippin-lang bump is a blocker.** Phase 0 below sketches the upstream PR.
@@ -1047,7 +1061,7 @@ func buildWorkdirNotRepoMessage(workDir string) string {
 		"    git init",
 		"",
 		"  Or have tracker do it:",
-		"    tracker run <workflow> --git=init --allow-init",
+		"    tracker <workflow> --git=init --allow-init",
 		"",
 		"  Or pass --git=off to bypass this check if you're sure git isn't needed.",
 	}, "\n")
@@ -2161,7 +2175,7 @@ func checkGitRequires(cfg DoctorConfig) CheckResult {
 	if !isRepo {
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
-		out.Hint = "run `git init` here, or `tracker run <wf> --git=init --allow-init`"
+		out.Hint = "run `git init` here, or `tracker <workflow> --git=init --allow-init`"
 		return out
 	}
 	out.Status = CheckStatusOK

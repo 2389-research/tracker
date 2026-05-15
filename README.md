@@ -183,7 +183,7 @@ workflow BuildProduct
   exit: Done
 ```
 
-`tracker run` checks these at startup. If the env doesn't satisfy them, the run fails in seconds with a copy-paste remediation instead of burning LLM spend before the first failure. Override per-run with `--git=auto|off|warn|require|init` (default `auto` respects `requires:`; `--git=init --allow-init` auto-initializes the workdir, with safety refusals for `$HOME`, `/`, and nested repos — including bare repos, linked worktrees, and submodules). v0.29.0 implements `git`; unrecognized entries warn and continue so workflow authors can forward-declare deps that future tracker versions will check.
+Tracker checks these at startup (when you invoke `tracker <workflow>`). If the env doesn't satisfy them, the run fails in seconds with a copy-paste remediation instead of burning LLM spend before the first failure. Override per-run with `--git=auto|off|warn|require|init` (default `auto` respects `requires:`; `--git=init --allow-init` auto-initializes the workdir, with safety refusals for `$HOME`, `/`, and nested repos — including bare repos, linked worktrees, and submodules). v0.29.0 implements `git`; unrecognized entries warn and continue so workflow authors can forward-declare deps that future tracker versions will check.
 
 ### Node Types
 
