@@ -273,6 +273,9 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	}
 	activeRunParams = maps.Clone(cfg.params)
 	activeEffectiveRunParams = nil
+	// Store git preflight policy for the inline preflight call in run/runTUI.
+	activeGitConfig.policy = cfg.git
+	activeGitConfig.allowInit = cfg.allowInit
 	// Store tool handler safety config for the registry (called from run/runTUI).
 	activeToolSafety = handlers.ToolHandlerConfig{
 		BypassDenylist: cfg.bypassDenylist,

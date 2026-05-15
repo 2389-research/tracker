@@ -83,6 +83,15 @@ var activeToolSafety handlers.ToolHandlerConfig
 // engine fires. The zero value is the new (non-resume) run case.
 var activeResumeInfo resumeInfo
 
+// activeGitConfig holds the --git / --allow-init values for the current run.
+// Set by executeRun before calling run/runTUI, matching the pattern of
+// activeAutopilotCfg. Consumed by the inline pipeline.Preflight call in
+// run() and runTUI() just after applyRunParamOverrides.
+var activeGitConfig struct {
+	policy    string
+	allowInit bool
+}
+
 // webhookGateCfg holds just the webhook gate settings needed by chooseInterviewer.
 type webhookGateCfg struct {
 	webhookURL        string
@@ -122,6 +131,24 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 	return wi
 }
 
+// applyGitPreflight runs the v0.29.0 git preflight check using the
+// module-level activeGitConfig populated by executeRun. Called from both
+// run() and runTUI() after applyRunParamOverrides — so the check fires
+// before any LLM client setup or network activity. Bail on error so the
+// user sees the actionable remediation instead of a deferred failure.
+func applyGitPreflight(graph *pipeline.Graph, workdir string) error {
+	return pipeline.Preflight(context.Background(), pipeline.PreflightConfig{
+		WorkDir:        workdir,
+		Requires:       graph.RequiredDeps(),
+		Policy:         pipeline.GitPreflight(activeGitConfig.policy),
+		AllowInit:      activeGitConfig.allowInit,
+		InteractiveTTY: isatty.IsTerminal(os.Stdin.Fd()),
+		Warner: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...)
+		},
+	})
+}
+
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
@@ -130,6 +157,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		return err
 	}
 	if err := applyRunParamOverrides(graph); err != nil {
+		return err
+	}
+	if err := applyGitPreflight(graph, workdir); err != nil {
 		return err
 	}
 
@@ -397,6 +427,9 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		return err
 	}
 	if err := applyRunParamOverrides(graph); err != nil {
+		return err
+	}
+	if err := applyGitPreflight(graph, workdir); err != nil {
 		return err
 	}
 
