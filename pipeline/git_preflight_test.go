@@ -777,6 +777,123 @@ func TestWorkdirHasContent(t *testing.T) {
 			t.Fatalf("want has=true for dir with .gitignore (user-managed, must be in initial commit)")
 		}
 	})
+	// CodeRabbit:3260803525 — a FILE named `.git` is the worktree-link
+	// shape and is user-managed content, not repo metadata we created.
+	// Pre-fix the helper exempted any entry named `.git` regardless of
+	// type, which would let runAutoInit fall through to `git init`
+	// against a workdir that already had user-visible files.
+	t.Run("dot_git_FILE_counts_as_content", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		has, err := workdirHasContent(dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !has {
+			t.Fatalf("want has=true for dir whose `.git` is a FILE (worktree-link or stray) — Latch 3 must refuse here")
+		}
+	})
+	// Same concern for symlinks: an attacker / accident planting a
+	// symlink named `.git` should NOT exempt the workdir. os.ReadDir's
+	// DirEntry.IsDir reports the entry's own type (lstat-style), so a
+	// symlink — even to a real directory — reports IsDir()==false and
+	// the helper correctly counts it as content.
+	t.Run("dot_git_SYMLINK_counts_as_content", func(t *testing.T) {
+		dir := t.TempDir()
+		target := t.TempDir() // any real directory
+		if err := os.Symlink(target, filepath.Join(dir, ".git")); err != nil {
+			t.Skipf("symlink unsupported on this platform: %v", err)
+		}
+		has, err := workdirHasContent(dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !has {
+			t.Fatalf("want has=true for dir whose `.git` is a SYMLINK — Latch 3 must refuse here")
+		}
+	})
+}
+
+// TestIsUnbornHEADStderr pins the two phrases hasBornHEAD relies on to
+// distinguish unborn HEAD from real failures (Copilot:3260797018,
+// CodeRabbit:3260803531). Both are upstream-stable English from git's
+// rev-parse code path; the C locale is forced via gitProbeEnv so
+// localized git installs can't bypass the classifier.
+func TestIsUnbornHEADStderr(t *testing.T) {
+	cases := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{"needed_single_revision", "fatal: Needed a single revision\n", true},
+		{"unknown_revision", "fatal: ambiguous argument 'HEAD^{commit}': unknown revision or path not in the working tree.\n", true},
+		{"corrupt_refs", "fatal: bad object HEAD\n", false},
+		{"permission_denied", "fatal: unable to read ref: refs/heads/main\n", false},
+		{"empty", "", false},
+		{"dubious_ownership", "fatal: detected dubious ownership in repository at '/tmp/x'\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isUnbornHEADStderr([]byte(tc.stderr)); got != tc.want {
+				t.Fatalf("isUnbornHEADStderr(%q) = %v, want %v", tc.stderr, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHasBornHEAD_RejectsNonCommitHEAD pins that hasBornHEAD uses
+// `HEAD^{commit}` (Codex:3260803910) rather than plain `HEAD`, so a
+// HEAD pointing at a non-commit object (tree/blob) is correctly
+// reported as NOT born. End-state under test: HEAD resolves under
+// plain `--verify` (because a tree is a valid object name) but FAILS
+// under `^{commit}` peeling — exactly the gap the reviewer flagged.
+//
+// Setup detail: git's own `update-ref` refuses to point a branch ref
+// at a non-commit OID (safety check), so we bypass it by writing the
+// raw OID directly to `.git/HEAD`. That produces a detached HEAD
+// pointing at the tree object, replicating the corrupt / pathological
+// state without fighting git's safety net.
+func TestHasBornHEAD_RejectsNonCommitHEAD(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	mustGitInit(t, dir)
+	mustGit(t, dir, "commit", "--allow-empty", "-m", "init")
+	// Extract the tree OID of the empty commit so we have a known
+	// non-commit object that exists in the object store.
+	treeCmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD^{tree}")
+	treeCmd.Env = gitProbeEnv()
+	treeOut, err := treeCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD^{tree}: %v", err)
+	}
+	treeOID := strings.TrimSpace(string(treeOut))
+	if treeOID == "" {
+		t.Fatalf("empty tree OID")
+	}
+	// Bypass git: write the tree OID directly into .git/HEAD so HEAD
+	// becomes a detached ref to a non-commit object.
+	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte(treeOID+"\n"), 0o644); err != nil {
+		t.Fatalf("write .git/HEAD: %v", err)
+	}
+	// Pre-condition sanity: plain `--verify HEAD` (without ^{commit})
+	// would still succeed here because the OID resolves to a real
+	// object — this is the gap that motivated the ^{commit} switch.
+	plainCmd := exec.Command("git", "-C", dir, "rev-parse", "--verify", "HEAD")
+	plainCmd.Env = gitProbeEnv()
+	if err := plainCmd.Run(); err != nil {
+		t.Skipf("git rev-parse --verify HEAD already failed before our probe (git version differs?): %v", err)
+	}
+	// Now hasBornHEAD must report (false, nil): tree resolves but
+	// `^{commit}` peeling fails.
+	born, err := hasBornHEAD(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if born {
+		t.Fatalf("want born=false when HEAD points at a non-commit object; pre-fix this returned born=true under plain `--verify HEAD`")
+	}
 }
 
 func TestPreflight_HardFail_RequiresGit_NotRepo(t *testing.T) {

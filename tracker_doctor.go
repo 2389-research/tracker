@@ -977,8 +977,19 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 				out.Hint = "stage your own initial commit: `git init && git add . && git commit -m initial`"
 				return out
 			}
-			out.Status = CheckStatusOK
-			out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start", cfg.WorkDir)
+			// Auto-init preview is OK. Preserve unknown-dependency warn
+			// severity at the check level (CodeRabbit:3260803551) — the
+			// parallel born-HEAD-success branch below already does this;
+			// pre-fix the auto-init branch returned CheckStatusOK
+			// unconditionally, suppressing the warning even though the
+			// individual unrecognized-dep warnings had been emitted.
+			if hasUnknownDeps {
+				out.Status = CheckStatusWarn
+				out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start (unrecognized requires: entries surfaced as warnings)", cfg.WorkDir)
+			} else {
+				out.Status = CheckStatusOK
+				out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start", cfg.WorkDir)
+			}
 			out.Hint = ".git will be created here at run start, before the first node executes"
 			return out
 		}
@@ -1001,7 +1012,10 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 	if !born {
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = fmt.Sprintf("workflow requires a git repository with at least one commit; %s has no commits (unborn HEAD)", cfg.WorkDir)
-		out.Hint = "create an initial commit: `git -C " + cfg.WorkDir + " commit --allow-empty -m initial` (or `git add . && git commit -m initial` to capture existing files)"
+		// Quote the workdir so paths containing spaces / special chars
+		// produce copy/pasteable commands (Copilot:3260796999,
+		// CodeRabbit:3260803559).
+		out.Hint = fmt.Sprintf("create an initial commit: `git -C %q commit --allow-empty -m initial` (or `git -C %q add . && git -C %q commit -m initial` to capture existing files)", cfg.WorkDir, cfg.WorkDir, cfg.WorkDir)
 		return out
 	}
 	if hasUnknownDeps {

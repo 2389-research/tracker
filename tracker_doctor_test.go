@@ -364,6 +364,26 @@ const preflightDoctorPipelineRequiresGit = `workflow PreflightDoctorReq
     Start -> Done
 `
 
+// preflightDoctorPipelineRequiresGitAndUnknown adds an unrecognized
+// dependency alongside git so tests can verify Doctor preserves
+// unknown-dep warning severity through every "Git Requires" success
+// branch (CodeRabbit:3260803551).
+const preflightDoctorPipelineRequiresGitAndUnknown = `workflow PreflightDoctorReqUnknown
+  goal: "doctor preflight test with requires + unknown dep"
+  requires: git, docker
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Done
+`
+
 func writeDoctorFixture(t *testing.T) (workDir, pipelineFile string) {
 	t.Helper()
 	workDir = t.TempDir()
@@ -567,6 +587,40 @@ func TestDoctor_GitRequires_InitAllowInitPreviewsOK(t *testing.T) {
 	}
 	if !strings.Contains(gr.Message, "auto-init") {
 		t.Errorf("message must mention auto-init to explain the preview, got: %s", gr.Message)
+	}
+}
+
+// TestDoctor_GitRequires_InitAllowInit_PreservesUnknownDepsWarn pins
+// CodeRabbit:3260803559 — the auto-init success branch must surface
+// the same CheckStatusWarn that the born-HEAD-success branch does when
+// the workflow has unrecognized requires: entries. Pre-fix the branch
+// returned CheckStatusOK unconditionally, swallowing the warning even
+// though the individual unrecognized-dep warnings had been emitted.
+func TestDoctor_GitRequires_InitAllowInit_PreservesUnknownDepsWarn(t *testing.T) {
+	requireGit(t)
+	// Empty workdir so the auto-init preview reaches the OK/Warn branch.
+	dir := t.TempDir()
+	pfDir := t.TempDir()
+	pf := filepath.Join(pfDir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGitAndUnknown), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightInit, true))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusWarn {
+		t.Fatalf("want CheckStatusWarn (unknown dep present), got %s: %s", gr.Status, gr.Message)
+	}
+	if !strings.Contains(gr.Message, "auto-init") {
+		t.Errorf("message must still describe the auto-init preview, got: %s", gr.Message)
+	}
+	if !strings.Contains(gr.Message, "unrecognized requires") {
+		t.Errorf("message must mention the unknown-deps reason for Warn, got: %s", gr.Message)
 	}
 }
 

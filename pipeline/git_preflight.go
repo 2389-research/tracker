@@ -405,7 +405,11 @@ func runAutoInit(ctx context.Context, workDir string, allowInit bool, interactiv
 		return fmt.Errorf("%w: scan workdir: %v", ErrGitAutoInitRefused, contentErr)
 	}
 	if hasContent {
-		return fmt.Errorf("%w: workdir is not empty.\n\n  --git=init creates an empty initial commit; tracker will not auto-`git add` your existing files (they might be secrets, build artifacts, or content you haven't decided to track). Stage and commit them yourself so you control the baseline:\n\n    git -C %s init\n    git -C %s add .\n    git -C %s commit -m \"initial\"\n\n  Or empty the workdir first, then re-run with --git=init --allow-init.", ErrGitAutoInitRefused, workDir, workDir, workDir)
+		// Use %q for workDir so paths containing spaces / special chars
+		// produce copy/pasteable commands (Copilot:3260796955,
+		// CodeRabbit:3260803559). %s here would emit unquoted shell-broken
+		// commands for any non-trivial workdir path on macOS/Windows.
+		return fmt.Errorf("%w: workdir is not empty.\n\n  --git=init creates an empty initial commit; tracker will not auto-`git add` your existing files (they might be secrets, build artifacts, or content you haven't decided to track). Stage and commit them yourself so you control the baseline:\n\n    git -C %q init\n    git -C %q add .\n    git -C %q commit -m \"initial\"\n\n  Or empty the workdir first, then re-run with --git=init --allow-init.", ErrGitAutoInitRefused, workDir, workDir, workDir)
 	}
 	initCmd := exec.CommandContext(ctx, "git", "-C", workDir, "init", "-q")
 	initCmd.Env = gitProbeEnv()
@@ -576,13 +580,19 @@ func safetyLatches(ctx context.Context, workDir string) error {
 // or `.env` — as content. A user with a `.gitignore` they want in HEAD
 // has the same answer as a user with source files: make the initial
 // commit yourself so you decide what's tracked.
+//
+// The `.git` exemption requires the entry to be a real directory
+// (CodeRabbit:3260803525). A stray FILE or SYMLINK named `.git` is
+// user-managed content, not repo metadata — exempting it here would let
+// runAutoInit fall through to `git init` against a workdir that already
+// has user-visible files, exactly the trap Latch 3 exists to prevent.
 func workdirHasContent(workDir string) (bool, error) {
 	entries, err := os.ReadDir(workDir)
 	if err != nil {
 		return false, err
 	}
 	for _, e := range entries {
-		if e.Name() == ".git" {
+		if e.Name() == ".git" && e.IsDir() {
 			continue
 		}
 		return true, nil
@@ -590,23 +600,63 @@ func workdirHasContent(workDir string) (bool, error) {
 	return false, nil
 }
 
+// isUnbornHEADStderr reports whether stderr from `git rev-parse --verify
+// HEAD^{commit}` corresponds to the benign unborn-HEAD case rather than a
+// real failure (corrupt refs, permission error, etc.). The two phrases
+// it matches are both from upstream git and have been stable across
+// recent versions:
+//
+//   - "Needed a single revision" — emitted by older git (and by plain
+//     `--verify HEAD` in newer git) when HEAD is unborn
+//   - "unknown revision or path not in the working tree" — emitted by
+//     newer git's `^{commit}` peeling code path when HEAD doesn't
+//     resolve to a commit (covers both unborn HEAD AND dangling /
+//     non-commit OIDs at HEAD)
+//
+// Distinguishing the two from other ExitError outputs keeps hasBornHEAD
+// from collapsing every git failure into "unborn" — corruption-class
+// failures need to surface as errors so callers can fix the underlying
+// problem (or rerun under `--git=warn`) rather than getting the
+// "create an initial commit" remediation steer.
+//
+// Callers force LANG/LC_ALL=C via gitProbeEnv so a localized git
+// installation can't translate either phrase and bypass this check.
+func isUnbornHEADStderr(stderr []byte) bool {
+	s := string(stderr)
+	return strings.Contains(s, "Needed a single revision") ||
+		strings.Contains(s, "unknown revision or path not in the working tree")
+}
+
 // hasBornHEAD reports whether HEAD points at a real commit in workDir.
 // Returns (false, nil) for an unborn HEAD (newly-init'd repo with no
 // commits) — that case is expected and not an error. Returns an error
-// only on unexpected I/O / ctx cancellation. Caller is responsible for
-// having already established that workDir is inside a work tree (via
-// checkGit); this probe is the second-stage check that catches the gap
-// between `--is-inside-work-tree` (which says yes for unborn repos)
-// and what requires:git workflows actually need (HEAD must commit).
+// for unexpected failures (corrupt refs, permission denied, etc.) so
+// callers don't silently report "unborn, please git commit --allow-empty"
+// when the actual problem is something `git fsck` would diagnose.
 //
-// We use `git rev-parse --verify HEAD` rather than `symbolic-ref` or
-// `cat-file -e` because:
-//   - --verify checks both that HEAD resolves AND that the resolved
-//     object exists (catches dangling refs from corrupt repos)
-//   - it's the same probe `git status` uses internally
-//   - on unborn HEAD it exits non-zero with "fatal: Needed a single revision"
-//     on stderr, distinct from "not a git repository" — so a probe at the
-//     wrong workdir doesn't masquerade as unborn
+// Caller is responsible for having already established that workDir is
+// inside a work tree (via checkGit); this probe is the second-stage
+// check that catches the gap between `--is-inside-work-tree` (which
+// says yes for unborn repos) and what requires:git workflows actually
+// need (HEAD must point at a commit).
+//
+// Probe choice: `git rev-parse --verify HEAD^{commit}` rather than
+// plain `--verify HEAD` (Codex:3260803910). `^{commit}` forces commit
+// peeling, so a HEAD pointing at a dangling OID or a non-commit object
+// (tree/blob in a pathological repo) fails the probe instead of
+// masquerading as born. Plain `--verify HEAD` would say yes for any
+// resolvable OID, including non-commit objects that `git worktree add
+// HEAD` / `git log` would still fail on.
+//
+// Stderr inspection: pre-fix this function used `cmd.Run()` and treated
+// every `*exec.ExitError` as `(false, nil)`. Go's `os/exec` package
+// does NOT populate `ExitError.Stderr` for `Run()` — only `Output()` /
+// `CombinedOutput()` capture stderr (Copilot:3260797018,
+// CodeRabbit:3260803531). So the previous code couldn't distinguish
+// unborn HEAD from corrupt refs even though the doc comment claimed it
+// could. Switched to `CombinedOutput()` + `isUnbornHEADStderr` so
+// unborn classifies as `(false, nil)` and anything else surfaces as an
+// error.
 func hasBornHEAD(ctx context.Context, workDir string) (bool, error) {
 	if _, lerr := exec.LookPath("git"); lerr != nil {
 		if errors.Is(lerr, exec.ErrNotFound) {
@@ -617,9 +667,9 @@ func hasBornHEAD(ctx context.Context, workDir string) (bool, error) {
 		}
 		return false, fmt.Errorf("locate git in PATH: %w", lerr)
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--verify", "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--verify", "HEAD^{commit}")
 	cmd.Env = gitProbeEnv()
-	err := cmd.Run()
+	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return true, nil
 	}
@@ -628,16 +678,12 @@ func hasBornHEAD(ctx context.Context, workDir string) (bool, error) {
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		// Either unborn HEAD or some other rev-parse failure. checkGit has
-		// already established we're inside a work tree, so the dominant
-		// case here is unborn HEAD; we accept that as (false, nil). Other
-		// failures (e.g. corrupt refs/) surface as the empty-stderr case
-		// only in pathological environments, and degrading to "unborn"
-		// produces the right user-visible remediation either way (create
-		// an initial commit, or repair the repo).
-		return false, nil
+		if isUnbornHEADStderr(out) {
+			return false, nil // expected — unborn HEAD or non-commit at HEAD
+		}
+		return false, fmt.Errorf("git rev-parse --verify HEAD^{commit} refused: %s", strings.TrimSpace(string(out)))
 	}
-	return false, fmt.Errorf("git rev-parse --verify HEAD: %w", err)
+	return false, fmt.Errorf("git rev-parse --verify HEAD^{commit}: %w", err)
 }
 
 // checkGit runs two cheap probes:
