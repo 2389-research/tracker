@@ -42,6 +42,8 @@ func TestParseFlagsDoctor(t *testing.T) {
 		wantPipelineFile string
 		wantWorkdir      string
 		wantBackend      string
+		wantGit          string
+		wantAllowInit    bool
 		wantErr          bool
 	}{
 		{name: "no args", args: []string{"tracker", "doctor"}, wantProbe: true},
@@ -53,6 +55,15 @@ func TestParseFlagsDoctor(t *testing.T) {
 		{name: "with short workdir", args: []string{"tracker", "doctor", "-w", "/tmp/myproject"}, wantProbe: true, wantWorkdir: "/tmp/myproject"},
 		{name: "with backend", args: []string{"tracker", "doctor", "--backend", "claude-code"}, wantProbe: true, wantBackend: "claude-code"},
 		{name: "invalid backend", args: []string{"tracker", "doctor", "--backend", "invalid-backend"}, wantErr: true},
+		// Any-order flag parsing — pre-fix the flag parser stopped at
+		// the first positional, so `tracker doctor wf.dip --git=warn`
+		// silently dropped --git=warn (Copilot:3260183662).
+		{name: "git flag after file", args: []string{"tracker", "doctor", "wf.dip", "--git=warn"}, wantProbe: true, wantPipelineFile: "wf.dip", wantGit: "warn"},
+		{name: "allow-init after file", args: []string{"tracker", "doctor", "wf.dip", "--git=init", "--allow-init"}, wantProbe: true, wantPipelineFile: "wf.dip", wantGit: "init", wantAllowInit: true},
+		{name: "git flag before file", args: []string{"tracker", "doctor", "--git=warn", "wf.dip"}, wantProbe: true, wantPipelineFile: "wf.dip", wantGit: "warn"},
+		// Two positionals must error out — pre-fix the second one was
+		// silently dropped, masking typos.
+		{name: "extra positional rejected", args: []string{"tracker", "doctor", "wf.dip", "extra.dip"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -81,6 +92,12 @@ func TestParseFlagsDoctor(t *testing.T) {
 			}
 			if cfg.backend != tt.wantBackend {
 				t.Errorf("backend = %q, want %q", cfg.backend, tt.wantBackend)
+			}
+			if cfg.git != tt.wantGit {
+				t.Errorf("git = %q, want %q", cfg.git, tt.wantGit)
+			}
+			if cfg.allowInit != tt.wantAllowInit {
+				t.Errorf("allowInit = %v, want %v", cfg.allowInit, tt.wantAllowInit)
 			}
 		})
 	}

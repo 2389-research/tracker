@@ -68,6 +68,43 @@ type Config struct {
 	// activityLog.SetBundleIdentity(cfg.BundleIdentity) so agent/llm writes
 	// outside the engine event chain carry the same provenance.
 	BundleIdentity string
+	// Git configures the v0.29.0 git preflight check. Nil = auto, which
+	// respects the workflow's `requires:` block. See GitConfig.
+	Git *GitConfig
+}
+
+// GitPreflight is the resolved preflight policy that controls the v0.29.0
+// git environment check. Type alias to pipeline.GitPreflight so callers
+// don't have to import the pipeline package for this single value.
+type GitPreflight = pipeline.GitPreflight
+
+// GitPreflight values re-exported from pipeline for caller convenience.
+const (
+	GitPreflightAuto    = pipeline.GitPreflightAuto
+	GitPreflightOff     = pipeline.GitPreflightOff
+	GitPreflightWarn    = pipeline.GitPreflightWarn
+	GitPreflightRequire = pipeline.GitPreflightRequire
+	GitPreflightInit    = pipeline.GitPreflightInit
+)
+
+// GitConfig configures the git preflight check that runs before any node
+// executes. Zero value (or nil *GitConfig on Config.Git) resolves to
+// GitPreflightAuto, which respects the workflow's `requires:` block.
+//
+// AllowInit is required when Preflight == GitPreflightInit and stdin is
+// not a TTY — it is the second safety latch on automatic `git init`.
+type GitConfig struct {
+	Preflight GitPreflight
+	AllowInit bool
+}
+
+// ResolveGitConfig returns the (policy, allowInit) pair to apply for this
+// run, considering Config.Git. The zero value resolves to (auto, false).
+func ResolveGitConfig(cfg Config) (GitPreflight, bool) {
+	if cfg.Git == nil {
+		return GitPreflightAuto, false
+	}
+	return cfg.Git.Preflight, cfg.Git.AllowInit
 }
 
 // WebhookGateConfig controls headless webhook-based human gate handling.
@@ -134,7 +171,23 @@ type Engine struct {
 // sources starting with "digraph" or "strict digraph" are treated as DOT,
 // everything else as .dip.
 // The caller must call Close() when done to release resources.
+//
+// This wrapper exists for backward compatibility: it uses
+// context.Background() for the v0.29.0 git preflight. New callers that
+// want to support cancellation of the preflight (especially with
+// `--git=init` which has a `git init` side effect) should use
+// NewEngineWithContext instead.
 func NewEngine(source string, cfg Config) (*Engine, error) {
+	return NewEngineWithContext(context.Background(), source, cfg)
+}
+
+// NewEngineWithContext is the context-aware form of NewEngine. The supplied
+// ctx threads into the v0.29.0 git preflight check; a canceled context
+// aborts preflight (including the `--git=init` `git init` side effect)
+// rather than letting it complete before Engine.Run(ctx) observes the
+// cancellation. tracker.Run(ctx, ...) calls this form so library callers
+// who pass a real ctx get end-to-end cancellation coverage.
+func NewEngineWithContext(ctx context.Context, source string, cfg Config) (*Engine, error) {
 	graph, err := parsePipelineSource(source, cfg.Format)
 	if err != nil {
 		return nil, err
@@ -149,6 +202,10 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
+	if err := runPreflight(ctx, graph, cfg, workDir); err != nil {
+		return nil, err
+	}
+
 	if err := applyResumeRunID(&cfg, workDir); err != nil {
 		return nil, err
 	}
@@ -159,6 +216,25 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 	}
 
 	return buildEngine(graph, cfg, workDir, client, completer)
+}
+
+// runPreflight invokes pipeline.Preflight with the resolved policy from cfg.
+// Returns nil if the workflow doesn't declare any deps (and CLI isn't
+// forcing the check), or if the policy downgrades the check to a warning.
+// Library callers default to non-interactive; the CLI overrides via its
+// own preflight call (cmd/tracker/run.go) where stdin TTY detection lives.
+func runPreflight(ctx context.Context, graph *pipeline.Graph, cfg Config, workDir string) error {
+	policy, allowInit := ResolveGitConfig(cfg)
+	return pipeline.Preflight(ctx, pipeline.PreflightConfig{
+		WorkDir:        workDir,
+		Requires:       graph.RequiredDeps(),
+		Policy:         policy,
+		AllowInit:      allowInit,
+		InteractiveTTY: false,
+		Warner: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...)
+		},
+	})
 }
 
 // applyResumeRunID resolves Config.ResumeRunID to a concrete checkpoint path
@@ -766,7 +842,7 @@ func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, e
 // Run parses a pipeline source, auto-wires all internals, executes, and returns the result.
 // This is the one-call convenience function. It handles Close() automatically.
 func Run(ctx context.Context, source string, cfg Config) (*Result, error) {
-	engine, err := NewEngine(source, cfg)
+	engine, err := NewEngineWithContext(ctx, source, cfg)
 	if err != nil {
 		return nil, err
 	}

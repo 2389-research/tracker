@@ -4,7 +4,9 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -923,5 +925,178 @@ func TestRun_Result_BundleIdentity_EmptyWhenNotSet(t *testing.T) {
 	}
 	if result.BundleIdentity != "" {
 		t.Errorf("Result.BundleIdentity should be empty when Config.BundleIdentity unset, got %q", result.BundleIdentity)
+	}
+}
+
+// preflightTestPipeline is a minimal .dip source used by NewEngine preflight
+// tests. It deliberately does NOT declare `requires:` — preflight is forced
+// via Policy=Require so this fixture exercises the CLI-override path. The
+// source-level `requires: git` path is exercised by preflightTestPipelineRequiresGit.
+const preflightTestPipeline = `workflow PreflightFixture
+  goal: "test fixture"
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Done
+`
+
+// preflightTestPipelineRequiresGit declares `requires: git` in the workflow
+// header. Exercises the full source → dippin parser → adapter → graph.Attrs
+// → Graph.RequiredDeps → Preflight path. Requires dippin-lang v0.26.0+.
+const preflightTestPipelineRequiresGit = `workflow PreflightFixture
+  goal: "test fixture"
+  requires: git
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Done
+`
+
+func TestNewEngine_PreflightFailsWhenForceRequireAndNotRepo(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	cfg := Config{
+		WorkingDir: dir,
+		Git:        &GitConfig{Preflight: GitPreflightRequire},
+	}
+	_, err := NewEngine(preflightTestPipeline, cfg)
+	if err == nil {
+		t.Fatalf("expected preflight failure on non-repo workdir with --git=require")
+	}
+	if !errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
+		t.Errorf("want ErrGitWorkdirNotRepo, got %v", err)
+	}
+}
+
+func TestNewEngine_PreflightPassesAfterGitInit(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = dir
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("git init: %v: %s", runErr, out)
+	}
+	cfg := Config{
+		WorkingDir: dir,
+		Git:        &GitConfig{Preflight: GitPreflightRequire},
+	}
+	// May fail for unrelated reasons (no API keys) but MUST NOT be ErrGitWorkdirNotRepo.
+	_, err := NewEngine(preflightTestPipeline, cfg)
+	if err != nil && errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
+		t.Fatalf("preflight should pass after git init, got %v", err)
+	}
+}
+
+// TestNewEngine_PreflightBypassedWithGitOff exercises the escape hatch:
+// even when the workflow source declares `requires: git` AND the workdir
+// is not a repo, `--git=off` bypasses the check. Uses
+// preflightTestPipelineRequiresGit (not preflightTestPipeline) so the
+// fixture actually has something to bypass — otherwise auto policy
+// would also pass with no check applied, and the test wouldn't be
+// exercising what its name promises. (PR #235 round-3 Copilot review.)
+//
+// No requireGit guard — off must work on hosts without git installed
+// (that's literally the point of the escape hatch).
+func TestNewEngine_PreflightBypassedWithGitOff(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		WorkingDir: dir,
+		Git:        &GitConfig{Preflight: GitPreflightOff},
+	}
+	// Without --git=off this fixture would hit ErrGitWorkdirNotRepo
+	// because the workflow source declares requires:git and dir is a
+	// non-repo tempdir.
+	_, err := NewEngine(preflightTestPipelineRequiresGit, cfg)
+	if err != nil && errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
+		t.Errorf("--git=off should bypass preflight even with source-level requires:git, got %v", err)
+	}
+}
+
+// TestNewEngine_PreflightFailsFromSourceLevelRequires exercises the full
+// path: source string → dippin parser → adapter → graph.Attrs["requires"]
+// → Graph.RequiredDeps → Preflight. The non-repo workdir should trip
+// ErrGitWorkdirNotRepo without any CLI override (auto policy honors
+// workflow's declared requires).
+func TestNewEngine_PreflightFailsFromSourceLevelRequires(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	cfg := Config{WorkingDir: dir} // auto policy
+	_, err := NewEngine(preflightTestPipelineRequiresGit, cfg)
+	if err == nil {
+		t.Fatalf("expected preflight failure on non-repo workdir with requires:git")
+	}
+	if !errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
+		t.Errorf("want ErrGitWorkdirNotRepo, got %v", err)
+	}
+}
+
+func TestNewEngine_PreflightPassesFromSourceLevelRequiresAfterInit(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = dir
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("git init: %v: %s", runErr, out)
+	}
+	cfg := Config{WorkingDir: dir}
+	_, err := NewEngine(preflightTestPipelineRequiresGit, cfg)
+	if err != nil && errors.Is(err, pipeline.ErrGitWorkdirNotRepo) {
+		t.Fatalf("preflight should pass after git init, got %v", err)
+	}
+}
+
+func TestGitConfig_ZeroValueIsAuto(t *testing.T) {
+	cfg := Config{}
+	policy, allowInit := ResolveGitConfig(cfg)
+	if policy != GitPreflightAuto {
+		t.Errorf("want auto policy on zero Config, got %q", policy)
+	}
+	if allowInit {
+		t.Errorf("want AllowInit=false on zero Config")
+	}
+}
+
+func TestGitConfig_ExplicitWins(t *testing.T) {
+	cfg := Config{Git: &GitConfig{Preflight: GitPreflightWarn, AllowInit: true}}
+	policy, allowInit := ResolveGitConfig(cfg)
+	if policy != GitPreflightWarn {
+		t.Errorf("want warn, got %q", policy)
+	}
+	if !allowInit {
+		t.Errorf("want AllowInit=true")
+	}
+}
+
+func TestGitConfig_AliasesPreservePipelineSemantics(t *testing.T) {
+	// The library-side GitPreflight aliases must be equal to their pipeline
+	// counterparts so they assignment-compatible with pipeline.PreflightConfig.
+	if GitPreflightAuto != pipeline.GitPreflightAuto {
+		t.Errorf("alias mismatch: GitPreflightAuto")
+	}
+	if GitPreflightOff != pipeline.GitPreflightOff {
+		t.Errorf("alias mismatch: GitPreflightOff")
+	}
+	if GitPreflightWarn != pipeline.GitPreflightWarn {
+		t.Errorf("alias mismatch: GitPreflightWarn")
+	}
+	if GitPreflightRequire != pipeline.GitPreflightRequire {
+		t.Errorf("alias mismatch: GitPreflightRequire")
+	}
+	if GitPreflightInit != pipeline.GitPreflightInit {
+		t.Errorf("alias mismatch: GitPreflightInit")
 	}
 }

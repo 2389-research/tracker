@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -324,4 +325,404 @@ func TestPinnedDippinVersionMatchesGoMod(t *testing.T) {
 		t.Fatalf("scan go.mod: %v", err)
 	}
 	t.Fatal("dippin-lang not found in go.mod")
+}
+
+// preflightDoctorPipeline is a fixture .dip source for the Git Requires
+// checks WITHOUT a source-level `requires:` declaration — exercises the
+// CLI-override (WithGitConfig(Require/Off, ...)) path.
+const preflightDoctorPipeline = `workflow PreflightDoctor
+  goal: "doctor preflight test"
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Done
+`
+
+// preflightDoctorPipelineRequiresGit declares `requires: git` in the
+// workflow header. Exercises the full source → dippin parser → adapter
+// → graph.Attrs → Doctor decision matrix path (dippin-lang v0.26.0+).
+const preflightDoctorPipelineRequiresGit = `workflow PreflightDoctorReq
+  goal: "doctor preflight test with requires"
+  requires: git
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Done
+`
+
+func writeDoctorFixture(t *testing.T) (workDir, pipelineFile string) {
+	t.Helper()
+	workDir = t.TempDir()
+	pipelineFile = filepath.Join(workDir, "wf.dip")
+	if err := os.WriteFile(pipelineFile, []byte(preflightDoctorPipeline), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return workDir, pipelineFile
+}
+
+func findCheck(rep *DoctorReport, name string) *CheckResult {
+	for i := range rep.Checks {
+		if rep.Checks[i].Name == name {
+			return &rep.Checks[i]
+		}
+	}
+	return nil
+}
+
+func TestDoctor_GitRequires_NoForce_NoRequiresInWorkflow(t *testing.T) {
+	dir, pf := writeDoctorFixture(t)
+	rep, err := Doctor(context.Background(), DoctorConfig{
+		WorkDir:        dir,
+		PipelineFile:   pf,
+		ProbeProviders: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusOK {
+		t.Errorf("workflow without requires:git should be OK, got %s: %s", gr.Status, gr.Message)
+	}
+}
+
+func TestDoctor_GitRequires_ForceRequire_MissingFail(t *testing.T) {
+	requireGit(t)
+	dir, pf := writeDoctorFixture(t)
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightRequire, false))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusError {
+		t.Fatalf("want error, got %v", gr)
+	}
+	if !strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint must include 'git init': %v", gr.Hint)
+	}
+}
+
+// TestDoctor_GitRequires_WarnDoesNotForce verifies that `--git=warn`
+// does NOT secretly force the check when the workflow has no `requires:`
+// declaration. Warn only downgrades a hard failure to a warning when
+// some OTHER signal would have caused the failure. With nothing
+// declared and warn policy, the result is OK. (Previously named
+// ForceWarn_Downgrades, which described the opposite of what the
+// test actually pins; renamed per PR #235 round-3 Copilot review.)
+func TestDoctor_GitRequires_WarnDoesNotForce(t *testing.T) {
+	dir, pf := writeDoctorFixture(t)
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightWarn, false))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusOK {
+		t.Fatalf("warn without force should be OK (no requires:git), got %v", gr)
+	}
+}
+
+// TestDoctor_GitRequires_WarnDowngradesSourceLevelRequires confirms the
+// `--git=warn` downgrade path: a workflow that declares `requires: git`
+// running in a non-repo dir produces an Error under auto/require/init
+// policy, but a Warn under warn policy. (PR #235 review: the prior test
+// named "...DowngradesToWarn" was misleading — it passed GitPreflightOff
+// and asserted Skip. This is the real warn-downgrade coverage now that
+// dippin v0.26.0 allows source-level `requires: git`.)
+func TestDoctor_GitRequires_WarnDowngradesSourceLevelRequires(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightWarn, false))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusWarn {
+		t.Fatalf("want warn (downgrade on missing repo + requires:git), got %s: %s", gr.Status, gr.Message)
+	}
+	if !strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint must include 'git init' remediation: %v", gr.Hint)
+	}
+}
+
+// TestDoctor_GitRequires_OffStillWarnsForUnknownDeps pins the PR #235
+// round-4 fix from Copilot: --git=off bypasses git enforcement but must
+// still surface "requires: docker not yet implemented" warnings so the
+// doctor preview matches runtime preflight behavior. Top-level Status
+// promotes to Warn (not Skip) when warning details are present so
+// `tracker doctor`'s exit code reflects the diagnostic.
+func TestDoctor_GitRequires_OffStillWarnsForUnknownDeps(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "wf.dip")
+	// Fixture with `requires: git, docker` — docker is the forward-declared
+	// dep that should warn under any policy.
+	const src = `workflow OffWarnsTest
+  goal: "test"
+  requires: git, docker
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+  agent Done
+    label: Done
+  edges
+    Start -> Done
+`
+	if err := os.WriteFile(pf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightOff, false))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusWarn {
+		t.Fatalf("want Warn (off bypass + docker warning), got %s: %s", gr.Status, gr.Message)
+	}
+	foundDocker := false
+	for _, d := range gr.Details {
+		if d.Status == CheckStatusWarn && strings.Contains(d.Message, "docker") {
+			foundDocker = true
+		}
+	}
+	if !foundDocker {
+		t.Errorf("expected a Warn detail for docker, got details: %+v", gr.Details)
+	}
+}
+
+// TestDoctor_GitRequires_OffSkipsSourceLevel re-pins the off-policy skip path,
+// matching what the misleading old test actually verified.
+func TestDoctor_GitRequires_OffSkipsSourceLevel(t *testing.T) {
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightOff, false))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusSkip {
+		t.Fatalf("off should skip, got %v", gr)
+	}
+}
+
+// TestDoctor_GitRequires_InitAllowInitPreviewsOK pins the PR #235 Codex P2 +
+// Copilot fix: under `--git=init --allow-init` in a clean directory,
+// runtime preflight would auto-run `git init` and the run would succeed.
+// Pre-fix, Doctor reported a false Error for this configuration. The check
+// now models the auto-init path: if pipeline.SafetyLatches passes, Doctor
+// reports OK with a hint explaining what would happen at run start.
+func TestDoctor_GitRequires_InitAllowInitPreviewsOK(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightInit, true))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusOK {
+		t.Fatalf("want OK (auto-init would succeed in clean dir), got %s: %s", gr.Status, gr.Message)
+	}
+	if !strings.Contains(gr.Message, "auto-init") {
+		t.Errorf("message must mention auto-init to explain the preview, got: %s", gr.Message)
+	}
+}
+
+// TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires pins the
+// PR #235 review case from Codex P2 + Copilot: when the user passes a
+// `.dipx` bundle to `tracker doctor`, the Git Requires check should
+// preview the entry workflow's `requires:` exactly as runtime preflight
+// would. Pre-fix, doctor read raw ZIP bytes via parsePipelineSource,
+// failed to parse, and silently Skip'd — bundles got no preview at all.
+func TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires(t *testing.T) {
+	requireGit(t)
+	tmp := t.TempDir()
+
+	// Build a fixture .dip and pack it into a .dipx.
+	srcDir := t.TempDir()
+	entryPath := filepath.Join(srcDir, "entry.dip")
+	if err := os.WriteFile(entryPath, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := dipxtest.PackTestBundle(t, entryPath)
+
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      tmp, // non-repo
+		PipelineFile: bundlePath,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusError {
+		t.Fatalf("bundle with requires:git in a non-repo dir should report Error, got %s: %s", gr.Status, gr.Message)
+	}
+	if !strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint must include 'git init': %v", gr.Hint)
+	}
+}
+
+// TestDoctor_GitRequires_BareRepoHintMentionsCheckout pins the PR #235
+// round-5 review fix (Copilot:3251112125): pre-fix, a bare repo
+// collapsed to the same "isRepo=false" state as a plain non-repo, and
+// Doctor showed the generic "run git init" hint — wrong remediation
+// for bare repos. Doctor now distinguishes the case and emits "cd into
+// a checkout (clone or worktree)" as the hint instead.
+func TestDoctor_GitRequires_BareRepoHintMentionsCheckout(t *testing.T) {
+	requireGit(t)
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "bare.git")
+	cmd := exec.CommandContext(context.Background(), "git", "init", "--bare", "-q", bare)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	pf := filepath.Join(tmp, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      bare,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusError {
+		t.Fatalf("want Error for bare-repo workdir, got %v", gr)
+	}
+	if !strings.Contains(gr.Message, "bare git repository") {
+		t.Errorf("message should mention 'bare git repository', got: %s", gr.Message)
+	}
+	if strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint should NOT suggest 'git init' for bare repo; got: %s", gr.Hint)
+	}
+	if !strings.Contains(gr.Hint, "checkout") {
+		t.Errorf("hint should suggest 'checkout' (clone or worktree) for bare repo; got: %s", gr.Hint)
+	}
+}
+
+// TestDoctor_GitRequires_BareRepoReportsError pins the PR #235 Copilot fix:
+// a bare repo passes `git rev-parse --git-dir` but has no work tree, so
+// `git commit` / `git merge` (the operations `requires: git` workflows
+// actually use) would fail. Doctor must report Error (or Warn under warn
+// policy), not OK, so the user gets the actionable remediation before
+// running the workflow.
+func TestDoctor_GitRequires_BareRepoReportsError(t *testing.T) {
+	requireGit(t)
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "bare.git")
+	cmd := exec.CommandContext(context.Background(), "git", "init", "--bare", "-q", bare)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	pf := filepath.Join(tmp, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      bare,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusError {
+		t.Fatalf("want Error for bare repo (no work tree), got %v", gr)
+	}
+}
+
+func TestDoctor_GitRequires_ForceRequire_AfterGitInit_Passes(t *testing.T) {
+	dir, pf := writeDoctorFixture(t)
+	mustGitInitForDoctor(t, dir)
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightRequire, false))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusOK {
+		t.Fatalf("want ok after git init, got %v", gr)
+	}
+}
+
+// TestDoctor_GitRequires_SourceLevelDetected exercises the workflow header's
+// `requires: git` declaration end-to-end through Doctor — no CLI override.
+// Confirms the dippin v0.26.0 syntax flows through the adapter to where
+// Doctor reads it.
+func TestDoctor_GitRequires_SourceLevelDetected(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pf := filepath.Join(dir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusError {
+		t.Fatalf("workflow declares requires:git in a non-repo dir, want error; got %v", gr)
+	}
+	if !strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint must include 'git init': %v", gr.Hint)
+	}
+}
+
+func TestDoctor_GitRequires_SourceLevelSatisfied(t *testing.T) {
+	dir := t.TempDir()
+	mustGitInitForDoctor(t, dir)
+	pf := filepath.Join(dir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusOK {
+		t.Fatalf("workflow declares requires:git in a repo dir, want OK; got %v", gr)
+	}
+}
+
+func mustGitInitForDoctor(t *testing.T, dir string) {
+	t.Helper()
+	requireGit(t)
+	cmd := exec.CommandContext(context.Background(), "git", "init", "-q")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init in %s: %v: %s", dir, err, out)
+	}
 }

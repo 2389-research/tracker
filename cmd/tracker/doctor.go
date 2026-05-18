@@ -32,6 +32,8 @@ type DoctorConfig struct {
 	probe        bool
 	pipelineFile string
 	backend      string
+	git          string // v0.29.0 preflight policy; empty = auto
+	allowInit    bool   // v0.29.0 --allow-init latch
 }
 
 // DoctorResult retains counts exposed to older tests. The authoritative
@@ -80,7 +82,10 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 		Backend:        cfg.backend,
 		ProbeProviders: cfg.probe,
 		PipelineFile:   cfg.pipelineFile,
-	}, tracker.WithVersionInfo(version, commit))
+	},
+		tracker.WithVersionInfo(version, commit),
+		tracker.WithGitConfig(tracker.GitPreflight(cfg.git), cfg.allowInit),
+	)
 	if err != nil {
 		return err
 	}
@@ -128,6 +133,9 @@ func printCheckResult(c tracker.CheckResult) {
 			printWarn(d.Message)
 		case "hint":
 			printHint(d.Message)
+		case "skip":
+			// Intentional bypass — render as a hint, not a failure.
+			printHint(d.Message)
 		default:
 			printCheck(false, d.Message)
 		}
@@ -147,6 +155,11 @@ func printCheckResult(c tracker.CheckResult) {
 		printCheck(true, c.Message)
 	case "warn":
 		printWarn(c.Message)
+	case "skip":
+		// Skip is an intentional bypass (e.g. `tracker doctor --git=off`),
+		// not a failure. Render as a hint so it doesn't show the red
+		// failure marker the default branch would produce.
+		printHint(c.Message)
 	default:
 		printCheck(false, c.Message)
 	}

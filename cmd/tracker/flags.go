@@ -74,6 +74,13 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 
 // parseDoctorFlags handles doctor-specific flag parsing.
 // Supports: --probe (live auth check), -w/--workdir, --backend, and an optional positional pipeline file.
+//
+// Uses parseArgsMultiPass so flags work in any order relative to the
+// positional pipeline argument, matching run-mode's UX. Pre-fix
+// `tracker doctor wf.dip --git=warn` silently left cfg.git at the
+// default because flag.Parse stops at the first positional, and the
+// downstream `--git=warn` override never reached the Git Requires
+// check.
 func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	dfs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	dfs.SetOutput(io.Discard)
@@ -81,14 +88,26 @@ func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	dfs.StringVar(&cfg.workdir, "w", "", "Working directory (default: current directory)")
 	dfs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
 	dfs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
-	if err := dfs.Parse(args[2:]); err != nil {
+	dfs.StringVar(&cfg.git, "git", "", "Git preflight policy (auto/off/warn/require/init) to evaluate")
+	dfs.BoolVar(&cfg.allowInit, "allow-init", false, "Required latch for --git=init")
+	positional, err := parseArgsMultiPass(dfs, args[2:])
+	if err != nil {
 		return *cfg, fmt.Errorf("doctor: %w", err)
 	}
-	if dfs.NArg() > 0 {
-		cfg.pipelineFile = dfs.Arg(0)
+	if len(positional) > 1 {
+		return *cfg, fmt.Errorf("doctor: unexpected extra arguments after pipeline file: %v", positional[1:])
+	}
+	if len(positional) == 1 {
+		cfg.pipelineFile = positional[0]
 	}
 	if err := validateBackend(cfg.backend); err != nil {
 		return *cfg, fmt.Errorf("doctor: %w", err)
+	}
+	if err := validateGitFlag(*cfg); err != nil {
+		return *cfg, fmt.Errorf("doctor: %w", err)
+	}
+	if cfg.git == "auto" {
+		cfg.git = ""
 	}
 	return *cfg, nil
 }
@@ -137,6 +156,13 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	}
 	if err := validateToolSafetyFlags(cfg); err != nil {
 		return cfg, err
+	}
+	if err := validateGitFlag(cfg); err != nil {
+		return cfg, err
+	}
+	// Normalize the "auto" alias to empty so downstream comparisons stay simple.
+	if cfg.git == "auto" {
+		cfg.git = ""
 	}
 	return cfg, nil
 }
@@ -224,7 +250,20 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.Var(stringSliceFlag{target: &cfg.toolDenylistAdd}, "tool-denylist-add", "Extra glob pattern(s) added to the built-in tool_command denylist (defense in depth; additive, cannot remove built-ins; --bypass-denylist disables these too)")
 	fs.IntVar(&cfg.maxOutputLimit, "max-output-limit", 0, "Hard ceiling in bytes on tool_command output per stream (0 = default 10MB)")
 	fs.BoolVar(&cfg.forceBundleMismatch, "force-bundle-mismatch", false, "allow resume even when the bundle's content-addressed identity differs from the original run")
+	fs.StringVar(&cfg.git, "git", "", "Git preflight policy: auto (default, respects workflow `requires:`) | off | warn | require | init")
+	fs.BoolVar(&cfg.allowInit, "allow-init", false, "Required latch for --git=init in non-interactive runs")
 	return fs
+}
+
+// validateGitFlag rejects invalid --git values up front so the user gets a
+// clear error at flag-parse time rather than deep inside preflight.
+// Accepts both "" (resolves to auto downstream) and "auto" as aliases.
+func validateGitFlag(cfg runConfig) error {
+	switch cfg.git {
+	case "", "auto", "off", "warn", "require", "init":
+		return nil
+	}
+	return fmt.Errorf("invalid --git=%q: must be one of: auto, off, warn, require, init", cfg.git)
 }
 
 type paramMapFlag struct {
@@ -358,5 +397,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --tool-denylist-add pat   Extra glob pattern(s) added to built-in denylist (repeatable, comma-separated, additive; --bypass-denylist disables built-in + added patterns)\n")
 	fmt.Fprintf(w, "  --max-output-limit bytes  Hard ceiling per tool_command output stream (default: 10MB)\n")
 	fmt.Fprintf(w, "  --force-bundle-mismatch   Allow resume even when the bundle's content-addressed identity differs from the original run\n")
+	fmt.Fprintf(w, "  --git policy              Git preflight policy: auto (default), off, warn, require, init\n")
+	fmt.Fprintf(w, "  --allow-init              Required for --git=init in non-interactive runs\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

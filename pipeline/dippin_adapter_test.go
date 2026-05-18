@@ -2084,3 +2084,106 @@ func TestFromDippinIR_BackendAttrRoundTrip(t *testing.T) {
 		t.Errorf("graph Native model = %q, want %q", native.Attrs["llm_model"], "deepseek-v3")
 	}
 }
+
+// TestFromDippinIR_RequiresPopulatesGraphAttr verifies that workflow.Requires
+// (dippin-lang v0.26.0+) flows through the adapter to graph.Attrs["requires"]
+// and is parseable by Graph.RequiredDeps(). Regression guard for the v0.29.0
+// git preflight integration.
+func TestFromDippinIR_RequiresPopulatesGraphAttr(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:     "TestRequires",
+		Start:    "Start",
+		Exit:     "Exit",
+		Requires: []string{"git", "docker"},
+		Nodes: []*ir.Node{
+			{ID: "Start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "Exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "Start", To: "Exit"}},
+	}
+	g, err := FromDippinIR(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Attrs["requires"]; got != "git, docker" {
+		t.Errorf("requires attr: want %q, got %q", "git, docker", got)
+	}
+	deps := g.RequiredDeps()
+	if len(deps) != 2 || deps[0] != "git" || deps[1] != "docker" {
+		t.Errorf("RequiredDeps: want [git docker], got %v", deps)
+	}
+}
+
+func TestFromDippinIR_RequiresEmpty(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:  "TestNoRequires",
+		Start: "Start",
+		Exit:  "Exit",
+		Nodes: []*ir.Node{
+			{ID: "Start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "Exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "Start", To: "Exit"}},
+	}
+	g, err := FromDippinIR(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g.Attrs["requires"]; ok {
+		t.Errorf("expected no 'requires' attr when workflow.Requires is empty")
+	}
+}
+
+func TestFromDippinIR_RequiresTrimsWhitespaceAndDropsEmpty(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:     "TestRequiresMessy",
+		Start:    "Start",
+		Exit:     "Exit",
+		Requires: []string{"  git  ", "", "docker"},
+		Nodes: []*ir.Node{
+			{ID: "Start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "Exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "Start", To: "Exit"}},
+	}
+	g, err := FromDippinIR(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Attrs["requires"]; got != "git, docker" {
+		t.Errorf("requires attr: want %q (trimmed, empty dropped), got %q", "git, docker", got)
+	}
+}
+
+// TestFromDippinIR_RequiresDeduplicates verifies the adapter removes
+// duplicates while preserving declaration order. PR #235 review.
+func TestFromDippinIR_RequiresDeduplicates(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:     "TestRequiresDuplicates",
+		Start:    "Start",
+		Exit:     "Exit",
+		Requires: []string{"git", "docker", "git", "docker", "jq"},
+		Nodes: []*ir.Node{
+			{ID: "Start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "Exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "Start", To: "Exit"}},
+	}
+	g, err := FromDippinIR(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Attrs["requires"]; got != "git, docker, jq" {
+		t.Errorf("requires attr: want %q (deduplicated), got %q", "git, docker, jq", got)
+	}
+	deps := g.RequiredDeps()
+	want := []string{"git", "docker", "jq"}
+	if len(deps) != len(want) {
+		t.Fatalf("RequiredDeps: want %v, got %v", want, deps)
+	}
+	for i := range want {
+		if deps[i] != want[i] {
+			t.Errorf("idx %d: want %q, got %q", i, want[i], deps[i])
+		}
+	}
+}

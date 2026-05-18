@@ -46,6 +46,12 @@ type runConfig struct {
 	// Consumed by resume identity verification to allow an explicit
 	// operator override when bundle identities differ.
 	forceBundleMismatch bool
+	// git is the v0.29.0 preflight policy: "" (auto) | "off" | "warn" |
+	// "require" | "init". Empty resolves to auto, which honors the
+	// workflow's `requires:` declaration.
+	git string
+	// allowInit is the second latch for --git=init in non-interactive runs.
+	allowInit bool
 }
 
 type commandMode string

@@ -1,5 +1,6 @@
 workflow BuildProduct
   goal: "Read a SPEC.md, decompose into milestones, implement each with verification loops, cross-review the complete result, and verify full spec compliance."
+  requires: git
   start: Start
   exit: Done
 

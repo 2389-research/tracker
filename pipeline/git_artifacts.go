@@ -190,6 +190,47 @@ func (r *gitArtifactRepo) git(args ...string) (string, error) {
 	return out.String(), err
 }
 
+// GitSafeEnv returns a copy of the current environment with sensitive
+// variables (API keys, secrets, tokens, passwords) stripped before
+// passing to a git subprocess. Exported so external callers (tracker
+// doctor's probeGitForDoctor) can match the runtime preflight's
+// sanitized-environment posture without duplicating the helper.
+// Honors the TRACKER_PASS_ENV=1 escape hatch.
+func GitSafeEnv() []string {
+	return gitSafeEnv()
+}
+
+// GitProbeEnv returns the safe env with locale forced to C so any stderr
+// we parse (`not a git repository`, `is-inside-work-tree`) is stable
+// regardless of the operator's LANG/LC_* settings. Use this for the
+// preflight + doctor probes that classify git output; the artifact
+// repo's user-visible operations stay on GitSafeEnv so commits/branches
+// still respect the user's locale for messages they actually see.
+func GitProbeEnv() []string {
+	return gitProbeEnv()
+}
+
+// gitProbeEnv forces LANG/LC_ALL/LANGUAGE=C and disables a pager (so
+// short-circuiting binaries don't deadlock on stdin) on top of
+// gitSafeEnv. Localized git installs would otherwise emit translated
+// "not a git repository" diagnostics that bypass isNotARepoStderr and
+// surface as unexpected probe failures.
+func gitProbeEnv() []string {
+	env := gitSafeEnv()
+	// Drop any caller-supplied LANG/LC_*/LANGUAGE/GIT_PAGER so the forced
+	// values below win regardless of inherited environment.
+	filtered := env[:0]
+	for _, e := range env {
+		name := strings.ToUpper(strings.SplitN(e, "=", 2)[0])
+		if name == "LANG" || name == "LANGUAGE" || name == "GIT_PAGER" ||
+			strings.HasPrefix(name, "LC_") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return append(filtered, "LANG=C", "LC_ALL=C", "LANGUAGE=C", "GIT_PAGER=cat")
+}
+
 // gitSafeEnv returns a copy of the current environment with sensitive variables
 // stripped to avoid leaking credentials into the git subprocess.
 // Mirrors the filterSensitiveEnv logic used by the tool handler, including

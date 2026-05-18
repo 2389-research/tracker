@@ -1119,6 +1119,46 @@ func TestParseFlagsArtifactDir(t *testing.T) {
 	}
 }
 
+// TestGitConfigFieldsPassedToActiveGlobal verifies that executeRun propagates
+// cfg.git and cfg.allowInit into activeGitConfig, which the inline preflight
+// in run/runTUI reads. PR #235 round-5 (Copilot:3251112134) — without this
+// regression guard, a CLI flag could parse correctly while the runtime
+// preflight still sees the zero-value policy.
+func TestGitConfigFieldsPassedToActiveGlobal(t *testing.T) {
+	t.Cleanup(func() {
+		activeGitConfig.policy = ""
+		activeGitConfig.allowInit = false
+	})
+
+	var capturedPolicy string
+	var capturedAllowInit bool
+	_ = executeCommand(runConfig{
+		mode:         modeRun,
+		pipelineFile: "pipeline.dip",
+		workdir:      "/tmp",
+		noTUI:        true,
+		git:          "init",
+		allowInit:    true,
+	}, commandDeps{
+		loadEnv: func(string) error { return nil },
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+			capturedPolicy = activeGitConfig.policy
+			capturedAllowInit = activeGitConfig.allowInit
+			return nil
+		},
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+			t.Fatal("unexpected TUI path")
+			return nil
+		},
+	})
+	if capturedPolicy != "init" {
+		t.Errorf("activeGitConfig.policy inside run() = %q, want %q", capturedPolicy, "init")
+	}
+	if !capturedAllowInit {
+		t.Errorf("activeGitConfig.allowInit inside run() = false, want true")
+	}
+}
+
 // TestArtifactDirFieldPassedToActiveGlobal verifies that executeRun propagates
 // cfg.artifactDir into the activeArtifactDir global, which run/runTUI reads.
 func TestArtifactDirFieldPassedToActiveGlobal(t *testing.T) {

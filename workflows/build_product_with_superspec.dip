@@ -1,5 +1,6 @@
 workflow BuildProductWithSuperspec
   goal: "Read a structured product spec with parallel work streams, execute streams respecting dependencies, enforce quality gates mechanically, cross-review the complete result, and verify full traceability."
+  requires: git
   start: Start
   exit: Done
 

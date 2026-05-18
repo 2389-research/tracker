@@ -83,6 +83,15 @@ var activeToolSafety handlers.ToolHandlerConfig
 // engine fires. The zero value is the new (non-resume) run case.
 var activeResumeInfo resumeInfo
 
+// activeGitConfig holds the --git / --allow-init values for the current run.
+// Set by executeRun before calling run/runTUI, matching the pattern of
+// activeAutopilotCfg. Consumed by the inline pipeline.Preflight call in
+// run() and runTUI() just after applyRunParamOverrides.
+var activeGitConfig struct {
+	policy    string
+	allowInit bool
+}
+
 // webhookGateCfg holds just the webhook gate settings needed by chooseInterviewer.
 type webhookGateCfg struct {
 	webhookURL        string
@@ -122,14 +131,48 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 	return wi
 }
 
+// applyGitPreflight runs the v0.29.0 git preflight check using the
+// module-level activeGitConfig populated by executeRun. Called from both
+// run() and runTUI() after applyRunParamOverrides — so the check fires
+// before any LLM client setup or network activity. Bail on error so the
+// user sees the actionable remediation instead of a deferred failure.
+//
+// Takes a context so Ctrl+C during slow git probes (network drives,
+// dubious-ownership prompts, hung remotes) or during the optional
+// `git init` side effect of `--git=init` propagates cleanly. The
+// caller threads a signal.NotifyContext created before the LLM client
+// setup so cancellation works uniformly across preflight and engine.
+func applyGitPreflight(ctx context.Context, graph *pipeline.Graph, workdir string) error {
+	return pipeline.Preflight(ctx, pipeline.PreflightConfig{
+		WorkDir:        workdir,
+		Requires:       graph.RequiredDeps(),
+		Policy:         pipeline.GitPreflight(activeGitConfig.policy),
+		AllowInit:      activeGitConfig.allowInit,
+		InteractiveTTY: isatty.IsTerminal(os.Stdin.Fd()),
+		Warner: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...)
+		},
+	})
+}
+
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
 func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+	// Signal context lives across preflight + engine so Ctrl+C during a
+	// slow git probe or auto-init also aborts cleanly. Pre-fix the
+	// preflight used context.Background and only the engine got the
+	// signal context, so Ctrl+C couldn't interrupt the preflight branch.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
 	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
 	if err := applyRunParamOverrides(graph); err != nil {
+		return err
+	}
+	if err := applyGitPreflight(ctx, graph, workdir); err != nil {
 		return err
 	}
 
@@ -188,9 +231,6 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	)
 
 	engine := pipeline.NewEngine(graph, registry, engineOpts...)
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
 
 	result, runErr := engine.Run(ctx)
 
@@ -392,11 +432,21 @@ func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[
 }
 
 func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+	// Signal context covers preflight + engine for consistent Ctrl+C
+	// handling. The TUI's tea.Program owns the terminal once running,
+	// but preflight runs before that, so a slow git probe needs an
+	// interruptible context here too.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
 	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
 	if err != nil {
 		return err
 	}
 	if err := applyRunParamOverrides(graph); err != nil {
+		return err
+	}
+	if err := applyGitPreflight(ctx, graph, workdir); err != nil {
 		return err
 	}
 
@@ -447,7 +497,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo, bundleInfo.Identity)
 
-	outcome, err := runTUIWithEngine(engine, prog)
+	outcome, err := runTUIWithEngine(ctx, engine, prog)
 	if err != nil {
 		return err
 	}
@@ -473,11 +523,13 @@ func resolveLLMClient(tokenTracker *llm.TokenTracker, backend string) (*llm.Clie
 }
 
 // runTUIWithEngine runs the TUI program and waits for pipeline completion.
-func runTUIWithEngine(engine *pipeline.Engine, prog *tea.Program) (pipelineOutcome, error) {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+// ctx is the signal-aware context created in runTUI so preflight, engine,
+// and the TUI program share a single cancellation surface.
+func runTUIWithEngine(ctx context.Context, engine *pipeline.Engine, prog *tea.Program) (pipelineOutcome, error) {
+	pipelineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	outcomeCh := runPipelineAsync(engine, ctx, prog)
+	outcomeCh := runPipelineAsync(engine, pipelineCtx, prog)
 
 	_, err := prog.Run()
 	cancel()

@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,7 +23,7 @@ import (
 
 // PinnedDippinVersion is the dippin-lang version from go.mod.
 // Keep in sync with the require line in go.mod.
-const PinnedDippinVersion = "v0.25.0"
+const PinnedDippinVersion = "v0.26.0"
 
 // DoctorConfig configures a Doctor() run.
 type DoctorConfig struct {
@@ -40,6 +41,17 @@ type DoctorConfig struct {
 	// versionInfo is populated by WithVersionInfo. Unexported so callers
 	// use the functional option rather than setting CLI-specific fields.
 	versionInfo versionInfo
+	// gitCfg is populated by WithGitConfig. Drives the Git Requires check.
+	// Unexported; zero value (set=false) implies GitPreflightAuto.
+	gitCfg doctorGitConfig
+}
+
+// doctorGitConfig carries the resolved --git/--allow-init values into the
+// Git Requires check.
+type doctorGitConfig struct {
+	policy    GitPreflight
+	allowInit bool
+	set       bool
 }
 
 // versionInfo carries CLI-provided build metadata into a Doctor run.
@@ -57,6 +69,16 @@ type DoctorOption func(*DoctorConfig)
 func WithVersionInfo(version, commit string) DoctorOption {
 	return func(c *DoctorConfig) {
 		c.versionInfo = versionInfo{version: version, commit: commit}
+	}
+}
+
+// WithGitConfig sets the git preflight policy considered by the Git Requires
+// check. Library callers that don't set this get GitPreflightAuto behavior
+// (respect workflow `requires:`). CLI doctor mode passes --git/--allow-init
+// through this option.
+func WithGitConfig(policy GitPreflight, allowInit bool) DoctorOption {
+	return func(c *DoctorConfig) {
+		c.gitCfg = doctorGitConfig{policy: policy, allowInit: allowInit, set: true}
 	}
 }
 
@@ -146,7 +168,10 @@ func Doctor(ctx context.Context, cfg DoctorConfig, opts ...DoctorOption) (*Docto
 		checkDiskSpace(cfg.WorkDir),
 	)
 	if cfg.PipelineFile != "" {
-		r.Checks = append(r.Checks, checkPipelineFile(cfg.PipelineFile))
+		r.Checks = append(r.Checks,
+			checkPipelineFile(cfg.PipelineFile),
+			checkGitRequires(ctx, cfg),
+		)
 	}
 
 	r.OK = true
@@ -809,6 +834,257 @@ func isDirWritable(dir string) bool {
 // checkDiskSpace warns when available disk space under workdir is low.
 // The implementation is platform-specific; see tracker_doctor_unix.go and
 // tracker_doctor_windows.go.
+
+// checkGitRequires evaluates the workflow's `requires:` list against the
+// current environment and the resolved --git= policy. Runs only when a
+// pipeline file is provided. The result mirrors what would happen at
+// `tracker run` time, so users can preview the gate without burning spend.
+//
+// Policy modeling matches pipeline.Preflight:
+//   - off  → Skip (bypass)
+//   - auto + workflow doesn't require git → OK
+//   - require / init → forces the check regardless of workflow
+//   - missing git → Error (downgraded to Warn under warn policy)
+//   - missing repo + policy != init → Error (downgraded to Warn under warn)
+//   - missing repo + policy == init: model the auto-init outcome:
+//     safety latches would pass → OK with hint ("auto-init would
+//     create .git here at run start")
+//     safety latches would refuse → Error with the latch reason
+//     This avoids the false-positive Error the previous implementation
+//     reported when --git=init --allow-init would actually succeed.
+func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
+	out := CheckResult{Name: "Git Requires"}
+
+	if cfg.PipelineFile == "" {
+		out.Status = CheckStatusSkip
+		out.Message = "no pipeline file provided"
+		return out
+	}
+
+	graph, loadMsg, ok := loadGraphForGitRequires(ctx, cfg.PipelineFile)
+	if !ok {
+		out.Status = CheckStatusSkip
+		out.Message = loadMsg
+		return out
+	}
+
+	deps := graph.RequiredDeps()
+	policy := cfg.gitCfg.policy
+
+	// Walk declared deps FIRST: classify each and surface unrecognized deps
+	// as CheckDetail warnings so the doctor preview matches what runtime
+	// pipeline.Preflight will emit on stderr. The off-bypass below must
+	// not silence these — runtime preflight scans deps before its own off
+	// bypass for the same reason (forward-declared deps stay visible).
+	requiresGit := false
+	hasUnknownDeps := false
+	for _, d := range deps {
+		switch strings.ToLower(strings.TrimSpace(d)) {
+		case "":
+			// empty entry; skip
+		case "git":
+			requiresGit = true
+		default:
+			hasUnknownDeps = true
+			out.Details = append(out.Details, CheckDetail{
+				Status:  CheckStatusWarn,
+				Message: fmt.Sprintf("requires %q is not yet implemented; runtime will warn and continue", d),
+			})
+		}
+	}
+
+	// Off-bypass comes AFTER the dep scan so unrecognized-dep warnings
+	// still surface under --git=off. Top-level Status escalates to Warn
+	// when any details warn, so `tracker doctor`'s exit code reflects
+	// the diagnostic (Doctor() counts CheckResult.Status, not Details).
+	if policy == GitPreflightOff {
+		if hasUnknownDeps {
+			out.Status = CheckStatusWarn
+			out.Message = "--git=off; bypassing git check (unrecognized requires: entries surfaced as warnings)"
+		} else {
+			out.Status = CheckStatusSkip
+			out.Message = "--git=off; bypassing"
+		}
+		return out
+	}
+
+	if policy == GitPreflightRequire || policy == GitPreflightInit {
+		requiresGit = true
+	}
+	if !requiresGit {
+		// No git required, but unknown deps may still warrant a top-level Warn.
+		if hasUnknownDeps {
+			out.Status = CheckStatusWarn
+			out.Message = "workflow does not require git; unrecognized requires: entries surfaced as warnings"
+		} else {
+			out.Status = CheckStatusOK
+			out.Message = "workflow does not require git"
+		}
+		return out
+	}
+
+	installed, isRepo, isBare, probeErr := probeGitForDoctor(ctx, cfg.WorkDir)
+	if probeErr != nil {
+		// ctx cancellation or unexpected execution failure. Treat as Error
+		// so the operator sees the actual cause rather than a misleading
+		// "not a repo" preview.
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("git probe failed: %v", probeErr)
+		out.Hint = "if the context was cancelled, retry; otherwise investigate the PATH/permissions"
+		return out
+	}
+	if !installed {
+		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+		out.Message = "workflow requires git, but git is not in PATH"
+		out.Hint = "install git (brew install git / apt install git / https://git-scm.com)"
+		return out
+	}
+	if isBare {
+		// Inside a bare repo (or .git dir): "git init" here is wrong; the
+		// user needs to operate from a checkout/worktree. Distinct
+		// remediation from the plain non-repo case below.
+		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+		out.Message = fmt.Sprintf("workflow requires a working tree; %s is a bare git repository (no work tree)", cfg.WorkDir)
+		out.Hint = "cd into a checkout of this repo (clone or worktree) and run from there"
+		return out
+	}
+	if !isRepo {
+		// Auto-init preview: under --git=init, runtime would call
+		// runAutoInit which gates on (a) --allow-init or interactive
+		// confirmation, and (b) safety latches. Doctor doesn't have
+		// interactivity, so a non-interactive run effectively requires
+		// allowInit=true. Model that here so a user who passes
+		// --git=init --allow-init in a clean dir gets the accurate
+		// preview (OK with hint) rather than a misleading Error.
+		if policy == GitPreflightInit && cfg.gitCfg.allowInit {
+			if latchErr := pipeline.SafetyLatches(ctx, cfg.WorkDir); latchErr != nil {
+				out.Status = CheckStatusError
+				out.Message = fmt.Sprintf("auto-init would refuse: %v", latchErr)
+				out.Hint = "cd into a project subdirectory, or run `git init` manually"
+				return out
+			}
+			out.Status = CheckStatusOK
+			out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start", cfg.WorkDir)
+			out.Hint = ".git will be created here at run start, before the first node executes"
+			return out
+		}
+		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
+		out.Hint = "run `git init` here, or `tracker <workflow> --git=init --allow-init`"
+		return out
+	}
+	if hasUnknownDeps {
+		// Git satisfied but unknown deps still warrant a top-level Warn
+		// so `tracker doctor`'s exit code reflects the diagnostic.
+		out.Status = CheckStatusWarn
+		out.Message = "workflow requires git; env satisfies it (unrecognized requires: entries surfaced as warnings)"
+	} else {
+		out.Status = CheckStatusOK
+		out.Message = "workflow requires git; env satisfies it"
+	}
+	return out
+}
+
+// loadGraphForGitRequires loads the entry graph from a `.dip` source file
+// OR a `.dipx` bundle, returning the same `*pipeline.Graph` shape either
+// way. The doctor's Git Requires check needs `graph.RequiredDeps()` and
+// nothing else — running tracker's full bundle validation would duplicate
+// what checkPipelineBundle already covers. Returns (nil, "...", false)
+// when the file can't be loaded; the caller maps that to CheckStatusSkip.
+//
+// .dipx bundles are routed through pipeline.LoadDipxBundle so a
+// `tracker doctor <bundle.dipx>` invocation accurately previews what
+// runtime preflight (which also goes through LoadDipxBundle internally
+// in the loader path) would see. Pre-fix the .dipx branch fell through
+// to parsePipelineSource which choked on ZIP bytes and silently Skip'd
+// — bundle inputs got no Git Requires preview at all.
+func loadGraphForGitRequires(ctx context.Context, pipelineFile string) (*pipeline.Graph, string, bool) {
+	if strings.EqualFold(filepath.Ext(pipelineFile), ".dipx") {
+		entry, _, _, _, err := pipeline.LoadDipxBundle(ctx, pipelineFile)
+		if err != nil {
+			return nil, fmt.Sprintf("cannot load bundle %s: %v", pipelineFile, err), false
+		}
+		return entry, "", true
+	}
+	fileBytes, err := os.ReadFile(pipelineFile)
+	if err != nil {
+		return nil, fmt.Sprintf("cannot read %s: %v", pipelineFile, err), false
+	}
+	graph, err := parsePipelineSource(string(fileBytes), detectSourceFormat(string(fileBytes)))
+	if err != nil {
+		return nil, fmt.Sprintf("cannot parse %s: %v", pipelineFile, err), false
+	}
+	return graph, "", true
+}
+
+// doctorStatusForPolicy maps preflight policy to a CheckStatus, downgrading
+// to warn when policy == warn.
+func doctorStatusForPolicy(policy GitPreflight, hardStatus CheckStatus) CheckStatus {
+	if policy == GitPreflightWarn {
+		return CheckStatusWarn
+	}
+	return hardStatus
+}
+
+// probeGitForDoctor performs the same two probes as pipeline.checkGit but
+// without reaching into the pipeline-internal helper. Local copy keeps the
+// doctor file's dependency surface clean.
+//
+// Uses `--is-inside-work-tree` (NOT `--git-dir`) so bare repositories don't
+// count as "repo OK": workflows that declare `requires: git` need a work
+// tree for `git commit`/`git merge`, both of which fail in a bare repo.
+// Matches the pipeline.checkGit fix from the same review pass.
+// probeGitForDoctor returns (installed, isRepo, isBare, err). Mirrors
+// pipeline.checkGit's contract:
+//   - installed=false means git missing from PATH (benign)
+//   - isRepo=true means inside a real work tree
+//   - isBare=true means inside a bare repo or .git directory (no work tree)
+//   - all three false means outside any repo (plain dir)
+//   - err is non-nil only on cancellation or unexpected execution failure;
+//     "not a repo" stderr discrimination keeps dubious-ownership /
+//     safe.directory failures from being mis-classified as benign
+//
+// Bare distinction is necessary so the doctor preview can emit the right
+// remediation: bare-repo users need "cd into a checkout," not "git init."
+func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isRepo bool, isBare bool, err error) {
+	if _, lerr := exec.LookPath("git"); lerr != nil {
+		if errors.Is(lerr, exec.ErrNotFound) {
+			return false, false, false, nil
+		}
+		return false, false, false, fmt.Errorf("locate git in PATH: %w", lerr)
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
+	// Strip sensitive env AND force LANG/LC_ALL=C so the "not a git
+	// repository" classifier below can rely on stable English stderr
+	// regardless of operator locale. Pre-fix the doctor on a localized
+	// install would have reported a plain non-repo as `git rev-parse
+	// refused: <translated phrase>` instead of the documented
+	// not-a-repo remediation.
+	cmd.Env = pipeline.GitProbeEnv()
+	out, runErr := cmd.Output()
+	if runErr == nil {
+		stdout := strings.TrimSpace(string(out))
+		switch stdout {
+		case "true":
+			return true, true, false, nil
+		case "false":
+			return true, false, true, nil
+		default:
+			return true, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: unexpected output %q", stdout)
+		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return true, false, false, ctxErr
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		if strings.Contains(string(exitErr.Stderr), "not a git repository") {
+			return true, false, false, nil // expected — outside any repo
+		}
+		return true, false, false, fmt.Errorf("git rev-parse refused: %s", strings.TrimSpace(string(exitErr.Stderr)))
+	}
+	return true, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: %w", runErr)
+}
 
 // checkPipelineFile parses and validates a pipeline file.
 func checkPipelineFile(pipelineFile string) CheckResult {

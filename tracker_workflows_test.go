@@ -50,6 +50,45 @@ func TestWorkflows_ReturnsCopy(t *testing.T) {
 	}
 }
 
+// TestWorkflows_RequiresSliceIsDeepCopy pins the PR #235 review fix from
+// Copilot: WorkflowInfo.Requires is a slice, and shallow-copying the struct
+// shares the backing array with the cached catalog. A caller that mutates
+// info.Requires[0] would corrupt the global catalog for the rest of the
+// process. Workflows() and LookupWorkflow() now deep-copy via
+// cloneWorkflowInfo.
+func TestWorkflows_RequiresSliceIsDeepCopy(t *testing.T) {
+	first := Workflows()
+	var target int = -1
+	for i := range first {
+		if len(first[i].Requires) > 0 {
+			target = i
+			break
+		}
+	}
+	if target < 0 {
+		t.Skip("no built-in workflow declares requires: — nothing to mutate")
+	}
+	originalFirstDep := first[target].Requires[0]
+	first[target].Requires[0] = "mutated"
+
+	// Same workflow re-read: must be the pristine value, not "mutated".
+	second := Workflows()
+	if got := second[target].Requires[0]; got != originalFirstDep {
+		t.Errorf("Workflows() shared the Requires backing array: mutation leaked (%q → %q)", originalFirstDep, got)
+	}
+
+	// Also via LookupWorkflow.
+	info, ok := LookupWorkflow(second[target].Name)
+	if !ok {
+		t.Fatalf("LookupWorkflow(%q) missing", second[target].Name)
+	}
+	info.Requires[0] = "mutated-via-lookup"
+	info2, _ := LookupWorkflow(second[target].Name)
+	if info2.Requires[0] != originalFirstDep {
+		t.Errorf("LookupWorkflow shared the Requires backing array: mutation leaked (%q → %q)", originalFirstDep, info2.Requires[0])
+	}
+}
+
 func TestLookupWorkflow_Known(t *testing.T) {
 	info, ok := LookupWorkflow("build_product")
 	if !ok {
@@ -88,5 +127,67 @@ func TestOpenWorkflow_Unknown(t *testing.T) {
 	_, _, err := OpenWorkflow("no_such_workflow_anywhere")
 	if err == nil {
 		t.Error("expected error for unknown workflow, got nil")
+	}
+}
+
+func TestParseWorkflowHeader_RequiresMulti(t *testing.T) {
+	displayName, goal, requires := parseWorkflowHeaderForTest([]byte(`workflow Foo
+  goal: "test"
+  requires: git, docker
+  start: Start
+  exit: Done
+`))
+	if displayName != "Foo" {
+		t.Errorf("displayName: want Foo, got %q", displayName)
+	}
+	if goal != "test" {
+		t.Errorf("goal: want 'test', got %q", goal)
+	}
+	if len(requires) != 2 || requires[0] != "git" || requires[1] != "docker" {
+		t.Errorf("requires: want [git docker], got %v", requires)
+	}
+}
+
+func TestParseWorkflowHeader_NoRequires(t *testing.T) {
+	_, _, requires := parseWorkflowHeaderForTest([]byte(`workflow Foo
+  goal: "test"
+  start: Start
+  exit: Done
+`))
+	if len(requires) != 0 {
+		t.Errorf("expected empty requires when not declared, got %v", requires)
+	}
+}
+
+func TestParseWorkflowHeader_RequiresStopsAtStart(t *testing.T) {
+	// Header scan stops at `start:`; a `requires:` line after `start:` is
+	// ignored. (No real workflow would do that, but the parser shouldn't
+	// scan the whole file looking for it.)
+	_, _, requires := parseWorkflowHeaderForTest([]byte(`workflow Foo
+  goal: "test"
+  start: Start
+  requires: git
+  exit: Done
+`))
+	if len(requires) != 0 {
+		t.Errorf("expected empty requires (declared after start:), got %v", requires)
+	}
+}
+
+func TestParseWorkflowHeader_RequiresDeduplicates(t *testing.T) {
+	_, _, requires := parseWorkflowHeaderForTest([]byte(`workflow Foo
+  goal: "test"
+  requires: git, docker, git, docker, jq
+  start: Start
+  exit: Done
+`))
+	want := []string{"git", "docker", "jq"}
+	if len(requires) != len(want) {
+		t.Fatalf("requires: want %v (deduped), got %v", want, requires)
+	}
+	for i := range want {
+		if requires[i] != want[i] {
+			t.Errorf("idx %d: want %q, got %q", i, want[i], requires[i])
+		}
 	}
 }
