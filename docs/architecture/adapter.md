@@ -271,7 +271,7 @@ Two invariants from CLAUDE.md that the adapter's shape supports:
 ## Integration points
 
 - **Callers**: `tracker.NewEngine` (via `pipeline.LoadDippinSource`) parses `.dip` text, then calls `FromDippinIR`. `cmd/tracker/resolve.go` resolves bare names to `.dip` files before calling the library.
-- **Downstream**: the resulting `*pipeline.Graph` feeds the validator (`pipeline/validate*.go`), the lint suite (`pipeline/lint_dippin*.go`), and the engine (`pipeline/engine.go`).
+- **Downstream**: the resulting `*pipeline.Graph` feeds the validator (`pipeline/validate*.go`), tracker-specific lint (`pipeline/lint_tracker.go` for TRK1XX), and the engine (`pipeline/engine.go`). DIP-coded lint (DIP1XX) is owned by `dippin-lang/validator.Lint()` and surfaces through `Graph.LintWarnings`, which the adapter does not populate itself — `LoadDippinWorkflowFromIR` does, before returning the graph.
 - **Subgraph loading**: workflow files that reference external subgraphs trigger `pipeline/dippin_load.go`, which recursively adapts each referenced file so handler attribute keys match across levels.
 
 ## Gotchas and invariants

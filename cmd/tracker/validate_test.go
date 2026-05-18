@@ -26,13 +26,18 @@ const invalidDOTNoStart = `digraph test {
 	Work -> End;
 }`
 
+// warningOnlyDOT exercises tracker's structural lint without firing any
+// errors: Check is a diamond (conditional) node with a labeled "yes" edge
+// and an unlabeled fallthrough — that triggers validateEdgeLabelConsistency
+// ("inconsistent edge label usage"). DIP1XX warnings are owned by
+// dippin-lang and don't apply to DOT graphs.
 const warningOnlyDOT = `digraph test {
 	Start [shape=Mdiamond];
 	Check [shape=diamond];
 	EndA [shape=Msquare];
 	Start -> Check;
 	Check -> EndA [label="yes" condition="outcome=success"];
-	Check -> EndA [label="no" condition="outcome=fail"];
+	Check -> EndA [condition="outcome=fail"];
 }`
 
 func TestValidateValid(t *testing.T) {

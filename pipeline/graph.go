@@ -53,6 +53,16 @@ type Graph struct {
 	// changed since dippin last validated it.
 	DippinValidated bool
 
+	// LintWarnings carries pre-formatted warning lines from dippin-lang's
+	// lint pass (DIP1XX). Populated by LoadDippinWorkflowFromIR for .dip /
+	// .dipx sources and empty for DOT graphs. tracker.ValidateAll surfaces
+	// these alongside its own structural warnings so callers (validate /
+	// simulate / doctor) see a single warnings list without re-running any
+	// DIP-coded check on the tracker side. Format matches tracker's
+	// single-line convention ("warning[DIPxxx]: ...") to render cleanly
+	// inside bulleted "Validation Warnings" output.
+	LintWarnings []string
+
 	// Adjacency indexes for O(1) edge lookup. Built by AddEdge.
 	outgoing map[string][]*Edge
 	incoming map[string][]*Edge

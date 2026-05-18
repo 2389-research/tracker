@@ -43,7 +43,9 @@ func LoadDippinWorkflowFromIR(workflow *ir.Workflow, filename string) (*Graph, [
 		return nil, valResult.Diagnostics, fmt.Errorf("%d validation error(s) in %s", len(valResult.Errors()), filename)
 	}
 
-	// Run Dippin lint checks (DIP101–DIP115). Warnings only — don't block.
+	// Run Dippin lint checks (DIP101+). Warnings only — don't block.
+	// dippin-lang is the single source of truth for DIP-coded lint; tracker
+	// no longer maintains a parallel implementation.
 	lintResult := validator.Lint(workflow)
 
 	// Convert IR to tracker's Graph representation.
@@ -56,10 +58,34 @@ func LoadDippinWorkflowFromIR(workflow *ir.Workflow, filename string) (*Graph, [
 	// own validator skips redundant structural checks (DIP001–DIP009).
 	graph.DippinValidated = true
 
+	// Stash formatted lint warnings on the graph so ValidateAll/-WithLint
+	// can surface them through the standard warnings channel without
+	// re-running any DIP check on the tracker side.
+	graph.LintWarnings = formatLintWarnings(lintResult.Diagnostics)
+
 	// Return all diagnostics (both validation and lint) so callers can log them.
 	var allDiags []validator.Diagnostic
 	allDiags = append(allDiags, valResult.Diagnostics...)
 	allDiags = append(allDiags, lintResult.Diagnostics...)
 
 	return graph, allDiags, nil
+}
+
+// formatLintWarnings returns single-line "warning[CODE]: message" strings for
+// every warning-severity diagnostic. Used to seed Graph.LintWarnings so the
+// "Validation Warnings" output rendered by tracker validate / simulate stays
+// one-line-per-warning regardless of dippin-lang's multi-line String() form.
+// Errors are not included — those are returned as a fatal error.
+func formatLintWarnings(diags []validator.Diagnostic) []string {
+	if len(diags) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(diags))
+	for _, d := range diags {
+		if d.Severity != validator.SeverityWarning {
+			continue
+		}
+		out = append(out, fmt.Sprintf("warning[%s]: %s", d.Code, d.Message))
+	}
+	return out
 }
