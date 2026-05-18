@@ -133,14 +133,14 @@ type PreflightConfig struct {
 }
 ```
 
-Internal helpers:
-- `checkGit(workDir) (installed bool, isRepo bool, err error)` — runs `git --version` and `git -C <workDir> rev-parse --git-dir`
-- `runAutoInit(workDir, allowInit, interactive bool) error` — performs `git init` after running safety latches
-- `safetyLatches(workDir) error` — refuses init if `cwd == $HOME`, `cwd == /`, or any parent dir already contains `.git`
+Internal helpers (final shipped shapes after PR review):
+- `checkGit(ctx, workDir) (installed, isRepo, isBare bool, err error)` — runs `git --version` and `git -C <workDir> rev-parse --is-inside-work-tree`. Uses `--is-inside-work-tree` (NOT `--git-dir`) so bare repositories correctly fail `requires: git` since `git commit`/`git merge` need a work tree. The `isBare` return lets callers emit a "cd into a checkout" remediation distinct from "run git init."
+- `runAutoInit(ctx, workDir, allowInit, interactive bool, promptYN func(string) bool) error` — performs `git init` after running safety latches; promptYN is injected so tests don't have to attach a real stdin.
+- `safetyLatches(ctx, workDir) error` — refuses init if `cwd == $HOME` (symlink-resolved), `cwd` is the filesystem root (volume-aware on Windows), or `git -C cwd rev-parse --git-dir` resolves any kind of git context (bare repo, linked worktree, submodule, regular nested repo). Distinguishes "not a repo" stderr from real errors so a dubious-ownership/safe.directory/permission failure doesn't fail open.
 
 ### Engine hook placement
 
-`pipeline.NewEngine` is unchanged (no dependency on preflight). The preflight runs in `tracker.Run` (the library entry point), before the engine starts:
+The preflight runs in `tracker.NewEngineWithContext` (the ctx-aware constructor introduced by PR review). `tracker.Run(ctx, ...)` calls it; `tracker.NewEngine(source, cfg)` is a thin BC wrapper that delegates with `context.Background()`. The CLI's `cmd/tracker/run.go` calls `pipeline.Preflight` directly because it bypasses `tracker.NewEngine{,WithContext}` (custom registry path). All three call sites converge on `pipeline.Preflight`, which always runs before the engine starts:
 
 ```go
 // In tracker.go's Run() or buildEngine() flow:
@@ -288,18 +288,21 @@ A fixture pipeline declaring `requires: git`, run end-to-end in a temp directory
 
 ## Migration & rollout
 
-- **Built-in workflows updated in the same PR:**
+- **Built-in workflows updated in the same PR** (final shipped set; the
+  original spec listed a `dotpowers` workflow that doesn't exist in this
+  repo — the actual mid-run-git-using built-ins are):
   - `examples/build_product.dip` — add `requires: git`
   - `examples/build_product_with_superspec.dip` — add `requires: git`
-  - `examples/dotpowers.dip` — add `requires: git`
-  - Other built-ins audited: any that mention `git` in agent prompts or tool commands get the declaration
+  - `examples/ask_and_execute.dip` — add `requires: git` (uses `git worktree` for parallel-impl fan-out + `git branch`/`git merge`)
+  - `examples/deep_review.dip` — audited; no git references, no declaration
+  - The `workflows/*.dip` embedded mirrors are kept in sync via `make sync-workflows`.
 - **Backward compatibility:** the change is additive. Workflows that don't declare `requires:` get the same behavior as today. CLI flag default is `auto`, which is a no-op when no workflow declares `requires:`. No existing test should need to change.
 - **CHANGELOG entry** (Added section):
 
   > - **Workflow header `requires: <list>` for environmental dependencies.** Workflows can now declare prerequisites at the top of the `.dip` file. v0.29.0 implements `git` (`requires: git` makes tracker check git is installed and the workdir is a git repo before any LLM call). Unrecognized entries warn and continue, so workflow authors can forward-declare deps that future tracker versions will check. Closes #<filed-during-implementation>.
   > - **`--git=off|warn|require|init` CLI flag** to override per-run. Default `auto` respects the workflow's `requires:` block. `--git=init` (with mandatory `--allow-init` latch) auto-runs `git init` in the workdir, with safety refusals for `$HOME` / `/` / nested repos.
   > - **`tracker doctor` git-requires check** shows what would happen at run start for the current dir + workflow + flags.
-  > - **Built-in workflows** that use git (`build_product`, `build_product_with_superspec`, `dotpowers`) now declare `requires: git`. Running them in a non-git directory fails in seconds with a copy-paste remediation, instead of burning hours of LLM spend before failing at the first `git commit` instruction.
+  > - **Built-in workflows** that use git (`ask_and_execute`, `build_product`, `build_product_with_superspec`) now declare `requires: git`. Running them in a non-git directory fails in seconds with a copy-paste remediation, instead of burning hours of LLM spend before failing at the first `git commit` instruction.
 
 - **README** — single new paragraph in the workflow-authoring section pointing at `requires:`.
 - **docs/architecture/** — no new doc needed; this is a small surface. A brief mention in `docs/architecture/adapter.md` describing the `requires:` IR field, if it gets one.
