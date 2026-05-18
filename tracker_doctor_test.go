@@ -598,6 +598,43 @@ func TestDoctor_GitRequires_BundleInputDetectsSourceLevelRequires(t *testing.T) 
 	}
 }
 
+// TestDoctor_GitRequires_BareRepoHintMentionsCheckout pins the PR #235
+// round-5 review fix (Copilot:3251112125): pre-fix, a bare repo
+// collapsed to the same "isRepo=false" state as a plain non-repo, and
+// Doctor showed the generic "run git init" hint — wrong remediation
+// for bare repos. Doctor now distinguishes the case and emits "cd into
+// a checkout (clone or worktree)" as the hint instead.
+func TestDoctor_GitRequires_BareRepoHintMentionsCheckout(t *testing.T) {
+	requireGit(t)
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "bare.git")
+	cmd := exec.CommandContext(context.Background(), "git", "init", "--bare", "-q", bare)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	pf := filepath.Join(tmp, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      bare,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil || gr.Status != CheckStatusError {
+		t.Fatalf("want Error for bare-repo workdir, got %v", gr)
+	}
+	if !strings.Contains(gr.Message, "bare git repository") {
+		t.Errorf("message should mention 'bare git repository', got: %s", gr.Message)
+	}
+	if strings.Contains(gr.Hint, "git init") {
+		t.Errorf("hint should NOT suggest 'git init' for bare repo; got: %s", gr.Hint)
+	}
+	if !strings.Contains(gr.Hint, "checkout") {
+		t.Errorf("hint should suggest 'checkout' (clone or worktree) for bare repo; got: %s", gr.Hint)
+	}
+}
+
 // TestDoctor_GitRequires_BareRepoReportsError pins the PR #235 Copilot fix:
 // a bare repo passes `git rev-parse --git-dir` but has no work tree, so
 // `git commit` / `git merge` (the operations `requires: git` workflows

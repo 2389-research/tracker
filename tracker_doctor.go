@@ -923,7 +923,7 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		return out
 	}
 
-	installed, isRepo, probeErr := probeGitForDoctor(ctx, cfg.WorkDir)
+	installed, isRepo, isBare, probeErr := probeGitForDoctor(ctx, cfg.WorkDir)
 	if probeErr != nil {
 		// ctx cancellation or unexpected execution failure. Treat as Error
 		// so the operator sees the actual cause rather than a misleading
@@ -937,6 +937,15 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = "workflow requires git, but git is not in PATH"
 		out.Hint = "install git (brew install git / apt install git / https://git-scm.com)"
+		return out
+	}
+	if isBare {
+		// Inside a bare repo (or .git dir): "git init" here is wrong; the
+		// user needs to operate from a checkout/worktree. Distinct
+		// remediation from the plain non-repo case below.
+		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+		out.Message = fmt.Sprintf("workflow requires a working tree; %s is a bare git repository (no work tree)", cfg.WorkDir)
+		out.Hint = "cd into a checkout of this repo (clone or worktree) and run from there"
 		return out
 	}
 	if !isRepo {
@@ -1025,18 +1034,24 @@ func doctorStatusForPolicy(policy GitPreflight, hardStatus CheckStatus) CheckSta
 // count as "repo OK": workflows that declare `requires: git` need a work
 // tree for `git commit`/`git merge`, both of which fail in a bare repo.
 // Matches the pipeline.checkGit fix from the same review pass.
-// probeGitForDoctor returns (installed, isRepo, err) where err is non-nil
-// only on cancellation or unexpected execution failure. A normal "not a
-// repo" exit yields (true, false, nil); a missing-git PATH yields
-// (false, false, nil); everything else (cancellation, permission failures,
-// unexpected git crashes) propagates so Doctor doesn't silently report
-// a repository miss when the caller actually canceled or hit IO.
-func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isRepo bool, err error) {
+// probeGitForDoctor returns (installed, isRepo, isBare, err). Mirrors
+// pipeline.checkGit's contract:
+//   - installed=false means git missing from PATH (benign)
+//   - isRepo=true means inside a real work tree
+//   - isBare=true means inside a bare repo or .git directory (no work tree)
+//   - all three false means outside any repo (plain dir)
+//   - err is non-nil only on cancellation or unexpected execution failure;
+//     "not a repo" stderr discrimination keeps dubious-ownership /
+//     safe.directory failures from being mis-classified as benign
+//
+// Bare distinction is necessary so the doctor preview can emit the right
+// remediation: bare-repo users need "cd into a checkout," not "git init."
+func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isRepo bool, isBare bool, err error) {
 	if _, lerr := exec.LookPath("git"); lerr != nil {
 		if errors.Is(lerr, exec.ErrNotFound) {
-			return false, false, nil
+			return false, false, false, nil
 		}
-		return false, false, fmt.Errorf("locate git in PATH: %w", lerr)
+		return false, false, false, fmt.Errorf("locate git in PATH: %w", lerr)
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
 	// Strip sensitive env (API keys, tokens, secrets, passwords) before
@@ -1046,16 +1061,27 @@ func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isR
 	cmd.Env = pipeline.GitSafeEnv()
 	out, runErr := cmd.Output()
 	if runErr == nil {
-		return true, strings.TrimSpace(string(out)) == "true", nil
+		stdout := strings.TrimSpace(string(out))
+		switch stdout {
+		case "true":
+			return true, true, false, nil
+		case "false":
+			return true, false, true, nil
+		default:
+			return true, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: unexpected output %q", stdout)
+		}
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return true, false, ctxErr
+		return true, false, false, ctxErr
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		return true, false, nil // expected — workdir is not a repo
+		if strings.Contains(string(exitErr.Stderr), "not a git repository") {
+			return true, false, false, nil // expected — outside any repo
+		}
+		return true, false, false, fmt.Errorf("git rev-parse refused: %s", strings.TrimSpace(string(exitErr.Stderr)))
 	}
-	return true, false, fmt.Errorf("git rev-parse --is-inside-work-tree: %w", runErr)
+	return true, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: %w", runErr)
 }
 
 // checkPipelineFile parses and validates a pipeline file.
