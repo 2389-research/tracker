@@ -951,16 +951,30 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 	if !isRepo {
 		// Auto-init preview: under --git=init, runtime would call
 		// runAutoInit which gates on (a) --allow-init or interactive
-		// confirmation, and (b) safety latches. Doctor doesn't have
-		// interactivity, so a non-interactive run effectively requires
-		// allowInit=true. Model that here so a user who passes
-		// --git=init --allow-init in a clean dir gets the accurate
-		// preview (OK with hint) rather than a misleading Error.
+		// confirmation, (b) safety latches, and (c) the workdir-content
+		// latch (refuses if the dir has files outside `.git`). Doctor
+		// doesn't have interactivity, so a non-interactive run
+		// effectively requires allowInit=true. Model both latches so
+		// `doctor --git=init --allow-init` doesn't say OK in a workdir
+		// where the runtime would refuse.
 		if policy == GitPreflightInit && cfg.gitCfg.allowInit {
 			if latchErr := pipeline.SafetyLatches(ctx, cfg.WorkDir); latchErr != nil {
 				out.Status = CheckStatusError
 				out.Message = fmt.Sprintf("auto-init would refuse: %v", latchErr)
 				out.Hint = "cd into a project subdirectory, or run `git init` manually"
+				return out
+			}
+			hasContent, contentErr := pipeline.WorkdirHasContent(cfg.WorkDir)
+			if contentErr != nil {
+				out.Status = CheckStatusError
+				out.Message = fmt.Sprintf("could not scan workdir for auto-init preview: %v", contentErr)
+				out.Hint = "check filesystem permissions on the workdir"
+				return out
+			}
+			if hasContent {
+				out.Status = CheckStatusError
+				out.Message = fmt.Sprintf("auto-init would refuse: %s is not empty (auto-init makes an empty initial commit; user files would stay untracked)", cfg.WorkDir)
+				out.Hint = "stage your own initial commit: `git init && git add . && git commit -m initial`"
 				return out
 			}
 			out.Status = CheckStatusOK
@@ -970,7 +984,24 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		}
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
-		out.Hint = "run `git init` here, or `tracker <workflow> --git=init --allow-init`"
+		out.Hint = "run `git init && git commit --allow-empty -m initial` here, or `tracker <workflow> --git=init --allow-init` in an empty directory"
+		return out
+	}
+	// Workdir IS a repo. Verify HEAD is born — same probe Preflight uses,
+	// so the doctor preview agrees with the runtime check. Pre-fix the
+	// doctor reported "OK" for unborn-HEAD repos while the actual run
+	// failed in preflight (Copilot:3260568737).
+	born, headErr := pipeline.HasBornHEAD(ctx, cfg.WorkDir)
+	if headErr != nil {
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("could not verify HEAD: %v", headErr)
+		out.Hint = "retry if ctx was cancelled; otherwise investigate the repo state"
+		return out
+	}
+	if !born {
+		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+		out.Message = fmt.Sprintf("workflow requires a git repository with at least one commit; %s has no commits (unborn HEAD)", cfg.WorkDir)
+		out.Hint = "create an initial commit: `git -C " + cfg.WorkDir + " commit --allow-empty -m initial` (or `git add . && git commit -m initial` to capture existing files)"
 		return out
 	}
 	if hasUnknownDeps {

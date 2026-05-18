@@ -277,7 +277,7 @@ tracker: refusing to run `git init` here — a parent directory is already a git
 
 - `--git=off`, `--git=warn`, `--git=require`, `--git=init`, `--allow-init` all parse correctly
 - `--git=bogus` returns an explicit error listing valid values
-- `--git=init` without `--allow-init` in non-interactive mode is caught at flag-parse time with a friendly error (not deferred to preflight)
+- `--git=init` without `--allow-init` parses successfully — the `--allow-init` requirement is a *preflight*-time latch, not a flag-parse rule, because interactive (TTY) runs may satisfy it via the `[Y/n]` consent prompt instead. The non-interactive refusal is covered by the unit test for `runAutoInit` (`TestRunAutoInit_NeedsAllowInit_NonInteractive`).
 
 ### Integration test
 

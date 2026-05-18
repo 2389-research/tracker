@@ -543,8 +543,14 @@ func TestDoctor_GitRequires_OffSkipsSourceLevel(t *testing.T) {
 // reports OK with a hint explaining what would happen at run start.
 func TestDoctor_GitRequires_InitAllowInitPreviewsOK(t *testing.T) {
 	requireGit(t)
+	// WorkDir must be empty for the auto-init preview to be OK: PR #235
+	// round-7 added a workdir-content latch (Copilot:3260568814) — if the
+	// dir contains files, auto-init would refuse because an empty initial
+	// commit would leave those files outside HEAD. Keep wf.dip in a
+	// separate dir so the workdir under test stays empty.
 	dir := t.TempDir()
-	pf := filepath.Join(dir, "wf.dip")
+	pfDir := t.TempDir()
+	pf := filepath.Join(pfDir, "wf.dip")
 	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -561,6 +567,74 @@ func TestDoctor_GitRequires_InitAllowInitPreviewsOK(t *testing.T) {
 	}
 	if !strings.Contains(gr.Message, "auto-init") {
 		t.Errorf("message must mention auto-init to explain the preview, got: %s", gr.Message)
+	}
+}
+
+// TestDoctor_GitRequires_InitAllowInit_NonEmptyWorkdirRefuses pins that
+// the doctor preview models the workdir-content latch added in PR #235
+// round-7 (Copilot:3260568814). Pre-fix the preview said OK in a
+// non-empty workdir while the runtime would refuse — the goal of doctor
+// is "don't lie about what the run would do."
+func TestDoctor_GitRequires_InitAllowInit_NonEmptyWorkdirRefuses(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	// Existing user file in the workdir → auto-init refuses at runtime.
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("# spec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pipeline file in a separate dir so SPEC.md is the only file in workdir.
+	pfDir := t.TempDir()
+	pf := filepath.Join(pfDir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	}, WithGitConfig(GitPreflightInit, true))
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusError {
+		t.Fatalf("want Error (non-empty workdir blocks auto-init), got %s: %s", gr.Status, gr.Message)
+	}
+	if !strings.Contains(gr.Message, "not empty") {
+		t.Errorf("message must mention non-empty workdir, got: %s", gr.Message)
+	}
+}
+
+// TestDoctor_GitRequires_UnbornHEADReportsError pins the new born-HEAD
+// preview from PR #235 round-7 (Copilot:3260568737). Pre-fix Doctor
+// reported OK for a `git init`'d-but-uncommitted repo while the runtime
+// preflight failed with ErrGitUnbornHEAD.
+func TestDoctor_GitRequires_UnbornHEADReportsError(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	// `git init` only — HEAD is unborn.
+	cmd := exec.CommandContext(context.Background(), "git", "init", "-q")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	pfDir := t.TempDir()
+	pf := filepath.Join(pfDir, "wf.dip")
+	if err := os.WriteFile(pf, []byte(preflightDoctorPipelineRequiresGit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ := Doctor(context.Background(), DoctorConfig{
+		WorkDir:      dir,
+		PipelineFile: pf,
+	})
+	gr := findCheck(rep, "Git Requires")
+	if gr == nil {
+		t.Fatal("no Git Requires check in report")
+	}
+	if gr.Status != CheckStatusError {
+		t.Fatalf("want Error for unborn HEAD, got %s: %s", gr.Status, gr.Message)
+	}
+	if !strings.Contains(gr.Message, "unborn HEAD") {
+		t.Errorf("message must mention unborn HEAD, got: %s", gr.Message)
 	}
 }
 
@@ -724,5 +798,17 @@ func mustGitInitForDoctor(t *testing.T, dir string) {
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init in %s: %v: %s", dir, err, out)
+	}
+	// Born HEAD: PR #235 round-7 added an unborn-HEAD check to Doctor's
+	// Git Requires preview, so a fresh `git init` alone now reports
+	// Error("no commits"). All callers want a usable repo; bake the
+	// `--allow-empty` initial commit into the helper so each test
+	// doesn't have to repeat it. (Copilot:3260568737)
+	commitCmd := exec.CommandContext(context.Background(), "git",
+		"-c", "user.name=t", "-c", "user.email=t@t",
+		"commit", "--allow-empty", "-q", "-m", "init")
+	commitCmd.Dir = dir
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit --allow-empty in %s: %v: %s", dir, err, out)
 	}
 }

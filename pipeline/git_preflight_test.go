@@ -13,6 +13,35 @@ import (
 	"testing"
 )
 
+// TestReadPromptYN pins the consent semantics of the interactive --git=init
+// latch: EOF / read error refuses, an empty line accepts (matches the
+// uppercase Y in "[Y/n]"), and "n"/"N" refuses. Pre-fix EOF returned true,
+// which let a stdin-less pipe satisfy the consent gate without the user
+// typing anything (Copilot:3260568794).
+func TestReadPromptYN(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "eof_refuses", input: "", want: false},
+		{name: "blank_line_accepts", input: "\n", want: true},
+		{name: "yes_lower", input: "y\n", want: true},
+		{name: "yes_upper", input: "Y\n", want: true},
+		{name: "no_lower", input: "n\n", want: false},
+		{name: "no_upper", input: "N\n", want: false},
+		{name: "no_word", input: "no\n", want: false},
+		{name: "garbage_accepts", input: "asdf\n", want: true}, // anything not starting with n/N
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := readPromptYN(strings.NewReader(tc.input)); got != tc.want {
+				t.Fatalf("readPromptYN(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 // mustGit runs a git command in dir with deterministic author identity,
 // failing the test if it returns a non-zero exit code. Skips if git is
 // not on PATH (delegates to requireGit from git_artifacts_test.go).
@@ -573,6 +602,7 @@ func TestPreflight_HappyPath_NoRequires_NoCheck(t *testing.T) {
 func TestPreflight_HappyPath_RequiresGit_InRepo(t *testing.T) {
 	dir := t.TempDir()
 	mustGitInit(t, dir)
+	mustGit(t, dir, "commit", "--allow-empty", "-m", "init") // born HEAD; pre-fix this passed without a commit (Copilot:3260568737)
 	err := Preflight(context.Background(), PreflightConfig{
 		WorkDir:  dir,
 		Requires: []string{"git"},
@@ -581,6 +611,172 @@ func TestPreflight_HappyPath_RequiresGit_InRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
+}
+
+// TestPreflight_UnbornHEAD_HardFails pins the born-HEAD invariant added for
+// PR #235 round-7 review feedback (Copilot:3260568737). Pre-fix, a freshly
+// `git init`'d repo with no commits satisfied `--is-inside-work-tree`, so
+// requires:git workflows passed preflight and then crashed mid-run on
+// `git worktree add ... HEAD` after burning LLM turns. Now Preflight
+// surfaces ErrGitUnbornHEAD up front.
+func TestPreflight_UnbornHEAD_HardFails(t *testing.T) {
+	dir := t.TempDir()
+	mustGitInit(t, dir) // no commit → HEAD is unborn
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"git"},
+		Policy:   GitPreflightAuto,
+	})
+	if !errors.Is(err, ErrGitUnbornHEAD) {
+		t.Fatalf("want ErrGitUnbornHEAD, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "git commit --allow-empty") {
+		t.Fatalf("error must include the --allow-empty remediation, got: %v", err)
+	}
+}
+
+// TestPreflight_UnbornHEAD_WarnPolicy mirrors the hard-fail test under
+// --git=warn: the issue is reported via Warner and Preflight returns nil
+// so the workflow can still attempt to run (matching the existing
+// not-a-repo / not-installed warn semantics).
+func TestPreflight_UnbornHEAD_WarnPolicy(t *testing.T) {
+	dir := t.TempDir()
+	mustGitInit(t, dir)
+	var warnings []string
+	err := Preflight(context.Background(), PreflightConfig{
+		WorkDir:  dir,
+		Requires: []string{"git"},
+		Policy:   GitPreflightWarn,
+		Warner: func(format string, args ...any) {
+			warnings = append(warnings, fmt.Sprintf(format, args...))
+		},
+	})
+	if err != nil {
+		t.Fatalf("want nil err under warn policy, got %v", err)
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "unborn HEAD") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected unborn-HEAD warning, got %v", warnings)
+	}
+}
+
+// TestHasBornHEAD pins the probe's three outcomes: born HEAD → (true, nil),
+// unborn HEAD → (false, nil), non-repo dir → (false, nil) (caller's
+// checkGit step is responsible for that distinction, so we accept it
+// silently here rather than surfacing a separate error).
+func TestHasBornHEAD(t *testing.T) {
+	requireGit(t)
+	t.Run("born", func(t *testing.T) {
+		dir := t.TempDir()
+		mustGitInit(t, dir)
+		mustGit(t, dir, "commit", "--allow-empty", "-m", "init")
+		born, err := hasBornHEAD(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !born {
+			t.Fatalf("want born=true for repo with commit")
+		}
+	})
+	t.Run("unborn", func(t *testing.T) {
+		dir := t.TempDir()
+		mustGitInit(t, dir)
+		born, err := hasBornHEAD(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if born {
+			t.Fatalf("want born=false for fresh init")
+		}
+	})
+}
+
+// TestRunAutoInit_RefusedByLatch_NonEmptyWorkdir pins the workdir-content
+// latch added for PR #235 round-7 review feedback (Copilot:3260568814).
+// Auto-init creates an empty initial commit; in a non-empty workdir that
+// would leave the user's files outside HEAD (worktrees from HEAD would
+// then be empty, breaking workflows that read SPEC.md etc. from a
+// worktree). We refuse rather than `git add -A`-ing the user's content,
+// which might include secrets or build artifacts.
+func TestRunAutoInit_RefusedByLatch_NonEmptyWorkdir(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	// A single user file is enough to trigger the latch.
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("# spec\n"), 0o644); err != nil {
+		t.Fatalf("seed workdir: %v", err)
+	}
+	err := runAutoInit(context.Background(), dir, true /*allowInit*/, false /*interactive*/, nil)
+	if !errors.Is(err, ErrGitAutoInitRefused) {
+		t.Fatalf("want ErrGitAutoInitRefused, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "workdir is not empty") {
+		t.Fatalf("error must mention workdir-not-empty, got: %v", err)
+	}
+	// And the refusal must come BEFORE git init runs — otherwise we've
+	// already mutated the user's workdir before reporting refusal.
+	if _, statErr := os.Stat(filepath.Join(dir, ".git")); !os.IsNotExist(statErr) {
+		t.Fatalf("workdir-content latch must refuse before `git init`; .git exists: %v", statErr)
+	}
+}
+
+// TestWorkdirHasContent pins the helper's contract: empty dir → false, any
+// non-`.git` entry (including dotfiles) → true, pre-existing `.git` alone
+// → false (so a partial / replay auto-init still works on an empty repo).
+func TestWorkdirHasContent(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		dir := t.TempDir()
+		has, err := workdirHasContent(dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if has {
+			t.Fatalf("want has=false for empty dir")
+		}
+	})
+	t.Run("only_dot_git", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		has, err := workdirHasContent(dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if has {
+			t.Fatalf("want has=false when only .git is present")
+		}
+	})
+	t.Run("regular_file", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		has, err := workdirHasContent(dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !has {
+			t.Fatalf("want has=true for dir with regular file")
+		}
+	})
+	t.Run("dotfile_counts", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		has, err := workdirHasContent(dir)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !has {
+			t.Fatalf("want has=true for dir with .gitignore (user-managed, must be in initial commit)")
+		}
+	})
 }
 
 func TestPreflight_HardFail_RequiresGit_NotRepo(t *testing.T) {
