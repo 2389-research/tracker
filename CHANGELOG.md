@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Defer all DIP-coded lint to dippin-lang** ([#239](https://github.com/2389-research/tracker/issues/239)). Deleted `pipeline/lint_dippin.go` + `pipeline/lint_dippin_extra.go` (550+ lines covering DIP101–DIP112, DIP120, DIP121) — every one of those checks was already implemented in `dippin-lang/validator.Lint()`, which tracker has been calling at `.dip` / `.dipx` load time since v0.16. The duplicates had drifted: tracker's `knownProviderModels` catalog hadn't been updated past Gemini 2.5, so any pipeline using `gemini-3-flash-preview` or other current model names produced a false-positive DIP108 warning from `tracker validate` even though `dippin doctor` accepted the same file cleanly. Tracker's local DIP120/DIP121 also semantically collided with dippin-lang's DIP120/DIP121 (different checks under the same code numbers). After this change, dippin-lang is the sole authority for DIP-coded lint and adding a new model to the catalog only requires one edit. Tracker keeps `LintTrackerRules` (TRK1XX) — those encode tracker-runtime concerns (64KB tool-output cap, tail-window routing-marker pitfalls) that don't belong upstream. Lint warnings still surface in `tracker validate` / `simulate` / `doctor` output via the new `Graph.LintWarnings` field, which `LoadDippinWorkflowFromIR` populates from `validator.Lint()` and `ValidateAll` appends to its warnings channel — so the user-visible "Validation Warnings" section is unchanged except that the warnings now come from the current dippin-lang catalog instead of tracker's stale copy.
+
 ## [0.29.0] - 2026-05-18
 
 ### Added

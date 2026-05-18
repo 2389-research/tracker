@@ -9,10 +9,10 @@ import (
 	"strings"
 )
 
-// LintTrackerRules runs tracker-specific lint rules (TRK1XX). Called from
-// LintDippinRules so callers get all warnings in a single pass; the
-// separate function lets future tracker-only rules slot in without
-// extending the (dippin-named) entry point's responsibility.
+// LintTrackerRules runs tracker-specific lint rules (TRK1XX). DIP1XX lint
+// (DIP101–DIP137, etc.) is owned by dippin-lang and runs at .dip load time
+// via LoadDippinWorkflow → validator.Lint; tracker does not duplicate it,
+// so this is the only lint entry point tracker should expose.
 func LintTrackerRules(g *Graph) []string {
 	var warnings []string
 	warnings = append(warnings, lintTRK101(g)...)

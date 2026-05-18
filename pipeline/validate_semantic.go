@@ -9,9 +9,20 @@ import (
 )
 
 // ValidateSemantic checks a Graph for semantic correctness against a handler
-// registry. It verifies that referenced handlers are registered, edge conditions
-// parse correctly, and node attributes have valid types. It also runs Dippin
-// lint rules and returns both errors and warnings.
+// registry. It always runs tracker-runtime-specific checks that dippin-lang
+// cannot perform — handler registration (tracker owns the registry) and
+// edge condition syntax (tracker owns the runtime evaluator dialect) —
+// plus tracker-specific lint rules (TRK1XX).
+//
+// Typed node-attribute checks (max_retries, cache_tool_results,
+// context_compaction, context_compaction_threshold) are dippin's domain:
+// these are typed fields on *ir.Workflow, validated by dippin's parser
+// and lint (e.g. DIP116 for compaction_threshold range). They run here
+// only when the graph did NOT come from a .dip source (DOT inputs and
+// programmatically-constructed graphs in library callers and tests) —
+// otherwise tracker would duplicate dippin's work and risk diverging
+// from `dippin doctor`. DIP1XX lint flows separately through
+// Graph.LintWarnings populated at load time.
 func ValidateSemantic(g *Graph, registry *HandlerRegistry) (errors error, warnings []string) {
 	if g == nil {
 		return &ValidationError{Errors: []string{"graph is nil"}}, nil
@@ -19,10 +30,11 @@ func ValidateSemantic(g *Graph, registry *HandlerRegistry) (errors error, warnin
 	ve := &ValidationError{}
 	validateHandlerRegistration(g, registry, ve)
 	validateConditionSyntax(g, ve)
-	validateNodeAttributes(g, ve)
+	if !g.DippinValidated {
+		validateNodeAttributes(g, ve)
+	}
 
-	// Run Dippin lint rules (warnings only)
-	lintWarnings := LintDippinRules(g)
+	lintWarnings := LintTrackerRules(g)
 
 	if ve.hasErrors() {
 		return ve, lintWarnings

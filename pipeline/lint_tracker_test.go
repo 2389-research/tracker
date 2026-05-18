@@ -4,8 +4,24 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 )
+
+// containsWarning reports whether warnings contains a message matching the
+// given lint code, optionally requiring that the message also mention nodeID.
+// Pass nodeID="" to match the code alone.
+func containsWarning(warnings []string, code, nodeID string) bool {
+	for _, w := range warnings {
+		if !strings.Contains(w, code) {
+			continue
+		}
+		if nodeID == "" || strings.Contains(w, nodeID) {
+			return true
+		}
+	}
+	return false
+}
 
 // getNode returns the node with the given ID, or nil if not found.
 // Test-local helper; Graph has no public GetNode method.

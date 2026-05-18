@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/2389-research/dippin-lang/dipx"
 	"github.com/2389-research/dippin-lang/validator"
@@ -54,6 +55,10 @@ func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph
 	if err != nil {
 		return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: entry %s: %w", path, manifest.Entry, err)
 	}
+	// Same DIP126 suppression applies to LintWarnings the graph carries
+	// into ValidateAll/-WithLint, so the "Validation Warnings" output
+	// matches the stderr log emitted at load time.
+	entryGraph.LintWarnings = filterBundleLintWarnings(entryGraph.LintWarnings)
 	if err := canonicalizeSubgraphRefs(entryGraph, bundle, manifest.Entry); err != nil {
 		return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: entry %s: %w", path, manifest.Entry, err)
 	}
@@ -72,6 +77,7 @@ func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph
 		if err != nil {
 			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
 		}
+		sub.LintWarnings = filterBundleLintWarnings(sub.LintWarnings)
 		if err := canonicalizeSubgraphRefs(sub, bundle, file.Path); err != nil {
 			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
 		}
@@ -100,6 +106,24 @@ func filterBundleLintNoise(diags []validator.Diagnostic) []validator.Diagnostic 
 			continue
 		}
 		out = append(out, d)
+	}
+	return out
+}
+
+// filterBundleLintWarnings mirrors filterBundleLintNoise for the pre-formatted
+// Graph.LintWarnings slice. The single-line "warning[DIP126]: ..." form is
+// matched on its code prefix so the suppression stays in lockstep with the
+// validator.Diagnostic filter above.
+func filterBundleLintWarnings(warnings []string) []string {
+	if len(warnings) == 0 {
+		return warnings
+	}
+	out := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		if strings.HasPrefix(w, "warning["+validator.DIP126+"]") {
+			continue
+		}
+		out = append(out, w)
 	}
 	return out
 }

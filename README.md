@@ -221,7 +221,7 @@ workflow MyPipeline
 tracker --param model=claude-opus-4 --param retries=1 MyPipeline
 ```
 
-Unknown `--param` keys hard-fail at startup. Lint rules flag undeclared references (DIP120) and declared-but-unused vars (DIP121).
+Unknown `--param` keys hard-fail at startup. Dippin-lang's lint (run automatically at .dip load) flags undeclared `${params.*}` references and other variable-reference mistakes — see `dippin doctor` for the full lint catalog.
 
 Variables are expanded in a single pass — resolved values are never re-scanned, preventing recursive expansion.
 
