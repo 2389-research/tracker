@@ -114,7 +114,7 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("preflight cancelled: %w", err)
 	}
-	installed, isRepo, err := checkGit(ctx, cfg.WorkDir)
+	installed, isRepo, isBare, err := checkGit(ctx, cfg.WorkDir)
 	if err != nil {
 		return fmt.Errorf("git check: %w", err)
 	}
@@ -127,6 +127,17 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 		return fmt.Errorf("%w: %s", ErrGitNotInstalled, msg)
 	}
 	if !isRepo {
+		// Bare-repo case (or inside a .git directory): users need to cd into
+		// a checkout, NOT run `git init`. --git=init would create a nested
+		// repo here, so we skip the auto-init branch entirely for isBare.
+		if isBare {
+			msg := buildInsideBareRepoMessage(cfg.WorkDir)
+			if cfg.Policy == GitPreflightWarn {
+				warn("%s", msg)
+				return nil
+			}
+			return fmt.Errorf("%w: %s", ErrGitWorkdirNotRepo, msg)
+		}
 		if cfg.Policy == GitPreflightInit {
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("preflight cancelled before auto-init: %w", err)
@@ -161,6 +172,29 @@ func buildGitNotInstalledMessage(workDir string) string {
 	}, "\n")
 }
 
+// buildInsideBareRepoMessage is the remediation copy for the
+// `requires: git` + workdir-is-bare-repo case (or inside any .git dir
+// without a work tree). `git init` here would create a nested repo;
+// the right answer is to cd into a checkout/worktree. Distinguished
+// from buildWorkdirNotRepoMessage so the user gets the correct fix
+// rather than the generic "run git init" steer.
+func buildInsideBareRepoMessage(workDir string) string {
+	return strings.Join([]string{
+		"this workflow requires a working tree, but the current directory has no work tree (bare git repository or inside a .git directory).",
+		"",
+		"  Working directory: " + workDir,
+		"",
+		"  Bare repositories have no checked-out files, so workflows that need to commit/branch/merge can't run here.",
+		"",
+		"  cd into a checkout of this repo:",
+		"    git clone <bare-repo-url> /path/to/checkout && cd /path/to/checkout",
+		"  or, if you have a worktree set up:",
+		"    git -C <bare-repo> worktree list",
+		"",
+		"  Or pass --git=off to bypass this check if you're sure git isn't needed.",
+	}, "\n")
+}
+
 func buildWorkdirNotRepoMessage(workDir string) string {
 	return strings.Join([]string{
 		"this workflow requires a git repository, but the current directory is not inside one.",
@@ -188,6 +222,19 @@ func resolveSymlinksOrFallback(p string) string {
 		return resolved
 	}
 	return p
+}
+
+// isNotARepoStderr reports whether stderr captured from a non-zero
+// `git rev-parse` exit corresponds to the benign "not a git repository"
+// case rather than a real failure (dubious ownership, safe.directory,
+// permission/config error, etc.). Distinguishing the two is what keeps
+// safetyLatches from failing open and running `git init` inside a repo
+// that git refused to inspect.
+//
+// The phrase comes straight from setup.c's `not_a_git_repository_msg`
+// in upstream git; it has been stable since at least git 1.5.0.
+func isNotARepoStderr(stderr []byte) bool {
+	return strings.Contains(string(stderr), "not a git repository")
 }
 
 // SafetyLatches returns a wrapped ErrGitAutoInitRefused when auto-init would
@@ -312,16 +359,23 @@ func safetyLatches(ctx context.Context, workDir string) error {
 	cmd.Env = gitSafeEnv()
 	out, runErr := cmd.Output()
 	if runErr != nil {
-		// Distinguish three cases:
-		//   - ctx cancellation: propagate so callers can abort cleanly
-		//   - normal exit-non-zero (not inside a repo): safe to init, return nil
-		//   - everything else (signal, I/O error): unexpected, propagate
+		// Four cases:
+		//   - ctx cancellation → propagate so callers can abort cleanly
+		//   - ExitError with "fatal: not a git repository" stderr → safe to
+		//     init, return nil (the documented "clean dir" outcome)
+		//   - ExitError with any other stderr (dubious ownership / safe.directory
+		//     / permission / config errors) → propagate so we don't fail open
+		//     and run `git init` inside a repo git refused to inspect
+		//   - non-ExitError (signal, I/O) → propagate as unexpected
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("%w: %w", ErrGitAutoInitRefused, ctxErr)
 		}
 		var exitErr *exec.ExitError
 		if errors.As(runErr, &exitErr) {
-			return nil // expected — workdir is not a repo
+			if isNotARepoStderr(exitErr.Stderr) {
+				return nil // expected — workdir is not a repo, safe to init
+			}
+			return fmt.Errorf("%w: git rev-parse --git-dir refused: %s", ErrGitAutoInitRefused, strings.TrimSpace(string(exitErr.Stderr)))
 		}
 		return fmt.Errorf("%w: git rev-parse --git-dir: %v", ErrGitAutoInitRefused, runErr)
 	}
@@ -351,47 +405,65 @@ func safetyLatches(ctx context.Context, workDir string) error {
 //  2. `git -C <workDir> rev-parse --is-inside-work-tree` — are we inside a
 //     repo with a work tree?
 //
-// installed reports the first probe; isRepo reports the second. Returns an
-// error only on unexpected I/O failure; "not installed" and "not a repo"
-// are returned as installed=false / isRepo=false with err==nil.
+// Returns (installed, isRepo, isBare, err). Returns an error only on
+// unexpected I/O failure; "not installed" and "not a repo" surface as
+// non-error states. isBare reports "inside a bare repository's GIT_DIR"
+// (or, more generally, inside any git context that has no work tree) —
+// distinct from isRepo, which is true only inside a real work tree.
+// Callers can use isBare to emit a more accurate remediation ("cd into a
+// checkout") instead of the generic "run git init" message.
 //
 // We use `--is-inside-work-tree`, NOT `--git-dir`, so bare repositories
-// don't count as a "repo" for preflight purposes: workflows that declare
-// `requires: git` need to run `git commit` / `git merge`, both of which
-// require a work tree and would fail in a bare repo with `fatal: this
-// operation must be run in a work tree`. Reporting isRepo=true for a bare
-// repo would defer that failure to mid-run instead of catching it here,
-// which is the bug the preflight is meant to prevent.
-func checkGit(ctx context.Context, workDir string) (installed bool, isRepo bool, err error) {
+// don't count as a "repo" for `requires: git` purposes: workflows declare
+// requires:git because they need `git commit` / `git merge`, both of
+// which require a work tree and fail in a bare repo. Reporting isRepo=true
+// for a bare repo would defer that failure to mid-run instead of catching
+// it here, which is the bug the preflight is meant to prevent.
+//
+// The not-a-repo case is distinguished from other ExitError failures by
+// inspecting stderr for "not a git repository" — the upstream-stable
+// phrase from setup.c. Dubious-ownership / safe.directory / permission
+// errors all exit 128 but with distinct stderr; they propagate as real
+// errors rather than fail-open as "not in a repo."
+func checkGit(ctx context.Context, workDir string) (installed bool, isRepo bool, isBare bool, err error) {
 	if _, lerr := exec.LookPath("git"); lerr != nil {
-		// Only ErrNotFound qualifies as "not installed." Other lookups can
-		// fail for I/O reasons; surface those per the documented contract.
 		if errors.Is(lerr, exec.ErrNotFound) {
-			return false, false, nil
+			return false, false, false, nil
 		}
-		return false, false, fmt.Errorf("locate git in PATH: %w", lerr)
+		return false, false, false, fmt.Errorf("locate git in PATH: %w", lerr)
 	}
 	installed = true
 	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "--is-inside-work-tree")
 	cmd.Env = gitSafeEnv()
 	out, runErr := cmd.Output()
-	// Exits non-zero (and writes to stderr) when not inside a repo. Inside a
-	// bare repo, exits 0 but prints "false". Inside a normal repo or linked
-	// worktree, exits 0 and prints "true".
 	if runErr == nil {
-		if strings.TrimSpace(string(out)) == "true" {
-			isRepo = true
+		// Exit 0 outcomes:
+		//   stdout="true"  → inside a real work tree (normal repo or linked
+		//                    worktree). isRepo=true.
+		//   stdout="false" → inside a bare repo or inside a .git directory.
+		//                    isRepo=false (no work tree); isBare=true so
+		//                    callers can give a better remediation.
+		stdout := strings.TrimSpace(string(out))
+		switch stdout {
+		case "true":
+			return installed, true, false, nil
+		case "false":
+			return installed, false, true, nil
+		default:
+			// Defensive: git contract says "true" or "false"; anything else
+			// is unexpected. Surface rather than guess.
+			return installed, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: unexpected output %q", stdout)
 		}
-		return installed, isRepo, nil
 	}
-	// Distinguish cancellation (must propagate) from ExitError (expected
-	// "not a repo") from unexpected execution failures (propagate).
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return installed, false, ctxErr
+		return installed, false, false, ctxErr
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		return installed, false, nil // expected — workdir is not a repo
+		if isNotARepoStderr(exitErr.Stderr) {
+			return installed, false, false, nil // expected — not in any repo
+		}
+		return installed, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree refused: %s", strings.TrimSpace(string(exitErr.Stderr)))
 	}
-	return installed, false, fmt.Errorf("git rev-parse --is-inside-work-tree: %w", runErr)
+	return installed, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: %w", runErr)
 }
