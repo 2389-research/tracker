@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang dependency bumped v0.26.0 → v0.27.0**. Picks up the 2026-05-18 model/pricing catalog refresh and the grok-4-1-fast-* redirect fix (callable model IDs survive their target's rename). No IR or adapter changes — drop-in. `PinnedDippinVersion` in `tracker_doctor.go` updated in lockstep so `tracker doctor`'s dippin-version check matches.
+
 ## [0.29.1] - 2026-05-18
 
 ### Changed
