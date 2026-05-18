@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-05-18
+
 ### Added
 
 - **Workflow header `requires: <list>` for environmental dependencies** ([#234](https://github.com/2389-research/tracker/issues/234)). Workflows can now declare prerequisites at the top of the `.dip` file via a comma-separated list (e.g. `requires: git`). v0.29.0 implements `git`: when a workflow declares `requires: git`, tracker verifies `git` is installed AND the working directory is a git repository before any node executes. Unrecognized entries (`docker`, `gh`, `jq`, etc.) warn and continue, so workflow authors can forward-declare dependencies that future tracker versions will check. The mechanism lives at the library + CLI boundary, not inside the engine — `pipeline.Preflight` is invoked once at run start; subgraph and `manager_loop` children inherit the parent's check. Requires dippin-lang v0.26.0 ([dippin-lang#35](https://github.com/2389-research/dippin-lang/issues/35), [#36](https://github.com/2389-research/dippin-lang/pull/36)).
