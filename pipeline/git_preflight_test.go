@@ -665,10 +665,20 @@ func TestPreflight_UnbornHEAD_WarnPolicy(t *testing.T) {
 	}
 }
 
-// TestHasBornHEAD pins the probe's three outcomes: born HEAD → (true, nil),
-// unborn HEAD → (false, nil), non-repo dir → (false, nil) (caller's
-// checkGit step is responsible for that distinction, so we accept it
-// silently here rather than surfacing a separate error).
+// TestHasBornHEAD pins the probe's contract:
+//
+//   - born HEAD (resolves to a commit) → (true, nil)
+//   - unborn HEAD (no commits yet) → (false, nil), classified via
+//     isUnbornHEADStderr matching "Needed a single revision" or
+//     "unknown revision or path not in the working tree"
+//   - non-repo dir → wrapped error. Pre-fix this comment claimed
+//     (false, nil) and was wrong (Copilot:3261104638) — after the
+//     round-8 stderr classifier, anything that doesn't match the
+//     unborn phrases surfaces. The non-repo case is the caller's
+//     responsibility to gate (Preflight calls checkGit first, which
+//     surfaces ErrGitWorkdirNotRepo before hasBornHEAD ever runs).
+//     The non-repo subtest below pins the error path so the contract
+//     is enforced, not just documented.
 func TestHasBornHEAD(t *testing.T) {
 	requireGit(t)
 	t.Run("born", func(t *testing.T) {
@@ -692,6 +702,23 @@ func TestHasBornHEAD(t *testing.T) {
 		}
 		if born {
 			t.Fatalf("want born=false for fresh init")
+		}
+	})
+	// Non-repo dir surfaces as an error. Callers in Preflight gate this
+	// on checkGit (which returns ErrGitWorkdirNotRepo first), so this
+	// path isn't reached in production — but the probe shouldn't lie
+	// about it. Pre-round-8 the cmd.Run() ExitError was silently
+	// returned as (false, nil); after switching to CombinedOutput +
+	// isUnbornHEADStderr, "fatal: not a git repository" doesn't match
+	// the unborn phrases and surfaces as a wrapped error.
+	t.Run("non_repo_returns_error", func(t *testing.T) {
+		dir := t.TempDir() // no `git init` — plain non-repo
+		born, err := hasBornHEAD(context.Background(), dir)
+		if err == nil {
+			t.Fatalf("want non-nil error for non-repo dir, got born=%v err=nil", born)
+		}
+		if born {
+			t.Fatalf("want born=false when err is non-nil, got true")
 		}
 	})
 }

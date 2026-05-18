@@ -995,7 +995,11 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		}
 		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
 		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
-		out.Hint = "run `git init && git commit --allow-empty -m initial` here, or `tracker <workflow> --git=init --allow-init` in an empty directory"
+		// Offer both paths so a workdir with existing files doesn't end
+		// up with a born-but-empty HEAD (Copilot:3261104615) — the
+		// `--allow-empty` path is correct only for an empty workdir; a
+		// dir with source files almost always wants `git add .` first.
+		out.Hint = "run `git init && git add . && git commit -m initial` to capture existing files, OR `git init && git commit --allow-empty -m initial` for an empty baseline, OR `tracker <workflow> --git=init --allow-init` in an empty directory"
 		return out
 	}
 	// Workdir IS a repo. Verify HEAD is born — same probe Preflight uses,

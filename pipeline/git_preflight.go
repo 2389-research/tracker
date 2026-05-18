@@ -224,14 +224,28 @@ func buildInsideBareRepoMessage(workDir string) string {
 	}, "\n")
 }
 
+// buildWorkdirNotRepoMessage emits the remediation for the
+// `requires: git` + workdir-not-a-repo case. Offers two paths
+// explicitly because round-8 review (Copilot:3261104567) flagged that
+// the round-7 copy ("git init + --allow-empty") recreated the same
+// "files outside HEAD" trap Latch 3 in runAutoInit exists to prevent —
+// for a workdir that already contains source files, the user almost
+// always wants `git add .` first so subsequent `git worktree add ...
+// HEAD` sees those files. Mirrors the buildUnbornHEADMessage shape.
 func buildWorkdirNotRepoMessage(workDir string) string {
 	return strings.Join([]string{
 		"this workflow requires a git repository, but the current directory is not inside one.",
 		"",
 		"  Working directory: " + workDir,
 		"",
-		"  Initialize a repo here (the empty initial commit gives HEAD something",
-		"  to point at so `git worktree add ... HEAD` and `git merge` work):",
+		"  Initialize a repo here. To capture the existing workdir contents",
+		"  (recommended if files are already present — workflows that run",
+		"  `git worktree add ... HEAD` need them in HEAD):",
+		"    git init",
+		"    git add .",
+		"    git commit -m \"initial\"",
+		"",
+		"  Or, to start with an empty baseline (workflow files commit later):",
 		"    git init",
 		"    git commit --allow-empty -m \"initial\"",
 		"",
