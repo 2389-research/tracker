@@ -42,6 +42,30 @@ func TestReadPromptYN(t *testing.T) {
 	}
 }
 
+// cleanGitEnv returns os.Environ() with git-internal vars stripped that
+// would otherwise leak from a calling `git commit`'s hook context and
+// confuse test-spawned git subprocesses (e.g. GIT_INDEX_FILE pointing at
+// the outer repo's staging index). Identity vars (GIT_AUTHOR_*, GIT_EDITOR)
+// pass through.
+func cleanGitEnv() []string {
+	stripped := map[string]bool{
+		"GIT_DIR":              true,
+		"GIT_INDEX_FILE":       true,
+		"GIT_WORK_TREE":        true,
+		"GIT_OBJECT_DIRECTORY": true,
+		"GIT_COMMON_DIR":       true,
+	}
+	src := os.Environ()
+	out := make([]string, 0, len(src))
+	for _, e := range src {
+		name := strings.SplitN(e, "=", 2)[0]
+		if !stripped[name] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // mustGit runs a git command in dir with deterministic author identity,
 // failing the test if it returns a non-zero exit code. Skips if git is
 // not on PATH (delegates to requireGit from git_artifacts_test.go).
@@ -50,7 +74,7 @@ func mustGit(t *testing.T, dir string, args ...string) {
 	requireGit(t)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(cleanGitEnv(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
 	)
@@ -67,6 +91,7 @@ func mustGitInit(t *testing.T, dir string) {
 	requireGit(t)
 	cmd := exec.Command("git", "init", "-q")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init in %s: %v: %s", dir, err, out)
 	}
