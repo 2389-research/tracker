@@ -32,6 +32,66 @@ workflow BuildProduct
         exit 1
       fi
       wc -l SPEC.md | awk '{print $1" lines"}'
+
+      # Write the shared project-CI probe (issue #233 Gap 1; refactored
+      # in PR #246 round-5 per Copilot). TestMilestone and FinalBuild
+      # source this file so the probe/run logic lives in exactly one
+      # place — round-4 review found the awk had silently drifted
+      # between the two nodes; this prevents that class of bug.
+      cat > .ai/build/ci-probe.sh <<'PROBE_EOF'
+      # Source this file, then call `run_project_ci_gate`. Returns:
+      #   0  — clean (no Makefile, no matching target, OR
+      #        `make <TARGET>` exited 0)
+      #   2  — Makefile present but `make` not installed (caller
+      #        should escalate; LLM fix loop can't install a binary)
+      #   N  — `make <TARGET>` exited with non-zero N
+      #        (caller should fail / retry)
+      # Sets PROJECT_CI_RAN to the chosen target on a real run,
+      # empty string otherwise.
+      run_project_ci_gate() {
+        PROJECT_CI_RAN=""
+        MAKEFILE=""
+        for mf in Makefile makefile GNUmakefile; do
+          if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
+        done
+        if [ -z "$MAKEFILE" ]; then
+          echo "INFO: no Makefile present, no project CI gate to run"
+          return 0
+        fi
+        if ! command -v make >/dev/null 2>&1; then
+          echo "ERROR: $MAKEFILE present but 'make' not installed — escalating"
+          return 2
+        fi
+        for TARGET in ci check lint; do
+          # Parse the Makefile for a top-level target named TARGET:
+          #   - skip tab-prefixed recipe lines
+          #   - skip variable assignments (first ':' part of := / ::= / :::=)
+          #   - tokenize everything before the first ':' as the target list
+          # Handles `ci:`, `ci check lint:`, `ci: VAR := overridden`,
+          # rejects `ci := value` and substring collisions like `build-ci:`.
+          if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
+              /^\t/ { next }
+              {
+                cp = index($0, ":")
+                if (cp == 0) next
+                if (substr($0, cp) ~ /^:+=/) next
+                head = substr($0, 1, cp - 1)
+                n = split(head, tokens, /[ \t]+/)
+                for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
+              }
+              END { exit !found }
+            '; then
+            echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
+            PROJECT_CI_RAN="$TARGET"
+            make "$TARGET" 2>&1
+            return $?
+          fi
+        done
+        echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
+        return 0
+      }
+      PROBE_EOF
+
       printf 'setup-ready'
 
   agent ReadSpec
@@ -270,73 +330,23 @@ workflow BuildProduct
         echo "no known build system — skipping tests"
       fi
 
-      # Run the project's own CI gate if present (issue #233 Gap 1).
-      # The language-stack tests above don't catch lint, format, or
-      # vet failures the project's CI enforces. Probe for a Makefile
-      # target in order of specificity (ci > check > lint) and run
-      # the first one that exists.
-      #
-      # Probe design (PR #246 review by Codex P1 / CodeRabbit / Copilot):
-      # earlier versions used `make -n <target>` for existence
-      # detection, but GNU Make returns 0 when the target name
-      # matches a file/directory on disk (so `ci/` and `lint/` dirs
-      # would false-positive), and a missing `make` binary or a
-      # Makefile parse error would collapse silently to "no target"
-      # — letting CI-red projects through. The current version:
-      #   1. Refuses to skip the gate silently when a Makefile is
-      #      present but `make` isn't installed — failing loud.
-      #   2. Parses the Makefile directly for top-level target
-      #      declarations:
-      #        - skip recipe lines (start with TAB)
-      #        - skip variable assignments (first ':' followed by
-      #          a run of colons and '=' — handles :=, ::=, :::=)
-      #        - take everything before the first ':' as the target
-      #          list, split on whitespace, look for TARGET as a
-      #          token
-      #      Handles `ci:`, `ci check lint:`, rules with deps after
-      #      the colon, and target-specific variables like
-      #      `ci: VAR := overridden`. Substring collisions
-      #      (`build-ci:` vs `ci`) are avoided because we tokenize.
-      #      Trade-off: misses targets defined only in included
-      #      files; acceptable since CI/lint/check are by convention
-      #      declared in the root Makefile.
-      PROJECT_CI_RAN=""
-      MAKEFILE=""
-      for mf in Makefile makefile GNUmakefile; do
-        if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
-      done
-      if [ -n "$MAKEFILE" ]; then
-        if ! command -v make >/dev/null 2>&1; then
-          echo "ERROR: $MAKEFILE present but 'make' not installed — failing project CI gate"
-          TEST_EXIT=1
-        else
-          for TARGET in ci check lint; do
-            if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
-                /^\t/ { next }
-                {
-                  cp = index($0, ":")
-                  if (cp == 0) next
-                  if (substr($0, cp) ~ /^:+=/) next
-                  head = substr($0, 1, cp - 1)
-                  n = split(head, tokens, /[ \t]+/)
-                  for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
-                }
-                END { exit !found }
-              '; then
-              echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
-              make "$TARGET" 2>&1 || TEST_EXIT=$?
-              PROJECT_CI_RAN="$TARGET"
-              break
-            fi
-          done
-        fi
+      # Project CI gate (issue #233 Gap 1). Source the shared helper
+      # written by Setup so the probe/run logic lives in exactly one
+      # place — see Setup for the full design. Helper returns 2 when
+      # a Makefile is present but `make` isn't installed; that's an
+      # environment problem the LLM fix loop can't resolve, so we
+      # route directly to EscalateMilestone via the `escalate`
+      # marker instead of burning fix attempts (#246 Copilot round-5).
+      . .ai/build/ci-probe.sh
+      CI_RC=0
+      run_project_ci_gate || CI_RC=$?
+      if [ "$CI_RC" -eq 2 ]; then
+        echo "0" > "$ATTEMPT_FILE"
+        printf 'escalate'
+        exit 1
       fi
-      if [ -z "$PROJECT_CI_RAN" ]; then
-        if [ -n "$MAKEFILE" ] && command -v make >/dev/null 2>&1; then
-          echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
-        elif [ -z "$MAKEFILE" ]; then
-          echo "INFO: no Makefile present, no project CI gate to run"
-        fi
+      if [ "$CI_RC" -ne 0 ]; then
+        TEST_EXIT="$CI_RC"
       fi
 
       # Note: milestone-specific verification is handled by the Implement agent
@@ -527,58 +537,14 @@ workflow BuildProduct
         cargo test 2>&1
       fi
 
-      # Run the project's own CI gate if present (issue #233 Gap 1).
-      # The language-stack tests above don't catch lint, format, or
-      # vet failures the project's CI enforces — the previous version
-      # of FinalBuild reported "done" on a commit whose CI was red
-      # because it only ran `go test`. Probe + run pattern mirrors
-      # TestMilestone above; see that node for the probe design notes
-      # (Codex P1, CodeRabbit Major, Copilot from PR #246 review).
-      # Under set -eu, a missing `make` (when a Makefile is present)
-      # OR a non-zero exit from the chosen target propagates to the
-      # engine, which classifies the node as failed and routes
-      # through the strict-failure-edge logic (engine.go) — no silent
-      # pass.
-      PROJECT_CI_RAN=""
-      MAKEFILE=""
-      for mf in Makefile makefile GNUmakefile; do
-        if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
-      done
-      if [ -n "$MAKEFILE" ]; then
-        if ! command -v make >/dev/null 2>&1; then
-          echo "ERROR: $MAKEFILE present but 'make' not installed — failing project CI gate"
-          exit 1
-        fi
-        for TARGET in ci check lint; do
-          # See TestMilestone above for the probe design notes; this
-          # block is intentionally a byte-identical copy of that awk
-          # so behavior stays in sync between the two gates.
-          if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
-              /^\t/ { next }
-              {
-                cp = index($0, ":")
-                if (cp == 0) next
-                if (substr($0, cp) ~ /^:+=/) next
-                head = substr($0, 1, cp - 1)
-                n = split(head, tokens, /[ \t]+/)
-                for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
-              }
-              END { exit !found }
-            '; then
-            echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
-            make "$TARGET" 2>&1
-            PROJECT_CI_RAN="$TARGET"
-            break
-          fi
-        done
-      fi
-      if [ -z "$PROJECT_CI_RAN" ]; then
-        if [ -n "$MAKEFILE" ]; then
-          echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
-        else
-          echo "INFO: no Makefile present, no project CI gate to run"
-        fi
-      fi
+      # Project CI gate (issue #233 Gap 1). Sources the same shared
+      # helper as TestMilestone — written by Setup; lives in exactly
+      # one place. FinalBuild has no fix loop, so any non-zero return
+      # (including the rc=2 "make missing" case) propagates as a
+      # node-level failure via `set -eu`, which the engine routes
+      # through the strict-failure-edge logic — no silent pass.
+      . .ai/build/ci-probe.sh
+      run_project_ci_gate
 
       printf 'final-build-pass'
 
