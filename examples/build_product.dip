@@ -234,8 +234,14 @@ workflow BuildProduct
       ATTEMPTS=$((ATTEMPTS + 1))
       echo "$ATTEMPTS" > "$ATTEMPT_FILE"
 
-      # Run tests FIRST — if they pass, the milestone is done regardless
-      # of how many fix attempts we've burned.
+      # Run tests AND the project CI gate. If both pass, the milestone is
+      # done regardless of how many fix attempts we've burned. The CI gate
+      # (added per #233 Gap 1, further down in this command) can fail
+      # after the language-stack tests pass — that's intentional: a green
+      # `go test ./...` doesn't catch lint/vet/format failures that the
+      # project's own `make ci` would, and the previous version of this
+      # node reported "Done" on a commit whose CI was red because it only
+      # ran the language-stack default.
       TEST_EXIT=0
 
       # Run the project's test suite.
@@ -279,12 +285,17 @@ workflow BuildProduct
       # — letting CI-red projects through. The current version:
       #   1. Refuses to skip the gate silently when a Makefile is
       #      present but `make` isn't installed — failing loud.
-      #   2. Greps the Makefile directly for top-level target
-      #      declarations (`^[ ]*<TARGET>[ ]*:` after comment strip).
-      #      Recipe lines start with TAB not spaces, so they don't
-      #      match. Trade-off: misses targets defined in included
-      #      files; acceptable since CI/lint/check are by convention
-      #      declared in the root Makefile.
+      #   2. Parses the Makefile directly for top-level target
+      #      declarations. The target list is everything before the
+      #      first colon on a non-recipe, non-comment line; split that
+      #      on whitespace and look for the literal target as a token.
+      #      Handles `ci:`, `ci check lint:`, and rules with
+      #      dependencies after the colon. Recipe lines start with
+      #      TAB not spaces, so they're skipped. Substring collisions
+      #      (`build-ci:` vs `ci`) are avoided because we tokenize.
+      #      Trade-off: misses targets defined only in included files;
+      #      acceptable since CI/lint/check are by convention declared
+      #      in the root Makefile.
       PROJECT_CI_RAN=""
       MAKEFILE=""
       for mf in Makefile makefile GNUmakefile; do
@@ -296,7 +307,15 @@ workflow BuildProduct
           TEST_EXIT=1
         else
           for TARGET in ci check lint; do
-            if sed 's/#.*//' "$MAKEFILE" | grep -qE "^[ ]*${TARGET}[ ]*:"; then
+            if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
+                /^\t/ { next }
+                /:/ {
+                  head = $0; sub(/:.*/, "", head)
+                  n = split(head, tokens, /[ \t]+/)
+                  for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
+                }
+                END { exit !found }
+              '; then
               echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
               make "$TARGET" 2>&1 || TEST_EXIT=$?
               PROJECT_CI_RAN="$TARGET"
@@ -524,7 +543,15 @@ workflow BuildProduct
           exit 1
         fi
         for TARGET in ci check lint; do
-          if sed 's/#.*//' "$MAKEFILE" | grep -qE "^[ ]*${TARGET}[ ]*:"; then
+          if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
+              /^\t/ { next }
+              /:/ {
+                head = $0; sub(/:.*/, "", head)
+                n = split(head, tokens, /[ \t]+/)
+                for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
+              }
+              END { exit !found }
+            '; then
             echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
             make "$TARGET" 2>&1
             PROJECT_CI_RAN="$TARGET"
