@@ -1,0 +1,228 @@
+---
+title: "Multi-Agent Pipeline Orchestration"
+description: "Multi-agent LLM pipeline orchestration with hard cost ceilings, parallel branches in git worktrees, and a live TUI. Define workflows in a small text file; every run is a git commit you can diff and replay."
+og_title: "Tracker — Multi-Agent Pipeline Orchestration"
+og_description: "Multi-agent LLM pipeline orchestration with hard cost ceilings, parallel branches in git worktrees, and a live TUI. Built by 2389.ai."
+jsonld:
+  "@context": "https://schema.org"
+  "@type": "SoftwareApplication"
+  name: "Tracker"
+  description: "Multi-agent LLM pipeline orchestration with hard cost ceilings, parallel branches in git worktrees, and a live TUI."
+  url: "https://2389-research.github.io/tracker/"
+  applicationCategory: "DeveloperApplication"
+  operatingSystem: "macOS, Linux"
+  offers:
+    "@type": "Offer"
+    price: "0"
+    priceCurrency: "USD"
+  author:
+    "@type": "Organization"
+    name: "2389.ai"
+    url: "https://2389.ai"
+  codeRepository: "https://github.com/2389-research/tracker"
+  license: "https://github.com/2389-research/tracker/blob/main/LICENSE"
+---
+
+  <!-- ═══ Hero ═══ -->
+  <section class="hero glass">
+    <p class="hero-eyebrow">Wire it up. Let it rip.</p>
+    <h1>Multi-agent LLM pipelines that won&rsquo;t surprise you on the bill.</h1>
+    <p class="subtitle">
+      Define workflows in a small text file. Run them locally with budget caps,
+      parallel branches in git worktrees, and a live TUI. Every run is a git
+      commit you can diff and replay.
+    </p>
+
+    <ul class="hero-bullets">
+      <li><strong>Hard cost ceilings.</strong> <code>--max-cost 500 --max-tokens 100k --max-wall-time 30m</code>. Halts mid-run with a snapshot.</li>
+      <li><strong>Parallel branches in worktrees.</strong> Three model variants race in isolated checkouts. No filesystem stomping.</li>
+      <li><strong>Every run is a git commit.</strong> Replay any past run, diff the artifacts, export as a portable bundle.</li>
+    </ul>
+
+    <div class="hero-actions">
+      <a href="#install" class="btn btn-primary">Install + run</a>
+      <a href="https://github.com/2389-research/tracker" class="btn btn-ghost">GitHub</a>
+    </div>
+
+    <p class="hero-meta">
+      Three agent backends &mdash; <strong>native</strong> (Anthropic / OpenAI / Gemini / OpenAI-compat),
+      <strong>Claude&nbsp;Code</strong> (subscription auth, file editing, terminal),
+      and <strong>ACP</strong> (claude-agent-acp&nbsp;/ codex-acp&nbsp;/ gemini --acp). Mix per node.
+      &middot; Latest: <a href="changelog.html#v0-29-2">v0.29.2</a>
+    </p>
+  </section>
+
+  <!-- ═══ Install + run (above the fold reachability) ═══ -->
+  <section class="glass" id="install">
+    <h2>Install + run in <span class="accent">60 seconds</span></h2>
+    <pre data-lang="bash"><code><span class="comment"># 1. Install — pick one</span>
+<span class="keyword">brew install</span> 2389-research/tap/tracker
+<span class="comment"># or</span>
+<span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
+
+<span class="comment"># 2. Run a built-in workflow (no file needed)</span>
+tracker build_product
+
+<span class="comment"># 3. Inspect what happened</span>
+tracker diagnose</code></pre>
+
+    <details class="more-cmds">
+      <summary>More commands</summary>
+      <pre data-lang="bash"><code><span class="comment"># Verify your providers + tools</span>
+tracker doctor
+
+<span class="comment"># Run with the Claude Code agent backend</span>
+tracker <span class="flag">--backend</span> claude-code build_product
+
+<span class="comment"># Run autonomously — LLM judges every gate</span>
+tracker <span class="flag">--autopilot</span> mid build_product
+
+<span class="comment"># Headless — POST gates to your service</span>
+tracker <span class="flag">--webhook-url</span> https://factory.example.com/gate build_product
+
+<span class="comment"># Override workflow params + cap budget</span>
+tracker <span class="flag">--param</span> model=claude-opus-4-7 \
+        <span class="flag">--max-cost</span> 500 <span class="flag">--max-wall-time</span> 30m build_product
+
+<span class="comment"># Drive from any language: tracker --json | jq + parse activity.jsonl</span>
+tracker <span class="flag">--json</span> build_product</code></pre>
+    </details>
+
+    <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 1rem; margin-bottom: 0;">
+      Four flagship workflows are <strong>embedded in the binary</strong> &mdash; no cloning, no examples directory.
+      Or write your own in a <code>.dip</code> file (<a href="#snippet">see below</a>).
+    </p>
+  </section>
+
+  <!-- ═══ How is this different? ═══ -->
+  <section class="glass">
+    <h2>How is this <span class="accent">different</span>?</h2>
+    <p class="lead">
+      Tracker is not a replacement for Temporal or Airflow &mdash; those are
+      excellent general workflow schedulers but they don&rsquo;t model what LLM
+      pipelines actually need (tokens, dollars, parallel branches with
+      filesystem isolation, gates that resume from a webhook). And it&rsquo;s not a
+      Python library like LangGraph or LangChain &mdash; you don&rsquo;t wire your own
+      observability or eat your own surprise bills.
+    </p>
+    <p>
+      It&rsquo;s the local-first, pipelines-as-text-in-git tool you reach for when
+      <strong>&ldquo;just run it&rdquo; means &ldquo;run it inside a budget, with a live TUI,
+      and let me diff what happened later.&rdquo;</strong>
+    </p>
+  </section>
+
+  <!-- ═══ What a pipeline looks like ═══ -->
+  <section class="glass" id="snippet">
+    <h2>What a pipeline <span class="accent">looks like</span></h2>
+    <p class="lead">
+      Pipelines are <code>.dip</code> files. Yes, it&rsquo;s a small DSL &mdash; the whole grammar
+      fits on one page; the snippet below is most of what you need.
+    </p>
+
+    <pre data-lang="dip"><code><span class="keyword">agent</span> Draft
+  model: claude-sonnet-4-6
+  prompt: <span class="string">"Draft a brief on ${params.topic}."</span>
+
+<span class="keyword">human</span> Review
+  mode: yes_no
+
+<span class="keyword">edges</span>
+  Draft -&gt; Review
+  Review -&gt; Done <span class="cond">when</span> ctx.outcome = success</code></pre>
+
+    <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0;">
+      <strong>Driving from Python or another language?</strong> Run the binary
+      with <code>tracker --json</code> and parse <code>activity.jsonl</code>.
+      A Go library API is available for in-process embedding.
+    </p>
+  </section>
+
+  <!-- ═══ What you get ═══ -->
+  <section class="glass">
+    <h2>What you <span class="accent">get</span></h2>
+    <div class="grid-3" style="margin-top: 1.5rem;">
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Kill a runaway agent at $5, not $500.</h3>
+        <p>Hard caps on tokens, cost (cents), and wall-time as CLI flags or workflow defaults. The engine checks between every node and halts with a <code>CostSnapshot</code> on breach.</p>
+        <p class="outcome-cli"><code>--max-cost 500 --max-tokens 100k --max-wall-time 30m</code></p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Race four model variants in parallel; pick the winner.</h3>
+        <p>Fan out to concurrent branches in isolated git worktrees, fan in to a join. Built-in pattern for cross-model races without filesystem stomping.</p>
+        <p class="outcome-cli"><code>tracker ask_and_execute</code></p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>See every token, tool call, and gate in a live TUI.</h3>
+        <p>Bubble-tea dashboard, append-only activity log, per-node streams, search, drilldown. Every event also lands in <code>activity.jsonl</code> for grep + post-hoc analysis.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Pause for human approval; resume from a webhook.</h3>
+        <p>Choice, freeform, hybrid, yes/no, and interview gates. Or POST the gate to your service and block on the callback. Per-gate timeout and outbound auth.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Steps pass typed JSON to each other &mdash; no glue code.</h3>
+        <p>Declare what an agent produces with <code>writes: [field, field]</code>; downstream steps read those fields as typed values. The runtime validates the output, and a self-healing cascade rescues the common &ldquo;LLM returned prose around the JSON&rdquo; case.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3><code>tracker diagnose</code> tells you which node burned the budget.</h3>
+        <p>Deterministic vs. flaky retries, escalation patterns, stalled loops. Run it after any failure for a triage report. Available as a Go library call too.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ Stream to your own UI ═══ -->
+  <section class="glass" style="border-left: 3px solid var(--orange-600);">
+    <h3 style="margin-top: 0;">Stream pipeline status to your own users.</h3>
+    <p style="margin-bottom: 0.75rem;">
+      Every event &mdash; node started, gate hit, cost updated, run completed &mdash; lands in
+      <code>activity.jsonl</code> on disk and on stdout via <code>tracker --json</code>. Pipe it to your
+      customer dashboard, Slack bot, or status page. Webhook gates POST to your URL on every
+      human-decision point so approvals can render in your own app, not just the TUI.
+    </p>
+    <pre data-lang="bash" style="margin: 0;"><code>tracker <span class="flag">--json</span> build_product | <span class="comment"># pipe into your event bus / SSE relay / dashboard</span></code></pre>
+  </section>
+
+  <!-- ═══ Providers (kept, slimmer) ═══ -->
+  <section class="glass">
+    <h2>Four <span class="accent">providers</span>, one pipeline</h2>
+    <p class="lead">Mix models freely. Route everything through a <a href="https://developers.cloudflare.com/ai-gateway/">Cloudflare AI Gateway</a> with <code>--gateway-url</code> for central analytics, caching, and 429 relief.</p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>Anthropic</h3>
+        <p style="margin: 0;"><code>claude-opus-4-7</code> &middot; <code>claude-sonnet-4-6</code> &middot; <code>claude-haiku-4-5</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>OpenAI</h3>
+        <p style="margin: 0;"><code>gpt-5.4</code> &middot; <code>gpt-5.4-mini</code> &middot; <code>gpt-4.1</code> &middot; <code>o3</code> &middot; <code>o4-mini</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>Gemini</h3>
+        <p style="margin: 0;"><code>gemini-3.1-pro-preview</code> &middot; <code>gemini-2.5-pro</code> &middot; <code>gemini-2.5-flash</code></p>
+      </div>
+      <div class="glass glass-sm" style="text-align: center;">
+        <h3>OpenAI-Compat</h3>
+        <p style="margin: 0;">Any OpenAI-compatible endpoint<br><em>OpenRouter, vLLM, local proxies</em></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ CTA ═══ -->
+  <section class="glass" style="text-align: center; padding: 3.5rem;">
+    <h2>Ready to <span class="accent">build</span>?</h2>
+    <p class="lead" style="margin-bottom: 2rem; max-width: 560px; margin-left: auto; margin-right: auto;">
+      Install, run a built-in workflow, watch the TUI. If it survives <code>tracker diagnose</code>,
+      write your own pipeline next.
+    </p>
+    <div class="hero-actions">
+      <a href="#install" class="btn btn-primary">Install + run</a>
+      <a href="workflows.html" class="btn btn-ghost">Explore workflows</a>
+    </div>
+  </section>
