@@ -394,11 +394,17 @@ workflow BuildProduct
       elided entirely. The authoritative "both passed" signal is the
       `tests-pass` sentinel — TestMilestone prints it ONLY when both
       language tests and the CI gate returned 0. Treat its presence
-      in tool_stdout as proof both passed; treat `escalate` as proof
-      of an environment problem (e.g., Makefile present but `make`
-      missing) that the engine's strict-failure-edge logic should
-      have caught upstream. Visible CI probe lines (`--- running
-      make ---`, `INFO: ...`) corroborate but are not required.
+      in tool_stdout as proof both passed. The `escalate` sentinel
+      means TestMilestone gave up (one of two causes: `make` binary
+      missing, indicated by `ERROR: <Makefile> present but 'make'
+      not installed`; OR fix attempts exhausted, indicated by the
+      `ESCALATE: milestone failed after N attempts` line) — either
+      way the engine's edge from `TestMilestone -> EscalateMilestone
+      when ctx.tool_stdout contains escalate` should have routed
+      away from this verifier; if you see `escalate` here, the
+      routing missed and you should surface the cause explicitly.
+      Visible CI probe lines (`--- running make ---`, `INFO: ...`)
+      corroborate but are not required.
 
       VERIFY — work through every item; cite file:line and grep output
       for every finding:
@@ -471,10 +477,18 @@ workflow BuildProduct
                — the repo has a Makefile but no matching target;
                valid skip (PASS).
          FAIL only if you see `--- running make ---` followed by make
-         errors / non-zero exit, or `escalate` / `ERROR: <Makefile>
-         present but 'make' not installed` (the latter two should
-         have been caught upstream by the engine's strict-failure-edge
-         logic; if they reach the verifier, surface explicitly).
+         errors / non-zero exit, or the `escalate` sentinel. `escalate`
+         has two distinct causes — distinguish them so the report is
+         actionable: an `ERROR: <Makefile> present but 'make' not
+         installed` line means env-missing (the operator needs to
+         install `make`); an `ESCALATE: milestone failed after N
+         attempts` line means the fix loop exhausted (the milestone
+         is genuinely broken and the prior attempts didn't converge).
+         Either escalate cause should have been caught upstream by
+         the `TestMilestone -> EscalateMilestone when ctx.tool_stdout
+         contains escalate` edge; if you see `escalate` here, the
+         routing missed and you should name the specific cause from
+         the surrounding lines.
          Do NOT FAIL on absence of visible language-test output —
          that output is routinely elided by the 64KB tail cap on
          repos with verbose tests, and the sentinel covers that
