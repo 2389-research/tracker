@@ -1,0 +1,34 @@
+baseURL = "https://2389-research.github.io/tracker/"
+languageCode = "en-us"
+title = "Tracker"
+enableRobotsTXT = true
+enableGitInfo = true
+uglyURLs = true
+
+[params]
+description = "Multi-agent LLM pipeline orchestration with hard cost ceilings, parallel branches in git worktrees, and a live TUI."
+author = "2389.ai"
+authorURL = "https://2389.ai"
+repoURL = "https://github.com/2389-research/tracker"
+
+[outputs]
+home = ["html", "sitemap", "sitemap-md", "rss"]
+section = ["html"]
+page = ["html"]
+
+[outputFormats.sitemap-md]
+mediaType = "text/markdown"
+baseName = "sitemap"
+isPlainText = true
+notAlternative = true
+path = "/"
+suffix = "md"
+
+[markup.goldmark.renderer]
+unsafe = true
+
+[minify.tdewolff.html]
+keepEndTags = true
+keepDocumentTags = true
+keepConditionalComments = true
+keepDefaultAttrVals = true
