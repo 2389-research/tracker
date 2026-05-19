@@ -1,0 +1,754 @@
+---
+title: "Changelog"
+description: "Tracker release history — versions, breaking changes, new features, and fixes across every shipped release."
+og_title: "Changelog — Tracker"
+og_description: "Tracker release history — versions, breaking changes, new features, and fixes."
+jsonld:
+  "@context": "https://schema.org"
+  "@type": "TechArticle"
+  headline: "Tracker Changelog"
+  description: "Tracker release history — versions, breaking changes, new features, and fixes."
+  url: "https://2389-research.github.io/tracker/changelog.html"
+  author:
+    "@type": "Organization"
+    name: "2389.ai"
+    url: "https://2389.ai"
+  publisher:
+    "@type": "Organization"
+    name: "2389.ai"
+  isPartOf:
+    "@type": "WebSite"
+    name: "Tracker"
+    url: "https://2389-research.github.io/tracker/"
+---
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>Changelog</h1>
+    <p class="subtitle">Every feature, fix, and breaking change. <a href="https://github.com/2389-research/tracker/releases">All GitHub Releases &rarr;</a></p>
+  </section>
+
+  <nav class="page-toc" aria-label="Versions">
+    <strong>Jump to:</strong>
+    <a href="#v0-29-2">v0.29.2</a>
+    <a href="#v0-29-1">v0.29.1</a>
+    <a href="#v0-29-0">v0.29.0</a>
+    <a href="#v0-28-2">v0.28.2</a>
+    <a href="#v0-28-1">v0.28.1</a>
+    <a href="#v0-28-0">v0.28.0</a>
+    <a href="#v0-27-0">v0.27.0</a>
+    <a href="#v0-26-0">v0.26.0</a>
+    <a href="#v0-25-1">v0.25.1</a>
+    <a href="#v0-25-0">v0.25.0</a>
+    <a href="#v0-24-2">v0.24.2</a>
+    <a href="#v0-24-1">v0.24.1</a>
+    <a href="#v0-24-0">v0.24.0</a>
+    <a href="#v0-23-0">v0.23.0</a>
+    <a href="#v0-22-0">v0.22.0</a>
+    <a href="#v0-21-0">v0.21.0</a>
+    <a href="#v0-20-0">v0.20.0</a>
+    <a href="#v0-19-0">v0.19.0</a>
+    <a href="#v0-18-0">v0.18.0</a>
+    <a href="#v0-17-0">v0.17.0</a>
+    <a href="#v0-16-x">v0.16.x</a>
+    <a href="#v0-15-0">v0.15.0</a>
+    <a href="#v0-14-0">v0.14.0</a>
+    <a href="#v0-13-0">v0.13.0</a>
+    <a href="#v0-12-1">v0.12.1</a>
+    <a href="#v0-12-0">v0.12.0</a>
+    <a href="#v0-11-2">v0.11.2</a>
+    <a href="#v0-11-0">v0.11.0</a>
+    <a href="#v0-10-x">v0.10.x</a>
+    <a href="#v0-9-x">v0.9.x</a>
+    <a href="#v0-8-0">v0.8.0</a>
+  </nav>
+
+  <!-- ═══ v0.29.2 ═══ -->
+  <section class="glass" id="v0-29-2" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.29.2" style="color: inherit; text-decoration: none;">v0.29.2</a></h2>
+      <span class="badge">2026-05-18</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.29.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Maintenance release — picks up dippin-lang v0.27.0 (2026-05-18 model/pricing catalog refresh). Combined with v0.29.1's lint deduplication, DIP108 now covers the full current catalog so workflows using <code>gemini-3-flash-preview</code>, redirected <code>grok-4-1-fast-*</code> IDs, and other recent models validate clean. No tracker-side feature changes; no breaking changes.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang dependency bumped v0.26.0 → v0.27.0</strong> (<a href="https://github.com/2389-research/tracker/pull/242">#242</a>). Picks up the 2026-05-18 model / pricing catalog refresh and a bug fix where redirected <code>grok-4-1-fast-*</code> IDs stay callable when their target gets renamed. No IR or adapter changes — drop-in. <code>PinnedDippinVersion</code> in <code>tracker_doctor.go</code> updated in lockstep so <code>tracker doctor</code>'s dippin-version mismatch check uses the new pin.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.29.1 ═══ -->
+  <section class="glass" id="v0-29-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.29.1" style="color: inherit; text-decoration: none;">v0.29.1</a></h2>
+      <span class="badge">2026-05-18</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.29.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Defers all DIP-coded lint to dippin-lang. Tracker had been maintaining a parallel implementation of DIP101–DIP112 + DIP120–DIP121 in <code>pipeline/lint_dippin*.go</code> while already calling <code>validator.Lint()</code> from dippin on every <code>.dip</code> / <code>.dipx</code> load — and the duplicates had drifted, producing false-positive warnings on current model names like <code>gemini-3-flash-preview</code> even though <code>dippin doctor</code> accepted the same file cleanly.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Single source of truth for DIP-coded lint</strong> (<a href="https://github.com/2389-research/tracker/issues/239">#239</a>, <a href="https://github.com/2389-research/tracker/pull/240">#240</a>). Deleted <code>pipeline/lint_dippin.go</code> + <code>lint_dippin_extra.go</code> (660+ lines covering DIP101–DIP112 + tracker's local DIP120 / DIP121, which semantically collided with dippin-lang's own DIP120 / DIP121 — different checks under the same codes). Tracker now has zero DIP-coded lint implementations; <code>dippin-lang/validator.Lint()</code> is the sole authority and a model catalog edit happens in one place. Lint warnings still surface through <code>tracker validate</code> / <code>simulate</code> / <code>doctor</code> via the new <code>Graph.LintWarnings</code> field, populated by <code>LoadDippinWorkflowFromIR</code> from dippin's lint output and appended to <code>ValidateAll</code>'s warnings channel.</li>
+      <li><strong><code>validateNodeAttributes</code> gated behind <code>!g.DippinValidated</code></strong>. The typed-attribute checks (<code>max_retries</code>, <code>cache_tool_results</code>, <code>context_compaction</code>, <code>context_compaction_threshold</code>) were re-validating fields that dippin's typed IR already enforces at parse time and DIP116 lints for range. Worse, tracker errored when <code>compaction_threshold = 0.0</code> while dippin only warned — exactly the kind of "dippin doctor and tracker validate disagree" divergence the architecture is supposed to prevent. The gate matches the existing pattern for DIP001–DIP009 structural checks: <code>.dip</code> sources defer fully to dippin; DOT graphs and programmatically-constructed graphs still get the runtime sanity checks.</li>
+      <li><strong>TRK1XX rules retained.</strong> <code>LintTrackerRules</code> (currently TRK101, the tool_stdout tail-window routing pitfall from <a href="https://github.com/2389-research/tracker/issues/208">#208</a> / <a href="https://github.com/2389-research/tracker/issues/210">#210</a> / <a href="https://github.com/2389-research/tracker/issues/211">#211</a>) stays — those encode tracker-runtime concerns that don't belong upstream.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.29.0 ═══ -->
+  <section class="glass" id="v0-29-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.29.0" style="color: inherit; text-decoration: none;">v0.29.0</a></h2>
+      <span class="badge">2026-05-18</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.29.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Workflows can now declare environmental dependencies in the header (<code>requires: &lt;list&gt;</code>) and tracker preflights them before any node runs — failing in seconds with a copy-paste remediation instead of burning $20–$100 of LLM spend before the first git operation. Requires dippin-lang v0.26.0.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>requires:</code> workflow header keyword</strong> (<a href="https://github.com/2389-research/tracker/issues/234">#234</a>). Comma-separated dependency list in the <code>.dip</code> workflow header. v0.29.0 implements <code>git</code>: when declared, tracker verifies git is installed AND the workdir is inside a real work tree AND HEAD points at a real commit before any node executes. Unrecognized entries (<code>docker</code>, <code>gh</code>, <code>jq</code>, etc.) parse fine and emit a "not yet implemented" warning so workflow authors can forward-declare deps that future tracker versions will check. The mechanism lives at the library + CLI boundary, not inside the engine — <code>pipeline.Preflight</code> is invoked once at run start; subgraph and <code>manager_loop</code> children inherit the parent's check.</li>
+      <li><strong><code>--git=auto|off|warn|require|init</code> CLI flag</strong> overrides policy per run. Default <code>auto</code> respects the workflow's <code>requires:</code>. <code>off</code> bypasses, <code>warn</code> downgrades hard-fails to warnings, <code>require</code> forces the check even if not declared, <code>init</code> (with mandatory <code>--allow-init</code> latch in non-interactive runs, or a <code>[Y/n]</code> prompt in interactive runs) auto-runs <code>git init</code> + an empty initial commit so HEAD is born and worktree workflows work immediately. Safety refusals fire for <code>$HOME</code>, <code>/</code>, and nested git contexts — bare repos, linked worktrees (<code>.git</code> is a file), submodules (same); <code>$HOME</code> and root comparisons fold case on Windows. Auto-init refuses in non-empty workdirs rather than silently <code>git add -A</code>-ing content that might be secrets / build artifacts. All git probes run under <code>LANG=C LC_ALL=C</code> so the "not a git repository" stderr classifier is stable on localized installs.</li>
+      <li><strong>Born-HEAD check</strong> via <code>git rev-parse --verify HEAD^{commit}</code>. <code>--is-inside-work-tree</code> returns true for a <code>git init</code>'d repo with no commits, so without this probe a <code>requires: git</code> workflow could pass preflight and crash mid-run on <code>git worktree add ... HEAD</code> after burning LLM turns. <code>^{commit}</code> forces commit peeling so a dangling/non-commit OID at HEAD doesn't masquerade as born. Stderr is inspected via the two upstream-stable phrases (<code>Needed a single revision</code>, <code>unknown revision or path not in the working tree</code>) so corruption-class errors surface as wrapped errors instead of collapsing to "unborn."</li>
+      <li><strong><code>tracker doctor</code> Git Requires check</strong> previews the runtime decision: <code>OK</code> (env satisfies <code>requires: git</code>, or <code>--git=init --allow-init</code> would succeed in this clean dir), <code>Warn</code> (downgrade under <code>--git=warn</code>, or auto-init OK + unknown deps surfaced), <code>Error</code> (hard-fail), <code>Skip</code> (<code>--git=off</code>). The <code>Hint</code> field carries the exact remediation command including dual paths for non-repo / unborn-HEAD cases (capture existing files vs empty baseline).</li>
+      <li><strong>Library API surface.</strong> <code>tracker.Config.Git *GitConfig</code> for embedded callers (zero value resolves to <code>GitPreflightAuto</code>). <code>GitPreflight</code> constants re-exported from the <code>tracker</code> package. <code>tracker.WithGitConfig(policy, allowInit)</code> functional option for <code>tracker.Doctor</code>. <code>pipeline.SafetyLatches</code>, <code>pipeline.HasBornHEAD</code>, <code>pipeline.WorkdirHasContent</code> exported so Doctor preview models the same latches the runtime preflight enforces. <code>tracker.NewEngineWithContext(ctx, source, cfg)</code> is the ctx-aware constructor so cancellation reaches every git subprocess including the <code>--git=init</code> side effect.</li>
+      <li><strong>Built-in workflows that commit / branch / merge mid-run declare <code>requires: git</code></strong> — <code>ask_and_execute</code>, <code>build_product</code>, <code>build_product_with_superspec</code>. Running them in a non-git directory now fails in seconds with copy-paste remediation instead of burning LLM spend before the first git operation. <code>tracker workflows</code> shows a new REQUIRES column.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang dependency bumped v0.25.0 → v0.26.0.</strong> Picks up <code>ir.Workflow.Requires []string</code> and the parser / formatter support for the <code>requires:</code> workflow header keyword.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.28.2 ═══ -->
+  <section class="glass" id="v0-28-2" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.28.2" style="color: inherit; text-decoration: none;">v0.28.2</a></h2>
+      <span class="badge">2026-05-14</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.28.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Patch release fixing a runaway-agent bug in three of the four built-in workflows. No engine changes; no breaking changes.</p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Built-in workflows no longer run an unconstrained agent in <code>Start</code> / <code>Done</code></strong> (<a href="https://github.com/2389-research/tracker/issues/230">#230</a>). <code>workflows/ask_and_execute.dip</code>, <code>workflows/build_product.dip</code>, and <code>workflows/build_product_with_superspec.dip</code> (and their <code>examples/</code> mirrors) defined Start/Done as <code>agent</code> nodes with <code>prompt: Initialize pipeline.</code> / <code>prompt: Pipeline complete.</code>. Because the prompt attribute was present, <code>ensureStartExitNodes</code> skipped the passthrough handler and these nodes became real codergen sessions — system message limited to the file-path reminder, full default tool access (read/write/bash/glob/edit/grep_search), no per-node turn cap. A real <code>build_product</code> run was observed spending ~10 minutes and ~39k output tokens inside <code>Start</code>, implementing an entire separate Go project from a SPEC.md found on disk, before getting <code>context canceled</code> and being classified <code>outcome: retry</code>. Dropping the prompt lines makes Start/Done passthroughs (matching <code>deep_review.dip</code>, which was already correct). The broader engine policy gaps surfaced by this incident — <code>outcome: retry</code> on cancellation, no default <code>max_turns</code> cap, runaway nodes invisible to <code>tracker diagnose</code>, missing tool-call args in <code>activity.jsonl</code>, suspect per-node token accounting — are tracked in <a href="https://github.com/2389-research/tracker/issues/230">#230</a> for separate follow-up.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.28.1 ═══ -->
+  <section class="glass" id="v0-28-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.28.1" style="color: inherit; text-decoration: none;">v0.28.1</a></h2>
+      <span class="badge">2026-05-14</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.28.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Maintenance release — picks up dippin-lang v0.25.0 (<code>.dipx</code> format v1.1). No tracker-side feature changes; no breaking changes.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang dependency bumped v0.24.0 → v0.25.0.</strong> Three bundle-load improvements arrive automatically: <code>dipx.Open</code> cycle detection now walks every manifest-listed workflow (was: rooted only at <code>m.Entry</code>, could miss cycles in entry-unreachable workflows that <code>parseAllWorkflows</code> had already loaded); <code>dipx.Open</code> enriches <code>ErrManifestInvalid</code> / <code>ErrUnsupportedFormatVersion</code> errors with the bundle path; <code>dipx.Pack</code> correctly classifies subgraph parse failures as <code>ErrSubgraphParse</code> instead of <code>ErrEntryParse</code>. Plus context-cancellation through <code>Open</code> / <code>Pack</code> hot paths (per-entry <code>ctx.Err()</code> checks). The <code>Source.Workflow</code> signature change in dippin-lang v0.25.0 doesn't affect tracker — we use <code>Bundle.Entry()</code> / <code>Bundle.Lookup()</code> directly.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.28.0 ═══ -->
+  <section class="glass" id="v0-28-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.28.0" style="color: inherit; text-decoration: none;">v0.28.0</a></h2>
+      <span class="badge">2026-05-13</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.28.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">The full <a href="https://github.com/2389-research/tracker/issues/208">#208</a> follow-up arc lands: typed routing channels, validate-time lint, and integrity-protected audit log.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>marker_grep:</code> typed routing channel on tool nodes</strong> (closes <a href="https://github.com/2389-research/tracker/issues/210">#210</a>). Declarative regex on a tool node populates <code>ctx.tool_marker</code> from the last match's capture group — routing reads <code>when ctx.tool_marker = pass</code> instead of grepping <code>ctx.tool_stdout</code>. Missing match fails the node with <code>OutcomeFail</code> and emits <code>EventToolMarkerMissing</code> rather than silently falling through. <code>ctx.tool_marker</code> is LLM-origin so it's blocked from <code>tool_command</code> interpolation. Compatible with the v0.27.0 tail-window: regex runs over the captured tail, so end-of-output markers survive by construction.</li>
+      <li><strong><code>_TRACKER_ROUTE=&lt;value&gt;</code> reserved routing sentinel</strong> (closes <a href="https://github.com/2389-research/tracker/issues/212">#212</a>). Complement to <code>marker_grep</code> for tools that can't change schema. Runtime scans every tool node's captured stdout for <code>^\s*_TRACKER_ROUTE=(.+?)\s*$</code>, takes the last match, populates <code>ctx.tool_route</code>. Author pattern: <code>printf '_TRACKER_ROUTE=tests-pass\n'</code> once the routing decision is known, then <code>when ctx.tool_route = tests-pass</code>. Optional <code>route_required: true</code> opts in to strict mode — node fails with <code>OutcomeFail</code> + <code>EventToolRouteMissing</code> if no sentinel was emitted.</li>
+      <li><strong><code>TRK101</code> validate-time lint for risky tool-stdout routing</strong> (closes <a href="https://github.com/2389-research/tracker/issues/211">#211</a>). New <code>TRK1XX</code> namespace (distinct from dippin's <code>DIP1XX</code>). Fires at <code>tracker validate</code> / <code>tracker doctor</code> time on tool nodes that route on <code>ctx.tool_stdout</code> via one conditional + unconditional fallback + no <code>marker_grep</code> + no <code>output_limit</code> + volume-emitting body (<code>tee</code> or <code>2&gt;&amp;1</code>). Suggests <code>marker_grep</code> as the primary remediation. Heuristics tuned for low false-positive rate across <code>examples/*.dip</code>.</li>
+      <li><strong>Activity log integrity hardening</strong> (closes <a href="https://github.com/2389-research/tracker/issues/213">#213</a>). Pre-fix, the audit log at <code>&lt;workDir&gt;/.tracker/runs/&lt;runID&gt;/activity.jsonl</code> mode <code>0o644</code> was reachable via relative path from any tool subprocess with <code>cmd.Dir = workDir</code> — an LLM-controlled subprocess could inject fake <code>decision_edge</code> lines, truncate to suppress <code>tool_output_truncated</code>, or forge <code>pipeline_completed</code>. <strong>(A)</strong> Live writes relocated to <code>$XDG_STATE_HOME/tracker/runs/&lt;runID&gt;/activity.jsonl</code> (default <code>$HOME/.local/state/tracker/</code>, mode <code>0o600</code>, <code>TRACKER_AUDIT_DIR</code> override, <code>%LOCALAPPDATA%</code> fallback on Windows). <strong>(B)</strong> Every runtime-written line prefixed with <code>\x1f\x1e</code> (<code>pipeline.ActivityLogSentinel</code>); <code>tracker diagnose</code> validates and surfaces non-sentinel lines as <code>SuggestionAuditLogInjection</code>. On <code>Close()</code> a sentinel-stripped snapshot is written to the legacy run-dir path (mode <code>0o644</code>, <code>O_NOFOLLOW</code> on unix) so bundle export and git_artifacts keep working. Detection-only, not authentication — by design; per-line HMAC was explicitly out of scope.</li>
+      <li><strong>Property-based tests for <code>tailBuffer</code></strong> (closes <a href="https://github.com/2389-research/tracker/issues/214">#214</a>). New dev dep <code>pgregory.net/rapid</code> v1.3.0. Generalizes the v0.27.0 hand-rolled boundary tests to the full state space: for any sequence of writes with total <code>N</code> bytes and limit <code>L</code>, <code>tb.String()</code> equals the last <code>min(N, L)</code> bytes. 100 random cases per property, &lt; 2ms per property.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.27.0 ═══ -->
+  <section class="glass" id="v0-27-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.27.0" style="color: inherit; text-decoration: none;">v0.27.0</a></h2>
+      <span class="badge">2026-05-13</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.27.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Tail-window tool output capture + diagnostic events for routing-marker truncation.</p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Tool stdout/stderr truncation now keeps the tail, not the head</strong> (closes <a href="https://github.com/2389-research/tracker/issues/208">#208</a>). Pre-fix, the per-stream 64KB cap in <code>agent/exec/local.go</code> kept the <em>first</em> 64KB of output, silently dropping routing markers (<code>printf 'tests-pass'</code>) past the boundary — pipeline routing then fell through the unconditional fallback edge and could ship broken code as if it had passed. The <code>notebook_smoke</code> pipeline reproduced this twice in one day. New <code>tailBuffer</code> ring-buffer keeps the trailing <code>limit</code> bytes (O(1) amortized per-byte, single <code>limit</code>-sized allocation, exact tail match regardless of write boundaries). <code>CommandResult</code> gains structured <code>StdoutTruncated</code> / <code>StdoutBytesDropped</code> / <code>StderrTruncated</code> / <code>StderrBytesDropped</code> fields; the in-band <code>"...(output truncated at N bytes)"</code> suffix is gone — consumers must read the new flags (or the new <code>EventToolOutputTruncated</code> event below) to detect truncation. Symmetric for stderr, closing a pre-existing zero-stderr-truncation-tests coverage gap.</li>
+    </ul>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>EventToolOutputTruncated</code> activity event</strong> (Tier 1). Emitted once per truncated stream after each tool node, with <code>TruncationDetail{Stream, Limit, CapturedBytes, DroppedBytes, TotalBytes}</code>. Written to <code>activity.jsonl</code> so <code>tracker diagnose</code>, <code>tracker.Audit</code>, and NDJSON consumers can detect truncation retrospectively. <code>tracker diagnose</code> surfaces a <code>SuggestionToolOutputTruncated</code> suggestion explaining the elision and pointing at <code>output_limit</code> as the escape hatch.</li>
+      <li><strong><code>EventConditionalFallthrough</code> activity event</strong> (Tier 2). Fires when at least one conditional outgoing edge from a node was evaluated, all evaluated false, and routing fell through to a fallback (<code>label</code>, <code>suggested</code>, or <code>weight</code>). Carries the list of <code>ConditionEval{EdgeTo, Condition}</code> entries that missed. Does NOT fire on intentional all-unconditional routing &mdash; distinguishes "stated routing intent missed" from "fallback is the only option". <code>tracker diagnose</code> correlates this with <code>EventToolOutputTruncated</code> on the same node and surfaces a combined suggestion ("your routing marker may have been dropped") &mdash; the canonical diagnostic narrative for the <a href="https://github.com/2389-research/tracker/issues/208">#208</a> failure shape.</li>
+      <li><strong>Five hardening follow-ups filed</strong> from the 6-expert design panel that reviewed the #208 fixes: <a href="https://github.com/2389-research/tracker/issues/210">#210</a> <code>marker_grep</code> primitive, <a href="https://github.com/2389-research/tracker/issues/211">#211</a> validate-time lint for risky stdout-routing patterns, <a href="https://github.com/2389-research/tracker/issues/212">#212</a> <code>_TRACKER_ROUTE</code> reserved sentinel, <a href="https://github.com/2389-research/tracker/issues/213">#213</a> <code>activity.jsonl</code> integrity, <a href="https://github.com/2389-research/tracker/issues/214">#214</a> property tests via <code>pgregory.net/rapid</code>.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.26.0 ═══ -->
+  <section class="glass" id="v0-26-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.26.0" style="color: inherit; text-decoration: none;">v0.26.0</a></h2>
+      <span class="badge">2026-05-12</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.26.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Native <code>.dipx</code> bundle support across the entire CLI.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Native <code>.dipx</code> bundle support</strong> (<a href="https://github.com/2389-research/tracker/pull/209">#209</a>): tracker now accepts content-addressed <code>.dipx</code> bundles (produced by <code>dippin pack</code>) anywhere it accepts a pipeline file &mdash; <code>tracker validate</code>, <code>tracker simulate</code>, <code>tracker run</code>, <code>tracker doctor</code>, and <code>tracker -r &lt;runID&gt;</code> resume. Pre-fix, tracker read the bundle's ZIP bytes as <code>.dip</code> source and failed with bogus <code>DIP001</code>/<code>DIP002</code> validation errors. New <code>pipeline.LoadDipxBundle</code> opens the bundle via <code>dipx.Open</code> (SHA-256 verifies every file in <code>manifest.json</code> before any content reaches the parser), uses the bundle's pre-parsed <code>*ir.Workflow</code> directly, and bypasses the filesystem subgraph walker entirely since dipx already verifies ref closure + acyclicity on <code>Open</code>. The bundle's content-addressed identity (<code>sha256:&lt;hex&gt;</code>) is stamped on every line of <code>activity.jsonl</code> (engine emissions, parallel/manager_loop emissions that bypass the engine's emit chokepoint, and agent/llm JSONL writes that bypass both &mdash; three composable layers), persisted into <code>checkpoint.json</code> for resume verification, and surfaced in <code>tracker list</code> (new <code>Bundle</code> column) and <code>tracker audit</code> (new <code>Bundle:</code> header line). Bundle identity is exposed on <code>tracker.Result.BundleIdentity</code> and <code>tracker.RunSummary.BundleIdentity</code> for embedded library callers. Resume against a <code>.dipx</code> strictly verifies the stored identity matches the one being resumed &mdash; mismatch aborts with both hashes shown; <code>--force-bundle-mismatch</code> is the escape hatch (loud warning to stderr).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang dependency bumped v0.23.0 &rarr; v0.24.0</strong> for the new <code>dipx</code> package (<code>Open</code>, <code>Bundle.Workflow</code>, <code>Bundle.Identity</code>). <code>PinnedDippinVersion</code> in <code>tracker_doctor.go</code> updated to match so <code>tracker doctor</code>'s version-mismatch check reflects the new pin.</li>
+      <li><strong><code>pipeline.LoadDipxBundle</code> returns diagnostics instead of writing to <code>os.Stderr</code></strong>: the library API no longer prints to the process-global stderr; the signature gains a <code>[]validator.Diagnostic</code> return so embedded callers can route them through their own logger. CLI callers (<code>cmd/tracker/loadDipxPipeline</code>, <code>tracker doctor</code>'s bundle check) print to stderr as before. Mirrors the existing <code>pipeline.LoadDippinWorkflow</code> contract for the <code>.dip</code> path.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.25.1 ═══ -->
+  <section class="glass" id="v0-25-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.25.1" style="color: inherit; text-decoration: none;">v0.25.1</a></h2>
+      <span class="badge">2026-05-11</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.25.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Bedrock Gateway integration polish + Gemini token-usage fix.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Bedrock Gateway integration guide refreshed</strong> for upstream gateway fixes (<a href="https://github.com/2389-research/gateway/issues/4">#4</a> Gemini <code>/v1beta</code> paths and <a href="https://github.com/2389-research/gateway/issues/5">#5</a> Cloudflare AI Gateway native routing prefixes <code>/anthropic</code> <code>/openai</code> <code>/google-ai-studio</code> <code>/compat</code>, both closed 2026-04-30). Tracker's <code>--gateway-url</code> flag now works end-to-end against <code>https://bedrock-gateway.2389-research-inc.workers.dev</code> and <code>provider: gemini</code> is no longer broken. <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md"><code>docs/bedrock-gateway.md</code></a> rewritten to lead with the recommended <code>--gateway-url</code> recipe; compatibility matrix flips Gemini to working; obsolete workarounds dropped. <code>provider: openai</code> (Responses API) row stays as broken pending gateway <a href="https://github.com/2389-research/gateway/issues/3">#3</a>, which was reopened after discovering it had been auto-closed by an unrelated commit's "Fix #3" wording.</li>
+      <li><strong>Gemini SSE parser coalesces split finish + usage chunks into a single <code>EventFinish</code></strong>: when an upstream emits the finish reason and <code>usageMetadata</code> in two separate chunks (the bedrock gateway does this; real Google can too), the parser now buffers the finish reason in <code>geminiStreamState.pendingFinish</code> and emits one combined event when the usage chunk arrives. A <code>flushPendingFinish</code> helper guarantees the buffered reason is emitted before every early-return path &mdash; clean stream exit, scanner error, JSON parse error &mdash; so partial-failure streams still produce a terminal <code>EventFinish</code> ahead of any <code>EventError</code>, preserving accumulator bookkeeping. Net effect: the <code>llm finish</code> trace line prints exactly once per turn regardless of upstream chunking shape.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Gemini token usage no longer reports 0 when the upstream emits <code>usageMetadata</code> as a standalone trailing SSE chunk</strong>: tracker's <code>llm/google/adapter.go</code> SSE parser used to bail on any chunk with no <code>candidates</code> array, which dropped trailing usage-only chunks on the floor. Surfaced while smoke-testing tracker against the bedrock gateway where the streaming reply is three chunks: text &rarr; <code>finishReason:"STOP"</code> &rarr; <code>usageMetadata</code>. End-to-end verified: <code>provider: gemini</code> smoke run now reports <code>1,408 in / 4 out</code> instead of <code>0 in / 0 out</code>, and per-provider cost rollup is correct (no double-counting because <code>AggregateUsage</code> folds per-node <code>SessionStats</code>, not per <code>TraceEvent</code>).</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.25.0 ═══ -->
+  <section class="glass" id="v0-25-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.25.0" style="color: inherit; text-decoration: none;">v0.25.0</a></h2>
+      <span class="badge">2026-05-05</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.25.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Architect-side machinery for local codegen + self-healing declared writes.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Architect-side machinery for local codegen</strong>: new agent-runtime primitive <code>TerminalTool</code> ends the session loop the moment a tool flagged terminal succeeds &mdash; no wasted post-dispatch turns. Three new tools land via env-gated registration (<code>TRACKER_SPRINT_WRITER_MODEL</code> / <code>TRACKER_CODEGEN_MODEL</code>): <code>dispatch_sprints</code> reads a <code>{path, description}</code> JSONL plan and runs the per-sprint author+audit pipeline once per line via a deterministic in-tool loop with bounded retry+backoff for transient provider errors (5xx, rate-limit, timeout, network); <code>write_enriched_sprint</code> calls a mid-tier LLM once per sprint with a 4-strategy SEARCH/REPLACE matcher (exact &rarr; indent-preserving &rarr; whitespace-insensitive &rarr; fuzzy with Levenshtein ratio &ge; 0.9), partial-apply semantics distinguishing <code>PATCHED-PARTIAL</code> from clean <code>PATCHED</code>, and a tolerant audit-verdict parser; <code>generate_code</code> expands a contract into one or more files via a cheap/fast model. Validated end-to-end on Notebook synthetic (41/41 pytest passing, ~$2, 28min) and NIFB architect-only (16 sprints, ~$5, 47min).</li>
+      <li><strong>Self-healing JSON extraction cascade for declared writes</strong>: when an LLM responds with prose instead of valid JSON for a node with <code>writes:</code>, the runner now attempts (1) direct JSON parse; (2) extraction of any <code>```...```</code> fenced block via a strict-shape regex (so a <code>text</code>/<code>bash</code> preamble and stray inline backticks don't fool it); (3) balanced-brace scan for the first top-level <code>{&hellip;}</code> span that parses as an object (handles prose with stray brace pairs around real JSON; <code>{</code> inside JSON-string values and inside <code>[&hellip;]</code> arrays correctly skipped); (4) single-key fallback to the raw response with <code>writes_warning</code>, capped at 8 KiB. Multi-key writes still hard-fail. Fallback is gated on "no extractable JSON found" &mdash; a model that returned valid JSON missing the declared key gets a hard contract failure with a specific error.</li>
+      <li><strong>Bedrock Gateway integration guide</strong>: new <a href="https://github.com/2389-research/tracker/blob/main/docs/bedrock-gateway.md"><code>docs/bedrock-gateway.md</code></a> walks through pointing tracker at the 2389 Cloudflare Worker &mdash; per-provider <code>*_BASE_URL</code> recipes, provider compatibility matrix, authentication via Cloudflare AI Gateway tokens, and verification guidance.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>writes:</code> declarations are rejected when they collide with reserved key names</strong>: two reserved sets &mdash; (a) the <code>tool_command</code> safe-key allowlist (<code>outcome</code>, <code>preferred_label</code>, <code>human_response</code>, <code>interview_answers</code>); allowing <code>writes: outcome</code> would funnel LLM-controlled content into a reserved name and bypass the sanitization that keeps LLM output out of shell input. (b) the writes-signal keys (<code>writes_error</code>, <code>writes_warning</code>); allowing them via writes would let an LLM spoof a failure/healed signal that <code>tracker diagnose</code> and <code>when ctx.writes_error != ""</code> edges branch on. Collision rejection runs before any value is written. No existing pipelines used these collisions.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker doctor</code> provider probe restored to 16-token max output</strong>: the probe had been using <code>maxTok:= 1</code>, but OpenAI's Responses API requires <code>max_output_tokens &ge; 16</code> and returns HTTP 400 (<code>Invalid 'max_output_tokens': integer below minimum</code>) below that &mdash; breaking <code>tracker doctor</code> for OpenAI keys entirely.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.24.2 ═══ -->
+  <section class="glass" id="v0-24-2" style="border-left: 3px solid var(--red-500, #ef4444);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2" style="color: inherit; text-decoration: none;">v0.24.2</a></h2>
+      <span class="badge">2026-05-03</span>
+      <span class="badge" style="background: rgba(239,68,68,0.15); color: #ef4444;">security</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Security and correctness fixes from a 13-expert panel audit of v0.24.1.</p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>ACP <code>CreateTerminal</code> now validates commands against the built-in denylist and constrains <code>cwd</code> to the working directory</strong>: previously an LLM-directed ACP agent could execute arbitrary commands, completely bypassing the denylist that protects <code>tool_command</code>. Bare denylisted commands (e.g. <code>eval</code> with no args) are also blocked.</li>
+      <li><strong>Claude Code backend kills subprocess process group on pipeline cancellation</strong>: added <code>SysProcAttr.Setpgid</code> + <code>cmd.Cancel</code> (SIGKILL to process group) to prevent orphaned <code>claude</code> subprocesses consuming API credits after ctrl-C or budget breach.</li>
+      <li><strong><code>TRACKER_PASS_API_KEYS</code> now requires <code>=1</code></strong> instead of any non-empty value: previously <code>TRACKER_PASS_API_KEYS=false</code> or <code>=0</code> silently leaked all API keys to the claude subprocess. <code>tracker doctor</code> env warning updated to match.</li>
+      <li><strong>Engine fails on unknown outcome status instead of treating as success</strong>: the <code>default:</code> case in <code>handleOutcomeStatus</code> previously called <code>MarkCompleted</code>, silently promoting handler bugs to success. Now emits <code>EventStageFailed</code> and sets <code>OutcomeFail</code>.</li>
+      <li><strong>Pipeline goroutine panic recovery</strong>: <code>runPipelineAsync</code> now has <code>defer/recover</code> so a handler panic produces a clean error instead of crashing the TUI.</li>
+      <li><strong><code>PinnedDippinVersion</code> updated to <code>v0.23.0</code></strong> to match <code>go.mod</code>.</li>
+      <li><strong><code>DefaultModel</code> updated to <code>claude-sonnet-4-6</code></strong>.</li>
+      <li><strong>Autopilot LLM calls now respect pipeline context cancellation</strong>: all call sites used <code>context.Background()</code> &mdash; pipeline cancellation had no effect on in-flight autopilot requests.</li>
+      <li><strong>Example <code>manager_loop_child.dip</code> updated for <code>steer.*</code> namespace</strong>.</li>
+      <li><strong><code>escapeOsascript</code> now escapes newlines</strong> to prevent injection in macOS notification strings.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>stack.manager_loop</code> <code>steer_context</code> keys namespaced under <code>steer.*</code></strong>: prevents collision with safe-allowlisted bare ctx keys used in <code>tool_command</code> variable expansion. <strong>Behavior change:</strong> pipelines reading steer values via <code>${ctx.hint}</code> must update to <code>${ctx.steer.hint}</code>.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.24.1 ═══ -->
+  <section class="glass" id="v0-24-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1" style="color: inherit; text-decoration: none;">v0.24.1</a></h2>
+      <span class="badge">2026-04-24</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>claude-code backend now parses cache-token usage from the NDJSON result envelope</strong>: the Claude CLI already emits <code>cache_read_input_tokens</code> and <code>cache_creation_input_tokens</code> in its <code>result</code> message, but <code>storeResult</code> was silently dropping both. For heavy-cache Sonnet workloads (typically 60&ndash;90% cache-read), that meant ~3&times; input-cost overcount because <code>llm.EstimateCost</code> priced every input token at the fresh rate. Fix populates <code>*int</code> pointers on <code>llm.Usage</code> so <code>EstimateCost</code> prices cache reads at 10% and cache writes at 25% of the input rate (Anthropic pricing convention). <code>TotalTokens</code> stays fresh-input + output per the cross-provider convention so <code>BudgetGuard</code>'s <code>--max-tokens</code> semantics stay uniform.</li>
+    </ul>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>TRACKER_ACP_CACHE_READ_RATIO</code> env var for ACP cost-estimate tuning</strong>: ACP protocol doesn't expose cache tokens, so the estimator defaulted to pricing all estimated input as fresh. Conservative but up to ~3&times; high for bridges that keep a stable prompt cache. Setting <code>TRACKER_ACP_CACHE_READ_RATIO</code> to a value in <code>(0, 1]</code> routes that fraction of estimated input to <code>Usage.CacheReadTokens</code>. Typical values for stable-context Claude workloads: 0.5&ndash;0.8. NaN/Inf/out-of-range ignored with a one-time warning.</li>
+      <li><strong><code>--tool-denylist-add &lt;glob&gt;</code> CLI flag + <code>tool_denylist_add</code> graph attribute</strong>: operators and workflow authors can extend the built-in tool-command denylist with additional glob patterns for defense in depth. User patterns are strictly additive &mdash; cannot remove a built-in; <code>--bypass-denylist</code> still disables everything (built-in + user-added); allowlist and user-denylist are independent gates (both must pass). Completes the deferred <code>WorkflowDefaults.ToolDenylistAdd</code> adapter wiring from v0.24.0's dippin v0.23.0 bump.</li>
+      <li><strong>Estimated-usage flag plumbed from ACP backend through trace &rarr; CLI &rarr; TUI &rarr; NDJSON</strong>: <code>ACPUsageMarker</code> on <code>llm.Usage.Raw</code> is now preserved by a new <code>extractEstimateMarker</code> helper that populates <code>SessionStats.Estimated</code> + <code>EstimateSource</code> before <code>Usage.Raw</code> gets dropped. <code>Trace.AggregateUsage</code> OR-propagates the flag across sessions and child rollups, so any estimated session taints the per-provider bucket and summary. CLI "Tokens by Provider" table suffixes estimated providers with <code>(estimated)</code>, total-cost line renders as <code>~$X.XXXX (estimated)</code>, TUI header cost badge prefixes with <code>~</code>, and NDJSON <code>cost_updated</code>/<code>budget_exceeded</code> events carry <code>CostSnapshot.Estimated</code>. Mixed native+ACP runs no longer misleadingly present heuristic spend as metered.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.24.0 ═══ -->
+  <section class="glass" id="v0-24-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0" style="color: inherit; text-decoration: none;">v0.24.0</a></h2>
+      <span class="badge">2026-04-24</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.24.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>subgraph</code> nodes no longer bypass <code>--max-tokens</code>/<code>--max-cost</code> budgets</strong>: pre-fix, a pipeline author could place cost-intensive nodes inside a subgraph and both token and cost ceilings became silently non-binding. Now child engines inherit the parent's <code>BudgetGuard</code> + baseline-usage snapshot via a new <code>ChildRunContextFromContext(ctx)</code> channel; <code>Outcome</code> and <code>TraceEntry</code> gain a <code>ChildUsage</code> field so child spend rolls up through <code>Trace.AggregateUsage</code> into parent <code>ProviderTotals</code> and fires the parent's guard at the next between-node check. A child-side <code>OutcomeBudgetExceeded</code> propagates as <code>OutcomeSuccess</code> + <code>ChildUsage</code> so the parent's own guard reports the correct halt status instead of tripping the strict-failure-edges rule. Four regression tests cover rollup, delayed parent-halt, mid-subgraph child-guard halt, and two-level nesting.</li>
+      <li><strong><code>stack.manager_loop</code> nodes no longer bypass budgets</strong>: same shape of bug as the subgraph fix. <code>ManagerLoopHandler.Execute</code> now reads <code>ChildRunContextFromContext</code> and threads <code>BudgetGuard</code> + baseline usage into the child engine, and <code>handleChildResult</code> sets <code>Outcome.ChildUsage</code> on every return path. Especially load-bearing given manager_loop is the canonical place where tokens pile up &mdash; specifically designed for cycle-heavy async supervision (Attractor spec 4.11). Three regression tests mirror the subgraph suite.</li>
+      <li><strong><code>SessionResult.Provider</code> now populated for <code>claude-code</code> and <code>acp</code> backends</strong>: previously left empty, so <code>Trace.AggregateUsage</code> bucketed their usage under the <code>"unknown"</code> provider. Dashboards and library consumers reading <code>EngineResult.Usage.ProviderTotals</code> now see populated buckets.</li>
+      <li><strong><code>trackExternalBackendUsage</code> threads <code>cfg.Model</code> into <code>TokenTracker.AddUsage</code></strong>: previously the model arg was omitted, so <code>TokenTracker.CostByProvider</code>'s resolver fell back to (often empty) <code>graph.Attrs["llm_model"]</code> and priced at <code>$0</code>. Library <code>tracker.Result.Cost.ByProvider["claude-code"|"acp"]</code> and <code>--max-cost</code> enforcement were silently disabled for those backends.</li>
+      <li><strong><code>llm.EstimateCost</code> logs a one-time warning per unknown model</strong> instead of returning <code>$0</code> silently: violates the project's "never silently swallow errors" rule and hides the real consequence that <code>--max-cost</code> ceilings can't apply to usage priced under a model that isn't in the catalog.</li>
+      <li><strong><code>steer_context</code> keys with <code>:</code> rejected at adapter time</strong>: dippin-lang's block-form formatter writes entries as <code>key: value</code>, so a colon in a key breaks <code>.dip &rarr; IR &rarr;.dip</code> round-trip. <code>flattenSteerContext</code> now returns <code>ErrInvalidSteerContextKey</code> instead of letting the parser drop the key with a diagnostic.</li>
+      <li><strong><code>manager_loop</code> nodes with nil <code>ir.ManagerLoopConfig</code> fail at graph-build time</strong>: <code>convertNode</code> previously let a nil Config flow through as a no-op, producing a graph node without <code>subgraph_ref</code> that failed vaguely at Execute-time. Returns <code>ErrMissingManagerLoopCfg</code> instead.</li>
+    </ul>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>ACP backend surfaces approximate per-prompt token usage</strong>: the Agent Client Protocol spec has no native usage surface, so <code>estimateACPUsage</code> synthesizes <code>llm.Usage</code> from rune counts across six billable channels &mdash; <code>cfg.Prompt</code>, <code>cfg.SystemPrompt</code>, assistant text, reasoning chunks, tool-call argument payloads, and tool-call result payloads (full <code>Content</code> + <code>RawOutput</code>, not display summaries). UTF-8 aware via <code>unicode/utf8</code>, <code>ceil(runes/4)</code> applied per side. <code>Usage.ReasoningTokens</code> populated from reasoning runes for future catalog-level per-reasoning pricing. <code>ACPUsageMarker{Estimated: true,...}</code> on <code>Usage.Raw</code> for consumers reading <code>SessionResult.Usage</code> directly; a one-time log per <code>ACPBackend</code> instance announces that ACP numbers are estimates. <code>--max-tokens</code> and <code>--max-cost</code> now enforce against ACP sessions. Remaining intrinsic undercount: the bridge's own injected system prompt + tool schemas are invisible to the heuristic (requires a bridge-specific <code>Meta</code> extension we don't have).</li>
+      <li><strong>Example manager_loop pipelines</strong>: <code>examples/manager_loop_demo.dip</code> + <code>examples/subgraphs/manager_loop_child.dip</code> exercise <code>subgraph_ref</code> + poll interval + steering against a real child. Both grade A via <code>dippin doctor</code>; the Makefile <code>doctor</code> target runs them in CI.</li>
+      <li><strong>Diagnostic warnings for manager_loop authoring mistakes</strong>: warn when both unprefixed and legacy <code>manager.*</code> attrs are set on the same node (accidental shadowing); warn on <code>stack.child.&lt;word&gt;</code> references in <code>stop_condition</code>/<code>steer_condition</code> that aren't among the three keys tracker actually publishes (<code>status</code>, <code>cycles</code>, <code>exit_status</code>).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang dependency bumped v0.22.0 &rarr; v0.23.0</strong>: upstream ships DIP28 tool-safety defaults. <code>extractWorkflowDefaults</code> wires <code>WorkflowDefaults.ToolCommandsAllow</code> &rarr; <code>graph.Attrs["tool_commands_allow"]</code>; the <code>ToolDenylistAdd</code> field is deferred until the matching <code>--tool-denylist-add</code> CLI flag lands.</li>
+      <li><strong>Docs relocated under <code>docs/architecture/</code></strong>: <code>docs/pipeline-context-flow.md</code> &rarr; <code>docs/architecture/context-flow.md</code>; <code>docs/manager-loop.md</code> &rarr; <code>docs/architecture/handlers/manager-loop.md</code>. All inbound links updated.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.23.0 ═══ -->
+  <section class="glass" id="v0-23-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.23.0" style="color: inherit; text-decoration: none;">v0.23.0</a></h2>
+      <span class="badge">2026-04-22</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.23.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>ir.NodeManagerLoop</code> adapter support + dippin-lang v0.22.0 bump</strong>: <code>.dip</code> authors can now declare <code>stack.manager_loop</code> supervisors directly via the new IR kind instead of reaching for DOT. The adapter maps <code>ir.NodeManagerLoop</code> &rarr; <code>shape=house</code> &rarr; <code>handler=stack.manager_loop</code> and flattens <code>ir.ManagerLoopConfig</code> into six unprefixed attrs: <code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>. <code>steer_context</code> uses canonical sorted <code>k=v,k=v</code> pairs with percent-encoding for <code>,</code>/<code>=</code>/<code>%</code>, matching dippin-lang's <code>export.flattenSteerContext</code> for lossless round-trips. When a manager_loop is the workflow's Start or Exit, shape is overridden to <code>Mdiamond</code>/<code>Msquare</code> but the handler and flat attrs are preserved so the supervisor still executes.</li>
+      <li><strong><code>ManagerLoopHandler</code> accepts both v0.22.0 unprefixed contract names and legacy <code>manager.*</code> prefixed variants</strong>: backward-compatible; unprefixed wins when both are set. <code>parseSteerContext</code> percent-decodes reserved chars so round-trips complete through the handler. Partial steering configs (<code>steer_condition</code> without <code>steer_context</code>, or vice versa) are now rejected at parse time instead of silently rendering the supervisor inert.</li>
+      <li><strong>Three new tool-safety CLI flags</strong>: <code>--bypass-denylist</code> (bool, default <code>false</code>) disables the built-in denylist with a loud stderr warning on startup &mdash; use only in sandboxed environments. <code>--tool-allowlist &lt;pattern&gt;</code> is repeatable and accepts comma-separated glob patterns; every tool command must match at least one allowlist entry when the flag is set. <code>--max-output-limit &lt;bytes&gt;</code> sets the hard ceiling (default 10&nbsp;MB) applied to per-node <code>output_limit:</code> attrs. Allowlists union with the <code>tool_commands_allow</code> graph attr; the denylist always wins.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>formatManagerLoopConditionExpr</code> emits Go-style <code>&amp;&amp;</code> / <code>||</code></strong> instead of English <code>and</code> / <code>or</code>. Parsed-only IR conditions (Raw empty) now evaluate correctly through <code>pipeline.EvaluateCondition</code>. <code>CondNot</code> continues to emit <code>not </code>, matching the evaluator's native negation.</li>
+      <li><strong><code>managerAttr</code> uses comma-ok lookup</strong> so an explicit empty string on the unprefixed key wins over a non-empty legacy <code>manager.*</code> value. Previously the zero-value check let authors accidentally resurrect values they thought they had cleared.</li>
+      <li><strong><code>parseManagerLoopConfig</code> distinguishes empty vs. malformed <code>steer_context</code></strong>: error now reports "steer_context %q is invalid" with the raw value if it was non-empty, and "steer_context is empty &mdash; nothing to inject" only when truly unset.</li>
+      <li><strong><code>tool_commands_allow</code> graph attribute wired</strong> so the allowlist is enforceable from a pipeline file as well as the CLI.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.22.0 ═══ -->
+  <section class="glass" id="v0-22-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.22.0" style="color: inherit; text-decoration: none;">v0.22.0</a></h2>
+      <span class="badge">2026-04-22</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.22.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker-swebench analyze &lt;results-dir&gt;</code></strong>: Bulk-triage tool for completed SWE-bench runs. Reads <code>predictions.jsonl</code>, run logs, and empty-patch diagnostics, then emits resolved/unresolved/empty/error counts, per-repo breakdown, top-10 empty-patch and longest-unresolved instances, and error class distribution. Auto-detects SWE-bench evaluator reports; <code>--json</code> emits the structured <code>AnalyzeReport</code>.</li>
+      <li><strong>Typed <code>NodeConfig</code> accessors on <code>*pipeline.Node</code></strong>: <code>AgentConfig()</code>, <code>ToolConfig()</code>, <code>HumanConfig()</code>, <code>ParallelConfig()</code>, and <code>RetryConfig()</code> return typed structs parsed from <code>Node.Attrs</code>. Graph-default-then-node-override merge is centralized; three-state booleans expose companion <code>*Set</code> flags so callers can distinguish "explicitly configured" from "absent".</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Codergen handler now consumes <code>AgentNodeConfig</code></strong> instead of eight separate <code>apply*</code> methods re-parsing <code>Node.Attrs</code>. No behavior change.</li>
+      <li><strong>Human, tool, and parallel handlers consume typed configs</strong> via <code>HumanConfig()</code>, <code>ToolConfig()</code>, and <code>ParallelConfig()</code> accessors. Direct <code>Attrs</code> reads reduced substantially across handlers.</li>
+      <li><strong>Tool node <code>timeout</code> errors on zero or negative durations</strong>: previously fell through to <code>context.WithTimeout</code> causing immediate cancellation with a confusing error. Validated at handler entry with a clear <code>non-positive timeout</code> message.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.21.0 ═══ -->
+  <section class="glass" id="v0-21-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.21.0" style="color: inherit; text-decoration: none;">v0.21.0</a></h2>
+      <span class="badge">2026-04-21</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.21.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Declarative <code>writes:</code> / <code>reads:</code> unified structured output</strong>: Agent, human, and tool nodes can declare the keys they produce and consume. Declared writes are extracted from handler output into the pipeline context and validated; missing required fields fail the node. <code>reads:</code> pins fidelity for the keys a node consumes. Replaces node-type-specific workarounds for threading typed outputs between nodes.</li>
+      <li><strong><code>tracker.SimulateGraph(ctx, graph)</code></strong>: Graph-in variant of <code>Simulate</code> for callers that already parsed the pipeline. <code>Simulate()</code> is now a thin wrapper.</li>
+      <li><strong>Repository localization pre-processing</strong>: Optional pre-scan of the working directory for files relevant to the task prompt, injected as a structured context block before the first LLM turn. Pure text analysis, zero LLM calls. Reduces wasted turns on <code>glob</code>/<code>grep</code> for repository-level tasks.</li>
+      <li><strong>Agent episodic memory across retries/resumes</strong>: Native codergen sessions record a structured per-tool episode log and inject prior summaries into subsequent retry/resume attempts so the model can avoid repeating failed approaches.</li>
+      <li><strong>Plan-before-execute phase</strong>: Optional single planning LLM call before the main execution loop. Opt-in via <code>SessionConfig.PlanBeforeExecute</code> or the <code>plan_before_execute</code> node attr.</li>
+      <li><strong>Library API godoc, stability policy, and runnable examples</strong>: Pre-1.0 stability callout in <code>doc.go</code>; runnable <code>ExampleDiagnose</code>/<code>ExampleAudit</code>/<code>ExampleDoctor</code>.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker simulate</code> output is now deterministic</strong>: Graph attrs sorted alphabetically; orphan nodes appended in sorted order. No more random-map-iteration diffs between runs.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker simulate</code> now parses the pipeline source exactly once</strong>: Previously double-parsed. No more duplicated dippin-lang lint warnings.</li>
+      <li><strong>Cost accounting consistent across runtime and CLI summaries</strong>: CLI uses <code>EngineResult.Usage</code> (trace aggregate) instead of <code>TokenTracker</code>; repair turns apply <code>EstimateCost</code> compensation; OpenAI <code>response.completed</code> preserves reasoning tokens; Gemini adapter falls back to requested model when <code>modelVersion</code> missing.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.20.0 ═══ -->
+  <section class="glass" id="v0-20-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.20.0" style="color: inherit; text-decoration: none;">v0.20.0</a></h2>
+      <span class="badge">2026-04-21</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.20.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>stack.manager_loop</code> handler</strong>: A supervisor node that launches a child pipeline in a goroutine, polls at a configurable interval, and optionally steers the running child by injecting context mid-execution. Config via <code>subgraph_ref</code>, <code>manager.poll_interval</code>, <code>manager.max_cycles</code>, <code>manager.stop_condition</code>, <code>manager.steer_condition</code>, <code>manager.steer_context</code>. Emits <code>stage_started</code>, <code>manager_cycle_tick</code>, and terminal stage events. See <code>docs/manager-loop.md</code>.</li>
+      <li><strong>Engine steering channel</strong>: New <code>pipeline.WithSteeringChan</code> engine option. Between node executions, the engine drains the channel and merges updates into the run's <code>PipelineContext</code>. Used by <code>manager_loop</code> and available to any supervisor.</li>
+      <li><strong><code>PipelineContext.MergeWithoutDirty</code></strong>: Writes updates without marking keys as dirty so externally-injected values never leak into a node's per-node scope.</li>
+      <li><strong>Accurate cost estimation via catalog + cache token pricing</strong>: <code>EstimateCost</code> resolves prices through the model catalog instead of a duplicate hardcoded map. Cache reads at 10% of input rate, cache writes at 25%. <code>TokenTracker</code> records observed model per provider.</li>
+      <li><strong>Model catalog April 2026 refresh</strong>: Adds <code>claude-opus-4-7</code>, <code>gpt-5.4-mini</code>/<code>gpt-5.4-nano</code>, the <code>gpt-4.1</code> family, <code>o3</code>, <code>o4-mini</code>, GA Gemini 2.5 models, and <code>gemini-3.1-pro-preview</code>. Fixes <code>claude-opus-4-6</code> pricing and bumps Sonnet/Opus 4.6 context windows to 1M.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>ACP path validation rejects <code>..</code> segments before symlink resolution</strong>: Security hardening against a symlink + <code>..</code> sandbox-escape vector. Splits on both <code>/</code> and <code>\</code> so Windows paths are protected.</li>
+      <li><strong>Manager loop hardening</strong>: Poll-timer vs. child-completion race, crash path always returns non-nil error, config validation hard-fails on malformed values, <code>EvaluateCondition</code> errors surface for both stop and steer conditions, <code>EventStageFailed</code> emitted on context cancellation and condition-parse errors.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.19.0 ═══ -->
+  <section class="glass" id="v0-19-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.19.0" style="color: inherit; text-decoration: none;">v0.19.0</a></h2>
+      <span class="badge">2026-04-20</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.19.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Workflow params via <code>${params.*}</code> with CLI/library overrides</strong>: Top-level Dippin <code>vars</code> become <code>params.*</code> graph attrs available in prompts, tool commands, and edge conditions. Repeatable <code>--param key=value</code> on the CLI plus <code>tracker.Config.Params</code> for library callers. Overrides hard-fail on unknown keys. New lint rules DIP120 (undeclared reference) and DIP121 (unused var).</li>
+      <li><strong>Per-human-gate <code>timeout</code> / <code>timeout_action</code> in <code>.dip</code></strong>: Exposed by dippin-lang v0.21.0's <code>HumanConfig</code> IR and copied into node attrs consumed by the human handler.</li>
+      <li><strong>Workflow-level budget ceilings from <code>.dip</code></strong>: <code>max_total_tokens</code>, <code>max_cost_cents</code>, and <code>max_wall_time</code> in a workflow's <code>defaults:</code> block feed <code>ResolveBudgetLimits</code>. Explicit config/CLI flags still win.</li>
+      <li><strong>Library API hardening for v1.0</strong>: Typed <code>CheckStatus</code> and <code>SuggestionKind</code> enums; <code>tracker.WithVersionInfo(version, commit)</code> functional option; <code>DiagnoseConfig.LogWriter</code> / <code>AuditConfig.LogWriter</code>; <code>Doctor</code>, <code>Diagnose</code>, <code>Audit</code>, <code>Simulate</code> all take <code>context.Context</code>; provider probe error bodies sanitized; NDJSON writer closures recover from sink panics; <code>Diagnose</code> streams <code>activity.jsonl</code> via <code>bufio.Scanner</code>.</li>
+      <li><strong>TUI pre-populates subgraph children in the sidebar</strong>: Subgraph reference nodes no longer appear as opaque single rows until child events arrive.</li>
+      <li><strong>Agent QoL from SWE-bench</strong>: Turn-budget checkpoints at 50%/75%, two-phase verify-after-edit, tool polish (<code>grep</code> context lines, <code>read</code> offset/limit, <code>edit</code> miss context), subprocess group kill for orphan safety. Defaults promoted: <code>MaxTokens: 16384</code>, auto-continue on truncation, <code>LoopDetectionThreshold: 4</code> — SWE-bench Lite 59% &rarr; 70% baseline shift.</li>
+      <li><strong><code>--artifact-dir</code> CLI flag</strong> overrides the node state directory.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang dependency v0.20.0 &rarr; v0.21.0</strong>. Picks up <code>${ctx.node.&lt;id&gt;.*}</code> scoped-read lint support.</li>
+      <li><strong>BREAKING (library)</strong>: <code>Doctor</code>, <code>Diagnose</code>, <code>DiagnoseMostRecent</code>, <code>Audit</code>, <code>Simulate</code> all now take <code>context.Context</code> as the first argument. <code>tracker.NDJSONEvent</code> renamed to <code>StreamEvent</code>. <code>NDJSONWriter.Write</code> returns <code>error</code>. <code>DoctorConfig.TrackerVersion</code>/<code>TrackerCommit</code> removed — use <code>WithVersionInfo</code>.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>OpenAI Responses API <code>function_call_output</code> / <code>function_call</code> serialization</strong>: <code>omitempty</code> on required fields caused OpenRouter's strict Zod validator to reject requests (GLM, Qwen, Kimi). Replaced with <code>MarshalJSON</code> that always emits required fields.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.18.0 ═══ -->
+  <section class="glass" id="v0-18-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.18.0" style="color: inherit; text-decoration: none;">v0.18.0</a></h2>
+      <span class="badge">2026-04-17</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.18.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>CLI&harr;library feature parity — Phase 1 (NDJSON) + Phase 2</strong>: Four CLI commands (<code>diagnose</code>, <code>audit</code>, <code>doctor</code>, <code>simulate</code>) and the NDJSON event writer are now public library APIs. Consumers can reuse CLI behavior without shelling out.</li>
+      <li><strong><code>tracker.NewNDJSONWriter</code></strong>: Public writer producing the same wire format as <code>tracker --json</code>. Factory methods for <code>PipelineHandler</code>, <code>AgentHandler</code>, <code>TraceObserver</code>.</li>
+      <li><strong><code>tracker.Diagnose</code> / <code>DiagnoseMostRecent</code> / <code>Audit</code> / <code>Doctor</code> / <code>Simulate</code></strong>: Structured reports with typed suggestions, timelines, check statuses, execution plans, and unreachable-node lists.</li>
+      <li><strong><code>tracker.ListRuns</code></strong>: Sorted <code>[]RunSummary</code> for enumerating past runs.</li>
+      <li><strong><code>tracker.ResolveRunDir</code> / <code>MostRecentRunID</code> / <code>LoadActivityLog</code> / <code>ParseActivityLine</code></strong>: Shared run-directory and activity-log helpers.</li>
+      <li><strong><code>tracker.PinnedDippinVersion</code></strong>: Constant exposing the dippin-lang version pinned in <code>go.mod</code>.</li>
+      <li><strong>SWE-bench harness (<code>cmd/tracker-swebench</code>)</strong>: New orchestrator binary evaluating tracker against SWE-bench. Includes Dockerfile, container lifecycle, dataset JSONL parsing, resumable results writer, resource limits, secure <code>--env-file</code>, and an in-container <code>agent-runner</code> that captures changes via <code>git diff</code>.</li>
+      <li><strong><code>WithExtraHeaders</code> option for Anthropic and OpenAI adapters</strong>: Injects gateway auth headers (e.g. <code>cf-aig-token</code>).</li>
+      <li><strong>Structured reflection prompt on tool failure</strong>: When a tool call fails, the session injects a user-role reflection message before the next turn. Default on (<code>ReflectOnError: true</code>), capped at 3 consecutive reflection turns.</li>
+      <li><strong>Verify-after-edit loop with auto-test</strong>: Session optionally runs tests after any turn with file-edit tool calls. Auto-detection for Go, Rust, npm, Make, and pytest projects. Repair turns don't count toward <code>MaxTurns</code>.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>CLI <code>diagnose.go</code> / <code>audit.go</code> / <code>doctor.go</code> / <code>simulate.go</code> are now thin printers over the library APIs. Stdout and <code>--json</code> wire format are byte-identical.</li>
+      <li>dippin-lang dependency v0.19.1 &rarr; v0.20.0.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.17.0 ═══ -->
+  <section class="glass" id="v0-17-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.17.0" style="color: inherit; text-decoration: none;">v0.17.0</a></h2>
+      <span class="badge">2026-04-16</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.17.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Webhook-based human gates for headless execution</strong>: New <code>tracker.Config.WebhookGate</code> field and matching CLI flags wire a <code>WebhookInterviewer</code> that POSTs gate prompts to a user-configured webhook URL and blocks on a callback. Per-gate shared-secret tokens (<code>X-Tracker-Gate-Token</code>), per-gate timeout with configurable action, optional outbound <code>Authorization</code> header, HTTP timeouts and 64 KB body cap. Flags: <code>--webhook-url</code>, <code>--gate-callback-addr</code>, <code>--gate-timeout</code>, <code>--gate-timeout-action</code>, <code>--webhook-auth</code>. Mutually exclusive with <code>--autopilot</code> and <code>--auto-approve</code>.</li>
+      <li><strong>Cloudflare AI Gateway support</strong>: <code>TRACKER_GATEWAY_URL</code> env var and <code>--gateway-url</code> flag route every provider through Cloudflare's AI Gateway. New <code>ResolveProviderBaseURL(provider)</code> helper with priority <code>&lt;PROVIDER&gt;_BASE_URL</code> &gt; gateway URL + provider suffix &gt; empty.</li>
+      <li><strong>Library API for workflow catalog and resolution</strong>: <code>tracker.Workflows</code>, <code>LookupWorkflow</code>, <code>OpenWorkflow</code>, <code>ResolveSource</code>, <code>ResolveCheckpoint</code>. <code>Config.ResumeRunID</code> equivalent of the CLI's <code>-r/--resume</code>.</li>
+      <li><strong><code>ExportBundle</code> library API + <code>--export-bundle</code> CLI flag</strong>: After a run completes, <code>git bundle create --all</code> packages the artifact directory into a single portable file. Clone with <code>git clone &lt;bundle&gt;</code> anywhere.</li>
+      <li><strong><code>WithGitArtifacts</code> engine option</strong>: Initializes the artifact run directory as a git repo and commits after every terminal-outcome node. Checkpoint tags (<code>checkpoint/&lt;runID&gt;/&lt;nodeID&gt;</code>) mark each save point.</li>
+      <li><strong><code>tracker doctor</code> comprehensive preflight</strong>: Per-provider API key validation with format hints, <code>--probe</code> flag for live auth validation, dippin version compatibility, <code>.ai/</code> writability, disk space warning (&lt; 10 GB), <code>.gitignore</code> line-by-line check, dangerous env var warnings, <code>--backend claude-code</code> awareness. Exit code 2 for warnings-only.</li>
+      <li><strong>Per-node context scoping (<code>ScopeToNode</code>)</strong>: After each node, every key written during that node's execution is copied into <code>node.&lt;nodeID&gt;.&lt;key&gt;</code>. Downstream nodes read <code>node.MyAgent.last_response</code> for specific upstream output. Bare keys retain last-writer-wins for backward compatibility.</li>
+      <li><strong>Cost governance</strong>: <code>Result.Cost</code> with per-provider rollup; <code>pipeline.BudgetGuard</code> enforcing <code>MaxTotalTokens</code> / <code>MaxCostCents</code> / <code>MaxWallTime</code>. Halts with <code>pipeline.OutcomeBudgetExceeded</code> and fires <code>EventBudgetExceeded</code>. CLI flags <code>--max-tokens</code>, <code>--max-cost</code> (cents), <code>--max-wall-time</code>.</li>
+      <li><strong>Per-node backend selection overrides global <code>--backend</code></strong>: A node with <code>backend: native</code> always uses native even when <code>--backend claude-code</code> is set globally. Enables mixed-backend pipelines.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Start/exit node handler overwrite broadened fix</strong>: <code>ensureStartExitNodes</code> now bases the decision on <code>Handler</code>, not <code>prompt</code>. Any non-<code>codergen</code> handler is preserved; previously <code>tool</code>, <code>human</code>, <code>parallel</code>, <code>conditional</code>, <code>subgraph</code>, and <code>wait.human</code> handlers on start/exit nodes were silently overwritten.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.16.x ═══ -->
+  <section class="glass" id="v0-16-x" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.16.4" style="color: inherit; text-decoration: none;">v0.16.0 – v0.16.4</a></h2>
+      <span class="badge">2026-04-04 to 2026-04-09</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.16.4" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>ACP (Agent Client Protocol) backend</strong> (v0.16.0): Third execution backend alongside native and claude-code. Spawns ACP-compatible coding agents as subprocesses via JSON-RPC 2.0 over stdio. Per-node via <code>backend: acp</code> + <code>acp_agent</code> params, global via <code>--backend acp</code>.</li>
+      <li><strong>ACP provider-based agent routing</strong> (v0.16.0): <code>anthropic</code> &rarr; <code>claude-agent-acp</code>, <code>openai</code> &rarr; <code>codex-acp</code>, <code>gemini</code> &rarr; <code>gemini --acp</code>. Override per-node via <code>acp_agent</code>.</li>
+      <li><strong>ACP environment scoping, model bridging, terminal management, and file ops</strong> (v0.16.0): API keys stripped from subprocess env; <code>mapModelToBridge</code> maps tracker model names to bridge model IDs; full <code>CreateTerminal</code> / <code>TerminalOutput</code> / <code>KillTerminalCommand</code> with process group isolation; <code>ReadTextFile</code>/<code>WriteTextFile</code> scoped to the node's working directory.</li>
+      <li><strong>Dedicated <code>executeYesNo</code> handler</strong> (v0.16.1): <code>mode: yes_no</code> human gates now present fixed Yes/No choices and correctly map to <code>OutcomeSuccess</code>/<code>OutcomeFail</code>.</li>
+      <li><strong>Comprehensive human gate test suite</strong> (v0.16.2): <code>examples/human_gate_test_suite.dip</code> exercises all 4 gate modes plus timeout, default_choice, <code>ctx.outcome</code> routing, and interview cancel.</li>
+      <li><strong><code>ContextKeyTurnLimitMsg</code> constant</strong> (v0.16.4): New context key for turn-limit and loop-detection diagnostics.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>ACP data races and safety</strong> (v0.16.0): handler mutex on empty-response check, <code>syncBuffer</code> for subprocess output, protocol version validation, empty <code>Cwd</code> fallback, <code>Pid &gt; 0</code> guard before <code>syscall.Kill</code>.</li>
+      <li><strong><code>mode: yes_no</code> outcome mapping</strong> (v0.16.1): No longer falls through to choice mode (which always returned <code>OutcomeSuccess</code>). Pipelines using <code>ctx.outcome = fail</code> with <code>yes_no</code> now route correctly.</li>
+      <li><strong>Thinking signature dropped in streaming</strong> (v0.16.3): Anthropic SSE handler now captures <code>signature_delta</code> events and <code>redacted_thinking</code> blocks. Previously caused multi-turn Opus sessions with extended thinking to crash.</li>
+      <li><strong>Turn-limit exhaustion treated as success</strong> (v0.16.4): Agents that exhausted their turn limit (or entered a tool call loop) were silently treated as <code>OutcomeSuccess</code>, allowing pipelines to advance past nodes that wrote zero files. Now returns <code>OutcomeFail</code>.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang v0.18.0</strong> (v0.16.2): Adds <code>flatten</code> package for inlining subgraph refs into a single flat workflow.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.15.0 ═══ -->
+  <section class="glass" id="v0-15-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.15.0" style="color: inherit; text-decoration: none;">v0.15.0</a></h2>
+      <span class="badge">2026-04-03</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.15.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Per-node response context keys</strong>: Codergen and human handlers write <code>response.&lt;nodeID&gt;</code> alongside <code>last_response</code>/<code>human_response</code>, so downstream nodes can reference specific upstream outputs.</li>
+      <li><strong>Parallel concurrency limits</strong>: <code>max_concurrency</code> attr on parallel nodes bounds concurrent branch goroutines via semaphore, context-aware.</li>
+      <li><strong>Parallel branch timeout</strong>: <code>branch_timeout</code> attr sets a per-branch context deadline so slow branches fail without blocking fan-in.</li>
+      <li><strong>Human gate timeout</strong>: <code>timeout</code> attr on human nodes with <code>timeout_action</code> (default/fail) and <code>default_choice</code> fallback — applied to freeform, choice, and interview modes.</li>
+      <li><strong>Edge adjacency indexes</strong>: <code>OutgoingEdges</code>/<code>IncomingEdges</code> use O(1) map lookup via adjacency indexes built by <code>AddEdge</code>.</li>
+      <li><strong>Format constants</strong>: <code>FormatDip</code> and <code>FormatDOT</code> typed constants for pipeline format identification.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>P0: Goal-gate infinite fallback loop</strong>: <code>FallbackTaken</code> guard persisted in checkpoint prevents one-shot fallback/escalation from looping.</li>
+      <li><strong>P0: Parallel branch context loss on fan-in</strong>: <code>PipelineContext.DiffFrom</code> captures side effects from parallel branches.</li>
+      <li><strong>Adapter nil pointer guards</strong>, sentinel errors (<code>ErrNilWorkflow</code>, etc.), deterministic map iteration, variable expansion single-pass, case-insensitive <code>auto_status</code>, word-boundary fidelity truncation, and condition parser hardening (<code>==</code> operator, quote stripping).</li>
+      <li><strong>Empty API response retry</strong>: Empty API responses (0 output tokens, 0 tool calls) now trigger <code>OutcomeRetry</code> instead of hard-failing.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Retry backoff jitter</strong>: <code>ExponentialBackoff</code> and <code>LinearBackoff</code> now apply &plusmn;25% random jitter to prevent thundering herd.</li>
+    </ul>
+    <h4>Deprecated</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>DOT format support</strong>: <code>ParseDOT</code> is deprecated. Use <code>.dip</code> format instead. DOT support will be removed in v1.0.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.14.0 ═══ -->
+  <section class="glass" id="v0-14-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.14.0" style="color: inherit; text-decoration: none;">v0.14.0</a></h2>
+      <span class="badge">2026-03-31</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.14.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Interview mode for human gates</strong>: <code>mode: interview</code> enables structured multi-field form collection driven by upstream agent output. One question at a time with progress bar, selection feedback, and pre-fill on retry.</li>
+      <li><strong>Structured JSON question format</strong>: Agents output <code>{"questions": [...]}</code> with text, context, and options. Validated before presenting. Falls back to markdown heuristic parsing.</li>
+      <li><strong><code>response_format</code> support</strong>: Agent nodes can force structured JSON output at the API level via <code>response_format: json_object</code>. All three providers supported (Anthropic, OpenAI, Gemini).</li>
+      <li><strong>Agent <code>params</code> map</strong>: Generic key-value pass-through from <code>.dip</code> files (dippin-lang v0.16.0). Enables <code>backend: claude-code</code> and other runtime features without IR schema changes.</li>
+      <li><strong><code>deep_review</code> built-in workflow</strong>: Interview-driven codebase review with 3 structured interview gates, parallel analysis (correctness/security/design), and remediation plan. Run with <code>tracker deep_review</code>.</li>
+      <li><strong><code>interview-loop.dip</code> subgraph</strong>: Reusable interview loop pattern (ask &rarr; answer &rarr; assess &rarr; loop) in <code>examples/subgraphs/</code>.</li>
+      <li><strong>Empty API response diagnostics</strong>: Session-level retry with diagnostic logging for 0-token API responses. Hard-fails after 2 retries.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Cancel returns OutcomeFail</strong>: Canceled interviews return <code>fail</code> instead of <code>success</code>. Partial answers preserved.</li>
+      <li><strong>Autopilot hard-fails on parse error</strong>: Both <code>AutopilotInterviewer</code> and <code>ClaudeCodeAutopilotInterviewer</code> retry once, then hard-fail. No more silent auto-approve.</li>
+      <li><strong>Goroutine leak in flashDecision</strong>: Fixed with <code>done</code> channel and <code>defer/recover</code>.</li>
+      <li><strong>Mode 1 tea.Cmd propagation</strong>: All three TUI runners now propagate commands from content updates.</li>
+      <li><strong>Context leak in retry loop</strong>: Explicit <code>cancel()</code> instead of <code>defer</code> inside for loop.</li>
+      <li><strong>Empty response guard</strong>: Agent sessions with 0 output tokens and 0 tool calls now fail instead of silently succeeding.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.13.0 ═══ -->
+  <section class="glass" id="v0-13-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.13.0" style="color: inherit; text-decoration: none;">v0.13.0</a></h2>
+      <span class="badge">2026-03-28</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.13.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>TUI: Progress bar with ETA</strong>: Amber ASCII bar in status bar shows completed/total nodes.</li>
+      <li><strong>TUI: Log verbosity cycling (<code>v</code>)</strong>: All &rarr; Tools &rarr; Errors &rarr; Reasoning.</li>
+      <li><strong>TUI: Zen mode (<code>z</code>)</strong>: Hide sidebar, full-width agent log.</li>
+      <li><strong>TUI: Help overlay (<code>?</code>)</strong>: All keyboard shortcuts in styled table.</li>
+      <li><strong>TUI: Agent log search (<code>/</code>)</strong>: Inline search with <code>n</code>/<code>N</code> navigation.</li>
+      <li><strong>TUI: Per-node cost tracking</strong>: Cost badges on completed nodes in sidebar.</li>
+      <li><strong>TUI: Node drill-down (<code>Enter</code>)</strong>: Focus log on selected node.</li>
+      <li><strong>TUI: Copy to clipboard (<code>y</code>)</strong>: Copies visible filtered log text.</li>
+      <li><strong>Claude-code autopilot</strong>: Routes gate decisions through <code>claude</code> CLI subprocess.</li>
+      <li><strong>Strict failure edges</strong>: Pipeline stops on uncaught failures instead of silently continuing.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.12.1 ═══ -->
+  <section class="glass" id="v0-12-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.12.1" style="color: inherit; text-decoration: none;">v0.12.1</a></h2>
+      <span class="badge">2026-03-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.12.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Claude Code subprocess killed after 10s</strong>: Go's <code>exec.CommandContext</code> + <code>WaitDelay</code> sent SIGKILL. Switched to plain <code>exec.Command</code>.</li>
+      <li><strong>Claude Code auth failure</strong>: Stripped env prevented OAuth token discovery. Now passes full parent environment.</li>
+      <li><strong>NDJSON subagent content</strong>: Handles both string and array <code>content</code> formats from Claude Code's subagent tool results.</li>
+    </ul>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Autopilot inside the TUI</strong>: <code>--autopilot</code> no longer forces <code>--no-tui</code>. Decisions flash in a modal for 2s.</li>
+      <li><strong>Header tags</strong>: Orange <code>claude-code</code> and purple <code>autopilot:lax</code> tags in the TUI header bar.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.12.0 ═══ -->
+  <section class="glass" id="v0-12-0">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.12.0" style="color: inherit; text-decoration: none;">v0.12.0</a></h2>
+      <span class="badge">2026-03-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.12.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker update</code></strong>: Self-update command downloads the latest GitHub release, verifies SHA256 checksum, extracts the binary, smoke-tests it, and atomically replaces the current binary with <code>.bak</code> rollback. Detects Homebrew, <code>go install</code>, and direct binary installs.</li>
+      <li><strong>Non-blocking update check</strong>: On every <code>tracker run</code>, a background goroutine checks for new releases (24h cache). Prints a one-line hint if an update is available. Disabled with <code>CI</code> or <code>TRACKER_NO_UPDATE_CHECK</code> env vars.</li>
+      <li><strong>Claude Code backend</strong>: Pluggable agent backend abstraction. <code>--backend claude-code</code> spawns the <code>claude</code> CLI as a subprocess and parses NDJSON output, giving agents file editing, terminal access, and MCP tool servers. Per-node via <code>backend: claude-code</code> in <code>.dip</code> files, or global via the CLI flag.</li>
+      <li><strong><code>AgentBackend</code> interface</strong>: Minimal contract in <code>pipeline/backend.go</code> &mdash; one method to execute a node and return an event stream. NativeBackend wraps <code>agent.Session</code> (existing behavior), ClaudeCodeBackend wraps the subprocess.</li>
+      <li><strong>dippin-lang v0.12.0</strong>: Upgraded from v0.10.0 &mdash; picks up <code>preferred_label</code> on freeform gates, <code>immediately_after</code> assertions, tool command lint rules, subgraph validation, and <code>dippin test --coverage</code>.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.11.2 ═══ -->
+  <section class="glass" id="v0-11-2">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.11.2" style="color: inherit; text-decoration: none;">v0.11.2</a></h2>
+      <span class="badge">2026-03-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.11.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>PickNextMilestone silent skip</strong>: Flexible milestone header matching, fails loudly if no milestones found or extraction empty</li>
+      <li><strong>Removed <code>eval</code> of LLM-generated verify commands</strong>: Was arbitrary code execution from free-form text</li>
+      <li><strong>TestMilestone known_failures</strong>: Strips comments, uses <code>go test -skip</code> instead of unsupported negative lookahead</li>
+      <li><strong>PickBest winner parsing</strong>: Uses <code>grep -ioE</code> regardless of markdown formatting</li>
+    </ul>
+  </section>
+
+  <section class="glass">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.11.1" style="color: inherit; text-decoration: none;">v0.11.1</a></h2>
+      <span class="badge">2026-03-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.11.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>Provider errors now hard-fail per CLAUDE.md (only parse failures retry)</li>
+      <li>AskFreeform logs warning instead of silently swallowing errors</li>
+      <li>Default model picks cheapest from configured provider (not hardcoded to Anthropic)</li>
+      <li>Autopilot forces <code>--no-tui</code></li>
+      <li><code>matchChoice</code> uses longest-match to prevent "a" matching before "abandon"</li>
+      <li><code>decide()</code> returns errors instead of silently falling back</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.11.0 ═══ -->
+  <section class="glass" id="v0-11-0">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.11.0" style="color: inherit; text-decoration: none;">v0.11.0</a></h2>
+      <span class="badge">2026-03-26</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.11.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>--autopilot &lt;persona&gt;</code></strong>: Replace human gates with LLM-backed decisions (lax / mid / hard / mentor)</li>
+      <li><strong><code>--auto-approve</code></strong>: Deterministic auto-approval for CI and testing</li>
+      <li>dippin-lang upgraded to v0.10.0</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.10.x ═══ -->
+  <section class="glass" id="v0-10-x">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.10.x</h2>
+      <span class="badge">2026-03-26</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Embedded built-in workflows</strong>: 3 flagship pipelines in the binary (<code>tracker build_product</code>)</li>
+      <li><strong><code>tracker workflows</code></strong> and <strong><code>tracker init</code></strong> commands</li>
+      <li><strong>Bare name resolution</strong>: filesystem &rarr; embedded &rarr; error</li>
+      <li><strong>Deterministic failure detection</strong> in <code>tracker diagnose</code></li>
+      <li>23 dippin simulation tests for build_product.dip</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>Split <code>EscalateToHuman</code> into <code>EscalateMilestone</code> + <code>EscalateReview</code></li>
+      <li>Escalation gates have <code>prompt:</code> blocks with rich context</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>TestMilestone early-exit bug (attempt counter fired before tests)</li>
+      <li><code>ContextKeySuggestedNextNodes</code> constant (6 string literals eliminated)</li>
+      <li>Complexity violations in diagnose.go</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.9.x ═══ -->
+  <section class="glass" id="v0-9-x">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.9.x</h2>
+      <span class="badge">2026-03-25</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker diagnose</code></strong>: Deep failure analysis with tool output, timing, suggestions</li>
+      <li><strong><code>tracker doctor</code></strong>: Preflight health check</li>
+      <li>Provider status in <code>tracker version</code></li>
+      <li>Freeform "other" option in review hybrid gates</li>
+      <li>Runtime error surfacing in TUI activity log</li>
+      <li>Subgraph loading with cycle detection</li>
+      <li>Hybrid radio+freeform gates</li>
+      <li>Decision audit trail in activity.jsonl</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.8.0 ═══ -->
+  <section class="glass" id="v0-8-0">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">v0.8.0</h2>
+      <span class="badge">2026-03-25</span>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+      <li>Decision audit trail (edge selection, condition evaluation, node outcomes)</li>
+      <li>Checkpoint resume with edge replay</li>
+      <li>Per-node working directory for git worktree isolation</li>
+      <li>Conditional edge evaluation with <code>ctx.</code> namespace</li>
+    </ul>
+  </section>
+
+  <div class="glass" style="text-align: center; padding: 2rem;">
+    <p>Full changelog: <a href="https://github.com/2389-research/tracker/blob/main/CHANGELOG.md">CHANGELOG.md on GitHub</a></p>
+  </div>
