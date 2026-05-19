@@ -476,37 +476,39 @@ workflow BuildProduct
          succeeded" — TestMilestone prints it when its language-stack
          runner passed-or-was-validly-skipped AND its project CI gate
          passed-or-was-validly-skipped (see the preamble above for the
-         exact "validly skipped" rules). If you can see `tests-pass`
-         in the tail, the step succeeded under the workflow's rules;
-         no further check is required.
-         If the sentinel is NOT visible, the tail may have elided
-         it under a large CI output run; in that case fall back to
-         the visible probe lines:
-           (a) `--- running make <target> (project CI gate from <Makefile>) ---`
-               followed by make output with no errors and no non-zero
-               exit indication — a successful CI run.
-           (b) `INFO: no Makefile present, no project CI gate to run`
-               — the repo has no Makefile; valid skip (PASS).
-           (c) `INFO: no project CI target in <Makefile> (looked for: ci, check, lint)`
-               — the repo has a Makefile but no matching target;
-               valid skip (PASS).
-         FAIL only if you see `--- running make ---` followed by make
-         errors / non-zero exit, or the `escalate` sentinel. `escalate`
-         has two distinct causes — distinguish them so the report is
-         actionable: an `ERROR: <Makefile> present but 'make' not
-         installed` line means env-missing (the operator needs to
-         install `make`); an `ESCALATE: milestone failed after N
-         attempts` line means the fix loop exhausted (the milestone
-         is genuinely broken and the prior attempts didn't converge).
-         Either escalate cause should have been caught upstream by
-         the `TestMilestone -> EscalateMilestone when ctx.tool_stdout
-         contains escalate` edge; if you see `escalate` here, the
-         routing missed and you should name the specific cause from
-         the surrounding lines.
-         Do NOT FAIL on absence of visible language-test output —
-         that output is routinely elided by the 64KB tail cap on
-         repos with verbose tests, and the sentinel covers that
-         signal already.
+         exact "validly skipped" rules). The sentinel is emitted at
+         end-of-command via `printf`, and `tool_stdout` keeps the
+         tail of stdout, so the sentinel survives truncation by
+         construction — its presence is reliable, its absence is
+         not "routine elision".
+         Three sentinel/marker cases the verifier should distinguish:
+           - `tests-pass` present → PASS, no further check required.
+           - `escalate` present → FAIL, with one of two causes:
+               * `ERROR: <Makefile> present but 'make' not installed`
+                 = env-missing (operator must install `make`).
+               * `ESCALATE: milestone failed after N attempts` =
+                 the fix loop exhausted (milestone genuinely broken;
+                 prior attempts didn't converge).
+             Either escalate cause should have been caught upstream
+             by the `TestMilestone -> EscalateMilestone when
+             ctx.tool_stdout contains escalate` edge; if you see
+             `escalate` here, the routing missed — name the specific
+             cause from the surrounding lines.
+           - Neither sentinel present → ANOMALY. TestMilestone
+             always emits one or the other at end-of-command; its
+             absence in the tail means either the tool didn't reach
+             the printf (an uncaught script error), the `output_limit`
+             node attribute is misconfigured below the sentinel's
+             byte length, or the tool crashed mid-stream. STATUS:fail
+             and surface "TestMilestone produced no terminal sentinel
+             — output capture or script integrity is broken; do not
+             treat this as a passing milestone."
+         Visible CI probe lines (`--- running make ---`, `INFO: ...`)
+         and language-test output are corroborating signals, not
+         required. The 64KB tail cap CAN elide earlier verbose
+         language-test output on a large repo, but never the
+         end-of-command sentinel. Do NOT FAIL on absence of visible
+         language-test output — the sentinel covers that signal.
 
       7. NO EXTRA WORK: No unnecessary changes, docs, or refactoring
          outside scope. Walk the diff for files / functions / fields
