@@ -550,10 +550,16 @@ workflow BuildProduct
           exit 1
         fi
         for TARGET in ci check lint; do
+          # See TestMilestone above for the probe design notes; this
+          # block is intentionally a byte-identical copy of that awk
+          # so behavior stays in sync between the two gates.
           if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
               /^\t/ { next }
-              /:/ {
-                head = $0; sub(/:.*/, "", head)
+              {
+                cp = index($0, ":")
+                if (cp == 0) next
+                if (substr($0, cp) ~ /^:+=/) next
+                head = substr($0, 1, cp - 1)
                 n = split(head, tokens, /[ \t]+/)
                 for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
               }
