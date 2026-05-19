@@ -421,6 +421,15 @@ func extractToolAttrs(cfg ir.ToolConfig, attrs map[string]string) {
 	if cfg.Timeout > 0 {
 		attrs["timeout"] = cfg.Timeout.String()
 	}
+	if cfg.MarkerGrep != "" {
+		attrs["marker_grep"] = cfg.MarkerGrep
+	}
+	if cfg.RouteRequired {
+		attrs["route_required"] = "true"
+	}
+	if cfg.OutputLimit > 0 {
+		attrs["output_limit"] = strconv.Itoa(cfg.OutputLimit)
+	}
 }
 
 func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {

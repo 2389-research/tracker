@@ -1509,6 +1509,68 @@ func TestExtractToolAttrs_ZeroValueFieldsOmitted(t *testing.T) {
 	}
 }
 
+// TestExtractToolAttrs_MarkerRouteOutputLimitForwarded asserts the three v0.28.0
+// passthroughs (MarkerGrep, RouteRequired, OutputLimit) land in node attrs with the
+// wire-contract names that dippin-lang's DOT exporter emits.
+func TestExtractToolAttrs_MarkerRouteOutputLimitForwarded(t *testing.T) {
+	attrs := map[string]string{}
+	extractToolAttrs(ir.ToolConfig{
+		MarkerGrep:    `^_TRACKER_ROUTE=`,
+		RouteRequired: true,
+		OutputLimit:   131072,
+	}, attrs)
+
+	if got, want := attrs["marker_grep"], `^_TRACKER_ROUTE=`; got != want {
+		t.Errorf("marker_grep = %q, want %q", got, want)
+	}
+	if got, want := attrs["route_required"], "true"; got != want {
+		t.Errorf("route_required = %q, want %q", got, want)
+	}
+	if got, want := attrs["output_limit"], "131072"; got != want {
+		t.Errorf("output_limit = %q, want %q", got, want)
+	}
+}
+
+// TestFromDippinIR_ToolConfigMarkerRouteOutputLimit asserts end-to-end forwarding
+// through FromDippinIR — the path a real .dip file takes.
+func TestFromDippinIR_ToolConfigMarkerRouteOutputLimit(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ToolMarkerTest",
+		Start: "start",
+		Exit:  "tool",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "tool",
+				Kind: ir.NodeTool,
+				Config: ir.ToolConfig{
+					Command:       "./run.sh",
+					MarkerGrep:    `^STATUS=(ok|fail)$`,
+					RouteRequired: true,
+					OutputLimit:   65536,
+				},
+			},
+		},
+		Edges: []*ir.Edge{{From: "start", To: "tool"}},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	node := graph.Nodes["tool"]
+	if got, want := node.Attrs["marker_grep"], `^STATUS=(ok|fail)$`; got != want {
+		t.Errorf("marker_grep = %q, want %q", got, want)
+	}
+	if got, want := node.Attrs["route_required"], "true"; got != want {
+		t.Errorf("route_required = %q, want %q", got, want)
+	}
+	if got, want := node.Attrs["output_limit"], "65536"; got != want {
+		t.Errorf("output_limit = %q, want %q", got, want)
+	}
+}
+
 func TestConvertEdge_WeightAndRestart(t *testing.T) {
 	irEdge := &ir.Edge{From: "a", To: "b", Weight: 5, Restart: true}
 	gEdge, err := convertEdge(irEdge)
