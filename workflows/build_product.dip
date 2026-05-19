@@ -286,16 +286,20 @@ workflow BuildProduct
       #   1. Refuses to skip the gate silently when a Makefile is
       #      present but `make` isn't installed — failing loud.
       #   2. Parses the Makefile directly for top-level target
-      #      declarations. The target list is everything before the
-      #      first colon on a non-recipe, non-comment line; split that
-      #      on whitespace and look for the literal target as a token.
-      #      Handles `ci:`, `ci check lint:`, and rules with
-      #      dependencies after the colon. Recipe lines start with
-      #      TAB not spaces, so they're skipped. Substring collisions
+      #      declarations:
+      #        - skip recipe lines (start with TAB)
+      #        - skip variable assignments (first ':' followed by
+      #          a run of colons and '=' — handles :=, ::=, :::=)
+      #        - take everything before the first ':' as the target
+      #          list, split on whitespace, look for TARGET as a
+      #          token
+      #      Handles `ci:`, `ci check lint:`, rules with deps after
+      #      the colon, and target-specific variables like
+      #      `ci: VAR := overridden`. Substring collisions
       #      (`build-ci:` vs `ci`) are avoided because we tokenize.
-      #      Trade-off: misses targets defined only in included files;
-      #      acceptable since CI/lint/check are by convention declared
-      #      in the root Makefile.
+      #      Trade-off: misses targets defined only in included
+      #      files; acceptable since CI/lint/check are by convention
+      #      declared in the root Makefile.
       PROJECT_CI_RAN=""
       MAKEFILE=""
       for mf in Makefile makefile GNUmakefile; do
@@ -309,8 +313,11 @@ workflow BuildProduct
           for TARGET in ci check lint; do
             if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
                 /^\t/ { next }
-                /:/ {
-                  head = $0; sub(/:.*/, "", head)
+                {
+                  cp = index($0, ":")
+                  if (cp == 0) next
+                  if (substr($0, cp) ~ /^:+=/) next
+                  head = substr($0, 1, cp - 1)
                   n = split(head, tokens, /[ \t]+/)
                   for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
                 }
