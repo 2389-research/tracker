@@ -32,6 +32,66 @@ workflow BuildProduct
         exit 1
       fi
       wc -l SPEC.md | awk '{print $1" lines"}'
+
+      # Write the shared project-CI probe (issue #233 Gap 1; refactored
+      # in PR #246 round-5 per Copilot). TestMilestone and FinalBuild
+      # source this file so the probe/run logic lives in exactly one
+      # place — round-4 review found the awk had silently drifted
+      # between the two nodes; this prevents that class of bug.
+      cat > .ai/build/ci-probe.sh <<'PROBE_EOF'
+      # Source this file, then call `run_project_ci_gate`. Returns:
+      #   0  — clean (no Makefile, no matching target, OR
+      #        `make <TARGET>` exited 0)
+      #   2  — Makefile present but `make` not installed (caller
+      #        should escalate; LLM fix loop can't install a binary)
+      #   N  — `make <TARGET>` exited with non-zero N
+      #        (caller should fail / retry)
+      # Sets PROJECT_CI_RAN to the chosen target on a real run,
+      # empty string otherwise.
+      run_project_ci_gate() {
+        PROJECT_CI_RAN=""
+        MAKEFILE=""
+        for mf in Makefile makefile GNUmakefile; do
+          if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
+        done
+        if [ -z "$MAKEFILE" ]; then
+          echo "INFO: no Makefile present, no project CI gate to run"
+          return 0
+        fi
+        if ! command -v make >/dev/null 2>&1; then
+          echo "ERROR: $MAKEFILE present but 'make' not installed — escalating"
+          return 2
+        fi
+        for TARGET in ci check lint; do
+          # Parse the Makefile for a top-level target named TARGET:
+          #   - skip tab-prefixed recipe lines
+          #   - skip variable assignments (first ':' part of := / ::= / :::=)
+          #   - tokenize everything before the first ':' as the target list
+          # Handles `ci:`, `ci check lint:`, `ci: VAR := overridden`,
+          # rejects `ci := value` and substring collisions like `build-ci:`.
+          if sed 's/#.*//' "$MAKEFILE" | awk -v t="$TARGET" '
+              /^\t/ { next }
+              {
+                cp = index($0, ":")
+                if (cp == 0) next
+                if (substr($0, cp) ~ /^:+=/) next
+                head = substr($0, 1, cp - 1)
+                n = split(head, tokens, /[ \t]+/)
+                for (i = 1; i <= n; i++) if (tokens[i] == t) { found = 1; exit }
+              }
+              END { exit !found }
+            '; then
+            echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
+            PROJECT_CI_RAN="$TARGET"
+            make "$TARGET" 2>&1
+            return $?
+          fi
+        done
+        echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
+        return 0
+      }
+      PROBE_EOF
+
       printf 'setup-ready'
 
   agent ReadSpec
@@ -76,6 +136,20 @@ workflow BuildProduct
       **Files**: [exact files to create/modify/delete]
       **Done when**: [specific, testable criteria]
       **Verify command**: [shell command that proves this milestone works, or "manual review"]
+      **DO NOT implement**: [Phase 2+ features mentioned in the spec that touch
+        any file in this milestone's file list. One line per item, naming the
+        feature and the spec section that defers it. If none apply, write "none".]
+
+      The DO NOT list is the anti-scope-creep gate (issue #233 Gap 6). The
+      Implement agent reads it before writing in any file in this milestone.
+      Phase 1 spec sections frequently define types/functions whose live use is
+      deferred to later phases; without an explicit DO NOT, the implementing
+      agent will reasonably wire them up early and ship a future phase's
+      behavior. Concrete example: SPEC.md may define a `Fingerprint` function
+      in Phase 1 but say its consumer (a trailer field) is populated starting
+      Phase 6 — the DO NOT list for any Phase 1 milestone that touches the
+      trailer file must say: "DO NOT implement: populating the trailer's
+      `fingerprints` field — spec defers to Phase 6."
 
       Also write a one-line summary of each milestone — this becomes the build plan
       the user approves.
@@ -168,6 +242,44 @@ workflow BuildProduct
         responsibility — the test runner does NOT eval verify commands from the spec.
       - Commit your work with a conventional commit message referencing the milestone.
 
+      DO NOT LIST (issue #233 Gap 6):
+      - Read the "DO NOT implement" lines in .ai/milestones/current.md, if any.
+        These name Phase 2+ features that the spec defers. Before writing in any
+        file, check whether the DO NOT list mentions it. If yes, leave those
+        affordances inert (do not wire the feature into call sites, do not
+        populate fields the spec marks as empty in this phase, do not return
+        non-default values from helper functions that the spec marks as deferred).
+        It is fine — and often required — to define the type or function
+        signature; it is NOT fine to make it observably active when the spec
+        says it should be a no-op until a later phase.
+
+      SPEC LITERALS (issue #233 Gap 3):
+      - Before committing: for every literal value in the spec section this
+        milestone covers — exact command strings, exact JSON key names, exact
+        header names, exact integer constants, exact log key names — grep your
+        implementation for that literal. If it isn't there byte-for-byte, EITHER
+        fix the implementation to match the spec OR add a comment in
+        .ai/decisions/ that names the literal you deviated from and explains
+        why. Silent paraphrase ("--head <branch>" when the spec says
+        "--head <owner>:<branch>") is the most common way milestones ship wrong.
+
+      TESTS VERIFY THE CONTRACT, NOT YOUR CODE (issue #233 Gap 3):
+      - Tests must verify the spec's requirement, not whatever your
+        implementation happens to do. Read each assertion you write and ask:
+        "If I deleted my production code and rewrote it differently but
+        spec-conformantly, would this test still pass for the right reason?"
+        If the answer is no — your test asserts an implementation detail rather
+        than a contract — rewrite it. The canonical failure mode is asserting
+        `attempts == 2` when the spec says "max 2 retries" (= 3 attempts):
+        the test green-lights the off-by-one because it was written from the
+        code, not from the spec.
+      - Snapshot / golden-file tests: the FIRST version of every snapshot
+        must be hand-verified against the spec, not regenerated from the
+        current implementation's output. If your test framework supports an
+        UPDATE_GOLDEN env var, only use it after the first hand-verification.
+        Add a comment to the golden file naming the spec section it was
+        verified against and the date.
+
   tool TestMilestone
     label: "Test Current Milestone"
     timeout: 300s
@@ -182,8 +294,14 @@ workflow BuildProduct
       ATTEMPTS=$((ATTEMPTS + 1))
       echo "$ATTEMPTS" > "$ATTEMPT_FILE"
 
-      # Run tests FIRST — if they pass, the milestone is done regardless
-      # of how many fix attempts we've burned.
+      # Run tests AND the project CI gate. If both pass, the milestone is
+      # done regardless of how many fix attempts we've burned. The CI gate
+      # (added per #233 Gap 1, further down in this command) can fail
+      # after the language-stack tests pass — that's intentional: a green
+      # `go test ./...` doesn't catch lint/vet/format failures that the
+      # project's own `make ci` would, and the previous version of this
+      # node reported "Done" on a commit whose CI was red because it only
+      # ran the language-stack default.
       TEST_EXIT=0
 
       # Run the project's test suite.
@@ -210,6 +328,25 @@ workflow BuildProduct
         cargo test 2>&1 || TEST_EXIT=$?
       else
         echo "no known build system — skipping tests"
+      fi
+
+      # Project CI gate (issue #233 Gap 1). Source the shared helper
+      # written by Setup so the probe/run logic lives in exactly one
+      # place — see Setup for the full design. Helper returns 2 when
+      # a Makefile is present but `make` isn't installed; that's an
+      # environment problem the LLM fix loop can't resolve, so we
+      # route directly to EscalateMilestone via the `escalate`
+      # marker instead of burning fix attempts (#246 Copilot round-5).
+      . .ai/build/ci-probe.sh
+      CI_RC=0
+      run_project_ci_gate || CI_RC=$?
+      if [ "$CI_RC" -eq 2 ]; then
+        echo "0" > "$ATTEMPT_FILE"
+        printf 'escalate'
+        exit 1
+      fi
+      if [ "$CI_RC" -ne 0 ]; then
+        TEST_EXIT="$CI_RC"
       fi
 
       # Note: milestone-specific verification is handled by the Implement agent
@@ -386,7 +523,7 @@ workflow BuildProduct
 
   tool FinalBuild
     label: "Final Build & Test"
-    timeout: 300s
+    timeout: 600s
     command:
       set -eu
       if [ -f go.mod ]; then
@@ -399,6 +536,16 @@ workflow BuildProduct
       elif [ -f Cargo.toml ]; then
         cargo test 2>&1
       fi
+
+      # Project CI gate (issue #233 Gap 1). Sources the same shared
+      # helper as TestMilestone — written by Setup; lives in exactly
+      # one place. FinalBuild has no fix loop, so any non-zero return
+      # (including the rc=2 "make missing" case) propagates as a
+      # node-level failure via `set -eu`, which the engine routes
+      # through the strict-failure-edge logic — no silent pass.
+      . .ai/build/ci-probe.sh
+      run_project_ci_gate
+
       printf 'final-build-pass'
 
   agent FinalSpecCheck
