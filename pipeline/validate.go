@@ -151,6 +151,16 @@ func validateGraph(g *Graph) *ValidationError {
 	// Empty for DOT graphs and for graphs constructed programmatically.
 	// This is the only path by which DIP-coded warnings reach tracker's
 	// warnings channel — tracker no longer maintains its own DIP checks.
+	//
+	// Note (#244): the CLI's `tracker validate` suppresses these from its
+	// stdout output (the loader has already printed the long-form version
+	// to stderr) by filtering result.Warnings against this same
+	// g.LintWarnings slice — see cmd/tracker/validate.go::printValidationResult.
+	// We deliberately do NOT drop the append here, because non-CLI consumers
+	// of ValidateAll / ValidateAllWithLint (tracker_doctor.go::checkPipelineFile,
+	// tracker.ValidateSource, cmd/tracker-conformance) rely on ve.Warnings as
+	// the single source of pipeline warnings and would silently lose DIP1XX
+	// signal otherwise.
 	ve.Warnings = append(ve.Warnings, g.LintWarnings...)
 
 	return ve

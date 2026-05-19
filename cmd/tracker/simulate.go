@@ -80,7 +80,8 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	}
 
 	// ValidationResult.Errors carries structural problems (unreachable nodes,
-	// bad references, etc.); Warnings carries lint-style advisory items.
+	// bad references, etc.); Warnings carries lint-style advisory items
+	// (tracker semantic + DIP1XX lint folded in by validateGraph).
 	// The old CLI printed only Errors under a "Validation Warnings" heading
 	// — confusing. We now split them into explicit sections and continue to
 	// simulate either way (matching prior continue-on-errors behavior so

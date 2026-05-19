@@ -68,13 +68,28 @@ func buildValidationRegistry() *pipeline.HandlerRegistry {
 }
 
 // printValidationResult writes the validation outcome to w and returns an error on failures.
+//
+// DIP1XX lint warnings are stored on graph.LintWarnings AND folded into
+// result.Warnings by validateGraph (so non-CLI consumers of the validator see
+// them via the single warnings channel). The loader has already printed the
+// long-form version of each DIP1XX warning to stderr; emitting the short-form
+// copy from result.Warnings here would render the same warning twice (#244).
+// We skip every result.Warnings entry whose text matches a string in
+// graph.LintWarnings, so stdout carries only tracker-side semantic warnings
+// (e.g. conditionalFailEdges, edgeLabelConsistency). The summary count uses
+// len(result.Warnings) — DIP warnings are still counted toward the total
+// even though their text is emitted on stderr by the loader rather than here.
 func printValidationResult(w io.Writer, displayName string, graph *pipeline.Graph, result *pipeline.ValidationError) error {
 	if result == nil {
 		fmt.Fprintf(w, "%s: valid (%d nodes, %d edges)\n", displayName, len(graph.Nodes), len(graph.Edges))
 		return nil
 	}
 
+	lintDups := graphLintWarningSet(graph)
 	for _, warn := range result.Warnings {
+		if lintDups[warn] {
+			continue
+		}
 		fmt.Fprintf(w, "%s\n", warn)
 	}
 
@@ -88,6 +103,23 @@ func printValidationResult(w io.Writer, displayName string, graph *pipeline.Grap
 	fmt.Fprintf(w, "%s: valid with %d warning(s) (%d nodes, %d edges)\n",
 		displayName, len(result.Warnings), len(graph.Nodes), len(graph.Edges))
 	return nil
+}
+
+// graphLintWarningSet returns graph.LintWarnings as a lookup set. These are
+// the pre-formatted single-line "warning[DIPnnn]: ..." strings the dippin
+// loader stashed on the graph and that validateGraph then appended to
+// ValidationError.Warnings. printValidationResult uses this set to skip
+// emitting those same strings on stdout — they have already been printed
+// in long form by the loader to stderr at load time. Nil-safe.
+func graphLintWarningSet(graph *pipeline.Graph) map[string]bool {
+	if graph == nil || len(graph.LintWarnings) == 0 {
+		return map[string]bool{}
+	}
+	out := make(map[string]bool, len(graph.LintWarnings))
+	for _, w := range graph.LintWarnings {
+		out[w] = true
+	}
+	return out
 }
 
 // mockHandler is a minimal handler implementation for validation purposes.
