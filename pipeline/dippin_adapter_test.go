@@ -1571,6 +1571,52 @@ func TestFromDippinIR_ToolConfigMarkerRouteOutputLimit(t *testing.T) {
 	}
 }
 
+// TestExtractToolAttrs_OutputsForwarded asserts the v0.29.0 `Outputs` field
+// (closes dippin-lang#44) lands in node attrs as a comma-joined string using
+// the wire-contract name dippin-lang's DOT exporter emits (`outputs`).
+func TestExtractToolAttrs_OutputsForwarded(t *testing.T) {
+	attrs := map[string]string{}
+	extractToolAttrs(ir.ToolConfig{
+		Outputs: []string{"pass", "fail", "retry"},
+	}, attrs)
+
+	if got, want := attrs["outputs"], "pass,fail,retry"; got != want {
+		t.Errorf("outputs = %q, want %q", got, want)
+	}
+}
+
+// TestFromDippinIR_ToolConfigOutputs asserts end-to-end forwarding through
+// FromDippinIR — the path a real .dip file takes.
+func TestFromDippinIR_ToolConfigOutputs(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ToolOutputsTest",
+		Start: "start",
+		Exit:  "tool",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "tool",
+				Kind: ir.NodeTool,
+				Config: ir.ToolConfig{
+					Command: "./check.sh",
+					Outputs: []string{"green", "yellow", "red"},
+				},
+			},
+		},
+		Edges: []*ir.Edge{{From: "start", To: "tool"}},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	node := graph.Nodes["tool"]
+	if got, want := node.Attrs["outputs"], "green,yellow,red"; got != want {
+		t.Errorf("outputs = %q, want %q", got, want)
+	}
+}
+
 func TestConvertEdge_WeightAndRestart(t *testing.T) {
 	irEdge := &ir.Edge{From: "a", To: "b", Weight: 5, Restart: true}
 	gEdge, err := convertEdge(irEdge)

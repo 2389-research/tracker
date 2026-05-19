@@ -430,6 +430,9 @@ func extractToolAttrs(cfg ir.ToolConfig, attrs map[string]string) {
 	if cfg.OutputLimit > 0 {
 		attrs["output_limit"] = strconv.Itoa(cfg.OutputLimit)
 	}
+	if len(cfg.Outputs) > 0 {
+		attrs["outputs"] = strings.Join(cfg.Outputs, ",")
+	}
 }
 
 func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
