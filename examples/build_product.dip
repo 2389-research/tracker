@@ -481,7 +481,19 @@ workflow BuildProduct
          tail of stdout, so the sentinel survives truncation by
          construction — its presence is reliable, its absence is
          not "routine elision".
-         Three sentinel/marker cases the verifier should distinguish:
+         TestMilestone has THREE terminal paths (see the tool node
+         body for the exact branches):
+           (i)  TEST_EXIT==0 → `printf 'tests-pass'` + exit 0
+                (success — routes to VerifyMilestone)
+           (ii) TEST_EXIT!=0 && ATTEMPTS>3 → `printf 'escalate'` +
+                exit 1 (env-missing or fix-loop-exhausted — routes
+                to EscalateMilestone)
+           (iii) TEST_EXIT!=0 && ATTEMPTS<=3 → NO marker + exit 1
+                (normal in-progress failure — routes to FixMilestone)
+         Under normal routing only path (i) reaches VerifyMilestone,
+         so the contract for THIS node is: "if you see me, the
+         upstream tool emitted `tests-pass`." The three sentinel
+         cases the verifier should distinguish:
            - `tests-pass` present → PASS, no further check required.
            - `escalate` present → FAIL, with one of two causes:
                * `ERROR: <Makefile> present but 'make' not installed`
@@ -489,20 +501,28 @@ workflow BuildProduct
                * `ESCALATE: milestone failed after N attempts` =
                  the fix loop exhausted (milestone genuinely broken;
                  prior attempts didn't converge).
-             Either escalate cause should have been caught upstream
-             by the `TestMilestone -> EscalateMilestone when
-             ctx.tool_stdout contains escalate` edge; if you see
-             `escalate` here, the routing missed — name the specific
-             cause from the surrounding lines.
-           - Neither sentinel present → ANOMALY. TestMilestone
-             always emits one or the other at end-of-command; its
-             absence in the tail means either the tool didn't reach
-             the printf (an uncaught script error), the `output_limit`
-             node attribute is misconfigured below the sentinel's
-             byte length, or the tool crashed mid-stream. STATUS:fail
-             and surface "TestMilestone produced no terminal sentinel
-             — output capture or script integrity is broken; do not
-             treat this as a passing milestone."
+             Either cause should have been caught upstream by the
+             `TestMilestone -> EscalateMilestone when ctx.tool_stdout
+             contains escalate` edge; if you see `escalate` here,
+             the routing missed — name the specific cause from the
+             surrounding lines.
+           - Neither sentinel present → ANOMALY. STATUS:fail and
+             surface explicitly; do NOT silently treat as passing.
+             The path-(iii) "normal failure" branch above also emits
+             no sentinel, but its `ctx.outcome = fail` should route
+             to FixMilestone — never to VerifyMilestone. So missing
+             sentinels here mean ONE of:
+               * routing bug: a failing path-(iii) TestMilestone run
+                 reached VerifyMilestone instead of FixMilestone
+                 (rare — surface "TestMilestone failed but
+                 outcome-routing landed me here; investigate
+                 success-edge condition").
+               * output-capture problem: tool crashed mid-stream
+                 before printf, `output_limit` misconfigured below
+                 the ~12-byte sentinel length, or the tail buffer
+                 was lost (surface "TestMilestone produced no
+                 terminal sentinel — output capture or script
+                 integrity is broken").
          Visible CI probe lines (`--- running make ---`, `INFO: ...`)
          and language-test output are corroborating signals, not
          required. The 64KB tail cap CAN elide earlier verbose
