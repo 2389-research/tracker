@@ -1,0 +1,31 @@
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ if .IsHome }}{{ site.Title }} — {{ site.Params.description | truncate 60 }}{{ else }}{{ .Title }} — {{ site.Title }}{{ end }}</title>
+
+  {{ $description := .Params.description | default site.Params.description }}
+  <meta name="description" content="{{ $description }}">
+
+  {{ $ogTitle := .Params.og_title | default .Title }}
+  {{ if .IsHome }}{{ $ogTitle = .Params.og_title | default (printf "%s — %s" site.Title "Multi-Agent Pipeline Orchestration") }}{{ end }}
+  <meta property="og:title" content="{{ $ogTitle }}">
+  <meta property="og:description" content="{{ .Params.og_description | default $description }}">
+  <meta property="og:type" content="{{ if .IsHome }}website{{ else }}article{{ end }}">
+  <meta property="og:url" content="{{ .Permalink }}">
+
+  <link rel="canonical" href="{{ .Permalink }}">
+  <link rel="alternate" type="application/rss+xml" href="{{ "index.xml" | absURL }}" title="{{ site.Title }} RSS feed">
+
+  <link rel="stylesheet" href="{{ "style.css" | relURL }}">
+
+  {{ if .Params.mermaid }}
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ theme: 'base', securityLevel: 'loose', flowchart: { htmlLabels: true }, themeVariables: { fontSize: '16px', primaryColor: '#fff7ed', primaryTextColor: '#1c1917', primaryBorderColor: '#ea580c', lineColor: '#a8a29e', secondaryColor: '#ffedd5', tertiaryColor: '#fef7f0', background: 'transparent', mainBkg: '#fff7ed', nodeBorder: '#ea580c', clusterBkg: '#ffedd566', clusterBorder: '#ea580c44', titleColor: '#7c2d12', edgeLabelBackground: '#fef7f0', nodeTextColor: '#1c1917', actorTextColor: '#1c1917', signalTextColor: '#1c1917', labelTextColor: '#7c2d12' }});</script>
+  {{ end }}
+
+  {{ with .Params.jsonld }}
+  <script type="application/ld+json">
+  {{ . | jsonify (dict "indent" "  ") | safeJS }}
+  </script>
+  {{ end }}
+</head>
