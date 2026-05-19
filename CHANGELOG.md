@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-05-19
+
 ### Changed
 
 - **`build_product` workflow: closed Gaps 2 + 4 from the #233 audit (reviewer rubric overhaul + `VerifyMilestone` reads SPEC.md)** ([#233](https://github.com/2389-research/tracker/issues/233)). PR #246 shipped the cheap trio (Gaps 1, 3, 6); this PR is the next chunk. Additional audit findings from #233 Appendix A are now caught upfront by these two gaps, in addition to what PR #246 already catches (see per-gap Appendix A maps below — these overlap with the #246 set on B1, B3, B5).
