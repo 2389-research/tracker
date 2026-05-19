@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+{{ partial "head.html" . }}
+<body>
+
+{{ partial "nav.html" . }}
+
+<main>
+{{ block "main" . }}{{ end }}
+</main>
+
+{{ partial "footer.html" . }}
+
+<script src="{{ "highlight.js" | relURL }}"></script>
+
+</body>
+</html>
