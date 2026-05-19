@@ -68,8 +68,25 @@ func buildValidationRegistry() *pipeline.HandlerRegistry {
 }
 
 // printValidationResult writes the validation outcome to w and returns an error on failures.
+//
+// The "valid with N warning(s)" total counts both result.Warnings (tracker
+// semantic warnings) AND graph.LintWarnings (dippin-lang DIP1XX warnings).
+// DIP1XX warnings deliberately do not flow through result.Warnings — that path
+// previously caused #244, where each warning was printed twice (long form on
+// stderr from the loader, short form on stdout from here). The long form
+// remains the canonical user-visible output and is emitted once by the loader.
 func printValidationResult(w io.Writer, displayName string, graph *pipeline.Graph, result *pipeline.ValidationError) error {
+	lintCount := 0
+	if graph != nil {
+		lintCount = len(graph.LintWarnings)
+	}
+
 	if result == nil {
+		if lintCount > 0 {
+			fmt.Fprintf(w, "%s: valid with %d warning(s) (%d nodes, %d edges)\n",
+				displayName, lintCount, len(graph.Nodes), len(graph.Edges))
+			return nil
+		}
 		fmt.Fprintf(w, "%s: valid (%d nodes, %d edges)\n", displayName, len(graph.Nodes), len(graph.Edges))
 		return nil
 	}
@@ -86,7 +103,7 @@ func printValidationResult(w io.Writer, displayName string, graph *pipeline.Grap
 	}
 
 	fmt.Fprintf(w, "%s: valid with %d warning(s) (%d nodes, %d edges)\n",
-		displayName, len(result.Warnings), len(graph.Nodes), len(graph.Edges))
+		displayName, len(result.Warnings)+lintCount, len(graph.Nodes), len(graph.Edges))
 	return nil
 }
 

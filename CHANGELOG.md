@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tracker validate` no longer prints every DIP1XX lint warning twice** ([#244](https://github.com/2389-research/tracker/issues/244)). Two parallel emission paths fed the same `validator.Lint()` diagnostics through the CLI: `loadDippinPipeline` printed each diagnostic in long form (with `--> file:line:col` location and `= help: ...` suggestion) to stderr, and `pipeline/validate.go`'s `validateGraph` folded the pre-formatted single-line `Graph.LintWarnings` strings into `ValidationError.Warnings`, which `printValidationResult` then re-emitted on stdout. The summary count was correctly de-duplicated (it counted via `lintResult.Diagnostics`, not the concatenation) but the printed list was not — a workflow with 5 DIP1XX warnings showed 10 warning lines. Fix per the issue's recommended Option 1: drop the `ve.Warnings = append(ve.Warnings, g.LintWarnings...)` line in `validateGraph`, so the long-form stderr diagnostic remains the sole source of warning text for the user. `printValidationResult` now adds `len(graph.LintWarnings)` back into the `valid with N warning(s)` summary count so the total stays accurate (a graph with zero tracker-semantic warnings and N DIP warnings now reports N, not 0). The `simulate` paths (`runSimulateCmd` and `runSimulateBundle`) explicitly read `Graph.LintWarnings` so the inline "=== Validation Warnings ===" section continues to surface DIP1XX warnings — preserving `TestSimulateDipxBundleShowsLintWarnings`'s contract that users inspecting an unfamiliar `.dipx` bundle still see lint warnings in stdout. A new regression test `TestValidateNoDuplicateLintWarnings` captures both stdout and stderr (via an `os.Pipe`-redirected `os.Stderr` for the duration of the call) and asserts each `warning[DIPnnn]` code appears exactly once in the combined output, and that the summary line does not undercount.
+
 ## [0.29.2] - 2026-05-18
 
 ### Changed

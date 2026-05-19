@@ -80,7 +80,11 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 	}
 
 	// ValidationResult.Errors carries structural problems (unreachable nodes,
-	// bad references, etc.); Warnings carries lint-style advisory items.
+	// bad references, etc.); Warnings carries tracker-semantic advisory items.
+	// DIP1XX lint warnings live on result.Graph.LintWarnings (not folded into
+	// result.Warnings since #244 — see pipeline/validate.go); we pull them in
+	// here so the inline "=== Validation Warnings ===" section still surfaces
+	// them for users inspecting an unfamiliar workflow.
 	// The old CLI printed only Errors under a "Validation Warnings" heading
 	// — confusing. We now split them into explicit sections and continue to
 	// simulate either way (matching prior continue-on-errors behavior so
@@ -92,15 +96,28 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 			fmt.Fprintf(w, "  ! %s\n", e)
 		}
 	}
-	if len(result.Warnings) > 0 {
+	lintWarnings := graphLintWarnings(result.Graph)
+	if len(result.Warnings) > 0 || len(lintWarnings) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "=== Validation Warnings ===")
 		for _, msg := range result.Warnings {
 			fmt.Fprintf(w, "  ~ %s\n", msg)
 		}
+		for _, msg := range lintWarnings {
+			fmt.Fprintf(w, "  ~ %s\n", msg)
+		}
 	}
 
 	return simulateGraphAndPrint(w, result.Graph, displayName)
+}
+
+// graphLintWarnings returns g.LintWarnings, or nil if g is nil. Small helper
+// to keep the simulate paths free of nil-guard boilerplate.
+func graphLintWarnings(g *pipeline.Graph) []string {
+	if g == nil {
+		return nil
+	}
+	return g.LintWarnings
 }
 
 // runSimulateBundle is the .dipx variant of runSimulateCmd. It loads the
@@ -128,20 +145,30 @@ func runSimulateBundle(resolved, _ string, w io.Writer) error {
 	// regression in LoadDipxBundle that surfaces a malformed graph would
 	// be visible instead of silently fed into the simulator.
 	registry := buildValidationRegistry()
-	if vresult := pipeline.ValidateAllWithLint(graph, registry); vresult != nil {
-		if len(vresult.Errors) > 0 {
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, "=== Validation Errors ===")
-			for _, e := range vresult.Errors {
-				fmt.Fprintf(w, "  ! %s\n", e)
-			}
+	vresult := pipeline.ValidateAllWithLint(graph, registry)
+	var vErrors, vWarnings []string
+	if vresult != nil {
+		vErrors = vresult.Errors
+		vWarnings = vresult.Warnings
+	}
+	if len(vErrors) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "=== Validation Errors ===")
+		for _, e := range vErrors {
+			fmt.Fprintf(w, "  ! %s\n", e)
 		}
-		if len(vresult.Warnings) > 0 {
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, "=== Validation Warnings ===")
-			for _, msg := range vresult.Warnings {
-				fmt.Fprintf(w, "  ~ %s\n", msg)
-			}
+	}
+	// DIP1XX warnings come off the graph directly (not via vresult.Warnings)
+	// since #244 — see pipeline/validate.go.
+	lintWarnings := graphLintWarnings(graph)
+	if len(vWarnings) > 0 || len(lintWarnings) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "=== Validation Warnings ===")
+		for _, msg := range vWarnings {
+			fmt.Fprintf(w, "  ~ %s\n", msg)
+		}
+		for _, msg := range lintWarnings {
+			fmt.Fprintf(w, "  ~ %s\n", msg)
 		}
 	}
 

@@ -147,11 +147,16 @@ func validateGraph(g *Graph) *ValidationError {
 	validateConditionalFailEdges(g, ve)
 	validateEdgeLabelConsistency(g, ve)
 
-	// Surface dippin-lang lint warnings (DIP1XX) captured at load time.
-	// Empty for DOT graphs and for graphs constructed programmatically.
-	// This is the only path by which DIP-coded warnings reach tracker's
-	// warnings channel — tracker no longer maintains its own DIP checks.
-	ve.Warnings = append(ve.Warnings, g.LintWarnings...)
+	// Note: dippin-lang lint warnings (DIP1XX) live on g.LintWarnings and are
+	// surfaced separately by callers that want them inline (e.g. simulate's
+	// "=== Validation Warnings ===" section reads them directly). They are
+	// deliberately NOT folded into ve.Warnings here — the long-form, location-
+	// annotated version is printed once at load time by the .dip / .dipx
+	// loader (see loadDippinPipeline / loadDipxPipeline / parseDIPSource),
+	// and the short form folded in here used to duplicate that output
+	// (see #244). The summary count in cmd/tracker/validate.go's
+	// printValidationResult adds len(g.LintWarnings) back in so the
+	// "valid with N warning(s)" total still reflects DIP1XX warnings.
 
 	return ve
 }
