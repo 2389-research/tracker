@@ -1,0 +1,342 @@
+---
+title: "Architecture"
+description: "How Tracker orchestrates multi-agent pipelines — the engine, nodes, edges, backends (native / Claude Code / ACP), checkpoints, parallel execution, budget governance, and tool-safety controls."
+og_title: "Architecture — Tracker"
+og_description: "How Tracker orchestrates multi-agent pipelines — engine, nodes, edges, backends, checkpoints, parallel execution, and budget governance."
+mermaid: true
+jsonld:
+  "@context": "https://schema.org"
+  "@type": "TechArticle"
+  headline: "Architecture — Tracker"
+  description: "How Tracker orchestrates multi-agent pipelines — the engine, nodes, edges, backends, checkpoints, parallel execution, and budget governance."
+  url: "https://2389-research.github.io/tracker/architecture.html"
+  author:
+    "@type": "Organization"
+    name: "2389.ai"
+    url: "https://2389.ai"
+  publisher:
+    "@type": "Organization"
+    name: "2389.ai"
+  isPartOf:
+    "@type": "WebSite"
+    name: "Tracker"
+    url: "https://2389-research.github.io/tracker/"
+---
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>Architecture</h1>
+    <p class="subtitle">Three layers, clean boundaries. The engine doesn&rsquo;t know about parallel execution. The LLM client doesn&rsquo;t know about pipelines.</p>
+  </section>
+
+  <nav class="page-toc" aria-label="On this page">
+    <strong>On this page:</strong>
+    <a href="#layers">System layers</a>
+    <a href="#engine">Run loop</a>
+    <a href="#handlers">Handlers</a>
+    <a href="#adapter">Dippin adapter</a>
+    <a href="#backends">Agent backends</a>
+    <a href="#agent-tools">Agent tools</a>
+    <a href="#state">State &amp; resume</a>
+    <a href="#llm-client">LLM client</a>
+    <a href="#tui">TUI</a>
+    <a href="#library-api">Library API</a>
+  </nav>
+
+  <!-- ═══ System layers ═══ -->
+  <section class="glass" id="layers">
+    <h2>System <span class="accent">layers</span></h2>
+    <p class="layers-key">
+      Each box: <strong>layer name</strong> &middot; <code>source path</code> &middot; what it owns.
+    </p>
+    <div class="diagram diagram-layers">
+      <div class="mermaid">
+graph TB
+    CLI["<span class='ly-name'>CLI</span><br/><span class='ly-path'>cmd/tracker</span><br/><span class='ly-desc'>flags &middot; name resolution &middot; TUI &middot; embedded workflows</span>"]
+    Engine["<span class='ly-name'>Pipeline Engine</span><br/><span class='ly-path'>pipeline/</span><br/><span class='ly-desc'>run loop &middot; edge selection &middot; checkpoints &middot; budget guard &middot; steering channel</span>"]
+    Handlers["<span class='ly-name'>Handlers</span><br/><span class='ly-path'>pipeline/handlers</span><br/><span class='ly-desc'>codergen &middot; tool &middot; human &middot; parallel &middot; fan_in &middot; conditional &middot; subgraph &middot; manager_loop</span>"]
+    Backends["<span class='ly-name'>Agent Backends</span><br/><span class='ly-path'>pipeline/backend.go</span><br/><span class='ly-desc'>native &middot; claude-code &middot; acp</span>"]
+    Agent["<span class='ly-name'>Agent Session</span><br/><span class='ly-path'>agent/</span><br/><span class='ly-desc'>turn loop &middot; tool registry &middot; context compaction &middot; episodic memory &middot; verify-after-edit</span>"]
+    LLM["<span class='ly-name'>LLM Client</span><br/><span class='ly-path'>llm/</span><br/><span class='ly-desc'>Anthropic &middot; OpenAI &middot; Gemini &middot; OpenAI-compat &middot; retry &middot; cost estimation</span>"]
+
+    CLI --> Engine --> Handlers --> Backends --> Agent --> LLM
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Engine run loop ═══ -->
+  <section class="glass" id="engine">
+    <h2>The engine <span class="accent">run loop</span></h2>
+    <p class="lead">
+      Every node is treated the same: execute the handler, evaluate edges, advance.
+      Parallel, subgraphs, human gates &mdash; handlers encapsulate it all.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph LR
+    A["Clear routing<br/>context"] --> B["Execute<br/>handler"]
+    B --> C["Set outcome<br/>in context"]
+    C --> D["Select<br/>outgoing edge"]
+    D --> E["Checkpoint"]
+    E --> F["Advance to<br/>next node"]
+    F --> A
+      </div>
+    </div>
+
+    <h3>Edge selection priority</h3>
+    <ol class="steps">
+      <li>
+        <h4>Suggested next nodes</h4>
+        <p>If the handler set <code>suggested_next_nodes</code> (e.g., parallel pointing at a fan-in), take that edge.</p>
+      </li>
+      <li>
+        <h4>Conditional match</h4>
+        <p>Evaluate conditions in declaration order; first match wins. Operators: <code>=</code>, <code>!=</code>, <code>contains</code>, <code>not contains</code>, <code>startswith</code>, <code>endswith</code>, <code>in</code>, plus logical <code>and</code>/<code>or</code>/<code>not</code>.</p>
+      </li>
+      <li>
+        <h4>Label match</h4>
+        <p>Match a human gate&rsquo;s <code>preferred_label</code> against edge labels.</p>
+      </li>
+      <li>
+        <h4>Default edge</h4>
+        <p>First unconditional edge. Safety net &mdash; and the source of infinite loops if pointed at a loop target.</p>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ═══ Handlers ═══ -->
+  <section class="glass" id="handlers">
+    <h2>Handler <span class="accent">types</span></h2>
+    <p class="lead">
+      Each node resolves to a handler. The engine calls <code>Execute()</code> and reads the outcome.
+      New handlers register without touching the run loop.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Handler</th><th>Node kind</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>codergen</code></td><td><code>agent</code></td><td>Runs an LLM session via the selected backend. Emits an <code>agent.Event</code> stream.</td></tr>
+          <tr><td><code>tool</code></td><td><code>tool</code></td><td>Shell command with timeout, output cap, env scoping, denylist/allowlist, comment stripping for LLM-written lists.</td></tr>
+          <tr><td><code>wait.human</code></td><td><code>human</code></td><td>Choice / freeform / hybrid / yes-no / interview gates. Pluggable <code>Interviewer</code> for autopilot, auto-approve, webhook routing.</td></tr>
+          <tr><td><code>parallel</code></td><td><code>parallel</code></td><td>Dispatches branches from <code>parallel_targets</code> as goroutines. Honors <code>max_concurrency</code> and <code>branch_timeout</code>.</td></tr>
+          <tr><td><code>parallel.fan_in</code></td><td><code>fan_in</code></td><td>Joins parallel branches; aggregates branch <code>SessionStats</code> into its own trace entry.</td></tr>
+          <tr><td><code>conditional</code></td><td><code>conditional</code></td><td>Pure routing &mdash; evaluates conditions without an LLM call.</td></tr>
+          <tr><td><code>subgraph</code></td><td><code>subgraph</code></td><td>Runs a referenced child pipeline; events propagate to the parent TUI.</td></tr>
+          <tr><td><code>stack.manager_loop</code></td><td><code>manager_loop</code></td><td>Async child-pipeline supervisor. Polls, evaluates stop and steer conditions, injects context mid-execution. Native <code>.dip</code> syntax via <code>ir.NodeManagerLoop</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ Dippin adapter ═══ -->
+  <section class="glass" id="adapter">
+    <h2>The dippin <span class="accent">adapter</span></h2>
+    <p class="lead">
+      <code>pipeline/dippin_adapter.go</code> bridges dippin-lang&rsquo;s IR to tracker&rsquo;s Graph model.
+      Every naming mismatch lives here.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Dippin IR</th><th>Tracker Graph</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>model</code></td><td><code>llm_model</code></td><td>Attribute rename</td></tr>
+          <tr><td><code>provider</code></td><td><code>llm_provider</code></td><td>Attribute rename</td></tr>
+          <tr><td><code>google</code></td><td><code>gemini</code></td><td>Provider name normalization</td></tr>
+          <tr><td><code>ctx.outcome</code></td><td><code>outcome</code></td><td>Namespace prefix stripped at evaluation time</td></tr>
+          <tr><td><code>ParallelConfig.Targets</code></td><td>Implicit edges</td><td>Synthesized from parallel targets</td></tr>
+          <tr><td><code>FanInConfig.Sources</code></td><td>Implicit edges</td><td>Synthesized from fan-in sources</td></tr>
+          <tr><td><code>ir.NodeManagerLoop</code></td><td><code>handler=stack.manager_loop</code></td><td>Flattens the IR config into six unprefixed attrs (<code>subgraph_ref</code>, <code>poll_interval</code>, <code>max_cycles</code>, <code>stop_condition</code>, <code>steer_condition</code>, <code>steer_context</code>). <code>steer_context</code> uses canonical <code>k=v,k=v</code> with percent-encoding. Steered values land under <code>${ctx.steer.&lt;key&gt;}</code> on the child to avoid colliding with the <code>tool_command</code> safe-key allowlist.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ Agent backends ═══ -->
+  <section class="glass" id="backends">
+    <h2>Agent <span class="accent">backends</span></h2>
+    <p class="lead">
+      <code>AgentBackend</code> is a one-method contract: execute a node, return an <code>agent.Event</code> stream.
+      The engine doesn&rsquo;t know which backend ran. Mix per node; per-node attr beats <code>--backend</code>.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph TB
+    CH["CodergenHandler"] --> SB["selectBackend()"]
+    SB -->|"default"| NB["Native\nagent.Session\nturn loop + tool registry"]
+    SB -->|"backend: claude-code"| CC["Claude Code\nclaude CLI subprocess\nNDJSON stdout"]
+    SB -->|"backend: acp"| AC["ACP\nJSON-RPC over stdio\nclaude-agent-acp / codex-acp / gemini --acp"]
+    NB --> Events["agent.Event stream"]
+    CC --> Events
+    AC --> Events
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-top: 1.5rem;">
+      <div class="glass glass-sm">
+        <h4>Native</h4>
+        <p>Wraps <code>agent.Session</code> &mdash; turn loop, tool registry, context compaction, optional plan-before-execute, episodic memory, structured reflection on tool failure. Anthropic, OpenAI, Gemini, OpenAI-compat.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Claude Code</h4>
+        <p>Spawns <code>claude</code> as a subprocess; parses NDJSON. File editing, terminal, MCP servers come for free. API keys stripped by default so the CLI uses subscription auth (override with <code>TRACKER_PASS_API_KEYS=1</code>).</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>ACP</h4>
+        <p>Spawns any <a href="https://agentclientprotocol.com/">Agent Client Protocol</a> agent over stdio. Provider-based defaults: <code>anthropic</code>&nbsp;&rarr;&nbsp;<code>claude-agent-acp</code>, <code>openai</code>&nbsp;&rarr;&nbsp;<code>codex-acp</code>, <code>gemini</code>&nbsp;&rarr;&nbsp;<code>gemini --acp</code>. Override per node via <code>acp_agent</code>.</p>
+      </div>
+    </div>
+
+    <p style="margin-top: 1.25rem; font-size: 0.9rem; color: var(--text-secondary);">
+      <strong>Lazy LLM client.</strong> <code>buildLLMClient()</code> failure is non-fatal when the global <code>--backend</code> isn&rsquo;t <code>native</code>.
+      A pipeline can run with no API keys at all if every node uses <code>claude-code</code> (subscription auth) or <code>acp</code> (bridge native auth).
+    </p>
+  </section>
+
+  <!-- ═══ Agent-runtime tools ═══ -->
+  <section class="glass" id="agent-tools">
+    <h2>Agent-runtime <span class="accent">tools</span></h2>
+    <p class="lead">
+      The native backend ships an extensible tool registry. Architect-tier tools register on demand
+      via env vars &mdash; no env var, no tool. Lives in <code>agent/tools/</code>; registered from
+      <code>pipeline/handlers/backend_native.go</code>.
+    </p>
+
+    <div class="grid-2" style="margin-top: 1.25rem;">
+      <div class="glass glass-sm">
+        <h4><code>TerminalTool</code> &mdash; primitive</h4>
+        <p>An interface a tool can implement to flag itself terminal. The runtime ends the session loop the moment it succeeds &mdash; before the next LLM call &mdash; so dispatch tools don&rsquo;t waste a post-dispatch turn.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>dispatch_sprints</code></h4>
+        <p>Reads a <code>{path, description}</code> JSONL plan and runs the per-sprint author + audit pipeline once per line. Bounded retry+backoff for transient provider errors; non-retryable errors bubble out.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>write_enriched_sprint</code></h4>
+        <p>Mid-tier LLM (Sonnet by default) with a 4-strategy SEARCH/REPLACE matcher (exact &rarr; indent-preserving &rarr; whitespace-insensitive &rarr; fuzzy). Partial-apply semantics distinguish <code>PATCHED-PARTIAL</code> from clean <code>PATCHED</code>. Override via <code>TRACKER_SPRINT_WRITER_MODEL</code>.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4><code>generate_code</code></h4>
+        <p>Cheap/fast model expands a contract into one or more files. Default <code>gpt-4o-mini</code>; override via <code>TRACKER_CODEGEN_MODEL</code>. Companion to <code>write_enriched_sprint</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ State, budgets &amp; resume ═══ -->
+  <section class="glass" id="state">
+    <h2>State, budgets &amp; <span class="accent">resume</span></h2>
+    <p class="lead">
+      The <code>PipelineContext</code> is the typed key-value store shared across nodes.
+      Variable expansion resolves <code>${ctx.*}</code>, <code>${params.*}</code>, <code>${graph.*}</code>,
+      and <code>${ctx.node.&lt;id&gt;.*}</code> in prompts, tool commands, and edge conditions &mdash; single-pass,
+      never re-scanning resolved values.
+    </p>
+
+    <div class="grid-2" style="margin-top: 1.25rem;">
+      <div class="glass glass-sm">
+        <h4>Per-node scoping</h4>
+        <p>After each node, every key it wrote is also copied into <code>node.&lt;nodeID&gt;.&lt;key&gt;</code>. Downstream reads <code>${ctx.node.ReadSpec.last_response}</code> reference a specific upstream output instead of the latest.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Declarative <code>writes:</code> / <code>reads:</code></h4>
+        <p>Nodes declare the keys they produce and consume. Declared writes are validated into the context after the handler runs &mdash; missing required fields fail the node. Self-healing JSON cascade catches the common &ldquo;LLM returned prose&rdquo; failure modes.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Budget guard</h4>
+        <p>Enforces <code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> between every pair of nodes. Breach halts the run with <code>OutcomeBudgetExceeded</code> and a full <code>CostSnapshot</code>. Subgraph and manager_loop children inherit the parent guard so ceilings bind through nested execution.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Cost-accounting fidelity</h4>
+        <p>Per-call usage carries an <code>Estimated</code> flag that propagates through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. Cache reads priced at 10% of input, cache writes at 25%.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Git artifacts</h4>
+        <p>With <code>WithGitArtifacts(true)</code>, the run dir is a git repo. Every terminal node creates a commit (<code>node(&lt;id&gt;): &lt;handler&gt; outcome=&lt;status&gt;</code>) carrying duration, edge, token, and cost metadata. <code>git log</code> is a human-readable audit trail.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Resume &amp; bundle</h4>
+        <p><code>tracker.Config.ResumeRunID</code> resolves a run ID to its <code>checkpoint.json</code> path. <code>ExportBundle</code> wraps <code>git bundle create --all</code> into a single self-contained file you can <code>git clone</code> anywhere &mdash; no network needed.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>.dipx bundle identity <span class="badge">v0.26.0</span></h4>
+        <p>Content-addressed <code>.dipx</code> bundles (from <code>dippin pack</code>) load via <code>pipeline.LoadDipxBundle</code>: SHA-256 verifies every file in <code>manifest.json</code>, uses the pre-parsed <code>*ir.Workflow</code> directly (no re-parse), bypasses the filesystem subgraph walker. The <code>sha256:&lt;hex&gt;</code> identity is stamped on every <code>activity.jsonl</code> line, persisted into <code>checkpoint.json</code>, surfaced in <code>tracker list</code>/<code>audit</code>, and exposed on <code>tracker.Result.BundleIdentity</code> &amp; <code>RunSummary.BundleIdentity</code>. Resume strictly verifies identity match; <code>--force-bundle-mismatch</code> is the escape hatch.</p>
+      </div>
+    </div>
+
+    <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
+      <strong>Steering channel.</strong> <code>pipeline.WithSteeringChan(chan map[string]string)</code> lets a supervisor inject context updates between node executions
+      via <code>MergeWithoutDirty</code> &mdash; writes the global namespace without leaking into per-node scope.
+      Used by <code>stack.manager_loop</code> to steer a child pipeline mid-run.
+      Steered values are namespaced under <code>steer.</code> on the child.
+    </p>
+  </section>
+
+  <!-- ═══ LLM client middleware ═══ -->
+  <section class="glass" id="llm-client">
+    <h2>LLM client <span class="accent">middleware</span></h2>
+    <p class="lead">Provider-agnostic. Middleware wraps every request for cross-cutting concerns.</p>
+
+    <div class="diagram">
+      <div class="mermaid">
+graph LR
+    Req["Request"] --> Retry["Retry<br/><i>502, 503, 429</i>"]
+    Retry --> Token["Token<br/>tracker"]
+    Token --> Provider["Provider<br/>adapter"]
+    Provider --> API["Provider API"]
+    API --> SSE["SSE Stream"]
+      </div>
+    </div>
+
+    <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+      <strong>Infra retry</strong> handles transient errors transparently: max 3 retries, 2s base delay, exponential backoff.
+      Pipeline-level retries are reserved for actual node logic failures.
+      <strong>SSE error handling</strong> matters because OpenAI&rsquo;s Responses API returns HTTP 200 and sends
+      <code>error</code> / <code>response.failed</code> as SSE events &mdash; the adapter parses these out;
+      they are NOT reflected in the HTTP status.
+    </p>
+  </section>
+
+  <!-- ═══ TUI ═══ -->
+  <section class="glass" id="tui">
+    <h2>TUI <span class="accent">model</span></h2>
+    <p class="lead">
+      Built on <a href="https://github.com/charmbracelet/bubbletea">bubbletea</a>. The pipeline runs in a
+      background goroutine; the TUI receives events via <code>tea.Msg</code>. No polling.
+    </p>
+    <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 0.65rem;">
+      <li><strong>Pipeline panel</strong> &mdash; node list in topological order (Kahn&rsquo;s algorithm). Status lamps, thinking spinners, tool indicators. Subgraph nodes inserted and indented dynamically.</li>
+      <li><strong>Activity log</strong> &mdash; append-only, line-level styled. No glamour rendering (too expensive for streaming). Per-node streams with separators on node change.</li>
+      <li><strong>Modal overlays</strong> &mdash; choice radio, freeform textarea, hybrid radio+freeform, fullscreen review with glamour viewport. All <code>Cancellable</code>.</li>
+      <li><strong>Event flow</strong> &mdash; engine emits pipeline events &rarr; adapted to <code>tea.Msg</code> &rarr; sent to program &rarr; state store updates &rarr; view re-renders.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ Library API ═══ -->
+  <section class="glass" id="library-api">
+    <h2>Library <span class="accent">API</span></h2>
+    <p class="lead">
+      Tracker is also a Go library. The CLI is a thin printer over the same APIs.
+    </p>
+    <div class="grid-2" style="margin-top: 1rem;">
+      <div class="glass glass-sm">
+        <h4>Structured reports</h4>
+        <p><code>tracker.Diagnose</code>, <code>DiagnoseMostRecent</code>, <code>Audit</code>, <code>Doctor</code>, <code>Simulate</code> return typed reports. Typed enums for <code>CheckStatus</code> and <code>SuggestionKind</code> &mdash; no stdout scraping.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>NDJSON streaming</h4>
+        <p><code>tracker.NewNDJSONWriter(io.Writer)</code> produces the same wire format as <code>--json</code>. Plug it into <code>Config.EventHandler</code>, <code>Config.AgentEvents</code>, and the LLM trace hook. Per-writer write-failure recovery.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Context-first</h4>
+        <p>Every entry point takes <code>context.Context</code> as its first argument, honored by provider probes and binary version lookups. Cancellation is real.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Typed <code>NodeConfig</code></h4>
+        <p><code>*pipeline.Node</code> exposes <code>AgentConfig</code> / <code>ToolConfig</code> / <code>HumanConfig</code> / <code>ParallelConfig</code> / <code>RetryConfig</code>. Graph-default-then-node-override merge happens once inside the accessor; handlers consume typed structs, not raw <code>Node.Attrs</code> reads.</p>
+      </div>
+    </div>
+  </section>
