@@ -1,0 +1,10 @@
+{{ define "main" }}
+<section class="hero glass" style="padding: 3rem 2rem; text-align: center;">
+  <h1>404 — page not found</h1>
+  <p class="subtitle">That URL doesn't exist on this site.</p>
+  <div class="hero-actions">
+    <a href="{{ "/" | relURL }}" class="btn btn-primary">Back to home</a>
+    <a href="{{ site.Params.repoURL }}" class="btn btn-ghost">GitHub</a>
+  </div>
+</section>
+{{ end }}
