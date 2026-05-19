@@ -1,5 +1,5 @@
 baseURL = "https://2389-research.github.io/tracker/"
-languageCode = "en-us"
+defaultContentLanguage = "en"
 title = "Tracker"
 enableRobotsTXT = true
 enableGitInfo = true
@@ -30,5 +30,8 @@ unsafe = true
 [minify.tdewolff.html]
 keepEndTags = true
 keepDocumentTags = true
-keepConditionalComments = true
+keepSpecialComments = true
 keepDefaultAttrVals = true
+
+[taxonomies]
+# Taxonomies disabled — we don't classify pages by tag/category.
