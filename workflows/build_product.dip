@@ -400,9 +400,21 @@ workflow BuildProduct
          (with the file/test that proves it) or not.
 
       2. FILES IN SCOPE: Only the files listed in the milestone were
-         modified. Run `git diff --name-only <prev-milestone-sha>..HEAD`
-         and write the output inline. Files outside the milestone's
-         declared list are FAIL.
+         modified. Determine this milestone's commit range — Implement
+         commits with messages referencing the milestone (per its
+         "Commit your work with a conventional commit message
+         referencing the milestone" rule). Run:
+           git log --oneline -30
+         to see recent commits; identify those for the current
+         milestone (by the milestone tag/number in the message), then
+         for the OLDEST such commit run:
+           git diff --name-only <oldest-milestone-commit>^..HEAD
+         Paste the resulting file list inline. If you cannot reliably
+         identify the milestone's commits this way (e.g., no
+         conventional-commit references), fall back to:
+           git log --oneline -10 --stat
+         and review the file lists manually. Files outside the
+         milestone's declared list are FAIL.
 
       3. SPEC LITERALS (issue #233 Gap 4): For every literal value in
          the spec sections this milestone covers — exact command
@@ -434,12 +446,24 @@ workflow BuildProduct
          criteria — so a SPEC.md bullet that Decompose dropped
          silently passed through. Cross-check against SPEC.md directly.
 
-      6. TESTS + CI PASSED: Confirm ${ctx.tool_stdout} shows both
-         green tests AND a green project CI gate (look for the
-         `--- running make <target> ---` line and check its exit
-         status). Red CI is FAIL — the engine's strict-failure-edge
-         logic should have caught it upstream, but if you see it
-         here surface it explicitly.
+      6. TESTS + CI PASSED: Confirm ${ctx.tool_stdout} shows BOTH
+         green language-stack tests AND a valid project-CI outcome.
+         The project-CI probe (from PR #246) has three valid PASS
+         outcomes — accept any of them:
+           (a) `--- running make <target> (project CI gate from <Makefile>) ---`
+               line followed by make output with no errors and no
+               non-zero exit indication. This is a successful CI run.
+           (b) `INFO: no Makefile present, no project CI gate to run`
+               — the repo has no Makefile, so the probe correctly
+               skipped. This is PASS, not FAIL.
+           (c) `INFO: no project CI target in <Makefile> (looked for: ci, check, lint)`
+               — the repo has a Makefile but no matching target, so
+               the probe correctly skipped. Also PASS, not FAIL.
+         FAIL only if you see `--- running make ---` followed by make
+         errors / non-zero exit, or `ERROR: <Makefile> present but
+         'make' not installed` (the latter should have been caught
+         upstream by the engine's strict-failure-edge logic; if it
+         reaches the verifier, surface it explicitly).
 
       7. NO EXTRA WORK: No unnecessary changes, docs, or refactoring
          outside scope. Walk the diff for files / functions / fields
@@ -634,8 +658,9 @@ workflow BuildProduct
          what the implementation happens to produce? Snapshot tests
          regenerated from current output are FAIL. Tests asserting
          `attempts == 2` when the spec says "max 2 retries" (= 3 attempts)
-         are FAIL. Tests that test stdlib code instead of the daemon's
-         own handler are FAIL.
+         are FAIL. Tests that only validate standard-library or
+         third-party-library behavior instead of the project's own
+         logic are FAIL.
       4. SCOPE: Was anything implemented beyond what this section asks
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
