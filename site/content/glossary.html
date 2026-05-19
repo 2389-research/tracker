@@ -1,0 +1,125 @@
+---
+title: "Glossary"
+description: "Terminology used across Tracker pipelines, the Dippin language, and the multi-agent runtime — node, edge, handler, backend, autopilot, budget, checkpoint, bundle, and more."
+og_title: "Glossary — Tracker"
+og_description: "Terminology used across Tracker pipelines, the Dippin language, and the multi-agent runtime."
+jsonld:
+  "@context": "https://schema.org"
+  "@type": "DefinedTermSet"
+  name: "Tracker Glossary"
+  description: "Terminology used across Tracker pipelines, the Dippin language, and the multi-agent runtime."
+  url: "https://2389-research.github.io/tracker/glossary.html"
+  publisher:
+    "@type": "Organization"
+    name: "2389.ai"
+    url: "https://2389.ai"
+---
+
+<section class="hero glass" style="padding: 3rem 2rem;">
+  <h1>Glossary</h1>
+  <p class="subtitle">Terminology used across Tracker pipelines, the Dippin language, and the multi-agent runtime.</p>
+</section>
+
+<nav class="page-toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#pipeline">Pipeline &amp; runtime</a>
+  <a href="#dippin">Dippin language</a>
+  <a href="#agents">Agents &amp; backends</a>
+  <a href="#handlers">Node handlers</a>
+  <a href="#routing">Routing &amp; outcome</a>
+  <a href="#governance">Governance</a>
+  <a href="#artifacts">Artifacts &amp; inspection</a>
+</nav>
+
+<section class="glass" id="pipeline">
+  <h2>Pipeline &amp; <span class="accent">runtime</span></h2>
+  <p class="lead">The core abstractions the engine works with.</p>
+  <div class="grid-2" style="margin-top: 1.25rem;">
+    <div class="glass glass-sm"><h4>Pipeline</h4><p>A directed graph of nodes connected by edges, plus shared context. Defined in a <code>.dip</code> file and executed by the engine.</p></div>
+    <div class="glass glass-sm"><h4>Engine</h4><p>The Tracker runtime that walks the graph: pick a node, execute its handler, evaluate outgoing edges, advance. Treats every node the same &mdash; no special-cases for parallel or fan-in.</p></div>
+    <div class="glass glass-sm"><h4>Node</h4><p>A single step in the pipeline. Identified by ID; carries a <code>handler</code> (agent, tool, human, parallel, &hellip;) and attributes (prompt, model, command, &hellip;).</p></div>
+    <div class="glass glass-sm"><h4>Edge</h4><p>A directed connection between two nodes. Optionally guarded by a condition like <code>when ctx.outcome = success</code>. Labeled edges can carry a human-readable choice.</p></div>
+    <div class="glass glass-sm"><h4>Run</h4><p>One execution of a pipeline. Has a unique <code>runID</code>, an artifact directory, and a status. Resumable from a checkpoint.</p></div>
+    <div class="glass glass-sm"><h4>Checkpoint</h4><p>A snapshot of the engine&rsquo;s state &mdash; completed nodes, context, edge selections &mdash; written after each node finishes. Used to resume a stopped run.</p></div>
+  </div>
+</section>
+
+<section class="glass" id="dippin">
+  <h2><span class="accent">Dippin</span> language</h2>
+  <p class="lead">The text format pipelines are authored in.</p>
+  <div class="grid-2" style="margin-top: 1.25rem;">
+    <div class="glass glass-sm"><h4>Dippin</h4><p>The pipeline language used by Tracker. Has its own parser, linter (<code>dippin doctor</code>), and simulator. Ships as a Go module: <code>github.com/2389-research/dippin-lang</code>.</p></div>
+    <div class="glass glass-sm"><h4><code>.dip</code> file</h4><p>A Dippin source file declaring nodes, edges, and workflow-level defaults. Loaded by <code>tracker run</code>, <code>tracker validate</code>, and <code>tracker simulate</code>.</p></div>
+    <div class="glass glass-sm"><h4>IR (Intermediate Representation)</h4><p>The parsed in-memory form of a Dippin pipeline. Converted to Tracker&rsquo;s <code>Graph</code> model by <code>pipeline/dippin_adapter.go</code>.</p></div>
+    <div class="glass glass-sm"><h4>Workflow defaults</h4><p>A <code>defaults:</code> block at the top of a <code>.dip</code> file that sets pipeline-wide values &mdash; default model, provider, budget ceilings &mdash; folded in as fallbacks beneath CLI flags and library config.</p></div>
+    <div class="glass glass-sm"><h4><code>writes:</code> / <code>reads:</code></h4><p>Declarative I/O contracts on agent, tool, and interview-human nodes. Lists the context keys a node produces (<code>writes:</code>) or expects (<code>reads:</code>). Extracted into first-class context keys at runtime.</p></div>
+    <div class="glass glass-sm"><h4>Context</h4><p>The shared key/value store every node reads from and writes to. Bare keys live at the top; per-node aliases (<code>node.&lt;nodeID&gt;.&lt;key&gt;</code>) appear after each node finishes.</p></div>
+  </div>
+</section>
+
+<section class="glass" id="agents">
+  <h2>Agents &amp; <span class="accent">backends</span></h2>
+  <p class="lead">How LLM calls actually happen.</p>
+  <div class="grid-2" style="margin-top: 1.25rem;">
+    <div class="glass glass-sm"><h4>Agent</h4><p>The LLM-driven actor that runs inside an agent node. Has a model, a prompt, and access to tools; produces a session result with token usage and final response.</p></div>
+    <div class="glass glass-sm"><h4>Backend</h4><p>The execution strategy for an agent node. Three are built in: <strong>Native</strong>, <strong>Claude Code</strong>, and <strong>ACP</strong>. Selected per-node via <code>backend:</code> or globally via <code>--backend</code>.</p></div>
+    <div class="glass glass-sm"><h4>Native backend</h4><p>Wraps <code>agent.Session</code> with a turn loop, tool registry, and context compaction. Calls the provider SDK directly (Anthropic / OpenAI / Gemini / OpenAI-compat).</p></div>
+    <div class="glass glass-sm"><h4>Claude Code backend</h4><p>Spawns the <code>claude</code> CLI as a subprocess and parses NDJSON output. API keys are stripped from the subprocess env so subscription auth works; override with <code>TRACKER_PASS_API_KEYS=1</code>.</p></div>
+    <div class="glass glass-sm"><h4>ACP backend</h4><p>Bridges to any <a href="https://agentclientprotocol.com/">Agent Client Protocol</a> agent over stdio &mdash; <code>claude-agent-acp</code>, <code>codex-acp</code>, <code>gemini --acp</code>. Provider-based defaults; override per node via <code>acp_agent</code>.</p></div>
+    <div class="glass glass-sm"><h4>Provider</h4><p>The LLM vendor for a native-backend call: <code>anthropic</code>, <code>openai</code>, <code>gemini</code>, or <code>openai-compat</code>. Base URL resolved via <code>tracker.ResolveProviderBaseURL(provider)</code>.</p></div>
+  </div>
+</section>
+
+<section class="glass" id="handlers">
+  <h2>Node <span class="accent">handlers</span></h2>
+  <p class="lead">The set of behaviors a node can have. Selected by the <code>handler:</code> attribute.</p>
+  <div class="grid-2" style="margin-top: 1.25rem;">
+    <div class="glass glass-sm"><h4>Agent (codergen)</h4><p>Runs an LLM session via the selected backend. Carries a prompt, model, optional tools, and an optional structured-output schema.</p></div>
+    <div class="glass glass-sm"><h4>Tool</h4><p>Runs a shell command. Stdout/stderr are captured (tail-windowed at 64KB by default) and surfaced as <code>ctx.tool_stdout</code> / <code>ctx.tool_stderr</code>.</p></div>
+    <div class="glass glass-sm"><h4>Human gate</h4><p>Pauses the pipeline for human input. Modes: default choice, yes/no, freeform, labeled freeform, and interview (multi-field form from JSON questions).</p></div>
+    <div class="glass glass-sm"><h4>Parallel</h4><p>Dispatches multiple branches concurrently from <code>parallel_targets</code>. Each branch runs in its own goroutine with panic recovery; emits per-branch start/complete events.</p></div>
+    <div class="glass glass-sm"><h4>Fan-in</h4><p>Joins parallel branches back into a single path. The parallel handler hints the engine at the join node via <code>suggested_next_nodes</code>.</p></div>
+    <div class="glass glass-sm"><h4>Conditional</h4><p>A no-op node whose only job is to route the run based on <code>when&hellip;</code> guards on its outgoing edges. Useful as an explicit branching point.</p></div>
+    <div class="glass glass-sm"><h4>Subgraph</h4><p>Embeds another <code>.dip</code> pipeline as a node. The child runs in isolation with its own context window; results merge back via declared <code>writes:</code>.</p></div>
+    <div class="glass glass-sm"><h4>Manager loop</h4><p>A controller node that repeatedly spawns a child agent with steerable context (<code>steer.&lt;key&gt;</code>) until a termination condition fires. Lives in the <code>stack.manager_loop</code> handler.</p></div>
+  </div>
+</section>
+
+<section class="glass" id="routing">
+  <h2>Routing &amp; <span class="accent">outcome</span></h2>
+  <p class="lead">How the engine decides where to go next.</p>
+  <div class="grid-2" style="margin-top: 1.25rem;">
+    <div class="glass glass-sm"><h4>Outcome</h4><p>The status a node reports when it finishes: <code>success</code>, <code>fail</code>, <code>retry</code>, or <code>budget_exceeded</code>. Available on outgoing edges as <code>ctx.outcome</code>.</p></div>
+    <div class="glass glass-sm"><h4>Conditional edge</h4><p>An edge with a <code>when&hellip;</code> guard like <code>when ctx.outcome = success</code>. Evaluated against the context; unmatched conditional edges are skipped.</p></div>
+    <div class="glass glass-sm"><h4>Strict failure edge</h4><p>When a node&rsquo;s outcome is <code>fail</code> and every outgoing edge is unconditional, the engine stops. Prevents tool nodes from silently masking errors.</p></div>
+    <div class="glass glass-sm"><h4>Suggested next nodes</h4><p>An optional hint a handler can set to redirect the engine past the normal edge-walk &mdash; used by the parallel handler to jump to the fan-in.</p></div>
+    <div class="glass glass-sm"><h4>Escalation</h4><p>A routing convention, not a distinct outcome: an edge guarded by <code>ctx.outcome = fail</code> that leads to an escalation gate (e.g. <code>EscalateMilestone</code>).</p></div>
+    <div class="glass glass-sm"><h4>Preferred label</h4><p>The human-readable choice a human-gate node returned. Drives label-based edge selection when an edge specifies a target label.</p></div>
+  </div>
+</section>
+
+<section class="glass" id="governance">
+  <h2><span class="accent">Governance</span></h2>
+  <p class="lead">Budgets, ceilings, and headless decision-making.</p>
+  <div class="grid-2" style="margin-top: 1.25rem;">
+    <div class="glass glass-sm"><h4>Budget</h4><p>The set of ceilings a run will halt under: max tokens, max cost (cents), max wall-time. Configured via <code>tracker.Config.Budget</code>, CLI flags, or a <code>defaults:</code> block.</p></div>
+    <div class="glass glass-sm"><h4>Cost ceiling</h4><p>A dollar (or cents) cap. Enforced between nodes after each cost update; breach halts the run with outcome <code>budget_exceeded</code> and fires <code>EventBudgetExceeded</code>.</p></div>
+    <div class="glass glass-sm"><h4>Autopilot</h4><p>Replaces every human gate with an LLM-backed decision. Four personas: <code>lax</code> (forward progress), <code>mid</code> (balanced, default), <code>hard</code> (high bar), <code>mentor</code> (approve with feedback).</p></div>
+    <div class="glass glass-sm"><h4>Auto-approve</h4><p>Deterministic alternative to autopilot &mdash; always picks the default or first option at a gate. No LLM call.</p></div>
+    <div class="glass glass-sm"><h4>Webhook gate</h4><p>Headless alternative to autopilot: gates are POSTed to an external service and blocked on a callback. Enabled via <code>--webhook-url</code>.</p></div>
+    <div class="glass glass-sm"><h4>Circuit breaker</h4><p>A per-area attempt counter (e.g. <code>fix_attempts</code> on disk) that caps how many times a section of a pipeline can retry. Persists across run restarts.</p></div>
+  </div>
+</section>
+
+<section class="glass" id="artifacts">
+  <h2>Artifacts &amp; <span class="accent">inspection</span></h2>
+  <p class="lead">Everything a run leaves behind, and the commands that read it.</p>
+  <div class="grid-2" style="margin-top: 1.25rem;">
+    <div class="glass glass-sm"><h4>Artifact</h4><p>Any file written by a node during a run &mdash; agent transcripts, tool outputs, generated code. Lives in the run directory.</p></div>
+    <div class="glass glass-sm"><h4>Run directory</h4><p>The on-disk home for one run: <code>&lt;workDir&gt;/.tracker/runs/&lt;runID&gt;/</code>. Contains <code>status.json</code>, <code>checkpoint.json</code>, transcripts, and the git-artifacts repo if enabled.</p></div>
+    <div class="glass glass-sm"><h4>Git artifacts</h4><p>When <code>WithGitArtifacts(true)</code> is set, the run directory is initialized as a git repo and a commit is made after every terminal node &mdash; every run is replayable.</p></div>
+    <div class="glass glass-sm"><h4>Bundle</h4><p>A portable, self-contained git bundle of the run directory&rsquo;s full history. Built by <code>tracker.ExportBundle</code> or <code>--export-bundle</code>; clone with <code>git clone &lt;bundle&gt;</code>.</p></div>
+    <div class="glass glass-sm"><h4>Activity log</h4><p>The append-only event stream for a run (<code>activity.jsonl</code>). Lives in a secured XDG state dir; a sentinel-stripped copy is written back to the run dir for bundle export.</p></div>
+    <div class="glass glass-sm"><h4><code>tracker diagnose</code></h4><p>Reads <code>status.json</code> + <code>activity.jsonl</code> for a failed run and surfaces tool output, stderr, errors, timing anomalies, and suggested fixes. Without an ID, analyzes the most recent run.</p></div>
+  </div>
+</section>
