@@ -485,9 +485,13 @@ workflow BuildProduct
          body for the exact branches):
            (i)  TEST_EXIT==0 → `printf 'tests-pass'` + exit 0
                 (success — routes to VerifyMilestone)
-           (ii) TEST_EXIT!=0 && ATTEMPTS>3 → `printf 'escalate'` +
-                exit 1 (env-missing or fix-loop-exhausted — routes
-                to EscalateMilestone)
+           (ii) CI_RC==2 (`make` binary missing — short-circuits
+                BEFORE the TEST_EXIT / ATTEMPTS logic and resets
+                ATTEMPTS to 0)
+                OR
+                (TEST_EXIT!=0 && ATTEMPTS>3) (fix loop exhausted)
+                → `printf 'escalate'` + exit 1 (routes to
+                EscalateMilestone)
            (iii) TEST_EXIT!=0 && ATTEMPTS<=3 → NO marker + exit 1
                 (normal in-progress failure — routes to FixMilestone)
          Under normal routing only path (i) reaches VerifyMilestone,
