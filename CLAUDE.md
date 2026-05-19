@@ -112,10 +112,13 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ### Website (GitHub Pages)
 - Site is hosted on GitHub Pages at <https://2389-research.github.io/tracker/>
-- Source: `gh-pages` branch in this repo (legacy branch-based Pages, NOT the GitHub Actions deployment type)
-- Contents: 6 hand-written static files — `index.html`, `cli.html`, `workflows.html`, `architecture.html`, `changelog.html`, `style.css`. No static site generator.
-- Refresh workflow: `git fetch origin gh-pages && git worktree add /tmp/tracker-site gh-pages` (or `git checkout gh-pages` if you don't mind switching branches in the main tree), edit the HTML, commit, `git push origin gh-pages`. Pages rebuilds automatically; changes are live in ~1 minute.
-- Each release should include a site refresh as a separate PR/commit on `gh-pages`. The site drifted from v0.14.0 → v0.22.0 once because the release workflow didn't include it; the refresh step is now part of every release's checklist.
+- Source: `site/` directory on `main`, built with Hugo extended v0.161.1. The `gh-pages` branch is a build artifact — never edit it by hand.
+- Layout: Hugo project at `site/` with hand-written HTML in `site/content/*.html` (home, workflows, architecture, cli, changelog, glossary), shared layouts in `site/layouts/`, static assets (style.css, highlight.js, AGENTS.md, llms.txt) in `site/static/`, nav data in `site/data/nav.yaml`.
+- Deploy: `.github/workflows/docs.yml` runs Hugo on every push to `main` that touches `site/**` or the workflow itself, then publishes `site/public/` to `gh-pages` via `peaceiris/actions-gh-pages` with `force_orphan: true` (single-commit history). No manual `gh-pages` edits needed.
+- Local preview: `cd site && hugo server` (port 1313 by default). Site is served under `/tracker/` per `baseURL` in `site/hugo.toml`. The `public/` directory is gitignored.
+- Per-page front matter controls a14y metadata: `title`, `description`, `og_title`, `og_description`, `mermaid: true` (only on pages with diagrams), and a `jsonld:` block that the head partial inlines as `<script type="application/ld+json">`. Use `TechArticle` for inner pages, `SoftwareApplication` for home, `DefinedTermSet` for glossary.
+- Adding a new page: drop `site/content/<name>.html` with the front matter block (see existing pages for the pattern), add an entry to `site/data/nav.yaml` if it should appear in the top nav, push to `main`. The workflow handles the rest.
+- `uglyURLs = true` in `hugo.toml` keeps URLs at `/tracker/<name>.html` (matching the pre-Hugo URL shape — preserves external links and search-indexed paths).
 
 ### Version bumps
 - Update go.mod module version on MAJOR bumps
