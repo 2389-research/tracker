@@ -1,0 +1,16 @@
+items:
+  - label: Home
+    url: /
+  - label: Workflows
+    url: /workflows.html
+  - label: Architecture
+    url: /architecture.html
+  - label: CLI
+    url: /cli.html
+  - label: Changelog
+    url: /changelog.html
+  - label: Glossary
+    url: /glossary.html
+  - label: GitHub
+    url: https://github.com/2389-research/tracker
+    external: true

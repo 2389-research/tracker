@@ -1,0 +1,18 @@
+<nav class="nav">
+  <a href="{{ "/" | relURL }}" class="nav-brand">
+    <div class="logo-icon">T</div>
+    <span>tracker</span> <span class="accent">by 2389.ai</span>
+  </a>
+  <ul class="nav-links">
+    {{ $current := .RelPermalink }}
+    {{ range site.Data.nav.items }}
+      {{ $url := .url }}
+      {{ if not .external }}{{ $url = .url | relURL }}{{ end }}
+      <li>
+        <a href="{{ $url }}"
+           {{ if eq $current (.url | relURL) }}class="active"{{ end }}
+           {{ if .external }}target="_blank"{{ end }}>{{ .label }}</a>
+      </li>
+    {{ end }}
+  </ul>
+</nav>
