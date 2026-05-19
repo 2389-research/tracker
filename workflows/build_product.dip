@@ -76,6 +76,20 @@ workflow BuildProduct
       **Files**: [exact files to create/modify/delete]
       **Done when**: [specific, testable criteria]
       **Verify command**: [shell command that proves this milestone works, or "manual review"]
+      **DO NOT implement**: [Phase 2+ features mentioned in the spec that touch
+        any file in this milestone's file list. One line per item, naming the
+        feature and the spec section that defers it. If none apply, write "none".]
+
+      The DO NOT list is the anti-scope-creep gate (issue #233 Gap 6). The
+      Implement agent reads it before writing in any file in this milestone.
+      Phase 1 spec sections frequently define types/functions whose live use is
+      deferred to later phases; without an explicit DO NOT, the implementing
+      agent will reasonably wire them up early and ship a future phase's
+      behavior. Concrete example: SPEC.md may define a `Fingerprint` function
+      in Phase 1 but say its consumer (a trailer field) is populated starting
+      Phase 6 — the DO NOT list for any Phase 1 milestone that touches the
+      trailer file must say: "DO NOT implement: populating the trailer's
+      `fingerprints` field — spec defers to Phase 6."
 
       Also write a one-line summary of each milestone — this becomes the build plan
       the user approves.
@@ -168,6 +182,44 @@ workflow BuildProduct
         responsibility — the test runner does NOT eval verify commands from the spec.
       - Commit your work with a conventional commit message referencing the milestone.
 
+      DO NOT LIST (issue #233 Gap 6):
+      - Read the "DO NOT implement" lines in .ai/milestones/current.md, if any.
+        These name Phase 2+ features that the spec defers. Before writing in any
+        file, check whether the DO NOT list mentions it. If yes, leave those
+        affordances inert (do not wire the feature into call sites, do not
+        populate fields the spec marks as empty in this phase, do not return
+        non-default values from helper functions that the spec marks as deferred).
+        It is fine — and often required — to define the type or function
+        signature; it is NOT fine to make it observably active when the spec
+        says it should be a no-op until a later phase.
+
+      SPEC LITERALS (issue #233 Gap 3):
+      - Before committing: for every literal value in the spec section this
+        milestone covers — exact command strings, exact JSON key names, exact
+        header names, exact integer constants, exact log key names — grep your
+        implementation for that literal. If it isn't there byte-for-byte, EITHER
+        fix the implementation to match the spec OR add a comment in
+        .ai/decisions/ that names the literal you deviated from and explains
+        why. Silent paraphrase ("--head <branch>" when the spec says
+        "--head <owner>:<branch>") is the most common way milestones ship wrong.
+
+      TESTS VERIFY THE CONTRACT, NOT YOUR CODE (issue #233 Gap 3):
+      - Tests must verify the spec's requirement, not whatever your
+        implementation happens to do. Read each assertion you write and ask:
+        "If I deleted my production code and rewrote it differently but
+        spec-conformantly, would this test still pass for the right reason?"
+        If the answer is no — your test asserts an implementation detail rather
+        than a contract — rewrite it. The canonical failure mode is asserting
+        `attempts == 2` when the spec says "max 2 retries" (= 3 attempts):
+        the test green-lights the off-by-one because it was written from the
+        code, not from the spec.
+      - Snapshot / golden-file tests: the FIRST version of every snapshot
+        must be hand-verified against the spec, not regenerated from the
+        current implementation's output. If your test framework supports an
+        UPDATE_GOLDEN env var, only use it after the first hand-verification.
+        Add a comment to the golden file naming the spec section it was
+        verified against and the date.
+
   tool TestMilestone
     label: "Test Current Milestone"
     timeout: 300s
@@ -210,6 +262,30 @@ workflow BuildProduct
         cargo test 2>&1 || TEST_EXIT=$?
       else
         echo "no known build system — skipping tests"
+      fi
+
+      # Run the project's own CI gate if present (issue #233 Gap 1).
+      # The language-stack tests above don't catch lint, format, or
+      # vet failures that the project's CI enforces. Probe for a
+      # Makefile target in order of specificity (ci > check > lint)
+      # and run the first one that exists. We use `make -n` (dry-run)
+      # to check whether the target is defined without executing it.
+      # If no Makefile target is found, log explicitly so an operator
+      # reading `tracker diagnose` sees the gap rather than assuming
+      # CI was run.
+      PROJECT_CI_RAN=""
+      if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
+        for TARGET in ci check lint; do
+          if make -n "$TARGET" >/dev/null 2>&1; then
+            echo "--- running make $TARGET (project CI gate) ---"
+            make "$TARGET" 2>&1 || TEST_EXIT=$?
+            PROJECT_CI_RAN="$TARGET"
+            break
+          fi
+        done
+      fi
+      if [ -z "$PROJECT_CI_RAN" ]; then
+        echo "INFO: no project-defined CI command run (looked for: make ci, make check, make lint)"
       fi
 
       # Note: milestone-specific verification is handled by the Implement agent
@@ -386,7 +462,7 @@ workflow BuildProduct
 
   tool FinalBuild
     label: "Final Build & Test"
-    timeout: 300s
+    timeout: 600s
     command:
       set -eu
       if [ -f go.mod ]; then
@@ -399,6 +475,31 @@ workflow BuildProduct
       elif [ -f Cargo.toml ]; then
         cargo test 2>&1
       fi
+
+      # Run the project's own CI gate if present (issue #233 Gap 1).
+      # The language-stack tests above don't catch lint, format, or
+      # vet failures that the project's CI enforces — and the previous
+      # version of FinalBuild reported "done" on a commit whose CI was
+      # red because it only ran `go test`. Probe for a Makefile target
+      # in order of specificity (ci > check > lint) and run the first
+      # one that exists. set -eu propagates the non-zero exit to the
+      # engine, which classifies the node as failed and routes through
+      # the strict-failure-edge logic (engine.go) — no silent pass.
+      PROJECT_CI_RAN=""
+      if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
+        for TARGET in ci check lint; do
+          if make -n "$TARGET" >/dev/null 2>&1; then
+            echo "--- running make $TARGET (project CI gate) ---"
+            make "$TARGET" 2>&1
+            PROJECT_CI_RAN="$TARGET"
+            break
+          fi
+        done
+      fi
+      if [ -z "$PROJECT_CI_RAN" ]; then
+        echo "INFO: no project-defined CI command run (looked for: make ci, make check, make lint)"
+      fi
+
       printf 'final-build-pass'
 
   agent FinalSpecCheck
