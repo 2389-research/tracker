@@ -446,12 +446,28 @@ workflow BuildProduct
          strings, exact JSON key names, exact header names, exact
          integer constants, exact log key names — grep the
          implementation for that literal and write the grep command
-         and its result inline. Missing literals are FAIL.
+         and its result inline. A missing literal is FAIL UNLESS the
+         Implement step recorded an explicit deviation in
+         `.ai/decisions/` that names this literal and justifies the
+         deviation. (The Implement prompt — Gap 3, PR #246 — gives
+         the implementing agent two options for any literal mismatch:
+         fix the implementation OR document the deviation in
+         `.ai/decisions/`. VerifyMilestone must honor the same
+         contract.) Concretely: when a literal is missing, before
+         declaring FAIL run
+           grep -rn '<literal>' .ai/decisions/
+         to look for a documented deviation. If one exists and names
+         this literal, treat it as PASS (and surface the decision-log
+         path + rationale in your report so the operator can audit
+         it). If no decision-log entry exists, FAIL.
          Example workflow:
            - Spec section says: `gh pr list --head <owner>:<branch> --json number,headRefName,headRepository`
            - Run: `grep -rn '<owner>:<branch>' --include='*.go' .`
            - Run: `grep -rn 'headRepository' --include='*.go' .`
-           - Paste the output. If empty, that literal is missing.
+           - If output is empty, run `grep -rn '<owner>:<branch>' .ai/decisions/`
+             and `grep -rn 'headRepository' .ai/decisions/` — a hit
+             with a rationale means PASS (cite the decision file);
+             no hit means FAIL (cite the missing literal).
 
       4. TEST-VERIFIES-CONTRACT (issue #233 Gap 4): For each test
          touched by this milestone, read its assertions and ask: "If
