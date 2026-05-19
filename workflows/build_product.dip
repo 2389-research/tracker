@@ -266,26 +266,51 @@ workflow BuildProduct
 
       # Run the project's own CI gate if present (issue #233 Gap 1).
       # The language-stack tests above don't catch lint, format, or
-      # vet failures that the project's CI enforces. Probe for a
-      # Makefile target in order of specificity (ci > check > lint)
-      # and run the first one that exists. We use `make -n` (dry-run)
-      # to check whether the target is defined without executing it.
-      # If no Makefile target is found, log explicitly so an operator
-      # reading `tracker diagnose` sees the gap rather than assuming
-      # CI was run.
+      # vet failures the project's CI enforces. Probe for a Makefile
+      # target in order of specificity (ci > check > lint) and run
+      # the first one that exists.
+      #
+      # Probe design (PR #246 review by Codex P1 / CodeRabbit / Copilot):
+      # earlier versions used `make -n <target>` for existence
+      # detection, but GNU Make returns 0 when the target name
+      # matches a file/directory on disk (so `ci/` and `lint/` dirs
+      # would false-positive), and a missing `make` binary or a
+      # Makefile parse error would collapse silently to "no target"
+      # — letting CI-red projects through. The current version:
+      #   1. Refuses to skip the gate silently when a Makefile is
+      #      present but `make` isn't installed — failing loud.
+      #   2. Greps the Makefile directly for top-level target
+      #      declarations (`^[ ]*<TARGET>[ ]*:` after comment strip).
+      #      Recipe lines start with TAB not spaces, so they don't
+      #      match. Trade-off: misses targets defined in included
+      #      files; acceptable since CI/lint/check are by convention
+      #      declared in the root Makefile.
       PROJECT_CI_RAN=""
-      if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
-        for TARGET in ci check lint; do
-          if make -n "$TARGET" >/dev/null 2>&1; then
-            echo "--- running make $TARGET (project CI gate) ---"
-            make "$TARGET" 2>&1 || TEST_EXIT=$?
-            PROJECT_CI_RAN="$TARGET"
-            break
-          fi
-        done
+      MAKEFILE=""
+      for mf in Makefile makefile GNUmakefile; do
+        if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
+      done
+      if [ -n "$MAKEFILE" ]; then
+        if ! command -v make >/dev/null 2>&1; then
+          echo "ERROR: $MAKEFILE present but 'make' not installed — failing project CI gate"
+          TEST_EXIT=1
+        else
+          for TARGET in ci check lint; do
+            if sed 's/#.*//' "$MAKEFILE" | grep -qE "^[ ]*${TARGET}[ ]*:"; then
+              echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
+              make "$TARGET" 2>&1 || TEST_EXIT=$?
+              PROJECT_CI_RAN="$TARGET"
+              break
+            fi
+          done
+        fi
       fi
       if [ -z "$PROJECT_CI_RAN" ]; then
-        echo "INFO: no project-defined CI command run (looked for: make ci, make check, make lint)"
+        if [ -n "$MAKEFILE" ] && command -v make >/dev/null 2>&1; then
+          echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
+        elif [ -z "$MAKEFILE" ]; then
+          echo "INFO: no Makefile present, no project CI gate to run"
+        fi
       fi
 
       # Note: milestone-specific verification is handled by the Implement agent
@@ -478,18 +503,29 @@ workflow BuildProduct
 
       # Run the project's own CI gate if present (issue #233 Gap 1).
       # The language-stack tests above don't catch lint, format, or
-      # vet failures that the project's CI enforces — and the previous
-      # version of FinalBuild reported "done" on a commit whose CI was
-      # red because it only ran `go test`. Probe for a Makefile target
-      # in order of specificity (ci > check > lint) and run the first
-      # one that exists. set -eu propagates the non-zero exit to the
-      # engine, which classifies the node as failed and routes through
-      # the strict-failure-edge logic (engine.go) — no silent pass.
+      # vet failures the project's CI enforces — the previous version
+      # of FinalBuild reported "done" on a commit whose CI was red
+      # because it only ran `go test`. Probe + run pattern mirrors
+      # TestMilestone above; see that node for the probe design notes
+      # (Codex P1, CodeRabbit Major, Copilot from PR #246 review).
+      # Under set -eu, a missing `make` (when a Makefile is present)
+      # OR a non-zero exit from the chosen target propagates to the
+      # engine, which classifies the node as failed and routes
+      # through the strict-failure-edge logic (engine.go) — no silent
+      # pass.
       PROJECT_CI_RAN=""
-      if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
+      MAKEFILE=""
+      for mf in Makefile makefile GNUmakefile; do
+        if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
+      done
+      if [ -n "$MAKEFILE" ]; then
+        if ! command -v make >/dev/null 2>&1; then
+          echo "ERROR: $MAKEFILE present but 'make' not installed — failing project CI gate"
+          exit 1
+        fi
         for TARGET in ci check lint; do
-          if make -n "$TARGET" >/dev/null 2>&1; then
-            echo "--- running make $TARGET (project CI gate) ---"
+          if sed 's/#.*//' "$MAKEFILE" | grep -qE "^[ ]*${TARGET}[ ]*:"; then
+            echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
             make "$TARGET" 2>&1
             PROJECT_CI_RAN="$TARGET"
             break
@@ -497,7 +533,11 @@ workflow BuildProduct
         done
       fi
       if [ -z "$PROJECT_CI_RAN" ]; then
-        echo "INFO: no project-defined CI command run (looked for: make ci, make check, make lint)"
+        if [ -n "$MAKEFILE" ]; then
+          echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
+        else
+          echo "INFO: no Makefile present, no project CI gate to run"
+        fi
       fi
 
       printf 'final-build-pass'
