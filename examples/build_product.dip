@@ -386,15 +386,26 @@ workflow BuildProduct
       incomplete criteria, the verifier had no path to discover the
       gap. Reading SPEC.md directly closes that loop.
 
-      TestMilestone already ran both the language-stack tests AND the
+      TestMilestone already handled the language-stack tests AND the
       project CI gate (issue #233 Gap 1), so the verifier does NOT
       need to re-run them. Note that `${ctx.tool_stdout}` is the
       tail of TestMilestone's stdout (64KB cap by default); on a
       repo with verbose test output the language-test lines may be
-      elided entirely. The authoritative "both passed" signal is the
-      `tests-pass` sentinel — TestMilestone prints it ONLY when both
-      language tests and the CI gate returned 0. Treat its presence
-      in tool_stdout as proof both passed. The `escalate` sentinel
+      elided entirely. The authoritative success signal is the
+      `tests-pass` sentinel — TestMilestone prints it when its step
+      succeeded under the workflow's rules. "Succeeded" means:
+      the language-stack test runner ran and returned 0 (if one of
+      `go.mod` / `package.json` / `pyproject.toml` / `Cargo.toml`
+      was detected) OR no known build system was detected and the
+      runner was skipped; AND the project CI gate ran and returned 0
+      (when a Makefile with a `ci`/`check`/`lint` target was present)
+      OR the probe correctly skipped (no Makefile, or no matching
+      target). The sentinel does NOT prove every check executed —
+      only that none failed. Treat its presence as authoritative for
+      "TestMilestone step succeeded"; if a milestone implies tests
+      must have RUN (not skipped), check the visible probe / test
+      lines as corroboration when present, but absence is not FAIL
+      (those lines are routinely elided by the tail cap). The `escalate` sentinel
       means TestMilestone gave up (one of two causes: `make` binary
       missing, indicated by `ERROR: <Makefile> present but 'make'
       not installed`; OR fix attempts exhausted, indicated by the
@@ -461,10 +472,13 @@ workflow BuildProduct
          silently passed through. Cross-check against SPEC.md directly.
 
       6. TESTS + CI PASSED: The `tests-pass` sentinel in
-         ${ctx.tool_stdout} is authoritative — TestMilestone prints
-         it ONLY when both the language-stack tests AND the project
-         CI gate returned 0. If you can see `tests-pass` in the
-         tail, both passed; no further check needed.
+         ${ctx.tool_stdout} is authoritative for "TestMilestone step
+         succeeded" — TestMilestone prints it when its language-stack
+         runner passed-or-was-validly-skipped AND its project CI gate
+         passed-or-was-validly-skipped (see the preamble above for the
+         exact "validly skipped" rules). If you can see `tests-pass`
+         in the tail, the step succeeded under the workflow's rules;
+         no further check is required.
          If the sentinel is NOT visible, the tail may have elided
          it under a large CI output run; in that case fall back to
          the visible probe lines:
