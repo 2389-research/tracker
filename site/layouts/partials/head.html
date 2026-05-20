@@ -24,8 +24,12 @@
   {{ end }}
 
   {{ with .Params.jsonld }}
+  {{ $jsonld := . }}
+  {{ if not (index $jsonld "dateModified") }}
+    {{ $jsonld = merge $jsonld (dict "dateModified" ($.Lastmod.Format "2006-01-02")) }}
+  {{ end }}
   <script type="application/ld+json">
-  {{ . | jsonify (dict "indent" "  ") | safeJS }}
+  {{ $jsonld | jsonify (dict "indent" "  ") | safeJS }}
   </script>
   {{ end }}
 </head>
