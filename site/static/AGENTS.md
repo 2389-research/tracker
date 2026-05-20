@@ -33,4 +33,5 @@ Code, issues, and releases live at <https://github.com/2389-research/tracker>.
 - Scorecard: 0.2.0
 - Mode: site
 - Last runs:
+  - 2026-05-19 — 79 (scorecard 0.2.0)
   - 2026-05-19 — 39 (scorecard 0.2.0)
