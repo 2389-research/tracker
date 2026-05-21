@@ -790,9 +790,15 @@ workflow BuildProduct
          integer constants, exact log key names — does the code contain it
          byte-for-byte? Show grep evidence. (E.g., spec says
          `--head <owner>:<branch>`; grep the code for that literal.)
-      2. INTERFACE REACHABILITY: For every interface method defined in this
-         section's files, name at least one production (non-test) caller.
-         Where there is none, flag it.
+      2. INTERFACE REACHABILITY: For every interface method defined in
+         this section's files, name at least one production (non-test)
+         caller with grep evidence — show the grep command, paste its
+         output, cite the file:line. Apply the same show-your-work
+         standard as SPEC LITERALS at point 1. "Looks reachable" /
+         "exported, so something must call it" without a file:line hit
+         is FAIL. Follow the discipline in
+         `.ai/build/iface-reachability-rubric.md` (test-file exclusions,
+         stdlib carve-out, waiver rules, known limitations).
       3. TEST VERIFIES CONTRACT: For each assertion in a test under this
          section, does it verify the spec's contract, or does it mirror
          what the implementation happens to produce? Snapshot tests
@@ -831,9 +837,15 @@ workflow BuildProduct
          command strings, exact JSON key names, exact header names, exact
          integer constants, exact log key names — does the code contain it
          byte-for-byte? Show grep evidence.
-      2. INTERFACE REACHABILITY: For every interface method defined in this
-         section's files, name at least one production (non-test) caller.
-         Where there is none, flag it.
+      2. INTERFACE REACHABILITY: For every interface method defined in
+         this section's files, name at least one production (non-test)
+         caller with grep evidence — show the grep command, paste its
+         output, cite the file:line. Apply the same show-your-work
+         standard as SPEC LITERALS at point 1. "Looks reachable" /
+         "exported, so something must call it" without a file:line hit
+         is FAIL. Follow the discipline in
+         `.ai/build/iface-reachability-rubric.md` (test-file exclusions,
+         stdlib carve-out, waiver rules, known limitations).
       3. TEST VERIFIES CONTRACT: For each assertion in a test under this
          section, does it verify the spec's contract, or does it mirror
          what the implementation happens to produce? Snapshot tests
@@ -883,9 +895,15 @@ workflow BuildProduct
          integer constants, exact log key names — does the code contain it
          byte-for-byte? Show grep evidence. Letter-only — do not credit
          "the intent is preserved" if the literal differs.
-      2. INTERFACE REACHABILITY: For every interface method defined in this
-         section's files, name at least one production (non-test) caller.
-         Where there is none, flag it.
+      2. INTERFACE REACHABILITY: For every interface method defined in
+         this section's files, name at least one production (non-test)
+         caller with grep evidence — show the grep command, paste its
+         output, cite the file:line. Apply the same show-your-work
+         standard as SPEC LITERALS at point 1. "Looks reachable" /
+         "exported, so something must call it" without a file:line hit
+         is FAIL. Follow the discipline in
+         `.ai/build/iface-reachability-rubric.md` (test-file exclusions,
+         stdlib carve-out, waiver rules, known limitations).
       3. TEST VERIFIES CONTRACT: For each assertion in a test under this
          section, does it verify the spec's contract, or does it mirror
          what the implementation happens to produce? Snapshot tests
