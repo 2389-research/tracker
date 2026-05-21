@@ -1001,6 +1001,45 @@ workflow BuildProduct
     fallback_target: EscalateReview
     auto_status: true
     prompt:
+      INTERFACE REACHABILITY (issue #233 Gap 7):
+
+      Your default STATUS for this section is `fail`. Emit a single
+      `STATUS:success` line at the very end of your response — alone
+      on its line, outside any code fence — only if every check below
+      passes. Do NOT emit `STATUS:success` inside a table cell or
+      narrative paragraph; the workflow's auto_status parser scans
+      for line-leading STATUS markers and uses the last one wins.
+
+      Read `.ai/build/iface-reachability-rubric.md` FIRST (it was
+      written by Setup at the start of this run; cat the file). It
+      contains the language-detection step, enumeration grep patterns
+      per language, caller discipline (call-syntax targeting,
+      receiver-context requirements, test-file exclusion globs),
+      stdlib/framework carve-out principle, waiver rules, library-API
+      carve-out, and known-limitation skips. Apply it across the
+      entire repo. Enumerate every method declared on any interface /
+      protocol / trait / typeclass / abstract class in the repo (NOT
+      just last-milestone diff). For each declared method, name a
+      non-test production caller with grep evidence per the rubric,
+      OR cite the applicable carve-out:
+        - stdlib / framework wiring site
+        - `.ai/decisions/library_api.md` entry
+        - `.ai/decisions/*.md` waiver with non-blanket rationale
+        - known-limitation skip with named reason
+
+      Output is prose enumeration — name each method, give file:line
+      of the production caller (or the carve-out reason). Do NOT
+      group, do NOT skip, do NOT write "ditto" or "similar." If you
+      run out of context mid-enumeration, stop and emit `STATUS:fail`
+      with the count of methods you reached.
+
+      Regression cases this check exists to catch (issue #233
+      Appendix A I9, I10): `AuthStatus(ctx) error` defined and
+      unit-tested but never called from `cmd/goblin/main.go`;
+      `IsRebaseInProgress() bool` defined and tested but unused in
+      `internal/review/loop.go`. Both shipped green because this
+      check didn't exist.
+
       This is the final gate. Read SPEC.md line by line.
 
       For EVERY requirement, prescription, and instruction in the spec:
