@@ -1003,15 +1003,21 @@ workflow BuildProduct
     prompt:
       INTERFACE REACHABILITY (issue #233 Gap 7):
 
-      Your default STATUS for this section is `fail`. Emit a single
-      `STATUS:success` line at the very end of your response — alone
-      on its line, outside any code fence — only if every check below
-      passes. Do NOT emit `STATUS:success` inside a table cell or
-      narrative paragraph; the workflow's auto_status parser scans
-      for line-leading STATUS markers and uses the last one wins.
+      STATUS contract — emit `STATUS:fail` as the FIRST line of your
+      response, before any other text. Begin your enumeration. Only
+      at the very end, after every check in this prompt passes
+      (interface reachability AND the SPEC.md compliance check that
+      follows), emit a final `STATUS:success` line — alone on its
+      line, outside any code fence — to override the early fail. The
+      workflow's `auto_status` parser is last-line-wins, so the final
+      success replaces the early fail when everything passes; if your
+      response is truncated for any reason, the early `STATUS:fail`
+      remains and the section fails closed. Do NOT emit
+      `STATUS:success` inside a table cell or narrative paragraph;
+      the parser scans for line-leading STATUS markers only.
 
       Read `.ai/build/iface-reachability-rubric.md` FIRST (it was
-      written by Setup at the start of this run; cat the file). It
+      written by Setup at the start of this run; Read the file). It
       contains the language-detection step, enumeration grep patterns
       per language, caller discipline (call-syntax targeting,
       receiver-context requirements, test-file exclusion globs),
@@ -1056,7 +1062,10 @@ workflow BuildProduct
       Write the final compliance report to .ai/decisions/compliance.md
 
       If fully compliant: STATUS:success
-      If not: STATUS:fail with specific list of gaps
+      If not: emit STATUS:fail on its own line, followed by the
+      specific list of gaps on subsequent lines (the parser requires
+      the STATUS value to be exactly `success`, `fail`, or `retry` —
+      no trailing prose on the same line).
 
   human EscalateMilestone
     label: "Milestone stuck — pick how to proceed"
