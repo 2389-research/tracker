@@ -200,10 +200,15 @@ Replace with:
 
       If the project contains files in a static-interface language —
       Go (.go), Rust (.rs), Java (.java), Kotlin (.kt), Swift (.swift),
-      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.h/.hh/.hpp/.hxx),
+      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.hh/.hpp/.hxx),
       C# (.cs), PHP (.php), Python with `ABC` or `Protocol` (.py) —
-      proceed. Header-only C++ projects whose sources are exclusively
-      .h/.hxx still trigger the check.
+      proceed. Note: `.h` alone is NOT a C++ trigger because the
+      extension is ambiguous between C (no static interfaces) and
+      C++ (has them). Header-only C++ projects using only `.h` are
+      a known blind spot — operators can declare via `.ai/decisions/`
+      or rename to `.hpp`/`.hxx`. The enumeration grep `--include`
+      list does include `.h` so that mixed-source C++ projects with
+      `.cpp` + `.h` still get their headers scanned.
 
       If the project is exclusively in languages WITHOUT a static
       interface system (Ruby, plain JS, Elixir, Zig, C without
@@ -223,13 +228,15 @@ Replace with:
                  and not enumerated by this pattern — if the project
                  uses them, run a follow-up grep with the bracket
                  syntax.
-        Rust:    grep -rnE '\btrait +[[:alnum:]_]+' \
+        Rust:    grep -rnE '(^|[^[:alnum:]_])trait +[[:alnum:]_]+' \
                    --include='*.rs' .
                  Catches `trait`, `pub trait`, `pub(crate) trait`,
                  and unexported traits — all can carry unwired
-                 methods.
-        Java:    grep -rnE '^(public |abstract |sealed )*interface ' \
-                   --include='*.java' .  ; also abstract class
+                 methods. The `(^|[^[:alnum:]_])` prefix is a
+                 portable word-boundary (POSIX ERE doesn't define
+                 `\b`; GNU grep supports it but BSD/macOS does not).
+        Java:    grep -rnE '^(public |abstract |sealed )*(interface |abstract class )' \
+                   --include='*.java' .
         Kotlin:  grep -rnE '(interface |abstract class |fun interface )' \
                    --include='*.kt' .
         Swift:   grep -rnE 'protocol [A-Z][A-Za-z0-9_]* *(:|\{)' \

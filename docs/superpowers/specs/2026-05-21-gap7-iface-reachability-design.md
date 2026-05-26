@@ -60,7 +60,7 @@ This is the highest-leverage architectural decision in v3. It eliminates the dri
 
 `.ai/build/iface-reachability-rubric.md` opens with a language detection step:
 
-> Survey languages in scope via `git ls-files | awk -F. '{print $NF}' | sort -u`. If the project contains files in any of these languages with static interface systems — Go (`.go`), Rust (`.rs`), Java (`.java`), Kotlin (`.kt`), Swift (`.swift`), TypeScript (`.ts`/`.tsx`), C++ (`.cc`/`.cpp`/`.cxx`/`.h`/`.hh`/`.hpp`/`.hxx`), C# (`.cs`), PHP (`.php`), Python with `ABC` or `Protocol` (`.py`) — proceed. If the project is exclusively in languages without static interface systems (Ruby, plain JS, Elixir, Zig, C, bash, shell, plain Markdown, DSL files), emit `STATUS:success` with the note: "no static-interface languages detected; reachability check skipped."
+> Survey languages in scope via `git ls-files | awk -F. '{print $NF}' | sort -u`. If the project contains files in any of these languages with static interface systems — Go (`.go`), Rust (`.rs`), Java (`.java`), Kotlin (`.kt`), Swift (`.swift`), TypeScript (`.ts`/`.tsx`), C++ (`.cc`/`.cpp`/`.cxx`/`.hh`/`.hpp`/`.hxx`), C# (`.cs`), PHP (`.php`), Python with `ABC` or `Protocol` (`.py`) — proceed. Note: `.h` alone is NOT a C++ trigger because the extension is ambiguous between C (no static interfaces) and C++ (has them); the enumeration grep still includes `.h` so mixed-source C++ projects with `.cpp` + `.h` get their headers scanned. If the project is exclusively in languages without static interface systems (Ruby, plain JS, Elixir, Zig, C, bash, shell, plain Markdown, DSL files), emit `STATUS:success` with the note: "no static-interface languages detected; reachability check skipped."
 
 For projects with **specific** dispatch mechanisms grep can't see (Rust `dyn Trait`, Haskell typeclasses, TS bracket-notation, Swift protocol extensions, Ruby `module` mixins, Elixir `@behaviour`, etc.), the rubric lists these as known limitations and instructs the agent to skip them with a one-line note. Operators relying on those patterns declare via `.ai/decisions/`.
 
@@ -124,10 +124,15 @@ After the existing `cat > .ai/build/ci-probe.sh` block, add:
 
       If the project contains files in a static-interface language —
       Go (.go), Rust (.rs), Java (.java), Kotlin (.kt), Swift (.swift),
-      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.h/.hh/.hpp/.hxx),
+      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.hh/.hpp/.hxx),
       C# (.cs), PHP (.php), Python with `ABC` or `Protocol` (.py) —
-      proceed. Header-only C++ projects whose sources are exclusively
-      .h/.hxx still trigger the check.
+      proceed. Note: `.h` alone is NOT a C++ trigger because the
+      extension is ambiguous between C (no static interfaces) and
+      C++ (has them). Header-only C++ projects using only `.h` are
+      a known blind spot — operators can declare via `.ai/decisions/`
+      or rename to `.hpp`/`.hxx`. The enumeration grep `--include`
+      list does include `.h` so that mixed-source C++ projects with
+      `.cpp` + `.h` still get their headers scanned.
 
       If the project is exclusively in languages WITHOUT a static
       interface system (Ruby, plain JS, Elixir, Zig, C without
@@ -147,13 +152,15 @@ After the existing `cat > .ai/build/ci-probe.sh` block, add:
                  and not enumerated by this pattern — if the project
                  uses them, run a follow-up grep with the bracket
                  syntax.
-        Rust:    grep -rnE '\btrait +[[:alnum:]_]+' \
+        Rust:    grep -rnE '(^|[^[:alnum:]_])trait +[[:alnum:]_]+' \
                    --include='*.rs' .
                  Catches `trait`, `pub trait`, `pub(crate) trait`,
                  and unexported traits — all can carry unwired
-                 methods.
-        Java:    grep -rnE '^(public |abstract |sealed )*interface ' \
-                   --include='*.java' .  ; also abstract class
+                 methods. The `(^|[^[:alnum:]_])` prefix is a
+                 portable word-boundary (POSIX ERE doesn't define
+                 `\b`; GNU grep supports it but BSD/macOS does not).
+        Java:    grep -rnE '^(public |abstract |sealed )*(interface |abstract class )' \
+                   --include='*.java' .
         Kotlin:  grep -rnE '(interface |abstract class |fun interface )' \
                    --include='*.kt' .
         Swift:   grep -rnE 'protocol [A-Z][A-Za-z0-9_]* *(:|\{)' \
