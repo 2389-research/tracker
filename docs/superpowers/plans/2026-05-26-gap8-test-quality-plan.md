@@ -61,9 +61,9 @@ The Smell 3 block to insert (this is the literal prompt text the agent will read
 
       Grep test files for sleep-class calls:
         Go:        grep -rnE '(time\.Sleep|<-time\.After)\(' \
-                     --include='*_test.go' .
+                     --include='*_test.go' . || true
         Python:    grep -rnE '(time|asyncio|trio|anyio|gevent)\.sleep\(' \
-                     --include='test_*.py' --include='*_test.py' .
+                     --include='test_*.py' --include='*_test.py' . || true
         JS/TS:     find . -type f \
                      \( -name '*.js' -o -name '*.ts' -o -name '*.jsx' \
                         -o -name '*.tsx' -o -name '*.mjs' -o -name '*.cjs' \) \
@@ -83,7 +83,7 @@ The Smell 3 block to insert (this is the literal prompt text the agent will read
                    # in source files aren't filtered — agent should
                    # note as a limitation when relevant.
         Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]+[0-9]|sleep\([0-9]|Kernel\.sleep)' \
-                     --include='*_test.rb' --include='*_spec.rb' .
+                     --include='*_test.rb' --include='*_spec.rb' . || true
         Java/Kotlin: find . -path '*/src/test/*' -type f \
                        \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \
                        -exec grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' {} + \
