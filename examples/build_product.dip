@@ -1092,6 +1092,36 @@ workflow BuildProduct
       `internal/review/loop.go`. Both shipped green because this
       check didn't exist.
 
+      TEST QUALITY — sleep-as-fence (issue #233 Gap 8 W17):
+
+      Grep test files for sleep-class calls:
+        Go:        grep -rnE '(time\.Sleep|<-time\.After)\(' \
+                     --include='*_test.go' .
+        Python:    grep -rnE '(time|asyncio|trio|anyio|gevent)\.sleep\(' \
+                     --include='test_*.py' --include='*_test.py' .
+        JS/TS:     grep -rnE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' \
+                     --include='*.test.*' --include='*.spec.*' --include='*.cy.*' .
+        Rust:      git grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' -- '*.rs'
+        Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
+                     --include='*_test.rb' --include='*_spec.rb' .
+        Java/Kotlin: grep -rnE '(Thread\.sleep|delay\(|Mono\.delay)' \
+                     $(find . -path '*/src/test/*' -type f \( -name '*.java' -o -name '*.kt' \) 2>/dev/null) || true
+      For other languages, name the framework and its sleep-class
+      call shape and run the equivalent grep.
+
+      Paste each grep's full output (even when empty). For each hit,
+      give disposition: (a) the sleep IS the SUT — cite the SPEC.md
+      section calling out the timing contract, file:line; OR (b)
+      replaced by deterministic primitive — cite the primitive's
+      introduction; OR (c) waiver per `.ai/decisions/*.md` naming
+      the specific test with smell-specific rationale citing a
+      SPEC.md section. "Intentional timing test" without a
+      spec-section citation is blanket — FAIL.
+
+      W4 (zero-assertion), W5 (wrong-target), W13 (DI bypass) are
+      caught by reviewer rubric point 3 upgrade (also in this PR) —
+      not detected here. W21 (subname collision) is out of scope.
+
       This is the final gate. Read SPEC.md line by line.
 
       For EVERY requirement, prescription, and instruction in the spec:
