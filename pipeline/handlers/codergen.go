@@ -222,6 +222,7 @@ func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, bac
 		Provider:     sessionCfg.Provider,
 		WorkingDir:   sessionCfg.WorkingDir,
 		MaxTurns:     sessionCfg.MaxTurns,
+		ToolAccess:   sessionCfg.ToolAccess,
 	}
 
 	// Build backend-specific Extra config.
@@ -271,6 +272,7 @@ func parseClaudeCodeToolAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeCon
 		return err
 	}
 	applyToolLists(node, ccCfg)
+	applyClaudeCodeToolAccess(node, ccCfg)
 	if err := pipeline.ValidateToolLists(ccCfg.AllowedTools, ccCfg.DisallowedTools); err != nil {
 		return fmt.Errorf("node %q: %w", node.ID, err)
 	}
@@ -292,13 +294,68 @@ func applyMCPServers(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) erro
 }
 
 // applyToolLists sets AllowedTools and DisallowedTools from node attrs if present.
+//
+// tool_access enforcement (issue #258): when the node carries
+// `tool_access: <any>`, the Params bypass keys `allowed_tools` and
+// `disallowed_tools` are ignored — they could otherwise re-enable tools
+// the directive intends to deny. For the claude-code backend, the deny
+// list is set explicitly by applyClaudeCodeToolAccess (best-effort
+// enumeration of canonical tool names).
 func applyToolLists(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
+	if isNodeToolAccessRestricted(node) {
+		return
+	}
 	if raw := node.Attrs["allowed_tools"]; raw != "" {
 		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
 	}
 	if raw := node.Attrs["disallowed_tools"]; raw != "" {
 		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
 	}
+}
+
+// isNodeToolAccessRestricted reports whether the node's `tool_access` attr
+// is set to any non-empty (canonical) value. Mirrors
+// agent.SessionConfig.IsToolAccessRestricted; defined here to avoid an
+// import cycle. Issue: github.com/2389-research/tracker#258.
+func isNodeToolAccessRestricted(node *pipeline.Node) bool {
+	return strings.TrimSpace(node.Attrs["tool_access"]) != ""
+}
+
+// canonicalClaudeCodeToolDenyList is the best-effort enumeration of
+// Claude Code tool names used to populate the CLI's --disallowed-tools
+// when `tool_access: <any>` is set on a node that targets the claude-code
+// backend. Kept in sync with the names the Claude Code CLI recognizes;
+// a stricter approach (fail backend creation) is taken for backends
+// where we cannot verify the deny spelling — see backend_acp.go.
+//
+// Issue: github.com/2389-research/tracker#258.
+var canonicalClaudeCodeToolDenyList = []string{
+	"Bash",
+	"Edit",
+	"Glob",
+	"Grep",
+	"NotebookEdit",
+	"Read",
+	"Task",
+	"TodoWrite",
+	"WebFetch",
+	"WebSearch",
+	"Write",
+}
+
+// applyClaudeCodeToolAccess applies the `tool_access` directive to the
+// claude-code backend by populating DisallowedTools with the canonical
+// tool name list. If the node also carried `allowed_tools` or
+// `disallowed_tools`, applyToolLists already short-circuited and the
+// caller-supplied lists are ignored — by design.
+func applyClaudeCodeToolAccess(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
+	if !isNodeToolAccessRestricted(node) {
+		return
+	}
+	ccCfg.AllowedTools = nil
+	denied := make([]string, len(canonicalClaudeCodeToolDenyList))
+	copy(denied, canonicalClaudeCodeToolDenyList)
+	ccCfg.DisallowedTools = denied
 }
 
 // parseClaudeCodeBudgetAttrs parses max_budget_usd and permission_mode.
@@ -326,7 +383,15 @@ func applyMaxBudget(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error
 }
 
 // applyPermissionMode parses and applies the permission_mode attribute if present.
+//
+// tool_access enforcement (issue #258): when the node carries
+// `tool_access: <any>`, the Params bypass key `permission_mode` is
+// ignored — `permission_mode: bypassPermissions` or `acceptEdits` could
+// otherwise re-enable tool execution the directive intends to deny.
 func applyPermissionMode(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
+	if isNodeToolAccessRestricted(node) {
+		return nil
+	}
 	raw, ok := node.Attrs["permission_mode"]
 	if !ok || raw == "" {
 		return nil
@@ -604,6 +669,14 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	}
 	if cfg.PlanBeforeExecuteSet {
 		config.PlanBeforeExecute = cfg.PlanBeforeExecute
+	}
+
+	// tool_access enforcement (issue #258): thread the directive from the
+	// node's AgentConfig into SessionConfig. The session's IsToolAccessRestricted
+	// helper does the canonical case-insensitive, whitespace-trimmed check.
+	// Any non-empty value disables tools (fail-closed for typos).
+	if cfg.ToolAccess != "" {
+		config.ToolAccess = cfg.ToolAccess
 	}
 
 	return config

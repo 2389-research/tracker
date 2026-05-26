@@ -7,6 +7,12 @@ import (
 )
 
 func builtInToolsForConfig(cfg SessionConfig, env exec.ExecutionEnvironment) []tools.Tool {
+	// tool_access enforcement (issue #258): any non-empty value disables
+	// the built-in tool registry. Fail-closed for typos — only the empty
+	// string means unrestricted.
+	if cfg.IsToolAccessRestricted() {
+		return nil
+	}
 	switch resolvedProvider(cfg) {
 	case "openai":
 		return []tools.Tool{

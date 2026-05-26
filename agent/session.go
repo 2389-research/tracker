@@ -100,6 +100,17 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 	s.initToolCache()
 	s.registerSpawnTool()
 
+	// tool_access enforcement (issue #258): after every registration path
+	// (built-ins, WithTools, spawn_agent), clear the registry if access is
+	// restricted. Defense in depth — builtInToolsForConfig already returns
+	// nil under restriction, but WithTools and the spawn tool bypass that
+	// guard. The empty registry plus ToolChoice=none on the request gives
+	// fail-closed behavior even if a caller mis-orders WithTools.
+	if s.config.IsToolAccessRestricted() {
+		s.registry = tools.NewRegistry()
+		s.registry.SetOutputLimits(s.config.ToolOutputLimits)
+	}
+
 	return s, nil
 }
 

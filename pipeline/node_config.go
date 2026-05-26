@@ -33,6 +33,14 @@ type AgentNodeConfig struct {
 	PermissionMode  string
 	ACPAgent        string
 
+	// ToolAccess restricts the agent's tool surface. When non-empty (any
+	// value), the runtime registers zero tools, sets ToolChoice=none on
+	// LLM requests, scrubs tool-naming text from the system prompt, and
+	// rejects Params bypass keys. Canonical: case-insensitive, whitespace-
+	// trimmed. Fail-closed for typos. See agent.SessionConfig.ToolAccess.
+	// Issue: github.com/2389-research/tracker#258.
+	ToolAccess string
+
 	AutoStatus        bool
 	ReflectOnError    bool // initialized to true by AgentConfig; explicit "false" disables
 	ReflectOnErrorSet bool // true when the attr was present on the node
@@ -88,6 +96,7 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	cfg.AllowedTools = n.Attrs["allowed_tools"]
 	cfg.DisallowedTools = n.Attrs["disallowed_tools"]
 	cfg.PermissionMode = n.Attrs["permission_mode"]
+	cfg.ToolAccess = n.Attrs["tool_access"]
 	cfg.ACPAgent = n.Attrs["acp_agent"]
 	cfg.SystemPrompt = n.Attrs["system_prompt"]
 	cfg.ResponseFormat = n.Attrs["response_format"]
