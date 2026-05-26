@@ -1137,8 +1137,14 @@ workflow BuildProduct
                      --include='*_test.go' .
         Python:    grep -rnE '(time|asyncio|trio|anyio|gevent)\.sleep\(' \
                      --include='test_*.py' --include='*_test.py' .
-        JS/TS:     grep -rnE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' \
-                     --include='*.test.*' --include='*.spec.*' --include='*.cy.*' .
+        JS/TS:     find . -type f \
+                     \( -name '*.js' -o -name '*.ts' -o -name '*.jsx' \
+                        -o -name '*.tsx' -o -name '*.mjs' -o -name '*.cjs' \) \
+                     \( -name '*.test.*' -o -name '*.spec.*' -o -name '*.cy.*' \
+                        -o -path '*/__tests__/*' -o -path '*/test/*' \
+                        -o -path '*/tests/*' \) 2>/dev/null \
+                     -exec grep -nE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' {} + \
+                     || true
         Rust:      find . -type f -name '*.rs' \
                      \( -path '*/tests/*' -o -name '*_test.rs' \) 2>/dev/null \
                      -exec grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \

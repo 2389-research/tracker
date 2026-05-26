@@ -103,7 +103,7 @@ FinalSpecCheck's pre-PR tail block says "If fully compliant: STATUS:success / If
 - **No named-test spot-check.** v2 had one; v3 dropped it; v5 keeps it dropped.
 - **No 7-wrapper STATUS-bypass enumeration.** The inverted STATUS contract from PR #254 already gives fail-closed on truncation. Parser-level fence-bypass is filed as follow-up (§10 q1).
 
-The cumulative prompt growth across all of FinalSpecCheck + three reviewers is ~40 prompt lines in v5 vs v4's ~165-200 and v1's ~330.
+The cumulative prompt growth in the shipped PR is ~83 net lines (92 insertions, 9 deletions to `examples/build_product.dip`): ~40 lines for the FinalSpecCheck TEST QUALITY block (per-language sleep-class greps + disposition + regression-coverage note), ~33 lines for the reviewer rubric appends (11 × 3 reviewers), ~6 lines for the Gemini-sentence promotion to ReviewClaude and ReviewCodex, and ~4 net lines for the legacy STATUS tail rewrite. Still well below v4's ~165-200 and v1's ~330.
 
 ### 4.6 Honest residual risks
 
@@ -130,8 +130,14 @@ Insert between INTERFACE REACHABILITY (ends ~line 1093) and the SPEC.md complian
                      --include='*_test.go' .
         Python:    grep -rnE '(time|asyncio|trio|anyio|gevent)\.sleep\(' \
                      --include='test_*.py' --include='*_test.py' .
-        JS/TS:     grep -rnE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' \
-                     --include='*.test.*' --include='*.spec.*' --include='*.cy.*' .
+        JS/TS:     find . -type f \
+                     \( -name '*.js' -o -name '*.ts' -o -name '*.jsx' \
+                        -o -name '*.tsx' -o -name '*.mjs' -o -name '*.cjs' \) \
+                     \( -name '*.test.*' -o -name '*.spec.*' -o -name '*.cy.*' \
+                        -o -path '*/__tests__/*' -o -path '*/test/*' \
+                        -o -path '*/tests/*' \) 2>/dev/null \
+                     -exec grep -nE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' {} + \
+                     || true
         Rust:      find . -type f -name '*.rs' \
                      \( -path '*/tests/*' -o -name '*_test.rs' \) 2>/dev/null \
                      -exec grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \

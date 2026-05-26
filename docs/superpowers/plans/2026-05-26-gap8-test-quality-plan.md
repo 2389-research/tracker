@@ -4,7 +4,7 @@
 
 **Goal:** Close Gap 8 of issue #233 by adding sleep-as-fence detection at `FinalSpecCheck`, upgrading the three reviewer rubrics for zero-assertion + DI-bypass shown-work, promoting Gemini's wrong-target sentence to all reviewers, and fixing the legacy STATUS tail's contradiction with PR #254's inverted contract.
 
-**Architecture:** Three edits to `examples/build_product.dip`, mirrored to `workflows/build_product.dip` via `make sync-workflows`. No Setup changes, no Gap 7 rubric file changes, no parser changes. Total prompt growth ≈ 40 lines. The audit found honest LLM oversight, not adversarial tampering — defense is sized to the observed threat model (per spec §4.5 / §4.6).
+**Architecture:** Three edits to `examples/build_product.dip`, mirrored to `workflows/build_product.dip` via `make sync-workflows`. No Setup changes, no Gap 7 rubric file changes, no parser changes. Total prompt growth ≈ 83 net lines (40 for the FinalSpecCheck sleep-fence block, 33 for the reviewer rubric appends across all three reviewers, 6 for the Gemini-sentence promotion, 4 net for the legacy STATUS tail rewrite). The audit found honest LLM oversight, not adversarial tampering — defense is sized to the observed threat model (per spec §4.5 / §4.6).
 
 **Tech Stack:** Dippin pipeline language (`.dip` files), Go test suite (`go test`), `dippin doctor` / `dippin simulate` validators, `tracker validate`, GNU Make.
 
@@ -64,8 +64,14 @@ The Smell 3 block to insert (this is the literal prompt text the agent will read
                      --include='*_test.go' .
         Python:    grep -rnE '(time|asyncio|trio|anyio|gevent)\.sleep\(' \
                      --include='test_*.py' --include='*_test.py' .
-        JS/TS:     grep -rnE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' \
-                     --include='*.test.*' --include='*.spec.*' --include='*.cy.*' .
+        JS/TS:     find . -type f \
+                     \( -name '*.js' -o -name '*.ts' -o -name '*.jsx' \
+                        -o -name '*.tsx' -o -name '*.mjs' -o -name '*.cjs' \) \
+                     \( -name '*.test.*' -o -name '*.spec.*' -o -name '*.cy.*' \
+                        -o -path '*/__tests__/*' -o -path '*/test/*' \
+                        -o -path '*/tests/*' \) 2>/dev/null \
+                     -exec grep -nE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' {} + \
+                     || true
         Rust:      find . -type f -name '*.rs' \
                      \( -path '*/tests/*' -o -name '*_test.rs' \) 2>/dev/null \
                      -exec grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \
