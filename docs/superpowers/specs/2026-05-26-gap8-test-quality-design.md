@@ -47,7 +47,7 @@ These are honest LLM oversights, not adversarial attacks. The audit found NO evi
 
 ### 4.1 Single owner: `FinalSpecCheck`, but only for sleep-as-fence
 
-Sleep-as-fence (W17) is the one smell where grep is mechanically reliable and the disposition is concrete (cite SPEC.md timing-contract section OR cite deterministic primitive replacement). It lives in `FinalSpecCheck` as a ~12-line section between INTERFACE REACHABILITY and SPEC.md compliance.
+Sleep-as-fence (W17) is the one smell where grep is mechanically reliable and the disposition is concrete (cite SPEC.md timing-contract section OR cite deterministic primitive replacement). It lives in `FinalSpecCheck` as an inline section between INTERFACE REACHABILITY and SPEC.md compliance (~40 lines of prompt — language-specific greps for Go/Python/JS-TS/Rust/Ruby/Java-Kotlin plus the (a)/(b)/(c) disposition discipline and regression-coverage note).
 
 All other smells (W4 zero-assertion, W5 wrong-target, W13 DI bypass) are semantic and live at the reviewer rubric layer. Reviewers reading test bodies catch them more reliably than grep.
 
@@ -91,7 +91,7 @@ This is ~9 lines per reviewer × 3 = 27 lines. Point 3 grows from ~6 lines to ~1
 
 ### 4.4 Legacy STATUS tail fix (small)
 
-FinalSpecCheck's existing tail (lines 1115-1119) says "If fully compliant: STATUS:success / If not: emit STATUS:fail." This contradicts PR #254's inverted contract under last-line-wins semantics. v5 fixes the tail in a 5-line edit (§5.3 below) to align with the inverted contract — single source of truth for the allowlist via reference to lines 1103-1108, not inline re-enumeration.
+FinalSpecCheck's pre-PR tail block says "If fully compliant: STATUS:success / If not: emit STATUS:fail." This contradicts PR #254's inverted contract under last-line-wins semantics. v5 fixes the tail in a 5-line edit (§5.3 below) to align with the inverted contract — single source of truth for the allowlist via content-based reference to the existing allowlist earlier in the SPEC.md compliance section, not inline re-enumeration.
 
 ### 4.5 What v5 explicitly does NOT do
 
