@@ -828,7 +828,9 @@ workflow BuildProduct
          what the implementation happens to produce? Snapshot tests
          regenerated from current output are FAIL. Tests asserting
          `attempts == 2` when the spec says "max 2 retries" (= 3 attempts)
-         are FAIL.
+         are FAIL. Tests that only validate standard-library or
+         third-party-library behavior instead of the project's own
+         logic are FAIL.
       4. SCOPE: Was anything implemented beyond what this section asks
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
@@ -875,7 +877,9 @@ workflow BuildProduct
          what the implementation happens to produce? Snapshot tests
          regenerated from current output are FAIL. Tests asserting
          `attempts == 2` when the spec says "max 2 retries" (= 3 attempts)
-         are FAIL.
+         are FAIL. Tests that only validate standard-library or
+         third-party-library behavior instead of the project's own
+         logic are FAIL.
       4. SCOPE: Was anything implemented beyond what this section asks
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
