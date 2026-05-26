@@ -132,12 +132,20 @@ Insert between INTERFACE REACHABILITY (ends ~line 1093) and the SPEC.md complian
                      --include='test_*.py' --include='*_test.py' .
         JS/TS:     grep -rnE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' \
                      --include='*.test.*' --include='*.spec.*' --include='*.cy.*' .
-        Rust:      git grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' -- '*.rs'
+        Rust:      find . -type f -name '*.rs' \
+                     \( -path '*/tests/*' -o -name '*_test.rs' \) 2>/dev/null \
+                     -exec grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \
+                     || true
+                   # Restricts to `tests/` integration tests and
+                   # `_test.rs` files. Inline `#[cfg(test)] mod tests`
+                   # blocks in source files aren't filtered — agent
+                   # should note as a limitation when relevant.
         Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
                      --include='*_test.rb' --include='*_spec.rb' .
         Java/Kotlin: find . -path '*/src/test/*' -type f \
-                       \( -name '*.java' -o -name '*.kt' \) -print0 2>/dev/null \
-                       | xargs -0r grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' || true
+                       \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \
+                       -exec grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' {} + \
+                       || true
       For other languages, name the framework and its sleep-class
       call shape and run the equivalent grep.
 
