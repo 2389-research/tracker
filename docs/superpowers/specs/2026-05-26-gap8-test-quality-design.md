@@ -125,33 +125,32 @@ Insert between INTERFACE REACHABILITY (ends ~line 1093) and the SPEC.md complian
 ```dip
       TEST QUALITY — sleep-as-fence (issue #233 Gap 8 W17):
 
-      Grep test files for sleep-class calls:
-        Go:        grep -rnE '(time\.Sleep|<-time\.After)\(' \
-                     --include='*_test.go' . || true
-        Python:    grep -rnE '(time|asyncio|trio|anyio|gevent)\.sleep\(' \
-                     --include='test_*.py' --include='*_test.py' . || true
-        JS/TS:     find . -type f \
-                     \( -name '*.js' -o -name '*.ts' -o -name '*.jsx' \
-                        -o -name '*.tsx' -o -name '*.mjs' -o -name '*.cjs' \) \
-                     \( -name '*.test.*' -o -name '*.spec.*' -o -name '*.cy.*' \
-                        -o -path '*/__tests__/*' -o -path '*/test/*' \
-                        -o -path '*/tests/*' \) 2>/dev/null \
-                     -exec grep -nHE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' {} + \
+      Grep tracked test files for sleep-class calls. `git grep` is
+      used throughout so dependency directories (`node_modules/`,
+      `vendor/`, `.venv/`, `target/`, build outputs) — which are
+      gitignored by definition — are excluded by construction; only
+      project test files are checked.
+        Go:        git grep -nE '(time\.Sleep|<-time\.After)\(' \
+                     -- '*_test.go' || true
+        Python:    git grep -nE '(time|asyncio|trio|anyio|gevent)\.sleep\(' \
+                     -- 'test_*.py' '*_test.py' || true
+        JS/TS:     git grep -nE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' \
+                     -- '*.test.*' '*.spec.*' '*.cy.*' \
+                        ':(glob)**/__tests__/**' \
+                        ':(glob)**/test/**' \
+                        ':(glob)**/tests/**' \
                      || true
-        Rust:      find . -type f -name '*.rs' \
-                     \( -path '*/tests/*' -o -name '*_test.rs' \) 2>/dev/null \
-                     -exec grep -nHE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \
-                     || true
+        Rust:      git grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' \
+                     -- '*_test.rs' ':(glob)**/tests/**/*.rs' || true
                    # Restricts to `tests/` integration tests and
                    # `_test.rs` files. Inline `#[cfg(test)] mod tests`
                    # blocks in source files aren't filtered — agent
                    # should note as a limitation when relevant.
-        Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]+[0-9]|sleep\([0-9]|Kernel\.sleep)' \
-                     --include='*_test.rb' --include='*_spec.rb' . || true
-        Java/Kotlin: find . -path '*/src/test/*' -type f \
-                       \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \
-                       -exec grep -nHE '(Thread\.sleep|delay\(|Mono\.delay)' {} + \
-                       || true
+        Ruby:      git grep -nE '(^|[^[:alnum:]_])(sleep[[:space:]]+[0-9]|sleep\([0-9]|Kernel\.sleep)' \
+                     -- '*_test.rb' '*_spec.rb' || true
+        Java/Kotlin: git grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' \
+                     -- ':(glob)**/src/test/**/*.java' \
+                        ':(glob)**/src/test/**/*.kt' || true
       For other languages, name the framework and its sleep-class
       call shape and run the equivalent grep.
 
