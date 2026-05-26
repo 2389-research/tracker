@@ -70,11 +70,11 @@ The Smell 3 block to insert (this is the literal prompt text the agent will read
                      \( -name '*.test.*' -o -name '*.spec.*' -o -name '*.cy.*' \
                         -o -path '*/__tests__/*' -o -path '*/test/*' \
                         -o -path '*/tests/*' \) 2>/dev/null \
-                     -exec grep -nE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' {} + \
+                     -exec grep -nHE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' {} + \
                      || true
         Rust:      find . -type f -name '*.rs' \
                      \( -path '*/tests/*' -o -name '*_test.rs' \) 2>/dev/null \
-                     -exec grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \
+                     -exec grep -nHE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \
                      || true
                    # Restricts to `tests/` integration tests and
                    # `_test.rs` files (avoids false-positives on
@@ -86,7 +86,7 @@ The Smell 3 block to insert (this is the literal prompt text the agent will read
                      --include='*_test.rb' --include='*_spec.rb' . || true
         Java/Kotlin: find . -path '*/src/test/*' -type f \
                        \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \
-                       -exec grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' {} + \
+                       -exec grep -nHE '(Thread\.sleep|delay\(|Mono\.delay)' {} + \
                        || true
       For other languages, name the framework and its sleep-class
       call shape and run the equivalent grep.
