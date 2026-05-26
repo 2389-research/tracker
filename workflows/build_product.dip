@@ -1154,7 +1154,7 @@ workflow BuildProduct
                    # source files aren't filtered here — agent should
                    # note them as a limitation if the project relies
                    # on the inline-test convention.
-        Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
+        Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]+[0-9]|sleep\([0-9]|Kernel\.sleep)' \
                      --include='*_test.rb' --include='*_spec.rb' .
         Java/Kotlin: find . -path '*/src/test/*' -type f \
                        \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \

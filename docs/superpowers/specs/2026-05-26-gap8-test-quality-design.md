@@ -146,7 +146,7 @@ Insert between INTERFACE REACHABILITY (ends ~line 1093) and the SPEC.md complian
                    # `_test.rs` files. Inline `#[cfg(test)] mod tests`
                    # blocks in source files aren't filtered — agent
                    # should note as a limitation when relevant.
-        Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
+        Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]+[0-9]|sleep\([0-9]|Kernel\.sleep)' \
                      --include='*_test.rb' --include='*_spec.rb' .
         Java/Kotlin: find . -path '*/src/test/*' -type f \
                        \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \
@@ -250,7 +250,7 @@ Unchanged.
 | Sleep grep false positives on Java/Kotlin reactive (`Mono.delay`) | Medium | Low | Disposition (b) accepts "replaced by deterministic primitive" — cite the primitive's introduction (e.g., `StepVerifier.withVirtualTime`). |
 | Waivers in `.ai/decisions/*.md` cite real spec sections that are irrelevant | Medium | Medium | Reviewer audit at point 3 must verify cited content is relevant. Two-layer audit raises cost; sophisticated forgery still possible (acknowledged residual). |
 | Parser sees `STATUS:success` lines inside agent's fenced grep-output blocks | Low | Medium | Inverted STATUS contract from PR #254: the early `STATUS:fail` (first line) survives truncation. Parser-level fix for bypass shapes (table cells, blockquotes, etc.) is filed as follow-up (§10 q1). |
-| FinalSpecCheck prompt grows by ~12 lines (sleep section) + ~5 lines (tail rewrite) | Low | Low | Smaller than any prior version. dippin-lang has no prompt-length warning. |
+| FinalSpecCheck prompt grows by ~40 lines (sleep section) + ~4 net lines (tail rewrite); reviewer rubrics gain ~33 lines (11 × 3) plus ~6 lines for the Gemini-sentence promotion — ~83 net lines workflow-wide | Low | Low | Still much smaller than any prior draft (v4 ~165-200, v1 ~330). dippin-lang has no prompt-length warning; verified A/100 on `dippin doctor`. |
 
 ## 8. v1 → v2 → v3 → v4 → v5 condensed history
 
@@ -260,7 +260,7 @@ Five iterations across three squad review rounds (round 1 on v1, round 2 on v2, 
 - **v2** (3 smells inlined, named-test spot-check, code-fence prompt): squad 3 minor / 2 major. Named-test spot-check brittle; chmod+sha cherry-pick demanded.
 - **v3** (DI-bypass folded into Gap 7, chmod+sha + integrity preamble, dropped named-test spot-check, dropped numbered hits): squad 1 ship / 1 minor / 3 major. New bugs: parser/spec contradiction (`-` bullets mandated, parser ignores), SURVEY regex misses top-level test directories, Rust inline-test pipeline mathematically broken, sha256sum macOS portability, SPEC.md mismatch exit code, DI-bypass language slice inconsistent with Gap 7.
 - **v4** (between-rounds draft, never squad-reviewed): bug-fix iteration on v3. User feedback: "produce a simpler specification/design that achieves most if not all the goals with pragmatism and elegance and simplicity with minimal to no cleverness or hacks." Drove v5.
-- **v5** (this version): radical simplification. One grep at FinalSpecCheck (sleep-as-fence — the only smell where grep is mechanically reliable). W4 / W5 / W13 caught at reviewer layer with shown-work prose. No chmod+sha, no integrity preamble, no SPEC.md SHA, no DI-bypass fold-in, no inline TEST QUALITY rubric, no 7-wrapper bypass enumeration. ~40 prompt lines total vs v1's ~330 and v4's ~165-200.
+- **v5** (this version): radical simplification. One grep at FinalSpecCheck (sleep-as-fence — the only smell where grep is mechanically reliable). W4 / W5 / W13 caught at reviewer layer with shown-work prose. No chmod+sha, no integrity preamble, no SPEC.md SHA, no DI-bypass fold-in, no inline TEST QUALITY rubric, no 7-wrapper bypass enumeration. ~83 net prompt lines total (40 sleep-fence block + 33 reviewer appends + 6 Gemini-sentence promotion + 4 STATUS tail) vs v1's ~330 and v4's ~165-200.
 
 The simplification is justified by the audit's actual evidence: honest LLM oversight, not adversarial tampering. The defense should be sized to the observed threat model. If a future audit shows mid-run rubric mutation or SPEC.md prompt injection, file as separate hardening PR with a proper defense (file relocation, signing, sandboxing — not chmod+sha tripwires).
 
