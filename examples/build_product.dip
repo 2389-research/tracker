@@ -831,6 +831,17 @@ workflow BuildProduct
          are FAIL. Tests that only validate standard-library or
          third-party-library behavior instead of the project's own
          logic are FAIL.
+         Also: for each test file under this section, show grep
+         evidence that the tests do NOT exhibit (a) zero-assertion
+         bodies — test functions with no t.Error/t.Fatal/require/
+         assert/expect/should/panic/etc. calls; or (b) DI bypass —
+         tests calling time.Now, rand.Read, stdlib-IO when the
+         production code defines a Clock/Random/IO seam. Cite the
+         grep command and its output for each hit AND for the
+         empty-result case. Audit any `.ai/decisions/*.md` waivers
+         referenced — flag rationales whose logic, if applied
+         broadly, would void the smell check, and verify cited
+         SPEC.md sections actually contain relevant content.
       4. SCOPE: Was anything implemented beyond what this section asks
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
@@ -880,6 +891,17 @@ workflow BuildProduct
          are FAIL. Tests that only validate standard-library or
          third-party-library behavior instead of the project's own
          logic are FAIL.
+         Also: for each test file under this section, show grep
+         evidence that the tests do NOT exhibit (a) zero-assertion
+         bodies — test functions with no t.Error/t.Fatal/require/
+         assert/expect/should/panic/etc. calls; or (b) DI bypass —
+         tests calling time.Now, rand.Read, stdlib-IO when the
+         production code defines a Clock/Random/IO seam. Cite the
+         grep command and its output for each hit AND for the
+         empty-result case. Audit any `.ai/decisions/*.md` waivers
+         referenced — flag rationales whose logic, if applied
+         broadly, would void the smell check, and verify cited
+         SPEC.md sections actually contain relevant content.
       4. SCOPE: Was anything implemented beyond what this section asks
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
@@ -940,6 +962,17 @@ workflow BuildProduct
          are FAIL. Tests that only validate standard-library or
          third-party-library behavior instead of the project's own
          logic are FAIL.
+         Also: for each test file under this section, show grep
+         evidence that the tests do NOT exhibit (a) zero-assertion
+         bodies — test functions with no t.Error/t.Fatal/require/
+         assert/expect/should/panic/etc. calls; or (b) DI bypass —
+         tests calling time.Now, rand.Read, stdlib-IO when the
+         production code defines a Clock/Random/IO seam. Cite the
+         grep command and its output for each hit AND for the
+         empty-result case. Audit any `.ai/decisions/*.md` waivers
+         referenced — flag rationales whose logic, if applied
+         broadly, would void the smell check, and verify cited
+         SPEC.md sections actually contain relevant content.
       4. SCOPE: Was anything implemented beyond what this section asks
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
