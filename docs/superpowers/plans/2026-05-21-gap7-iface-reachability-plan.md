@@ -173,7 +173,7 @@ Use Read tool on `examples/build_product.dip` lines 80-100 to confirm exact whit
 
 Use Edit tool. Find this text (which currently appears at lines 93-95):
 
-```
+```text
       PROBE_EOF
 
       printf 'setup-ready'
@@ -181,7 +181,7 @@ Use Edit tool. Find this text (which currently appears at lines 93-95):
 
 Replace with:
 
-```
+```text
       PROBE_EOF
 
       # Shared interface-reachability rubric (issue #233 Gap 7).
@@ -404,7 +404,7 @@ Use Read tool on `examples/build_product.dip` lines 847-900 (the FinalSpecCheck 
 
 Find the first non-blank line of FinalSpecCheck's prompt body (after the `prompt:` line). Insert the following block as the very first content of the prompt, with the same indentation the existing prompt body uses:
 
-```
+```text
       INTERFACE REACHABILITY (issue #233 Gap 7):
 
       Your default STATUS for this section is `fail`. Emit a single
@@ -520,7 +520,7 @@ Use Read tool on `examples/build_product.dip` lines 640-650, 680-695, and 735-74
 
 Find this text at approximately lines 645-648:
 
-```
+```text
       2. INTERFACE REACHABILITY: For every interface method defined in this
          section's files, name at least one production (non-test) caller.
          Where there is none, flag it.
@@ -528,7 +528,7 @@ Find this text at approximately lines 645-648:
 
 Replace with:
 
-```
+```text
       2. INTERFACE REACHABILITY: For every interface method defined in
          this section's files, name at least one production (non-test)
          caller with grep evidence — show the grep command, paste its
@@ -607,7 +607,7 @@ Already confirmed: `## [Unreleased]` is at line 8 followed by an empty section. 
 
 Use Edit tool. Find:
 
-```
+```text
 ## [Unreleased]
 
 ## [0.30.0] - 2026-05-19
@@ -615,7 +615,7 @@ Use Edit tool. Find:
 
 Replace with:
 
-```
+```text
 ## [Unreleased]
 
 ### Changed

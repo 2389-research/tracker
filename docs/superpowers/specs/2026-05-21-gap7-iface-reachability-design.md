@@ -323,7 +323,7 @@ After the existing `cat > .ai/build/ci-probe.sh` block, add:
 
 Replace lines 645-648 / 686-688 / 738-740 of `examples/build_product.dip` with:
 
-```
+```text
 2. INTERFACE REACHABILITY: For every interface method defined in
    this section's files, name at least one production (non-test)
    caller with grep evidence — show the grep command, paste its
