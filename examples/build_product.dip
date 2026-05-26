@@ -1181,11 +1181,15 @@ workflow BuildProduct
 
       Write the final compliance report to .ai/decisions/compliance.md
 
-      If fully compliant: STATUS:success
-      If not: emit STATUS:fail on its own line, followed by the
-      specific list of gaps on subsequent lines (the parser requires
-      the STATUS value to be exactly `success`, `fail`, or `retry` —
-      no trailing prose on the same line).
+      Emit `STATUS:success` as your terminal line ONLY if INTERFACE
+      REACHABILITY (every method has a production caller or
+      carve-out), TEST QUALITY (every sleep-fence hit dispositioned),
+      and SPEC.md compliance (every requirement implemented, no
+      extras, no TODO/FIXME/HACK, tests pass, no unexpected files
+      in .ai/build/ outside the allowlist enumerated above) all
+      passed. Otherwise the early `STATUS:fail` from your first
+      line stays in place. The parser requires `STATUS:<value>` on
+      its own line, no leading characters, no fences/tables.
 
   human EscalateMilestone
     label: "Milestone stuck — pick how to proceed"
