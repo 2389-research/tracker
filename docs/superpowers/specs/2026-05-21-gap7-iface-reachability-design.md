@@ -60,7 +60,7 @@ This is the highest-leverage architectural decision in v3. It eliminates the dri
 
 `.ai/build/iface-reachability-rubric.md` opens with a language detection step:
 
-> Survey languages in scope via `git ls-files | awk -F. '{print $NF}' | sort -u`. If the project contains files in any of these languages with static interface systems — Go (`.go`), Rust (`.rs`), Java (`.java`), Kotlin (`.kt`), Swift (`.swift`), TypeScript (`.ts`/`.tsx`), C++ (`.cc`/`.cpp`/`.cxx`/`.hh`/`.hpp`), C# (`.cs`), PHP (`.php`), Python with `ABC` or `Protocol` (`.py`) — proceed. If the project is exclusively in languages without static interface systems (Ruby, plain JS, Elixir, Zig, C, bash, shell, plain Markdown, DSL files), emit `STATUS:success` with the note: "no static-interface languages detected; reachability check skipped."
+> Survey languages in scope via `git ls-files | awk -F. '{print $NF}' | sort -u`. If the project contains files in any of these languages with static interface systems — Go (`.go`), Rust (`.rs`), Java (`.java`), Kotlin (`.kt`), Swift (`.swift`), TypeScript (`.ts`/`.tsx`), C++ (`.cc`/`.cpp`/`.cxx`/`.h`/`.hh`/`.hpp`/`.hxx`), C# (`.cs`), PHP (`.php`), Python with `ABC` or `Protocol` (`.py`) — proceed. If the project is exclusively in languages without static interface systems (Ruby, plain JS, Elixir, Zig, C, bash, shell, plain Markdown, DSL files), emit `STATUS:success` with the note: "no static-interface languages detected; reachability check skipped."
 
 For projects with **specific** dispatch mechanisms grep can't see (Rust `dyn Trait`, Haskell typeclasses, TS bracket-notation, Swift protocol extensions, Ruby `module` mixins, Elixir `@behaviour`, etc.), the rubric lists these as known limitations and instructs the agent to skip them with a one-line note. Operators relying on those patterns declare via `.ai/decisions/`.
 
@@ -95,9 +95,9 @@ v2's per-language enumeration was incomplete and tempted cherry-picking; the pri
 
 ### 4.7 STATUS contract — fail-closed by default
 
-The `FinalSpecCheck` prompt opens with: **"Your default STATUS for this section is `fail`. Emit a single line `STATUS:success` at the very end of your response, alone on its line and outside any code fence, only if every check below passed."** This defends against the partial-completion fail-open the squad review (Prompt-Pragmatist finding #1) identified as the dispositive issue — `parseAutoStatus` is last-STATUS-wins and defaults to `success` on empty.
+The `FinalSpecCheck` prompt instructs the agent to **emit `STATUS:fail` as the first line of its response, before any other text**, then perform the enumeration, then **emit `STATUS:success` as the last line of the response — alone on its line, outside any code fence — only if every check passed**. The `parseAutoStatus` parser is last-line-wins: if the agent finishes cleanly, the final `STATUS:success` overrides the early fail; if the response is truncated for any reason (token exhaustion, network cut, mid-enumeration stop), the early `STATUS:fail` survives and the section fails closed. This defends against the partial-completion fail-open the squad review (Prompt-Pragmatist finding #1) identified as the dispositive issue — `parseAutoStatus` defaults to `success` on empty/missing STATUS lines.
 
-Combined with the language-conditional skip from §4.3, the agent emits exactly one terminal `STATUS:success` or `STATUS:fail` line, never embedded in a table cell or prose.
+The agent emits exactly one terminal STATUS marker (either `STATUS:fail` from the opening or `STATUS:success` from the conclusion), never embedded in a table cell or prose, never with trailing prose on the same line (the parser requires the STATUS value to be exactly `success`, `fail`, or `retry`).
 
 ## 5. Concrete edits
 
@@ -124,8 +124,10 @@ After the existing `cat > .ai/build/ci-probe.sh` block, add:
 
       If the project contains files in a static-interface language —
       Go (.go), Rust (.rs), Java (.java), Kotlin (.kt), Swift (.swift),
-      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.hh/.hpp), C# (.cs),
-      PHP (.php), Python with `ABC` or `Protocol` (.py) — proceed.
+      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.h/.hh/.hpp/.hxx),
+      C# (.cs), PHP (.php), Python with `ABC` or `Protocol` (.py) —
+      proceed. Header-only C++ projects whose sources are exclusively
+      .h/.hxx still trigger the check.
 
       If the project is exclusively in languages WITHOUT a static
       interface system (Ruby, plain JS, Elixir, Zig, C without
@@ -359,7 +361,7 @@ For each session working on this PR:
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | `FinalSpecCheck`'s prompt grows long once the iface section is added on top of its existing spec-conformance checks | Medium | Medium — `dippin doctor` may warn | Discipline lives in `.ai/build/iface-reachability-rubric.md`; the prompt section is small. If `doctor` still warns, peel more of the existing FinalSpecCheck content into a shared file. |
-| Agent runs out of context mid-enumeration on a repo with hundreds of interface methods | Medium | High — without §4.7's fail-closed default, this would silently pass | §4.7's "default STATUS is `fail`" plus the explicit instruction "if you run out of context mid-enumeration, stop and emit STATUS:fail with the count" defends against this. |
+| Agent runs out of context mid-enumeration on a repo with hundreds of interface methods | Medium | High — without §4.7's fail-closed default, this would silently pass | §4.7's "emit `STATUS:fail` as the first line of the response" contract defends against this: any truncation point preserves the early `STATUS:fail`. If the agent wants to record progress, it puts the count on a separate non-STATUS line; the parser rejects trailing prose on a STATUS line (requires exactly `success`/`fail`/`retry`), so `STATUS:fail <N>` or `STATUS:fail with count` are explicitly forbidden in the prompt. |
 | Implement agent pre-authors `.ai/decisions/*.md` to game its own future verifier | Medium | Medium — the v2 four-condition discipline was theatre against this | The reviewer rubric is the next layer; reviewers see all `.ai/decisions/` files and can flag blanket-rationale waivers. The repo-wide sweep at `FinalSpecCheck` reads decision files line-by-line, not just by presence. |
 | Stdlib carve-out misapplied (agent claims "this is a stdlib interface" without evidence) | Medium | Low | Carve-out requires citing the wiring site (`http.Handle(...)`, etc.). No wiring site cited = no carve-out. |
 | Language-detection survey misses a static-interface project file | Low | Low — false skip | Survey is a one-shot grep on file extensions; the listed extensions cover all currently-supported languages. New languages added later require a one-line append. |

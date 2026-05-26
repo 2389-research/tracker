@@ -200,8 +200,10 @@ Replace with:
 
       If the project contains files in a static-interface language —
       Go (.go), Rust (.rs), Java (.java), Kotlin (.kt), Swift (.swift),
-      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.hh/.hpp), C# (.cs),
-      PHP (.php), Python with `ABC` or `Protocol` (.py) — proceed.
+      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.h/.hh/.hpp/.hxx),
+      C# (.cs), PHP (.php), Python with `ABC` or `Protocol` (.py) —
+      proceed. Header-only C++ projects whose sources are exclusively
+      .h/.hxx still trigger the check.
 
       If the project is exclusively in languages WITHOUT a static
       interface system (Ruby, plain JS, Elixir, Zig, C without

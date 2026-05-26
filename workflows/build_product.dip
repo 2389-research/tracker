@@ -108,8 +108,10 @@ workflow BuildProduct
 
       If the project contains files in a static-interface language —
       Go (.go), Rust (.rs), Java (.java), Kotlin (.kt), Swift (.swift),
-      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.hh/.hpp), C# (.cs),
-      PHP (.php), Python with `ABC` or `Protocol` (.py) — proceed.
+      TypeScript (.ts/.tsx), C++ (.cc/.cpp/.cxx/.h/.hh/.hpp/.hxx),
+      C# (.cs), PHP (.php), Python with `ABC` or `Protocol` (.py) —
+      proceed. Header-only C++ projects whose sources are exclusively
+      .h/.hxx still trigger the check.
 
       If the project is exclusively in languages WITHOUT a static
       interface system (Ruby, plain JS, Elixir, Zig, C without
@@ -1091,7 +1093,11 @@ workflow BuildProduct
       - Was nothing extra added beyond what the spec asked for?
 
       Also verify:
-      - No leftover files in .ai/build/ beyond review artifacts
+      - No UNEXPECTED leftover files in .ai/build/ — the workflow
+        intentionally writes helpers (ci-probe.sh from PR #246,
+        iface-reachability-rubric.md from PR #254) and reviewers
+        write reports (review-claude/codex/gemini.md). Only flag
+        files that fit none of those categories.
       - No TODO/FIXME/HACK comments added
       - All "throw away" items from the spec were actually removed
       - Tests pass (check ${ctx.tool_stdout})
