@@ -135,8 +135,9 @@ Insert between INTERFACE REACHABILITY (ends ~line 1093) and the SPEC.md complian
         Rust:      git grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' -- '*.rs'
         Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
                      --include='*_test.rb' --include='*_spec.rb' .
-        Java/Kotlin: grep -rnE '(Thread\.sleep|delay\(|Mono\.delay)' \
-                     $(find . -path '*/src/test/*' -type f \( -name '*.java' -o -name '*.kt' \) 2>/dev/null) || true
+        Java/Kotlin: find . -path '*/src/test/*' -type f \
+                       \( -name '*.java' -o -name '*.kt' \) -print0 2>/dev/null \
+                       | xargs -0r grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' || true
       For other languages, name the framework and its sleep-class
       call shape and run the equivalent grep.
 
