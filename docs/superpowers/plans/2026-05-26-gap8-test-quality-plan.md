@@ -66,7 +66,16 @@ The Smell 3 block to insert (this is the literal prompt text the agent will read
                      --include='test_*.py' --include='*_test.py' .
         JS/TS:     grep -rnE '(await sleep\(|setTimeout\(|waitForTimeout\(|cy\.wait\()' \
                      --include='*.test.*' --include='*.spec.*' --include='*.cy.*' .
-        Rust:      git grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' -- '*.rs'
+        Rust:      find . -type f -name '*.rs' \
+                     \( -path '*/tests/*' -o -name '*_test.rs' \) 2>/dev/null \
+                     -exec grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' {} + \
+                     || true
+                   # Restricts to `tests/` integration tests and
+                   # `_test.rs` files (avoids false-positives on
+                   # production thread::sleep in backoff/polling
+                   # code). Inline `#[cfg(test)] mod tests` blocks
+                   # in source files aren't filtered — agent should
+                   # note as a limitation when relevant.
         Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
                      --include='*_test.rb' --include='*_spec.rb' .
         Java/Kotlin: find . -path '*/src/test/*' -type f \
