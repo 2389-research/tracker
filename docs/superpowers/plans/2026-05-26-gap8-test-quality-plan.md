@@ -44,7 +44,7 @@ The Smell 3 block goes BETWEEN the INTERFACE REACHABILITY regression-cases recap
 Find the exact anchor text using:
 
 ```bash
-grep -n 'Both shipped green because this check didn' examples/build_product.dip
+grep -n "Both shipped green because this check didn't exist." examples/build_product.dip
 grep -n 'This is the final gate' examples/build_product.dip
 ```
 
@@ -69,8 +69,10 @@ The Smell 3 block to insert (this is the literal prompt text the agent will read
         Rust:      git grep -nE '(thread::sleep|tokio::time::sleep|async_std::task::sleep)' -- '*.rs'
         Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
                      --include='*_test.rb' --include='*_spec.rb' .
-        Java/Kotlin: grep -rnE '(Thread\.sleep|delay\(|Mono\.delay)' \
-                     $(find . -path '*/src/test/*' -type f \( -name '*.java' -o -name '*.kt' \) 2>/dev/null) || true
+        Java/Kotlin: find . -path '*/src/test/*' -type f \
+                       \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \
+                       -exec grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' {} + \
+                       || true
       For other languages, name the framework and its sleep-class
       call shape and run the equivalent grep.
 
@@ -528,7 +530,7 @@ Insert this entry into `CHANGELOG.md`, as a new bullet IMMEDIATELY AFTER the Gap
   - **Legacy `FinalSpecCheck` STATUS tail fixed.** The pre-PR-#254 framing at the bottom of FinalSpecCheck (`If fully compliant: STATUS:success / If not: emit STATUS:fail`) contradicted PR #254's inverted contract opening — under last-line-wins parsing, a passing SPEC.md section reached mid-survey could override the early `STATUS:fail` for INTERFACE REACHABILITY or TEST QUALITY. The tail is rewritten to require all three sections to pass before emitting terminal `STATUS:success`, with single-source-of-truth reference to the existing allowlist at lines 1103-1108.
   - **What's intentionally NOT in this PR.** W21 (Go subtest case-fold collision) is explicit non-goal — Go-specific lexical bug, golangci-lint territory. No chmod+sha tripwire on Gap 7's rubric file. No integrity preamble. No SPEC.md SHA verification. No DI-bypass cross-check folded into Gap 7's rubric heredoc. No inline TEST QUALITY rubric enumerating Smell 1 (zero-assertion) at FinalSpecCheck. The audit found honest LLM oversight, not adversarial mutation — defense is sized to the observed threat model. Three squad-review rounds taught us what to trim; v5 is ~40 prompt lines (vs ~330 in v1, ~165-200 in earlier drafts).
   - Spec: `docs/superpowers/specs/2026-05-26-gap8-test-quality-design.md` (v5). Plan: `docs/superpowers/plans/2026-05-26-gap8-test-quality-plan.md`.
-  - With Gap 8 landed, six of eight #233 audit gaps are closed (1, 2, 3, 4, 6, 7, 8). Gap 5 (engine-level `auto_status` audit + `OutcomeHumanOverride` + re-run `FinalSpecCheck` after `ApplyReviewFixes`) remains as the final Chunk C work before `release: v0.31.0` closes out #233.
+  - With Gap 8 landed, seven of eight #233 audit gaps are closed (1, 2, 3, 4, 6, 7, 8). Gap 5 (engine-level `auto_status` audit + `OutcomeHumanOverride` + re-run `FinalSpecCheck` after `ApplyReviewFixes`) remains as the final Chunk C work before `release: v0.31.0` closes out #233.
 ```
 
 - [ ] **Step 3: Verify CHANGELOG structure is intact**

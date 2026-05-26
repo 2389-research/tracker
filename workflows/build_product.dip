@@ -1085,8 +1085,9 @@ workflow BuildProduct
       STATUS contract — emit `STATUS:fail` as the FIRST line of your
       response, before any other text. Begin your enumeration. Only
       at the very end, after every check in this prompt passes
-      (interface reachability AND the SPEC.md compliance check that
-      follows), emit a final `STATUS:success` line — alone on its
+      (interface reachability AND test quality AND the SPEC.md
+      compliance check that follows), emit a final `STATUS:success`
+      line — alone on its
       line, outside any code fence — to override the early fail. The
       workflow's `auto_status` parser is last-line-wins, so the final
       success replaces the early fail when everything passes; if your
@@ -1142,8 +1143,9 @@ workflow BuildProduct
         Ruby:      grep -rnE '(^|[^[:alnum:]_])(sleep[[:space:]]*\(?[0-9]|Kernel\.sleep)' \
                      --include='*_test.rb' --include='*_spec.rb' .
         Java/Kotlin: find . -path '*/src/test/*' -type f \
-                       \( -name '*.java' -o -name '*.kt' \) -print0 2>/dev/null \
-                       | xargs -0r grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' || true
+                       \( -name '*.java' -o -name '*.kt' \) 2>/dev/null \
+                       -exec grep -nE '(Thread\.sleep|delay\(|Mono\.delay)' {} + \
+                       || true
       For other languages, name the framework and its sleep-class
       call shape and run the equivalent grep.
 

@@ -29,7 +29,7 @@ These are honest LLM oversights, not adversarial attacks. The audit found NO evi
 - Catch W17 (sleep-as-fence) at `FinalSpecCheck` with one grep and disposition discipline.
 - Catch W4, W5, W13 at the **reviewer layer** by upgrading reviewer rubric point 3 to demand shown-work grep evidence for the three smell shapes.
 - Cover W21 by explicit out-of-scope acknowledgement (golangci-lint territory).
-- **Minimal cleverness.** No chmod+sha tripwires. No integrity preambles. No SPEC.md SHA. No DI-bypass cross-check inside Gap 7's rubric. No per-language grep matrices in the FinalSpecCheck prompt. No 7-wrapper bypass enumeration in the prompt.
+- **Minimal cleverness.** No chmod+sha tripwires. No integrity preambles. No SPEC.md SHA. No DI-bypass cross-check inside Gap 7's rubric. No 7-wrapper bypass enumeration in the prompt. (The one smell that ships at FinalSpecCheck — sleep-as-fence — enumerates per-language sleep-call shapes; that's a single smell with language patterns, not a matrix.)
 - Compose with PR #246, PR #249, PR #254 without modifying any of them beyond the minimum required.
 
 ## 3. Non-goals
