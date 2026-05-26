@@ -1226,3 +1226,46 @@ func TestCodergenHandlerLoopDetectedMessage(t *testing.T) {
 		t.Errorf("loop-detected message should NOT mention 'turn limit', got %q", msg)
 	}
 }
+
+// TestParseAutoStatus_V3FailFirstContract locks in the parser behavior
+// that Gap 7 design v3 §4.7 depends on: agent emits STATUS:fail first
+// and only flips to STATUS:success at the end if every check passed.
+// If parseAutoStatus's last-wins semantics changes, this contract breaks
+// and Gap 7's check becomes fail-open (the original bug shape).
+func TestParseAutoStatus_V3FailFirstContract(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{
+			name: "agent completes all checks: terminal success wins",
+			input: "STATUS:fail\n" +
+				"Default fail per Gap 7 §4.7 contract.\n" +
+				"... full enumeration ...\n" +
+				"All checks passed.\n" +
+				"STATUS:success",
+			expect: pipeline.OutcomeSuccess,
+		},
+		{
+			name: "agent gives up mid-check: only initial fail remains",
+			input: "STATUS:fail\n" +
+				"Default fail per Gap 7 §4.7 contract.\n" +
+				"... partial enumeration, ran out of context ...",
+			expect: pipeline.OutcomeFail,
+		},
+		{
+			name:   "agent emits no STATUS line at all (legacy default)",
+			input:  "Some narrative without any STATUS marker.",
+			expect: pipeline.OutcomeSuccess,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseAutoStatus(tc.input)
+			if got != tc.expect {
+				t.Fatalf("parseAutoStatus = %v, want %v", got, tc.expect)
+			}
+		})
+	}
+}
