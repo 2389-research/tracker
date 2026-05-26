@@ -204,7 +204,7 @@ Replace FinalSpecCheck lines 1115-1119 with:
       its own line, no leading characters, no fences/tables.
 ```
 
-This aligns the tail with PR #254's inverted contract under last-line-wins semantics and refers to the existing allowlist enumeration at lines 1103-1108 rather than re-listing filenames.
+This aligns the tail with PR #254's inverted contract under last-line-wins semantics and refers to the existing allowlist enumeration earlier in the SPEC.md compliance section rather than re-listing filenames.
 
 ### 5.4 `Setup` — no change
 
