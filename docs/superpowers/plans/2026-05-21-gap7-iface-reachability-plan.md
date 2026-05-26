@@ -213,10 +213,19 @@ Replace with:
 
       For each detected language, enumerate interfaces / protocols /
       traits / typeclasses / abstract classes:
-        Go:      grep -rnE 'type [A-Z][A-Za-z0-9_]* +interface ' \
+        Go:      grep -rnE 'type [[:alnum:]_]+ +interface[[:space:]{]' \
                    --include='*.go' .
-        Rust:    grep -rnE '\bpub trait [A-Z][A-Za-z0-9_]*' \
+                 Catches exported and unexported names; allows brace
+                 immediately after `interface` (no space). Generic
+                 interfaces (`type Foo[T any] interface`) are rarer
+                 and not enumerated by this pattern — if the project
+                 uses them, run a follow-up grep with the bracket
+                 syntax.
+        Rust:    grep -rnE '\btrait +[[:alnum:]_]+' \
                    --include='*.rs' .
+                 Catches `trait`, `pub trait`, `pub(crate) trait`,
+                 and unexported traits — all can carry unwired
+                 methods.
         Java:    grep -rnE '^(public |abstract |sealed )*interface ' \
                    --include='*.java' .  ; also abstract class
         Kotlin:  grep -rnE '(interface |abstract class |fun interface )' \
@@ -227,8 +236,9 @@ Replace with:
                    --include='*.ts' --include='*.tsx' .
         C++:     best-effort — look for pure-virtual classes:
                    grep -rnE 'virtual [^;]+= *0 *;' \
-                   --include='*.cc' --include='*.hh' --include='*.cpp' \
-                   --include='*.hpp' .
+                   --include='*.cc' --include='*.cpp' --include='*.cxx' \
+                   --include='*.h' --include='*.hh' --include='*.hpp' \
+                   --include='*.hxx' .
                  The containing class is an abstract interface. CRTP
                  and templates are not enumerable via grep; skip those
                  with a one-line note.
@@ -267,7 +277,12 @@ Replace with:
         **/fakes/**, **/fixtures/**, **/testdata/**, *_mock.go,
         **/__tests__/**, *.test.*, *.spec.*, conftest.py,
         src/test/java/**, test/*_test.exs, spec/**, Tests/, tests/,
-        target/**, build/**, .gocache/**.
+        .gocache/**.
+      Note: build-output trees (`target/**`, `build/**`) are NOT
+      blanket-excluded — they often contain generated-source callers
+      (see next paragraph) that ARE production. The test-specific
+      globs above (`src/test/java/**`, etc.) handle hand-written test
+      trees regardless of where they live.
 
       Generated code (*.pb.go, *_gen.go, zz_generated_*.go,
       target/generated-sources/**, __generated__/**, *.pb.cc,
@@ -419,8 +434,12 @@ Find the first non-blank line of FinalSpecCheck's prompt body (after the `prompt
       Output is prose enumeration — name each method, give file:line
       of the production caller (or the carve-out reason). Do NOT
       group, do NOT skip, do NOT write "ditto" or "similar." If you
-      run out of context mid-enumeration, stop and emit `STATUS:fail`
-      with the count of methods you reached.
+      run out of context mid-enumeration, stop and leave the early
+      `STATUS:fail` from your response's first line in place; you
+      may add a separate line stating how many methods you reached.
+      Do NOT emit `STATUS:fail <N>` or `STATUS:fail with count` —
+      the parser requires the STATUS value to be exactly `fail`,
+      `success`, or `retry`, with no trailing prose on that line.
 
       Regression cases this check exists to catch (issue #233
       Appendix A I9, I10): `AuthStatus(ctx) error` defined and
