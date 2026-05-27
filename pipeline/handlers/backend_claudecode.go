@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -205,6 +206,25 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	}
 
 	ccCfg, _ := cfg.Extra.(*pipeline.ClaudeCodeConfig)
+
+	// tool_access enforcement (issue #258): if a direct caller constructed
+	// AgentRunConfig with cfg.ToolAccess set but no (or only partial)
+	// ClaudeCodeConfig in Extra, synthesize one with the canonical deny
+	// list so the CLI denies the surface. CodergenHandler already populates
+	// this via applyClaudeCodeToolAccess; this branch covers the direct-Run
+	// bypass Codex flagged on PR #259.
+	if strings.TrimSpace(cfg.ToolAccess) != "" {
+		if ccCfg == nil {
+			ccCfg = &pipeline.ClaudeCodeConfig{}
+		}
+		// Override AllowedTools (don't trust caller-provided allowlist when
+		// tool_access is set — that would be the Params-bypass shape).
+		// Use slices.Clone so callers can't accidentally mutate the
+		// package-level canonical list via the assigned DisallowedTools.
+		ccCfg.AllowedTools = nil
+		ccCfg.DisallowedTools = slices.Clone(canonicalClaudeCodeToolDenyList)
+	}
+
 	if ccCfg == nil {
 		return args, nil
 	}

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`tool_access: none` runtime enforcement on agent nodes** ([#258](https://github.com/2389-research/tracker/issues/258), joint with [dippin-lang#41](https://github.com/2389-research/dippin-lang/issues/41)). Bounds the v0.28.2 single-agent multi-tool-call vector: when an LLM emits multiple tool calls in one response, tracker would dispatch all of them before `max_turns` checked the cap. With `tool_access: none` set on an agent node, tracker now hands the LLM **zero tools** so the response comes back as plain text. Implementation:
+  - `agent.SessionConfig.ToolAccess` (`string`) — populated from the dippin adapter; canonical case-insensitive, whitespace-trimmed. Any non-empty value disables tools (fail-closed for typos — `noen`, `None`, `off`, `x` all trip the restriction so a lint-skipped misspelling can't ship full tools). Helper: `SessionConfig.IsToolAccessRestricted()`.
+  - `agent.builtInToolsForConfig` returns `nil` when restricted (no built-in tools registered).
+  - `agent.NewSession` clears the tool registry after all options apply — catches `WithTools(...)` bypass. Defense in depth: built-ins gate + post-WithTools clear + executeToolCalls early-exit means three independent paths block dispatch.
+  - `agent.Session.doLLMCall` sets `request.Tools = nil` and `request.ToolChoice = ToolChoiceNone()` so the API itself blocks tool invocation.
+  - `agent.Session.initConversation` swaps the default `"File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative..."` prefix for a tool-free variant when restricted. Scope: only the built-in prefix is scrubbed — a caller-supplied `SessionConfig.SystemPrompt` is still appended verbatim. The registry-empty + ToolChoice=none + dispatch-shortcircuit defenses do NOT depend on the prompt scrub; the scrub is defense-in-depth, not load-bearing.
+  - `agent.Session.executeToolCalls` short-circuits when restricted — if the LLM emits tool calls despite `ToolChoice=none` (mock, retry, provider that ignored the signal), zero of them execute. Emits an error event for visibility.
+  - **Params-bypass defense** at `pipeline/handlers/codergen.go`: `applyToolLists` and `applyPermissionMode` early-return when `tool_access` is set, so `allowed_tools`/`disallowed_tools`/`permission_mode=bypassPermissions` Params keys can't re-enable the tools the directive intends to deny.
+  - **Backend compatibility:**
+    - **Native backend** — full honor via `agent.SessionConfig.ToolAccess`.
+    - **claude-code backend** — best-effort enumeration: `applyClaudeCodeToolAccess` populates `DisallowedTools` with the canonical Claude Code tool names (`Bash`, `Edit`, `Glob`, `Grep`, `NotebookEdit`, `Read`, `Task`, `TodoWrite`, `WebFetch`, `WebSearch`, `Write`) so the CLI denies the surface.
+    - **ACP backend** — refuses session creation with a clear error pointing to #258. ACP's deny-equivalent spelling hasn't been verified against each upstream agent (claude-code-acp, codex-acp, gemini); per the spec's "fallback unsupported → refuse" rule, refusing is safer than shipping a soft-no that silently allows execution.
+  - **Tests** (`agent/tool_access_test.go`, `pipeline/handlers/tool_access_test.go`):
+    - `TestSessionToolAccess_RedTeamMultiToolCall` — the dispositive v0.28.2 test. Mock LLM returns a single response containing three tool calls (`bash`, `write`, `bash`). Assert: zero tool executions, `result.TotalToolCalls() == 0`, request had no tools, `ToolChoice.Mode == "none"`.
+    - `TestSessionToolAccess_RestrictedRegistry_EmptyAfterWithTools` — registry is empty even when `WithTools(read, write, bash)` is called.
+    - `TestSessionToolAccess_FailClosedOnTypo` — `noen`, `None`, `  none  `, `NONE`, `off`, `x` all disable tools.
+    - `TestSessionToolAccess_EmptyMeansUnrestricted` — empty string leaves tools registered normally.
+    - `TestSessionToolAccess_SystemPromptScrub` — assembled system prompt contains no standalone case-insensitive `read`/`write`/`edit`/`glob`/`grep_search`/`bash`/`apply_patch` for the built-in prefix path (i.e. when SystemPrompt is either empty or doesn't name tools itself).
+    - `TestApplyToolLists_BypassDefense` + `TestApplyPermissionMode_BypassDefense` — Params keys ignored under `tool_access: none`.
+    - `TestApplyClaudeCodeToolAccess` — DisallowedTools populated with canonical names.
+    - `TestACPBackend_RefusesToolAccess` — ACP returns error referencing #258 and the directive value.
+  - **Joint-release coordination:** this lands on tracker `main` but is **not** tagged. The dippin-lang #41 PR will bump `go.mod` to the new tracker tag, then tag dippin v0.32.0 immediately after. No advisory window — the dippin field doesn't ship in a tagged release until tracker enforcement is also tagged.
+
 ### Changed
 
 - **`build_product` workflow: closed Gap 7 from the #233 audit (interface-method reachability)** ([#233](https://github.com/2389-research/tracker/issues/233)). The audit caught three Go interface methods defined and unit-tested but never called from production code: `AuthStatus(ctx) error` (Appendix A I9), `IsRebaseInProgress() bool` (I10), `DiffStat` (similar shape). Tests passed because the same agent wrote impl and tests; the workflow had no check that defined interface methods have a non-test caller. New mechanism:

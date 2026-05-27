@@ -26,6 +26,13 @@ type AgentRunConfig struct {
 	MaxTurns     int
 	Timeout      time.Duration
 	Extra        any // backend-specific: *ClaudeCodeConfig for claude-code backend
+
+	// ToolAccess restricts the agent's tool surface. When non-empty, every
+	// backend must enforce: native via agent.SessionConfig.IsToolAccessRestricted;
+	// claude-code via the DisallowedTools list set by applyClaudeCodeToolAccess;
+	// ACP refuses session creation (no verified deny-equivalent — see
+	// backend_acp.go for the refusal site). Issue: github.com/2389-research/tracker#258.
+	ToolAccess string
 }
 
 // ClaudeCodeConfig holds Claude-Code-specific settings.

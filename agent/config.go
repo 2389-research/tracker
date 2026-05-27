@@ -5,6 +5,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -76,6 +77,39 @@ type SessionConfig struct {
 	// loop and keeps that plan in conversation context for subsequent turns.
 	// Default: false.
 	PlanBeforeExecute bool
+
+	// ToolAccess restricts the agent's tool surface. When non-empty (any value),
+	// the session registers zero tools, sets ToolChoice=none on LLM requests,
+	// scrubs the built-in tool-naming prefix from the system prompt, and rejects
+	// Params bypass keys (allowed_tools, disallowed_tools, permission_mode).
+	//
+	// Defends the v0.28.2 single-agent multi-tool-call vector: an LLM emitting
+	// multiple tool calls in one response cannot execute any of them because
+	// the registry is empty by construction.
+	//
+	// Canonical: case-insensitive, whitespace-trimmed. Only recognized spelling
+	// is "none"; any other non-empty value still disables tools (fail-closed for
+	// typos). Default: "" (unrestricted).
+	//
+	// System-prompt scope: tracker only scrubs its own built-in basePrompt
+	// (which names "read", "write", etc. for path-relative semantics). A
+	// caller-supplied SystemPrompt is appended verbatim — if it names tools,
+	// the assembled prompt will still contain those tokens. The registry +
+	// ToolChoice + dispatch-shortcircuit defenses do not depend on the prompt
+	// scrub; the scrub is defense-in-depth against the LLM noticing tool
+	// affordances. Callers who need a fully scrubbed assembled prompt should
+	// audit their own SystemPrompt under restriction.
+	//
+	// Issue: github.com/2389-research/tracker#258.
+	ToolAccess string
+}
+
+// IsToolAccessRestricted reports whether ToolAccess is set to any non-empty
+// canonical value. Used by the session to gate tool registration, ToolChoice,
+// and system-prompt assembly. Fail-closed: any non-empty value (including
+// typos) returns true.
+func (c SessionConfig) IsToolAccessRestricted() bool {
+	return strings.TrimSpace(c.ToolAccess) != ""
 }
 
 // Checkpoint defines a message to inject at a specific turn-budget fraction.

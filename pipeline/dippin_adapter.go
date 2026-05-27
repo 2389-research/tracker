@@ -370,6 +370,9 @@ func extractAgentOutputAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 //   - disallowed_tools→ attrs["disallowed_tools"]  (comma-separated tool names)
 //   - max_budget_usd  → attrs["max_budget_usd"]    (float string, e.g. "1.50")
 //   - permission_mode → attrs["permission_mode"]   (plan|acceptEdits|bypassPermissions)
+//   - tool_access     → attrs["tool_access"]       ("none" to disable tools entirely;
+//     any non-empty value is fail-closed —
+//     see issue #258 and dippin-lang#41)
 //
 // Unrecognized keys are silently ignored.
 // A nil or empty params map is a no-op.
@@ -382,6 +385,7 @@ func extractAgentBackendAttrs(params map[string]string, attrs map[string]string)
 		"disallowed_tools",
 		"max_budget_usd",
 		"permission_mode",
+		"tool_access",
 	}
 	for _, k := range keys {
 		if v, ok := params[k]; ok && v != "" {

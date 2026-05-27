@@ -135,6 +135,18 @@ func NewACPBackend() *ACPBackend {
 // prompt, and collects results. The agent binary is selected based on the
 // provider in cfg or the ACPConfig.Agent override.
 func (b *ACPBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
+	// tool_access enforcement (issue #258): the ACP backend has no verified
+	// deny-equivalent for the directive — the protocol exposes session
+	// permissions but tracker has not yet audited the spelling against the
+	// upstream ACP agents (claude-code-acp, codex-acp, gemini). Per the
+	// spec's "fallback unsupported → refuse" rule, refuse session creation
+	// with a clear error rather than ship a soft-no that silently allows
+	// tool execution. Lifting this requires a follow-up that pins ACP's
+	// session.permission_modes (or equivalent) against each known agent.
+	if strings.TrimSpace(cfg.ToolAccess) != "" {
+		return agent.SessionResult{}, fmt.Errorf("acp backend cannot enforce tool_access=%q yet — see github.com/2389-research/tracker#258 (use the native backend, or open a follow-up issue once the ACP deny-equivalent is verified for your agent)", cfg.ToolAccess)
+	}
+
 	agentName := b.resolveAgentName(cfg)
 
 	agentPath, err := b.ensureAgentPath(agentName)

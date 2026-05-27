@@ -21,9 +21,25 @@ const (
 // context is honored by the localization pre-processing phase so cancellation
 // or deadlines abort the pre-turn filesystem scan.
 func (s *Session) initConversation(ctx context.Context, userInput string) {
+	// tool_access enforcement (issue #258): when restricted, swap the
+	// built-in basePrompt for a tool-free variant. The default basePrompt
+	// names read/write/edit/glob/grep_search/bash explicitly to disambiguate
+	// path semantics — under tool_access restriction the agent has no tools
+	// so the disambiguation is irrelevant and the prompt would only tell the
+	// LLM what tools to ask for.
+	//
+	// Note: this scrub applies ONLY to the built-in prefix. If the caller
+	// also supplies SessionConfig.SystemPrompt that names tools, those names
+	// are still appended verbatim below. The registry-empty + ToolChoice=none
+	// + dispatch-shortcircuit defenses do NOT depend on the prompt scrub;
+	// the scrub is defense-in-depth, not the load-bearing check.
 	basePrompt := "File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative to the working directory. " +
 		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\". " +
 		"Bash commands may use absolute paths when needed."
+	if s.config.IsToolAccessRestricted() {
+		basePrompt = "Respond to the user with plain text only; do not attempt to invoke any tool. " +
+			"No tools are available for this session."
+	}
 	if s.config.SystemPrompt != "" {
 		s.messages = append(s.messages, llm.SystemMessage(basePrompt+"\n\n"+s.config.SystemPrompt))
 	} else {
@@ -125,6 +141,23 @@ func (s *Session) doLLMCall(ctx context.Context, turn int) (*llm.Response, error
 				s.emitLLMTraceEvent(turn, traceEvt)
 			}),
 		},
+	}
+
+	// tool_access enforcement (issue #258): zero out the tool surface in
+	// the outbound request and signal ToolChoice=none. The registry is
+	// already empty under restriction (cleared in NewSession), so Tools is
+	// nil already; setting it explicitly is defensive.
+	//
+	// Wire encoding of ToolChoice=none varies by provider:
+	//   - Anthropic: translator omits `tool_choice` entirely (an empty
+	//     tool surface alone tells the API not to call any tool).
+	//   - OpenAI:    `tool_choice: "none"`.
+	//   - Gemini:    no tool-config field → no tool calls.
+	// All three converge on the same observable behavior (no tool calls).
+	if s.config.IsToolAccessRestricted() {
+		req.Tools = nil
+		none := llm.ToolChoiceNone()
+		req.ToolChoice = &none
 	}
 
 	s.emit(Event{
@@ -274,6 +307,20 @@ func (s *Session) computeToolSignature(toolCalls []llm.ToolCallData) string {
 // step" (e.g., a model emitting `[dispatch_sprints, write_summary_doc]`
 // shouldn't run write_summary_doc once dispatch_sprints succeeded).
 func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) (hadErrors, terminate bool) {
+	// tool_access enforcement (issue #258): when restricted, the LLM was
+	// instructed via ToolChoice=none not to emit tool calls. If it did
+	// anyway (mock, retry of stale state, provider that ignored the
+	// signal), skip dispatch entirely — zero executions, zero counts. The
+	// session loop continues without appending tool-result messages, and
+	// the next LLM turn proceeds without prior tool context.
+	if s.config.IsToolAccessRestricted() {
+		s.emit(Event{
+			Type:      EventError,
+			SessionID: s.id,
+			Err:       fmt.Errorf("tool_access restricted: dropped %d tool call(s) emitted by the LLM despite ToolChoice=none", len(toolCalls)),
+		})
+		return false, false
+	}
 	var toolResults []llm.ContentPart
 	for _, call := range toolCalls {
 		toolResult, toolDuration := s.executeSingleTool(ctx, call)
