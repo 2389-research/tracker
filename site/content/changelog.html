@@ -29,6 +29,9 @@ jsonld:
 
   <nav class="page-toc" aria-label="Versions">
     <strong>Jump to:</strong>
+    <a href="#v0-32-0">v0.32.0</a>
+    <a href="#v0-31-0">v0.31.0</a>
+    <a href="#v0-30-0">v0.30.0</a>
     <a href="#v0-29-2">v0.29.2</a>
     <a href="#v0-29-1">v0.29.1</a>
     <a href="#v0-29-0">v0.29.0</a>
@@ -61,6 +64,57 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.32.0 ═══ -->
+  <section class="glass" id="v0-32-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.32.0" style="color: inherit; text-decoration: none;">v0.32.0</a></h2>
+      <span class="badge">2026-05-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.32.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Joint-release closeout for <a href="https://github.com/2389-research/tracker/issues/258">#258</a> / <a href="https://github.com/2389-research/dippin-lang/issues/41">dippin-lang#41</a>. v0.31.0 shipped with a transient pseudo-version pin pointing at the dippin-lang#41 merge SHA because dippin v0.32.0 didn't exist yet when tracker was tagged. dippin v0.32.0 (whose go.mod pins tracker v0.31.0) is now published, so tracker v0.32.0 swaps the SHA for the tag. <strong>No functional changes vs v0.31.0</strong> — the underlying dippin code is byte-identical. Joint-release loop closed: tracker v0.32.0 ↔ dippin v0.32.0 mutually pinned, both tags published.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang dependency bumped to v0.32.0 tag</strong> (<a href="https://github.com/2389-research/tracker/pull/261">#261</a>). <code>go.mod</code> swaps the joint-release-window pseudo-version (<code>v0.31.1-0.20260526211025-53c24f13a4d0</code>) for the published <code>v0.32.0</code> tag. <code>PinnedDippinVersion</code> in <code>tracker_doctor.go</code> updated in lockstep. The window-godoc paragraph explaining the transient pin was removed since the swap is now complete.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.31.0 ═══ -->
+  <section class="glass" id="v0-31-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.31.0" style="color: inherit; text-decoration: none;">v0.31.0</a></h2>
+      <span class="badge">2026-05-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.31.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Two more <code>build_product</code> audit gaps closed plus new <code>tool_access</code> runtime enforcement bounding the v0.28.2 single-agent multi-tool-call vector. <strong>Seven of the eight <a href="https://github.com/2389-research/tracker/issues/233">#233</a> audit gaps now closed</strong> (1, 2, 3, 4, 6, 7, 8); only Gap 5 (engine-level <code>auto_status</code> audit + <code>OutcomeHumanOverride</code> + post-<code>ApplyReviewFixes</code> re-check) remains as a follow-up.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tool_access: none</code> runtime enforcement on agent nodes</strong> (<a href="https://github.com/2389-research/tracker/issues/258">#258</a>, joint with <a href="https://github.com/2389-research/dippin-lang/issues/41">dippin-lang#41</a>). Bounds the v0.28.2 single-agent multi-tool-call vector: an LLM emitting <code>[bash(...), write(...), bash(...)]</code> in one response would otherwise dispatch all of them before <code>max_turns</code> checks the cap. With <code>tool_access: none</code> set on an agent node, tracker hands the LLM <strong>zero tools</strong> so the response comes back as plain text. Defense in depth: built-in registry gate + post-<code>WithTools</code> registry clear in <code>NewSession</code> + <code>request.ToolChoice = ToolChoiceNone()</code> + <code>executeToolCalls</code> early-exit + Params-bypass defense (<code>allowed_tools</code> / <code>disallowed_tools</code> / <code>permission_mode</code> ignored when <code>tool_access</code> is set). Backend coverage: native full honor; claude-code best-effort via <code>--disallowedTools</code> enumeration; ACP refuses session creation with a clear error pointing to <a href="https://github.com/2389-research/tracker/issues/258">#258</a> (no verified deny-equivalent yet). Fail-closed for typos — <code>noen</code> / <code>None</code> / <code>off</code> all disable tools so a misspelling can't ship full tools.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>build_product</code> Gap 7 — interface-method reachability</strong> (<a href="https://github.com/2389-research/tracker/pull/254">#254</a>). <code>FinalSpecCheck</code> now enforces that every interface method defined in the codebase has a non-test production caller, with shown-work grep evidence. <code>Setup</code> writes <code>.ai/build/iface-reachability-rubric.md</code> (language detection + per-language enumeration patterns + caller-discipline rules + stdlib carve-out principle + waiver discipline + known-limitation skips) and the prompt + three reviewers reference it so the discipline lives in one place. The prompt opens with an inverted STATUS contract — <code>STATUS:fail</code> as the FIRST line, <code>STATUS:success</code> as the LAST line only on full pass — so a truncated response fails closed under last-line-wins parsing, defending against the <code>parseAutoStatus</code> default-success-on-empty shape that was the original Gap 7 bug. Reviewer rubric point 2 strengthened from 3-line prose to 9-line shown-work-grep requirement matching point 1's standard.</li>
+      <li><strong><code>build_product</code> Gap 8 — test-quality smells</strong> (<a href="https://github.com/2389-research/tracker/pull/257">#257</a>). <code>FinalSpecCheck</code> adds a sleep-as-fence section restricted to tracked test files via <code>git grep</code> (so dependency dirs like <code>node_modules/</code>, <code>vendor/</code>, <code>.venv/</code>, <code>target/</code> are excluded by construction); each hit needs disposition — cite a SPEC.md timing-contract section, OR cite a deterministic primitive that replaced the sleep, OR a <code>.ai/decisions/</code> waiver naming the specific test. Reviewer rubric point 3 strengthened across all three reviewers: Gemini's "stdlib-only tests FAIL" sentence promoted to ReviewClaude and ReviewCodex (covers W5 wrong-target), plus shown-work demands for zero-assertion test bodies (W4) and DI bypass when a Clock/Random/IO seam exists (W13). The legacy STATUS tail at <code>FinalSpecCheck</code> was rewritten to align with PR #254's inverted contract. W21 (Go subtest case-fold collision) is explicit non-goal — golangci-lint territory.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.30.0 ═══ -->
+  <section class="glass" id="v0-30-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.30.0" style="color: inherit; text-decoration: none;">v0.30.0</a></h2>
+      <span class="badge">2026-05-19</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.30.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;"><strong><code>build_product</code> workflow hardened against five of the eight failure modes the <a href="https://github.com/2389-research/tracker/issues/233">#233</a> audit uncovered.</strong> The audit ran <code>build_product</code> end-to-end on a real Phase 1 spec and found 38 issues the workflow declared "Done" on — wrong API shape, off-by-one retries, red CI, dead interface methods, Phase-6 features built in Phase 1 with green tests pinning the bug. Five gaps closed in this release; three (Gap 5 <code>auto_status</code> engine audit, Gap 7 interface reachability, Gap 8 <code>TestQuality</code> step) remain.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>build_product</code> Gap 1 — project CI gate</strong> (<a href="https://github.com/2389-research/tracker/pull/246">#246</a>). <code>TestMilestone</code> + <code>FinalBuild</code> now probe for a project <code>Makefile</code> and run the first defined target out of <code>ci</code> / <code>check</code> / <code>lint</code> (parsed via sed+awk that handles multi-target rules and rejects variable assignments); a missing <code>make</code> binary fails loud instead of silently skipping. The probe lives in a shared <code>.ai/build/ci-probe.sh</code> written by <code>Setup</code>, sourced by both nodes — round-5 review found the awk had silently drifted between the two pre-shared-file copies; this prevents that class of bug.</li>
+      <li><strong><code>build_product</code> Gaps 3 + 6 — spec-literal anchoring + DO NOT list</strong> (<a href="https://github.com/2389-research/tracker/pull/246">#246</a>). <code>Implement</code> carries explicit "spec literals are contracts" + "tests verify the contract, not your code" + "snapshot tests must be hand-verified" rules. <code>Decompose</code> now produces a per-milestone "DO NOT implement" list (Phase 2+ scope) so deferred-phase affordances stay inert — green tests on Phase-6 features built in Phase 1 was a top-5 audit finding.</li>
+      <li><strong><code>build_product</code> Gap 2 — cross-reviewer rubric overhaul</strong> (<a href="https://github.com/2389-research/tracker/pull/249">#249</a>). The three cross-reviewers (<code>ReviewClaude</code>, <code>ReviewCodex</code>, <code>ReviewGemini</code>) now share a 5-point structured rubric (spec literals grep, interface reachability, test-verifies-contract, scope, architecture); each carries a "do not trust spec ✅ markers" warning; <code>ReviewGemini</code> is now explicitly adversarial ("faithful and high-quality realization" is a forbidden phrase); <code>SynthesizeReviews</code> weights findings by evidence not vote count, so a single reviewer with grep / file:line evidence flips <code>STATUS:fail</code> over two evidence-free PASSes. Synthesis missed ~33 of 38 real audit findings pre-#249.</li>
+      <li><strong><code>build_product</code> Gap 4 — <code>VerifyMilestone</code> reads SPEC.md</strong> (<a href="https://github.com/2389-research/tracker/pull/249">#249</a>). <code>VerifyMilestone</code> now reads <code>SPEC.md</code> directly (not just the milestone notes), runs spec-literal greps inline (with a <code>.ai/decisions/</code> documented-deviation carve-out matching Implement's contract), applies the test-asserts-contract check, and confirms tests + CI passed via the <code>tests-pass</code> sentinel rather than scanning for visible test output (which the 64KB stdout tail-cap routinely elides).</li>
+      <li><strong>dippin-lang dependency bumped v0.27.0 → v0.29.0</strong> across two passthrough PRs (<a href="https://github.com/2389-research/tracker/pull/248">#248</a>, <a href="https://github.com/2389-research/tracker/pull/250">#250</a>). <code>ir.ToolConfig</code> gains <code>MarkerGrep</code> / <code>RouteRequired</code> / <code>OutputLimit</code> / <code>Outputs</code> adapter forwarding; dippin-side polish lands lint suppression on <code>marker_grep</code> tools (DIP138), <code>parseBoolAttr</code> normalization (<code>yes</code> / <code>1</code> / <code>TRUE</code> now parse correctly on <code>goal_gate</code> / <code>auto_status</code> / <code>cache_tools</code> / <code>route_required</code>), and <code>Outputs</code> DOT round-trip parity.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.29.2 ═══ -->
   <section class="glass" id="v0-29-2" style="border-left: 3px solid var(--orange-600);">
