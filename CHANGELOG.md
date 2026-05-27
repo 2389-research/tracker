@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-05-27
+
+### Changed
+
+- **`dippin-lang` dependency bumped to v0.32.0 tag** ([#258](https://github.com/2389-research/tracker/issues/258), joint-release follow-up). v0.31.0 shipped with a transient pseudo-version pin (`v0.31.1-0.20260526211025-53c24f13a4d0`, the dippin-lang#41 merge SHA) during the joint-release window — at the time tracker v0.31.0 was tagged, dippin v0.32.0 didn't exist yet, but tracker's `tool_access: none` enforcement code depended on the `tool_access` IR field from that unreleased dippin work. With dippin v0.32.0 now tagged, this release swaps the SHA pin for the proper tag and updates `PinnedDippinVersion` in `tracker_doctor.go`. No functional changes vs v0.31.0; the `tool_access` enforcement behavior is identical because the underlying dippin code is identical (the pseudo-version pointed at the same commit that became the v0.32.0 tag). This release closes the joint-release coordination loop: tracker v0.32.0's go.mod pins dippin v0.32.0; dippin v0.32.0's go.mod pins tracker v0.31.0; both tags are now mutually pinned and published.
+
 ## [0.31.0] - 2026-05-27
 
 ### Added
