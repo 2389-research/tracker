@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Collapsed `workflows/` mirror into `examples/` via explicit-file `go:embed`** ([#256](https://github.com/2389-research/tracker/issues/256)). The repo previously kept four byte-identical copies of the built-in workflow .dip files under `workflows/` and `examples/`, synchronized by a Makefile target (`make sync-workflows` / `make check-workflows`), a pre-commit gate, and a CI step. This drifted three times despite the guardrails. The `//go:embed workflows/*.dip` glob is replaced with four explicit `//go:embed examples/<name>.dip` lines pointing directly at the canonical copies. The `workflows/` directory and all four sync-infrastructure pieces (Makefile targets, pre-commit gate #9, CI `Embedded workflows in sync` step) are deleted. `WorkflowInfo.File` (library API) now reports paths with the `examples/` prefix instead of `workflows/` — the only externally visible delta. No functional change for CLI users: `tracker workflows`, `tracker init`, and bare-name resolution behave identically. Closes [#256](https://github.com/2389-research/tracker/issues/256).
+
 ## [0.33.0] - 2026-05-27
 
 ### Changed

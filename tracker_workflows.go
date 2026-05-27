@@ -15,13 +15,16 @@ import (
 	"sync"
 )
 
-//go:embed workflows/*.dip
+//go:embed examples/ask_and_execute.dip
+//go:embed examples/build_product.dip
+//go:embed examples/build_product_with_superspec.dip
+//go:embed examples/deep_review.dip
 var embeddedWorkflows embed.FS
 
 // WorkflowInfo describes a built-in workflow embedded in the tracker binary.
 type WorkflowInfo struct {
 	Name        string   // bare name used for lookup, e.g. "build_product"
-	File        string   // path within the embedded FS, e.g. "workflows/build_product.dip"
+	File        string   // path within the embedded FS, e.g. "examples/build_product.dip"
 	DisplayName string   // workflow declaration name, e.g. "BuildProduct"
 	Goal        string   // parsed from the goal: field at the top of the .dip file
 	Requires    []string // parsed from the `requires:` field (v0.29.0); nil if not declared
@@ -38,7 +41,7 @@ func loadWorkflowCatalog() {
 		catalogMap = make(map[string]WorkflowInfo)
 
 		// Embedded FS should never fail; return empty catalog on error.
-		entries, err := fs.ReadDir(embeddedWorkflows, "workflows")
+		entries, err := fs.ReadDir(embeddedWorkflows, "examples")
 		if err != nil {
 			return
 		}
@@ -46,7 +49,7 @@ func loadWorkflowCatalog() {
 			if entry.IsDir() || filepath.Ext(entry.Name()) != ".dip" {
 				continue
 			}
-			file := "workflows/" + entry.Name()
+			file := "examples/" + entry.Name()
 			name := strings.TrimSuffix(entry.Name(), ".dip")
 			displayName, goal, requires := parseWorkflowHeader(file)
 
