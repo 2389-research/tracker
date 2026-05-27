@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-05-27
+
 ### Added
 
 - **`tool_access: none` runtime enforcement on agent nodes** ([#258](https://github.com/2389-research/tracker/issues/258), joint with [dippin-lang#41](https://github.com/2389-research/dippin-lang/issues/41)). Bounds the v0.28.2 single-agent multi-tool-call vector: when an LLM emits multiple tool calls in one response, tracker would dispatch all of them before `max_turns` checked the cap. With `tool_access: none` set on an agent node, tracker now hands the LLM **zero tools** so the response comes back as plain text. Implementation:
