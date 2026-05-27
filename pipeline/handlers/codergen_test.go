@@ -1269,3 +1269,123 @@ func TestParseAutoStatus_V3FailFirstContract(t *testing.T) {
 		})
 	}
 }
+
+// TestParseAutoStatus_Gap5_1_AuditedShapes covers the LLM-emitted STATUS-line
+// variations the original #233 audit named as parser misses:
+// `**STATUS: fail**` (markdown bold) and `STATUS: FAIL` (uppercase value).
+// Plus adjacent shapes that exercise the same parsing seams: italic, value-
+// only bold, leading/trailing whitespace, mid-response position.
+//
+// Discipline: these tests MUST go RED before they go GREEN if the parser
+// is changing semantics. Tests that go GREEN on first run document existing
+// behavior — flagged inline.
+//
+// Locked semantics from TestParseAutoStatus_V3FailFirstContract that this
+// test must NOT break: (a) last-line-wins, (b) default success on no STATUS.
+//
+// Issue: github.com/2389-research/tracker#233 Gap 5.1.
+func TestParseAutoStatus_Gap5_1_AuditedShapes(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		expect string
+		note   string
+	}{
+		// --- The two shapes the audit named ---
+		{
+			name:   "bold full-line: **STATUS: fail**",
+			input:  "**STATUS: fail**",
+			expect: pipeline.OutcomeFail,
+			note:   "RED→GREEN: parser pre-Gap-5.1 rejects because HasPrefix('**STATUS:', 'STATUS:') is false. Audit-named regression.",
+		},
+		{
+			name:   "uppercase value: STATUS: FAIL",
+			input:  "STATUS: FAIL",
+			expect: pipeline.OutcomeFail,
+			note:   "GREEN-on-first-run: parser already lowercases the value via strings.ToLower — pin existing behavior. Audit's uppercase claim may have predated the lower-case normalization.",
+		},
+
+		// --- Variations on the bold shape (incidental coverage from same fix) ---
+		{
+			name:   "bold no space: **STATUS:fail**",
+			input:  "**STATUS:fail**",
+			expect: pipeline.OutcomeFail,
+			note:   "RED→GREEN: same surrounding-emphasis miss as audit-named case.",
+		},
+		{
+			name:   "italic full-line: *STATUS: fail*",
+			input:  "*STATUS: fail*",
+			expect: pipeline.OutcomeFail,
+			note:   "RED→GREEN: same shape as bold; LLMs sometimes italicize for emphasis instead.",
+		},
+		{
+			name:   "bold value only: STATUS: **fail**",
+			input:  "STATUS: **fail**",
+			expect: pipeline.OutcomeFail,
+			note:   "RED→GREEN: prefix matches, but value 'fail' is wrapped in '**' so the switch falls through.",
+		},
+		{
+			name:   "bold success: **STATUS: success**",
+			input:  "**STATUS: success**",
+			expect: pipeline.OutcomeSuccess,
+			note:   "RED→GREEN: success value via the same emphasis shape (verifies the fix isn't fail-specific).",
+		},
+
+		// --- Position + whitespace variants (mostly GREEN-on-first-run) ---
+		{
+			name: "mid-response bold STATUS line surrounded by prose",
+			input: "I have completed the enumeration.\n" +
+				"Several interface methods lack production callers.\n" +
+				"**STATUS: fail**\n" +
+				"Recommend escalating to human review.",
+			expect: pipeline.OutcomeFail,
+			note:   "RED→GREEN: parser scans every non-fenced line so position is fine, but bold formatting still trips the prefix check.",
+		},
+		{
+			name:   "trailing whitespace: STATUS:fail   ",
+			input:  "STATUS:fail   ",
+			expect: pipeline.OutcomeFail,
+			note:   "GREEN-on-first-run: parseStatusLine trims the value via strings.TrimSpace — pin existing behavior.",
+		},
+		{
+			name:   "leading whitespace on line: '   STATUS:fail'",
+			input:  "   STATUS:fail",
+			expect: pipeline.OutcomeFail,
+			note:   "GREEN-on-first-run: parseAutoStatus trims each line before parseStatusLine — pin existing behavior.",
+		},
+
+		// --- Last-wins invariant must survive the emphasis-handling change ---
+		{
+			name: "last-wins still holds with bold mid-response",
+			input: "**STATUS: fail**\n" +
+				"... agent recovers and continues ...\n" +
+				"STATUS:success",
+			expect: pipeline.OutcomeSuccess,
+			note:   "Locked semantics: last-line-wins. The bold fail mid-response must not override a clean terminal success.",
+		},
+		{
+			name: "last-wins with bold terminal",
+			input: "STATUS:fail\n" +
+				"... checks ran ...\n" +
+				"**STATUS: success**",
+			expect: pipeline.OutcomeSuccess,
+			note:   "RED→GREEN: terminal bold success must override the early plain fail (Gap 7 inverted-contract case wearing bold).",
+		},
+
+		// --- Edge cases that should stay misses (NOT a regression to fix) ---
+		{
+			name:   "code-fence-wrapped bold STATUS stays ignored",
+			input:  "```text\n**STATUS: success**\n```",
+			expect: pipeline.OutcomeSuccess,
+			note:   "Behavior pinned: lines inside ``` fences are skipped regardless of emphasis. The default-success on no-STATUS-found rule applies. Locked from TestParseAutoStatus_V3FailFirstContract.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseAutoStatus(tc.input)
+			if got != tc.expect {
+				t.Errorf("parseAutoStatus(%q) = %q; want %q\n  note: %s", tc.input, got, tc.expect, tc.note)
+			}
+		})
+	}
+}
