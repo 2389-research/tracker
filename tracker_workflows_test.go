@@ -19,8 +19,8 @@ func TestWorkflows_ReturnsBuiltIns(t *testing.T) {
 		if wf.File == "" {
 			t.Errorf("workflow %+v has empty File", wf)
 		}
-		if !strings.HasPrefix(wf.File, "workflows/") {
-			t.Errorf("workflow %q File %q does not start with 'workflows/'", wf.Name, wf.File)
+		if !strings.HasPrefix(wf.File, "examples/") {
+			t.Errorf("workflow %q File %q does not start with 'examples/'", wf.Name, wf.File)
 		}
 		if !strings.HasSuffix(wf.File, ".dip") {
 			t.Errorf("workflow %q File %q does not end with .dip", wf.Name, wf.File)

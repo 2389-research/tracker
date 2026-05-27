@@ -49,9 +49,6 @@ jobs:
       - name: Dippin doctor
         run: make doctor
 
-      - name: Embedded workflows in sync
-        run: make check-workflows
-
       - name: Verify tracker binary
         run: ./bin/tracker --help
 
