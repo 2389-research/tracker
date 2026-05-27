@@ -1042,6 +1042,38 @@ workflow BuildProduct
 
       Commit fixes with "fix: address cross-review findings"
 
+  tool CheckReviewFixBudget
+    label: "Re-Review Budget Gate"
+    timeout: 5s
+    command:
+      set -eu
+      # Per-build counter that caps the re-review loop after
+      # ApplyReviewFixes. Without this gate, a fix that introduces
+      # zero-assertion / wrong-target / DI-bypass regressions (the
+      # reviewer-layer W4/W5/W13 smells from Gap 8) would never be
+      # re-reviewed before Done — reviewers run pre-fix only and
+      # FinalSpecCheck deliberately scopes to W17 sleep-fence +
+      # iface-reachability + SPEC.md compliance.
+      #
+      # Budget = 1 re-review pass. If the first re-review surfaces
+      # new issues that ApplyReviewFixes can't resolve cleanly,
+      # escalate to a human rather than burn LLM cycles forever.
+      # Closes Gap 5.3 of issue #233.
+      BUDGET_FILE=".ai/build/review_fix_attempts"
+      MAX_ATTEMPTS=1
+      ATTEMPTS=0
+      if [ -f "$BUDGET_FILE" ]; then
+        ATTEMPTS=$(cat "$BUDGET_FILE")
+      fi
+      ATTEMPTS=$((ATTEMPTS + 1))
+      mkdir -p .ai/build
+      echo "$ATTEMPTS" > "$BUDGET_FILE"
+      if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ]; then
+        printf 'budget-exhausted: review-fix loop ran %d times (max %d allowed re-reviews)\n' "$ATTEMPTS" "$MAX_ATTEMPTS"
+        exit 1
+      fi
+      printf 'review-fix budget OK: re-review pass %d of %d\n' "$ATTEMPTS" "$MAX_ATTEMPTS"
+
   # ─── Phase 4: Final Verification ───────────────────────────
 
   tool FinalBuild
@@ -1186,10 +1218,11 @@ workflow BuildProduct
       Also verify:
       - No UNEXPECTED leftover files in .ai/build/ — the workflow
         intentionally writes helpers (ci-probe.sh from PR #246,
-        iface-reachability-rubric.md from PR #254) and reviewers
-        write reports (review-claude.md, review-codex.md,
-        review-gemini.md). Only flag files outside this explicit
-        allowlist.
+        iface-reachability-rubric.md from PR #254), the re-review
+        budget counter (review_fix_attempts from Gap 5.3 of #233),
+        and reviewers write reports (review-claude.md,
+        review-codex.md, review-gemini.md). Only flag files outside
+        this explicit allowlist.
       - No TODO/FIXME/HACK comments added
       - All "throw away" items from the spec were actually removed
       - Tests pass (check ${ctx.tool_stdout})
@@ -1231,6 +1264,22 @@ workflow BuildProduct
       - **accept**: Ship as-is. The findings are acceptable or already addressed.
       - **retry**: Go back to Decompose and re-plan the build from scratch.
       - **abandon**: Kill the pipeline.
+
+  tool ResetReviewBudget
+    label: "Reset Re-Review Budget"
+    timeout: 5s
+    command:
+      # When the human picks "retry" at EscalateReview, the pipeline
+      # restarts at Decompose without going through Cleanup, so the
+      # `.ai/build/review_fix_attempts` counter from the prior build
+      # would otherwise persist. Without this reset, the very first
+      # ApplyReviewFixes of the retry build would read the stale
+      # counter (already 1), increment to 2, exceed MAX_ATTEMPTS=1,
+      # and immediately escalate again — the retry would never get
+      # the one allowed re-review pass. Flagged by Codex P2 and
+      # Copilot on PR #264.
+      rm -f .ai/build/review_fix_attempts
+      printf 'review-fix budget reset for retry'
 
   tool Cleanup
     label: "Clean Build Artifacts"
@@ -1295,7 +1344,19 @@ workflow BuildProduct
     SynthesizeReviews -> FinalBuild  when ctx.outcome = success
     SynthesizeReviews -> ApplyReviewFixes  when ctx.outcome = fail
     SynthesizeReviews -> EscalateReview
-    ApplyReviewFixes -> FinalBuild
+
+    # Post-fix re-review gate (issue #233 Gap 5.3). ApplyReviewFixes
+    # may introduce W4/W5/W13 regressions (zero-assertion, wrong-target,
+    # DI bypass) that the pre-fix reviewer rubrics already passed; the
+    # downstream FinalSpecCheck deliberately scopes to W17 + iface +
+    # SPEC.md per Gap 8 v5, so without this gate post-fix smells would
+    # reach Done unchecked. CheckReviewFixBudget caps the re-review
+    # loop at MAX_ATTEMPTS=1 — a clean re-review proceeds to FinalBuild
+    # via SynthesizeReviews's existing success edge; an exhausted budget
+    # escalates to a human.
+    ApplyReviewFixes -> CheckReviewFixBudget
+    CheckReviewFixBudget -> ReviewParallel  when ctx.outcome = success  restart: true
+    CheckReviewFixBudget -> EscalateReview  when ctx.outcome = fail
 
     # Final verification
     FinalBuild -> FinalSpecCheck  when ctx.outcome = success
@@ -1307,7 +1368,8 @@ workflow BuildProduct
 
     # Review escalation — human decides for the whole build
     EscalateReview -> Cleanup  label: "accept"
-    EscalateReview -> Decompose  label: "retry"  restart: true
+    EscalateReview -> ResetReviewBudget  label: "retry"
+    ResetReviewBudget -> Decompose  restart: true
     EscalateReview -> Done  label: "abandon"
 
     Cleanup -> FinalCommit
