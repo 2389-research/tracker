@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `agent.builtInToolsForConfig` returns `nil` when restricted (no built-in tools registered).
   - `agent.NewSession` clears the tool registry after all options apply — catches `WithTools(...)` bypass. Defense in depth: built-ins gate + post-WithTools clear + executeToolCalls early-exit means three independent paths block dispatch.
   - `agent.Session.doLLMCall` sets `request.Tools = nil` and `request.ToolChoice = ToolChoiceNone()` so the API itself blocks tool invocation.
-  - `agent.Session.initConversation` swaps the default `"File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative..."` prefix for a tool-free prompt that names no tools at all (system-prompt scrub — no standalone case-insensitive `read`/`write`/`edit`/`glob`/`grep_search`/`bash`/`apply_patch`).
+  - `agent.Session.initConversation` swaps the default `"File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative..."` prefix for a tool-free variant when restricted. Scope: only the built-in prefix is scrubbed — a caller-supplied `SessionConfig.SystemPrompt` is still appended verbatim. The registry-empty + ToolChoice=none + dispatch-shortcircuit defenses do NOT depend on the prompt scrub; the scrub is defense-in-depth, not load-bearing.
   - `agent.Session.executeToolCalls` short-circuits when restricted — if the LLM emits tool calls despite `ToolChoice=none` (mock, retry, provider that ignored the signal), zero of them execute. Emits an error event for visibility.
   - **Params-bypass defense** at `pipeline/handlers/codergen.go`: `applyToolLists` and `applyPermissionMode` early-return when `tool_access` is set, so `allowed_tools`/`disallowed_tools`/`permission_mode=bypassPermissions` Params keys can't re-enable the tools the directive intends to deny.
   - **Backend compatibility:**
@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `TestSessionToolAccess_RestrictedRegistry_EmptyAfterWithTools` — registry is empty even when `WithTools(read, write, bash)` is called.
     - `TestSessionToolAccess_FailClosedOnTypo` — `noen`, `None`, `  none  `, `NONE`, `off`, `x` all disable tools.
     - `TestSessionToolAccess_EmptyMeansUnrestricted` — empty string leaves tools registered normally.
-    - `TestSessionToolAccess_SystemPromptScrub` — assembled system prompt contains no standalone case-insensitive `read`/`write`/`edit`/`glob`/`grep_search`/`bash`/`apply_patch`.
+    - `TestSessionToolAccess_SystemPromptScrub` — assembled system prompt contains no standalone case-insensitive `read`/`write`/`edit`/`glob`/`grep_search`/`bash`/`apply_patch` for the built-in prefix path (i.e. when SystemPrompt is either empty or doesn't name tools itself).
     - `TestApplyToolLists_BypassDefense` + `TestApplyPermissionMode_BypassDefense` — Params keys ignored under `tool_access: none`.
     - `TestApplyClaudeCodeToolAccess` — DisallowedTools populated with canonical names.
     - `TestACPBackend_RefusesToolAccess` — ACP returns error referencing #258 and the directive value.

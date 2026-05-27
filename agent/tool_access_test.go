@@ -187,10 +187,17 @@ func TestSessionToolAccess_EmptyMeansUnrestricted(t *testing.T) {
 	}
 }
 
-// TestSessionToolAccess_SystemPromptScrub confirms the assembled system
-// prompt contains no standalone case-insensitive tool names when ToolAccess
-// is restricted. Defends against the LLM noticing tool affordances even
-// though the API tool list is empty.
+// TestSessionToolAccess_SystemPromptScrub confirms the BUILT-IN prefix of
+// the assembled system prompt contains no standalone case-insensitive tool
+// names when ToolAccess is restricted. Defends against the LLM noticing
+// tool affordances from tracker's own boilerplate.
+//
+// Scope: tracker only scrubs its own built-in prefix. A caller-supplied
+// SessionConfig.SystemPrompt is appended verbatim — if it names tools,
+// they survive into the assembled prompt. The registry-empty + ToolChoice
+// + dispatch-shortcircuit defenses do not depend on the prompt scrub; the
+// scrub is defense-in-depth. This test deliberately uses a SystemPrompt
+// that does NOT name tools so the assertion holds for the built-in path.
 func TestSessionToolAccess_SystemPromptScrub(t *testing.T) {
 	var captured []llm.Request
 	client := &mockCompleter{

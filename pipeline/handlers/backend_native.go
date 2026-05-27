@@ -98,9 +98,20 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 // buildSessionConfig returns the SessionConfig to use for a run.
 // If cfg.Extra carries a pre-built *agent.SessionConfig it is used directly;
 // otherwise a default config is built from the AgentRunConfig fields.
+//
+// tool_access enforcement (issue #258): regardless of whether Extra carries
+// a pre-built SessionConfig or we build fresh, the directive on the
+// AgentRunConfig must end up on the SessionConfig — direct callers (tests,
+// integrators) that construct AgentRunConfig manually would otherwise
+// bypass enforcement because Extra is nil and applyRunConfigOverrides
+// previously dropped the field.
 func (b *NativeBackend) buildSessionConfig(cfg pipeline.AgentRunConfig) agent.SessionConfig {
 	if sc, ok := cfg.Extra.(*agent.SessionConfig); ok && sc != nil {
-		return *sc
+		out := *sc
+		if cfg.ToolAccess != "" && out.ToolAccess == "" {
+			out.ToolAccess = cfg.ToolAccess
+		}
+		return out
 	}
 	return applyRunConfigOverrides(agent.DefaultConfig(), cfg)
 }
@@ -121,6 +132,12 @@ func applyRunConfigOverrides(base agent.SessionConfig, cfg pipeline.AgentRunConf
 	}
 	if cfg.WorkingDir != "" {
 		base.WorkingDir = cfg.WorkingDir
+	}
+	// tool_access enforcement (issue #258): propagate the directive to the
+	// SessionConfig so direct AgentRunConfig callers (not just CodergenHandler)
+	// get the empty-registry / ToolChoice=none defenses.
+	if cfg.ToolAccess != "" {
+		base.ToolAccess = cfg.ToolAccess
 	}
 	return base
 }

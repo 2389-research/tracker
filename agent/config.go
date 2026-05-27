@@ -80,14 +80,27 @@ type SessionConfig struct {
 
 	// ToolAccess restricts the agent's tool surface. When non-empty (any value),
 	// the session registers zero tools, sets ToolChoice=none on LLM requests,
-	// scrubs tool-naming text from the system prompt, and rejects Params bypass
-	// keys (allowed_tools, disallowed_tools, tool_choice, permission_mode).
+	// scrubs the built-in tool-naming prefix from the system prompt, and rejects
+	// Params bypass keys (allowed_tools, disallowed_tools, permission_mode).
+	//
 	// Defends the v0.28.2 single-agent multi-tool-call vector: an LLM emitting
 	// multiple tool calls in one response cannot execute any of them because
-	// the registry is empty by construction. Canonical: case-insensitive,
-	// whitespace-trimmed. Only recognized spelling is "none"; any other
-	// non-empty value still disables tools (fail-closed for typos). Default: ""
-	// (unrestricted). Issue: github.com/2389-research/tracker#258.
+	// the registry is empty by construction.
+	//
+	// Canonical: case-insensitive, whitespace-trimmed. Only recognized spelling
+	// is "none"; any other non-empty value still disables tools (fail-closed for
+	// typos). Default: "" (unrestricted).
+	//
+	// System-prompt scope: tracker only scrubs its own built-in basePrompt
+	// (which names "read", "write", etc. for path-relative semantics). A
+	// caller-supplied SystemPrompt is appended verbatim — if it names tools,
+	// the assembled prompt will still contain those tokens. The registry +
+	// ToolChoice + dispatch-shortcircuit defenses do not depend on the prompt
+	// scrub; the scrub is defense-in-depth against the LLM noticing tool
+	// affordances. Callers who need a fully scrubbed assembled prompt should
+	// audit their own SystemPrompt under restriction.
+	//
+	// Issue: github.com/2389-research/tracker#258.
 	ToolAccess string
 }
 

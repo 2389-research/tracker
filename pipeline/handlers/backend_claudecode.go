@@ -205,11 +205,49 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	}
 
 	ccCfg, _ := cfg.Extra.(*pipeline.ClaudeCodeConfig)
+
+	// tool_access enforcement (issue #258): if a direct caller constructed
+	// AgentRunConfig with cfg.ToolAccess set but no (or only partial)
+	// ClaudeCodeConfig in Extra, synthesize one with the canonical deny
+	// list so the CLI denies the surface. CodergenHandler already populates
+	// this via applyClaudeCodeToolAccess; this branch covers the direct-Run
+	// bypass Codex flagged on PR #259.
+	if strings.TrimSpace(cfg.ToolAccess) != "" {
+		if ccCfg == nil {
+			ccCfg = &pipeline.ClaudeCodeConfig{}
+		}
+		// Override AllowedTools (don't trust caller-provided allowlist when
+		// tool_access is set — that would be the Params-bypass shape).
+		ccCfg.AllowedTools = nil
+		ccCfg.DisallowedTools = canonicalClaudeCodeDenyListCopy()
+	}
+
 	if ccCfg == nil {
 		return args, nil
 	}
 
 	return appendClaudeCodeArgs(args, ccCfg)
+}
+
+// canonicalClaudeCodeDenyListCopy returns a fresh copy of the canonical
+// tool name list used to deny the CLI's tool surface when tool_access is
+// set. Mirrors the list in codergen.go's applyClaudeCodeToolAccess —
+// kept here to avoid exporting that list across the package boundary.
+// Issue: github.com/2389-research/tracker#258.
+func canonicalClaudeCodeDenyListCopy() []string {
+	return []string{
+		"Bash",
+		"Edit",
+		"Glob",
+		"Grep",
+		"NotebookEdit",
+		"Read",
+		"Task",
+		"TodoWrite",
+		"WebFetch",
+		"WebSearch",
+		"Write",
+	}
 }
 
 // appendClaudeCodeArgs appends ClaudeCode-specific flags to args.

@@ -21,12 +21,18 @@ const (
 // context is honored by the localization pre-processing phase so cancellation
 // or deadlines abort the pre-turn filesystem scan.
 func (s *Session) initConversation(ctx context.Context, userInput string) {
-	// tool_access enforcement (issue #258): when restricted, the assembled
-	// system prompt must contain no tool-naming text. The default basePrompt
+	// tool_access enforcement (issue #258): when restricted, swap the
+	// built-in basePrompt for a tool-free variant. The default basePrompt
 	// names read/write/edit/glob/grep_search/bash explicitly to disambiguate
 	// path semantics — under tool_access restriction the agent has no tools
 	// so the disambiguation is irrelevant and the prompt would only tell the
 	// LLM what tools to ask for.
+	//
+	// Note: this scrub applies ONLY to the built-in prefix. If the caller
+	// also supplies SessionConfig.SystemPrompt that names tools, those names
+	// are still appended verbatim below. The registry-empty + ToolChoice=none
+	// + dispatch-shortcircuit defenses do NOT depend on the prompt scrub;
+	// the scrub is defense-in-depth, not the load-bearing check.
 	basePrompt := "File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative to the working directory. " +
 		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\". " +
 		"Bash commands may use absolute paths when needed."
@@ -140,9 +146,14 @@ func (s *Session) doLLMCall(ctx context.Context, turn int) (*llm.Response, error
 	// tool_access enforcement (issue #258): zero out the tool surface in
 	// the outbound request and signal ToolChoice=none. The registry is
 	// already empty under restriction (cleared in NewSession), so Tools is
-	// nil already; setting it explicitly is defensive. ToolChoice=none
-	// translates to the Anthropic `tool_choice: none` and equivalent
-	// signals on other providers.
+	// nil already; setting it explicitly is defensive.
+	//
+	// Wire encoding of ToolChoice=none varies by provider:
+	//   - Anthropic: translator omits `tool_choice` entirely (an empty
+	//     tool surface alone tells the API not to call any tool).
+	//   - OpenAI:    `tool_choice: "none"`.
+	//   - Gemini:    no tool-config field → no tool calls.
+	// All three converge on the same observable behavior (no tool calls).
 	if s.config.IsToolAccessRestricted() {
 		req.Tools = nil
 		none := llm.ToolChoiceNone()
