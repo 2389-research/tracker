@@ -28,8 +28,9 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
-    <a href="#v0-33-0">v0.33.0</a>
+    <a href="#v0-34-0">v0.34.0</a>
     <strong>Jump to:</strong>
+    <a href="#v0-33-0">v0.33.0</a>
     <a href="#v0-32-0">v0.32.0</a>
     <a href="#v0-31-0">v0.31.0</a>
     <a href="#v0-30-0">v0.30.0</a>
@@ -65,6 +66,20 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.34.0 ═══ -->
+  <section class="glass" id="v0-34-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.34.0" style="color: inherit; text-decoration: none;">v0.34.0</a></h2>
+      <span class="badge">2026-05-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.34.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">The <code>workflows/</code> mirror is gone — built-in workflows are now embedded directly from <code>examples/</code> via explicit-file <code>//go:embed</code> lines (<a href="https://github.com/2389-research/tracker/issues/256">#256</a>). <strong>No functional change for CLI users.</strong> The library-API <code>WorkflowInfo.File</code> field now reports paths with the <code>examples/</code> prefix instead of <code>workflows/</code> — the only externally visible delta.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Collapsed <code>workflows/</code> mirror into <code>examples/</code> via explicit-file <code>go:embed</code></strong> (<a href="https://github.com/2389-research/tracker/pull/267">#267</a>). The repo previously kept four byte-identical copies of the built-in workflow <code>.dip</code> files under <code>workflows/</code> and <code>examples/</code>, synchronized by a <code>make sync-workflows</code> / <code>make check-workflows</code> target, a pre-commit gate, and a CI step — guardrails that still let the two copies drift three times. The <code>//go:embed workflows/*.dip</code> glob is replaced with four explicit <code>//go:embed examples/&lt;name&gt;.dip</code> lines pointing directly at the canonical copies. The <code>workflows/</code> directory and all of the sync infrastructure (Makefile targets, pre-commit gate #9, CI <code>Embedded workflows in sync</code> step) are deleted. <code>WorkflowInfo.File</code> (library API) now reports paths with the <code>examples/</code> prefix instead of <code>workflows/</code>; that's the only externally visible delta. ~3,200 lines deleted net.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.33.0 ═══ -->
   <section class="glass" id="v0-33-0" style="border-left: 3px solid var(--orange-600);">
