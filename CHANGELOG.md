@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`parseAutoStatus` tolerates markdown-emphasis on STATUS lines** ([#233](https://github.com/2389-research/tracker/issues/233) Gap 5.1). The original `build_product` audit observed a `FinalSpecCheck` run where the agent emitted `**STATUS: fail**` (bold) and the parser silently fell back to the default `success` because `HasPrefix("**STATUS:", "STATUS:")` returns false. LLMs commonly bold/italicize STATUS lines when they want the verdict to draw the eye — the parser was treating these as no-STATUS-found and the inverted Gap 7 contract was the only thing preventing fail-open on a real bug. Fix: `parseStatusLine` now `strings.Trim`s the line and value with the `"*_"` cutset before the prefix check + switch, so `**STATUS: fail**` / `*STATUS: fail*` / `STATUS: **fail**` / `__STATUS: success__` / etc. all parse correctly. Locked semantics from `TestParseAutoStatus_V3FailFirstContract` are unchanged: last-line-wins + default-success-on-empty. New regression coverage in `TestParseAutoStatus_Gap5_1_AuditedShapes` (11 sub-tests) — six previously RED, now GREEN; five pin existing behavior (uppercase value, whitespace trimming, last-wins under emphasis, code-fence skip). Closes Gap 5.1 of the #233 audit recap. Gap 5.2 (`OutcomeHumanOverride`) and Gap 5.3 (re-run `FinalSpecCheck` after `ApplyReviewFixes`) remain as separate follow-ups.
+
 ## [0.32.0] - 2026-05-27
 
 ### Changed

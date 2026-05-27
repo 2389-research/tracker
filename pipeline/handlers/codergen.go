@@ -732,11 +732,22 @@ func parseAutoStatus(text string) string {
 
 // parseStatusLine extracts the status value from a "STATUS: ..." line.
 // Returns "" if the line is not a valid STATUS directive.
+//
+// Markdown-emphasis tolerance (issue #233 Gap 5.1): LLMs commonly emit
+// `**STATUS: fail**` or `STATUS: **fail**` when they want the directive
+// to draw the eye. strings.Trim with the "*_" cutset strips any
+// combination of leading/trailing markdown emphasis markers (bold `**`,
+// italic `*`, underscore-bold `__`, underscore-italic `_`) from both
+// the full line and the value portion, so the prefix check and value
+// switch see the bare token.
 func parseStatusLine(trimmed string) string {
+	trimmed = strings.Trim(trimmed, "*_")
 	if !strings.HasPrefix(strings.ToUpper(trimmed), "STATUS:") {
 		return ""
 	}
-	switch strings.ToLower(strings.TrimSpace(trimmed[len("STATUS:"):])) {
+	value := strings.TrimSpace(trimmed[len("STATUS:"):])
+	value = strings.Trim(value, "*_")
+	switch strings.ToLower(value) {
 	case "success":
 		return pipeline.OutcomeSuccess
 	case "fail":
