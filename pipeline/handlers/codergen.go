@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -322,8 +323,9 @@ func isNodeToolAccessRestricted(node *pipeline.Node) bool {
 }
 
 // canonicalClaudeCodeToolDenyList is the best-effort enumeration of
-// Claude Code tool names used to populate the CLI's --disallowed-tools
-// when `tool_access: <any>` is set on a node that targets the claude-code
+// Claude Code tool names used to populate the CLI's --disallowedTools
+// flag (see appendToolFlags / buildArgs for the actual invocation) when
+// `tool_access: <any>` is set on a node that targets the claude-code
 // backend. Kept in sync with the names the Claude Code CLI recognizes;
 // a stricter approach (fail backend creation) is taken for backends
 // where we cannot verify the deny spelling — see backend_acp.go.
@@ -353,9 +355,9 @@ func applyClaudeCodeToolAccess(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeCo
 		return
 	}
 	ccCfg.AllowedTools = nil
-	denied := make([]string, len(canonicalClaudeCodeToolDenyList))
-	copy(denied, canonicalClaudeCodeToolDenyList)
-	ccCfg.DisallowedTools = denied
+	// Clone so a downstream mutator on ccCfg.DisallowedTools can't drift
+	// the package-level canonical list.
+	ccCfg.DisallowedTools = slices.Clone(canonicalClaudeCodeToolDenyList)
 }
 
 // parseClaudeCodeBudgetAttrs parses max_budget_usd and permission_mode.

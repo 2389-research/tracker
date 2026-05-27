@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -218,8 +219,10 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 		}
 		// Override AllowedTools (don't trust caller-provided allowlist when
 		// tool_access is set — that would be the Params-bypass shape).
+		// Use slices.Clone so callers can't accidentally mutate the
+		// package-level canonical list via the assigned DisallowedTools.
 		ccCfg.AllowedTools = nil
-		ccCfg.DisallowedTools = canonicalClaudeCodeDenyListCopy()
+		ccCfg.DisallowedTools = slices.Clone(canonicalClaudeCodeToolDenyList)
 	}
 
 	if ccCfg == nil {
@@ -227,27 +230,6 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 	}
 
 	return appendClaudeCodeArgs(args, ccCfg)
-}
-
-// canonicalClaudeCodeDenyListCopy returns a fresh copy of the canonical
-// tool name list used to deny the CLI's tool surface when tool_access is
-// set. Mirrors the list in codergen.go's applyClaudeCodeToolAccess —
-// kept here to avoid exporting that list across the package boundary.
-// Issue: github.com/2389-research/tracker#258.
-func canonicalClaudeCodeDenyListCopy() []string {
-	return []string{
-		"Bash",
-		"Edit",
-		"Glob",
-		"Grep",
-		"NotebookEdit",
-		"Read",
-		"Task",
-		"TodoWrite",
-		"WebFetch",
-		"WebSearch",
-		"Write",
-	}
 }
 
 // appendClaudeCodeArgs appends ClaudeCode-specific flags to args.

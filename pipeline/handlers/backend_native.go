@@ -108,7 +108,13 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 func (b *NativeBackend) buildSessionConfig(cfg pipeline.AgentRunConfig) agent.SessionConfig {
 	if sc, ok := cfg.Extra.(*agent.SessionConfig); ok && sc != nil {
 		out := *sc
-		if cfg.ToolAccess != "" && out.ToolAccess == "" {
+		// Inherit cfg.ToolAccess whenever the pre-built SessionConfig
+		// is not already restricted under the canonical (whitespace-
+		// trimmed) check. Using `out.ToolAccess == ""` alone would
+		// treat a whitespace-only value like " " as "set" — but
+		// IsToolAccessRestricted considers it unrestricted, so the
+		// AgentRunConfig directive should override.
+		if cfg.ToolAccess != "" && !out.IsToolAccessRestricted() {
 			out.ToolAccess = cfg.ToolAccess
 		}
 		return out
