@@ -21,9 +21,14 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// PinnedDippinVersion is the dippin-lang version from go.mod.
-// Keep in sync with the require line in go.mod.
-const PinnedDippinVersion = "v0.29.0"
+// PinnedDippinVersion is the dippin-lang version from go.mod. Kept in sync
+// with go.mod by TestPinnedDippinVersionMatchesGoMod.
+//
+// During the joint tracker #258 + dippin-lang #41 release window this is a
+// pseudo-version pinned to the dippin merge SHA. After dippin tags v0.32.0
+// this swaps to "v0.32.0" in a follow-up commit (see github.com/2389-research/tracker#258
+// for the coordination plan).
+const PinnedDippinVersion = "v0.31.1-0.20260526211025-53c24f13a4d0"
 
 // DoctorConfig configures a Doctor() run.
 type DoctorConfig struct {
