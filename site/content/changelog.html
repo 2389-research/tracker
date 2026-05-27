@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-33-0">v0.33.0</a>
     <strong>Jump to:</strong>
     <a href="#v0-32-0">v0.32.0</a>
     <a href="#v0-31-0">v0.31.0</a>
@@ -64,6 +65,21 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.33.0 ═══ -->
+  <section class="glass" id="v0-33-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.33.0" style="color: inherit; text-decoration: none;">v0.33.0</a></h2>
+      <span class="badge">2026-05-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.33.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">The last two visible <code>build_product</code> audit gaps from <a href="https://github.com/2389-research/tracker/issues/233">#233</a> close. <strong>The eight-gap audit thread is now down to a single design-scope follow-up</strong> — Gap 5.2 (<code>OutcomeHumanOverride</code>), tracked separately because <code>pipeline.Outcome</code> has wide blast radius across every consumer.</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Gap 5.1 — <code>parseAutoStatus</code> tolerates markdown-emphasis on STATUS lines</strong> (<a href="https://github.com/2389-research/tracker/pull/263">#263</a>). The audit observed <code>**STATUS: fail**</code> (bold) silently falling back to the default <code>success</code> because <code>HasPrefix("**STATUS:", "STATUS:")</code> returns false, and LLMs commonly bold/italicize STATUS lines when they want the verdict to draw the eye. <code>parseStatusLine</code> now <code>strings.Trim</code>s the line and value with the <code>"*_"</code> cutset, so <code>**STATUS: fail**</code> / <code>*STATUS: fail*</code> / <code>STATUS: **fail**</code> / <code>__STATUS: success__</code> all parse correctly. Locked semantics from <code>TestParseAutoStatus_V3FailFirstContract</code> are unchanged: last-line-wins + default-success-on-empty. New regression coverage in <code>TestParseAutoStatus_Gap5_1_AuditedShapes</code> (11 sub-tests) — six previously RED, now GREEN; five pin existing behavior (uppercase value, whitespace trimming, last-wins under emphasis, code-fence skip).</li>
+      <li><strong>Gap 5.3 — <code>build_product</code> re-runs reviewers after <code>ApplyReviewFixes</code> with a one-shot budget</strong> (<a href="https://github.com/2389-research/tracker/pull/264">#264</a>). Pre-fix, the workflow only ran reviewers once and routed straight to <code>FinalBuild</code> after fixes, so a fix commit introducing W4 (zero-assertion stubs), W5 (wrong-target tests), or W13 (DI bypass) regressions reached <code>Done</code> unchecked — <code>FinalSpecCheck</code> per Gap 8 v5 scopes to W17 + iface + <code>SPEC.md</code> and explicitly delegates W4/W5/W13 to reviewer rubric point 3, which only ran pre-fix. New <code>CheckReviewFixBudget</code> tool node increments <code>.ai/build/review_fix_attempts</code> and routes <code>ApplyReviewFixes &rarr; CheckReviewFixBudget &rarr; ReviewParallel restart:true</code> (one re-review pass) or <code>&rarr; EscalateReview</code> (budget exhausted, <code>MAX_ATTEMPTS=1</code>). A <code>ResetReviewBudget</code> tool node sits on the <code>EscalateReview "retry" &rarr; Decompose</code> edge so the counter clears when the human picks retry — otherwise the stale counter would immediately fail-close the retry's first re-review pass (caught by Codex / Copilot during PR review). Pattern mirrors the existing <code>TestMilestone</code> <code>fix_attempts</code> precedent.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.32.0 ═══ -->
   <section class="glass" id="v0-32-0" style="border-left: 3px solid var(--orange-600);">
