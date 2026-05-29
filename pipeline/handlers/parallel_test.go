@@ -852,3 +852,143 @@ func TestMergeSessionStats_PropagatesEstimatedFlag(t *testing.T) {
 		}
 	})
 }
+
+// TestParallel_BranchOverrideAggregates pins the propagation contract: when a
+// single parallel branch returns Outcome.ChildOverride (e.g. its target is a
+// subgraph child whose engine terminated with a validation override), the
+// ParallelHandler aggregates that ChildOverride into the parent's returned
+// Outcome so the engine's applyOutcome path can absorb it into the run's
+// sticky list.
+//
+// Clean branches (no ChildOverride) contribute nothing to the aggregate, so the
+// parent sees exactly the entries the overridding branch produced.
+//
+// This is the third sticky-write site (own-graph flip-point in advanceToNext,
+// subgraph/manager_loop absorption in handleNodeResult, parallel aggregation
+// here). See pipeline/subgraph_test.go TestSubgraph_ChildOverridePropagates
+// for the analogous single-branch contract on the subgraph handler.
+func TestParallel_BranchOverrideAggregates(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_override")
+	registry := pipeline.NewHandlerRegistry()
+
+	// Branch A simulates a subgraph child that propagated an override up via
+	// ChildOverride. Branch B is clean.
+	registry.Register(&stubHandler{
+		name: "stub_override",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			if node.ID == "branch_a" {
+				return pipeline.Outcome{
+					Status: string(pipeline.OutcomeSuccess),
+					ChildOverride: []pipeline.OverrideDetail{{
+						GateNodeID:   "Gate",
+						Label:        "accept",
+						Actor:        pipeline.ActorHuman,
+						SubgraphPath: []string{"branch_a"},
+					}},
+				}, nil
+			}
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+		},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
+		t.Fatalf("Status = %q, want success", outcome.Status)
+	}
+	if len(outcome.ChildOverride) != 1 {
+		t.Fatalf("ChildOverride length = %d, want 1: %+v", len(outcome.ChildOverride), outcome.ChildOverride)
+	}
+	got := outcome.ChildOverride[0]
+	if got.GateNodeID != "Gate" {
+		t.Errorf("GateNodeID = %q, want Gate", got.GateNodeID)
+	}
+	if got.Label != "accept" {
+		t.Errorf("Label = %q, want accept", got.Label)
+	}
+	if got.Actor != pipeline.ActorHuman {
+		t.Errorf("Actor = %q, want %q", got.Actor, pipeline.ActorHuman)
+	}
+	if len(got.SubgraphPath) != 1 || got.SubgraphPath[0] != "branch_a" {
+		t.Errorf("SubgraphPath = %v, want [branch_a]", got.SubgraphPath)
+	}
+}
+
+// TestParallel_BothBranchesOverride verifies that when multiple branches each
+// propagate a ChildOverride, the parent's Outcome.ChildOverride contains every
+// entry in branch-result-order (matching the deterministic ordering enforced by
+// the indexed results slice in executeBranches).
+func TestParallel_BothBranchesOverride(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_both_override")
+	registry := pipeline.NewHandlerRegistry()
+
+	registry.Register(&stubHandler{
+		name: "stub_both_override",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			return pipeline.Outcome{
+				Status: string(pipeline.OutcomeSuccess),
+				ChildOverride: []pipeline.OverrideDetail{{
+					GateNodeID:   "Gate_" + node.ID,
+					Label:        "accept",
+					Actor:        pipeline.ActorHuman,
+					SubgraphPath: []string{node.ID},
+				}},
+			}, nil
+		},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
+		t.Fatalf("Status = %q, want success", outcome.Status)
+	}
+	if len(outcome.ChildOverride) != 2 {
+		t.Fatalf("ChildOverride length = %d, want 2: %+v", len(outcome.ChildOverride), outcome.ChildOverride)
+	}
+	// Branch-result-order: branch_a (index 0) before branch_b (index 1).
+	if outcome.ChildOverride[0].GateNodeID != "Gate_branch_a" {
+		t.Errorf("ChildOverride[0].GateNodeID = %q, want Gate_branch_a (branch-result-order)", outcome.ChildOverride[0].GateNodeID)
+	}
+	if outcome.ChildOverride[1].GateNodeID != "Gate_branch_b" {
+		t.Errorf("ChildOverride[1].GateNodeID = %q, want Gate_branch_b (branch-result-order)", outcome.ChildOverride[1].GateNodeID)
+	}
+}
+
+// TestParallel_NoBranchOverrides_NilAggregate verifies the no-op path: when no
+// branch propagates a ChildOverride, the parent's Outcome.ChildOverride is nil
+// (not an empty non-nil slice). The engine's `if len(outcome.ChildOverride) > 0`
+// guard treats both identically, but the nil-result contract keeps the
+// in-memory shape minimal and matches PrependSubgraphPath's nil-for-empty
+// convention used by subgraph/manager_loop.
+func TestParallel_NoBranchOverrides_NilAggregate(t *testing.T) {
+	g := buildTestGraph([]string{"branch_a", "branch_b"}, "stub_clean")
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(&stubHandler{
+		name:    "stub_clean",
+		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	node := g.Nodes["parallel_node"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.ChildOverride != nil {
+		t.Errorf("ChildOverride = %+v, want nil (no branches propagated overrides)", outcome.ChildOverride)
+	}
+}

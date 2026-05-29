@@ -67,7 +67,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
 	})
 
-	collected := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
+	collected, branchOverridesOut := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
 
 	resultsJSON, err := json.Marshal(collected)
 	if err != nil {
@@ -84,11 +84,42 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Message:   fmt.Sprintf("fan-in complete, aggregate status: %s", status),
 	})
 
-	outcome := pipeline.Outcome{Status: status, Stats: aggregateBranchStats(collected)}
+	outcome := pipeline.Outcome{
+		Status:        status,
+		Stats:         aggregateBranchStats(collected),
+		ChildOverride: aggregateChildOverrides(branchOverridesOut),
+	}
 	if joinID := node.ParallelConfig().JoinID; joinID != "" {
 		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
 	}
 	return outcome, nil
+}
+
+// aggregateChildOverrides unions OverrideDetail slices across parallel branches
+// in branch-result-order. Branches that propagate no override contribute
+// nothing; branches that do are concatenated leaf-to-leaf so the parent's
+// engine sees every child-side override in a deterministic, replayable order.
+//
+// Returns nil when no branch propagated any override so the engine's
+// `if len(outcome.ChildOverride) > 0` guard short-circuits and we match
+// PrependSubgraphPath's nil-for-empty convention.
+//
+// This is the third sticky-write site (own-graph flip-point, subgraph/
+// manager_loop single-child absorption, parallel multi-branch aggregation).
+// Per-branch SubgraphPath prepending already happened inside each branch's
+// child handler (a subgraph or manager_loop branch target prepends its own
+// node ID via PrependSubgraphPath). The parallel node ID is intentionally
+// NOT prepended here — parallel is a fan-out, not a subgraph boundary; the
+// branch IDs already identify which fork the override came from via the
+// subgraph child's prepend.
+func aggregateChildOverrides(branchOverrides [][]pipeline.OverrideDetail) []pipeline.OverrideDetail {
+	var aggregated []pipeline.OverrideDetail
+	for _, br := range branchOverrides {
+		if len(br) > 0 {
+			aggregated = append(aggregated, br...)
+		}
+	}
+	return aggregated
 }
 
 // resolveBranchEdges determines the branch target edges for a parallel node.
@@ -132,13 +163,23 @@ func (h *ParallelHandler) edgesFromOutgoing(node *pipeline.Node) []*pipeline.Edg
 }
 
 // branchResultMsg pairs a branch index with its parallel result.
+//
+// childOverride is carried alongside ParallelResult (not folded into it) so
+// the parent-level aggregation can union OverrideDetail entries across
+// branches without leaking them into the JSON-serialized parallel.results
+// context value. The ParallelResult is an audit-facing record; ChildOverride
+// is a vertical propagation channel up to the engine's sticky-list absorption.
 type branchResultMsg struct {
-	index  int
-	result ParallelResult
+	index         int
+	result        ParallelResult
+	childOverride []pipeline.OverrideDetail
 }
 
 // executeBranches spawns goroutines for each branch and collects results.
-func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) []ParallelResult {
+// Returns the per-branch ParallelResult slice (audit-facing, JSON-serialized
+// into parallel.results) and the per-branch ChildOverride slices, both indexed
+// in branch-result-order for deterministic aggregation downstream.
+func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) ([]ParallelResult, [][]pipeline.OverrideDetail) {
 	snapshot := pctx.Snapshot()
 	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
 	cfg := parallelNode.ParallelConfig()
@@ -166,10 +207,12 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 	close(resultsCh)
 
 	collected := make([]ParallelResult, len(edges))
+	overrides := make([][]pipeline.OverrideDetail, len(edges))
 	for br := range resultsCh {
 		collected[br.index] = br.result
+		overrides[br.index] = br.childOverride
 	}
-	return collected
+	return collected, overrides
 }
 
 // makeSemaphore returns a buffered channel used as a semaphore with the
@@ -233,7 +276,11 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 	pr := buildBranchResult(tn.ID, outcome, mergedUpdates, err)
 	h.emitBranchComplete(tn.ID, pr)
-	resultsCh <- branchResultMsg{index: idx, result: pr}
+	// Carry the branch's ChildOverride up to the parent aggregation site (not
+	// onto ParallelResult, which is JSON-serialized into the parallel.results
+	// audit value). Empty/nil propagates as nil — the aggregator unions
+	// per-branch slices and drops empties.
+	resultsCh <- branchResultMsg{index: idx, result: pr, childOverride: outcome.ChildOverride}
 }
 
 // buildBranchResult assembles a ParallelResult from the branch execution outcome.
