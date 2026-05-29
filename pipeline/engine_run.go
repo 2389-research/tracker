@@ -204,7 +204,25 @@ type runState struct {
 	// lastOutcome carries the most recent handler outcome through edge selection
 	// so advanceToNextNode can read Outcome.OverrideActor when an override edge
 	// is traversed. Set in applyOutcome before the engine advances.
+	//
+	// Stored as a shallow copy via `s.lastOutcome = *outcome`: value-type fields
+	// (Status, OverrideActor, PreferredLabel) are safely snapshotted, but slice
+	// and pointer fields (Truncations, ChildOverride, ChildUsage, MissingMarker,
+	// MissingRoute) share backing storage with the original outcome — treat them
+	// as read-only here. Mutating those fields through s.lastOutcome would
+	// silently corrupt the handler's outcome value (and vice versa).
 	lastOutcome Outcome
+}
+
+// appendOverride appends an OverrideDetail to BOTH the in-memory hot-path
+// slice (s.validationOverrides) and the checkpoint slice (s.cp.ValidationOverrides).
+// They MUST stay in sync — the hot-path slice serves the engine's terminal-status
+// rule and event-emission; the checkpoint slice is the durable record for resume
+// and audit-log fallback. Any code path that records a new override must use
+// this helper.
+func (s *runState) appendOverride(d OverrideDetail) {
+	s.validationOverrides = append(s.validationOverrides, d)
+	s.cp.ValidationOverrides = append(s.cp.ValidationOverrides, d)
 }
 
 // initRunState initializes all per-run state: context, checkpoint, trace, and stylesheet.

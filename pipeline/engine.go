@@ -482,8 +482,7 @@ func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next
 		Actor:      actor,
 		Timestamp:  time.Now(),
 	}
-	s.validationOverrides = append(s.validationOverrides, detail)
-	s.cp.ValidationOverrides = append(s.cp.ValidationOverrides, detail)
+	s.appendOverride(detail)
 	e.emit(PipelineEvent{
 		Type:      EventValidationOverridden,
 		Timestamp: detail.Timestamp,
