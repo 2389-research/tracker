@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // StatusBar renders the bottom status bar of the TUI dashboard.
@@ -40,19 +42,14 @@ func (sb *StatusBar) Progress() *ProgressTracker { return sb.progress }
 func (sb *StatusBar) SetWidth(w int) { sb.width = w }
 
 // View renders the status bar as a single line: progress bar + badges + hints.
+// When the pipeline has reached a terminal state, the progress region is
+// replaced by CompletionRow so operators see the final status (and any
+// override gate/label/actor detail) inline.
 func (sb *StatusBar) View() string {
 	// Feed node durations to the progress tracker for ETA calculation.
 	sb.syncProgressDurations()
 
-	// Use progress bar when there are running nodes, fall back to track diagram.
-	done, total := sb.store.Progress()
-	var left string
-	if total > 0 && done < total && sb.hasRunningNode() {
-		sb.progress.SetWidth(sb.width / 3)
-		left = sb.progress.View()
-	} else {
-		left = sb.trackDiagram() + "  " + sb.progressSummary()
-	}
+	left := sb.buildLeftSegment()
 
 	// Verbosity badge.
 	if sb.agentLog != nil && sb.agentLog.Verbosity() != VerbosityAll {
@@ -74,6 +71,76 @@ func (sb *StatusBar) View() string {
 
 	line := left + fmt.Sprintf("%*s", gap, "") + right
 	return Styles.StatusBar.Render(line)
+}
+
+// buildLeftSegment picks the leftmost status region: completion row when the
+// pipeline has finished (so the terminal status is visible at-a-glance),
+// progress bar while nodes are still running, otherwise the static track
+// diagram + done/total summary.
+func (sb *StatusBar) buildLeftSegment() string {
+	if sb.store.PipelineDone() {
+		return CompletionRow(sb.store.PipelineStatus(), sb.store.HeadlineOverride(), sb.store.PipelineError())
+	}
+	done, total := sb.store.Progress()
+	if total > 0 && done < total && sb.hasRunningNode() {
+		sb.progress.SetWidth(sb.width / 3)
+		return sb.progress.View()
+	}
+	return sb.trackDiagram() + "  " + sb.progressSummary()
+}
+
+// CompletionRow renders the terminal-status banner shown in the status bar
+// once the pipeline has reached a final state. The bullet glyph and textual
+// status string carry the same semantic signal as the color, so NO_COLOR /
+// monochrome terminals still distinguish the four states (Gap 5.2 spec D17
+// + D18). Override is non-nil only for validation_overridden runs; pipelineErr
+// supplies the failed-at-node detail when present.
+//
+// Status branches:
+//   - OutcomeSuccess:               green ● Completed
+//   - OutcomeValidationOverridden:  amber ● Completed — validation override at <gate> (label "<label>" by <actor>)
+//   - OutcomeBudgetExceeded:        red   ✗ Budget exceeded
+//   - OutcomeFail:                  red   ✗ Failed[: <error>]
+//   - unknown/zero status:          dim   ● Completed (defensive default)
+func CompletionRow(status pipeline.TerminalStatus, override *pipeline.OverrideDetail, pipelineErr string) string {
+	switch status {
+	case pipeline.OutcomeValidationOverridden:
+		return renderOverrideCompletion(override)
+	case pipeline.OutcomeBudgetExceeded:
+		style := lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
+		return style.Render(LampFailed + " Budget exceeded")
+	case pipeline.OutcomeFail:
+		style := lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
+		text := LampFailed + " Failed"
+		if pipelineErr != "" {
+			text += ": " + pipelineErr
+		}
+		return style.Render(text)
+	case pipeline.OutcomeSuccess:
+		style := lipgloss.NewStyle().Foreground(ColorGreen).Bold(true)
+		return style.Render(LampDone + " Completed")
+	default:
+		// Unknown / zero status — render a neutral default so the user still
+		// sees that the run ended. This branch fires for legacy stateless-adapter
+		// completions where status wasn't computed.
+		return Styles.DimText.Render(LampDone + " Completed")
+	}
+}
+
+// renderOverrideCompletion formats the amber "validation override at <gate>
+// (label \"<label>\" by <actor>)" line. The bullet glyph + textual status
+// keeps the signal in NO_COLOR terminals; the amber tint is for sighted-color
+// terminals (spec D18). When override is nil (defensive — shouldn't happen
+// for OutcomeValidationOverridden in practice), falls back to the bare
+// "validation override" suffix.
+func renderOverrideCompletion(override *pipeline.OverrideDetail) string {
+	style := lipgloss.NewStyle().Foreground(ColorOverride).Bold(true)
+	if override == nil {
+		return style.Render(LampDone + " Completed — validation override")
+	}
+	text := fmt.Sprintf("%s Completed — validation override at %s (label %q by %s)",
+		LampDone, override.GateNodeID, override.Label, override.Actor)
+	return style.Render(text)
 }
 
 // syncProgressDurations feeds completed node durations to the progress tracker.

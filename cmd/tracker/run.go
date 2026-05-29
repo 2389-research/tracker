@@ -672,8 +672,13 @@ func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEvent
 			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
 		}))
 	}
+	// PipelineAdapter is stateful (accumulates EventValidationOverridden so the
+	// terminal MsgPipelineCompleted carries Status + headline Override for the
+	// completion-row renderer per Gap 5.2 D17). Scope it to one pipeline run —
+	// sharing across runs would mix override state across pipelines.
+	pipelineAdapter := tui.NewPipelineAdapter()
 	pipelineHandler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
-		if msg := tui.AdaptPipelineEvent(evt); msg != nil {
+		if msg := pipelineAdapter.Adapt(evt); msg != nil {
 			prog.Send(msg)
 		}
 	})

@@ -5,6 +5,8 @@ package tui
 import (
 	"reflect"
 	"testing"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestStateStoreInitialState(t *testing.T) {
@@ -49,6 +51,14 @@ func TestStateStorePipelineDone(t *testing.T) {
 	if !s.PipelineDone() {
 		t.Error("expected pipeline done")
 	}
+	// With no overrides accumulated and no explicit Status on the msg, the
+	// StateStore derives success.
+	if s.PipelineStatus() != pipeline.OutcomeSuccess {
+		t.Errorf("expected status=success, got %q", s.PipelineStatus())
+	}
+	if s.HeadlineOverride() != nil {
+		t.Errorf("expected nil headline override, got %+v", s.HeadlineOverride())
+	}
 }
 
 func TestStateStorePipelineFailed(t *testing.T) {
@@ -59,6 +69,64 @@ func TestStateStorePipelineFailed(t *testing.T) {
 	}
 	if s.PipelineError() != "fatal" {
 		t.Errorf("expected 'fatal', got %q", s.PipelineError())
+	}
+	if s.PipelineStatus() != pipeline.OutcomeFail {
+		t.Errorf("expected status=fail, got %q", s.PipelineStatus())
+	}
+}
+
+// TestStateStore_ValidationOverridesAccumulate verifies that
+// MsgValidationOverridden events build up the in-memory override list in
+// chronological order, and the completion message uses the latest as headline.
+func TestStateStore_ValidationOverridesAccumulate(t *testing.T) {
+	s := NewStateStore(nil)
+	s.Apply(MsgValidationOverridden{
+		NodeID: "G1",
+		Detail: pipeline.OverrideDetail{GateNodeID: "G1", Label: "lgtm", Actor: pipeline.ActorHuman},
+	})
+	s.Apply(MsgValidationOverridden{
+		NodeID: "G2",
+		Detail: pipeline.OverrideDetail{GateNodeID: "G2", Label: "force", Actor: pipeline.ActorAutopilot},
+	})
+	got := s.ValidationOverrides()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 accumulated overrides, got %d", len(got))
+	}
+	if got[0].GateNodeID != "G1" || got[1].GateNodeID != "G2" {
+		t.Errorf("expected chronological order [G1, G2], got [%s, %s]", got[0].GateNodeID, got[1].GateNodeID)
+	}
+	// Now complete: status should flip to validation_overridden and headline
+	// should be the latest (G2) per spec D5a.
+	s.Apply(MsgPipelineCompleted{})
+	if s.PipelineStatus() != pipeline.OutcomeValidationOverridden {
+		t.Errorf("expected status=validation_overridden, got %q", s.PipelineStatus())
+	}
+	if h := s.HeadlineOverride(); h == nil || h.GateNodeID != "G2" {
+		t.Errorf("expected headline=G2 (D5a latest), got %+v", h)
+	}
+}
+
+// TestStateStore_MsgPipelineCompleted_ExplicitStatusWins verifies that when
+// the stateful PipelineAdapter has already computed Status + Override (the
+// production path), the StateStore honors the message's fields rather than
+// re-deriving from accumulated state. This matters when the adapter saw
+// override events the state store didn't (e.g. early-injection scenarios).
+func TestStateStore_MsgPipelineCompleted_ExplicitStatusWins(t *testing.T) {
+	s := NewStateStore(nil)
+	override := &pipeline.OverrideDetail{
+		GateNodeID: "AdapterSet",
+		Label:      "approve",
+		Actor:      pipeline.ActorWebhook,
+	}
+	s.Apply(MsgPipelineCompleted{
+		Status:   pipeline.OutcomeValidationOverridden,
+		Override: override,
+	})
+	if s.PipelineStatus() != pipeline.OutcomeValidationOverridden {
+		t.Errorf("expected status=validation_overridden, got %q", s.PipelineStatus())
+	}
+	if h := s.HeadlineOverride(); h == nil || h.GateNodeID != "AdapterSet" {
+		t.Errorf("expected headline=AdapterSet from msg, got %+v", h)
 	}
 }
 

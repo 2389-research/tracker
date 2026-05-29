@@ -87,6 +87,126 @@ func TestAdaptPipelineEventUnknownReturnsNil(t *testing.T) {
 	}
 }
 
+func TestAdaptPipelineEvent_ValidationOverridden(t *testing.T) {
+	detail := pipeline.OverrideDetail{
+		GateNodeID: "ReviewGate",
+		Label:      "force-merge",
+		Actor:      pipeline.ActorHuman,
+	}
+	evt := pipeline.PipelineEvent{
+		Type:     pipeline.EventValidationOverridden,
+		NodeID:   "ReviewGate",
+		Override: &detail,
+	}
+	msg := AdaptPipelineEvent(evt)
+	m, ok := msg.(MsgValidationOverridden)
+	if !ok {
+		t.Fatalf("expected MsgValidationOverridden, got %T", msg)
+	}
+	if m.NodeID != "ReviewGate" {
+		t.Errorf("expected NodeID ReviewGate, got %q", m.NodeID)
+	}
+	if m.Detail.Label != "force-merge" {
+		t.Errorf("expected label force-merge, got %q", m.Detail.Label)
+	}
+}
+
+func TestAdaptPipelineEvent_ValidationOverridden_NilOverrideReturnsNil(t *testing.T) {
+	// Defensive: a malformed event without the Override payload yields nil
+	// (no message) rather than a half-built MsgValidationOverridden.
+	evt := pipeline.PipelineEvent{Type: pipeline.EventValidationOverridden, NodeID: "Gate"}
+	if msg := AdaptPipelineEvent(evt); msg != nil {
+		t.Errorf("expected nil for EventValidationOverridden with nil Override, got %T", msg)
+	}
+}
+
+func TestPipelineAdapter_PassesThroughNonCompletionEvents(t *testing.T) {
+	a := NewPipelineAdapter()
+	evt := pipeline.PipelineEvent{Type: pipeline.EventStageStarted, NodeID: "n1"}
+	msg := a.Adapt(evt)
+	if _, ok := msg.(MsgNodeStarted); !ok {
+		t.Errorf("expected MsgNodeStarted, got %T", msg)
+	}
+}
+
+func TestPipelineAdapter_CompletionWithoutOverrides_IsSuccess(t *testing.T) {
+	a := NewPipelineAdapter()
+	a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventStageStarted, NodeID: "n1"})
+	a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventStageCompleted, NodeID: "n1"})
+	msg := a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted})
+	m, ok := msg.(MsgPipelineCompleted)
+	if !ok {
+		t.Fatalf("expected MsgPipelineCompleted, got %T", msg)
+	}
+	if m.Status != pipeline.OutcomeSuccess {
+		t.Errorf("expected Status=success, got %q", m.Status)
+	}
+	if m.Override != nil {
+		t.Errorf("expected nil Override for non-override completion, got %+v", m.Override)
+	}
+}
+
+// TestTUIAdapter_BuildsMsgWithLatestOverride covers spec D5a: when multiple
+// overrides fire during a run, the headline carried on MsgPipelineCompleted
+// must be the LATEST entry (closest to the exit), not the first.
+func TestTUIAdapter_BuildsMsgWithLatestOverride(t *testing.T) {
+	a := NewPipelineAdapter()
+	a.Adapt(pipeline.PipelineEvent{
+		Type:   pipeline.EventValidationOverridden,
+		NodeID: "EarlyGate",
+		Override: &pipeline.OverrideDetail{
+			GateNodeID: "EarlyGate",
+			Label:      "lgtm",
+			Actor:      pipeline.ActorHuman,
+		},
+	})
+	a.Adapt(pipeline.PipelineEvent{
+		Type:   pipeline.EventValidationOverridden,
+		NodeID: "LateGate",
+		Override: &pipeline.OverrideDetail{
+			GateNodeID: "LateGate",
+			Label:      "force-merge",
+			Actor:      pipeline.ActorAutopilot,
+		},
+	})
+	msg := a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted})
+	m, ok := msg.(MsgPipelineCompleted)
+	if !ok {
+		t.Fatalf("expected MsgPipelineCompleted, got %T", msg)
+	}
+	if m.Status != pipeline.OutcomeValidationOverridden {
+		t.Errorf("expected validation_overridden Status, got %q", m.Status)
+	}
+	if m.Override == nil {
+		t.Fatal("expected Override to be populated for override completion")
+	}
+	if m.Override.GateNodeID != "LateGate" {
+		t.Errorf("D5a violated: expected headline=LateGate (latest), got %q", m.Override.GateNodeID)
+	}
+	if m.Override.Label != "force-merge" {
+		t.Errorf("expected label force-merge, got %q", m.Override.Label)
+	}
+	if m.Override.Actor != pipeline.ActorAutopilot {
+		t.Errorf("expected actor autopilot, got %q", m.Override.Actor)
+	}
+}
+
+func TestPipelineAdapter_FreeFunctionStillStateless(t *testing.T) {
+	// Sanity: the stateless free function must still yield the legacy empty
+	// MsgPipelineCompleted (so existing callers / tests aren't surprised).
+	msg := AdaptPipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted})
+	m, ok := msg.(MsgPipelineCompleted)
+	if !ok {
+		t.Fatalf("expected MsgPipelineCompleted, got %T", msg)
+	}
+	if m.Status != "" {
+		t.Errorf("stateless adapter must yield zero Status, got %q", m.Status)
+	}
+	if m.Override != nil {
+		t.Errorf("stateless adapter must yield nil Override, got %+v", m.Override)
+	}
+}
+
 func TestAdaptAgentEvent(t *testing.T) {
 	tests := []struct {
 		name     string
