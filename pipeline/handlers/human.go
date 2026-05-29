@@ -80,6 +80,23 @@ type Interviewer interface {
 	Ask(prompt string, choices []string, defaultChoice string) (string, error)
 }
 
+// actorOf returns the Actor classification for an Interviewer by querying its
+// optional Actor() method via interface assertion. This pattern avoids adding
+// a method to the exported Interviewer interface (which would break third-party
+// implementations); interviewers in the tracker codebase implement the method,
+// third-party implementations default to ActorUnknown.
+//
+// Used by HumanHandler.Execute to populate Outcome.OverrideActor.
+func actorOf(i Interviewer) pipeline.Actor {
+	if i == nil {
+		return pipeline.ActorUnknown
+	}
+	if a, ok := i.(interface{ Actor() pipeline.Actor }); ok {
+		return a.Actor()
+	}
+	return pipeline.ActorUnknown
+}
+
 // ContextSetter is an optional interface for interviewers that can receive a
 // pipeline context for cancellation and timeout propagation. The human handler
 // calls SetPipelineContext via type assertion before invoking any interviewer
