@@ -26,7 +26,8 @@ type AuditConfig struct {
 // AuditReport is the structured result of Audit().
 type AuditReport struct {
 	RunID string `json:"run_id"`
-	// Status is one of: "success", "fail".
+	// Status is one of: "success", "fail", "validation_overridden",
+	// "budget_exceeded". See classifyStatus for the resolution algorithm.
 	Status string `json:"status"`
 	// TotalDuration is encoded as integer nanoseconds in JSON
 	// ("total_duration_ns"), not as a duration string.
@@ -74,7 +75,8 @@ type ActivityError struct {
 // RunSummary is a condensed view of a single pipeline run for listing.
 type RunSummary struct {
 	RunID string `json:"run_id"`
-	// Status is one of: "success", "fail".
+	// Status is one of: "success", "fail", "validation_overridden",
+	// "budget_exceeded". See classifyStatus for the resolution algorithm.
 	Status    string    `json:"status"`
 	Nodes     int       `json:"nodes"`
 	Retries   int       `json:"retries"`
@@ -178,16 +180,50 @@ func firstAuditConfig(opts []AuditConfig) AuditConfig {
 	return opts[0]
 }
 
+// classifyStatus collapses a run's activity log and checkpoint into a single
+// status string for the audit/list surfaces. Algorithm per spec §6.4:
+//
+//  1. Reverse-scan activity entries. pipeline_failed / budget_exceeded
+//     short-circuit (failure dominates). pipeline_completed and
+//     validation_overridden are observed but the scan continues so a later
+//     (i.e. earlier-in-scan) failure event can still override them.
+//  2. If both pipeline_completed and validation_overridden were observed in
+//     the scan, return "validation_overridden". A lone pipeline_completed
+//     resolves to "success".
+//  3. If no terminal activity event (completed/failed/budget) was observed,
+//     fall back to checkpoint signals: a non-empty CurrentNode means the run
+//     halted mid-graph → "fail"; a sticky ValidationOverrides on a finished
+//     run (CurrentNode == "") → "validation_overridden"; otherwise "success".
+//
+// D12 fix (Gap 5.2): budget_exceeded no longer collapses to "fail" — it
+// surfaces as its own status string. Scripts that previously filtered on
+// status == "fail" will see budget-halted runs leave that bucket.
 func classifyStatus(cp *pipeline.Checkpoint, activity []ActivityEntry) string {
+	sawCompletion := false
+	sawOverride := false
 	for i := len(activity) - 1; i >= 0; i-- {
 		switch activity[i].Type {
-		case "pipeline_completed":
-			return "success"
 		case "pipeline_failed":
 			return "fail"
 		case "budget_exceeded":
-			return "fail"
+			return "budget_exceeded"
+		case "pipeline_completed":
+			sawCompletion = true
+		case "validation_overridden":
+			sawOverride = true
 		}
+	}
+	if sawCompletion {
+		if sawOverride {
+			return "validation_overridden"
+		}
+		return "success"
+	}
+	// No terminal event in activity — fall back to checkpoint signals. A lone
+	// validation_overridden event in the log is not treated as terminal here;
+	// it only contributes when paired with pipeline_completed above.
+	if len(cp.ValidationOverrides) > 0 && cp.CurrentNode == "" {
+		return "validation_overridden"
 	}
 	if cp.CurrentNode != "" {
 		return "fail"

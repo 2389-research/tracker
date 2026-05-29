@@ -219,6 +219,140 @@ func TestAudit_EmptyBundleIdentity_ForPlainDipRuns(t *testing.T) {
 	}
 }
 
+// TestClassifyStatus_Scenarios pins the spec §6.4 reverse-scan algorithm:
+// failure dominates (pipeline_failed / budget_exceeded short-circuit);
+// pipeline_completed + validation_overridden anywhere in scan resolves to
+// validation_overridden; checkpoint fallback applies when no terminal
+// activity event is found. D12 fix: budget_exceeded no longer collapses to
+// "fail".
+func TestClassifyStatus_Scenarios(t *testing.T) {
+	cases := []struct {
+		name   string
+		events []ActivityEntry
+		cp     *pipeline.Checkpoint
+		want   string
+	}{
+		{
+			name: "override then complete",
+			events: []ActivityEntry{
+				{Type: "validation_overridden"},
+				{Type: "pipeline_completed"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "validation_overridden",
+		},
+		{
+			name: "override then fail (failure dominates)",
+			events: []ActivityEntry{
+				{Type: "validation_overridden"},
+				{Type: "pipeline_failed"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "fail",
+		},
+		{
+			name: "override then budget (failure dominates)",
+			events: []ActivityEntry{
+				{Type: "validation_overridden"},
+				{Type: "budget_exceeded"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "budget_exceeded",
+		},
+		{
+			name: "budget_exceeded alone — D12 fix (was 'fail')",
+			events: []ActivityEntry{
+				{Type: "budget_exceeded"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "budget_exceeded",
+		},
+		{
+			name:   "no terminal, CurrentNode set → fail",
+			events: nil,
+			cp:     &pipeline.Checkpoint{CurrentNode: "Mid"},
+			want:   "fail",
+		},
+		{
+			name:   "no terminal, CurrentNode empty, sticky has overrides → validation_overridden",
+			events: nil,
+			cp: &pipeline.Checkpoint{
+				CurrentNode:         "",
+				ValidationOverrides: []pipeline.OverrideDetail{{GateNodeID: "G"}},
+			},
+			want: "validation_overridden",
+		},
+		{
+			name:   "no terminal, CurrentNode empty, no overrides → success",
+			events: nil,
+			cp:     &pipeline.Checkpoint{CurrentNode: ""},
+			want:   "success",
+		},
+		{
+			name: "resumed run: override on attempt 1, complete on attempt 2",
+			events: []ActivityEntry{
+				{Type: "pipeline_started"},
+				{Type: "validation_overridden"},
+				{Type: "pipeline_started"},
+				{Type: "pipeline_completed"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "validation_overridden",
+		},
+		{
+			name: "lone override + halted (CurrentNode != \"\")",
+			events: []ActivityEntry{
+				{Type: "validation_overridden"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: "Mid"},
+			want: "fail",
+		},
+		{
+			name: "lone override + completed run with sticky overrides (CurrentNode empty)",
+			events: []ActivityEntry{
+				{Type: "validation_overridden"},
+			},
+			cp: &pipeline.Checkpoint{
+				CurrentNode:         "",
+				ValidationOverrides: []pipeline.OverrideDetail{{GateNodeID: "G"}},
+			},
+			want: "validation_overridden",
+		},
+		{
+			name: "lone override event, no sticky on checkpoint, CurrentNode empty → success",
+			events: []ActivityEntry{
+				{Type: "validation_overridden"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "success",
+		},
+		{
+			name: "success last",
+			events: []ActivityEntry{
+				{Type: "pipeline_completed"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "success",
+		},
+		{
+			name: "fail last",
+			events: []ActivityEntry{
+				{Type: "pipeline_failed"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "fail",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyStatus(tc.cp, tc.events)
+			if got != tc.want {
+				t.Errorf("classifyStatus = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestListRuns_EmptyBundleIdentity_ForPlainDipRuns(t *testing.T) {
 	workdir := t.TempDir()
 	runDir := filepath.Join(workdir, ".tracker", "runs", "plain-dip-run")
