@@ -800,6 +800,59 @@ func TestJSONLEventHandler_SecureLogReclampsMode(t *testing.T) {
 	}
 }
 
+func TestJSONL_OverrideEventRoundTrip(t *testing.T) {
+	detail := &OverrideDetail{
+		GateNodeID:   "EscalateReview",
+		Label:        "accept",
+		Actor:        ActorHuman,
+		SubgraphPath: []string{"Outer", "Inner"},
+		Timestamp:    time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC),
+	}
+	ev := PipelineEvent{
+		Type:      EventValidationOverridden,
+		Timestamp: time.Date(2026, 5, 29, 12, 0, 1, 0, time.UTC),
+		RunID:     "test-run",
+		NodeID:    "EscalateReview",
+		Message:   "validation override",
+		Override:  detail,
+	}
+	entry := buildLogEntry(ev)
+
+	if entry.OverrideGate != "EscalateReview" {
+		t.Errorf("OverrideGate = %q, want EscalateReview", entry.OverrideGate)
+	}
+	if entry.OverrideLabel != "accept" {
+		t.Errorf("OverrideLabel = %q, want accept", entry.OverrideLabel)
+	}
+	if entry.OverrideActor != ActorHuman {
+		t.Errorf("OverrideActor = %q, want %q", entry.OverrideActor, ActorHuman)
+	}
+	if len(entry.OverrideSubgraphPath) != 2 ||
+		entry.OverrideSubgraphPath[0] != "Outer" ||
+		entry.OverrideSubgraphPath[1] != "Inner" {
+		t.Errorf("OverrideSubgraphPath = %v, want [Outer Inner]", entry.OverrideSubgraphPath)
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded jsonlLogEntry
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.OverrideGate != entry.OverrideGate {
+		t.Errorf("round-trip OverrideGate: got %q want %q", decoded.OverrideGate, entry.OverrideGate)
+	}
+	if decoded.OverrideActor != entry.OverrideActor {
+		t.Errorf("round-trip OverrideActor: got %q want %q", decoded.OverrideActor, entry.OverrideActor)
+	}
+	if len(decoded.OverrideSubgraphPath) != len(entry.OverrideSubgraphPath) {
+		t.Errorf("round-trip path length: got %d want %d",
+			len(decoded.OverrideSubgraphPath), len(entry.OverrideSubgraphPath))
+	}
+}
+
 // isolateSecureLog pins TRACKER_AUDIT_DIR to a per-test tmp dir so
 // tests using shared/hardcoded runIDs (abc123, def456, etc.) don't
 // collide on the user's $HOME-based default secure path. Without this,
