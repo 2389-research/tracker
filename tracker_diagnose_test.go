@@ -373,6 +373,94 @@ func TestDiagnose_AuditLogInjection_LegacyPathNoSignal(t *testing.T) {
 	}
 }
 
+// TestDiagnose_PopulatesValidationOverrides verifies the override fields on
+// DiagnoseReport are sourced from validation_overridden activity entries,
+// even when the checkpoint sticky slice is empty. The override section is
+// informational (per spec §9.4) — Diagnose() must NOT emit a Suggestion
+// for the override itself.
+func TestDiagnose_PopulatesValidationOverrides(t *testing.T) {
+	runDir := t.TempDir()
+	runID := "diag-overrides-activity"
+	if err := os.WriteFile(filepath.Join(runDir, "checkpoint.json"),
+		[]byte(fmt.Sprintf(`{"run_id":%q,"completed_nodes":[],"current_node":"","retry_counts":{},"restart_count":0,"timestamp":"2026-05-29T12:00:00Z"}`, runID)),
+		0o644); err != nil {
+		t.Fatalf("write checkpoint: %v", err)
+	}
+	lines := `{"ts":"2026-05-29T12:00:00Z","type":"pipeline_started","run_id":"diag-overrides-activity"}` + "\n" +
+		`{"ts":"2026-05-29T12:00:01Z","type":"validation_overridden","run_id":"diag-overrides-activity","override_gate":"GateA","override_label":"accept","override_actor":"human","override_subgraph_path":["Outer","Inner"]}` + "\n" +
+		`{"ts":"2026-05-29T12:00:02Z","type":"pipeline_completed","run_id":"diag-overrides-activity"}` + "\n"
+	if err := os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(lines), 0o644); err != nil {
+		t.Fatalf("write activity: %v", err)
+	}
+
+	r, err := Diagnose(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if r.OverrideCount != 1 {
+		t.Fatalf("OverrideCount = %d, want 1", r.OverrideCount)
+	}
+	if len(r.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides len = %d, want 1", len(r.ValidationOverrides))
+	}
+	got := r.ValidationOverrides[0]
+	if got.GateNodeID != "GateA" {
+		t.Errorf("GateNodeID = %q, want GateA", got.GateNodeID)
+	}
+	if got.Label != "accept" {
+		t.Errorf("Label = %q, want accept", got.Label)
+	}
+	if got.Actor != pipeline.ActorHuman {
+		t.Errorf("Actor = %q, want %q", got.Actor, pipeline.ActorHuman)
+	}
+	if len(got.SubgraphPath) != 2 || got.SubgraphPath[0] != "Outer" || got.SubgraphPath[1] != "Inner" {
+		t.Errorf("SubgraphPath = %v, want [Outer Inner]", got.SubgraphPath)
+	}
+	// Override must NOT raise a Suggestion (spec §9.4: informational only).
+	for _, s := range r.Suggestions {
+		if strings.Contains(strings.ToLower(string(s.Kind)), "override") {
+			t.Errorf("override should not raise a Suggestion, got: %+v", s)
+		}
+	}
+}
+
+// TestDiagnose_FallsBackToCheckpointForOverrides verifies that when no
+// validation_overridden events live in the activity log,
+// Checkpoint.ValidationOverrides feeds the report.
+func TestDiagnose_FallsBackToCheckpointForOverrides(t *testing.T) {
+	runDir := t.TempDir()
+	runID := "diag-overrides-checkpoint"
+
+	cp := &pipeline.Checkpoint{
+		RunID: runID,
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "GateB", Label: "mark done", Actor: pipeline.ActorAutopilot},
+		},
+	}
+	if err := pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")); err != nil {
+		t.Fatalf("save checkpoint: %v", err)
+	}
+	// No activity.jsonl written — LoadActivityLog returns nil entries, so
+	// extractOverridesFromActivity is empty and the checkpoint fallback wins.
+
+	r, err := Diagnose(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if r.OverrideCount != 1 {
+		t.Fatalf("OverrideCount = %d, want 1", r.OverrideCount)
+	}
+	if len(r.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides len = %d, want 1", len(r.ValidationOverrides))
+	}
+	if r.ValidationOverrides[0].GateNodeID != "GateB" {
+		t.Errorf("GateNodeID = %q, want GateB", r.ValidationOverrides[0].GateNodeID)
+	}
+	if r.ValidationOverrides[0].Actor != pipeline.ActorAutopilot {
+		t.Errorf("Actor = %q, want %q", r.ValidationOverrides[0].Actor, pipeline.ActorAutopilot)
+	}
+}
+
 func writeCheckpoint(t *testing.T, runDir, runID string) {
 	t.Helper()
 	cp := fmt.Sprintf(`{"run_id":%q,"completed_nodes":[],"current_node":"","retry_counts":{},"restart_count":0,"timestamp":"2026-05-13T20:30:00Z"}`, runID)
