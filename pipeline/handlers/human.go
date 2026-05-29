@@ -544,12 +544,24 @@ func (h *HumanHandler) Name() string { return "wait.human" }
 func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	prompt := h.resolveHumanPrompt(node, pctx)
 
+	// Capture the bound interviewer's Actor classification once. Every
+	// outcome we return must carry it on Outcome.OverrideActor so the
+	// engine's edge-selection flip-point (Chunk 5) can populate
+	// OverrideDetail.Actor when an override edge is traversed. Setting
+	// it on the zero-value outcome returned on error paths is harmless
+	// — the field describes the bound interviewer, not the outcome's
+	// success. See actorOf for the interface-assertion contract.
+	actor := actorOf(h.interviewer)
+
 	outcome, err := h.dispatchHumanMode(ctx, node, pctx, prompt)
 
 	if errors.Is(err, errHumanTimeout) {
-		return h.handleHumanTimeout(node), nil
+		timeoutOutcome := h.handleHumanTimeout(node)
+		timeoutOutcome.OverrideActor = actor
+		return timeoutOutcome, nil
 	}
 
+	outcome.OverrideActor = actor
 	return outcome, err
 }
 

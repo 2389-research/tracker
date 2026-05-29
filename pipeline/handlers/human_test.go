@@ -1304,3 +1304,58 @@ func TestAutoApproveFreeformInterviewer_Actor(t *testing.T) {
 		t.Errorf("actorOf(AutoApproveFreeformInterviewer) = %q, want %q", got, pipeline.ActorAutopilot)
 	}
 }
+
+// TestHumanHandler_PopulatesOverrideActor_AutoApprove verifies that
+// HumanHandler.Execute writes the bound interviewer's Actor classification
+// into Outcome.OverrideActor. The AutoApproveInterviewer reports
+// ActorAutopilot, so any outcome the handler emits while using it must
+// carry OverrideActor=ActorAutopilot. This is the end-to-end wiring check
+// for Gap 5.2 / Chunk 3: actorOf(h.interviewer) → Outcome.OverrideActor.
+func TestHumanHandler_PopulatesOverrideActor_AutoApprove(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})
+	graph.AddNode(&pipeline.Node{ID: "approve", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "reject", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "approve", Label: "approve"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "reject", Label: "reject"})
+
+	h := NewHumanHandler(&AutoApproveInterviewer{}, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.OverrideActor != pipeline.ActorAutopilot {
+		t.Errorf("OverrideActor = %q, want %q",
+			outcome.OverrideActor, pipeline.ActorAutopilot)
+	}
+}
+
+// TestHumanHandler_PopulatesOverrideActor_Unknown verifies that an
+// interviewer without an Actor() method falls through to ActorUnknown.
+// This pins the contract that third-party Interviewer implementations
+// produce ActorUnknown rather than a misleading default.
+func TestHumanHandler_PopulatesOverrideActor_Unknown(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next", Label: "go"})
+
+	// recordingInterviewer (defined earlier in this file) does not
+	// implement Actor(), so actorOf must fall back to ActorUnknown.
+	recorder := &recordingInterviewer{response: "go"}
+	h := NewHumanHandler(recorder, graph)
+	node := graph.Nodes["gate"]
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.OverrideActor != pipeline.ActorUnknown {
+		t.Errorf("OverrideActor = %q, want %q",
+			outcome.OverrideActor, pipeline.ActorUnknown)
+	}
+}
