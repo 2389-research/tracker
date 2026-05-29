@@ -4,6 +4,8 @@ package pipeline
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,10 +71,10 @@ func TestOverrideDetail_OmitEmpty(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(data)
-	if contains(s, `"label"`) {
+	if strings.Contains(s, `"label"`) {
 		t.Errorf("expected label omitted, got %s", s)
 	}
-	if contains(s, `"subgraph_path"`) {
+	if strings.Contains(s, `"subgraph_path"`) {
 		t.Errorf("expected subgraph_path omitted, got %s", s)
 	}
 }
@@ -84,9 +86,11 @@ func TestErrValidationOverridden_Is(t *testing.T) {
 	if ErrValidationOverridden.Error() == "" {
 		t.Fatal("ErrValidationOverridden has empty message")
 	}
-	wrapped := errors.New("wrapped: " + ErrValidationOverridden.Error())
-	_ = wrapped
+	// The cobra exit-code-2 path in cmd/tracker depends on errors.Is matching
+	// the sentinel through whatever wrapping interpretRunResult adds. Pin that
+	// contract here so a refactor to errors.New (without %w support) would fail.
+	wrapped := fmt.Errorf("interpretRunResult: %w", ErrValidationOverridden)
+	if !errors.Is(wrapped, ErrValidationOverridden) {
+		t.Fatal("errors.Is should match wrapped ErrValidationOverridden")
+	}
 }
-
-// Note: a package-level `contains(s, sub string) bool` helper is provided by
-// subgraph_test.go and reused by the OmitEmpty test above.
