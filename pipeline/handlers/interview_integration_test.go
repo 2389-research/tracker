@@ -49,7 +49,7 @@ func TestInterview_Integration(t *testing.T) {
 	}
 
 	// 5. Verify outcome
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -124,7 +124,7 @@ func TestInterview_Integration_ZeroQuestions(t *testing.T) {
 	}
 
 	// Falls back to freeform — outcome is still success
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -186,7 +186,7 @@ func TestInterview_Integration_RetryPreFill(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -235,7 +235,7 @@ func TestInterview_Integration_StructuredJSON(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 

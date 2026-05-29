@@ -62,7 +62,7 @@ func TestManagerLoopHandler_MissingSubgraphRef(t *testing.T) {
 	pctx := pipeline.NewPipelineContext()
 
 	outcome, err := h.Execute(context.Background(), node, pctx)
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if err == nil {
@@ -79,7 +79,7 @@ func TestManagerLoopHandler_SubgraphNotFound(t *testing.T) {
 	pctx := pipeline.NewPipelineContext()
 
 	outcome, err := h.Execute(context.Background(), node, pctx)
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if err == nil {
@@ -98,7 +98,7 @@ func TestManagerLoopHandler_ChildSucceeds(t *testing.T) {
 		name: "step_handler",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			return pipeline.Outcome{
-				Status:         pipeline.OutcomeSuccess,
+				Status:         string(pipeline.OutcomeSuccess),
 				ContextUpdates: map[string]string{"child_key": "child_value"},
 			}, nil
 		},
@@ -118,7 +118,7 @@ func TestManagerLoopHandler_ChildSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected OutcomeSuccess, got %q", outcome.Status)
 	}
 
@@ -142,7 +142,7 @@ func TestManagerLoopHandler_ChildFails(t *testing.T) {
 	registry.Register(&stubHandler{
 		name: "step_handler",
 		outcome: pipeline.Outcome{
-			Status:         pipeline.OutcomeFail,
+			Status:         string(pipeline.OutcomeFail),
 			ContextUpdates: map[string]string{"fail_key": "fail_value"},
 		},
 	})
@@ -160,7 +160,7 @@ func TestManagerLoopHandler_ChildFails(t *testing.T) {
 	outcome, _ := h.Execute(context.Background(), node, pctx)
 	// The child engine may return both a result (Status=fail) and an error (strict
 	// failure edges). Either way the manager should report OutcomeFail.
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "failed" {
@@ -179,7 +179,7 @@ func TestManagerLoopHandler_MaxCyclesExceeded(t *testing.T) {
 		name: "step_handler",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			<-ctx.Done()
-			return pipeline.Outcome{Status: pipeline.OutcomeFail}, ctx.Err()
+			return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, ctx.Err()
 		},
 	})
 
@@ -197,7 +197,7 @@ func TestManagerLoopHandler_MaxCyclesExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for max_cycles exceeded")
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "max_cycles_exceeded" {
@@ -218,7 +218,7 @@ func TestManagerLoopHandler_CtxCancellation(t *testing.T) {
 		name: "step_handler",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			<-ctx.Done()
-			return pipeline.Outcome{Status: pipeline.OutcomeFail}, ctx.Err()
+			return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, ctx.Err()
 		},
 	})
 
@@ -242,7 +242,7 @@ func TestManagerLoopHandler_CtxCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for context cancellation")
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "cancelled" {
@@ -288,7 +288,7 @@ func TestManagerLoopHandler_HandleChildResult_CancellationPropagates(t *testing.
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected errors.Is(err, context.Canceled) to be true, got err=%v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "cancelled" {
@@ -321,7 +321,7 @@ func TestManagerLoopHandler_HandleChildResult_DeadlineExceededFromParentCtx(t *t
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("expected errors.Is(err, context.DeadlineExceeded) to be true, got err=%v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "cancelled" {
@@ -355,7 +355,7 @@ func TestManagerLoopHandler_HandleChildResult_ChildInternalDeadlineNotCancellati
 	if err != nil {
 		t.Errorf("child-internal DeadlineExceeded with parent ctx alive must NOT return handler error, got %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail (normal failure-edge routing), got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "failed" {
@@ -385,7 +385,7 @@ func TestManagerLoopHandler_HandleChildResult_NonCancellationErrPreserved(t *tes
 	if err != nil {
 		t.Errorf("expected nil error (informational err discarded for non-cancellation), got %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "failed" {
@@ -420,7 +420,7 @@ func TestManagerLoopHandler_ChildPanic(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from panic in child")
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "error" {
@@ -448,7 +448,7 @@ func TestManagerLoopHandler_EventsEmitted(t *testing.T) {
 			case <-ctx.Done():
 				return pipeline.Outcome{}, ctx.Err()
 			}
-			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 		},
 	})
 
@@ -486,7 +486,7 @@ func TestManagerLoopHandler_EventsEmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -631,7 +631,7 @@ func TestManagerLoopHandler_StopConditionMet(t *testing.T) {
 		name: "step_handler",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			<-ctx.Done()
-			return pipeline.Outcome{Status: pipeline.OutcomeFail}, ctx.Err()
+			return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, ctx.Err()
 		},
 	})
 
@@ -652,7 +652,7 @@ func TestManagerLoopHandler_StopConditionMet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Stop condition returns success — intentional early exit.
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected OutcomeSuccess, got %q", outcome.Status)
 	}
 	if v, _ := pctx.Get("stack.child.status"); v != "stop_condition_met" {
@@ -673,7 +673,7 @@ func TestManagerLoopHandler_StopConditionNotMet(t *testing.T) {
 	registry.Register(&stubHandler{
 		name: "step_handler",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 		},
 	})
 
@@ -693,7 +693,7 @@ func TestManagerLoopHandler_StopConditionNotMet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected OutcomeSuccess, got %q", outcome.Status)
 	}
 	// Child completed normally, not via stop condition.
@@ -736,7 +736,7 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 			case <-ctx.Done():
 				return pipeline.Outcome{}, ctx.Err()
 			}
-			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 		},
 	})
 	registry.Register(&stubHandler{
@@ -751,7 +751,7 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 			// expansion permits.
 			val, _ := pctx.Get("steer.hint")
 			childSawHint = val
-			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 		},
 	})
 
@@ -791,7 +791,7 @@ func TestManagerLoopHandler_SteeringInjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected OutcomeSuccess, got %q", outcome.Status)
 	}
 
@@ -1110,7 +1110,7 @@ func TestManagerLoop_BudgetBypass_Fix_UsageRollup(t *testing.T) {
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			if node.ID == "step" {
 				return pipeline.Outcome{
-					Status: pipeline.OutcomeSuccess,
+					Status: string(pipeline.OutcomeSuccess),
 					Stats: &pipeline.SessionStats{
 						InputTokens:  childTokens / 2,
 						OutputTokens: childTokens / 2,
@@ -1120,7 +1120,7 @@ func TestManagerLoop_BudgetBypass_Fix_UsageRollup(t *testing.T) {
 					},
 				}, nil
 			}
-			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 		},
 	})
 	graphs := map[string]*pipeline.Graph{"child": childGraph}
@@ -1164,12 +1164,12 @@ func TestManagerLoop_BudgetBypass_Fix_ParentGuardHaltsAfterOverspend(t *testing.
 		name: "codergen",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			if node.ID == "step" {
-				return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: &pipeline.SessionStats{
+				return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), Stats: &pipeline.SessionStats{
 					TotalTokens: 10_000,
 					Provider:    "anthropic",
 				}}, nil
 			}
-			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 		},
 	})
 	graphs := map[string]*pipeline.Graph{"child": childGraph}
@@ -1213,11 +1213,11 @@ func TestManagerLoop_BudgetBypass_Fix_ChildGuardHaltsMidLoop(t *testing.T) {
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			switch node.ID {
 			case "parent_pre":
-				return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: &pipeline.SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+				return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), Stats: &pipeline.SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
 			case "step":
-				return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: &pipeline.SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+				return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), Stats: &pipeline.SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
 			}
-			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 		},
 	})
 	graphs := map[string]*pipeline.Graph{"child": childGraph}

@@ -58,12 +58,12 @@ func (h *SubgraphHandler) Name() string {
 func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 	ref, ok := node.Attrs["subgraph_ref"]
 	if !ok || ref == "" {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("node %q missing subgraph_ref attribute", node.ID)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("node %q missing subgraph_ref attribute", node.ID)
 	}
 
 	subGraph, ok := h.graphs[ref]
 	if !ok {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q not found", ref)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("subgraph %q not found", ref)
 	}
 
 	// Merge child workflow's own vars defaults with parent-provided
@@ -85,7 +85,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	// Inject params into graph (creates clone if params exist)
 	subGraphWithParams, err := InjectParamsIntoGraph(subGraph, params)
 	if err != nil {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("failed to inject params into subgraph %q: %w", ref, err)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("failed to inject params into subgraph %q: %w", ref, err)
 	}
 
 	// After pre-expansion, write the merged effective params back onto
@@ -134,7 +134,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	engine := NewEngine(subGraphWithParams, childRegistry, childOpts...)
 	result, err := engine.Run(ctx)
 	if err != nil {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q execution failed: %w", ref, err)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("subgraph %q execution failed: %w", ref, err)
 	}
 
 	// Map engine result status to outcome. A child-side budget halt is not
@@ -155,7 +155,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	// BudgetGuard checks between parent nodes, per-provider CLI rollups,
 	// and library-level EngineResult.Usage all see subgraph spend.
 	return Outcome{
-		Status:         status,
+		Status:         string(status),
 		ContextUpdates: result.Context,
 		ChildUsage:     result.Usage,
 	}, nil

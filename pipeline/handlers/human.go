@@ -560,18 +560,18 @@ func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome 
 		action = "default"
 	}
 	if action == "fail" {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out",
 		}}
 	}
 	def := cfg.DefaultChoice
 	if def == "" {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out (no default)",
 		}}
 	}
 	return pipeline.Outcome{
-		Status:         pipeline.OutcomeSuccess,
+		Status:         string(pipeline.OutcomeSuccess),
 		PreferredLabel: def,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            def,
@@ -632,7 +632,7 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	}
 
 	outcome := pipeline.Outcome{
-		Status: pipeline.OutcomeSuccess,
+		Status: string(pipeline.OutcomeSuccess),
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            response,
 			pipeline.ContextKeyResponsePrefix + node.ID: response,
@@ -797,7 +797,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 	}
 
 	outcome := pipeline.Outcome{
-		Status: status,
+		Status: string(status),
 		ContextUpdates: map[string]string{
 			answersKey:                                  jsonStr,
 			pipeline.ContextKeyHumanResponse:            summary,
@@ -805,7 +805,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		},
 	}
 	if applyInterviewDeclaredWrites(node, outcome.ContextUpdates, result) {
-		outcome.Status = pipeline.OutcomeFail
+		outcome.Status = string(pipeline.OutcomeFail)
 	}
 	return outcome, nil
 }
@@ -899,7 +899,7 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
-	return pipeline.Outcome{Status: pipeline.OutcomeSuccess, PreferredLabel: selected}, nil
+	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), PreferredLabel: selected}, nil
 }
 
 // executeYesNo handles yes_no mode: presents Yes/No choices and maps them to
@@ -918,5 +918,5 @@ func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipelin
 	if selected == "No" {
 		status = pipeline.OutcomeFail
 	}
-	return pipeline.Outcome{Status: status, PreferredLabel: selected}, nil
+	return pipeline.Outcome{Status: string(status), PreferredLabel: selected}, nil
 }

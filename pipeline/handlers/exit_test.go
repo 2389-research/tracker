@@ -25,7 +25,7 @@ func TestExitHandlerExecute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
 	}
 }

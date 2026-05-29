@@ -264,7 +264,7 @@ func TestCodergenHandlerSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 	// The handler returns last_response via ContextUpdates for the engine
@@ -298,7 +298,7 @@ func TestCodergenHandlerLLMError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler should not return error on LLM failure, got: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeRetry {
+	if outcome.Status != string(pipeline.OutcomeRetry) {
 		t.Errorf("expected 'retry', got %q", outcome.Status)
 	}
 }
@@ -324,7 +324,7 @@ func TestCodergenHandlerAutoStatusSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 }
@@ -338,7 +338,7 @@ func TestCodergenHandlerAutoStatusFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected 'fail', got %q", outcome.Status)
 	}
 }
@@ -352,7 +352,7 @@ func TestCodergenHandlerAutoStatusRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeRetry {
+	if outcome.Status != string(pipeline.OutcomeRetry) {
 		t.Errorf("expected 'retry', got %q", outcome.Status)
 	}
 }
@@ -368,7 +368,7 @@ func TestCodergenHandlerAutoStatusMultiTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeRetry {
+	if outcome.Status != string(pipeline.OutcomeRetry) {
 		t.Errorf("expected 'retry' from last STATUS line, got %q", outcome.Status)
 	}
 }
@@ -383,7 +383,7 @@ func TestCodergenHandlerAutoStatusLastWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeRetry {
+	if outcome.Status != string(pipeline.OutcomeRetry) {
 		t.Errorf("expected 'retry' (last STATUS line wins), got %q", outcome.Status)
 	}
 }
@@ -397,7 +397,7 @@ func TestCodergenHandlerSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 }
@@ -418,7 +418,7 @@ func TestCodergenHandlerWritesArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -447,7 +447,7 @@ func TestCodergenHandlerWritesArtifacts(t *testing.T) {
 	if err := json.Unmarshal(statusBytes, &status); err != nil {
 		t.Fatalf("status artifact should be valid json: %v", err)
 	}
-	if status["outcome"] != pipeline.OutcomeSuccess {
+	if status["outcome"] != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("status outcome = %v", status["outcome"])
 	}
 }
@@ -579,7 +579,7 @@ func TestCodergenHandlerWritesTranscriptForToolOnlyRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -633,7 +633,7 @@ func TestCodergenHandlerFidelityCompactMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -673,7 +673,7 @@ func TestCodergenHandlerFidelityFullUsesStandardInjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -908,7 +908,7 @@ func TestCodergenHandler_DeclaredWritesExtracted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("status = %q, want success", outcome.Status)
 	}
 	if got := outcome.ContextUpdates["milestone_id"]; got != "m1" {
@@ -936,7 +936,7 @@ func TestCodergenHandler_DeclaredWritesMissingKeyFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Fatalf("status = %q, want fail", outcome.Status)
 	}
 	if outcome.ContextUpdates[contextKeyWritesError] == "" {
@@ -956,7 +956,7 @@ func containsAll(s string, subs ...string) bool {
 func TestParseAutoStatus_CaseInsensitive(t *testing.T) {
 	tests := []struct {
 		input string
-		want  string
+		want  pipeline.TerminalStatus
 	}{
 		{"STATUS: Success\nDone.", pipeline.OutcomeSuccess},
 		{"STATUS: FAIL\nBroken.", pipeline.OutcomeFail},
@@ -1036,7 +1036,7 @@ func TestCodergenHandlerMaxTurnsExhaustedIsFail(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected outcome %q when agent exhausts turn limit, got %q",
 			pipeline.OutcomeFail, outcome.Status)
 	}
@@ -1111,7 +1111,7 @@ func TestCodergenHandlerMaxTurnsWithAutoStatusSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected outcome %q when auto_status emits success despite turn limit, got %q",
 			pipeline.OutcomeSuccess, outcome.Status)
 	}
@@ -1175,7 +1175,7 @@ func TestCodergenHandlerMaxTurnsWithAutoStatusFail(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected outcome %q when auto_status emits fail, got %q",
 			pipeline.OutcomeFail, outcome.Status)
 	}
@@ -1213,7 +1213,7 @@ func TestCodergenHandlerLoopDetectedMessage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected outcome %q for loop-detected agent, got %q",
 			pipeline.OutcomeFail, outcome.Status)
 	}
@@ -1236,7 +1236,7 @@ func TestParseAutoStatus_V3FailFirstContract(t *testing.T) {
 	cases := []struct {
 		name   string
 		input  string
-		expect string
+		expect pipeline.TerminalStatus
 	}{
 		{
 			name: "agent completes all checks: terminal success wins",
@@ -1288,7 +1288,7 @@ func TestParseAutoStatus_Gap5_1_AuditedShapes(t *testing.T) {
 	cases := []struct {
 		name   string
 		input  string
-		expect string
+		expect pipeline.TerminalStatus
 		note   string
 	}{
 		// --- The two shapes the audit named ---

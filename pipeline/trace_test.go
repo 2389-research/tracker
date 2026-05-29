@@ -24,7 +24,7 @@ func TestTraceEntryCreation(t *testing.T) {
 		Timestamp:   now,
 		NodeID:      "step1",
 		HandlerName: "codergen",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    150 * time.Millisecond,
 		EdgeTo:      "step2",
 		Error:       "",
@@ -39,7 +39,7 @@ func TestTraceEntryCreation(t *testing.T) {
 	if entry.HandlerName != "codergen" {
 		t.Errorf("expected HandlerName codergen, got %q", entry.HandlerName)
 	}
-	if entry.Status != OutcomeSuccess {
+	if entry.Status != string(OutcomeSuccess) {
 		t.Errorf("expected Status success, got %q", entry.Status)
 	}
 	if entry.Duration != 150*time.Millisecond {
@@ -67,7 +67,7 @@ func TestTraceAddEntry(t *testing.T) {
 		Timestamp:   time.Now(),
 		NodeID:      "s",
 		HandlerName: "start",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    10 * time.Millisecond,
 		EdgeTo:      "step1",
 	}
@@ -84,7 +84,7 @@ func TestTraceAddEntry(t *testing.T) {
 		Timestamp:   time.Now(),
 		NodeID:      "step1",
 		HandlerName: "codergen",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    50 * time.Millisecond,
 		EdgeTo:      "end",
 	}
@@ -106,7 +106,7 @@ func TestTraceSummary(t *testing.T) {
 		Timestamp:   start,
 		NodeID:      "s",
 		HandlerName: "start",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    10 * time.Millisecond,
 		EdgeTo:      "step1",
 	})
@@ -114,7 +114,7 @@ func TestTraceSummary(t *testing.T) {
 		Timestamp:   start.Add(10 * time.Millisecond),
 		NodeID:      "step1",
 		HandlerName: "codergen",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    200 * time.Millisecond,
 		EdgeTo:      "end",
 	})
@@ -122,7 +122,7 @@ func TestTraceSummary(t *testing.T) {
 		Timestamp:   start.Add(210 * time.Millisecond),
 		NodeID:      "end",
 		HandlerName: "exit",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    5 * time.Millisecond,
 	})
 
@@ -239,7 +239,7 @@ func TestEngineTraceRecordsEdgeSelections(t *testing.T) {
 		name: "start",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				PreferredLabel: "right",
 			}, nil
 		},
@@ -327,7 +327,7 @@ func TestEngineTraceRecordsErrors(t *testing.T) {
 	reg2.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeFail}, nil
+			return Outcome{Status: string(OutcomeFail)}, nil
 		},
 	})
 
@@ -355,7 +355,7 @@ func TestEngineTraceRecordsErrors(t *testing.T) {
 	if failEntry == nil {
 		t.Fatal("expected trace entry for failing node")
 	}
-	if failEntry.Status != OutcomeFail {
+	if failEntry.Status != string(OutcomeFail) {
 		t.Errorf("expected fail status in trace entry, got %q", failEntry.Status)
 	}
 }
@@ -419,7 +419,7 @@ func TestTraceEntryWithStats(t *testing.T) {
 	entry := TraceEntry{
 		NodeID:      "impl",
 		HandlerName: "codergen",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    5 * time.Minute,
 		Stats: &SessionStats{
 			Turns:          7,
@@ -443,7 +443,7 @@ func TestTraceEntryWithoutStats(t *testing.T) {
 	entry := TraceEntry{
 		NodeID:      "start",
 		HandlerName: "start",
-		Status:      OutcomeSuccess,
+		Status:      string(OutcomeSuccess),
 		Duration:    1 * time.Millisecond,
 	}
 
@@ -454,7 +454,7 @@ func TestTraceEntryWithoutStats(t *testing.T) {
 
 func TestOutcomeWithStats(t *testing.T) {
 	outcome := Outcome{
-		Status: OutcomeSuccess,
+		Status: string(OutcomeSuccess),
 		Stats: &SessionStats{
 			Turns:          3,
 			TotalToolCalls: 15,
@@ -481,7 +481,7 @@ func TestEngineTracePropagatesStats(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status: OutcomeSuccess,
+				Status: string(OutcomeSuccess),
 				Stats: &SessionStats{
 					Turns:          5,
 					TotalToolCalls: 20,
@@ -569,9 +569,9 @@ func TestTraceAggregateUsage(t *testing.T) {
 			RunID:     "agg-test",
 			StartTime: time.Now(),
 			Entries: []TraceEntry{
-				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{NodeID: "s", HandlerName: "start", Status: string(OutcomeSuccess)},
 				{
-					NodeID: "impl1", HandlerName: "codergen", Status: OutcomeSuccess,
+					NodeID: "impl1", HandlerName: "codergen", Status: string(OutcomeSuccess),
 					Stats: &SessionStats{
 						Turns:        10,
 						InputTokens:  5000,
@@ -581,7 +581,7 @@ func TestTraceAggregateUsage(t *testing.T) {
 					},
 				},
 				{
-					NodeID: "impl2", HandlerName: "codergen", Status: OutcomeSuccess,
+					NodeID: "impl2", HandlerName: "codergen", Status: string(OutcomeSuccess),
 					Stats: &SessionStats{
 						Turns:        5,
 						InputTokens:  3000,
@@ -590,7 +590,7 @@ func TestTraceAggregateUsage(t *testing.T) {
 						CostUSD:      0.06,
 					},
 				},
-				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+				{NodeID: "end", HandlerName: "exit", Status: string(OutcomeSuccess)},
 			},
 		}
 
@@ -627,8 +627,8 @@ func TestTraceAggregateUsage(t *testing.T) {
 		tr := &Trace{
 			RunID: "no-sessions",
 			Entries: []TraceEntry{
-				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
-				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+				{NodeID: "s", HandlerName: "start", Status: string(OutcomeSuccess)},
+				{NodeID: "end", HandlerName: "exit", Status: string(OutcomeSuccess)},
 			},
 		}
 		usage := tr.AggregateUsage()
@@ -758,7 +758,7 @@ func TestEngineResultUsageFromTraceStats(t *testing.T) {
 		name: "codergen",
 		executeFn: func(_ context.Context, _ *Node, _ *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status: OutcomeSuccess,
+				Status: string(OutcomeSuccess),
 				Stats: &SessionStats{
 					Turns:        5,
 					InputTokens:  2000,
@@ -847,20 +847,20 @@ func TestTraceAggregateToolCalls(t *testing.T) {
 		tr := &Trace{
 			RunID: "tool-agg",
 			Entries: []TraceEntry{
-				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{NodeID: "s", HandlerName: "start", Status: string(OutcomeSuccess)},
 				{
-					NodeID: "impl1", HandlerName: "codergen", Status: OutcomeSuccess,
+					NodeID: "impl1", HandlerName: "codergen", Status: string(OutcomeSuccess),
 					Stats: &SessionStats{
 						ToolCalls: map[string]int{"bash": 5, "write": 3},
 					},
 				},
 				{
-					NodeID: "impl2", HandlerName: "codergen", Status: OutcomeSuccess,
+					NodeID: "impl2", HandlerName: "codergen", Status: string(OutcomeSuccess),
 					Stats: &SessionStats{
 						ToolCalls: map[string]int{"bash": 2, "read": 4},
 					},
 				},
-				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+				{NodeID: "end", HandlerName: "exit", Status: string(OutcomeSuccess)},
 			},
 		}
 
@@ -880,8 +880,8 @@ func TestTraceAggregateToolCalls(t *testing.T) {
 		tr := &Trace{
 			RunID: "no-tools",
 			Entries: []TraceEntry{
-				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
-				{NodeID: "end", HandlerName: "exit", Status: OutcomeSuccess},
+				{NodeID: "s", HandlerName: "start", Status: string(OutcomeSuccess)},
+				{NodeID: "end", HandlerName: "exit", Status: string(OutcomeSuccess)},
 			},
 		}
 		calls := tr.AggregateToolCalls()
@@ -894,9 +894,9 @@ func TestTraceAggregateToolCalls(t *testing.T) {
 		tr := &Trace{
 			RunID: "nil-stats",
 			Entries: []TraceEntry{
-				{NodeID: "s", HandlerName: "start", Status: OutcomeSuccess},
+				{NodeID: "s", HandlerName: "start", Status: string(OutcomeSuccess)},
 				{
-					NodeID: "impl", HandlerName: "codergen", Status: OutcomeSuccess,
+					NodeID: "impl", HandlerName: "codergen", Status: string(OutcomeSuccess),
 					Stats: &SessionStats{
 						ToolCalls: map[string]int{"bash": 10},
 					},

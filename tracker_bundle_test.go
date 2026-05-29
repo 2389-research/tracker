@@ -182,5 +182,5 @@ type alwaysSucceedHandler struct{ name string }
 
 func (h *alwaysSucceedHandler) Name() string { return h.name }
 func (h *alwaysSucceedHandler) Execute(_ context.Context, _ *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 }

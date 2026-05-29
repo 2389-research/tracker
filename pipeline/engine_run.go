@@ -703,7 +703,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 // handleOutcomeStatus emits events and marks completion for non-retry outcomes.
 func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status string) {
 	switch status {
-	case OutcomeFail:
+	case string(OutcomeFail):
 		e.emit(PipelineEvent{
 			Type:      EventStageFailed,
 			Timestamp: time.Now(),
@@ -713,7 +713,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 		})
 		s.cp.MarkCompleted(currentNodeID)
 
-	case OutcomeSuccess:
+	case string(OutcomeSuccess):
 		e.emit(PipelineEvent{
 			Type:      EventStageCompleted,
 			Timestamp: time.Now(),
@@ -731,7 +731,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 			NodeID:    currentNodeID,
 			Message:   fmt.Sprintf("node %q returned unknown outcome status %q; treating as failure", currentNodeID, status),
 		})
-		s.pctx.Set(ContextKeyOutcome, OutcomeFail)
+		s.pctx.Set(ContextKeyOutcome, string(OutcomeFail))
 	}
 }
 
@@ -795,7 +795,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
 		return false, "", result
 	}
-	if outcomeStatus == OutcomeFail {
+	if outcomeStatus == string(OutcomeFail) {
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()

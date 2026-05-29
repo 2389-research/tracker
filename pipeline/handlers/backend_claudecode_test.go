@@ -29,7 +29,7 @@ func TestClassifyError(t *testing.T) {
 		name     string
 		stderr   string
 		exitCode int
-		want     string
+		want     pipeline.TerminalStatus
 	}{
 		{"exit 0 is success", "", 0, pipeline.OutcomeSuccess},
 		{"authentication error", "Error: authentication failed", 1, pipeline.OutcomeFail},

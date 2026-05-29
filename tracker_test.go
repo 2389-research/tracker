@@ -561,7 +561,7 @@ func TestRun_BudgetHalt_FromConfig(t *testing.T) {
 	}
 
 	// Verify that the run halted due to budget breach.
-	if result.Status != pipeline.OutcomeBudgetExceeded {
+	if result.Status != string(pipeline.OutcomeBudgetExceeded) {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeBudgetExceeded, result.Status)
 	}
 

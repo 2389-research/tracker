@@ -36,12 +36,12 @@ func TestFanInHandlerAllSuccess(t *testing.T) {
 	results := []ParallelResult{
 		{
 			NodeID:         "branch_a",
-			Status:         pipeline.OutcomeSuccess,
+			Status:         string(pipeline.OutcomeSuccess),
 			ContextUpdates: map[string]string{"key_a": "val_a", "shared": "from_a"},
 		},
 		{
 			NodeID:         "branch_b",
-			Status:         pipeline.OutcomeSuccess,
+			Status:         string(pipeline.OutcomeSuccess),
 			ContextUpdates: map[string]string{"key_b": "val_b", "shared": "from_b"},
 		},
 	}
@@ -52,7 +52,7 @@ func TestFanInHandlerAllSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 
@@ -75,8 +75,8 @@ func TestFanInHandlerAllFail(t *testing.T) {
 	pctx := pipeline.NewPipelineContext()
 
 	results := []ParallelResult{
-		{NodeID: "branch_a", Status: pipeline.OutcomeFail, Error: "oops a"},
-		{NodeID: "branch_b", Status: pipeline.OutcomeFail, Error: "oops b"},
+		{NodeID: "branch_a", Status: string(pipeline.OutcomeFail), Error: "oops a"},
+		{NodeID: "branch_b", Status: string(pipeline.OutcomeFail), Error: "oops b"},
 	}
 	data, _ := json.Marshal(results)
 	pctx.Set("parallel.results", string(data))
@@ -85,7 +85,7 @@ func TestFanInHandlerAllFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected 'fail', got %q", outcome.Status)
 	}
 	if len(outcome.ContextUpdates) != 0 {
@@ -101,12 +101,12 @@ func TestFanInHandlerPartialFailure(t *testing.T) {
 	results := []ParallelResult{
 		{
 			NodeID:         "branch_ok",
-			Status:         pipeline.OutcomeSuccess,
+			Status:         string(pipeline.OutcomeSuccess),
 			ContextUpdates: map[string]string{"from_ok": "yes"},
 		},
 		{
 			NodeID:         "branch_fail",
-			Status:         pipeline.OutcomeFail,
+			Status:         string(pipeline.OutcomeFail),
 			Error:          "branch failed",
 			ContextUpdates: map[string]string{"from_fail": "should_not_appear"},
 		},
@@ -118,7 +118,7 @@ func TestFanInHandlerPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected 'success' (partial failure), got %q", outcome.Status)
 	}
 	// Only successful branch context should be merged.
@@ -142,7 +142,7 @@ func TestFanInHandlerEmptyResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected 'fail' for empty results, got %q", outcome.Status)
 	}
 }

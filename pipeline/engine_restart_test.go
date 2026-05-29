@@ -42,7 +42,7 @@ func TestEngineRestartLoopDetection(t *testing.T) {
 			mu.Lock()
 			aExecutions++
 			mu.Unlock()
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -55,12 +55,12 @@ func TestEngineRestartLoopDetection(t *testing.T) {
 			mu.Unlock()
 			if attempt == 1 {
 				return Outcome{
-					Status:         OutcomeFail,
+					Status:         string(OutcomeFail),
 					ContextUpdates: map[string]string{"outcome": "fail"},
 				}, nil
 			}
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"outcome": "success"},
 			}, nil
 		},
@@ -106,7 +106,7 @@ func TestEngineRestartMaxRestartsExceeded(t *testing.T) {
 		name: "conditional",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeFail,
+				Status:         string(OutcomeFail),
 				ContextUpdates: map[string]string{"outcome": "fail"},
 			}, nil
 		},
@@ -155,7 +155,7 @@ func TestEngineRestartDownstreamClearing(t *testing.T) {
 			mu.Lock()
 			execCounts[node.ID]++
 			mu.Unlock()
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -168,12 +168,12 @@ func TestEngineRestartDownstreamClearing(t *testing.T) {
 			mu.Unlock()
 			if attempt == 1 {
 				return Outcome{
-					Status:         OutcomeFail,
+					Status:         string(OutcomeFail),
 					ContextUpdates: map[string]string{"outcome": "fail"},
 				}, nil
 			}
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"outcome": "success"},
 			}, nil
 		},
@@ -233,7 +233,7 @@ func TestEngineRestartTargetAttribute(t *testing.T) {
 			mu.Lock()
 			execCounts[node.ID]++
 			mu.Unlock()
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -246,12 +246,12 @@ func TestEngineRestartTargetAttribute(t *testing.T) {
 			mu.Unlock()
 			if attempt == 1 {
 				return Outcome{
-					Status:         OutcomeFail,
+					Status:         string(OutcomeFail),
 					ContextUpdates: map[string]string{"outcome": "fail"},
 				}, nil
 			}
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"outcome": "success"},
 			}, nil
 		},
@@ -305,12 +305,12 @@ func TestEngineRestartEmitsLoopRestartEvent(t *testing.T) {
 			mu.Unlock()
 			if attempt == 1 {
 				return Outcome{
-					Status:         OutcomeFail,
+					Status:         string(OutcomeFail),
 					ContextUpdates: map[string]string{"outcome": "fail"},
 				}, nil
 			}
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"outcome": "success"},
 			}, nil
 		},
@@ -379,12 +379,12 @@ func TestEngineRestartCheckpointPreservesRestartCount(t *testing.T) {
 			mu.Unlock()
 			if attempt <= 2 {
 				return Outcome{
-					Status:         OutcomeFail,
+					Status:         string(OutcomeFail),
 					ContextUpdates: map[string]string{"outcome": "fail"},
 				}, nil
 			}
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"outcome": "success"},
 			}, nil
 		},
@@ -430,7 +430,7 @@ func TestEngineRestartDefaultMaxRestarts(t *testing.T) {
 		name: "conditional",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeFail,
+				Status:         string(OutcomeFail),
 				ContextUpdates: map[string]string{"outcome": "fail"},
 			}, nil
 		},
@@ -482,10 +482,10 @@ func TestEngineRestartResetsRetryCountsForClearedNodes(t *testing.T) {
 				mu.Unlock()
 				// Retry once on each pass.
 				if retries%2 == 1 {
-					return Outcome{Status: OutcomeRetry}, nil
+					return Outcome{Status: string(OutcomeRetry)}, nil
 				}
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -498,12 +498,12 @@ func TestEngineRestartResetsRetryCountsForClearedNodes(t *testing.T) {
 			mu.Unlock()
 			if attempt == 1 {
 				return Outcome{
-					Status:         OutcomeFail,
+					Status:         string(OutcomeFail),
 					ContextUpdates: map[string]string{"outcome": "fail"},
 				}, nil
 			}
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"outcome": "success"},
 			}, nil
 		},
@@ -604,7 +604,7 @@ func TestEngineRestartMaxRestartsErrorMessage(t *testing.T) {
 		name: "conditional",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeFail,
+				Status:         string(OutcomeFail),
 				ContextUpdates: map[string]string{"outcome": "fail"},
 			}, nil
 		},

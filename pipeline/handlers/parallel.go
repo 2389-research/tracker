@@ -153,7 +153,7 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 		if !ok {
 			resultsCh <- branchResultMsg{
 				index:  i,
-				result: ParallelResult{NodeID: edge.To, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("target node %q not found in graph", edge.To)},
+				result: ParallelResult{NodeID: edge.To, Status: string(pipeline.OutcomeFail), Error: fmt.Sprintf("target node %q not found in graph", edge.To)},
 			}
 			continue
 		}
@@ -199,7 +199,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 		case <-ctx.Done():
 			resultsCh <- branchResultMsg{
 				index:  idx,
-				result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("context canceled while waiting for concurrency slot: %v", ctx.Err())},
+				result: ParallelResult{NodeID: tn.ID, Status: string(pipeline.OutcomeFail), Error: fmt.Sprintf("context canceled while waiting for concurrency slot: %v", ctx.Err())},
 			}
 			return
 		}
@@ -240,7 +240,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 func buildBranchResult(nodeID string, outcome pipeline.Outcome, mergedUpdates map[string]string, err error) ParallelResult {
 	pr := ParallelResult{NodeID: nodeID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
 	if err != nil {
-		pr.Status = pipeline.OutcomeFail
+		pr.Status = string(pipeline.OutcomeFail)
 		pr.Error = err.Error()
 	}
 	return pr
@@ -251,7 +251,7 @@ func (h *ParallelHandler) recoverBranch(idx int, tn *pipeline.Node, resultsCh ch
 	if r := recover(); r != nil {
 		resultsCh <- branchResultMsg{
 			index:  idx,
-			result: ParallelResult{NodeID: tn.ID, Status: pipeline.OutcomeFail, Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
+			result: ParallelResult{NodeID: tn.ID, Status: string(pipeline.OutcomeFail), Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
 		}
 		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
@@ -262,7 +262,7 @@ func (h *ParallelHandler) recoverBranch(idx int, tn *pipeline.Node, resultsCh ch
 
 // emitBranchComplete emits the appropriate pipeline event for a branch result.
 func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult) {
-	if pr.Status == pipeline.OutcomeFail {
+	if pr.Status == string(pipeline.OutcomeFail) {
 		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: nodeID, Message: pr.Error,
 		})
@@ -276,11 +276,11 @@ func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult) {
 // aggregateStatus returns success if at least one branch succeeded, fail otherwise.
 func aggregateStatus(results []ParallelResult) string {
 	for _, r := range results {
-		if r.Status == pipeline.OutcomeSuccess {
-			return pipeline.OutcomeSuccess
+		if r.Status == string(pipeline.OutcomeSuccess) {
+			return string(pipeline.OutcomeSuccess)
 		}
 	}
-	return pipeline.OutcomeFail
+	return string(pipeline.OutcomeFail)
 }
 
 // aggregateBranchStats sums SessionStats from all parallel branch results.

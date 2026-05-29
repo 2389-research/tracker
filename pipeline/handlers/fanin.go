@@ -46,7 +46,7 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 	}
 
 	return pipeline.Outcome{
-		Status:         status,
+		Status:         string(status),
 		ContextUpdates: merged,
 	}, nil
 }
@@ -57,7 +57,7 @@ func mergeSuccessfulBranches(results []ParallelResult) (map[string]string, bool)
 	merged := make(map[string]string)
 	anySuccess := false
 	for _, r := range results {
-		if r.Status == pipeline.OutcomeSuccess {
+		if r.Status == string(pipeline.OutcomeSuccess) {
 			anySuccess = true
 			for k, v := range r.ContextUpdates {
 				merged[k] = v

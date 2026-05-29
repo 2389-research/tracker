@@ -22,5 +22,5 @@ func (h *ConditionalHandler) Name() string { return "conditional" }
 
 // Execute is a no-op that returns a success outcome.
 func (h *ConditionalHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 }

@@ -29,7 +29,7 @@ func (h *testHandler) Execute(ctx context.Context, node *Node, pctx *PipelineCon
 func newTestRegistry() *HandlerRegistry {
 	reg := NewHandlerRegistry()
 	defaultFn := func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-		return Outcome{Status: OutcomeSuccess}, nil
+		return Outcome{Status: string(OutcomeSuccess)}, nil
 	}
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		n := name
@@ -48,7 +48,7 @@ func newTestRegistryWithOutcomes(outcomes map[string]Outcome) *HandlerRegistry {
 			if o, ok := outcomes[node.ID]; ok {
 				return o, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		}})
 	}
 	return reg
@@ -232,7 +232,7 @@ func TestEngineDiamondPipeline(t *testing.T) {
 		name: "conditional",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"outcome": "success"},
 			}, nil
 		},
@@ -270,7 +270,7 @@ func TestEngineEdgeSelectionByCondition(t *testing.T) {
 		name: "start",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"route": "beta"},
 			}, nil
 		},
@@ -313,7 +313,7 @@ func TestEngineEdgeSelectionByConditionWithParamsInterpolation(t *testing.T) {
 		name: "start",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"route": "beta"},
 			}, nil
 		},
@@ -354,7 +354,7 @@ func TestEngineEdgeSelectionByPreferredLabel(t *testing.T) {
 		name: "start",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				PreferredLabel: "right",
 			}, nil
 		},
@@ -431,9 +431,9 @@ func TestEngineRetryLogic(t *testing.T) {
 			current := attempts
 			mu.Unlock()
 			if current < 3 {
-				return Outcome{Status: OutcomeRetry}, nil
+				return Outcome{Status: string(OutcomeRetry)}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -462,7 +462,7 @@ func TestEngineRetryExhausted(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeRetry}, nil
+			return Outcome{Status: string(OutcomeRetry)}, nil
 		},
 	})
 
@@ -530,7 +530,7 @@ func TestEngineHandlerError_ChildUsagePreservedOnError(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:     OutcomeFail,
+				Status:     string(OutcomeFail),
 				ChildUsage: childUsage,
 			}, fmt.Errorf("handler cancelled: %w", context.Canceled)
 		},
@@ -580,7 +580,7 @@ func TestEngineContextCancellation(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			cancel()
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -648,7 +648,7 @@ func TestEngineGoalGate(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeFail}, nil
+			return Outcome{Status: string(OutcomeFail)}, nil
 		},
 	})
 
@@ -697,7 +697,7 @@ func TestEngineCheckpointResume(t *testing.T) {
 			mu.Lock()
 			executedNodes = append(executedNodes, node.ID)
 			mu.Unlock()
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -765,7 +765,7 @@ func TestEngineCheckpointResumeWithFidelityDegradation(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			capturedCtx = pctx.Snapshot()
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -810,7 +810,7 @@ func TestEngineAutoCheckpointWithArtifactDir(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -859,7 +859,7 @@ func TestEngineMirrorsGraphGoalAndExpandsPrompt(t *testing.T) {
 			if node.Attrs["prompt"] != "Plan for ship a hello world script" {
 				t.Fatalf("prompt = %q", node.Attrs["prompt"])
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -888,7 +888,7 @@ func TestEngineExpandsGraphVariablesInToolCommand(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			handlerCalled = true
 			capturedCommand = node.Attrs["tool_command"]
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -930,7 +930,7 @@ func TestEngineWithStylesheet(t *testing.T) {
 			for k, v := range node.Attrs {
 				capturedAttrs[k] = v
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -964,7 +964,7 @@ func TestEngineEdgeSelectionBySuggestedIDs(t *testing.T) {
 		name: "conditional",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:             OutcomeSuccess,
+				Status:             string(OutcomeSuccess),
 				SuggestedNextNodes: []string{"beta"},
 			}, nil
 		},
@@ -1019,9 +1019,9 @@ func TestEngineLoopBackToConditionalNode(t *testing.T) {
 			attempt := validateAttempts
 			mu.Unlock()
 			if attempt == 1 {
-				return Outcome{Status: OutcomeFail}, nil
+				return Outcome{Status: string(OutcomeFail)}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -1079,7 +1079,7 @@ func TestEngineConditionalEdgeMatchesOutcome(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -1130,7 +1130,7 @@ func TestEngineConditionalEdgeMatchesFail(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeFail}, nil
+			return Outcome{Status: string(OutcomeFail)}, nil
 		},
 	})
 
@@ -1167,7 +1167,7 @@ func TestEngineConditionalEdgeDiagnosticOnMismatch(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -1199,9 +1199,9 @@ func TestEngineStrictFailureEdgeStopsPipeline(t *testing.T) {
 	g.AddEdge(&Edge{From: "next", To: "end"})
 
 	reg := newTestRegistryWithOutcomes(map[string]Outcome{
-		"s":     {Status: OutcomeSuccess},
-		"setup": {Status: OutcomeFail}, // Setup fails
-		"next":  {Status: OutcomeSuccess},
+		"s":     {Status: string(OutcomeSuccess)},
+		"setup": {Status: string(OutcomeFail)}, // Setup fails
+		"next":  {Status: string(OutcomeSuccess)},
 	})
 	engine := NewEngine(g, reg)
 	result, err := engine.Run(context.Background())
@@ -1241,9 +1241,9 @@ func TestEngineStrictFailureEdgeAllowsConditionalRouting(t *testing.T) {
 	g.AddEdge(&Edge{From: "nok", To: "end", Condition: "ctx.outcome = success"})
 
 	reg := newTestRegistryWithOutcomes(map[string]Outcome{
-		"s":     {Status: OutcomeSuccess},
-		"check": {Status: OutcomeFail}, // fails, routes to nok via condition
-		"nok":   {Status: OutcomeSuccess},
+		"s":     {Status: string(OutcomeSuccess)},
+		"check": {Status: string(OutcomeFail)}, // fails, routes to nok via condition
+		"nok":   {Status: string(OutcomeSuccess)},
 	})
 	engine := NewEngine(g, reg)
 	result, err := engine.Run(context.Background())
@@ -1302,7 +1302,7 @@ func TestEngineResumePreservesEdgeContext(t *testing.T) {
 			if node.ID == "b" {
 				bExecuted = true
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -1365,7 +1365,7 @@ func TestEngineResumeLoopingPipelineDoesNotInfiniteLoop(t *testing.T) {
 			mu.Unlock()
 			// On re-execution, gate should route to "done".
 			pctx.Set(ContextKeyPreferredLabel, "done")
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -1374,7 +1374,7 @@ func TestEngineResumeLoopingPipelineDoesNotInfiniteLoop(t *testing.T) {
 			mu.Lock()
 			executedNodes = append(executedNodes, node.ID)
 			mu.Unlock()
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -1423,7 +1423,7 @@ func TestEngine_EmitsCostUpdatedAfterEachNode(t *testing.T) {
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		n := name
 		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeSuccess, Stats: nodeStats}, nil
+			return Outcome{Status: string(OutcomeSuccess), Stats: nodeStats}, nil
 		}})
 	}
 
@@ -1523,7 +1523,7 @@ func TestEngine_HaltsOnBudgetBreach(t *testing.T) {
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		n := name
 		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeSuccess, Stats: nodeStats}, nil
+			return Outcome{Status: string(OutcomeSuccess), Stats: nodeStats}, nil
 		}})
 	}
 
@@ -1604,7 +1604,7 @@ func TestEngine_HaltsOnBudgetBreachDuringRetry(t *testing.T) {
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		n := name
 		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeRetry, Stats: nodeStats}, nil
+			return Outcome{Status: string(OutcomeRetry), Stats: nodeStats}, nil
 		}})
 	}
 

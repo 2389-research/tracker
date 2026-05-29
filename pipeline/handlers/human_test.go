@@ -65,7 +65,7 @@ func TestHumanHandlerWithAutoApprove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 	if outcome.PreferredLabel != "approve" {
@@ -176,7 +176,7 @@ func TestHumanHandlerFreeformMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 	if recorder.freeformPromptReceived != "What would you like to do?" {
@@ -462,7 +462,7 @@ func TestHumanHandler_InterviewMode_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -517,7 +517,7 @@ func TestHumanHandler_InterviewMode_ZeroQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 	// Falls back to freeform — human_response should be set (auto-approved)
@@ -562,7 +562,7 @@ func TestHumanHandler_InterviewMode_MissingQuestionsKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 	// Should have parsed questions from last_response and called AskInterview
@@ -668,7 +668,7 @@ func TestHumanHandler_InterviewMode_Canceled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error (canceled should not error): %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected fail on cancel, got %q", outcome.Status)
 	}
 	// Partial answers should still be stored
@@ -805,7 +805,7 @@ func TestHumanHandler_InterviewMode_CustomKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -848,7 +848,7 @@ func TestHumanHandler_InterviewMode_DeclaredWritesExtracted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("status = %q, want success", outcome.Status)
 	}
 	if got := outcome.ContextUpdates["target_language"]; got != "go" {
@@ -886,7 +886,7 @@ func TestHumanHandler_InterviewMode_DeclaredWritesMissingKeyFails(t *testing.T) 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Fatalf("status = %q, want fail", outcome.Status)
 	}
 	if outcome.ContextUpdates[contextKeyWritesError] == "" {
@@ -923,7 +923,7 @@ func TestHumanHandler_InterviewMode_CanceledZeroAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected fail on cancel, got %q", outcome.Status)
 	}
 	// Partial answers (even zero) should be stored
@@ -1013,7 +1013,7 @@ func TestHumanHandler_FreeformTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail on timeout with timeout_action=fail, got %q", outcome.Status)
 	}
 }
@@ -1042,7 +1042,7 @@ func TestHumanHandler_TimeoutUsesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected OutcomeSuccess when default_choice is set, got %q", outcome.Status)
 	}
 	if outcome.PreferredLabel != "approved" {
@@ -1092,7 +1092,7 @@ func TestYesNoMode_YesReturnsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected OutcomeSuccess for Yes, got %q", outcome.Status)
 	}
 }
@@ -1120,7 +1120,7 @@ func TestYesNoMode_NoReturnsFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected OutcomeFail for No, got %q", outcome.Status)
 	}
 }
@@ -1174,7 +1174,7 @@ func TestAllGateModes_CorrectRouting(t *testing.T) {
 			if err != nil {
 				t.Fatalf("pick=%s: unexpected error: %v", pick, err)
 			}
-			if outcome.Status != pipeline.OutcomeSuccess {
+			if outcome.Status != string(pipeline.OutcomeSuccess) {
 				t.Errorf("pick=%s: choice mode should always return OutcomeSuccess, got %q", pick, outcome.Status)
 			}
 			if outcome.PreferredLabel != pick {
@@ -1200,7 +1200,7 @@ func TestAllGateModes_CorrectRouting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Yes: unexpected error: %v", err)
 		}
-		if outcome.Status != pipeline.OutcomeSuccess {
+		if outcome.Status != string(pipeline.OutcomeSuccess) {
 			t.Errorf("Yes: expected OutcomeSuccess, got %q", outcome.Status)
 		}
 
@@ -1210,7 +1210,7 @@ func TestAllGateModes_CorrectRouting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("No: unexpected error: %v", err)
 		}
-		if outcome.Status != pipeline.OutcomeFail {
+		if outcome.Status != string(pipeline.OutcomeFail) {
 			t.Errorf("No: expected OutcomeFail, got %q", outcome.Status)
 		}
 	})
@@ -1230,7 +1230,7 @@ func TestAllGateModes_CorrectRouting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("freeform: unexpected error: %v", err)
 		}
-		if outcome.Status != pipeline.OutcomeSuccess {
+		if outcome.Status != string(pipeline.OutcomeSuccess) {
 			t.Errorf("freeform: expected OutcomeSuccess, got %q", outcome.Status)
 		}
 		if outcome.ContextUpdates[pipeline.ContextKeyHumanResponse] != "the login page crashes" {
@@ -1261,7 +1261,7 @@ func TestAllGateModes_CorrectRouting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("interview complete: unexpected error: %v", err)
 		}
-		if outcome.Status != pipeline.OutcomeSuccess {
+		if outcome.Status != string(pipeline.OutcomeSuccess) {
 			t.Errorf("interview complete: expected OutcomeSuccess, got %q", outcome.Status)
 		}
 
@@ -1277,7 +1277,7 @@ func TestAllGateModes_CorrectRouting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("interview cancel: unexpected error: %v", err)
 		}
-		if outcome.Status != pipeline.OutcomeFail {
+		if outcome.Status != string(pipeline.OutcomeFail) {
 			t.Errorf("interview cancel: expected OutcomeFail, got %q", outcome.Status)
 		}
 	})

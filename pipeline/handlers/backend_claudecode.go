@@ -339,7 +339,7 @@ func isClaudeModel(model string) bool {
 
 // classifyError maps stderr content and exit codes to pipeline outcome strings.
 // Returns the outcome status that should be used for retry/fail decisions.
-func classifyError(stderr string, exitCode int) string {
+func classifyError(stderr string, exitCode int) pipeline.TerminalStatus {
 	if exitCode == 0 {
 		return pipeline.OutcomeSuccess
 	}

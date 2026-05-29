@@ -130,5 +130,5 @@ type mockHandler struct {
 func (h *mockHandler) Name() string { return h.name }
 
 func (h *mockHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 }

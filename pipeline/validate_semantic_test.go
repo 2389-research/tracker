@@ -15,7 +15,7 @@ type semanticStubHandler struct {
 
 func (s *semanticStubHandler) Name() string { return s.name }
 func (s *semanticStubHandler) Execute(_ context.Context, _ *Node, _ *PipelineContext) (Outcome, error) {
-	return Outcome{Status: OutcomeSuccess}, nil
+	return Outcome{Status: string(OutcomeSuccess)}, nil
 }
 
 func TestHandlerRegistry_Has(t *testing.T) {

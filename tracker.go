@@ -857,7 +857,7 @@ func resultFromEngine(er *pipeline.EngineResult) *Result {
 	}
 	return &Result{
 		RunID:          er.RunID,
-		Status:         er.Status,
+		Status:         string(er.Status),
 		CompletedNodes: er.CompletedNodes,
 		Context:        er.Context,
 		EngineResult:   er,

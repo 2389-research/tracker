@@ -14,7 +14,7 @@ import (
 // EngineResult holds the final outcome of a pipeline execution run.
 type EngineResult struct {
 	RunID           string
-	Status          string
+	Status          TerminalStatus
 	CompletedNodes  []string
 	Context         map[string]string
 	Trace           *Trace
@@ -23,7 +23,13 @@ type EngineResult struct {
 }
 
 // OutcomeBudgetExceeded signals that a BudgetGuard halted the run.
-const OutcomeBudgetExceeded = "budget_exceeded"
+const OutcomeBudgetExceeded TerminalStatus = "budget_exceeded"
+
+// OutcomeValidationOverridden signals that the run reached the success exit
+// after traversing at least one Edge.Override == true edge. Engine-terminal-only:
+// handlers never return this value; the engine writes it post-loop based on the
+// runState.validationOverrides slice. See docs/superpowers/specs/2026-05-29-validation-overridden-design.md.
+const OutcomeValidationOverridden TerminalStatus = "validation_overridden"
 
 // ChildRunContext is the execution context a handler may need when it
 // launches a child run (subgraph, manager_loop). Carries the parent
@@ -330,7 +336,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	// never flow into any node's per-node scope.
 	e.drainSteering(s)
 
-	if outcome.Status == OutcomeRetry {
+	if outcome.Status == string(OutcomeRetry) {
 		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, &traceEntry)
 	}
 
@@ -426,7 +432,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 // unconditional outgoing edges stops the pipeline.
 func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *TraceEntry, edges []*Edge) *loopResult {
 	outcome, _ := s.pctx.Get(ContextKeyOutcome)
-	if outcome != OutcomeFail || hasAnyConditionalEdge(edges) {
+	if outcome != string(OutcomeFail) || hasAnyConditionalEdge(edges) {
 		return nil
 	}
 	e.emit(PipelineEvent{

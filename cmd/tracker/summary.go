@@ -195,7 +195,7 @@ func printRunHeader(result *pipeline.EngineResult) {
 	case pipeline.OutcomeFail:
 		statusText = lipgloss.NewStyle().Foreground(colorHot).Render(statusIcon + " fail")
 	default:
-		statusText = mutedStyle.Render(statusIcon + " " + result.Status)
+		statusText = mutedStyle.Render(statusIcon + " " + string(result.Status))
 	}
 	fmt.Printf("  Status:    %s\n", statusText)
 }
@@ -301,9 +301,9 @@ func printNodeTable(result *pipeline.EngineResult) {
 func printNodeTableRow(entry pipeline.TraceEntry) {
 	icon := "✓"
 	switch entry.Status {
-	case pipeline.OutcomeFail:
+	case string(pipeline.OutcomeFail):
 		icon = "✗"
-	case pipeline.OutcomeRetry:
+	case string(pipeline.OutcomeRetry):
 		icon = "↻"
 	}
 	nodeID := entry.NodeID
@@ -379,9 +379,9 @@ func printNodeGraph(entries []pipeline.TraceEntry) {
 // nodeStatusIcon returns the ASCII icon for a node execution status.
 func nodeStatusIcon(status string) string {
 	switch status {
-	case pipeline.OutcomeFail:
+	case string(pipeline.OutcomeFail):
 		return "✗"
-	case pipeline.OutcomeRetry:
+	case string(pipeline.OutcomeRetry):
 		return "↻"
 	default:
 		return "✓"

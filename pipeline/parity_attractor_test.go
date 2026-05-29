@@ -118,13 +118,13 @@ func TestParityGoalGateReroutesAtExitViaGraphRetryTarget(t *testing.T) {
 			case "work":
 				attempts++
 				if attempts == 1 {
-					return Outcome{Status: OutcomeFail}, nil
+					return Outcome{Status: string(OutcomeFail)}, nil
 				}
-				return Outcome{Status: OutcomeSuccess}, nil
+				return Outcome{Status: string(OutcomeSuccess)}, nil
 			case "repair":
-				return Outcome{Status: OutcomeSuccess}, nil
+				return Outcome{Status: string(OutcomeSuccess)}, nil
 			default:
-				return Outcome{Status: OutcomeSuccess}, nil
+				return Outcome{Status: string(OutcomeSuccess)}, nil
 			}
 		},
 	})

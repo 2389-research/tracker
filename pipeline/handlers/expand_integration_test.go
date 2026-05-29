@@ -49,7 +49,7 @@ func TestVariableExpansion_Integration(t *testing.T) {
 		t.Fatalf("execution failed: %v", err)
 	}
 
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("got status %q, want success", outcome.Status)
 	}
 

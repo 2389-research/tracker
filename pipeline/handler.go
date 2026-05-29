@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	OutcomeSuccess = "success"
-	OutcomeRetry   = "retry"
-	OutcomeFail    = "fail"
+	OutcomeSuccess TerminalStatus = "success"
+	OutcomeRetry   TerminalStatus = "retry"
+	OutcomeFail    TerminalStatus = "fail"
 )
 
 // Outcome represents the result of executing a handler on a pipeline node.
