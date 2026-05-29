@@ -1391,3 +1391,85 @@ func TestParseManagerLoopConfig_SteerKeysCannotCollideWithSafeAllowlist(t *testi
 		t.Errorf("cfg.steerKeys[steer.interview_answers] is empty; want a populated value")
 	}
 }
+
+// TestManagerLoop_ChildOverridePropagates pins the propagation contract:
+// when a manager_loop child terminates with Status=OutcomeValidationOverridden,
+// the manager_loop handler returns Outcome.Status=OutcomeSuccess for parent
+// routing (audit-only signal — the override does not redirect parent edges),
+// populates Outcome.ChildOverride with the child's ValidationOverrides each
+// prepended with the manager_loop node's ID, and sets
+// stack.child.exit_status=validation_overridden in parent context so operator
+// introspection sees the underlying child terminal status.
+//
+// Mirrors TestSubgraph_ChildOverridePropagates in pipeline/subgraph_test.go
+// for the manager_loop handler.
+func TestManagerLoop_ChildOverridePropagates(t *testing.T) {
+	// Child graph: Start -> Gate (wait.human, override edge) -> End.
+	// The HumanHandler stub returns Actor=human and PreferredLabel=accept,
+	// so the child engine takes the override edge and terminates with
+	// Status=OutcomeValidationOverridden via the terminal-status rule.
+	childGraph := pipeline.NewGraph("child_pipeline")
+	childGraph.AddNode(&pipeline.Node{ID: "Start", Shape: "Mdiamond", Label: "Start"})
+	childGraph.AddNode(&pipeline.Node{ID: "Gate", Shape: "hexagon", Label: "Gate", Attrs: map[string]string{"label": "Accept?"}})
+	childGraph.AddNode(&pipeline.Node{ID: "End", Shape: "Msquare", Label: "End"})
+	childGraph.AddEdge(&pipeline.Edge{From: "Start", To: "Gate"})
+	childGraph.AddEdge(&pipeline.Edge{From: "Gate", To: "End", Label: "accept", Override: true})
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(NewStartHandler())
+	registry.Register(NewExitHandler())
+	// Stub wait.human that simulates a human selecting the override-labeled edge.
+	registry.Register(&stubHandler{
+		name: "wait.human",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			return pipeline.Outcome{
+				Status:         string(pipeline.OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  pipeline.ActorHuman,
+			}, nil
+		},
+	})
+
+	graphs := map[string]*pipeline.Graph{"child_pipeline": childGraph}
+	h := NewManagerLoopHandler(graphs, registry, pipeline.PipelineNoopHandler, nil)
+
+	node := &pipeline.Node{ID: "mgr", Handler: "stack.manager_loop", Attrs: map[string]string{
+		"subgraph_ref":          "child_pipeline",
+		"manager.poll_interval": "1ms",
+		"manager.max_cycles":    "100",
+	}}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Parent routing: success (audit-only override signal — see #271 spec).
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
+		t.Errorf("Status = %q, want %q", outcome.Status, pipeline.OutcomeSuccess)
+	}
+	// ChildOverride must carry exactly one entry with the manager_loop node
+	// ID prepended to SubgraphPath. The leaf gate stays on GateNodeID.
+	if len(outcome.ChildOverride) != 1 {
+		t.Fatalf("ChildOverride length = %d, want 1: %+v", len(outcome.ChildOverride), outcome.ChildOverride)
+	}
+	got := outcome.ChildOverride[0]
+	if got.GateNodeID != "Gate" {
+		t.Errorf("GateNodeID = %q, want Gate", got.GateNodeID)
+	}
+	if got.Label != "accept" {
+		t.Errorf("Label = %q, want accept", got.Label)
+	}
+	if got.Actor != pipeline.ActorHuman {
+		t.Errorf("Actor = %q, want %q", got.Actor, pipeline.ActorHuman)
+	}
+	if len(got.SubgraphPath) != 1 || got.SubgraphPath[0] != "mgr" {
+		t.Errorf("SubgraphPath = %v, want [mgr]", got.SubgraphPath)
+	}
+	// Parent context records the child's true terminal status so operator
+	// introspection sees what really happened (mirrors budget exit-status
+	// recording at handleChildResult line ~695).
+	if v, _ := pctx.Get("stack.child.exit_status"); v != string(pipeline.OutcomeValidationOverridden) {
+		t.Errorf("stack.child.exit_status = %q, want %q", v, pipeline.OutcomeValidationOverridden)
+	}
+}

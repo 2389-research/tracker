@@ -52,3 +52,30 @@ type OverrideDetail struct {
 // The cobra entry checks errors.Is(err, ErrValidationOverridden) and exits with
 // code 2 (distinct from generic-fail exit 1).
 var ErrValidationOverridden = errors.New("run completed via validation_overridden")
+
+// PrependSubgraphPath returns a copy of in with parentNodeID prepended to each
+// entry's SubgraphPath. Used by subgraph and manager_loop handlers to lift
+// child ValidationOverrides into parent-visible OverrideDetails with outermost-
+// to-innermost ordering: at depth N each level prepends its own subgraph node ID,
+// so by the time control returns to the outermost run the path enumerates the
+// nesting chain top-down (leaf gate node ID stays on GateNodeID, never in
+// SubgraphPath).
+//
+// The input is not mutated. Each output entry has a fresh SubgraphPath slice
+// so callers may safely retain or mutate either side independently.
+// Returns nil for nil/empty input so callers can rely on
+// `if len(out) > 0` checks downstream.
+func PrependSubgraphPath(in []OverrideDetail, parentNodeID string) []OverrideDetail {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]OverrideDetail, len(in))
+	for i, d := range in {
+		newPath := make([]string, 0, len(d.SubgraphPath)+1)
+		newPath = append(newPath, parentNodeID)
+		newPath = append(newPath, d.SubgraphPath...)
+		d.SubgraphPath = newPath
+		out[i] = d
+	}
+	return out
+}

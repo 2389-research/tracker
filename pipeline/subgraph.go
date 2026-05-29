@@ -163,20 +163,10 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	// innermost ordering: a child override originating at "Gate" inside a
 	// "L2" subgraph that itself runs inside an "L1" subgraph terminates at
 	// the outermost engine with SubgraphPath=["L1", "L2"] and GateNodeID="Gate".
-	// The recursive prepend lives in this handler — each level adds its own
-	// ID to the front, so by the time control returns to the outermost run
-	// the path enumerates the nesting chain leaf-up.
-	var childOverride []OverrideDetail
-	if len(result.ValidationOverrides) > 0 {
-		childOverride = make([]OverrideDetail, len(result.ValidationOverrides))
-		for i, det := range result.ValidationOverrides {
-			newPath := make([]string, 0, len(det.SubgraphPath)+1)
-			newPath = append(newPath, node.ID)
-			newPath = append(newPath, det.SubgraphPath...)
-			det.SubgraphPath = newPath
-			childOverride[i] = det
-		}
-	}
+	// The recursive prepend lives in this handler (via PrependSubgraphPath) —
+	// each level adds its own ID to the front, so by the time control returns
+	// to the outermost run the path enumerates the nesting chain leaf-up.
+	childOverride := PrependSubgraphPath(result.ValidationOverrides, node.ID)
 
 	// Propagate the child's aggregated usage up to the parent trace so
 	// BudgetGuard checks between parent nodes, per-provider CLI rollups,

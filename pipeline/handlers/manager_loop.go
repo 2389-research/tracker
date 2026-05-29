@@ -680,6 +680,38 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 			}, nil
 		}
 
+		// Validation override: the child engine terminated with
+		// Status=OutcomeValidationOverridden via the engine's terminal-status
+		// rule (s.validationOverrides was non-empty at the success exit).
+		// Map to OutcomeSuccess for parent routing — the override is an
+		// audit-only signal that doesn't redirect parent edge selection —
+		// and propagate the child's ValidationOverrides via ChildOverride
+		// so the parent engine absorbs them into its own sticky list and
+		// the parent's terminal-status rule flips Status → validation_overridden
+		// in turn. Mirrors the SubgraphHandler propagation path (#271).
+		//
+		// Why this branch must come before the generic non-success fallback
+		// below: that fallback returns OutcomeFail (or OutcomeSuccess for
+		// child-side budget halts) and never populates ChildOverride, so a
+		// child that succeeded-with-overrides would otherwise be reported
+		// to the parent as a plain failure with no override trail.
+		if result.Status == pipeline.OutcomeValidationOverridden {
+			pctx.Set("stack.child.status", "success")
+			pctx.Set("stack.child.exit_status", string(pipeline.OutcomeValidationOverridden))
+			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+				Type:      pipeline.EventStageCompleted,
+				Timestamp: time.Now(),
+				NodeID:    nodeID,
+				Message:   fmt.Sprintf("manager_loop: child completed with validation_overridden after %d cycles", cycles),
+			})
+			return pipeline.Outcome{
+				Status:         string(pipeline.OutcomeSuccess),
+				ContextUpdates: result.Context,
+				ChildUsage:     result.Usage,
+				ChildOverride:  pipeline.PrependSubgraphPath(result.ValidationOverrides, nodeID),
+			}, nil
+		}
+
 		// Child pipeline failed (non-success status). Record the child's
 		// real exit status (e.g. OutcomeBudgetExceeded) in context for
 		// inspection, but return a valid handler-level outcome. Handler
