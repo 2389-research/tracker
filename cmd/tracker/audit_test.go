@@ -642,3 +642,86 @@ func TestPrintRunList_BundleColumn(t *testing.T) {
 		}
 	}
 }
+
+// TestPrintRunList_StatusIcons verifies the Status column icon mapping for
+// every status the runtime can emit: success → "ok", validation_overridden →
+// "override", budget_exceeded → "budget", fail → "FAIL". Pins Gap 5.2 Task 21:
+// the override/budget icons were silently rendered as the default "+" before
+// classifyStatus (Task 15) and the icon switch widening here.
+func TestPrintRunList_StatusIcons(t *testing.T) {
+	runs := []tracker.RunSummary{
+		{RunID: "successrun0000", Status: "success", Nodes: 1},
+		{RunID: "overriderun000", Status: "validation_overridden", Nodes: 1},
+		{RunID: "budgetrun00000", Status: "budget_exceeded", Nodes: 1, FailedAt: "BuildNode"},
+		{RunID: "failrun0000000", Status: "fail", Nodes: 1, FailedAt: "ImplNode"},
+	}
+	out := captureStdout(t, func() { printRunList(runs) })
+
+	lines := strings.Split(out, "\n")
+	findLine := func(runIDPrefix string) string {
+		t.Helper()
+		for _, ln := range lines {
+			if strings.Contains(ln, runIDPrefix) {
+				return ln
+			}
+		}
+		t.Fatalf("no row for runID %q in output:\n%s", runIDPrefix, out)
+		return ""
+	}
+
+	cases := []struct {
+		runID    string
+		wantIcon string
+	}{
+		{"successrun0000", "ok"},
+		{"overriderun000", "override"},
+		{"budgetrun00000", "budget"},
+		{"failrun0000000", "FAIL"},
+	}
+	for _, c := range cases {
+		line := findLine(c.runID)
+		if !strings.Contains(line, c.wantIcon) {
+			t.Errorf("row for %s missing icon %q: %q", c.runID, c.wantIcon, line)
+		}
+	}
+
+	// Sanity: the override row must NOT render as FAIL (regression guard for
+	// the pre-Task-21 silent fallthrough).
+	overrideLine := findLine("overriderun000")
+	if strings.Contains(overrideLine, "FAIL") {
+		t.Errorf("override row should not contain FAIL: %q", overrideLine)
+	}
+	budgetLine := findLine("budgetrun00000")
+	if strings.Contains(budgetLine, "FAIL") {
+		t.Errorf("budget row should not contain FAIL: %q", budgetLine)
+	}
+}
+
+// TestPrintRunList_StatusColumnWidth verifies the Status header is padded to
+// at least 10 characters (Gap 5.2 Task 21 widening) so the "override" (8) and
+// "budget" (6) icons render without column collision into Nodes.
+func TestPrintRunList_StatusColumnWidth(t *testing.T) {
+	runs := []tracker.RunSummary{
+		{RunID: "overriderun000", Status: "validation_overridden", Nodes: 7},
+	}
+	out := captureStdout(t, func() { printRunList(runs) })
+
+	// Find the row for the override run and verify "override" and the Nodes
+	// count are separated by the column's whitespace gap, not jammed adjacent.
+	var row string
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.Contains(ln, "overriderun000") {
+			row = ln
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("override row missing from output:\n%s", out)
+	}
+	// "override" is 8 chars; the format string pads to %-10s, leaving 2
+	// trailing spaces. Combined with the 2-space inter-column gap, "override"
+	// must be followed by at least 4 spaces before the Nodes value "7".
+	if !strings.Contains(row, "override    ") {
+		t.Errorf("Status column not widened to %%-10s — expected 4+ trailing spaces after \"override\":\n%q", row)
+	}
+}
