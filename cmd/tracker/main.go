@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 type runConfig struct {
@@ -28,6 +30,12 @@ type runConfig struct {
 	maxTokens         int           // halt if total tokens exceed this value (0 = no limit)
 	maxCostCents      int           // halt if total cost in cents exceeds this value (0 = no limit)
 	maxWallTime       time.Duration // halt if wall time exceeds this duration (0 = no limit)
+	// failOnOverride causes the CLI to exit with code 2 (not 0) when the run
+	// terminates as pipeline.OutcomeValidationOverridden. Default false keeps
+	// validation_overridden a success-equivalent exit, matching IsSuccess().
+	// Also settable via TRACKER_FAIL_ON_OVERRIDE=1 (strict "=1" parsing,
+	// matching the TRACKER_PASS_* convention).
+	failOnOverride bool
 	params            map[string]string
 	gatewayURL        string        // TRACKER_GATEWAY_URL override — synthesizes per-provider base URLs
 	webhookURL        string        // POST human gate prompts to this URL and wait for callback
@@ -121,6 +129,14 @@ func main() {
 		var doctorWarn *DoctorWarningsError
 		if errors.As(err, &doctorWarn) {
 			// exit 2 = doctor finished with warnings but no failures
+			os.Exit(2)
+		}
+		// --fail-on-override turns a validation_overridden run-mode terminal
+		// status into exit 2 (distinct from generic fail=1, doctor-warning=2
+		// only applies to `tracker doctor` so the two exit-2 codepaths can't
+		// both fire on the same invocation).
+		if errors.Is(err, pipeline.ErrValidationOverridden) {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(2)
 		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

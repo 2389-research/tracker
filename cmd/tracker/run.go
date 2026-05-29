@@ -92,6 +92,32 @@ var activeGitConfig struct {
 	allowInit bool
 }
 
+// activeFailOnOverride captures the effective --fail-on-override decision for
+// the current run, merged with the TRACKER_FAIL_ON_OVERRIDE=1 env var
+// fallback. Read by runPipelineAsync (TUI path), which doesn't have cfg in
+// scope — set by executeRun via applyFailOnOverrideEnv before the pipeline
+// fires. The non-TUI path (run()) reads cfg directly through
+// interpretRunResult, so it doesn't need this var, but keeping a single
+// source-of-truth across both paths avoids drift.
+var activeFailOnOverride bool
+
+// applyFailOnOverrideEnv reads TRACKER_FAIL_ON_OVERRIDE and sets
+// cfg.failOnOverride if it isn't already true. Strict "=1" parsing matches
+// the TRACKER_PASS_* convention (TRACKER_PASS_API_KEYS, TRACKER_PASS_ENV).
+// Truthy-looking values like "true", "yes", "TRUE" are deliberately rejected
+// so the env-var contract stays narrow and predictable.
+//
+// The flag-set value always wins: a --fail-on-override flag survives an
+// absent/zero env var, and the env var never *unsets* the flag.
+func applyFailOnOverrideEnv(cfg *runConfig) {
+	if cfg.failOnOverride {
+		return
+	}
+	if os.Getenv("TRACKER_FAIL_ON_OVERRIDE") == "1" {
+		cfg.failOnOverride = true
+	}
+}
+
 // webhookGateCfg holds just the webhook gate settings needed by chooseInterviewer.
 type webhookGateCfg struct {
 	webhookURL        string
@@ -234,7 +260,7 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 
 	result, runErr := engine.Run(ctx)
 
-	pipelineErr := interpretRunResult(result, runErr)
+	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
 	printRunSummary(result, pipelineErr, pipelineFile)
 	if result != nil && result.RunID != "" {
 		maybeExportBundle(artifactDir, result.RunID)
@@ -305,15 +331,47 @@ func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.Pipe
 	return opts
 }
 
-// interpretRunResult converts a raw engine run result into a pipeline-level error.
-func interpretRunResult(result *pipeline.EngineResult, runErr error) error {
+// interpretRunResult converts a raw engine run result into a pipeline-level
+// error.
+//
+// Mapping:
+//   - runErr != nil               -> wrapped engine error (exit 1)
+//   - Status.IsSuccess() && !flag -> nil (exit 0); covers both success and
+//     validation_overridden by default
+//   - Status==validation_overridden && --fail-on-override -> ErrValidationOverridden
+//     (exit 2 — distinct from generic fail)
+//   - Any other status            -> generic "pipeline finished with status: X"
+//     error (exit 1); failure dominates --fail-on-override.
+//
+// Note: runErr precedence comes first so a low-level engine crash is surfaced
+// even on a paper-success status, and the override sentinel only fires on the
+// no-runErr path.
+func interpretRunResult(result *pipeline.EngineResult, runErr error, cfg *runConfig) error {
 	if runErr != nil {
 		return fmt.Errorf("pipeline execution: %w", runErr)
 	}
-	if result.Status != pipeline.OutcomeSuccess {
+	if result.Status == pipeline.OutcomeValidationOverridden && cfg != nil && cfg.failOnOverride {
+		head := headlineOverride(result.ValidationOverrides)
+		fmt.Fprintf(os.Stderr,
+			"tracker: run completed via %s at %q (label %q); --fail-on-override caused non-zero exit\n",
+			result.Status, head.GateNodeID, head.Label)
+		return pipeline.ErrValidationOverridden
+	}
+	if !result.Status.IsSuccess() {
 		return fmt.Errorf("pipeline finished with status: %s", result.Status)
 	}
 	return nil
+}
+
+// headlineOverride returns the latest entry from in (per spec D5a — the audit
+// header picks the newest entry as the "headline" since it's the override that
+// drove the run to its terminal exit). Returns a zero-value OverrideDetail for
+// empty input so callers can format %q on the bare fields without nil checks.
+func headlineOverride(in []pipeline.OverrideDetail) pipeline.OverrideDetail {
+	if len(in) == 0 {
+		return pipeline.OverrideDetail{}
+	}
+	return in[len(in)-1]
 }
 
 // buildConsoleEventHandlers creates the agent and pipeline event handlers for
@@ -682,6 +740,11 @@ type pipelineOutcome struct {
 }
 
 // runPipelineAsync starts the pipeline in a background goroutine and returns the outcome channel.
+//
+// Status-to-error translation goes through interpretRunResult so the TUI path
+// shares one source of truth with the non-TUI path: failure dominates, override
+// only fires when --fail-on-override is set, and validation_overridden returns
+// nil by default (because IsSuccess() covers it).
 func runPipelineAsync(engine *pipeline.Engine, ctx context.Context, prog *tea.Program) chan pipelineOutcome {
 	outcomeCh := make(chan pipelineOutcome, 1)
 	go func() {
@@ -692,10 +755,8 @@ func runPipelineAsync(engine *pipeline.Engine, ctx context.Context, prog *tea.Pr
 				prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
 			}
 		}()
-		result, pipelineErr := engine.Run(ctx)
-		if pipelineErr == nil && result.Status != pipeline.OutcomeSuccess {
-			pipelineErr = fmt.Errorf("pipeline finished with status: %s", result.Status)
-		}
+		result, runErr := engine.Run(ctx)
+		pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
 		outcomeCh <- pipelineOutcome{result: result, err: pipelineErr}
 		prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
 	}()

@@ -262,6 +262,14 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		return err
 	}
 
+	// Apply TRACKER_FAIL_ON_OVERRIDE=1 env var fallback. The flag (when set
+	// explicitly) always wins; the env var only flips false→true. Must run
+	// before activeFailOnOverride is stamped below.
+	applyFailOnOverrideEnv(&cfg)
+	// Store the effective decision for runPipelineAsync (TUI path) and
+	// run() (non-TUI path) — both call interpretRunResult and need cfg.
+	activeFailOnOverride = cfg.failOnOverride
+
 	// Store autopilot config for chooseInterviewer (called from run/runTUI).
 	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
 	// Store webhook gate config for chooseInterviewer (called from run/runTUI).

@@ -443,8 +443,12 @@ func runUsageSummary(result *pipeline.EngineResult) *pipeline.UsageSummary {
 }
 
 // printResumeHint shows the resume command when the pipeline didn't complete successfully.
+//
+// Uses TerminalStatus.IsSuccess() so validation_overridden runs (which are
+// success-equivalent by default) don't print a resume hint — they completed,
+// they just took an override edge along the way.
 func printResumeHint(result *pipeline.EngineResult, pipelineFile string) {
-	if result == nil || result.Status == pipeline.OutcomeSuccess || result.RunID == "" {
+	if result == nil || result.Status.IsSuccess() || result.RunID == "" {
 		return
 	}
 	pipelineArg := pipelineFile
