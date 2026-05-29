@@ -20,6 +20,15 @@ type EngineResult struct {
 	Trace           *Trace
 	Usage           *UsageSummary
 	BudgetLimitsHit []string // populated when a BudgetGuard halted the run
+	// ValidationOverrides is the list of override edges traversed during this
+	// run, in chronological order. Populated for every terminal path (success,
+	// fail, budget, validation_overridden) so failure-after-override forensics
+	// still see the override. Empty for runs with no override edges.
+	//
+	// The terminal-status rule writes Status=OutcomeValidationOverridden when
+	// len(ValidationOverrides) > 0 AND the run reached the success exit;
+	// failure paths return fail/budget regardless of override presence.
+	ValidationOverrides []OverrideDetail
 }
 
 // OutcomeBudgetExceeded signals that a BudgetGuard halted the run.

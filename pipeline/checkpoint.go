@@ -35,6 +35,13 @@ type Checkpoint struct {
 	// from a plain .dip file. Used for strict resume verification.
 	BundleIdentity string `json:"bundle_identity,omitempty"`
 
+	// ValidationOverrides persists the override sticky list across resume and
+	// bundle export. Appended at the flip-point in advanceToNextNode whenever
+	// an override edge is traversed; never cleared by clearDownstream or
+	// handleLoopRestart. omitempty for backwards compat with pre-v0.35
+	// checkpoints (absent = "no overrides happened").
+	ValidationOverrides []OverrideDetail `json:"validation_overrides,omitempty"`
+
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
 	completedSet map[string]bool `json:"-"`
