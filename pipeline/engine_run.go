@@ -639,6 +639,41 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 		Message:   fmt.Sprintf("node %q outcome: %s", currentNodeID, outcome.Status),
 		Decision:  detail,
 	})
+
+	// Absorb any child-propagated validation overrides into the run's sticky
+	// list. This is the SECOND sticky-write site — the first is the flip-point
+	// in advanceToNextNode (recordOverrideIfPresent) which handles own-graph
+	// Edge.Override traversals. The two sites cover different sources:
+	//   - own-graph: this run took an override edge directly.
+	//   - child-propagated: a child run (subgraph, manager_loop, future
+	//     parallel-with-subgraph branches) terminated with overrides, which
+	//     the child handler folded into Outcome.ChildOverride with its own
+	//     subgraph node ID prepended to SubgraphPath.
+	// We append unconditionally — child-propagated entries always carry a
+	// non-empty SubgraphPath and can never collide with own-graph entries
+	// (which always have empty SubgraphPath), so the dedup check in
+	// overrideAlreadyRecorded is unnecessary here.
+	if len(outcome.ChildOverride) > 0 {
+		for i := range outcome.ChildOverride {
+			d := outcome.ChildOverride[i]
+			s.appendOverride(d)
+			// Emit a stage-level EventValidationOverridden so the audit
+			// timeline records when the parent learned of the child's
+			// override. NodeID is the subgraph node (the parent's view),
+			// not the leaf gate (which lives in d.GateNodeID).
+			e.emit(PipelineEvent{
+				Type:      EventValidationOverridden,
+				Timestamp: time.Now(),
+				RunID:     s.runID,
+				NodeID:    currentNodeID,
+				Message:   fmt.Sprintf("validation override propagated from subgraph child via %q", currentNodeID),
+				Override:  &d,
+			})
+		}
+		// Synchronously persist after child propagation so a kill -9 between
+		// here and the next selectEdge does not lose the propagated state.
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
+	}
 }
 
 // drainSteering non-blockingly drains all pending steering context updates from

@@ -143,12 +143,39 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	// with the correct OutcomeBudgetExceeded status. Mapping it to fail
 	// here would trip the engine's strict-failure-edges rule before the
 	// parent's budget check runs, masking the real reason for the halt.
+	//
+	// OutcomeValidationOverridden gets the same Success treatment for
+	// parent routing — the child's override doesn't redirect the parent's
+	// edge selection (parent decides its own routing). The override flag
+	// is propagated up via ChildOverride below; the parent's engine
+	// absorbs it into the sticky list and the terminal-status rule
+	// flips Success → ValidationOverridden at the parent level.
 	status := OutcomeSuccess
 	switch result.Status {
-	case OutcomeSuccess, OutcomeBudgetExceeded:
+	case OutcomeSuccess, OutcomeBudgetExceeded, OutcomeValidationOverridden:
 		status = OutcomeSuccess
 	default:
 		status = OutcomeFail
+	}
+
+	// Propagate the child's ValidationOverrides up to the parent, prepending
+	// this subgraph node's ID to each entry's SubgraphPath. Outermost-to-
+	// innermost ordering: a child override originating at "Gate" inside a
+	// "L2" subgraph that itself runs inside an "L1" subgraph terminates at
+	// the outermost engine with SubgraphPath=["L1", "L2"] and GateNodeID="Gate".
+	// The recursive prepend lives in this handler — each level adds its own
+	// ID to the front, so by the time control returns to the outermost run
+	// the path enumerates the nesting chain leaf-up.
+	var childOverride []OverrideDetail
+	if len(result.ValidationOverrides) > 0 {
+		childOverride = make([]OverrideDetail, len(result.ValidationOverrides))
+		for i, det := range result.ValidationOverrides {
+			newPath := make([]string, 0, len(det.SubgraphPath)+1)
+			newPath = append(newPath, node.ID)
+			newPath = append(newPath, det.SubgraphPath...)
+			det.SubgraphPath = newPath
+			childOverride[i] = det
+		}
 	}
 
 	// Propagate the child's aggregated usage up to the parent trace so
@@ -158,5 +185,6 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 		Status:         string(status),
 		ContextUpdates: result.Context,
 		ChildUsage:     result.Usage,
+		ChildOverride:  childOverride,
 	}, nil
 }
