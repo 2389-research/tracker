@@ -194,6 +194,17 @@ func printRunHeader(result *pipeline.EngineResult) {
 		statusText = selectedStyle.Render(statusIcon + " success")
 	case pipeline.OutcomeFail:
 		statusText = lipgloss.NewStyle().Foreground(colorHot).Render(statusIcon + " fail")
+	case pipeline.OutcomeValidationOverridden:
+		// Per spec D5a/D18: amber treatment + headline from the LATEST override
+		// (the one that drove the run to its terminal exit). Format matches the
+		// audit header's inline (label "X" at Gate by Actor) shape but stays
+		// terse here — actor lives in the audit header, not the run summary.
+		base := statusIcon + " " + string(result.Status)
+		head := headlineOverride(result.ValidationOverrides)
+		if head.GateNodeID != "" {
+			base += fmt.Sprintf(" — at %s (label %q)", head.GateNodeID, head.Label)
+		}
+		statusText = overrideStyle.Render(base)
 	default:
 		statusText = mutedStyle.Render(statusIcon + " " + string(result.Status))
 	}

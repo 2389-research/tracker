@@ -19,6 +19,12 @@ var (
 	colorSky   = lipgloss.Color("#00D4FF")
 	colorWarm  = lipgloss.Color("#FFB800")
 	colorMuted = lipgloss.Color("#666666")
+	// colorOverride is amber (Tailwind amber-600 #D97706) per Gap 5.2 spec D18 —
+	// the chosen color for the validation_overridden status across CLI summary,
+	// tracker list, and TUI completion row. Distinct from colorWarm (#FFB800,
+	// used for diagnose suggestions/setup wizard) so the override treatment is
+	// visually unique within the brand palette.
+	colorOverride = lipgloss.Color("#D97706")
 )
 
 // ── Brand styles ────────────────────────────────────────────────────────────
@@ -38,6 +44,12 @@ var (
 	selectedStyle = lipgloss.NewStyle().
 			Foreground(colorHot).
 			Bold(true)
+
+	// overrideStyle paints the validation_overridden status line in the run
+	// summary (and any future surface that wants the same treatment) in
+	// Tailwind amber-600. See colorOverride above for the rationale.
+	overrideStyle = lipgloss.NewStyle().
+			Foreground(colorOverride)
 
 	headerBox = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
