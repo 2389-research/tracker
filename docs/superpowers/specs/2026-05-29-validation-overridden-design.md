@@ -6,7 +6,7 @@
 
 **Date:** 2026-05-29
 
-**Closes:** Gap 5.2 of [#233](https://github.com/2389-research/tracker/issues/233).
+**Closes:** Gap 5.2 of [#233](https://github.com/2389-research/tracker/issues/233). Tracking issue: [#271](https://github.com/2389-research/tracker/issues/271).
 
 **Likely release:** v0.35.0 (minor — library-API delta on `EngineResult.Status`, `tracker.Result.Status`, `AuditReport.Status`, `RunSummary.Status`).
 
