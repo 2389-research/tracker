@@ -327,6 +327,16 @@ func TestClassifyStatus_Scenarios(t *testing.T) {
 			want: "success",
 		},
 		{
+			name: "2x override then complete",
+			events: []ActivityEntry{
+				{Type: "validation_overridden"},
+				{Type: "validation_overridden"},
+				{Type: "pipeline_completed"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: ""},
+			want: "validation_overridden",
+		},
+		{
 			name: "success last",
 			events: []ActivityEntry{
 				{Type: "pipeline_completed"},
