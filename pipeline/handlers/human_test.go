@@ -1282,3 +1282,25 @@ func TestAllGateModes_CorrectRouting(t *testing.T) {
 		}
 	})
 }
+
+func TestConsoleInterviewer_Actor(t *testing.T) {
+	// Actor() doesn't touch the reader/writer — zero-value construction is fine.
+	var iv Interviewer = &ConsoleInterviewer{}
+	if got := actorOf(iv); got != pipeline.ActorHuman {
+		t.Errorf("actorOf(ConsoleInterviewer) = %q, want %q", got, pipeline.ActorHuman)
+	}
+}
+
+func TestAutoApproveInterviewer_Actor(t *testing.T) {
+	var iv Interviewer = &AutoApproveInterviewer{}
+	if got := actorOf(iv); got != pipeline.ActorAutopilot {
+		t.Errorf("actorOf(AutoApproveInterviewer) = %q, want %q", got, pipeline.ActorAutopilot)
+	}
+}
+
+func TestAutoApproveFreeformInterviewer_Actor(t *testing.T) {
+	var iv Interviewer = &AutoApproveFreeformInterviewer{}
+	if got := actorOf(iv); got != pipeline.ActorAutopilot {
+		t.Errorf("actorOf(AutoApproveFreeformInterviewer) = %q, want %q", got, pipeline.ActorAutopilot)
+	}
+}

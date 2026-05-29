@@ -5,6 +5,8 @@ package handlers
 import (
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestClaudeCodeAutopilotImplementsLabeledFreeformInterviewer(t *testing.T) {
@@ -85,5 +87,13 @@ func TestClaudeCodeAutopilotAskFreeformWithLabelsFailsWithBadPath(t *testing.T) 
 	_, err := ai.AskFreeformWithLabels("review", []string{"approve", "reject"}, "approve")
 	if err == nil {
 		t.Error("expected error with nonexistent claude path")
+	}
+}
+
+func TestClaudeCodeAutopilotInterviewer_Actor(t *testing.T) {
+	// Actor() doesn't touch claudePath or persona — zero-value construction is fine.
+	var iv Interviewer = &ClaudeCodeAutopilotInterviewer{}
+	if got := actorOf(iv); got != pipeline.ActorAutopilot {
+		t.Errorf("actorOf(ClaudeCodeAutopilotInterviewer) = %q, want %q", got, pipeline.ActorAutopilot)
 	}
 }

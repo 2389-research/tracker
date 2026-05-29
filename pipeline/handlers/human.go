@@ -133,6 +133,9 @@ type InterviewInterviewer interface {
 // if no default is specified. Useful for testing and non-interactive pipelines.
 type AutoApproveInterviewer struct{}
 
+// Actor returns ActorAutopilot — deterministic auto-accept, no human in the loop.
+func (a *AutoApproveInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
+
 // Ask returns the default choice if set, otherwise returns the first choice.
 // Returns an error if no choices are provided.
 func (a *AutoApproveInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
@@ -150,6 +153,10 @@ func (a *AutoApproveInterviewer) Ask(prompt string, choices []string, defaultCho
 type AutoApproveFreeformInterviewer struct {
 	AutoApproveInterviewer
 }
+
+// Actor returns ActorAutopilot — deterministic auto-accept, no human in the loop.
+// Defined explicitly (rather than relying on embedding) so the mapping is grep-able.
+func (a *AutoApproveFreeformInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
 
 // AskFreeform returns a fixed "auto-approved" string.
 func (a *AutoApproveFreeformInterviewer) AskFreeform(prompt string) (string, error) {
@@ -234,6 +241,9 @@ type ConsoleInterviewer struct {
 func NewConsoleInterviewer() *ConsoleInterviewer {
 	return &ConsoleInterviewer{Reader: os.Stdin, Writer: os.Stdout}
 }
+
+// Actor returns ActorHuman — a real human at stdin.
+func (c *ConsoleInterviewer) Actor() pipeline.Actor { return pipeline.ActorHuman }
 
 // readLine reads a single line from the reader, lazily initializing a shared
 // scanner so that buffered stdin data is not lost between calls.

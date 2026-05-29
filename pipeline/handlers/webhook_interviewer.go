@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 const (
@@ -125,6 +127,9 @@ func NewWebhookInterviewer(webhookURL, callbackAddr string) *WebhookInterviewer 
 
 // Compile-time assertions: WebhookInterviewer implements LabeledFreeformInterviewer.
 var _ LabeledFreeformInterviewer = (*WebhookInterviewer)(nil)
+
+// Actor returns ActorWebhook — gate response came from an external callback service.
+func (w *WebhookInterviewer) Actor() pipeline.Actor { return pipeline.ActorWebhook }
 
 // effectiveTimeout returns the configured timeout, falling back to the default.
 func (w *WebhookInterviewer) effectiveTimeout() time.Duration {

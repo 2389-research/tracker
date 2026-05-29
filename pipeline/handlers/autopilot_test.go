@@ -5,6 +5,8 @@ package handlers
 import (
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestParsePersonaValid(t *testing.T) {
@@ -325,5 +327,13 @@ func TestParseInterviewResponseUnknownIDs(t *testing.T) {
 	_, err := parseInterviewResponse(`{"answers": [{"id": "x99", "answer": "something"}]}`, questions)
 	if err == nil {
 		t.Fatal("expected error when no answer IDs match questions")
+	}
+}
+
+func TestAutopilotInterviewer_Actor(t *testing.T) {
+	// Actor() doesn't touch the client or persona — zero-value construction is fine.
+	var iv Interviewer = &AutopilotInterviewer{}
+	if got := actorOf(iv); got != pipeline.ActorAutopilot {
+		t.Errorf("actorOf(AutopilotInterviewer) = %q, want %q", got, pipeline.ActorAutopilot)
 	}
 }

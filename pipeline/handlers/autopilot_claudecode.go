@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 	// parseDecision, matchChoice, personaPrompts, buildUserPrompt
 	// are reused from autopilot.go in this package.
 )
@@ -39,6 +41,9 @@ func NewClaudeCodeAutopilotInterviewer(persona Persona) (*ClaudeCodeAutopilotInt
 		claudePath: path,
 	}, nil
 }
+
+// Actor returns ActorAutopilot — claude CLI subprocess persona standing in for a human.
+func (a *ClaudeCodeAutopilotInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
 
 // SetPipelineContext stores the pipeline execution context so that subprocess
 // spawns respect pipeline cancellation (ctrl-C, budget breach, etc.). Called
