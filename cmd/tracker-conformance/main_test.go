@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestNoSubcommand(t *testing.T) {
@@ -978,5 +979,85 @@ func TestRunNoArgs(t *testing.T) {
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for no file arg, got %d", code)
+	}
+}
+
+// TestBuildRunResultJSON_StatusClass exercises the Gap 5.2 / spec D15 status_class
+// classifier. The status field carries the raw open-enum TerminalStatus; the
+// status_class field is the stable two-value derivative ("succeeded"|"failed")
+// derived from TerminalStatus.IsSuccess(). Downstream verifiers checking
+// status_class survive future enum extensions.
+func TestBuildRunResultJSON_StatusClass(t *testing.T) {
+	tests := []struct {
+		name            string
+		status          pipeline.TerminalStatus
+		wantStatusClass string
+	}{
+		{"success_is_succeeded", pipeline.OutcomeSuccess, "succeeded"},
+		{"validation_overridden_is_succeeded", pipeline.OutcomeValidationOverridden, "succeeded"},
+		{"fail_is_failed", pipeline.OutcomeFail, "failed"},
+		{"budget_exceeded_is_failed", pipeline.OutcomeBudgetExceeded, "failed"},
+		{"unknown_future_status_is_failed", pipeline.TerminalStatus("hypothetical_new_status"), "failed"},
+		{"empty_is_failed", pipeline.TerminalStatus(""), "failed"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &pipeline.EngineResult{
+				RunID:          "test-run",
+				Status:         tc.status,
+				CompletedNodes: []string{"start", "exit"},
+			}
+			out := buildRunResultJSON(result)
+
+			gotStatus, _ := out["status"].(pipeline.TerminalStatus)
+			if gotStatus != tc.status {
+				t.Errorf("status: got %q, want %q (status field must echo raw value)", gotStatus, tc.status)
+			}
+
+			gotClass, ok := out["status_class"].(string)
+			if !ok {
+				t.Fatalf("status_class missing or not a string; got %T %v", out["status_class"], out["status_class"])
+			}
+			if gotClass != tc.wantStatusClass {
+				t.Errorf("status_class: got %q, want %q", gotClass, tc.wantStatusClass)
+			}
+
+			if gotRunID, _ := out["run_id"].(string); gotRunID != "test-run" {
+				t.Errorf("run_id: got %q, want %q", gotRunID, "test-run")
+			}
+			if gotCompleted, _ := out["completed_nodes"].(int); gotCompleted != 2 {
+				t.Errorf("completed_nodes: got %d, want 2", gotCompleted)
+			}
+		})
+	}
+}
+
+// TestBuildRunResultJSON_RoundTripsThroughJSON verifies the payload encodes
+// to JSON cleanly (TerminalStatus serializes as its underlying string) so
+// downstream tooling parsing the actual stdout sees what we expect.
+func TestBuildRunResultJSON_RoundTripsThroughJSON(t *testing.T) {
+	result := &pipeline.EngineResult{
+		RunID:          "round-trip",
+		Status:         pipeline.OutcomeValidationOverridden,
+		CompletedNodes: []string{"start", "validate", "exit"},
+	}
+	out := buildRunResultJSON(result)
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(out); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode: %v\nraw: %s", err, buf.String())
+	}
+
+	if s, _ := decoded["status"].(string); s != "validation_overridden" {
+		t.Errorf("status after JSON round-trip: got %q, want %q", s, "validation_overridden")
+	}
+	if c, _ := decoded["status_class"].(string); c != "succeeded" {
+		t.Errorf("status_class after JSON round-trip: got %q, want %q", c, "succeeded")
 	}
 }

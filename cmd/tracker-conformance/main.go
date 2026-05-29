@@ -997,12 +997,32 @@ func handleRun(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	writeJSON(stdout, map[string]interface{}{
+	writeJSON(stdout, buildRunResultJSON(result))
+	return 0
+}
+
+// buildRunResultJSON constructs the JSON payload emitted by `tracker-conformance run`.
+//
+// Per spec D15 (Gap 5.2), the output carries both:
+//   - status: the raw open-enum TerminalStatus (e.g. "success", "fail",
+//     "budget_exceeded", "validation_overridden")
+//   - status_class: a stable two-value classifier — "succeeded" if
+//     TerminalStatus.IsSuccess() (i.e. {success, validation_overridden}),
+//     "failed" otherwise.
+//
+// Downstream verifiers asserting status_class == "succeeded" survive future
+// enum extensions without code changes.
+func buildRunResultJSON(result *pipeline.EngineResult) map[string]any {
+	statusClass := "failed"
+	if result.Status.IsSuccess() {
+		statusClass = "succeeded"
+	}
+	return map[string]any{
 		"status":          result.Status,
+		"status_class":    statusClass,
 		"run_id":          result.RunID,
 		"completed_nodes": len(result.CompletedNodes),
-	})
-	return 0
+	}
 }
 
 // handleListHandlers writes the names of all registered pipeline handler types.
