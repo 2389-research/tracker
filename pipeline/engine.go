@@ -261,13 +261,21 @@ done:
 		Message:   "pipeline completed",
 	})
 
+	// Terminal-status rule: a success exit becomes validation_overridden if
+	// any override fired during the run. Failure paths return fail/budget
+	// regardless of override presence; only this success path flips.
+	status := OutcomeSuccess
+	if len(s.validationOverrides) > 0 {
+		status = OutcomeValidationOverridden
+	}
 	return &EngineResult{
-		RunID:          s.runID,
-		Status:         OutcomeSuccess,
-		CompletedNodes: s.cp.CompletedNodes,
-		Context:        s.pctx.Snapshot(),
-		Trace:          s.trace,
-		Usage:          s.trace.AggregateUsage(),
+		RunID:               s.runID,
+		Status:              status,
+		CompletedNodes:      s.cp.CompletedNodes,
+		Context:             s.pctx.Snapshot(),
+		Trace:               s.trace,
+		Usage:               s.trace.AggregateUsage(),
+		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 	}, nil
 }
 
@@ -316,12 +324,13 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 		return loopResult{
 			action: loopReturn,
 			result: &EngineResult{
-				RunID:          s.runID,
-				Status:         OutcomeFail,
-				CompletedNodes: s.cp.CompletedNodes,
-				Context:        s.pctx.Snapshot(),
-				Trace:          s.trace,
-				Usage:          s.trace.AggregateUsage(),
+				RunID:               s.runID,
+				Status:              OutcomeFail,
+				CompletedNodes:      s.cp.CompletedNodes,
+				Context:             s.pctx.Snapshot(),
+				Trace:               s.trace,
+				Usage:               s.trace.AggregateUsage(),
+				ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 			},
 			err: fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
 		}
@@ -419,6 +428,14 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 		return loopResult{action: loopReturn, err: fmt.Errorf("select edge from %q: %w", currentNodeID, err)}
 	}
 
+	// Override edge flip-point: if the selected edge has Override:true, append
+	// a new OverrideDetail to the sticky list and persist synchronously.
+	// Placed between selectEdge and SetEdgeSelection so the durable record is
+	// written before any further state mutation that could be rolled back by
+	// a crash. Idempotency: re-traversal of the same gate+label during
+	// restart or goal-gate retry is a no-op.
+	e.recordOverrideIfPresent(s, currentNodeID, next)
+
 	traceEntry.EdgeTo = next.To
 	s.trace.AddEntry(*traceEntry)
 	e.emitGitCommit(s, currentNodeID, traceEntry)
@@ -435,6 +452,63 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	s.cp.CurrentNode = next.To
 	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 	return loopResult{action: loopContinue, nextNodeID: next.To}
+}
+
+// recordOverrideIfPresent is the flip-point that fires when the engine
+// traverses an Edge.Override-marked edge. It builds an OverrideDetail from
+// the current node + edge label + last outcome's OverrideActor, appends to
+// the sticky list (both in-memory and checkpoint), emits
+// EventValidationOverridden, and synchronously persists the checkpoint so a
+// kill -9 between this point and the next selectEdge does not lose the
+// override-fired state.
+//
+// Idempotency: own-graph entries are deduped by (gate node, label). Child-
+// propagated entries (with non-empty SubgraphPath) are appended separately
+// by the subgraph/manager_loop handlers and can never collide here.
+func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next *Edge) {
+	if next == nil || !next.Override {
+		return
+	}
+	if overrideAlreadyRecorded(s.validationOverrides, currentNodeID, next.Label) {
+		return
+	}
+	actor := s.lastOutcome.OverrideActor
+	if actor == "" {
+		actor = ActorUnknown
+	}
+	detail := OverrideDetail{
+		GateNodeID: currentNodeID,
+		Label:      next.Label,
+		Actor:      actor,
+		Timestamp:  time.Now(),
+	}
+	s.validationOverrides = append(s.validationOverrides, detail)
+	s.cp.ValidationOverrides = append(s.cp.ValidationOverrides, detail)
+	e.emit(PipelineEvent{
+		Type:      EventValidationOverridden,
+		Timestamp: detail.Timestamp,
+		RunID:     s.runID,
+		NodeID:    currentNodeID,
+		Message:   fmt.Sprintf("validation override at %q via label %q (actor=%s)", currentNodeID, next.Label, detail.Actor),
+		Override:  &detail,
+	})
+	// Synchronously persist so a kill -9 between this point and the next
+	// selectEdge does not lose the override-fired state.
+	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
+}
+
+// overrideAlreadyRecorded returns true if the sticky list already contains an
+// own-graph override entry with the same gate node and label. Used by the
+// flip-point for the restart re-traversal idempotency check.
+// Note: only checks entries with empty SubgraphPath; child-propagated entries
+// can never collide with own-graph entries.
+func overrideAlreadyRecorded(list []OverrideDetail, gateNodeID, label string) bool {
+	for _, d := range list {
+		if len(d.SubgraphPath) == 0 && d.GateNodeID == gateNodeID && d.Label == label {
+			return true
+		}
+	}
+	return false
 }
 
 // checkStrictFailure enforces strict failure mode: a failed node with only
@@ -455,12 +529,13 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	lr := loopResult{
 		action: loopReturn,
 		result: &EngineResult{
-			RunID:          s.runID,
-			Status:         OutcomeFail,
-			CompletedNodes: s.cp.CompletedNodes,
-			Context:        s.pctx.Snapshot(),
-			Trace:          s.trace,
-			Usage:          s.trace.AggregateUsage(),
+			RunID:               s.runID,
+			Status:              OutcomeFail,
+			CompletedNodes:      s.cp.CompletedNodes,
+			Context:             s.pctx.Snapshot(),
+			Trace:               s.trace,
+			Usage:               s.trace.AggregateUsage(),
+			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 		},
 		err: fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
 	}
@@ -496,12 +571,13 @@ func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) 
 		Err:       err,
 	})
 	return &EngineResult{
-		RunID:          s.runID,
-		Status:         OutcomeFail,
-		CompletedNodes: s.cp.CompletedNodes,
-		Context:        s.pctx.Snapshot(),
-		Trace:          s.trace,
-		Usage:          s.trace.AggregateUsage(),
+		RunID:               s.runID,
+		Status:              OutcomeFail,
+		CompletedNodes:      s.cp.CompletedNodes,
+		Context:             s.pctx.Snapshot(),
+		Trace:               s.trace,
+		Usage:               s.trace.AggregateUsage(),
+		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 	}, fmt.Errorf("pipeline cancelled: %w", err)
 }
 
@@ -516,21 +592,24 @@ func (e *Engine) emit(evt PipelineEvent) {
 	e.eventHandler.HandlePipelineEvent(evt)
 }
 
-// failResult builds an EngineResult with fail status.
-func (e *Engine) failResult(runID string, cp *Checkpoint, pctx *PipelineContext, trace *Trace) *EngineResult {
+// failResult builds an EngineResult with fail status. Populates
+// ValidationOverrides from the run's sticky list so forensics see "this run
+// had an override AND it failed."
+func (e *Engine) failResult(s *runState) *EngineResult {
 	e.emit(PipelineEvent{
 		Type:      EventPipelineFailed,
 		Timestamp: time.Now(),
-		RunID:     runID,
+		RunID:     s.runID,
 		Message:   "pipeline failed",
 	})
 	return &EngineResult{
-		RunID:          runID,
-		Status:         OutcomeFail,
-		CompletedNodes: cp.CompletedNodes,
-		Context:        pctx.Snapshot(),
-		Trace:          trace,
-		Usage:          trace.AggregateUsage(),
+		RunID:               s.runID,
+		Status:              OutcomeFail,
+		CompletedNodes:      s.cp.CompletedNodes,
+		Context:             s.pctx.Snapshot(),
+		Trace:               s.trace,
+		Usage:               s.trace.AggregateUsage(),
+		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 	}
 }
 

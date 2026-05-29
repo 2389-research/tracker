@@ -118,13 +118,14 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 	return loopResult{
 		action: loopReturn,
 		result: &EngineResult{
-			RunID:           s.runID,
-			Status:          OutcomeBudgetExceeded,
-			CompletedNodes:  s.cp.CompletedNodes,
-			Context:         s.pctx.Snapshot(),
-			Trace:           s.trace,
-			Usage:           s.trace.AggregateUsage(),
-			BudgetLimitsHit: []string{breach.Kind.String()},
+			RunID:               s.runID,
+			Status:              OutcomeBudgetExceeded,
+			CompletedNodes:      s.cp.CompletedNodes,
+			Context:             s.pctx.Snapshot(),
+			Trace:               s.trace,
+			Usage:               s.trace.AggregateUsage(),
+			BudgetLimitsHit:     []string{breach.Kind.String()},
+			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 		},
 	}
 }
@@ -191,6 +192,19 @@ type runState struct {
 	nodeOutcomes map[string]string
 	stylesheet   *Stylesheet
 	gitRepo      *gitArtifactRepo // non-nil when git artifact tracking is enabled
+
+	// validationOverrides is the per-run sticky list of override events
+	// appended at the flip-point in advanceToNextNode. Mirrors
+	// cp.ValidationOverrides; the runState copy is the in-memory hot-path read,
+	// the cp copy is the durable record. Populated on every terminal-result
+	// path (success, fail, budget) so forensics see overrides even when
+	// failure dominates.
+	validationOverrides []OverrideDetail
+
+	// lastOutcome carries the most recent handler outcome through edge selection
+	// so advanceToNextNode can read Outcome.OverrideActor when an override edge
+	// is traversed. Set in applyOutcome before the engine advances.
+	lastOutcome Outcome
 }
 
 // initRunState initializes all per-run state: context, checkpoint, trace, and stylesheet.
@@ -239,14 +253,23 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		}
 	}
 
+	// Seed the in-memory sticky list from any prior checkpoint so a resumed
+	// run preserves overrides that fired before the kill / SIGINT. The cp
+	// copy is the durable record; the runState copy is the hot-path read.
+	var stickyOverrides []OverrideDetail
+	if len(cp.ValidationOverrides) > 0 {
+		stickyOverrides = append(stickyOverrides, cp.ValidationOverrides...)
+	}
+
 	return &runState{
-		runID:        runID,
-		pctx:         pctx,
-		cp:           cp,
-		trace:        &Trace{RunID: runID, StartTime: time.Now()},
-		nodeOutcomes: make(map[string]string),
-		stylesheet:   stylesheet,
-		gitRepo:      gitRepo,
+		runID:               runID,
+		pctx:                pctx,
+		cp:                  cp,
+		trace:               &Trace{RunID: runID, StartTime: time.Now()},
+		nodeOutcomes:        make(map[string]string),
+		stylesheet:          stylesheet,
+		gitRepo:             gitRepo,
+		validationOverrides: stickyOverrides,
 	}, nil
 }
 
@@ -561,6 +584,13 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 
 // applyOutcome merges handler outcome into pipeline context and emits the decision_outcome event.
 func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcome) {
+	// Snapshot the outcome so advanceToNextNode can read OverrideActor (and
+	// future override-related fields) when an override edge is traversed.
+	// The pointer-derived copy is intentional: applyOutcome already mutates
+	// pctx based on the outcome, so the snapshot here is a stable record of
+	// what the handler returned for downstream edge handling.
+	s.lastOutcome = *outcome
+
 	s.pctx.Merge(outcome.ContextUpdates)
 
 	if outcome.Status != "" {
@@ -637,12 +667,13 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 			e.saveCheckpoint(s.cp, s.pctx, s.runID)
 			s.trace.EndTime = time.Now()
 			return "", false, &EngineResult{
-				RunID:          s.runID,
-				Status:         OutcomeFail,
-				CompletedNodes: s.cp.CompletedNodes,
-				Context:        s.pctx.Snapshot(),
-				Trace:          s.trace,
-				Usage:          s.trace.AggregateUsage(),
+				RunID:               s.runID,
+				Status:              OutcomeFail,
+				CompletedNodes:      s.cp.CompletedNodes,
+				Context:             s.pctx.Snapshot(),
+				Trace:               s.trace,
+				Usage:               s.trace.AggregateUsage(),
+				ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 			}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
 		}
 	}
@@ -696,7 +727,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	})
 	e.emitGitCommit(s, currentNodeID, traceEntry)
 	s.trace.EndTime = time.Now()
-	result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
+	result := e.failResult(s)
 	return "", false, result, nil
 }
 
@@ -792,14 +823,14 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
-		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
+		result := e.failResult(s)
 		return false, "", result
 	}
 	if outcomeStatus == string(OutcomeFail) {
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
-		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
+		result := e.failResult(s)
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)
@@ -825,12 +856,13 @@ func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *Trace
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		s.trace.EndTime = time.Now()
 		return "", false, &EngineResult{
-			RunID:          s.runID,
-			Status:         OutcomeFail,
-			CompletedNodes: s.cp.CompletedNodes,
-			Context:        s.pctx.Snapshot(),
-			Trace:          s.trace,
-			Usage:          s.trace.AggregateUsage(),
+			RunID:               s.runID,
+			Status:              OutcomeFail,
+			CompletedNodes:      s.cp.CompletedNodes,
+			Context:             s.pctx.Snapshot(),
+			Trace:               s.trace,
+			Usage:               s.trace.AggregateUsage(),
+			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 		}, fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
 	}
 

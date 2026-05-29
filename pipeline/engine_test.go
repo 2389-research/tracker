@@ -1676,3 +1676,250 @@ func TestEngine_UnknownOutcomeFailsNode(t *testing.T) {
 		t.Fatal("expected unknown outcome to NOT be treated as success")
 	}
 }
+
+// TestEngine_OverrideEdge_SetsSticky pins the flip-point: when the engine
+// traverses an Edge.Override-marked edge from a wait.human gate, the
+// resulting EngineResult carries Status=OutcomeValidationOverridden and a
+// single OverrideDetail with the expected gate/label/actor.
+func TestEngine_OverrideEdge_SetsSticky(t *testing.T) {
+	g := NewGraph("override_sticky")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon", Label: "Gate", Attrs: map[string]string{"label": "Accept?"}})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "end", Label: "accept", Override: true})
+	g.AddEdge(&Edge{From: "gate", To: "s", Label: "retry"})
+
+	reg := newTestRegistry()
+	// Override the wait.human handler to return PreferredLabel=accept plus
+	// OverrideActor=human, simulating what HumanHandler does after the
+	// interviewer commits an override edge.
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  ActorHuman,
+			}, nil
+		},
+	})
+
+	var capturedMu sync.Mutex
+	var sawEvent bool
+	var capturedDetail *OverrideDetail
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		capturedMu.Lock()
+		defer capturedMu.Unlock()
+		if evt.Type == EventValidationOverridden {
+			sawEvent = true
+			if evt.Override != nil {
+				d := *evt.Override
+				capturedDetail = &d
+			}
+		}
+	})
+
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	if result.Status != OutcomeValidationOverridden {
+		t.Errorf("Status = %q, want %q", result.Status, OutcomeValidationOverridden)
+	}
+	if len(result.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides length = %d, want 1: %+v", len(result.ValidationOverrides), result.ValidationOverrides)
+	}
+	got := result.ValidationOverrides[0]
+	if got.GateNodeID != "gate" {
+		t.Errorf("GateNodeID = %q, want gate", got.GateNodeID)
+	}
+	if got.Label != "accept" {
+		t.Errorf("Label = %q, want accept", got.Label)
+	}
+	if got.Actor != ActorHuman {
+		t.Errorf("Actor = %q, want %q", got.Actor, ActorHuman)
+	}
+	if got.Timestamp.IsZero() {
+		t.Error("Timestamp should be populated")
+	}
+	capturedMu.Lock()
+	defer capturedMu.Unlock()
+	if !sawEvent {
+		t.Error("expected EventValidationOverridden to be emitted")
+	}
+	if capturedDetail == nil || capturedDetail.GateNodeID != "gate" || capturedDetail.Label != "accept" {
+		t.Errorf("event Override payload mismatch: %+v", capturedDetail)
+	}
+}
+
+// TestEngine_OverrideEdge_NoActorDefaultsUnknown verifies that an override
+// edge traversed without an Outcome.OverrideActor (third-party / future
+// handler) records Actor=ActorUnknown rather than empty string.
+func TestEngine_OverrideEdge_NoActorDefaultsUnknown(t *testing.T) {
+	g := NewGraph("override_unknown_actor")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon", Label: "Gate"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "end", Label: "accept", Override: true})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				// Intentionally no OverrideActor set.
+			}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if len(result.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides length = %d, want 1", len(result.ValidationOverrides))
+	}
+	if result.ValidationOverrides[0].Actor != ActorUnknown {
+		t.Errorf("Actor = %q, want %q", result.ValidationOverrides[0].Actor, ActorUnknown)
+	}
+}
+
+// TestEngine_OverrideEdge_RestartIdempotent pins the idempotency guard: if
+// the flip-point is invoked twice for the same gate+label, the sticky list
+// contains exactly one entry, not two. Exercises the helper directly because
+// natural-runtime re-traversal requires a restart path that also clears
+// downstream state (and the override is preserved across restarts by design).
+func TestEngine_OverrideEdge_RestartIdempotent(t *testing.T) {
+	g := NewGraph("override_idempotent")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon", Label: "Gate"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "end", Label: "accept", Override: true})
+
+	reg := newTestRegistry()
+	engine := NewEngine(g, reg)
+
+	s, err := engine.initRunState(context.Background())
+	if err != nil {
+		t.Fatalf("initRunState: %v", err)
+	}
+	s.lastOutcome = Outcome{OverrideActor: ActorHuman}
+	overrideEdge := &Edge{From: "gate", To: "end", Label: "accept", Override: true}
+	engine.recordOverrideIfPresent(s, "gate", overrideEdge)
+	engine.recordOverrideIfPresent(s, "gate", overrideEdge)
+
+	if len(s.validationOverrides) != 1 {
+		t.Errorf("validationOverrides length = %d, want 1 after duplicate flip-point calls", len(s.validationOverrides))
+	}
+	if len(s.cp.ValidationOverrides) != 1 {
+		t.Errorf("cp.ValidationOverrides length = %d, want 1 after duplicate flip-point calls", len(s.cp.ValidationOverrides))
+	}
+
+	// Different label on the same gate is a different override and should
+	// record a second entry.
+	otherEdge := &Edge{From: "gate", To: "end", Label: "mark done", Override: true}
+	engine.recordOverrideIfPresent(s, "gate", otherEdge)
+	if len(s.validationOverrides) != 2 {
+		t.Errorf("validationOverrides length = %d, want 2 after distinct label", len(s.validationOverrides))
+	}
+}
+
+// TestEngine_OverrideEdge_FailureAfterOverride verifies that when an
+// override fires AND a downstream handler then fails, the terminal status
+// is OutcomeFail (failure dominates), but ValidationOverrides is still
+// populated so forensics can see "this run had an override AND it failed."
+func TestEngine_OverrideEdge_FailureAfterOverride(t *testing.T) {
+	g := NewGraph("override_then_fail")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon", Label: "Gate"})
+	g.AddNode(&Node{ID: "post", Shape: "box", Label: "Post"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "post", Label: "accept", Override: true})
+	// post has only an unconditional edge, so a fail outcome triggers
+	// strict-failure stop (Status=fail).
+	g.AddEdge(&Edge{From: "post", To: "end"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  ActorHuman,
+			}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{Status: string(OutcomeFail)}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, _ := engine.Run(context.Background())
+	if result == nil {
+		t.Fatal("expected non-nil result on failure path")
+	}
+	if result.Status != OutcomeFail {
+		t.Errorf("Status = %q, want %q (failure dominates)", result.Status, OutcomeFail)
+	}
+	if len(result.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides length = %d, want 1 even on failure", len(result.ValidationOverrides))
+	}
+	if result.ValidationOverrides[0].GateNodeID != "gate" {
+		t.Errorf("GateNodeID = %q, want gate", result.ValidationOverrides[0].GateNodeID)
+	}
+}
+
+// TestEngine_OverrideEdge_NoOverride_StaysSuccess verifies the negative case:
+// a run with no override edges traversed reports Status=success, not
+// validation_overridden.
+func TestEngine_OverrideEdge_NoOverride_StaysSuccess(t *testing.T) {
+	g := NewGraph("no_override")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon", Label: "Gate"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "gate"})
+	// No Override flag.
+	g.AddEdge(&Edge{From: "gate", To: "end", Label: "accept"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  ActorHuman,
+			}, nil
+		},
+	})
+
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("Status = %q, want %q", result.Status, OutcomeSuccess)
+	}
+	if len(result.ValidationOverrides) != 0 {
+		t.Errorf("ValidationOverrides length = %d, want 0", len(result.ValidationOverrides))
+	}
+}
