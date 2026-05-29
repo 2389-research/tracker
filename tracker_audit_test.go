@@ -389,3 +389,334 @@ func TestListRuns_EmptyBundleIdentity_ForPlainDipRuns(t *testing.T) {
 		t.Errorf("BundleIdentity should be empty for plain .dip run, got %q", runs[0].BundleIdentity)
 	}
 }
+
+// TestAudit_PopulatesValidationOverrides verifies that override entries in
+// the activity log land on AuditReport.ValidationOverrides with
+// OverrideCount and StatusClass=succeeded. The checkpoint's empty sticky
+// slice should not mask the activity-sourced entries.
+func TestAudit_PopulatesValidationOverrides(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "overrides-from-activity")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:     "overrides-from-activity",
+		Timestamp: time.Now(),
+		// ValidationOverrides intentionally empty — exercise the activity path.
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+
+	base := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	lines := []string{
+		`{"ts":"` + base.Format(time.RFC3339Nano) + `","type":"pipeline_started","run_id":"overrides-from-activity"}`,
+		`{"ts":"` + base.Add(time.Second).Format(time.RFC3339Nano) + `","type":"validation_overridden","run_id":"overrides-from-activity","override_gate":"GateA","override_label":"accept","override_actor":"human","override_subgraph_path":["Outer","Inner"]}`,
+		`{"ts":"` + base.Add(2*time.Second).Format(time.RFC3339Nano) + `","type":"pipeline_completed","run_id":"overrides-from-activity"}`,
+	}
+	must(t, os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	r, err := Audit(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if r.Status != "validation_overridden" {
+		t.Errorf("Status = %q, want validation_overridden", r.Status)
+	}
+	if r.StatusClass != "succeeded" {
+		t.Errorf("StatusClass = %q, want succeeded", r.StatusClass)
+	}
+	if r.OverrideCount != 1 {
+		t.Fatalf("OverrideCount = %d, want 1", r.OverrideCount)
+	}
+	if len(r.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides len = %d, want 1", len(r.ValidationOverrides))
+	}
+	got := r.ValidationOverrides[0]
+	if got.GateNodeID != "GateA" {
+		t.Errorf("GateNodeID = %q, want GateA", got.GateNodeID)
+	}
+	if got.Label != "accept" {
+		t.Errorf("Label = %q, want accept", got.Label)
+	}
+	if got.Actor != pipeline.ActorHuman {
+		t.Errorf("Actor = %q, want %q", got.Actor, pipeline.ActorHuman)
+	}
+	if len(got.SubgraphPath) != 2 || got.SubgraphPath[0] != "Outer" || got.SubgraphPath[1] != "Inner" {
+		t.Errorf("SubgraphPath = %v, want [Outer Inner]", got.SubgraphPath)
+	}
+	if got.Timestamp.IsZero() {
+		t.Error("Timestamp not populated from activity entry")
+	}
+}
+
+// TestAudit_FallsBackToCheckpointOverrides verifies that when the activity
+// log has no validation_overridden entries but Checkpoint.ValidationOverrides
+// is populated, Audit() falls back to the checkpoint.
+func TestAudit_FallsBackToCheckpointOverrides(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "overrides-from-checkpoint")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:     "overrides-from-checkpoint",
+		Timestamp: time.Now(),
+		// CurrentNode empty + sticky overrides → validation_overridden via
+		// checkpoint fallback in classifyStatus.
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "GateB", Label: "mark done", Actor: pipeline.ActorAutopilot},
+		},
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+	// No activity.jsonl written — LoadActivityLog returns nil entries.
+
+	r, err := Audit(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if r.Status != "validation_overridden" {
+		t.Errorf("Status = %q, want validation_overridden", r.Status)
+	}
+	if r.StatusClass != "succeeded" {
+		t.Errorf("StatusClass = %q, want succeeded", r.StatusClass)
+	}
+	if r.OverrideCount != 1 {
+		t.Fatalf("OverrideCount = %d, want 1", r.OverrideCount)
+	}
+	if len(r.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides len = %d, want 1", len(r.ValidationOverrides))
+	}
+	if r.ValidationOverrides[0].GateNodeID != "GateB" {
+		t.Errorf("GateNodeID = %q, want GateB", r.ValidationOverrides[0].GateNodeID)
+	}
+	if r.ValidationOverrides[0].Actor != pipeline.ActorAutopilot {
+		t.Errorf("Actor = %q, want %q", r.ValidationOverrides[0].Actor, pipeline.ActorAutopilot)
+	}
+}
+
+// TestRunSummary_OverrideCount verifies RunSummary.OverrideCount and
+// StatusClass populate from activity-log override entries.
+func TestRunSummary_OverrideCount(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "run-with-overrides")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:     "run-with-overrides",
+		Timestamp: time.Now(),
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+
+	base := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	lines := []string{
+		`{"ts":"` + base.Format(time.RFC3339Nano) + `","type":"pipeline_started","run_id":"run-with-overrides"}`,
+		`{"ts":"` + base.Add(time.Second).Format(time.RFC3339Nano) + `","type":"validation_overridden","run_id":"run-with-overrides","override_gate":"G1","override_actor":"human"}`,
+		`{"ts":"` + base.Add(2*time.Second).Format(time.RFC3339Nano) + `","type":"validation_overridden","run_id":"run-with-overrides","override_gate":"G2","override_actor":"autopilot"}`,
+		`{"ts":"` + base.Add(3*time.Second).Format(time.RFC3339Nano) + `","type":"pipeline_completed","run_id":"run-with-overrides"}`,
+	}
+	must(t, os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	runs, err := ListRuns(workdir, AuditConfig{LogWriter: io.Discard})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(runs))
+	}
+	rs := runs[0]
+	if rs.Status != "validation_overridden" {
+		t.Errorf("Status = %q, want validation_overridden", rs.Status)
+	}
+	if rs.StatusClass != "succeeded" {
+		t.Errorf("StatusClass = %q, want succeeded", rs.StatusClass)
+	}
+	if rs.OverrideCount != 2 {
+		t.Errorf("OverrideCount = %d, want 2", rs.OverrideCount)
+	}
+}
+
+// TestRunSummary_OverrideCountFromCheckpoint verifies that with no activity
+// override entries, RunSummary.OverrideCount falls back to the checkpoint's
+// sticky ValidationOverrides slice length.
+func TestRunSummary_OverrideCountFromCheckpoint(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "checkpoint-only-overrides")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:     "checkpoint-only-overrides",
+		Timestamp: time.Now(),
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "G1", Actor: pipeline.ActorHuman},
+			{GateNodeID: "G2", Actor: pipeline.ActorHuman},
+			{GateNodeID: "G3", Actor: pipeline.ActorAutopilot},
+		},
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+
+	runs, err := ListRuns(workdir, AuditConfig{LogWriter: io.Discard})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(runs))
+	}
+	if runs[0].OverrideCount != 3 {
+		t.Errorf("OverrideCount = %d, want 3", runs[0].OverrideCount)
+	}
+}
+
+// TestBuildRunSummary_FailedAtForBudgetExceeded pins the Gap 5.2 D12
+// downstream gate fix: budget_exceeded runs populate FailedAt the same way
+// "fail" runs do. Pre-fix this branch was status == "fail" only, so a
+// budget-halted run left FailedAt empty even though CurrentNode pointed at
+// the node that hit the ceiling.
+func TestBuildRunSummary_FailedAtForBudgetExceeded(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "budget-halted")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:       "budget-halted",
+		CurrentNode: "Mid",
+		Timestamp:   time.Now(),
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+
+	base := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	lines := []string{
+		`{"ts":"` + base.Format(time.RFC3339Nano) + `","type":"pipeline_started","run_id":"budget-halted"}`,
+		`{"ts":"` + base.Add(time.Second).Format(time.RFC3339Nano) + `","type":"budget_exceeded","run_id":"budget-halted"}`,
+	}
+	must(t, os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	runs, err := ListRuns(workdir, AuditConfig{LogWriter: io.Discard})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(runs))
+	}
+	rs := runs[0]
+	if rs.Status != "budget_exceeded" {
+		t.Errorf("Status = %q, want budget_exceeded", rs.Status)
+	}
+	if rs.StatusClass != "failed" {
+		t.Errorf("StatusClass = %q, want failed", rs.StatusClass)
+	}
+	if rs.FailedAt != "Mid" {
+		t.Errorf("FailedAt = %q, want Mid", rs.FailedAt)
+	}
+}
+
+// TestAuditRecommendations_HaltedAtForBudgetExceeded pins the matching
+// downstream gate fix in buildAuditRecommendations: budget_exceeded with a
+// non-empty CurrentNode now surfaces a "halted (budget exceeded) at <node>"
+// recommendation. Pre-fix this branch was status == "fail" only.
+func TestAuditRecommendations_HaltedAtForBudgetExceeded(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "budget-rec")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:       "budget-rec",
+		CurrentNode: "Build",
+		Timestamp:   time.Now(),
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+
+	base := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	lines := []string{
+		`{"ts":"` + base.Format(time.RFC3339Nano) + `","type":"pipeline_started","run_id":"budget-rec"}`,
+		`{"ts":"` + base.Add(time.Second).Format(time.RFC3339Nano) + `","type":"budget_exceeded","run_id":"budget-rec"}`,
+	}
+	must(t, os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	r, err := Audit(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if r.Status != "budget_exceeded" {
+		t.Errorf("Status = %q, want budget_exceeded", r.Status)
+	}
+	if r.StatusClass != "failed" {
+		t.Errorf("StatusClass = %q, want failed", r.StatusClass)
+	}
+	var foundHalted bool
+	for _, rec := range r.Recommendations {
+		if strings.Contains(rec, "halted (budget exceeded) at Build") {
+			foundHalted = true
+			break
+		}
+	}
+	if !foundHalted {
+		t.Errorf("missing halted-at recommendation; recs = %v", r.Recommendations)
+	}
+}
+
+// TestAuditRecommendations_FailedAtForFailUnchanged guards the regression
+// path the other direction: the original "fail" wording must keep firing for
+// non-budget failures so existing scripts that grep for "Pipeline failed at"
+// keep matching.
+func TestAuditRecommendations_FailedAtForFailUnchanged(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "fail-rec")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:       "fail-rec",
+		CurrentNode: "Build",
+		Timestamp:   time.Now(),
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+
+	base := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	lines := []string{
+		`{"ts":"` + base.Format(time.RFC3339Nano) + `","type":"pipeline_started","run_id":"fail-rec"}`,
+		`{"ts":"` + base.Add(time.Second).Format(time.RFC3339Nano) + `","type":"pipeline_failed","run_id":"fail-rec"}`,
+	}
+	must(t, os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	r, err := Audit(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if r.Status != "fail" {
+		t.Errorf("Status = %q, want fail", r.Status)
+	}
+	if r.StatusClass != "failed" {
+		t.Errorf("StatusClass = %q, want failed", r.StatusClass)
+	}
+	var foundFailed bool
+	for _, rec := range r.Recommendations {
+		if strings.Contains(rec, "Pipeline failed at Build") {
+			foundFailed = true
+			break
+		}
+	}
+	if !foundFailed {
+		t.Errorf("missing failed-at recommendation; recs = %v", r.Recommendations)
+	}
+}
+
+// TestAudit_StatusClass_ForKnownStatuses pins the StatusClass mapping for
+// each of the four known Status values. Stable bucket categorization is the
+// whole point of the StatusClass companion field — if this drifts, every
+// downstream consumer that buckets on it drifts with it.
+func TestAudit_StatusClass_ForKnownStatuses(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"success", "succeeded"},
+		{"validation_overridden", "succeeded"},
+		{"fail", "failed"},
+		{"budget_exceeded", "failed"},
+		{"unknown_future_status", "failed"}, // fail-closed for open enum extensions.
+	}
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			if got := statusClassFor(tc.status); got != tc.want {
+				t.Errorf("statusClassFor(%q) = %q, want %q", tc.status, got, tc.want)
+			}
+		})
+	}
+}

@@ -119,6 +119,16 @@ type ActivityEntry struct {
 	NodeID    string
 	Message   string
 	Error     string
+	// Override fields — populated for "validation_overridden" entries.
+	// Mirror the wire-format fields written by the runtime's
+	// jsonlLogEntry (see pipeline/events_jsonl.go): the gate that
+	// produced the override, the label that selected the override
+	// edge, who acted, and the subgraph_path when propagated up from
+	// a child run. Empty for non-override entries.
+	OverrideGate         string
+	OverrideLabel        string
+	OverrideActor        pipeline.Actor
+	OverrideSubgraphPath []string
 }
 
 // ResolveActivityLogPath returns the on-disk location of the activity
@@ -235,12 +245,16 @@ func SortActivityByTime(entries []ActivityEntry) {
 // ParseActivityLine decodes a single JSONL line. Returns (zero, false) on any parse error.
 func ParseActivityLine(line string) (ActivityEntry, bool) {
 	var raw struct {
-		Timestamp string `json:"ts"`
-		Type      string `json:"type"`
-		RunID     string `json:"run_id"`
-		NodeID    string `json:"node_id"`
-		Message   string `json:"message"`
-		Error     string `json:"error"`
+		Timestamp            string         `json:"ts"`
+		Type                 string         `json:"type"`
+		RunID                string         `json:"run_id"`
+		NodeID               string         `json:"node_id"`
+		Message              string         `json:"message"`
+		Error                string         `json:"error"`
+		OverrideGate         string         `json:"override_gate"`
+		OverrideLabel        string         `json:"override_label"`
+		OverrideActor        pipeline.Actor `json:"override_actor"`
+		OverrideSubgraphPath []string       `json:"override_subgraph_path"`
 	}
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return ActivityEntry{}, false
@@ -249,14 +263,23 @@ func ParseActivityLine(line string) (ActivityEntry, bool) {
 	if !ok {
 		return ActivityEntry{}, false
 	}
-	return ActivityEntry{
-		Timestamp: ts,
-		Type:      raw.Type,
-		RunID:     raw.RunID,
-		NodeID:    raw.NodeID,
-		Message:   raw.Message,
-		Error:     raw.Error,
-	}, true
+	entry := ActivityEntry{
+		Timestamp:     ts,
+		Type:          raw.Type,
+		RunID:         raw.RunID,
+		NodeID:        raw.NodeID,
+		Message:       raw.Message,
+		Error:         raw.Error,
+		OverrideGate:  raw.OverrideGate,
+		OverrideLabel: raw.OverrideLabel,
+		OverrideActor: raw.OverrideActor,
+	}
+	if len(raw.OverrideSubgraphPath) > 0 {
+		// Defensive copy so callers can't mutate the parsed slice and
+		// leak into another entry through aliased backing arrays.
+		entry.OverrideSubgraphPath = append([]string(nil), raw.OverrideSubgraphPath...)
+	}
+	return entry, true
 }
 
 func parseActivityTimestamp(s string) (time.Time, bool) {

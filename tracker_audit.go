@@ -26,9 +26,20 @@ type AuditConfig struct {
 // AuditReport is the structured result of Audit().
 type AuditReport struct {
 	RunID string `json:"run_id"`
-	// Status is one of: "success", "fail", "validation_overridden",
-	// "budget_exceeded". See classifyStatus for the resolution algorithm.
+	// Status is one of:
+	//   - "success"
+	//   - "fail"
+	//   - "budget_exceeded"
+	//   - "validation_overridden"
+	// The enum is open — future minor releases may add new values. Consumers
+	// should use StatusClass for stable {succeeded|failed} bucketing.
+	// See classifyStatus for the resolution algorithm.
 	Status string `json:"status"`
+	// StatusClass is one of "succeeded" or "failed" — stable companion to
+	// Status for downstream consumers that need bucket categorization that
+	// survives future enum extensions. Computed via
+	// pipeline.TerminalStatus(Status).IsSuccess().
+	StatusClass string `json:"status_class"`
 	// TotalDuration is encoded as integer nanoseconds in JSON
 	// ("total_duration_ns"), not as a duration string.
 	TotalDuration   time.Duration   `json:"total_duration_ns"`
@@ -46,6 +57,15 @@ type AuditReport struct {
 	// the .dipx bundle the run was executed against. Read from the run's
 	// checkpoint. Empty for runs from a plain .dip file.
 	BundleIdentity string `json:"bundle_identity,omitempty"`
+	// ValidationOverrides is populated when one or more override edges were
+	// traversed during the run. Sourced from activity-log
+	// EventValidationOverridden entries (chronological order); falls back to
+	// Checkpoint.ValidationOverrides when the activity log carries no
+	// override entries. Empty for runs with no override edges.
+	ValidationOverrides []pipeline.OverrideDetail `json:"validation_overrides,omitempty"`
+	// OverrideCount is len(ValidationOverrides). Kept as its own field so
+	// thin consumers can read it without unmarshaling the slice.
+	OverrideCount int `json:"override_count,omitempty"`
 }
 
 // TimelineEntry is a single entry in the audit timeline.
@@ -75,21 +95,35 @@ type ActivityError struct {
 // RunSummary is a condensed view of a single pipeline run for listing.
 type RunSummary struct {
 	RunID string `json:"run_id"`
-	// Status is one of: "success", "fail", "validation_overridden",
-	// "budget_exceeded". See classifyStatus for the resolution algorithm.
-	Status    string    `json:"status"`
-	Nodes     int       `json:"nodes"`
-	Retries   int       `json:"retries"`
-	Restarts  int       `json:"restarts"`
-	Timestamp time.Time `json:"timestamp"`
+	// Status is one of: "success", "fail", "budget_exceeded",
+	// "validation_overridden". Open enum; prefer StatusClass for stable
+	// {succeeded|failed} bucketing. See classifyStatus for the resolution
+	// algorithm.
+	Status string `json:"status"`
+	// StatusClass is one of "succeeded" or "failed" — stable companion to
+	// Status. Computed via pipeline.TerminalStatus(Status).IsSuccess().
+	StatusClass string    `json:"status_class"`
+	Nodes       int       `json:"nodes"`
+	Retries     int       `json:"retries"`
+	Restarts    int       `json:"restarts"`
+	Timestamp   time.Time `json:"timestamp"`
 	// Duration is encoded as integer nanoseconds in JSON ("duration_ns"),
 	// not as a duration string.
 	Duration time.Duration `json:"duration_ns"`
-	FailedAt string        `json:"failed_at,omitempty"`
+	// FailedAt is the node ID where the run halted, populated for both
+	// "fail" and "budget_exceeded" runs (Gap 5.2: budget-halted runs are
+	// no longer classified as "fail", so the gate also fires on
+	// "budget_exceeded").
+	FailedAt string `json:"failed_at,omitempty"`
 	// BundleIdentity is the content-addressed identity ("sha256:<hex>") of
 	// the .dipx bundle the run was executed against. Read from the run's
 	// checkpoint at summary-build time. Empty for runs from a plain .dip file.
 	BundleIdentity string `json:"bundle_identity,omitempty"`
+	// OverrideCount is the number of override edges traversed in this run.
+	// Sourced from activity log when present, else
+	// len(Checkpoint.ValidationOverrides). RunSummary stays thin — for the
+	// full OverrideDetail slice see AuditReport.ValidationOverrides.
+	OverrideCount int `json:"override_count,omitempty"`
 }
 
 // Audit reads checkpoint.json and activity.jsonl under runDir and returns a
@@ -131,6 +165,7 @@ func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
 	r := &AuditReport{
 		RunID:               cp.RunID,
 		Status:              status,
+		StatusClass:         statusClassFor(status),
 		Timeline:            buildTimeline(activity),
 		Retries:             buildRetryRecords(cp),
 		Errors:              buildActivityErrors(activity),
@@ -142,8 +177,55 @@ func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
 	if len(activity) >= 2 {
 		r.TotalDuration = activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
 	}
+	// Source ValidationOverrides from activity events first; fall back to the
+	// sticky checkpoint slice when the activity log carries no override entries
+	// (legacy runs, archived activity logs, etc.).
+	overrides := extractOverridesFromActivity(activity)
+	if len(overrides) == 0 {
+		overrides = cp.ValidationOverrides
+	}
+	r.ValidationOverrides = overrides
+	r.OverrideCount = len(overrides)
 	r.Recommendations = buildAuditRecommendations(cp, status, r.TotalDuration)
 	return r, nil
+}
+
+// statusClassFor maps a Status string to its stable two-bucket class
+// ("succeeded" or "failed") via pipeline.TerminalStatus.IsSuccess().
+// Centralized so AuditReport and RunSummary stay in lockstep.
+func statusClassFor(status string) string {
+	if pipeline.TerminalStatus(status).IsSuccess() {
+		return "succeeded"
+	}
+	return "failed"
+}
+
+// extractOverridesFromActivity returns the OverrideDetail entries from
+// validation_overridden activity entries, in the order they appear in
+// activity. SortActivityByTime is the caller's responsibility — Audit()
+// and buildRunSummary both call it before this helper, so the result is
+// in chronological order.
+func extractOverridesFromActivity(activity []ActivityEntry) []pipeline.OverrideDetail {
+	var out []pipeline.OverrideDetail
+	for _, e := range activity {
+		if e.Type != "validation_overridden" {
+			continue
+		}
+		det := pipeline.OverrideDetail{
+			GateNodeID: e.OverrideGate,
+			Label:      e.OverrideLabel,
+			Actor:      e.OverrideActor,
+			Timestamp:  e.Timestamp,
+		}
+		if len(e.OverrideSubgraphPath) > 0 {
+			// Defensive copy: callers may mutate the slice on the returned
+			// OverrideDetail without leaking back into the source
+			// ActivityEntry.
+			det.SubgraphPath = append([]string(nil), e.OverrideSubgraphPath...)
+		}
+		out = append(out, det)
+	}
+	return out
 }
 
 // ListRuns returns all runs under workdir/.tracker/runs, sorted newest first.
@@ -299,8 +381,16 @@ func buildAuditRecommendations(cp *pipeline.Checkpoint, status string, total tim
 	if total > 30*time.Minute {
 		recs = append(recs, "Long-running pipeline — consider fidelity=summary:medium for faster resumes")
 	}
-	if status == "fail" && cp.CurrentNode != "" {
-		recs = append(recs, fmt.Sprintf("Pipeline failed at %s — check error details above", cp.CurrentNode))
+	// Surface a "halted at" hint for both fail and budget_exceeded. Pre-Gap-5.2
+	// budget-halted runs were classified as "fail" so this branch caught them;
+	// after D12 they surface as their own status string and would otherwise
+	// silently no-op here.
+	if (status == "fail" || status == "budget_exceeded") && cp.CurrentNode != "" {
+		verb := "failed"
+		if status == "budget_exceeded" {
+			verb = "halted (budget exceeded)"
+		}
+		recs = append(recs, fmt.Sprintf("Pipeline %s at %s — check error details above", verb, cp.CurrentNode))
 	}
 	sort.Strings(recs)
 	return recs
@@ -330,6 +420,7 @@ func buildRunSummary(runsDir, name string, logW io.Writer) (RunSummary, bool) {
 	rs := RunSummary{
 		RunID:          name,
 		Status:         status,
+		StatusClass:    statusClassFor(status),
 		Nodes:          len(cp.CompletedNodes),
 		Retries:        totalRetries,
 		Restarts:       cp.RestartCount,
@@ -337,8 +428,20 @@ func buildRunSummary(runsDir, name string, logW io.Writer) (RunSummary, bool) {
 		Duration:       dur,
 		BundleIdentity: cp.BundleIdentity,
 	}
-	if status == "fail" {
+	// Gap 5.2: budget_exceeded is no longer collapsed into "fail" (D12 fix),
+	// so this gate must include both statuses to keep populating FailedAt for
+	// budget-halted runs.
+	if status == "fail" || status == "budget_exceeded" {
 		rs.FailedAt = cp.CurrentNode
+	}
+	// Count overrides from activity when present, else fall back to the sticky
+	// checkpoint slice. RunSummary stays thin (count only) — AuditReport
+	// carries the full slice.
+	overrides := extractOverridesFromActivity(activity)
+	if len(overrides) > 0 {
+		rs.OverrideCount = len(overrides)
+	} else {
+		rs.OverrideCount = len(cp.ValidationOverrides)
 	}
 	return rs, true
 }
