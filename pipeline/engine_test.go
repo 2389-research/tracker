@@ -1923,3 +1923,54 @@ func TestEngine_OverrideEdge_NoOverride_StaysSuccess(t *testing.T) {
 		t.Errorf("ValidationOverrides length = %d, want 0", len(result.ValidationOverrides))
 	}
 }
+
+// TestEngine_OverrideEdge_DecisionPriorityIsOverride pins the
+// DecisionDetail.EdgePriority value emitted on EventDecisionEdge when the
+// engine selects an Edge.Override-marked edge. The override edge is also a
+// labeled edge (so the existing selection logic would naturally tag it as
+// "label"); this test asserts the runtime overrides that to "override" so
+// external NDJSON consumers keying off edge_priority see the override
+// classification alongside the dedicated EventValidationOverridden event.
+func TestEngine_OverrideEdge_DecisionPriorityIsOverride(t *testing.T) {
+	g := NewGraph("override_decision_priority")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon", Label: "Gate", Attrs: map[string]string{"label": "Accept?"}})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "end", Label: "accept", Override: true})
+	g.AddEdge(&Edge{From: "gate", To: "s", Label: "retry"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  ActorHuman,
+			}, nil
+		},
+	})
+
+	var mu sync.Mutex
+	var observedPriority string
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		if evt.Type == EventDecisionEdge && evt.Decision != nil && evt.Decision.EdgeFrom == "gate" {
+			observedPriority = evt.Decision.EdgePriority
+		}
+	})
+
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler))
+	if _, err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if observedPriority != EdgePriorityOverride {
+		t.Errorf("EdgePriority = %q, want %q", observedPriority, EdgePriorityOverride)
+	}
+}

@@ -192,7 +192,14 @@ func (e *Engine) noMatchingEdgesError(edges []*Edge, pctx *PipelineContext) erro
 }
 
 // emitEdgeSelected emits a decision_edge event recording which edge was selected and why.
+// Override-marked edges always emit EdgePriorityOverride regardless of which selection
+// path (label, condition, weight, etc.) actually picked them — external NDJSON consumers
+// keying off edge_priority can identify the traversal as an override without watching
+// the dedicated EventValidationOverridden event that rides alongside.
 func (e *Engine) emitEdgeSelected(runID string, edge *Edge, priority string, ctxSnap map[string]string) {
+	if edge.Override {
+		priority = EdgePriorityOverride
+	}
 	e.emit(PipelineEvent{
 		Type:      EventDecisionEdge,
 		Timestamp: time.Now(),
