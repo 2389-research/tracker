@@ -1100,3 +1100,52 @@ func TestGitConfig_AliasesPreservePipelineSemantics(t *testing.T) {
 		t.Errorf("alias mismatch: GitPreflightInit")
 	}
 }
+
+// TestResult_MirrorsValidationOverrides pins the contract that
+// resultFromEngine copies EngineResult.ValidationOverrides into the
+// library-API Result so embedded callers can inspect override-edge
+// traversals without reaching through EngineResult. Also pins that the
+// Status field carries the validation_overridden enum value as a string.
+func TestResult_MirrorsValidationOverrides(t *testing.T) {
+	er := &pipeline.EngineResult{
+		Status: pipeline.OutcomeValidationOverridden,
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "Gate", Label: "accept", Actor: pipeline.ActorHuman},
+		},
+	}
+	r := resultFromEngine(er)
+	if r.Status != "validation_overridden" {
+		t.Errorf("Status = %q, want validation_overridden", r.Status)
+	}
+	if len(r.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides len = %d, want 1", len(r.ValidationOverrides))
+	}
+	if r.ValidationOverrides[0].GateNodeID != "Gate" {
+		t.Errorf("GateNodeID = %q, want Gate", r.ValidationOverrides[0].GateNodeID)
+	}
+	if r.ValidationOverrides[0].Label != "accept" {
+		t.Errorf("Label = %q, want accept", r.ValidationOverrides[0].Label)
+	}
+	if r.ValidationOverrides[0].Actor != pipeline.ActorHuman {
+		t.Errorf("Actor = %q, want %q", r.ValidationOverrides[0].Actor, pipeline.ActorHuman)
+	}
+}
+
+// TestResult_DefensiveCopy pins that resultFromEngine takes a defensive
+// copy of ValidationOverrides so library callers cannot mutate the
+// engine's internal slice (and vice-versa: engine-side mutations after
+// Result is built do not bleed through).
+func TestResult_DefensiveCopy(t *testing.T) {
+	er := &pipeline.EngineResult{
+		Status: pipeline.OutcomeValidationOverridden,
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "Gate"},
+		},
+	}
+	r := resultFromEngine(er)
+	// Mutate engine-side slice; Result-side should be unaffected.
+	er.ValidationOverrides[0].GateNodeID = "MUTATED"
+	if r.ValidationOverrides[0].GateNodeID != "Gate" {
+		t.Errorf("Result aliased engine slice; got %q, want Gate", r.ValidationOverrides[0].GateNodeID)
+	}
+}
