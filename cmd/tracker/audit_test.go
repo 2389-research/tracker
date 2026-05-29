@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // makeCheckpoint creates a checkpoint.json in the given run directory.
@@ -723,5 +724,98 @@ func TestPrintRunList_StatusColumnWidth(t *testing.T) {
 	// must be followed by at least 4 spaces before the Nodes value "7".
 	if !strings.Contains(row, "override    ") {
 		t.Errorf("Status column not widened to %%-10s — expected 4+ trailing spaces after \"override\":\n%q", row)
+	}
+}
+
+// TestPrintAuditHeader_OverrideHeadline verifies the Status line gains an
+// inline `(label "X" at Gate by Actor)` headline when ValidationOverrides is
+// non-empty, and that one Override: chain line per entry follows.
+func TestPrintAuditHeader_OverrideHeadline(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "validation_overridden",
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "EscalateReview", Label: "accept", Actor: pipeline.ActorHuman},
+		},
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	if !strings.Contains(out, `Status:    validation_overridden (label "accept" at EscalateReview by human)`) {
+		t.Errorf("header missing override headline:\n%s", out)
+	}
+	if !strings.Contains(out, "Override:  EscalateReview → accept") {
+		t.Errorf("header missing Override: line:\n%s", out)
+	}
+}
+
+// TestPrintAuditHeader_LatestHeadline verifies that with multiple overrides
+// the LATEST entry (per spec D5a) is used as the inline headline, while
+// every entry still gets its own Override: chain line in chronological order.
+func TestPrintAuditHeader_LatestHeadline(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "validation_overridden",
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "EscalateMilestone", Label: "mark done", Actor: pipeline.ActorAutopilot},
+			{GateNodeID: "EscalateReview", Label: "accept", Actor: pipeline.ActorHuman},
+		},
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	// Latest entry (EscalateReview) should be the headline.
+	if !strings.Contains(out, "at EscalateReview by human") {
+		t.Errorf("headline should be latest entry; got:\n%s", out)
+	}
+	// Earlier entry must NOT supply the headline.
+	if strings.Contains(out, "at EscalateMilestone by autopilot") {
+		t.Errorf("headline should not be the first entry; got:\n%s", out)
+	}
+	// Both Override: lines should appear in chronological order.
+	idxFirst := strings.Index(out, "Override:  EscalateMilestone → mark done")
+	idxSecond := strings.Index(out, "Override:  EscalateReview → accept")
+	if idxFirst < 0 {
+		t.Errorf("first override line missing:\n%s", out)
+	}
+	if idxSecond < 0 {
+		t.Errorf("second override line missing:\n%s", out)
+	}
+	if idxFirst >= 0 && idxSecond >= 0 && idxFirst > idxSecond {
+		t.Errorf("Override: lines should be chronological (first entry first):\n%s", out)
+	}
+}
+
+// TestPrintAuditHeader_SubgraphPathJoined verifies that the SubgraphPath is
+// joined as outer/inner/.../gate for both the inline headline and the
+// per-entry Override: chain line.
+func TestPrintAuditHeader_SubgraphPathJoined(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "validation_overridden",
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "Gate", Label: "accept", Actor: pipeline.ActorHuman, SubgraphPath: []string{"Outer", "Inner"}},
+		},
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	if !strings.Contains(out, "at Outer/Inner/Gate by human") {
+		t.Errorf("subgraph path not joined in headline; got:\n%s", out)
+	}
+	if !strings.Contains(out, "Override:  Outer/Inner/Gate → accept") {
+		t.Errorf("Override: line missing subgraph join:\n%s", out)
+	}
+}
+
+// TestPrintAuditHeader_NoOverridesUnaffected verifies clean runs (no
+// ValidationOverrides) keep their original header: no inline headline, no
+// Override: lines.
+func TestPrintAuditHeader_NoOverridesUnaffected(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "success",
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	if strings.Contains(out, "Override:") {
+		t.Errorf("Override line should not appear for clean runs:\n%s", out)
+	}
+	// Status line should be the plain "Status:    success" with no parenthetical.
+	if !strings.Contains(out, "Status:    success\n") {
+		t.Errorf("Status line should be unannotated for clean runs; got:\n%s", out)
 	}
 }
