@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/pipeline"
@@ -186,7 +187,7 @@ func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
 	}
 	r.ValidationOverrides = overrides
 	r.OverrideCount = len(overrides)
-	r.Recommendations = buildAuditRecommendations(cp, status, r.TotalDuration)
+	r.Recommendations = buildAuditRecommendations(cp, status, r.TotalDuration, overrides)
 	return r, nil
 }
 
@@ -364,13 +365,56 @@ func buildActivityErrors(activity []ActivityEntry) []ActivityError {
 	return out
 }
 
-func buildAuditRecommendations(cp *pipeline.Checkpoint, status string, total time.Duration) []string {
+// buildAuditRecommendations assembles the recommendation list for an AuditReport.
+//
+// Entries are emitted in priority order — override notes first (a one-line
+// summary + one per-override chronological entry), then per-node retry
+// suggestions (sorted by node ID for stable test output), then restart and
+// long-running notes, then a halted-at hint for fail / budget_exceeded runs.
+// No sort.Strings: the order matters and downstream consumers that want
+// alphabetical can sort on receipt.
+func buildAuditRecommendations(cp *pipeline.Checkpoint, status string, total time.Duration, overrides []pipeline.OverrideDetail) []string {
 	var recs []string
-	for nodeID, count := range cp.RetryCounts {
-		if count >= 2 {
-			recs = append(recs, fmt.Sprintf("Consider adjusting retry_policy for %s (used %d retries)", nodeID, count))
+
+	// Override notes (D16) lead the list when the run took at least one
+	// override edge. A single summary line flags the bypass, then one entry
+	// per OverrideDetail in chronological order (the caller passes
+	// overrides in the order they were collected from the activity log or
+	// the sticky checkpoint slice).
+	if len(overrides) > 0 {
+		recs = append(recs,
+			"This run terminated via a validation override. Workflow completion does not imply spec compliance — the override path bypassed at least one automated gate.")
+		for _, d := range overrides {
+			gate := d.GateNodeID
+			if len(d.SubgraphPath) > 0 {
+				parts := make([]string, 0, len(d.SubgraphPath)+1)
+				parts = append(parts, d.SubgraphPath...)
+				parts = append(parts, d.GateNodeID)
+				gate = strings.Join(parts, "/")
+			}
+			recs = append(recs,
+				fmt.Sprintf("Validation override at gate %q (label: %q, actor: %s). Review the override decision to confirm it meets project policy.",
+					gate, d.Label, d.Actor))
 		}
 	}
+
+	// Per-node retry notes. Iterate the retry map in node-ID order so the
+	// emitted entries are deterministic for tests/snapshots — map range is
+	// random in Go and would otherwise produce flaky ordering within this
+	// priority bucket.
+	if len(cp.RetryCounts) > 0 {
+		ids := make([]string, 0, len(cp.RetryCounts))
+		for id := range cp.RetryCounts {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			if count := cp.RetryCounts[id]; count >= 2 {
+				recs = append(recs, fmt.Sprintf("Consider adjusting retry_policy for %s (used %d retries)", id, count))
+			}
+		}
+	}
+
 	if cp.RestartCount > 0 {
 		suffix := "time"
 		if cp.RestartCount > 1 {
@@ -392,7 +436,8 @@ func buildAuditRecommendations(cp *pipeline.Checkpoint, status string, total tim
 		}
 		recs = append(recs, fmt.Sprintf("Pipeline %s at %s — check error details above", verb, cp.CurrentNode))
 	}
-	sort.Strings(recs)
+	// No sort.Strings(recs) — entries appear in priority order per D16:
+	// override notes → retry → restart → long-running → halted-at.
 	return recs
 }
 

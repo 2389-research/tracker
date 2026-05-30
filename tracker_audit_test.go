@@ -697,6 +697,178 @@ func TestAuditRecommendations_FailedAtForFailUnchanged(t *testing.T) {
 	}
 }
 
+// TestAuditRecommendations_OverrideNotesAppearFirst verifies that when both
+// an override and a retry condition fire, the override summary lands ahead of
+// the retry note. Pre-D16 sort.Strings(recs) would have re-ordered them.
+func TestAuditRecommendations_OverrideNotesAppearFirst(t *testing.T) {
+	cp := &pipeline.Checkpoint{
+		RunID: "override-first",
+		// Retries on a node — "Consider adjusting retry_policy …" alphabetically
+		// sorts BEFORE the override summary's "This run terminated …" line in
+		// the legacy sort.Strings order ('C' < 'T'). The priority-order
+		// contract requires the override line to win regardless.
+		RetryCounts: map[string]int{"Build": 3},
+	}
+	overrides := []pipeline.OverrideDetail{
+		{GateNodeID: "Gate1", Label: "accept", Actor: pipeline.ActorHuman},
+	}
+
+	recs := buildAuditRecommendations(cp, "validation_overridden", time.Second, overrides)
+	if len(recs) < 3 {
+		t.Fatalf("expected at least 3 recs (summary + per-override + retry), got %d: %v", len(recs), recs)
+	}
+	if !strings.HasPrefix(recs[0], "This run terminated via a validation override") {
+		t.Errorf("recs[0] should be the override summary; got %q", recs[0])
+	}
+	if !strings.HasPrefix(recs[1], "Validation override at gate") {
+		t.Errorf("recs[1] should be the per-override entry; got %q", recs[1])
+	}
+	if !strings.HasPrefix(recs[2], "Consider adjusting retry_policy for Build") {
+		t.Errorf("recs[2] should be the retry note; got %q", recs[2])
+	}
+}
+
+// TestAuditRecommendations_OverrideSummaryAndPerEntry verifies multiple
+// override events produce a single summary line followed by one entry per
+// OverrideDetail in input (chronological) order.
+func TestAuditRecommendations_OverrideSummaryAndPerEntry(t *testing.T) {
+	cp := &pipeline.Checkpoint{RunID: "multi-override"}
+	overrides := []pipeline.OverrideDetail{
+		{GateNodeID: "GateA", Label: "accept", Actor: pipeline.ActorHuman},
+		{GateNodeID: "GateB", Label: "mark done", Actor: pipeline.ActorAutopilot},
+		{GateNodeID: "GateC", Label: "ship", Actor: pipeline.ActorWebhook},
+	}
+
+	recs := buildAuditRecommendations(cp, "validation_overridden", time.Second, overrides)
+	if len(recs) != 4 {
+		t.Fatalf("want 4 recs (1 summary + 3 per-override), got %d: %v", len(recs), recs)
+	}
+	if !strings.HasPrefix(recs[0], "This run terminated via a validation override") {
+		t.Errorf("recs[0] should be the summary; got %q", recs[0])
+	}
+	// Per-override entries in chronological order.
+	for i, want := range []string{"GateA", "GateB", "GateC"} {
+		got := recs[i+1]
+		if !strings.Contains(got, want) {
+			t.Errorf("recs[%d] = %q, want to contain gate %q", i+1, got, want)
+		}
+	}
+	// Labels and actors should also land on the line.
+	if !strings.Contains(recs[1], `label: "accept"`) || !strings.Contains(recs[1], "actor: human") {
+		t.Errorf("recs[1] missing label/actor formatting: %q", recs[1])
+	}
+	if !strings.Contains(recs[2], `label: "mark done"`) || !strings.Contains(recs[2], "actor: autopilot") {
+		t.Errorf("recs[2] missing label/actor formatting: %q", recs[2])
+	}
+	if !strings.Contains(recs[3], `label: "ship"`) || !strings.Contains(recs[3], "actor: webhook") {
+		t.Errorf("recs[3] missing label/actor formatting: %q", recs[3])
+	}
+}
+
+// TestAuditRecommendations_NoSort constructs a scenario where alphabetical
+// sort would have reordered entries and verifies they appear in priority order
+// (override > retry > restart > halted-at). This is the canary that pins the
+// sort.Strings(recs) removal.
+func TestAuditRecommendations_NoSort(t *testing.T) {
+	cp := &pipeline.Checkpoint{
+		RunID:        "no-sort",
+		CurrentNode:  "Mid",
+		RestartCount: 1,
+		// "Consider adjusting …" ('C') and "Pipeline halted …" ('P') and
+		// "Pipeline restarted …" ('P') would all alphabetically precede the
+		// override summary "This run terminated …" ('T'). Pre-fix the override
+		// entry was last in the sorted output; post-fix it is first.
+		RetryCounts: map[string]int{"NodeX": 2},
+	}
+	overrides := []pipeline.OverrideDetail{
+		{GateNodeID: "G1", Label: "accept", Actor: pipeline.ActorHuman},
+	}
+
+	recs := buildAuditRecommendations(cp, "budget_exceeded", time.Second, overrides)
+	if len(recs) < 5 {
+		t.Fatalf("want >=5 recs, got %d: %v", len(recs), recs)
+	}
+	wantOrder := []string{
+		"This run terminated via a validation override",
+		"Validation override at gate",
+		"Consider adjusting retry_policy for NodeX",
+		"Pipeline restarted 1 time",
+		"Pipeline halted (budget exceeded) at Mid",
+	}
+	for i, prefix := range wantOrder {
+		if !strings.HasPrefix(recs[i], prefix) {
+			t.Errorf("recs[%d] = %q, want prefix %q", i, recs[i], prefix)
+		}
+	}
+}
+
+// TestAuditRecommendations_NoOverridesPreserveExisting guards the
+// backward-compat path: with no overrides the existing retry / restart /
+// halted-at logic still fires, and no override summary leaks through.
+func TestAuditRecommendations_NoOverridesPreserveExisting(t *testing.T) {
+	cp := &pipeline.Checkpoint{
+		RunID:        "no-overrides",
+		CurrentNode:  "Build",
+		RestartCount: 2,
+		RetryCounts:  map[string]int{"Test": 3},
+	}
+
+	recs := buildAuditRecommendations(cp, "fail", time.Second, nil)
+	for _, r := range recs {
+		if strings.HasPrefix(r, "This run terminated via a validation override") {
+			t.Errorf("override summary leaked in non-override run: %q", r)
+		}
+		if strings.HasPrefix(r, "Validation override at gate") {
+			t.Errorf("per-override entry leaked in non-override run: %q", r)
+		}
+	}
+	var sawRetry, sawRestart, sawHaltedAt bool
+	for _, r := range recs {
+		switch {
+		case strings.Contains(r, "Consider adjusting retry_policy for Test"):
+			sawRetry = true
+		case strings.Contains(r, "Pipeline restarted 2 times"):
+			sawRestart = true
+		case strings.Contains(r, "Pipeline failed at Build"):
+			sawHaltedAt = true
+		}
+	}
+	if !sawRetry {
+		t.Errorf("missing retry rec; got %v", recs)
+	}
+	if !sawRestart {
+		t.Errorf("missing restart rec; got %v", recs)
+	}
+	if !sawHaltedAt {
+		t.Errorf("missing halted-at rec; got %v", recs)
+	}
+}
+
+// TestAuditRecommendations_SubgraphPathInGate verifies that an
+// OverrideDetail with a populated SubgraphPath renders the gate field as
+// `outer/inner/gate` rather than dropping the path.
+func TestAuditRecommendations_SubgraphPathInGate(t *testing.T) {
+	cp := &pipeline.Checkpoint{RunID: "nested"}
+	overrides := []pipeline.OverrideDetail{
+		{
+			GateNodeID:   "ApproveSpec",
+			Label:        "accept",
+			Actor:        pipeline.ActorHuman,
+			SubgraphPath: []string{"Outer", "Inner"},
+		},
+	}
+
+	recs := buildAuditRecommendations(cp, "validation_overridden", time.Second, overrides)
+	if len(recs) < 2 {
+		t.Fatalf("want >=2 recs (summary + entry), got %d: %v", len(recs), recs)
+	}
+	// The per-override entry is recs[1] (recs[0] is the summary).
+	wantGate := `"Outer/Inner/ApproveSpec"`
+	if !strings.Contains(recs[1], wantGate) {
+		t.Errorf("expected gate path %s in entry; got %q", wantGate, recs[1])
+	}
+}
+
 // TestAudit_StatusClass_ForKnownStatuses pins the StatusClass mapping for
 // each of the four known Status values. Stable bucket categorization is the
 // whole point of the StatusClass companion field — if this drifts, every
