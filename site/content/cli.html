@@ -32,6 +32,7 @@ jsonld:
     <a href="#install">Install</a>
     <a href="#commands">Commands</a>
     <a href="#flags">Flags</a>
+    <a href="#exit-codes">Exit codes</a>
     <a href="#tool-safety">Tool safety</a>
     <a href="#name-resolution">Name resolution</a>
     <a href="#env-vars">Environment variables</a>
@@ -232,11 +233,38 @@ tracker update</code></pre>
           <tr><td><code>--bypass-denylist</code></td><td>Disable the built-in denylist for dangerous tool commands (eval, pipe-to-shell, <code>curl | sh</code>). Loud stderr warning on startup. Use only in sandboxed environments where dangerous patterns are intentional. <span class="badge">v0.23.0</span></td><td>Off</td></tr>
           <tr><td><code>--max-output-limit</code></td><td>Hard ceiling (bytes) on per-stream tool output size; caps per-node <code>output_limit</code> attrs. When a stream exceeds its cap, tracker keeps the <strong>tail</strong> (last <code>limit</code> bytes) so routing markers like <code>printf 'tests-pass'</code> emitted at end-of-output survive truncation. <code>tracker diagnose</code> surfaces a <code>tool_output_truncated</code> suggestion. <span class="badge">v0.23.0</span> <span class="badge">tail-window v0.27.0</span></td><td><code>0</code> (effective 10&nbsp;MB)</td></tr>
 
+          <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Exit codes</th></tr>
+          <tr><td><code>--fail-on-override</code></td><td>Exit code <code>2</code> when the run terminates as <code>validation_overridden</code>. Default behavior exits <code>0</code> (an override is a deliberate operator decision). Equivalent to <code>TRACKER_FAIL_ON_OVERRIDE=1</code>; the flag wins. See the <a href="#exit-codes">Exit codes</a> section. <span class="badge">v0.35.0</span></td><td>Off</td></tr>
+
           <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Misc</th></tr>
           <tr><td><code>--version</code></td><td>Show version info</td><td>&mdash;</td></tr>
         </tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ═══ Exit codes ═══ -->
+  <section class="glass" id="exit-codes">
+    <h2>Exit <span class="accent">codes</span> <span class="badge">v0.35.0</span></h2>
+    <p class="lead">
+      <code>tracker run</code> uses three distinguishable exit codes so CI integrations can branch on terminal status without parsing stdout.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>0</code></td><td>Run completed. Terminal status is either <code>success</code> or <code>validation_overridden</code>.</td></tr>
+          <tr><td><code>1</code></td><td>Run failed or was halted by a budget guard. Terminal status is <code>fail</code> or <code>budget_exceeded</code>.</td></tr>
+          <tr><td><code>2</code></td><td>Run completed as <code>validation_overridden</code> <strong>and</strong> <code>--fail-on-override</code> (or <code>TRACKER_FAIL_ON_OVERRIDE=1</code>) was set. Lets CI distinguish operator-accepted overrides from clean successes without scraping output.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+      Generic failures dominate <code>--fail-on-override</code>: a run that fails after an override exits <code>1</code>, not <code>2</code>. Without the flag, override runs exit <code>0</code> &mdash; an override is a deliberate operator decision and the default treats it as audit-positive. CI pipelines that should NOT auto-deploy on overrides must opt in:
+    </p>
+    <pre data-lang="bash"><code>tracker run <span class="flag">--fail-on-override</span> workflow.dip <span class="comment">&amp;&amp; deploy.sh</span></code></pre>
   </section>
 
   <!-- ═══ Tool safety graph attrs ═══ -->
@@ -340,6 +368,7 @@ tracker update</code></pre>
           <tr><td><code>TRACKER_GATEWAY_URL</code></td><td>&mdash;</td><td>Equivalent to <code>--gateway-url</code>. Tracker appends per-provider suffixes (<code>/anthropic</code>, <code>/openai</code>, <code>/google-ai-studio</code>, <code>/compat</code>). Per-provider <code>*_BASE_URL</code> still wins. <span class="badge">v0.17.0</span></td></tr>
           <tr><td><code>TRACKER_PASS_API_KEYS</code></td><td>unset</td><td>Set to <code>1</code> to keep <code>*_API_KEY</code> in the subprocess env when using <code>--backend claude-code</code> or <code>--backend acp</code>. Default behavior strips them so the subprocess uses subscription / native auth. <span class="badge">v0.12.0</span></td></tr>
           <tr><td><code>TRACKER_PASS_ENV</code></td><td>unset</td><td>Set to <code>1</code> to disable the sensitive-env scrub on tool subprocesses (<code>*_API_KEY</code>, <code>*_SECRET</code>, <code>*_TOKEN</code>, <code>*_PASSWORD</code>). Default scrubs them out. Use only when a tool genuinely needs a secret.</td></tr>
+          <tr><td><code>TRACKER_FAIL_ON_OVERRIDE</code></td><td>unset</td><td>Set to exactly <code>1</code> (strict parsing) to exit code <code>2</code> when a run terminates as <code>validation_overridden</code>. Equivalent to <code>--fail-on-override</code>; the CLI flag wins when both are present. <span class="badge">v0.35.0</span></td></tr>
           <tr><td><code>TRACKER_SPRINT_WRITER_MODEL</code></td><td>Sonnet</td><td>Model used by the <code>write_enriched_sprint</code> agent-runtime tool. When set, the tool registers in the native backend's tool registry. Pair with <code>TRACKER_CODEGEN_MODEL</code> for the full architect-side flow. <span class="badge">v0.25.0</span></td></tr>
           <tr><td><code>TRACKER_CODEGEN_MODEL</code></td><td><code>gpt-4o-mini</code></td><td>Model used by the <code>generate_code</code> tool to expand a contract into files. Setting this also registers <code>dispatch_sprints</code>. <span class="badge">v0.25.0</span></td></tr>
         </tbody>

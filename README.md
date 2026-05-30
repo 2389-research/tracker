@@ -441,6 +441,19 @@ The terminal UI shows:
 | ↻ (amber) | Retrying |
 | ⊘ (dim) | Skipped — pipeline took a different path |
 
+### Run terminal status
+
+`tracker.Result.Status` is one of:
+
+| Value | Meaning | `IsSuccess()` |
+|---|---|---|
+| `success` | Run reached the success exit; all validations passed. | true |
+| `validation_overridden` | Run reached the success exit, but a human, autopilot, or webhook accepted a failed validation along the way. See `Result.ValidationOverrides`. | true |
+| `budget_exceeded` | A `BudgetGuard` halted the run. | false |
+| `fail` | Run halted via failure. | false |
+
+The enum is open — future minor releases may add new values. Use `IsSuccess()` (or `status_class` in JSON output) instead of switching on the raw string.
+
 ### Keyboard
 
 | Key | Action |
@@ -570,8 +583,15 @@ result, _ := tracker.Run(ctx, source, tracker.Config{
         MaxWallTime:    30 * time.Minute,
     },
 })
-if result.Status == pipeline.OutcomeBudgetExceeded {
-    log.Printf("halt: %s, spent $%.4f", result.Cost.LimitsHit, result.Cost.TotalUSD)
+// IsSuccess() returns true for {success, validation_overridden}; classify by
+// status_class for stable bucketing across future enum extensions.
+if !result.Status.IsSuccess() {
+    log.Printf("run did not complete cleanly: status=%s, spent $%.4f",
+        result.Status, result.Cost.TotalUSD)
+}
+// To branch on overrides specifically:
+if len(result.ValidationOverrides) > 0 {
+    log.Printf("run involved %d override(s)", len(result.ValidationOverrides))
 }
 for provider, pc := range result.Cost.ByProvider {
     log.Printf("%s: %d tokens, $%.4f", provider, pc.Usage.InputTokens+pc.Usage.OutputTokens, pc.USD)

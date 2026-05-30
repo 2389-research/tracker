@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] — YYYY-MM-DD
+
+### Added
+
+- **New terminal `EngineResult.Status` value `validation_overridden`.** Runs that traverse a `wait.human` gate edge marked `override: true` in their `.dip` workflow now terminate with `Status == "validation_overridden"` instead of `"success"`, recording in the audit trail that a non-workflow decision (a human at the TUI, an autopilot persona, or a webhook callback) accepted a result the automated checks flagged as failed. The `Override:` line in `tracker audit` traces the routing; the `--json` output carries a stable `status_class: succeeded|failed` companion field for downstream consumers. Closes Gap 5.2 of [#233](https://github.com/2389-research/tracker/issues/233) ([#271](https://github.com/2389-research/tracker/issues/271)).
+- **New edge attribute `override: true`** in `.dip` syntax, valid only on edges from `wait.human` nodes. Adapter rejects misuse at compile-time. See the `validation_overridden` design doc for the per-edge guidance.
+- **New CLI flag `--fail-on-override`** (and env var `TRACKER_FAIL_ON_OVERRIDE=1`, strict-`=1` parsing matching the existing `TRACKER_PASS_*` convention). Causes `tracker run` to exit code 2 (distinguishable from generic-fail exit 1) when a run terminates as `validation_overridden`. Default unchanged: exit 0.
+- **New `dippin doctor` lint rule TRK102** (warn-level): fires on `wait.human` edges with label `accept` / `mark done` / `approve` (case-insensitive) that route to a forward-progress target, are upstream-reachable from an `outcome = fail` edge, and lack `override: true`. Surfaces the migration opportunity without false-positive on plan-approval gates.
+- **TUI live override rendering**: `MsgPipelineCompleted` gains a typed `Status` field; the TUI completion row renders the amber override badge in real-time. No more identical green badges for `success` and `validation_overridden`.
+
+### Changed
+
+- **Library-API delta**: `EngineResult.Status`, `tracker.Result.Status`, `tracker.AuditReport.Status`, `tracker.RunSummary.Status` are re-typed from `string` to `pipeline.TerminalStatus` (a named string type). Existing literal-string comparisons (`result.Status == "success"`) continue to compile and produce the same answer. Assignments from a `string` variable into a `Status` field require an explicit cast — this is the one breaking change in the re-typing. Embedded library callers should migrate to the new `TerminalStatus.IsSuccess()` helper for forward-compat across future status additions.
+- **New exported symbols** (additive): `pipeline.TerminalStatus` (type), `pipeline.OutcomeValidationOverridden`, `pipeline.OverrideDetail`, `pipeline.Actor` (type), `pipeline.ActorHuman` / `ActorAutopilot` / `ActorWebhook` / `ActorUnknown`, `pipeline.Edge.Override`, `pipeline.Outcome.ChildOverride`, `pipeline.Outcome.OverrideActor`, `pipeline.EngineResult.ValidationOverrides`, `pipeline.Checkpoint.ValidationOverrides`, `pipeline.EventValidationOverridden`, `pipeline.PipelineEvent.Override`, `pipeline.ErrValidationOverridden`. Plus mirrored fields on `tracker.Result`, `tracker.AuditReport`, `tracker.RunSummary`, `tracker.DiagnoseReport`.
+- `tracker_audit.AuditReport.Recommendations` is no longer alphabetically sorted — entries appear in priority order (override notes first, then per-override entries chronologically, then retry/budget notes). Downstream tools that sort on receipt are unaffected; tools that displayed in receive-order will see a different order.
+
+### Fixed
+
+- **`tracker_audit.classifyStatus` previously collapsed `budget_exceeded` events to `"fail"`**, so `tracker audit` and `tracker list` reported budget-halted runs as failures. Audit surfaces now surface `budget_exceeded` correctly. **User-visible behavior change**: scripts filtering on `status == "fail"` will see budget-halted runs move out of the `fail` bucket into a new `budget_exceeded` bucket. Update filters to `status_class == "failed"` (introduced in this release) for a stable bucket that survives future enum extensions. `EngineResult.Status` on budget-halted runs was already `budget_exceeded` since `OutcomeBudgetExceeded` shipped — this fix aligns the audit surface with the engine surface, closing a long-standing reporting gap.
+
+### Requires
+
+- `dippin-lang vX.Y.Z` (a real tag, not a pseudo-version pin — see release sequence in the design doc §16). `PinnedDippinVersion` bumped in lockstep with `go.mod` in the same commit.
+
+### Migration for embedded library callers
+
+```go
+// Before:
+if result.Status == pipeline.OutcomeSuccess {
+    deploy()
+}
+
+// After (treats validation_overridden as success — opt into the new audit-positive semantic):
+if result.Status.IsSuccess() {
+    deploy()
+}
+
+// To gate deploy on overrides explicitly:
+if result.Status.IsSuccess() && len(result.ValidationOverrides) == 0 {
+    deploy()
+}
+```
+
+If your code only ever cared about "completed cleanly without further action," no change is needed — `IsSuccess()` returns the same value for `OutcomeSuccess` as the old string comparison did. Override runs now classify as `IsSuccess() == true` (audit-positive) rather than as failures.
+
+### Operator notes (monitoring & CI integrations)
+
+Two surfaces silently change behavior on upgrade:
+
+1. **Monitoring dashboards filtering JSON output on `status == "success"` will silently undercount completed runs.** Override runs surface as `status == "validation_overridden"` — update filters to `status_class == "succeeded"` (the new stable open-enum-tolerant companion field) or to the union `status IN ("success", "validation_overridden")`.
+2. **Scripts counting failed runs via `status == "fail"` will see budget-halted runs disappear from the failure bucket** (the `classifyStatus` fix). Update to `status_class == "failed"` for a stable bucket.
+
+For CI integrations that should NOT auto-deploy on overrides:
+
+```bash
+tracker run --fail-on-override workflow.dip && deploy.sh
+```
+
+Without `--fail-on-override`, override runs exit 0 and `deploy.sh` will fire — this is the intended default (an override is a deliberate operator decision), but CI integrators should opt in to strict mode.
+
 ## [0.34.0] - 2026-05-27
 
 ### Changed
