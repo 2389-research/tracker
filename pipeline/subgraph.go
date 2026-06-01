@@ -150,7 +150,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	// is propagated up via ChildOverride below; the parent's engine
 	// absorbs it into the sticky list and the terminal-status rule
 	// flips Success → ValidationOverridden at the parent level.
-	status := OutcomeSuccess
+	var status TerminalStatus
 	switch result.Status {
 	case OutcomeSuccess, OutcomeBudgetExceeded, OutcomeValidationOverridden:
 		status = OutcomeSuccess

@@ -94,11 +94,11 @@ var activeGitConfig struct {
 
 // activeFailOnOverride captures the effective --fail-on-override decision for
 // the current run, merged with the TRACKER_FAIL_ON_OVERRIDE=1 env var
-// fallback. Read by runPipelineAsync (TUI path), which doesn't have cfg in
-// scope — set by executeRun via applyFailOnOverrideEnv before the pipeline
-// fires. The non-TUI path (run()) reads cfg directly through
-// interpretRunResult, so it doesn't need this var, but keeping a single
-// source-of-truth across both paths avoids drift.
+// fallback. Both run paths read it because cfg is out of reach where the
+// post-pipeline decision is made — runPipelineAsync (TUI) and run() (non-TUI)
+// each pass `&runConfig{failOnOverride: activeFailOnOverride}` to
+// interpretRunResult. executeRun calls applyFailOnOverrideEnv before the
+// pipeline fires so the global reflects the merged flag+env decision.
 var activeFailOnOverride bool
 
 // applyFailOnOverrideEnv reads TRACKER_FAIL_ON_OVERRIDE and sets

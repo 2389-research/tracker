@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.35.0] — YYYY-MM-DD
-
 ### Added
 
 - **New terminal `EngineResult.Status` value `validation_overridden`.** Runs that traverse a `wait.human` gate edge marked `override: true` in their `.dip` workflow now terminate with `Status == "validation_overridden"` instead of `"success"`, recording in the audit trail that a non-workflow decision (a human at the TUI, an autopilot persona, or a webhook callback) accepted a result the automated checks flagged as failed. The `Override:` line in `tracker audit` traces the routing; the `--json` output carries a stable `status_class: succeeded|failed` companion field for downstream consumers. Closes Gap 5.2 of [#233](https://github.com/2389-research/tracker/issues/233) ([#271](https://github.com/2389-research/tracker/issues/271)).
