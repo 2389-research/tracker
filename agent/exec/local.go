@@ -21,6 +21,25 @@ import (
 // scoped to a specific working directory.
 type LocalEnvironment struct {
 	workDir string
+
+	// CommandWrapper, when non-nil, is applied to every *exec.Cmd that
+	// ExecCommand and ExecCommandWithLimit construct, after all standard
+	// fields (Dir, SysProcAttr, Cancel, WaitDelay) are set but before
+	// the command runs. The writable_paths fs-jail (issue #272) uses this
+	// to rewrite Bash invocations through tracker's __jail-exec self-re-exec,
+	// applying Linux Landlock before the agent command runs.
+	// Default nil — the environment behaves as before.
+	CommandWrapper func(*exec.Cmd) *exec.Cmd
+
+	// WriteOpener, when non-nil, replaces the os.WriteFile call in WriteFile.
+	// Receives the absolute path (already validated by safePath) and the
+	// file mode; returns an *os.File for writing. The writable_paths fs-jail
+	// sets this to an openat2-backed opener that enforces RESOLVE_BENEATH +
+	// RESOLVE_NO_SYMLINKS against a session-root file descriptor — the
+	// kernel atomic-checks the chain, closing the parallel-branch symlink
+	// race vector (spec D6).
+	// Default nil — WriteFile uses os.WriteFile as before.
+	WriteOpener func(abs string, perm os.FileMode) (*os.File, error)
 }
 
 // NewLocalEnvironment creates a LocalEnvironment rooted at workDir.
@@ -85,6 +104,15 @@ func (e *LocalEnvironment) WriteFile(ctx context.Context, path string, content s
 		return err
 	}
 
+	if e.WriteOpener != nil {
+		f, err := e.WriteOpener(abs, 0644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = f.Write([]byte(content))
+		return err
+	}
 	return os.WriteFile(abs, []byte(content), 0644)
 }
 
@@ -109,6 +137,10 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	// Without this, cmd.Run() can block forever if a child process inherited
 	// stdout/stderr and the SIGKILL didn't close them quickly enough.
 	cmd.WaitDelay = 5 * time.Second
+
+	if e.CommandWrapper != nil {
+		cmd = e.CommandWrapper(cmd)
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -259,6 +291,10 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 
 	if len(env) > 0 && env[0] != nil {
 		cmd.Env = env[0]
+	}
+
+	if e.CommandWrapper != nil {
+		cmd = e.CommandWrapper(cmd)
 	}
 
 	if outputLimit <= 0 {

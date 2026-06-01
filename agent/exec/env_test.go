@@ -5,6 +5,7 @@ package exec
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -235,5 +236,73 @@ func TestExecCommandWithLimit_CustomEnv(t *testing.T) {
 	}
 	if strings.TrimSpace(result.Stdout) != "hello" {
 		t.Errorf("stdout = %q, want %q", strings.TrimSpace(result.Stdout), "hello")
+	}
+}
+
+func TestLocalEnvironment_CommandWrapperApplied(t *testing.T) {
+	env := NewLocalEnvironment(t.TempDir())
+	wrapped := false
+	env.CommandWrapper = func(cmd *exec.Cmd) *exec.Cmd {
+		wrapped = true
+		return cmd
+	}
+	_, err := env.ExecCommand(context.Background(), "/bin/true", nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("ExecCommand: %v", err)
+	}
+	if !wrapped {
+		t.Error("CommandWrapper was not invoked")
+	}
+}
+
+func TestLocalEnvironment_CommandWrapperAppliedWithLimit(t *testing.T) {
+	// ExecCommandWithLimit takes the same wrap path; the jail must apply
+	// uniformly across both Exec entry points.
+	env := NewLocalEnvironment(t.TempDir())
+	wrapped := false
+	env.CommandWrapper = func(cmd *exec.Cmd) *exec.Cmd {
+		wrapped = true
+		return cmd
+	}
+	_, err := env.ExecCommandWithLimit(context.Background(), "/bin/true", nil, 5*time.Second, 1024)
+	if err != nil {
+		t.Fatalf("ExecCommandWithLimit: %v", err)
+	}
+	if !wrapped {
+		t.Error("CommandWrapper was not invoked for ExecCommandWithLimit")
+	}
+}
+
+func TestLocalEnvironment_WriteOpenerApplied(t *testing.T) {
+	dir := t.TempDir()
+	env := NewLocalEnvironment(dir)
+	opened := false
+	env.WriteOpener = func(abs string, perm os.FileMode) (*os.File, error) {
+		opened = true
+		return os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	}
+	if err := env.WriteFile(context.Background(), "test.txt", "hello"); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if !opened {
+		t.Error("WriteOpener was not invoked")
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "test.txt"))
+	if string(got) != "hello" {
+		t.Errorf("file contents = %q, want %q", string(got), "hello")
+	}
+}
+
+func TestLocalEnvironment_HooksNilFallsThrough(t *testing.T) {
+	env := NewLocalEnvironment(t.TempDir())
+	// Both function fields nil — must fall through to existing behavior.
+	if _, err := env.ExecCommand(context.Background(), "/bin/true", nil, 5*time.Second); err != nil {
+		t.Errorf("ExecCommand with nil CommandWrapper = %v, want nil", err)
+	}
+	if _, err := env.ExecCommandWithLimit(context.Background(), "/bin/true", nil, 5*time.Second, 1024); err != nil {
+		t.Errorf("ExecCommandWithLimit with nil CommandWrapper = %v, want nil", err)
+	}
+	if err := env.WriteFile(context.Background(), "test.txt", "hello"); err != nil {
+		t.Errorf("WriteFile with nil WriteOpener = %v, want nil", err)
 	}
 }
