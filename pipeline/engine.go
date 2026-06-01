@@ -509,7 +509,7 @@ func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next
 // per cycle, but operators who need per-traversal recording should use
 // distinct labels per iteration (e.g., "accept attempt 1" / "accept
 // attempt 2") until the dedup is rescoped to checkpoint generations.
-// Tracking issue: TBD as a follow-up to #273.
+// Tracking issue: #279.
 //
 // Note: only checks entries with empty SubgraphPath; child-propagated entries
 // can never collide with own-graph entries.
