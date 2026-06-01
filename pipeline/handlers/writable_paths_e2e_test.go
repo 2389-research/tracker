@@ -227,3 +227,85 @@ func TestBranchEnforcesResolvedPaths(t *testing.T) {
 		t.Errorf("inside file not created: %v", statErr)
 	}
 }
+
+func TestParallelBranchSymlinkRace(t *testing.T) {
+	if err := execpkg.ProbeLandlock(); err != nil {
+		t.Skipf("Landlock unavailable: %v", err)
+	}
+	anchor := t.TempDir()
+	workspaceA := filepath.Join(anchor, "branchA")
+	workspaceB := filepath.Join(anchor, "branchB")
+	if err := os.MkdirAll(workspaceA, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(workspaceB, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Branches share `anchor` per pipeline/handlers/parallel.go:162.
+	// Branch A's Bash runs a tight symlink-forge loop inside its workspace.
+	// Branch B's in-process Write tries to land files in branchB. Without
+	// openat2's RESOLVE_BENEATH + RESOLVE_NO_SYMLINKS, branch B would race
+	// branch A's symlink swap; with the kernel atomic-check, the race is
+	// closed.
+
+	outsideDir := t.TempDir()
+
+	envA := execpkg.NewLocalEnvironment(anchor)
+	cfgA := agent.SessionConfig{
+		WorkingDir:       anchor,
+		WritablePaths:    []string{"branchA/**"},
+		WritablePathsSet: true,
+		Backend:          "native",
+	}
+	if _, err := configureJail(&cfgA, envA, anchor); err != nil {
+		t.Fatalf("configureJail A: %v", err)
+	}
+
+	envB := execpkg.NewLocalEnvironment(anchor)
+	cfgB := agent.SessionConfig{
+		WorkingDir:       anchor,
+		WritablePaths:    []string{"branchB/**"},
+		WritablePathsSet: true,
+		Backend:          "native",
+	}
+	if _, err := configureJail(&cfgB, envB, anchor); err != nil {
+		t.Fatalf("configureJail B: %v", err)
+	}
+
+	// Goroutine A: forges symlinks in a loop until told to stop.
+	stop := make(chan struct{})
+	forgeDone := make(chan struct{})
+	go func() {
+		defer close(forgeDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			// Forge a symlink inside branchA pointing to outsideDir.
+			// ln -sfn replaces atomically if the link already exists.
+			_, _ = envA.ExecCommand(context.Background(), "sh",
+				[]string{"-c", fmt.Sprintf("ln -sfn %s %s/share", outsideDir, workspaceA)}, 2*time.Second)
+		}
+	}()
+
+	// Branch B: races writes through any "share" path it can construct.
+	// Even if A's symlink ends up at branchA/share pointing outside, B's
+	// writes target branchB/payload-N.txt — they shouldn't reach outsideDir.
+	// But if envB.WriteFile EVER follows a symlink and ends up writing
+	// outside, we have a race vector.
+	for i := 0; i < 200; i++ {
+		relPath := fmt.Sprintf("branchB/payload-%d.txt", i)
+		_ = envB.WriteFile(context.Background(), relPath, "ok")
+	}
+
+	close(stop)
+	<-forgeDone
+
+	entries, _ := os.ReadDir(outsideDir)
+	if len(entries) > 0 {
+		t.Errorf("outsideDir has %d entries; race let a write through. Entries: %v", len(entries), entries)
+	}
+}
