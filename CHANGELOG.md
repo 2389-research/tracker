@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`writable_paths` fs-jail enforcement** (closes #272, paired with dippin
+  v0.35.0 / #75). Agents with `writable_paths` declared in the workflow now have
+  a runtime write jail bounding all file mutations (Write/Edit/ApplyPatch AND
+  Bash + descendants) to the declared globs. **Linux-only** (kernel 6.7+ for
+  Landlock ABI v3); macOS/Windows/older Linux refuse-to-start when `writable_paths`
+  is set. `claude-code` and `acp` backends also refuse-to-start (out-of-process
+  backends tracker cannot sandbox). In-process tools enforce the **exact** globs
+  via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)`;
+  Bash subprocess is bounded at the **directory ancestors** of each glob's
+  static prefix via Linux Landlock — for the sentinel-writer adopters these are
+  identical because their globs are directory-scoped (e.g. `workspace/**`).
+
+  **Operator notes:**
+  - A new internal subcommand `tracker __jail-exec` exists for the runtime to
+    re-exec into a Landlock-sandboxed child. Operators MUST NOT invoke it
+    directly; documented for transparency only.
+  - Residual escape classes (not bounded by writable_paths): network egress
+    (`curl`, `cargo` crate fetches), reads / exfil-by-read, content within an
+    allowed path. The agent can still poison `workspace/Cargo.toml` if
+    `writable_paths: workspace/**`. Narrow globs are the strongest posture.
+  - **Requires**: paired dippin-lang release with the `WritablePaths` IR field
+    (tracked via #75). During cross-repo dev tracker pins `@latest` against
+    dippin's `main`; the release PR bumps to the tagged version. Without a
+    matching tracker, dippin's `writable_paths` field is unenforced — tracker
+    fail-closes on the field, so an older tracker refuses to run rather than
+    silently ignoring.
+
+  **Library-API delta** (for embedded integrations):
+  - `pipeline.AgentNodeConfig` gains `WritablePaths []string` + `WritablePathsSet bool` (typed accessor).
+  - `agent.SessionConfig` gains `Backend string`, `WritablePaths []string`, `WritablePathsSet bool`.
+  - `agent/exec.LocalEnvironment` gains optional `CommandWrapper`, `WriteOpener`, and `Remover` function fields.
+  - `agent/exec.ExecutionEnvironment` interface gains a `RemoveFile` method (the writable_paths jail intercepts delete + apply_patch move-cleanup paths through this seam).
+  - New `agent/exec` package functions: `WrapBashCmd`, `RunJailExec`, `ProbeLandlock`, `ValidateWritablePaths`, `OpenForWrite`. Linux-only; non-Linux builds get passthrough stubs that refuse-to-start.
+
 - **New terminal `EngineResult.Status` value `validation_overridden`.** Runs that traverse a `wait.human` gate edge marked `override: true` in their `.dip` workflow now terminate with `Status == "validation_overridden"` instead of `"success"`, recording in the audit trail that a non-workflow decision (a human at the TUI, an autopilot persona, or a webhook callback) accepted a result the automated checks flagged as failed. The `Override:` line in `tracker audit` traces the routing; the `--json` output carries a stable `status_class: succeeded|failed` companion field for downstream consumers. Closes Gap 5.2 of [#233](https://github.com/2389-research/tracker/issues/233) ([#271](https://github.com/2389-research/tracker/issues/271)).
 - **New edge attribute `override: true`** in `.dip` syntax, valid only on edges from `wait.human` nodes. Adapter rejects misuse at compile-time. See the `validation_overridden` design doc for the per-edge guidance.
 - **New CLI flag `--fail-on-override`** (and env var `TRACKER_FAIL_ON_OVERRIDE=1`, strict-`=1` parsing matching the existing `TRACKER_PASS_*` convention). Causes `tracker run` to exit code 2 (distinguishable from generic-fail exit 1) when a run terminates as `validation_overridden`. Default unchanged: exit 0.

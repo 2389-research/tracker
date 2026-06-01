@@ -351,3 +351,32 @@ retries per milestone. This counter persists across pipeline restarts — if a
 human says "retry" after escalation, the counter is already maxed. The counter
 is only reset in `MarkMilestoneDone`. This is a design tradeoff, not a bug,
 but users need to know about it (`tracker diagnose` surfaces this).
+
+### `tracker __jail-exec` internal subcommand (#272)
+
+When `writable_paths` is set on an agent node, tracker re-execs itself via
+`/proc/self/exe __jail-exec -- <anchor> <globs> -- sh -c <cmd>` to apply
+Linux Landlock to Bash subprocesses. The dispatch happens in `cmd/tracker/main.go`
+BEFORE flag parsing. Operators MUST NOT invoke `__jail-exec` directly — the
+`__` prefix signals "internal." The helper applies Landlock ABI v3, then
+`syscall.Exec`s into `sh -c <cmd>`, preserving Landlock through exec so the
+agent's bash and all descendants (cargo, rustc, child shells) are bounded by
+the writable_paths globs at the kernel layer.
+
+Two-tier semantic: in-process tools (`Write`, `Edit`, `ApplyPatch`) enforce
+the exact globs via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)`
+against a session-root fd — symlink chains rejected at the kernel syscall, no
+TOCTOU window. Bash subprocess is bounded at the directory ancestor of each
+glob's static prefix because Landlock is path-prefix on directories, not
+glob-aware.
+
+Refuse-to-start: invalid `working_dir` (escapes process cwd), malformed globs
+(absolute / ~ / parent-escape / unbalanced braces), backend ∈ {claude-code, acp,
+unknown} (out-of-process; tracker cannot sandbox), Landlock unavailable
+(kernel < 6.7 or non-Linux). Configure-jail gate in `pipeline/handlers/codergen_jail.go`.
+
+Residual escape classes (not bounded): network egress (cargo crate fetches,
+curl), reads / exfil-by-read, content within an allowed path. Narrow globs are
+the strongest posture. See
+`docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md`
+for the full design.
