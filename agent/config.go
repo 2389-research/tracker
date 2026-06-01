@@ -119,6 +119,13 @@ type SessionConfig struct {
 	// pipeline.AgentNodeConfig.WritablePathsSet so the signal carries
 	// through the codergen buildConfig handoff intact.
 	WritablePathsSet bool
+
+	// Backend names the execution backend for this session. Carried from
+	// pipeline.AgentNodeConfig.Backend so configureJail can refuse
+	// out-of-process backends (claude-code, acp) and unknown backends
+	// (fail-closed) before wiring the writable_paths fs-jail. Empty string
+	// is treated as "native" by configureJail. See issue #272.
+	Backend string
 }
 
 // IsToolAccessRestricted reports whether ToolAccess is set to any non-empty
