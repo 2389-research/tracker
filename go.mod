@@ -13,6 +13,7 @@ require (
 	github.com/coder/acp-go-sdk v0.6.3
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-isatty v0.0.20
+	golang.org/x/sys v0.42.0
 	golang.org/x/term v0.41.0
 	pgregory.net/rapid v1.3.0
 )
@@ -33,7 +34,6 @@ require (
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/landlock-lsm/go-landlock v0.8.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
@@ -47,7 +47,6 @@ require (
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
