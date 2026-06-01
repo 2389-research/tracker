@@ -123,3 +123,36 @@ func TestValidate_ResponseFormat(t *testing.T) {
 		t.Error("expected error for invalid ResponseSchema JSON")
 	}
 }
+
+func TestSessionConfig_WritablePaths(t *testing.T) {
+	t.Run("default is nil and unset", func(t *testing.T) {
+		cfg := DefaultConfig()
+		if cfg.WritablePaths != nil {
+			t.Errorf("default WritablePaths = %v, want nil", cfg.WritablePaths)
+		}
+		if cfg.WritablePathsSet {
+			t.Errorf("default WritablePathsSet = true, want false")
+		}
+	})
+
+	t.Run("populated config validates", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.WritablePaths = []string{"workspace/**"}
+		cfg.WritablePathsSet = true
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate with WritablePaths set = %v, want nil", err)
+		}
+	})
+
+	t.Run("set with empty slice still validates", func(t *testing.T) {
+		// Validate() does NOT enforce the fail-CLOSED contract; that is the
+		// codergen configureJail gate's responsibility (Task 14). At the
+		// SessionConfig layer, Set=true + len==0 is a legal carrying state.
+		cfg := DefaultConfig()
+		cfg.WritablePaths = nil
+		cfg.WritablePathsSet = true
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate with Set=true + empty paths = %v, want nil (gate is at configureJail)", err)
+		}
+	})
+}
