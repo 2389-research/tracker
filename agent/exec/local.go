@@ -129,6 +129,11 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	// group on timeout, preventing orphaned child processes (e.g. long-running
 	// servers started by the shell command).
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Pdeathsig=SIGKILL on Linux: child dies when this process dies. Closes
+	// the orphan-accumulation hole that fork-bombed dev hosts during #272
+	// (132 live __jail-exec orphans, load avg 74). No-op on macOS — see
+	// parent_death_other.go.
+	applyParentDeathSig(cmd)
 	// Override the default WaitDelay-based kill with process group kill.
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -284,6 +289,11 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = e.workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Pdeathsig=SIGKILL on Linux: child dies when this process dies. Closes
+	// the orphan-accumulation hole that fork-bombed dev hosts during #272
+	// (132 live __jail-exec orphans, load avg 74). No-op on macOS — see
+	// parent_death_other.go.
+	applyParentDeathSig(cmd)
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
