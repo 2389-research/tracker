@@ -36,11 +36,35 @@ func ProbeLandlock() error {
 	return nil
 }
 
-// WrapBashCmd returns cmd unchanged on Linux. The actual enforcement happens
-// via RunJailExec (self-re-exec into a Landlock-restricted child), which is
-// wired by Task 10. This stub keeps the package compiling while Tasks 10-13
-// are implemented.
+// WrapBashCmd rewrites cmd's argv to invoke `/proc/self/exe __jail-exec` with
+// the writable_paths jail rules, then the original command after a `--`
+// separator.
+//
+// The wrapped command runs in three stages:
+//  1. tracker re-execs itself as `tracker __jail-exec`.
+//  2. The __jail-exec child applies Landlock ABI v3 with the static-prefix
+//     ancestor directories of each writable_paths glob.
+//  3. The child syscall.Exec's into the original command (e.g. `sh -c <agentCmd>`),
+//     replacing its image. Landlock is preserved through exec; bash + all
+//     descendants are bounded.
+//
+// Argv layout — the two `--` separators are unambiguous boundaries that
+// RunJailExec's parseJailExecArgs (Task 11) splits on:
+//
+//	/proc/self/exe __jail-exec -- <anchor> <glob1> ... <globN> -- <origArgs...>
+//
+// All other Cmd fields (Dir, Env, Stdin/Stdout/Stderr, SysProcAttr, ctx) are
+// preserved by in-place mutation — the wrapper returns the same *Cmd.
 func WrapBashCmd(cmd *exec.Cmd, anchor string, writable []string) *exec.Cmd {
+	newArgs := make([]string, 0, 4+len(writable)+len(cmd.Args))
+	newArgs = append(newArgs, "/proc/self/exe", "__jail-exec", "--")
+	newArgs = append(newArgs, anchor)
+	newArgs = append(newArgs, writable...)
+	newArgs = append(newArgs, "--")
+	newArgs = append(newArgs, cmd.Args...)
+
+	cmd.Path = "/proc/self/exe"
+	cmd.Args = newArgs
 	return cmd
 }
 
