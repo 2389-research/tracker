@@ -64,12 +64,20 @@ type AgentNodeConfig struct {
 	ResponseSchema string
 
 	// WritablePaths bounds the file paths this agent's tools may write,
-	// as author-chosen globs resolved against the session root. Empty/absent
-	// = unbounded. Non-empty triggers the runtime fs-jail (Linux Landlock for
-	// Bash subprocess + openat2 for in-process Write/Edit/ApplyPatch). A
-	// present-but-empty or malformed value fails CLOSED at session creation
-	// (deny-all / refuse-to-start), never unbounded. See issue #272.
+	// as author-chosen globs resolved against the session root. Non-empty
+	// triggers the runtime fs-jail (Linux Landlock for Bash subprocess +
+	// openat2 for in-process Write/Edit/ApplyPatch). Distinguishing absent
+	// from present-but-empty requires WritablePathsSet — the configureJail
+	// gate refuses-to-start when Set && len == 0 so a malformed/whitespace
+	// attr can never silently degrade to unbounded. See issue #272.
 	WritablePaths []string
+
+	// WritablePathsSet records whether the writable_paths attr was present
+	// on the node. Distinguishes "absent" (Set=false, jail disabled) from
+	// "present but parses to no entries" (Set=true, fail-CLOSED at the
+	// codergen configureJail gate per issue #272). Mirrors the three-state
+	// pattern of ReflectOnErrorSet et al. above.
+	WritablePathsSet bool
 
 	CacheToolResults    bool
 	CacheToolResultsSet bool
@@ -225,7 +233,8 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		}
 	}
 
-	if raw, ok := n.Attrs["writable_paths"]; ok && raw != "" {
+	if raw, ok := n.Attrs["writable_paths"]; ok {
+		cfg.WritablePathsSet = true
 		cfg.WritablePaths = splitCommaNoEmpty(raw)
 	}
 
