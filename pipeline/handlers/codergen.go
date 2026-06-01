@@ -630,7 +630,16 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	}
 
 	if cfg.Backend != "" {
-		config.Backend = cfg.Backend
+		// Normalize the documented "codergen" alias to "native" before the
+		// jail check. selectBackend already treats both as native; carrying
+		// the literal "codergen" alias into SessionConfig would make
+		// configureJail's G2 gate reject the node when writable_paths is set
+		// (#272 review, codex P2 codergen.go:634).
+		if cfg.Backend == "codergen" {
+			config.Backend = "native"
+		} else {
+			config.Backend = cfg.Backend
+		}
 	}
 	if cfg.WritablePathsSet {
 		config.WritablePathsSet = true

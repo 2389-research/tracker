@@ -25,7 +25,7 @@
 | `agent/exec/jail_linux_test.go` | Unit tests for the Linux-only helpers. Uses `TestMain` re-exec idiom for `RunJailExec`. |
 | `agent/exec/jail_test.go` | Cross-platform unit tests for `ValidateWritablePaths` (pure Go, no syscalls). |
 | `agent/exec/jail_errors.go` | Shared error sentinels: `ErrLandlockUnavailable`, `ErrPathEscape`, `ErrPathNotAllowed`. |
-| `pipeline/handlers/codergen_jail.go` | `configureJail(cfg, attrs, env) (bool, error)` helper called from `buildConfig`. Co-located with codergen handler. |
+| `pipeline/handlers/codergen_jail.go` | `configureJail(cfg, env, processCwd) (bool, error)` helper called from `buildConfig`. Co-located with codergen handler. |
 | `pipeline/handlers/codergen_jail_test.go` | Tests for the three refuse-to-start gates. |
 
 ### Modified files

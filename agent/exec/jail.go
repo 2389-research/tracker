@@ -4,6 +4,7 @@ package exec
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -87,6 +88,15 @@ func validateGlobEntry(g string) error {
 	}
 	if !balancedBraces(g) {
 		return fmt.Errorf("malformed writable_paths entry %q: unbalanced braces (comma-split tore an expansion apart)", g)
+	}
+	// Probe with path.Match so malformed character classes (e.g. "foo[") and
+	// other Match-rejected shapes are caught at session setup rather than
+	// becoming opaque runtime denials (#272 review, Copilot jail.go:91).
+	// "**" is tracker's own metasyntax — path.Match would reject it as a
+	// bad pattern, so we strip it before probing.
+	probe := strings.ReplaceAll(g, "**", "x")
+	if _, err := path.Match(probe, "x"); err != nil {
+		return fmt.Errorf("malformed writable_paths entry %q: %v", g, err)
 	}
 	return nil
 }

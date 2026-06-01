@@ -32,6 +32,9 @@ func (m *mockExecEnv) ReadFile(ctx context.Context, path string) (string, error)
 func (m *mockExecEnv) WriteFile(ctx context.Context, path, content string) error {
 	return fmt.Errorf("not implemented")
 }
+func (m *mockExecEnv) RemoveFile(ctx context.Context, path string) error {
+	return fmt.Errorf("not implemented")
+}
 func (m *mockExecEnv) Glob(ctx context.Context, pattern string) ([]string, error) {
 	return nil, fmt.Errorf("not implemented")
 }

@@ -73,37 +73,66 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 		return execpkg.WrapBashCmd(c, anchor, globs)
 	}
 	env.WriteOpener = func(absPath string, perm os.FileMode) (*os.File, error) {
-		// LocalEnvironment.WriteFile passes an absolute path; convert to
-		// relative-to-anchor for OpenForWrite (which uses openat2 with
-		// RESOLVE_BENEATH against the anchor FD).
-		relPath, relErr := filepath.Rel(anchor, absPath)
-		if relErr != nil || strings.HasPrefix(relPath, "..") {
-			return nil, fmt.Errorf("%w: %q is outside anchor %q", execpkg.ErrPathEscape, absPath, anchor)
+		relPath, err := relPathForJail(anchor, absPath)
+		if err != nil {
+			return nil, err
 		}
-
-		// Glob check: enforces the EXACT writable_paths globs per spec D2
-		// two-tier semantic. RESOLVE_BENEATH only enforces anchor containment;
-		// without this, a file-scoped glob like "workspace/out.md" would
-		// degrade to directory-scoped behavior.
-		// Check BEFORE OpenForWrite so no file is created on rejection.
 		if !matchWritablePath(relPath, globs) {
 			return nil, fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
 				execpkg.ErrPathNotAllowed, relPath, globs)
 		}
-
+		// Policy approved — create the parent dir then open via openat2.
+		// Order matters: mkdir runs AFTER the glob check so a rejected
+		// write leaves no empty directories outside writable_paths
+		// (#272 review, codex P2).
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			return nil, err
+		}
 		return execpkg.OpenForWrite(anchor, relPath, perm)
+	}
+	env.Remover = func(absPath string) error {
+		relPath, err := relPathForJail(anchor, absPath)
+		if err != nil {
+			return err
+		}
+		if !matchWritablePath(relPath, globs) {
+			return fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
+				execpkg.ErrPathNotAllowed, relPath, globs)
+		}
+		return os.Remove(absPath)
 	}
 	return true, nil
 }
 
+// relPathForJail validates that absPath sits beneath anchor and returns the
+// relative path used by the jail's policy and openat2 layers. Rejects only
+// real parent traversal: relPath == ".." or starts with "../" — bare names
+// like "..foo" or "...cache" stay below the anchor and must be allowed
+// through (#272 review, coderabbitai codergen_jail.go:82).
+func relPathForJail(anchor, absPath string) (string, error) {
+	relPath, relErr := filepath.Rel(anchor, absPath)
+	if relErr != nil {
+		return "", fmt.Errorf("%w: cannot relativize %q against anchor %q: %v",
+			execpkg.ErrPathEscape, absPath, anchor, relErr)
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: %q is outside anchor %q", execpkg.ErrPathEscape, absPath, anchor)
+	}
+	return relPath, nil
+}
+
 // matchWritablePath returns true when relPath matches any of the writable
 // glob patterns. Supports:
-//   - "prefix/**" — matches relPath when it has prefix "prefix/"
-//     (any depth descendant, file or directory).
-//   - "exact/path.md" — exact match against relPath.
+//   - "**" — matches anything.
+//   - "prefix/**" — matches the prefix itself and any descendant.
+//   - "**/suffix" — matches at any depth, including the top level.
+//   - "prefix/**/suffix" — matches "prefix/.../suffix" at any intermediate depth.
 //   - "*.md", "foo/*.txt" — path.Match (single-segment globs).
+//   - "exact/path.md" — literal match.
 //
 // All globs are workspace-relative and use forward-slash separators.
+// Closes the #272 review gap (coderabbitai codergen_jail.go:129) where the
+// previous matcher only honored trailing "/**" and bare "**".
 func matchWritablePath(relPath string, globs []string) bool {
 	for _, g := range globs {
 		if matchOneGlob(relPath, g) {
@@ -114,19 +143,67 @@ func matchWritablePath(relPath string, globs []string) bool {
 }
 
 func matchOneGlob(relPath, g string) bool {
-	// Double-star prefix match. e.g. "workspace/**" matches anything under
-	// "workspace/". Per spec D2, the static prefix is everything before the
-	// first glob metachar; for "X/**" that's "X/".
-	if strings.HasSuffix(g, "/**") {
-		prefix := strings.TrimSuffix(g, "/**")
-		return relPath == prefix || strings.HasPrefix(relPath, prefix+"/")
+	// Static glob: literal match.
+	if !strings.ContainsAny(g, "*?[") {
+		return relPath == g
 	}
 	if g == "**" {
 		return true
 	}
-	if strings.Contains(g, "*") || strings.Contains(g, "?") || strings.Contains(g, "[") {
-		ok, _ := path.Match(g, relPath)
-		return ok
+	if strings.Contains(g, "**") {
+		// Split on the first "/**" boundary. Note: we deliberately don't
+		// support multiple "**" in one glob — that's a doublestar feature
+		// we don't need for the documented adopters.
+		i := strings.Index(g, "/**")
+		switch {
+		case i == 0:
+			// "/**suffix" — same shape as "**/suffix" after stripping the
+			// leading "/". Treat both as "any-path-prefix + suffix".
+			rest := strings.TrimPrefix(g[3:], "/")
+			return rest == "" || matchSuffixAtAnyDepth(relPath, rest)
+		case i < 0:
+			// No "/**" present but contains "**" elsewhere (e.g. leading
+			// "**/x"). Handle the "**/" prefix case here.
+			if strings.HasPrefix(g, "**/") {
+				return matchSuffixAtAnyDepth(relPath, strings.TrimPrefix(g, "**/"))
+			}
+			// Fallback: anything else with embedded ** is not supported.
+			// path.Match doesn't understand **, so this would mis-match;
+			// reject.
+			return false
+		default:
+			// "prefix/**" or "prefix/**/suffix".
+			prefix := g[:i]
+			rest := strings.TrimPrefix(g[i+3:], "/")
+			if !strings.HasPrefix(relPath+"/", prefix+"/") {
+				return false
+			}
+			if rest == "" {
+				return relPath == prefix || strings.HasPrefix(relPath, prefix+"/")
+			}
+			after := strings.TrimPrefix(relPath, prefix)
+			after = strings.TrimPrefix(after, "/")
+			return matchSuffixAtAnyDepth(after, rest)
+		}
 	}
-	return relPath == g
+	// Single-segment glob (*, ?, []). path.Match treats "/" as a separator.
+	ok, _ := path.Match(g, relPath)
+	return ok
+}
+
+// matchSuffixAtAnyDepth returns true when suffix matches relPath after
+// trimming zero or more leading path components. Each trim step delegates
+// to path.Match so single-segment globs in the suffix still work
+// (e.g. matchSuffixAtAnyDepth("a/b/c.md", "*.md") = true via the "c.md" step).
+func matchSuffixAtAnyDepth(relPath, suffix string) bool {
+	for {
+		if ok, _ := path.Match(suffix, relPath); ok {
+			return true
+		}
+		idx := strings.Index(relPath, "/")
+		if idx < 0 {
+			return false
+		}
+		relPath = relPath[idx+1:]
+	}
 }

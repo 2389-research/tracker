@@ -86,14 +86,25 @@ func TestRunJailExec_DeniesOutsideWrite(t *testing.T) {
 		t.Skip("Landlock unavailable on this host")
 	}
 	anchor := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(anchor, "workspace"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	outsideRoot := t.TempDir()
 	outsidePath := filepath.Join(outsideRoot, "escape.txt")
+	insidePath := filepath.Join(anchor, "workspace", "ok.txt")
+	// Run an allowed write FIRST so we can prove the re-exec path is
+	// reachable, then attempt the denied write. Without the positive
+	// side-effect the test would pass vacuously on any sh / __jail-exec
+	// startup failure (#272 review, coderabbitai jail_linux_test.go:100).
 	cmd := exec.Command(os.Args[0], "--", anchor, "workspace/**", "--",
-		"sh", "-c", fmt.Sprintf("echo pwned > %s", outsidePath))
+		"sh", "-c", fmt.Sprintf("echo allowed > %s && echo pwned > %s", insidePath, outsidePath))
 	cmd.Env = append(os.Environ(), "TRACKER_TEST_JAIL_EXEC=1")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Errorf("re-exec succeeded; expected non-zero exit. Output: %s", out)
+	}
+	if _, statErr := os.Stat(insidePath); statErr != nil {
+		t.Fatalf("inside write did not succeed; test cannot prove the re-exec path was reached: %v. Output: %s", statErr, out)
 	}
 	if _, statErr := os.Stat(outsidePath); statErr == nil {
 		t.Errorf("file %q exists; jail let the write through. Output: %s", outsidePath, out)
@@ -184,14 +195,24 @@ func TestRunJailExec_DeniesSymlinkEscape(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(anchor, "workspace"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Agent forges a symlink inside the jail pointing outside, then writes through it.
+	// Agent forges a symlink inside the jail pointing outside, then writes
+	// through it. Assert the symlink itself was created so we can prove
+	// the re-exec path was reachable — without that, "outside file
+	// absent" passes vacuously when sh / __jail-exec startup fails
+	// (#272 review, coderabbitai jail_linux_test.go:179-198).
 	outsideDir := t.TempDir()
-	cmdStr := fmt.Sprintf("ln -s %s %s/link && echo pwned > %s/link/escape.txt",
-		outsideDir, filepath.Join(anchor, "workspace"), filepath.Join(anchor, "workspace"))
+	linkPath := filepath.Join(anchor, "workspace", "link")
+	cmdStr := fmt.Sprintf("ln -s %s %s && echo pwned > %s/escape.txt",
+		outsideDir, linkPath, linkPath)
 	cmd := exec.Command(os.Args[0], "--", anchor, "workspace/**", "--",
 		"sh", "-c", cmdStr)
 	cmd.Env = append(os.Environ(), "TRACKER_TEST_JAIL_EXEC=1")
-	_, _ = cmd.CombinedOutput() // We don't care about exit code; symlink creation may succeed.
+	out, _ := cmd.CombinedOutput()
+	if lst, statErr := os.Lstat(linkPath); statErr != nil {
+		t.Fatalf("symlink at %q not created; re-exec path may not have run: %v. Output: %s", linkPath, statErr, out)
+	} else if lst.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("path %q exists but is not a symlink; sh didn't run ln -s as expected. Output: %s", linkPath, out)
+	}
 	escapePath := filepath.Join(outsideDir, "escape.txt")
 	if _, err := os.Stat(escapePath); err == nil {
 		t.Errorf("file %q exists; symlink-escape was not blocked", escapePath)

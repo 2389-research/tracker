@@ -90,10 +90,18 @@ func TestWritablePathsEnforcement(t *testing.T) {
 				t.Fatalf("test row has neither inside nor outside assertion: %s", tc.name)
 			}
 
-			// Run the command through the jailed env. Output ignored; the
-			// assertion is on the resulting filesystem state, since shells
-			// generally print errors but exit non-zero only on the last command.
-			_, _ = env.ExecCommand(context.Background(), "sh", []string{"-c", cmd}, 5*time.Second)
+			// Run the command through the jailed env. Capture and verify
+			// the run actually started — without this, a missing `sh` or a
+			// __jail-exec dispatch failure would make the negative-path
+			// rows pass vacuously (#272 review, Copilot e2e:97).
+			res, runErr := env.ExecCommand(context.Background(), "sh", []string{"-c", cmd}, 5*time.Second)
+			if runErr != nil {
+				t.Fatalf("ExecCommand startup failed (test cannot prove enforcement): %v", runErr)
+			}
+			_ = res // exit code intentionally not asserted: sh emits a
+			// non-zero exit on redirect failure but tracker only stamps
+			// ExitCode for *exec.ExitError; both signals point at the
+			// filesystem assertions below, which are the authoritative check.
 
 			if tc.assertInsideOK {
 				okPath := filepath.Join(workspace, "ok.txt")
@@ -262,15 +270,30 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 		t.Fatalf("configureJail A: %v", err)
 	}
 
+	// Branch B's jail is broad enough to include the symlink-bearing path
+	// branch A is racing. This is the only shape that actually exercises
+	// the TOCTOU (#272 review, coderabbitai e2e:310): if branches B's
+	// writable_paths didn't overlap with the path A is mutating, the
+	// kernel wouldn't even attempt to resolve through the symlink and
+	// the race would never fire. Branch B's writes target
+	// `branchA/share/payload-N.txt` — A is flipping `branchA/share` to
+	// outsideDir, B opens through it. With openat2 RESOLVE_NO_SYMLINKS
+	// the syscall fails atomically when B's resolution hits A's symlink.
 	envB := execpkg.NewLocalEnvironment(anchor)
 	cfgB := agent.SessionConfig{
 		WorkingDir:       anchor,
-		WritablePaths:    []string{"branchB/**"},
+		WritablePaths:    []string{"branchA/share/**"},
 		WritablePathsSet: true,
 		Backend:          "native",
 	}
 	if _, err := configureJail(&cfgB, envB, anchor); err != nil {
 		t.Fatalf("configureJail B: %v", err)
+	}
+	// Pre-create branchA/share/ as a real directory so the very first race
+	// iteration has a writable resolution. A's loop will flip it to a
+	// symlink, then back, repeatedly.
+	if err := os.MkdirAll(filepath.Join(workspaceA, "share"), 0755); err != nil {
+		t.Fatal(err)
 	}
 
 	// Goroutine A: forges symlinks in a bounded loop. The cap (maxForges)
@@ -278,8 +301,7 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 	// fails to observe `stop` promptly. Each iteration spawns one
 	// /proc/self/exe __jail-exec child via WrapBashCmd; an unbounded loop
 	// has overwhelmed 4-core hosts in practice. 100 iterations is more
-	// than enough to expose any kernel-level race window for the writes
-	// branch B is doing concurrently.
+	// than enough to expose any kernel-level race window.
 	const maxForges = 100
 	stop := make(chan struct{})
 	forgeDone := make(chan struct{})
@@ -291,23 +313,32 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 				return
 			default:
 			}
-			// Forge a symlink inside branchA pointing to outsideDir.
-			// ln -sfn replaces atomically if the link already exists.
+			// Flip branchA/share between a real dir and a symlink to
+			// outsideDir. Bash subprocess is jailed to branchA/** so it
+			// can mutate inside its workspace freely.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_, _ = envA.ExecCommand(ctx, "sh",
-				[]string{"-c", fmt.Sprintf("ln -sfn %s %s/share", outsideDir, workspaceA)}, 2*time.Second)
+				[]string{"-c", fmt.Sprintf(
+					"rm -rf %s/share && ln -sfn %s %s/share",
+					workspaceA, outsideDir, workspaceA)},
+				2*time.Second)
 			cancel()
 		}
 	}()
 
-	// Branch B: races writes through any "share" path it can construct.
-	// Even if A's symlink ends up at branchA/share pointing outside, B's
-	// writes target branchB/payload-N.txt — they shouldn't reach outsideDir.
-	// But if envB.WriteFile EVER follows a symlink and ends up writing
-	// outside, we have a race vector.
-	for i := 0; i < 200; i++ {
-		relPath := fmt.Sprintf("branchB/payload-%d.txt", i)
-		_ = envB.WriteFile(context.Background(), relPath, "ok")
+	// Branch B: races writes through branchA/share/payload-N.txt — the
+	// SAME path A is forging the symlink at. We assert that:
+	//   (a) at least some writes succeeded (proving the race actually
+	//       reached the resolution stage and didn't pass vacuously), AND
+	//   (b) NO file landed in outsideDir (proving openat2 RESOLVE_NO_SYMLINKS
+	//       atomically rejected resolutions that crossed A's symlink).
+	const writeAttempts = 200
+	succeeded := 0
+	for i := 0; i < writeAttempts; i++ {
+		relPath := fmt.Sprintf("branchA/share/payload-%d.txt", i)
+		if err := envB.WriteFile(context.Background(), relPath, "ok"); err == nil {
+			succeeded++
+		}
 	}
 
 	close(stop)
@@ -316,6 +347,14 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 	entries, _ := os.ReadDir(outsideDir)
 	if len(entries) > 0 {
 		t.Errorf("outsideDir has %d entries; race let a write through. Entries: %v", len(entries), entries)
+	}
+	if succeeded == 0 {
+		// Vacuity guard: if every write was rejected (e.g. because A's
+		// symlink was always in place), the test never exercised the race
+		// and would pass even on a broken implementation. Require at
+		// least one successful in-jail write to confirm the resolution
+		// path is reachable (#272 review, Copilot e2e:311).
+		t.Errorf("zero successful in-jail writes across %d attempts; test cannot prove the race was exercised", writeAttempts)
 	}
 }
 

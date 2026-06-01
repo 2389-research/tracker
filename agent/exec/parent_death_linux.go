@@ -7,8 +7,31 @@ package exec
 
 import (
 	"os/exec"
+	"runtime"
 	"syscall"
 )
+
+// pinCallingThreadForParentDeath locks the calling goroutine to its current
+// OS thread. Pairs with applyParentDeathSig: PR_SET_PDEATHSIG is thread-
+// scoped, so the kernel sends SIGKILL when the spawning thread terminates,
+// not the parent process. If the Go runtime migrates the calling goroutine
+// off its original thread and that thread is later retired (during GC
+// stop-the-world or thread-pool reduction), every child whose Pdeathsig was
+// armed on that thread gets a premature kill (#272 review,
+// coderabbitai parent_death_linux.go:43).
+//
+// Locking the goroutine for the duration of cmd.Run() pins the thread alive
+// — Go won't retire a thread that has a goroutine locked to it. Callers
+// should defer the returned unlock immediately:
+//
+//	unlock := pinCallingThreadForParentDeath()
+//	defer unlock()
+//
+// On non-Linux builds the helper is a no-op (see parent_death_other.go).
+func pinCallingThreadForParentDeath() func() {
+	runtime.LockOSThread()
+	return runtime.UnlockOSThread
+}
 
 // applyParentDeathSig configures cmd's SysProcAttr so the kernel sends SIGKILL
 // to the child when its immediate parent (this process) dies. Protects against

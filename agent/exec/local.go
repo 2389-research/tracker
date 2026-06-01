@@ -40,6 +40,15 @@ type LocalEnvironment struct {
 	// race vector (spec D6).
 	// Default nil — WriteFile uses os.WriteFile as before.
 	WriteOpener func(abs string, perm os.FileMode) (*os.File, error)
+
+	// Remover, when non-nil, replaces the os.Remove call in RemoveFile.
+	// Receives the absolute path (already validated by safePath). The
+	// writable_paths fs-jail (#272) sets this with the same exact-glob
+	// check WriteOpener uses, so destructive operations (apply_patch's
+	// delete and move-cleanup paths) are bounded to the declared globs
+	// just like writes are.
+	// Default nil — RemoveFile uses os.Remove as before.
+	Remover func(abs string) error
 }
 
 // NewLocalEnvironment creates a LocalEnvironment rooted at workDir.
@@ -93,14 +102,16 @@ func (e *LocalEnvironment) ReadFile(ctx context.Context, path string) (string, e
 
 // WriteFile writes content to a file relative to the working directory,
 // creating intermediate directories as needed.
+//
+// When WriteOpener is non-nil, the opener is solely responsible for both
+// policy (e.g. writable_paths glob check) AND mkdir+open. The opener
+// performs the policy check BEFORE any filesystem mutation so rejected
+// writes leave no empty intermediate directories behind (#272 review,
+// codex P2). The unjailed path (WriteOpener nil) does mkdir then
+// os.WriteFile as before.
 func (e *LocalEnvironment) WriteFile(ctx context.Context, path string, content string) error {
 	abs, err := e.safePath(path)
 	if err != nil {
-		return err
-	}
-
-	dir := filepath.Dir(abs)
-	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
@@ -113,7 +124,26 @@ func (e *LocalEnvironment) WriteFile(ctx context.Context, path string, content s
 		_, err = f.Write([]byte(content))
 		return err
 	}
+	dir := filepath.Dir(abs)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
 	return os.WriteFile(abs, []byte(content), 0644)
+}
+
+// RemoveFile deletes a file relative to the working directory. The
+// writable_paths fs-jail (#272) hooks here via Remover so destructive
+// operations (apply_patch's delete and move-cleanup paths) are bounded
+// to the declared globs.
+func (e *LocalEnvironment) RemoveFile(ctx context.Context, path string) error {
+	abs, err := e.safePath(path)
+	if err != nil {
+		return err
+	}
+	if e.Remover != nil {
+		return e.Remover(abs)
+	}
+	return os.Remove(abs)
 }
 
 // ExecCommand runs a command with the given arguments and timeout.
@@ -150,6 +180,12 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+
+	// Pin the calling goroutine to its OS thread for the lifetime of Run so
+	// the Pdeathsig set on the child (Linux-only) survives Go runtime
+	// thread-pool churn. See parent_death_linux.go.
+	unlock := pinCallingThreadForParentDeath()
+	defer unlock()
 
 	err := cmd.Run()
 	reapProcessGroup(cmd)
@@ -318,6 +354,8 @@ func (e *LocalEnvironment) runUnlimited(ctx context.Context, cmd *exec.Cmd, time
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	unlock := pinCallingThreadForParentDeath()
+	defer unlock()
 	err := cmd.Run()
 	reapProcessGroup(cmd)
 	result := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
@@ -334,6 +372,8 @@ func (e *LocalEnvironment) runLimited(ctx context.Context, cmd *exec.Cmd, timeou
 	stderrBuf := newTailBuffer(outputLimit)
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
+	unlock := pinCallingThreadForParentDeath()
+	defer unlock()
 	err := cmd.Run()
 	reapProcessGroup(cmd)
 	result := CommandResult{

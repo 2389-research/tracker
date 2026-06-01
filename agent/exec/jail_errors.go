@@ -8,7 +8,7 @@ import "errors"
 // doesn't support Landlock ABI v3 (kernel 6.7+), or when the binary is built
 // for a non-Linux target. The codergen handler refuses to start a session
 // with non-empty WritablePaths on this error.
-var ErrLandlockUnavailable = errors.New("Landlock ABI v3 not available on this host (requires Linux kernel 6.7+)")
+var ErrLandlockUnavailable = errors.New("landlock ABI v3 not available on this host (requires Linux kernel 6.7+)")
 
 // ErrPathEscape is returned by OpenForWrite when the requested path resolves
 // outside the session anchor (via absolute path, parent traversal, or symlink

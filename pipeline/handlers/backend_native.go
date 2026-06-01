@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/2389-research/tracker/agent"
 	execpkg "github.com/2389-research/tracker/agent/exec"
@@ -41,16 +42,24 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	// the backend, working_dir, paths, or kernel support are bad.
 	env := b.env
 	if sessionCfg.WritablePathsSet {
-		localEnv, ok := b.env.(*execpkg.LocalEnvironment)
-		if !ok {
+		if _, ok := b.env.(*execpkg.LocalEnvironment); !ok {
 			return agent.SessionResult{}, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
 		}
-		// Fresh env at the same workdir — jail hooks here only affect this session.
-		jailedEnv := execpkg.NewLocalEnvironment(localEnv.WorkingDir())
 		processCwd, err := os.Getwd()
 		if err != nil {
 			return agent.SessionResult{}, fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
 		}
+		// Fresh env rooted at the session's working_dir, NOT the shared
+		// backend env's workDir. The session may set a node-level
+		// working_dir that differs from the backend default; using the
+		// backend's workDir would let cmd.Dir and relative tool paths
+		// resolve outside the jail anchor configureJail validates against
+		// (#272 review, coderabbitai backend_native.go:57).
+		jailedWorkDir := sessionCfg.WorkingDir
+		if !filepath.IsAbs(jailedWorkDir) {
+			jailedWorkDir = filepath.Join(processCwd, jailedWorkDir)
+		}
+		jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
 		if _, err := configureJail(&sessionCfg, jailedEnv, processCwd); err != nil {
 			return agent.SessionResult{}, err
 		}
