@@ -285,6 +285,15 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.WorkingDir != "" {
 		attrs["working_dir"] = cfg.WorkingDir
 	}
+	// writable_paths: typed IR field is authoritative. If empty but Params
+	// carries the key, claim the attr with "" so the spill below cannot
+	// land an attacker-supplied value — configureJail (Task 14) then fail-
+	// CLOSES on Set && len==0 at the accessor layer. See issue #272 § 8 D8.
+	if len(cfg.WritablePaths) > 0 {
+		attrs["writable_paths"] = strings.Join(cfg.WritablePaths, ",")
+	} else if _, paramsHasIt := cfg.Params["writable_paths"]; paramsHasIt {
+		attrs["writable_paths"] = ""
+	}
 	for k, v := range cfg.Params {
 		if _, exists := attrs[k]; !exists {
 			attrs[k] = v
