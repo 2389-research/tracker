@@ -89,6 +89,9 @@ func validateGlobEntry(g string) error {
 	if !balancedBraces(g) {
 		return fmt.Errorf("malformed writable_paths entry %q: unbalanced braces (comma-split tore an expansion apart)", g)
 	}
+	if err := validateDoubleStarPlacement(g); err != nil {
+		return err
+	}
 	// Probe with path.Match so malformed character classes (e.g. "foo[") and
 	// other Match-rejected shapes are caught at session setup rather than
 	// becoming opaque runtime denials (#272 review, Copilot jail.go:91).
@@ -118,4 +121,34 @@ func balancedBraces(s string) bool {
 	openCount := strings.Count(s, "{")
 	closeBrace := strings.Count(s, "}")
 	return openCount == closeBrace
+}
+
+// validateDoubleStarPlacement refuses writable_paths entries whose `**`
+// placement matchOneGlob doesn't honor. Supported shapes:
+//
+//   - bare `**`
+//   - `prefix/**`
+//   - `**/suffix`
+//   - `prefix/**/suffix`
+//
+// Anything else (e.g. `foo/**bar`, multiple `**` segments, `**foo`) passes
+// path.Match probing but silently never matches at runtime. Since
+// writable_paths is a security boundary, refuse-to-start rather than
+// silently misapply policy (#275 review, Copilot jail.go:101).
+func validateDoubleStarPlacement(g string) error {
+	doubleStarCount := 0
+	for _, seg := range strings.Split(g, "/") {
+		if seg == "**" {
+			doubleStarCount++
+			continue
+		}
+		if strings.Contains(seg, "**") {
+			return fmt.Errorf("malformed writable_paths entry %q: `**` must be its own path segment (got segment %q); supported shapes are `**`, `prefix/**`, `**/suffix`, `prefix/**/suffix`",
+				g, seg)
+		}
+	}
+	if doubleStarCount > 1 {
+		return fmt.Errorf("malformed writable_paths entry %q: only one `**` segment is supported per glob", g)
+	}
+	return nil
 }

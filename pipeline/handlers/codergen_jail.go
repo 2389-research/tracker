@@ -81,11 +81,15 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 			return nil, fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
 				execpkg.ErrPathNotAllowed, relPath, globs)
 		}
-		// Policy approved — create the parent dir then open via openat2.
-		// Order matters: mkdir runs AFTER the glob check so a rejected
-		// write leaves no empty directories outside writable_paths
-		// (#272 review, codex P2).
-		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		// Policy approved — create the parent dir via the symlink-safe
+		// walker then open via openat2. SafeMkdirAll uses openat2 with
+		// RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS on every intermediate
+		// component so an agent who pre-creates "workspace" (or any
+		// ancestor) as a symlink cannot redirect the MkdirAll outside
+		// the jail (#275 review, Copilot codergen_jail.go:92). Order
+		// matters: mkdir runs AFTER the glob check so a rejected write
+		// leaves no empty directories.
+		if err := execpkg.SafeMkdirAll(anchor, filepath.Dir(relPath), 0755); err != nil {
 			return nil, err
 		}
 		return execpkg.OpenForWrite(anchor, relPath, perm)
@@ -99,7 +103,11 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 			return fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
 				execpkg.ErrPathNotAllowed, relPath, globs)
 		}
-		return os.Remove(absPath)
+		// SafeRemove resolves the parent dir via openat2 + unlinkat so
+		// an agent who pre-creates any intermediate component as a
+		// symlink cannot redirect the delete outside the jail (#275
+		// review, Copilot codergen_jail.go:103).
+		return execpkg.SafeRemove(anchor, relPath)
 	}
 	return true, nil
 }

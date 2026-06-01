@@ -45,3 +45,16 @@ func RunJailExec(args []string) int {
 	_, _ = os.Stderr.WriteString("tracker __jail-exec: Landlock not supported on this platform (issue #272)\n")
 	return 1
 }
+
+// SafeMkdirAll on non-Linux returns ErrLandlockUnavailable. The codergen
+// handler refuses to install the jail when ProbeLandlock fails, so this
+// stub is unreachable in production — kept for cross-platform compile.
+func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
+	return ErrLandlockUnavailable
+}
+
+// SafeRemove on non-Linux returns ErrLandlockUnavailable. Reachability
+// argument matches SafeMkdirAll above.
+func SafeRemove(anchor, relPath string) error {
+	return ErrLandlockUnavailable
+}

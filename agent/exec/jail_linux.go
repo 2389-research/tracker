@@ -246,3 +246,114 @@ func landlockDirForGlob(anchor, g string) string {
 	}
 	return filepath.Join(anchor, dir)
 }
+
+// SafeMkdirAll creates the directory tree rooted at anchor + relDir without
+// following symlinks at any intermediate component. Each path component is
+// resolved via openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS) against the
+// running parent fd; missing components are created via mkdirat. A symlink
+// at any intermediate path causes the resolution to fail with EXDEV/ELOOP,
+// which surfaces as ErrPathEscape.
+//
+// Closes the #275 review gap where os.MkdirAll inside the WriteOpener
+// closure would follow agent-placed symlinks before openat2 saw the leaf
+// path (Copilot codergen_jail.go:92).
+func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
+	anchorFD, err := unix.Open(anchor, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open anchor %q: %w", anchor, err)
+	}
+	defer unix.Close(anchorFD)
+
+	parentFD := anchorFD
+	cleanup := func() {
+		if parentFD != anchorFD {
+			unix.Close(parentFD)
+		}
+	}
+	defer cleanup()
+
+	for _, comp := range strings.Split(filepath.Clean(relDir), "/") {
+		if comp == "" || comp == "." {
+			continue
+		}
+		how := unix.OpenHow{
+			Flags:   uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC),
+			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
+		}
+		fd, err := unix.Openat2(parentFD, comp, &how)
+		if err == nil {
+			if parentFD != anchorFD {
+				unix.Close(parentFD)
+			}
+			parentFD = fd
+			continue
+		}
+		switch err {
+		case unix.EXDEV, unix.ELOOP, unix.EACCES:
+			return fmt.Errorf("%w: SafeMkdirAll %q under %q: %v",
+				ErrPathEscape, relDir, anchor, err)
+		case unix.ENOENT:
+			// Component does not exist — create it then re-open.
+		default:
+			return fmt.Errorf("openat2 component %q under %q: %w", comp, anchor, err)
+		}
+		if err := unix.Mkdirat(parentFD, comp, uint32(perm.Perm())); err != nil {
+			return fmt.Errorf("mkdirat %q under %q: %w", comp, anchor, err)
+		}
+		fd, err = unix.Openat2(parentFD, comp, &how)
+		if err != nil {
+			return fmt.Errorf("re-open %q under %q after mkdir: %w", comp, anchor, err)
+		}
+		if parentFD != anchorFD {
+			unix.Close(parentFD)
+		}
+		parentFD = fd
+	}
+	return nil
+}
+
+// SafeRemove deletes the file at anchor + relPath without following symlinks
+// at any intermediate path component. Uses openat2 to resolve the parent
+// directory with RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS, then unlinkat on the
+// final component. A symlink anywhere in the parent chain causes EXDEV/ELOOP
+// which surfaces as ErrPathEscape.
+//
+// Closes the #275 review gap where os.Remove inside env.Remover would follow
+// agent-placed symlinks (Copilot codergen_jail.go:103).
+func SafeRemove(anchor, relPath string) error {
+	parentRel := filepath.Dir(relPath)
+	name := filepath.Base(relPath)
+	if name == "" || name == "." || name == "/" {
+		return fmt.Errorf("%w: SafeRemove %q under %q: empty leaf",
+			ErrPathEscape, relPath, anchor)
+	}
+
+	anchorFD, err := unix.Open(anchor, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open anchor %q: %w", anchor, err)
+	}
+	defer unix.Close(anchorFD)
+
+	parentFD := anchorFD
+	if parentRel != "." && parentRel != "" {
+		how := unix.OpenHow{
+			Flags:   uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC),
+			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
+		}
+		fd, err := unix.Openat2(anchorFD, parentRel, &how)
+		if err != nil {
+			switch err {
+			case unix.EXDEV, unix.ELOOP, unix.EACCES:
+				return fmt.Errorf("%w: SafeRemove parent %q under %q: %v",
+					ErrPathEscape, parentRel, anchor, err)
+			}
+			return fmt.Errorf("openat2 parent %q under %q: %w", parentRel, anchor, err)
+		}
+		defer unix.Close(fd)
+		parentFD = fd
+	}
+	if err := unix.Unlinkat(parentFD, name, 0); err != nil {
+		return fmt.Errorf("unlinkat %q under %q: %w", relPath, anchor, err)
+	}
+	return nil
+}
