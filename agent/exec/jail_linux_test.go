@@ -125,6 +125,57 @@ func TestRunJailExec_AllowsInsideWrite(t *testing.T) {
 	}
 }
 
+func TestOpenForWrite_AllowsInsideAnchor(t *testing.T) {
+	anchor := t.TempDir()
+	f, err := OpenForWrite(anchor, "ok.txt", 0644)
+	if err != nil {
+		t.Fatalf("OpenForWrite: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.Write([]byte("hello")); err != nil {
+		t.Errorf("Write: %v", err)
+	}
+}
+
+func TestOpenForWrite_RejectsParentEscape(t *testing.T) {
+	anchor := t.TempDir()
+	_, err := OpenForWrite(anchor, "../escape.txt", 0644)
+	if err == nil {
+		t.Fatal("OpenForWrite for parent escape = nil error; want refuse")
+	}
+	if !errors.Is(err, ErrPathEscape) {
+		t.Errorf("err = %v, want errors.Is(err, ErrPathEscape)", err)
+	}
+}
+
+func TestOpenForWrite_RejectsSymlinkEscape(t *testing.T) {
+	anchor := t.TempDir()
+	// Create a symlink inside the anchor pointing outside.
+	outside := t.TempDir()
+	linkPath := filepath.Join(anchor, "link")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	_, err := OpenForWrite(anchor, "link/payload.txt", 0644)
+	if err == nil {
+		t.Fatal("OpenForWrite through symlink to outside = nil error; want refuse")
+	}
+	if !errors.Is(err, ErrPathEscape) {
+		t.Errorf("err = %v, want errors.Is(err, ErrPathEscape)", err)
+	}
+}
+
+func TestOpenForWrite_RejectsAbsolutePath(t *testing.T) {
+	// Absolute paths must be rejected — they could escape the anchor regardless
+	// of openat2's RESOLVE_BENEATH (which applies to relative components only
+	// after the anchor FD is set).
+	anchor := t.TempDir()
+	_, err := OpenForWrite(anchor, "/etc/passwd", 0644)
+	if err == nil {
+		t.Fatal("OpenForWrite for absolute path = nil error; want refuse")
+	}
+}
+
 func TestRunJailExec_DeniesSymlinkEscape(t *testing.T) {
 	if errors.Is(ProbeLandlock(), ErrLandlockUnavailable) {
 		t.Skip("Landlock unavailable on this host")

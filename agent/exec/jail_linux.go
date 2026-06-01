@@ -72,11 +72,49 @@ func WrapBashCmd(cmd *exec.Cmd, anchor string, writable []string) *exec.Cmd {
 	return cmd
 }
 
-// OpenForWrite on Linux is the Landlock-aware file opener implemented in
-// Task 13. This stub is a placeholder — it fails closed to match the
-// non-Linux behaviour until Task 13 provides the real openat2 implementation.
+// OpenForWrite opens (or creates + truncates) a file under anchor for writing,
+// using openat2(2) with RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS.
+// The kernel binds path resolution to anchorFD; symlink chains rejected at
+// the syscall — no userspace TOCTOU window.
+//
+// Returns ErrPathEscape (wrapped) when the kernel returns EXDEV / ELOOP /
+// EACCES indicating the resolved path is outside anchor.
+//
+// Used by LocalEnvironment.WriteOpener when SessionConfig.WritablePaths is
+// non-empty. The codergen handler (Task 14) installs the configured
+// OpenForWrite closure on the env. Closes the parallel-branch symlink race
+// vector documented in spec D6.
 func OpenForWrite(anchor, relPath string, perm os.FileMode) (*os.File, error) {
-	return nil, fmt.Errorf("%w: OpenForWrite not yet implemented on Linux (Task 13)", ErrLandlockUnavailable)
+	// Reject absolute paths defensively — openat2's RESOLVE_BENEATH applies
+	// to relative resolution after the anchor FD; an absolute path would
+	// resolve to itself regardless of the anchor.
+	if filepath.IsAbs(relPath) {
+		return nil, fmt.Errorf("%w: absolute path %q rejected by OpenForWrite (use a workspace-relative path)",
+			ErrPathEscape, relPath)
+	}
+
+	// Open the anchor dirfd.
+	anchorFD, err := unix.Open(anchor, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open anchor %q: %w", anchor, err)
+	}
+	defer unix.Close(anchorFD)
+
+	how := unix.OpenHow{
+		Flags:   uint64(unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC | unix.O_CLOEXEC),
+		Mode:    uint64(perm),
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	}
+	fd, err := unix.Openat2(anchorFD, relPath, &how)
+	if err != nil {
+		switch err {
+		case unix.EXDEV, unix.ELOOP, unix.EACCES:
+			return nil, fmt.Errorf("%w: openat2 %q under %q: %v",
+				ErrPathEscape, relPath, anchor, err)
+		}
+		return nil, fmt.Errorf("openat2 %q under %q: %w", relPath, anchor, err)
+	}
+	return os.NewFile(uintptr(fd), filepath.Join(anchor, relPath)), nil
 }
 
 // RunJailExec is the entry point for the `tracker __jail-exec` subcommand.
