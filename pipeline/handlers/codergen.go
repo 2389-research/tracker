@@ -629,6 +629,14 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		config.WorkingDir = cfg.WorkingDir
 	}
 
+	if cfg.Backend != "" {
+		config.Backend = cfg.Backend
+	}
+	if cfg.WritablePathsSet {
+		config.WritablePathsSet = true
+		config.WritablePaths = append([]string(nil), cfg.WritablePaths...) // defensive copy
+	}
+
 	if cfg.Model != "" {
 		config.Model = cfg.Model
 	}

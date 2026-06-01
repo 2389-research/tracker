@@ -4,10 +4,11 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/2389-research/tracker/agent"
-	"github.com/2389-research/tracker/agent/exec"
+	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/agent/tools"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -15,12 +16,12 @@ import (
 // NativeBackend implements pipeline.AgentBackend using the built-in agent.Session.
 type NativeBackend struct {
 	client agent.Completer
-	env    exec.ExecutionEnvironment
+	env    execpkg.ExecutionEnvironment
 }
 
 // NewNativeBackend creates a NativeBackend that runs agent sessions with the
 // given LLM completer and execution environment.
-func NewNativeBackend(client agent.Completer, env exec.ExecutionEnvironment) *NativeBackend {
+func NewNativeBackend(client agent.Completer, env execpkg.ExecutionEnvironment) *NativeBackend {
 	return &NativeBackend{
 		client: client,
 		env:    env,
@@ -34,6 +35,28 @@ func NewNativeBackend(client agent.Completer, env exec.ExecutionEnvironment) *Na
 func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
 	sessionCfg := b.buildSessionConfig(cfg)
 
+	// writable_paths fs-jail (#272): when the session config declares it,
+	// build a fresh *LocalEnvironment so the per-session jail hooks don't
+	// leak into the shared b.env. configureJail also refuses-to-start when
+	// the backend, working_dir, paths, or kernel support are bad.
+	env := b.env
+	if sessionCfg.WritablePathsSet {
+		localEnv, ok := b.env.(*execpkg.LocalEnvironment)
+		if !ok {
+			return agent.SessionResult{}, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
+		}
+		// Fresh env at the same workdir — jail hooks here only affect this session.
+		jailedEnv := execpkg.NewLocalEnvironment(localEnv.WorkingDir())
+		processCwd, err := os.Getwd()
+		if err != nil {
+			return agent.SessionResult{}, fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
+		}
+		if _, err := configureJail(&sessionCfg, jailedEnv, processCwd); err != nil {
+			return agent.SessionResult{}, err
+		}
+		env = jailedEnv
+	}
+
 	handler := agent.EventHandlerFunc(func(evt agent.Event) {
 		emit(evt)
 	})
@@ -41,8 +64,8 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	opts := []agent.SessionOption{
 		agent.WithEventHandler(handler),
 	}
-	if b.env != nil {
-		opts = append(opts, agent.WithEnvironment(b.env))
+	if env != nil {
+		opts = append(opts, agent.WithEnvironment(env))
 	}
 
 	// Register generate_code tool if a cheap model is configured via env.
