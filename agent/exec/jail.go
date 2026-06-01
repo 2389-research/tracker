@@ -3,7 +3,9 @@
 package exec
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"path/filepath"
 	"strings"
@@ -39,7 +41,18 @@ func ValidateWritablePaths(workingDir string, globs []string, processCwd string)
 
 // validateWorkingDirEscape rejects a working_dir that resolves outside
 // processCwd. Catches both absolute paths (e.g. "/tmp/atk") and parent
-// escapes (e.g. "../../etc").
+// escapes (e.g. "../../etc"), plus symlink relocation: a working_dir of
+// "link" where "link" is a symlink to a directory outside processCwd
+// would pass the string-only Clean/HasPrefix check, but the kernel
+// follows it at runtime and the jail anchor relocates outside the
+// intended session root (#275 review, Copilot jail.go:56).
+//
+// String check first (catches the absolute and ../-escape cases without
+// touching the filesystem); then if the path exists, filepath.EvalSymlinks
+// resolves any symlink chain and the containment check runs against the
+// real target. ErrNotExist is the safe case — no symlink can have been
+// placed at a path that doesn't exist yet, and the runtime creates the
+// dir under the (already-validated) string-cleaned anchor.
 func validateWorkingDirEscape(workingDir, processCwd string) error {
 	cleanedCwd := filepath.Clean(processCwd)
 	var resolved string
@@ -51,6 +64,29 @@ func validateWorkingDirEscape(workingDir, processCwd string) error {
 	if !isSubpathOf(resolved, cleanedCwd) {
 		return fmt.Errorf("%w: working_dir %q resolves to %q which escapes the tracker process cwd %q",
 			ErrPathEscape, workingDir, resolved, cleanedCwd)
+	}
+	// Symlink-aware re-check: if the path exists on disk, follow any
+	// symlinks and re-verify containment against the real target.
+	realResolved, evalErr := filepath.EvalSymlinks(resolved)
+	if evalErr != nil {
+		if errors.Is(evalErr, fs.ErrNotExist) {
+			// Path doesn't exist yet — the string check was the
+			// authoritative one; nothing to follow.
+			return nil
+		}
+		return fmt.Errorf("evaluate working_dir %q: %w", workingDir, evalErr)
+	}
+	realCwd, evalCwdErr := filepath.EvalSymlinks(cleanedCwd)
+	if evalCwdErr != nil {
+		// Falling back to the cleaned cwd is fine — if tracker can't
+		// resolve its own cwd we have bigger problems, and using the
+		// cleaned form for the containment check is no worse than the
+		// pre-existing string-only behavior.
+		realCwd = cleanedCwd
+	}
+	if !isSubpathOf(realResolved, realCwd) {
+		return fmt.Errorf("%w: working_dir %q evaluates to %q via symlinks which escapes %q",
+			ErrPathEscape, workingDir, realResolved, realCwd)
 	}
 	return nil
 }
@@ -86,8 +122,14 @@ func validateGlobEntry(g string) error {
 		return fmt.Errorf("%w: writable_paths entry %q escapes via parent traversal (cleaned: %q)",
 			ErrPathEscape, g, cleaned)
 	}
-	if !balancedBraces(g) {
-		return fmt.Errorf("malformed writable_paths entry %q: unbalanced braces (comma-split tore an expansion apart)", g)
+	// Brace expansion is unsupported by the matcher (matchOneGlob /
+	// path.Match neither expand `{a,b}`). Accepting balanced braces
+	// would silently never match anything at runtime — surprising
+	// denials on what looks like a legitimate pattern. Refuse all
+	// brace usage with an actionable hint (#275 review, Copilot
+	// jail.go:95).
+	if strings.ContainsAny(g, "{}") {
+		return fmt.Errorf("malformed writable_paths entry %q: brace expansion `{a,b}` is not supported; enumerate each pattern as a separate comma-delimited entry (e.g. write `workspace/*.md,workspace/*.yaml` rather than `workspace/*.{md,yaml}`)", g)
 	}
 	if err := validateDoubleStarPlacement(g); err != nil {
 		return err
@@ -113,14 +155,6 @@ func isWindowsAbsolute(s string) bool {
 		return true
 	}
 	return false
-}
-
-// balancedBraces returns true when { and } counts match in s. Catches the
-// case where a comma-split tore `*.{md,yaml}` into `*.{md` and `yaml}`.
-func balancedBraces(s string) bool {
-	openCount := strings.Count(s, "{")
-	closeBrace := strings.Count(s, "}")
-	return openCount == closeBrace
 }
 
 // validateDoubleStarPlacement refuses writable_paths entries whose `**`
