@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	osexec "os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -79,7 +80,53 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 		if relErr != nil || strings.HasPrefix(relPath, "..") {
 			return nil, fmt.Errorf("%w: %q is outside anchor %q", execpkg.ErrPathEscape, absPath, anchor)
 		}
+
+		// Glob check: enforces the EXACT writable_paths globs per spec D2
+		// two-tier semantic. RESOLVE_BENEATH only enforces anchor containment;
+		// without this, a file-scoped glob like "workspace/out.md" would
+		// degrade to directory-scoped behavior.
+		// Check BEFORE OpenForWrite so no file is created on rejection.
+		if !matchWritablePath(relPath, globs) {
+			return nil, fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
+				execpkg.ErrPathNotAllowed, relPath, globs)
+		}
+
 		return execpkg.OpenForWrite(anchor, relPath, perm)
 	}
 	return true, nil
+}
+
+// matchWritablePath returns true when relPath matches any of the writable
+// glob patterns. Supports:
+//   - "prefix/**" — matches relPath when it has prefix "prefix/"
+//     (any depth descendant, file or directory).
+//   - "exact/path.md" — exact match against relPath.
+//   - "*.md", "foo/*.txt" — path.Match (single-segment globs).
+//
+// All globs are workspace-relative and use forward-slash separators.
+func matchWritablePath(relPath string, globs []string) bool {
+	for _, g := range globs {
+		if matchOneGlob(relPath, g) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchOneGlob(relPath, g string) bool {
+	// Double-star prefix match. e.g. "workspace/**" matches anything under
+	// "workspace/". Per spec D2, the static prefix is everything before the
+	// first glob metachar; for "X/**" that's "X/".
+	if strings.HasSuffix(g, "/**") {
+		prefix := strings.TrimSuffix(g, "/**")
+		return relPath == prefix || strings.HasPrefix(relPath, prefix+"/")
+	}
+	if g == "**" {
+		return true
+	}
+	if strings.Contains(g, "*") || strings.Contains(g, "?") || strings.Contains(g, "[") {
+		ok, _ := path.Match(g, relPath)
+		return ok
+	}
+	return relPath == g
 }

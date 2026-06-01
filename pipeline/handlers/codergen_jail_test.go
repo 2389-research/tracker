@@ -156,3 +156,81 @@ func TestConfigureJail_RefusesOnNoLandlock_SimulatedNonLinux(t *testing.T) {
 		t.Errorf("err = %v, want errors.Is(err, ErrLandlockUnavailable)", err)
 	}
 }
+
+func TestMatchWritablePath(t *testing.T) {
+	cases := []struct {
+		name    string
+		relPath string
+		globs   []string
+		want    bool
+	}{
+		{
+			name:    "exact match — directory glob",
+			relPath: "workspace/foo.txt",
+			globs:   []string{"workspace/**"},
+			want:    true,
+		},
+		{
+			name:    "deep match — directory glob",
+			relPath: "workspace/a/b/c.txt",
+			globs:   []string{"workspace/**"},
+			want:    true,
+		},
+		{
+			name:    "directory itself — directory glob",
+			relPath: "workspace",
+			globs:   []string{"workspace/**"},
+			want:    true,
+		},
+		{
+			name:    "exact file glob — matches",
+			relPath: "workspace/out.md",
+			globs:   []string{"workspace/out.md"},
+			want:    true,
+		},
+		{
+			name:    "exact file glob — does NOT match other file",
+			relPath: "workspace/other.md",
+			globs:   []string{"workspace/out.md"},
+			want:    false,
+		},
+		{
+			name:    "single-segment * glob — matches",
+			relPath: "workspace/foo.md",
+			globs:   []string{"workspace/*.md"},
+			want:    true,
+		},
+		{
+			name:    "single-segment * glob — does NOT match deeper path",
+			relPath: "workspace/sub/foo.md",
+			globs:   []string{"workspace/*.md"},
+			want:    false,
+		},
+		{
+			name:    "multiple globs — second matches",
+			relPath: ".ai/sprints/2026/A.json",
+			globs:   []string{"workspace/**", ".ai/sprints/**"},
+			want:    true,
+		},
+		{
+			name:    "no glob matches",
+			relPath: "etc/passwd",
+			globs:   []string{"workspace/**"},
+			want:    false,
+		},
+		{
+			name:    "** alone matches anything",
+			relPath: "anything/at/all",
+			globs:   []string{"**"},
+			want:    true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchWritablePath(tc.relPath, tc.globs)
+			if got != tc.want {
+				t.Errorf("matchWritablePath(%q, %v) = %v, want %v", tc.relPath, tc.globs, got, tc.want)
+			}
+		})
+	}
+}

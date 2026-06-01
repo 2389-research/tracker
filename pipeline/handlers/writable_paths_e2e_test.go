@@ -309,3 +309,46 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 		t.Errorf("outsideDir has %d entries; race let a write through. Entries: %v", len(entries), entries)
 	}
 }
+
+func TestInProcessWriteEnforcesExactGlob(t *testing.T) {
+	if err := execpkg.ProbeLandlock(); err != nil {
+		t.Skipf("Landlock unavailable: %v", err)
+	}
+	// File-scoped glob — only workspace/allowed.md may be written.
+	anchor := t.TempDir()
+	workspace := filepath.Join(anchor, "workspace")
+	if err := os.MkdirAll(workspace, 0755); err != nil {
+		t.Fatal(err)
+	}
+	env := execpkg.NewLocalEnvironment(anchor)
+	cfg := agent.SessionConfig{
+		WorkingDir:       anchor,
+		WritablePaths:    []string{"workspace/allowed.md"},
+		WritablePathsSet: true,
+		Backend:          "native",
+	}
+	if _, err := configureJail(&cfg, env, anchor); err != nil {
+		t.Fatalf("configureJail: %v", err)
+	}
+
+	// Allowed file: must succeed.
+	if err := env.WriteFile(context.Background(), "workspace/allowed.md", "ok"); err != nil {
+		t.Errorf("write to allowed file failed: %v", err)
+	}
+
+	// In-anchor but not in glob: must FAIL with ErrPathNotAllowed.
+	err := env.WriteFile(context.Background(), "workspace/forbidden.md", "no")
+	if err == nil {
+		t.Fatal("write to non-matching file succeeded; spec D2 in-process exact-glob enforcement is missing")
+	}
+	if !errors.Is(err, execpkg.ErrPathNotAllowed) {
+		t.Errorf("err = %v, want errors.Is(err, ErrPathNotAllowed)", err)
+	}
+
+	// Outside the working directory (relative traversal): safePath blocks this
+	// before WriteOpener is reached; any non-nil error satisfies the contract.
+	err = env.WriteFile(context.Background(), "../outside.txt", "no")
+	if err == nil {
+		t.Fatal("write outside working directory succeeded")
+	}
+}
