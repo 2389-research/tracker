@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/2389-research/tracker/tui"
 )
 
 // ── Brand colors ────────────────────────────────────────────────────────────
@@ -19,12 +21,12 @@ var (
 	colorSky   = lipgloss.Color("#00D4FF")
 	colorWarm  = lipgloss.Color("#FFB800")
 	colorMuted = lipgloss.Color("#666666")
-	// colorOverride is amber (Tailwind amber-600 #D97706) per Gap 5.2 spec D18 —
-	// the chosen color for the validation_overridden status across CLI summary,
-	// tracker list, and TUI completion row. Distinct from colorWarm (#FFB800,
-	// used for diagnose suggestions/setup wizard) so the override treatment is
+	// colorOverride aliases tui.ColorOverride so the CLI summary and the TUI
+	// completion row share one source of truth for the validation_overridden
+	// amber treatment (Gap 5.2 spec D18). Distinct from colorWarm (#FFB800,
+	// used for diagnose suggestions/setup wizard) so the override stays
 	// visually unique within the brand palette.
-	colorOverride = lipgloss.Color("#D97706")
+	colorOverride = tui.ColorOverride
 )
 
 // ── Brand styles ────────────────────────────────────────────────────────────

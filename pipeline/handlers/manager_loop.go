@@ -741,10 +741,15 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 		if childStatus == pipeline.OutcomeBudgetExceeded {
 			handlerStatus = pipeline.OutcomeSuccess
 		}
+		// Propagate any validation overrides the child accumulated even on
+		// fail / budget_exceeded — the spec promise is that override
+		// forensics survive failure-after-override scenarios. Matches
+		// SubgraphHandler.Execute's unconditional propagation.
 		return pipeline.Outcome{
 			Status:         string(handlerStatus),
 			ContextUpdates: result.Context,
 			ChildUsage:     result.Usage,
+			ChildOverride:  pipeline.PrependSubgraphPath(result.ValidationOverrides, nodeID),
 		}, nil
 	}
 

@@ -31,8 +31,14 @@ func captureDiagnoseStdout(t *testing.T, fn func()) string {
 		done <- buf
 	}()
 
-	fn()
-	w.Close()
+	// Wrap fn so w.Close() runs even if fn panics. Without this, a panic
+	// before w.Close() would leave the io.ReadAll goroutine waiting for
+	// EOF forever — defer at line 26 unwinds the test fast but the reader
+	// goroutine still leaks.
+	func() {
+		defer w.Close()
+		fn()
+	}()
 	return string(<-done)
 }
 

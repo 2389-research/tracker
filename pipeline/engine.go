@@ -499,6 +499,18 @@ func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next
 // overrideAlreadyRecorded returns true if the sticky list already contains an
 // own-graph override entry with the same gate node and label. Used by the
 // flip-point for the restart re-traversal idempotency check.
+//
+// Trade-off (#273 review, Copilot): the predicate is keyed on (gateNodeID,
+// label) only — it has no concept of "this is restart resume" vs "this is
+// a fresh loop iteration." A workflow that legitimately loops back to the
+// same gate and accepts the same label twice in a single run will record
+// only the first acceptance; the second is silently deduped. In practice
+// override-shape gates appear once per validation cycle and labels rotate
+// per cycle, but operators who need per-traversal recording should use
+// distinct labels per iteration (e.g., "accept attempt 1" / "accept
+// attempt 2") until the dedup is rescoped to checkpoint generations.
+// Tracking issue: TBD as a follow-up to #273.
+//
 // Note: only checks entries with empty SubgraphPath; child-propagated entries
 // can never collide with own-graph entries.
 func overrideAlreadyRecorded(list []OverrideDetail, gateNodeID, label string) bool {

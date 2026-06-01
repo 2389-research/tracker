@@ -34,7 +34,7 @@ func printRunList(runs []tracker.RunSummary) {
 	fmt.Printf("  %-14s  %-10s  %-6s  %-8s  %-10s  %-26s  %s\n", "──────", "──────", "─────", "───────", "────────", "──────", "─────────")
 
 	for _, r := range runs {
-		icon := "+"
+		var icon string
 		switch r.Status {
 		case "success":
 			icon = "ok"

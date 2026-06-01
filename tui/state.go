@@ -391,7 +391,14 @@ func (s *StateStore) applyCompletedStatus(m MsgPipelineCompleted) {
 	if m.Override != nil {
 		cp := *m.Override
 		s.headlineOverride = &cp
-	} else if n := len(s.validationOverrides); n > 0 {
+	} else if n := len(s.validationOverrides); n > 0 &&
+		(m.Status == "" || m.Status == pipeline.OutcomeValidationOverridden) {
+		// Only synthesize a headline from accumulated overrides when status
+		// is defaulted OR explicitly carries the override status. A
+		// non-override explicit Status with no Override pointer is the
+		// clean-success case; surfacing a stale override headline would
+		// confuse HeadlineOverride() consumers even though the completion-
+		// row renderer keys on pipelineStatus today.
 		cp := s.validationOverrides[n-1] // D5a: latest = headline
 		s.headlineOverride = &cp
 	}
