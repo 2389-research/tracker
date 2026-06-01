@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/coder/acp-go-sdk v0.6.3
 	github.com/joho/godotenv v1.5.1
+	github.com/landlock-lsm/go-landlock v0.8.1
 	github.com/mattn/go-isatty v0.0.20
 	golang.org/x/sys v0.42.0
 	golang.org/x/term v0.41.0
@@ -48,5 +49,6 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )

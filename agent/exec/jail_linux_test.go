@@ -5,9 +5,24 @@ package exec
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestMain dispatches to the jail-exec helper when the test binary is invoked
+// as a re-exec child (TRACKER_TEST_JAIL_EXEC=1).
+func TestMain(m *testing.M) {
+	if os.Getenv("TRACKER_TEST_JAIL_EXEC") == "1" {
+		// We are the re-exec child. Args are the same shape RunJailExec
+		// expects after the binary path: -- anchor glob... -- cmd...
+		os.Exit(RunJailExec(os.Args[1:]))
+	}
+	os.Exit(m.Run())
+}
 
 func TestProbeLandlock_OnSupportedKernel(t *testing.T) {
 	// GHA ubuntu-latest, Ubuntu 24.04, RHEL 9.4+ all have ABI v3.
@@ -63,5 +78,71 @@ func TestWrapBashCmd_PreservesOriginalFields(t *testing.T) {
 	// Returned cmd should be the same instance (mutation, not new allocation).
 	if wrapped != cmd {
 		t.Errorf("WrapBashCmd returned a different *Cmd; expected in-place mutation")
+	}
+}
+
+func TestRunJailExec_DeniesOutsideWrite(t *testing.T) {
+	if errors.Is(ProbeLandlock(), ErrLandlockUnavailable) {
+		t.Skip("Landlock unavailable on this host")
+	}
+	anchor := t.TempDir()
+	outsideRoot := t.TempDir()
+	outsidePath := filepath.Join(outsideRoot, "escape.txt")
+	cmd := exec.Command(os.Args[0], "--", anchor, "workspace/**", "--",
+		"sh", "-c", fmt.Sprintf("echo pwned > %s", outsidePath))
+	cmd.Env = append(os.Environ(), "TRACKER_TEST_JAIL_EXEC=1")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("re-exec succeeded; expected non-zero exit. Output: %s", out)
+	}
+	if _, statErr := os.Stat(outsidePath); statErr == nil {
+		t.Errorf("file %q exists; jail let the write through. Output: %s", outsidePath, out)
+	}
+}
+
+func TestRunJailExec_AllowsInsideWrite(t *testing.T) {
+	if errors.Is(ProbeLandlock(), ErrLandlockUnavailable) {
+		t.Skip("Landlock unavailable on this host")
+	}
+	anchor := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(anchor, "workspace"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	insidePath := filepath.Join(anchor, "workspace", "ok.txt")
+	cmd := exec.Command(os.Args[0], "--", anchor, "workspace/**", "--",
+		"sh", "-c", fmt.Sprintf("echo allowed > %s", insidePath))
+	cmd.Env = append(os.Environ(), "TRACKER_TEST_JAIL_EXEC=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("re-exec failed: %v. Output: %s", err, out)
+	}
+	contents, err := os.ReadFile(insidePath)
+	if err != nil {
+		t.Fatalf("inside file not created: %v", err)
+	}
+	if strings.TrimSpace(string(contents)) != "allowed" {
+		t.Errorf("inside file contents = %q, want %q", string(contents), "allowed")
+	}
+}
+
+func TestRunJailExec_DeniesSymlinkEscape(t *testing.T) {
+	if errors.Is(ProbeLandlock(), ErrLandlockUnavailable) {
+		t.Skip("Landlock unavailable on this host")
+	}
+	anchor := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(anchor, "workspace"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Agent forges a symlink inside the jail pointing outside, then writes through it.
+	outsideDir := t.TempDir()
+	cmdStr := fmt.Sprintf("ln -s %s %s/link && echo pwned > %s/link/escape.txt",
+		outsideDir, filepath.Join(anchor, "workspace"), filepath.Join(anchor, "workspace"))
+	cmd := exec.Command(os.Args[0], "--", anchor, "workspace/**", "--",
+		"sh", "-c", cmdStr)
+	cmd.Env = append(os.Environ(), "TRACKER_TEST_JAIL_EXEC=1")
+	_, _ = cmd.CombinedOutput() // We don't care about exit code; symlink creation may succeed.
+	escapePath := filepath.Join(outsideDir, "escape.txt")
+	if _, err := os.Stat(escapePath); err == nil {
+		t.Errorf("file %q exists; symlink-escape was not blocked", escapePath)
 	}
 }
