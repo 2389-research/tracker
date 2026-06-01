@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -347,5 +348,48 @@ func TestRetryConfig_BaseDelayGraphFallback(t *testing.T) {
 	rc2 := n2.RetryConfig(graph)
 	if rc2.BaseDelay != 500*time.Millisecond {
 		t.Errorf("node value should override graph default; got %v", rc2.BaseDelay)
+	}
+}
+
+func TestAgentConfig_WritablePaths(t *testing.T) {
+	cases := []struct {
+		name  string
+		attrs map[string]string
+		want  []string
+	}{
+		{
+			name:  "absent",
+			attrs: map[string]string{},
+			want:  nil,
+		},
+		{
+			name:  "single glob",
+			attrs: map[string]string{"writable_paths": "workspace/**"},
+			want:  []string{"workspace/**"},
+		},
+		{
+			name:  "comma-separated",
+			attrs: map[string]string{"writable_paths": "workspace/**,.ai/sprints/**,.ai/managers/recovery-journal.md"},
+			want:  []string{"workspace/**", ".ai/sprints/**", ".ai/managers/recovery-journal.md"},
+		},
+		{
+			name:  "whitespace trimmed",
+			attrs: map[string]string{"writable_paths": " workspace/** ,  .ai/sprints/** "},
+			want:  []string{"workspace/**", ".ai/sprints/**"},
+		},
+		{
+			name:  "empty entries dropped",
+			attrs: map[string]string{"writable_paths": "workspace/**,,.ai/sprints/**"},
+			want:  []string{"workspace/**", ".ai/sprints/**"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &Node{Attrs: tc.attrs}
+			got := n.AgentConfig(nil).WritablePaths
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("WritablePaths = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

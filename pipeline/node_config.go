@@ -63,6 +63,14 @@ type AgentNodeConfig struct {
 	ResponseFormat string
 	ResponseSchema string
 
+	// WritablePaths bounds the file paths this agent's tools may write,
+	// as author-chosen globs resolved against the session root. Empty/absent
+	// = unbounded. Non-empty triggers the runtime fs-jail (Linux Landlock for
+	// Bash subprocess + openat2 for in-process Write/Edit/ApplyPatch). A
+	// present-but-empty or malformed value fails CLOSED at session creation
+	// (deny-all / refuse-to-start), never unbounded. See issue #272.
+	WritablePaths []string
+
 	CacheToolResults    bool
 	CacheToolResultsSet bool
 
@@ -217,7 +225,33 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		}
 	}
 
+	if raw, ok := n.Attrs["writable_paths"]; ok && raw != "" {
+		cfg.WritablePaths = splitCommaNoEmpty(raw)
+	}
+
 	return cfg
+}
+
+// splitCommaNoEmpty splits s on commas, trims whitespace from each entry, and
+// drops empty entries. Mirrors dippin's parser/parse_nodes.go splitCommaNoEmpty
+// so the round-trip from .dip → IR → adapter → AgentNodeConfig produces identical
+// slices regardless of which path was taken.
+func splitCommaNoEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ToolNodeConfig is a typed view over a tool node's attributes. Tool nodes
