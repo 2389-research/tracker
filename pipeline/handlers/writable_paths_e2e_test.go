@@ -273,12 +273,19 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 		t.Fatalf("configureJail B: %v", err)
 	}
 
-	// Goroutine A: forges symlinks in a loop until told to stop.
+	// Goroutine A: forges symlinks in a bounded loop. The cap (maxForges)
+	// prevents fork-bombing the host if branch B stalls or the goroutine
+	// fails to observe `stop` promptly. Each iteration spawns one
+	// /proc/self/exe __jail-exec child via WrapBashCmd; an unbounded loop
+	// has overwhelmed 4-core hosts in practice. 100 iterations is more
+	// than enough to expose any kernel-level race window for the writes
+	// branch B is doing concurrently.
+	const maxForges = 100
 	stop := make(chan struct{})
 	forgeDone := make(chan struct{})
 	go func() {
 		defer close(forgeDone)
-		for {
+		for i := 0; i < maxForges; i++ {
 			select {
 			case <-stop:
 				return
@@ -286,8 +293,10 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 			}
 			// Forge a symlink inside branchA pointing to outsideDir.
 			// ln -sfn replaces atomically if the link already exists.
-			_, _ = envA.ExecCommand(context.Background(), "sh",
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_, _ = envA.ExecCommand(ctx, "sh",
 				[]string{"-c", fmt.Sprintf("ln -sfn %s %s/share", outsideDir, workspaceA)}, 2*time.Second)
+			cancel()
 		}
 	}()
 
