@@ -139,4 +139,3 @@ func TestPrintDiagnoseReport_NoOverrideSectionWhenEmpty(t *testing.T) {
 		t.Errorf("expected clean-run early-return, got:\n%s", out)
 	}
 }
-
