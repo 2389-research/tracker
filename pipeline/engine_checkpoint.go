@@ -181,7 +181,7 @@ func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string, nodeOutcomes m
 		return goalGateCheckResult{}, false
 	}
 	status := nodeOutcomes[nodeID]
-	if status == OutcomeSuccess || status == "partial_success" {
+	if status == string(OutcomeSuccess) || status == "partial_success" {
 		return goalGateCheckResult{}, false
 	}
 

@@ -427,7 +427,7 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 	stderr := strings.TrimRight(result.Stderr, " \t\n\r")
 
 	outcome := pipeline.Outcome{
-		Status: status,
+		Status: string(status),
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyToolStdout: stdout,
 			pipeline.ContextKeyToolStderr: stderr,
@@ -490,14 +490,14 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 			// MissingMarker.Error (so EventToolMarkerMissing carries it
 			// into activity.jsonl + tracker diagnose) and via
 			// ctx.tool_marker_error so routing conditions can read it.
-			outcome.Status = pipeline.OutcomeFail
+			outcome.Status = string(pipeline.OutcomeFail)
 			outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = err.Error()
 			outcome.MissingMarker = &pipeline.MarkerDetail{
 				Pattern: pattern,
 				Error:   err.Error(),
 			}
 		case missing:
-			outcome.Status = pipeline.OutcomeFail
+			outcome.Status = string(pipeline.OutcomeFail)
 			outcome.MissingMarker = &pipeline.MarkerDetail{
 				Pattern:      pattern,
 				CapturedTail: tailForDiag(stdout, 256),
@@ -520,14 +520,14 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 	if route := extractToolRoute(stdout); route != "" {
 		outcome.ContextUpdates[pipeline.ContextKeyToolRoute] = route
 	} else if node.ToolConfig().RouteRequired {
-		outcome.Status = pipeline.OutcomeFail
+		outcome.Status = string(pipeline.OutcomeFail)
 		outcome.MissingRoute = &pipeline.RouteDetail{
 			CapturedTail: tailForDiag(stdout, 256),
 		}
 	}
 
 	if applyDeclaredWrites(node, outcome.ContextUpdates, stdout, "Tool stdout JSON") {
-		outcome.Status = pipeline.OutcomeFail
+		outcome.Status = string(pipeline.OutcomeFail)
 	}
 	return outcome, pipeline.WriteStatusArtifact(artifactRoot, node.ID, outcome)
 }

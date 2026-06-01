@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // makeCheckpoint creates a checkpoint.json in the given run directory.
@@ -640,5 +641,181 @@ func TestPrintRunList_BundleColumn(t *testing.T) {
 				t.Errorf("plain .dip run row should not have sha256:\n%s", line)
 			}
 		}
+	}
+}
+
+// TestPrintRunList_StatusIcons verifies the Status column icon mapping for
+// every status the runtime can emit: success → "ok", validation_overridden →
+// "override", budget_exceeded → "budget", fail → "FAIL". Pins Gap 5.2 Task 21:
+// the override/budget icons were silently rendered as the default "+" before
+// classifyStatus (Task 15) and the icon switch widening here.
+func TestPrintRunList_StatusIcons(t *testing.T) {
+	runs := []tracker.RunSummary{
+		{RunID: "successrun0000", Status: "success", Nodes: 1},
+		{RunID: "overriderun000", Status: "validation_overridden", Nodes: 1},
+		{RunID: "budgetrun00000", Status: "budget_exceeded", Nodes: 1, FailedAt: "BuildNode"},
+		{RunID: "failrun0000000", Status: "fail", Nodes: 1, FailedAt: "ImplNode"},
+	}
+	out := captureStdout(t, func() { printRunList(runs) })
+
+	lines := strings.Split(out, "\n")
+	findLine := func(runIDPrefix string) string {
+		t.Helper()
+		for _, ln := range lines {
+			if strings.Contains(ln, runIDPrefix) {
+				return ln
+			}
+		}
+		t.Fatalf("no row for runID %q in output:\n%s", runIDPrefix, out)
+		return ""
+	}
+
+	cases := []struct {
+		runID    string
+		wantIcon string
+	}{
+		{"successrun0000", "ok"},
+		{"overriderun000", "override"},
+		{"budgetrun00000", "budget"},
+		{"failrun0000000", "FAIL"},
+	}
+	for _, c := range cases {
+		line := findLine(c.runID)
+		if !strings.Contains(line, c.wantIcon) {
+			t.Errorf("row for %s missing icon %q: %q", c.runID, c.wantIcon, line)
+		}
+	}
+
+	// Sanity: the override row must NOT render as FAIL (regression guard for
+	// the pre-Task-21 silent fallthrough).
+	overrideLine := findLine("overriderun000")
+	if strings.Contains(overrideLine, "FAIL") {
+		t.Errorf("override row should not contain FAIL: %q", overrideLine)
+	}
+	budgetLine := findLine("budgetrun00000")
+	if strings.Contains(budgetLine, "FAIL") {
+		t.Errorf("budget row should not contain FAIL: %q", budgetLine)
+	}
+}
+
+// TestPrintRunList_StatusColumnWidth verifies the Status header is padded to
+// at least 10 characters (Gap 5.2 Task 21 widening) so the "override" (8) and
+// "budget" (6) icons render without column collision into Nodes.
+func TestPrintRunList_StatusColumnWidth(t *testing.T) {
+	runs := []tracker.RunSummary{
+		{RunID: "overriderun000", Status: "validation_overridden", Nodes: 7},
+	}
+	out := captureStdout(t, func() { printRunList(runs) })
+
+	// Find the row for the override run and verify "override" and the Nodes
+	// count are separated by the column's whitespace gap, not jammed adjacent.
+	var row string
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.Contains(ln, "overriderun000") {
+			row = ln
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("override row missing from output:\n%s", out)
+	}
+	// "override" is 8 chars; the format string pads to %-10s, leaving 2
+	// trailing spaces. Combined with the 2-space inter-column gap, "override"
+	// must be followed by at least 4 spaces before the Nodes value "7".
+	if !strings.Contains(row, "override    ") {
+		t.Errorf("Status column not widened to %%-10s — expected 4+ trailing spaces after \"override\":\n%q", row)
+	}
+}
+
+// TestPrintAuditHeader_OverrideHeadline verifies the Status line gains an
+// inline `(label "X" at Gate by Actor)` headline when ValidationOverrides is
+// non-empty, and that one Override: chain line per entry follows.
+func TestPrintAuditHeader_OverrideHeadline(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "validation_overridden",
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "EscalateReview", Label: "accept", Actor: pipeline.ActorHuman},
+		},
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	if !strings.Contains(out, `Status:    validation_overridden (label "accept" at EscalateReview by human)`) {
+		t.Errorf("header missing override headline:\n%s", out)
+	}
+	if !strings.Contains(out, "Override:  EscalateReview → accept") {
+		t.Errorf("header missing Override: line:\n%s", out)
+	}
+}
+
+// TestPrintAuditHeader_LatestHeadline verifies that with multiple overrides
+// the LATEST entry (per spec D5a) is used as the inline headline, while
+// every entry still gets its own Override: chain line in chronological order.
+func TestPrintAuditHeader_LatestHeadline(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "validation_overridden",
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "EscalateMilestone", Label: "mark done", Actor: pipeline.ActorAutopilot},
+			{GateNodeID: "EscalateReview", Label: "accept", Actor: pipeline.ActorHuman},
+		},
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	// Latest entry (EscalateReview) should be the headline.
+	if !strings.Contains(out, "at EscalateReview by human") {
+		t.Errorf("headline should be latest entry; got:\n%s", out)
+	}
+	// Earlier entry must NOT supply the headline.
+	if strings.Contains(out, "at EscalateMilestone by autopilot") {
+		t.Errorf("headline should not be the first entry; got:\n%s", out)
+	}
+	// Both Override: lines should appear in chronological order.
+	idxFirst := strings.Index(out, "Override:  EscalateMilestone → mark done")
+	idxSecond := strings.Index(out, "Override:  EscalateReview → accept")
+	if idxFirst < 0 {
+		t.Errorf("first override line missing:\n%s", out)
+	}
+	if idxSecond < 0 {
+		t.Errorf("second override line missing:\n%s", out)
+	}
+	if idxFirst >= 0 && idxSecond >= 0 && idxFirst > idxSecond {
+		t.Errorf("Override: lines should be chronological (first entry first):\n%s", out)
+	}
+}
+
+// TestPrintAuditHeader_SubgraphPathJoined verifies that the SubgraphPath is
+// joined as outer/inner/.../gate for both the inline headline and the
+// per-entry Override: chain line.
+func TestPrintAuditHeader_SubgraphPathJoined(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "validation_overridden",
+		ValidationOverrides: []pipeline.OverrideDetail{
+			{GateNodeID: "Gate", Label: "accept", Actor: pipeline.ActorHuman, SubgraphPath: []string{"Outer", "Inner"}},
+		},
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	if !strings.Contains(out, "at Outer/Inner/Gate by human") {
+		t.Errorf("subgraph path not joined in headline; got:\n%s", out)
+	}
+	if !strings.Contains(out, "Override:  Outer/Inner/Gate → accept") {
+		t.Errorf("Override: line missing subgraph join:\n%s", out)
+	}
+}
+
+// TestPrintAuditHeader_NoOverridesUnaffected verifies clean runs (no
+// ValidationOverrides) keep their original header: no inline headline, no
+// Override: lines.
+func TestPrintAuditHeader_NoOverridesUnaffected(t *testing.T) {
+	r := &tracker.AuditReport{
+		RunID:  "test-run",
+		Status: "success",
+	}
+	out := captureStdout(t, func() { printAuditHeader(r) })
+	if strings.Contains(out, "Override:") {
+		t.Errorf("Override line should not appear for clean runs:\n%s", out)
+	}
+	// Status line should be the plain "Status:    success" with no parenthetical.
+	if !strings.Contains(out, "Status:    success\n") {
+		t.Errorf("Status line should be unannotated for clean runs; got:\n%s", out)
 	}
 }

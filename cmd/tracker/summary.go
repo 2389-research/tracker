@@ -194,8 +194,19 @@ func printRunHeader(result *pipeline.EngineResult) {
 		statusText = selectedStyle.Render(statusIcon + " success")
 	case pipeline.OutcomeFail:
 		statusText = lipgloss.NewStyle().Foreground(colorHot).Render(statusIcon + " fail")
+	case pipeline.OutcomeValidationOverridden:
+		// Per spec D5a/D18: amber treatment + headline from the LATEST override
+		// (the one that drove the run to its terminal exit). Format matches the
+		// audit header's inline (label "X" at Gate by Actor) shape but stays
+		// terse here — actor lives in the audit header, not the run summary.
+		base := statusIcon + " " + string(result.Status)
+		head := headlineOverride(result.ValidationOverrides)
+		if head.GateNodeID != "" {
+			base += fmt.Sprintf(" — at %s (label %q)", head.GateNodeID, head.Label)
+		}
+		statusText = overrideStyle.Render(base)
 	default:
-		statusText = mutedStyle.Render(statusIcon + " " + result.Status)
+		statusText = mutedStyle.Render(statusIcon + " " + string(result.Status))
 	}
 	fmt.Printf("  Status:    %s\n", statusText)
 }
@@ -301,9 +312,9 @@ func printNodeTable(result *pipeline.EngineResult) {
 func printNodeTableRow(entry pipeline.TraceEntry) {
 	icon := "✓"
 	switch entry.Status {
-	case pipeline.OutcomeFail:
+	case string(pipeline.OutcomeFail):
 		icon = "✗"
-	case pipeline.OutcomeRetry:
+	case string(pipeline.OutcomeRetry):
 		icon = "↻"
 	}
 	nodeID := entry.NodeID
@@ -379,9 +390,9 @@ func printNodeGraph(entries []pipeline.TraceEntry) {
 // nodeStatusIcon returns the ASCII icon for a node execution status.
 func nodeStatusIcon(status string) string {
 	switch status {
-	case pipeline.OutcomeFail:
+	case string(pipeline.OutcomeFail):
 		return "✗"
-	case pipeline.OutcomeRetry:
+	case string(pipeline.OutcomeRetry):
 		return "↻"
 	default:
 		return "✓"
@@ -443,8 +454,12 @@ func runUsageSummary(result *pipeline.EngineResult) *pipeline.UsageSummary {
 }
 
 // printResumeHint shows the resume command when the pipeline didn't complete successfully.
+//
+// Uses TerminalStatus.IsSuccess() so validation_overridden runs (which are
+// success-equivalent by default) don't print a resume hint — they completed,
+// they just took an override edge along the way.
 func printResumeHint(result *pipeline.EngineResult, pipelineFile string) {
-	if result == nil || result.Status == pipeline.OutcomeSuccess || result.RunID == "" {
+	if result == nil || result.Status.IsSuccess() || result.RunID == "" {
 		return
 	}
 	pipelineArg := pipelineFile

@@ -9,6 +9,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/2389-research/tracker/pipeline"
+	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 // mockAutopilot implements handlers.LabeledFreeformInterviewer for testing.
@@ -239,5 +242,13 @@ func TestDecisionString(t *testing.T) {
 	got := DecisionString("approve")
 	if got != "Autopilot chose: approve" {
 		t.Errorf("expected 'Autopilot chose: approve', got %q", got)
+	}
+}
+
+func TestAutopilotTUIInterviewer_Actor(t *testing.T) {
+	// Actor() doesn't touch the inner autopilot or send func — zero-value is fine.
+	var iv handlers.Interviewer = &AutopilotTUIInterviewer{}
+	if got := actorOfTUI(iv); got != pipeline.ActorAutopilot {
+		t.Errorf("actorOfTUI(AutopilotTUIInterviewer) = %q, want %q", got, pipeline.ActorAutopilot)
 	}
 }

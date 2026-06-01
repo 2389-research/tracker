@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
@@ -40,6 +41,9 @@ type AutopilotTUIInterviewer struct {
 func NewAutopilotTUIInterviewer(autopilot handlers.LabeledFreeformInterviewer, send SendFunc) *AutopilotTUIInterviewer {
 	return &AutopilotTUIInterviewer{autopilot: autopilot, send: send}
 }
+
+// Actor returns ActorAutopilot — autopilot persona acting through the TUI surface.
+func (a *AutopilotTUIInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
 
 func (a *AutopilotTUIInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
 	decision, err := a.autopilot.Ask(prompt, choices, defaultChoice)

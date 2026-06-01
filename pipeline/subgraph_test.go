@@ -66,7 +66,7 @@ func TestSubgraphHandler_ContextPropagation(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         OutcomeSuccess,
+				Status:         string(OutcomeSuccess),
 				ContextUpdates: map[string]string{"child_key": "child_value"},
 			}, nil
 		},
@@ -91,7 +91,7 @@ func TestSubgraphHandler_ContextPropagation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
-	if outcome.Status != OutcomeSuccess {
+	if outcome.Status != string(OutcomeSuccess) {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -119,7 +119,7 @@ func TestSubgraphHandler_MissingSubgraph(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing subgraph ref")
 	}
-	if outcome.Status != OutcomeFail {
+	if outcome.Status != string(OutcomeFail) {
 		t.Errorf("expected fail outcome, got %q", outcome.Status)
 	}
 }
@@ -143,7 +143,7 @@ func TestSubgraphHandler_MissingRef(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing subgraph_ref attribute")
 	}
-	if outcome.Status != OutcomeFail {
+	if outcome.Status != string(OutcomeFail) {
 		t.Errorf("expected fail outcome, got %q", outcome.Status)
 	}
 }
@@ -163,7 +163,7 @@ func TestSubgraphHandler_SubgraphFailure(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeFail}, nil
+			return Outcome{Status: string(OutcomeFail)}, nil
 		},
 	})
 
@@ -183,7 +183,7 @@ func TestSubgraphHandler_SubgraphFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != OutcomeFail {
+	if outcome.Status != string(OutcomeFail) {
 		t.Errorf("expected fail outcome for failed sub-pipeline, got %q", outcome.Status)
 	}
 }
@@ -390,7 +390,7 @@ func TestSubgraph_BudgetBypass_Fix_UsageRollup(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "expensive" {
 				return Outcome{
-					Status: OutcomeSuccess,
+					Status: string(OutcomeSuccess),
 					Stats: &SessionStats{
 						InputTokens:  childTokens / 2,
 						OutputTokens: childTokens / 2,
@@ -400,7 +400,7 @@ func TestSubgraph_BudgetBypass_Fix_UsageRollup(t *testing.T) {
 					},
 				}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -461,12 +461,12 @@ func TestSubgraph_BudgetBypass_Fix_ParentGuardHaltsAfterOverspend(t *testing.T) 
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "burn" {
-				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{
+				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{
 					TotalTokens: 10_000,
 					Provider:    "anthropic",
 				}}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -531,13 +531,13 @@ func TestSubgraph_BudgetBypass_Fix_ChildGuardHaltsMidSubgraph(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			switch node.ID {
 			case "parent_pre":
-				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
 			case "burn1":
-				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
 			case "burn2":
-				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 40, Provider: "anthropic"}}, nil
+				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 40, Provider: "anthropic"}}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -603,13 +603,13 @@ func TestSubgraph_BudgetBypass_Fix_NestedSubgraph(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "burn" {
-				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{
+				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{
 					TotalTokens: 777,
 					CostUSD:     0.12,
 					Provider:    "openai",
 				}}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -668,11 +668,11 @@ func TestSubgraph_BudgetExceededEvent_ReportsCombinedSnapshot(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			switch node.ID {
 			case "parent_pre":
-				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
 			case "burn1":
-				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -733,5 +733,243 @@ func TestSubgraph_BudgetExceededEvent_ReportsCombinedSnapshot(t *testing.T) {
 			}
 		}
 		t.Errorf("no EventBudgetExceeded reported the combined total (want ≥110 = 50 baseline + 60 child); child-local sub-snapshot was emitted instead")
+	}
+}
+
+// TestSubgraph_ChildOverridePropagates pins the propagation contract: when a
+// child subgraph run terminates with validation overrides, the parent absorbs
+// them into runState.validationOverrides with the subgraph node ID prepended
+// to SubgraphPath. The parent's terminal status flips to
+// validation_overridden via the success-with-overrides rule.
+func TestSubgraph_ChildOverridePropagates(t *testing.T) {
+	// Child graph: Start -> Gate (wait.human, accept-with-override) -> End.
+	childGraph := NewGraph("child")
+	childGraph.AddNode(&Node{ID: "Start", Shape: "Mdiamond", Label: "Start"})
+	childGraph.AddNode(&Node{ID: "Gate", Shape: "hexagon", Label: "Gate", Attrs: map[string]string{"label": "Accept?"}})
+	childGraph.AddNode(&Node{ID: "End", Shape: "Msquare", Label: "End"})
+	childGraph.AddEdge(&Edge{From: "Start", To: "Gate"})
+	childGraph.AddEdge(&Edge{From: "Gate", To: "End", Label: "accept", Override: true})
+
+	reg := newTestRegistry()
+	// Simulate the HumanHandler returning an override-bound outcome (Actor=human,
+	// PreferredLabel=accept) so the child engine takes the override edge.
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  ActorHuman,
+			}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"child": childGraph},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	// Parent graph: Start -> ChildRun (subgraph) -> End.
+	parentGraph := NewGraph("parent")
+	parentGraph.AddNode(&Node{ID: "Start", Shape: "Mdiamond", Label: "Start"})
+	parentGraph.AddNode(&Node{ID: "ChildRun", Shape: "tab", Label: "ChildRun", Attrs: map[string]string{"subgraph_ref": "child"}})
+	parentGraph.AddNode(&Node{ID: "End", Shape: "Msquare", Label: "End"})
+	parentGraph.AddEdge(&Edge{From: "Start", To: "ChildRun"})
+	parentGraph.AddEdge(&Edge{From: "ChildRun", To: "End"})
+
+	var sawPropagatedEvent bool
+	var propagatedDetail *OverrideDetail
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventValidationOverridden && evt.NodeID == "ChildRun" && evt.Override != nil {
+			sawPropagatedEvent = true
+			d := *evt.Override
+			propagatedDetail = &d
+		}
+	})
+
+	engine := NewEngine(parentGraph, reg, WithPipelineEventHandler(handler))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Status != OutcomeValidationOverridden {
+		t.Errorf("Status = %q, want %q", result.Status, OutcomeValidationOverridden)
+	}
+	if len(result.ValidationOverrides) != 1 {
+		t.Fatalf("len = %d, want 1: %+v", len(result.ValidationOverrides), result.ValidationOverrides)
+	}
+	got := result.ValidationOverrides[0]
+	if got.GateNodeID != "Gate" {
+		t.Errorf("GateNodeID = %q, want Gate", got.GateNodeID)
+	}
+	if got.Label != "accept" {
+		t.Errorf("Label = %q, want accept", got.Label)
+	}
+	if got.Actor != ActorHuman {
+		t.Errorf("Actor = %q, want %q", got.Actor, ActorHuman)
+	}
+	if len(got.SubgraphPath) != 1 || got.SubgraphPath[0] != "ChildRun" {
+		t.Errorf("SubgraphPath = %v, want [ChildRun]", got.SubgraphPath)
+	}
+	if !sawPropagatedEvent {
+		t.Error("expected EventValidationOverridden emitted on parent with NodeID=ChildRun")
+	}
+	if propagatedDetail == nil || len(propagatedDetail.SubgraphPath) != 1 || propagatedDetail.SubgraphPath[0] != "ChildRun" {
+		t.Errorf("propagated event payload = %+v, want SubgraphPath=[ChildRun]", propagatedDetail)
+	}
+}
+
+// TestSubgraph_ThreeLevelNesting verifies the recursive prepend rule: at
+// depth N, SubgraphPath has length N-1, outermost-to-innermost. GateNodeID
+// is always the leaf gate, never in SubgraphPath.
+func TestSubgraph_ThreeLevelNesting(t *testing.T) {
+	// Leaf graph: Start -> Gate (wait.human, override) -> End.
+	leaf := NewGraph("leaf")
+	leaf.AddNode(&Node{ID: "LStart", Shape: "Mdiamond"})
+	leaf.AddNode(&Node{ID: "Gate", Shape: "hexagon", Attrs: map[string]string{"label": "Accept?"}})
+	leaf.AddNode(&Node{ID: "LEnd", Shape: "Msquare"})
+	leaf.AddEdge(&Edge{From: "LStart", To: "Gate"})
+	leaf.AddEdge(&Edge{From: "Gate", To: "LEnd", Label: "accept", Override: true})
+
+	// Middle graph: Start -> L2 (subgraph ref leaf) -> End.
+	middle := NewGraph("middle")
+	middle.AddNode(&Node{ID: "MStart", Shape: "Mdiamond"})
+	middle.AddNode(&Node{ID: "L2", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "leaf"}})
+	middle.AddNode(&Node{ID: "MEnd", Shape: "Msquare"})
+	middle.AddEdge(&Edge{From: "MStart", To: "L2"})
+	middle.AddEdge(&Edge{From: "L2", To: "MEnd"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  ActorHuman,
+			}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"leaf": leaf, "middle": middle},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	// Outermost: Start -> L1 (subgraph ref middle) -> End.
+	outer := NewGraph("outer")
+	outer.AddNode(&Node{ID: "OStart", Shape: "Mdiamond"})
+	outer.AddNode(&Node{ID: "L1", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "middle"}})
+	outer.AddNode(&Node{ID: "OEnd", Shape: "Msquare"})
+	outer.AddEdge(&Edge{From: "OStart", To: "L1"})
+	outer.AddEdge(&Edge{From: "L1", To: "OEnd"})
+
+	engine := NewEngine(outer, reg)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Status != OutcomeValidationOverridden {
+		t.Errorf("Status = %q, want %q", result.Status, OutcomeValidationOverridden)
+	}
+	if len(result.ValidationOverrides) != 1 {
+		t.Fatalf("len = %d, want 1: %+v", len(result.ValidationOverrides), result.ValidationOverrides)
+	}
+	got := result.ValidationOverrides[0]
+	if got.GateNodeID != "Gate" {
+		t.Errorf("GateNodeID = %q, want Gate (leaf gate, not subgraph node)", got.GateNodeID)
+	}
+	if got.Label != "accept" {
+		t.Errorf("Label = %q, want accept", got.Label)
+	}
+	if got.Actor != ActorHuman {
+		t.Errorf("Actor = %q, want %q", got.Actor, ActorHuman)
+	}
+	wantPath := []string{"L1", "L2"}
+	if len(got.SubgraphPath) != len(wantPath) {
+		t.Fatalf("SubgraphPath = %v, want %v", got.SubgraphPath, wantPath)
+	}
+	for i, want := range wantPath {
+		if got.SubgraphPath[i] != want {
+			t.Errorf("SubgraphPath[%d] = %q, want %q (outermost-to-innermost)", i, got.SubgraphPath[i], want)
+		}
+	}
+}
+
+// TestSubgraph_ChildOverride_ParentFails verifies failure-dominates semantics:
+// when a child overrides successfully but a downstream parent node fails,
+// the terminal status is OutcomeFail, but ValidationOverrides is still
+// populated so forensics can see "this run had a child override AND failed."
+func TestSubgraph_ChildOverride_ParentFails(t *testing.T) {
+	// Child graph: Start -> Gate (override) -> End.
+	childGraph := NewGraph("child")
+	childGraph.AddNode(&Node{ID: "CStart", Shape: "Mdiamond"})
+	childGraph.AddNode(&Node{ID: "Gate", Shape: "hexagon", Attrs: map[string]string{"label": "Accept?"}})
+	childGraph.AddNode(&Node{ID: "CEnd", Shape: "Msquare"})
+	childGraph.AddEdge(&Edge{From: "CStart", To: "Gate"})
+	childGraph.AddEdge(&Edge{From: "Gate", To: "CEnd", Label: "accept", Override: true})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{
+		name: "wait.human",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			return Outcome{
+				Status:         string(OutcomeSuccess),
+				PreferredLabel: "accept",
+				OverrideActor:  ActorHuman,
+			}, nil
+		},
+	})
+	// Make the parent's post-subgraph node fail. It has only an unconditional
+	// edge, so the strict-failure-edges rule halts the pipeline with
+	// Status=fail.
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if node.ID == "Post" {
+				return Outcome{Status: string(OutcomeFail)}, nil
+			}
+			return Outcome{Status: string(OutcomeSuccess)}, nil
+		},
+	})
+	reg.Register(&testHandler{
+		name: "subgraph",
+		executeFn: NewSubgraphHandler(
+			map[string]*Graph{"child": childGraph},
+			reg, nil, nil,
+		).Execute,
+	})
+
+	// Parent: Start -> ChildRun -> Post (fails) -> End.
+	parent := NewGraph("parent")
+	parent.AddNode(&Node{ID: "Start", Shape: "Mdiamond"})
+	parent.AddNode(&Node{ID: "ChildRun", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	parent.AddNode(&Node{ID: "Post", Shape: "box"})
+	parent.AddNode(&Node{ID: "End", Shape: "Msquare"})
+	parent.AddEdge(&Edge{From: "Start", To: "ChildRun"})
+	parent.AddEdge(&Edge{From: "ChildRun", To: "Post"})
+	parent.AddEdge(&Edge{From: "Post", To: "End"})
+
+	engine := NewEngine(parent, reg)
+	result, _ := engine.Run(context.Background())
+	if result == nil {
+		t.Fatal("expected non-nil result on failure path")
+	}
+	if result.Status != OutcomeFail {
+		t.Errorf("Status = %q, want %q (failure dominates child override)", result.Status, OutcomeFail)
+	}
+	if len(result.ValidationOverrides) != 1 {
+		t.Fatalf("ValidationOverrides len = %d, want 1 even on failure", len(result.ValidationOverrides))
+	}
+	got := result.ValidationOverrides[0]
+	if got.GateNodeID != "Gate" {
+		t.Errorf("GateNodeID = %q, want Gate", got.GateNodeID)
+	}
+	if len(got.SubgraphPath) != 1 || got.SubgraphPath[0] != "ChildRun" {
+		t.Errorf("SubgraphPath = %v, want [ChildRun]", got.SubgraphPath)
 	}
 }

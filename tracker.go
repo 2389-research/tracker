@@ -131,7 +131,15 @@ type CostReport struct {
 
 // Result contains the outcome of a pipeline execution.
 type Result struct {
-	RunID            string
+	RunID string
+	// Status carries the run's terminal status. One of:
+	//   - "success"
+	//   - "fail"
+	//   - "budget_exceeded"
+	//   - "validation_overridden"
+	// The enum is open — future minor releases may add new values. Use
+	// pipeline.TerminalStatus(r.Status).IsSuccess() to classify rather than
+	// switching on the raw string.
 	Status           string
 	CompletedNodes   []string
 	Context          map[string]string
@@ -152,6 +160,11 @@ type Result struct {
 	// the .dipx bundle the run was loaded from, mirrored from Config.BundleIdentity
 	// for the caller's convenience. Empty for plain .dip runs.
 	BundleIdentity string
+	// ValidationOverrides is the list of override edges traversed during the run.
+	// Empty for runs with no override edges. Populated for every terminal status
+	// (including fail and budget_exceeded) so forensics see overrides even when
+	// failure dominates.
+	ValidationOverrides []pipeline.OverrideDetail
 }
 
 // Engine wraps pipeline.Engine with auto-wired internals.
@@ -856,11 +869,12 @@ func resultFromEngine(er *pipeline.EngineResult) *Result {
 		return &Result{Status: "fail"}
 	}
 	return &Result{
-		RunID:          er.RunID,
-		Status:         er.Status,
-		CompletedNodes: er.CompletedNodes,
-		Context:        er.Context,
-		EngineResult:   er,
-		Trace:          er.Trace,
+		RunID:               er.RunID,
+		Status:              string(er.Status),
+		CompletedNodes:      er.CompletedNodes,
+		Context:             er.Context,
+		EngineResult:        er,
+		Trace:               er.Trace,
+		ValidationOverrides: append([]pipeline.OverrideDetail(nil), er.ValidationOverrides...),
 	}
 }

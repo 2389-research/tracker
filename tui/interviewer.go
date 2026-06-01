@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
@@ -41,6 +42,9 @@ func NewBubbleteaInterviewer(send SendFunc) *BubbleteaInterviewer {
 func NewMode1Interviewer() *BubbleteaInterviewer {
 	return &BubbleteaInterviewer{}
 }
+
+// Actor returns ActorHuman — gate response came from a real human at the TUI.
+func (b *BubbleteaInterviewer) Actor() pipeline.Actor { return pipeline.ActorHuman }
 
 // Ask presents a choice prompt and returns the selected option.
 func (b *BubbleteaInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestPipelineMessagesAreTeaMsgs(t *testing.T) {
@@ -15,12 +17,42 @@ func TestPipelineMessagesAreTeaMsgs(t *testing.T) {
 		MsgNodeFailed{NodeID: "n1", Error: "boom"},
 		MsgNodeRetrying{NodeID: "n1", Message: "retrying in 5s"},
 		MsgPipelineCompleted{},
+		MsgPipelineCompleted{Status: pipeline.OutcomeValidationOverridden, Override: &pipeline.OverrideDetail{}},
 		MsgPipelineFailed{Error: "fatal"},
+		MsgValidationOverridden{NodeID: "Gate", Detail: pipeline.OverrideDetail{GateNodeID: "Gate"}},
 	}
 	for i, msg := range msgs {
 		if msg == nil {
 			t.Errorf("message %d is nil", i)
 		}
+	}
+}
+
+func TestMsgPipelineCompleted_StatusField(t *testing.T) {
+	m := MsgPipelineCompleted{Status: pipeline.OutcomeValidationOverridden}
+	if m.Status != pipeline.OutcomeValidationOverridden {
+		t.Errorf("expected validation_overridden Status, got %q", m.Status)
+	}
+}
+
+func TestMsgPipelineCompleted_OverridePopulated(t *testing.T) {
+	detail := &pipeline.OverrideDetail{
+		GateNodeID: "ApproveGate",
+		Label:      "force-merge",
+		Actor:      pipeline.ActorHuman,
+	}
+	m := MsgPipelineCompleted{Status: pipeline.OutcomeValidationOverridden, Override: detail}
+	if m.Override == nil {
+		t.Fatal("expected Override to be populated")
+	}
+	if m.Override.GateNodeID != "ApproveGate" {
+		t.Errorf("expected gate ApproveGate, got %q", m.Override.GateNodeID)
+	}
+	if m.Override.Label != "force-merge" {
+		t.Errorf("expected label force-merge, got %q", m.Override.Label)
+	}
+	if m.Override.Actor != pipeline.ActorHuman {
+		t.Errorf("expected actor human, got %q", m.Override.Actor)
 	}
 }
 

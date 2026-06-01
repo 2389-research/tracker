@@ -118,13 +118,14 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 	return loopResult{
 		action: loopReturn,
 		result: &EngineResult{
-			RunID:           s.runID,
-			Status:          OutcomeBudgetExceeded,
-			CompletedNodes:  s.cp.CompletedNodes,
-			Context:         s.pctx.Snapshot(),
-			Trace:           s.trace,
-			Usage:           s.trace.AggregateUsage(),
-			BudgetLimitsHit: []string{breach.Kind.String()},
+			RunID:               s.runID,
+			Status:              OutcomeBudgetExceeded,
+			CompletedNodes:      s.cp.CompletedNodes,
+			Context:             s.pctx.Snapshot(),
+			Trace:               s.trace,
+			Usage:               s.trace.AggregateUsage(),
+			BudgetLimitsHit:     []string{breach.Kind.String()},
+			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 		},
 	}
 }
@@ -191,6 +192,37 @@ type runState struct {
 	nodeOutcomes map[string]string
 	stylesheet   *Stylesheet
 	gitRepo      *gitArtifactRepo // non-nil when git artifact tracking is enabled
+
+	// validationOverrides is the per-run sticky list of override events
+	// appended at the flip-point in advanceToNextNode. Mirrors
+	// cp.ValidationOverrides; the runState copy is the in-memory hot-path read,
+	// the cp copy is the durable record. Populated on every terminal-result
+	// path (success, fail, budget) so forensics see overrides even when
+	// failure dominates.
+	validationOverrides []OverrideDetail
+
+	// lastOutcome carries the most recent handler outcome through edge selection
+	// so advanceToNextNode can read Outcome.OverrideActor when an override edge
+	// is traversed. Set in applyOutcome before the engine advances.
+	//
+	// Stored as a shallow copy via `s.lastOutcome = *outcome`: value-type fields
+	// (Status, OverrideActor, PreferredLabel) are safely snapshotted, but slice
+	// and pointer fields (Truncations, ChildOverride, ChildUsage, MissingMarker,
+	// MissingRoute) share backing storage with the original outcome — treat them
+	// as read-only here. Mutating those fields through s.lastOutcome would
+	// silently corrupt the handler's outcome value (and vice versa).
+	lastOutcome Outcome
+}
+
+// appendOverride appends an OverrideDetail to BOTH the in-memory hot-path
+// slice (s.validationOverrides) and the checkpoint slice (s.cp.ValidationOverrides).
+// They MUST stay in sync — the hot-path slice serves the engine's terminal-status
+// rule and event-emission; the checkpoint slice is the durable record for resume
+// and audit-log fallback. Any code path that records a new override must use
+// this helper.
+func (s *runState) appendOverride(d OverrideDetail) {
+	s.validationOverrides = append(s.validationOverrides, d)
+	s.cp.ValidationOverrides = append(s.cp.ValidationOverrides, d)
 }
 
 // initRunState initializes all per-run state: context, checkpoint, trace, and stylesheet.
@@ -239,14 +271,23 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		}
 	}
 
+	// Seed the in-memory sticky list from any prior checkpoint so a resumed
+	// run preserves overrides that fired before the kill / SIGINT. The cp
+	// copy is the durable record; the runState copy is the hot-path read.
+	var stickyOverrides []OverrideDetail
+	if len(cp.ValidationOverrides) > 0 {
+		stickyOverrides = append(stickyOverrides, cp.ValidationOverrides...)
+	}
+
 	return &runState{
-		runID:        runID,
-		pctx:         pctx,
-		cp:           cp,
-		trace:        &Trace{RunID: runID, StartTime: time.Now()},
-		nodeOutcomes: make(map[string]string),
-		stylesheet:   stylesheet,
-		gitRepo:      gitRepo,
+		runID:               runID,
+		pctx:                pctx,
+		cp:                  cp,
+		trace:               &Trace{RunID: runID, StartTime: time.Now()},
+		nodeOutcomes:        make(map[string]string),
+		stylesheet:          stylesheet,
+		gitRepo:             gitRepo,
+		validationOverrides: stickyOverrides,
 	}, nil
 }
 
@@ -561,6 +602,13 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 
 // applyOutcome merges handler outcome into pipeline context and emits the decision_outcome event.
 func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcome) {
+	// Snapshot the outcome so advanceToNextNode can read OverrideActor (and
+	// future override-related fields) when an override edge is traversed.
+	// The pointer-derived copy is intentional: applyOutcome already mutates
+	// pctx based on the outcome, so the snapshot here is a stable record of
+	// what the handler returned for downstream edge handling.
+	s.lastOutcome = *outcome
+
 	s.pctx.Merge(outcome.ContextUpdates)
 
 	if outcome.Status != "" {
@@ -591,6 +639,41 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 		Message:   fmt.Sprintf("node %q outcome: %s", currentNodeID, outcome.Status),
 		Decision:  detail,
 	})
+
+	// Absorb any child-propagated validation overrides into the run's sticky
+	// list. This is the SECOND sticky-write site — the first is the flip-point
+	// in advanceToNextNode (recordOverrideIfPresent) which handles own-graph
+	// Edge.Override traversals. The two sites cover different sources:
+	//   - own-graph: this run took an override edge directly.
+	//   - child-propagated: a child run (subgraph, manager_loop, future
+	//     parallel-with-subgraph branches) terminated with overrides, which
+	//     the child handler folded into Outcome.ChildOverride with its own
+	//     subgraph node ID prepended to SubgraphPath.
+	// We append unconditionally — child-propagated entries always carry a
+	// non-empty SubgraphPath and can never collide with own-graph entries
+	// (which always have empty SubgraphPath), so the dedup check in
+	// overrideAlreadyRecorded is unnecessary here.
+	if len(outcome.ChildOverride) > 0 {
+		for i := range outcome.ChildOverride {
+			d := outcome.ChildOverride[i]
+			s.appendOverride(d)
+			// Emit a stage-level EventValidationOverridden so the audit
+			// timeline records when the parent learned of the child's
+			// override. NodeID is the subgraph node (the parent's view),
+			// not the leaf gate (which lives in d.GateNodeID).
+			e.emit(PipelineEvent{
+				Type:      EventValidationOverridden,
+				Timestamp: time.Now(),
+				RunID:     s.runID,
+				NodeID:    currentNodeID,
+				Message:   fmt.Sprintf("validation override propagated from subgraph child via %q", currentNodeID),
+				Override:  &d,
+			})
+		}
+		// Synchronously persist after child propagation so a kill -9 between
+		// here and the next selectEdge does not lose the propagated state.
+		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
+	}
 }
 
 // drainSteering non-blockingly drains all pending steering context updates from
@@ -637,12 +720,13 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 			e.saveCheckpoint(s.cp, s.pctx, s.runID)
 			s.trace.EndTime = time.Now()
 			return "", false, &EngineResult{
-				RunID:          s.runID,
-				Status:         OutcomeFail,
-				CompletedNodes: s.cp.CompletedNodes,
-				Context:        s.pctx.Snapshot(),
-				Trace:          s.trace,
-				Usage:          s.trace.AggregateUsage(),
+				RunID:               s.runID,
+				Status:              OutcomeFail,
+				CompletedNodes:      s.cp.CompletedNodes,
+				Context:             s.pctx.Snapshot(),
+				Trace:               s.trace,
+				Usage:               s.trace.AggregateUsage(),
+				ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 			}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
 		}
 	}
@@ -696,14 +780,14 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	})
 	e.emitGitCommit(s, currentNodeID, traceEntry)
 	s.trace.EndTime = time.Now()
-	result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
+	result := e.failResult(s)
 	return "", false, result, nil
 }
 
 // handleOutcomeStatus emits events and marks completion for non-retry outcomes.
 func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status string) {
 	switch status {
-	case OutcomeFail:
+	case string(OutcomeFail):
 		e.emit(PipelineEvent{
 			Type:      EventStageFailed,
 			Timestamp: time.Now(),
@@ -713,7 +797,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 		})
 		s.cp.MarkCompleted(currentNodeID)
 
-	case OutcomeSuccess:
+	case string(OutcomeSuccess):
 		e.emit(PipelineEvent{
 			Type:      EventStageCompleted,
 			Timestamp: time.Now(),
@@ -731,7 +815,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 			NodeID:    currentNodeID,
 			Message:   fmt.Sprintf("node %q returned unknown outcome status %q; treating as failure", currentNodeID, status),
 		})
-		s.pctx.Set(ContextKeyOutcome, OutcomeFail)
+		s.pctx.Set(ContextKeyOutcome, string(OutcomeFail))
 	}
 }
 
@@ -792,14 +876,14 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
-		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
+		result := e.failResult(s)
 		return false, "", result
 	}
-	if outcomeStatus == OutcomeFail {
+	if outcomeStatus == string(OutcomeFail) {
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
-		result := e.failResult(s.runID, s.cp, s.pctx, s.trace)
+		result := e.failResult(s)
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)
@@ -825,12 +909,13 @@ func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *Trace
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		s.trace.EndTime = time.Now()
 		return "", false, &EngineResult{
-			RunID:          s.runID,
-			Status:         OutcomeFail,
-			CompletedNodes: s.cp.CompletedNodes,
-			Context:        s.pctx.Snapshot(),
-			Trace:          s.trace,
-			Usage:          s.trace.AggregateUsage(),
+			RunID:               s.runID,
+			Status:              OutcomeFail,
+			CompletedNodes:      s.cp.CompletedNodes,
+			Context:             s.pctx.Snapshot(),
+			Trace:               s.trace,
+			Usage:               s.trace.AggregateUsage(),
+			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
 		}, fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
 	}
 

@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#unreleased">[Unreleased]</a>
     <a href="#v0-34-0">v0.34.0</a>
     <strong>Jump to:</strong>
     <a href="#v0-33-0">v0.33.0</a>
@@ -66,6 +67,46 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ [Unreleased] ═══ -->
+  <section class="glass" id="unreleased" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;">[Unreleased]</h2>
+      <span class="badge">tracking next minor</span>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Closes Gap 5.2 of <a href="https://github.com/2389-research/tracker/issues/233">#233</a></strong>
+      (<a href="https://github.com/2389-research/tracker/issues/271">#271</a>). Runs that accept a failed validation
+      through a human gate now terminate as a new fourth status &mdash; <code>validation_overridden</code> &mdash;
+      instead of being silently bucketed as <code>success</code>. The audit trail, JSON output, TUI completion row,
+      and exit code can all distinguish operator-accepted overrides from clean successes.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>New terminal <code>EngineResult.Status</code> value <code>validation_overridden</code>.</strong> Runs that traverse a <code>wait.human</code> gate edge marked <code>override: true</code> in their <code>.dip</code> workflow now terminate with <code>Status == "validation_overridden"</code> instead of <code>"success"</code>, recording in the audit trail that a non-workflow decision (a human at the TUI, an autopilot persona, or a webhook callback) accepted a result the automated checks flagged as failed. The <code>Override:</code> line in <code>tracker audit</code> traces the routing; the <code>--json</code> output carries a stable <code>status_class: succeeded|failed</code> companion field for downstream consumers.</li>
+      <li><strong>New edge attribute <code>override: true</code></strong> in <code>.dip</code> syntax, valid only on edges from <code>wait.human</code> nodes. Adapter rejects misuse at compile-time.</li>
+      <li><strong>New CLI flag <code>--fail-on-override</code></strong> (and env var <code>TRACKER_FAIL_ON_OVERRIDE=1</code>, strict-<code>=1</code> parsing matching the existing <code>TRACKER_PASS_*</code> convention). Causes <code>tracker run</code> to exit code <code>2</code> (distinguishable from generic-fail exit <code>1</code>) when a run terminates as <code>validation_overridden</code>. Default unchanged: exit <code>0</code>.</li>
+      <li><strong>New <code>dippin doctor</code> lint rule TRK102</strong> (warn-level): fires on <code>wait.human</code> edges with label <code>accept</code> / <code>mark done</code> / <code>approve</code> (case-insensitive) that route to a forward-progress target, are upstream-reachable from an <code>outcome = fail</code> edge, and lack <code>override: true</code>. Surfaces the migration opportunity without false-positive on plan-approval gates.</li>
+      <li><strong>TUI live override rendering</strong>: <code>MsgPipelineCompleted</code> gains a typed <code>Status</code> field; the TUI completion row renders the amber override badge in real-time. No more identical green badges for <code>success</code> and <code>validation_overridden</code>.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Library-API delta</strong>: <code>EngineResult.Status</code>, <code>tracker.Result.Status</code>, <code>tracker.AuditReport.Status</code>, <code>tracker.RunSummary.Status</code> are re-typed from <code>string</code> to <code>pipeline.TerminalStatus</code> (a named string type). Existing literal-string comparisons (<code>result.Status == "success"</code>) continue to compile and produce the same answer. Assignments from a <code>string</code> variable into a <code>Status</code> field require an explicit cast &mdash; this is the one breaking change in the re-typing. Embedded library callers should migrate to the new <code>TerminalStatus.IsSuccess()</code> helper for forward-compat across future status additions.</li>
+      <li><strong>New exported symbols</strong> (additive): <code>pipeline.TerminalStatus</code> (type), <code>pipeline.OutcomeValidationOverridden</code>, <code>pipeline.OverrideDetail</code>, <code>pipeline.Actor</code> (type), <code>pipeline.ActorHuman</code> / <code>ActorAutopilot</code> / <code>ActorWebhook</code> / <code>ActorUnknown</code>, <code>pipeline.Edge.Override</code>, <code>pipeline.Outcome.ChildOverride</code>, <code>pipeline.Outcome.OverrideActor</code>, <code>pipeline.EngineResult.ValidationOverrides</code>, <code>pipeline.Checkpoint.ValidationOverrides</code>, <code>pipeline.EventValidationOverridden</code>, <code>pipeline.PipelineEvent.Override</code>, <code>pipeline.ErrValidationOverridden</code>. Plus mirrored fields on <code>tracker.Result</code>, <code>tracker.AuditReport</code>, <code>tracker.RunSummary</code>, <code>tracker.DiagnoseReport</code>.</li>
+      <li><code>tracker_audit.AuditReport.Recommendations</code> is no longer alphabetically sorted &mdash; entries appear in priority order (override notes first, then per-override entries chronologically, then retry/budget notes). Downstream tools that sort on receipt are unaffected; tools that displayed in receive-order will see a different order.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker_audit.classifyStatus</code> previously collapsed <code>budget_exceeded</code> events to <code>"fail"</code></strong>, so <code>tracker audit</code> and <code>tracker list</code> reported budget-halted runs as failures. Audit surfaces now surface <code>budget_exceeded</code> correctly. <strong>User-visible behavior change</strong>: scripts filtering on <code>status == "fail"</code> will see budget-halted runs move out of the <code>fail</code> bucket into a new <code>budget_exceeded</code> bucket. Update filters to <code>status_class == "failed"</code> (introduced in this release) for a stable bucket that survives future enum extensions.</li>
+    </ul>
+    <h4>Operator notes</h4>
+    <p style="color: var(--text-secondary); margin-bottom: 0.75rem;">Two surfaces silently change behavior on upgrade:</p>
+    <ol style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Monitoring dashboards filtering JSON output on <code>status == "success"</code> will silently undercount completed runs.</strong> Override runs surface as <code>status == "validation_overridden"</code> &mdash; update filters to <code>status_class == "succeeded"</code> or to the union <code>status IN ("success", "validation_overridden")</code>.</li>
+      <li><strong>Scripts counting failed runs via <code>status == "fail"</code> will see budget-halted runs disappear from the failure bucket.</strong> Update to <code>status_class == "failed"</code> for a stable bucket.</li>
+    </ol>
+    <p style="color: var(--text-secondary);">CI integrations that should NOT auto-deploy on overrides must opt in with <code>tracker run --fail-on-override workflow.dip &amp;&amp; deploy.sh</code>. Without the flag, override runs exit <code>0</code> &mdash; the default treats them as audit-positive deliberate operator decisions.</p>
+  </section>
 
   <!-- ═══ v0.34.0 ═══ -->
   <section class="glass" id="v0-34-0" style="border-left: 3px solid var(--orange-600);">

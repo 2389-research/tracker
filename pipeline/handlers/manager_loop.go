@@ -391,17 +391,17 @@ type engineResultMsg struct {
 func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	cfg, err := parseManagerLoopConfig(node.ID, node.Attrs)
 	if err != nil {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, err
 	}
 
 	// Look up the child graph.
 	if h.graphs == nil {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail},
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
 			fmt.Errorf("manager_loop: no subgraphs available, cannot find %q", cfg.subgraphRef)
 	}
 	childGraph, ok := h.graphs[cfg.subgraphRef]
 	if !ok {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail},
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
 			fmt.Errorf("manager_loop: subgraph %q not found", cfg.subgraphRef)
 	}
 
@@ -415,7 +415,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 	// registry to NewEngine and panic on the first handler lookup.
 	// Report clearly instead.
 	if childRegistry == nil {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail},
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
 			fmt.Errorf("manager_loop: no handler registry available for child subgraph %q", cfg.subgraphRef)
 	}
 
@@ -495,7 +495,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 				NodeID:    node.ID,
 				Message:   fmt.Sprintf("manager_loop: cancelled: %v", ctx.Err()),
 			})
-			return pipeline.Outcome{Status: pipeline.OutcomeFail},
+			return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
 				fmt.Errorf("manager_loop: cancelled: %w", ctx.Err())
 
 		case msg := <-resultCh:
@@ -533,7 +533,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 					NodeID:    node.ID,
 					Message:   fmt.Sprintf("manager_loop: max_cycles %d reached", cfg.maxCycles),
 				})
-				return pipeline.Outcome{Status: pipeline.OutcomeFail},
+				return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
 					fmt.Errorf("manager_loop: max_cycles %d reached", cfg.maxCycles)
 			}
 
@@ -554,7 +554,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 						NodeID:    node.ID,
 						Message:   fmt.Sprintf("manager_loop: stop_condition %q is invalid: %v", cfg.stopCondition, condErr),
 					})
-					return pipeline.Outcome{Status: pipeline.OutcomeFail},
+					return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
 						fmt.Errorf("manager_loop: stop_condition %q is invalid: %w", cfg.stopCondition, condErr)
 				}
 				if match {
@@ -567,7 +567,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 						NodeID:    node.ID,
 						Message:   fmt.Sprintf("manager_loop: stop_condition met after %d cycles", cycles),
 					})
-					return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+					return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 				}
 			}
 
@@ -584,7 +584,7 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 						NodeID:    node.ID,
 						Message:   fmt.Sprintf("manager_loop: steer_condition %q is invalid: %v", cfg.steerExpr, condErr),
 					})
-					return pipeline.Outcome{Status: pipeline.OutcomeFail},
+					return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
 						fmt.Errorf("manager_loop: steer_condition %q is invalid: %w", cfg.steerExpr, condErr)
 				}
 				if match {
@@ -653,7 +653,7 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 			NodeID:    nodeID,
 			Message:   fmt.Sprintf("manager_loop: cancelled: %v", ctxErr),
 		})
-		out := pipeline.Outcome{Status: pipeline.OutcomeFail}
+		out := pipeline.Outcome{Status: string(pipeline.OutcomeFail)}
 		if msg.result != nil {
 			out.ChildUsage = msg.result.Usage
 		}
@@ -666,7 +666,7 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 		result := msg.result
 		if result.Status == pipeline.OutcomeSuccess {
 			pctx.Set("stack.child.status", "success")
-			pctx.Set("stack.child.exit_status", pipeline.OutcomeSuccess)
+			pctx.Set("stack.child.exit_status", string(pipeline.OutcomeSuccess))
 			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 				Type:      pipeline.EventStageCompleted,
 				Timestamp: time.Now(),
@@ -674,9 +674,41 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 				Message:   fmt.Sprintf("manager_loop: child completed successfully after %d cycles", cycles),
 			})
 			return pipeline.Outcome{
-				Status:         pipeline.OutcomeSuccess,
+				Status:         string(pipeline.OutcomeSuccess),
 				ContextUpdates: result.Context,
 				ChildUsage:     result.Usage,
+			}, nil
+		}
+
+		// Validation override: the child engine terminated with
+		// Status=OutcomeValidationOverridden via the engine's terminal-status
+		// rule (s.validationOverrides was non-empty at the success exit).
+		// Map to OutcomeSuccess for parent routing — the override is an
+		// audit-only signal that doesn't redirect parent edge selection —
+		// and propagate the child's ValidationOverrides via ChildOverride
+		// so the parent engine absorbs them into its own sticky list and
+		// the parent's terminal-status rule flips Status → validation_overridden
+		// in turn. Mirrors the SubgraphHandler propagation path (#271).
+		//
+		// Why this branch must come before the generic non-success fallback
+		// below: that fallback returns OutcomeFail (or OutcomeSuccess for
+		// child-side budget halts) and never populates ChildOverride, so a
+		// child that succeeded-with-overrides would otherwise be reported
+		// to the parent as a plain failure with no override trail.
+		if result.Status == pipeline.OutcomeValidationOverridden {
+			pctx.Set("stack.child.status", "success")
+			pctx.Set("stack.child.exit_status", string(pipeline.OutcomeValidationOverridden))
+			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+				Type:      pipeline.EventStageCompleted,
+				Timestamp: time.Now(),
+				NodeID:    nodeID,
+				Message:   fmt.Sprintf("manager_loop: child completed with validation_overridden after %d cycles", cycles),
+			})
+			return pipeline.Outcome{
+				Status:         string(pipeline.OutcomeSuccess),
+				ContextUpdates: result.Context,
+				ChildUsage:     result.Usage,
+				ChildOverride:  pipeline.PrependSubgraphPath(result.ValidationOverrides, nodeID),
 			}, nil
 		}
 
@@ -692,7 +724,7 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 			childStatus = pipeline.OutcomeFail
 		}
 		pctx.Set("stack.child.status", "failed")
-		pctx.Set("stack.child.exit_status", childStatus)
+		pctx.Set("stack.child.exit_status", string(childStatus))
 		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
 			Type:      pipeline.EventStageFailed,
 			Timestamp: time.Now(),
@@ -709,10 +741,15 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 		if childStatus == pipeline.OutcomeBudgetExceeded {
 			handlerStatus = pipeline.OutcomeSuccess
 		}
+		// Propagate any validation overrides the child accumulated even on
+		// fail / budget_exceeded — the spec promise is that override
+		// forensics survive failure-after-override scenarios. Matches
+		// SubgraphHandler.Execute's unconditional propagation.
 		return pipeline.Outcome{
-			Status:         handlerStatus,
+			Status:         string(handlerStatus),
 			ContextUpdates: result.Context,
 			ChildUsage:     result.Usage,
+			ChildOverride:  pipeline.PrependSubgraphPath(result.ValidationOverrides, nodeID),
 		}, nil
 	}
 
@@ -730,5 +767,5 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: child error: %v", err),
 	})
-	return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
+	return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, err
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // Persona defines an autopilot decision-making style.
@@ -116,6 +117,9 @@ func NewAutopilotInterviewer(client *llm.Client, persona Persona, opts ...Autopi
 	}
 	return ai
 }
+
+// Actor returns ActorAutopilot — LLM persona standing in for a human at a gate.
+func (a *AutopilotInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
 
 // SetPipelineContext stores the pipeline execution context so that LLM calls
 // respect pipeline cancellation (ctrl-C, budget breach, etc.). Called by the

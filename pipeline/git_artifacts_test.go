@@ -210,7 +210,7 @@ func TestEngine_WithGitArtifacts_ProducesCommitsPerNode(t *testing.T) {
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		n := name
 		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: OutcomeSuccess, Stats: nodeStats}, nil
+			return Outcome{Status: string(OutcomeSuccess), Stats: nodeStats}, nil
 		}})
 	}
 
@@ -300,9 +300,9 @@ func TestEngine_WithGitArtifacts_CommitsRetryExhausted(t *testing.T) {
 		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			// "flaky" always returns retry — it will exhaust the budget.
 			if node.ID == "flaky" {
-				return Outcome{Status: OutcomeRetry}, nil
+				return Outcome{Status: string(OutcomeRetry)}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		}})
 	}
 
@@ -400,10 +400,10 @@ func TestEngine_WithGitArtifacts_CommitsFailOutcome(t *testing.T) {
 	reg := NewHandlerRegistry()
 	// start succeeds, exit returns fail.
 	reg.Register(&testHandler{name: "start", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-		return Outcome{Status: OutcomeSuccess}, nil
+		return Outcome{Status: string(OutcomeSuccess)}, nil
 	}})
 	reg.Register(&testHandler{name: "exit", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-		return Outcome{Status: OutcomeFail}, nil
+		return Outcome{Status: string(OutcomeFail)}, nil
 	}})
 
 	engine := NewEngine(g, reg,

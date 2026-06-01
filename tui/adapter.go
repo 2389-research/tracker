@@ -12,6 +12,14 @@ import (
 
 // AdaptPipelineEvent maps a pipeline lifecycle event to a typed TUI message.
 // Returns nil for event types that have no TUI representation.
+//
+// This is the stateless free-function form: the returned MsgPipelineCompleted
+// always has zero-valued Status and nil Override, because the function doesn't
+// observe override events across the run. Callers that need the completion
+// message to carry Status + Override should use the stateful PipelineAdapter
+// (NewPipelineAdapter) instead — it accumulates EventValidationOverridden
+// across the run and synthesizes the headline at completion. Tests retain the
+// free-function form for one-shot conversions.
 func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 	switch evt.Type {
 	case pipeline.EventStageStarted:
@@ -22,6 +30,8 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 		return MsgNodeFailed{NodeID: evt.NodeID, Error: pipelineEventMsg(evt)}
 	case pipeline.EventStageRetrying:
 		return MsgNodeRetrying{NodeID: evt.NodeID, Message: evt.Message}
+	case pipeline.EventValidationOverridden:
+		return adaptValidationOverridden(evt)
 	case pipeline.EventPipelineCompleted:
 		return MsgPipelineCompleted{}
 	case pipeline.EventPipelineFailed:
@@ -29,6 +39,67 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 	default:
 		return nil
 	}
+}
+
+// adaptValidationOverridden builds MsgValidationOverridden from a pipeline
+// event. The engine guarantees evt.Override is non-nil for this event type;
+// the nil check is defensive against malformed events from custom emitters.
+func adaptValidationOverridden(evt pipeline.PipelineEvent) tea.Msg {
+	if evt.Override == nil {
+		return nil
+	}
+	return MsgValidationOverridden{NodeID: evt.NodeID, Detail: *evt.Override}
+}
+
+// PipelineAdapter is a stateful event-to-message adapter that accumulates
+// override events across a run so the MsgPipelineCompleted it emits carries
+// the terminal Status (OutcomeSuccess vs OutcomeValidationOverridden) and the
+// headline OverrideDetail per Gap 5.2 spec D5a (latest entry wins). Use this
+// when the TUI needs live override status on the completion event; use the
+// stateless AdaptPipelineEvent for one-shot conversions.
+//
+// Lifetime is scoped to a single pipeline run. Construct one per run via
+// NewPipelineAdapter — sharing one across runs would mix override state.
+type PipelineAdapter struct {
+	overrides []pipeline.OverrideDetail
+}
+
+// NewPipelineAdapter returns a freshly-initialized PipelineAdapter ready to
+// adapt one pipeline run's events.
+func NewPipelineAdapter() *PipelineAdapter {
+	return &PipelineAdapter{}
+}
+
+// Adapt is the stateful equivalent of AdaptPipelineEvent: it tracks override
+// events as they arrive and, on EventPipelineCompleted, returns a
+// MsgPipelineCompleted with Status and Override populated from accumulated
+// state. Other event types route through the same mapping as the free function.
+func (a *PipelineAdapter) Adapt(evt pipeline.PipelineEvent) tea.Msg {
+	switch evt.Type {
+	case pipeline.EventValidationOverridden:
+		if evt.Override != nil {
+			a.overrides = append(a.overrides, *evt.Override)
+		}
+		return adaptValidationOverridden(evt)
+	case pipeline.EventPipelineCompleted:
+		return a.buildCompleted()
+	default:
+		return AdaptPipelineEvent(evt)
+	}
+}
+
+// buildCompleted constructs the terminal MsgPipelineCompleted carrying Status
+// and Override derived from accumulated override events. The headline picks
+// the LATEST override per spec D5a — operators reading "validation override
+// at <gate>" should see the most recent (closest-to-exit) gate by default.
+func (a *PipelineAdapter) buildCompleted() MsgPipelineCompleted {
+	msg := MsgPipelineCompleted{Status: pipeline.OutcomeSuccess}
+	if n := len(a.overrides); n > 0 {
+		msg.Status = pipeline.OutcomeValidationOverridden
+		head := a.overrides[n-1] // D5a: latest = headline
+		msg.Override = &head
+	}
+	return msg
 }
 
 // pipelineEventMsg returns the error message from a pipeline event, preferring Err over Message.

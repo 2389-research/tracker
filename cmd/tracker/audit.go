@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // listRuns shows all available runs with their status and node count.
@@ -29,22 +30,28 @@ func listRuns(workdir string) error {
 // printRunList prints the formatted run listing table.
 func printRunList(runs []tracker.RunSummary) {
 	fmt.Println()
-	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %-26s  %s\n", "Run ID", "Status", "Nodes", "Retries", "Duration", "Bundle", "Failed At")
-	fmt.Printf("  %-14s  %-8s  %-6s  %-8s  %-10s  %-26s  %s\n", "──────", "──────", "─────", "───────", "────────", "──────", "─────────")
+	fmt.Printf("  %-14s  %-10s  %-6s  %-8s  %-10s  %-26s  %s\n", "Run ID", "Status", "Nodes", "Retries", "Duration", "Bundle", "Failed At")
+	fmt.Printf("  %-14s  %-10s  %-6s  %-8s  %-10s  %-26s  %s\n", "──────", "──────", "─────", "───────", "────────", "──────", "─────────")
 
 	for _, r := range runs {
-		icon := "+"
+		var icon string
 		switch r.Status {
 		case "success":
 			icon = "ok"
+		case "validation_overridden":
+			icon = "override"
+		case "budget_exceeded":
+			icon = "budget"
 		case "fail":
 			icon = "FAIL"
+		default:
+			icon = r.Status // fall back to raw value for unknown statuses
 		}
 		durStr := ""
 		if r.Duration > 0 {
 			durStr = formatElapsed(r.Duration)
 		}
-		fmt.Printf("  %-14s  %-8s  %-6d  %-8d  %-10s  %-26s  %s\n",
+		fmt.Printf("  %-14s  %-10s  %-6d  %-8d  %-10s  %-26s  %s\n",
 			r.RunID[:min(14, len(r.RunID))], icon, r.Nodes, r.Retries, durStr, truncateBundleIdentity(r.BundleIdentity), r.FailedAt)
 	}
 
@@ -101,10 +108,37 @@ func printAuditHeader(r *tracker.AuditReport) {
 	if r.BundleIdentity != "" {
 		fmt.Printf("  Bundle:    %s\n", r.BundleIdentity)
 	}
-	fmt.Printf("  Status:    %s\n", r.Status)
+	// Status line: append override headline inline when overrides exist. Per
+	// spec D5a the headline is the LATEST entry (the one that produced the
+	// terminal validation_overridden status).
+	fmt.Printf("  Status:    %s", r.Status)
+	if len(r.ValidationOverrides) > 0 {
+		head := r.ValidationOverrides[len(r.ValidationOverrides)-1]
+		fmt.Printf(" (label %q at %s by %s)", head.Label, formatOverrideGate(head), head.Actor)
+	}
+	fmt.Println()
 	fmt.Printf("  Nodes:     %d completed\n", r.CompletedNodes)
 	fmt.Printf("  Restarts:  %d\n", r.RestartCount)
 	fmt.Printf("  Timestamp: %s\n", r.CheckpointTimestamp.Format("2006-01-02 15:04:05 MST"))
+	// Per-override Override: chain lines (chronological order, all entries).
+	// SubgraphPath is joined outermost-to-innermost with the leaf gate appended.
+	for _, d := range r.ValidationOverrides {
+		fmt.Printf("  Override:  %s \u2192 %s\n", formatOverrideGate(d), d.Label)
+	}
+}
+
+// formatOverrideGate joins the SubgraphPath as `outer/inner/.../gate` with the
+// GateNodeID appended as the leaf segment. Returns just GateNodeID when no
+// subgraph path is set. Copies into a fresh slice so the caller's
+// SubgraphPath is never mutated by the trailing append.
+func formatOverrideGate(d pipeline.OverrideDetail) string {
+	if len(d.SubgraphPath) == 0 {
+		return d.GateNodeID
+	}
+	parts := make([]string, 0, len(d.SubgraphPath)+1)
+	parts = append(parts, d.SubgraphPath...)
+	parts = append(parts, d.GateNodeID)
+	return strings.Join(parts, "/")
 }
 
 func printTimeline(timeline []tracker.TimelineEntry) {

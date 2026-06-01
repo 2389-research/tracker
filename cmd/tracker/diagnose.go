@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -57,7 +58,16 @@ func printDiagnoseHeader(r *tracker.DiagnoseReport) {
 		printBudgetHalt(r.BudgetHalt)
 	}
 
-	if len(r.Failures) == 0 && r.BudgetHalt == nil {
+	// Surface validation overrides between BudgetHalt and Failures (spec §9.4).
+	// Informational only — override is NOT a failure, so this section may be
+	// rendered alongside (or instead of) the failure section, and the
+	// clean-run early-return below treats "overrides without failures" as a
+	// non-empty report.
+	if len(r.ValidationOverrides) > 0 {
+		printValidationOverrides(r.ValidationOverrides)
+	}
+
+	if len(r.Failures) == 0 && r.BudgetHalt == nil && len(r.ValidationOverrides) == 0 {
 		fmt.Println()
 		fmt.Println(lipgloss.NewStyle().Foreground(colorNeon).Render("  No failures found — this run completed cleanly."))
 		fmt.Println()
@@ -66,6 +76,25 @@ func printDiagnoseHeader(r *tracker.DiagnoseReport) {
 
 	if len(r.Failures) > 0 {
 		printNodeFailures(r.Failures, r.Suggestions)
+	}
+}
+
+// printValidationOverrides renders the informational "Validation Override"
+// section. Per spec §9.4 this is NOT a failure surface — it is a forensic
+// trail showing which gates were overridden, by whom, and on which edge
+// label. Sub-graph paths are rendered as outer/inner/.../gate when present.
+func printValidationOverrides(overrides []pipeline.OverrideDetail) {
+	fmt.Println()
+	fmt.Println("─── Validation Override ─────")
+	for _, d := range overrides {
+		gate := d.GateNodeID
+		if len(d.SubgraphPath) > 0 {
+			gate = strings.Join(append(append([]string{}, d.SubgraphPath...), d.GateNodeID), "/")
+		}
+		fmt.Printf("  Gate:     %s\n", gate)
+		fmt.Printf("  Label:    %q\n", d.Label)
+		fmt.Printf("  Actor:    %s\n", d.Actor)
+		fmt.Println()
 	}
 }
 

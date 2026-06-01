@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	OutcomeSuccess = "success"
-	OutcomeRetry   = "retry"
-	OutcomeFail    = "fail"
+	OutcomeSuccess TerminalStatus = "success"
+	OutcomeRetry   TerminalStatus = "retry"
+	OutcomeFail    TerminalStatus = "fail"
 )
 
 // Outcome represents the result of executing a handler on a pipeline node.
@@ -46,6 +46,17 @@ type Outcome struct {
 	// runs unconditionally; this field is populated only when the
 	// missing-sentinel + route_required combination triggers a fail.
 	MissingRoute *RouteDetail
+	// OverrideActor is the Actor classification of the interviewer that produced
+	// this outcome. Populated by HumanHandler from its bound interviewer's
+	// Actor() method (via actorOf helper). The engine reads this at edge-selection
+	// time when an override edge is traversed, to populate OverrideDetail.Actor.
+	// Empty for non-wait.human handlers (they cannot originate override edges).
+	OverrideActor Actor
+	// ChildOverride carries OverrideDetail entries propagated up from a child
+	// run (subgraph, manager_loop, or parallel branch with a subgraph child).
+	// The engine's applyOutcome path appends these to the parent's
+	// runState.validationOverrides after the handler returns.
+	ChildOverride []OverrideDetail
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

@@ -84,6 +84,15 @@ type jsonlLogEntry struct {
 	// The matcher is built-in so there is no Pattern field; just the
 	// captured stdout tail for diagnosis.
 	RouteTail string `json:"route_tail,omitempty"`
+
+	// Override fields — populated for validation_overridden events.
+	// Identify the gate that produced the override, the edge label that
+	// selected it, who acted, and the subgraph_path when the override
+	// was propagated up from a child run.
+	OverrideGate         string   `json:"override_gate,omitempty"`
+	OverrideLabel        string   `json:"override_label,omitempty"`
+	OverrideActor        Actor    `json:"override_actor,omitempty"`
+	OverrideSubgraphPath []string `json:"override_subgraph_path,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a
@@ -229,6 +238,15 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	}
 	if evt.Route != nil {
 		entry.RouteTail = evt.Route.CapturedTail
+	}
+	if evt.Override != nil {
+		entry.OverrideGate = evt.Override.GateNodeID
+		entry.OverrideLabel = evt.Override.Label
+		entry.OverrideActor = evt.Override.Actor
+		if len(evt.Override.SubgraphPath) > 0 {
+			// Copy to defend against later mutation of the source slice.
+			entry.OverrideSubgraphPath = append([]string(nil), evt.Override.SubgraphPath...)
+		}
 	}
 	return entry
 }

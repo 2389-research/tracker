@@ -95,7 +95,7 @@ func TestToolHandlerSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
 	}
 	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
@@ -120,7 +120,7 @@ func TestToolHandlerFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeFail, outcome.Status)
 	}
 }
@@ -143,7 +143,7 @@ func TestToolHandlerDeclaredWritesExtracted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("status = %q, want success", outcome.Status)
 	}
 	if got := outcome.ContextUpdates["commit_sha"]; got != "abc" {
@@ -173,7 +173,7 @@ func TestToolHandlerDeclaredWritesSingleKeyFallsBackToRaw(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Single-key writes with non-JSON output falls back to raw value with warning.
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("status = %q, want success (single-key fallback)", outcome.Status)
 	}
 	if got := outcome.ContextUpdates["commit_sha"]; got != "nope" {
@@ -207,7 +207,7 @@ func TestToolHandlerDeclaredWritesMultiKeyInvalidJSONFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Fatalf("status = %q, want fail", outcome.Status)
 	}
 	if outcome.ContextUpdates[contextKeyWritesError] == "" {
@@ -278,7 +278,7 @@ func TestToolHandlerCustomTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("expected status %q, got %q", pipeline.OutcomeSuccess, outcome.Status)
 	}
 	stdout := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]
@@ -312,7 +312,7 @@ func TestToolHandlerWritesStatusArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -325,7 +325,7 @@ func TestToolHandlerWritesStatusArtifact(t *testing.T) {
 	if err := json.Unmarshal(statusBytes, &status); err != nil {
 		t.Fatalf("status artifact should be valid json: %v", err)
 	}
-	if status["outcome"] != pipeline.OutcomeSuccess {
+	if status["outcome"] != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("status outcome = %v", status["outcome"])
 	}
 }
@@ -352,7 +352,7 @@ func TestToolHandlerWritesStatusArtifactToPipelineArtifactDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -365,7 +365,7 @@ func TestToolHandlerWritesStatusArtifactToPipelineArtifactDir(t *testing.T) {
 	if err := json.Unmarshal(statusBytes, &status); err != nil {
 		t.Fatalf("status artifact should be valid json: %v", err)
 	}
-	if status["outcome"] != pipeline.OutcomeSuccess {
+	if status["outcome"] != string(pipeline.OutcomeSuccess) {
 		t.Fatalf("status outcome = %v", status["outcome"])
 	}
 
@@ -485,7 +485,7 @@ func TestToolHandler_AllowsSafeVariable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("status = %q, want success", outcome.Status)
 	}
 }
@@ -506,7 +506,7 @@ func TestToolHandler_ExpandsWorkflowParams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("status = %q, want success", outcome.Status)
 	}
 }
@@ -729,7 +729,7 @@ func TestToolHandler_MarkerGrep_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("Status = %q, want %q", outcome.Status, pipeline.OutcomeSuccess)
 	}
 	if outcome.MissingMarker != nil {
@@ -793,7 +793,7 @@ func TestToolHandler_MarkerGrep_LastLineWins(t *testing.T) {
 	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; got != "fail" {
 		t.Errorf("ctx.tool_marker = %q, want last-match %q", got, "fail")
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("Status = %q, want %q (exit 1 must propagate even when marker matched)",
 			outcome.Status, pipeline.OutcomeFail)
 	}
@@ -853,7 +853,7 @@ func TestToolHandler_MarkerGrep_MissingFailsNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("Status = %q, want %q (must fail loudly, not silently fall through)",
 			outcome.Status, pipeline.OutcomeFail)
 	}
@@ -888,7 +888,7 @@ func TestToolHandler_RouteSentinel_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("Status = %q, want success", outcome.Status)
 	}
 	if got := outcome.ContextUpdates[pipeline.ContextKeyToolRoute]; got != "tests-pass" {
@@ -951,7 +951,7 @@ func TestToolHandler_RouteSentinel_RouteRequiredFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("Status = %q, want fail (route_required + no sentinel)", outcome.Status)
 	}
 	if outcome.MissingRoute == nil {
@@ -979,7 +979,7 @@ func TestToolHandler_RouteSentinel_NoFlagNoFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeSuccess {
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
 		t.Errorf("Status = %q, want success (no flag → no fail)", outcome.Status)
 	}
 	if outcome.MissingRoute != nil {
@@ -1031,7 +1031,7 @@ func TestToolHandler_MarkerGrep_BadRegexFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != pipeline.OutcomeFail {
+	if outcome.Status != string(pipeline.OutcomeFail) {
 		t.Errorf("Status = %q, want %q", outcome.Status, pipeline.OutcomeFail)
 	}
 	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError]; got == "" {

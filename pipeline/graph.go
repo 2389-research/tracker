@@ -240,5 +240,11 @@ type Edge struct {
 	To        string
 	Label     string
 	Condition string
-	Attrs     map[string]string
+	// Override marks the edge as a validation-override path. When the engine
+	// traverses an override edge from a wait.human gate, the run's terminal
+	// EngineResult.Status becomes OutcomeValidationOverridden (audit-only;
+	// routing is unaffected). Valid only on edges from wait.human-handler
+	// nodes; enforced by the adapter at graph construction time.
+	Override bool
+	Attrs    map[string]string
 }

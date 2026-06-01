@@ -80,6 +80,23 @@ type Interviewer interface {
 	Ask(prompt string, choices []string, defaultChoice string) (string, error)
 }
 
+// actorOf returns the Actor classification for an Interviewer by querying its
+// optional Actor() method via interface assertion. This pattern avoids adding
+// a method to the exported Interviewer interface (which would break third-party
+// implementations); interviewers in the tracker codebase implement the method,
+// third-party implementations default to ActorUnknown.
+//
+// Used by HumanHandler.Execute to populate Outcome.OverrideActor.
+func actorOf(i Interviewer) pipeline.Actor {
+	if i == nil {
+		return pipeline.ActorUnknown
+	}
+	if a, ok := i.(interface{ Actor() pipeline.Actor }); ok {
+		return a.Actor()
+	}
+	return pipeline.ActorUnknown
+}
+
 // ContextSetter is an optional interface for interviewers that can receive a
 // pipeline context for cancellation and timeout propagation. The human handler
 // calls SetPipelineContext via type assertion before invoking any interviewer
@@ -116,6 +133,9 @@ type InterviewInterviewer interface {
 // if no default is specified. Useful for testing and non-interactive pipelines.
 type AutoApproveInterviewer struct{}
 
+// Actor returns ActorAutopilot — deterministic auto-accept, no human in the loop.
+func (a *AutoApproveInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
+
 // Ask returns the default choice if set, otherwise returns the first choice.
 // Returns an error if no choices are provided.
 func (a *AutoApproveInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
@@ -133,6 +153,10 @@ func (a *AutoApproveInterviewer) Ask(prompt string, choices []string, defaultCho
 type AutoApproveFreeformInterviewer struct {
 	AutoApproveInterviewer
 }
+
+// Actor returns ActorAutopilot — deterministic auto-accept, no human in the loop.
+// Defined explicitly (rather than relying on embedding) so the mapping is grep-able.
+func (a *AutoApproveFreeformInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
 
 // AskFreeform returns a fixed "auto-approved" string.
 func (a *AutoApproveFreeformInterviewer) AskFreeform(prompt string) (string, error) {
@@ -217,6 +241,9 @@ type ConsoleInterviewer struct {
 func NewConsoleInterviewer() *ConsoleInterviewer {
 	return &ConsoleInterviewer{Reader: os.Stdin, Writer: os.Stdout}
 }
+
+// Actor returns ActorHuman — a real human at stdin.
+func (c *ConsoleInterviewer) Actor() pipeline.Actor { return pipeline.ActorHuman }
 
 // readLine reads a single line from the reader, lazily initializing a shared
 // scanner so that buffered stdin data is not lost between calls.
@@ -517,12 +544,24 @@ func (h *HumanHandler) Name() string { return "wait.human" }
 func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	prompt := h.resolveHumanPrompt(node, pctx)
 
+	// Capture the bound interviewer's Actor classification once. Every
+	// outcome we return must carry it on Outcome.OverrideActor so the
+	// engine's edge-selection flip-point (Chunk 5) can populate
+	// OverrideDetail.Actor when an override edge is traversed. Setting
+	// it on the zero-value outcome returned on error paths is harmless
+	// — the field describes the bound interviewer, not the outcome's
+	// success. See actorOf for the interface-assertion contract.
+	actor := actorOf(h.interviewer)
+
 	outcome, err := h.dispatchHumanMode(ctx, node, pctx, prompt)
 
 	if errors.Is(err, errHumanTimeout) {
-		return h.handleHumanTimeout(node), nil
+		timeoutOutcome := h.handleHumanTimeout(node)
+		timeoutOutcome.OverrideActor = actor
+		return timeoutOutcome, nil
 	}
 
+	outcome.OverrideActor = actor
 	return outcome, err
 }
 
@@ -560,18 +599,18 @@ func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome 
 		action = "default"
 	}
 	if action == "fail" {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out",
 		}}
 	}
 	def := cfg.DefaultChoice
 	if def == "" {
-		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out (no default)",
 		}}
 	}
 	return pipeline.Outcome{
-		Status:         pipeline.OutcomeSuccess,
+		Status:         string(pipeline.OutcomeSuccess),
 		PreferredLabel: def,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            def,
@@ -632,7 +671,7 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	}
 
 	outcome := pipeline.Outcome{
-		Status: pipeline.OutcomeSuccess,
+		Status: string(pipeline.OutcomeSuccess),
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            response,
 			pipeline.ContextKeyResponsePrefix + node.ID: response,
@@ -797,7 +836,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 	}
 
 	outcome := pipeline.Outcome{
-		Status: status,
+		Status: string(status),
 		ContextUpdates: map[string]string{
 			answersKey:                                  jsonStr,
 			pipeline.ContextKeyHumanResponse:            summary,
@@ -805,7 +844,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		},
 	}
 	if applyInterviewDeclaredWrites(node, outcome.ContextUpdates, result) {
-		outcome.Status = pipeline.OutcomeFail
+		outcome.Status = string(pipeline.OutcomeFail)
 	}
 	return outcome, nil
 }
@@ -899,7 +938,7 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
-	return pipeline.Outcome{Status: pipeline.OutcomeSuccess, PreferredLabel: selected}, nil
+	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), PreferredLabel: selected}, nil
 }
 
 // executeYesNo handles yes_no mode: presents Yes/No choices and maps them to
@@ -918,5 +957,5 @@ func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipelin
 	if selected == "No" {
 		status = pipeline.OutcomeFail
 	}
-	return pipeline.Outcome{Status: status, PreferredLabel: selected}, nil
+	return pipeline.Outcome{Status: string(status), PreferredLabel: selected}, nil
 }

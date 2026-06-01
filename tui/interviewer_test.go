@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
@@ -74,5 +75,26 @@ func TestInterviewerMode2SendsGateInterview(t *testing.T) {
 	}
 	if result.Questions[0].Answer != "a" {
 		t.Errorf("expected answer 'a', got %q", result.Questions[0].Answer)
+	}
+}
+
+// actorOfTUI mirrors handlers.actorOf (which is package-private). Same code path:
+// opportunistic interface assertion, fallback to ActorUnknown. Used to exercise
+// the contract that handlers.actorOf will satisfy when it sees this type.
+func actorOfTUI(i handlers.Interviewer) pipeline.Actor {
+	if i == nil {
+		return pipeline.ActorUnknown
+	}
+	if a, ok := i.(interface{ Actor() pipeline.Actor }); ok {
+		return a.Actor()
+	}
+	return pipeline.ActorUnknown
+}
+
+func TestBubbleteaInterviewer_Actor(t *testing.T) {
+	// Mode-1 zero-value construction is fine — Actor() doesn't touch send.
+	var iv handlers.Interviewer = NewMode1Interviewer()
+	if got := actorOfTUI(iv); got != pipeline.ActorHuman {
+		t.Errorf("actorOfTUI(BubbleteaInterviewer) = %q, want %q", got, pipeline.ActorHuman)
 	}
 }

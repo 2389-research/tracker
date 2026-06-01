@@ -34,6 +34,15 @@ var (
 	ColorGrep  = lipgloss.Color("114") // #87d787 — green search
 	ColorAgent = lipgloss.Color("213") // #ff87ff — magenta spawn
 	ColorPatch = lipgloss.Color("180") // #d7af87 — tan patch/apply
+
+	// ColorOverride is Tailwind amber-600 — the chosen color for the
+	// validation_overridden terminal status (Gap 5.2 spec D18). Canonical
+	// source for the override amber across both the TUI and CLI surfaces;
+	// cmd/tracker/branding.go's colorOverride aliases this value so future
+	// updates only need to land here. Distinct from ColorAmber (#ffaf00,
+	// used for running/warning states) so the override treatment is visually
+	// unique within the TUI palette.
+	ColorOverride = lipgloss.Color("#D97706")
 )
 
 // Color aliases for semantic node status colors.

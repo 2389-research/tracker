@@ -444,7 +444,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 	}
 
 	outcome := pipeline.Outcome{
-		Status: pipeline.OutcomeRetry,
+		Status: string(pipeline.OutcomeRetry),
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             runErr.Error(),
 			pipeline.ContextKeyResponsePrefix + node.ID: runErr.Error(),
@@ -506,7 +506,7 @@ func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt,
 
 	status, msg := emptyResponseStatusMsg(node.ID, emptyAPIResponse)
 	outcome := pipeline.Outcome{
-		Status: status,
+		Status: string(status),
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
@@ -520,7 +520,7 @@ func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt,
 }
 
 // emptyResponseStatusMsg returns the outcome status and diagnostic message for an empty response.
-func emptyResponseStatusMsg(nodeID string, emptyAPIResponse bool) (string, string) {
+func emptyResponseStatusMsg(nodeID string, emptyAPIResponse bool) (pipeline.TerminalStatus, string) {
 	if emptyAPIResponse {
 		return pipeline.OutcomeRetry, fmt.Sprintf("node %q: provider returned empty API response (0 output tokens, 0 tool calls); retrying session", nodeID)
 	}
@@ -549,7 +549,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	}
 
 	outcome := pipeline.Outcome{
-		Status: status,
+		Status: string(status),
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             responseText,
 			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
@@ -558,7 +558,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	}
 	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
 	if applyDeclaredWrites(node, outcome.ContextUpdates, responseText, "Response JSON") {
-		outcome.Status = pipeline.OutcomeFail
+		outcome.Status = string(pipeline.OutcomeFail)
 	}
 	if turnLimitMsg != "" {
 		outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] = turnLimitMsg
@@ -711,7 +711,7 @@ func applyTypedCompaction(config *agent.SessionConfig, cfg pipeline.AgentNodeCon
 // the last one found. Case-insensitive matching. Lines inside code fences
 // (``` blocks) are skipped to avoid matching hallucinated STATUS lines.
 // Falls back to success if no valid STATUS line is found.
-func parseAutoStatus(text string) string {
+func parseAutoStatus(text string) pipeline.TerminalStatus {
 	result := pipeline.OutcomeSuccess
 	inCodeBlock := false
 	for _, line := range strings.Split(text, "\n") {
@@ -740,7 +740,7 @@ func parseAutoStatus(text string) string {
 // italic `*`, underscore-bold `__`, underscore-italic `_`) from both
 // the full line and the value portion, so the prefix check and value
 // switch see the bare token.
-func parseStatusLine(trimmed string) string {
+func parseStatusLine(trimmed string) pipeline.TerminalStatus {
 	trimmed = strings.Trim(trimmed, "*_")
 	if !strings.HasPrefix(strings.ToUpper(trimmed), "STATUS:") {
 		return ""

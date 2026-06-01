@@ -30,11 +30,11 @@ func TestGoalGateRetryTerminatesAtDefaultMax(t *testing.T) {
 			switch node.ID {
 			case "work":
 				workAttempts++
-				return Outcome{Status: OutcomeFail}, nil // always fail
+				return Outcome{Status: string(OutcomeFail)}, nil // always fail
 			case "repair":
-				return Outcome{Status: OutcomeSuccess}, nil
+				return Outcome{Status: string(OutcomeSuccess)}, nil
 			default:
-				return Outcome{Status: OutcomeSuccess}, nil
+				return Outcome{Status: string(OutcomeSuccess)}, nil
 			}
 		},
 	})
@@ -75,9 +75,9 @@ func TestGoalGateRetryRespectsNodeMaxRetries(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "work" {
 				workAttempts++
-				return Outcome{Status: OutcomeFail}, nil
+				return Outcome{Status: string(OutcomeFail)}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -119,13 +119,13 @@ func TestGoalGateRetryFallsBackToFallbackTarget(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "work" {
-				return Outcome{Status: OutcomeFail}, nil
+				return Outcome{Status: string(OutcomeFail)}, nil
 			}
 			if node.ID == "escalate" {
 				escalateVisited = true
-				return Outcome{Status: OutcomeSuccess}, nil
+				return Outcome{Status: string(OutcomeSuccess)}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 
@@ -176,11 +176,11 @@ func TestGoalGateFallbackTargetAttributeRecognized(t *testing.T) {
 			if node.ID == "work" {
 				workAttempts++
 				if workAttempts == 1 {
-					return Outcome{Status: OutcomeFail}, nil
+					return Outcome{Status: string(OutcomeFail)}, nil
 				}
-				return Outcome{Status: OutcomeSuccess}, nil
+				return Outcome{Status: string(OutcomeSuccess)}, nil
 			}
-			return Outcome{Status: OutcomeSuccess}, nil
+			return Outcome{Status: string(OutcomeSuccess)}, nil
 		},
 	})
 

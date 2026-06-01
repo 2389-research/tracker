@@ -1316,7 +1316,7 @@ type doctorMockHandler struct{ name string }
 func (h *doctorMockHandler) Name() string { return h.name }
 
 func (h *doctorMockHandler) Execute(_ context.Context, _ *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 }
 
 func maskKey(key string) string {

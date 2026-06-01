@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // postCallback posts a WebhookGateResponse to the interviewer's callback server.
@@ -404,5 +406,13 @@ func TestNewGateID(t *testing.T) {
 		if len(parts) != 5 {
 			t.Errorf("gate ID %q does not look like a UUID (got %d parts)", id, len(parts))
 		}
+	}
+}
+
+func TestWebhookInterviewer_Actor(t *testing.T) {
+	// Actor() doesn't touch any internal state — zero-value construction is fine.
+	var iv Interviewer = &WebhookInterviewer{}
+	if got := actorOf(iv); got != pipeline.ActorWebhook {
+		t.Errorf("actorOf(WebhookInterviewer) = %q, want %q", got, pipeline.ActorWebhook)
 	}
 }

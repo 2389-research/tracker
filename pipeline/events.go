@@ -74,7 +74,29 @@ const (
 	// marker_grep is the strictness flag for the regex-attribute
 	// channel. Carries RouteDetail with the captured stdout tail.
 	EventToolRouteMissing PipelineEventType = "tool_route_missing"
+
+	// EventValidationOverridden fires when the engine traverses an
+	// Edge.Override-marked edge at advanceToNextNode. Carries an
+	// OverrideDetail payload via PipelineEvent.Override. Stage-level
+	// event (NodeID = gate node), same shape as
+	// EventConditionalFallthrough. Rides alongside (not instead of) the
+	// EventDecisionEdge event emitted for the same selection — the
+	// DecisionEdge carries EdgePriorityOverride on its EdgePriority
+	// field so external consumers that only watch DecisionEdge can still
+	// identify the traversal as an override.
+	EventValidationOverridden PipelineEventType = "validation_overridden"
 )
+
+// EdgePriorityOverride identifies an edge selected at advanceToNextNode
+// that carries Edge.Override == true. Emitted as the EdgePriority on
+// the EventDecisionEdge event for the override-edge selection.
+// EventValidationOverridden rides alongside (not instead of) the
+// DecisionEdge event for these traversals.
+//
+// Untyped string constant to match the existing edge_priority values
+// ("condition", "label", "suggested", "weight", "lexical") which are
+// inlined as bare string literals at the call sites in engine_edges.go.
+const EdgePriorityOverride = "override"
 
 // MarkerDetail is the payload for EventToolMarkerMissing. Pattern is the
 // raw regex declared on the node's marker_grep attribute; CapturedTail is
@@ -126,7 +148,7 @@ type DecisionDetail struct {
 	// Edge selection fields.
 	EdgeFrom     string `json:"edge_from,omitempty"`
 	EdgeTo       string `json:"edge_to,omitempty"`
-	EdgePriority string `json:"edge_priority,omitempty"` // "condition", "label", "suggested", "weight", "lexical"
+	EdgePriority string `json:"edge_priority,omitempty"` // "condition", "label", "suggested", "weight", "lexical", "override"
 
 	// Condition evaluation fields.
 	EdgeCondition  string `json:"edge_condition,omitempty"`
@@ -180,6 +202,9 @@ type PipelineEvent struct {
 	Truncation *TruncationDetail // non-nil for EventToolOutputTruncated
 	Marker     *MarkerDetail     // non-nil for EventToolMarkerMissing
 	Route      *RouteDetail      // non-nil for EventToolRouteMissing
+	// Override is non-nil on EventValidationOverridden events. Carries the
+	// gate, label, actor, and subgraph_path of the traversed override edge.
+	Override *OverrideDetail
 
 	// BundleIdentity is the content-addressed identity of the .dipx bundle
 	// the run was started against ("sha256:<hex>"). Empty for runs from a

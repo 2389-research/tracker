@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/2389-research/tracker/llm"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // NodeState represents the execution state of a pipeline node.
@@ -70,8 +71,25 @@ type StateStore struct {
 	visitPath    []string // ordered list of visited node IDs (with repeats for loops)
 	pipelineDone bool
 	pipelineErr  string
-	Tokens       *llm.TokenTracker
-	startUsage   map[string]llm.Usage // usage snapshot at node start (for delta calculation)
+	// pipelineStatus is the terminal status assigned when the pipeline ends.
+	// Zero value (empty string) while the run is in flight; set to
+	// OutcomeSuccess, OutcomeValidationOverridden, OutcomeFail, or
+	// OutcomeBudgetExceeded by Apply when MsgPipelineCompleted/Failed lands.
+	// Gap 5.2 D17: the completion-row renderer reads this to pick amber for
+	// validation_overridden vs green for plain success.
+	pipelineStatus pipeline.TerminalStatus
+	// validationOverrides accumulates override entries from
+	// MsgValidationOverridden as they arrive. Stored in chronological order;
+	// the headline (latest, per spec D5a) is computed on read so callers see
+	// a consistent view regardless of arrival timing.
+	validationOverrides []pipeline.OverrideDetail
+	// headlineOverride is the rendered headline entry as of the last
+	// MsgPipelineCompleted (latest accumulated entry per D5a). Cached so the
+	// renderer reads a stable snapshot and Apply orders override-accumulation
+	// before status-computation deterministically.
+	headlineOverride *pipeline.OverrideDetail
+	Tokens           *llm.TokenTracker
+	startUsage       map[string]llm.Usage // usage snapshot at node start (for delta calculation)
 }
 
 // NewStateStore creates a StateStore with an optional TokenTracker.
@@ -195,6 +213,30 @@ func (s *StateStore) PipelineDone() bool { return s.pipelineDone }
 // PipelineError returns the pipeline error message, if any.
 func (s *StateStore) PipelineError() string { return s.pipelineErr }
 
+// PipelineStatus returns the terminal status assigned when the pipeline
+// finished. Empty string while the run is in flight or for partial states
+// that haven't yet computed a terminal classification. The completion-row
+// renderer keys on this to pick green vs amber vs red.
+func (s *StateStore) PipelineStatus() pipeline.TerminalStatus { return s.pipelineStatus }
+
+// HeadlineOverride returns the snapshot of the headline override entry as of
+// pipeline completion (latest accumulated entry per spec D5a), or nil when
+// no override fired. The renderer uses this for the
+// "Completed — validation override at <gate> ..." copy.
+func (s *StateStore) HeadlineOverride() *pipeline.OverrideDetail { return s.headlineOverride }
+
+// ValidationOverrides returns a defensive copy of the accumulated override
+// list for inspection (e.g. tests). The caller may mutate the returned slice
+// without affecting StateStore.
+func (s *StateStore) ValidationOverrides() []pipeline.OverrideDetail {
+	if len(s.validationOverrides) == 0 {
+		return nil
+	}
+	out := make([]pipeline.OverrideDetail, len(s.validationOverrides))
+	copy(out, s.validationOverrides)
+	return out
+}
+
 // Progress returns the count of completed nodes and total nodes.
 func (s *StateStore) Progress() (done, total int) {
 	total = len(s.nodes)
@@ -309,12 +351,16 @@ func (s *StateStore) applyNodeMsg(msg interface{}) bool {
 // applyPipelineOrThinkingMsg handles pipeline and thinking state messages.
 func (s *StateStore) applyPipelineOrThinkingMsg(msg interface{}) {
 	switch m := msg.(type) {
+	case MsgValidationOverridden:
+		s.validationOverrides = append(s.validationOverrides, m.Detail)
 	case MsgPipelineCompleted:
 		s.pipelineDone = true
+		s.applyCompletedStatus(m)
 		s.markSkippedNodes()
 	case MsgPipelineFailed:
 		s.pipelineDone = true
 		s.pipelineErr = m.Error
+		s.pipelineStatus = pipeline.OutcomeFail
 		s.markSkippedNodes()
 	case MsgThinkingStarted:
 		s.ensure(m.NodeID).thinking = true
@@ -323,6 +369,38 @@ func (s *StateStore) applyPipelineOrThinkingMsg(msg interface{}) {
 		s.ensure(m.NodeID).thinking = false
 	case MsgLLMRequestPreparing:
 		s.ensure(m.NodeID).waiting = true // set waiting state before provider responds
+	}
+}
+
+// applyCompletedStatus reconciles the terminal status carried on the
+// MsgPipelineCompleted message with the StateStore's accumulated override
+// list. When the message carries an explicit Status (stateful PipelineAdapter
+// path) we honor it. When Status is zero (stateless AdaptPipelineEvent path
+// used in tests) we derive the status from accumulated overrides: any
+// override present flips a success exit to OutcomeValidationOverridden per
+// Gap 5.2 D17. The headline override is similarly preferred from the message
+// when set, else picked as the latest accumulated entry per D5a.
+func (s *StateStore) applyCompletedStatus(m MsgPipelineCompleted) {
+	if m.Status != "" {
+		s.pipelineStatus = m.Status
+	} else if len(s.validationOverrides) > 0 {
+		s.pipelineStatus = pipeline.OutcomeValidationOverridden
+	} else {
+		s.pipelineStatus = pipeline.OutcomeSuccess
+	}
+	if m.Override != nil {
+		cp := *m.Override
+		s.headlineOverride = &cp
+	} else if n := len(s.validationOverrides); n > 0 &&
+		(m.Status == "" || m.Status == pipeline.OutcomeValidationOverridden) {
+		// Only synthesize a headline from accumulated overrides when status
+		// is defaulted OR explicitly carries the override status. A
+		// non-override explicit Status with no Override pointer is the
+		// clean-success case; surfacing a stale override headline would
+		// confuse HeadlineOverride() consumers even though the completion-
+		// row renderer keys on pipelineStatus today.
+		cp := s.validationOverrides[n-1] // D5a: latest = headline
+		s.headlineOverride = &cp
 	}
 }
 

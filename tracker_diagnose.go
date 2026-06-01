@@ -31,11 +31,23 @@ type DiagnoseConfig struct {
 
 // DiagnoseReport is the structured output of Diagnose / DiagnoseMostRecent.
 type DiagnoseReport struct {
-	RunID          string        `json:"run_id"`
-	CompletedNodes int           `json:"completed_nodes"`
-	BudgetHalt     *BudgetHalt   `json:"budget_halt,omitempty"`
-	Failures       []NodeFailure `json:"failures"`
-	Suggestions    []Suggestion  `json:"suggestions"`
+	RunID          string      `json:"run_id"`
+	CompletedNodes int         `json:"completed_nodes"`
+	BudgetHalt     *BudgetHalt `json:"budget_halt,omitempty"`
+	// ValidationOverrides is the list of override edges traversed during the run.
+	// Sourced from activity log first, with checkpoint fallback for runs whose
+	// activity log is missing (legacy / archived). Empty for runs with no
+	// override edges. Populated for every terminal status (success, fail,
+	// budget_exceeded, validation_overridden) so override forensics survive
+	// failure-after-override scenarios. Per spec §9.4 the override section in
+	// `tracker diagnose` is informational only — override is NOT a failure and
+	// does NOT raise a Suggestion of its own.
+	ValidationOverrides []pipeline.OverrideDetail `json:"validation_overrides,omitempty"`
+	// OverrideCount is len(ValidationOverrides). Kept as its own field so
+	// JSON consumers can branch without iterating the slice.
+	OverrideCount int           `json:"override_count,omitempty"`
+	Failures      []NodeFailure `json:"failures"`
+	Suggestions   []Suggestion  `json:"suggestions"`
 }
 
 // NodeFailure captures everything known about a failed node.
@@ -151,6 +163,25 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 	}
 	report.BudgetHalt = halt
 	report.Failures = sortedFailures(failures)
+	// Source ValidationOverrides from activity log first; fall back to the sticky
+	// checkpoint slice when the activity log carries no override entries (legacy
+	// runs, archived activity logs, etc.). Mirrors the Audit() pattern in
+	// tracker_audit.go. Per spec §9.4: override is NOT a failure, so the
+	// suggestion builder is intentionally not informed — the diagnose render
+	// surfaces overrides as a separate informational section.
+	if activity, err := LoadActivityLog(runDir); err == nil {
+		SortActivityByTime(activity)
+		overrides := extractOverridesFromActivity(activity)
+		if len(overrides) == 0 {
+			overrides = cp.ValidationOverrides
+		}
+		report.ValidationOverrides = overrides
+		report.OverrideCount = len(overrides)
+	} else {
+		// Activity log unreadable: fall back to checkpoint sticky slice.
+		report.ValidationOverrides = cp.ValidationOverrides
+		report.OverrideCount = len(cp.ValidationOverrides)
+	}
 	report.Suggestions = buildSuggestions(report.Failures, report.BudgetHalt, anomalies)
 	return report, nil
 }

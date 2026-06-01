@@ -58,12 +58,12 @@ func (h *SubgraphHandler) Name() string {
 func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 	ref, ok := node.Attrs["subgraph_ref"]
 	if !ok || ref == "" {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("node %q missing subgraph_ref attribute", node.ID)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("node %q missing subgraph_ref attribute", node.ID)
 	}
 
 	subGraph, ok := h.graphs[ref]
 	if !ok {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q not found", ref)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("subgraph %q not found", ref)
 	}
 
 	// Merge child workflow's own vars defaults with parent-provided
@@ -85,7 +85,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	// Inject params into graph (creates clone if params exist)
 	subGraphWithParams, err := InjectParamsIntoGraph(subGraph, params)
 	if err != nil {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("failed to inject params into subgraph %q: %w", ref, err)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("failed to inject params into subgraph %q: %w", ref, err)
 	}
 
 	// After pre-expansion, write the merged effective params back onto
@@ -134,7 +134,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	engine := NewEngine(subGraphWithParams, childRegistry, childOpts...)
 	result, err := engine.Run(ctx)
 	if err != nil {
-		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q execution failed: %w", ref, err)
+		return Outcome{Status: string(OutcomeFail)}, fmt.Errorf("subgraph %q execution failed: %w", ref, err)
 	}
 
 	// Map engine result status to outcome. A child-side budget halt is not
@@ -143,20 +143,38 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	// with the correct OutcomeBudgetExceeded status. Mapping it to fail
 	// here would trip the engine's strict-failure-edges rule before the
 	// parent's budget check runs, masking the real reason for the halt.
-	status := OutcomeSuccess
+	//
+	// OutcomeValidationOverridden gets the same Success treatment for
+	// parent routing — the child's override doesn't redirect the parent's
+	// edge selection (parent decides its own routing). The override flag
+	// is propagated up via ChildOverride below; the parent's engine
+	// absorbs it into the sticky list and the terminal-status rule
+	// flips Success → ValidationOverridden at the parent level.
+	var status TerminalStatus
 	switch result.Status {
-	case OutcomeSuccess, OutcomeBudgetExceeded:
+	case OutcomeSuccess, OutcomeBudgetExceeded, OutcomeValidationOverridden:
 		status = OutcomeSuccess
 	default:
 		status = OutcomeFail
 	}
 
+	// Propagate the child's ValidationOverrides up to the parent, prepending
+	// this subgraph node's ID to each entry's SubgraphPath. Outermost-to-
+	// innermost ordering: a child override originating at "Gate" inside a
+	// "L2" subgraph that itself runs inside an "L1" subgraph terminates at
+	// the outermost engine with SubgraphPath=["L1", "L2"] and GateNodeID="Gate".
+	// The recursive prepend lives in this handler (via PrependSubgraphPath) —
+	// each level adds its own ID to the front, so by the time control returns
+	// to the outermost run the path enumerates the nesting chain leaf-up.
+	childOverride := PrependSubgraphPath(result.ValidationOverrides, node.ID)
+
 	// Propagate the child's aggregated usage up to the parent trace so
 	// BudgetGuard checks between parent nodes, per-provider CLI rollups,
 	// and library-level EngineResult.Usage all see subgraph spend.
 	return Outcome{
-		Status:         status,
+		Status:         string(status),
 		ContextUpdates: result.Context,
 		ChildUsage:     result.Usage,
+		ChildOverride:  childOverride,
 	}, nil
 }

@@ -273,6 +273,29 @@ graph TB
       Used by <code>stack.manager_loop</code> to steer a child pipeline mid-run.
       Steered values are namespaced under <code>steer.</code> on the child.
     </p>
+
+    <h3 style="margin-top: 2rem;">Run terminal statuses</h3>
+    <p style="color: var(--text-secondary);">
+      <code>EngineResult.Status</code> carries one of four values when a run ends. The enum is open &mdash;
+      future minor releases may add values, so consumers should classify via <code>TerminalStatus.IsSuccess()</code>
+      (or the <code>status_class</code> JSON companion field) rather than switching on the raw string.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Value</th><th>Meaning</th><th><code>IsSuccess()</code></th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>success</code></td><td>Run reached the success exit; every validation along the way passed.</td><td>true</td></tr>
+          <tr><td><code>validation_overridden</code> <span class="badge">v0.35.0</span></td><td>Run reached the success exit, but a human, autopilot, or webhook accepted a failed validation along the way via a <code>wait.human</code> edge marked <code>override: true</code>. Routing is unchanged from the success path &mdash; the marker is an audit signal recorded on <code>EngineResult.ValidationOverrides</code>.</td><td>true</td></tr>
+          <tr><td><code>budget_exceeded</code></td><td>The <code>BudgetGuard</code> halted the run after a token, cost, or wall-time ceiling tripped. <code>CostSnapshot</code> on the result names the dimension.</td><td>false</td></tr>
+          <tr><td><code>fail</code></td><td>Run halted via failure (strict failure edge, provider error, etc.).</td><td>false</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+      The <code>tracker run</code> CLI maps <code>fail</code>/<code>budget_exceeded</code> to exit <code>1</code> and (with <code>--fail-on-override</code>) maps <code>validation_overridden</code> to exit <code>2</code>. Without the flag, override runs exit <code>0</code> &mdash; the default treats an operator-accepted override as audit-positive. See the <a href="/tracker/cli.html#exit-codes">CLI exit-codes table</a>.
+    </p>
   </section>
 
   <!-- ═══ LLM client middleware ═══ -->
