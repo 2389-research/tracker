@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`TRACKER_GATEWAY_KIND` routing dispatch** (refs #274, closes #276). New env
+  var, `--gateway-kind` CLI flag, and `Config.GatewayKind` library option select
+  the per-provider URL suffix convention used with `TRACKER_GATEWAY_URL`:
+  - `cf-aig` (empty/default, backcompat) — Cloudflare AI Gateway path
+    conventions: `/anthropic`, `/openai`, `/google-ai-studio`, `/compat`.
+  - `bedrock` — the 2389 bedrock-gateway Worker: empty suffix for Anthropic
+    (the SDK appends `/v1/messages`), `/v1` for OpenAI and Gemini.
+    `openai-compat` is unsupported (the bedrock gateway has no `/compat`
+    equivalent) and the resolver refuses to route (fail-closed).
+
+  Unknown kind values refuse to route rather than silently falling through
+  to `cf-aig`. Per-provider `<PROVIDER>_BASE_URL` env vars still win
+  unconditionally as the surgical override.
+
+  Existing CF AIG callers see zero behavior change — the default behavior
+  matches the prior hard-coded suffix map. Operator-facing docs + doctor
+  preflight notes ship in follow-up PRs (#277, #278).
+
 ## [0.35.1] - 2026-06-02
 
 ### Changed
