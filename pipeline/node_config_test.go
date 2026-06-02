@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -347,5 +348,75 @@ func TestRetryConfig_BaseDelayGraphFallback(t *testing.T) {
 	rc2 := n2.RetryConfig(graph)
 	if rc2.BaseDelay != 500*time.Millisecond {
 		t.Errorf("node value should override graph default; got %v", rc2.BaseDelay)
+	}
+}
+
+func TestAgentConfig_WritablePaths(t *testing.T) {
+	cases := []struct {
+		name    string
+		attrs   map[string]string
+		want    []string
+		wantSet bool
+	}{
+		{
+			name:    "absent",
+			attrs:   map[string]string{},
+			want:    nil,
+			wantSet: false,
+		},
+		{
+			name:    "single glob",
+			attrs:   map[string]string{"writable_paths": "workspace/**"},
+			want:    []string{"workspace/**"},
+			wantSet: true,
+		},
+		{
+			name:    "comma-separated",
+			attrs:   map[string]string{"writable_paths": "workspace/**,.ai/sprints/**,.ai/managers/recovery-journal.md"},
+			want:    []string{"workspace/**", ".ai/sprints/**", ".ai/managers/recovery-journal.md"},
+			wantSet: true,
+		},
+		{
+			name:    "whitespace trimmed",
+			attrs:   map[string]string{"writable_paths": " workspace/** ,  .ai/sprints/** "},
+			want:    []string{"workspace/**", ".ai/sprints/**"},
+			wantSet: true,
+		},
+		{
+			name:    "empty entries dropped",
+			attrs:   map[string]string{"writable_paths": "workspace/**,,.ai/sprints/**"},
+			want:    []string{"workspace/**", ".ai/sprints/**"},
+			wantSet: true,
+		},
+		{
+			name:    "present empty string",
+			attrs:   map[string]string{"writable_paths": ""},
+			want:    nil,
+			wantSet: true,
+		},
+		{
+			name:    "present whitespace only",
+			attrs:   map[string]string{"writable_paths": "   "},
+			want:    nil,
+			wantSet: true,
+		},
+		{
+			name:    "present only commas",
+			attrs:   map[string]string{"writable_paths": ",,,"},
+			want:    nil,
+			wantSet: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &Node{Attrs: tc.attrs}
+			cfg := n.AgentConfig(nil)
+			if !slices.Equal(cfg.WritablePaths, tc.want) {
+				t.Errorf("WritablePaths = %v, want %v", cfg.WritablePaths, tc.want)
+			}
+			if cfg.WritablePathsSet != tc.wantSet {
+				t.Errorf("WritablePathsSet = %v, want %v", cfg.WritablePathsSet, tc.wantSet)
+			}
+		})
 	}
 }

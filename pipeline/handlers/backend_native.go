@@ -4,10 +4,12 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/2389-research/tracker/agent"
-	"github.com/2389-research/tracker/agent/exec"
+	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/agent/tools"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -15,12 +17,12 @@ import (
 // NativeBackend implements pipeline.AgentBackend using the built-in agent.Session.
 type NativeBackend struct {
 	client agent.Completer
-	env    exec.ExecutionEnvironment
+	env    execpkg.ExecutionEnvironment
 }
 
 // NewNativeBackend creates a NativeBackend that runs agent sessions with the
 // given LLM completer and execution environment.
-func NewNativeBackend(client agent.Completer, env exec.ExecutionEnvironment) *NativeBackend {
+func NewNativeBackend(client agent.Completer, env execpkg.ExecutionEnvironment) *NativeBackend {
 	return &NativeBackend{
 		client: client,
 		env:    env,
@@ -34,6 +36,56 @@ func NewNativeBackend(client agent.Completer, env exec.ExecutionEnvironment) *Na
 func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
 	sessionCfg := b.buildSessionConfig(cfg)
 
+	// writable_paths fs-jail (#272): when the session config declares it,
+	// build a fresh *LocalEnvironment so the per-session jail hooks don't
+	// leak into the shared b.env. configureJail also refuses-to-start when
+	// the backend, working_dir, paths, or kernel support are bad.
+	env := b.env
+	if sessionCfg.WritablePathsSet {
+		localEnv, ok := b.env.(*execpkg.LocalEnvironment)
+		if !ok {
+			return agent.SessionResult{}, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
+		}
+		// The "session root" for jail validation is the backend env's
+		// WorkingDir — the resolved --workdir flag (or AgentRunConfig.WorkingDir
+		// when set). Process CWD is wherever the user happened to invoke
+		// tracker from; using it as the validation base would either let a
+		// node-level working_dir relocate the jail anchor outside the
+		// session root (escape) or reject valid absolute --workdir values
+		// that sit outside the user's shell cwd (#275 review, Copilot
+		// backend_native.go:78).
+		sessionRoot := localEnv.WorkingDir()
+		if sessionRoot == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return agent.SessionResult{}, fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
+			}
+			sessionRoot = cwd
+		}
+		// Fresh env rooted at the session's working_dir when set, falling
+		// back to the session root. Using sessionCfg.WorkingDir respects
+		// per-node overrides so cmd.Dir and the jail anchor stay aligned
+		// (#272 review, coderabbitai backend_native.go:57). Empty
+		// sessionCfg.WorkingDir defers to the session root rather than
+		// filepath.Join(root, "") which silently relocates (#275 review,
+		// Copilot backend_native.go:62).
+		jailedWorkDir := sessionCfg.WorkingDir
+		if jailedWorkDir == "" {
+			jailedWorkDir = sessionRoot
+		}
+		if !filepath.IsAbs(jailedWorkDir) {
+			jailedWorkDir = filepath.Join(sessionRoot, jailedWorkDir)
+		}
+		// Keep SessionConfig.WorkingDir in sync with the resolved anchor so
+		// configureJail validates against the same path the env is rooted at.
+		sessionCfg.WorkingDir = jailedWorkDir
+		jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
+		if _, err := configureJail(&sessionCfg, jailedEnv, sessionRoot); err != nil {
+			return agent.SessionResult{}, err
+		}
+		env = jailedEnv
+	}
+
 	handler := agent.EventHandlerFunc(func(evt agent.Event) {
 		emit(evt)
 	})
@@ -41,8 +93,8 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	opts := []agent.SessionOption{
 		agent.WithEventHandler(handler),
 	}
-	if b.env != nil {
-		opts = append(opts, agent.WithEnvironment(b.env))
+	if env != nil {
+		opts = append(opts, agent.WithEnvironment(env))
 	}
 
 	// Register generate_code tool if a cheap model is configured via env.
@@ -54,6 +106,12 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 		genOpts := []tools.GenerateCodeOption{
 			tools.WithGenerateModel(cheapModel),
 			tools.WithGenerateProvider(cheapProvider),
+			// Route writes through the resolved env so the writable_paths
+			// fs-jail (#272) intercepts generated files alongside Write /
+			// Edit / ApplyPatch. `env` here is the JAILED env when
+			// sessionCfg.WritablePathsSet — see the configureJail block
+			// above. #275 audit pass.
+			tools.WithGenerateEnv(env),
 		}
 		workDir := sessionCfg.WorkingDir
 		if workDir == "" {
@@ -74,6 +132,9 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 		swOpts := []tools.WriteEnrichedSprintOption{
 			tools.WithSprintWriterModel(sprintModel),
 			tools.WithSprintWriterProvider(sprintProvider),
+			// Same routing rationale as the generate_code tool above
+			// (#275 audit pass).
+			tools.WithSprintWriterEnv(env),
 		}
 		workDir := sessionCfg.WorkingDir
 		if workDir == "" {

@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -157,4 +158,66 @@ func (c *modelCapturingCompleter) Complete(ctx context.Context, req *llm.Request
 		FinishReason: llm.FinishReason{Reason: "stop"},
 		Usage:        llm.Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
 	}, nil
+}
+
+func TestNativeBackend_Run_WritablePathsRefusesOnBadBackendField(t *testing.T) {
+	if probeErr := agentexec.ProbeLandlock(); probeErr != nil {
+		t.Skipf("Landlock unavailable: %v", probeErr)
+	}
+	client := &fakeCompleter{}
+	env := agentexec.NewLocalEnvironment(t.TempDir())
+	backend := NewNativeBackend(client, env)
+
+	// Build a session config with WritablePaths set but Backend="acp" —
+	// configureJail must refuse before agent.NewSession is invoked.
+	// WorkingDir="." resolves under process CWD to pass G1 (path-escape gate)
+	// so that G2 (backend gate) fires and returns the error we assert on.
+	sessionCfg := agent.SessionConfig{
+		WorkingDir:       ".",
+		WritablePaths:    []string{"workspace/**"},
+		WritablePathsSet: true,
+		Backend:          "acp",
+	}
+	runCfg := pipeline.AgentRunConfig{
+		Prompt: "hi",
+		Extra:  &sessionCfg,
+	}
+	emit := func(_ agent.Event) {}
+	_, err := backend.Run(context.Background(), runCfg, emit)
+	if err == nil {
+		t.Fatal("expected refuse-to-start error; got nil")
+	}
+	if !strings.Contains(err.Error(), "acp") {
+		t.Errorf("err = %v, want message naming acp backend refusal", err)
+	}
+}
+
+func TestNativeBackend_Run_NoWritablePaths_UnchangedBehavior(t *testing.T) {
+	// Regression: when WritablePathsSet=false, the shared b.env is used
+	// unchanged — no jail wiring, no new env construction. Verifies the
+	// no-op short-circuit path.
+	client := &fakeCompleter{responseText: "ok"}
+	env := agentexec.NewLocalEnvironment(t.TempDir())
+	backend := NewNativeBackend(client, env)
+
+	sessionCfg := agent.SessionConfig{
+		WorkingDir:       env.WorkingDir(),
+		WritablePathsSet: false,
+	}
+	if env.CommandWrapper != nil || env.WriteOpener != nil {
+		t.Fatal("test setup error: env hooks pre-set")
+	}
+	runCfg := pipeline.AgentRunConfig{
+		Prompt: "hi",
+		Extra:  &sessionCfg,
+	}
+	emit := func(_ agent.Event) {}
+	_, _ = backend.Run(context.Background(), runCfg, emit)
+	// b.env's hooks must remain nil — confirms we didn't mutate the shared env.
+	if env.CommandWrapper != nil {
+		t.Error("shared env.CommandWrapper was mutated despite WritablePathsSet=false")
+	}
+	if env.WriteOpener != nil {
+		t.Error("shared env.WriteOpener was mutated despite WritablePathsSet=false")
+	}
 }

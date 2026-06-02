@@ -30,6 +30,12 @@ type CommandResult struct {
 type ExecutionEnvironment interface {
 	ReadFile(ctx context.Context, path string) (string, error)
 	WriteFile(ctx context.Context, path string, content string) error
+	// RemoveFile deletes a file relative to the working directory. Used by
+	// tools that mutate the workspace (e.g. apply_patch's delete and
+	// move-cleanup paths). Implementations enforce the same containment
+	// rules as WriteFile so the writable_paths fs-jail (#272) can intercept
+	// destructive operations through a single seam.
+	RemoveFile(ctx context.Context, path string) error
 	ExecCommand(ctx context.Context, command string, args []string, timeout time.Duration) (CommandResult, error)
 	Glob(ctx context.Context, pattern string) ([]string, error)
 	WorkingDir() string

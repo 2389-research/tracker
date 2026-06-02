@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -105,6 +106,18 @@ type setupResult struct {
 }
 
 func main() {
+	// __jail-exec is an internal subcommand the agent runtime invokes via
+	// /proc/self/exe to re-exec itself into a Landlock-sandboxed child for
+	// the writable_paths fs-jail (issue #272). It MUST be dispatched before
+	// flag parsing because:
+	//   - We don't want flag.Parse to validate or surface help.
+	//   - The child's job is to apply Landlock and syscall.Exec into sh -c.
+	//   - Operators MUST NOT invoke it directly; the __ prefix signals
+	//     "internal." See CLAUDE.md § Architecture Gotchas for details.
+	if len(os.Args) > 1 && os.Args[1] == "__jail-exec" {
+		os.Exit(execpkg.RunJailExec(os.Args[2:]))
+	}
+
 	cfg, err := parseFlags(os.Args)
 	if err != nil {
 		handleFlagsError(err)

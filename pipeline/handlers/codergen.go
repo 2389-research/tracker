@@ -75,6 +75,17 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if backendErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
 	}
+	// writable_paths gate (#272 G2) at the dispatcher layer. NativeBackend.Run
+	// also runs configureJail with the same gate, but only the native path
+	// reaches it — buildRunConfig switches Extra to ClaudeCodeConfig / ACPConfig
+	// for the other backends, dropping the SessionConfig that carried
+	// WritablePathsSet. Without this earlier check a node with
+	// writable_paths + backend:claude-code / acp would silently start
+	// unjailed instead of refuse-to-start (#275 review, Copilot
+	// codergen.go:647).
+	if err := refuseWritablePathsOnUnsupportedBackend(node, backend); err != nil {
+		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, err)
+	}
 	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend)
 	if cfgErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q config: %w", node.ID, cfgErr)
@@ -627,6 +638,23 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 
 	if cfg.WorkingDir != "" {
 		config.WorkingDir = cfg.WorkingDir
+	}
+
+	if cfg.Backend != "" {
+		// Normalize the documented "codergen" alias to "native" before the
+		// jail check. selectBackend already treats both as native; carrying
+		// the literal "codergen" alias into SessionConfig would make
+		// configureJail's G2 gate reject the node when writable_paths is set
+		// (#272 review, codex P2 codergen.go:634).
+		if cfg.Backend == "codergen" {
+			config.Backend = "native"
+		} else {
+			config.Backend = cfg.Backend
+		}
+	}
+	if cfg.WritablePathsSet {
+		config.WritablePathsSet = true
+		config.WritablePaths = append([]string(nil), cfg.WritablePaths...) // defensive copy
 	}
 
 	if cfg.Model != "" {

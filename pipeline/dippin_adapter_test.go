@@ -2295,3 +2295,73 @@ func TestFromDippinIR_RequiresDeduplicates(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractAgentAttrs_WritablePaths(t *testing.T) {
+	t.Run("typed field populates attrs", func(t *testing.T) {
+		cfg := ir.AgentConfig{
+			WritablePaths: []string{"workspace/**", ".ai/sprints/**"},
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		got, ok := attrs["writable_paths"]
+		if !ok {
+			t.Fatal("attrs missing writable_paths key")
+		}
+		if got != "workspace/**,.ai/sprints/**" {
+			t.Errorf("attrs[writable_paths] = %q, want %q", got, "workspace/**,.ai/sprints/**")
+		}
+	})
+
+	t.Run("Params writable_paths cannot override typed field", func(t *testing.T) {
+		cfg := ir.AgentConfig{
+			WritablePaths: []string{"workspace/**"},
+			Params:        map[string]string{"writable_paths": "/etc/**"},
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		if attrs["writable_paths"] != "workspace/**" {
+			t.Errorf("Params override won (got %q); typed field should have won (want %q)",
+				attrs["writable_paths"], "workspace/**")
+		}
+	})
+
+	t.Run("Params writable_paths is blocked when typed empty (bypass defense)", func(t *testing.T) {
+		// SECURITY: a workflow author putting writable_paths in params: is
+		// either confused or attempting bypass. Either way, we refuse to
+		// let Params reach the attrs map. We instead claim the key with an
+		// empty value — Task 14's configureJail will fail-CLOSED on this,
+		// not silently accept the attacker's globs.
+		cfg := ir.AgentConfig{
+			WritablePaths: nil,
+			Params:        map[string]string{"writable_paths": "/etc/**"},
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		got, ok := attrs["writable_paths"]
+		if !ok {
+			t.Fatal("attrs missing writable_paths key; bypass defense did not claim it")
+		}
+		if got != "" {
+			t.Errorf("attrs[writable_paths] = %q, want %q (empty signals fail-CLOSED to Task 14)", got, "")
+		}
+	})
+
+	t.Run("typed empty + no params = no attr", func(t *testing.T) {
+		// When writable_paths is genuinely absent (no typed field, no params
+		// entry), the attr is absent — the accessor returns WritablePathsSet
+		// = false and Task 14 leaves the jail disabled.
+		cfg := ir.AgentConfig{
+			WritablePaths: nil,
+			Params:        map[string]string{"other_key": "ok"},
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		if _, ok := attrs["writable_paths"]; ok {
+			t.Errorf("attrs has writable_paths key = %q, want absent", attrs["writable_paths"])
+		}
+		// Sanity: the unrelated Params key did spill.
+		if attrs["other_key"] != "ok" {
+			t.Errorf("Params spill for unrelated key failed: %v", attrs)
+		}
+	})
+}

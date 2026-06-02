@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,34 @@ import (
 // scoped to a specific working directory.
 type LocalEnvironment struct {
 	workDir string
+
+	// CommandWrapper, when non-nil, is applied to every *exec.Cmd that
+	// ExecCommand and ExecCommandWithLimit construct, after all standard
+	// fields (Dir, SysProcAttr, Cancel, WaitDelay) are set but before
+	// the command runs. The writable_paths fs-jail (issue #272) uses this
+	// to rewrite Bash invocations through tracker's __jail-exec self-re-exec,
+	// applying Linux Landlock before the agent command runs.
+	// Default nil — the environment behaves as before.
+	CommandWrapper func(*exec.Cmd) *exec.Cmd
+
+	// WriteOpener, when non-nil, replaces the os.WriteFile call in WriteFile.
+	// Receives the absolute path (already validated by safePath) and the
+	// file mode; returns an *os.File for writing. The writable_paths fs-jail
+	// sets this to an openat2-backed opener that enforces RESOLVE_BENEATH +
+	// RESOLVE_NO_SYMLINKS against a session-root file descriptor — the
+	// kernel atomic-checks the chain, closing the parallel-branch symlink
+	// race vector (spec D6).
+	// Default nil — WriteFile uses os.WriteFile as before.
+	WriteOpener func(abs string, perm os.FileMode) (*os.File, error)
+
+	// Remover, when non-nil, replaces the os.Remove call in RemoveFile.
+	// Receives the absolute path (already validated by safePath). The
+	// writable_paths fs-jail (#272) sets this with the same exact-glob
+	// check WriteOpener uses, so destructive operations (apply_patch's
+	// delete and move-cleanup paths) are bounded to the declared globs
+	// just like writes are.
+	// Default nil — RemoveFile uses os.Remove as before.
+	Remover func(abs string) error
 }
 
 // NewLocalEnvironment creates a LocalEnvironment rooted at workDir.
@@ -74,18 +103,67 @@ func (e *LocalEnvironment) ReadFile(ctx context.Context, path string) (string, e
 
 // WriteFile writes content to a file relative to the working directory,
 // creating intermediate directories as needed.
+//
+// When WriteOpener is non-nil, the opener is solely responsible for both
+// policy (e.g. writable_paths glob check) AND mkdir+open. The opener
+// performs the policy check BEFORE any filesystem mutation so rejected
+// writes leave no empty intermediate directories behind (#272 review,
+// codex P2). The unjailed path (WriteOpener nil) does mkdir then
+// os.WriteFile as before.
 func (e *LocalEnvironment) WriteFile(ctx context.Context, path string, content string) error {
 	abs, err := e.safePath(path)
 	if err != nil {
 		return err
 	}
 
+	if e.WriteOpener != nil {
+		return writeViaOpener(e.WriteOpener, abs, []byte(content))
+	}
 	dir := filepath.Dir(abs)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-
 	return os.WriteFile(abs, []byte(content), 0644)
+}
+
+// writeViaOpener performs the open → write → close sequence with short-write
+// and Close error propagation. Matches os.WriteFile's contract: a short write
+// surfaces as io.ErrShortWrite, and a Close error returned post-write (delayed
+// fsync, NFS commit, etc.) replaces a nil write error rather than being
+// swallowed by `defer f.Close()` (#275 review, Copilot local.go:125).
+func writeViaOpener(opener func(string, os.FileMode) (*os.File, error), abs string, data []byte) (err error) {
+	f, err := opener(abs, 0644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	n, werr := f.Write(data)
+	if werr != nil {
+		return werr
+	}
+	if n < len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+// RemoveFile deletes a file relative to the working directory. The
+// writable_paths fs-jail (#272) hooks here via Remover so destructive
+// operations (apply_patch's delete and move-cleanup paths) are bounded
+// to the declared globs.
+func (e *LocalEnvironment) RemoveFile(ctx context.Context, path string) error {
+	abs, err := e.safePath(path)
+	if err != nil {
+		return err
+	}
+	if e.Remover != nil {
+		return e.Remover(abs)
+	}
+	return os.Remove(abs)
 }
 
 // ExecCommand runs a command with the given arguments and timeout.
@@ -101,6 +179,11 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	// group on timeout, preventing orphaned child processes (e.g. long-running
 	// servers started by the shell command).
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Pdeathsig=SIGKILL on Linux: child dies when this process dies. Closes
+	// the orphan-accumulation hole that fork-bombed dev hosts during #272
+	// (132 live __jail-exec orphans, load avg 74). No-op on macOS — see
+	// parent_death_other.go.
+	applyParentDeathSig(cmd)
 	// Override the default WaitDelay-based kill with process group kill.
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -110,9 +193,32 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	// stdout/stderr and the SIGKILL didn't close them quickly enough.
 	cmd.WaitDelay = 5 * time.Second
 
+	if e.CommandWrapper != nil {
+		// Enforce the in-place mutation contract: a wrapper that returns
+		// a different *exec.Cmd would silently drop the Cancel,
+		// WaitDelay, and SysProcAttr (including Pdeathsig + Setpgid)
+		// fields the orphan-reaper defense (#272 commit e257d02) relies
+		// on. The jail's WrapBashCmd mutates cmd in place; reject any
+		// other shape rather than re-apply the fields on the new cmd
+		// (which would re-open the very orphan-leak window the wrapper
+		// is meant to preserve) — #275 review, Copilot local.go:178.
+		wrapped := e.CommandWrapper(cmd)
+		if wrapped != cmd {
+			return CommandResult{}, fmt.Errorf("CommandWrapper must mutate cmd in place and return the same *exec.Cmd; got different pointer (would silently drop Cancel/WaitDelay/SysProcAttr including Pdeathsig)")
+		}
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+
+	// Pin the calling goroutine to its OS thread for the lifetime of Run.
+	// Defensive pairing with applyParentDeathSig (Linux-only). Modern
+	// kernels deliver PDEATHSIG on parent process exit, so the lock is
+	// not strictly required for correctness — see parent_death_linux.go
+	// for the full rationale and historical context.
+	unlock := pinCallingThreadForParentDeath()
+	defer unlock()
 
 	err := cmd.Run()
 	reapProcessGroup(cmd)
@@ -252,6 +358,11 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = e.workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Pdeathsig=SIGKILL on Linux: child dies when this process dies. Closes
+	// the orphan-accumulation hole that fork-bombed dev hosts during #272
+	// (132 live __jail-exec orphans, load avg 74). No-op on macOS — see
+	// parent_death_other.go.
+	applyParentDeathSig(cmd)
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
@@ -259,6 +370,17 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 
 	if len(env) > 0 && env[0] != nil {
 		cmd.Env = env[0]
+	}
+
+	if e.CommandWrapper != nil {
+		// Same in-place-mutation contract as ExecCommand — keep both
+		// entry points consistent so a future wrapper can't drop
+		// Cancel/WaitDelay/SysProcAttr on one path while preserving them
+		// on the other (#275 review, Copilot local.go:344).
+		wrapped := e.CommandWrapper(cmd)
+		if wrapped != cmd {
+			return CommandResult{}, fmt.Errorf("CommandWrapper must mutate cmd in place and return the same *exec.Cmd; got different pointer (would silently drop Cancel/WaitDelay/SysProcAttr including Pdeathsig)")
+		}
 	}
 
 	if outputLimit <= 0 {
@@ -272,6 +394,8 @@ func (e *LocalEnvironment) runUnlimited(ctx context.Context, cmd *exec.Cmd, time
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	unlock := pinCallingThreadForParentDeath()
+	defer unlock()
 	err := cmd.Run()
 	reapProcessGroup(cmd)
 	result := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
@@ -288,6 +412,8 @@ func (e *LocalEnvironment) runLimited(ctx context.Context, cmd *exec.Cmd, timeou
 	stderrBuf := newTailBuffer(outputLimit)
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
+	unlock := pinCallingThreadForParentDeath()
+	defer unlock()
 	err := cmd.Run()
 	reapProcessGroup(cmd)
 	result := CommandResult{

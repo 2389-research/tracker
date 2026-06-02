@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -71,7 +70,7 @@ func (t *ApplyPatchTool) applyOp(ctx context.Context, op patchOperation) error {
 	case patchUpdate:
 		return t.applyUpdateOp(ctx, op)
 	case patchDelete:
-		return t.applyDeleteOp(op)
+		return t.applyDeleteOp(ctx, op)
 	default:
 		return fmt.Errorf("unsupported patch operation")
 	}
@@ -95,22 +94,26 @@ func (t *ApplyPatchTool) applyUpdateOp(ctx context.Context, op patchOperation) e
 		return err
 	}
 	if op.moveTo != "" && op.moveTo != op.path {
-		path, err := safePatchPath(t.env.WorkingDir(), op.path)
-		if err != nil {
+		// Route the move-cleanup through env.RemoveFile so the
+		// writable_paths fs-jail (#272) can intercept it. Without this
+		// indirection, an agent could delete files outside the declared
+		// writable globs via apply_patch's move shape (codex P1 review).
+		if _, err := safePatchPath(t.env.WorkingDir(), op.path); err != nil {
 			return err
 		}
-		return os.Remove(path)
+		return t.env.RemoveFile(ctx, op.path)
 	}
 	return nil
 }
 
 // applyDeleteOp removes a file safely within the working directory.
-func (t *ApplyPatchTool) applyDeleteOp(op patchOperation) error {
-	path, err := safePatchPath(t.env.WorkingDir(), op.path)
-	if err != nil {
+// Routes through env.RemoveFile so the writable_paths fs-jail (#272)
+// can intercept destructive operations alongside writes (codex P1 review).
+func (t *ApplyPatchTool) applyDeleteOp(ctx context.Context, op patchOperation) error {
+	if _, err := safePatchPath(t.env.WorkingDir(), op.path); err != nil {
 		return err
 	}
-	return os.Remove(path)
+	return t.env.RemoveFile(ctx, op.path)
 }
 
 type patchKind string

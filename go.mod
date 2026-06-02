@@ -5,14 +5,16 @@ go 1.25.5
 require github.com/awalterschulze/gographviz v2.0.3+incompatible
 
 require (
-	github.com/2389-research/dippin-lang v0.32.0
+	github.com/2389-research/dippin-lang v0.34.1-0.20260601154018-792e6e644e9f
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/coder/acp-go-sdk v0.6.3
 	github.com/joho/godotenv v1.5.1
+	github.com/landlock-lsm/go-landlock v0.8.1
 	github.com/mattn/go-isatty v0.0.20
+	golang.org/x/sys v0.42.0
 	golang.org/x/term v0.41.0
 	pgregory.net/rapid v1.3.0
 )
@@ -46,7 +48,7 @@ require (
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )

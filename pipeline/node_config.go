@@ -63,6 +63,22 @@ type AgentNodeConfig struct {
 	ResponseFormat string
 	ResponseSchema string
 
+	// WritablePaths bounds the file paths this agent's tools may write,
+	// as author-chosen globs resolved against the session root. Non-empty
+	// triggers the runtime fs-jail (Linux Landlock for Bash subprocess +
+	// openat2 for in-process Write/Edit/ApplyPatch). Distinguishing absent
+	// from present-but-empty requires WritablePathsSet — the configureJail
+	// gate refuses-to-start when Set && len == 0 so a malformed/whitespace
+	// attr can never silently degrade to unbounded. See issue #272.
+	WritablePaths []string
+
+	// WritablePathsSet records whether the writable_paths attr was present
+	// on the node. Distinguishes "absent" (Set=false, jail disabled) from
+	// "present but parses to no entries" (Set=true, fail-CLOSED at the
+	// codergen configureJail gate per issue #272). Mirrors the three-state
+	// pattern of ReflectOnErrorSet et al. above.
+	WritablePathsSet bool
+
 	CacheToolResults    bool
 	CacheToolResultsSet bool
 
@@ -217,7 +233,34 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		}
 	}
 
+	if raw, ok := n.Attrs["writable_paths"]; ok {
+		cfg.WritablePathsSet = true
+		cfg.WritablePaths = splitCommaNoEmpty(raw)
+	}
+
 	return cfg
+}
+
+// splitCommaNoEmpty splits s on commas, trims whitespace from each entry, and
+// drops empty entries. Mirrors dippin's parser/parse_nodes.go splitCommaNoEmpty
+// so the round-trip from .dip → IR → adapter → AgentNodeConfig produces identical
+// slices regardless of which path was taken.
+func splitCommaNoEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ToolNodeConfig is a typed view over a tool node's attributes. Tool nodes
