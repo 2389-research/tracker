@@ -248,11 +248,14 @@ func landlockDirForGlob(anchor, g string) string {
 }
 
 // SafeMkdirAll creates the directory tree rooted at anchor + relDir without
-// following symlinks at any intermediate component. Each path component is
-// resolved via openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS) against the
-// running parent fd; missing components are created via mkdirat. A symlink
-// at any intermediate path causes the resolution to fail with EXDEV/ELOOP,
-// which surfaces as ErrPathEscape.
+// following symlinks or procfs magic-links at any intermediate component.
+// Each path component is resolved via
+// openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)
+// against the running parent fd; missing components are created via mkdirat.
+// A symlink at any intermediate path causes the resolution to fail with
+// EXDEV/ELOOP, which surfaces as ErrPathEscape. Same Resolve flags as
+// OpenForWrite so the in-process write seam and the on-the-side dir
+// creation share one hardening contract (#275 review, Copilot jail_linux.go:282).
 //
 // Closes the #275 review gap where os.MkdirAll inside the WriteOpener
 // closure would follow agent-placed symlinks before openat2 saw the leaf
@@ -278,7 +281,7 @@ func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
 		}
 		how := unix.OpenHow{
 			Flags:   uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC),
-			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
+			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
 		}
 		fd, err := unix.Openat2(parentFD, comp, &how)
 		if err == nil {
@@ -317,10 +320,13 @@ func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
 }
 
 // SafeRemove deletes the file at anchor + relPath without following symlinks
-// at any intermediate path component. Uses openat2 to resolve the parent
-// directory with RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS, then unlinkat on the
-// final component. A symlink anywhere in the parent chain causes EXDEV/ELOOP
-// which surfaces as ErrPathEscape.
+// or procfs magic-links at any intermediate path component. Uses openat2 to
+// resolve the parent directory with
+// RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS, then unlinkat
+// on the final component. A symlink anywhere in the parent chain causes
+// EXDEV/ELOOP which surfaces as ErrPathEscape. Same Resolve flags as
+// OpenForWrite / SafeMkdirAll for consistent hardening across the jail's
+// destructive operations (#275 review, Copilot jail_linux.go:346).
 //
 // Closes the #275 review gap where os.Remove inside env.Remover would follow
 // agent-placed symlinks (Copilot codergen_jail.go:103).
@@ -342,7 +348,7 @@ func SafeRemove(anchor, relPath string) error {
 	if parentRel != "." && parentRel != "" {
 		how := unix.OpenHow{
 			Flags:   uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC),
-			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
+			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
 		}
 		fd, err := unix.Openat2(anchorFD, parentRel, &how)
 		if err != nil {

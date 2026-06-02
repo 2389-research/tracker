@@ -12,17 +12,28 @@ import (
 )
 
 // pinCallingThreadForParentDeath locks the calling goroutine to its current
-// OS thread. Pairs with applyParentDeathSig: PR_SET_PDEATHSIG is thread-
-// scoped, so the kernel sends SIGKILL when the spawning thread terminates,
-// not the parent process. If the Go runtime migrates the calling goroutine
-// off its original thread and that thread is later retired (during GC
-// stop-the-world or thread-pool reduction), every child whose Pdeathsig was
-// armed on that thread gets a premature kill (#272 review,
-// coderabbitai parent_death_linux.go:43).
+// OS thread for the lifetime of the spawn. Defensive measure paired with
+// applyParentDeathSig.
 //
-// Locking the goroutine for the duration of cmd.Run() pins the thread alive
-// — Go won't retire a thread that has a goroutine locked to it. Callers
-// should defer the returned unlock immediately:
+// PDEATHSIG semantics, accurately: modern Linux delivers PR_SET_PDEATHSIG on
+// **parent process** exit, not on individual parent-thread exit. The
+// earlier coderabbitai review (#272 round 2, parent_death_linux.go:43)
+// cited a web result claiming the signal is thread-scoped — that result was
+// outdated and contradicted by current kernel behavior (#275 review,
+// Copilot parent_death_linux.go:30). For the modern semantics the lock is
+// not strictly required for correctness.
+//
+// We keep it as a conservative measure for three reasons:
+//  1. Defensive depth on the off chance a child runs against a kernel where
+//     the older thread-scoped behavior still applies (no documented support
+//     window for tracker says "kernel >= 2.6.27 only").
+//  2. Pinning the goroutine guarantees the fork-exec syscall and the
+//     surrounding cmd.Run loop observe a stable thread identity, which makes
+//     reasoning about any future per-thread state simpler.
+//  3. The cost is one goroutine pinned for the duration of cmd.Run, which
+//     tracker invokes serially per agent. No measurable scheduling impact.
+//
+// Callers should defer the returned unlock immediately:
 //
 //	unlock := pinCallingThreadForParentDeath()
 //	defer unlock()

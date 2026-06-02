@@ -370,10 +370,15 @@ TOCTOU window. Bash subprocess is bounded at the directory ancestor of each
 glob's static prefix because Landlock is path-prefix on directories, not
 glob-aware.
 
-Refuse-to-start: invalid `working_dir` (escapes process cwd), malformed globs
-(absolute / ~ / parent-escape / unbalanced braces), backend ∈ {claude-code, acp,
-unknown} (out-of-process; tracker cannot sandbox), Landlock unavailable
-(kernel < 6.7 or non-Linux). Configure-jail gate in `pipeline/handlers/codergen_jail.go`.
+Refuse-to-start: invalid `working_dir` (escapes process cwd; the check is
+symlink-aware and walks the deepest existing ancestor when the leaf does not
+yet exist), malformed globs (absolute / `~` / parent-escape / **any brace
+usage** since the matcher does not expand `{a,b}` / unsupported doublestar
+shapes / malformed character classes), backend ∈ {claude-code, acp, unknown}
+(out-of-process; tracker cannot sandbox — gated both inside
+`NativeBackend.Run` and at the `CodergenHandler.Execute` dispatcher),
+Landlock unavailable (kernel < 6.7 or non-Linux). Configure-jail gate in
+`pipeline/handlers/codergen_jail.go`.
 
 Residual escape classes (not bounded): network egress (cargo crate fetches,
 curl), reads / exfil-by-read, content within an allowed path. Narrow globs are

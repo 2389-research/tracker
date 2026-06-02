@@ -192,9 +192,11 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Pin the calling goroutine to its OS thread for the lifetime of Run so
-	// the Pdeathsig set on the child (Linux-only) survives Go runtime
-	// thread-pool churn. See parent_death_linux.go.
+	// Pin the calling goroutine to its OS thread for the lifetime of Run.
+	// Defensive pairing with applyParentDeathSig (Linux-only). Modern
+	// kernels deliver PDEATHSIG on parent process exit, so the lock is
+	// not strictly required for correctness — see parent_death_linux.go
+	// for the full rationale and historical context.
 	unlock := pinCallingThreadForParentDeath()
 	defer unlock()
 
