@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +12,14 @@ import (
 )
 
 func TestJailExecDispatch(t *testing.T) {
-	if errors.Is(trkexec.ProbeLandlock(), trkexec.ErrLandlockUnavailable) {
-		t.Skip("Landlock unavailable")
+	// Skip on ANY non-nil ProbeLandlock error, not just ErrLandlockUnavailable —
+	// restricted CI environments can fail with EPERM/seccomp without the
+	// sentinel wrap, and the dispatch enforcement can't be exercised when
+	// Landlock isn't reachable for any reason (#275 review, Copilot
+	// jail_exec_test.go:18). Matches the broader-skip pattern used by every
+	// other Landlock-gated test in this PR.
+	if err := trkexec.ProbeLandlock(); err != nil {
+		t.Skipf("Landlock unavailable: %v", err)
 	}
 
 	// Build tracker into a temp file so we don't depend on a pre-built

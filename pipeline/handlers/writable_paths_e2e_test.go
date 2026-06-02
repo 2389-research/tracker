@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -305,6 +306,7 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 	const maxForges = 100
 	stop := make(chan struct{})
 	forgeDone := make(chan struct{})
+	var forgesSucceeded atomic.Int64
 	go func() {
 		defer close(forgeDone)
 		for i := 0; i < maxForges; i++ {
@@ -315,14 +317,19 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 			}
 			// Flip branchA/share between a real dir and a symlink to
 			// outsideDir. Bash subprocess is jailed to branchA/** so it
-			// can mutate inside its workspace freely.
+			// can mutate inside its workspace freely. Count successes
+			// so the test can fail vacuously-quietly when the forge
+			// path is broken (#275 review, Copilot e2e:325).
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_, _ = envA.ExecCommand(ctx, "sh",
+			res, err := envA.ExecCommand(ctx, "sh",
 				[]string{"-c", fmt.Sprintf(
 					"rm -rf %s/share && ln -sfn %s %s/share",
 					workspaceA, outsideDir, workspaceA)},
 				2*time.Second)
 			cancel()
+			if err == nil && res.ExitCode == 0 {
+				forgesSucceeded.Add(1)
+			}
 		}
 	}()
 
@@ -355,6 +362,17 @@ func TestParallelBranchSymlinkRace(t *testing.T) {
 		// least one successful in-jail write to confirm the resolution
 		// path is reachable (#272 review, Copilot e2e:311).
 		t.Errorf("zero successful in-jail writes across %d attempts; test cannot prove the race was exercised", writeAttempts)
+	}
+	if forgesSucceeded.Load() == 0 {
+		// Forge-side vacuity guard: if every symlink-flip subprocess
+		// failed (missing sh, missing ln, __jail-exec dispatch broken,
+		// Bash jail too tight, etc.), branch B's writes succeeded against
+		// a static pre-created directory and the race was never actually
+		// raced. Require at least one successful forge iteration so the
+		// "outsideDir is empty" assertion below can only mean the kernel
+		// rejected resolution, not that A's symlink never existed
+		// (#275 review, Copilot e2e:325).
+		t.Errorf("zero successful symlink forges across %d iterations; the symlink-race vector was never actually exercised", maxForges)
 	}
 }
 
