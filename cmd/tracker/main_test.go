@@ -1000,9 +1000,10 @@ func TestResolveProviderBaseURLFromEnvGateway(t *testing.T) {
 	// resolveProviderBaseURLFromEnv must return the gateway-suffixed URL when
 	// TRACKER_GATEWAY_URL is set and no per-provider override exists.
 	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	unsetEnvForTest(t, "TRACKER_GATEWAY_KIND")
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
 
-	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	got := resolveProviderBaseURLFromEnv("anthropic")
 	want := "https://gw.example.com/v1/acc/slug/anthropic"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -1014,7 +1015,7 @@ func TestResolveProviderBaseURLFromEnvPerProviderWins(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "https://custom-proxy.example.com")
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
 
-	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	got := resolveProviderBaseURLFromEnv("anthropic")
 	want := "https://custom-proxy.example.com"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -1026,9 +1027,27 @@ func TestResolveProviderBaseURLFromEnvNoGateway(t *testing.T) {
 	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
 	unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
 
-	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	got := resolveProviderBaseURLFromEnv("anthropic")
 	if got != "" {
 		t.Fatalf("expected empty string, got %q", got)
+	}
+}
+
+// TestResolveProviderBaseURLFromEnv_RespectsBedrockKind asserts that the CLI's
+// provider URL helper consults TRACKER_GATEWAY_KIND. The CLI sets the env var
+// from --gateway-kind (see commands.go), so the helper that downstream
+// constructor closures call must dispatch on it. Without this, the
+// --gateway-kind flag would have no effect on the CLI binary even though the
+// env var is set — a silent regression on the user-facing surface.
+func TestResolveProviderBaseURLFromEnv_RespectsBedrockKind(t *testing.T) {
+	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+
+	got := resolveProviderBaseURLFromEnv("anthropic")
+	want := "https://bedrock.example.com" // bedrock anthropic drops the /anthropic suffix
+	if got != want {
+		t.Fatalf("got %q, want %q (bedrock kind should override the cf-aig /anthropic suffix)", got, want)
 	}
 }
 
