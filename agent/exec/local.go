@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,19 +117,38 @@ func (e *LocalEnvironment) WriteFile(ctx context.Context, path string, content s
 	}
 
 	if e.WriteOpener != nil {
-		f, err := e.WriteOpener(abs, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, err = f.Write([]byte(content))
-		return err
+		return writeViaOpener(e.WriteOpener, abs, []byte(content))
 	}
 	dir := filepath.Dir(abs)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	return os.WriteFile(abs, []byte(content), 0644)
+}
+
+// writeViaOpener performs the open → write → close sequence with short-write
+// and Close error propagation. Matches os.WriteFile's contract: a short write
+// surfaces as io.ErrShortWrite, and a Close error returned post-write (delayed
+// fsync, NFS commit, etc.) replaces a nil write error rather than being
+// swallowed by `defer f.Close()` (#275 review, Copilot local.go:125).
+func writeViaOpener(opener func(string, os.FileMode) (*os.File, error), abs string, data []byte) (err error) {
+	f, err := opener(abs, 0644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	n, werr := f.Write(data)
+	if werr != nil {
+		return werr
+	}
+	if n < len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // RemoveFile deletes a file relative to the working directory. The

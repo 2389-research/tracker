@@ -77,8 +77,12 @@ func WrapBashCmd(cmd *exec.Cmd, anchor string, writable []string) *exec.Cmd {
 // The kernel binds path resolution to anchorFD; symlink chains rejected at
 // the syscall — no userspace TOCTOU window.
 //
-// Returns ErrPathEscape (wrapped) when the kernel returns EXDEV / ELOOP /
-// EACCES indicating the resolved path is outside anchor.
+// Returns ErrPathEscape (wrapped) when the kernel returns EXDEV / ELOOP
+// indicating the resolved path is outside anchor. EACCES is propagated as a
+// regular permission error — it can be a real escape signal, but also fires
+// for ordinary mode/ownership issues, so we don't claim escape unless the
+// kernel's resolve-specific errno was returned (#275 review, Copilot
+// jail_linux.go:113).
 //
 // Used by LocalEnvironment.WriteOpener when SessionConfig.WritablePaths is
 // non-empty. The codergen handler (Task 14) installs the configured
@@ -108,7 +112,7 @@ func OpenForWrite(anchor, relPath string, perm os.FileMode) (*os.File, error) {
 	fd, err := unix.Openat2(anchorFD, relPath, &how)
 	if err != nil {
 		switch err {
-		case unix.EXDEV, unix.ELOOP, unix.EACCES:
+		case unix.EXDEV, unix.ELOOP:
 			return nil, fmt.Errorf("%w: openat2 %q under %q: %v",
 				ErrPathEscape, relPath, anchor, err)
 		}
@@ -316,7 +320,7 @@ func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
 			continue
 		}
 		switch err {
-		case unix.EXDEV, unix.ELOOP, unix.EACCES:
+		case unix.EXDEV, unix.ELOOP:
 			return fmt.Errorf("%w: SafeMkdirAll %q under %q: %v",
 				ErrPathEscape, relDir, anchor, err)
 		case unix.ENOENT:
@@ -377,7 +381,7 @@ func SafeRemove(anchor, relPath string) error {
 		fd, err := unix.Openat2(anchorFD, parentRel, &how)
 		if err != nil {
 			switch err {
-			case unix.EXDEV, unix.ELOOP, unix.EACCES:
+			case unix.EXDEV, unix.ELOOP:
 				return fmt.Errorf("%w: SafeRemove parent %q under %q: %v",
 					ErrPathEscape, parentRel, anchor, err)
 			}

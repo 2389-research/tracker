@@ -55,15 +55,31 @@ func ValidateWritablePaths(workingDir string, globs []string, processCwd string)
 // dir under the (already-validated) string-cleaned anchor.
 func validateWorkingDirEscape(workingDir, processCwd string) error {
 	cleanedCwd := filepath.Clean(processCwd)
+	// Resolve processCwd's own symlinks FIRST. If tracker was invoked from
+	// a symlinked path (e.g. /home -> /var/home on some distros), the
+	// string-cleaned containment check would reject perfectly valid
+	// working_dir values expressed as the real path. EvalSymlinks falls
+	// back to the cleaned form on error — if we can't resolve tracker's
+	// own cwd we accept the existing string-only behavior rather than
+	// fail-closing on an unrelated FS issue (#275 review, Copilot
+	// jail.go:67).
+	realCwd, evalCwdErr := filepath.EvalSymlinks(cleanedCwd)
+	if evalCwdErr != nil {
+		realCwd = cleanedCwd
+	}
 	var resolved string
 	if filepath.IsAbs(workingDir) {
 		resolved = filepath.Clean(workingDir)
 	} else {
 		resolved = filepath.Clean(filepath.Join(cleanedCwd, workingDir))
 	}
-	if !isSubpathOf(resolved, cleanedCwd) {
-		return fmt.Errorf("%w: working_dir %q resolves to %q which escapes the tracker process cwd %q",
-			ErrPathEscape, workingDir, resolved, cleanedCwd)
+	// Quick string-cleaned check against both the cleaned and the
+	// symlink-resolved cwd. Containment under either form is enough — the
+	// per-component symlink-aware re-check below catches escapes the
+	// string layer can't see.
+	if !isSubpathOf(resolved, cleanedCwd) && !isSubpathOf(resolved, realCwd) {
+		return fmt.Errorf("%w: working_dir %q resolves to %q which escapes the tracker process cwd %q (real path %q)",
+			ErrPathEscape, workingDir, resolved, cleanedCwd, realCwd)
 	}
 	// Symlink-aware re-check: if the path exists on disk, follow any
 	// symlinks and re-verify containment against the real target.
@@ -80,14 +96,6 @@ func validateWorkingDirEscape(workingDir, processCwd string) error {
 			return validateExistingAncestorEscape(resolved, cleanedCwd, workingDir)
 		}
 		return fmt.Errorf("evaluate working_dir %q: %w", workingDir, evalErr)
-	}
-	realCwd, evalCwdErr := filepath.EvalSymlinks(cleanedCwd)
-	if evalCwdErr != nil {
-		// Falling back to the cleaned cwd is fine — if tracker can't
-		// resolve its own cwd we have bigger problems, and using the
-		// cleaned form for the containment check is no worse than the
-		// pre-existing string-only behavior.
-		realCwd = cleanedCwd
 	}
 	if !isSubpathOf(realResolved, realCwd) {
 		return fmt.Errorf("%w: working_dir %q evaluates to %q via symlinks which escapes %q",
