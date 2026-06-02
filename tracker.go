@@ -57,7 +57,15 @@ type Config struct {
 	// per-provider *_BASE_URL env var always takes precedence over GatewayURL so
 	// library callers can still override individual providers. The TRACKER_GATEWAY_URL
 	// env var is the fallback when GatewayURL is empty.
-	GatewayURL  string
+	GatewayURL string
+	// GatewayKind selects the path convention used with GatewayURL (or its
+	// TRACKER_GATEWAY_URL env-var fallback). Empty or GatewayKindCFAIG
+	// (default, backcompat) routes via Cloudflare AI Gateway conventions:
+	// /anthropic, /openai, /google-ai-studio, /compat. GatewayKindBedrock
+	// targets the 2389 bedrock-gateway Worker which uses native SDK paths.
+	// The TRACKER_GATEWAY_KIND env var is the fallback when GatewayKind is
+	// empty. See ResolveProviderBaseURL.
+	GatewayKind GatewayKind
 	WebhookGate *WebhookGateConfig // optional: post human gates to an HTTP webhook and wait for callback
 	// BundleIdentity is the content-addressed identity ("sha256:<hex>") of
 	// the .dipx bundle this run was loaded from. Stamped onto every emitted
@@ -324,7 +332,7 @@ func resolveCompleter(cfg Config) (*llm.Client, agent.Completer, error) {
 	if cfg.LLMClient != nil {
 		return nil, cfg.LLMClient, nil
 	}
-	client, err := buildClient(cfg.Provider, cfg.GatewayURL)
+	client, err := buildClient(cfg.Provider, cfg.GatewayURL, cfg.GatewayKind)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create LLM client: %w", err)
 	}
@@ -579,11 +587,13 @@ func parseDIPSource(source string) (*pipeline.Graph, error) {
 // buildClient creates an LLM client from environment variables with
 // base URL support and retry middleware. If provider is non-empty, only
 // that provider is configured (returns error if unknown).
-// gatewayURL is the Cloudflare AI Gateway root URL from Config.GatewayURL;
-// it is consulted after per-provider *_BASE_URL env vars and before
-// TRACKER_GATEWAY_URL (see resolveProviderBaseURLWithGateway).
-func buildClient(provider, gatewayURL string) (*llm.Client, error) {
-	constructors := allProviderConstructors(gatewayURL)
+// gatewayURL is the gateway root URL from Config.GatewayURL; gatewayKind
+// is the matching Config.GatewayKind (empty = cf-aig default). Both are
+// consulted after per-provider *_BASE_URL env vars and before the
+// TRACKER_GATEWAY_URL / TRACKER_GATEWAY_KIND env-var fallbacks (see
+// resolveProviderBaseURLWithGateway).
+func buildClient(provider, gatewayURL string, gatewayKind GatewayKind) (*llm.Client, error) {
+	constructors := allProviderConstructors(gatewayURL, gatewayKind)
 
 	if provider != "" {
 		constructor, ok := constructors[provider]
@@ -610,15 +620,16 @@ func buildClient(provider, gatewayURL string) (*llm.Client, error) {
 }
 
 // allProviderConstructors returns the full map of provider constructor functions.
-// gatewayURL is the explicit gateway root URL (from Config.GatewayURL); it is
-// passed to the adapter constructors so library consumers don't need to mutate
-// os.Environ.
-func allProviderConstructors(gatewayURL string) map[string]func(string) (llm.ProviderAdapter, error) {
+// gatewayURL is the explicit gateway root URL (from Config.GatewayURL) and
+// gatewayKind is the matching path-convention selector (from
+// Config.GatewayKind). Both are passed to the adapter constructors so
+// library consumers don't need to mutate os.Environ.
+func allProviderConstructors(gatewayURL string, gatewayKind GatewayKind) map[string]func(string) (llm.ProviderAdapter, error) {
 	return map[string]func(string) (llm.ProviderAdapter, error){
-		"anthropic":     func(k string) (llm.ProviderAdapter, error) { return newAnthropicAdapter(k, gatewayURL) },
-		"openai":        func(k string) (llm.ProviderAdapter, error) { return newOpenAIAdapter(k, gatewayURL) },
-		"gemini":        func(k string) (llm.ProviderAdapter, error) { return newGeminiAdapter(k, gatewayURL) },
-		"openai-compat": func(k string) (llm.ProviderAdapter, error) { return newOpenAICompatAdapter(k, gatewayURL) },
+		"anthropic":     func(k string) (llm.ProviderAdapter, error) { return newAnthropicAdapter(k, gatewayURL, gatewayKind) },
+		"openai":        func(k string) (llm.ProviderAdapter, error) { return newOpenAIAdapter(k, gatewayURL, gatewayKind) },
+		"gemini":        func(k string) (llm.ProviderAdapter, error) { return newGeminiAdapter(k, gatewayURL, gatewayKind) },
+		"openai-compat": func(k string) (llm.ProviderAdapter, error) { return newOpenAICompatAdapter(k, gatewayURL, gatewayKind) },
 	}
 }
 
@@ -683,10 +694,12 @@ func gatewaySuffix(kind GatewayKind, provider string) (string, bool) {
 //  3. TRACKER_GATEWAY_URL env var with kind-dependent suffix appended.
 //  4. Empty string — use provider SDK default.
 //
-// TRACKER_GATEWAY_KIND selects the suffix map (see gatewaySuffix). Unknown
-// kind values and unsupported (kind, provider) pairs refuse to route
-// (return "") rather than silently falling through.
-func resolveProviderBaseURLWithGateway(provider, gatewayURL string) string {
+// The kind argument (from Config.GatewayKind) selects the suffix map; if
+// empty, TRACKER_GATEWAY_KIND env var is consulted, and if that is also
+// empty the default is cf-aig. Unknown kind values and unsupported
+// (kind, provider) pairs refuse to route (return "") rather than silently
+// falling through.
+func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind GatewayKind) string {
 	var envKey string
 	switch provider {
 	case "anthropic":
@@ -712,7 +725,10 @@ func resolveProviderBaseURLWithGateway(provider, gatewayURL string) string {
 		return ""
 	}
 
-	kind := GatewayKind(os.Getenv("TRACKER_GATEWAY_KIND"))
+	kind := gatewayKind
+	if kind == "" {
+		kind = GatewayKind(os.Getenv("TRACKER_GATEWAY_KIND"))
+	}
 	suffix, ok := gatewaySuffix(kind, provider)
 	if !ok {
 		return ""
@@ -765,33 +781,33 @@ func ResolveProviderBaseURL(provider string) string {
 	return gateway + suffix
 }
 
-func newAnthropicAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
+func newAnthropicAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
 	var opts []anthropic.Option
-	if base := resolveProviderBaseURLWithGateway("anthropic", gatewayURL); base != "" {
+	if base := resolveProviderBaseURLWithGateway("anthropic", gatewayURL, gatewayKind); base != "" {
 		opts = append(opts, anthropic.WithBaseURL(base))
 	}
 	return anthropic.New(key, opts...), nil
 }
 
-func newOpenAIAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
+func newOpenAIAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
 	var opts []openai.Option
-	if base := resolveProviderBaseURLWithGateway("openai", gatewayURL); base != "" {
+	if base := resolveProviderBaseURLWithGateway("openai", gatewayURL, gatewayKind); base != "" {
 		opts = append(opts, openai.WithBaseURL(base))
 	}
 	return openai.New(key, opts...), nil
 }
 
-func newGeminiAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
+func newGeminiAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
 	var opts []google.Option
-	if base := resolveProviderBaseURLWithGateway("gemini", gatewayURL); base != "" {
+	if base := resolveProviderBaseURLWithGateway("gemini", gatewayURL, gatewayKind); base != "" {
 		opts = append(opts, google.WithBaseURL(base))
 	}
 	return google.New(key, opts...), nil
 }
 
-func newOpenAICompatAdapter(key, gatewayURL string) (llm.ProviderAdapter, error) {
+func newOpenAICompatAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
 	var opts []openaicompat.Option
-	if base := resolveProviderBaseURLWithGateway("openai-compat", gatewayURL); base != "" {
+	if base := resolveProviderBaseURLWithGateway("openai-compat", gatewayURL, gatewayKind); base != "" {
 		opts = append(opts, openaicompat.WithBaseURL(base))
 	}
 	return openaicompat.New(key, opts...), nil

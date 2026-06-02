@@ -778,6 +778,38 @@ func TestResolveProviderBaseURL_UnknownKindRefusesRouting(t *testing.T) {
 	}
 }
 
+// TestResolveProviderBaseURLWithGateway_ExplicitKindWinsOverEnv asserts the
+// library-API path for Config.GatewayKind: when a non-empty kind is
+// threaded through buildClient → allProviderConstructors → the resolver,
+// the explicit value is used in preference to TRACKER_GATEWAY_KIND. This
+// mirrors how Config.GatewayURL takes precedence over TRACKER_GATEWAY_URL.
+func TestResolveProviderBaseURLWithGateway_ExplicitKindWinsOverEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+	t.Setenv("TRACKER_GATEWAY_KIND", "cf-aig") // env says cf-aig
+	// Explicit kind = bedrock should win; anthropic gets empty suffix.
+	got := resolveProviderBaseURLWithGateway("anthropic", "https://bedrock.example.com", GatewayKindBedrock)
+	want := "https://bedrock.example.com"
+	if got != want {
+		t.Errorf("explicit GatewayKindBedrock should win over env cf-aig; got %q want %q", got, want)
+	}
+}
+
+// TestResolveProviderBaseURLWithGateway_EmptyKindFallsThroughToEnv asserts
+// that when Config.GatewayKind is empty, the env var TRACKER_GATEWAY_KIND
+// is consulted as the fallback.
+func TestResolveProviderBaseURLWithGateway_EmptyKindFallsThroughToEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	// Empty kind arg → env wins → bedrock.
+	got := resolveProviderBaseURLWithGateway("anthropic", "https://example.com", "")
+	want := "https://example.com"
+	if got != want {
+		t.Errorf("empty kind arg should fall through to env bedrock; got %q want %q", got, want)
+	}
+}
+
 // TestResolveBudgetLimits_FallsBackToGraphAttrs verifies that when
 // Config.Budget is zero, ResolveBudgetLimits fills from the graph-level
 // max_total_tokens / max_cost_cents / max_wall_time attrs populated by
