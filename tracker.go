@@ -622,6 +622,59 @@ func allProviderConstructors(gatewayURL string) map[string]func(string) (llm.Pro
 	}
 }
 
+// GatewayKind selects the path convention used when TRACKER_GATEWAY_URL is
+// set. The default (cf-aig) matches Cloudflare AI Gateway's per-provider
+// subpath convention; bedrock targets the 2389 bedrock-gateway Worker which
+// uses native SDK URL paths.
+//
+// See docs/superpowers/specs/2026-06-01-issue-274-bedrock-gateway-integration-design.md.
+type GatewayKind string
+
+const (
+	// GatewayKindCFAIG routes via Cloudflare AI Gateway path conventions:
+	// /anthropic, /openai, /google-ai-studio, /compat. Default.
+	GatewayKindCFAIG GatewayKind = "cf-aig"
+
+	// GatewayKindBedrock routes via the 2389 bedrock-gateway Worker which
+	// translates SDK requests to AWS Bedrock Converse. Uses native SDK
+	// URL conventions: empty suffix for Anthropic, /v1 for OpenAI and
+	// Gemini. openai-compat is not supported on this gateway.
+	GatewayKindBedrock GatewayKind = "bedrock"
+)
+
+// gatewaySuffix returns the per-provider URL path suffix for the given
+// gateway kind. Returns ok=false when the (kind, provider) pair is
+// unsupported — callers should treat this as "do not route via gateway"
+// and emit an actionable error. Unknown kind values also return ok=false
+// (fail-closed) rather than silently falling through to the cf-aig default.
+func gatewaySuffix(kind GatewayKind, provider string) (string, bool) {
+	switch kind {
+	case "", GatewayKindCFAIG:
+		switch provider {
+		case "anthropic":
+			return "/anthropic", true
+		case "openai":
+			return "/openai", true
+		case "gemini":
+			return "/google-ai-studio", true
+		case "openai-compat":
+			return "/compat", true
+		}
+	case GatewayKindBedrock:
+		switch provider {
+		case "anthropic":
+			return "", true // Anthropic SDK appends /v1/messages itself
+		case "openai":
+			return "/v1", true
+		case "gemini":
+			return "/v1", true
+		case "openai-compat":
+			return "", false // refuse: bedrock gateway has no /compat
+		}
+	}
+	return "", false
+}
+
 // resolveProviderBaseURLWithGateway resolves the base URL for a provider,
 // consulting sources in priority order:
 //
