@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-06-02
+
+### Changed
+
+- **Joint-release closeout for v0.35.0 ↔ dippin v0.35.0.** `go.mod` swaps the
+  joint-release-window pseudo-version
+  (`v0.34.1-0.20260601154018-792e6e644e9f`) for the published
+  `github.com/2389-research/dippin-lang v0.35.0` tag. `PinnedDippinVersion`
+  in `tracker_doctor.go` updated in lockstep. **No functional changes vs
+  v0.35.0** — the underlying dippin code is byte-identical (`792e6e6` is
+  the commit dippin v0.35.0 tagged). Joint-release loop closed: tracker
+  v0.35.0 ships against dippin's `main` HEAD, dippin v0.35.0 tags pinning
+  tracker v0.35.0, tracker v0.35.1 swaps the SHA for the tag. Same shape
+  as the v0.31.0 → v0.32.0 closeout.
+
 ## [0.35.0] - 2026-06-02
 
 ### Added

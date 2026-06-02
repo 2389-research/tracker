@@ -23,12 +23,7 @@ import (
 
 // PinnedDippinVersion is the dippin-lang version from go.mod. Kept in sync
 // with go.mod by TestPinnedDippinVersionMatchesGoMod.
-//
-// Currently a pseudo-version pointing at dippin's `main` HEAD because
-// the WritablePaths IR field (issue #272 / dippin-lang #75) is merged
-// but not yet tagged. The release PR will swap this for the tagged
-// v0.35.0 in lockstep with the go.mod bump.
-const PinnedDippinVersion = "v0.34.1-0.20260601154018-792e6e644e9f"
+const PinnedDippinVersion = "v0.35.0"
 
 // DoctorConfig configures a Doctor() run.
 type DoctorConfig struct {
