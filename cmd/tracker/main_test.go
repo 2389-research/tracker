@@ -904,6 +904,16 @@ func TestParseFlagsGatewayURL(t *testing.T) {
 	}
 }
 
+func TestParseFlagsGatewayKind(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--gateway-kind", "bedrock", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.gatewayKind != "bedrock" {
+		t.Fatalf("gatewayKind = %q, want %q", cfg.gatewayKind, "bedrock")
+	}
+}
+
 func TestParseFlagsParamOverrides(t *testing.T) {
 	cfg, err := parseFlags([]string{"tracker", "--param", "foo=bar", "--param", "env=prod", "pipeline.dip"})
 	if err != nil {
@@ -953,6 +963,36 @@ func TestGatewayURLPropagatesViaEnv(t *testing.T) {
 
 	if envValueAtRunTime != gateway {
 		t.Fatalf("TRACKER_GATEWAY_URL inside run() = %q, want %q", envValueAtRunTime, gateway)
+	}
+}
+
+func TestGatewayKindPropagatesViaEnv(t *testing.T) {
+	// executeRun sets TRACKER_GATEWAY_KIND before buildLLMClient runs.
+	unsetEnvForTest(t, "TRACKER_GATEWAY_KIND")
+
+	const kind = "bedrock"
+	var envValueAtRunTime string
+
+	_ = executeCommand(runConfig{
+		mode:         modeRun,
+		pipelineFile: "pipeline.dip",
+		workdir:      "/tmp",
+		noTUI:        true,
+		gatewayKind:  kind,
+	}, commandDeps{
+		loadEnv: func(string) error { return nil },
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+			envValueAtRunTime = os.Getenv("TRACKER_GATEWAY_KIND")
+			return nil
+		},
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+			t.Fatal("unexpected TUI path")
+			return nil
+		},
+	})
+
+	if envValueAtRunTime != kind {
+		t.Fatalf("TRACKER_GATEWAY_KIND inside run() = %q, want %q", envValueAtRunTime, kind)
 	}
 }
 

@@ -39,6 +39,7 @@ type runConfig struct {
 	failOnOverride    bool
 	params            map[string]string
 	gatewayURL        string        // TRACKER_GATEWAY_URL override — synthesizes per-provider base URLs
+	gatewayKind       string        // TRACKER_GATEWAY_KIND override — selects cf-aig (default) or bedrock path convention
 	webhookURL        string        // POST human gate prompts to this URL and wait for callback
 	gateCallbackAddr  string        // local addr for the callback server when --webhook-url is set
 	gateTimeout       time.Duration // per-gate wait timeout when --webhook-url is set
