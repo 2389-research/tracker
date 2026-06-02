@@ -297,9 +297,13 @@ func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
 		default:
 			return fmt.Errorf("openat2 component %q under %q: %w", comp, anchor, err)
 		}
-		if err := unix.Mkdirat(parentFD, comp, uint32(perm.Perm())); err != nil {
+		if err := unix.Mkdirat(parentFD, comp, uint32(perm.Perm())); err != nil && err != unix.EEXIST {
 			return fmt.Errorf("mkdirat %q under %q: %w", comp, anchor, err)
 		}
+		// EEXIST: a concurrent creator won the race between the ENOENT
+		// openat2 above and this mkdirat. Treat it like the ENOENT path and
+		// re-open — the re-open below still uses RESOLVE_NO_SYMLINKS, so a
+		// symlink planted by the racing creator is rejected, not followed.
 		fd, err = unix.Openat2(parentFD, comp, &how)
 		if err != nil {
 			return fmt.Errorf("re-open %q under %q after mkdir: %w", comp, anchor, err)

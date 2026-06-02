@@ -70,9 +70,14 @@ func validateWorkingDirEscape(workingDir, processCwd string) error {
 	realResolved, evalErr := filepath.EvalSymlinks(resolved)
 	if evalErr != nil {
 		if errors.Is(evalErr, fs.ErrNotExist) {
-			// Path doesn't exist yet — the string check was the
-			// authoritative one; nothing to follow.
-			return nil
+			// The full path doesn't exist yet, but an intermediate
+			// component may be a symlink that relocates the eventual
+			// working_dir outside the jail (e.g. working_dir "link/new"
+			// where "link" -> /etc). EvalSymlinks on the whole path
+			// returns ErrNotExist because the final suffix is missing,
+			// hiding that escape. Re-check containment against the
+			// deepest *existing* ancestor instead.
+			return validateExistingAncestorEscape(resolved, cleanedCwd, workingDir)
 		}
 		return fmt.Errorf("evaluate working_dir %q: %w", workingDir, evalErr)
 	}
@@ -87,6 +92,39 @@ func validateWorkingDirEscape(workingDir, processCwd string) error {
 	if !isSubpathOf(realResolved, realCwd) {
 		return fmt.Errorf("%w: working_dir %q evaluates to %q via symlinks which escapes %q",
 			ErrPathEscape, workingDir, realResolved, realCwd)
+	}
+	return nil
+}
+
+// validateExistingAncestorEscape handles the case where the cleaned
+// working_dir does not yet exist on disk. It walks from the missing leaf up
+// toward processCwd, finds the deepest ancestor that actually exists, and
+// re-checks that its symlink-resolved real path stays inside processCwd. This
+// rejects an intermediate symlink (e.g. working_dir "link/new" where "link" ->
+// /etc) that would otherwise be hidden by EvalSymlinks returning ErrNotExist
+// for the missing final suffix. The not-yet-existing suffix is created under
+// that resolved ancestor at runtime, so a contained ancestor means the eventual
+// working_dir is contained too.
+func validateExistingAncestorEscape(resolved, cleanedCwd, workingDir string) error {
+	realCwd, err := filepath.EvalSymlinks(cleanedCwd)
+	if err != nil {
+		// Same fallback as the caller: if tracker can't resolve its own cwd,
+		// the cleaned form is no worse than the pre-existing string check.
+		realCwd = cleanedCwd
+	}
+	for ancestor := filepath.Dir(resolved); isSubpathOf(ancestor, cleanedCwd); ancestor = filepath.Dir(ancestor) {
+		real, err := filepath.EvalSymlinks(ancestor)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // this ancestor is also missing — keep walking up
+			}
+			return fmt.Errorf("evaluate working_dir ancestor %q: %w", ancestor, err)
+		}
+		if !isSubpathOf(real, realCwd) {
+			return fmt.Errorf("%w: working_dir %q has existing ancestor %q resolving to %q via symlinks which escapes %q",
+				ErrPathEscape, workingDir, ancestor, real, realCwd)
+		}
+		return nil // deepest existing ancestor is contained — safe
 	}
 	return nil
 }

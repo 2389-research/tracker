@@ -67,7 +67,18 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 	} else {
 		anchor = filepath.Clean(filepath.Join(processCwd, cfg.WorkingDir))
 	}
-	globs := append([]string(nil), cfg.WritablePaths...) // defensive copy
+	// Normalize the stored globs to the same canonical (path.Clean) form the
+	// validator checked. ValidateWritablePaths Cleans each entry before its
+	// escape/shape checks, but the runtime matcher (matchOneGlob) and the
+	// Landlock dir computation (landlockDirForGlob) both consume the stored
+	// string literally. Without normalizing here, an entry like "./workspace/**"
+	// passes validation yet makes matchOneGlob compare the literal prefix
+	// "./workspace" against "workspace/..." and deny every write under
+	// workspace/ — a fail-closed surprise (Copilot codergen_jail.go:71).
+	globs := make([]string, len(cfg.WritablePaths))
+	for i, g := range cfg.WritablePaths {
+		globs[i] = path.Clean(g)
+	}
 
 	env.CommandWrapper = func(c *osexec.Cmd) *osexec.Cmd {
 		return execpkg.WrapBashCmd(c, anchor, globs)

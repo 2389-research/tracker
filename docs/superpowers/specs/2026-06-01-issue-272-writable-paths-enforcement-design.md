@@ -231,7 +231,7 @@ The release PR (after dippin tags v0.35.0) bumps to the tagged version AND bumps
 | `agent/exec/local.go` | add optional `CommandWrapper` and `WriteOpener` function fields; `ExecCommand` / `WriteFile` call them if set |
 | `agent/exec/jail_linux.go` (new) | `WrapBashCmd`, `RunJailExec`, `ProbeLandlock`, `ValidateWritablePaths`, `OpenForWrite`; `//go:build linux` |
 | `agent/exec/jail_other.go` (new) | passthrough stubs; `//go:build !linux` |
-| `pipeline/handlers/codergen.go` | one new helper `configureJail(cfg, attrs, env) (bool, error)` called from `buildConfig`; collapses G1+G2+G3 into one error path; wires env's function fields |
+| `pipeline/handlers/codergen.go` | one new helper `configureJail(cfg, env, processCwd) (bool, error)` called from `buildConfig`; collapses G1+G2+G3 into one error path; wires env's function fields |
 | `cmd/tracker/main.go` | early `if os.Args[1] == "__jail-exec"` dispatch to `exec.RunJailExec(os.Args[2:])` |
 | `CLAUDE.md` | one paragraph in "Architecture Gotchas" explaining the re-exec mechanism |
 | `site/static/skill.md` | one paragraph: tracker-side enforcement contract, two-tier semantic, residual escape classes |
