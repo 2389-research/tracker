@@ -160,6 +160,20 @@ func validateGlobEntry(g string) error {
 		return fmt.Errorf("%w: writable_paths entry %q escapes via parent traversal (cleaned: %q)",
 			ErrPathEscape, g, cleaned)
 	}
+	// Reject ANY ".." segment in the original (uncleaned) entry. The cleaned
+	// check above only catches outward escapes — but configureJail normalizes
+	// stored globs with path.Clean (round 6 fix for the `./workspace/**`
+	// matcher mismatch), and a clever author-input like "workspace/../**"
+	// cleans to "**", which would silently grant write across the entire
+	// anchor instead of the workspace subtree the author probably meant
+	// to deny themselves out of. Refuse any `..` segment fail-closed
+	// (#275 review, Copilot jail.go:162).
+	for _, seg := range strings.Split(g, "/") {
+		if seg == ".." {
+			return fmt.Errorf("%w: writable_paths entry %q contains `..` segment; rejected fail-closed because path.Clean would collapse it to a broader glob than authored",
+				ErrPathEscape, g)
+		}
+	}
 	// Brace expansion is unsupported by the matcher (matchOneGlob /
 	// path.Match neither expand `{a,b}`). Accepting balanced braces
 	// would silently never match anything at runtime — surprising
@@ -207,11 +221,24 @@ func isWindowsAbsolute(s string) bool {
 // path.Match probing but silently never matches at runtime. Since
 // writable_paths is a security boundary, refuse-to-start rather than
 // silently misapply policy (#275 review, Copilot jail.go:101).
+//
+// Additionally, when `**` is present, the *prefix* part (segments before
+// `/**`) must be a LITERAL path with no glob metachars (`*`, `?`, `[`).
+// matchOneGlob compares the prefix as a literal string via strings.HasPrefix,
+// while landlockDirForGlob derives RWDirs from the static-prefix-before-first-
+// metachar — so `work*/**` would silently never match writes in-process while
+// Landlock would grant write on the entire anchor (the static prefix is just
+// `work`, and `landlockDirForGlob` collapses that to the anchor itself).
+// That mismatch is broader than authored permissions; refuse fail-closed
+// (#275 review, Copilot jail.go:225).
 func validateDoubleStarPlacement(g string) error {
 	doubleStarCount := 0
-	for _, seg := range strings.Split(g, "/") {
+	doubleStarIdx := -1
+	segs := strings.Split(g, "/")
+	for i, seg := range segs {
 		if seg == "**" {
 			doubleStarCount++
+			doubleStarIdx = i
 			continue
 		}
 		if strings.Contains(seg, "**") {
@@ -221,6 +248,14 @@ func validateDoubleStarPlacement(g string) error {
 	}
 	if doubleStarCount > 1 {
 		return fmt.Errorf("malformed writable_paths entry %q: only one `**` segment is supported per glob", g)
+	}
+	if doubleStarIdx >= 0 {
+		for _, seg := range segs[:doubleStarIdx] {
+			if strings.ContainsAny(seg, "*?[") {
+				return fmt.Errorf("malformed writable_paths entry %q: glob metachars before `**` are not supported (segment %q) — matchOneGlob takes the prefix literally while Landlock derives a broader directory than authored, so the matcher and jail tiers would disagree; use a literal prefix or move `**` earlier",
+					g, seg)
+			}
+		}
 	}
 	return nil
 }
