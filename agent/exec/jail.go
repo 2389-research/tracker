@@ -14,16 +14,28 @@ import (
 // ValidateWritablePaths is the cross-platform gate that runs at session
 // setup before the jail is wired. It catches three classes of refusal:
 //
-//  1. working_dir escapes tracker's process cwd (the "working_dir: /tmp/atk
-//     relocation" attack described in the spec § 8.1).
+//  1. working_dir escapes tracker's process cwd / session root (the
+//     "working_dir: /tmp/atk relocation" attack described in the spec § 8.1).
 //  2. The glob list is empty (fail-closed; a present-but-empty value is
 //     already rejected by dippin's parser, but tracker backstops).
-//  3. A glob entry is absolute, starts with ~, escapes the workspace via
-//     parent traversal, or has unbalanced brace expansion. These are mostly
+//  3. A glob entry is bad in some way (absolute, starts with ~, escapes via
+//     parent traversal, uses an unsupported shape, etc.). These are mostly
 //     caught by dippin DIP142, but tracker is the runtime backstop.
 //
-// Returns ErrPathEscape-wrapped errors for class-1 and class-3; plain error
-// for class-2.
+// Error sentinels:
+//
+//   - ErrPathEscape wraps class-1 errors AND the escape-flavored class-3
+//     subclass: absolute / `~` / parent-traversal / Windows-absolute / inward
+//     `..` segments / non-existent intermediate. errors.Is(err, ErrPathEscape)
+//     answers "did the operator (or attacker) try to point the jail outside
+//     the session root?"
+//   - Plain (non-sentinel) errors carry the malformed-pattern class-3 cases:
+//     empty / brace usage / multiple ** / metachars before ** / glued
+//     `foo/**bar` / unbalanced character classes. These are "bad glob shape"
+//     rather than "escape attempt" — the codergen handler refuses to start
+//     on either, but the sentinel distinction lets upstream consumers
+//     differentiate if they care.
+//   - Class-2 (empty list) is a plain error too.
 func ValidateWritablePaths(workingDir string, globs []string, processCwd string) error {
 	if err := validateWorkingDirEscape(workingDir, processCwd); err != nil {
 		return err

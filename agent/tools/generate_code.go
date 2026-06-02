@@ -46,8 +46,19 @@ func WithGenerateWorkDir(dir string) GenerateCodeOption {
 // alongside the openat2-protected env.WriteFile path. When nil (default), the
 // tool falls back to direct os.WriteFile — fine for the unjailed code path
 // but bypasses the jail when writable_paths is set (#275 audit pass).
+//
+// If workDir is still empty when this option fires, defaults it to
+// env.WorkingDir(). Without that default, a caller that supplies env but
+// not WithGenerateWorkDir would get filepath.Rel(env.WorkingDir(), absPath)
+// producing a leading "../..." that env.WriteFile rejects — the tool would
+// silently stop writing files (#275 review, Copilot generate_code.go:51).
 func WithGenerateEnv(env exec.ExecutionEnvironment) GenerateCodeOption {
-	return func(t *GenerateCodeTool) { t.env = env }
+	return func(t *GenerateCodeTool) {
+		t.env = env
+		if t.workDir == "" && env != nil {
+			t.workDir = env.WorkingDir()
+		}
+	}
 }
 
 // NewGenerateCodeTool creates a tool that generates code via a cheap model.

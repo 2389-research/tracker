@@ -52,8 +52,20 @@ func WithSprintWriterWorkDir(dir string) WriteEnrichedSprintOption {
 // path. When nil (default), the tool falls back to direct os.WriteFile —
 // fine for the unjailed code path but bypasses the jail when writable_paths
 // is set (#275 audit pass).
+//
+// If workDir is still empty when this option fires, defaults it to
+// env.WorkingDir(). Without that default, a caller that supplies env but
+// not WithSprintWriterWorkDir would get filepath.Rel(env.WorkingDir(),
+// absPath) producing a leading "../..." that env.WriteFile rejects — the
+// tool would silently stop writing files (#275 review, Copilot
+// write_enriched_sprint.go:57).
 func WithSprintWriterEnv(env exec.ExecutionEnvironment) WriteEnrichedSprintOption {
-	return func(t *WriteEnrichedSprintTool) { t.env = env }
+	return func(t *WriteEnrichedSprintTool) {
+		t.env = env
+		if t.workDir == "" && env != nil {
+			t.workDir = env.WorkingDir()
+		}
+	}
 }
 
 // NewWriteEnrichedSprintTool creates a tool that writes enriched sprint markdown.
