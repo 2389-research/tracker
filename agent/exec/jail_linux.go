@@ -150,6 +150,30 @@ func RunJailExec(args []string) int {
 		rwDirs = append(rwDirs, landlockDirForGlob(anchor, g))
 	}
 
+	// Pre-create each RW root through the anchor with symlink-safe
+	// component walking. Landlock RestrictPaths refuses to add a path
+	// rule for a non-existent directory, and even once the ruleset is
+	// active the jailed shell can't create the root itself because
+	// the parent (anchor) is read-only under RODirs("/"). Without this,
+	// flows like `mkdir -p workspace && …` fail under writable_paths
+	// whenever the workspace dir wasn't pre-staged (#275 review,
+	// Copilot jail_linux.go:151). SafeMkdirAll uses openat2 with
+	// RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS
+	// so a pre-existing symlink at the rwDir path can't redirect this
+	// creation outside the anchor.
+	for _, rw := range rwDirs {
+		rel, err := filepath.Rel(anchor, rw)
+		if err != nil || rel == "." || rel == "" {
+			// rwDir is the anchor itself (bare-** glob); already exists by
+			// construction (configureJail validated it). Skip.
+			continue
+		}
+		if err := SafeMkdirAll(anchor, rel, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "tracker __jail-exec: pre-create %q: %v\n", rw, err)
+			return 4
+		}
+	}
+
 	// Resolve the binary path before applying Landlock so PATH lookup succeeds
 	// while we still have unrestricted FS access. syscall.Exec does no PATH
 	// lookup of its own.

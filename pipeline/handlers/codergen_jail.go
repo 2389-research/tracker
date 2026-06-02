@@ -57,9 +57,15 @@ func refuseWritablePathsOnUnsupportedBackend(node *pipeline.Node, backend pipeli
 //	    OR unknown (fail-closed).
 //	G3. ProbeLandlock fails (non-Linux, kernel < 6.7, syscall denied).
 //
-// The handoff: Task 15's codergen buildConfig calls this immediately before
-// agent.NewSession. Any refuse returned here surfaces as EventNodeFailed
-// pre-LLM-token; the session never starts.
+// The handoff: NativeBackend.Run calls this immediately before
+// agent.NewSession with a fresh *LocalEnvironment rooted at the resolved
+// session working_dir. Any refuse returned here surfaces as the
+// SessionResult error, which CodergenHandler.Execute turns into
+// EventNodeFailed pre-LLM-token; the session never starts. claude-code
+// and acp backends never reach this function — they're refused earlier
+// at refuseWritablePathsOnUnsupportedBackend in CodergenHandler.Execute
+// (round 7) because buildRunConfig drops the SessionConfig signal for
+// them before any backend.Run is dispatched.
 func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, processCwd string) (bool, error) {
 	if !cfg.WritablePathsSet {
 		return false, nil

@@ -46,35 +46,41 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 		if !ok {
 			return agent.SessionResult{}, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
 		}
-		processCwd, err := os.Getwd()
-		if err != nil {
-			return agent.SessionResult{}, fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
+		// The "session root" for jail validation is the backend env's
+		// WorkingDir — the resolved --workdir flag (or AgentRunConfig.WorkingDir
+		// when set). Process CWD is wherever the user happened to invoke
+		// tracker from; using it as the validation base would either let a
+		// node-level working_dir relocate the jail anchor outside the
+		// session root (escape) or reject valid absolute --workdir values
+		// that sit outside the user's shell cwd (#275 review, Copilot
+		// backend_native.go:78).
+		sessionRoot := localEnv.WorkingDir()
+		if sessionRoot == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return agent.SessionResult{}, fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
+			}
+			sessionRoot = cwd
 		}
 		// Fresh env rooted at the session's working_dir when set, falling
-		// back to the existing backend env's WorkingDir, then processCwd.
-		// Using the session's working_dir respects per-node overrides so
-		// cmd.Dir and the jail anchor stay aligned (#272 review,
-		// coderabbitai backend_native.go:57). The fallback to the backend
-		// env's WorkingDir preserves the effective working dir for callers
-		// that set AgentRunConfig.WorkingDir but leave SessionConfig.WorkingDir
-		// empty — without it, filepath.Join(processCwd, "") would silently
-		// relocate the session to tracker's cwd (#275 review, Copilot
-		// backend_native.go:62).
+		// back to the session root. Using sessionCfg.WorkingDir respects
+		// per-node overrides so cmd.Dir and the jail anchor stay aligned
+		// (#272 review, coderabbitai backend_native.go:57). Empty
+		// sessionCfg.WorkingDir defers to the session root rather than
+		// filepath.Join(root, "") which silently relocates (#275 review,
+		// Copilot backend_native.go:62).
 		jailedWorkDir := sessionCfg.WorkingDir
 		if jailedWorkDir == "" {
-			jailedWorkDir = localEnv.WorkingDir()
+			jailedWorkDir = sessionRoot
 		}
 		if !filepath.IsAbs(jailedWorkDir) {
-			jailedWorkDir = filepath.Join(processCwd, jailedWorkDir)
+			jailedWorkDir = filepath.Join(sessionRoot, jailedWorkDir)
 		}
 		// Keep SessionConfig.WorkingDir in sync with the resolved anchor so
-		// configureJail validates against the same path the env is rooted
-		// at — without this, an empty SessionConfig.WorkingDir would make
-		// configureJail anchor on processCwd while the env runs from the
-		// (potentially different) backend WorkingDir.
+		// configureJail validates against the same path the env is rooted at.
 		sessionCfg.WorkingDir = jailedWorkDir
 		jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
-		if _, err := configureJail(&sessionCfg, jailedEnv, processCwd); err != nil {
+		if _, err := configureJail(&sessionCfg, jailedEnv, sessionRoot); err != nil {
 			return agent.SessionResult{}, err
 		}
 		env = jailedEnv
