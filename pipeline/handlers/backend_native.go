@@ -106,6 +106,12 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 		genOpts := []tools.GenerateCodeOption{
 			tools.WithGenerateModel(cheapModel),
 			tools.WithGenerateProvider(cheapProvider),
+			// Route writes through the resolved env so the writable_paths
+			// fs-jail (#272) intercepts generated files alongside Write /
+			// Edit / ApplyPatch. `env` here is the JAILED env when
+			// sessionCfg.WritablePathsSet — see the configureJail block
+			// above. #275 audit pass.
+			tools.WithGenerateEnv(env),
 		}
 		workDir := sessionCfg.WorkingDir
 		if workDir == "" {
@@ -126,6 +132,9 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 		swOpts := []tools.WriteEnrichedSprintOption{
 			tools.WithSprintWriterModel(sprintModel),
 			tools.WithSprintWriterProvider(sprintProvider),
+			// Same routing rationale as the generate_code tool above
+			// (#275 audit pass).
+			tools.WithSprintWriterEnv(env),
 		}
 		workDir := sessionCfg.WorkingDir
 		if workDir == "" {

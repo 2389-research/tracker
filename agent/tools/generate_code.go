@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
 )
 
@@ -19,6 +20,7 @@ type GenerateCodeTool struct {
 	model    string
 	provider string
 	workDir  string
+	env      exec.ExecutionEnvironment
 }
 
 // GenerateCodeOption configures the GenerateCodeTool.
@@ -37,6 +39,15 @@ func WithGenerateProvider(provider string) GenerateCodeOption {
 // WithGenerateWorkDir sets the base directory for writing generated files.
 func WithGenerateWorkDir(dir string) GenerateCodeOption {
 	return func(t *GenerateCodeTool) { t.workDir = dir }
+}
+
+// WithGenerateEnv routes file writes through the supplied ExecutionEnvironment
+// so the writable_paths fs-jail (#272) can intercept generated-file writes
+// alongside the openat2-protected env.WriteFile path. When nil (default), the
+// tool falls back to direct os.WriteFile — fine for the unjailed code path
+// but bypasses the jail when writable_paths is set (#275 audit pass).
+func WithGenerateEnv(env exec.ExecutionEnvironment) GenerateCodeOption {
+	return func(t *GenerateCodeTool) { t.env = env }
 }
 
 // NewGenerateCodeTool creates a tool that generates code via a cheap model.
@@ -180,7 +191,7 @@ func (t *GenerateCodeTool) generateSequential(ctx context.Context, contract, out
 		if err != nil {
 			return "", fmt.Errorf("generate_code: file path %q: %w", f.Path, err)
 		}
-		if err := writeFile(path, code); err != nil {
+		if err := t.writeFile(ctx, path, code); err != nil {
 			return "", err
 		}
 
@@ -224,7 +235,7 @@ func (t *GenerateCodeTool) generateSingleCall(ctx context.Context, contract, out
 		if err != nil {
 			return "", err
 		}
-		if err := writeFile(path, code); err != nil {
+		if err := t.writeFile(ctx, path, code); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Generated 1 file (%d bytes): %s\nModel: %s\nTokens: %d in / %d out",
@@ -240,7 +251,7 @@ func (t *GenerateCodeTool) generateSingleCall(ctx context.Context, contract, out
 		if err != nil {
 			return "", fmt.Errorf("generate_code: file %q: %w", f.name, err)
 		}
-		if err := writeFile(path, f.content); err != nil {
+		if err := t.writeFile(ctx, path, f.content); err != nil {
 			return "", err
 		}
 		summary = append(summary, fmt.Sprintf("  %s (%d bytes)", f.name, len(f.content)))
@@ -301,7 +312,19 @@ func stripMarkdownFences(code string) string {
 	return code
 }
 
-func writeFile(path string, content string) error {
+// writeFile prefers the configured ExecutionEnvironment when set — that
+// routes through the writable_paths fs-jail (#272) WriteOpener so generated
+// files are bounded just like apply_patch/edit/write. Falls back to direct
+// os.WriteFile for unjailed sessions (no env wired) and for the test-only
+// path where workDir is empty. #275 audit pass.
+func (t *GenerateCodeTool) writeFile(ctx context.Context, path string, content string) error {
+	if t.env != nil {
+		rel, err := filepath.Rel(t.env.WorkingDir(), path)
+		if err != nil {
+			return fmt.Errorf("compute path relative to env workdir %q for %q: %w", t.env.WorkingDir(), path, err)
+		}
+		return t.env.WriteFile(ctx, rel, content)
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)

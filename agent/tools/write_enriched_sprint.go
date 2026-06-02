@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
 )
 
@@ -24,6 +25,7 @@ type WriteEnrichedSprintTool struct {
 	model    string
 	provider string
 	workDir  string
+	env      exec.ExecutionEnvironment
 }
 
 // WriteEnrichedSprintOption configures the WriteEnrichedSprintTool.
@@ -42,6 +44,16 @@ func WithSprintWriterProvider(provider string) WriteEnrichedSprintOption {
 // WithSprintWriterWorkDir sets the base directory for writing sprint files.
 func WithSprintWriterWorkDir(dir string) WriteEnrichedSprintOption {
 	return func(t *WriteEnrichedSprintTool) { t.workDir = dir }
+}
+
+// WithSprintWriterEnv routes file writes through the supplied
+// ExecutionEnvironment so the writable_paths fs-jail (#272) can intercept
+// generated sprint writes alongside the openat2-protected env.WriteFile
+// path. When nil (default), the tool falls back to direct os.WriteFile —
+// fine for the unjailed code path but bypasses the jail when writable_paths
+// is set (#275 audit pass).
+func WithSprintWriterEnv(env exec.ExecutionEnvironment) WriteEnrichedSprintOption {
+	return func(t *WriteEnrichedSprintTool) { t.env = env }
 }
 
 // NewWriteEnrichedSprintTool creates a tool that writes enriched sprint markdown.
@@ -636,7 +648,7 @@ func (t *WriteEnrichedSprintTool) RunOne(ctx context.Context, contract, path, de
 	}
 
 	fullPath := filepath.Join(outputDir, path)
-	if err := writeSprintFile(fullPath, final); err != nil {
+	if err := t.writeSprintFile(ctx, fullPath, final); err != nil {
 		return nil, err
 	}
 
@@ -1195,7 +1207,18 @@ func trimEnclosingMarkdownFence(s string) string {
 	return s
 }
 
-func writeSprintFile(path string, content string) error {
+// writeSprintFile prefers the configured ExecutionEnvironment when set —
+// that routes through the writable_paths fs-jail (#272) WriteOpener so
+// generated sprint files are bounded just like apply_patch/edit/write.
+// Falls back to direct os.WriteFile for unjailed sessions. #275 audit pass.
+func (t *WriteEnrichedSprintTool) writeSprintFile(ctx context.Context, path string, content string) error {
+	if t.env != nil {
+		rel, err := filepath.Rel(t.env.WorkingDir(), path)
+		if err != nil {
+			return fmt.Errorf("compute path relative to env workdir %q for %q: %w", t.env.WorkingDir(), path, err)
+		}
+		return t.env.WriteFile(ctx, rel, content)
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
