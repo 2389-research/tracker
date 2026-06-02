@@ -679,31 +679,42 @@ func gatewaySuffix(kind GatewayKind, provider string) (string, bool) {
 // consulting sources in priority order:
 //
 //  1. Per-provider env var (*_BASE_URL) — always wins.
-//  2. gatewayURL argument (from Config.GatewayURL) with provider suffix appended.
-//  3. TRACKER_GATEWAY_URL env var with provider suffix appended.
+//  2. gatewayURL argument (from Config.GatewayURL) with kind-dependent suffix appended.
+//  3. TRACKER_GATEWAY_URL env var with kind-dependent suffix appended.
 //  4. Empty string — use provider SDK default.
+//
+// TRACKER_GATEWAY_KIND selects the suffix map (see gatewaySuffix). Unknown
+// kind values and unsupported (kind, provider) pairs refuse to route
+// (return "") rather than silently falling through.
 func resolveProviderBaseURLWithGateway(provider, gatewayURL string) string {
-	var envKey, suffix string
+	var envKey string
 	switch provider {
 	case "anthropic":
-		envKey, suffix = "ANTHROPIC_BASE_URL", "/anthropic"
+		envKey = "ANTHROPIC_BASE_URL"
 	case "openai":
-		envKey, suffix = "OPENAI_BASE_URL", "/openai"
+		envKey = "OPENAI_BASE_URL"
 	case "gemini":
-		envKey, suffix = "GEMINI_BASE_URL", "/google-ai-studio"
+		envKey = "GEMINI_BASE_URL"
 	case "openai-compat":
-		envKey, suffix = "OPENAI_COMPAT_BASE_URL", "/compat"
+		envKey = "OPENAI_COMPAT_BASE_URL"
 	default:
 		return ""
 	}
 	if v := os.Getenv(envKey); v != "" {
 		return v
 	}
-	if gatewayURL != "" {
-		return strings.TrimRight(gatewayURL, "/") + suffix
-	}
-	gateway := strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
+
+	gateway := strings.TrimRight(gatewayURL, "/")
 	if gateway == "" {
+		gateway = strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
+	}
+	if gateway == "" {
+		return ""
+	}
+
+	kind := GatewayKind(os.Getenv("TRACKER_GATEWAY_KIND"))
+	suffix, ok := gatewaySuffix(kind, provider)
+	if !ok {
 		return ""
 	}
 	return gateway + suffix
@@ -714,26 +725,28 @@ func resolveProviderBaseURLWithGateway(provider, gatewayURL string) string {
 //
 //  1. The provider-specific env var (ANTHROPIC_BASE_URL, OPENAI_BASE_URL,
 //     GEMINI_BASE_URL, OPENAI_COMPAT_BASE_URL).
-//  2. TRACKER_GATEWAY_URL with the Cloudflare AI Gateway provider suffix
-//     appended (e.g. ".../anthropic", ".../openai", ".../google-ai-studio").
+//  2. TRACKER_GATEWAY_URL with a per-provider suffix appended; the suffix
+//     map is selected by TRACKER_GATEWAY_KIND (default cf-aig — Cloudflare
+//     AI Gateway conventions).
 //  3. Empty string, meaning the provider's SDK default.
 //
 // Per-provider env vars always win over TRACKER_GATEWAY_URL, so users can set
 // a single gateway URL for everything and still override individual providers.
 // Trailing slashes on the gateway root are stripped before the suffix is
 // appended to prevent double-slash URLs. Unknown provider names return the
-// empty string.
+// empty string. Unknown TRACKER_GATEWAY_KIND values refuse to route
+// (fail-closed) rather than silently falling through to cf-aig.
 func ResolveProviderBaseURL(provider string) string {
-	var envKey, suffix string
+	var envKey string
 	switch provider {
 	case "anthropic":
-		envKey, suffix = "ANTHROPIC_BASE_URL", "/anthropic"
+		envKey = "ANTHROPIC_BASE_URL"
 	case "openai":
-		envKey, suffix = "OPENAI_BASE_URL", "/openai"
+		envKey = "OPENAI_BASE_URL"
 	case "gemini":
-		envKey, suffix = "GEMINI_BASE_URL", "/google-ai-studio"
+		envKey = "GEMINI_BASE_URL"
 	case "openai-compat":
-		envKey, suffix = "OPENAI_COMPAT_BASE_URL", "/compat"
+		envKey = "OPENAI_COMPAT_BASE_URL"
 	default:
 		return ""
 	}
@@ -742,6 +755,11 @@ func ResolveProviderBaseURL(provider string) string {
 	}
 	gateway := strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
 	if gateway == "" {
+		return ""
+	}
+	kind := GatewayKind(os.Getenv("TRACKER_GATEWAY_KIND"))
+	suffix, ok := gatewaySuffix(kind, provider)
+	if !ok {
 		return ""
 	}
 	return gateway + suffix

@@ -697,6 +697,87 @@ func TestResolveProviderBaseURL_UnknownProvider(t *testing.T) {
 	}
 }
 
+// TestResolveProviderBaseURL_GatewayKindCFAIG_BackcompatDefault asserts that
+// existing CF AIG callers see zero behavior change when TRACKER_GATEWAY_KIND
+// is empty (the new env var is unset). This is the back-compat canary for
+// #276.
+func TestResolveProviderBaseURL_GatewayKindCFAIG_BackcompatDefault(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "") // unset = default cf-aig
+	got := ResolveProviderBaseURL("anthropic")
+	want := "https://example.com/anthropic"
+	if got != want {
+		t.Errorf("anthropic with cf-aig default = %q, want %q", got, want)
+	}
+}
+
+// TestResolveProviderBaseURL_GatewayKindBedrock covers the bedrock-gateway
+// suffix map: anthropic gets empty (SDK appends /v1/messages), openai and
+// gemini get /v1.
+func TestResolveProviderBaseURL_GatewayKindBedrock(t *testing.T) {
+	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock-gateway.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	cases := []struct {
+		provider string
+		want     string
+	}{
+		{"anthropic", "https://bedrock-gateway.example.com"},
+		{"openai", "https://bedrock-gateway.example.com/v1"},
+		{"gemini", "https://bedrock-gateway.example.com/v1"},
+	}
+	for _, c := range cases {
+		t.Setenv(strings.ToUpper(strings.ReplaceAll(c.provider, "-", "_"))+"_BASE_URL", "")
+		t.Run(c.provider, func(t *testing.T) {
+			got := ResolveProviderBaseURL(c.provider)
+			if got != c.want {
+				t.Errorf("%s with bedrock kind = %q, want %q", c.provider, got, c.want)
+			}
+		})
+	}
+}
+
+// TestResolveProviderBaseURL_GatewayKindBedrock_OpenAICompatRefused asserts
+// fail-closed behavior: the bedrock gateway has no /compat equivalent, so
+// openai-compat under KIND=bedrock must refuse to route rather than emit a
+// URL that would 404.
+func TestResolveProviderBaseURL_GatewayKindBedrock_OpenAICompatRefused(t *testing.T) {
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock-gateway.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	got := ResolveProviderBaseURL("openai-compat")
+	if got != "" {
+		t.Errorf("openai-compat under bedrock should refuse routing (return \"\"); got %q", got)
+	}
+}
+
+// TestResolveProviderBaseURL_PerProviderEnvWins asserts that the
+// per-provider <PROVIDER>_BASE_URL env var still wins unconditionally —
+// even under KIND=bedrock — preserving the "surgical override" precedence.
+func TestResolveProviderBaseURL_PerProviderEnvWins(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "https://surgical.example.com")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	got := ResolveProviderBaseURL("anthropic")
+	want := "https://surgical.example.com"
+	if got != want {
+		t.Errorf("per-provider env should win over gateway+kind; got %q want %q", got, want)
+	}
+}
+
+// TestResolveProviderBaseURL_UnknownKindRefusesRouting asserts fail-closed:
+// an unknown TRACKER_GATEWAY_KIND value refuses to route rather than
+// silently falling through to cf-aig.
+func TestResolveProviderBaseURL_UnknownKindRefusesRouting(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "future-kind-xyz")
+	got := ResolveProviderBaseURL("anthropic")
+	if got != "" {
+		t.Errorf("unknown KIND should refuse routing; got %q", got)
+	}
+}
+
 // TestResolveBudgetLimits_FallsBackToGraphAttrs verifies that when
 // Config.Budget is zero, ResolveBudgetLimits fills from the graph-level
 // max_total_tokens / max_cost_cents / max_wall_time attrs populated by
