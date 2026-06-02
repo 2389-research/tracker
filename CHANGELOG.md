@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-06-02
+
 ### Added
 
 - **`writable_paths` fs-jail enforcement** (closes #272, paired with dippin
@@ -51,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Joint-release coordination**: `go.mod` pins `github.com/2389-research/dippin-lang` to the pseudo-version `v0.34.1-0.20260601154018-792e6e644e9f` (dippin's `main` commit `792e6e6`), which contains the matching `WritablePaths` and `Override` IR fields. dippin v0.35.0 is not yet tagged; the loop closes when dippin tags v0.35.0 pinning tracker v0.35.0 and tracker then publishes v0.35.1 swapping to the tagged dippin version (zero functional change). Same pattern as the v0.31.0 → v0.32.0 closeout.
 - **Library-API delta**: `EngineResult.Status`, `tracker.Result.Status`, `tracker.AuditReport.Status`, `tracker.RunSummary.Status` are re-typed from `string` to `pipeline.TerminalStatus` (a named string type). Existing literal-string comparisons (`result.Status == "success"`) continue to compile and produce the same answer. Assignments from a `string` variable into a `Status` field require an explicit cast — this is the one breaking change in the re-typing. Embedded library callers should migrate to the new `TerminalStatus.IsSuccess()` helper for forward-compat across future status additions.
 - **New exported symbols** (additive): `pipeline.TerminalStatus` (type), `pipeline.OutcomeValidationOverridden`, `pipeline.OverrideDetail`, `pipeline.Actor` (type), `pipeline.ActorHuman` / `ActorAutopilot` / `ActorWebhook` / `ActorUnknown`, `pipeline.Edge.Override`, `pipeline.Outcome.ChildOverride`, `pipeline.Outcome.OverrideActor`, `pipeline.EngineResult.ValidationOverrides`, `pipeline.Checkpoint.ValidationOverrides`, `pipeline.EventValidationOverridden`, `pipeline.PipelineEvent.Override`, `pipeline.ErrValidationOverridden`. Plus mirrored fields on `tracker.Result`, `tracker.AuditReport`, `tracker.RunSummary`, `tracker.DiagnoseReport`.
 - `tracker_audit.AuditReport.Recommendations` is no longer alphabetically sorted — entries appear in priority order (override notes first, then per-override entries chronologically, then retry/budget notes). Downstream tools that sort on receipt are unaffected; tools that displayed in receive-order will see a different order.
