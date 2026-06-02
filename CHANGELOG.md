@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-06-02
+
+### Joint-release coordination
+
+`go.mod` pins `github.com/2389-research/dippin-lang` to the pseudo-version
+`v0.34.1-0.20260601154018-792e6e644e9f` — dippin's `main` HEAD commit
+`792e6e6`, which contains the matching `WritablePaths` and `Override` IR
+fields. dippin v0.35.0 is not yet tagged; the joint-release loop closes
+when dippin tags v0.35.0 pinning tracker v0.35.0 and tracker then publishes
+v0.35.1 swapping the pseudo-version for the tagged dippin (zero functional
+change). Same pattern as the v0.31.0 → v0.32.0 closeout.
+
 ### Added
 
 - **`writable_paths` fs-jail enforcement** (closes #272, paired with dippin
