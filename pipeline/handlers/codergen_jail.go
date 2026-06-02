@@ -12,7 +12,35 @@ import (
 
 	"github.com/2389-research/tracker/agent"
 	execpkg "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
+
+// refuseWritablePathsOnUnsupportedBackend is the dispatcher-layer
+// counterpart to configureJail's G2 gate. configureJail only runs inside
+// NativeBackend.Run; the claude-code and acp backends never invoke it
+// because buildRunConfig switches Extra away from *agent.SessionConfig
+// for them, so the writable_paths signal is dropped before any gate fires.
+// Without an earlier check a node that declares writable_paths but selects
+// a non-native backend (either via `backend: claude-code` / `backend: acp`
+// on the node OR via the global --backend default with no node-level
+// override) starts unjailed (#275 review, Copilot codergen.go:647).
+//
+// The detection is by type assertion against the backend instance: anything
+// that isn't *NativeBackend cannot run inside the jail, regardless of how
+// it got selected.
+func refuseWritablePathsOnUnsupportedBackend(node *pipeline.Node, backend pipeline.AgentBackend) error {
+	if node == nil {
+		return nil
+	}
+	cfg := node.AgentConfig(nil)
+	if !cfg.WritablePathsSet {
+		return nil
+	}
+	if _, ok := backend.(*NativeBackend); ok {
+		return nil
+	}
+	return fmt.Errorf("writable_paths refuses backend %T (only native enforces; out-of-process backends cannot be sandboxed; see issue #272)", backend)
+}
 
 // configureJail consults cfg.WritablePathsSet and wires the jail into env
 // when the flag is set. Returns (enabled, err):

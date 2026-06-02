@@ -174,7 +174,18 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 	cmd.WaitDelay = 5 * time.Second
 
 	if e.CommandWrapper != nil {
-		cmd = e.CommandWrapper(cmd)
+		// Enforce the in-place mutation contract: a wrapper that returns
+		// a different *exec.Cmd would silently drop the Cancel,
+		// WaitDelay, and SysProcAttr (including Pdeathsig + Setpgid)
+		// fields the orphan-reaper defense (#272 commit e257d02) relies
+		// on. The jail's WrapBashCmd mutates cmd in place; reject any
+		// other shape rather than re-apply the fields on the new cmd
+		// (which would re-open the very orphan-leak window the wrapper
+		// is meant to preserve) — #275 review, Copilot local.go:178.
+		wrapped := e.CommandWrapper(cmd)
+		if wrapped != cmd {
+			return CommandResult{}, fmt.Errorf("CommandWrapper must mutate cmd in place and return the same *exec.Cmd; got different pointer (would silently drop Cancel/WaitDelay/SysProcAttr including Pdeathsig)")
+		}
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -340,7 +351,14 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 	}
 
 	if e.CommandWrapper != nil {
-		cmd = e.CommandWrapper(cmd)
+		// Same in-place-mutation contract as ExecCommand — keep both
+		// entry points consistent so a future wrapper can't drop
+		// Cancel/WaitDelay/SysProcAttr on one path while preserving them
+		// on the other (#275 review, Copilot local.go:344).
+		wrapped := e.CommandWrapper(cmd)
+		if wrapped != cmd {
+			return CommandResult{}, fmt.Errorf("CommandWrapper must mutate cmd in place and return the same *exec.Cmd; got different pointer (would silently drop Cancel/WaitDelay/SysProcAttr including Pdeathsig)")
+		}
 	}
 
 	if outputLimit <= 0 {

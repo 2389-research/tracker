@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/agent"
 	execpkg "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestConfigureJail_NotSet_NoOp(t *testing.T) {
@@ -230,6 +232,47 @@ func TestMatchWritablePath(t *testing.T) {
 			got := matchWritablePath(tc.relPath, tc.globs)
 			if got != tc.want {
 				t.Errorf("matchWritablePath(%q, %v) = %v, want %v", tc.relPath, tc.globs, got, tc.want)
+			}
+		})
+	}
+}
+
+// fakeBackendForGate is a tiny pipeline.AgentBackend stand-in for tests of
+// refuseWritablePathsOnUnsupportedBackend. The gate dispatches on the
+// concrete type via type assertion, so any non-*NativeBackend value
+// exercises the refusal path. Run is never called from these tests.
+type fakeBackendForGate struct{}
+
+func (fakeBackendForGate) Run(_ context.Context, _ pipeline.AgentRunConfig, _ func(agent.Event)) (agent.SessionResult, error) {
+	return agent.SessionResult{}, nil
+}
+
+func TestRefuseWritablePathsOnUnsupportedBackend(t *testing.T) {
+	nodeWith := &pipeline.Node{Attrs: map[string]string{"writable_paths": "workspace/**"}}
+	nodeWithout := &pipeline.Node{Attrs: map[string]string{}}
+	native := &NativeBackend{}
+	nonNative := fakeBackendForGate{}
+
+	cases := []struct {
+		name      string
+		node      *pipeline.Node
+		backend   pipeline.AgentBackend
+		wantErr   bool
+		wantInMsg string
+	}{
+		{name: "nil node is a no-op", node: nil, backend: native, wantErr: false},
+		{name: "no writable_paths attr — pass", node: nodeWithout, backend: nonNative, wantErr: false},
+		{name: "writable_paths + native — pass", node: nodeWith, backend: native, wantErr: false},
+		{name: "writable_paths + non-native — refuse", node: nodeWith, backend: nonNative, wantErr: true, wantInMsg: "writable_paths refuses backend"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := refuseWritablePathsOnUnsupportedBackend(tc.node, tc.backend)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("refuseWritablePathsOnUnsupportedBackend = %v, wantErr=%v", err, tc.wantErr)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), tc.wantInMsg) {
+				t.Errorf("err = %v, want substring %q", err, tc.wantInMsg)
 			}
 		})
 	}

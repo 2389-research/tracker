@@ -75,6 +75,17 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if backendErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
 	}
+	// writable_paths gate (#272 G2) at the dispatcher layer. NativeBackend.Run
+	// also runs configureJail with the same gate, but only the native path
+	// reaches it — buildRunConfig switches Extra to ClaudeCodeConfig / ACPConfig
+	// for the other backends, dropping the SessionConfig that carried
+	// WritablePathsSet. Without this earlier check a node with
+	// writable_paths + backend:claude-code / acp would silently start
+	// unjailed instead of refuse-to-start (#275 review, Copilot
+	// codergen.go:647).
+	if err := refuseWritablePathsOnUnsupportedBackend(node, backend); err != nil {
+		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, err)
+	}
 	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend)
 	if cfgErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q config: %w", node.ID, cfgErr)
