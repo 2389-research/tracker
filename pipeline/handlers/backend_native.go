@@ -42,23 +42,37 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	// the backend, working_dir, paths, or kernel support are bad.
 	env := b.env
 	if sessionCfg.WritablePathsSet {
-		if _, ok := b.env.(*execpkg.LocalEnvironment); !ok {
+		localEnv, ok := b.env.(*execpkg.LocalEnvironment)
+		if !ok {
 			return agent.SessionResult{}, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
 		}
 		processCwd, err := os.Getwd()
 		if err != nil {
 			return agent.SessionResult{}, fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
 		}
-		// Fresh env rooted at the session's working_dir, NOT the shared
-		// backend env's workDir. The session may set a node-level
-		// working_dir that differs from the backend default; using the
-		// backend's workDir would let cmd.Dir and relative tool paths
-		// resolve outside the jail anchor configureJail validates against
-		// (#272 review, coderabbitai backend_native.go:57).
+		// Fresh env rooted at the session's working_dir when set, falling
+		// back to the existing backend env's WorkingDir, then processCwd.
+		// Using the session's working_dir respects per-node overrides so
+		// cmd.Dir and the jail anchor stay aligned (#272 review,
+		// coderabbitai backend_native.go:57). The fallback to the backend
+		// env's WorkingDir preserves the effective working dir for callers
+		// that set AgentRunConfig.WorkingDir but leave SessionConfig.WorkingDir
+		// empty — without it, filepath.Join(processCwd, "") would silently
+		// relocate the session to tracker's cwd (#275 review, Copilot
+		// backend_native.go:62).
 		jailedWorkDir := sessionCfg.WorkingDir
+		if jailedWorkDir == "" {
+			jailedWorkDir = localEnv.WorkingDir()
+		}
 		if !filepath.IsAbs(jailedWorkDir) {
 			jailedWorkDir = filepath.Join(processCwd, jailedWorkDir)
 		}
+		// Keep SessionConfig.WorkingDir in sync with the resolved anchor so
+		// configureJail validates against the same path the env is rooted
+		// at — without this, an empty SessionConfig.WorkingDir would make
+		// configureJail anchor on processCwd while the env runs from the
+		// (potentially different) backend WorkingDir.
+		sessionCfg.WorkingDir = jailedWorkDir
 		jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
 		if _, err := configureJail(&sessionCfg, jailedEnv, processCwd); err != nil {
 			return agent.SessionResult{}, err
