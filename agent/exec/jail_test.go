@@ -72,7 +72,74 @@ func TestValidateWritablePaths(t *testing.T) {
 			name:       "malformed brace glob is rejected",
 			workingDir: "/home/user/run",
 			globs:      []string{"workspace/*.{md"},
+			wantErr:    "brace expansion",
+		},
+		// --- Validation gaps closed during #275 review ---
+		{
+			name:       "balanced braces also rejected (matcher does not expand)",
+			workingDir: "/home/user/run",
+			globs:      []string{"workspace/*.{md,yaml}"},
+			wantErr:    "brace expansion",
+		},
+		{
+			name:       "inward .. segment rejected (path.Clean collapse escalation)",
+			workingDir: "/home/user/run",
+			globs:      []string{"workspace/../**"},
+			wantErr:    "..",
+		},
+		{
+			name:       "metachar in prefix before ** rejected (matcher vs Landlock mismatch)",
+			workingDir: "/home/user/run",
+			globs:      []string{"work*/**"},
+			wantErr:    "metachars before",
+		},
+		{
+			name:       "metachar in middle segment of prefix/**/suffix rejected",
+			workingDir: "/home/user/run",
+			globs:      []string{"work*/**/report.md"},
+			wantErr:    "metachars before",
+		},
+		{
+			name:       "doublestar glued to chars rejected (foo/**bar)",
+			workingDir: "/home/user/run",
+			globs:      []string{"foo/**bar"},
+			wantErr:    "must be its own path segment",
+		},
+		{
+			name:       "multiple ** segments rejected",
+			workingDir: "/home/user/run",
+			globs:      []string{"a/**/b/**/c"},
+			wantErr:    "only one",
+		},
+		{
+			name:       "malformed character class rejected",
+			workingDir: "/home/user/run",
+			globs:      []string{"workspace/foo["},
 			wantErr:    "malformed",
+		},
+		{
+			name:       "happy: prefix/**/suffix is supported",
+			workingDir: "/home/user/run",
+			globs:      []string{"workspace/**/report.md"},
+			wantErr:    "",
+		},
+		{
+			name:       "happy: **/suffix is supported",
+			workingDir: "/home/user/run",
+			globs:      []string{"**/report.md"},
+			wantErr:    "",
+		},
+		{
+			name:       "happy: bare ** is supported",
+			workingDir: "/home/user/run",
+			globs:      []string{"**"},
+			wantErr:    "",
+		},
+		{
+			name:       "Windows absolute path rejected",
+			workingDir: "/home/user/run",
+			globs:      []string{`C:\foo\**`},
+			wantErr:    "Windows",
 		},
 	}
 	for _, tc := range cases {
