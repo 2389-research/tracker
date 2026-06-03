@@ -991,6 +991,10 @@ func TestCheckGatewayRouting_NoPrecedenceNoteWithoutGatewayURL(t *testing.T) {
 	if gatewayDetailContains(c, "per-provider overrides win") {
 		t.Errorf("precedence note requires TRACKER_GATEWAY_URL; details = %+v", c.Details)
 	}
+	// The summary must not imply gateway routing is in effect without a URL.
+	if !strings.Contains(c.Message, "no gateway routing in effect") {
+		t.Errorf("summary should note no routing without a URL; got %q", c.Message)
+	}
 }
 
 func TestDoctor_GatewayRoutingCheckGatedOnEnv(t *testing.T) {

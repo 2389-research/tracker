@@ -234,10 +234,11 @@ var gatewayBaseURLEnvVars = []struct {
 // Doctor) and emits informational notes — never warnings or errors, since
 // every condition it reports is an intentional configuration:
 //
-//   - B.1 bedrock masquerade: under KIND=bedrock, gpt-* / o*-* model strings
-//     route to Claude today because AWS Bedrock has no OpenAI models yet.
-//     Triggered by KIND=bedrock + OPENAI_API_KEY present, so it surfaces once
-//     at setup time rather than as a per-session runtime warning.
+//   - B.1 bedrock masquerade: when OpenAI traffic actually routes through the
+//     bedrock gateway (KIND=bedrock + a gateway URL + OPENAI_API_KEY, with no
+//     OPENAI_BASE_URL override), gpt-* / o*-* model strings route to Claude
+//     today because AWS Bedrock has no OpenAI models yet. Surfaced once at
+//     setup time rather than as a per-session runtime warning.
 //   - B.2 per-provider precedence: a *_BASE_URL override silently wins over
 //     TRACKER_GATEWAY_URL for that provider.
 func checkGatewayRouting() CheckResult {
@@ -306,9 +307,14 @@ func checkGatewayRouting() CheckResult {
 		}
 	}
 
-	if notes > 0 {
+	switch {
+	case gatewayURL == "":
+		// Only the kind is set; without a URL the resolver never routes via a
+		// gateway, so don't imply one is in use.
+		out.Message = fmt.Sprintf("TRACKER_GATEWAY_KIND=%s set without TRACKER_GATEWAY_URL — no gateway routing in effect", kindLabel)
+	case notes > 0:
 		out.Message = fmt.Sprintf("gateway configured (%d routing note(s))", notes)
-	} else {
+	default:
 		out.Message = "gateway configured (no routing caveats)"
 	}
 	return out
