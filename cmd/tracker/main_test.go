@@ -904,6 +904,55 @@ func TestParseFlagsGatewayURL(t *testing.T) {
 	}
 }
 
+func TestParseFlagsGatewayKind(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--gateway-kind", "bedrock", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("parseFlags returned error: %v", err)
+	}
+	if cfg.gatewayKind != "bedrock" {
+		t.Fatalf("gatewayKind = %q, want %q", cfg.gatewayKind, "bedrock")
+	}
+}
+
+// TestParseFlagsGatewayKindRejectsUnknown asserts that --gateway-kind=<typo>
+// fails fast at flag-parse time with a clear error, rather than propagating
+// to TRACKER_GATEWAY_KIND and surfacing later as an adapter construction
+// error. Caught at CLI parse time → user sees the typo immediately.
+func TestParseFlagsGatewayKindRejectsUnknown(t *testing.T) {
+	_, err := parseFlags([]string{"tracker", "--gateway-kind", "typo-kind", "pipeline.dip"})
+	if err == nil {
+		t.Fatal("parseFlags should reject unknown --gateway-kind value")
+	}
+	if !strings.Contains(err.Error(), "gateway-kind") {
+		t.Fatalf("error message should mention --gateway-kind; got %v", err)
+	}
+}
+
+// TestParseFlagsGatewayKindAcceptsEmpty asserts that the empty value (the
+// default that selects cf-aig downstream) is allowed — only typos are
+// rejected.
+func TestParseFlagsGatewayKindAcceptsEmpty(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("empty --gateway-kind should be accepted; got %v", err)
+	}
+	if cfg.gatewayKind != "" {
+		t.Fatalf("default gatewayKind = %q, want empty", cfg.gatewayKind)
+	}
+}
+
+// TestParseFlagsGatewayKindAcceptsCFAIG asserts the explicit cf-aig form
+// (besides the empty default) is allowed.
+func TestParseFlagsGatewayKindAcceptsCFAIG(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--gateway-kind", "cf-aig", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("--gateway-kind cf-aig should be accepted; got %v", err)
+	}
+	if cfg.gatewayKind != "cf-aig" {
+		t.Fatalf("gatewayKind = %q, want cf-aig", cfg.gatewayKind)
+	}
+}
+
 func TestParseFlagsParamOverrides(t *testing.T) {
 	cfg, err := parseFlags([]string{"tracker", "--param", "foo=bar", "--param", "env=prod", "pipeline.dip"})
 	if err != nil {
@@ -956,13 +1005,47 @@ func TestGatewayURLPropagatesViaEnv(t *testing.T) {
 	}
 }
 
+func TestGatewayKindPropagatesViaEnv(t *testing.T) {
+	// executeRun sets TRACKER_GATEWAY_KIND before buildLLMClient runs.
+	unsetEnvForTest(t, "TRACKER_GATEWAY_KIND")
+
+	const kind = "bedrock"
+	var envValueAtRunTime string
+
+	_ = executeCommand(runConfig{
+		mode:         modeRun,
+		pipelineFile: "pipeline.dip",
+		workdir:      "/tmp",
+		noTUI:        true,
+		gatewayKind:  kind,
+	}, commandDeps{
+		loadEnv: func(string) error { return nil },
+		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+			envValueAtRunTime = os.Getenv("TRACKER_GATEWAY_KIND")
+			return nil
+		},
+		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+			t.Fatal("unexpected TUI path")
+			return nil
+		},
+	})
+
+	if envValueAtRunTime != kind {
+		t.Fatalf("TRACKER_GATEWAY_KIND inside run() = %q, want %q", envValueAtRunTime, kind)
+	}
+}
+
 func TestResolveProviderBaseURLFromEnvGateway(t *testing.T) {
 	// resolveProviderBaseURLFromEnv must return the gateway-suffixed URL when
 	// TRACKER_GATEWAY_URL is set and no per-provider override exists.
 	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	unsetEnvForTest(t, "TRACKER_GATEWAY_KIND")
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
 
-	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	got, err := resolveProviderBaseURLFromEnv("anthropic")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := "https://gw.example.com/v1/acc/slug/anthropic"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -974,7 +1057,10 @@ func TestResolveProviderBaseURLFromEnvPerProviderWins(t *testing.T) {
 	t.Setenv("ANTHROPIC_BASE_URL", "https://custom-proxy.example.com")
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
 
-	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	got, err := resolveProviderBaseURLFromEnv("anthropic")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := "https://custom-proxy.example.com"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -982,13 +1068,73 @@ func TestResolveProviderBaseURLFromEnvPerProviderWins(t *testing.T) {
 }
 
 func TestResolveProviderBaseURLFromEnvNoGateway(t *testing.T) {
-	// With neither env var set, must return empty string (use provider SDK default).
+	// With neither env var set, must return empty string with nil error
+	// (use provider SDK default — this is NOT a refusal, it's "no gateway needed").
 	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
 	unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
 
-	got := resolveProviderBaseURLFromEnv("ANTHROPIC_BASE_URL", "/anthropic")
+	got, err := resolveProviderBaseURLFromEnv("anthropic")
+	if err != nil {
+		t.Fatalf("no-gateway path must not error, got %v", err)
+	}
 	if got != "" {
 		t.Fatalf("expected empty string, got %q", got)
+	}
+}
+
+// TestResolveProviderBaseURLFromEnv_RespectsBedrockKind asserts that the CLI's
+// provider URL helper consults TRACKER_GATEWAY_KIND. The CLI sets the env var
+// from --gateway-kind (see commands.go), so the helper that downstream
+// constructor closures call must dispatch on it. Without this, the
+// --gateway-kind flag would have no effect on the CLI binary even though the
+// env var is set — a silent regression on the user-facing surface.
+func TestResolveProviderBaseURLFromEnv_RespectsBedrockKind(t *testing.T) {
+	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+
+	got, err := resolveProviderBaseURLFromEnv("anthropic")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://bedrock.example.com" // bedrock anthropic drops the /anthropic suffix
+	if got != want {
+		t.Fatalf("got %q, want %q (bedrock kind should override the cf-aig /anthropic suffix)", got, want)
+	}
+}
+
+// TestBuildOpenAICompatConstructor_RefusesUnderBedrock asserts that the CLI
+// binary FAILS to construct an openai-compat client when KIND=bedrock and a
+// gateway URL is configured. Without this fix, the constructor silently
+// dropped the WithBaseURL option and the SDK defaulted to openrouter.ai —
+// leaking the CF AIG token to the public default endpoint. Reviewers
+// flagged this on PR #289.
+func TestBuildOpenAICompatConstructor_RefusesUnderBedrock(t *testing.T) {
+	unsetEnvForTest(t, "OPENAI_COMPAT_BASE_URL")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock-gateway.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+
+	constructor := buildOpenAICompatConstructor()
+	_, err := constructor("test-key")
+	if err == nil {
+		t.Fatal("openai-compat constructor should fail under KIND=bedrock; got nil error (silent SDK-default leak)")
+	}
+}
+
+// TestBuildAnthropicConstructor_RefusesUnderUnknownKind asserts that the CLI
+// binary FAILS to construct an anthropic client when TRACKER_GATEWAY_KIND
+// is a typo and a gateway URL is configured. Without this fix, the
+// constructor silently dropped WithBaseURL and SDK requests would have
+// gone to api.anthropic.com instead of the user's gateway.
+func TestBuildAnthropicConstructor_RefusesUnderUnknownKind(t *testing.T) {
+	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://my-gw.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "typo-kind")
+
+	constructor := buildAnthropicConstructor()
+	_, err := constructor("test-key")
+	if err == nil {
+		t.Fatal("anthropic constructor should fail under unknown KIND; got nil error (silent SDK-default leak)")
 	}
 }
 

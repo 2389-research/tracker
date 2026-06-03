@@ -313,6 +313,11 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 			return fmt.Errorf("set TRACKER_GATEWAY_URL: %w", err)
 		}
 	}
+	if cfg.gatewayKind != "" {
+		if err := os.Setenv("TRACKER_GATEWAY_KIND", cfg.gatewayKind); err != nil {
+			return fmt.Errorf("set TRACKER_GATEWAY_KIND: %w", err)
+		}
+	}
 
 	if err := printRunPreamble(cfg); err != nil {
 		return err

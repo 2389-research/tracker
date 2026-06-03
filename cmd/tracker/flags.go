@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	tracker "github.com/2389-research/tracker"
 )
 
 func parseFlags(args []string) (runConfig, error) {
@@ -160,6 +162,9 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	if err := validateGitFlag(cfg); err != nil {
 		return cfg, err
 	}
+	if err := validateGatewayKind(cfg.gatewayKind); err != nil {
+		return cfg, err
+	}
 	// Normalize the "auto" alias to empty so downstream comparisons stay simple.
 	if cfg.git == "auto" {
 		cfg.git = ""
@@ -239,6 +244,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.BoolVar(&cfg.failOnOverride, "fail-on-override", false, "Exit code 2 if the run terminates via validation_overridden (default: exit 0)")
 	fs.Var(paramMapFlag{target: &cfg.params}, "param", "Override workflow param (repeatable): key=value")
 	fs.StringVar(&cfg.gatewayURL, "gateway-url", "", "Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)")
+	fs.StringVar(&cfg.gatewayKind, "gateway-kind", "", "Gateway path convention: empty/cf-aig (default) or bedrock (2389 bedrock-gateway Worker)")
 	fs.StringVar(&cfg.webhookURL, "webhook-url", "", "POST human gate prompts to this URL and wait for callback (headless execution)")
 	fs.StringVar(&cfg.gateCallbackAddr, "gate-callback-addr", ":8789", "Local addr for the callback server when --webhook-url is set")
 	fs.DurationVar(&cfg.gateTimeout, "gate-timeout", 10*time.Minute, "Per-gate wait timeout when --webhook-url is set")
@@ -265,6 +271,21 @@ func validateGitFlag(cfg runConfig) error {
 		return nil
 	}
 	return fmt.Errorf("invalid --git=%q: must be one of: auto, off, warn, require, init", cfg.git)
+}
+
+// validateGatewayKind rejects unsupported --gateway-kind values at
+// flag-parse time. Without this, a typo like --gateway-kind=bdrock would
+// be propagated into TRACKER_GATEWAY_KIND and surface much later as an
+// adapter-construction error (the strict resolver refuses to route on
+// unknown kinds — see tracker.ErrGatewayRouteRefused). Catching at parse
+// time gives the user a clear CLI message right where they made the typo.
+// Accepted values must stay in sync with the tracker.GatewayKind constants.
+func validateGatewayKind(kind string) error {
+	switch kind {
+	case "", string(tracker.GatewayKindCFAIG), string(tracker.GatewayKindBedrock):
+		return nil
+	}
+	return fmt.Errorf("invalid --gateway-kind=%q: must be one of: %q, %q", kind, tracker.GatewayKindCFAIG, tracker.GatewayKindBedrock)
 }
 
 type paramMapFlag struct {
@@ -387,6 +408,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --fail-on-override        Exit code 2 if run terminates via validation_overridden (default: exit 0)\n")
 	fmt.Fprintf(w, "  --param key=value         Override a declared workflow param (repeatable)\n")
 	fmt.Fprintf(w, "  --gateway-url string      Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)\n")
+	fmt.Fprintf(w, "  --gateway-kind string     Gateway path convention: empty/cf-aig (default) or bedrock\n")
 	fmt.Fprintf(w, "  --webhook-url string      POST human gate prompts to this URL and wait for callback (headless)\n")
 	fmt.Fprintf(w, "  --gate-callback-addr string  Local addr for the webhook callback server (default: :8789)\n")
 	fmt.Fprintf(w, "  --gate-timeout duration      Per-gate wait timeout when --webhook-url is set (default: 10m)\n")
