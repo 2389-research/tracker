@@ -866,3 +866,158 @@ func mustGitInitForDoctor(t *testing.T, dir string) {
 		t.Fatalf("git commit --allow-empty in %s: %v: %s", dir, err, out)
 	}
 }
+
+// clearGatewayEnv unsets every env var the Gateway Routing check consults so
+// each test starts from a known-empty baseline regardless of the developer's
+// shell environment.
+func clearGatewayEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND",
+		"OPENAI_API_KEY",
+		"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GEMINI_BASE_URL", "OPENAI_COMPAT_BASE_URL",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
+// gatewayDetailContains reports whether any detail message in the check
+// contains substr.
+func gatewayDetailContains(c CheckResult, substr string) bool {
+	for _, d := range c.Details {
+		if strings.Contains(d.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCheckGatewayRouting_BedrockMasqueradeNote(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
+
+	c := checkGatewayRouting()
+	if c.Status != CheckStatusOK {
+		t.Fatalf("status = %q, want ok (informational only)", c.Status)
+	}
+	if !gatewayDetailContains(c, "route to Claude Sonnet 4.6") {
+		t.Errorf("expected bedrock masquerade note; details = %+v", c.Details)
+	}
+}
+
+func TestCheckGatewayRouting_NoMasqueradeWithoutGatewayURL(t *testing.T) {
+	clearGatewayEnv(t)
+	// kind=bedrock + OPENAI_API_KEY but no gateway URL: openai resolves to
+	// the SDK default (api.openai.com), so traffic never traverses a gateway
+	// and is not masqueraded.
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "route to Claude") {
+		t.Errorf("masquerade note should not fire without a gateway URL; details = %+v", c.Details)
+	}
+}
+
+func TestCheckGatewayRouting_NoMasqueradeWithoutOpenAIKey(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "route to Claude") {
+		t.Errorf("masquerade note should not fire without OPENAI_API_KEY; details = %+v", c.Details)
+	}
+}
+
+func TestCheckGatewayRouting_NoMasqueradeUnderCFAIG(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("TRACKER_GATEWAY_KIND", "cf-aig")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "route to Claude") {
+		t.Errorf("masquerade note is bedrock-only; details = %+v", c.Details)
+	}
+}
+
+func TestCheckGatewayRouting_NoMasqueradeWhenOpenAIBaseURLOverridden(t *testing.T) {
+	clearGatewayEnv(t)
+	// OPENAI_BASE_URL wins over the gateway in the resolver, so OpenAI
+	// traffic bypasses the bedrock gateway entirely — no masquerade.
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
+	t.Setenv("OPENAI_BASE_URL", "https://direct.openai.example.com")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "route to Claude") {
+		t.Errorf("masquerade note should be suppressed when OPENAI_BASE_URL overrides routing; details = %+v", c.Details)
+	}
+	// The precedence note should still cover the OpenAI override.
+	if !gatewayDetailContains(c, "openai (OPENAI_BASE_URL)") {
+		t.Errorf("expected precedence note for the OpenAI override; details = %+v", c.Details)
+	}
+}
+
+func TestCheckGatewayRouting_PerProviderPrecedenceNote(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://direct.anthropic.example.com")
+
+	c := checkGatewayRouting()
+	if c.Status != CheckStatusOK {
+		t.Fatalf("status = %q, want ok (informational only)", c.Status)
+	}
+	if !gatewayDetailContains(c, "per-provider overrides win over TRACKER_GATEWAY_URL") {
+		t.Errorf("expected precedence note; details = %+v", c.Details)
+	}
+	if !gatewayDetailContains(c, "anthropic (ANTHROPIC_BASE_URL)") {
+		t.Errorf("expected the overriding provider named; details = %+v", c.Details)
+	}
+}
+
+func TestCheckGatewayRouting_NoPrecedenceNoteWithoutGatewayURL(t *testing.T) {
+	clearGatewayEnv(t)
+	// Kind set but no gateway URL: a *_BASE_URL is a direct override, not a
+	// conflict with any gateway, so no precedence note.
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://direct.anthropic.example.com")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "per-provider overrides win") {
+		t.Errorf("precedence note requires TRACKER_GATEWAY_URL; details = %+v", c.Details)
+	}
+	// The summary must not imply gateway routing is in effect without a URL.
+	if !strings.Contains(c.Message, "no gateway routing in effect") {
+		t.Errorf("summary should note no routing without a URL; got %q", c.Message)
+	}
+}
+
+func TestDoctor_GatewayRoutingCheckGatedOnEnv(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-12345678901234567890")
+	workdir := t.TempDir()
+
+	// No gateway env → check absent.
+	r, err := Doctor(context.Background(), DoctorConfig{WorkDir: workdir})
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	if findCheck(r, "Gateway Routing") != nil {
+		t.Error("Gateway Routing check should be absent when no gateway env is set")
+	}
+
+	// Gateway env present → check appears.
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	r, err = Doctor(context.Background(), DoctorConfig{WorkDir: workdir})
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	if findCheck(r, "Gateway Routing") == nil {
+		t.Error("Gateway Routing check should appear when TRACKER_GATEWAY_KIND is set")
+	}
+}

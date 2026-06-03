@@ -174,7 +174,8 @@ func printCheckResult(c tracker.CheckResult) {
 func needsCompositeResultLine(checkName string) bool {
 	switch checkName {
 	case "LLM Providers", "Version Compatibility", "Optional Binaries",
-		"Artifact Directories", "Working Directory", "Pipeline File":
+		"Artifact Directories", "Working Directory", "Pipeline File",
+		"Gateway Routing":
 		return false
 	}
 	return true
