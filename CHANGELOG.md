@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Property/invariant tests for the `writable_paths` jail public surface**
+  (closes #282, refs #275/#272). New `agent/exec/jail_property_test.go` and
+  `pipeline/handlers/codergen_jail_property_test.go`, plus property additions to
+  `agent/exec/jail_linux_test.go` and `agent/exec/jail_other_test.go`, all using
+  the existing `pgregory.net/rapid` dev dep (no new deps). These pin the
+  first-principles properties the #275 review surfaced round-by-round (~30
+  findings over 13 rounds) so a regression fails fast with a shrunk
+  counter-example: the escape-vs-malformed sentinel partition of
+  `ValidateWritablePaths`/`validateGlobEntry`; the supported doublestar shapes
+  of `matchOneGlob`/`matchWritablePath` and the matcher↔`landlockDirForGlob`
+  never-escapes-anchor invariant; `OpenForWrite`/`SafeMkdirAll`/`SafeRemove`
+  containment (absolute/parent/symlink-at-any-depth refusal, EACCES-vs-escape
+  classification, EEXIST/ENOENT tolerance); `relPathForJail` containment incl.
+  the bare-`..name` allow case; the `configureJail` G1/G2 refuse-to-start gates
+  and the `WriteOpener`/`Remover` closures (glob accept/`ErrPathNotAllowed`/
+  `ErrPathEscape` classes, mkdir-after-glob ordering); and the non-Linux stubs'
+  input-independent fail-closed contract. Test-only — no product code changed.
 - **`TRACKER_GATEWAY_KIND` routing dispatch** (refs #274, closes #276). New env
   var, `--gateway-kind` CLI flag, and `Config.GatewayKind` library option select
   the per-provider URL suffix convention used with `TRACKER_GATEWAY_URL`:
