@@ -2,7 +2,8 @@
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
 .PHONY: build test test-race test-short lint fmt fmt-check vet coverage \
-        doctor complexity complexity-report ci install clean setup-hooks
+        doctor complexity complexity-report ci install clean setup-hooks \
+        tools-jail-check
 
 GOCACHE ?= $(CURDIR)/.gocache
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -159,9 +160,19 @@ doctor:
 	if [ "$$FAIL" -gt 0 ]; then echo "FAIL: core pipelines must be grade A"; exit 1; fi
 	@echo "All core pipelines grade A (via $(DIPPIN_VERSION))"
 
+# ─── Agent-tool jail lint ────────────────────────────────
+
+# tools-jail-check flags direct os.* filesystem mutations in agent/tools/ that
+# bypass the ExecutionEnvironment seam guarding the writable_paths jail (#283,
+# refs #275/#272). The single legal exception — an env==nil fallback — must
+# carry a //jail:allow-unjailed-fallback marker on its function. See
+# docs/architecture/agent-tool-jail-checklist.md.
+tools-jail-check:
+	@GOCACHE=$(GOCACHE) go run ./tools/jailcheck agent/tools
+
 # ─── CI (all gates in sequence) ──────────────────────────
 
-ci: fmt-check vet build test-short test-race coverage lint doctor complexity
+ci: fmt-check vet build test-short test-race coverage lint doctor complexity tools-jail-check
 	@echo ""
 	@echo "═══ All CI gates passed ═══"
 

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent-tool jail threat model + `os.*` bypass lint** (closes #283, refs
+  #275/#272). New doc `docs/architecture/agent-tool-jail-checklist.md`: a
+  per-tool threat-model table (every `agent/tools/` tool — what it touches and
+  which `ExecutionEnvironment` seam it routes through, each row verified against
+  the code), the rule that any filesystem mutation MUST route through
+  `exec.ExecutionEnvironment` (direct `os.WriteFile`/`MkdirAll`/`Remove`/… is a
+  review-blocker), a new-tool checklist, and the documented env==nil-fallback
+  invariant. New CI gate `make tools-jail-check` (a `go/ast` analyzer under
+  `tools/jailcheck/`) flags any mutating `os.*` call in `agent/tools/*.go`
+  (excluding `_test.go`); the one legal exception — a fallback reachable only
+  when `env == nil`, where no jail can be active — is whitelisted by a
+  `//jail:allow-unjailed-fallback` marker on the function. Wired into the `ci:`
+  target and the CI "Quality Gates" job. The two existing audited fallbacks
+  (`generate_code`, `write_enriched_sprint`) carry the marker; no other product
+  code changed.
 - **Property/invariant tests for the `writable_paths` jail public surface**
   (closes #282, refs #275/#272). New `agent/exec/jail_property_test.go` and
   `pipeline/handlers/codergen_jail_property_test.go`, plus property additions to
