@@ -209,6 +209,9 @@ The Responses API returns HTTP 200 and sends `error` / `response.failed`
 as SSE event types. The adapter must handle these — they are NOT reflected
 in the HTTP status code.
 
+### Gateway upstream transparency
+Tracker is a pure passthrough to the gateway: it appends a per-provider suffix to the base URL and consumes the SSE stream, never inspecting model strings or stream internals. Gateway-side improvements therefore land with **no tracker code change**. Two cases on the `bedrock` kind: when AWS adds OpenAI models to Bedrock, the gateway re-routes `gpt-*` / `o*-*` from the current Claude masquerade to real OpenAI by updating its own mapping; when real Bedrock streaming replaces today's synthesized stream, the wire format is identical so the TUI just receives live tokens. Don't add tracker code to "handle" either — they are upstream events. Operator setup + caveats: [`docs/architecture/bedrock-gateway.md`](docs/architecture/bedrock-gateway.md). (Kind dispatch / fail-closed routing is in the Dippin-lang compatibility rules above.)
+
 ### CLI UX commands
 - `tracker workflows` — lists all embedded built-in workflows with display names and goals.
 - `tracker init <name>` — copies a built-in workflow to cwd for customization. Refuses to overwrite.

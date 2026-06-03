@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     over the gateway are listed by name. The check is omitted entirely when
     no gateway is configured, so default runs are unchanged.
 
+- **Gateway routing operator docs** (refs #274, closes #278). New
+  [`docs/architecture/bedrock-gateway.md`](docs/architecture/bedrock-gateway.md)
+  setup guide covering both gateway kinds (`cf-aig` default and `bedrock`),
+  their per-provider suffix conventions, `<PROVIDER>_BASE_URL` precedence, and
+  the bedrock-kind caveats (OpenAI→Claude masquerade, synthesized streaming,
+  `openai-compat` fail-closed). Linked from the architecture docs index and
+  `llm.md`.
+
 ## [0.35.1] - 2026-06-02
 
 ### Changed
