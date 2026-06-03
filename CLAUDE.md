@@ -264,7 +264,7 @@ Three backends, all implementing `AgentBackend` (`pipeline/backend.go`). `Coderg
 
 - **`native`** (default): wraps `agent.Session` — turn loop, tool registry, context compaction.
 - **`claude-code`**: spawns `claude` as a subprocess, parses NDJSON. **API keys are stripped** from the subprocess env so the claude CLI uses subscription auth (Max/Pro OAuth) — override with `TRACKER_PASS_API_KEYS=1`. With `--backend claude-code` and no per-node override, non-Anthropic model names are stripped so the CLI uses its default.
-- **`acp`**: ACP-protocol client (`backend_acp_client.go`) for headless external agents. The `writable_paths` jail refuses `acp` (out-of-process; tracker cannot apply Landlock to it).
+- **`acp`**: ACP-protocol client (`pipeline/handlers/backend_acp_client.go`) for headless external agents. The `writable_paths` jail refuses `acp` (out-of-process; tracker cannot apply Landlock to it).
 
 Selection: per-node `backend:` attr wins over the global `--backend` flag (a node with `backend: native` stays native under `--backend claude-code`). The engine and TUI see the same `agent.Event` stream regardless of backend.
 
@@ -289,6 +289,6 @@ Refuse-to-start gate in `pipeline/handlers/codergen_jail.go`: invalid `working_d
 - Hosted at <https://2389-research.github.io/tracker/>. Source: `site/` directory on `main`, built with Hugo extended. The `gh-pages` branch is a build artifact — never edit by hand.
 - Deploy: `.github/workflows/docs.yml` runs on every push to `main` that touches `site/**`, publishing `site/public/` to `gh-pages` via `peaceiris/actions-gh-pages` with `force_orphan: true`.
 - Layout: hand-written HTML in `site/content/*.html`, shared layouts in `site/layouts/`, static assets in `site/static/`, nav data in `site/data/nav.yaml`.
-- Local preview: `cd site && hugo server` (port 1313). `baseURL` in `hugo.toml` is the full production URL (`https://2389-research.github.io/tracker/`); pages are served under the `/tracker/` path. `uglyURLs = true` keeps URLs at `/tracker/<name>.html` (matching the pre-Hugo URL shape).
+- Local preview: `cd site && hugo server` (port 1313). `baseURL` in `site/hugo.toml` is the full production URL (`https://2389-research.github.io/tracker/`); pages are served under the `/tracker/` path. `uglyURLs = true` keeps URLs at `/tracker/<name>.html` (matching the pre-Hugo URL shape).
 - Per-page front matter controls a11y metadata (`title`, `description`, `og_*`, optional `mermaid: true`, `jsonld:` block inlined as JSON-LD). Use `TechArticle` for inner pages, `SoftwareApplication` for home, `DefinedTermSet` for glossary.
 - Adding a page: drop `site/content/<name>.html` with the front matter block (copy an existing page), add to `site/data/nav.yaml` if it should appear in the nav, push to `main`.
