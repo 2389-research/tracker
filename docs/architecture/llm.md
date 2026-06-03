@@ -231,6 +231,8 @@ Provider → env key / suffix mapping:
 
 Per-provider env vars always win. `resolveProviderBaseURLWithGateway` is the inner variant that accepts a `gatewayURL` string argument — used by the `--gateway-url` CLI flag, which sets `TRACKER_GATEWAY_URL` before the LLM client is built.
 
+The suffix column above is the `cf-aig` (default) gateway kind. `TRACKER_GATEWAY_KIND=bedrock` selects a different suffix map and fails closed on unsupported (kind, provider) pairs via `ErrGatewayRouteRefused`. See [`bedrock-gateway.md`](./bedrock-gateway.md) for the operator setup recipe, both kinds' suffix conventions, and the bedrock caveats.
+
 OpenAI has an extra normalization step: trailing `/v1` is stripped from the base URL because `responsesPath` already includes the `/v1` prefix. Without this, `OPENAI_BASE_URL=http://localhost:9999/v1` would produce `/v1/v1/responses`.
 
 ## Construction

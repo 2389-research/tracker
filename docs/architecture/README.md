@@ -25,6 +25,7 @@ transitions.
 | [`handlers/manager-loop.md`](./handlers/manager-loop.md) | Async child-pipeline supervisor (`stack.manager_loop` / `house`). |
 | [`agent.md`](./agent.md) | Session turn loop, tool registry, context compaction, episodic memory, plan-before-execute, repository localization, steering. |
 | [`llm.md`](./llm.md) | `llm.Client`, middleware stack, `TokenTracker`, cost estimator via model catalog, and the four provider adapters (`anthropic`, `openai`, `google` / Gemini, `openaicompat`). |
+| [`bedrock-gateway.md`](./bedrock-gateway.md) | Operator setup for gateway routing: `TRACKER_GATEWAY_URL` + `TRACKER_GATEWAY_KIND` (`cf-aig` default vs `bedrock`), per-provider suffix conventions, precedence, and the bedrock-kind caveats. |
 | [`adapter.md`](./adapter.md) | `pipeline/dippin_adapter.go` — the bridge from dippin-lang IR to tracker's `Graph` model. Documents every field mapping and naming convention. |
 | [`context-flow.md`](./context-flow.md) | User-facing model of context, fidelity, scoping, declared `reads:`/`writes:`, and safe-key restrictions. |
 | [`tui.md`](./tui.md) | Bubbletea state machine, sidebar, activity log, modal content types (hybrid, review, interview), verbosity cycling, zen mode, search. |
