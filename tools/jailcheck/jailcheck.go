@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -147,11 +148,15 @@ type funcRange struct {
 
 // checkFile reports every unguarded mutating os.* call in a parsed file.
 func checkFile(fset *token.FileSet, f *ast.File) []Violation {
+	osNames := osLocalNames(f)
+	if len(osNames) == 0 {
+		return nil // file does not import "os" — no os.* call can resolve here.
+	}
 	funcs := funcRanges(f)
 
 	var violations []Violation
 	ast.Inspect(f, func(n ast.Node) bool {
-		name, ok := mutatingOSCall(n)
+		name, ok := mutatingOSCall(n, osNames)
 		if !ok {
 			return true
 		}
@@ -192,8 +197,11 @@ func funcRanges(f *ast.File) []funcRange {
 }
 
 // mutatingOSCall reports whether n is a call to a mutating os.* function and,
-// if so, the bare function name (e.g. "WriteFile").
-func mutatingOSCall(n ast.Node) (string, bool) {
+// if so, the bare function name (e.g. "WriteFile"). osNames is the set of local
+// identifiers bound to the standard-library "os" package in the file, so an
+// aliased import (`stdos "os"` → `stdos.WriteFile`) is matched while a
+// non-stdlib package happening to be named "os" is not.
+func mutatingOSCall(n ast.Node, osNames map[string]bool) (string, bool) {
 	call, ok := n.(*ast.CallExpr)
 	if !ok {
 		return "", false
@@ -203,13 +211,33 @@ func mutatingOSCall(n ast.Node) (string, bool) {
 		return "", false
 	}
 	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || pkg.Name != "os" {
+	if !ok || !osNames[pkg.Name] {
 		return "", false
 	}
 	if !mutatingOSFuncs[sel.Sel.Name] {
 		return "", false
 	}
 	return sel.Sel.Name, true
+}
+
+// osLocalNames returns the set of local identifiers bound to the standard
+// library "os" package in f. Handles the default name (`import "os"` → "os")
+// and aliases (`import stdos "os"` → "stdos"). Dot- and blank-imports are
+// recorded but cannot form a flaggable `pkg.Sel` selector, so they are inert.
+func osLocalNames(f *ast.File) map[string]bool {
+	names := map[string]bool{}
+	for _, imp := range f.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || path != "os" {
+			continue
+		}
+		if imp.Name != nil {
+			names[imp.Name.Name] = true
+		} else {
+			names["os"] = true
+		}
+	}
+	return names
 }
 
 // enclosingFunc returns the function span containing pos, or nil for file scope.

@@ -148,8 +148,10 @@ mutating `os.*` function (`WriteFile`, `MkdirAll`, `Mkdir`, `MkdirTemp`,
 `Truncate`, `Symlink`, `Link`, `Chmod`, `Chown`, `Lchown`, `Chtimes`),
 exiting non-zero with `file:line: os.X called directly in <func>` for each.
 AST (not grep) so a mention of `os.WriteFile` inside a doc comment or string
-does not false-positive. The single exemption is the
-`//jail:allow-unjailed-fallback` marker described above.
+does not false-positive. Package qualifiers are resolved against the file's
+imports, so an aliased import (`import stdos "os"` → `stdos.WriteFile`) is still
+caught, while a non-stdlib package that happens to be named `os` is not. The
+single exemption is the `//jail:allow-unjailed-fallback` marker described above.
 
 It is wired into the `ci:` Makefile target and the CI "Quality Gates" job, and
 is unit-tested against `clean` / `violation` fixtures under
@@ -161,10 +163,11 @@ is unit-tested against `clean` / `violation` fixtures under
   reads outside the workspace (or `grep_search`/`dispatch_sprints` reading an
   attacker-chosen path within it) is not flagged.
 - **Network egress.** Out of scope for the filesystem jail entirely.
-- **Aliased `os` imports.** The lint matches the `os.X(...)` selector on an
-  unaliased `os` import (the convention everywhere in this package). An
-  `import ospkg "os"` alias would slip past — flagged here so a reviewer knows
-  to reject aliasing the `os` import in `agent/tools/`.
+- **Dot-imported `os`.** The lint resolves aliased imports (`import stdos "os"`
+  is caught), but a dot-import (`import . "os"`) makes `WriteFile(...)` a bare
+  call with no package selector, which this selector-based analyzer cannot
+  attribute to `os`. Dot-importing `os` is its own red flag; reject it in
+  review.
 - **Out-of-process backends.** `claude-code` and `acp` run the agent in a
   separate process tracker cannot Landlock; `writable_paths` refuses them at
   start (see `CLAUDE.md` → Agent backends). This lint only governs the

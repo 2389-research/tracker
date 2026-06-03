@@ -48,6 +48,21 @@ func TestCheckDir_Violation(t *testing.T) {
 	}
 }
 
+func TestCheckDir_AliasedImport(t *testing.T) {
+	// An aliased os import (`stdos "os"`) must still be caught via import
+	// resolution; the aliased read-only call must not be flagged.
+	violations, err := checkDir("testdata/aliased")
+	if err != nil {
+		t.Fatalf("checkDir: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation in aliased fixture, got %d: %+v", len(violations), violations)
+	}
+	if violations[0].Call != "os.WriteFile" || violations[0].Func != "rawWriteAliased" {
+		t.Fatalf("expected os.WriteFile in rawWriteAliased, got %+v", violations[0])
+	}
+}
+
 func TestCheckDir_ReadOnlyNotFlagged(t *testing.T) {
 	// The violation fixture's readOnly func uses os.ReadFile; it must not appear.
 	violations, err := checkDir("testdata/violation")
