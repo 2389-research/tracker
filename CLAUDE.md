@@ -18,10 +18,10 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ## Code map
 
-- **Library API**: top-level `tracker.go`, `tracker_*.go` (`Run`, `Diagnose`, `Doctor`, `Audit`, `Bundle`, `Resolve`, `Simulate`). Prefer these over shelling out to the CLI from embedded integrations.
+- **Library API**: top-level `tracker.go`, `tracker_*.go`. Exported entry points include `Run`, `Diagnose` / `DiagnoseMostRecent`, `Doctor`, `Audit`, `ListRuns`, `Simulate`, `ExportBundle`, `ResolveRunDir`, `ResolveBudgetLimits`, `ResolveProviderBaseURL`, `ResolveActivityLogPath`, `NewNDJSONWriter`. Prefer these over shelling out to the CLI from embedded integrations.
 - **CLI**: `cmd/tracker/` — `main.go` (entry, dispatches `__jail-exec` before flag parsing), `flags.go` (every flag), `run.go`, `resolve.go` (bare-name resolution), `doctor.go`, `diagnose.go`, `summary.go`.
 - **Engine**: `pipeline/` — `engine.go`, `engine_edges.go` (edge selection), `graph.go` (shape → handler map), `handler.go` (Handler/Outcome contract), `node_config.go` (typed accessors), `dippin_adapter.go` (IR → Graph), `context.go`, `condition.go`, `checkpoint.go`, `budget.go`, `audit_path.go`.
-- **Handlers**: `pipeline/handlers/` — one file per handler. **`registry.go` `BuildDefaultRegistry` is the wire-up point** — add new handlers there and map the shape in `pipeline/graph.go`.
+- **Handlers**: `pipeline/handlers/` — one file per handler. **`registry.go` `NewDefaultRegistry` is the wire-up point** — add new handlers there and map the shape in `pipeline/graph.go`.
 - **Agent**: `agent/` — `Session` turn loop, tool registry, context compaction. `agent/exec/` holds the Landlock jail (Linux).
 - **LLM**: `llm/` — `Client`, middleware, token tracker; per-provider adapters under `llm/anthropic/`, `llm/openai/`, `llm/google/`, `llm/openaicompat/`.
 - **TUI**: `tui/` — Bubble Tea dashboard, modal/review/interview content types.
@@ -43,9 +43,9 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Condition evaluation on unresolved variables must warn, not silently return empty string
 
 ### NEVER `go install` dippin-lang
-- `go install github.com/2389-research/dippin-lang/cmd/dippin@...` will silently overwrite the user's local development checkout
+- `go install github.com/2389-research/dippin-lang/cmd/dippin@...` overwrites the `dippin` binary on `PATH` (in `$GOBIN` or `$GOPATH/bin`) with a module-cache build, displacing the user's locally-built `dippin` from their development checkout. They want to keep using their local build.
 - Update the Go module dependency with `go get github.com/2389-research/dippin-lang@vX.Y.Z` only
-- If `dippin` is not on PATH for a verification step, ask the user — don't `go install`
+- If `dippin` is not on `PATH` for a verification step, ask the user — don't `go install`
 
 ### Tool node safety — LLM output as shell input
 - NEVER `eval` content extracted from LLM-written files (arbitrary command execution).
@@ -57,7 +57,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Strip comments (`grep -v '^#'`) and blank lines from LLM-generated lists. Use flexible regex for markdown headers (LLMs vary `##` / `###` / colon use). Add empty-file guards after extracting from LLM-written files — fail loudly.
 
 ### Activity log integrity (#213)
-- Live audit log is at `$XDG_STATE_HOME/tracker/runs/<runID>/activity.jsonl` (default `$HOME/.local/state/tracker/runs/<runID>/`, mode `0o600`, opened `O_NOFOLLOW`). Override via `TRACKER_AUDIT_DIR`. Path computed by `pipeline.SecureActivityLogPath(runID)`; reads go through `tracker.ResolveActivityLogPath`.
+- Live audit log path is computed by `pipeline.SecureActivityLogPath(runID)`; reads go through `tracker.ResolveActivityLogPath`. Resolution order: `$TRACKER_AUDIT_DIR` → `$XDG_STATE_HOME/tracker/runs/<runID>/` → `$HOME/.local/state/tracker/runs/<runID>/` → `%LOCALAPPDATA%\tracker\runs\<runID>\` (Windows) → `os.TempDir()/tracker-audit/<runID>/` (last-resort when no `$HOME`). File mode `0o600`, opened `O_NOFOLLOW`.
 - Every runtime-written line is prefixed with sentinel `\x1f\x1e` (`pipeline.ActivityLogSentinel`). Lines lacking it count as `runtimeAnomalies.InjectedLines` and fire `SuggestionAuditLogInjection`. The sentinel is detection, not authentication.
 - `TRACKER_AUDIT_DIR` and `XDG_STATE_HOME` MUST be absolute paths — relative values are silently ignored (`pipeline.absEnv`) so CWD can't re-anchor the secure log.
 - RunIDs are validated by `pipeline.validateRunID` (rejects separators, `..`, `.`) so a tampered checkpoint can't escape the base.
