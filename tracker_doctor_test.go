@@ -927,6 +927,25 @@ func TestCheckGatewayRouting_NoMasqueradeUnderCFAIG(t *testing.T) {
 	}
 }
 
+func TestCheckGatewayRouting_NoMasqueradeWhenOpenAIBaseURLOverridden(t *testing.T) {
+	clearGatewayEnv(t)
+	// OPENAI_BASE_URL wins over the gateway in the resolver, so OpenAI
+	// traffic bypasses the bedrock gateway entirely — no masquerade.
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
+	t.Setenv("OPENAI_BASE_URL", "https://direct.openai.example.com")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "route to Claude") {
+		t.Errorf("masquerade note should be suppressed when OPENAI_BASE_URL overrides routing; details = %+v", c.Details)
+	}
+	// The precedence note should still cover the OpenAI override.
+	if !gatewayDetailContains(c, "openai (OPENAI_BASE_URL)") {
+		t.Errorf("expected precedence note for the OpenAI override; details = %+v", c.Details)
+	}
+}
+
 func TestCheckGatewayRouting_PerProviderPrecedenceNote(t *testing.T) {
 	clearGatewayEnv(t)
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
@@ -967,7 +986,7 @@ func TestDoctor_GatewayRoutingCheckGatedOnEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Doctor: %v", err)
 	}
-	if findCheckByName(r, "Gateway Routing") != nil {
+	if findCheck(r, "Gateway Routing") != nil {
 		t.Error("Gateway Routing check should be absent when no gateway env is set")
 	}
 
@@ -977,16 +996,7 @@ func TestDoctor_GatewayRoutingCheckGatedOnEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Doctor: %v", err)
 	}
-	if findCheckByName(r, "Gateway Routing") == nil {
+	if findCheck(r, "Gateway Routing") == nil {
 		t.Error("Gateway Routing check should appear when TRACKER_GATEWAY_KIND is set")
 	}
-}
-
-func findCheckByName(r *DoctorReport, name string) *CheckResult {
-	for i := range r.Checks {
-		if r.Checks[i].Name == name {
-			return &r.Checks[i]
-		}
-	}
-	return nil
 }

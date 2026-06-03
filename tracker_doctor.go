@@ -225,8 +225,8 @@ var gatewayBaseURLEnvVars = []struct {
 }{
 	{"anthropic", "ANTHROPIC_BASE_URL"},
 	{"openai", "OPENAI_BASE_URL"},
-	{"gemini", "GEMINI_BASE_URL"},
 	{"openai-compat", "OPENAI_COMPAT_BASE_URL"},
+	{"gemini", "GEMINI_BASE_URL"},
 }
 
 // checkGatewayRouting surfaces non-fatal gateway routing caveats (#277). It
@@ -265,8 +265,11 @@ func checkGatewayRouting() CheckResult {
 
 	notes := 0
 
-	// B.1 — OpenAI→Claude masquerade under the bedrock gateway.
-	if kind == string(GatewayKindBedrock) {
+	// B.1 — OpenAI→Claude masquerade under the bedrock gateway. Skip the note
+	// when OPENAI_BASE_URL is set: that override wins over the gateway in the
+	// resolver, so OpenAI traffic never traverses the bedrock gateway and is
+	// not masqueraded. The B.2 precedence note below covers that case instead.
+	if kind == string(GatewayKindBedrock) && os.Getenv("OPENAI_BASE_URL") == "" {
 		if key, _ := findProviderKey([]string{"OPENAI_API_KEY"}); key != "" {
 			out.Details = append(out.Details, CheckDetail{
 				Status:  CheckStatusHint,
