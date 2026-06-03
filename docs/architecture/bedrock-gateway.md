@@ -66,14 +66,20 @@ export GEMINI_API_KEY=<cf-aig-token>
 The CLI equivalents are `--gateway-url` and `--gateway-kind`; the library
 equivalents are `Config.GatewayURL` and `Config.GatewayKind`.
 
-Per-provider suffixes under `bedrock` follow native SDK path conventions:
+Per-provider suffixes under `bedrock` (from `gatewaySuffix` in
+[`../../tracker.go`](../../tracker.go)) and the request path tracker's native
+adapters actually issue against the gateway — useful when debugging the Worker:
 
-| Provider | Suffix | Why |
-|----------|--------|-----|
-| `anthropic` | `""` (none) | the Anthropic SDK appends `/v1/messages` itself |
-| `openai` | `/v1` | the OpenAI SDK appends `/chat/completions` etc. |
-| `gemini` | `/v1` | the Gemini SDK appends `/models/{model}:...` |
+| Provider | Suffix | Resulting request path on the gateway |
+|----------|--------|----------------------------------------|
+| `anthropic` | `""` (none) | adapter appends `/v1/messages` → `<gateway>/v1/messages` |
+| `openai` | `/v1` | adapter uses the Responses API: it strips a trailing `/v1` from the base, then appends `/v1/responses` → `<gateway>/v1/responses` |
+| `gemini` | `/v1` | adapter appends `/v1beta/models/{model}:generateContent` → `<gateway>/v1/v1beta/models/{model}:generateContent` |
 | `openai-compat` | — | **refuses to route** (see caveats) |
+
+The OpenAI trailing-`/v1` normalization is documented in
+[`./llm.md`](./llm.md#base-url-resolution); it means the `/v1` suffix and the
+adapter's own `/v1/responses` path do not double up.
 
 ## Caveats (bedrock kind only)
 
