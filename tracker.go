@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -686,6 +687,13 @@ func gatewaySuffix(kind GatewayKind, provider string) (string, bool) {
 	return "", false
 }
 
+// ErrGatewayRouteRefused is returned by the strict resolver functions when
+// a gateway URL is configured but the (kind, provider) pair is unsupported
+// or the kind is unknown. Surfacing this as an error prevents the silent
+// SDK-default fallback (e.g. openai-compat defaulting to openrouter.ai)
+// that contradicts the documented fail-closed semantics of #276.
+var ErrGatewayRouteRefused = errors.New("gateway route refused: kind/provider combination unsupported or unknown")
+
 // resolveProviderBaseURLWithGateway resolves the base URL for a provider,
 // consulting sources in priority order:
 //
@@ -696,10 +704,16 @@ func gatewaySuffix(kind GatewayKind, provider string) (string, bool) {
 //
 // The kind argument (from Config.GatewayKind) selects the suffix map; if
 // empty, TRACKER_GATEWAY_KIND env var is consulted, and if that is also
-// empty the default is cf-aig. Unknown kind values and unsupported
-// (kind, provider) pairs refuse to route (return "") rather than silently
-// falling through.
-func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind GatewayKind) string {
+// empty the default is cf-aig.
+//
+// **Fail-closed contract:** when a gateway URL is configured (either via
+// the gatewayURL argument or TRACKER_GATEWAY_URL) AND the (kind,
+// provider) pair is unsupported OR the kind is unknown, this function
+// returns ErrGatewayRouteRefused. Adapter constructors propagate the
+// error so client construction fails — preventing the silent SDK-default
+// fallback that would otherwise leak requests (carrying the gateway
+// token) to the public default endpoint.
+func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind GatewayKind) (string, error) {
 	var envKey string
 	switch provider {
 	case "anthropic":
@@ -711,10 +725,10 @@ func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind 
 	case "openai-compat":
 		envKey = "OPENAI_COMPAT_BASE_URL"
 	default:
-		return ""
+		return "", nil
 	}
 	if v := os.Getenv(envKey); v != "" {
-		return v
+		return v, nil
 	}
 
 	gateway := strings.TrimRight(gatewayURL, "/")
@@ -722,7 +736,7 @@ func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind 
 		gateway = strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
 	}
 	if gateway == "" {
-		return ""
+		return "", nil
 	}
 
 	kind := gatewayKind
@@ -731,9 +745,9 @@ func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind 
 	}
 	suffix, ok := gatewaySuffix(kind, provider)
 	if !ok {
-		return ""
+		return "", fmt.Errorf("%w: kind=%q provider=%q", ErrGatewayRouteRefused, kind, provider)
 	}
-	return gateway + suffix
+	return gateway + suffix, nil
 }
 
 // ResolveProviderBaseURL returns the base URL a provider's HTTP client should
@@ -746,68 +760,73 @@ func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind 
 //     AI Gateway conventions).
 //  3. Empty string, meaning the provider's SDK default.
 //
-// Per-provider env vars always win over TRACKER_GATEWAY_URL, so users can set
-// a single gateway URL for everything and still override individual providers.
-// Trailing slashes on the gateway root are stripped before the suffix is
-// appended to prevent double-slash URLs. Unknown provider names return the
-// empty string. Unknown TRACKER_GATEWAY_KIND values refuse to route
-// (fail-closed) rather than silently falling through to cf-aig.
+// Per-provider env vars always win over TRACKER_GATEWAY_URL.
+//
+// **Lax variant.** This function returns the empty string for BOTH "no
+// gateway configured" AND "gateway configured but routing refused." It
+// is preserved for backward compatibility with library callers that
+// existed before #276 added kind dispatch. New code on the adapter
+// construction path MUST use [ResolveProviderBaseURLStrict] so that
+// refuse-to-route surfaces as an error rather than a silent SDK-default
+// fallback.
 func ResolveProviderBaseURL(provider string) string {
-	var envKey string
-	switch provider {
-	case "anthropic":
-		envKey = "ANTHROPIC_BASE_URL"
-	case "openai":
-		envKey = "OPENAI_BASE_URL"
-	case "gemini":
-		envKey = "GEMINI_BASE_URL"
-	case "openai-compat":
-		envKey = "OPENAI_COMPAT_BASE_URL"
-	default:
-		return ""
-	}
-	if v := os.Getenv(envKey); v != "" {
-		return v
-	}
-	gateway := strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
-	if gateway == "" {
-		return ""
-	}
-	kind := GatewayKind(os.Getenv("TRACKER_GATEWAY_KIND"))
-	suffix, ok := gatewaySuffix(kind, provider)
-	if !ok {
-		return ""
-	}
-	return gateway + suffix
+	base, _ := ResolveProviderBaseURLStrict(provider)
+	return base
+}
+
+// ResolveProviderBaseURLStrict is the fail-closed sibling of
+// [ResolveProviderBaseURL]. It returns the same URL resolution but
+// distinguishes "no gateway needed" (returns "", nil) from "gateway
+// configured but routing refused" (returns "", [ErrGatewayRouteRefused]
+// wrapped). Adapter constructors call this so a misconfigured gateway
+// cannot silently leak requests to public SDK default endpoints.
+func ResolveProviderBaseURLStrict(provider string) (string, error) {
+	return resolveProviderBaseURLWithGateway(provider, "", "")
 }
 
 func newAnthropicAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
+	base, err := resolveProviderBaseURLWithGateway("anthropic", gatewayURL, gatewayKind)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic adapter: %w", err)
+	}
 	var opts []anthropic.Option
-	if base := resolveProviderBaseURLWithGateway("anthropic", gatewayURL, gatewayKind); base != "" {
+	if base != "" {
 		opts = append(opts, anthropic.WithBaseURL(base))
 	}
 	return anthropic.New(key, opts...), nil
 }
 
 func newOpenAIAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
+	base, err := resolveProviderBaseURLWithGateway("openai", gatewayURL, gatewayKind)
+	if err != nil {
+		return nil, fmt.Errorf("openai adapter: %w", err)
+	}
 	var opts []openai.Option
-	if base := resolveProviderBaseURLWithGateway("openai", gatewayURL, gatewayKind); base != "" {
+	if base != "" {
 		opts = append(opts, openai.WithBaseURL(base))
 	}
 	return openai.New(key, opts...), nil
 }
 
 func newGeminiAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
+	base, err := resolveProviderBaseURLWithGateway("gemini", gatewayURL, gatewayKind)
+	if err != nil {
+		return nil, fmt.Errorf("gemini adapter: %w", err)
+	}
 	var opts []google.Option
-	if base := resolveProviderBaseURLWithGateway("gemini", gatewayURL, gatewayKind); base != "" {
+	if base != "" {
 		opts = append(opts, google.WithBaseURL(base))
 	}
 	return google.New(key, opts...), nil
 }
 
 func newOpenAICompatAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
+	base, err := resolveProviderBaseURLWithGateway("openai-compat", gatewayURL, gatewayKind)
+	if err != nil {
+		return nil, fmt.Errorf("openai-compat adapter: %w", err)
+	}
 	var opts []openaicompat.Option
-	if base := resolveProviderBaseURLWithGateway("openai-compat", gatewayURL, gatewayKind); base != "" {
+	if base != "" {
 		opts = append(opts, openaicompat.WithBaseURL(base))
 	}
 	return openaicompat.New(key, opts...), nil

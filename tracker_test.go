@@ -788,7 +788,10 @@ func TestResolveProviderBaseURLWithGateway_ExplicitKindWinsOverEnv(t *testing.T)
 	t.Setenv("TRACKER_GATEWAY_URL", "")
 	t.Setenv("TRACKER_GATEWAY_KIND", "cf-aig") // env says cf-aig
 	// Explicit kind = bedrock should win; anthropic gets empty suffix.
-	got := resolveProviderBaseURLWithGateway("anthropic", "https://bedrock.example.com", GatewayKindBedrock)
+	got, err := resolveProviderBaseURLWithGateway("anthropic", "https://bedrock.example.com", GatewayKindBedrock)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
 	want := "https://bedrock.example.com"
 	if got != want {
 		t.Errorf("explicit GatewayKindBedrock should win over env cf-aig; got %q want %q", got, want)
@@ -803,10 +806,88 @@ func TestResolveProviderBaseURLWithGateway_EmptyKindFallsThroughToEnv(t *testing
 	t.Setenv("TRACKER_GATEWAY_URL", "")
 	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
 	// Empty kind arg → env wins → bedrock.
-	got := resolveProviderBaseURLWithGateway("anthropic", "https://example.com", "")
+	got, err := resolveProviderBaseURLWithGateway("anthropic", "https://example.com", "")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
 	want := "https://example.com"
 	if got != want {
 		t.Errorf("empty kind arg should fall through to env bedrock; got %q want %q", got, want)
+	}
+}
+
+// TestResolveProviderBaseURLStrict_BedrockOpenAICompatErrors asserts the
+// strict semantic that PR #276 documents as "fail-closed": when a gateway
+// URL is configured but (kind, provider) is unsupported, callers must see
+// an error rather than an empty string that adapter constructors silently
+// treat as "no gateway" — which would leak requests to the SDK default
+// endpoint (openrouter.ai for openai-compat, api.openai.com for openai,
+// api.anthropic.com for anthropic). Captures the bug that 4 reviewers
+// flagged on the initial PR.
+func TestResolveProviderBaseURLStrict_BedrockOpenAICompatErrors(t *testing.T) {
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock-gateway.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	got, err := ResolveProviderBaseURLStrict("openai-compat")
+	if err == nil {
+		t.Fatalf("expected refuse-to-route error, got nil (base=%q) — this is the silent-bypass bug reviewers flagged", got)
+	}
+	if got != "" {
+		t.Errorf("expected empty string alongside error, got %q", got)
+	}
+}
+
+// TestResolveProviderBaseURLStrict_UnknownKindErrors asserts strict
+// semantic for the unknown-kind case: with a gateway configured but
+// TRACKER_GATEWAY_KIND=<typo>, callers must see an error rather than the
+// silent fallback that was the original bug.
+func TestResolveProviderBaseURLStrict_UnknownKindErrors(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://my-gw.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "future-kind-xyz")
+	got, err := ResolveProviderBaseURLStrict("anthropic")
+	if err == nil {
+		t.Fatalf("expected refuse-to-route error for unknown kind, got nil (base=%q)", got)
+	}
+	if got != "" {
+		t.Errorf("expected empty string alongside error, got %q", got)
+	}
+}
+
+// TestResolveProviderBaseURLStrict_NoGatewayIsNotAnError asserts that
+// strict resolution returns ("", nil) when no gateway is configured — the
+// "no gateway needed; SDK default is fine" case must remain a clean nil
+// error so downstream constructors don't refuse to build a perfectly
+// valid no-gateway client.
+func TestResolveProviderBaseURLStrict_NoGatewayIsNotAnError(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+	t.Setenv("TRACKER_GATEWAY_KIND", "")
+	got, err := ResolveProviderBaseURLStrict("anthropic")
+	if err != nil {
+		t.Fatalf("no-gateway path must not error, got %v", err)
+	}
+	if got != "" {
+		t.Errorf("no-gateway path should return empty URL, got %q", got)
+	}
+}
+
+// TestResolveProviderBaseURLStrict_PerProviderOverrideBeatsRefuse asserts
+// that an explicit per-provider override wins even when the (kind,
+// provider) pair would otherwise be refused. Per the precedence spec
+// (D2), per-provider env vars win unconditionally — they are the
+// surgical escape hatch for any routing edge case.
+func TestResolveProviderBaseURLStrict_PerProviderOverrideBeatsRefuse(t *testing.T) {
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "https://my-private-compat.example.com")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock-gateway.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	got, err := ResolveProviderBaseURLStrict("openai-compat")
+	if err != nil {
+		t.Fatalf("per-provider override should bypass refuse path, got %v", err)
+	}
+	want := "https://my-private-compat.example.com"
+	if got != want {
+		t.Errorf("got %q want %q", got, want)
 	}
 }
 

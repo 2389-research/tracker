@@ -828,24 +828,31 @@ func buildProviderConstructors() map[string]func(string) (llm.ProviderAdapter, e
 	}
 }
 
-// resolveProviderBaseURLFromEnv delegates to tracker.ResolveProviderBaseURL,
+// resolveProviderBaseURLFromEnv delegates to tracker.ResolveProviderBaseURLStrict,
 // which consults sources in priority order:
 //  1. Per-provider *_BASE_URL env var (always wins).
 //  2. TRACKER_GATEWAY_URL (set by --gateway-url before buildLLMClient runs,
 //     or by the user directly), with a per-provider suffix selected by
 //     TRACKER_GATEWAY_KIND (cf-aig default, or bedrock).
-//  3. Empty string → use provider SDK default.
+//  3. Empty string with nil error → use provider SDK default.
+//
+// Refuse-to-route surfaces as a non-nil error so adapter constructors can
+// fail fast instead of silently falling back to the SDK default endpoint.
 //
 // The thin wrapper exists so test code in this package can exercise the
 // resolved value without importing the tracker package directly.
-func resolveProviderBaseURLFromEnv(provider string) string {
-	return tracker.ResolveProviderBaseURL(provider)
+func resolveProviderBaseURLFromEnv(provider string) (string, error) {
+	return tracker.ResolveProviderBaseURLStrict(provider)
 }
 
 func buildAnthropicConstructor() func(string) (llm.ProviderAdapter, error) {
 	return func(key string) (llm.ProviderAdapter, error) {
+		base, err := resolveProviderBaseURLFromEnv("anthropic")
+		if err != nil {
+			return nil, fmt.Errorf("anthropic adapter: %w", err)
+		}
 		var opts []anthropic.Option
-		if base := resolveProviderBaseURLFromEnv("anthropic"); base != "" {
+		if base != "" {
 			opts = append(opts, anthropic.WithBaseURL(base))
 		}
 		return anthropic.New(key, opts...), nil
@@ -854,8 +861,12 @@ func buildAnthropicConstructor() func(string) (llm.ProviderAdapter, error) {
 
 func buildOpenAIConstructor() func(string) (llm.ProviderAdapter, error) {
 	return func(key string) (llm.ProviderAdapter, error) {
+		base, err := resolveProviderBaseURLFromEnv("openai")
+		if err != nil {
+			return nil, fmt.Errorf("openai adapter: %w", err)
+		}
 		var opts []openai.Option
-		if base := resolveProviderBaseURLFromEnv("openai"); base != "" {
+		if base != "" {
 			opts = append(opts, openai.WithBaseURL(base))
 		}
 		return openai.New(key, opts...), nil
@@ -864,8 +875,12 @@ func buildOpenAIConstructor() func(string) (llm.ProviderAdapter, error) {
 
 func buildGeminiConstructor() func(string) (llm.ProviderAdapter, error) {
 	return func(key string) (llm.ProviderAdapter, error) {
+		base, err := resolveProviderBaseURLFromEnv("gemini")
+		if err != nil {
+			return nil, fmt.Errorf("gemini adapter: %w", err)
+		}
 		var opts []google.Option
-		if base := resolveProviderBaseURLFromEnv("gemini"); base != "" {
+		if base != "" {
 			opts = append(opts, google.WithBaseURL(base))
 		}
 		return google.New(key, opts...), nil
@@ -874,8 +889,12 @@ func buildGeminiConstructor() func(string) (llm.ProviderAdapter, error) {
 
 func buildOpenAICompatConstructor() func(string) (llm.ProviderAdapter, error) {
 	return func(key string) (llm.ProviderAdapter, error) {
+		base, err := resolveProviderBaseURLFromEnv("openai-compat")
+		if err != nil {
+			return nil, fmt.Errorf("openai-compat adapter: %w", err)
+		}
 		var opts []openaicompat.Option
-		if base := resolveProviderBaseURLFromEnv("openai-compat"); base != "" {
+		if base != "" {
 			opts = append(opts, openaicompat.WithBaseURL(base))
 		}
 		return openaicompat.New(key, opts...), nil
