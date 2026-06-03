@@ -46,10 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gateway is configured (`TRACKER_GATEWAY_URL` or `TRACKER_GATEWAY_KIND` set),
   doctor adds a "Gateway Routing" check that surfaces two setup-time caveats
   as informational notes (never warnings or errors):
-  - **Bedrock masquerade** — under `TRACKER_GATEWAY_KIND=bedrock` with
-    `OPENAI_API_KEY` set, `gpt-*` / `o*-*` model strings route to Claude
-    Sonnet 4.6 today (AWS Bedrock has no OpenAI models yet); the gateway
-    re-routes automatically with no tracker change once AWS adds them.
+  - **Bedrock masquerade** — when OpenAI traffic actually traverses the
+    bedrock gateway (`TRACKER_GATEWAY_KIND=bedrock` + a gateway URL +
+    `OPENAI_API_KEY`, with no `OPENAI_BASE_URL` override), `gpt-*` / `o*-*`
+    model strings route to Claude Sonnet 4.6 today (AWS Bedrock has no
+    OpenAI models yet); the gateway re-routes automatically with no tracker
+    change once AWS adds them.
   - **Per-provider precedence** — when `TRACKER_GATEWAY_URL` and one or more
     `<PROVIDER>_BASE_URL` are both set, the per-provider overrides that win
     over the gateway are listed by name. The check is omitted entirely when

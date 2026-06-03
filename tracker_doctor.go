@@ -265,11 +265,21 @@ func checkGatewayRouting() CheckResult {
 
 	notes := 0
 
-	// B.1 — OpenAI→Claude masquerade under the bedrock gateway. Skip the note
-	// when OPENAI_BASE_URL is set: that override wins over the gateway in the
-	// resolver, so OpenAI traffic never traverses the bedrock gateway and is
-	// not masqueraded. The B.2 precedence note below covers that case instead.
-	if kind == string(GatewayKindBedrock) && os.Getenv("OPENAI_BASE_URL") == "" {
+	// B.1 — OpenAI→Claude masquerade under the bedrock gateway. The note fires
+	// only when OpenAI traffic actually traverses the bedrock gateway:
+	//   - kind must be bedrock;
+	//   - a gateway URL must be configured — without one, openai resolves to
+	//     the SDK default (api.openai.com), so there is no gateway and no
+	//     masquerade;
+	//   - OPENAI_BASE_URL must be unset — it wins over the gateway in the
+	//     resolver, so when set, openai bypasses the gateway. The B.2
+	//     precedence note covers that case instead.
+	//
+	// Residual gap: an OPENAI_BASE_URL pointed explicitly at the bedrock
+	// gateway (e.g. <gateway>/v1) would still masquerade, but an arbitrary
+	// URL can't be reliably recognized as a gateway endpoint, so we defer to
+	// the B.2 note rather than guess.
+	if kind == string(GatewayKindBedrock) && gatewayURL != "" && os.Getenv("OPENAI_BASE_URL") == "" {
 		if key, _ := findProviderKey([]string{"OPENAI_API_KEY"}); key != "" {
 			out.Details = append(out.Details, CheckDetail{
 				Status:  CheckStatusHint,

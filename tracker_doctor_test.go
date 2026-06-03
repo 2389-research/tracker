@@ -895,6 +895,7 @@ func gatewayDetailContains(c CheckResult, substr string) bool {
 func TestCheckGatewayRouting_BedrockMasqueradeNote(t *testing.T) {
 	clearGatewayEnv(t)
 	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
 	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
 
 	c := checkGatewayRouting()
@@ -906,9 +907,24 @@ func TestCheckGatewayRouting_BedrockMasqueradeNote(t *testing.T) {
 	}
 }
 
+func TestCheckGatewayRouting_NoMasqueradeWithoutGatewayURL(t *testing.T) {
+	clearGatewayEnv(t)
+	// kind=bedrock + OPENAI_API_KEY but no gateway URL: openai resolves to
+	// the SDK default (api.openai.com), so traffic never traverses a gateway
+	// and is not masqueraded.
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "route to Claude") {
+		t.Errorf("masquerade note should not fire without a gateway URL; details = %+v", c.Details)
+	}
+}
+
 func TestCheckGatewayRouting_NoMasqueradeWithoutOpenAIKey(t *testing.T) {
 	clearGatewayEnv(t)
 	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
 
 	c := checkGatewayRouting()
 	if gatewayDetailContains(c, "route to Claude") {
@@ -919,6 +935,7 @@ func TestCheckGatewayRouting_NoMasqueradeWithoutOpenAIKey(t *testing.T) {
 func TestCheckGatewayRouting_NoMasqueradeUnderCFAIG(t *testing.T) {
 	clearGatewayEnv(t)
 	t.Setenv("TRACKER_GATEWAY_KIND", "cf-aig")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
 	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
 
 	c := checkGatewayRouting()
