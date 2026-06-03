@@ -167,7 +167,12 @@ func TestMatchWritablePath_IsUnion_Rapid(t *testing.T) {
 // --- relPathForJail ---
 
 // TestRelPathForJail_ContainedRoundTrips_Rapid: for any literal relative path,
-// relPathForJail(anchor, anchor/rel) returns rel with no error.
+// relPathForJail(anchor, anchor/rel) round-trips to rel with no error.
+//
+// relPathForJail returns filepath.Rel's output, which uses OS separators, so the
+// comparison normalizes with filepath.ToSlash before checking against the
+// forward-slash-generated rel — otherwise the multi-segment case would mismatch
+// on Windows (`a\b` vs `a/b`).
 func TestRelPathForJail_ContainedRoundTrips_Rapid(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		anchor := "/" + drawPath(t, "anchor")
@@ -177,7 +182,7 @@ func TestRelPathForJail_ContainedRoundTrips_Rapid(t *testing.T) {
 		if err != nil {
 			t.Fatalf("relPathForJail(%q, %q) = err %v, want nil", anchor, abs, err)
 		}
-		if got != rel {
+		if filepath.ToSlash(got) != rel {
 			t.Fatalf("relPathForJail(%q, %q) = %q, want %q", anchor, abs, got, rel)
 		}
 	})
