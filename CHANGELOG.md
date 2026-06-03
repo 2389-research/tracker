@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `cf-aig`. Per-provider `<PROVIDER>_BASE_URL` env vars still win
   unconditionally as the surgical override.
 
+  **Fail-closed enforcement:** when a gateway URL is configured but the
+  (kind, provider) pair is unsupported (e.g. `bedrock` + `openai-compat`)
+  or the kind is unknown, adapter construction fails with a wrapped
+  `tracker.ErrGatewayRouteRefused`. This prevents silent fallback to the
+  provider SDK's default endpoint (which would otherwise leak the gateway
+  token to public hosts like `openrouter.ai`, `api.openai.com`,
+  `api.anthropic.com`). The new strict resolver is exposed as
+  `tracker.ResolveProviderBaseURLStrict`; the legacy
+  `tracker.ResolveProviderBaseURL` is preserved for back-compat and
+  returns `""` for both "no gateway" and "refuse" without distinction.
+
+  `--gateway-kind` is validated at flag-parse time: unsupported values
+  fail fast with a clear CLI error instead of propagating to
+  `TRACKER_GATEWAY_KIND` and surfacing late as a routing refusal.
+
   Existing CF AIG callers see zero behavior change — the default behavior
   matches the prior hard-coded suffix map. Operator-facing docs + doctor
   preflight notes ship in follow-up PRs (#277, #278).

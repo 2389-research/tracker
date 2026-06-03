@@ -914,6 +914,45 @@ func TestParseFlagsGatewayKind(t *testing.T) {
 	}
 }
 
+// TestParseFlagsGatewayKindRejectsUnknown asserts that --gateway-kind=<typo>
+// fails fast at flag-parse time with a clear error, rather than propagating
+// to TRACKER_GATEWAY_KIND and surfacing later as an adapter construction
+// error. Caught at CLI parse time → user sees the typo immediately.
+func TestParseFlagsGatewayKindRejectsUnknown(t *testing.T) {
+	_, err := parseFlags([]string{"tracker", "--gateway-kind", "typo-kind", "pipeline.dip"})
+	if err == nil {
+		t.Fatal("parseFlags should reject unknown --gateway-kind value")
+	}
+	if !strings.Contains(err.Error(), "gateway-kind") {
+		t.Fatalf("error message should mention --gateway-kind; got %v", err)
+	}
+}
+
+// TestParseFlagsGatewayKindAcceptsEmpty asserts that the empty value (the
+// default that selects cf-aig downstream) is allowed — only typos are
+// rejected.
+func TestParseFlagsGatewayKindAcceptsEmpty(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("empty --gateway-kind should be accepted; got %v", err)
+	}
+	if cfg.gatewayKind != "" {
+		t.Fatalf("default gatewayKind = %q, want empty", cfg.gatewayKind)
+	}
+}
+
+// TestParseFlagsGatewayKindAcceptsCFAIG asserts the explicit cf-aig form
+// (besides the empty default) is allowed.
+func TestParseFlagsGatewayKindAcceptsCFAIG(t *testing.T) {
+	cfg, err := parseFlags([]string{"tracker", "--gateway-kind", "cf-aig", "pipeline.dip"})
+	if err != nil {
+		t.Fatalf("--gateway-kind cf-aig should be accepted; got %v", err)
+	}
+	if cfg.gatewayKind != "cf-aig" {
+		t.Fatalf("gatewayKind = %q, want cf-aig", cfg.gatewayKind)
+	}
+}
+
 func TestParseFlagsParamOverrides(t *testing.T) {
 	cfg, err := parseFlags([]string{"tracker", "--param", "foo=bar", "--param", "env=prod", "pipeline.dip"})
 	if err != nil {
