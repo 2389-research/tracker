@@ -20,7 +20,11 @@ Base URL resolution consults three sources, in order:
    `OPENAI_BASE_URL`, `GEMINI_BASE_URL`, `OPENAI_COMPAT_BASE_URL`) — wins
    unconditionally. Use it to surgically override one provider while leaving the
    rest on the gateway.
-2. **`TRACKER_GATEWAY_URL` + kind-dependent suffix** — the gateway fallback.
+2. **The gateway URL + kind-dependent suffix** — the gateway fallback. The URL
+   comes from `Config.GatewayURL` (library, passed programmatically) first, then
+   the `TRACKER_GATEWAY_URL` env var; likewise `Config.GatewayKind` then
+   `TRACKER_GATEWAY_KIND`. The `--gateway-url` / `--gateway-kind` CLI flags set
+   those env vars.
 3. **Empty** — the provider SDK's own default endpoint.
 
 So a per-provider base URL always beats gateway routing for that provider.
