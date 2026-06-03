@@ -236,20 +236,28 @@ func TestIsWindowsAbsolute_MatchesSpec_Rapid(t *testing.T) {
 // literal descendant is contained, and a sibling sharing a string prefix but
 // not a path-component boundary is NOT contained (the bug class isSubpathOf's
 // separator guard exists to prevent).
+//
+// isSubpathOf compares using string(filepath.Separator) and operates on cleaned
+// OS paths, so the test builds native-separator paths via filepath.Join rather
+// than hard-coded "/" — otherwise the descendant case would mismatch on Windows
+// (`/a/b/c` vs prefix `/a/b\`). (Globs elsewhere are forward-slash by spec, so
+// those generators legitimately keep "/".)
 func TestIsSubpathOf_Rapid(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		parent := "/" + strings.Join(genLiteralSegments(t, "p", 1, 4), "/")
+		sep := string(filepath.Separator)
+		parent := filepath.Join(append([]string{sep}, genLiteralSegments(t, "p", 1, 4)...)...)
 
 		if !isSubpathOf(parent, parent) {
 			t.Fatalf("isSubpathOf(%q, %q) = false, want true (reflexive)", parent, parent)
 		}
 
-		child := parent + "/" + genLiteralPath(t, "sub")
+		child := filepath.Join(parent, genLiteralPath(t, "sub"))
 		if !isSubpathOf(child, parent) {
 			t.Fatalf("isSubpathOf(%q, %q) = false, want true (descendant)", child, parent)
 		}
 
-		// "/a/b" vs sibling "/a/bx": string-prefix match, but NOT a path child.
+		// Sibling sharing a string prefix but NOT a path-component boundary
+		// (e.g. "/a/b" vs "/a/bx") — appended WITHOUT a separator on purpose.
 		sibling := parent + genLiteralSegment(t, "suffix")
 		if isSubpathOf(sibling, parent) {
 			t.Fatalf("isSubpathOf(%q, %q) = true, want false (prefix-but-not-child)", sibling, parent)

@@ -266,7 +266,7 @@ func TestConfigureJail_G2_RefusesNonNativeBackend_Rapid(t *testing.T) {
 		if !strings.Contains(err.Error(), backend) {
 			t.Fatalf("configureJail err %v does not name backend %q", err, backend)
 		}
-		if env.CommandWrapper != nil || env.WriteOpener != nil {
+		if env.CommandWrapper != nil || env.WriteOpener != nil || env.Remover != nil {
 			t.Fatalf("env hooks wired despite G2 refusal")
 		}
 	})
