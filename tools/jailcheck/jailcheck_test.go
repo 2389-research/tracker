@@ -63,6 +63,22 @@ func TestCheckDir_AliasedImport(t *testing.T) {
 	}
 }
 
+func TestCheckDir_FuncValueCapture(t *testing.T) {
+	// Hoisting os.WriteFile into a variable (`wf := os.WriteFile; wf(...)`)
+	// must still be caught: the lint matches the selector reference, not just
+	// the call. The read-only capture must not be flagged.
+	violations, err := checkDir("testdata/funcvalue")
+	if err != nil {
+		t.Fatalf("checkDir: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation in funcvalue fixture, got %d: %+v", len(violations), violations)
+	}
+	if violations[0].Call != "os.WriteFile" || violations[0].Func != "captureWrite" {
+		t.Fatalf("expected os.WriteFile in captureWrite, got %+v", violations[0])
+	}
+}
+
 func TestCheckDir_ReadOnlyNotFlagged(t *testing.T) {
 	// The violation fixture's readOnly func uses os.ReadFile; it must not appear.
 	violations, err := checkDir("testdata/violation")

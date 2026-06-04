@@ -91,7 +91,7 @@ func main() {
 
 	for _, v := range violations {
 		fmt.Fprintf(os.Stderr,
-			"%s:%d: %s called directly in %s — route filesystem mutations through "+
+			"%s:%d: %s used directly in %s — route filesystem mutations through "+
 				"exec.ExecutionEnvironment (env.WriteFile/RemoveFile/ExecCommand), or, for an "+
 				"env==nil fallback, annotate the function with //%s. "+
 				"See docs/architecture/agent-tool-jail-checklist.md\n",
@@ -154,17 +154,17 @@ type funcRange struct {
 	allowed    bool
 }
 
-// checkFile reports every unguarded mutating os.* call in a parsed file.
+// checkFile reports every unguarded mutating os.* reference in a parsed file.
 func checkFile(fset *token.FileSet, f *ast.File) []Violation {
 	osNames := osLocalNames(f)
 	if len(osNames) == 0 {
-		return nil // file does not import "os" — no os.* call can resolve here.
+		return nil // file does not import "os" — no os.* reference can resolve here.
 	}
 	funcs := funcRanges(f)
 
 	var violations []Violation
 	ast.Inspect(f, func(n ast.Node) bool {
-		name, ok := mutatingOSCall(n, osNames)
+		name, ok := mutatingOSRef(n, osNames)
 		if !ok {
 			return true
 		}
@@ -204,17 +204,17 @@ func funcRanges(f *ast.File) []funcRange {
 	return ranges
 }
 
-// mutatingOSCall reports whether n is a call to a mutating os.* function and,
-// if so, the bare function name (e.g. "WriteFile"). osNames is the set of local
+// mutatingOSRef reports whether n is a *reference* to a mutating os.* function
+// (e.g. "WriteFile") and, if so, the bare function name. It matches the
+// selector itself rather than the enclosing call, so a function-value capture
+// (`wf := os.WriteFile; wf(...)`) or callback pass (`f(os.Remove)`) is flagged
+// just like a direct `os.WriteFile(...)` call — a CI gate must not be bypassable
+// by hoisting the symbol into a variable. osNames is the set of local
 // identifiers bound to the standard-library "os" package in the file, so an
 // aliased import (`stdos "os"` → `stdos.WriteFile`) is matched while a
 // non-stdlib package happening to be named "os" is not.
-func mutatingOSCall(n ast.Node, osNames map[string]bool) (string, bool) {
-	call, ok := n.(*ast.CallExpr)
-	if !ok {
-		return "", false
-	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+func mutatingOSRef(n ast.Node, osNames map[string]bool) (string, bool) {
+	sel, ok := n.(*ast.SelectorExpr)
 	if !ok {
 		return "", false
 	}

@@ -150,10 +150,13 @@ mutating `os.*` function (`WriteFile`, `MkdirAll`, `Mkdir`, `MkdirTemp`,
 `Truncate`, `Symlink`, `Link`, `Chmod`, `Chown`, `Lchown`, `Chtimes`),
 exiting non-zero with `file:line: os.X called directly in <func>` for each.
 AST (not grep) so a mention of `os.WriteFile` inside a doc comment or string
-does not false-positive. Package qualifiers are resolved against the file's
-imports, so an aliased import (`import stdos "os"` → `stdos.WriteFile`) is still
-caught, while a non-stdlib package that happens to be named `os` is not. The
-single exemption is the `//jail:allow-unjailed-fallback` marker described above.
+does not false-positive. It matches the **selector reference**, not just the
+call, so hoisting the symbol into a variable (`wf := os.WriteFile; wf(...)`) or
+passing it as a callback (`f(os.Remove)`) is flagged just like a direct call.
+Package qualifiers are resolved against the file's imports, so an aliased import
+(`import stdos "os"` → `stdos.WriteFile`) is still caught, while a non-stdlib
+package that happens to be named `os` is not. The single exemption is the
+`//jail:allow-unjailed-fallback` marker described above.
 
 It is wired into the `ci:` Makefile target and the CI "Quality Gates" job, and
 is unit-tested against `clean` / `violation` fixtures under
@@ -166,10 +169,16 @@ is unit-tested against `clean` / `violation` fixtures under
   attacker-chosen path within it) is not flagged.
 - **Network egress.** Out of scope for the filesystem jail entirely.
 - **Dot-imported `os`.** The lint resolves aliased imports (`import stdos "os"`
-  is caught), but a dot-import (`import . "os"`) makes `WriteFile(...)` a bare
-  call with no package selector, which this selector-based analyzer cannot
+  is caught) and selector references (function-value capture / callback pass are
+  caught), but a dot-import (`import . "os"`) makes `WriteFile(...)` a bare
+  identifier with no package selector, which this selector-based analyzer cannot
   attribute to `os`. Dot-importing `os` is its own red flag; reject it in
   review.
+- **Reflective / indirect dispatch.** Reaching a mutating syscall via
+  `reflect`, `plugin`, `//go:linkname`, or a syscall wrapper that doesn't name
+  `os.*` is out of scope — the lint is a static guardrail against the easy
+  mistake (a direct `os.*` write), not a sandbox. The jail itself (Landlock +
+  `openat2`) is the actual enforcement boundary.
 - **Out-of-process backends.** `claude-code` and `acp` run the agent in a
   separate process tracker cannot Landlock; `writable_paths` refuses them at
   start (see `CLAUDE.md` → Agent backends). This lint only governs the
