@@ -162,10 +162,11 @@ doctor:
 
 # ─── Agent-tool jail lint ────────────────────────────────
 
-# tools-jail-check flags direct os.* filesystem mutations in agent/tools/ that
-# bypass the ExecutionEnvironment seam guarding the writable_paths jail (#283,
-# refs #275/#272). The single legal exception — an env==nil fallback — must
-# carry a //jail:allow-unjailed-fallback marker on its function. See
+# tools-jail-check flags direct filesystem-mutation / subprocess calls in
+# agent/tools/ that bypass the ExecutionEnvironment seam guarding the
+# writable_paths jail (#283, refs #275/#272). It watches os, os/exec, io/ioutil,
+# and syscall. The single legal exception — an env==nil fallback — must carry a
+# //jail:allow-unjailed-fallback marker on its function. See
 # docs/architecture/agent-tool-jail-checklist.md.
 tools-jail-check:
 	@GOCACHE=$(GOCACHE) go run ./tools/jailcheck agent/tools
