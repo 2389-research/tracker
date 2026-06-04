@@ -49,6 +49,9 @@ jobs:
       - name: Dippin doctor
         run: make doctor
 
+      - name: Agent-tool jail lint
+        run: make tools-jail-check
+
       - name: Verify tracker binary
         run: ./bin/tracker --help
 

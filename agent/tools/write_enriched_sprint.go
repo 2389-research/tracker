@@ -1223,6 +1223,17 @@ func trimEnclosingMarkdownFence(s string) string {
 // that routes through the writable_paths fs-jail (#272) WriteOpener so
 // generated sprint files are bounded just like apply_patch/edit/write.
 // Falls back to direct os.WriteFile for unjailed sessions. #275 audit pass.
+//
+// The os.* fallback below is reachable ONLY when t.env == nil. backend_native
+// wires the JAILED *LocalEnvironment into t.env whenever writable_paths is set
+// (it refuses-to-start otherwise), so env==nil implies no active jail and the
+// fallback has nothing to bypass. That env==nil invariant is enforced by
+// backend_native's refuse-to-start, not by the linter: the jailcheck linter
+// (#283) only requires this direct-os.* fallback to carry the marker below, so
+// no unannotated bypass can be added. The marker records that this exception
+// is intentional and audited.
+//
+//jail:allow-unjailed-fallback env==nil ⟹ no active jail; see agent-tool-jail-checklist.md
 func (t *WriteEnrichedSprintTool) writeSprintFile(ctx context.Context, path string, content string) error {
 	if t.env != nil {
 		rel, err := filepath.Rel(t.env.WorkingDir(), path)
