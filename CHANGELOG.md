@@ -112,7 +112,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every downstream safety node. A single graph-level `fallback_target` thus
   becomes a catch-all escalation route for any unhandled failure. Behavior is
   unchanged when no fallback is declared — same terminal `OutcomeFail` status
-  and the same error string as before.
+  and the same error string as before. The fallback advance applies the same
+  post-node `BudgetGuard` check as the normal edge-advance path, so a failed
+  node that already breached a hard token/cost ceiling halts on budget instead
+  of spending more on the fallback node.
 
 ## [0.35.1] - 2026-06-02
 

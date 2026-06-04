@@ -576,6 +576,15 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	if fb == "" {
 		return nil
 	}
+	traceEntry.EdgeTo = fb
+	s.trace.AddEntry(*traceEntry)
+	// Apply the same post-node budget check as advanceToNextNode before
+	// advancing, so a node that already breached a hard ceiling halts the run
+	// rather than spending more on the fallback node (#311 review).
+	e.emitCostUpdate(s)
+	if lr := e.checkBudgetAfterEmit(s); lr != nil {
+		return lr
+	}
 	if s.cp.FallbackTaken == nil {
 		s.cp.FallbackTaken = map[string]bool{}
 	}
@@ -587,8 +596,6 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 		NodeID:    node.ID,
 		Message:   fmt.Sprintf("node %q failed with no failure edge, routing to fallback %q", node.ID, fb),
 	})
-	traceEntry.EdgeTo = fb
-	s.trace.AddEntry(*traceEntry)
 	e.clearDownstream(fb, s.cp)
 	s.cp.CurrentNode = fb
 	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, node.ID)

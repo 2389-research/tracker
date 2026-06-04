@@ -175,6 +175,54 @@ func TestStrictFailureFallbackTakenAtMostOnce(t *testing.T) {
 	}
 }
 
+// TestStrictFailureFallbackRespectsBudget verifies that when the failed node's
+// own usage already breaches a hard budget ceiling, the run halts on budget
+// instead of spending more by running the fallback node. The strict-failure
+// fallback advance must apply the same post-node budget check as the normal
+// advanceToNextNode path (#311 review, Codex).
+func TestStrictFailureFallbackRespectsBudget(t *testing.T) {
+	g := NewGraph("strict-fallback-budget")
+	g.Attrs["fallback_target"] = "escalate"
+
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "agentFail", Shape: "box"})
+	g.AddNode(&Node{ID: "escalate", Shape: "box"})
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+
+	g.AddEdge(&Edge{From: "start", To: "agentFail"})
+	g.AddEdge(&Edge{From: "agentFail", To: "done"})
+	g.AddEdge(&Edge{From: "escalate", To: "done"})
+
+	reg := newTestRegistry()
+	escalateVisited := false
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			switch node.ID {
+			case "agentFail":
+				// Spend past the 1000-token ceiling before failing.
+				return Outcome{Status: string(OutcomeFail), Stats: &SessionStats{TotalTokens: 5000}}, nil
+			case "escalate":
+				escalateVisited = true
+				return Outcome{Status: string(OutcomeSuccess)}, nil
+			default:
+				return Outcome{Status: string(OutcomeSuccess)}, nil
+			}
+		},
+	})
+
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 1000})
+	engine := NewEngine(g, reg, WithBudgetGuard(guard))
+	result, _ := engine.Run(context.Background())
+
+	if escalateVisited {
+		t.Fatal("escalate must NOT run: the failed node already breached the token budget")
+	}
+	if result.Status != OutcomeBudgetExceeded {
+		t.Fatalf("status = %q, want %q", result.Status, OutcomeBudgetExceeded)
+	}
+}
+
 // TestStrictFailureNoFallbackPreservesHalt pins the unchanged behavior when no
 // node/graph fallback_target is declared: same status and same error string.
 func TestStrictFailureNoFallbackPreservesHalt(t *testing.T) {
