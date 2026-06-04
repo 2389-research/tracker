@@ -169,22 +169,37 @@ func checkDir(dir string) ([]Violation, error) {
 	return violations, nil
 }
 
-// goFiles lists non-test .go files directly under dir, sorted.
+// goFiles lists non-test .go files under dir recursively (so a tool added in a
+// future subpackage is covered too), skipping testdata directories, sorted.
 func goFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		return collectGoFile(&files, path, d, err)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var files []string
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		files = append(files, filepath.Join(dir, name))
-	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// collectGoFile is the WalkDir visitor for goFiles: it skips testdata trees and
+// _test.go files, appending every other .go file to *files.
+func collectGoFile(files *[]string, path string, d os.DirEntry, err error) error {
+	if err != nil {
+		return err
+	}
+	if d.IsDir() {
+		if d.Name() == "testdata" {
+			return filepath.SkipDir
+		}
+		return nil
+	}
+	name := d.Name()
+	if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
+		*files = append(*files, path)
+	}
+	return nil
 }
 
 // funcRange records a function's source span and name.
