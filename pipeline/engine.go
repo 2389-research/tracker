@@ -529,6 +529,14 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	if outcome != string(OutcomeFail) || hasAnyConditionalEdge(edges) {
 		return nil
 	}
+	// Before dead-stopping, consult the node/graph-level fallback_target so an
+	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
+	// instead of skipping every downstream node (#295). One-shot per node.
+	if node := e.graph.Nodes[nodeID]; node != nil {
+		if lr := e.strictFailureFallback(s, node, traceEntry); lr != nil {
+			return lr
+		}
+	}
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),
@@ -551,6 +559,47 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 		err: fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
 	}
 	return &lr
+}
+
+// strictFailureFallback attempts to route an unhandled strict failure to a
+// node- or graph-level fallback_target instead of halting. It mirrors
+// goalGateExhaustedPath (engine_checkpoint.go): the fallback is taken at most
+// once per node per run, guarded by cp.FallbackTaken (persisted in the
+// checkpoint) to prevent loop-backs from re-escalating forever. Returns an
+// advancing loopResult when a fallback resolves, or nil to let the caller
+// perform today's terminal halt.
+func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry) *loopResult {
+	if s.cp.FallbackTaken[node.ID] {
+		return nil
+	}
+	fb := e.findFallbackTarget(node)
+	if fb == "" {
+		return nil
+	}
+	traceEntry.EdgeTo = fb
+	s.trace.AddEntry(*traceEntry)
+	// Apply the same post-node budget check as advanceToNextNode before
+	// advancing, so a node that already breached a hard ceiling halts the run
+	// rather than spending more on the fallback node (#311 review).
+	e.emitCostUpdate(s)
+	if lr := e.checkBudgetAfterEmit(s); lr != nil {
+		return lr
+	}
+	if s.cp.FallbackTaken == nil {
+		s.cp.FallbackTaken = map[string]bool{}
+	}
+	s.cp.FallbackTaken[node.ID] = true
+	e.emit(PipelineEvent{
+		Type:      EventStageFailed,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    node.ID,
+		Message:   fmt.Sprintf("node %q failed with no failure edge, routing to fallback %q", node.ID, fb),
+	})
+	e.clearDownstream(fb, s.cp)
+	s.cp.CurrentNode = fb
+	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, node.ID)
+	return &loopResult{action: loopContinue, nextNodeID: fb}
 }
 
 // handleCompletedTarget handles the case where the selected next node was already completed.
