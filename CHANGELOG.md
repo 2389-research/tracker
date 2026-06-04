@@ -100,6 +100,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `openai-compat` fail-closed). Linked from the architecture docs index and
   `llm.md`.
 
+### Fixed
+
+- **Unhandled agent failure no longer dead-stops the pipeline** (closes #295,
+  refs epic #308, pairs with #296). When an agent node returns `OutcomeFail`
+  (including turn-limit exhaustion) and has only unconditional outgoing edges,
+  the strict-failure guard now consults `findFallbackTarget` before halting:
+  if a node-level or graph-level `fallback_target`/`fallback_retry_target`
+  resolves, the run routes there (one-shot per node, guarded by
+  `Checkpoint.FallbackTaken` and persisted across resume) instead of skipping
+  every downstream safety node. A single graph-level `fallback_target` thus
+  becomes a catch-all escalation route for any unhandled failure. Behavior is
+  unchanged when no fallback is declared — same terminal `OutcomeFail` status
+  and the same error string as before.
+
 ## [0.35.1] - 2026-06-02
 
 ### Changed
