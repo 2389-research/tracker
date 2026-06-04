@@ -2,9 +2,9 @@
 
 Follow-up to [#275](https://github.com/2389-research/tracker/pull/275) /
 [#272](https://github.com/2389-research/tracker/issues/272). This doc pins the
-invariant the `writable_paths` filesystem jail depends on — **every agent tool
-routes its filesystem mutations through `exec.ExecutionEnvironment`** — and the
-CI lint (`make tools-jail-check`) that keeps it from rotting.
+invariant the `writable_paths` jail depends on — **every agent tool routes its
+filesystem mutations and subprocesses through `exec.ExecutionEnvironment`** —
+and the CI lint (`make tools-jail-check`) that keeps it from rotting.
 
 ## Why this exists
 
@@ -26,22 +26,34 @@ replaces that luck with a gate.
 
 ## The rule
 
-> Any `agent/tools/` tool that mutates the filesystem **MUST** route through
-> `exec.ExecutionEnvironment`. **Any** direct mutating `os.*` call in
-> `agent/tools/*.go` is a **review-blocker** — `os.WriteFile`, `os.MkdirAll`,
-> `os.Mkdir`, `os.MkdirTemp`, `os.Remove`, `os.RemoveAll`, `os.Rename`,
-> `os.Create`, `os.CreateTemp`, `os.OpenFile`, `os.Truncate`, `os.Symlink`,
-> `os.Link`, `os.Chmod`, `os.Chown`, `os.Lchown`, `os.Chtimes` (the exact set
-> the analyzer flags; see `mutatingOSFuncs` in `tools/jailcheck/jailcheck.go`).
+> Any `agent/tools/` tool that mutates the filesystem **or spawns a
+> subprocess** MUST route through `exec.ExecutionEnvironment`. **Any** direct
+> mutating call in `agent/tools/*.go` is a **review-blocker**, across all of:
+>
+> - **`os`** — `WriteFile`, `Create`, `CreateTemp`, `OpenFile`, `Mkdir`,
+>   `MkdirAll`, `MkdirTemp`, `Remove`, `RemoveAll`, `Rename`, `Truncate`,
+>   `Symlink`, `Link`, `Chmod`, `Chown`, `Lchown`, `Chtimes`, `StartProcess`,
+>   `OpenRoot`, `NewRoot`.
+> - **`os/exec`** — `Command`, `CommandContext` (every `*exec.Cmd` starts here;
+>   use `env.ExecCommand`).
+> - **`io/ioutil`** — `WriteFile`, `TempFile`, `TempDir` (deprecated, but still
+>   bypass `env`).
+> - **`syscall`** — the mutating/spawning surface (`Unlink`, `Rmdir`, `Rename`,
+>   `Mkdir`, `Link`, `Symlink`, `Truncate`, `Chmod`, `Chown`, `Creat`, `Open`,
+>   `Exec`, `ForkExec`, …).
+>
+> The exact set the analyzer flags is `mutatingFuncs` in
+> `tools/jailcheck/jailcheck.go` — that map is the source of truth; this list is
+> a summary.
 
 The one legal exception is an **unjailed fallback** — see
 [The env==nil-fallback invariant](#the-envnil-fallback-invariant).
 
-Read-only `os.*` (`os.ReadFile`, `os.Open`, `os.Stat`, `os.ReadDir`) is **not**
-covered by this rule. The jail bounds *writes*, not reads; read/exfil is an
-accepted residual risk of the design (see the activity-log threat model in
-`CLAUDE.md` and the `writable_paths` spec). The lint deliberately ignores
-read-only calls.
+Read-only entry points (`os.ReadFile`/`Open`/`Stat`/`ReadDir`, `exec.LookPath`,
+`ioutil.ReadFile`, `syscall.Read`/`Stat`) are **not** covered by this rule. The
+jail bounds *writes and subprocesses*, not reads; read/exfil is an accepted
+residual risk of the design (see the activity-log threat model in `CLAUDE.md`
+and the `writable_paths` spec). The lint deliberately ignores read-only calls.
 
 ## Threat-model table
 
@@ -149,26 +161,29 @@ When you add a tool to `agent/tools/` that touches the filesystem:
 ## The lint
 
 `make tools-jail-check` runs the `go/ast` analyzer at `tools/jailcheck/`. It
-parses every non-`_test.go` file in `agent/tools/` and reports any call to a
-mutating `os.*` function (`WriteFile`, `MkdirAll`, `Mkdir`, `MkdirTemp`,
-`Remove`, `RemoveAll`, `Rename`, `Create`, `CreateTemp`, `OpenFile`,
-`Truncate`, `Symlink`, `Link`, `Chmod`, `Chown`, `Lchown`, `Chtimes`),
-exiting non-zero with `file:line: os.X in <func> — …` for each. AST (not grep)
-so a mention of `os.WriteFile` inside a doc comment or string does not
-false-positive. It matches the **selector reference**, not just the call, so
-hoisting the symbol into a variable (`wf := os.WriteFile; wf(...)`) or passing
-it as a callback (`f(os.Remove)`) is flagged just like a direct call. Package
-qualifiers are resolved against the file's imports, so an aliased import
-(`import stdos "os"` → `stdos.WriteFile`) is still caught, while a non-stdlib
-package that happens to be named `os` is not. A **dot-import** of `os`
-(`import . "os"`) — which would hide every mutating call behind a bare
-identifier — is itself flagged as a violation so it can't be used to slip past
-the gate. The single exemption is the `//jail:allow-unjailed-fallback` marker
-described above.
+parses every non-`_test.go` file in `agent/tools/` and reports any reference to
+a watched mutating function across **`os`, `os/exec`, `io/ioutil`, and
+`syscall`** (the `mutatingFuncs` map), exiting non-zero with
+`file:line: pkg.Func in <func> — …` for each. Its robustness properties:
+
+- **AST, not grep** — a mention of `os.WriteFile` inside a doc comment or string
+  does not false-positive.
+- **Selector reference, not just calls** — hoisting the symbol into a variable
+  (`wf := os.WriteFile; wf(...)`) or passing it as a callback (`f(os.Remove)`)
+  is flagged just like a direct call.
+- **Import-resolved** — qualifiers are matched against the file's imports, so an
+  aliased import (`import stdos "os"` → `stdos.WriteFile`) is caught while a
+  non-stdlib package that happens to share a name is not.
+- **Dot-import flagged** — `import . "os"` (or any watched package) would hide
+  every mutating call behind a bare identifier, so the dot-import itself is a
+  violation.
+
+The single exemption is the `//jail:allow-unjailed-fallback` marker described
+above.
 
 It is wired into the `ci:` Makefile target and the CI "Quality Gates" job, and
 is unit-tested against `clean` / `violation` / `aliased` / `funcvalue` /
-`dotimport` fixtures under `tools/jailcheck/testdata/`.
+`subprocess` / `dotimport` fixtures under `tools/jailcheck/testdata/`.
 
 ## Residual risks (not covered by this lint)
 
@@ -176,11 +191,12 @@ is unit-tested against `clean` / `violation` / `aliased` / `funcvalue` /
   reads outside the workspace (or `grep_search`/`dispatch_sprints` reading an
   attacker-chosen path within it) is not flagged.
 - **Network egress.** Out of scope for the filesystem jail entirely.
-- **Reflective / indirect dispatch.** Reaching a mutating syscall via
-  `reflect`, `plugin`, `//go:linkname`, or a syscall wrapper that doesn't name
-  `os.*` is out of scope — the lint is a static guardrail against the easy
-  mistake (a direct `os.*` write), not a sandbox. The jail itself (Landlock +
-  `openat2`) is the actual enforcement boundary.
+- **Reflective / indirect dispatch.** Reaching a mutating call via `reflect`,
+  `plugin`, `//go:linkname`, `golang.org/x/sys/unix`, or a wrapper that names
+  none of the watched packages is out of scope — the lint is a static guardrail
+  against the easy mistake (a direct `os.*` / `exec.Command` / raw `syscall.*`),
+  not a sandbox. The jail itself (Landlock + `openat2` + the `__jail-exec`
+  CommandWrapper) is the actual enforcement boundary.
 - **Out-of-process backends.** `claude-code` and `acp` run the agent in a
   separate process tracker cannot Landlock; `writable_paths` refuses them at
   start (see `CLAUDE.md` → Agent backends). This lint only governs the

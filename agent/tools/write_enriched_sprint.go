@@ -1230,7 +1230,7 @@ func trimEnclosingMarkdownFence(s string) string {
 // fallback has nothing to bypass. That env==nil invariant is enforced by
 // backend_native's refuse-to-start, not by the linter: the jailcheck linter
 // (#283) only requires this direct-os.* fallback to carry the marker below, so
-// no UNannotated bypass can be added. The marker records that this exception
+// no unannotated bypass can be added. The marker records that this exception
 // is intentional and audited.
 //
 //jail:allow-unjailed-fallback env==nil ⟹ no active jail; see agent-tool-jail-checklist.md

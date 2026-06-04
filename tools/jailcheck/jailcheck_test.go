@@ -79,6 +79,31 @@ func TestCheckDir_FuncValueCapture(t *testing.T) {
 	}
 }
 
+func TestCheckDir_NonOSPackages(t *testing.T) {
+	// The jail has two seams: filesystem writes and subprocesses. A tool can
+	// bypass either without touching os.* — via os/exec, io/ioutil, or a raw
+	// syscall. All must be flagged; read-only entry points must not.
+	violations, err := checkDir("testdata/subprocess")
+	if err != nil {
+		t.Fatalf("checkDir: %v", err)
+	}
+	got := make([]string, 0, len(violations))
+	for _, v := range violations {
+		got = append(got, v.Call)
+	}
+	sort.Strings(got)
+
+	want := []string{"exec.Command", "exec.CommandContext", "ioutil.WriteFile", "syscall.Unlink"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v (full: %+v)", want, got, violations)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	}
+}
+
 func TestCheckDir_DotImport(t *testing.T) {
 	// A dot-import of os hides every mutating call behind a bare identifier;
 	// the import itself must be flagged so CI fails fast.

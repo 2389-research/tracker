@@ -1,19 +1,23 @@
-// ABOUTME: jailcheck flags direct os.* filesystem mutations in agent/tools that
-// ABOUTME: bypass the ExecutionEnvironment seam guarding the writable_paths jail (#272/#275/#283).
+// ABOUTME: jailcheck flags direct filesystem-mutation / subprocess calls in
+// ABOUTME: agent/tools that bypass the ExecutionEnvironment seam guarding the writable_paths jail (#272/#275/#283).
 //
-// Background: agent tools must route every filesystem mutation through the
-// exec.ExecutionEnvironment interface (env.WriteFile / env.RemoveFile /
-// env.ExecCommand). When a node sets writable_paths, that seam is the single
-// choke point where Landlock + openat2 enforcement is wired (see
+// Background: agent tools must route every filesystem mutation and subprocess
+// through the exec.ExecutionEnvironment interface (env.WriteFile /
+// env.RemoveFile / env.ExecCommand). When a node sets writable_paths, that seam
+// is the single choke point where Landlock + openat2 (writes) and the
+// __jail-exec CommandWrapper (subprocesses) are wired (see
 // pipeline/handlers/codergen_jail.go). A tool that calls os.WriteFile /
-// os.Remove / os.MkdirAll directly bypasses the jail entirely — exactly the
-// bug the #275 audit caught in generate_code and write_enriched_sprint.
+// os.Remove / os.MkdirAll — or exec.Command, ioutil.WriteFile, a mutating
+// syscall.* — directly bypasses the jail entirely. That is exactly the bug the
+// #275 audit caught in generate_code and write_enriched_sprint.
 //
 // This analyzer parses every non-test .go file in the target directory
-// (default agent/tools) and reports any call to a mutating os.* function.
-// The single legal exception is an env==nil fallback path, which can only run
-// when no jail is active and therefore has nothing to bypass; such a function
-// must carry the //jail:allow-unjailed-fallback marker comment.
+// (default agent/tools) and reports any reference to a watched mutating
+// function (filesystem write/delete or subprocess spawn) across the os,
+// os/exec, io/ioutil, and syscall packages — resolving aliased imports and
+// flagging dot-imports. The single legal exception is an env==nil fallback
+// path, which can only run when no jail is active and therefore has nothing to
+// bypass; such a function must carry the //jail:allow-unjailed-fallback marker.
 //
 // Usage: go run ./tools/jailcheck [dir]   (exit 1 on any violation)
 //
@@ -33,44 +37,70 @@ import (
 	"strings"
 )
 
-// mutatingOSFuncs are os-package functions that mutate the filesystem. A call
-// to any of these from agent/tools/ bypasses ExecutionEnvironment and so the
-// writable_paths jail. Read-only os funcs (ReadFile, Open, Stat, ReadDir, ...)
-// are intentionally absent: reads/exfil are an accepted residual risk of the
-// jail design (the jail bounds writes, not reads), not a bypass.
-var mutatingOSFuncs = map[string]bool{
-	"WriteFile":  true,
-	"MkdirAll":   true,
-	"Mkdir":      true,
-	"MkdirTemp":  true,
-	"Remove":     true,
-	"RemoveAll":  true,
-	"Rename":     true,
-	"Create":     true,
-	"CreateTemp": true,
-	"OpenFile":   true,
-	"Truncate":   true,
-	"Symlink":    true,
-	"Link":       true,
-	"Chmod":      true,
-	"Chown":      true,
-	"Lchown":     true,
-	"Chtimes":    true,
+// mutatingFuncs maps a watched import path to the set of its functions that
+// mutate the filesystem or spawn a subprocess OUTSIDE the ExecutionEnvironment
+// seam. A reference to any of these from agent/tools/ bypasses the
+// writable_paths jail (Landlock+openat2 for writes, CommandWrapper for
+// subprocesses). Read-only entry points (os.ReadFile/Open/Stat, exec.LookPath,
+// ioutil.ReadFile/ReadDir, syscall.Read/Stat) are intentionally absent: reads
+// are an accepted residual risk of the jail design (it bounds writes, not
+// reads), not a bypass.
+var mutatingFuncs = map[string]map[string]bool{
+	"os": {
+		// filesystem writes / deletes / metadata
+		"WriteFile": true, "Create": true, "CreateTemp": true, "OpenFile": true,
+		"Mkdir": true, "MkdirAll": true, "MkdirTemp": true,
+		"Remove": true, "RemoveAll": true, "Rename": true, "Truncate": true,
+		"Symlink": true, "Link": true,
+		"Chmod": true, "Chown": true, "Lchown": true, "Chtimes": true,
+		// process spawn; and the os.Root handle whose methods escape selector
+		// detection on later calls, so flag the entry points.
+		"StartProcess": true, "OpenRoot": true, "NewRoot": true,
+	},
+	"os/exec": {
+		// every *exec.Cmd starts here; Run/Start/Output are methods on the
+		// returned value, so flagging the constructors covers them all.
+		"Command": true, "CommandContext": true,
+	},
+	"io/ioutil": {
+		// deprecated, but still compiles and bypasses env just like os.*.
+		"WriteFile": true, "TempFile": true, "TempDir": true,
+	},
+	"syscall": {
+		// low-level mutators that sidestep the os.* surface entirely.
+		"Unlink": true, "Unlinkat": true, "Rmdir": true,
+		"Rename": true, "Renameat": true,
+		"Mkdir": true, "Mkdirat": true, "Link": true, "Linkat": true,
+		"Symlink": true, "Symlinkat": true, "Truncate": true, "Ftruncate": true,
+		"Chmod": true, "Fchmodat": true, "Chown": true, "Fchownat": true,
+		"Creat": true, "Open": true, "Openat": true, "Mkfifo": true, "Mknod": true,
+		"Exec": true, "ForkExec": true, "StartProcess": true,
+	},
 }
 
 // allowMarker, when present in a comment inside (or on the doc comment of) the
-// enclosing function, permits that function's os.* mutations. It documents the
-// one legal exception: a fallback that runs only when env == nil, where no jail
-// can be active. See docs/architecture/agent-tool-jail-checklist.md.
+// enclosing function, permits that function's watched mutating calls. It
+// documents the one legal exception: a fallback that runs only when env == nil,
+// where no jail can be active. See docs/architecture/agent-tool-jail-checklist.md.
 const allowMarker = "jail:allow-unjailed-fallback"
 
-// Violation is a single unguarded os.* mutation reference (or a dot-import of
-// "os", which defeats selector attribution wholesale).
+// pkgBase returns the import path's final segment (the default package name):
+// "os/exec" → "exec", "io/ioutil" → "ioutil", "os" → "os". Import paths always
+// use "/" so this is OS-independent.
+func pkgBase(importPath string) string {
+	if i := strings.LastIndex(importPath, "/"); i >= 0 {
+		return importPath[i+1:]
+	}
+	return importPath
+}
+
+// Violation is a single unguarded mutating reference (or a dot-import of a
+// watched package, which defeats selector attribution wholesale).
 type Violation struct {
 	File string
 	Line int
 	Func string // enclosing function name, or a "<...>" pseudo-scope
-	Call string // e.g. "os.WriteFile", or `dot-import of "os"`
+	Call string // e.g. "os.WriteFile", "exec.Command", or `dot-import of "os"`
 	Hint string // remediation hint; empty → the default ExecutionEnvironment hint
 }
 
@@ -78,9 +108,9 @@ type Violation struct {
 func (v Violation) report() string {
 	hint := v.Hint
 	if hint == "" {
-		hint = "route filesystem mutations through exec.ExecutionEnvironment " +
-			"(env.WriteFile/RemoveFile/ExecCommand), or, for an env==nil fallback, " +
-			"annotate the function with //" + allowMarker
+		hint = "route filesystem mutations and subprocesses through " +
+			"exec.ExecutionEnvironment (env.WriteFile/RemoveFile/ExecCommand), or, " +
+			"for an env==nil fallback, annotate the function with //" + allowMarker
 	}
 	return fmt.Sprintf("%s:%d: %s in %s — %s. "+
 		"See docs/architecture/agent-tool-jail-checklist.md",
@@ -100,14 +130,14 @@ func main() {
 	}
 
 	if len(violations) == 0 {
-		fmt.Printf("jailcheck: ok — no unguarded os.* filesystem mutations in %s\n", dir)
+		fmt.Printf("jailcheck: ok — no unguarded filesystem-mutation/subprocess calls in %s\n", dir)
 		return
 	}
 
 	for _, v := range violations {
 		fmt.Fprintln(os.Stderr, v.report())
 	}
-	fmt.Fprintf(os.Stderr, "jailcheck: FAIL — %d unguarded os.* filesystem mutation(s) in %s\n", len(violations), dir)
+	fmt.Fprintf(os.Stderr, "jailcheck: FAIL — %d unguarded jail-bypassing call(s) in %s\n", len(violations), dir)
 	os.Exit(1)
 }
 
@@ -164,23 +194,23 @@ type funcRange struct {
 	allowed    bool
 }
 
-// checkFile reports every unguarded mutating os.* reference in a parsed file.
+// checkFile reports every unguarded mutating reference in a parsed file.
 func checkFile(fset *token.FileSet, f *ast.File) []Violation {
 	if v, ok := dotImportViolation(fset, f); ok {
-		// A dot-import of "os" turns every WriteFile(...) into a bare ident the
-		// selector matcher can't attribute — a wholesale bypass. Flag the import
-		// itself and stop: per-call results for this file would be misleading.
+		// A dot-import of a watched package turns every WriteFile(...) into a
+		// bare ident the selector matcher can't attribute — a wholesale bypass.
+		// Flag the import itself and stop: per-call results would be misleading.
 		return []Violation{v}
 	}
-	osNames := osLocalNames(f)
-	if len(osNames) == 0 {
-		return nil // file does not import "os" — no os.* reference can resolve here.
+	named := watchedLocalNames(f)
+	if len(named) == 0 {
+		return nil // no watched package imported — nothing can resolve here.
 	}
 	funcs := funcRanges(f)
 
 	var violations []Violation
 	ast.Inspect(f, func(n ast.Node) bool {
-		name, ok := mutatingOSRef(n, osNames)
+		call, ok := mutatingRef(n, named)
 		if !ok {
 			return true
 		}
@@ -194,7 +224,7 @@ func checkFile(fset *token.FileSet, f *ast.File) []Violation {
 			File: p.Filename,
 			Line: p.Line,
 			Func: funcLabel(fr),
-			Call: "os." + name,
+			Call: call,
 		})
 		return true
 	})
@@ -220,60 +250,61 @@ func funcRanges(f *ast.File) []funcRange {
 	return ranges
 }
 
-// mutatingOSRef reports whether n is a *reference* to a mutating os.* function
-// (e.g. "WriteFile") and, if so, the bare function name. It matches the
-// selector itself rather than the enclosing call, so a function-value capture
-// (`wf := os.WriteFile; wf(...)`) or callback pass (`f(os.Remove)`) is flagged
-// just like a direct `os.WriteFile(...)` call — a CI gate must not be bypassable
-// by hoisting the symbol into a variable. osNames is the set of local
-// identifiers bound to the standard-library "os" package in the file, so an
-// aliased import (`stdos "os"` → `stdos.WriteFile`) is matched while a
-// non-stdlib package happening to be named "os" is not.
-func mutatingOSRef(n ast.Node, osNames map[string]bool) (string, bool) {
+// mutatingRef reports whether n is a *reference* to a watched mutating function
+// and, if so, the canonical "pkg.Func" display string (e.g. "os.WriteFile",
+// "exec.Command", "syscall.Unlink"). It matches the selector itself rather than
+// the enclosing call, so a function-value capture (`wf := os.WriteFile;
+// wf(...)`) or callback pass (`f(os.Remove)`) is flagged just like a direct
+// call — a CI gate must not be bypassable by hoisting the symbol into a
+// variable. named maps each local identifier to the watched import path it is
+// bound to, so an aliased import (`stdos "os"` → `stdos.WriteFile`) is matched
+// while a non-stdlib package happening to share a name is not.
+func mutatingRef(n ast.Node, named map[string]string) (string, bool) {
 	sel, ok := n.(*ast.SelectorExpr)
 	if !ok {
 		return "", false
 	}
 	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || !osNames[pkg.Name] {
+	if !ok {
 		return "", false
 	}
-	if !mutatingOSFuncs[sel.Sel.Name] {
+	importPath, watched := named[pkg.Name]
+	if !watched || !mutatingFuncs[importPath][sel.Sel.Name] {
 		return "", false
 	}
-	return sel.Sel.Name, true
+	return pkgBase(importPath) + "." + sel.Sel.Name, true
 }
 
-// osLocalNames returns the set of local identifiers bound to the standard
-// library "os" package in f. Handles the default name (`import "os"` → "os")
-// and aliases (`import stdos "os"` → "stdos"). Dot-imports are handled earlier
-// by dotImportViolation; a blank import (`_ "os"`) is recorded but can never
-// form a `pkg.Sel` selector, so it is inert.
-func osLocalNames(f *ast.File) map[string]bool {
-	names := map[string]bool{}
+// watchedLocalNames maps each local identifier bound to a watched package
+// (mutatingFuncs keys) to that package's import path. Handles the default name
+// (`import "os"` → "os":"os") and aliases (`import stdos "os"` → "stdos":"os").
+// Dot-imports are handled earlier by dotImportViolation; a blank import
+// (`_ "os"`) maps "_", which can never form a `pkg.Sel` selector, so it is inert.
+func watchedLocalNames(f *ast.File) map[string]string {
+	named := map[string]string{}
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || path != "os" {
+		if err != nil || mutatingFuncs[path] == nil {
 			continue
 		}
 		if imp.Name != nil {
-			names[imp.Name.Name] = true
+			named[imp.Name.Name] = path
 		} else {
-			names["os"] = true
+			named[pkgBase(path)] = path
 		}
 	}
-	return names
+	return named
 }
 
-// dotImportViolation reports a dot-import of the standard library "os"
-// (`import . "os"`). Such an import makes every os function a bare identifier
-// (`WriteFile(...)`), which the selector-based matcher cannot attribute to os —
-// a wholesale bypass of this gate. Flag it explicitly so CI fails fast rather
-// than silently passing a file that has hidden the entire os surface.
+// dotImportViolation reports a dot-import of any watched package (e.g.
+// `import . "os"`). Such an import makes every function a bare identifier
+// (`WriteFile(...)`), which the selector-based matcher cannot attribute — a
+// wholesale bypass. Flag it explicitly so CI fails fast rather than silently
+// passing a file that has hidden a watched package's surface.
 func dotImportViolation(fset *token.FileSet, f *ast.File) (Violation, bool) {
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || path != "os" || imp.Name == nil || imp.Name.Name != "." {
+		if err != nil || mutatingFuncs[path] == nil || imp.Name == nil || imp.Name.Name != "." {
 			continue
 		}
 		p := fset.Position(imp.Pos())
@@ -281,8 +312,8 @@ func dotImportViolation(fset *token.FileSet, f *ast.File) (Violation, bool) {
 			File: p.Filename,
 			Line: p.Line,
 			Func: "<imports>",
-			Call: `dot-import of "os"`,
-			Hint: `import "os" under its normal name (no "." dot-import) so mutating os.* calls stay attributable to this lint`,
+			Call: fmt.Sprintf("dot-import of %q", path),
+			Hint: fmt.Sprintf("import %q under its normal name (no %q dot-import) so its mutating calls stay attributable to this lint", path, "."),
 		}, true
 	}
 	return Violation{}, false
