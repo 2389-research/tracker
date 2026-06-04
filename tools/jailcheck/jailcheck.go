@@ -64,12 +64,27 @@ var mutatingOSFuncs = map[string]bool{
 // can be active. See docs/architecture/agent-tool-jail-checklist.md.
 const allowMarker = "jail:allow-unjailed-fallback"
 
-// Violation is a single unguarded os.* mutation call.
+// Violation is a single unguarded os.* mutation reference (or a dot-import of
+// "os", which defeats selector attribution wholesale).
 type Violation struct {
 	File string
 	Line int
-	Func string // enclosing function name, or "<file scope>"
-	Call string // e.g. "os.WriteFile"
+	Func string // enclosing function name, or a "<...>" pseudo-scope
+	Call string // e.g. "os.WriteFile", or `dot-import of "os"`
+	Hint string // remediation hint; empty → the default ExecutionEnvironment hint
+}
+
+// report renders the one-line CI message for a violation.
+func (v Violation) report() string {
+	hint := v.Hint
+	if hint == "" {
+		hint = "route filesystem mutations through exec.ExecutionEnvironment " +
+			"(env.WriteFile/RemoveFile/ExecCommand), or, for an env==nil fallback, " +
+			"annotate the function with //" + allowMarker
+	}
+	return fmt.Sprintf("%s:%d: %s in %s — %s. "+
+		"See docs/architecture/agent-tool-jail-checklist.md",
+		v.File, v.Line, v.Call, v.Func, hint)
 }
 
 func main() {
@@ -90,12 +105,7 @@ func main() {
 	}
 
 	for _, v := range violations {
-		fmt.Fprintf(os.Stderr,
-			"%s:%d: %s used directly in %s — route filesystem mutations through "+
-				"exec.ExecutionEnvironment (env.WriteFile/RemoveFile/ExecCommand), or, for an "+
-				"env==nil fallback, annotate the function with //%s. "+
-				"See docs/architecture/agent-tool-jail-checklist.md\n",
-			v.File, v.Line, v.Call, v.Func, allowMarker)
+		fmt.Fprintln(os.Stderr, v.report())
 	}
 	fmt.Fprintf(os.Stderr, "jailcheck: FAIL — %d unguarded os.* filesystem mutation(s) in %s\n", len(violations), dir)
 	os.Exit(1)
@@ -156,6 +166,12 @@ type funcRange struct {
 
 // checkFile reports every unguarded mutating os.* reference in a parsed file.
 func checkFile(fset *token.FileSet, f *ast.File) []Violation {
+	if v, ok := dotImportViolation(fset, f); ok {
+		// A dot-import of "os" turns every WriteFile(...) into a bare ident the
+		// selector matcher can't attribute — a wholesale bypass. Flag the import
+		// itself and stop: per-call results for this file would be misleading.
+		return []Violation{v}
+	}
 	osNames := osLocalNames(f)
 	if len(osNames) == 0 {
 		return nil // file does not import "os" — no os.* reference can resolve here.
@@ -230,8 +246,9 @@ func mutatingOSRef(n ast.Node, osNames map[string]bool) (string, bool) {
 
 // osLocalNames returns the set of local identifiers bound to the standard
 // library "os" package in f. Handles the default name (`import "os"` → "os")
-// and aliases (`import stdos "os"` → "stdos"). Dot- and blank-imports are
-// recorded but cannot form a flaggable `pkg.Sel` selector, so they are inert.
+// and aliases (`import stdos "os"` → "stdos"). Dot-imports are handled earlier
+// by dotImportViolation; a blank import (`_ "os"`) is recorded but can never
+// form a `pkg.Sel` selector, so it is inert.
 func osLocalNames(f *ast.File) map[string]bool {
 	names := map[string]bool{}
 	for _, imp := range f.Imports {
@@ -246,6 +263,29 @@ func osLocalNames(f *ast.File) map[string]bool {
 		}
 	}
 	return names
+}
+
+// dotImportViolation reports a dot-import of the standard library "os"
+// (`import . "os"`). Such an import makes every os function a bare identifier
+// (`WriteFile(...)`), which the selector-based matcher cannot attribute to os —
+// a wholesale bypass of this gate. Flag it explicitly so CI fails fast rather
+// than silently passing a file that has hidden the entire os surface.
+func dotImportViolation(fset *token.FileSet, f *ast.File) (Violation, bool) {
+	for _, imp := range f.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || path != "os" || imp.Name == nil || imp.Name.Name != "." {
+			continue
+		}
+		p := fset.Position(imp.Pos())
+		return Violation{
+			File: p.Filename,
+			Line: p.Line,
+			Func: "<imports>",
+			Call: `dot-import of "os"`,
+			Hint: `import "os" under its normal name (no "." dot-import) so mutating os.* calls stay attributable to this lint`,
+		}, true
+	}
+	return Violation{}, false
 }
 
 // enclosingFunc returns the function span containing pos, or nil for file scope.

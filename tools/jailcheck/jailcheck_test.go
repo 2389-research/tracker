@@ -79,6 +79,21 @@ func TestCheckDir_FuncValueCapture(t *testing.T) {
 	}
 }
 
+func TestCheckDir_DotImport(t *testing.T) {
+	// A dot-import of os hides every mutating call behind a bare identifier;
+	// the import itself must be flagged so CI fails fast.
+	violations, err := checkDir("testdata/dotimport")
+	if err != nil {
+		t.Fatalf("checkDir: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation in dotimport fixture, got %d: %+v", len(violations), violations)
+	}
+	if violations[0].Call != `dot-import of "os"` {
+		t.Fatalf("expected dot-import violation, got %+v", violations[0])
+	}
+}
+
 func TestCheckDir_ReadOnlyNotFlagged(t *testing.T) {
 	// The violation fixture's readOnly func uses os.ReadFile; it must not appear.
 	violations, err := checkDir("testdata/violation")

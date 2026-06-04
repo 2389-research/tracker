@@ -47,8 +47,8 @@ read-only calls.
 
 One row per LLM-callable tool in `agent/tools/` (the 11 types that implement a
 `Name()` method and are registered for the model to call). Verified against the
-code at the cited lines — re-verify with `grep -nE 'os\.[A-Z]|env\.'
-agent/tools/<file>.go` before trusting a row after a refactor.
+code at the cited lines — re-verify with `grep -nE 'os\.[A-Z]|env\.' agent/tools/<file>.go`
+before trusting a row after a refactor.
 
 | Tool (`Name()`)        | File                       | Reads                          | Writes                              | Deletes            | Subprocess                       | Routes through `ExecutionEnvironment`? |
 | ---------------------- | -------------------------- | ------------------------------ | ----------------------------------- | ------------------ | -------------------------------- | -------------------------------------- |
@@ -79,13 +79,18 @@ fallback for the unjailed path:
 func (t *GenerateCodeTool) writeFile(ctx context.Context, path, content string) error {
 	if t.env != nil {
 		// jailed path: env.WriteFile → WriteOpener → openat2 glob check
+		rel, _ := filepath.Rel(t.env.WorkingDir(), path)
 		return t.env.WriteFile(ctx, rel, content)
 	}
-	// fallback: only reachable when env == nil
+	// fallback: only reachable when env == nil (no jail can be active)
+	dir := filepath.Dir(path)
 	os.MkdirAll(dir, 0o755)
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 ```
+
+(Abbreviated; the real `writeFile` in `generate_code.go` propagates the
+`filepath.Rel` error rather than discarding it.)
 
 **This fallback is not a bypass.** The invariant, traced end-to-end:
 
@@ -148,19 +153,22 @@ parses every non-`_test.go` file in `agent/tools/` and reports any call to a
 mutating `os.*` function (`WriteFile`, `MkdirAll`, `Mkdir`, `MkdirTemp`,
 `Remove`, `RemoveAll`, `Rename`, `Create`, `CreateTemp`, `OpenFile`,
 `Truncate`, `Symlink`, `Link`, `Chmod`, `Chown`, `Lchown`, `Chtimes`),
-exiting non-zero with `file:line: os.X called directly in <func>` for each.
-AST (not grep) so a mention of `os.WriteFile` inside a doc comment or string
-does not false-positive. It matches the **selector reference**, not just the
-call, so hoisting the symbol into a variable (`wf := os.WriteFile; wf(...)`) or
-passing it as a callback (`f(os.Remove)`) is flagged just like a direct call.
-Package qualifiers are resolved against the file's imports, so an aliased import
+exiting non-zero with `file:line: os.X in <func> — …` for each. AST (not grep)
+so a mention of `os.WriteFile` inside a doc comment or string does not
+false-positive. It matches the **selector reference**, not just the call, so
+hoisting the symbol into a variable (`wf := os.WriteFile; wf(...)`) or passing
+it as a callback (`f(os.Remove)`) is flagged just like a direct call. Package
+qualifiers are resolved against the file's imports, so an aliased import
 (`import stdos "os"` → `stdos.WriteFile`) is still caught, while a non-stdlib
-package that happens to be named `os` is not. The single exemption is the
-`//jail:allow-unjailed-fallback` marker described above.
+package that happens to be named `os` is not. A **dot-import** of `os`
+(`import . "os"`) — which would hide every mutating call behind a bare
+identifier — is itself flagged as a violation so it can't be used to slip past
+the gate. The single exemption is the `//jail:allow-unjailed-fallback` marker
+described above.
 
 It is wired into the `ci:` Makefile target and the CI "Quality Gates" job, and
-is unit-tested against `clean` / `violation` fixtures under
-`tools/jailcheck/testdata/`.
+is unit-tested against `clean` / `violation` / `aliased` / `funcvalue` /
+`dotimport` fixtures under `tools/jailcheck/testdata/`.
 
 ## Residual risks (not covered by this lint)
 
@@ -168,12 +176,6 @@ is unit-tested against `clean` / `violation` fixtures under
   reads outside the workspace (or `grep_search`/`dispatch_sprints` reading an
   attacker-chosen path within it) is not flagged.
 - **Network egress.** Out of scope for the filesystem jail entirely.
-- **Dot-imported `os`.** The lint resolves aliased imports (`import stdos "os"`
-  is caught) and selector references (function-value capture / callback pass are
-  caught), but a dot-import (`import . "os"`) makes `WriteFile(...)` a bare
-  identifier with no package selector, which this selector-based analyzer cannot
-  attribute to `os`. Dot-importing `os` is its own red flag; reject it in
-  review.
 - **Reflective / indirect dispatch.** Reaching a mutating syscall via
   `reflect`, `plugin`, `//go:linkname`, or a syscall wrapper that doesn't name
   `os.*` is out of scope — the lint is a static guardrail against the easy
