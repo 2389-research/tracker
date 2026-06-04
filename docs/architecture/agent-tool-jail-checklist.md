@@ -27,10 +27,12 @@ replaces that luck with a gate.
 ## The rule
 
 > Any `agent/tools/` tool that mutates the filesystem **MUST** route through
-> `exec.ExecutionEnvironment`. A direct `os.WriteFile` / `os.MkdirAll` /
-> `os.Mkdir` / `os.Remove` / `os.RemoveAll` / `os.Rename` / `os.Create` /
-> `os.OpenFile` / `os.Truncate` / `os.Symlink` / `os.Link` / `os.Chmod` /
-> `os.Chown` call in `agent/tools/*.go` is a **review-blocker**.
+> `exec.ExecutionEnvironment`. **Any** direct mutating `os.*` call in
+> `agent/tools/*.go` is a **review-blocker** — `os.WriteFile`, `os.MkdirAll`,
+> `os.Mkdir`, `os.MkdirTemp`, `os.Remove`, `os.RemoveAll`, `os.Rename`,
+> `os.Create`, `os.CreateTemp`, `os.OpenFile`, `os.Truncate`, `os.Symlink`,
+> `os.Link`, `os.Chmod`, `os.Chown`, `os.Lchown`, `os.Chtimes` (the exact set
+> the analyzer flags; see `mutatingOSFuncs` in `tools/jailcheck/jailcheck.go`).
 
 The one legal exception is an **unjailed fallback** — see
 [The env==nil-fallback invariant](#the-envnil-fallback-invariant).

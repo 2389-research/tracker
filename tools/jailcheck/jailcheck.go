@@ -118,6 +118,14 @@ func checkDir(dir string) ([]Violation, error) {
 		}
 		violations = append(violations, checkFile(fset, f)...)
 	}
+	// Honor the documented contract explicitly rather than relying on
+	// file-list order + AST-walk order happening to coincide with it.
+	sort.Slice(violations, func(i, j int) bool {
+		if violations[i].File != violations[j].File {
+			return violations[i].File < violations[j].File
+		}
+		return violations[i].Line < violations[j].Line
+	})
 	return violations, nil
 }
 

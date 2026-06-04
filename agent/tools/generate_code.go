@@ -332,8 +332,11 @@ func stripMarkdownFences(code string) string {
 // The os.* fallback below is reachable ONLY when t.env == nil. backend_native
 // wires the JAILED *LocalEnvironment into t.env whenever writable_paths is set
 // (it refuses-to-start otherwise), so env==nil implies no active jail and the
-// fallback has nothing to bypass. The jailcheck linter (#283) enforces this
-// invariant; this marker records that the exception is intentional and audited.
+// fallback has nothing to bypass. That env==nil invariant is enforced by
+// backend_native's refuse-to-start, not by the linter: the jailcheck linter
+// (#283) only requires this direct-os.* fallback to carry the marker below, so
+// no UNannotated bypass can be added. The marker records that this exception
+// is intentional and audited.
 //
 //jail:allow-unjailed-fallback env==nil ⟹ no active jail; see agent-tool-jail-checklist.md
 func (t *GenerateCodeTool) writeFile(ctx context.Context, path string, content string) error {
