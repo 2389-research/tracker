@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **build_product: commit-first / stop-when-green discipline + `CommitIfDirty`
+  checkpoint node** (closes #297, refs epic #308 Phase 1, builds on #296). Two
+  `.dip`-only changes guard against green-but-uncommitted work being lost. (1) A
+  terminal stop-when-green-and-committed rule appended to both the `Implement`
+  and `FixMilestone` prompts: the agent emits `DONE` and stops the instant the
+  milestone verify passes **and** it has committed — committing is the
+  precondition for stopping, so turns aren't burned on redundant re-verification
+  that ends with an uncommitted tree (the proximate cause of the `code-goblin`
+  run `7b6e08c9e2b2` failure). (2) A new `tool CommitIfDirty` node on the
+  `Implement` **success** path — the success edge changed from
+  `Implement -> TestMilestone` to `Implement -> CommitIfDirty`, with a new
+  `CommitIfDirty -> TestMilestone` edge — commits the working tree iff dirty so
+  a success-with-dirty-tree is persisted before `TestMilestone` runs. The commit
+  passes an explicit git identity and does **not** swallow failures (no
+  `|| true`, per CLAUDE.md "never silently swallow errors"). `CommitIfDirty` does
+  **not** run on the turn-**exhaustion** path: `Implement` failure routes
+  straight to `EscalateMilestone` via the #296 catch-all / `fallback_target`
+  (left unchanged), and persisting green work on the exhaustion path is the
+  engine's job, tracked in #302.
 - **Agent-tool jail threat model + jail-bypass lint** (closes #283, refs
   #275/#272). New doc `docs/architecture/agent-tool-jail-checklist.md`: a
   per-tool threat-model table (every `agent/tools/` tool — what it touches and
