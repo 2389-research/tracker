@@ -1359,6 +1359,7 @@ workflow BuildProduct
         intentionally writes helpers (ci-probe.sh from PR #246,
         iface-reachability-rubric.md from PR #254), the re-review
         budget counter (review_fix_attempts from Gap 5.3 of #233),
+        the per-node build-context file (build-context.md from #298),
         and reviewers write reports (review-claude.md,
         review-codex.md, review-gemini.md). Only flag files outside
         this explicit allowlist.
