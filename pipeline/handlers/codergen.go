@@ -546,14 +546,11 @@ func emptyResponseStatusMsg(nodeID string, emptyAPIResponse bool) (pipeline.Term
 // buildSuccessOutcome handles the normal (non-empty) completion path, including
 // turn-limit exhaustion and auto_status overrides.
 func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string, native bool) (pipeline.Outcome, error) {
-	// Determine status. Turn-limit exhaustion and loop detection default to
-	// OutcomeFail so the engine routes through explicit failure edges (e.g.
-	// "when ctx.outcome = fail"). On nodes without failure edges, the
-	// strict-failure-edge rule stops the pipeline — which is correct: if the
-	// pipeline author didn't handle agent failure, silently continuing is worse.
-	//
-	// auto_status overrides the default for both turn-exhaustion and normal
-	// completion: the agent's explicit STATUS line is authoritative.
+	// Determine status, the turn-limit message, and the #303 breach class.
+	// A turn-limit breach is classified (verify-green→success, loop→fail,
+	// else→operator) rather than unconditionally failed; auto_status is honored
+	// only on normal completion, never to rescue a breach. See
+	// resolveTerminalStatus / classifyBreach.
 	status, turnLimitMsg, breachClass := h.resolveTerminalStatus(node, responseText, sessResult, native)
 
 	outcome := pipeline.Outcome{
