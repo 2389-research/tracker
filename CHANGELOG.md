@@ -124,16 +124,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uncommitted work halted the pipeline before the cross-review lanes and
   FinalSpecCheck ever ran) the engine's strict-failure rule halted the whole
   run. Mirroring the `FixMilestone` precedent: `Implement` gains
-  `fallback_target: EscalateMilestone`; `ReviewClaude`/`ReviewCodex`/
-  `ReviewGemini`/`ApplyReviewFixes`/`FinalCommit` gain
-  `fallback_target: EscalateReview`. For `Implement` and `ApplyReviewFixes` the
-  primary edge is now conditional on `ctx.outcome = success` with an
+  `fallback_target: EscalateMilestone`; `ApplyReviewFixes` and `FinalCommit`
+  gain `fallback_target: EscalateReview`. For `Implement` and `ApplyReviewFixes`
+  the primary edge is now conditional on `ctx.outcome = success` with an
   unconditional belt-and-suspenders catch-all to the escalation gate;
   `FinalCommit` relies on `fallback_target` alone because a catch-all edge there
   would close an unconditional `Cleanup → FinalCommit → EscalateReview` cycle
-  (DIP005). New `pipeline/build_product_failure_routing_test.go` pins the
+  (DIP005). The three cross-review reviewers run as **parallel branches**, which
+  execute via `ParallelHandler` and bypass the engine's strict-failure path — a
+  per-branch `fallback_target` would be inert — so their failure is routed on the
+  aggregating `ReviewParallel` node with a conditional fail edge to
+  `EscalateReview`. Because `aggregateStatus` is success-if-any, this fires when
+  **all three** reviewers fail (previously a silent dead-stop); a single
+  reviewer failing is still masked by `aggregateStatus` and is tracked as an
+  engine follow-up (#313). New `pipeline/build_product_failure_routing_test.go` pins the
   invariant — every codergen node has a conditional edge or a resolvable
-  fallback — as the in-repo counterpart to dippin-lang#93's author-time lint.
+  fallback, with parallel branches checked against their parent's route — as the
+  in-repo counterpart to dippin-lang#93's author-time lint.
 
 ## [0.35.1] - 2026-06-02
 

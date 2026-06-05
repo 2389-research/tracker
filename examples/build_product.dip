@@ -798,7 +798,6 @@ workflow BuildProduct
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
-    fallback_target: EscalateReview
     prompt:
       Review the COMPLETE implementation against SPEC.md. All milestones are done.
 
@@ -860,7 +859,6 @@ workflow BuildProduct
     model: gpt-5.4
     provider: openai
     reasoning_effort: high
-    fallback_target: EscalateReview
     prompt:
       Review the COMPLETE implementation against SPEC.md. All milestones are done.
 
@@ -922,7 +920,6 @@ workflow BuildProduct
     model: gemini-2.5-pro
     provider: gemini
     reasoning_effort: high
-    fallback_target: EscalateReview
     prompt:
       Review the COMPLETE implementation against SPEC.md. All milestones are done.
 
@@ -1344,6 +1341,15 @@ workflow BuildProduct
     EscalateMilestone -> Done  label: "abandon"
 
     # Cross-review
+    # The three reviewers run as parallel branches; a branch runs via
+    # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
+    # path, so a per-branch fallback_target would be inert. Route failure on the
+    # aggregating ReviewParallel node instead: aggregateStatus is success-if-any,
+    # so this fires only when ALL THREE reviewers fail (which would otherwise
+    # dead-stop the pipeline). On success the parallel handler's suggested-next
+    # routes to ReviewJoin. A single reviewer failing is masked by aggregateStatus
+    # and needs an engine fix (per-branch routing); tracked separately.
+    ReviewParallel -> EscalateReview  when ctx.outcome = fail
     ReviewClaude -> ReviewJoin
     ReviewCodex -> ReviewJoin
     ReviewGemini -> ReviewJoin
