@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **build_product: per-node build-context file** (closes #298, refs epic #308
+  Phase 1; **completes the Phase-1 track** alongside #295/#296/#302/#297/#303).
+  Cures per-node rediscovery amnesia (the `code-goblin` run `7b6e08c9e2b2` burned
+  ~20% of the exhausted node's turn budget re-reading `SPEC.md` and re-grepping
+  the tree cold every milestone). `Setup` seeds a short, machine-written
+  `.ai/build/build-context.md` — an architecture map (capped, author-controlled
+  greps) plus a `## Milestones landed` header. `MarkMilestoneDone` appends one
+  machine-written entry per milestone (number/title, files touched via
+  `git diff --name-only` over the milestone's commit range, newest commit
+  subject), using an on-disk start marker recorded by `PickNextMilestone`; the
+  append is best-effort so it can never dead-stop a verified milestone.
+  `Implement`/`FixMilestone`/`VerifyMilestone` read the file first for
+  orientation (advisory — `SPEC.md` and the source stay authoritative), and
+  `FinalSpecCheck` allowlists it. `.dip`-only change; no engine code.
 - **engine: turn-limit breach = guard, not guillotine** (closes #303 PR1, refs
   epic #308 Phase 1; builds on #302/#295/#297, completes the Phase-1 turn-limit
   track). On a **native-backend** turn-limit breach the engine no longer fails

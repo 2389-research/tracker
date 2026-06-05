@@ -264,6 +264,32 @@ workflow BuildProduct
       entire interface as "dynamic dispatch."
       RUBRIC_EOF
 
+      # Seed the per-node build-context file (issue #298). Advisory artifact:
+      # the whole group is best-effort (|| true) so it can never dead-stop Setup.
+      # Each producer pipes to `head` (pipefail is off, so a no-match `git grep`
+      # yields the pipeline's `head` exit 0 and does not trip set -e). The map is
+      # frozen at Setup and labelled so later-milestone agents down-weight it vs
+      # the authoritative milestone log / code. Caps keep the file SHORT (#298 §4).
+      {
+        echo "# Build Context (machine-written — do not edit by hand)"
+        echo
+        echo "_Architecture map as of Setup ($(git rev-parse --short --verify --quiet HEAD 2>/dev/null || echo 'no commits')). Packages may change as milestones land; the milestone log below is authoritative for what moved._"
+        echo
+        echo "## Top-level layout"
+        git ls-files 2>/dev/null | awk -F/ 'NF>1{print $1"/"} NF==1{print}' | sort -u | head -40
+        echo
+        echo "## Languages"
+        git ls-files 2>/dev/null | awk -F. 'NF>1{print $NF}' | sort | uniq -c | sort -rn | head -15
+        echo
+        echo "## Entry points"
+        git ls-files 2>/dev/null | grep -E '(^|/)(main\.go|index\.[jt]s|main\.py|__main__\.py|main\.rs|Main\.java)$|(^|/)cmd/' | head -20
+        echo
+        echo "## Key interfaces (best-effort: Go / TS / Rust)"
+        git grep -nE 'type [[:alnum:]_]+ +interface[[:space:]{]|^(export )?(abstract )?(interface|trait) ' -- '*.go' '*.ts' '*.tsx' '*.rs' 2>/dev/null | head -20
+        echo
+        echo "## Milestones landed"
+      } > .ai/build/build-context.md 2>/dev/null || true
+
       printf 'setup-ready'
 
   agent ReadSpec
@@ -391,6 +417,16 @@ workflow BuildProduct
         exit 1
       fi
 
+      # Record this milestone's start boundary for MarkMilestoneDone's
+      # files-touched diff (issue #298). --verify --quiet prints nothing and
+      # exits non-zero on a commitless repo, so START is genuinely empty there
+      # (a bare `git rev-parse HEAD` would leak the literal "HEAD" to stdout and
+      # silently empty milestone 1's file record). Written on the has-next path
+      # only — the all-done branch returned earlier. Goes to a FILE so the
+      # routing marker below stays last on stdout.
+      START=$(git rev-parse --verify --quiet HEAD || true)
+      printf '%s\n' "$START" > .ai/build/milestone-start-sha
+
       printf "milestone-$NEXT"
 
   agent Implement
@@ -402,6 +438,14 @@ workflow BuildProduct
     max_turns: 50
     fallback_target: EscalateMilestone
     prompt:
+      FIRST, in one turn, read .ai/build/build-context.md for orientation — it
+      holds an architecture map and a one-entry-per-milestone log (files touched
+      + commit summary) so you don't rediscover the codebase layout and prior
+      milestones' changes from scratch. It is ADVISORY and may lag the latest
+      code: SPEC.md and the source are authoritative — if they disagree with the
+      context file, trust them. It supplements your normal reading; it does not
+      replace any SPEC.md read this prompt asks for below.
+
       Read the current milestone spec at .ai/milestones/current.md.
       Read the full spec at SPEC.md for context.
 
@@ -582,6 +626,14 @@ workflow BuildProduct
     reasoning_effort: high
     auto_status: true
     prompt:
+      FIRST, in one turn, read .ai/build/build-context.md for orientation — it
+      holds an architecture map and a one-entry-per-milestone log (files touched
+      + commit summary) so you don't rediscover the codebase layout and prior
+      milestones' changes from scratch. It is ADVISORY and may lag the latest
+      code: SPEC.md and the source are authoritative — if they disagree with the
+      context file, trust them. It supplements your normal reading; it does not
+      replace any SPEC.md read this prompt asks for below.
+
       Read the current milestone spec at .ai/milestones/current.md.
       Read SPEC.md (issue #233 Gap 4). Pre-#233 this verifier only read
       .ai/milestones/current.md — if Decompose dropped a requirement
@@ -771,6 +823,55 @@ workflow BuildProduct
       DONE_COUNT=$(ls "$DONE_DIR" 2>/dev/null | wc -l | tr -d ' ')
       NEXT=$((DONE_COUNT + 1))
       cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
+
+      # Append this milestone's entry to the build-context file (issue #298).
+      # MarkMilestoneDone is a strict-failure tool node (one unconditional edge,
+      # no fallback_target), so a logging hiccup must NOT dead-stop a verified
+      # milestone: the whole block runs in a `set +e` subshell that cannot
+      # propagate a non-zero exit, all bulk output goes to the FILE, and the
+      # terminal `printf` marker below stays last on stdout.
+      (
+        set +e
+        # Two-dot range from this milestone's start to HEAD. Degrade BASE to the
+        # empty tree when START is empty (first milestone / absent marker) OR
+        # unreachable (a retry rewrote/orphaned it). Three-dot (...) would fatal
+        # on the empty-tree object and under-report on rewritten history.
+        START=$(cat .ai/build/milestone-start-sha 2>/dev/null || true)
+        if [ -z "$START" ] || ! git cat-file -e "${START}^{commit}" 2>/dev/null; then
+          BASE=$(git hash-object -t tree /dev/null)
+        else
+          BASE="$START"
+        fi
+        TITLE=$(head -1 .ai/milestones/current.md 2>/dev/null)
+        [ -n "$TITLE" ] || TITLE="## Milestone $NEXT"
+        FILES=$(git diff --name-only "${BASE}..HEAD" 2>/dev/null | sed '/^$/d')
+        NFILES=$(printf '%s\n' "$FILES" | grep -c . || true)
+        # Summary = this milestone's newest commit subject, read from HEAD
+        # directly. NOT the BASE..HEAD range: when BASE is the empty tree (first
+        # milestone / unreachable START), `git log <tree>..HEAD` leans on lenient
+        # `^<tree>` handling that isn't guaranteed across git versions. Gate on
+        # NFILES so a no-op "mark done" milestone (zero files, HEAD unmoved)
+        # degrades to the title instead of echoing the prior milestone's subject.
+        if [ "$NFILES" -eq 0 ]; then
+          SUMMARY="$TITLE"
+        else
+          SUMMARY=$(git log -1 --format=%s HEAD 2>/dev/null)
+          [ -n "$SUMMARY" ] || SUMMARY="$TITLE"
+        fi
+        {
+          echo
+          echo "$TITLE"
+          if [ "$NFILES" -eq 0 ]; then
+            echo "Files: (none)"
+          else
+            printf 'Files: %s\n' "$(printf '%s\n' "$FILES" | head -12 | paste -sd, -)"
+            [ "$NFILES" -gt 12 ] && echo "Files: … and $((NFILES - 12)) more"
+          fi
+          echo "Summary: $SUMMARY"
+        } >> .ai/build/build-context.md
+      ) 2>/dev/null || true
+      rm -f .ai/build/milestone-start-sha
+
       # Reset fix attempt counter for next milestone
       rm -f .ai/milestones/fix_attempts
       rm .ai/milestones/current.md
@@ -787,6 +888,14 @@ workflow BuildProduct
     max_retries: 5
     fallback_target: EscalateMilestone
     prompt:
+      FIRST, in one turn, read .ai/build/build-context.md for orientation — it
+      holds an architecture map and a one-entry-per-milestone log (files touched
+      + commit summary) so you don't rediscover the codebase layout and prior
+      milestones' changes from scratch. It is ADVISORY and may lag the latest
+      code: SPEC.md and the source are authoritative — if they disagree with the
+      context file, trust them. It supplements your normal reading; it does not
+      replace any SPEC.md read this prompt asks for below.
+
       The current milestone failed verification. Read:
       - The milestone spec: .ai/milestones/current.md
       - The test output showing failures (in context from the previous node)
@@ -1257,6 +1366,7 @@ workflow BuildProduct
         intentionally writes helpers (ci-probe.sh from PR #246,
         iface-reachability-rubric.md from PR #254), the re-review
         budget counter (review_fix_attempts from Gap 5.3 of #233),
+        the per-node build-context file (build-context.md from #298),
         and reviewers write reports (review-claude.md,
         review-codex.md, review-gemini.md). Only flag files outside
         this explicit allowlist.
