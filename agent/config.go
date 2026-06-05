@@ -54,6 +54,13 @@ type SessionConfig struct {
 	// turn before giving up and proceeding. Default: 2.
 	MaxVerifyRetries int
 
+	// VerifyOnBreach, when true, makes the session run one verify pass after
+	// the turn loop exhausts (MaxTurns reached without a detected loop), using
+	// VerifyCommand only (never auto-detection — see resolveBreachVerifier).
+	// The pipeline layer sets this to (turn_breach_policy != "fail") so the
+	// opt-out path pays no verify cost. Independent of VerifyAfterEdit. (#303)
+	VerifyOnBreach bool
+
 	// Checkpoints are messages injected at specific turn-budget fractions.
 	// Each checkpoint fires exactly once, on the turn where the fraction is
 	// first reached. Fraction is in [0, 1] — e.g. 0.6 means "at 60% of MaxTurns".
