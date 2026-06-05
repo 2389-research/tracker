@@ -48,12 +48,15 @@ func (e *Engine) emitGitCommit(s *runState, nodeID string, traceEntry *TraceEntr
 // the routing outcome (CLAUDE.md: never silently swallow errors).
 func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *TraceEntry) {
 	if s.gitRepo == nil {
+		// gitRepo is nil when git artifacts are disabled, when enabled but no
+		// artifact dir was configured, or when repo init failed (initRunState
+		// already warned about that case) — so don't claim a single cause.
 		e.emit(PipelineEvent{
 			Type:      EventWarning,
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    nodeID,
-			Message:   fmt.Sprintf("cannot preserve uncommitted work for failed node %q: git artifacts not enabled (run with --git-artifacts)", nodeID),
+			Message:   fmt.Sprintf("cannot preserve uncommitted work for failed node %q: git artifact repository unavailable (enable with --git-artifacts and an artifact dir, or see the earlier init-failure warning)", nodeID),
 		})
 		return
 	}

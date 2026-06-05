@@ -727,12 +727,12 @@ func TestEngine_CommitWIP_NoGitAdapterWarns(t *testing.T) {
 	defer mu.Unlock()
 	found := false
 	for _, e := range events {
-		if e.Type == EventWarning && strings.Contains(e.Message, "git artifacts") {
+		if e.Type == EventWarning && strings.Contains(e.Message, "cannot preserve uncommitted work") {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected EventWarning about git artifacts not enabled when preserving failed work")
+		t.Error("expected EventWarning that uncommitted work could not be preserved when no git adapter is configured")
 	}
 }
 
