@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **engine: commit-WIP to a recoverable ref before routing a failed/exhausted
+  node** (closes #302, refs epic #308 Phase 1). The engine now preserves an
+  agent node's dirty (possibly green) working tree to a named, recoverable git
+  ref **before** it routes away from — or halts at — a failure/exhaustion, so
+  green-but-uncommitted work is no longer silently discarded (the loss in the
+  `code-goblin` run `7b6e08c9e2b2`, where `Implement` was green at turn 48 but
+  uncommitted when the turn budget breached). A new `gitArtifactRepo.CommitWIP`
+  method commits the dirty tree (additions, modifications, **and** removals via
+  `git add -A`) and points the lightweight tag `tracker/wip/<runID>/<nodeID>` at
+  it, mirroring the existing `TagCheckpoint` precedent; the ref is recorded in
+  both the checkpoint (`Checkpoint.WIPRefs`, additive/backward-compatible) and
+  the trace (`TraceEntry.WIPRef`). A single engine helper
+  (`commitWIPBeforeRouting`) is wired into every fail/exhaust routing path — the
+  strict-failure path (`checkStrictFailure`, covering both the `fallback_target`
+  escalation and the terminal halt), the retry-exhausted path
+  (`handleRetryExhausted`), the exit-node fail path (`handleExitNode`), and the
+  terminal handler-error path (`processActiveNode`, e.g. a node that wrote files
+  then returned an error or was cancelled mid-write) — and always runs
+  **before** the routing/halt decision. A clean tree is a no-op (no empty
+  commit, no ref); when git artifacts are disabled it logs an `EventWarning` and
+  skips (it never touches the user's real working repo); a WIP-commit failure is
+  surfaced as a warning and never masks the original failure or changes routing.
+  This completes #297's deferred exhaustion-path persistence (`CommitIfDirty`
+  covered only the success path) and is the persistence layer that #303's
+  verify-then-commit-on-breach builds on.
 - **build_product: commit-first / stop-when-green discipline + `CommitIfDirty`
   checkpoint node** (closes #297, refs epic #308 Phase 1, builds on #296). Two
   `.dip`-only changes guard against green-but-uncommitted work being lost. (1) A

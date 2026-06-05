@@ -30,6 +30,12 @@ type Checkpoint struct {
 	// the guard survives checkpoint save/restore cycles.
 	FallbackTaken map[string]bool `json:"fallback_taken,omitempty"`
 
+	// WIPRefs maps a failed/exhausted node ID to the recoverable git ref
+	// (a tag tracker/wip/<runID>/<nodeID>) where its uncommitted work was
+	// preserved before the engine routed away from it (#302). Additive;
+	// omitempty keeps older checkpoints without the field loading cleanly.
+	WIPRefs map[string]string `json:"wip_refs,omitempty"`
+
 	// BundleIdentity is the content-addressed identity of the .dipx bundle
 	// the run was started against ("sha256:<hex>"). Empty for runs started
 	// from a plain .dip file. Used for strict resume verification.
@@ -97,6 +103,15 @@ func (cp *Checkpoint) SetEdgeSelection(nodeID, edgeTo string) {
 		cp.EdgeSelections = make(map[string]string)
 	}
 	cp.EdgeSelections[nodeID] = edgeTo
+}
+
+// RecordWIPRef records the recoverable git ref where a failed/exhausted node's
+// uncommitted work was preserved (#302).
+func (cp *Checkpoint) RecordWIPRef(nodeID, ref string) {
+	if cp.WIPRefs == nil {
+		cp.WIPRefs = make(map[string]string)
+	}
+	cp.WIPRefs[nodeID] = ref
 }
 
 // GetEdgeSelection returns the stored edge selection for a node, if any.

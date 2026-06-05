@@ -55,6 +55,11 @@ type TraceEntry struct {
 	// Outcome carries child-run totals so AggregateUsage can include them
 	// in the parent's rollup. Omitted from JSON when nil.
 	ChildUsage *UsageSummary `json:"child_usage,omitempty"`
+	// WIPRef is the recoverable git ref (tag tracker/wip/<runID>/<nodeID>)
+	// where this node's uncommitted work was preserved before the engine
+	// routed away from a failure/exhaustion (#302). Empty when the tree was
+	// clean or no git artifact adapter was configured.
+	WIPRef string `json:"wip_ref,omitempty"`
 }
 
 // Trace captures the full execution history of a pipeline run.

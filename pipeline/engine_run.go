@@ -35,6 +35,63 @@ func (e *Engine) emitGitCommit(s *runState, nodeID string, traceEntry *TraceEntr
 	}
 }
 
+// commitWIPBeforeRouting preserves a failed/exhausted node's uncommitted work
+// to a recoverable git ref BEFORE the engine routes away from (or halts at) the
+// node, so green-but-uncommitted work is never silently discarded (#302). It
+// records the ref on the trace entry and durably in the checkpoint (cp.WIPRefs)
+// so the work is retrievable after the run.
+//
+// It is a no-op when the working tree is clean (no empty commit, no ref). When
+// no git artifact adapter is configured it emits an EventWarning and skips —
+// it never reaches into the user's real working repo. A WIP-commit failure is
+// surfaced as a warning and never masks the original node failure or changes
+// the routing outcome (CLAUDE.md: never silently swallow errors).
+func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *TraceEntry) {
+	if s.gitRepo == nil {
+		// gitRepo is nil when git artifacts are disabled, when enabled but no
+		// artifact dir was configured, or when repo init failed (initRunState
+		// already warned about that case) — so don't claim a single cause.
+		e.emit(PipelineEvent{
+			Type:      EventWarning,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    nodeID,
+			Message:   fmt.Sprintf("cannot preserve uncommitted work for failed node %q: git artifact repository unavailable (enable with --git-artifacts and an artifact dir, or see the earlier init-failure warning)", nodeID),
+		})
+		return
+	}
+	ref, err := s.gitRepo.CommitWIP(nodeID)
+	if err != nil {
+		e.emit(PipelineEvent{
+			Type:      EventWarning,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    nodeID,
+			Message:   fmt.Sprintf("WIP commit failed for node %q (work may be unpreserved): %v", nodeID, err),
+		})
+		return
+	}
+	if ref == "" {
+		return // clean tree — nothing to preserve
+	}
+	s.cp.RecordWIPRef(nodeID, ref)
+	if traceEntry != nil {
+		traceEntry.WIPRef = ref
+	}
+	// Persist immediately so the recoverable ref survives even on terminal-halt
+	// paths that do not otherwise save the checkpoint.
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	// Surface the recovery handle on the out-of-band warning channel so the
+	// preserved work is discoverable at runtime, not just in the trace.
+	e.emit(PipelineEvent{
+		Type:      EventWarning,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("preserved uncommitted work for failed node %q to recoverable ref %s", nodeID, ref),
+	})
+}
+
 // saveCheckpointWithTag saves the checkpoint and creates a lightweight git tag
 // checkpoint/<runID>/<nodeID> pointing at HEAD (the most recent node-outcome
 // commit). Because checkpoint.json is in .gitignore it is never committed, so
@@ -759,6 +816,9 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 // handleRetryExhausted handles the case when retry budget is depleted.
 // Routes to fallback target if available, otherwise fails the pipeline.
 func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
+	// Preserve any dirty (possibly green) tree to a recoverable ref before
+	// routing away from the exhausted node (#302). No-op on a clean tree.
+	e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
@@ -880,6 +940,9 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		return false, "", result
 	}
 	if outcomeStatus == string(OutcomeFail) {
+		// Preserve any dirty (possibly green) tree to a recoverable ref before
+		// the failing exit node halts the run (#302). No-op on a clean tree.
+		e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()

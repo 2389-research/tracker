@@ -218,3 +218,38 @@ func TestCheckpoint_BundleIdentity_BackwardCompat(t *testing.T) {
 		t.Errorf("expected empty BundleIdentity on old checkpoint, got %q", loaded.BundleIdentity)
 	}
 }
+
+// TestCheckpoint_WIPRefsRoundTrip verifies that recorded WIP refs (#302)
+// survive a checkpoint save/load round-trip and that older checkpoints without
+// the field still load (backward-compatible, additive).
+func TestCheckpoint_WIPRefsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	cp := &Checkpoint{RunID: "r1", CurrentNode: "Implement"}
+	cp.RecordWIPRef("Implement", "tracker/wip/r1/Implement")
+	if err := SaveCheckpoint(cp, path); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+
+	loaded, err := LoadCheckpoint(path)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if got := loaded.WIPRefs["Implement"]; got != "tracker/wip/r1/Implement" {
+		t.Errorf("WIPRefs[Implement]: got %q want %q", got, "tracker/wip/r1/Implement")
+	}
+
+	// Backward compat: a checkpoint JSON without wip_refs loads with a nil map.
+	legacy := filepath.Join(dir, "legacy.json")
+	if err := os.WriteFile(legacy, []byte(`{"run_id":"old","current_node":"a","completed_nodes":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := LoadCheckpoint(legacy)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint(legacy): %v", err)
+	}
+	if len(old.WIPRefs) != 0 {
+		t.Errorf("expected empty WIPRefs on legacy checkpoint, got %v", old.WIPRefs)
+	}
+}
