@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -441,5 +442,295 @@ func TestEngine_WithGitArtifacts_CommitsFailOutcome(t *testing.T) {
 	}
 	if !strings.Contains(log, "outcome=fail") {
 		t.Errorf("git log missing outcome=fail:\n%s", log)
+	}
+}
+
+// --- #302: CommitWIP recoverable-ref tests ---
+
+// TestGitArtifactRepo_CommitWIP_DirtyTree verifies that CommitWIP commits a
+// dirty working tree (including newly created/untracked files) to a named,
+// recoverable tag tracker/wip/<runID>/<nodeID> and leaves the tree clean.
+func TestGitArtifactRepo_CommitWIP_DirtyTree(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	runID := "wiprun1"
+	repo := newGitArtifactRepo(dir, runID)
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Simulate green-but-uncommitted agent work: a brand-new (untracked) file.
+	if err := os.WriteFile(filepath.Join(dir, "feature.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ref, err := repo.CommitWIP("Implement")
+	if err != nil {
+		t.Fatalf("CommitWIP: %v", err)
+	}
+	want := "tracker/wip/" + runID + "/Implement"
+	if ref != want {
+		t.Fatalf("ref: got %q want %q", ref, want)
+	}
+
+	tags := gitOutput(t, dir, "tag", "-l", "tracker/wip/*")
+	if !strings.Contains(tags, want) {
+		t.Errorf("expected tag %q in:\n%s", want, tags)
+	}
+
+	// The untracked file must be captured at the tagged commit.
+	show := gitOutput(t, dir, "show", "--stat", want)
+	if !strings.Contains(show, "feature.go") {
+		t.Errorf("WIP commit missing feature.go:\n%s", show)
+	}
+
+	// Tree is clean after WIP commit — the work was persisted.
+	if st := gitOutput(t, dir, "status", "--porcelain"); st != "" {
+		t.Errorf("expected clean tree after CommitWIP, got:\n%s", st)
+	}
+}
+
+// TestGitArtifactRepo_CommitWIP_CleanTree verifies that CommitWIP is a no-op on
+// a clean tree: no empty commit, no ref, empty return.
+func TestGitArtifactRepo_CommitWIP_CleanTree(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	repo := newGitArtifactRepo(dir, "cleanrun")
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	headBefore := gitOutput(t, dir, "rev-parse", "HEAD")
+
+	ref, err := repo.CommitWIP("Implement")
+	if err != nil {
+		t.Fatalf("CommitWIP: %v", err)
+	}
+	if ref != "" {
+		t.Errorf("expected empty ref on clean tree, got %q", ref)
+	}
+	if tags := gitOutput(t, dir, "tag", "-l", "tracker/wip/*"); tags != "" {
+		t.Errorf("expected no WIP tag on clean tree, got:\n%s", tags)
+	}
+	if headAfter := gitOutput(t, dir, "rev-parse", "HEAD"); headAfter != headBefore {
+		t.Errorf("clean-tree CommitWIP moved HEAD: %s -> %s", headBefore, headAfter)
+	}
+}
+
+// TestGitArtifactRepo_CommitWIP_FailedRepoNoOp verifies that a repo marked
+// failed no-ops without creating a ref.
+func TestGitArtifactRepo_CommitWIP_FailedRepoNoOp(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	repo := newGitArtifactRepo(dir, "failrun")
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	repo.failed = true
+
+	ref, err := repo.CommitWIP("Implement")
+	if err != nil {
+		t.Fatalf("CommitWIP on failed repo: %v", err)
+	}
+	if ref != "" {
+		t.Errorf("expected empty ref on failed repo, got %q", ref)
+	}
+}
+
+// makeWIPRegistry returns a registry whose codergen handler dirties the
+// artifact tree and/or fails based on per-node behavior, for #302 engine
+// integration tests. failNodes return OutcomeFail after writing
+// <nodeID>.go; other nodes write <nodeID>.go and succeed.
+func makeWIPRegistry(failNodes map[string]bool, dirtyNodes map[string]bool) *HandlerRegistry {
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		reg.Register(&testHandler{name: name, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if dirtyNodes[node.ID] {
+				dir, _ := pctx.GetInternal(InternalKeyArtifactDir)
+				if err := os.WriteFile(filepath.Join(dir, node.ID+".go"), []byte("package x\n"), 0o644); err != nil {
+					return Outcome{}, err
+				}
+			}
+			if failNodes[node.ID] {
+				return Outcome{Status: string(OutcomeFail)}, nil
+			}
+			return Outcome{Status: string(OutcomeSuccess)}, nil
+		}})
+	}
+	return reg
+}
+
+// TestEngine_CommitWIP_StrictFailureHaltPreservesWork drives an agent node to
+// OutcomeFail with a dirty tree on the strict-failure HALT path (#302). The
+// uncommitted work must be preserved to a recoverable ref recorded in both the
+// trace and the checkpoint, even though the pipeline halts.
+func TestEngine_CommitWIP_StrictFailureHaltPreservesWork(t *testing.T) {
+	requireGit(t)
+	artifactBase := t.TempDir()
+
+	g := NewGraph("wip_halt_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "Implement", Shape: "box", Label: "Implement"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "Implement"})
+	g.AddEdge(&Edge{From: "Implement", To: "end"})
+
+	reg := makeWIPRegistry(map[string]bool{"Implement": true}, map[string]bool{"Implement": true})
+	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true))
+	result, _ := engine.Run(context.Background())
+	if result == nil || result.Status != OutcomeFail {
+		t.Fatalf("expected fail result, got %+v", result)
+	}
+
+	repoDir := filepath.Join(artifactBase, result.RunID)
+	wantRef := "tracker/wip/" + result.RunID + "/Implement"
+
+	// 1. recoverable ref exists and captured the work.
+	if tags := gitOutput(t, repoDir, "tag", "-l", "tracker/wip/*"); !strings.Contains(tags, wantRef) {
+		t.Errorf("expected WIP tag %q, got:\n%s", wantRef, tags)
+	}
+	if show := gitOutput(t, repoDir, "show", "--stat", wantRef); !strings.Contains(show, "Implement.go") {
+		t.Errorf("WIP ref missing Implement.go:\n%s", show)
+	}
+
+	// 2. trace records the ref on the failed node.
+	var traceRef string
+	for _, e := range result.Trace.Entries {
+		if e.NodeID == "Implement" {
+			traceRef = e.WIPRef
+		}
+	}
+	if traceRef != wantRef {
+		t.Errorf("trace WIPRef for Implement: got %q want %q", traceRef, wantRef)
+	}
+
+	// 3. checkpoint records the ref (durably persisted).
+	cp, err := LoadCheckpoint(filepath.Join(repoDir, "checkpoint.json"))
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.WIPRefs["Implement"] != wantRef {
+		t.Errorf("checkpoint WIPRefs[Implement]: got %q want %q", cp.WIPRefs["Implement"], wantRef)
+	}
+}
+
+// TestEngine_CommitWIP_FallbackPreservesWorkBeforeRouting proves the WIP ref is
+// created BEFORE the fallback routing decision (#302): the failing node's work
+// is captured in the ref, but the fallback (escalation) node's later changes
+// are NOT — establishing the ordering.
+func TestEngine_CommitWIP_FallbackPreservesWorkBeforeRouting(t *testing.T) {
+	requireGit(t)
+	artifactBase := t.TempDir()
+
+	g := NewGraph("wip_fallback_test")
+	g.Attrs["fallback_target"] = "Escalate" // graph-level catch-all (#295)
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "Implement", Shape: "box", Label: "Implement"})
+	g.AddNode(&Node{ID: "Escalate", Shape: "box", Label: "Escalate"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "Implement"})
+	g.AddEdge(&Edge{From: "Implement", To: "end"}) // unconditional → strict failure → fallback
+	g.AddEdge(&Edge{From: "Escalate", To: "end"})
+
+	reg := makeWIPRegistry(
+		map[string]bool{"Implement": true},
+		map[string]bool{"Implement": true, "Escalate": true},
+	)
+	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true))
+	result, _ := engine.Run(context.Background())
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	repoDir := filepath.Join(artifactBase, result.RunID)
+	wantRef := "tracker/wip/" + result.RunID + "/Implement"
+
+	show := gitOutput(t, repoDir, "show", "--stat", wantRef)
+	if !strings.Contains(show, "Implement.go") {
+		t.Errorf("WIP ref missing Implement.go:\n%s", show)
+	}
+	// Ordering proof: the WIP ref was captured before Escalate ran, so it must
+	// NOT contain Escalate's file.
+	if strings.Contains(show, "Escalate.go") {
+		t.Errorf("WIP ref captured after fallback ran (contains Escalate.go):\n%s", show)
+	}
+
+	cp, err := LoadCheckpoint(filepath.Join(repoDir, "checkpoint.json"))
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if cp.WIPRefs["Implement"] != wantRef {
+		t.Errorf("checkpoint WIPRefs[Implement]: got %q want %q", cp.WIPRefs["Implement"], wantRef)
+	}
+}
+
+// TestEngine_CommitWIP_CleanTreeFailureNoRef verifies that a failed node with a
+// CLEAN tree creates no WIP ref and records none in the trace (#302 no-op).
+func TestEngine_CommitWIP_CleanTreeFailureNoRef(t *testing.T) {
+	requireGit(t)
+	artifactBase := t.TempDir()
+
+	g := NewGraph("wip_clean_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "Implement", Shape: "box", Label: "Implement"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "Implement"})
+	g.AddEdge(&Edge{From: "Implement", To: "end"})
+
+	// fail but DO NOT dirty the tree.
+	reg := makeWIPRegistry(map[string]bool{"Implement": true}, map[string]bool{})
+	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true))
+	result, _ := engine.Run(context.Background())
+	if result == nil || result.Status != OutcomeFail {
+		t.Fatalf("expected fail result, got %+v", result)
+	}
+
+	repoDir := filepath.Join(artifactBase, result.RunID)
+	if tags := gitOutput(t, repoDir, "tag", "-l", "tracker/wip/*"); tags != "" {
+		t.Errorf("expected no WIP tag on clean-tree failure, got:\n%s", tags)
+	}
+	for _, e := range result.Trace.Entries {
+		if e.NodeID == "Implement" && e.WIPRef != "" {
+			t.Errorf("expected empty WIPRef on clean-tree failure, got %q", e.WIPRef)
+		}
+	}
+}
+
+// TestEngine_CommitWIP_NoGitAdapterWarns verifies that when git artifacts are
+// disabled (no adapter), a failed node routes without panic and emits a warning
+// that work could not be preserved (#302 graceful skip).
+func TestEngine_CommitWIP_NoGitAdapterWarns(t *testing.T) {
+	g := NewGraph("wip_noadapter_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "Implement", Shape: "box", Label: "Implement"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "Implement"})
+	g.AddEdge(&Edge{From: "Implement", To: "end"})
+
+	var mu sync.Mutex
+	var events []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+
+	reg := makeWIPRegistry(map[string]bool{"Implement": true}, map[string]bool{})
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler)) // no artifact dir, no git artifacts
+	result, _ := engine.Run(context.Background())
+	if result == nil || result.Status != OutcomeFail {
+		t.Fatalf("expected fail result, got %+v", result)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, e := range events {
+		if e.Type == EventWarning && strings.Contains(e.Message, "git artifacts") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected EventWarning about git artifacts not enabled when preserving failed work")
 	}
 }

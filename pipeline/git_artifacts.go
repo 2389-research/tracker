@@ -177,6 +177,52 @@ func (r *gitArtifactRepo) TagCheckpoint(nodeID string) error {
 	return nil
 }
 
+// CommitWIP preserves a dirty working tree to a recoverable, named git ref
+// before the engine routes away from a failed/exhausted node (#302), so
+// green-but-uncommitted work is never silently discarded.
+//
+// Behavior:
+//   - Clean tree (nothing to preserve) → no-op: no commit, no ref, returns "".
+//   - Dirty tree → `git add .` (captures newly created/untracked files too),
+//     commits, then points the lightweight tag tracker/wip/<runID>/<nodeID> at
+//     the commit and returns that ref name. The commit lands on HEAD, so a
+//     subsequent CommitNode records the node outcome as an empty marker on top
+//     while the named tag remains the stable handle to the work.
+//   - Failed repo → no-op, returns "".
+//
+// Mirrors TagCheckpoint's lightweight-tag precedent. Errors are returned (not
+// swallowed) for the caller to surface as a warning; they never change routing.
+func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
+	if r.failed {
+		return "", nil
+	}
+
+	// Dirty check (includes untracked files; respects .gitignore). A clean
+	// tree must not produce an empty WIP commit or ref.
+	status, err := r.git("status", "--porcelain")
+	if err != nil {
+		return "", fmt.Errorf("git status for WIP of node %q: %w\n%s", nodeID, err, status)
+	}
+	if strings.TrimSpace(status) == "" {
+		return "", nil
+	}
+
+	if out, err := r.git("add", "."); err != nil {
+		return "", fmt.Errorf("git add for WIP of node %q: %w\n%s", nodeID, err, out)
+	}
+	msg := fmt.Sprintf("wip(%s): preserved uncommitted work before routing failure", nodeID)
+	if out, err := r.git("commit", "-m", msg); err != nil {
+		return "", fmt.Errorf("git commit for WIP of node %q: %w\n%s", nodeID, err, out)
+	}
+
+	ref := fmt.Sprintf("tracker/wip/%s/%s", r.runID, nodeID)
+	// -f to overwrite a prior WIP ref for the same node (e.g. retry then fail).
+	if out, err := r.git("tag", "-f", ref); err != nil {
+		return "", fmt.Errorf("git tag %q for WIP: %w\n%s", ref, err, out)
+	}
+	return ref, nil
+}
+
 // git runs a git command in r.dir with a sanitized environment.
 // Returns combined output and any error.
 func (r *gitArtifactRepo) git(args ...string) (string, error) {

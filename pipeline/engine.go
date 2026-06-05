@@ -529,6 +529,11 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	if outcome != string(OutcomeFail) || hasAnyConditionalEdge(edges) {
 		return nil
 	}
+	// Preserve any dirty (possibly green) working tree to a recoverable ref
+	// BEFORE deciding to halt or route to a fallback, so green-but-uncommitted
+	// work is never discarded by the routing decision (#302). No-op on a clean
+	// tree; warns and skips when no git adapter is configured.
+	e.commitWIPBeforeRouting(s, nodeID, traceEntry)
 	// Before dead-stopping, consult the node/graph-level fallback_target so an
 	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
 	// instead of skipping every downstream node (#295). One-shot per node.
