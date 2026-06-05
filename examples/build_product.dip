@@ -438,6 +438,15 @@ workflow BuildProduct
     max_turns: 50
     fallback_target: EscalateMilestone
     prompt:
+      FIRST, in one turn, read .ai/build/build-context.md for orientation — it
+      holds an architecture map and a one-entry-per-milestone log (files touched
+      + commit summary) so you don't rediscover the layout cold. It is ADVISORY
+      and may lag the latest code: SPEC.md and the source are authoritative — if
+      they disagree with the context file, trust them. Prefer the milestone's own
+      file list (.ai/milestones/current.md) plus this context file over re-reading
+      SPEC.md in full; re-read only the spec portions relevant to this milestone's
+      files.
+
       Read the current milestone spec at .ai/milestones/current.md.
       Read the full spec at SPEC.md for context.
 
@@ -618,6 +627,15 @@ workflow BuildProduct
     reasoning_effort: high
     auto_status: true
     prompt:
+      FIRST, in one turn, read .ai/build/build-context.md for orientation — it
+      holds an architecture map and a one-entry-per-milestone log (files touched
+      + commit summary) so you don't rediscover the layout cold. It is ADVISORY
+      and may lag the latest code: SPEC.md and the source are authoritative — if
+      they disagree with the context file, trust them. Prefer the milestone's own
+      file list (.ai/milestones/current.md) plus this context file over re-reading
+      SPEC.md in full; re-read only the spec portions relevant to this milestone's
+      files.
+
       Read the current milestone spec at .ai/milestones/current.md.
       Read SPEC.md (issue #233 Gap 4). Pre-#233 this verifier only read
       .ai/milestones/current.md — if Decompose dropped a requirement
@@ -862,6 +880,15 @@ workflow BuildProduct
     max_retries: 5
     fallback_target: EscalateMilestone
     prompt:
+      FIRST, in one turn, read .ai/build/build-context.md for orientation — it
+      holds an architecture map and a one-entry-per-milestone log (files touched
+      + commit summary) so you don't rediscover the layout cold. It is ADVISORY
+      and may lag the latest code: SPEC.md and the source are authoritative — if
+      they disagree with the context file, trust them. Prefer the milestone's own
+      file list (.ai/milestones/current.md) plus this context file over re-reading
+      SPEC.md in full; re-read only the spec portions relevant to this milestone's
+      files.
+
       The current milestone failed verification. Read:
       - The milestone spec: .ai/milestones/current.md
       - The test output showing failures (in context from the previous node)
