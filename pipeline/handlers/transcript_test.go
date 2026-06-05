@@ -10,6 +10,13 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
+func TestBuildSessionStats_CarriesBreachVerify(t *testing.T) {
+	stats := buildSessionStats(agent.SessionResult{BreachVerify: agent.BreachVerifyPassed})
+	if stats.BreachVerify != int(agent.BreachVerifyPassed) {
+		t.Errorf("SessionStats.BreachVerify = %d, want %d", stats.BreachVerify, int(agent.BreachVerifyPassed))
+	}
+}
+
 func floatNear(a, b, epsilon float64) bool {
 	diff := a - b
 	if diff < 0 {

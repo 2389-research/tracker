@@ -38,6 +38,10 @@ type SessionStats struct {
 	// buildSessionStats from llm.Usage.Raw.
 	Estimated      bool   `json:"estimated,omitempty"`
 	EstimateSource string `json:"estimate_source,omitempty"`
+	// BreachVerify is the verify-on-breach result (#303): 0=not-run, 1=passed,
+	// 2=failed. Mirrors agent.BreachVerifyState as an int so the trace JSON is
+	// self-contained. Non-zero only on a turn-limit breach under guard policy.
+	BreachVerify int `json:"breach_verify,omitempty"`
 }
 
 // TraceEntry records the execution of a single pipeline node.

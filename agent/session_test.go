@@ -2078,3 +2078,140 @@ exit 0
 	}
 	return scriptPath
 }
+
+// --- #303: verify-on-breach tests ---
+
+// exhaustingResponses returns n tool-call responses with VARYING names so the
+// loop-detector never fires (each turn's signature differs), forcing the loop
+// to run to MaxTurns → plain exhaustion (MaxTurnsUsed=true, LoopDetected=false).
+func exhaustingResponses(n int) []*llm.Response {
+	resps := make([]*llm.Response, n)
+	for i := range resps {
+		resps[i] = makeToolCallResponse(fmt.Sprintf("tool_%d", i))
+	}
+	return resps
+}
+
+func writeScript(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestSession_VerifyOnBreach_Green_RecordsPassed(t *testing.T) {
+	dir := t.TempDir()
+	pass := writeScript(t, dir, "pass.sh", "#!/bin/sh\nexit 0\n")
+	client := &mockCompleter{responses: exhaustingResponses(3)}
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 3
+	cfg.WorkingDir = dir
+	cfg.VerifyOnBreach = true
+	cfg.VerifyCommand = pass
+	sess := mustNewSession(t, client, cfg)
+
+	res, err := sess.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.MaxTurnsUsed || res.LoopDetected {
+		t.Fatalf("want plain exhaustion, got MaxTurnsUsed=%v LoopDetected=%v", res.MaxTurnsUsed, res.LoopDetected)
+	}
+	if res.BreachVerify != BreachVerifyPassed {
+		t.Errorf("BreachVerify = %v, want BreachVerifyPassed", res.BreachVerify)
+	}
+}
+
+func TestSession_VerifyOnBreach_Red_RecordsFailed(t *testing.T) {
+	dir := t.TempDir()
+	fail := writeScript(t, dir, "fail.sh", "#!/bin/sh\nexit 1\n")
+	client := &mockCompleter{responses: exhaustingResponses(3)}
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 3
+	cfg.WorkingDir = dir
+	cfg.VerifyOnBreach = true
+	cfg.VerifyCommand = fail
+	sess := mustNewSession(t, client, cfg)
+
+	res, err := sess.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.BreachVerify != BreachVerifyFailed {
+		t.Errorf("BreachVerify = %v, want BreachVerifyFailed", res.BreachVerify)
+	}
+}
+
+func TestSession_VerifyOnBreach_NoExplicitCommand_NotRun(t *testing.T) {
+	client := &mockCompleter{responses: exhaustingResponses(3)}
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 3
+	cfg.WorkingDir = t.TempDir()
+	cfg.VerifyOnBreach = true
+	cfg.VerifyCommand = "" // no explicit command → no breach verify
+	sess := mustNewSession(t, client, cfg)
+
+	res, err := sess.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.BreachVerify != BreachVerifyNotRun {
+		t.Errorf("BreachVerify = %v, want BreachVerifyNotRun", res.BreachVerify)
+	}
+}
+
+func TestSession_VerifyOnBreach_DisabledFlag_NoRun(t *testing.T) {
+	dir := t.TempDir()
+	pass := writeScript(t, dir, "pass.sh", "#!/bin/sh\nexit 0\n")
+	client := &mockCompleter{responses: exhaustingResponses(3)}
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 3
+	cfg.WorkingDir = dir
+	cfg.VerifyOnBreach = false // flag off → mechanism never runs
+	cfg.VerifyCommand = pass
+	sess := mustNewSession(t, client, cfg)
+
+	res, err := sess.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.BreachVerify != BreachVerifyNotRun {
+		t.Errorf("BreachVerify = %v, want BreachVerifyNotRun (flag off)", res.BreachVerify)
+	}
+}
+
+func TestSession_LoopDetected_SkipsBreachVerify(t *testing.T) {
+	dir := t.TempDir()
+	// A verify that would create a sentinel file IF it ran. Loop detection must
+	// skip verify, so the sentinel must be absent.
+	sentinel := filepath.Join(dir, "verify_ran")
+	script := writeScript(t, dir, "touch.sh", "#!/bin/sh\ntouch "+sentinel+"\nexit 0\n")
+	// Identical tool-call names every turn → loop detector fires.
+	resps := make([]*llm.Response, 10)
+	for i := range resps {
+		resps[i] = makeToolCallResponse("read")
+	}
+	client := &mockCompleter{responses: resps}
+	cfg := DefaultConfig()
+	cfg.MaxTurns = 10
+	cfg.WorkingDir = dir
+	cfg.VerifyOnBreach = true
+	cfg.VerifyCommand = script
+	sess := mustNewSession(t, client, cfg)
+
+	res, err := sess.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.LoopDetected {
+		t.Fatalf("expected LoopDetected=true")
+	}
+	if res.BreachVerify != BreachVerifyNotRun {
+		t.Errorf("BreachVerify = %v, want NotRun (verify must skip on loop)", res.BreachVerify)
+	}
+	if _, statErr := os.Stat(sentinel); statErr == nil {
+		t.Error("verify ran on a detected loop (sentinel exists) — must be skipped")
+	}
+}

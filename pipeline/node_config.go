@@ -53,12 +53,13 @@ type AgentNodeConfig struct {
 	PlanBeforeExecute    bool
 	PlanBeforeExecuteSet bool
 
-	Model           string
-	Provider        string
-	SystemPrompt    string
-	MaxTurns        int
-	CommandTimeout  time.Duration
-	ReasoningEffort string
+	Model            string
+	Provider         string
+	SystemPrompt     string
+	MaxTurns         int
+	TurnBreachPolicy string // #303: "guard" (default) or "fail" (opt-out)
+	CommandTimeout   time.Duration
+	ReasoningEffort  string
 
 	ResponseFormat string
 	ResponseSchema string
@@ -104,6 +105,8 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		// consumers that copy cfg.ReflectOnError directly don't accidentally
 		// disable reflection on untouched nodes.
 		ReflectOnError: true,
+		// #303: graduated guard is the default; turn_breach_policy: fail opts out.
+		TurnBreachPolicy: "guard",
 	}
 	// Non-overridable (node-only) simple strings.
 	cfg.Backend = n.Attrs["backend"]
@@ -127,6 +130,14 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			cfg.MaxTurns = i
 		}
+	}
+	// #303 turn_breach_policy: graph default then node override. Arrives via a
+	// dippin params: block, spilled into n.Attrs by the adapter.
+	if v, ok := graphAttrs["turn_breach_policy"]; ok && v != "" {
+		cfg.TurnBreachPolicy = v
+	}
+	if v, ok := n.Attrs["turn_breach_policy"]; ok && v != "" {
+		cfg.TurnBreachPolicy = v
 	}
 	if v := n.Attrs["command_timeout"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {

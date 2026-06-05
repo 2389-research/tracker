@@ -209,6 +209,13 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	if !stoppedNaturally {
 		result.MaxTurnsUsed = true
+		// #303 verify-on-breach: only on plain exhaustion (not a detected
+		// loop), only when the pipeline asked for it via VerifyOnBreach, and
+		// only against an explicit command. Reached only when runTurnLoop
+		// returned err==nil above, so a provider error is never masked.
+		if s.config.VerifyOnBreach && !result.LoopDetected {
+			result.BreachVerify = s.runBreachVerify(ctx)
+		}
 	}
 
 	result.ToolTimings = s.toolTimings
@@ -401,6 +408,29 @@ func (s *Session) turnHasEdits(toolCalls []llm.ToolCallData) bool {
 		}
 	}
 	return false
+}
+
+// runBreachVerify runs a single verify pass after turn exhaustion and maps the
+// result to a BreachVerifyState. A real execution error (binary missing, bad
+// workdir — NOT a test failure) is surfaced via EventVerify and treated as
+// Failed (non-green): per CLAUDE.md we never swallow it, and a breach must never
+// advance on an unverifiable tree.
+func (s *Session) runBreachVerify(ctx context.Context) BreachVerifyState {
+	v := resolveBreachVerifier(s.config)
+	if v == nil {
+		return BreachVerifyNotRun
+	}
+	res, err := v.run(ctx)
+	if err != nil {
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-on-breach: execution error: %v", err)})
+		return BreachVerifyFailed
+	}
+	if res.Passed {
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-on-breach: passed (%s)", res.Command)})
+		return BreachVerifyPassed
+	}
+	s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-on-breach: failed (exit %d, %s)", res.ExitCode, res.Command)})
+	return BreachVerifyFailed
 }
 
 // runVerifyLoop runs the verify-after-edit inner loop. It resolves the verify

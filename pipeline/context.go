@@ -54,6 +54,18 @@ const (
 	// from turn-limit exhaustion; absent on normal success.
 	ContextKeyTurnLimitMsg = "turn_limit_msg"
 
+	// ContextKeyTurnBreachClass classifies a turn-limit breach under the guard
+	// policy (#303). Set by the codergen handler on a breach; read by pipeline
+	// edge conditions (e.g. `when ctx.turn_breach_class = operator_decision`).
+	// Absent on normal success and on the turn_breach_policy: fail opt-out path
+	// (which reproduces today's guillotine exactly).
+	ContextKeyTurnBreachClass = "turn_breach_class"
+
+	// Turn-breach classification values (#303).
+	TurnBreachClassPathological     = "pathological"      // loop / no-progress → stop
+	TurnBreachClassVerifiedGreen    = "verified_green"    // breach verify passed → advance as success
+	TurnBreachClassOperatorDecision = "operator_decision" // steady progress, non-green → operator/fallback
+
 	// ContextKeyEpisodeSummary stores the most recent codergen session's episode
 	// summary (tool attempts + outcomes).
 	ContextKeyEpisodeSummary = "episode_summary"

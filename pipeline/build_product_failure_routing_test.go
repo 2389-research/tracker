@@ -202,6 +202,25 @@ func TestBuildProductCommitIfDirtyCheckpoint(t *testing.T) {
 	}
 }
 
+// TestBuildProductIssue303GreenBreachRescuePath pins the #303 case-study rescue
+// at the routing level (NOT the engine artifact repo, which is off by default
+// and commits a different dir). With the graduated guard, a turn-limit breach
+// whose tree verifies green returns OutcomeSuccess, so Implement takes its
+// `ctx.outcome = success` edge to CommitIfDirty — which commits the product
+// working tree (#297) — instead of the failure edge to EscalateMilestone.
+// That is exactly how the code-goblin run 7b6e08c9e2b2 (green at turn 48 but
+// uncommitted) would now be saved. This test guards against a future .dip edit
+// that reroutes the success edge and silently breaks the rescue.
+func TestBuildProductIssue303GreenBreachRescuePath(t *testing.T) {
+	g := loadBuildProduct(t)
+	if !hasEdgeWithCondition(g, "Implement", "CommitIfDirty", "ctx.outcome = success") {
+		t.Error("Implement success edge no longer reaches CommitIfDirty — #303 green-breach work would not be persisted")
+	}
+	if !hasEdgeTo(g, "CommitIfDirty", "TestMilestone") {
+		t.Error("CommitIfDirty must continue to TestMilestone so a rescued green breach advances")
+	}
+}
+
 // hasEdgeTo reports whether the node has any outgoing edge to the given target.
 func hasEdgeTo(g *Graph, from, to string) bool {
 	for _, e := range g.OutgoingEdges(from) {

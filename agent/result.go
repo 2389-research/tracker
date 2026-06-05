@@ -11,6 +11,17 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
+// BreachVerifyState records the result of the verify-on-breach pass (#303).
+// The zero value is BreachVerifyNotRun, so an unset field is always the safe
+// "could not verify" state — never mistaken for a pass.
+type BreachVerifyState int
+
+const (
+	BreachVerifyNotRun BreachVerifyState = iota // no verify ran (not a breach, no explicit command, or loop detected)
+	BreachVerifyPassed                          // verify command exited 0
+	BreachVerifyFailed                          // verify failed (non-zero exit) or errored
+)
+
 // SessionResult holds summary statistics and metadata from a completed session.
 type SessionResult struct {
 	SessionID          string
@@ -19,6 +30,7 @@ type SessionResult struct {
 	Turns              int
 	MaxTurnsUsed       bool
 	LoopDetected       bool
+	BreachVerify       BreachVerifyState // #303: result of the verify-on-breach pass
 	ToolCalls          map[string]int
 	FilesModified      []string
 	FilesCreated       []string
