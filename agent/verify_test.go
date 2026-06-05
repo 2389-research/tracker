@@ -9,6 +9,30 @@ import (
 	"testing"
 )
 
+func TestResolveBreachVerifier_ExplicitCommandOnly(t *testing.T) {
+	// Explicit command → a verifier is returned regardless of VerifyAfterEdit.
+	v := resolveBreachVerifier(SessionConfig{
+		VerifyAfterEdit: false,
+		VerifyCommand:   "true",
+		WorkingDir:      t.TempDir(),
+	})
+	if v == nil {
+		t.Fatal("expected a verifier when VerifyCommand is set, got nil")
+	}
+	if v.cmd != "true" {
+		t.Errorf("verifier.cmd = %q, want %q", v.cmd, "true")
+	}
+
+	// No explicit command → nil, even in a Go module dir (NO auto-detection).
+	goModDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(goModDir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveBreachVerifier(SessionConfig{VerifyCommand: "", WorkingDir: goModDir}); got != nil {
+		t.Errorf("expected nil (no auto-detect for breach verify), got verifier cmd=%q", got.cmd)
+	}
+}
+
 func TestDetectVerifyCommand_GoProject(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.21\n"), 0644); err != nil {

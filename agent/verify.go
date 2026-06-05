@@ -140,6 +140,22 @@ func newVerifier(cfg SessionConfig) *verifier {
 	}
 }
 
+// resolveBreachVerifier returns a verifier for the verify-on-breach pass (#303),
+// or nil when no EXPLICIT verify command is configured. Unlike newVerifier it
+// ignores the VerifyAfterEdit gate (a breach should be able to rescue green work
+// even when in-loop verification was off) but it deliberately does NOT fall back
+// to detectVerifyCommand: only an author-specified command may grant a breach
+// success, so a coarse/auto-detected suite can never silently advance incomplete
+// work. broadCmd is intentionally empty — the breach check is a single focused
+// pass.
+func resolveBreachVerifier(cfg SessionConfig) *verifier {
+	cmd := strings.TrimSpace(cfg.VerifyCommand)
+	if cmd == "" {
+		return nil
+	}
+	return &verifier{cmd: cmd, workDir: cfg.WorkingDir}
+}
+
 // verifyResult holds the result of a verification run, including which command
 // was executed so callers can attribute failures correctly.
 type verifyResult struct {
