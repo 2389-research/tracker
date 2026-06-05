@@ -75,6 +75,11 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if backendErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
 	}
+	// #303: turn-breach guard applies only to the native backend (claude-code /
+	// acp don't drive agent.Session's turn loop and never set MaxTurnsUsed/
+	// BreachVerify). Make that an explicit guard, not an accident of field
+	// population. Mirrors trackExternalBackendUsage's type switch.
+	_, native := backend.(*NativeBackend)
 	// writable_paths gate (#272 G2) at the dispatcher layer. NativeBackend.Run
 	// also runs configureJail with the same gate, but only the native path
 	// reaches it — buildRunConfig switches Extra to ClaudeCodeConfig / ACPConfig
@@ -106,7 +111,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if runErr != nil {
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector, priorEpisodes)
 	}
-	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector, priorEpisodes)
+	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector, priorEpisodes, native)
 }
 
 // trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
@@ -479,7 +484,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 // through failure edges when present, stops on strict-failure-edge otherwise),
 // OutcomeFail/OutcomeRetry for empty sessions, or OutcomeSuccess for normal
 // completion. auto_status can override any of these.
-func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string) (pipeline.Outcome, error) {
+func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string, native bool) (pipeline.Outcome, error) {
 	responseText := collector.text()
 	responseArtifact := collector.transcript()
 	if responseArtifact == "" {
@@ -491,7 +496,7 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 		return outcome, err
 	}
 
-	return h.buildSuccessOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult, priorEpisodes)
+	return h.buildSuccessOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult, priorEpisodes, native)
 }
 
 // buildEmptyResponseOutcome handles the two empty-response cases and returns
@@ -540,7 +545,7 @@ func emptyResponseStatusMsg(nodeID string, emptyAPIResponse bool) (pipeline.Term
 
 // buildSuccessOutcome handles the normal (non-empty) completion path, including
 // turn-limit exhaustion and auto_status overrides.
-func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
+func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artifactRoot, responseText, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string, native bool) (pipeline.Outcome, error) {
 	// Determine status. Turn-limit exhaustion and loop detection default to
 	// OutcomeFail so the engine routes through explicit failure edges (e.g.
 	// "when ctx.outcome = fail"). On nodes without failure edges, the
@@ -549,15 +554,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	//
 	// auto_status overrides the default for both turn-exhaustion and normal
 	// completion: the agent's explicit STATUS line is authoritative.
-	status := pipeline.OutcomeSuccess
-	turnLimitMsg := buildTurnLimitMsg(node, sessResult)
-	if turnLimitMsg != "" {
-		status = pipeline.OutcomeFail
-	}
-
-	if node.Attrs["auto_status"] == "true" {
-		status = parseAutoStatus(responseText)
-	}
+	status, turnLimitMsg, breachClass := h.resolveTerminalStatus(node, responseText, sessResult, native)
 
 	outcome := pipeline.Outcome{
 		Status: string(status),
@@ -571,6 +568,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	if applyDeclaredWrites(node, outcome.ContextUpdates, responseText, "Response JSON") {
 		outcome.Status = string(pipeline.OutcomeFail)
 	}
+	applyBreachMarker(outcome.ContextUpdates, outcome.Status, breachClass)
 	if turnLimitMsg != "" {
 		outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] = turnLimitMsg
 	}
@@ -621,6 +619,62 @@ func buildTurnLimitMsg(node *pipeline.Node, sessResult agent.SessionResult) stri
 		return fmt.Sprintf("node %q: agent entered tool call loop (detected after %d turns)", node.ID, sessResult.Turns)
 	}
 	return fmt.Sprintf("node %q: agent exhausted turn limit (%d turns) without completing", node.ID, sessResult.Turns)
+}
+
+// resolveTerminalStatus determines the node's terminal status, the turn-limit
+// message, and the #303 breach class. On a breach it classifies via the
+// turn_breach_policy; auto_status (an explicit STATUS line) is authoritative on
+// NORMAL completion only — it must NOT manufacture success on a breach, since a
+// missing/early STATUS line defaults parseAutoStatus to success and would
+// silently advance unverified work (#303 decision #5).
+func (h *CodergenHandler) resolveTerminalStatus(node *pipeline.Node, responseText string, sessResult agent.SessionResult, native bool) (pipeline.TerminalStatus, string, string) {
+	status := pipeline.OutcomeSuccess
+	turnLimitMsg := buildTurnLimitMsg(node, sessResult)
+	var breachClass string
+	if turnLimitMsg != "" {
+		policy := node.AgentConfig(h.graphAttrs).TurnBreachPolicy
+		status, breachClass = classifyBreach(policy, sessResult, native)
+	}
+	if node.Attrs["auto_status"] == "true" && turnLimitMsg == "" {
+		status = parseAutoStatus(responseText)
+	}
+	return status, turnLimitMsg, breachClass
+}
+
+// applyBreachMarker writes the #303 turn_breach_class to the context updates,
+// using the FINAL status. It never leaves a verified_green marker on a Fail (a
+// declared-writes failure can demote a green breach to fail). No-op when
+// breachClass is empty (opt-out / non-native / non-breach).
+func applyBreachMarker(updates map[string]string, status, breachClass string) {
+	if breachClass == "" {
+		return
+	}
+	if status == string(pipeline.OutcomeFail) && breachClass == pipeline.TurnBreachClassVerifiedGreen {
+		breachClass = pipeline.TurnBreachClassOperatorDecision
+	}
+	updates[pipeline.ContextKeyTurnBreachClass] = breachClass
+}
+
+// classifyBreach maps a turn-limit breach to (status, turn_breach_class) under
+// the turn_breach_policy (#303). Called only when buildTurnLimitMsg != "".
+//   - policy "fail" or non-native backend → today's guillotine (fail, no marker).
+//   - LoopDetected → pathological (fail).
+//   - BreachVerifyPassed → verified-green (success; the pipeline's success edge
+//     persists the tree, e.g. build_product's CommitIfDirty).
+//   - everything else (Failed / NotRun) → operator_decision (fail; routes to
+//     fallback / an operator gate). Never silently advances.
+func classifyBreach(policy string, r agent.SessionResult, native bool) (pipeline.TerminalStatus, string) {
+	if policy == "fail" || !native {
+		return pipeline.OutcomeFail, ""
+	}
+	switch {
+	case r.LoopDetected:
+		return pipeline.OutcomeFail, pipeline.TurnBreachClassPathological
+	case r.BreachVerify == agent.BreachVerifyPassed:
+		return pipeline.OutcomeSuccess, pipeline.TurnBreachClassVerifiedGreen
+	default:
+		return pipeline.OutcomeFail, pipeline.TurnBreachClassOperatorDecision
+	}
 }
 
 // buildConfig constructs a SessionConfig from the node's attributes, using
@@ -697,6 +751,8 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if cfg.MaxVerifyRetries > 0 {
 		config.MaxVerifyRetries = cfg.MaxVerifyRetries
 	}
+	// #303: run verify-on-breach unless the node opted into the guillotine.
+	config.VerifyOnBreach = cfg.TurnBreachPolicy != "fail"
 	if cfg.PlanBeforeExecuteSet {
 		config.PlanBeforeExecute = cfg.PlanBeforeExecute
 	}

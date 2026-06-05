@@ -1059,10 +1059,14 @@ func TestCodergenHandlerMaxTurnsExhaustedIsFail(t *testing.T) {
 	// This test exercises the failure path; the success test below verifies absence.
 }
 
-func TestCodergenHandlerMaxTurnsWithAutoStatusSuccess(t *testing.T) {
-	// When auto_status is true and the agent explicitly emitted STATUS:success
-	// before hitting the turn limit, the outcome should be success. The
-	// turn_limit_msg is still set (for diagnostics) but status is overridden.
+func TestCodergenHandlerMaxTurnsWithAutoStatus_BreachIgnoresAutoStatus(t *testing.T) {
+	// #303: auto_status MUST NOT manufacture success on a turn-limit breach.
+	// Here the agent emits STATUS:success but then keeps making tool calls and
+	// exhausts its turn budget — a stale/unreliable success claim. Under the
+	// graduated guard (default policy) with no explicit verify_command, the
+	// breach verify is NotRun, so the breach classifies to operator_decision
+	// and the outcome is FAIL — never a silent advance past unverified work.
+	// (Previously auto_status overrode this to success; that hole is closed.)
 	workdir := t.TempDir()
 
 	// Both responses include tool calls, so with max_turns=2 the agent
@@ -1111,15 +1115,20 @@ func TestCodergenHandlerMaxTurnsWithAutoStatusSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
-		t.Errorf("expected outcome %q when auto_status emits success despite turn limit, got %q",
-			pipeline.OutcomeSuccess, outcome.Status)
+	if outcome.Status != string(pipeline.OutcomeFail) {
+		t.Errorf("expected outcome %q (auto_status must not rescue a breach), got %q",
+			pipeline.OutcomeFail, outcome.Status)
 	}
 
-	// turn_limit_msg is still set (MaxTurnsUsed was true) even though
-	// auto_status overrode the status to success. Diagnostics are preserved.
+	// The breach is classified for routing: no explicit verify command → NotRun
+	// → operator_decision (steady progress, non-green).
+	if got := outcome.ContextUpdates[pipeline.ContextKeyTurnBreachClass]; got != pipeline.TurnBreachClassOperatorDecision {
+		t.Errorf("turn_breach_class = %q, want operator_decision", got)
+	}
+
+	// turn_limit_msg is still set (MaxTurnsUsed was true) for diagnostics.
 	if outcome.ContextUpdates[pipeline.ContextKeyTurnLimitMsg] == "" {
-		t.Error("expected turn_limit_msg to be set for diagnostics even on auto_status success")
+		t.Error("expected turn_limit_msg to be set for diagnostics on a breach")
 	}
 }
 
