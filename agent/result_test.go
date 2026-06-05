@@ -10,6 +10,19 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
+func TestBreachVerifyState_ZeroValueIsNotRun(t *testing.T) {
+	var r SessionResult
+	if r.BreachVerify != BreachVerifyNotRun {
+		t.Errorf("zero-value BreachVerify = %v, want BreachVerifyNotRun", r.BreachVerify)
+	}
+	if BreachVerifyNotRun != 0 {
+		t.Errorf("BreachVerifyNotRun = %d, want 0 (safe default)", BreachVerifyNotRun)
+	}
+	if BreachVerifyPassed == BreachVerifyFailed {
+		t.Error("BreachVerifyPassed and BreachVerifyFailed must be distinct")
+	}
+}
+
 func TestResultString(t *testing.T) {
 	r := SessionResult{
 		SessionID:     "a3f2",
