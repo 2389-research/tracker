@@ -110,6 +110,7 @@ func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 		Provider:         r.Provider,
 		Estimated:        estimated,
 		EstimateSource:   source,
+		BreachVerify:     int(r.BreachVerify),
 	}
 }
 
