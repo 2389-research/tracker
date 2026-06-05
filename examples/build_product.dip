@@ -400,6 +400,7 @@ workflow BuildProduct
     reasoning_effort: high
     fidelity: full
     max_turns: 50
+    fallback_target: EscalateMilestone
     prompt:
       Read the current milestone spec at .ai/milestones/current.md.
       Read the full spec at SPEC.md for context.
@@ -1035,6 +1036,7 @@ workflow BuildProduct
     provider: anthropic
     reasoning_effort: high
     fidelity: full
+    fallback_target: EscalateReview
     prompt:
       Read the review synthesis at .ai/decisions/review-synthesis.md.
       Apply ONLY the required fixes. Do NOT apply suggested improvements
@@ -1298,6 +1300,7 @@ workflow BuildProduct
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
+    fallback_target: EscalateReview
     prompt:
       Ensure all changes are committed. If there are uncommitted changes from
       the cleanup or final fixes, commit them. Include the commit hash.
@@ -1319,7 +1322,8 @@ workflow BuildProduct
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
     PickNextMilestone -> ReviewParallel  when ctx.tool_stdout contains all-done
     PickNextMilestone -> EscalateMilestone
-    Implement -> TestMilestone
+    Implement -> TestMilestone  when ctx.outcome = success
+    Implement -> EscalateMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
     TestMilestone -> EscalateMilestone  when ctx.tool_stdout contains escalate
     TestMilestone -> FixMilestone  when ctx.outcome = fail
@@ -1337,6 +1341,15 @@ workflow BuildProduct
     EscalateMilestone -> Done  label: "abandon"
 
     # Cross-review
+    # The three reviewers run as parallel branches; a branch runs via
+    # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
+    # path, so a per-branch fallback_target would be inert. Route failure on the
+    # aggregating ReviewParallel node instead: aggregateStatus is success-if-any,
+    # so this fires only when ALL THREE reviewers fail (which would otherwise
+    # dead-stop the pipeline). On success the parallel handler's suggested-next
+    # routes to ReviewJoin. A single reviewer failing is masked by aggregateStatus
+    # and needs an engine fix (per-branch routing); tracked separately.
+    ReviewParallel -> EscalateReview  when ctx.outcome = fail
     ReviewClaude -> ReviewJoin
     ReviewCodex -> ReviewJoin
     ReviewGemini -> ReviewJoin
@@ -1354,7 +1367,8 @@ workflow BuildProduct
     # loop at MAX_ATTEMPTS=1 — a clean re-review proceeds to FinalBuild
     # via SynthesizeReviews's existing success edge; an exhausted budget
     # escalates to a human.
-    ApplyReviewFixes -> CheckReviewFixBudget
+    ApplyReviewFixes -> CheckReviewFixBudget  when ctx.outcome = success
+    ApplyReviewFixes -> EscalateReview
     CheckReviewFixBudget -> ReviewParallel  when ctx.outcome = success  restart: true
     CheckReviewFixBudget -> EscalateReview  when ctx.outcome = fail
 
@@ -1373,4 +1387,7 @@ workflow BuildProduct
     EscalateReview -> Done  label: "abandon"
 
     Cleanup -> FinalCommit
+    # FinalCommit failure routes via fallback_target: EscalateReview (node attr),
+    # not a catch-all edge — Cleanup is reachable from EscalateReview (accept), so a
+    # FinalCommit -> EscalateReview edge would close an unconditional cycle (DIP005).
     FinalCommit -> Done
