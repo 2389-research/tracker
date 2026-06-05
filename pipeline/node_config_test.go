@@ -8,6 +8,24 @@ import (
 	"time"
 )
 
+func TestAgentConfig_TurnBreachPolicy(t *testing.T) {
+	// Default when unset.
+	n := &Node{Attrs: map[string]string{}}
+	if got := n.AgentConfig(nil).TurnBreachPolicy; got != "guard" {
+		t.Errorf("default TurnBreachPolicy = %q, want %q", got, "guard")
+	}
+	// Node override.
+	n2 := &Node{Attrs: map[string]string{"turn_breach_policy": "fail"}}
+	if got := n2.AgentConfig(nil).TurnBreachPolicy; got != "fail" {
+		t.Errorf("TurnBreachPolicy = %q, want %q", got, "fail")
+	}
+	// Graph default, node-overridable.
+	n3 := &Node{Attrs: map[string]string{}}
+	if got := n3.AgentConfig(map[string]string{"turn_breach_policy": "fail"}).TurnBreachPolicy; got != "fail" {
+		t.Errorf("graph TurnBreachPolicy = %q, want %q", got, "fail")
+	}
+}
+
 func TestAgentConfig_EmptyNode(t *testing.T) {
 	n := &Node{Attrs: map[string]string{}}
 	cfg := n.AgentConfig(nil)
