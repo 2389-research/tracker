@@ -154,6 +154,86 @@ func TestBuildProductIssue296FailureRoutes(t *testing.T) {
 	}
 }
 
+// TestBuildProductCommitIfDirtyCheckpoint pins issue #297: a CommitIfDirty tool
+// node sits on the Implement SUCCESS path so green-but-uncommitted work is
+// persisted before TestMilestone runs:
+//
+//	Implement --(ctx.outcome = success)--> CommitIfDirty --> TestMilestone
+//
+// while the #296 Implement FAILURE routing (unconditional catch-all edge +
+// fallback_target to EscalateMilestone) is left UNCHANGED. CommitIfDirty is
+// deliberately NOT on the failure path — turn-exhaustion routes straight to
+// EscalateMilestone, and persisting work on that path is engine issue #302.
+//
+// Negative control: removing the success edge through CommitIfDirty (so
+// Implement routes to TestMilestone again) fails this test on both the
+// "edge to CommitIfDirty" and "no direct edge to TestMilestone" assertions.
+func TestBuildProductCommitIfDirtyCheckpoint(t *testing.T) {
+	g := loadBuildProduct(t)
+
+	// CommitIfDirty exists and is a tool node.
+	n, ok := g.Nodes["CommitIfDirty"]
+	if !ok {
+		t.Fatal("CommitIfDirty node missing from build_product.dip (issue #297)")
+	}
+	if n.Handler != "tool" {
+		t.Errorf("CommitIfDirty handler = %q, want \"tool\" (issue #297)", n.Handler)
+	}
+
+	// Success path: Implement --(ctx.outcome = success)--> CommitIfDirty.
+	// Assert the SUCCESS condition specifically, not just "some condition" — a
+	// future edit routing `ctx.outcome = fail` to CommitIfDirty must fail here.
+	if !hasEdgeWithCondition(g, "Implement", "CommitIfDirty", "ctx.outcome = success") {
+		t.Error("Implement has no `ctx.outcome = success` edge to CommitIfDirty (issue #297)")
+	}
+	if hasEdgeTo(g, "Implement", "TestMilestone") {
+		t.Error("Implement still routes directly to TestMilestone; the success path must go through CommitIfDirty (issue #297)")
+	}
+	if !hasEdgeTo(g, "CommitIfDirty", "TestMilestone") {
+		t.Error("CommitIfDirty has no edge to TestMilestone (issue #297)")
+	}
+
+	// #296 failure routing must be intact: unconditional catch-all + fallback.
+	if !hasUnconditionalEdgeTo(g, "Implement", "EscalateMilestone") {
+		t.Error("Implement lost its unconditional catch-all to EscalateMilestone (issue #296 regression)")
+	}
+	if got := resolveFallback(g, g.Nodes["Implement"]); got != "EscalateMilestone" {
+		t.Errorf("Implement resolved fallback = %q, want EscalateMilestone (issue #296 regression)", got)
+	}
+}
+
+// hasEdgeTo reports whether the node has any outgoing edge to the given target.
+func hasEdgeTo(g *Graph, from, to string) bool {
+	for _, e := range g.OutgoingEdges(from) {
+		if e.To == to {
+			return true
+		}
+	}
+	return false
+}
+
+// hasEdgeWithCondition reports whether the node has an outgoing edge to the
+// given target whose condition matches exactly.
+func hasEdgeWithCondition(g *Graph, from, to, cond string) bool {
+	for _, e := range g.OutgoingEdges(from) {
+		if e.To == to && e.Condition == cond {
+			return true
+		}
+	}
+	return false
+}
+
+// hasUnconditionalEdgeTo reports whether the node has an outgoing edge to the
+// given target with no condition (the strict-failure catch-all).
+func hasUnconditionalEdgeTo(g *Graph, from, to string) bool {
+	for _, e := range g.OutgoingEdges(from) {
+		if e.To == to && e.Condition == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // hasConditionalEdgeTo reports whether the node has an outgoing conditional edge
 // to the given target.
 func hasConditionalEdgeTo(g *Graph, from, to string) bool {

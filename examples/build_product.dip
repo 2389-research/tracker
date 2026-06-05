@@ -453,6 +453,36 @@ workflow BuildProduct
         Add a comment to the golden file naming the spec section it was
         verified against and the date.
 
+      STOP WHEN GREEN AND COMMITTED (issue #297):
+      - The instant the milestone verify passes AND you have committed, emit
+        DONE and STOP. Do NOT perform further verification, re-reading, or
+        polishing. Committing is the precondition for stopping — never end a
+        session with a green-but-uncommitted tree.
+
+  tool CommitIfDirty
+    label: "Commit working tree if dirty"
+    timeout: 30s
+    command:
+      set -eu
+      # Issue #297: persist green-but-uncommitted work on the Implement SUCCESS
+      # path so it survives a later node death. Explicit identity makes the
+      # commit independent of the tool subprocess's git config (unproven here —
+      # commits otherwise happen inside agent sessions). A genuine commit
+      # failure is NOT swallowed (no `|| true`); it surfaces per CLAUDE.md
+      # "never silently swallow errors". The marker is printed last so it
+      # survives output truncation (CLAUDE.md "Tool output capture").
+      #
+      # `git status --porcelain` (not `git diff`) so UNTRACKED files count as
+      # dirty — a milestone that only adds new files would otherwise look clean
+      # to `git diff` and skip the commit, leaving exactly the green-but-
+      # uncommitted tree this node exists to prevent.
+      if [ -n "$(git status --porcelain)" ]; then
+        git add -A
+        git -c user.name="build_product" -c user.email="build_product@tracker.local" \
+          commit -m "chore(milestone): checkpoint working tree (auto-commit by build_product)"
+      fi
+      printf 'commit-if-dirty-done'
+
   tool TestMilestone
     label: "Test Current Milestone"
     timeout: 300s
@@ -776,6 +806,11 @@ workflow BuildProduct
 
       Do NOT make superficial patches. If a test expects story events to NOT
       merge, understand WHY they're merging and fix the decision logic.
+
+      The instant verification passes AND you have committed, emit DONE and
+      STOP. Do NOT perform further verification, re-reading, or polishing.
+      Committing is the precondition for stopping — never end a session with a
+      green-but-uncommitted tree. (issue #297)
 
   # ─── Phase 3: Cross-Review ─────────────────────────────────
 
@@ -1322,8 +1357,9 @@ workflow BuildProduct
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
     PickNextMilestone -> ReviewParallel  when ctx.tool_stdout contains all-done
     PickNextMilestone -> EscalateMilestone
-    Implement -> TestMilestone  when ctx.outcome = success
+    Implement -> CommitIfDirty  when ctx.outcome = success
     Implement -> EscalateMilestone
+    CommitIfDirty -> TestMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
     TestMilestone -> EscalateMilestone  when ctx.tool_stdout contains escalate
     TestMilestone -> FixMilestone  when ctx.outcome = fail
