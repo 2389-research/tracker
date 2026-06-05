@@ -417,6 +417,16 @@ workflow BuildProduct
         exit 1
       fi
 
+      # Record this milestone's start boundary for MarkMilestoneDone's
+      # files-touched diff (issue #298). --verify --quiet prints nothing and
+      # exits non-zero on a commitless repo, so START is genuinely empty there
+      # (a bare `git rev-parse HEAD` would leak the literal "HEAD" to stdout and
+      # silently empty milestone 1's file record). Written on the has-next path
+      # only — the all-done branch returned earlier. Goes to a FILE so the
+      # routing marker below stays last on stdout.
+      START=$(git rev-parse --verify --quiet HEAD || true)
+      printf '%s\n' "$START" > .ai/build/milestone-start-sha
+
       printf "milestone-$NEXT"
 
   agent Implement
