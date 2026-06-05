@@ -4,6 +4,7 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -732,5 +733,109 @@ func TestEngine_CommitWIP_NoGitAdapterWarns(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected EventWarning about git artifacts not enabled when preserving failed work")
+	}
+}
+
+// TestGitArtifactRepo_CommitWIP_CapturesDeletion verifies that a deletion-only
+// dirty tree is fully captured in the WIP commit (#302 review, Copilot): the
+// snapshot must reflect removals, not just additions/modifications.
+func TestGitArtifactRepo_CommitWIP_CapturesDeletion(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	runID := "delrun"
+	repo := newGitArtifactRepo(dir, runID)
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Seed a tracked file, commit it, then delete it so the ONLY dirty change
+	// is a deletion.
+	if err := os.WriteFile(filepath.Join(dir, "doomed.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOutput(t, dir, "add", "-A")
+	gitOutput(t, dir, "commit", "-m", "seed doomed.go")
+	if err := os.Remove(filepath.Join(dir, "doomed.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	ref, err := repo.CommitWIP("Implement")
+	if err != nil {
+		t.Fatalf("CommitWIP after delete: %v", err)
+	}
+	want := "tracker/wip/" + runID + "/Implement"
+	if ref != want {
+		t.Fatalf("ref: got %q want %q", ref, want)
+	}
+	// The deletion must be recorded at the tagged commit.
+	show := gitOutput(t, dir, "show", "--stat", want)
+	if !strings.Contains(show, "doomed.go") {
+		t.Errorf("WIP ref did not capture deletion of doomed.go:\n%s", show)
+	}
+	if st := gitOutput(t, dir, "status", "--porcelain"); st != "" {
+		t.Errorf("expected clean tree after CommitWIP, got:\n%s", st)
+	}
+}
+
+// TestEngine_CommitWIP_HandlerErrorPreservesWork verifies that when a handler
+// writes artifacts and then returns a Go error (terminal node death, e.g. a
+// tool/agent dying mid-write or a cancellation), the dirty tree is still
+// preserved to a recoverable ref recorded in the checkpoint and trace (#302
+// review, Codex) — not just on the status-based fail/exhaust paths.
+func TestEngine_CommitWIP_HandlerErrorPreservesWork(t *testing.T) {
+	requireGit(t)
+	artifactBase := t.TempDir()
+
+	g := NewGraph("wip_handler_error_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "Implement", Shape: "box", Label: "Implement"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "Implement"})
+	g.AddEdge(&Edge{From: "Implement", To: "end"})
+
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		reg.Register(&testHandler{name: name, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if node.ID == "Implement" {
+				dir, _ := pctx.GetInternal(InternalKeyArtifactDir)
+				if err := os.WriteFile(filepath.Join(dir, "Implement.go"), []byte("package x\n"), 0o644); err != nil {
+					return Outcome{}, err
+				}
+				return Outcome{}, fmt.Errorf("boom: handler died after writing files")
+			}
+			return Outcome{Status: string(OutcomeSuccess)}, nil
+		}})
+	}
+
+	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true))
+	result, err := engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected handler error to propagate")
+	}
+	if result == nil || result.Status != OutcomeFail {
+		t.Fatalf("expected fail result, got %+v", result)
+	}
+
+	repoDir := filepath.Join(artifactBase, result.RunID)
+	wantRef := "tracker/wip/" + result.RunID + "/Implement"
+
+	if tags := gitOutput(t, repoDir, "tag", "-l", "tracker/wip/*"); !strings.Contains(tags, wantRef) {
+		t.Errorf("expected WIP tag %q on handler-error path, got:\n%s", wantRef, tags)
+	}
+	cp, e := LoadCheckpoint(filepath.Join(repoDir, "checkpoint.json"))
+	if e != nil {
+		t.Fatalf("LoadCheckpoint: %v", e)
+	}
+	if cp.WIPRefs["Implement"] != wantRef {
+		t.Errorf("checkpoint WIPRefs[Implement]: got %q want %q", cp.WIPRefs["Implement"], wantRef)
+	}
+	var traceRef string
+	for _, en := range result.Trace.Entries {
+		if en.NodeID == "Implement" {
+			traceRef = en.WIPRef
+		}
+	}
+	if traceRef != wantRef {
+		t.Errorf("trace WIPRef for Implement: got %q want %q", traceRef, wantRef)
 	}
 }

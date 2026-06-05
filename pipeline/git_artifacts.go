@@ -183,8 +183,10 @@ func (r *gitArtifactRepo) TagCheckpoint(nodeID string) error {
 //
 // Behavior:
 //   - Clean tree (nothing to preserve) → no-op: no commit, no ref, returns "".
-//   - Dirty tree → `git add .` (captures newly created/untracked files too),
-//     commits, then points the lightweight tag tracker/wip/<runID>/<nodeID> at
+//   - Dirty tree → `git add -A` (captures additions, modifications, and
+//     removals so the snapshot faithfully mirrors the tree state — unambiguous
+//     regardless of cwd or git version), commits, then points the lightweight
+//     tag tracker/wip/<runID>/<nodeID> at
 //     the commit and returns that ref name. The commit lands on HEAD, so a
 //     subsequent CommitNode records the node outcome as an empty marker on top
 //     while the named tag remains the stable handle to the work.
@@ -207,7 +209,10 @@ func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
 		return "", nil
 	}
 
-	if out, err := r.git("add", "."); err != nil {
+	// -A stages additions, modifications, AND removals across the whole repo so
+	// a deletion-only dirty tree is preserved too (the porcelain gate above can
+	// be satisfied purely by removals).
+	if out, err := r.git("add", "-A"); err != nil {
 		return "", fmt.Errorf("git add for WIP of node %q: %w\n%s", nodeID, err, out)
 	}
 	msg := fmt.Sprintf("wip(%s): preserved uncommitted work before routing failure", nodeID)

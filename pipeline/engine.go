@@ -316,6 +316,15 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 
 	outcome, traceEntry, err := e.executeNode(ctx, s, currentNodeID, execNode)
 	if err != nil {
+		// Preserve any dirty (possibly green) tree before this terminal handler
+		// error halts the run (#302) — e.g. a tool/agent that wrote files then
+		// died, or a cancellation mid-write. No-op on a clean tree. executeNode
+		// already appended this node's trace entry, so mirror the recorded ref
+		// onto it after the helper sets it on our local copy.
+		e.commitWIPBeforeRouting(s, currentNodeID, &traceEntry)
+		if traceEntry.WIPRef != "" && len(s.trace.Entries) > 0 {
+			s.trace.Entries[len(s.trace.Entries)-1].WIPRef = traceEntry.WIPRef
+		}
 		// Scope any keys written before the error so checkpoints and downstream
 		// nodes can still access this node's partial output via the scoped namespace.
 		s.pctx.ScopeToNode(currentNodeID)

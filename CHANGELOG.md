@@ -16,16 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   green-but-uncommitted work is no longer silently discarded (the loss in the
   `code-goblin` run `7b6e08c9e2b2`, where `Implement` was green at turn 48 but
   uncommitted when the turn budget breached). A new `gitArtifactRepo.CommitWIP`
-  method commits the dirty tree (including newly created/untracked files via
-  `git add .`) and points the lightweight tag `tracker/wip/<runID>/<nodeID>` at
+  method commits the dirty tree (additions, modifications, **and** removals via
+  `git add -A`) and points the lightweight tag `tracker/wip/<runID>/<nodeID>` at
   it, mirroring the existing `TagCheckpoint` precedent; the ref is recorded in
   both the checkpoint (`Checkpoint.WIPRefs`, additive/backward-compatible) and
   the trace (`TraceEntry.WIPRef`). A single engine helper
-  (`commitWIPBeforeRouting`) is wired into all three fail/exhaust routing paths
-  — the strict-failure path (`checkStrictFailure`, covering both the
-  `fallback_target` escalation and the terminal halt), the retry-exhausted path
-  (`handleRetryExhausted`), and the exit-node fail path (`handleExitNode`) — and
-  always runs **before** the routing decision. A clean tree is a no-op (no empty
+  (`commitWIPBeforeRouting`) is wired into every fail/exhaust routing path — the
+  strict-failure path (`checkStrictFailure`, covering both the `fallback_target`
+  escalation and the terminal halt), the retry-exhausted path
+  (`handleRetryExhausted`), the exit-node fail path (`handleExitNode`), and the
+  terminal handler-error path (`processActiveNode`, e.g. a node that wrote files
+  then returned an error or was cancelled mid-write) — and always runs
+  **before** the routing/halt decision. A clean tree is a no-op (no empty
   commit, no ref); when git artifacts are disabled it logs an `EventWarning` and
   skips (it never touches the user's real working repo); a WIP-commit failure is
   surfaced as a warning and never masks the original failure or changes routing.
