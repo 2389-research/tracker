@@ -807,6 +807,45 @@ workflow BuildProduct
       DONE_COUNT=$(ls "$DONE_DIR" 2>/dev/null | wc -l | tr -d ' ')
       NEXT=$((DONE_COUNT + 1))
       cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
+
+      # Append this milestone's entry to the build-context file (issue #298).
+      # MarkMilestoneDone is a strict-failure tool node (one unconditional edge,
+      # no fallback_target), so a logging hiccup must NOT dead-stop a verified
+      # milestone: the whole block runs in a `set +e` subshell that cannot
+      # propagate a non-zero exit, all bulk output goes to the FILE, and the
+      # terminal `printf` marker below stays last on stdout.
+      (
+        set +e
+        # Two-dot range from this milestone's start to HEAD. Degrade BASE to the
+        # empty tree when START is empty (first milestone / absent marker) OR
+        # unreachable (a retry rewrote/orphaned it). Three-dot (...) would fatal
+        # on the empty-tree object and under-report on rewritten history.
+        START=$(cat .ai/build/milestone-start-sha 2>/dev/null || true)
+        if [ -z "$START" ] || ! git cat-file -e "${START}^{commit}" 2>/dev/null; then
+          BASE=$(git hash-object -t tree /dev/null)
+        else
+          BASE="$START"
+        fi
+        TITLE=$(head -1 .ai/milestones/current.md 2>/dev/null)
+        [ -n "$TITLE" ] || TITLE="## Milestone $NEXT"
+        FILES=$(git diff --name-only "${BASE}..HEAD" 2>/dev/null | sed '/^$/d')
+        SUMMARY=$(git log -1 --format=%s "${BASE}..HEAD" 2>/dev/null)
+        [ -n "$SUMMARY" ] || SUMMARY="$TITLE"
+        NFILES=$(printf '%s\n' "$FILES" | grep -c . || true)
+        {
+          echo
+          echo "$TITLE"
+          if [ "$NFILES" -eq 0 ]; then
+            echo "Files: (none)"
+          else
+            printf 'Files: %s\n' "$(printf '%s\n' "$FILES" | head -12 | paste -sd, -)"
+            [ "$NFILES" -gt 12 ] && echo "Files: … and $((NFILES - 12)) more"
+          fi
+          echo "Summary: $SUMMARY"
+        } >> .ai/build/build-context.md
+      ) 2>/dev/null || true
+      rm -f .ai/build/milestone-start-sha
+
       # Reset fix attempt counter for next milestone
       rm -f .ai/milestones/fix_attempts
       rm .ai/milestones/current.md
