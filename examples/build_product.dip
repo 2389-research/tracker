@@ -471,7 +471,12 @@ workflow BuildProduct
       # failure is NOT swallowed (no `|| true`); it surfaces per CLAUDE.md
       # "never silently swallow errors". The marker is printed last so it
       # survives output truncation (CLAUDE.md "Tool output capture").
-      if ! git diff --quiet || ! git diff --cached --quiet; then
+      #
+      # `git status --porcelain` (not `git diff`) so UNTRACKED files count as
+      # dirty — a milestone that only adds new files would otherwise look clean
+      # to `git diff` and skip the commit, leaving exactly the green-but-
+      # uncommitted tree this node exists to prevent.
+      if [ -n "$(git status --porcelain)" ]; then
         git add -A
         git -c user.name="build_product" -c user.email="build_product@tracker.local" \
           commit -m "chore(milestone): checkpoint working tree (auto-commit by build_product)"

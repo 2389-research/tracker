@@ -180,9 +180,11 @@ func TestBuildProductCommitIfDirtyCheckpoint(t *testing.T) {
 		t.Errorf("CommitIfDirty handler = %q, want \"tool\" (issue #297)", n.Handler)
 	}
 
-	// Success path: Implement --(success)--> CommitIfDirty --> TestMilestone.
-	if !hasConditionalEdgeTo(g, "Implement", "CommitIfDirty") {
-		t.Error("Implement has no conditional success edge to CommitIfDirty (issue #297)")
+	// Success path: Implement --(ctx.outcome = success)--> CommitIfDirty.
+	// Assert the SUCCESS condition specifically, not just "some condition" — a
+	// future edit routing `ctx.outcome = fail` to CommitIfDirty must fail here.
+	if !hasEdgeWithCondition(g, "Implement", "CommitIfDirty", "ctx.outcome = success") {
+		t.Error("Implement has no `ctx.outcome = success` edge to CommitIfDirty (issue #297)")
 	}
 	if hasEdgeTo(g, "Implement", "TestMilestone") {
 		t.Error("Implement still routes directly to TestMilestone; the success path must go through CommitIfDirty (issue #297)")
@@ -204,6 +206,17 @@ func TestBuildProductCommitIfDirtyCheckpoint(t *testing.T) {
 func hasEdgeTo(g *Graph, from, to string) bool {
 	for _, e := range g.OutgoingEdges(from) {
 		if e.To == to {
+			return true
+		}
+	}
+	return false
+}
+
+// hasEdgeWithCondition reports whether the node has an outgoing edge to the
+// given target whose condition matches exactly.
+func hasEdgeWithCondition(g *Graph, from, to, cond string) bool {
+	for _, e := range g.OutgoingEdges(from) {
+		if e.To == to && e.Condition == cond {
 			return true
 		}
 	}
