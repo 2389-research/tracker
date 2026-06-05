@@ -440,12 +440,11 @@ workflow BuildProduct
     prompt:
       FIRST, in one turn, read .ai/build/build-context.md for orientation — it
       holds an architecture map and a one-entry-per-milestone log (files touched
-      + commit summary) so you don't rediscover the layout cold. It is ADVISORY
-      and may lag the latest code: SPEC.md and the source are authoritative — if
-      they disagree with the context file, trust them. Prefer the milestone's own
-      file list (.ai/milestones/current.md) plus this context file over re-reading
-      SPEC.md in full; re-read only the spec portions relevant to this milestone's
-      files.
+      + commit summary) so you don't rediscover the codebase layout and prior
+      milestones' changes from scratch. It is ADVISORY and may lag the latest
+      code: SPEC.md and the source are authoritative — if they disagree with the
+      context file, trust them. It supplements your normal reading; it does not
+      replace any SPEC.md read this prompt asks for below.
 
       Read the current milestone spec at .ai/milestones/current.md.
       Read the full spec at SPEC.md for context.
@@ -629,12 +628,11 @@ workflow BuildProduct
     prompt:
       FIRST, in one turn, read .ai/build/build-context.md for orientation — it
       holds an architecture map and a one-entry-per-milestone log (files touched
-      + commit summary) so you don't rediscover the layout cold. It is ADVISORY
-      and may lag the latest code: SPEC.md and the source are authoritative — if
-      they disagree with the context file, trust them. Prefer the milestone's own
-      file list (.ai/milestones/current.md) plus this context file over re-reading
-      SPEC.md in full; re-read only the spec portions relevant to this milestone's
-      files.
+      + commit summary) so you don't rediscover the codebase layout and prior
+      milestones' changes from scratch. It is ADVISORY and may lag the latest
+      code: SPEC.md and the source are authoritative — if they disagree with the
+      context file, trust them. It supplements your normal reading; it does not
+      replace any SPEC.md read this prompt asks for below.
 
       Read the current milestone spec at .ai/milestones/current.md.
       Read SPEC.md (issue #233 Gap 4). Pre-#233 this verifier only read
@@ -847,9 +845,19 @@ workflow BuildProduct
         TITLE=$(head -1 .ai/milestones/current.md 2>/dev/null)
         [ -n "$TITLE" ] || TITLE="## Milestone $NEXT"
         FILES=$(git diff --name-only "${BASE}..HEAD" 2>/dev/null | sed '/^$/d')
-        SUMMARY=$(git log -1 --format=%s "${BASE}..HEAD" 2>/dev/null)
-        [ -n "$SUMMARY" ] || SUMMARY="$TITLE"
         NFILES=$(printf '%s\n' "$FILES" | grep -c . || true)
+        # Summary = this milestone's newest commit subject, read from HEAD
+        # directly. NOT the BASE..HEAD range: when BASE is the empty tree (first
+        # milestone / unreachable START), `git log <tree>..HEAD` leans on lenient
+        # `^<tree>` handling that isn't guaranteed across git versions. Gate on
+        # NFILES so a no-op "mark done" milestone (zero files, HEAD unmoved)
+        # degrades to the title instead of echoing the prior milestone's subject.
+        if [ "$NFILES" -eq 0 ]; then
+          SUMMARY="$TITLE"
+        else
+          SUMMARY=$(git log -1 --format=%s HEAD 2>/dev/null)
+          [ -n "$SUMMARY" ] || SUMMARY="$TITLE"
+        fi
         {
           echo
           echo "$TITLE"
@@ -882,12 +890,11 @@ workflow BuildProduct
     prompt:
       FIRST, in one turn, read .ai/build/build-context.md for orientation — it
       holds an architecture map and a one-entry-per-milestone log (files touched
-      + commit summary) so you don't rediscover the layout cold. It is ADVISORY
-      and may lag the latest code: SPEC.md and the source are authoritative — if
-      they disagree with the context file, trust them. Prefer the milestone's own
-      file list (.ai/milestones/current.md) plus this context file over re-reading
-      SPEC.md in full; re-read only the spec portions relevant to this milestone's
-      files.
+      + commit summary) so you don't rediscover the codebase layout and prior
+      milestones' changes from scratch. It is ADVISORY and may lag the latest
+      code: SPEC.md and the source are authoritative — if they disagree with the
+      context file, trust them. It supplements your normal reading; it does not
+      replace any SPEC.md read this prompt asks for below.
 
       The current milestone failed verification. Read:
       - The milestone spec: .ai/milestones/current.md

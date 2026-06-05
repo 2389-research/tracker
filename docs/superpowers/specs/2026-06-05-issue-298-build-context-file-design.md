@@ -1,6 +1,6 @@
 # Issue #298 — Cure per-node amnesia with a machine-written build-context file
 
-**Status:** design approved (post squad-review), pre-implementation
+**Status:** implemented (PR #319). Post-merge note: the read-first advisory was trimmed during PR review to drop a "re-read only relevant SPEC.md portions" clause that conflicted with the existing full-SPEC reads in `Implement`/`VerifyMilestone` (#233 Gap 4); the build-context file supplements, never replaces, those reads.
 **Branch:** `fix/298-build-context`
 **Epic:** #308 Phase 1 ("Never lose work, never overrun blindly") — last remaining item; builds on merged #295/#296/#302/#297/#303-PR1.
 **Scope:** `.dip` edits to `examples/build_product.dip` + negative-control tests. **No engine Go changes.**
@@ -125,17 +125,16 @@ The existing `Setup` heredocs use **quoted** delimiters to write file *content* 
 
 ## Prompt edits — read-first, advisory framing
 
-Prepended to `Implement`, `FixMilestone`, and `VerifyMilestone` (before their existing first instruction). Worded to be **followable** and to keep SPEC.md/code authoritative (squad: the original "only re-grep sections this milestone touches" is unfollowable — `current.md` lists files, not spec anchors; fixing that properly means a `Decompose` `Spec sections:` line, which is #300 territory and out of scope):
+Prepended to `Implement`, `FixMilestone`, and `VerifyMilestone` (before their existing first instruction). The advisory is scoped to **codebase-layout orientation only** and explicitly supplements (never replaces) the SPEC.md reads each prompt already mandates. (Squad I5 flagged, and PR-review confirmed, that any "re-read only relevant SPEC.md portions" clause both is unfollowable — `current.md` lists files, not spec anchors — and contradicts `Implement`'s "Read the full spec at SPEC.md" and `VerifyMilestone`'s #233 Gap 4 full-spec gap-catch. Making it followable would need a `Decompose` `Spec sections:` line, which is #300 territory and out of scope, so the clause was dropped entirely.)
 
 ```
 FIRST, in one turn, read .ai/build/build-context.md for orientation — it
 holds an architecture map and a one-entry-per-milestone log (files touched
-+ commit summary) so you don't rediscover the layout cold. It is ADVISORY
-and may lag the latest code: SPEC.md and the source are authoritative — if
-they disagree with the context file, trust them. Prefer the milestone's own
-file list (.ai/milestones/current.md) plus this context file over re-reading
-SPEC.md in full; re-read only the spec portions relevant to this milestone's
-files.
++ commit summary) so you don't rediscover the codebase layout and prior
+milestones' changes from scratch. It is ADVISORY and may lag the latest
+code: SPEC.md and the source are authoritative — if they disagree with the
+context file, trust them. It supplements your normal reading; it does not
+replace any SPEC.md read this prompt asks for below.
 ```
 
 ---
