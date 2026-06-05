@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **engine: turn-limit breach = guard, not guillotine** (closes #303 PR1, refs
+  epic #308 Phase 1; builds on #302/#295/#297, completes the Phase-1 turn-limit
+  track). On a **native-backend** turn-limit breach the engine no longer fails
+  unconditionally. It runs one verify pass (an author-specified `verify_command`
+  only — never auto-detection, so a coarse/empty suite can't grant a pass) and
+  classifies the breach: a **verified-green** tree returns `OutcomeSuccess` and
+  advances through the pipeline's own commit-on-success node (e.g.
+  `build_product`'s `CommitIfDirty`, #297) — this alone would have saved the
+  `code-goblin` run `7b6e08c9e2b2` (green at turn 48 but discarded); a detected
+  **loop** is classified pathological and stops; anything else fails with
+  `ctx.turn_breach_class = operator_decision` for routing. `auto_status` can no
+  longer manufacture success on a breach (a stale/early `STATUS:` line is
+  ignored when turns are exhausted). A new `turn_breach_policy: fail` node
+  attribute (declare it under a `params:` block) opts back into the previous
+  always-fail behavior. The verify result is recorded on the trace
+  (`SessionStats.BreachVerify`). Non-native backends (claude-code/acp) are
+  unchanged.
 - **engine: commit-WIP to a recoverable ref before routing a failed/exhausted
   node** (closes #302, refs epic #308 Phase 1). The engine now preserves an
   agent node's dirty (possibly green) working tree to a named, recoverable git
