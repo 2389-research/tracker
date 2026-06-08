@@ -915,6 +915,21 @@ workflow BuildProduct
          verifier only checked .ai/milestones/current.md's done-when
          criteria — so a SPEC.md bullet that Decompose dropped
          silently passed through. Cross-check against SPEC.md directly.
+         A requirement may NOT be waved through as "future work" or "a
+         later milestone" unless it is EITHER (a) owned — a named milestone
+         in .ai/decisions/milestones.md has a "Done when" line covering it
+         (`grep -nE '^#+ *[Mm]ilestone' .ai/decisions/milestones.md` and
+         cite the milestone number + the Done-when line verbatim) — OR (b)
+         deferred — SPEC.md defers it to a named later phase AND a milestone's
+         "DO NOT implement" block records that deferral citing the spec
+         section (cite both; consistent with check 4's deferred-field rule).
+         A deferral that is neither owned nor documented-deferred is a
+         dropped requirement: STATUS:fail. (This is the code-goblin miss —
+         the verifier saw the 429/cancel gap and waved it through as "future
+         work" with no owning milestone.) Cross-check against
+         .ai/decisions/requirement-coverage.md (written by Decompose, #300)
+         when present; if it disagrees with a live SPEC.md re-read, SPEC.md
+         wins.
 
       6. TESTS + CI PASSED: The `tests-pass` sentinel in
          ${ctx.tool_stdout} is authoritative for "TestMilestone step
