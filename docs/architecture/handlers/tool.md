@@ -3,7 +3,7 @@
 ## Purpose
 
 The tool handler runs a shell command in the workflow's working directory
-(the `--workdir`, default the current directory), captures
+(the `--workdir`, which defaults to the current directory), captures
 stdout/stderr, and maps the exit code to a pipeline outcome. It's how a
 pipeline node executes something that's not an LLM agent — running tests,
 invoking a formatter, generating a file, reading a directory, etc. Because
@@ -18,7 +18,7 @@ Ground truth:
 | Attribute | Type | Default | Behavior |
 |-----------|------|---------|----------|
 | `tool_command` | string (required) | — | Shell command to execute. `${ctx.foo}`, `${graph.bar}`, `${params.baz}` variable refs are expanded before execution. |
-| `working_dir` | string | `--workdir` | Prepends `cd "<dir>" && ` to the command, relative to the workflow's working directory. Rejected if it contains shell metacharacters or `..` path traversal. |
+| `working_dir` | string | `--workdir` | Prepends `cd "<dir>" && ` to the command. An absolute path is used as-is; a relative path resolves against the workflow's working directory. Rejected if it contains shell metacharacters or `..` path traversal. |
 | `timeout` | duration | 30s | Per-command wall-clock limit (e.g. `30s`, `5m`). Non-positive or unparseable values error at execution time. |
 | `output_limit` | bytes | 64KB | Per-stream (stdout or stderr) cap. Accepts raw bytes (`65536`), `KB`, or `MB` suffix. Capped at `max_output_limit` (default 10MB, configurable via `--max-output-limit`). |
 
@@ -148,7 +148,7 @@ around `<cleaned>` protects path values with spaces.
 
 The subprocess working directory starts as the workflow's working directory —
 the execution environment's `workDir`, which is the `--workdir` passed to
-`tracker` (default the current directory). This is not the
+`tracker` (defaulting to the current directory). This is not the
 `.tracker/runs/<runID>` artifacts directory. When `working_dir` is set, the
 handler prepends the `cd` command above, so the effective command still runs
 through `sh -c`.
