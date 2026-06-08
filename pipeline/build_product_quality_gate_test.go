@@ -176,20 +176,34 @@ func hermeticEnv(t *testing.T, home, gocache string, withMake bool) []string {
 	link := func(name string, required bool) {
 		src, err := exec.LookPath(name)
 		if err != nil {
+			// A required tool absent is an environment limitation, not a code
+			// defect — skip the case (the suite already skips when go/sh/make are
+			// absent) rather than failing the whole run.
 			if required {
-				t.Fatalf("%s not available: %v", name, err)
+				t.Skipf("%s not available; skipping runtime gate test", name)
 			}
 			return
 		}
 		if err := os.Symlink(src, filepath.Join(binDir, name)); err != nil {
-			t.Fatalf("symlink %s: %v", name, err)
+			// Symlinks unsupported (e.g. Windows without Developer Mode) — skip,
+			// matching the precedent in git_preflight_test.go.
+			t.Skipf("cannot symlink %s (likely a platform without symlink support): %v", name, err)
 		}
 	}
 	link("go", true)
 	link("sh", true)
+	// sed/awk/grep are load-bearing, not decorative: the Makefile-target parser is
+	// `sed | awk` and the eslint-config check greps package.json. Require them so a
+	// host missing one SKIPS rather than silently passing a parse-dependent case for
+	// the wrong reason (a missing sed/awk would make the parser find no target and
+	// fall through, masquerading as "no CI target").
+	for _, u := range []string{"sed", "awk", "grep"} {
+		link(u, true)
+	}
 	// echo is for make's recipe direct-exec (a `@echo ...` rule runs without a
-	// shell, so make resolves echo via PATH); the rest serve the gate's own probe.
-	for _, u := range []string{"sed", "awk", "grep", "cat", "echo"} {
+	// shell, so make resolves echo via PATH; its absence fails loud where used);
+	// cat is a belt-and-suspenders helper. Both genuinely optional.
+	for _, u := range []string{"echo", "cat"} {
 		link(u, false)
 	}
 	if withMake {
