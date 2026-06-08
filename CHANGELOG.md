@@ -20,10 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to an owning milestone. A verification that is **neither owned by a milestone
   nor a documented-deferred `DO NOT implement` item** emits `COVERAGE_GAPS:<n>` +
   `STATUS:fail`, routing to a human to re-plan instead of silently building with a
-  dropped test. `VerifyMilestone` and `FinalSpecCheck` gain the matching
-  owner-or-deferred rule: a requirement may not be waved through as "future work"
-  unless a named milestone owns it or a `DO NOT implement` entry documents the
-  deferral. `.dip`-only change; no engine code. **Behavior change:** a
+  dropped test. `VerifyMilestone` (mid-build) and `FinalSpecCheck` (final gate)
+  gain the matching no-unowned-deferral rule: a requirement may not be waved
+  through as "future work" unless a milestone owns it — and at the final gate,
+  where every planned milestone is already complete, only a SPEC-documented
+  future-phase deferral (a `DO NOT implement` entry) qualifies, since an
+  owned-but-unimplemented requirement is a failure, not future work.
+  `.dip`-only change; no engine code. **Behavior change:** a
   decomposition that drops a mandated test now fails at planning time rather than
   shipping the gap.
 - **build_product: language-native quality gate fallback** (closes #299, refs
