@@ -3,6 +3,10 @@
 package pipeline
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -132,4 +136,237 @@ func TestQualityGateVerifyPromptTruthful(t *testing.T) {
 	if strings.Contains(p, "correctly skipped (no Makefile") {
 		t.Error("VerifyMilestone prompt still says the no-Makefile path is skipped — false after #299")
 	}
+}
+
+// extractProbe pulls the ci-probe.sh body (between `<<'PROBE_EOF'` and the closing
+// `PROBE_EOF`) out of the LOADED (dippin-dedented) Setup tool_command — the exact
+// bytes tracker writes to disk at runtime.
+func extractProbe(t *testing.T) string {
+	t.Helper()
+	cmd := setupCmd(t)
+	const open = "<<'PROBE_EOF'\n"
+	i := strings.Index(cmd, open)
+	if i == -1 {
+		t.Fatal("could not find ci-probe.sh heredoc open in Setup command")
+	}
+	rest := cmd[i+len(open):]
+	j := strings.Index(rest, "PROBE_EOF")
+	if j == -1 {
+		t.Fatal("could not find ci-probe.sh heredoc close")
+	}
+	return rest[:j]
+}
+
+// hermeticEnv builds an env that deterministically excludes optional linters
+// (golangci-lint/ruff/etc. typically live in ~/go/bin or ~/.local/bin, not in the
+// dir-of-go or /usr/bin:/bin) and runs go offline.
+func hermeticEnv(t *testing.T, goDir, home, gocache string) []string {
+	t.Helper()
+	return []string{
+		"PATH=" + goDir + ":/usr/bin:/bin",
+		"HOME=" + home,
+		"GOCACHE=" + gocache,
+		"GOPROXY=off",
+		"GOFLAGS=",
+	}
+}
+
+// runGate sources the probe in dir and returns combined output + the parsed rc and
+// PROJECT_CI_RAN. PATH override lets the make-missing case drop make.
+func runGate(t *testing.T, probe, dir string, env []string) (out string, rc int, ciRan string) {
+	t.Helper()
+	probePath := filepath.Join(t.TempDir(), "ci-probe.sh")
+	if err := os.WriteFile(probePath, []byte(probe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := ". " + probePath + `; run_project_ci_gate; echo "RC=$?"; echo "RAN=[$PROJECT_CI_RAN]"`
+	c := exec.Command("sh", "-c", script)
+	c.Dir = dir
+	c.Env = env
+	b, _ := c.CombinedOutput()
+	out = string(b)
+	if m := regexp.MustCompile(`RC=(\d+)`).FindStringSubmatch(out); m != nil {
+		rc = atoi(m[1])
+	} else {
+		t.Fatalf("no RC marker in output:\n%s", out)
+	}
+	if m := regexp.MustCompile(`RAN=\[([^\]]*)\]`).FindStringSubmatch(out); m != nil {
+		ciRan = m[1]
+	}
+	return out, rc, ciRan
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, r := range s {
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// writeGoModule writes a minimal module; `vetViolation` injects an unreachable-code /
+// printf-mismatch that `go vet` flags.
+func writeGoModule(t *testing.T, dir string, vetViolation bool) {
+	t.Helper()
+	mustWrite(t, filepath.Join(dir, "go.mod"), "module example.test\n\ngo 1.22\n")
+	src := "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"ok\") }\n"
+	if vetViolation {
+		// Printf format/arg mismatch — a deterministic, offline `go vet` error.
+		src = "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Printf(\"%d\\n\", \"not-an-int\") }\n"
+	}
+	mustWrite(t, filepath.Join(dir, "main.go"), src)
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunProjectCIGateRuntime(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go not available; skipping runtime gate test")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available; skipping runtime gate test")
+	}
+	goDir := filepath.Dir(goBin)
+	probe := extractProbe(t)
+
+	// (b) clean Go repo → rc 0.
+	t.Run("clean_go_rc0", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, false)
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if rc != 0 {
+			t.Errorf("clean Go repo: rc=%d want 0\n%s", rc, out)
+		}
+		if !strings.Contains(out, "go vet ./...") {
+			t.Errorf("clean Go repo: go vet did not run\n%s", out)
+		}
+	})
+
+	// (a) Go vet violation → rc != 0 AND rc != 2.
+	t.Run("go_vet_violation_rc1", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, true)
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if rc == 0 || rc == 2 {
+			t.Errorf("vet violation: rc=%d want non-zero and != 2\n%s", rc, out)
+		}
+	})
+
+	// (c) golangci-lint absent → INFO skip line, rc != 2.
+	t.Run("golangci_absent_info_skip", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, false)
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if rc == 2 {
+			t.Errorf("optional-absent must not yield rc=2\n%s", out)
+		}
+		if !strings.Contains(out, "golangci-lint not installed") {
+			t.Errorf("expected golangci-lint INFO skip line\n%s", out)
+		}
+	})
+
+	// (e) empty repo → rc 0 + no-toolchain note.
+	t.Run("empty_repo_rc0", func(t *testing.T) {
+		dir := t.TempDir()
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if rc != 0 {
+			t.Errorf("empty repo: rc=%d want 0\n%s", rc, out)
+		}
+		if !strings.Contains(out, "no recognized toolchain") {
+			t.Errorf("empty repo: expected no-toolchain note\n%s", out)
+		}
+	})
+
+	// (f) build-only Makefile (no ci/check/lint) + vet violation → falls through
+	// to language gates: rc != 0 AND PROJECT_CI_RAN empty (make CI path didn't win).
+	t.Run("build_only_makefile_falls_through", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, true)
+		mustWrite(t, filepath.Join(dir, "Makefile"), "build:\n\tgo build ./...\n")
+		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if rc == 0 || rc == 2 {
+			t.Errorf("build-only Makefile: rc=%d want non-zero != 2 (vet must run)\n%s", rc, out)
+		}
+		if ciRan != "" {
+			t.Errorf("build-only Makefile: PROJECT_CI_RAN=%q want empty (no make CI target)\n%s", ciRan, out)
+		}
+		if !strings.Contains(out, "go vet ./...") {
+			t.Errorf("build-only Makefile: go vet did not run\n%s", out)
+		}
+	})
+
+	// (d) Makefile `ci:` target wins → PROJECT_CI_RAN=ci AND go vet did NOT run.
+	t.Run("makefile_ci_target_wins", func(t *testing.T) {
+		if _, err := exec.LookPath("make"); err != nil {
+			t.Skip("make not available")
+		}
+		dir := t.TempDir()
+		writeGoModule(t, dir, true) // vet would fail IF it ran — it must not
+		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@echo running-ci\n")
+		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if ciRan != "ci" {
+			t.Errorf("Makefile ci target: PROJECT_CI_RAN=%q want ci\n%s", ciRan, out)
+		}
+		if rc != 0 {
+			t.Errorf("Makefile ci (echo) target: rc=%d want 0\n%s", rc, out)
+		}
+		if strings.Contains(out, "go vet ./...") {
+			t.Errorf("Makefile ci won but go vet ALSO ran — precedence broken\n%s", out)
+		}
+	})
+
+	// (h) Makefile present, make uninstalled → rc 2 BEFORE any language gate.
+	t.Run("make_missing_rc2", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, false)
+		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@echo hi\n")
+		// PATH without /usr/bin:/bin so `command -v make` fails; only goDir present.
+		env := []string{"PATH=" + goDir, "HOME=" + t.TempDir(), "GOCACHE=" + t.TempDir(), "GOPROXY=off"}
+		out, rc, _ := runGate(t, probe, dir, env)
+		if rc != 2 {
+			t.Errorf("make missing: rc=%d want 2\n%s", rc, out)
+		}
+		if strings.Contains(out, "go vet ./...") {
+			t.Errorf("make-missing must short-circuit BEFORE language gates\n%s", out)
+		}
+	})
+
+	// (i) polyglot: clean Go + package.json → BOTH stacks detected (proves not
+	// first-match): go vet marker AND a node-stack INFO/skip line both present.
+	t.Run("polyglot_runs_all_stacks", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, false)
+		mustWrite(t, filepath.Join(dir, "package.json"), "{\"name\":\"x\",\"version\":\"0.0.0\"}\n")
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if rc != 0 {
+			t.Errorf("polyglot clean: rc=%d want 0\n%s", rc, out)
+		}
+		if !strings.Contains(out, "go vet ./...") {
+			t.Errorf("polyglot: Go stack did not run\n%s", out)
+		}
+		// tsc/eslint absent under hermetic PATH → INFO skip lines prove the JS
+		// stack was entered (not first-match-stopped at Go).
+		if !strings.Contains(out, "tsc not installed") && !strings.Contains(out, "eslint not installed") {
+			t.Errorf("polyglot: JS stack was not entered (first-match bug?)\n%s", out)
+		}
+	})
+
+	// (g) optional absent + core fails simultaneously → rc 1, not 2.
+	t.Run("optional_absent_core_fails_rc1", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, true) // go vet fails; golangci-lint absent
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		if rc != 1 {
+			t.Errorf("core-fail + optional-absent: rc=%d want 1\n%s", rc, out)
+		}
+		if !strings.Contains(out, "golangci-lint not installed") {
+			t.Errorf("expected golangci-lint INFO skip alongside the core failure\n%s", out)
+		}
+	})
 }
