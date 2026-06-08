@@ -157,13 +157,44 @@ func extractProbe(t *testing.T) string {
 	return rest[:j]
 }
 
-// hermeticEnv builds an env that deterministically excludes optional linters
-// (golangci-lint/ruff/etc. typically live in ~/go/bin or ~/.local/bin, not in the
-// dir-of-go or /usr/bin:/bin) and runs go offline.
-func hermeticEnv(t *testing.T, goDir, home, gocache string) []string {
+// hermeticEnv builds an env whose PATH is a freshly-created temp bin containing
+// ONLY symlinks to the tools the gate legitimately needs: go, sh, the coreutils
+// the Makefile-parse path (`sed | awk`) and the eslint-config check (`grep`) use,
+// and make when the case requires it. Optional linters (golangci-lint/tsc/eslint/
+// ruff/mypy/cargo) are therefore GUARANTEED absent regardless of what the host has
+// in /usr/bin, so the "not installed" INFO assertions can't flake on a machine
+// that happens to ship one of them in a system dir (CodeRabbit, PR #321). go runs
+// offline (GOPROXY=off) with an isolated cache. (NB: keeping /usr/bin:/bin on PATH
+// — as an earlier draft did — would have leaked any system-installed linter; but
+// dropping it naively would also drop sed/awk and break the Makefile-parse cases,
+// hence the explicit allowlist of symlinks below.)
+func hermeticEnv(t *testing.T, home, gocache string, withMake bool) []string {
 	t.Helper()
+	binDir := t.TempDir()
+	link := func(name string, required bool) {
+		src, err := exec.LookPath(name)
+		if err != nil {
+			if required {
+				t.Fatalf("%s not available: %v", name, err)
+			}
+			return
+		}
+		if err := os.Symlink(src, filepath.Join(binDir, name)); err != nil {
+			t.Fatalf("symlink %s: %v", name, err)
+		}
+	}
+	link("go", true)
+	link("sh", true)
+	// echo is for make's recipe direct-exec (a `@echo ...` rule runs without a
+	// shell, so make resolves echo via PATH); the rest serve the gate's own probe.
+	for _, u := range []string{"sed", "awk", "grep", "cat", "echo"} {
+		link(u, false)
+	}
+	if withMake {
+		link("make", true)
+	}
 	return []string{
-		"PATH=" + goDir + ":/usr/bin:/bin",
+		"PATH=" + binDir,
 		"HOME=" + home,
 		"GOCACHE=" + gocache,
 		"GOPROXY=off",
@@ -183,12 +214,15 @@ func runGate(t *testing.T, probe, dir string, env []string) (out string, rc int,
 	c := exec.Command("sh", "-c", script)
 	c.Dir = dir
 	c.Env = env
-	b, _ := c.CombinedOutput()
+	// A non-nil err here is normal — the gate exits non-zero on a gate failure, and
+	// we parse the real rc from the RC= marker. Only surface runErr if the marker is
+	// absent (shell couldn't exec / syntax error), so failures aren't opaque.
+	b, runErr := c.CombinedOutput()
 	out = string(b)
 	if m := regexp.MustCompile(`RC=(\d+)`).FindStringSubmatch(out); m != nil {
 		rc = atoi(m[1])
 	} else {
-		t.Fatalf("no RC marker in output:\n%s", out)
+		t.Fatalf("no RC marker in output (exec err: %v):\n%s", runErr, out)
 	}
 	if m := regexp.MustCompile(`RAN=\[([^\]]*)\]`).FindStringSubmatch(out); m != nil {
 		ciRan = m[1]
@@ -239,7 +273,7 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	t.Run("clean_go_rc0", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, false)
-		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
 		if rc != 0 {
 			t.Errorf("clean Go repo: rc=%d want 0\n%s", rc, out)
 		}
@@ -252,7 +286,7 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	t.Run("go_vet_violation_rc1", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, true)
-		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
 		if rc == 0 || rc == 2 {
 			t.Errorf("vet violation: rc=%d want non-zero and != 2\n%s", rc, out)
 		}
@@ -262,7 +296,7 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	t.Run("golangci_absent_info_skip", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, false)
-		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
 		if rc == 2 {
 			t.Errorf("optional-absent must not yield rc=2\n%s", out)
 		}
@@ -274,7 +308,7 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	// (e) empty repo → rc 0 + no-toolchain note.
 	t.Run("empty_repo_rc0", func(t *testing.T) {
 		dir := t.TempDir()
-		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
 		if rc != 0 {
 			t.Errorf("empty repo: rc=%d want 0\n%s", rc, out)
 		}
@@ -286,10 +320,13 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	// (f) build-only Makefile (no ci/check/lint) + vet violation → falls through
 	// to language gates: rc != 0 AND PROJECT_CI_RAN empty (make CI path didn't win).
 	t.Run("build_only_makefile_falls_through", func(t *testing.T) {
+		if _, err := exec.LookPath("make"); err != nil {
+			t.Skip("make not available") // Makefile present → gate needs make to fall through (else rc=2)
+		}
 		dir := t.TempDir()
 		writeGoModule(t, dir, true)
 		mustWrite(t, filepath.Join(dir, "Makefile"), "build:\n\tgo build ./...\n")
-		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), true))
 		if rc == 0 || rc == 2 {
 			t.Errorf("build-only Makefile: rc=%d want non-zero != 2 (vet must run)\n%s", rc, out)
 		}
@@ -309,7 +346,7 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, true) // vet would fail IF it ran — it must not
 		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@echo running-ci\n")
-		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), true))
 		if ciRan != "ci" {
 			t.Errorf("Makefile ci target: PROJECT_CI_RAN=%q want ci\n%s", ciRan, out)
 		}
@@ -326,9 +363,9 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, false)
 		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@echo hi\n")
-		// PATH without /usr/bin:/bin so `command -v make` fails; only goDir present.
-		env := []string{"PATH=" + goDir, "HOME=" + t.TempDir(), "GOCACHE=" + t.TempDir(), "GOPROXY=off"}
-		out, rc, _ := runGate(t, probe, dir, env)
+		// withMake=false: make is not symlinked into the hermetic bin, so the gate's
+		// `command -v make` fails and it returns rc=2 before any language gate.
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
 		if rc != 2 {
 			t.Errorf("make missing: rc=%d want 2\n%s", rc, out)
 		}
@@ -343,7 +380,7 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, false)
 		mustWrite(t, filepath.Join(dir, "package.json"), "{\"name\":\"x\",\"version\":\"0.0.0\"}\n")
-		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
 		if rc != 0 {
 			t.Errorf("polyglot clean: rc=%d want 0\n%s", rc, out)
 		}
@@ -387,7 +424,7 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	t.Run("optional_absent_core_fails_rc1", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, true) // go vet fails; golangci-lint absent
-		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, goDir, t.TempDir(), t.TempDir()))
+		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
 		if rc != 1 {
 			t.Errorf("core-fail + optional-absent: rc=%d want 1\n%s", rc, out)
 		}

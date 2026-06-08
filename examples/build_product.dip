@@ -46,10 +46,11 @@ workflow BuildProduct
       #   2  — Makefile present but `make` not installed (caller
       #        should escalate; LLM fix loop can't install a binary).
       #        rc=2 is reserved for THIS case only.
-      #   N  — a gate failed: `make <TARGET>` exited non-zero, OR a
-      #        language-native gate (go vet / golangci-lint / tsc /
-      #        eslint / ruff / mypy / cargo fmt|clippy) failed
-      #        (collapsed to 1; caller should fail / retry).
+      #   N  — a gate failed (caller should fail / retry): `make
+      #        <TARGET>` exits with make's own non-zero code, whereas a
+      #        failing language-native gate (go vet / golangci-lint /
+      #        tsc / eslint / ruff / mypy / cargo fmt|clippy) ALWAYS
+      #        collapses to exactly 1 — never an arbitrary N, never 2.
       # Sets PROJECT_CI_RAN to the chosen target on a real `make` run,
       # empty string otherwise (incl. the language-native fall-through).
       run_project_ci_gate() {
