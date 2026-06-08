@@ -226,7 +226,12 @@ func runGate(t *testing.T, probe, dir string, env []string) (out string, rc int,
 	if err := os.WriteFile(probePath, []byte(probe), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := ". " + probePath + `; run_project_ci_gate; echo "RC=$?"; echo "RAN=[$PROJECT_CI_RAN]"`
+	// Run under `set -eu` and capture rc via `|| rc=$?` — the exact shape TestMilestone
+	// uses (`run_project_ci_gate || CI_RC=$?` under set -eu). This adds set -u coverage
+	// and realistic shell options; the FinalBuild bare-call-under-set-e path (where a
+	// missing `|| LANG_RC=$?` guard would abort mid-function) is covered separately by
+	// TestRunProjectCIGateSetEBareCall.
+	script := "set -eu; . " + probePath + `; rc=0; run_project_ci_gate || rc=$?; echo "RC=$rc"; echo "RAN=[$PROJECT_CI_RAN]"`
 	c := exec.Command("sh", "-c", script)
 	c.Dir = dir
 	c.Env = env
@@ -252,6 +257,31 @@ func atoi(s string) int {
 		n = n*10 + int(r-'0')
 	}
 	return n
+}
+
+// sourceAndRun sources the probe then runs `body` under `set -eu` in dir, returning
+// combined output and the process exit code. Unlike runGate it parses no RC marker —
+// it's for the FinalBuild bare-call invariant, where set -e may abort the script
+// before any trailing marker prints.
+func sourceAndRun(t *testing.T, probe, dir string, env []string, body string) (string, int) {
+	t.Helper()
+	probePath := filepath.Join(t.TempDir(), "ci-probe.sh")
+	if err := os.WriteFile(probePath, []byte(probe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("sh", "-c", "set -eu\n. "+probePath+"\n"+body)
+	c.Dir = dir
+	c.Env = env
+	b, err := c.CombinedOutput()
+	code := 0
+	if err != nil {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("exec failed: %v\n%s", err, string(b))
+		}
+		code = ee.ExitCode()
+	}
+	return string(b), code
 }
 
 // writeGoModule writes a minimal module; `vetViolation` injects an unreachable-code /
@@ -446,6 +476,61 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		}
 		if !strings.Contains(out, "golangci-lint not installed") {
 			t.Errorf("expected golangci-lint INFO skip alongside the core failure\n%s", out)
+		}
+	})
+}
+
+// TestRunProjectCIGateSetEBareCall covers the FinalBuild invariant that the main
+// runtime harness (which captures rc via `|| rc=$?`, suppressing set -e inside the
+// function) cannot: FinalBuild calls `run_project_ci_gate` BARE under `set -eu`, so
+// a gate missing its `|| LANG_RC=$?` guard would abort the function the instant a
+// gate fails — before the remaining gates run and before the function's own return.
+func TestRunProjectCIGateSetEBareCall(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not available; skipping runtime gate test")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available; skipping runtime gate test")
+	}
+	probe := extractProbe(t)
+
+	// Negative control for the guard invariant: on a vet-violation repo, a bare call
+	// under set -e must still run PAST the failing go vet to the golangci-lint INFO
+	// line (proving the failure was accumulated via `|| LANG_RC=$?`, not aborted),
+	// then return non-zero so set -e stops before the trailing marker. If any gate
+	// lost its guard, set -e would abort at that gate and golangci's INFO line would
+	// be absent.
+	t.Run("failing_gate_runs_all_then_propagates", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, true)
+		out, code := sourceAndRun(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false),
+			"run_project_ci_gate\necho REACHED-END")
+		if !strings.Contains(out, "go vet ./...") {
+			t.Errorf("go vet did not run\n%s", out)
+		}
+		if !strings.Contains(out, "golangci-lint not installed") {
+			t.Errorf("function aborted at the failing go vet — a gate is missing its `|| LANG_RC=$?` guard\n%s", out)
+		}
+		if strings.Contains(out, "REACHED-END") {
+			t.Errorf("set -e should have aborted after the gate returned non-zero\n%s", out)
+		}
+		if code == 0 {
+			t.Errorf("expected non-zero exit from a bare set -e call on a failing gate\n%s", out)
+		}
+	})
+
+	// Happy path: a clean repo's bare call under set -eu reaches the trailing marker
+	// (all gates pass → return 0 → no spurious abort).
+	t.Run("clean_gate_reaches_end", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGoModule(t, dir, false)
+		out, code := sourceAndRun(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false),
+			"run_project_ci_gate\necho REACHED-END")
+		if !strings.Contains(out, "REACHED-END") {
+			t.Errorf("clean repo bare call did not reach end (spurious set -e abort?)\n%s", out)
+		}
+		if code != 0 {
+			t.Errorf("clean repo bare call: exit=%d want 0\n%s", code, out)
 		}
 	})
 }
