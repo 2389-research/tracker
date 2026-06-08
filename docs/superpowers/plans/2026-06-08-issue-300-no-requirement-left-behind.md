@@ -112,13 +112,16 @@ func TestDecomposeCoverageTablePrompt(t *testing.T) {
 }
 
 // Test 3 — negative-control: Decompose's coverage gate carves out documented
-// deferrals (the DO-NOT-implement / deferred case) so it does not false-fail a
-// correct decomposition that properly defers Phase-2+ work.
+// deferrals via a 3-way classification (owned | deferred | UNOWNED). Asserts
+// tokens UNIQUE to the #300 block ("UNOWNED", "neither owned") — NOT the bare
+// "DO NOT implement"/"deferred", which the pre-existing anti-scope-creep block
+// already contains (would be a no-op assertion; test-reviewer I1, verified
+// count=0 for UNOWNED/neither-owned, count>0 for DO-NOT-implement/deferred).
 func TestDecomposeDeferralCarveout(t *testing.T) {
 	p := promptOf(t, loadBuildProduct(t), "Decompose")
-	for _, sub := range []string{"DO NOT implement", "deferred"} {
+	for _, sub := range []string{"UNOWNED", "neither owned"} {
 		if !strings.Contains(p, sub) {
-			t.Errorf("Decompose coverage gate missing deferral-carveout substring %q (#300)", sub)
+			t.Errorf("Decompose coverage gate missing 3-way-classification substring %q (#300)", sub)
 		}
 	}
 }
