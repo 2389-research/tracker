@@ -83,9 +83,11 @@ func TestQualityGateMakefilePathPreserved(t *testing.T) {
 	}
 }
 
-// Test 6 — regression-pin (semantic): rc=2 stays sole-sourced to the make-missing
-// branch. Exactly one `return 2`, and it is adjacent to `command -v make` — no
-// `return 2` may appear after any language-native gate marker.
+// Test 6 — regression-pin (semantic): the only EXPLICIT `return 2` statement is
+// the make-missing branch. Exactly one `return 2`, adjacent to `command -v make`,
+// and none after any language-native gate marker. (This pins the source code, not
+// runtime rc uniqueness: the `make "$TARGET"` path can still propagate make's own
+// native exit 2 on a recipe error — pre-existing, tracked in #320.)
 func TestQualityGateRc2OnlyMakeMissing(t *testing.T) {
 	cmd := setupCmd(t)
 	if n := strings.Count(cmd, "return 2"); n != 1 {

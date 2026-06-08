@@ -45,7 +45,10 @@ workflow BuildProduct
       #        was detected (issue #299).
       #   2  — Makefile present but `make` not installed (caller
       #        should escalate; LLM fix loop can't install a binary).
-      #        rc=2 is reserved for THIS case only.
+      #        This helper emits an explicit rc=2 ONLY here; the
+      #        language-native block never returns 2. (Caveat: the
+      #        `make <TARGET>` path below can still propagate make's own
+      #        native exit 2 on a recipe error — pre-existing, #320.)
       #   N  — a gate failed (caller should fail / retry): `make
       #        <TARGET>` exits with make's own non-zero code, whereas a
       #        failing language-native gate (go vet / golangci-lint /
@@ -180,10 +183,22 @@ workflow BuildProduct
         if [ -f Cargo.toml ]; then
           RAN_ANY=1
           if command -v cargo >/dev/null 2>&1; then
-            echo "--- cargo fmt --check (language-native gate, #299) ---"
-            cargo fmt --check 2>&1 || LANG_RC=$?
-            echo "--- cargo clippy -- -D warnings (language-native gate, #299) ---"
-            cargo clippy -- -D warnings 2>&1 || LANG_RC=$?
+            # rustfmt/clippy are separate toolchain components — `cargo` can be
+            # present without them. A missing component is a tooling absence
+            # (same class as an optional tool not installed), not a code defect,
+            # so gate each subcommand on its own availability (#299).
+            if cargo fmt --version >/dev/null 2>&1; then
+              echo "--- cargo fmt --check (language-native gate, #299) ---"
+              cargo fmt --check 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: cargo fmt (rustfmt) not installed — skipping (optional, #299)"
+            fi
+            if cargo clippy --version >/dev/null 2>&1; then
+              echo "--- cargo clippy -- -D warnings (language-native gate, #299) ---"
+              cargo clippy -- -D warnings 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: cargo clippy not installed — skipping (optional, #299)"
+            fi
           else
             echo "INFO: cargo not installed — skipping (optional, #299)"
           fi
