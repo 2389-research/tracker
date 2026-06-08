@@ -1553,13 +1553,15 @@ workflow BuildProduct
       - Is it implemented correctly?
       - Was nothing extra added beyond what the spec asked for?
       - If it is NOT implemented and the report defers it to "future work":
-        that deferral is acceptable ONLY when it is EITHER owned by a named
-        milestone in .ai/decisions/milestones.md (grep `^#+ *[Mm]ilestone`
-        and cite the milestone + its "Done when" line) OR documented-deferred
-        (SPEC.md defers to a named phase AND a "DO NOT implement" block records
-        it, citing the spec section). A future-work deferral that is neither
-        keeps the early STATUS:fail in place — do NOT emit the terminal
-        STATUS:success (issue #300).
+        every planned milestone is already complete at THIS gate, so being
+        "owned" by a milestone is NOT an acceptable excuse — that milestone
+        should have built it, and an owned-but-unimplemented requirement is
+        a failure, not future work. The deferral is acceptable ONLY when
+        SPEC.md itself defers the behavior to a named later phase AND a
+        "DO NOT implement" block in .ai/decisions/milestones.md records that
+        deferral, citing the spec section (cite both). A future-work deferral
+        that is not SPEC-documented as deferred keeps the early STATUS:fail
+        in place — do NOT emit the terminal STATUS:success (issue #300).
 
       Also verify:
       - No UNEXPECTED leftover files in .ai/build/ — the workflow

@@ -130,7 +130,12 @@ func TestDecomposeOutEdgesUnchanged(t *testing.T) {
 func TestVerifyAndFinalKeepAutoStatus(t *testing.T) {
 	g := loadBuildProduct(t)
 	for _, id := range []string{"VerifyMilestone", "FinalSpecCheck"} {
-		if g.Nodes[id].Attrs["auto_status"] != "true" {
+		n, ok := g.Nodes[id]
+		if !ok {
+			t.Errorf("%s node missing from build_product graph (#300)", id)
+			continue
+		}
+		if n.Attrs["auto_status"] != "true" {
 			t.Errorf("%s lost auto_status:true — its STATUS:fail gate is dead (#300)", id)
 		}
 	}
