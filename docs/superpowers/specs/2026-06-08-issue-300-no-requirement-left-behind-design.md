@@ -70,11 +70,11 @@ Append an owner-or-fail rule to check 5 (the node already has `auto_status: true
 
 ### Edit 3 — `FinalSpecCheck` (`:1378`)
 
-Append the same owner-or-deferred-or-fail rule into FinalSpecCheck's SPEC.md compliance section (the node already has `auto_status: true` and uses the fail-closed first-line-`STATUS:fail` pattern):
+Append a **deferred-only** rule into FinalSpecCheck's SPEC.md compliance section (the node already has `auto_status: true` and uses the fail-closed first-line-`STATUS:fail` pattern). **This differs from Edit 2 deliberately** (Codex PR #322 P2): `FinalSpecCheck` runs *after every planned milestone is complete*, so "owned by a milestone" is NOT a valid future-work excuse — an owned-but-unimplemented requirement at the final gate is a milestone *failure*, not deferrable work. `VerifyMilestone` (mid-build) keeps the "owned by a *later* milestone" branch because later milestones genuinely haven't run yet; `FinalSpecCheck` drops it and accepts only a SPEC-documented future-phase deferral:
 
-> For EVERY requirement: if it is not implemented and the report defers it to "future work," that deferral is acceptable ONLY when it is EITHER owned by a named later milestone in `.ai/decisions/milestones.md` (grep + cite the milestone and its "Done when" line) OR documented-deferred (SPEC.md defers to a named phase AND a `DO NOT implement` block records it, citing the spec section). A future-work deferral that is neither keeps the early `STATUS:fail` in place (do NOT emit the terminal `STATUS:success`).
+> For EVERY requirement: if it is not implemented and the report defers it to "future work," every planned milestone is already complete at this gate, so being "owned" by a milestone is NOT acceptable — that milestone should have built it. The deferral is acceptable ONLY when SPEC.md itself defers the behavior to a named later phase AND a `DO NOT implement` block in `.ai/decisions/milestones.md` records that deferral, citing the spec section (cite both). A future-work deferral that is not SPEC-documented as deferred keeps the early `STATUS:fail` in place (do NOT emit the terminal `STATUS:success`).
 
-Because FinalSpecCheck is fail-closed, the rule is phrased as "an unowned/undocumented deferral **blocks** the terminal `STATUS:success`" — NOT "emit STATUS:fail" (which mid-prose would just be one more fail line the final success overrides). Keep this phrasing; do not let an implementer normalize it to Edit 2's "emit STATUS:fail."
+Because FinalSpecCheck is fail-closed, the rule is phrased as "a non-SPEC-documented deferral **blocks** the terminal `STATUS:success`" — NOT "emit STATUS:fail" (which mid-prose would just be one more fail line the final success overrides). Keep this phrasing; do not let an implementer normalize it to Edit 2's "emit STATUS:fail."
 
 ### Documenting the new `.ai/decisions/` artifact (hygiene — refuted-collision follow-through)
 
@@ -85,15 +85,6 @@ The feared FinalSpecCheck allowlist collision was refuted (its "no UNEXPECTED le
 After Edit 1, several existing prose sites that describe Decompose behavior must stay consistent:
 
 - `VerifyMilestone:759-763` ("if Decompose dropped a requirement during milestone planning … the verifier had no path to discover the gap") and `:865` ("a SPEC.md bullet that Decompose dropped silently passed through") — still true, but now Decompose *also* owns a coverage gate. Add a brief note that Decompose writes `requirement-coverage.md` and fails on an unowned mandated verification, so the two layers are described consistently (defense in depth, not contradiction). This note is also the positive prose-sync pin the test plan asserts.
-- `EscalateReview` retry copy (`:1538`, "Go back to Decompose and re-plan the build from scratch") — remains truthful; Decompose can now route here directly on a coverage failure.
-
-No prose may state or imply that Decompose "always succeeds" or "cannot fail." (None currently does; this is a guard against introducing such a claim.)
-
-### Prose-sync (the #299 doc-in-prompt-truthfulness lesson)
-
-After Edit 1, several existing prose sites that describe Decompose behavior must stay consistent:
-
-- `VerifyMilestone:759-763` ("if Decompose dropped a requirement during milestone planning … the verifier had no path to discover the gap") and `:865` ("a SPEC.md bullet that Decompose dropped silently passed through") — still true, but now Decompose *also* owns a coverage gate. Add a brief note that Decompose writes `requirement-coverage.md` and fails on an unowned mandated verification, so the two layers are described consistently (defense in depth, not contradiction).
 - `EscalateReview` retry copy (`:1538`, "Go back to Decompose and re-plan the build from scratch") — remains truthful; Decompose can now route here directly on a coverage failure.
 
 No prose may state or imply that Decompose "always succeeds" or "cannot fail." (None currently does; this is a guard against introducing such a claim.)
