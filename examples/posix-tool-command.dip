@@ -1,0 +1,30 @@
+workflow PosixToolCommandExample
+  goal: "Demonstrate portable POSIX sh style for tool command blocks."
+  start: CheckWorkspace
+  exit: Exit
+
+  tool CheckWorkspace
+    label: "Check workspace"
+    timeout: 10s
+    marker_grep: '^workspace-(ready|missing)$'
+    command:
+      #!/bin/sh
+      set -eu
+      if [ -f go.mod ]; then
+        printf 'workspace-ready\n'
+      else
+        printf 'workspace-missing\n'
+      fi
+
+  tool Exit
+    label: "Exit"
+    timeout: 5s
+    command:
+      #!/bin/sh
+      printf 'done\n'
+
+  edges
+    # Both marker values converge on Exit here to keep the illustration small;
+    # in a real workflow each branch would route to distinct follow-up nodes.
+    CheckWorkspace -> Exit when ctx.tool_marker = ready
+    CheckWorkspace -> Exit when ctx.tool_marker = missing

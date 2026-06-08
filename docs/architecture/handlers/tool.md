@@ -2,7 +2,8 @@
 
 ## Purpose
 
-The tool handler runs a shell command in the run's working directory, captures
+The tool handler runs a shell command in the workflow's working directory
+(the `--workdir`, which defaults to the current directory), captures
 stdout/stderr, and maps the exit code to a pipeline outcome. It's how a
 pipeline node executes something that's not an LLM agent — running tests,
 invoking a formatter, generating a file, reading a directory, etc. Because
@@ -17,7 +18,7 @@ Ground truth:
 | Attribute | Type | Default | Behavior |
 |-----------|------|---------|----------|
 | `tool_command` | string (required) | — | Shell command to execute. `${ctx.foo}`, `${graph.bar}`, `${params.baz}` variable refs are expanded before execution. |
-| `working_dir` | string | run dir | Prepends `cd "<dir>" && ` to the command. Rejected if it contains shell metacharacters or `..` path traversal. |
+| `working_dir` | string | `--workdir` | Prepends `cd "<dir>" && ` to the command. An absolute path is used as-is; a relative path resolves against the workflow's working directory. Rejected if it contains shell metacharacters or `..` path traversal. |
 | `timeout` | duration | 30s | Per-command wall-clock limit (e.g. `30s`, `5m`). Non-positive or unparseable values error at execution time. |
 | `output_limit` | bytes | 64KB | Per-stream (stdout or stderr) cap. Accepts raw bytes (`65536`), `KB`, or `MB` suffix. Capped at `max_output_limit` (default 10MB, configurable via `--max-output-limit`). |
 
@@ -44,6 +45,45 @@ sequenceDiagram
     X-->>T: exit code stdout stderr
     T-->>E: Outcome status tool_stdout tool_stderr
 ```
+
+## Shell execution model
+
+Tool command bodies run through `sh -c <command>`. This applies to the
+runtime `tool_command` attribute and to Dippin `command:` blocks that compile
+into a tool command body. If a command block starts with a shebang such as
+`#!/usr/bin/env bash`, the shebang is passed to `sh -c` as command text; it is
+not used to select an interpreter. In practice that first line is only a shell
+comment.
+
+Write command bodies as portable POSIX `sh` unless the command explicitly
+invokes another interpreter itself:
+
+```dip
+tool PortableCheck
+  command:
+    #!/bin/sh
+    set -eu
+    if [ -f go.mod ]; then
+      go test ./...
+    fi
+    printf 'tests-pass'
+```
+
+On Ubuntu and many CI hosts, `/bin/sh` is `dash`, not Bash. Avoid Bash-only
+syntax in tool command bodies, including:
+
+- `[[ ... ]]`
+- arrays such as `items=(a b)`
+- `local`
+- `trap ... ERR`
+- `${var,,}` case conversion
+- `${var:offset:length}` substring expansion
+- process substitution such as `<(cmd)`
+
+`set -o pipefail` is not portable to all `/bin/sh` implementations. If a
+pipeline needs Bash-specific behavior, wrap it explicitly, for example
+`bash -c 'set -euo pipefail; ...'`, and make that dependency clear in the
+workflow.
 
 ## Variable expansion and safe-key allowlist
 
@@ -106,6 +146,13 @@ before prepending `cd`:
 The final command becomes `cd "<cleaned>" && <command>`. The double-quote
 around `<cleaned>` protects path values with spaces.
 
+The subprocess working directory starts as the workflow's working directory —
+the execution environment's `workDir`, which is the `--workdir` passed to
+`tracker` (defaulting to the current directory). This is not the
+`.tracker/runs/<runID>` artifacts directory. When `working_dir` is set, the
+handler prepends the `cd` command above, so the effective command still runs
+through `sh -c`.
+
 ## Timeout
 
 [`parseTimeout`](../../../pipeline/handlers/tool.go):
@@ -165,6 +212,27 @@ filtered env, because they have their own isolation model (sandbox, container).
 the node declares a `writes:` attr listing expected JSON fields, the handler
 parses stdout as JSON and writes each declared key into context. A parse
 failure or missing declared field flips status to `OutcomeFail`.
+
+Routing sees both the exit-code outcome and any captured stdout markers:
+
+- `ctx.outcome` is `success` for exit code 0 and `fail` for any non-zero exit.
+- `ctx.tool_stdout` and `ctx.tool_stderr` receive the right-trimmed captured
+  tail of each stream.
+- If `marker_grep` is set, the regex scans captured stdout line by line; the
+  last match populates `ctx.tool_marker`. When the regex has a capture group,
+  group 1 is used; otherwise the full match — e.g. `^workspace-(ready|missing)$`
+  sets `ctx.tool_marker` to `ready` or `missing`, not `workspace-ready`.
+- `_TRACKER_ROUTE=<value>` sentinel lines are always scanned from captured
+  stdout, and the last match populates `ctx.tool_route`.
+
+When a tool exits non-zero, the engine dead-stops the node only when it has
+**no** conditional outgoing edge **and** no resolvable `fallback_target`. Any
+conditional edge counts as intentional routing and disables the halt — even one
+unrelated to failure, such as a `ctx.tool_marker = …` route. So marker routing
+and strict-failure protection are not automatic together: a node with only
+marker edges (like the `CheckWorkspace` example, which has no `fallback_target`)
+would not strict-halt on a non-zero exit. To catch failures explicitly, add an
+edge guarded by `ctx.outcome = fail` or configure a `fallback_target`.
 
 ## Events emitted
 
