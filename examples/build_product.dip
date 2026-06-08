@@ -40,14 +40,22 @@ workflow BuildProduct
       # between the two nodes; this prevents that class of bug.
       cat > .ai/build/ci-probe.sh <<'PROBE_EOF'
       # Source this file, then call `run_project_ci_gate`. Returns:
-      #   0  — clean (no Makefile, no matching target, OR
-      #        `make <TARGET>` exited 0)
+      #   0  — clean: `make <TARGET>` exited 0, OR (no Makefile gate
+      #        ran) the language-native gates passed / no toolchain
+      #        was detected (issue #299).
       #   2  — Makefile present but `make` not installed (caller
-      #        should escalate; LLM fix loop can't install a binary)
-      #   N  — `make <TARGET>` exited with non-zero N
-      #        (caller should fail / retry)
-      # Sets PROJECT_CI_RAN to the chosen target on a real run,
-      # empty string otherwise.
+      #        should escalate; LLM fix loop can't install a binary).
+      #        This helper emits an explicit rc=2 ONLY here; the
+      #        language-native block never returns 2. (Caveat: the
+      #        `make <TARGET>` path below can still propagate make's own
+      #        native exit 2 on a recipe error — pre-existing, #320.)
+      #   N  — a gate failed (caller should fail / retry): `make
+      #        <TARGET>` exits with make's own non-zero code, whereas a
+      #        failing language-native gate (go vet / golangci-lint /
+      #        tsc / eslint / ruff / mypy / cargo fmt|clippy) ALWAYS
+      #        collapses to exactly 1 — never an arbitrary N, never 2.
+      # Sets PROJECT_CI_RAN to the chosen target on a real `make` run,
+      # empty string otherwise (incl. the language-native fall-through).
       run_project_ci_gate() {
         PROJECT_CI_RAN=""
         MAKEFILE=""
@@ -55,8 +63,9 @@ workflow BuildProduct
           if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
         done
         if [ -z "$MAKEFILE" ]; then
-          echo "INFO: no Makefile present, no project CI gate to run"
-          return 0
+          echo "INFO: no Makefile present — running language-native gates (#299)"
+          run_language_native_gates
+          return $?
         fi
         if ! command -v make >/dev/null 2>&1; then
           echo "ERROR: $MAKEFILE present but 'make' not installed — escalating"
@@ -87,7 +96,119 @@ workflow BuildProduct
             return $?
           fi
         done
-        echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
+        echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint) — running language-native gates (#299)"
+        run_language_native_gates
+        return $?
+      }
+      # Language-native quality-gate fallback (issue #299, epic #308 Phase 2).
+      # Reached from run_project_ci_gate when no Makefile ci/check/lint target
+      # ran. Runs gates for EVERY detected toolchain (polyglot, not first-match).
+      # Returns 0 (clean / nothing to gate) or 1 (some gate failed) — NEVER 2;
+      # rc=2 stays reserved for the make-missing case in run_project_ci_gate.
+      #
+      # INVARIANT: every gate command MUST end in `|| LANG_RC=$?`. These nodes run
+      # `set -eu`; FinalBuild calls the gate BARE (set -e active in the body), so a
+      # bare failing gate would abort the node before later gates/markers run. The
+      # `|| LANG_RC=$?` neutralizes set -e per gate and accumulates the failure.
+      # "Core" tools fail when they FAIL; "optional" tools are command-v guarded so
+      # ABSENCE is a one-line INFO skip (never a failure, never rc=2).
+      run_language_native_gates() {
+        LANG_RC=0
+        RAN_ANY=""
+        # Go — `go vet` is the core gate (go is present by go.mod detection).
+        if [ -f go.mod ]; then
+          RAN_ANY=1
+          echo "--- go vet ./... (language-native gate, #299) ---"
+          go vet ./... 2>&1 || LANG_RC=$?
+          if command -v golangci-lint >/dev/null 2>&1; then
+            echo "--- golangci-lint run (language-native gate, #299) ---"
+            golangci-lint run 2>&1 || LANG_RC=$?
+          else
+            echo "INFO: golangci-lint not installed — skipping (optional, #299)"
+          fi
+        fi
+        # JS/TS — run-if-present AND only if the project opted into the tool
+        # (config file present). A plain-JS repo (package.json, no tsconfig /
+        # no eslint config) must NOT fail just because a global tsc/eslint is on
+        # PATH: bare `tsc --noEmit` exits non-zero on a project with no tsconfig,
+        # and `eslint .` errors with no config — gating on PATH alone would
+        # mis-route such a repo to the fix loop (Codex PR #321 P2, #299).
+        if [ -f package.json ]; then
+          RAN_ANY=1
+          if [ -f tsconfig.json ]; then
+            if command -v tsc >/dev/null 2>&1; then
+              echo "--- tsc --noEmit (language-native gate, #299) ---"
+              tsc --noEmit 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: tsc not installed — skipping (optional, #299)"
+            fi
+          else
+            echo "INFO: no tsconfig.json — skipping tsc (not a TypeScript project, #299)"
+          fi
+          ESLINT_CFG=""
+          for ec in eslint.config.js eslint.config.mjs eslint.config.cjs eslint.config.ts .eslintrc.js .eslintrc.cjs .eslintrc.yaml .eslintrc.yml .eslintrc.json .eslintrc; do
+            if [ -f "$ec" ]; then ESLINT_CFG="$ec"; break; fi
+          done
+          if [ -z "$ESLINT_CFG" ] && grep -q '"eslintConfig"' package.json 2>/dev/null; then
+            ESLINT_CFG="package.json"
+          fi
+          if [ -n "$ESLINT_CFG" ]; then
+            if command -v eslint >/dev/null 2>&1; then
+              echo "--- eslint . (language-native gate, #299) ---"
+              eslint . 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: eslint not installed — skipping (optional, #299)"
+            fi
+          else
+            echo "INFO: no eslint config — skipping eslint (not configured, #299)"
+          fi
+        fi
+        # Python — both run-if-present.
+        if [ -f pyproject.toml ]; then
+          RAN_ANY=1
+          if command -v ruff >/dev/null 2>&1; then
+            echo "--- ruff check . (language-native gate, #299) ---"
+            ruff check . 2>&1 || LANG_RC=$?
+          else
+            echo "INFO: ruff not installed — skipping (optional, #299)"
+          fi
+          if command -v mypy >/dev/null 2>&1; then
+            echo "--- mypy . (language-native gate, #299) ---"
+            mypy . 2>&1 || LANG_RC=$?
+          else
+            echo "INFO: mypy not installed — skipping (optional, #299)"
+          fi
+        fi
+        # Rust — run-if-present (cargo gates both fmt and clippy).
+        if [ -f Cargo.toml ]; then
+          RAN_ANY=1
+          if command -v cargo >/dev/null 2>&1; then
+            # rustfmt/clippy are separate toolchain components — `cargo` can be
+            # present without them. A missing component is a tooling absence
+            # (same class as an optional tool not installed), not a code defect,
+            # so gate each subcommand on its own availability (#299).
+            if cargo fmt --version >/dev/null 2>&1; then
+              echo "--- cargo fmt --check (language-native gate, #299) ---"
+              cargo fmt --check 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: cargo fmt (rustfmt) not installed — skipping (optional, #299)"
+            fi
+            if cargo clippy --version >/dev/null 2>&1; then
+              echo "--- cargo clippy -- -D warnings (language-native gate, #299) ---"
+              cargo clippy -- -D warnings 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: cargo clippy not installed — skipping (optional, #299)"
+            fi
+          else
+            echo "INFO: cargo not installed — skipping (optional, #299)"
+          fi
+        fi
+        if [ -z "$RAN_ANY" ]; then
+          echo "INFO: no recognized toolchain (go.mod/package.json/pyproject.toml/Cargo.toml) — no language-native gate (#299)"
+        fi
+        if [ "$LANG_RC" -ne 0 ]; then
+          return 1
+        fi
         return 0
       }
       PROBE_EOF
@@ -653,9 +774,11 @@ workflow BuildProduct
       `go.mod` / `package.json` / `pyproject.toml` / `Cargo.toml`
       was detected) OR no known build system was detected and the
       runner was skipped; AND the project CI gate ran and returned 0
-      (when a Makefile with a `ci`/`check`/`lint` target was present)
-      OR the probe correctly skipped (no Makefile, or no matching
-      target). The sentinel does NOT prove every check executed —
+      (a Makefile `ci`/`check`/`lint` target, OR — when no such target
+      ran — the language-native gates: go vet/golangci-lint, tsc/eslint,
+      ruff/mypy, cargo fmt/clippy for each detected toolchain, #299)
+      OR there was nothing to gate (no recognized toolchain). The
+      sentinel does NOT prove every check executed —
       only that none failed. Treat its presence as authoritative for
       "TestMilestone step succeeded"; if a milestone implies tests
       must have RUN (not skipped), check the visible probe / test
@@ -746,8 +869,9 @@ workflow BuildProduct
          ${ctx.tool_stdout} is authoritative for "TestMilestone step
          succeeded" — TestMilestone prints it when its language-stack
          runner passed-or-was-validly-skipped AND its project CI gate
-         passed-or-was-validly-skipped (see the preamble above for the
-         exact "validly skipped" rules). The sentinel is emitted at
+         passed (a Makefile target OR the language-native gates, #299)
+         or had nothing to gate (see the preamble above for the exact
+         rules). The sentinel is emitted at
          end-of-command via `printf`, and `tool_stdout` keeps the
          tail of stdout, so the sentinel survives truncation by
          construction — its presence is reliable, its absence is
@@ -764,7 +888,9 @@ workflow BuildProduct
                 → `printf 'escalate'` + exit 1 (routes to
                 EscalateMilestone)
            (iii) TEST_EXIT!=0 && ATTEMPTS<=3 → NO marker + exit 1
-                (normal in-progress failure — routes to FixMilestone)
+                (normal in-progress failure — routes to FixMilestone;
+                a failing language-native gate (#299) folds into
+                TEST_EXIT here, so it routes the same way)
          Under normal routing only path (i) reaches VerifyMilestone,
          so the contract for THIS node is: "if you see me, the
          upstream tool emitted `tests-pass`." The three sentinel
