@@ -209,7 +209,7 @@ documented in full at
   outcomes.
 - [`context-flow.md`](./context-flow.md) — how
   handlers write and read the shared context.
-- [`handlers/tool.md`](./handlers/tool.md#shell-execution-model) - how tool
+- [`handlers/tool.md`](./handlers/tool.md#shell-execution-model) — how tool
   `command:` / `tool_command` bodies run through `sh -c`, including the
   POSIX `sh` requirement and shebang caveat.
 - [`backends.md`](./backends.md) — how `codergen` delegates to pluggable

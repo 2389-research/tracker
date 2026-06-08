@@ -24,5 +24,7 @@ workflow PosixToolCommandExample
       printf 'done\n'
 
   edges
+    # Both marker values converge on Exit here to keep the illustration small;
+    # in a real workflow each branch would route to distinct follow-up nodes.
     CheckWorkspace -> Exit when ctx.tool_marker = ready
     CheckWorkspace -> Exit when ctx.tool_marker = missing
