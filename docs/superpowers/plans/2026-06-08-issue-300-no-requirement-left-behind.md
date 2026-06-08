@@ -138,12 +138,22 @@ func TestVerifyMilestoneOwnerOrFailRule(t *testing.T) {
 	}
 }
 
-// Test 5 — negative-control: FinalSpecCheck gains the same owner-or-deferred rule.
+// Test 5 — negative-control: FinalSpecCheck gains the DEFERRED-ONLY rule. At the
+// final gate every milestone is complete, so "owned" is not an excuse — only a
+// SPEC-documented future-phase deferral passes. Pin the distinctive owned-is-not-
+// an-excuse clause, not just generic tokens: a regression to "owned OR deferred"
+// (as in VerifyMilestone) must FAIL this test (CodeRabbit PR #322).
 func TestFinalSpecCheckOwnerOrFailRule(t *testing.T) {
 	p := promptOf(t, loadBuildProduct(t), "FinalSpecCheck")
-	for _, sub := range []string{"future work", "milestones.md", "DO NOT implement"} {
+	subs := []string{
+		"future work",
+		"DO NOT implement",
+		`"owned" by a milestone is NOT an acceptable excuse`,
+		"do NOT emit the terminal STATUS:success",
+	}
+	for _, sub := range subs {
 		if !strings.Contains(p, sub) {
-			t.Errorf("FinalSpecCheck prompt missing owner-or-deferred substring %q (#300)", sub)
+			t.Errorf("FinalSpecCheck prompt missing deferred-only substring %q (#300)", sub)
 		}
 	}
 }
@@ -187,7 +197,12 @@ func TestDecomposeOutEdgesUnchanged(t *testing.T) {
 func TestVerifyAndFinalKeepAutoStatus(t *testing.T) {
 	g := loadBuildProduct(t)
 	for _, id := range []string{"VerifyMilestone", "FinalSpecCheck"} {
-		if g.Nodes[id].Attrs["auto_status"] != "true" {
+		n, ok := g.Nodes[id]
+		if !ok {
+			t.Errorf("%s node missing from build_product graph (#300)", id)
+			continue
+		}
+		if n.Attrs["auto_status"] != "true" {
 			t.Errorf("%s lost auto_status:true — its STATUS:fail gate is dead (#300)", id)
 		}
 	}

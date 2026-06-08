@@ -21,11 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nor a documented-deferred `DO NOT implement` item** emits `COVERAGE_GAPS:<n>` +
   `STATUS:fail`, routing to a human to re-plan instead of silently building with a
   dropped test. `VerifyMilestone` (mid-build) and `FinalSpecCheck` (final gate)
-  gain the matching no-unowned-deferral rule: a requirement may not be waved
-  through as "future work" unless a milestone owns it — and at the final gate,
-  where every planned milestone is already complete, only a SPEC-documented
-  future-phase deferral (a `DO NOT implement` entry) qualifies, since an
-  owned-but-unimplemented requirement is a failure, not future work.
+  gain the matching no-unowned-deferral rule. Mid-build, a requirement may not be
+  waved through as "future work" unless a named **later** milestone owns it (the
+  current or an earlier milestone owning it is not a valid deferral — it should
+  already be done). At the final gate, where every planned milestone is already
+  complete, "owned" is no excuse at all — only a SPEC-documented future-phase
+  deferral (a `DO NOT implement` entry) qualifies, since an owned-but-unimplemented
+  requirement is a failure, not future work.
   `.dip`-only change; no engine code. **Behavior change:** a
   decomposition that drops a mandated test now fails at planning time rather than
   shipping the gap.
