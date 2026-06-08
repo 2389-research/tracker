@@ -330,8 +330,9 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ```
          A requirement may NOT be waved through as "future work" or "a
-         later milestone" unless it is EITHER (a) owned — a named milestone
-         in .ai/decisions/milestones.md has a "Done when" line covering it
+         later milestone" unless it is EITHER (a) owned — a named LATER
+         milestone in .ai/decisions/milestones.md has a "Done when" line
+         covering it
          (`grep -nE '^#+ *[Mm]ilestone' .ai/decisions/milestones.md` and
          cite the milestone number + the Done-when line verbatim) — OR (b)
          deferred — SPEC.md defers it to a named later phase AND a milestone's
