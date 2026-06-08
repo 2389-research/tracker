@@ -738,9 +738,11 @@ workflow BuildProduct
       `go.mod` / `package.json` / `pyproject.toml` / `Cargo.toml`
       was detected) OR no known build system was detected and the
       runner was skipped; AND the project CI gate ran and returned 0
-      (when a Makefile with a `ci`/`check`/`lint` target was present)
-      OR the probe correctly skipped (no Makefile, or no matching
-      target). The sentinel does NOT prove every check executed —
+      (a Makefile `ci`/`check`/`lint` target, OR — when no such target
+      ran — the language-native gates: go vet/golangci-lint, tsc/eslint,
+      ruff/mypy, cargo fmt/clippy for each detected toolchain, #299)
+      OR there was nothing to gate (no recognized toolchain). The
+      sentinel does NOT prove every check executed —
       only that none failed. Treat its presence as authoritative for
       "TestMilestone step succeeded"; if a milestone implies tests
       must have RUN (not skipped), check the visible probe / test
@@ -831,8 +833,9 @@ workflow BuildProduct
          ${ctx.tool_stdout} is authoritative for "TestMilestone step
          succeeded" — TestMilestone prints it when its language-stack
          runner passed-or-was-validly-skipped AND its project CI gate
-         passed-or-was-validly-skipped (see the preamble above for the
-         exact "validly skipped" rules). The sentinel is emitted at
+         passed (a Makefile target OR the language-native gates, #299)
+         or had nothing to gate (see the preamble above for the exact
+         rules). The sentinel is emitted at
          end-of-command via `printf`, and `tool_stdout` keeps the
          tail of stdout, so the sentinel survives truncation by
          construction — its presence is reliable, its absence is
@@ -849,7 +852,9 @@ workflow BuildProduct
                 → `printf 'escalate'` + exit 1 (routes to
                 EscalateMilestone)
            (iii) TEST_EXIT!=0 && ATTEMPTS<=3 → NO marker + exit 1
-                (normal in-progress failure — routes to FixMilestone)
+                (normal in-progress failure — routes to FixMilestone;
+                a failing language-native gate (#299) folds into
+                TEST_EXIT here, so it routes the same way)
          Under normal routing only path (i) reaches VerifyMilestone,
          so the contract for THIS node is: "if you see me, the
          upstream tool emitted `tests-pass`." The three sentinel
