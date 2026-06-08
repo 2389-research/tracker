@@ -92,8 +92,12 @@ func TestQualityGateRc2OnlyMakeMissing(t *testing.T) {
 	if makeIdx == -1 || ret2Idx < makeIdx {
 		t.Error("`return 2` is not anchored to the `command -v make` branch (#299 rc contract)")
 	}
-	// No return 2 after the first language-native gate marker.
-	if g := strings.Index(cmd, "language-native gate"); g != -1 {
+	// No return 2 within/after the language-native gate execution markers. Anchor
+	// on the parenthesized gate marker `(language-native gate,` (the form emitted
+	// by each run gate inside run_language_native_gates) — NOT the prose "running
+	// language-native gates" references in run_project_ci_gate's INFO echoes, which
+	// precede the make-missing `return 2` in text and would false-positive.
+	if g := strings.Index(cmd, "(language-native gate,"); g != -1 {
 		if strings.Contains(cmd[g:], "return 2") {
 			t.Error("a `return 2` appears within/after the language-native gates — rc=2 must stay make-missing-only (#299)")
 		}
