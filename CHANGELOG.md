@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shipped with no linter ever running), `run_project_ci_gate` now falls through to
   language-native gates for **every** detected toolchain (polyglot, not
   first-match): Go `go vet ./...` (+ `golangci-lint` if present), JS/TS `tsc
-  --noEmit`/`eslint`, Python `ruff`/`mypy`, Rust `cargo fmt --check`/`cargo clippy`.
-  Optional linters absent → one-line INFO skip (never an error); a present gate
-  that fails routes to the fix loop. The `0`/`2`/`N` return contract is preserved —
+  --noEmit`/`eslint` (each gated on the project's opt-in config — `tsconfig.json`
+  / an eslint config — so a plain-JS repo with a global `tsc`/`eslint` on PATH is
+  not spuriously failed), Python `ruff`/`mypy`, Rust `cargo fmt --check`/`cargo
+  clippy`. Optional linters absent or not configured → one-line INFO skip (never
+  an error); a present, configured gate that fails routes to the fix loop. The `0`/`2`/`N` return contract is preserved —
   `rc=2` stays reserved for the Makefile-present-but-`make`-missing escalation;
   language-gate failures collapse to `rc=1`. **Behavior change:** no-Makefile Go
   repos now enforce `go vet` on every milestone (previously green on tests alone).

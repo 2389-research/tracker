@@ -123,20 +123,40 @@ workflow BuildProduct
             echo "INFO: golangci-lint not installed — skipping (optional, #299)"
           fi
         fi
-        # JS/TS — both run-if-present.
+        # JS/TS — run-if-present AND only if the project opted into the tool
+        # (config file present). A plain-JS repo (package.json, no tsconfig /
+        # no eslint config) must NOT fail just because a global tsc/eslint is on
+        # PATH: bare `tsc --noEmit` exits non-zero on a project with no tsconfig,
+        # and `eslint .` errors with no config — gating on PATH alone would
+        # mis-route such a repo to the fix loop (Codex PR #321 P2, #299).
         if [ -f package.json ]; then
           RAN_ANY=1
-          if command -v tsc >/dev/null 2>&1; then
-            echo "--- tsc --noEmit (language-native gate, #299) ---"
-            tsc --noEmit 2>&1 || LANG_RC=$?
+          if [ -f tsconfig.json ]; then
+            if command -v tsc >/dev/null 2>&1; then
+              echo "--- tsc --noEmit (language-native gate, #299) ---"
+              tsc --noEmit 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: tsc not installed — skipping (optional, #299)"
+            fi
           else
-            echo "INFO: tsc not installed — skipping (optional, #299)"
+            echo "INFO: no tsconfig.json — skipping tsc (not a TypeScript project, #299)"
           fi
-          if command -v eslint >/dev/null 2>&1; then
-            echo "--- eslint . (language-native gate, #299) ---"
-            eslint . 2>&1 || LANG_RC=$?
+          ESLINT_CFG=""
+          for ec in eslint.config.js eslint.config.mjs eslint.config.cjs eslint.config.ts .eslintrc.js .eslintrc.cjs .eslintrc.yaml .eslintrc.yml .eslintrc.json .eslintrc; do
+            if [ -f "$ec" ]; then ESLINT_CFG="$ec"; break; fi
+          done
+          if [ -z "$ESLINT_CFG" ] && grep -q '"eslintConfig"' package.json 2>/dev/null; then
+            ESLINT_CFG="package.json"
+          fi
+          if [ -n "$ESLINT_CFG" ]; then
+            if command -v eslint >/dev/null 2>&1; then
+              echo "--- eslint . (language-native gate, #299) ---"
+              eslint . 2>&1 || LANG_RC=$?
+            else
+              echo "INFO: eslint not installed — skipping (optional, #299)"
+            fi
           else
-            echo "INFO: eslint not installed — skipping (optional, #299)"
+            echo "INFO: no eslint config — skipping eslint (not configured, #299)"
           fi
         fi
         # Python — both run-if-present.

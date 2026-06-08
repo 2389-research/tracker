@@ -38,11 +38,13 @@ Independent `if` blocks (not `elif`). Each runs if its project file is present:
 | Toolchain | Detect | Gates |
 |-----------|--------|-------|
 | Go | `go.mod` | `go vet ./...` (**always** — core; go is present by go.mod detection); `golangci-lint run` *if on PATH* |
-| JS/TS | `package.json` | `tsc --noEmit` *if on PATH*; `eslint .` *if on PATH* |
+| JS/TS | `package.json` | `tsc --noEmit` *if `tsconfig.json` present and tsc on PATH*; `eslint .` *if an eslint config present and eslint on PATH* |
 | Python | `pyproject.toml` | `ruff check .` *if on PATH*; `mypy .` *if on PATH* |
 | Rust | `Cargo.toml` | `cargo fmt --check` + `cargo clippy -- -D warnings` *if cargo on PATH* |
 
 **Core vs optional** (issue subtlety 2): "core" means *when the tool runs, its failure is fatal* — NOT that its absence is fatal. `go vet` is the only unguarded gate (runs whenever `go.mod` exists). Every other tool is `command -v`-guarded: **absent → one-line INFO skip (never rc=2, never a failure); present-and-failing → accumulate into `LANG_RC` and propagate**. This applies uniformly to every run gate, so the only thing the core/optional distinction governs in code is whether `go vet` carries a `command -v` guard (it does not).
+
+**JS/TS opt-in refinement (Codex PR #321 P2):** `tsc`/`eslint` are gated not only on `command -v` but also on the project having opted into the tool — `tsconfig.json` for `tsc`, an eslint config file (`eslint.config.*`, `.eslintrc*`, or an `eslintConfig` key in `package.json`) for `eslint`. A plain-JS repo (just `package.json`) where the runner image happens to have a global `tsc`/`eslint` on PATH would otherwise be failed spuriously: bare `tsc --noEmit` exits non-zero when no `tsconfig.json`/inputs exist, and `eslint .` errors when no config is found. The not-configured case is a one-line INFO skip, identical in spirit to the not-installed case. Go/Python/Rust gates are unaffected (`go vet`/`ruff`/`mypy`/`cargo` behave sensibly under their own project markers).
 
 ### Both no-gate paths fall through (decided)
 

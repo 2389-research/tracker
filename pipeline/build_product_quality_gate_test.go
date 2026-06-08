@@ -350,10 +350,36 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		if !strings.Contains(out, "go vet ./...") {
 			t.Errorf("polyglot: Go stack did not run\n%s", out)
 		}
-		// tsc/eslint absent under hermetic PATH → INFO skip lines prove the JS
-		// stack was entered (not first-match-stopped at Go).
-		if !strings.Contains(out, "tsc not installed") && !strings.Contains(out, "eslint not installed") {
+		// package.json present but no tsconfig/eslint config → the JS block emits
+		// its config-skip lines, proving it was entered (not first-match-stopped
+		// at Go). Robust whether or not tsc/eslint are on PATH.
+		if !strings.Contains(out, "skipping tsc") && !strings.Contains(out, "skipping eslint") {
 			t.Errorf("polyglot: JS stack was not entered (first-match bug?)\n%s", out)
+		}
+	})
+
+	// (j) plain-JS repo (package.json, NO tsconfig.json) must NOT run tsc even
+	// when a global tsc is on PATH — bare `tsc --noEmit` exits non-zero on a
+	// non-TypeScript project and would mis-route to the fix loop (Codex PR #321
+	// P2). The tsc gate is opt-in via tsconfig.json. This subtest puts a real
+	// global tsc (if installed) on PATH to exercise the exact reported scenario.
+	t.Run("js_no_tsconfig_skips_tsc", func(t *testing.T) {
+		dir := t.TempDir()
+		mustWrite(t, filepath.Join(dir, "package.json"), "{\"name\":\"x\",\"version\":\"0.0.0\"}\n")
+		pathDirs := goDir + ":/usr/bin:/bin"
+		if tscPath, err := exec.LookPath("tsc"); err == nil {
+			pathDirs = filepath.Dir(tscPath) + ":" + pathDirs // face a real global tsc
+		}
+		env := []string{"PATH=" + pathDirs, "HOME=" + t.TempDir(), "GOCACHE=" + t.TempDir(), "GOPROXY=off", "GOFLAGS="}
+		out, rc, _ := runGate(t, probe, dir, env)
+		if rc != 0 {
+			t.Errorf("plain-JS repo (no tsconfig): rc=%d want 0 (tsc must be skipped)\n%s", rc, out)
+		}
+		if strings.Contains(out, "tsc --noEmit (language-native gate") {
+			t.Errorf("tsc ran despite no tsconfig.json — must skip (Codex #321 P2)\n%s", out)
+		}
+		if !strings.Contains(out, "no tsconfig.json") {
+			t.Errorf("expected the no-tsconfig skip message\n%s", out)
 		}
 	})
 
