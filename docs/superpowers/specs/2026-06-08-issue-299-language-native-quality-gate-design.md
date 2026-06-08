@@ -12,7 +12,7 @@ The helper is sourced by two callers — `TestMilestone` (`:587-589`, branches o
 
 ## The change
 
-Replace the two early `return 0` skip paths with a **fall-through** to a language-native quality-gate block appended to the *same* function. The Makefile branch is preserved byte-for-byte; only the two `return 0`s become fall-throughs.
+Replace the two early `return 0` skip paths with a call to a **new sibling helper `run_language_native_gates`** (defined in the same `ci-probe.sh` heredoc). The Makefile branch — detection loop, `make`-missing rc=2, the awk target-parser, and `make "$TARGET"; return $?` — is preserved **byte-for-byte**; only the two `return 0` blocks change to `run_language_native_gates; return $?` (mirroring the existing `make "$TARGET" 2>&1; return $?` idiom, which has identical `set -e` semantics under both callers). Extracting the gates into their own function leaves the awk untouched and makes the block independently unit-testable — a refinement of the reviewed inline sketch with identical runtime behavior.
 
 ### Return-code contract (load-bearing — unchanged)
 
@@ -201,6 +201,6 @@ No coverage/complexity-hook risk: the complexity gate excludes `_test.go`; cover
 - `go build ./... && go test ./... -short` — green; each new test proven RED before its wiring.
 - CHANGELOG.md `[Unreleased]/Added` — language-native quality gate fallback closing the no-Makefile blind spot; epic #308 Phase 2; framed as a behavior change (no-Makefile repos now enforce `go vet`).
 
-## Follow-up issue to file
+## Follow-up issue (filed: #320)
 
-Pre-existing make-path rc=2 leak: `make "$TARGET"; return $?` (`:86-87`) propagates GNU make's native exit 2 on ordinary recipe failures, so a normal `make ci` lint failure escalates-to-human instead of routing to the fix loop, contradicting the contract VerifyMilestone's prose describes. Out of scope for #299 (fixing it changes Makefile-gate behavior).
+Pre-existing make-path rc=2 leak: `make "$TARGET"; return $?` (`:86-87`) propagates GNU make's native exit 2 on ordinary recipe failures, so a normal `make ci` lint failure escalates-to-human instead of routing to the fix loop, contradicting the contract VerifyMilestone's prose describes. Out of scope for #299 (fixing it changes Makefile-gate behavior). Tracked in **#320**.
