@@ -200,9 +200,13 @@ func hermeticEnv(t *testing.T, home, gocache string, withMake bool) []string {
 	for _, u := range []string{"sed", "awk", "grep"} {
 		link(u, true)
 	}
-	// echo is for make's recipe direct-exec (a `@echo ...` rule runs without a
-	// shell, so make resolves echo via PATH; its absence fails loud where used);
-	// cat is a belt-and-suspenders helper. Both genuinely optional.
+	// echo: GNU make has a no-shell optimization — a recipe line with NO shell
+	// metacharacters is exec'd DIRECTLY (not via /bin/sh), so make resolves the
+	// command via PATH. The `ci:` fixture's `@echo running-ci` has none, so echo
+	// must be on PATH (empirically: makefile_ci_target_wins fails with "make: echo:
+	// No such file or directory" without it). A recipe WITH a metacharacter (|,>,&&,
+	// …) would instead go through /bin/sh, where echo is a builtin — but this
+	// fixture doesn't. cat is a belt-and-suspenders helper. Both genuinely optional.
 	for _, u := range []string{"echo", "cat"} {
 		link(u, false)
 	}
