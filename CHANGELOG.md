@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **build_product: language-native quality gate fallback** (closes #299, refs
+  epic #308 Phase 2 — first item). Closes the no-Makefile blind spot: when a repo
+  has no Makefile `ci`/`check`/`lint` target (the `code-goblin` failure mode —
+  shipped with no linter ever running), `run_project_ci_gate` now falls through to
+  language-native gates for **every** detected toolchain (polyglot, not
+  first-match): Go `go vet ./...` (+ `golangci-lint` if present), JS/TS `tsc
+  --noEmit`/`eslint`, Python `ruff`/`mypy`, Rust `cargo fmt --check`/`cargo clippy`.
+  Optional linters absent → one-line INFO skip (never an error); a present gate
+  that fails routes to the fix loop. The `0`/`2`/`N` return contract is preserved —
+  `rc=2` stays reserved for the Makefile-present-but-`make`-missing escalation;
+  language-gate failures collapse to `rc=1`. **Behavior change:** no-Makefile Go
+  repos now enforce `go vet` on every milestone (previously green on tests alone).
+  Both `TestMilestone` and `FinalBuild` inherit it via the shared `ci-probe.sh`
+  helper. `.dip`-only change; no engine code.
 - **build_product: per-node build-context file** (closes #298, refs epic #308
   Phase 1; **completes the Phase-1 track** alongside #295/#296/#302/#297/#303).
   Cures per-node rediscovery amnesia (the `code-goblin` run `7b6e08c9e2b2` burned
