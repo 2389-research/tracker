@@ -438,6 +438,7 @@ workflow BuildProduct
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
+    auto_status: true
     prompt:
       Based on the spec analysis, decompose the work into ordered milestones.
 
@@ -479,6 +480,56 @@ workflow BuildProduct
       line. No comments, no blank lines, no headers — just bare test names like
       TestFooBar. The test runner uses these as a regex skip pattern. Remove
       test names from this file in the milestone where they should start passing.
+
+      ── REQUIREMENT COVERAGE (issue #300, epic #308 Phase 2) ──
+      No spec-mandated verification may be left unowned. Do this in THIS
+      order — the ordering is load-bearing (it stops you from back-filling
+      the table to match milestones you already wrote, which would make
+      the gate decorative):
+
+      1. FIRST, before writing any milestone, read SPEC.md and list every
+         spec-mandated verification into the LEFT columns of
+         .ai/decisions/requirement-coverage.md. A line is "spec-mandated"
+         ONLY if SPEC.md uses an obligation word (MUST / SHALL / "is
+         required to" / "the test must" / a named test function or
+         acceptance criterion) AND names a concrete, checkable behavior
+         (a specific input/output, a numeric bound, a named error path).
+         Aspirational words ("fast", "robust", "clean") with no checkable
+         threshold are NOT mandated — do not list them. State how many you
+         found; if none, write the line: SPEC mandates no named
+         verifications (never leave the table silently empty — a silent
+         empty table hides under-extraction). Table columns:
+           | Mandated verification | SPEC.md source (line/section) | Owning milestone |
+
+      2. THEN decompose into milestones as the rules above describe.
+
+      3. FINALLY, fill the "Owning milestone" column. You may NOT add rows
+         here and you may NOT invent a milestone to cover a verification.
+         Each verification resolves to exactly one of:
+         - owned: a milestone's "Done when" line covers it. Confirm with
+           `grep -nE '^#+ *[Mm]ilestone' .ai/decisions/milestones.md` and
+           cite `Milestone <N>: <the Done-when line, verbatim>`. A
+           milestone that only mentions the topic in prose does NOT own it.
+         - deferred: SPEC.md itself defers the behavior to a named later
+           phase AND a milestone's "DO NOT implement" block records that
+           deferral citing the spec section. Cite both. (This carve-out
+           keeps the gate consistent with the anti-scope-creep machinery
+           above — a correctly-deferred Phase-2+ feature is NOT a gap.)
+         - UNOWNED: neither owned nor deferred. This is the bug this gate
+           exists to catch.
+
+      Then re-read .ai/decisions/requirement-coverage.md, count the UNOWNED
+      rows, and emit on its own line: COVERAGE_GAPS: <count>. Then your
+      terminal STATUS line:
+        - every row owned or deferred (count 0) -> STATUS:success
+        - any row UNOWNED (count > 0) -> list the unowned verification(s)
+          ABOVE the STATUS line, then STATUS:fail (this routes to a human
+          to re-plan rather than silently building with a dropped test).
+      The final line must be EXACTLY `STATUS:success` or `STATUS:fail` —
+      no parentheses, no counts, no trailing words (a trailing count makes
+      the parser drop the line and default to success), OUTSIDE any code
+      fence, alone on its line. Emit only success or fail — never
+      STATUS:retry (this node has no retry route).
 
   human ApprovePlan
     label: "Review the milestone plan. Approve, adjust, or reject."
@@ -864,6 +915,22 @@ workflow BuildProduct
          verifier only checked .ai/milestones/current.md's done-when
          criteria — so a SPEC.md bullet that Decompose dropped
          silently passed through. Cross-check against SPEC.md directly.
+         A requirement may NOT be waved through as "future work" or "a
+         later milestone" unless it is EITHER (a) owned — a named LATER
+         milestone in .ai/decisions/milestones.md has a "Done when" line
+         covering it
+         (`grep -nE '^#+ *[Mm]ilestone' .ai/decisions/milestones.md` and
+         cite the milestone number + the Done-when line verbatim) — OR (b)
+         deferred — SPEC.md defers it to a named later phase AND a milestone's
+         "DO NOT implement" block records that deferral citing the spec
+         section (cite both; consistent with check 4's deferred-field rule).
+         A deferral that is neither owned nor documented-deferred is a
+         dropped requirement: STATUS:fail. (This is the code-goblin miss —
+         the verifier saw the 429/cancel gap and waved it through as "future
+         work" with no owning milestone.) Cross-check against
+         .ai/decisions/requirement-coverage.md (written by Decompose, #300)
+         when present; if it disagrees with a live SPEC.md re-read, SPEC.md
+         wins.
 
       6. TESTS + CI PASSED: The `tests-pass` sentinel in
          ${ctx.tool_stdout} is authoritative for "TestMilestone step
@@ -1486,6 +1553,16 @@ workflow BuildProduct
       - Is it implemented?
       - Is it implemented correctly?
       - Was nothing extra added beyond what the spec asked for?
+      - If it is NOT implemented and the report defers it to "future work":
+        every planned milestone is already complete at THIS gate, so being
+        "owned" by a milestone is NOT an acceptable excuse — that milestone
+        should have built it, and an owned-but-unimplemented requirement is
+        a failure, not future work. The deferral is acceptable ONLY when
+        SPEC.md itself defers the behavior to a named later phase AND a
+        "DO NOT implement" block in .ai/decisions/milestones.md records that
+        deferral, citing the spec section (cite both). A future-work deferral
+        that is not SPEC-documented as deferred keeps the early STATUS:fail
+        in place — do NOT emit the terminal STATUS:success (issue #300).
 
       Also verify:
       - No UNEXPECTED leftover files in .ai/build/ — the workflow
@@ -1495,7 +1572,9 @@ workflow BuildProduct
         the per-node build-context file (build-context.md from #298),
         and reviewers write reports (review-claude.md,
         review-codex.md, review-gemini.md). Only flag files outside
-        this explicit allowlist.
+        this explicit allowlist. (.ai/decisions/*.md workflow artifacts —
+        spec-analysis, milestones, requirement-coverage (#300), compliance —
+        are expected outputs, never "extras".)
       - No TODO/FIXME/HACK comments added
       - All "throw away" items from the spec were actually removed
       - Tests pass (check ${ctx.tool_stdout})
@@ -1561,7 +1640,7 @@ workflow BuildProduct
       set -eu
       # Keep decisions, remove build working files
       rm -rf .ai/build .ai/milestones
-      # Keep: .ai/decisions/ (spec-analysis, milestones, review-synthesis, compliance)
+      # Keep: .ai/decisions/ (spec-analysis, milestones, requirement-coverage, review-synthesis, compliance)
       echo "Preserved decision log in .ai/decisions/"
       ls .ai/decisions/
       printf 'cleanup-done'

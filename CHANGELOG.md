@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **build_product: no-requirement-left-behind** (closes #300, refs epic #308
+  Phase 2 — second item). Stops spec-mandated verifications from vanishing from a
+  build. `Decompose` now carries `auto_status: true` — which makes its previously
+  **dead** `Decompose -> EscalateReview when fail` edge live (an agent node
+  defaults to success unless `auto_status` reads its `STATUS:` line) — and runs a
+  coverage gate: it enumerates every spec-mandated verification from `SPEC.md`
+  first, decomposes, assigns owners last, and writes a
+  `.ai/decisions/requirement-coverage.md` table mapping each mandated verification
+  to an owning milestone. A verification that is **neither owned by a milestone
+  nor a documented-deferred `DO NOT implement` item** emits `COVERAGE_GAPS:<n>` +
+  `STATUS:fail`, routing to a human to re-plan instead of silently building with a
+  dropped test. `VerifyMilestone` (mid-build) and `FinalSpecCheck` (final gate)
+  gain the matching no-unowned-deferral rule. Mid-build, a requirement may not be
+  waved through as "future work" unless a named **later** milestone owns it (the
+  current or an earlier milestone owning it is not a valid deferral — it should
+  already be done). At the final gate, where every planned milestone is already
+  complete, "owned" is no excuse at all — only a SPEC-documented future-phase
+  deferral (a `DO NOT implement` entry) qualifies, since an owned-but-unimplemented
+  requirement is a failure, not future work.
+  `.dip`-only change; no engine code. **Behavior change:** a
+  decomposition that drops a mandated test now fails at planning time rather than
+  shipping the gap.
 - **build_product: language-native quality gate fallback** (closes #299, refs
   epic #308 Phase 2 — first item). Closes the no-Makefile blind spot: when a repo
   has no Makefile `ci`/`check`/`lint` target (the `code-goblin` failure mode —
