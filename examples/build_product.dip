@@ -1552,6 +1552,14 @@ workflow BuildProduct
       - Is it implemented?
       - Is it implemented correctly?
       - Was nothing extra added beyond what the spec asked for?
+      - If it is NOT implemented and the report defers it to "future work":
+        that deferral is acceptable ONLY when it is EITHER owned by a named
+        milestone in .ai/decisions/milestones.md (grep `^#+ *[Mm]ilestone`
+        and cite the milestone + its "Done when" line) OR documented-deferred
+        (SPEC.md defers to a named phase AND a "DO NOT implement" block records
+        it, citing the spec section). A future-work deferral that is neither
+        keeps the early STATUS:fail in place — do NOT emit the terminal
+        STATUS:success (issue #300).
 
       Also verify:
       - No UNEXPECTED leftover files in .ai/build/ — the workflow
@@ -1561,7 +1569,9 @@ workflow BuildProduct
         the per-node build-context file (build-context.md from #298),
         and reviewers write reports (review-claude.md,
         review-codex.md, review-gemini.md). Only flag files outside
-        this explicit allowlist.
+        this explicit allowlist. (.ai/decisions/*.md workflow artifacts —
+        spec-analysis, milestones, requirement-coverage (#300), compliance —
+        are expected outputs, never "extras".)
       - No TODO/FIXME/HACK comments added
       - All "throw away" items from the spec were actually removed
       - Tests pass (check ${ctx.tool_stdout})
@@ -1627,7 +1637,7 @@ workflow BuildProduct
       set -eu
       # Keep decisions, remove build working files
       rm -rf .ai/build .ai/milestones
-      # Keep: .ai/decisions/ (spec-analysis, milestones, review-synthesis, compliance)
+      # Keep: .ai/decisions/ (spec-analysis, milestones, requirement-coverage, review-synthesis, compliance)
       echo "Preserved decision log in .ai/decisions/"
       ls .ai/decisions/
       printf 'cleanup-done'
