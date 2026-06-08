@@ -231,8 +231,10 @@ func runGate(t *testing.T, probe, dir string, env []string) (out string, rc int,
 	// and realistic shell options; the FinalBuild bare-call-under-set-e path (where a
 	// missing `|| LANG_RC=$?` guard would abort mid-function) is covered separately by
 	// TestRunProjectCIGateSetEBareCall.
-	script := "set -eu; . " + probePath + `; rc=0; run_project_ci_gate || rc=$?; echo "RC=$rc"; echo "RAN=[$PROJECT_CI_RAN]"`
-	c := exec.Command("sh", "-c", script)
+	// Pass the probe path as $1 rather than interpolating it into the script, so a
+	// temp dir with spaces/special chars can't break sourcing (Copilot, PR #321).
+	script := `set -eu; . "$1"; rc=0; run_project_ci_gate || rc=$?; echo "RC=$rc"; echo "RAN=[$PROJECT_CI_RAN]"`
+	c := exec.Command("sh", "-c", script, "sh", probePath)
 	c.Dir = dir
 	c.Env = env
 	// A non-nil err here is normal — the gate exits non-zero on a gate failure, and
@@ -269,7 +271,8 @@ func sourceAndRun(t *testing.T, probe, dir string, env []string, body string) (s
 	if err := os.WriteFile(probePath, []byte(probe), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c := exec.Command("sh", "-c", "set -eu\n. "+probePath+"\n"+body)
+	// $1 carries the probe path (not interpolated) — space/special-char safe (PR #321).
+	c := exec.Command("sh", "-c", "set -eu\n. \"$1\"\n"+body, "sh", probePath)
 	c.Dir = dir
 	c.Env = env
 	b, err := c.CombinedOutput()
