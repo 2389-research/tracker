@@ -45,6 +45,45 @@ sequenceDiagram
     T-->>E: Outcome status tool_stdout tool_stderr
 ```
 
+## Shell execution model
+
+Tool command bodies run through `sh -c <command>`. This applies to the
+runtime `tool_command` attribute and to Dippin `command:` blocks that compile
+into a tool command body. If a command block starts with a shebang such as
+`#!/usr/bin/env bash`, the shebang is passed to `sh -c` as command text; it is
+not used to select an interpreter. In practice that first line is only a shell
+comment.
+
+Write command bodies as portable POSIX `sh` unless the command explicitly
+invokes another interpreter itself:
+
+```dip
+tool PortableCheck
+  command:
+    #!/bin/sh
+    set -eu
+    if [ -f go.mod ]; then
+      go test ./...
+    fi
+    printf 'tests-pass'
+```
+
+On Ubuntu and many CI hosts, `/bin/sh` is `dash`, not Bash. Avoid Bash-only
+syntax in tool command bodies, including:
+
+- `[[ ... ]]`
+- arrays such as `items=(a b)`
+- `local`
+- `trap ... ERR`
+- `${var,,}` case conversion
+- `${var:offset:length}` substring expansion
+- process substitution such as `<(cmd)`
+
+`set -o pipefail` is not portable to all `/bin/sh` implementations. If a
+pipeline needs Bash-specific behavior, wrap it explicitly, for example
+`bash -c 'set -euo pipefail; ...'`, and make that dependency clear in the
+workflow.
+
 ## Variable expansion and safe-key allowlist
 
 [`expandAndValidateCommand`](../../../pipeline/handlers/tool.go) calls
@@ -106,6 +145,10 @@ before prepending `cd`:
 The final command becomes `cd "<cleaned>" && <command>`. The double-quote
 around `<cleaned>` protects path values with spaces.
 
+The subprocess working directory starts as the workflow run directory. When
+`working_dir` is set, the handler prepends the `cd` command above, so the
+effective command still runs through `sh -c`.
+
 ## Timeout
 
 [`parseTimeout`](../../../pipeline/handlers/tool.go):
@@ -165,6 +208,20 @@ filtered env, because they have their own isolation model (sandbox, container).
 the node declares a `writes:` attr listing expected JSON fields, the handler
 parses stdout as JSON and writes each declared key into context. A parse
 failure or missing declared field flips status to `OutcomeFail`.
+
+Routing sees both the exit-code outcome and any captured stdout markers:
+
+- `ctx.outcome` is `success` for exit code 0 and `fail` for any non-zero exit.
+- `ctx.tool_stdout` and `ctx.tool_stderr` receive the right-trimmed captured
+  tail of each stream.
+- If `marker_grep` is set, the regex scans captured stdout line by line; the
+  last match populates `ctx.tool_marker`.
+- `_TRACKER_ROUTE=<value>` sentinel lines are always scanned from captured
+  stdout, and the last match populates `ctx.tool_route`.
+
+When a tool exits non-zero, strict failure routing still applies unless the
+graph has an explicit failure path, such as an edge guarded by
+`ctx.outcome = fail` or a configured `fallback_target`.
 
 ## Events emitted
 
