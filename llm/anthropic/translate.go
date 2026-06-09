@@ -29,6 +29,16 @@ type anthropicRequest struct {
 	Temperature *float64           `json:"temperature,omitempty"`
 	TopP        *float64           `json:"top_p,omitempty"`
 	StopSeqs    []string           `json:"stop_sequences,omitempty"`
+
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+// anthropicOutputConfig carries the GA reasoning-effort control
+// (output_config.effort: low|medium|high|max). Supported on Opus 4.5+ and
+// Sonnet 4.6; it governs thinking depth and overall token spend. Lower effort
+// yields fewer/terser tokens; "max" is Opus-tier only.
+type anthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -99,6 +109,13 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		ar.MaxTokens = *req.MaxTokens
 	} else {
 		ar.MaxTokens = defaultMaxTokens
+	}
+
+	// Map the unified reasoning_effort to Anthropic's output_config.effort.
+	// (OpenAI maps it to reasoning.effort; Gemini to thinkingConfig.thinkingLevel.)
+	// Empty means "unset" — the API defaults to high, so we omit it.
+	if req.ReasoningEffort != "" {
+		ar.OutputConfig = &anthropicOutputConfig{Effort: req.ReasoningEffort}
 	}
 
 	// Extract system/developer messages to top-level system field.
