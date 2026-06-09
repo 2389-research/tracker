@@ -8,6 +8,9 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
+// genConfig translates req and returns the decoded generationConfig object from
+// the resulting Gemini request body (nil if the request produced none), so the
+// assertions below can stay terse.
 func genConfig(t *testing.T, req *llm.Request) map[string]any {
 	t.Helper()
 	body, err := translateRequest(req)
@@ -22,6 +25,9 @@ func genConfig(t *testing.T, req *llm.Request) map[string]any {
 	return gc
 }
 
+// TestTranslateRequestThinkingLevel verifies that each reasoning_effort level
+// maps to generationConfig.thinkingConfig.thinkingLevel for Gemini 3 models.
+// "minimal" is included because it is a valid Gemini-3 level (≈ thinking off).
 func TestTranslateRequestThinkingLevel(t *testing.T) {
 	for _, effort := range []string{"low", "medium", "high", "minimal"} {
 		req := &llm.Request{
@@ -43,8 +49,10 @@ func TestTranslateRequestThinkingLevel(t *testing.T) {
 	}
 }
 
-// A request whose ONLY non-default field is reasoning_effort must still build a
-// generationConfig (the early-return guard must not drop it).
+// TestTranslateRequestReasoningOnlyStillBuildsGenConfig guards the early-return
+// in buildGenerationConfig: a request whose ONLY non-default field is
+// reasoning_effort must still produce a generationConfig carrying thinkingLevel,
+// rather than being dropped as "no config needed".
 func TestTranslateRequestReasoningOnlyStillBuildsGenConfig(t *testing.T) {
 	req := &llm.Request{
 		Model:           "gemini-3-flash-preview",
@@ -61,6 +69,9 @@ func TestTranslateRequestReasoningOnlyStillBuildsGenConfig(t *testing.T) {
 	}
 }
 
+// TestTranslateRequestNoReasoningEffortOmitsThinkingConfig verifies that when
+// reasoning_effort is unset (and no other gen-config field forces one), the
+// request carries no thinkingConfig, leaving Gemini at its default thinking.
 func TestTranslateRequestNoReasoningEffortOmitsThinkingConfig(t *testing.T) {
 	req := &llm.Request{
 		Model:    "gemini-3-flash-preview",

@@ -8,6 +8,9 @@ import (
 	"github.com/2389-research/tracker/llm"
 )
 
+// TestTranslateRequestReasoningEffort verifies that each reasoning_effort level
+// is emitted as output_config.effort in the Anthropic request body (the GA
+// effort knob). "max" is included because it is valid on Opus-tier models.
 func TestTranslateRequestReasoningEffort(t *testing.T) {
 	for _, effort := range []string{"low", "medium", "high", "max"} {
 		req := &llm.Request{
@@ -33,6 +36,9 @@ func TestTranslateRequestReasoningEffort(t *testing.T) {
 	}
 }
 
+// TestTranslateRequestNoReasoningEffortOmitsOutputConfig verifies that when
+// reasoning_effort is unset, the request omits output_config entirely so the
+// model falls back to its API default (high) rather than being pinned.
 func TestTranslateRequestNoReasoningEffortOmitsOutputConfig(t *testing.T) {
 	req := &llm.Request{
 		Model:    "claude-opus-4-6",
