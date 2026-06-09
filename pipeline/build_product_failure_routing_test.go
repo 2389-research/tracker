@@ -273,6 +273,12 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	if !hasEdgeWithCondition(g, "CheckReviewFixBudget", "ClearStaleReviews", "ctx.outcome = success") {
 		t.Error("CheckReviewFixBudget re-review edge must enter ClearStaleReviews before ReviewParallel (issue #313)")
 	}
+	// The re-review edge moved from CheckReviewFixBudget->ReviewParallel to
+	// ->ClearStaleReviews; pin restart:true so a future edit can't drop the loop
+	// semantics (which would also stop clearing stale reports each pass).
+	if !hasEdgeAttr(g, "CheckReviewFixBudget", "ClearStaleReviews", "ctx.outcome = success", "restart", "true") {
+		t.Error("CheckReviewFixBudget -> ClearStaleReviews must keep restart: true (issue #313)")
+	}
 	if hasEdgeTo(g, "PickNextMilestone", "ReviewParallel") {
 		t.Error("PickNextMilestone still routes directly to ReviewParallel; it must clear stale reviews first (issue #313)")
 	}
@@ -296,6 +302,17 @@ func hasEdgeTo(g *Graph, from, to string) bool {
 func hasEdgeWithCondition(g *Graph, from, to, cond string) bool {
 	for _, e := range g.OutgoingEdges(from) {
 		if e.To == to && e.Condition == cond {
+			return true
+		}
+	}
+	return false
+}
+
+// hasEdgeAttr reports whether the node has an outgoing edge to the given target
+// matching both the condition and an edge attribute key=value (e.g. restart).
+func hasEdgeAttr(g *Graph, from, to, cond, key, want string) bool {
+	for _, e := range g.OutgoingEdges(from) {
+		if e.To == to && e.Condition == cond && e.Attrs[key] == want {
 			return true
 		}
 	}

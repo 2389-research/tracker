@@ -62,15 +62,19 @@ tool CheckReviewsComplete
     # #313 defense-in-depth: parallel fan-in is success-if-any, so a single
     # reviewer that exhausts max_turns and never writes its report is masked.
     # Synthesis MUST NOT run on a partial review set — fail loudly and escalate.
+    # Routes on exit code (ctx.outcome), NOT stdout content, so diagnostics go
+    # to stderr (>&2) — keeps stdout free of routing-marker noise and the dippin
+    # coverage analyzer sees no stdout outputs to match (status "unknown", not
+    # "partial", so the build_product A grade is preserved).
     missing=""
     for f in review-claude.md review-codex.md review-gemini.md; do
       [ -s ".ai/build/$f" ] || missing="$missing $f"
     done
     if [ -n "$missing" ]; then
-      printf 'review-gate FAIL: missing/empty review(s):%s — escalating instead of synthesizing a partial review set\n' "$missing"
+      printf 'review-gate FAIL: missing/empty review(s):%s — escalating instead of synthesizing a partial review set\n' "$missing" >&2
       exit 1
     fi
-    printf 'review-gate OK: all 3 reviews present\n'
+    printf 'review-gate OK: all 3 reviews present\n' >&2
 ```
 
 **Why ALL-3, not 2-of-3:** the canonical #313 scenario is a *single* (adversarial)
