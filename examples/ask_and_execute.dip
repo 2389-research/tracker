@@ -9,6 +9,9 @@ workflow AskAndExecute
     fidelity: summary:high
     model: claude-sonnet-4-6
     provider: anthropic
+    # Graph-level catch-all: any agent failure with no node-level route
+    # escalates to a human instead of dead-stopping (#309).
+    on_failure: EscalateToHuman
 
   agent Start
     label: Start

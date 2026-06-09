@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Graph-level `on_failure` default failure route** (closes #309, refs epic #308,
+  pairs with the #295 strict-failure catch-all). dippin's workflow-level
+  `defaults { on_failure: <NodeID> }` now reaches the engine: the adapter
+  (`extractWorkflowDefaults`) maps it onto `graph.Attrs["fallback_target"]`, the
+  key `Engine.findFallbackTarget` already consults on the strict-failure path. A
+  bare agent failure (incl. turn exhaustion) with no node-level route now escalates
+  to the declared node instead of dead-stopping. Node-level `fallback_target` still
+  wins (it lands in the node's `fallback_retry_target`, consulted first). The three
+  shipped example pipelines now declare `on_failure` as a catch-all
+  (`ask_and_execute`/`build_product_with_superspec` → `EscalateToHuman`,
+  `build_product` → `EscalateReview`).
+
+### Changed
+
+- **Bumped dippin-lang pin v0.35.0 → v0.38.0** (`go.mod` + `PinnedDippinVersion`).
+  Pulls in the `on_failure` defaults field consumed above, plus additive advisory
+  lint (DIP144 "agent node has no failure route", cross-file DIP143/DIP146
+  completeness) that flows through automatically since tracker defers DIP checks to
+  dippin (#239). The new DIP144 is what made the example pipelines' `on_failure`
+  declarations necessary to hold their A `dippin doctor` grade. (#327 — the v0.38
+  bump goal; #310's budget/stall consumption remains.)
+
 - **build_product: no-requirement-left-behind** (closes #300, refs epic #308
   Phase 2 — second item). Stops spec-mandated verifications from vanishing from a
   build. `Decompose` now carries `auto_status: true` — which makes its previously

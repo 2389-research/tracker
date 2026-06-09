@@ -10,6 +10,10 @@ workflow BuildProduct
     fidelity: full
     model: claude-sonnet-4-6
     provider: anthropic
+    # Graph-level catch-all: any agent failure with no node-level route
+    # (fallback_target or a fail edge) escalates to a human instead of
+    # dead-stopping. Node-level routes still take precedence (#309).
+    on_failure: EscalateReview
 
   agent Start
     label: Start
