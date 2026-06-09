@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -606,6 +608,39 @@ func (h *CodergenHandler) applyEpisodeContextUpdates(updates map[string]string, 
 	updates[pipeline.ContextKeyEpisodeSummaries] = agent.SerializeEpisodeSummaries(summaries)
 }
 
+// maxTurnsOverrideSubdir is the tracker-owned, working-dir-relative directory
+// holding per-node warm-continue MaxTurns overrides (#318). One file per node
+// ID; its integer contents replace the node's static max_turns on re-entry.
+const maxTurnsOverrideSubdir = ".tracker/turn_overrides"
+
+// resolveMaxTurns returns the warm-continue MaxTurns override for nodeID under
+// workingDir when one is present, else base. Keeps the override branch out of
+// buildConfig (which is already a long flat sequence of attr applies). #318.
+func resolveMaxTurns(workingDir, nodeID string, base int) int {
+	if override := readMaxTurnsOverride(workingDir, nodeID); override > 0 {
+		return override
+	}
+	return base
+}
+
+// readMaxTurnsOverride returns the node-scoped warm-continue MaxTurns override
+// for nodeID under workingDir, or 0 when absent/unreadable/non-positive (a
+// no-op so normal runs keep their statically-configured budget). #318.
+func readMaxTurnsOverride(workingDir, nodeID string) int {
+	if workingDir == "" || nodeID == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(workingDir, maxTurnsOverrideSubdir, nodeID))
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
 // buildTurnLimitMsg returns a non-empty message when the session hit the turn limit,
 // and an empty string otherwise.
 func buildTurnLimitMsg(node *pipeline.Node, sessResult agent.SessionResult) string {
@@ -720,6 +755,13 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if cfg.MaxTurns > 0 {
 		config.MaxTurns = cfg.MaxTurns
 	}
+	// #318 warm continue+N: a node-scoped, disk-driven override bumps MaxTurns
+	// on warm re-entry of this agent node (the operator-decision "continue"
+	// path writes it via a capped tool node). Consulted here because MaxTurns
+	// is otherwise read statically and nothing reads context for it. A missing
+	// or malformed override is a no-op, so normal runs are unaffected. (The
+	// conditional lives in resolveMaxTurns to keep buildConfig's branch count flat.)
+	config.MaxTurns = resolveMaxTurns(config.WorkingDir, node.ID, config.MaxTurns)
 	if cfg.CommandTimeout > 0 {
 		config.CommandTimeout = cfg.CommandTimeout
 	}

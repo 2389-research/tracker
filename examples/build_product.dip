@@ -703,6 +703,47 @@ workflow BuildProduct
       fi
       printf 'commit-if-dirty-done'
 
+  tool ContinueWithMoreTurns
+    label: "Warm continue: bump turn budget (capped)"
+    timeout: 5s
+    command:
+      set -eu
+      # Issue #318 warm continue+N. The operator picked "continue" at the
+      # OperatorDecision gate: re-enter Implement WARM (it keeps its episode
+      # memory across the restart) but with a larger turn budget so it doesn't
+      # breach at the same wall again.
+      #
+      # Per-loop circuit-breaker: a disk counter — NOT the global engine
+      # RestartCount, which is shared across every loop in the run and would
+      # reset/consume budget with the wrong semantics (#318 hazard 3). Once the
+      # cap is exhausted we route to EscalateMilestone via ctx.outcome = fail
+      # (exit 1) instead of looping forever.
+      #
+      # The bump is delivered through the tracker-owned, node-scoped MaxTurns
+      # override file that codergen.buildConfig consults
+      # (.tracker/turn_overrides/<nodeID>); BASE matches Implement's max_turns.
+      CAP=3
+      BASE=50
+      BUMP=40
+      OVR_DIR=".tracker/turn_overrides"
+      ATTEMPT_FILE="$OVR_DIR/continue_attempts"
+      mkdir -p "$OVR_DIR"
+      ATTEMPTS=0
+      if [ -f "$ATTEMPT_FILE" ]; then
+        ATTEMPTS=$(cat "$ATTEMPT_FILE")
+      fi
+      ATTEMPTS=$((ATTEMPTS + 1))
+      echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+      if [ "$ATTEMPTS" -gt "$CAP" ]; then
+        echo "continue cap ($CAP) exhausted after $ATTEMPTS attempt(s) — escalating"
+        printf 'continue-cap-exhausted'
+        exit 1
+      fi
+      NEWMAX=$((BASE + ATTEMPTS * BUMP))
+      echo "$NEWMAX" > "$OVR_DIR/Implement"
+      echo "warm continue $ATTEMPTS/$CAP — bumped Implement max_turns to $NEWMAX"
+      printf 'continue-ok'
+
   tool TestMilestone
     label: "Test Current Milestone"
     timeout: 300s
@@ -1071,6 +1112,10 @@ workflow BuildProduct
 
       # Reset fix attempt counter for next milestone
       rm -f .ai/milestones/fix_attempts
+      # #318: reset the warm-continue cap counter + MaxTurns override at the
+      # milestone boundary so the next milestone's Implement starts at its base
+      # turn budget with a fresh continue allowance.
+      rm -rf .tracker/turn_overrides
       rm .ai/milestones/current.md
       printf "milestone-$NEXT-complete"
 
@@ -1637,6 +1682,41 @@ workflow BuildProduct
       line stays in place. The parser requires `STATUS:<value>` on
       its own line, no leading characters, no fences/tables.
 
+  human OperatorDecision
+    label: "Agent hit its turn limit mid-progress — pick how to proceed"
+    mode: freeform
+    # Issue #318 hazard 1 (CRITICAL): make the unattended default deterministically
+    # SAFE so a headless run never silently advances unverified work. TWO operative
+    # mechanisms, both resolving to "stop":
+    #   1. Edge order — the freeform interviewer's unattended path falls back to the
+    #      FIRST outgoing edge label (labels[0]). The edges below list stop/abandon
+    #      BEFORE continue, so --auto-approve / --webhook-url pick "stop".
+    #   2. `default: stop` — dippin maps this to `default_choice`, which is what the
+    #      gate's TIMEOUT path resolves (HumanConfig.DefaultChoice). Also documents
+    #      intent. (Note: freeform's labels[0] fallback, not default_choice, drives
+    #      the auto-approve path — keep stop first so both agree.)
+    # --autopilot lax/mentor bias to "forward progress" and are NOT deterministically
+    # safe here; the prompt frames "continue" as the RISKY option to bias the LLM
+    # judge away from it.
+    default: stop
+    prompt:
+      The implementation agent ran out of its turn budget while still making
+      steady progress: it did NOT enter a detected loop, and its work did NOT
+      verify green (either of those would have routed elsewhere). Its final
+      status and output are shown below — read them before choosing.
+
+      Options:
+      - **stop** (default; chosen automatically for unattended runs): Treat the
+        milestone as stuck and escalate to the milestone gate. Preserves work.
+        This is the SAFE choice — it never silently advances unverified work.
+      - **abandon**: Kill the pipeline immediately.
+      - **commit_advance**: You have inspected the working tree and judge it good
+        enough. Commit it and advance to verification as if the milestone passed.
+        Only pick this AFTER reviewing the work.
+      - **continue**: RISKY. Hand the agent a fresh, larger turn budget and let
+        it keep going (warm — it keeps its episode memory). Bounded by a hard cap
+        on consecutive continues; past the cap this escalates instead of looping.
+
   human EscalateMilestone
     label: "Milestone stuck — pick how to proceed"
     mode: freeform
@@ -1685,7 +1765,7 @@ workflow BuildProduct
     command:
       set -eu
       # Keep decisions, remove build working files
-      rm -rf .ai/build .ai/milestones
+      rm -rf .ai/build .ai/milestones .tracker/turn_overrides
       # Keep: .ai/decisions/ (spec-analysis, milestones, requirement-coverage, review-synthesis, compliance)
       echo "Preserved decision log in .ai/decisions/"
       ls .ai/decisions/
@@ -1719,7 +1799,26 @@ workflow BuildProduct
     PickNextMilestone -> ClearStaleReviews  when ctx.tool_stdout contains all-done
     PickNextMilestone -> EscalateMilestone
     Implement -> CommitIfDirty  when ctx.outcome = success
+    # #318: a steady-progress turn breach (verify ran but wasn't green, no loop)
+    # routes to the operator-decision gate. Narrow `= operator_decision` so a
+    # pathological breach (and any plain fail) still falls through to the
+    # unconditional EscalateMilestone catch-all below.
+    Implement -> OperatorDecision  when ctx.turn_breach_class = operator_decision
     Implement -> EscalateMilestone
+    # #318 operator-decision routes. stop/abandon are listed BEFORE continue so
+    # the freeform labels[0] fallback (if `default` were ever dropped) is safe.
+    OperatorDecision -> EscalateMilestone      label: "stop"
+    OperatorDecision -> Done                   label: "abandon"
+    OperatorDecision -> CommitIfDirty          label: "commit_advance"
+    OperatorDecision -> ContinueWithMoreTurns  label: "continue"
+    # Capped warm-retry: success re-enters Implement (warm, bumped MaxTurns);
+    # cap-exhausted (fail) escalates instead of looping forever. The trailing
+    # unconditional -> EscalateMilestone is the strict-failure catch-all (mirrors
+    # TestMilestone): conditional edges are tried first, so it only ever fires on
+    # an unexpected outcome — and it keeps the node's printed markers covered.
+    ContinueWithMoreTurns -> Implement          when ctx.outcome = success  restart: true
+    ContinueWithMoreTurns -> EscalateMilestone  when ctx.outcome = fail
+    ContinueWithMoreTurns -> EscalateMilestone
     CommitIfDirty -> TestMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
     TestMilestone -> EscalateMilestone  when ctx.tool_stdout contains escalate

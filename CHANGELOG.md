@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operator-decision node + warm `continue +N` for steady-progress turn breaches**
+  (closes #318, completes the #303 PR2 / epic #308 Phase 1 turn-limit track). When a
+  native-backend turn-limit breach classifies to `operator_decision` (PR1 #317: steady
+  progress, verify ran but not green, no loop), the operator now gets a real choice
+  instead of a bare escalation. In `build_product.dip`, `Implement` routes
+  `when ctx.turn_breach_class = operator_decision` to a new `OperatorDecision`
+  `wait.human` (freeform) gate — **no new handler** — with four labeled edges:
+  `stop` (escalate, preserving work), `abandon` (end the run), `commit_advance`
+  (persist the tree via `CommitIfDirty` and advance), and `continue` (warm retry).
+  - **Deterministically safe unattended default:** the gate pins `default: stop` and
+    lists `stop`/`abandon` *before* `continue`, so `--auto-approve` / `--webhook-url`
+    (and the timeout path) resolve to `stop` — an unattended run never silently
+    advances unverified work. (`--autopilot lax`/`mentor` bias to forward progress and
+    are not deterministically safe; the gate prompt frames `continue` as the risky
+    option.) A pathological breach still narrowly falls through to the existing
+    `EscalateMilestone` catch-all.
+  - **Warm `continue +N`:** a new node-scoped, disk-driven `MaxTurns` override
+    (`.tracker/turn_overrides/<nodeID>`, consulted in `codergen.buildConfig`) lets the
+    capped `ContinueWithMoreTurns` tool node re-enter `Implement` with a bumped turn
+    budget while `PriorEpisodeSummaries` carry across warm. The cap is a per-loop disk
+    counter (not the global engine `RestartCount`); past the cap it escalates instead
+    of looping.
+
 - **Graph-level `on_failure` default failure route** (closes #309, refs epic #308,
   pairs with the #295 strict-failure catch-all). dippin's workflow-level
   `defaults { on_failure: <NodeID> }` now reaches the engine: the adapter
