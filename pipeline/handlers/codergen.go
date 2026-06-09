@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -606,6 +608,67 @@ func (h *CodergenHandler) applyEpisodeContextUpdates(updates map[string]string, 
 	updates[pipeline.ContextKeyEpisodeSummaries] = agent.SerializeEpisodeSummaries(summaries)
 }
 
+// maxTurnsOverrideSubdir is the tracker-owned, working-dir-relative directory
+// holding per-node warm-continue MaxTurns overrides (#318). One file per node
+// ID; its integer contents replace the node's static max_turns on re-entry.
+const maxTurnsOverrideSubdir = ".tracker/turn_overrides"
+
+// maxTurnsOverrideCeiling bounds a warm-continue override so a stale or
+// corrupted file can't inflate runtime/cost. BudgetGuard is the global cost
+// backstop, but a single oversized session can still run long; this caps the
+// blast radius. Generous vs the agent default (80) and build_product's capped
+// bumps (≤170). #318.
+const maxTurnsOverrideCeiling = 1000
+
+// resolveMaxTurns returns the warm-continue MaxTurns override for nodeID under
+// workingDir when one is present, else base. A warm continue only ever RAISES
+// the budget, so an override that does not exceed base (stale/smaller, or left
+// by a different workflow that reused the node ID) is ignored, as is one past
+// the ceiling (corruption). Overrides are scoped per working dir + node ID.
+// Keeps the branch out of buildConfig (already a long flat attr sequence). #318.
+func resolveMaxTurns(workingDir, nodeID string, base int) int {
+	override := readMaxTurnsOverride(workingDir, nodeID)
+	if override <= base || override > maxTurnsOverrideCeiling {
+		return base
+	}
+	return override
+}
+
+// safeNodeFilename reports whether nodeID is usable as a single path element —
+// a bare filename with no separators or parent refs. dippin IDs are identifiers,
+// but readMaxTurnsOverride is a general working-dir file read, so it fails closed
+// against an ID that could traverse out of the override dir. #318.
+func safeNodeFilename(nodeID string) bool {
+	return nodeID != "" && nodeID == filepath.Base(nodeID) && nodeID != "." && nodeID != ".."
+}
+
+// parsePositiveInt returns the positive integer encoded in s (trimmed), or 0.
+func parsePositiveInt(s string) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n > 0 {
+		return n
+	}
+	return 0
+}
+
+// readMaxTurnsOverride returns the node-scoped warm-continue MaxTurns override
+// for nodeID under workingDir, or 0 when absent/unreadable/non-positive (a
+// no-op so normal runs keep their statically-configured budget). #318.
+func readMaxTurnsOverride(workingDir, nodeID string) int {
+	if workingDir == "" || !safeNodeFilename(nodeID) {
+		return 0
+	}
+	path := filepath.Join(workingDir, maxTurnsOverrideSubdir, nodeID)
+	// Only honor a regular file — a symlink planted here must not be followed.
+	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return parsePositiveInt(string(data))
+}
+
 // buildTurnLimitMsg returns a non-empty message when the session hit the turn limit,
 // and an empty string otherwise.
 func buildTurnLimitMsg(node *pipeline.Node, sessResult agent.SessionResult) string {
@@ -720,6 +783,13 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if cfg.MaxTurns > 0 {
 		config.MaxTurns = cfg.MaxTurns
 	}
+	// #318 warm continue+N: a node-scoped, disk-driven override bumps MaxTurns
+	// on warm re-entry of this agent node (the operator-decision "continue"
+	// path writes it via a capped tool node). Consulted here because MaxTurns
+	// is otherwise read statically and nothing reads context for it. A missing
+	// or malformed override is a no-op, so normal runs are unaffected. (The
+	// conditional lives in resolveMaxTurns to keep buildConfig's branch count flat.)
+	config.MaxTurns = resolveMaxTurns(config.WorkingDir, node.ID, config.MaxTurns)
 	if cfg.CommandTimeout > 0 {
 		config.CommandTimeout = cfg.CommandTimeout
 	}
