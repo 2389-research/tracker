@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/2389-research/tracker/llm"
@@ -161,11 +162,33 @@ func translateGeminiTools(tools []llm.ToolDefinition) []geminiToolDecl {
 	return []geminiToolDecl{{FunctionDeclarations: decls}}
 }
 
+// geminiSupportsThinkingLevel reports whether model is Gemini 3 or later — the
+// generations that accept generationConfig.thinkingConfig.thinkingLevel. Gemini
+// 2.5 and earlier reject it with a 400, so callers drop reasoning_effort for
+// them. Parses the major version from a "gemini-<major>[.<minor>]-..." string
+// (tolerating an optional "models/" prefix); anything unrecognized → false.
+func geminiSupportsThinkingLevel(model string) bool {
+	rest := strings.TrimPrefix(strings.TrimPrefix(model, "models/"), "gemini-")
+	major := rest
+	for i, r := range rest {
+		if r < '0' || r > '9' {
+			major = rest[:i]
+			break
+		}
+	}
+	n, err := strconv.Atoi(major)
+	return err == nil && n >= 3
+}
+
 // buildGenerationConfig creates a Gemini generation config from the request fields.
 func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 	needsResponseFormat := responseFormatRequired(req)
+	// thinkingLevel is Gemini 3+ only; Gemini 2.5 and earlier reject it (400).
+	// Gate on the model so reasoning_effort is silently dropped for older models
+	// (preserving prior behavior) instead of breaking shipped 2.5-pro reviewers.
+	useThinking := req.ReasoningEffort != "" && geminiSupportsThinkingLevel(req.Model)
 
-	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat && req.ReasoningEffort == "" {
+	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat && !useThinking {
 		return nil
 	}
 
@@ -182,7 +205,7 @@ func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 	}
 	// Map the unified reasoning_effort to Gemini's thinkingConfig.thinkingLevel
 	// (Gemini 3+). low|medium|high map straight through; "minimal" is also valid.
-	if req.ReasoningEffort != "" {
+	if useThinking {
 		gc.ThinkingConfig = &geminiThinkingConfig{ThinkingLevel: req.ReasoningEffort}
 	}
 	return gc

@@ -16,8 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   maps it to `output_config.effort` (GA effort knob; `low|medium|high|max`, Opus 4.5+/
   Sonnet 4.6) and Gemini maps it to `generationConfig.thinkingConfig.thinkingLevel`
   (Gemini 3+; `minimal|low|medium|high`), with a reasoning-only request still building a
-  `generationConfig`. Empty `reasoning_effort` omits the field → provider default, so
-  existing behavior is unchanged (and `high` is the Anthropic default).
+  `generationConfig`. The Gemini mapping is gated on the model — `thinkingLevel` is
+  Gemini 3+ only, so `reasoning_effort` is dropped for Gemini 2.5 and earlier (which
+  reject it), keeping shipped `gemini-2.5-pro` reviewers working. Empty `reasoning_effort`
+  omits the field → provider default, so existing behavior is unchanged (and `high` is the
+  Anthropic default).
 
 - **Operator-decision node + warm `continue +N` for steady-progress turn breaches**
   (closes #318, completes the #303 PR2 / epic #308 Phase 1 turn-limit track). When a
