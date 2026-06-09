@@ -613,14 +613,25 @@ func (h *CodergenHandler) applyEpisodeContextUpdates(updates map[string]string, 
 // ID; its integer contents replace the node's static max_turns on re-entry.
 const maxTurnsOverrideSubdir = ".tracker/turn_overrides"
 
+// maxTurnsOverrideCeiling bounds a warm-continue override so a stale or
+// corrupted file can't inflate runtime/cost. BudgetGuard is the global cost
+// backstop, but a single oversized session can still run long; this caps the
+// blast radius. Generous vs the agent default (80) and build_product's capped
+// bumps (≤170). #318.
+const maxTurnsOverrideCeiling = 1000
+
 // resolveMaxTurns returns the warm-continue MaxTurns override for nodeID under
-// workingDir when one is present, else base. Keeps the override branch out of
-// buildConfig (which is already a long flat sequence of attr applies). #318.
+// workingDir when one is present, else base. A warm continue only ever RAISES
+// the budget, so an override that does not exceed base (stale/smaller, or left
+// by a different workflow that reused the node ID) is ignored, as is one past
+// the ceiling (corruption). Overrides are scoped per working dir + node ID.
+// Keeps the branch out of buildConfig (already a long flat attr sequence). #318.
 func resolveMaxTurns(workingDir, nodeID string, base int) int {
-	if override := readMaxTurnsOverride(workingDir, nodeID); override > 0 {
-		return override
+	override := readMaxTurnsOverride(workingDir, nodeID)
+	if override <= base || override > maxTurnsOverrideCeiling {
+		return base
 	}
-	return base
+	return override
 }
 
 // safeNodeFilename reports whether nodeID is usable as a single path element —

@@ -13,10 +13,12 @@ import (
 )
 
 // writeTurnOverride writes a node-scoped warm-continue MaxTurns override file
-// under workingDir, matching the path codergen.buildConfig consults.
+// under workingDir, using the same maxTurnsOverrideSubdir constant buildConfig
+// consults so the test follows the override location if it ever moves. (The
+// build_product.dip tool node writes the literal equivalent of this path.)
 func writeTurnOverride(t *testing.T, workingDir, nodeID, value string) {
 	t.Helper()
-	dir := filepath.Join(workingDir, ".tracker", "turn_overrides")
+	dir := filepath.Join(workingDir, maxTurnsOverrideSubdir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir override dir: %v", err)
 	}
@@ -90,6 +92,36 @@ func TestBuildConfig_EmptyWorkingDirNoOverride(t *testing.T) {
 	}
 }
 
+// TestBuildConfig_OverrideIgnoredWhenNotAnIncrease pins that a warm-continue
+// override only ever RAISES the budget: an override that does not exceed the
+// node's base max_turns (e.g. a stale/smaller value, possibly left by a
+// different workflow that reused the node ID) is ignored.
+func TestBuildConfig_OverrideIgnoredWhenNotAnIncrease(t *testing.T) {
+	workdir := t.TempDir()
+	writeTurnOverride(t, workdir, "Implement", "30") // < base 50
+
+	h := &CodergenHandler{workingDir: workdir}
+	node := &pipeline.Node{ID: "Implement", Attrs: map[string]string{"max_turns": "50"}}
+	if got := h.buildConfig(node).MaxTurns; got != 50 {
+		t.Errorf("MaxTurns = %d, want 50 (a non-increasing override must be ignored)", got)
+	}
+}
+
+// TestBuildConfig_OverrideIgnoredWhenImplausiblyLarge pins that a corrupted or
+// runaway override can't inflate runtime/cost: a value past the ceiling is
+// ignored (BudgetGuard is the global backstop, but one oversized session can
+// still run long).
+func TestBuildConfig_OverrideIgnoredWhenImplausiblyLarge(t *testing.T) {
+	workdir := t.TempDir()
+	writeTurnOverride(t, workdir, "Implement", "999999")
+
+	h := &CodergenHandler{workingDir: workdir}
+	node := &pipeline.Node{ID: "Implement", Attrs: map[string]string{"max_turns": "50"}}
+	if got := h.buildConfig(node).MaxTurns; got != 50 {
+		t.Errorf("MaxTurns = %d, want 50 (an implausibly large override must be ignored)", got)
+	}
+}
+
 // TestReadMaxTurnsOverride_RejectsPathTraversal pins that a node ID is never
 // used to traverse out of the override directory or read an arbitrary file: a
 // nodeID containing separators or ".." resolves to no override (0), even when a
@@ -122,7 +154,7 @@ func TestReadMaxTurnsOverride_RejectsPathTraversal(t *testing.T) {
 // the override file is expected is not followed — only a regular file counts.
 func TestReadMaxTurnsOverride_SkipsNonRegularFile(t *testing.T) {
 	workdir := t.TempDir()
-	dir := filepath.Join(workdir, ".tracker", "turn_overrides")
+	dir := filepath.Join(workdir, maxTurnsOverrideSubdir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

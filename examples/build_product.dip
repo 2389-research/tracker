@@ -31,6 +31,11 @@ workflow BuildProduct
       mkdir -p .ai/build .ai/decisions .ai/milestones
       echo '.ai/' >> .gitignore 2>/dev/null || true
       sort -u .gitignore -o .gitignore
+      # #318: clear any warm-continue cap counter / MaxTurns override left by a
+      # prior run interrupted before its cleanup. Setup is skipped on checkpoint
+      # resume (already completed), so a deliberately-resumed run keeps its state;
+      # only a fresh run starts the continue allowance clean.
+      rm -rf .tracker/turn_overrides
       if [ ! -f SPEC.md ]; then
         echo "ERROR: SPEC.md not found in repo root"
         exit 1
@@ -742,8 +747,15 @@ workflow BuildProduct
       mkdir -p "$OVR_DIR"
       ATTEMPTS=0
       if [ -f "$ATTEMPT_FILE" ]; then
-        ATTEMPTS=$(cat "$ATTEMPT_FILE")
+        ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
       fi
+      # Reset a corrupted/non-numeric counter (e.g. a prior run interrupted
+      # before MarkMilestoneDone/Cleanup cleared it) so the arithmetic below
+      # can't error under `set -e` and a fresh operator decision isn't denied
+      # its continues by stale junk. Setup also clears this dir at run start.
+      case "$ATTEMPTS" in
+        ''|*[!0-9]*) ATTEMPTS=0 ;;
+      esac
       ATTEMPTS=$((ATTEMPTS + 1))
       echo "$ATTEMPTS" > "$ATTEMPT_FILE"
       if [ "$ATTEMPTS" -gt "$CAP" ]; then
