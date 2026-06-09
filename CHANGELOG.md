@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`reasoning_effort` wired through to Anthropic and Gemini** (closes #329). The
+  unified `reasoning_effort` knob (`.dip` node attr) was only consumed by the OpenAI
+  provider; the Anthropic and Gemini translate layers silently dropped it, so
+  `reasoning_effort: low|medium|high` had no effect on Opus or Gemini. Now Anthropic
+  maps it to `output_config.effort` (GA effort knob; `low|medium|high|max`, Opus 4.5+/
+  Sonnet 4.6) and Gemini maps it to `generationConfig.thinkingConfig.thinkingLevel`
+  (Gemini 3+; `minimal|low|medium|high`), with a reasoning-only request still building a
+  `generationConfig`. Empty `reasoning_effort` omits the field → provider default, so
+  existing behavior is unchanged (and `high` is the Anthropic default).
+
 - **Operator-decision node + warm `continue +N` for steady-progress turn breaches**
   (closes #318, completes the #303 PR2 / epic #308 Phase 1 turn-limit track). When a
   native-backend turn-limit breach classifies to `operator_decision` (PR1 #317: steady
