@@ -70,13 +70,22 @@ type geminiToolChoiceConfig struct {
 }
 
 type geminiGenConfig struct {
-	Temperature      *float64        `json:"temperature,omitempty"`
-	MaxOutputTokens  *int            `json:"maxOutputTokens,omitempty"`
-	TopP             *float64        `json:"topP,omitempty"`
-	TopK             *int            `json:"topK,omitempty"`
-	StopSequences    []string        `json:"stopSequences,omitempty"`
-	ResponseMimeType string          `json:"responseMimeType,omitempty"`
-	ResponseSchema   json.RawMessage `json:"responseSchema,omitempty"`
+	Temperature      *float64              `json:"temperature,omitempty"`
+	MaxOutputTokens  *int                  `json:"maxOutputTokens,omitempty"`
+	TopP             *float64              `json:"topP,omitempty"`
+	TopK             *int                  `json:"topK,omitempty"`
+	StopSequences    []string              `json:"stopSequences,omitempty"`
+	ResponseMimeType string                `json:"responseMimeType,omitempty"`
+	ResponseSchema   json.RawMessage       `json:"responseSchema,omitempty"`
+	ThinkingConfig   *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// geminiThinkingConfig carries the Gemini 3 reasoning control
+// (thinkingConfig.thinkingLevel: minimal|low|medium|high). It is the Gemini-3+
+// replacement for the legacy numeric thinkingBudget; combining the two in one
+// request returns a 400. Gemini 2.5 models do not support thinkingLevel.
+type geminiThinkingConfig struct {
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
 // translateRequest converts a unified llm.Request to Gemini API JSON.
@@ -156,7 +165,7 @@ func translateGeminiTools(tools []llm.ToolDefinition) []geminiToolDecl {
 func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 	needsResponseFormat := responseFormatRequired(req)
 
-	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat {
+	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat && req.ReasoningEffort == "" {
 		return nil
 	}
 
@@ -170,6 +179,11 @@ func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 	}
 	if needsResponseFormat {
 		applyResponseFormat(gc, req.ResponseFormat)
+	}
+	// Map the unified reasoning_effort to Gemini's thinkingConfig.thinkingLevel
+	// (Gemini 3+). low|medium|high map straight through; "minimal" is also valid.
+	if req.ReasoningEffort != "" {
+		gc.ThinkingConfig = &geminiThinkingConfig{ThinkingLevel: req.ReasoningEffort}
 	}
 	return gc
 }
