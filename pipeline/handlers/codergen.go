@@ -623,22 +623,39 @@ func resolveMaxTurns(workingDir, nodeID string, base int) int {
 	return base
 }
 
+// safeNodeFilename reports whether nodeID is usable as a single path element —
+// a bare filename with no separators or parent refs. dippin IDs are identifiers,
+// but readMaxTurnsOverride is a general working-dir file read, so it fails closed
+// against an ID that could traverse out of the override dir. #318.
+func safeNodeFilename(nodeID string) bool {
+	return nodeID != "" && nodeID == filepath.Base(nodeID) && nodeID != "." && nodeID != ".."
+}
+
+// parsePositiveInt returns the positive integer encoded in s (trimmed), or 0.
+func parsePositiveInt(s string) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n > 0 {
+		return n
+	}
+	return 0
+}
+
 // readMaxTurnsOverride returns the node-scoped warm-continue MaxTurns override
 // for nodeID under workingDir, or 0 when absent/unreadable/non-positive (a
 // no-op so normal runs keep their statically-configured budget). #318.
 func readMaxTurnsOverride(workingDir, nodeID string) int {
-	if workingDir == "" || nodeID == "" {
+	if workingDir == "" || !safeNodeFilename(nodeID) {
 		return 0
 	}
-	data, err := os.ReadFile(filepath.Join(workingDir, maxTurnsOverrideSubdir, nodeID))
+	path := filepath.Join(workingDir, maxTurnsOverrideSubdir, nodeID)
+	// Only honor a regular file — a symlink planted here must not be followed.
+	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
+		return 0
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || n <= 0 {
-		return 0
-	}
-	return n
+	return parsePositiveInt(string(data))
 }
 
 // buildTurnLimitMsg returns a non-empty message when the session hit the turn limit,

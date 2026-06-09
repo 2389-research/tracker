@@ -28,12 +28,17 @@ func loadBuildProductGraph(t *testing.T) *pipeline.Graph {
 	return g
 }
 
-// TestOperatorDecision_UnattendedResolvesToStop pins that a non-interactive run
-// (AutoApproveFreeformInterviewer — the deterministic --auto-approve / --webhook
-// path) on the real OperatorDecision node resolves to "stop", routing to the
-// escalation gate rather than advancing. This is the end-to-end form of the
-// #318 hazard-1 guard: the freeform `default` attr is honored and never lands on
-// "continue".
+// TestOperatorDecision_UnattendedResolvesToStop pins that a non-interactive
+// auto-approve run (AutoApproveFreeformInterviewer) on the real OperatorDecision
+// node resolves to "stop", routing to the escalation gate rather than advancing.
+//
+// NOTE on the mechanism: in freeform mode HumanHandler reads node.Attrs["default"]
+// (NOT default_choice, where dippin's `default:` keyword lands), so for a
+// dippin-authored gate that bare attr is empty and the interviewer falls back to
+// the FIRST labeled edge. The safety here therefore comes from EDGE ORDERING
+// (stop is listed first), not from a freeform `default` attr being honored. The
+// --webhook path is a separate interviewer not exercised here; this test pins the
+// deterministic auto-approve path end-to-end.
 func TestOperatorDecision_UnattendedResolvesToStop(t *testing.T) {
 	g := loadBuildProductGraph(t)
 	node := g.Nodes["OperatorDecision"]

@@ -90,6 +90,55 @@ func TestBuildConfig_EmptyWorkingDirNoOverride(t *testing.T) {
 	}
 }
 
+// TestReadMaxTurnsOverride_RejectsPathTraversal pins that a node ID is never
+// used to traverse out of the override directory or read an arbitrary file: a
+// nodeID containing separators or ".." resolves to no override (0), even when a
+// readable integer file sits at the traversed-to location. Defense-in-depth —
+// the helper is a general working-dir file read, so it fails closed.
+func TestReadMaxTurnsOverride_RejectsPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	workdir := filepath.Join(root, "work")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A valid integer file exactly where "../../../secret" would resolve from
+	// <workdir>/.tracker/turn_overrides — i.e. an escape the guard must block.
+	if err := os.WriteFile(filepath.Join(root, "secret"), []byte("999"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, nodeID := range []string{
+		"../../../secret",
+		"..",
+		"sub/Implement",
+	} {
+		if got := readMaxTurnsOverride(workdir, nodeID); got != 0 {
+			t.Errorf("readMaxTurnsOverride(workdir, %q) = %d, want 0 (must not traverse/read outside the override dir)", nodeID, got)
+		}
+	}
+}
+
+// TestReadMaxTurnsOverride_SkipsNonRegularFile pins that a symlink planted where
+// the override file is expected is not followed — only a regular file counts.
+func TestReadMaxTurnsOverride_SkipsNonRegularFile(t *testing.T) {
+	workdir := t.TempDir()
+	dir := filepath.Join(workdir, ".tracker", "turn_overrides")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(workdir, "elsewhere")
+	if err := os.WriteFile(target, []byte("999"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "Implement")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if got := readMaxTurnsOverride(workdir, "Implement"); got != 0 {
+		t.Errorf("readMaxTurnsOverride followed a symlink and returned %d, want 0", got)
+	}
+}
+
 // TestWarmContinue_CarriesBumpedTurnsAndEpisodes pins the #318 acceptance
 // criterion for continue+N: the resumed agent run config carries BOTH a bumped
 // MaxTurns (from the disk override) AND non-empty PriorEpisodeSummaries (warm,

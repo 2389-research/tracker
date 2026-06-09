@@ -727,6 +727,18 @@ workflow BuildProduct
       BUMP=40
       OVR_DIR=".tracker/turn_overrides"
       ATTEMPT_FILE="$OVR_DIR/continue_attempts"
+      # Keep these tracker-internal control files OUT of the product repo. A later
+      # CommitIfDirty runs `git add -A`, which would otherwise commit the counter +
+      # override — polluting the user's repo AND leaving a stale Implement override
+      # that a future run would read (via codergen.buildConfig) before any operator
+      # decision. Ignore them via the LOCAL, untracked .git/info/exclude so we never
+      # touch the user's tracked .gitignore (idempotent; safe outside a git repo).
+      GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
+      if [ -n "$GITDIR" ]; then
+        mkdir -p "$GITDIR/info"
+        grep -qxF "$OVR_DIR/" "$GITDIR/info/exclude" 2>/dev/null \
+          || echo "$OVR_DIR/" >> "$GITDIR/info/exclude"
+      fi
       mkdir -p "$OVR_DIR"
       ATTEMPTS=0
       if [ -f "$ATTEMPT_FILE" ]; then
