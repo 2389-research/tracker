@@ -215,6 +215,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`build_product.dip`: a silently-missing cross-review no longer reaches
+  synthesis** (refs #313, epic #308; engine half of #313 deferred). The parallel
+  fan-in is success-if-any, so if one reviewer (typically the adversarial
+  `ReviewGemini`) exhausts `max_turns` and never writes its report while the
+  other two succeed, `ReviewParallel` aggregated to success and flowed to
+  `SynthesizeReviews` with that review silently missing. A new `tool` node
+  `CheckReviewsComplete` now runs after `ReviewJoin` and **fails loudly unless all
+  three review reports (`.ai/build/review-{claude,codex,gemini}.md`) are present
+  and non-empty**, routing a partial set to the `EscalateReview` human gate
+  instead of synthesizing from it. A companion `ClearStaleReviews` node wipes the
+  prior round's reports before each fan-out (on both the first-entry and capped
+  re-review paths) so a reviewer that fails on a re-review pass can't be satisfied
+  by a stale file. `.dip`-only change; no engine code. The engine-level fix
+  (configurable fan-in aggregation policy + per-branch fallback routing) remains
+  open on #313 because dippin v0.35.0 cannot carry a per-node fan-in policy
+  attribute on `parallel`/`fan_in` nodes — a dippin-lang grammar change is filed
+  separately.
 - **Unhandled agent failure no longer dead-stops the pipeline** (closes #295,
   refs epic #308, pairs with #296). When an agent node returns `OutcomeFail`
   (including turn-limit exhaustion) and has only unconditional outgoing edges,

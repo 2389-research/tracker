@@ -1116,6 +1116,21 @@ workflow BuildProduct
 
   # ─── Phase 3: Cross-Review ─────────────────────────────────
 
+  tool ClearStaleReviews
+    label: "Clear Stale Review Reports"
+    timeout: 5s
+    command:
+      set -eu
+      # issue #313: the fan-in is success-if-any, so a reviewer that exhausts
+      # max_turns and fails is masked. CheckReviewsComplete (after the join)
+      # keys on review-file presence; clear last round's reports so a reviewer
+      # that fails on a re-review pass can't be satisfied by a stale file from
+      # the prior pass. Runs on BOTH inbound paths to ReviewParallel (first
+      # entry from PickNextMilestone and the capped re-review restart loop).
+      mkdir -p .ai/build
+      rm -f .ai/build/review-claude.md .ai/build/review-codex.md .ai/build/review-gemini.md
+      printf 'cleared stale review reports\n'
+
   parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
 
   # Phase 3 reviewers (issue #233 Gap 2). All three carry the same 5-point
@@ -1325,6 +1340,33 @@ workflow BuildProduct
       Write the report to .ai/build/review-gemini.md.
 
   fan_in ReviewJoin <- ReviewClaude, ReviewCodex, ReviewGemini
+
+  tool CheckReviewsComplete
+    label: "Verify All Reviews Present"
+    timeout: 5s
+    command:
+      set -eu
+      # issue #313 defense-in-depth: the parallel fan-in is success-if-any, so
+      # a single reviewer that exhausts max_turns and never writes its report
+      # is silently masked — SynthesizeReviews would synthesize from a partial
+      # set. Require ALL THREE reports present + non-empty; a single missing
+      # review (typically the adversarial ReviewGemini, the one most likely to
+      # exhaust turns) fails the gate and routes to EscalateReview rather than
+      # masking the gap. A 2-of-3 quorum would not fix this — it would still
+      # proceed with the adversarial reviewer absent.
+      # This gate routes on exit code (ctx.outcome), NOT on stdout content, so
+      # all diagnostics go to stderr — keeps stdout free of routing-marker noise
+      # (surfaced by `tracker diagnose` either way) and the dippin coverage
+      # analyzer correctly sees no stdout outputs to match.
+      missing=""
+      for f in review-claude.md review-codex.md review-gemini.md; do
+        [ -s ".ai/build/$f" ] || missing="$missing $f"
+      done
+      if [ -n "$missing" ]; then
+        printf 'review-gate FAIL: missing/empty review(s):%s — escalating instead of synthesizing a partial review set\n' "$missing" >&2
+        exit 1
+      fi
+      printf 'review-gate OK: all 3 reviews present\n' >&2
 
   agent SynthesizeReviews
     label: "Synthesize Reviews"
@@ -1670,7 +1712,7 @@ workflow BuildProduct
 
     # Build loop: pick → implement → test → verify → mark done → pick next
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
-    PickNextMilestone -> ReviewParallel  when ctx.tool_stdout contains all-done
+    PickNextMilestone -> ClearStaleReviews  when ctx.tool_stdout contains all-done
     PickNextMilestone -> EscalateMilestone
     Implement -> CommitIfDirty  when ctx.outcome = success
     Implement -> EscalateMilestone
@@ -1692,19 +1734,30 @@ workflow BuildProduct
     EscalateMilestone -> Done  label: "abandon"
 
     # Cross-review
+    # ClearStaleReviews wipes prior-round reports before fan-out so the
+    # post-join CheckReviewsComplete guard (issue #313) can't be satisfied by a
+    # stale file from an earlier re-review pass.
+    ClearStaleReviews -> ReviewParallel
     # The three reviewers run as parallel branches; a branch runs via
     # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
     # path, so a per-branch fallback_target would be inert. Route failure on the
     # aggregating ReviewParallel node instead: aggregateStatus is success-if-any,
     # so this fires only when ALL THREE reviewers fail (which would otherwise
     # dead-stop the pipeline). On success the parallel handler's suggested-next
-    # routes to ReviewJoin. A single reviewer failing is masked by aggregateStatus
-    # and needs an engine fix (per-branch routing); tracked separately.
+    # routes to ReviewJoin.
+    #
+    # A SINGLE reviewer failing is NOT caught here (success-if-any masks it) and
+    # cannot be fixed in .dip — dippin v0.35.0 carries no per-node fan-in policy
+    # attribute, so the engine-level configurable-policy fix stays open on #313.
+    # Defense-in-depth lives at CheckReviewsComplete below: it fails loudly if
+    # any of the three review reports is missing/empty and routes to EscalateReview.
     ReviewParallel -> EscalateReview  when ctx.outcome = fail
     ReviewClaude -> ReviewJoin
     ReviewCodex -> ReviewJoin
     ReviewGemini -> ReviewJoin
-    ReviewJoin -> SynthesizeReviews
+    ReviewJoin -> CheckReviewsComplete
+    CheckReviewsComplete -> SynthesizeReviews  when ctx.outcome = success
+    CheckReviewsComplete -> EscalateReview  when ctx.outcome = fail
     SynthesizeReviews -> FinalBuild  when ctx.outcome = success
     SynthesizeReviews -> ApplyReviewFixes  when ctx.outcome = fail
     SynthesizeReviews -> EscalateReview
@@ -1720,7 +1773,7 @@ workflow BuildProduct
     # escalates to a human.
     ApplyReviewFixes -> CheckReviewFixBudget  when ctx.outcome = success
     ApplyReviewFixes -> EscalateReview
-    CheckReviewFixBudget -> ReviewParallel  when ctx.outcome = success  restart: true
+    CheckReviewFixBudget -> ClearStaleReviews  when ctx.outcome = success  restart: true
     CheckReviewFixBudget -> EscalateReview  when ctx.outcome = fail
 
     # Final verification

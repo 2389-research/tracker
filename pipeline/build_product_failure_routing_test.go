@@ -221,6 +221,72 @@ func TestBuildProductIssue303GreenBreachRescuePath(t *testing.T) {
 	}
 }
 
+// TestBuildProductIssue313ReviewGate pins the #313 reviewer-completeness guard.
+// The parallel fan-in is success-if-any, so a single reviewer that exhausts
+// max_turns and never writes its report is masked: ReviewParallel aggregates to
+// success and flows to SynthesizeReviews with that review silently missing. The
+// engine-level fix (configurable fan-in policy) cannot be expressed in dippin
+// v0.35.0 (parallel/fan_in nodes carry no attributes), so the symptom is fixed
+// at the workflow layer:
+//
+//   - ClearStaleReviews (tool) runs before ReviewParallel on BOTH inbound paths
+//     so the capped re-review restart loop can't satisfy the guard with a stale
+//     report from a prior round.
+//   - CheckReviewsComplete (tool) runs after ReviewJoin and fails unless all
+//     three review files are present + non-empty, routing a partial set to the
+//     existing EscalateReview human gate instead of SynthesizeReviews.
+func TestBuildProductIssue313ReviewGate(t *testing.T) {
+	g := loadBuildProduct(t)
+
+	// Both guards are tool nodes.
+	for _, id := range []string{"CheckReviewsComplete", "ClearStaleReviews"} {
+		n, ok := g.Nodes[id]
+		if !ok {
+			t.Fatalf("%s node missing from build_product.dip (issue #313)", id)
+		}
+		if n.Handler != "tool" {
+			t.Errorf("%s handler = %q, want \"tool\" (issue #313)", id, n.Handler)
+		}
+	}
+
+	// Post-join guard: ReviewJoin -> CheckReviewsComplete -> {SynthesizeReviews|EscalateReview}.
+	if !hasEdgeTo(g, "ReviewJoin", "CheckReviewsComplete") {
+		t.Error("ReviewJoin has no edge to CheckReviewsComplete — partial review sets would reach synthesis (issue #313)")
+	}
+	if hasEdgeTo(g, "ReviewJoin", "SynthesizeReviews") {
+		t.Error("ReviewJoin still routes directly to SynthesizeReviews; it must go through CheckReviewsComplete (issue #313)")
+	}
+	if !hasEdgeWithCondition(g, "CheckReviewsComplete", "SynthesizeReviews", "ctx.outcome = success") {
+		t.Error("CheckReviewsComplete has no `ctx.outcome = success` edge to SynthesizeReviews (issue #313)")
+	}
+	if !hasEdgeWithCondition(g, "CheckReviewsComplete", "EscalateReview", "ctx.outcome = fail") {
+		t.Error("CheckReviewsComplete has no `ctx.outcome = fail` edge to EscalateReview — a missing review would not escalate (issue #313)")
+	}
+
+	// Pre-fan-out clear: both inbound paths to ReviewParallel go through ClearStaleReviews.
+	if !hasUnconditionalEdgeTo(g, "ClearStaleReviews", "ReviewParallel") {
+		t.Error("ClearStaleReviews has no edge to ReviewParallel (issue #313)")
+	}
+	if !hasEdgeWithCondition(g, "PickNextMilestone", "ClearStaleReviews", "ctx.tool_stdout contains all-done") {
+		t.Error("PickNextMilestone all-done edge must enter ClearStaleReviews before ReviewParallel (issue #313)")
+	}
+	if !hasEdgeWithCondition(g, "CheckReviewFixBudget", "ClearStaleReviews", "ctx.outcome = success") {
+		t.Error("CheckReviewFixBudget re-review edge must enter ClearStaleReviews before ReviewParallel (issue #313)")
+	}
+	// The re-review edge moved from CheckReviewFixBudget->ReviewParallel to
+	// ->ClearStaleReviews; pin restart:true so a future edit can't drop the loop
+	// semantics (which would also stop clearing stale reports each pass).
+	if !hasEdgeAttr(g, "CheckReviewFixBudget", "ClearStaleReviews", "ctx.outcome = success", "restart", "true") {
+		t.Error("CheckReviewFixBudget -> ClearStaleReviews must keep restart: true (issue #313)")
+	}
+	if hasEdgeTo(g, "PickNextMilestone", "ReviewParallel") {
+		t.Error("PickNextMilestone still routes directly to ReviewParallel; it must clear stale reviews first (issue #313)")
+	}
+	if hasEdgeTo(g, "CheckReviewFixBudget", "ReviewParallel") {
+		t.Error("CheckReviewFixBudget still routes directly to ReviewParallel; it must clear stale reviews first (issue #313)")
+	}
+}
+
 // hasEdgeTo reports whether the node has any outgoing edge to the given target.
 func hasEdgeTo(g *Graph, from, to string) bool {
 	for _, e := range g.OutgoingEdges(from) {
@@ -236,6 +302,17 @@ func hasEdgeTo(g *Graph, from, to string) bool {
 func hasEdgeWithCondition(g *Graph, from, to, cond string) bool {
 	for _, e := range g.OutgoingEdges(from) {
 		if e.To == to && e.Condition == cond {
+			return true
+		}
+	}
+	return false
+}
+
+// hasEdgeAttr reports whether the node has an outgoing edge to the given target
+// matching both the condition and an edge attribute key=value (e.g. restart).
+func hasEdgeAttr(g *Graph, from, to, cond, key, want string) bool {
+	for _, e := range g.OutgoingEdges(from) {
+		if e.To == to && e.Condition == cond && e.Attrs[key] == want {
 			return true
 		}
 	}
