@@ -715,6 +715,11 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 		attrs["max_restarts"] = strconv.Itoa(defaults.MaxRestarts)
 	}
 	setIfNonEmpty(attrs, "restart_target", defaults.RestartTarget)
+	// #309: dippin's graph-level `on_failure: <NodeID>` default failure route maps
+	// onto the graph fallback key the engine's strict-failure path reads
+	// (findFallbackTarget, #295). Node-level fallback_target lands in the node's
+	// own fallback_retry_target and is consulted first, so it still wins.
+	setIfNonEmpty(attrs, "fallback_target", defaults.OnFailure)
 	if defaults.CacheTools {
 		attrs["cache_tool_results"] = "true"
 	}
