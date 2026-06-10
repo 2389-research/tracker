@@ -28,10 +28,11 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-36-0">v0.36.0</a>
     <a href="#v0-35-1">v0.35.1</a>
     <a href="#v0-35-0">v0.35.0</a>
-    <a href="#v0-34-0">v0.34.0</a>
     <strong>Jump to:</strong>
+    <a href="#v0-34-0">v0.34.0</a>
     <a href="#v0-33-0">v0.33.0</a>
     <a href="#v0-32-0">v0.32.0</a>
     <a href="#v0-31-0">v0.31.0</a>
@@ -68,6 +69,46 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.36.0 ═══ -->
+  <section class="glass" id="v0-36-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.36.0" style="color: inherit; text-decoration: none;">v0.36.0</a></h2>
+      <span class="badge">2026-06-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.36.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Epic <a href="https://github.com/2389-research/tracker/issues/308">#308</a> Phases 0&ndash;2 land &mdash;
+      <code>build_product</code> no longer dead-stops, loses work, or builds on a broken spec.</strong> The epic's case
+      study was a real run that went green, exhausted its turn budget before committing, and silently halted the whole
+      pipeline &mdash; skipping the entire cross-review safety net. Phase 0 stops the bleeding (failure routing at both
+      the engine and workflow layers), Phase 1 preserves work (commit-WIP, commit-first discipline, turn-limit guard),
+      Phase 2 enforces quality regardless of spec or language (language-native gates, requirement coverage, spec-coherence
+      preflight). Also ships <code>reasoning_effort</code> for Anthropic/Gemini and the dippin v0.38 pin.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Spec-coherence preflight (<code>SpecLint</code>)</strong> in both build_product workflows (<a href="https://github.com/2389-research/tracker/issues/301">#301</a>). Runs once, strictly before any decomposition; hard-fails dangling doc/section refs, contradictory constants, contract/signature mismatches, and unassignable mandated tests; warns on uncheckable guarantees and contradicting example code. Findings with evidence land in <code>.ai/decisions/spec-quality.md</code>; fails closed via the <code>auto_status</code> last-line-wins STATUS contract.</li>
+      <li><strong><code>reasoning_effort</code> wired through to Anthropic and Gemini</strong> (<a href="https://github.com/2389-research/tracker/pull/329">#329</a>). Anthropic maps to <code>output_config.effort</code>; Gemini 3+ maps to <code>thinkingConfig.thinkingLevel</code> (dropped for Gemini 2.5 and earlier, which reject it).</li>
+      <li><strong>Operator-decision gate + warm <code>continue +N</code></strong> for steady-progress turn breaches (<a href="https://github.com/2389-research/tracker/issues/318">#318</a>). A turn-limit breach that classifies as steady progress routes to a freeform human gate (stop / abandon / commit-advance / continue) with a deterministically safe <code>stop</code> default for unattended runs.</li>
+      <li><strong>Graph-level <code>on_failure</code> default failure route</strong> (<a href="https://github.com/2389-research/tracker/issues/309">#309</a>, with dippin-lang v0.38). Authors declare one fallback instead of wiring fail edges per node; node-level routes take precedence.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pin bumped v0.35.0 &rarr; v0.38.0</strong> (consumes graph-level <code>on_failure</code>, the agent-failure-route lint, and declarable budget/limit attrs).</li>
+      <li><strong>build_product: no-requirement-left-behind</strong> (<a href="https://github.com/2389-research/tracker/issues/300">#300</a>) &mdash; Decompose builds a requirement-coverage table (every spec-mandated verification owned or explicitly deferred); Verify enforces owner-or-fail.</li>
+      <li><strong>build_product: language-native quality gates when no Makefile exists</strong> (<a href="https://github.com/2389-research/tracker/issues/299">#299</a>) &mdash; go vet / golangci-lint / tsc / eslint / ruff / mypy / cargo fmt+clippy fallbacks in the shared CI probe.</li>
+      <li><strong>build_product: per-node build-context file</strong> (<a href="https://github.com/2389-research/tracker/issues/298">#298</a>) cures rediscovery amnesia &mdash; agents stop re-burning ~20% of each turn budget re-reading the repo.</li>
+      <li><strong>engine: turn-limit breach = guard, not guillotine</strong> (<a href="https://github.com/2389-research/tracker/issues/303">#303</a>) &mdash; verify &rarr; commit-if-green &rarr; classify before any routing decision.</li>
+      <li><strong>engine: commit-WIP to a recoverable ref</strong> before routing a failed/exhausted node (<a href="https://github.com/2389-research/tracker/issues/302">#302</a>); <strong>build_product: commit-first / stop-when-green + <code>CommitIfDirty</code> checkpoint</strong> (<a href="https://github.com/2389-research/tracker/issues/297">#297</a>).</li>
+      <li><strong><code>TRACKER_GATEWAY_KIND</code> routing dispatch</strong> for bedrock-style gateways (<a href="https://github.com/2389-research/tracker/issues/276">#276</a>&ndash;<a href="https://github.com/2389-research/tracker/issues/278">#278</a>) with <code>tracker doctor</code> routing notes and operator docs.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Unhandled agent failure no longer dead-stops the pipeline</strong> (<a href="https://github.com/2389-research/tracker/issues/295">#295</a>) &mdash; routes to <code>fallback_target</code> / graph <code>on_failure</code>; <strong>every build_product agent node routes failure/turn-exhaustion to escalation</strong> (<a href="https://github.com/2389-research/tracker/issues/296">#296</a>).</li>
+      <li><strong>A silently-missing cross-review report can no longer reach <code>FinalBuild</code></strong> (<a href="https://github.com/2389-research/tracker/issues/313">#313</a> guard) &mdash; <code>CheckReviewsComplete</code> fails the gate when any of the three review reports is missing or empty.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.35.1 ═══ -->
   <section class="glass" id="v0-35-1" style="border-left: 3px solid var(--orange-600);">
