@@ -1304,10 +1304,12 @@ workflow BuildProduct
     timeout: 5s
     command:
       set -eu
-      # issue #313: the fan-in is success-if-any, so a reviewer that exhausts
-      # max_turns and fails is masked. CheckReviewsComplete (after the join)
-      # keys on review-file presence; clear last round's reports so a reviewer
-      # that fails on a re-review pass can't be satisfied by a stale file from
+      # issue #313: ReviewParallel declares fan_in_policy: all, so a reviewer
+      # that exhausts max_turns and FAILS now routes to EscalateReview — but a
+      # reviewer that reports success without writing its file is invisible to
+      # any aggregation policy. CheckReviewsComplete (after the join) keys on
+      # review-file presence; clear last round's reports so a reviewer that
+      # fails on a re-review pass can't be satisfied by a stale file from
       # the prior pass. Runs on BOTH inbound paths to ReviewParallel (first
       # entry from PickNextMilestone and the capped re-review restart loop).
       mkdir -p .ai/build

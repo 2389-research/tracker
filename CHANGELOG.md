@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   either node. Unknown policies and `quorum` without a positive `n` are
   hard configuration errors (on a parallel node they fail before any branch
   is dispatched; on a fan_in node, when it executes). A policy-caused
-  failure names the
-  policy and the failed branch IDs in the `EventParallelCompleted` message,
+  failure names the policy and the failed branch IDs in the
+  `EventParallelCompleted` message,
   and the fan-in handler records the same detail under the
   `fan_in.policy_detail` context key for the audit trail. A policy-failed
   parallel node routes through normal `ctx.outcome = fail` edges — no new
