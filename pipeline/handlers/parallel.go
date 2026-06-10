@@ -102,7 +102,15 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Stats:         aggregateBranchStats(collected),
 		ChildOverride: aggregateChildOverrides(branchOverridesOut),
 	}
-	if joinID := node.ParallelConfig().JoinID; joinID != "" {
+	// Suggest the join — EXCEPT when a non-default policy is unsatisfied.
+	// Leaving the suggestion in place would let edge selection fall through
+	// selectBySuggested to the join (bypassing strict-failure because
+	// conditional edges exist), and a default-any fan-in downstream would
+	// mask the very failure the policy surfaced (Codex review, PR #344).
+	// Under the default any policy the suggestion is kept even on all-fail —
+	// existing workflows route that failure at the fan-in node.
+	policyBlocked := policy.name != "any" && status != string(pipeline.OutcomeSuccess)
+	if joinID := node.ParallelConfig().JoinID; joinID != "" && !policyBlocked {
 		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
 	}
 	return outcome, nil

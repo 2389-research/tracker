@@ -156,6 +156,56 @@ func TestParallelHandlerPolicyFailureSurfacesInEvent(t *testing.T) {
 	}
 }
 
+// A policy-caused failure must NOT suggest the join node — otherwise a
+// workflow with (say) only a success conditional on the parallel node falls
+// through selectBySuggested to the join and the fan-in (default any) masks
+// the failure the policy was meant to surface (Codex review, PR #344).
+func TestParallelHandlerPolicyFailureSuppressesJoinSuggestion(t *testing.T) {
+	stub := mixedStubHandler("stub_policy_join", "branch_fail")
+	outcome, err := runParallelWithPolicy(t, []string{"branch_ok", "branch_fail"},
+		map[string]string{"fan_in_policy": "all", "parallel_join": "join_node"}, stub, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != string(pipeline.OutcomeFail) {
+		t.Fatalf("expected fail, got %q", outcome.Status)
+	}
+	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "" {
+		t.Errorf("policy failure must not suggest the join, got %q", v)
+	}
+}
+
+// Back-compat pin: under the default any policy, an all-branches-failed
+// parallel node STILL suggests the join — existing workflows route that
+// failure at the fan-in node downstream.
+func TestParallelHandlerDefaultPolicyAllFailStillSuggestsJoin(t *testing.T) {
+	stub := mixedStubHandler("stub_anyfail_join", "branch_a", "branch_b")
+	outcome, err := runParallelWithPolicy(t, []string{"branch_a", "branch_b"},
+		map[string]string{"parallel_join": "join_node"}, stub, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != string(pipeline.OutcomeFail) {
+		t.Fatalf("expected fail, got %q", outcome.Status)
+	}
+	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "join_node" {
+		t.Errorf("default-policy all-fail should keep suggesting the join, got %q", v)
+	}
+}
+
+// A satisfied non-default policy keeps the join suggestion.
+func TestParallelHandlerPolicySuccessKeepsJoinSuggestion(t *testing.T) {
+	stub := mixedStubHandler("stub_policy_ok_join")
+	outcome, err := runParallelWithPolicy(t, []string{"branch_a", "branch_b"},
+		map[string]string{"fan_in_policy": "all", "parallel_join": "join_node"}, stub, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "join_node" {
+		t.Errorf("satisfied policy should suggest the join, got %q", v)
+	}
+}
+
 // --- fan-in handler (mergeSuccessfulBranches path) ---
 
 func runFanInWithPolicy(t *testing.T, results []ParallelResult, policyAttrs map[string]string) (pipeline.Outcome, error) {
