@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`graph.workflow_dir` is seeded from the `.dip` file's parent directory**
-  (closes #332). When a pipeline loads from a real on-disk `.dip` path (via
-  `tracker run` / `validate`, including subgraph refs — each subgraph gets its
-  own dir), the loader sets `graph.Attrs["workflow_dir"]` to the absolute
+- **`graph.workflow_dir` is seeded from the pipeline file's parent directory**
+  (closes #332). When a pipeline loads from a real on-disk path — `.dip` or
+  legacy `.dot` — (via `tracker run` / `validate`, including subgraph refs;
+  each subgraph gets its own dir), the loader sets
+  `graph.Attrs["workflow_dir"]` to the absolute
   parent directory, so authors can reference sibling files from any cwd:
   `command: bash ${graph.workflow_dir}/scripts/setup.sh`. `graph.*` is
   author-controlled and already allowlisted in tool_command interpolation; the
