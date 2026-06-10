@@ -35,6 +35,80 @@ func TestCheckCommandDenylist(t *testing.T) {
 	}
 }
 
+func TestCheckCommandDenylist_ExecFdRedirects(t *testing.T) {
+	tests := []struct {
+		name   string
+		cmd    string
+		denied bool
+	}{
+		// fd-only redirect forms — POSIX idiom, no process replacement: allowed.
+		{"open fd to quoted var", `exec 3>"${env_tmp}"`, false},
+		{"close fd", "exec 3>&-", false},
+		{"stdin from file", "exec <input.txt", false},
+		{"append stderr to log", "exec 2>>log.txt", false},
+		{"redirect stdout to file", "exec >out.txt", false},
+		{"spaced target", "exec 3> /tmp/out.txt", false},
+		{"dup fd", "exec 3>&1", false},
+		{"multiple redirects", `exec 3>"${env_tmp}" 4<input.txt`, false},
+		{"fd-3 idiom compound", `exec 3>"${env_tmp}" && echo ok && exec 3>&-`, false},
+
+		// process-replacing exec — must stay denied.
+		{"exec sh", "exec sh", true},
+		{"exec binary path", "exec /bin/sh", true},
+		{"exec uppercase", "EXEC /bin/sh", true},
+		{"exec tab separator", "exec\t/bin/sh", true},
+		{"exec variable command", "exec $CMD", true},
+		{"exec quoted command", `exec "cmd"`, true},
+		{"redirect then command word", "exec 3>f sh", true},
+		{"dup then command word", "exec 3>&1 cmd", true},
+		{"command substitution target", "exec 3> $(payload)", true},
+		{"backtick target", "exec 3>`payload`", true},
+		{"unbalanced quote", `exec 3>"unterminated`, true},
+		{"exec python", "exec python script.py", true},
+		// Known limitation, denied by design: whitespace tokenization can't
+		// prove a quoted target with spaces is a single redirection word, so
+		// it falls to the bare-word path (fail closed, never fail open).
+		{"quoted target with space", `exec 3>"/tmp/a b"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			denied, pattern := checkCommandDenylist(tt.cmd, nil)
+			if denied != tt.denied {
+				t.Errorf("checkCommandDenylist(%q) denied=%v (pattern %q), want denied=%v", tt.cmd, denied, pattern, tt.denied)
+			}
+		})
+	}
+}
+
+// TestCheckCommandDenylist_ExecRedirectSplitStatements verifies the
+// per-statement split still checks the payload after an fd redirect:
+// "exec >f; ./payload" is two statements — the exec is exempt, but the
+// payload statement is evaluated against the denylist on its own.
+func TestCheckCommandDenylist_ExecRedirectSplitStatements(t *testing.T) {
+	// Payload statement matches a deny pattern → whole command denied.
+	denied, pattern := checkCommandDenylist("exec >f; cat file | sh", nil)
+	if !denied || pattern != "* | sh" {
+		t.Errorf("payload statement after exec redirect not denied: denied=%v pattern=%q", denied, pattern)
+	}
+
+	// Benign payload statement → allowed (matches pre-existing per-statement
+	// semantics; ./payload alone was never denied by the built-in list).
+	denied, pattern = checkCommandDenylist("exec >f; ./payload", nil)
+	if denied {
+		t.Errorf("benign statement after exec redirect denied: pattern=%q", pattern)
+	}
+}
+
+// TestCheckCommandDenylist_UserExecPatternNotExempted verifies the fd-redirect
+// exemption applies only to the built-in "exec *" pattern — a user-supplied
+// "exec *" via tool_denylist_add still denies everything.
+func TestCheckCommandDenylist_UserExecPatternNotExempted(t *testing.T) {
+	denied, pattern := checkCommandDenylist("exec 3>&-", []string{"exec *"})
+	if !denied || pattern != "exec *" {
+		t.Errorf("user-added exec * should not be exempted: denied=%v pattern=%q", denied, pattern)
+	}
+}
+
 func TestCheckCommandAllowlist(t *testing.T) {
 	allowlist := []string{"make *", "go test *", "echo *"}
 	tests := []struct {
