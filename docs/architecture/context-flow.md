@@ -122,6 +122,8 @@ Runtime contract:
 For human interview mode, `writes:` extraction uses the collected interview answers object (question IDs and normalized question-text keys mapped to answers).
 For other human modes (`freeform`, `choice`, `yes_no`), `writes:` extraction is not applied automatically; rely on built-in human response keys unless handler behavior is extended.
 
+**Tool-side complement:** locally-executed tool subprocesses (the default `LocalEnvironment` exec path) also receive `TRACKER_RUN_ID`, `TRACKER_RUN_DIR`, and `TRACKER_WORKDIR` in their environment (#323), so a tool node can read an upstream node's artifact directly — `cat "$TRACKER_RUN_DIR/<NodeID>/response.md"` — even when that agent has `tool_access: none` and cannot write files itself. These are env vars only, not `${ctx.*}` expansion keys; see [artifacts.md §Run identity env vars](./artifacts.md#run-identity-env-vars-for-tool-subprocesses).
+
 ## Fidelity levels
 
 An agent node receives a compacted view of the pipeline context as part of its prompt construction. The amount of context injected is controlled by the `fidelity` attribute.

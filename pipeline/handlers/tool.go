@@ -45,14 +45,57 @@ var sensitiveEnvPatterns = []string{
 	"_PASSWORD",
 }
 
+// runIdentity carries the per-invocation run identity injected into tool
+// subprocess environments (#323): TRACKER_RUN_ID, TRACKER_RUN_DIR,
+// TRACKER_WORKDIR. RunDir is the same directory WriteStageArtifacts uses,
+// so a tool subprocess can read an upstream agent's response.md without an
+// `ls -dt` mtime heuristic (unsafe under concurrent runs). Empty fields are
+// omitted from the env — e.g. RunID/RunDir when the run has no artifact dir.
+// Injection happens on the LocalEnvironment exec path only — the same path
+// that applies sensitive-env filtering; non-local ExecutionEnvironments run
+// via ExecCommand, which passes no environment at all.
+type runIdentity struct {
+	RunID   string
+	RunDir  string
+	WorkDir string
+}
+
 // buildToolEnv constructs a filtered environment for tool command execution.
 // Strips environment variables matching sensitive patterns to prevent
 // exfiltration via malicious tool commands. Override with TRACKER_PASS_ENV=1.
-func buildToolEnv() []string {
-	if os.Getenv("TRACKER_PASS_ENV") == "1" {
-		return os.Environ()
+// The run-identity vars are appended after filtering (and on the
+// TRACKER_PASS_ENV=1 path) so they are always present.
+func buildToolEnv(id runIdentity) []string {
+	env := os.Environ()
+	if os.Getenv("TRACKER_PASS_ENV") != "1" {
+		env = filterSensitiveEnv(env)
 	}
-	return filterSensitiveEnv(os.Environ())
+	return appendRunIdentityEnv(env, id)
+}
+
+// appendRunIdentityEnv removes any inherited TRACKER_RUN_ID / TRACKER_RUN_DIR /
+// TRACKER_WORKDIR entries — an operator export must never masquerade as run
+// identity, so stale values are dropped rather than duplicated — and appends
+// the non-empty fields of id.
+func appendRunIdentityEnv(env []string, id runIdentity) []string {
+	out := make([]string, 0, len(env)+3)
+	for _, e := range env {
+		switch strings.SplitN(e, "=", 2)[0] {
+		case "TRACKER_RUN_ID", "TRACKER_RUN_DIR", "TRACKER_WORKDIR":
+			continue
+		}
+		out = append(out, e)
+	}
+	if id.RunID != "" {
+		out = append(out, "TRACKER_RUN_ID="+id.RunID)
+	}
+	if id.RunDir != "" {
+		out = append(out, "TRACKER_RUN_DIR="+id.RunDir)
+	}
+	if id.WorkDir != "" {
+		out = append(out, "TRACKER_WORKDIR="+id.WorkDir)
+	}
+	return out
 }
 
 // filterSensitiveEnv returns a copy of env with sensitive vars removed.
@@ -255,8 +298,11 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 	}
 
 	artifactRoot := h.env.WorkingDir()
+	identity := runIdentity{WorkDir: absPathOrSelf(h.env.WorkingDir())}
 	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
 		artifactRoot = dir
+		identity.RunDir = absPathOrSelf(dir)
+		identity.RunID = filepath.Base(identity.RunDir)
 	}
 
 	command, err = h.applyWorkingDir(node, command)
@@ -274,7 +320,17 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 		return pipeline.Outcome{}, err
 	}
 
-	return h.execAndBuildOutcome(ctx, node, command, artifactRoot, timeout, outputLimit)
+	return h.execAndBuildOutcome(ctx, node, command, artifactRoot, identity, timeout, outputLimit)
+}
+
+// absPathOrSelf returns the absolute form of p, or p unchanged if it cannot
+// be resolved (filepath.Abs fails when the current working directory cannot
+// be determined — deleted, permission-denied, or other os.Getwd failures).
+func absPathOrSelf(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 // expandAndValidateCommand expands variables in the tool_command attribute and
@@ -402,11 +458,11 @@ func (h *ToolHandler) parseOutputLimit(node *pipeline.Node) (int, error) {
 
 // execAndBuildOutcome runs the command and builds the pipeline outcome from the result.
 // Layer 4: uses ExecCommandWithLimit on LocalEnvironment, ExecCommand otherwise.
-func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.Node, command, artifactRoot string, timeout time.Duration, outputLimit int) (pipeline.Outcome, error) {
+func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.Node, command, artifactRoot string, identity runIdentity, timeout time.Duration, outputLimit int) (pipeline.Outcome, error) {
 	var result exec.CommandResult
 	var err error
 	if le, ok := h.env.(*exec.LocalEnvironment); ok {
-		result, err = le.ExecCommandWithLimit(ctx, "sh", []string{"-c", command}, timeout, outputLimit, buildToolEnv())
+		result, err = le.ExecCommandWithLimit(ctx, "sh", []string{"-c", command}, timeout, outputLimit, buildToolEnv(identity))
 	} else {
 		result, err = h.env.ExecCommand(ctx, "sh", []string{"-c", command}, timeout)
 	}

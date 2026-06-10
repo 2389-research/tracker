@@ -385,7 +385,7 @@ func TestBuildToolEnv_StripsAPIKeys(t *testing.T) {
 	t.Setenv("SAFE_VAR", "keep-me")
 	t.Setenv("TRACKER_PASS_ENV", "")
 
-	env := buildToolEnv()
+	env := buildToolEnv(runIdentity{})
 	envMap := make(map[string]string)
 	for _, e := range env {
 		parts := strings.SplitN(e, "=", 2)
@@ -415,7 +415,7 @@ func TestBuildToolEnv_PassEnvOverride(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
 	t.Setenv("TRACKER_PASS_ENV", "1")
 
-	env := buildToolEnv()
+	env := buildToolEnv(runIdentity{})
 	envMap := make(map[string]string)
 	for _, e := range env {
 		parts := strings.SplitN(e, "=", 2)
@@ -426,6 +426,156 @@ func TestBuildToolEnv_PassEnvOverride(t *testing.T) {
 
 	if _, ok := envMap["ANTHROPIC_API_KEY"]; !ok {
 		t.Error("TRACKER_PASS_ENV=1 should preserve API keys")
+	}
+}
+
+// envToMap splits KEY=VALUE entries into a map and also returns a count of
+// occurrences per key so duplicate-injection bugs are visible.
+func envToMap(env []string) (map[string]string, map[string]int) {
+	m := make(map[string]string)
+	counts := make(map[string]int)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			m[parts[0]] = parts[1]
+			counts[parts[0]]++
+		}
+	}
+	return m, counts
+}
+
+func TestBuildToolEnv_RunIdentityVars(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+
+	id := runIdentity{RunID: "run-abc", RunDir: "/work/.tracker/runs/run-abc", WorkDir: "/work"}
+	envMap, _ := envToMap(buildToolEnv(id))
+
+	if got := envMap["TRACKER_RUN_ID"]; got != "run-abc" {
+		t.Errorf("TRACKER_RUN_ID = %q, want %q", got, "run-abc")
+	}
+	if got := envMap["TRACKER_RUN_DIR"]; got != "/work/.tracker/runs/run-abc" {
+		t.Errorf("TRACKER_RUN_DIR = %q, want %q", got, "/work/.tracker/runs/run-abc")
+	}
+	if got := envMap["TRACKER_WORKDIR"]; got != "/work" {
+		t.Errorf("TRACKER_WORKDIR = %q, want %q", got, "/work")
+	}
+}
+
+func TestBuildToolEnv_RunIdentitySurvivesSensitiveStripping(t *testing.T) {
+	// The three identity vars must never match the sensitive patterns —
+	// pin that so a future pattern addition can't silently strip them.
+	for _, name := range []string{"TRACKER_RUN_ID", "TRACKER_RUN_DIR", "TRACKER_WORKDIR"} {
+		if hasSensitivePattern(name + "=x") {
+			t.Errorf("%s matches a sensitive pattern and would be stripped", name)
+		}
+	}
+
+	// And with stripping active, the vars are present alongside stripped secrets.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("TRACKER_PASS_ENV", "")
+	envMap, _ := envToMap(buildToolEnv(runIdentity{RunID: "r1", RunDir: "/d/r1", WorkDir: "/d"}))
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should be stripped")
+	}
+	if envMap["TRACKER_RUN_ID"] != "r1" {
+		t.Errorf("TRACKER_RUN_ID = %q, want %q", envMap["TRACKER_RUN_ID"], "r1")
+	}
+}
+
+func TestBuildToolEnv_RunIdentityOverridesOperatorExports(t *testing.T) {
+	t.Setenv("TRACKER_RUN_ID", "stale-id")
+	t.Setenv("TRACKER_RUN_DIR", "/stale/dir")
+	t.Setenv("TRACKER_WORKDIR", "/stale/wd")
+	t.Setenv("TRACKER_PASS_ENV", "")
+
+	id := runIdentity{RunID: "fresh", RunDir: "/runs/fresh", WorkDir: "/wd"}
+	envMap, counts := envToMap(buildToolEnv(id))
+
+	for name, want := range map[string]string{
+		"TRACKER_RUN_ID":  "fresh",
+		"TRACKER_RUN_DIR": "/runs/fresh",
+		"TRACKER_WORKDIR": "/wd",
+	} {
+		if got := envMap[name]; got != want {
+			t.Errorf("%s = %q, want %q (operator export must be overridden)", name, got, want)
+		}
+		if counts[name] != 1 {
+			t.Errorf("%s appears %d times, want exactly 1 (no duplicates)", name, counts[name])
+		}
+	}
+}
+
+func TestBuildToolEnv_PassEnvCarriesRunIdentity(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "1")
+	t.Setenv("TRACKER_RUN_ID", "stale-id")
+
+	id := runIdentity{RunID: "fresh", RunDir: "/runs/fresh", WorkDir: "/wd"}
+	envMap, counts := envToMap(buildToolEnv(id))
+
+	if got := envMap["TRACKER_RUN_ID"]; got != "fresh" {
+		t.Errorf("TRACKER_RUN_ID = %q, want %q under TRACKER_PASS_ENV=1", got, "fresh")
+	}
+	if counts["TRACKER_RUN_ID"] != 1 {
+		t.Errorf("TRACKER_RUN_ID appears %d times, want exactly 1", counts["TRACKER_RUN_ID"])
+	}
+	if got := envMap["TRACKER_RUN_DIR"]; got != "/runs/fresh" {
+		t.Errorf("TRACKER_RUN_DIR = %q, want %q under TRACKER_PASS_ENV=1", got, "/runs/fresh")
+	}
+	if got := envMap["TRACKER_WORKDIR"]; got != "/wd" {
+		t.Errorf("TRACKER_WORKDIR = %q, want %q under TRACKER_PASS_ENV=1", got, "/wd")
+	}
+}
+
+func TestBuildToolEnv_NoRunIdentityOmitsVars(t *testing.T) {
+	// When no run-scoped artifact dir exists (bare engine, no-artifact run),
+	// RUN_ID/RUN_DIR are omitted — and stale operator exports are removed,
+	// not passed through.
+	t.Setenv("TRACKER_RUN_ID", "stale-id")
+	t.Setenv("TRACKER_RUN_DIR", "/stale/dir")
+	t.Setenv("TRACKER_PASS_ENV", "")
+
+	envMap, _ := envToMap(buildToolEnv(runIdentity{WorkDir: "/wd"}))
+
+	if v, ok := envMap["TRACKER_RUN_ID"]; ok {
+		t.Errorf("TRACKER_RUN_ID should be absent, got %q", v)
+	}
+	if v, ok := envMap["TRACKER_RUN_DIR"]; ok {
+		t.Errorf("TRACKER_RUN_DIR should be absent, got %q", v)
+	}
+	if got := envMap["TRACKER_WORKDIR"]; got != "/wd" {
+		t.Errorf("TRACKER_WORKDIR = %q, want %q", got, "/wd")
+	}
+}
+
+func TestToolHandlerInjectsRunIdentityEnv(t *testing.T) {
+	if _, err := osexec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	workdir := t.TempDir()
+	runDir := filepath.Join(t.TempDir(), "run-xyz")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := exec.NewLocalEnvironment(workdir)
+	h := NewToolHandler(env)
+	node := &pipeline.Node{
+		ID:    "envprobe",
+		Shape: "parallelogram",
+		Attrs: map[string]string{
+			"tool_command": `printf '%s|%s|%s' "$TRACKER_RUN_ID" "$TRACKER_RUN_DIR" "$TRACKER_WORKDIR"`,
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+	pctx.SetInternal(pipeline.InternalKeyArtifactDir, runDir)
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "run-xyz|" + runDir + "|" + workdir
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolStdout]; got != want {
+		t.Errorf("tool_stdout = %q, want %q", got, want)
 	}
 }
 
