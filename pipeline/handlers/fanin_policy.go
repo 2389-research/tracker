@@ -1,5 +1,5 @@
 // ABOUTME: Configurable fan-in aggregation policy shared by the parallel and fan-in handlers (#313).
-// ABOUTME: Supports any (default, success-if-any), all, and quorum:<n> branch-success policies.
+// ABOUTME: Supports fan_in_policy: any (default, success-if-any), all, or quorum (with quorum: <n>).
 package handlers
 
 import (

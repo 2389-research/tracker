@@ -16,15 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   succeed; `quorum` requires at least `<n>` successful branches. Both
   aggregation code paths honor the policy — `ParallelHandler`'s
   `aggregateStatus` and `FanInHandler` — so the policy can be declared on
-  either node. Unknown policies and `quorum` without a positive `n` fail
-  fast before any branch is dispatched. A policy-caused failure names the
+  either node. Unknown policies and `quorum` without a positive `n` are
+  hard configuration errors (on a parallel node they fail before any branch
+  is dispatched; on a fan_in node, when it executes). A policy-caused
+  failure names the
   policy and the failed branch IDs in the `EventParallelCompleted` message,
   and the fan-in handler records the same detail under the
   `fan_in.policy_detail` context key for the audit trail. A policy-failed
   parallel node routes through normal `ctx.outcome = fail` edges — no new
   engine special case — and suppresses its join-node suggestion so edge
   selection cannot fall through to the fan-in and mask the failure (the
-  default `any` policy keeps suggesting the join on all-fail, as before). `examples/build_product.dip` opts `ReviewParallel`
+  default `any` policy keeps suggesting the join on all-fail, as before).
+  `examples/build_product.dip` opts `ReviewParallel`
   into `fan_in_policy: all`, so a single failed reviewer (the canonical
   masked-adversarial-review bug) now routes to `EscalateReview` instead of
   silently proceeding with a partial review set; the `CheckReviewsComplete`
