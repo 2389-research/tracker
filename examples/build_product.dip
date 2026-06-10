@@ -52,17 +52,17 @@ workflow BuildProduct
       #   0  — clean: `make <TARGET>` exited 0, OR (no Makefile gate
       #        ran) the language-native gates passed / no toolchain
       #        was detected (issue #299).
+      #   1  — a gate failed (caller should fail / retry): a failing
+      #        `make <TARGET>` run collapses to exactly 1 — make's own
+      #        exit code (including its native exit 2 on ANY recipe
+      #        error) is never propagated (#320) — and a failing
+      #        language-native gate (go vet / golangci-lint / tsc /
+      #        eslint / ruff / mypy / cargo fmt|clippy) likewise
+      #        collapses to exactly 1. Never an arbitrary N, never 2.
       #   2  — Makefile present but `make` not installed (caller
       #        should escalate; LLM fix loop can't install a binary).
-      #        This helper emits an explicit rc=2 ONLY here; the
-      #        language-native block never returns 2. (Caveat: the
-      #        `make <TARGET>` path below can still propagate make's own
-      #        native exit 2 on a recipe error — pre-existing, #320.)
-      #   N  — a gate failed (caller should fail / retry): `make
-      #        <TARGET>` exits with make's own non-zero code, whereas a
-      #        failing language-native gate (go vet / golangci-lint /
-      #        tsc / eslint / ruff / mypy / cargo fmt|clippy) ALWAYS
-      #        collapses to exactly 1 — never an arbitrary N, never 2.
+      #        rc=2 is sole-sourced to the `command -v make` check —
+      #        no other path in this helper can produce it.
       # Sets PROJECT_CI_RAN to the chosen target on a real `make` run,
       # empty string otherwise (incl. the language-native fall-through).
       run_project_ci_gate() {
@@ -101,8 +101,15 @@ workflow BuildProduct
             '; then
             echo "--- running make $TARGET (project CI gate from $MAKEFILE) ---"
             PROJECT_CI_RAN="$TARGET"
-            make "$TARGET" 2>&1
-            return $?
+            # `|| MAKE_RC=$?` keeps a bare set -e caller (FinalBuild) from
+            # aborting mid-function, mirroring the language-gate invariant.
+            MAKE_RC=0
+            make "$TARGET" 2>&1 || MAKE_RC=$?
+            if [ "$MAKE_RC" -eq 0 ]; then return 0; fi
+            # GNU make exits 2 on ANY recipe error; collapse to 1 so a
+            # fixable CI failure routes to the fix loop, not human
+            # escalation — rc=2 stays sole-sourced to make-missing (#320).
+            return 1
           fi
         done
         echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint) — running language-native gates (#299)"

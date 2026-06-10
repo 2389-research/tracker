@@ -26,6 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **build_product: a failing `make ci`/`check`/`lint` target no longer
+  escalates to a human as "make not installed"** (closes #320). GNU make
+  exits 2 on any recipe error, colliding with the rc=2 code
+  `run_project_ci_gate` reserves for "Makefile present but `make` not
+  installed" — so an ordinary lint/test failure escaped the FixMilestone
+  loop, routed to EscalateMilestone, and reset the fix-attempt circuit
+  breaker. The make-run path now collapses any make failure to rc=1
+  (fixable → fix loop); rc=2 is genuinely sole-sourced to the
+  `command -v make` check. The make invocation is also `|| MAKE_RC=$?`
+  guarded so FinalBuild's bare call under `set -eu` can't abort
+  mid-function.
+
 - **`exec *` denylist no longer false-positives on fd-only redirect
   statements** (closes #333). The built-in tool_command deny pattern `exec *`
   caught both process-replacing exec (intended) and the POSIX fd-redirect

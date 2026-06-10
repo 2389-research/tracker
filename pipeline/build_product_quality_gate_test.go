@@ -85,9 +85,9 @@ func TestQualityGateMakefilePathPreserved(t *testing.T) {
 
 // Test 6 — regression-pin (semantic): the only EXPLICIT `return 2` statement is
 // the make-missing branch. Exactly one `return 2`, adjacent to `command -v make`,
-// and none after any language-native gate marker. (This pins the source code, not
-// runtime rc uniqueness: the `make "$TARGET"` path can still propagate make's own
-// native exit 2 on a recipe error — pre-existing, tracked in #320.)
+// and none after any language-native gate marker. Since #320 the make-run path
+// collapses recipe failures to `return 1`, so rc=2 is genuinely sole-sourced to
+// make-missing at runtime too (pinned by makefile_ci_failure_rc1 below).
 func TestQualityGateRc2OnlyMakeMissing(t *testing.T) {
 	cmd := setupCmd(t)
 	if n := strings.Count(cmd, "return 2"); n != 1 {
@@ -408,6 +408,29 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		}
 		if strings.Contains(out, "go vet ./...") {
 			t.Errorf("Makefile ci won but go vet ALSO ran — precedence broken\n%s", out)
+		}
+	})
+
+	// (k) Makefile ci target FAILS (recipe error) → rc 1, NOT 2 (#320). GNU make
+	// exits 2 on any recipe error, which previously collided with the rc=2
+	// "make missing" contract and mis-routed fixable CI failures to human
+	// escalation (resetting the fix-attempt counter). The helper must collapse
+	// a make-run failure to exactly 1 so it routes to the FixMilestone loop.
+	t.Run("makefile_ci_failure_rc1", func(t *testing.T) {
+		if _, err := exec.LookPath("make"); err != nil {
+			t.Skip("make not available")
+		}
+		dir := t.TempDir()
+		// `|| exit 1` forces the recipe through /bin/sh (metacharacter defeats
+		// make's no-shell fast path), so the failure doesn't depend on which
+		// binaries the hermetic PATH carries — false/exit are shell builtins.
+		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@false || exit 1\n")
+		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), true))
+		if ciRan != "ci" {
+			t.Errorf("failing ci target: PROJECT_CI_RAN=%q want ci (make path must have run)\n%s", ciRan, out)
+		}
+		if rc != 1 {
+			t.Errorf("failing ci target: rc=%d want 1 — rc=2 is reserved for make-missing (#320)\n%s", rc, out)
 		}
 	})
 
