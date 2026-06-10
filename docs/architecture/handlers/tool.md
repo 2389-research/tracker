@@ -199,6 +199,29 @@ Stripping applies to `*exec.LocalEnvironment` only. Other
 `exec.ExecutionEnvironment` implementations call `ExecCommand` without the
 filtered env, because they have their own isolation model (sandbox, container).
 
+## Run identity env vars (#323)
+
+After filtering (and on the `TRACKER_PASS_ENV=1` path), `buildToolEnv` appends
+the run's identity so a tool subprocess can locate the active run's artifacts
+without an `ls -dt` mtime heuristic (unsafe under concurrent runs in the same
+workdir):
+
+- `TRACKER_RUN_ID` — the run identifier (matches the `.tracker/runs/<runID>/`
+  directory name).
+- `TRACKER_RUN_DIR` — absolute per-run artifact dir, the same root
+  `WriteStageArtifacts` uses; `cat "$TRACKER_RUN_DIR/<NodeID>/response.md"`
+  reads a specific upstream node's output.
+- `TRACKER_WORKDIR` — absolute workdir.
+
+Operator-exported values of these three names are removed from the inherited
+environment before appending — a stale export can never masquerade as run
+identity. When the run has no artifact dir (bare library engines without
+`WithArtifactDir`), `TRACKER_RUN_ID`/`TRACKER_RUN_DIR` are omitted and
+`TRACKER_WORKDIR` is still set. Like sensitive stripping, injection applies to
+the `LocalEnvironment` path only, and the values are env-only — they are not
+`${ctx.*}` expansion keys. See
+[artifacts.md §Run identity env vars](../artifacts.md#run-identity-env-vars-for-tool-subprocesses).
+
 ## Outcomes produced
 
 | Field | Value |
