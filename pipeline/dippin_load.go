@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/2389-research/dippin-lang/ir"
 	"github.com/2389-research/dippin-lang/parser"
@@ -12,13 +13,26 @@ import (
 // LoadDippinWorkflowFromIR for validation, lint, and conversion to a Graph.
 // This ensures all .dip entry points apply consistent validation semantics.
 //
-// filename is used for error messages (e.g., "inline.dip" or "/path/to/file.dip").
+// filename is used for error messages (e.g., "inline.dip" or "/path/to/file.dip")
+// and as the anchor for file directives: command_file / prompt_file /
+// system_prompt_file paths resolve relative to filepath.Dir(filename), matching
+// the dippin CLI. For synthetic filenames like "inline.dip" the anchor is "."
+// (cwd-relative) — the same semantics as `dippin check inline.dip` run from cwd.
+// A directive resolution failure (missing/unreadable file, path escape) is fatal.
+//
 // Returns the graph and any validation/lint diagnostics (warnings only).
 // Validation errors are returned as fatal errors.
 func LoadDippinWorkflow(source, filename string) (*Graph, []validator.Diagnostic, error) {
 	workflow, err := parser.NewParser(source, filename).Parse()
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse Dippin file: %w", err)
+	}
+	// Parser entry points deliberately do not resolve file directives
+	// ("CLI entry points call it after parsing") — tracker is a CLI entry
+	// point, so resolve here. dippin's error already names the node ID,
+	// directive, and user-written path.
+	if err := parser.ResolveFileDirectives(workflow, filepath.Dir(filename)); err != nil {
+		return nil, nil, fmt.Errorf("resolve file directives in %s: %w", filename, err)
 	}
 	return LoadDippinWorkflowFromIR(workflow, filename)
 }

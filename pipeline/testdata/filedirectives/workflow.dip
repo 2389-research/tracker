@@ -1,0 +1,19 @@
+workflow FileDirectives
+  goal: "Fixture for command_file/prompt_file resolution in LoadDippinWorkflow."
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+    prompt_file: prompts/start.md
+
+  tool RunScript
+    label: "Run Script"
+    command_file: scripts/cmd.sh
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> RunScript
+    RunScript -> Done
