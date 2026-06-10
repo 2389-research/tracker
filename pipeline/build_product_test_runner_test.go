@@ -19,7 +19,11 @@ func toolCmd(t *testing.T, nodeID string) string {
 	if !ok {
 		t.Fatalf("%s node missing from build_product graph", nodeID)
 	}
-	return n.Attrs["tool_command"]
+	cmd := n.Attrs["tool_command"]
+	if cmd == "" {
+		t.Fatalf("%s node has an empty tool_command attr (schema change? not a tool node?)", nodeID)
+	}
+	return cmd
 }
 
 // writeStub writes a fake toolchain binary that logs its invocation to
