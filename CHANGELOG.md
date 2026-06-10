@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Raw `.dip` load path now resolves `command_file:` / `prompt_file:` /
+  `system_prompt_file:` directives** (closes #331). `LoadDippinWorkflow` parsed
+  the source but never called dippin's `parser.ResolveFileDirectives`, so any
+  tool node using `command_file:` arrived with an empty command and the run
+  failed at that node with `missing required attribute 'tool_command'` — while
+  the same workflow packed to `.dipx` worked. Directive paths now resolve
+  relative to the `.dip` file's own directory (matching the dippin CLI), so
+  multi-file workflow trees like dev_loop run via `tracker /path/to/foo.dip`
+  from any cwd. Resolution failures are fatal and name the node ID and the
+  referenced path. A guard test keeps embedded built-ins free of file
+  directives (no sibling files ship in the binary).
+
 ## [0.36.0] - 2026-06-10
 
 ### Added
