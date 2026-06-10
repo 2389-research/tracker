@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`exec *` denylist no longer false-positives on fd-only redirect
+  statements** (closes #333). The built-in tool_command deny pattern `exec *`
+  caught both process-replacing exec (intended) and the POSIX fd-redirect
+  idiom (`exec 3>"$tmp"`, `exec 3>&-`, `exec <file` — unintended), forcing
+  `--bypass-denylist` for workflows like dev_loop's atomic fd-3 env-file
+  write. A statement whose first word is `exec` and whose remaining tokens
+  are exclusively redirections is now exempt from the built-in pattern. The
+  exemption fails closed: command substitution (`$(`, backtick), unbalanced
+  quotes, or any bare command word after `exec` (`exec sh`, `exec 3>f sh`,
+  `exec $CMD`, `exec 3>&1 cmd`) stays denied. User-supplied `exec *` patterns
+  (via `tool_denylist_add`) get no exemption. Also tightened: statements are
+  whitespace-normalized before denylist matching, so tab-separated commands
+  (`exec\t/bin/sh`, `eval\tfoo`) can no longer evade space-separated deny
+  patterns.
 - **Raw `.dip` load path now resolves `command_file:` / `prompt_file:` /
   `system_prompt_file:` directives** (closes #331). `LoadDippinWorkflow` parsed
   the source but never called dippin's `parser.ResolveFileDirectives`, so any
