@@ -321,7 +321,8 @@ func (h *ToolHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pi
 }
 
 // absPathOrSelf returns the absolute form of p, or p unchanged if it cannot
-// be resolved (filepath.Abs fails only when the working directory is gone).
+// be resolved (filepath.Abs fails when the current working directory cannot
+// be determined — deleted, permission-denied, or other os.Getwd failures).
 func absPathOrSelf(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		return abs
