@@ -631,7 +631,7 @@ func TestExpandVariables_ToolCommandMode_WorkflowDir(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result != "bash /abs/path/to/dev_loop/scripts/setup.sh" {
-		t.Errorf("result = %q", result)
+		t.Errorf("result = %q, want %q", result, "bash /abs/path/to/dev_loop/scripts/setup.sh")
 	}
 
 	// Not seeded (embedded built-in, .dipx, library source): lenient mode
