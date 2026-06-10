@@ -467,11 +467,26 @@ func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
 			attrs[prefix+"fidelity"] = branch.Fidelity
 		}
 	}
+	// Generic params pass-through (dippin-lang v0.39.0, #313) — e.g.
+	// fan_in_policy / quorum. Typed fields above take precedence.
+	spillParams(cfg.Params, attrs)
 }
 
 func extractFanInAttrs(cfg ir.FanInConfig, attrs map[string]string) {
 	if len(cfg.Sources) > 0 {
 		attrs["fan_in_sources"] = strings.Join(cfg.Sources, ",")
+	}
+	// Generic params pass-through (dippin-lang v0.39.0, #313).
+	spillParams(cfg.Params, attrs)
+}
+
+// spillParams copies params into attrs without overwriting keys already set
+// by typed-field extraction (mirrors the AgentConfig.Params convention).
+func spillParams(params, attrs map[string]string) {
+	for k, v := range params {
+		if _, exists := attrs[k]; !exists {
+			attrs[k] = v
+		}
 	}
 }
 

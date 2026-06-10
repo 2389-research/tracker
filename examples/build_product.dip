@@ -1315,6 +1315,8 @@ workflow BuildProduct
       printf 'cleared stale review reports\n'
 
   parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
+    params:
+      fan_in_policy: all
 
   # Phase 3 reviewers (issue #233 Gap 2). All three carry the same 5-point
   # structured rubric so the synthesis step can compare findings on equal
@@ -1529,10 +1531,12 @@ workflow BuildProduct
     timeout: 5s
     command:
       set -eu
-      # issue #313 defense-in-depth: the parallel fan-in is success-if-any, so
-      # a single reviewer that exhausts max_turns and never writes its report
-      # is silently masked — SynthesizeReviews would synthesize from a partial
-      # set. Require ALL THREE reports present + non-empty; a single missing
+      # issue #313 defense-in-depth: ReviewParallel now declares
+      # fan_in_policy: all, so a failed reviewer routes to EscalateReview
+      # upstream — but a reviewer that "succeeds" without writing its report
+      # is invisible to any aggregation policy, and SynthesizeReviews would
+      # synthesize from a partial set. Require ALL THREE reports present +
+      # non-empty; a single missing
       # review (typically the adversarial ReviewGemini, the one most likely to
       # exhaust turns) fails the gate and routes to EscalateReview rather than
       # masking the gap. A 2-of-3 quorum would not fix this — it would still
@@ -1994,16 +1998,16 @@ workflow BuildProduct
     # The three reviewers run as parallel branches; a branch runs via
     # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
     # path, so a per-branch fallback_target would be inert. Route failure on the
-    # aggregating ReviewParallel node instead: aggregateStatus is success-if-any,
-    # so this fires only when ALL THREE reviewers fail (which would otherwise
-    # dead-stop the pipeline). On success the parallel handler's suggested-next
-    # routes to ReviewJoin.
+    # aggregating ReviewParallel node instead. ReviewParallel declares
+    # fan_in_policy: all (issue #313, dippin-lang v0.39.0), so this fires when
+    # ANY of the three reviewers fails — a single missing adversarial review can
+    # no longer be masked by the default success-if-any aggregation. On success
+    # the parallel handler's suggested-next routes to ReviewJoin.
     #
-    # A SINGLE reviewer failing is NOT caught here (success-if-any masks it) and
-    # cannot be fixed in .dip — dippin v0.35.0 carries no per-node fan-in policy
-    # attribute, so the engine-level configurable-policy fix stays open on #313.
-    # Defense-in-depth lives at CheckReviewsComplete below: it fails loudly if
-    # any of the three review reports is missing/empty and routes to EscalateReview.
+    # Defense-in-depth stays at CheckReviewsComplete below: it fails loudly if
+    # any of the three review reports is missing/empty and routes to
+    # EscalateReview (catches a reviewer that "succeeds" without writing its
+    # report, which no aggregation policy can see).
     ReviewParallel -> EscalateReview  when ctx.outcome = fail
     ReviewClaude -> ReviewJoin
     ReviewCodex -> ReviewJoin
