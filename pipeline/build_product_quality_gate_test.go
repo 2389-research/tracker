@@ -422,8 +422,10 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		}
 		dir := t.TempDir()
 		// `|| exit 1` forces the recipe through /bin/sh (metacharacter defeats
-		// make's no-shell fast path), so the failure doesn't depend on which
-		// binaries the hermetic PATH carries — false/exit are shell builtins.
+		// make's no-shell fast path) and makes the failure independent of the
+		// hermetic PATH: `exit` is a builtin everywhere, and if this sh resolves
+		// `false` externally (POSIX doesn't require it builtin) the not-found
+		// failure (127) still trips `|| exit 1` — the recipe exits 1 either way.
 		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@false || exit 1\n")
 		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), true))
 		if ciRan != "ci" {
