@@ -899,6 +899,12 @@ workflow BuildProduct
         SKIP_PATTERN=$(grep -v '^#' .ai/milestones/known_failures | grep -v '^$' | paste -sd'|')
       fi
 
+      # Run EVERY detected stack, not just the first match (issue #305) — a
+      # polyglot repo (e.g. Go backend + JS frontend) must exercise all of its
+      # test suites. Failures accumulate into TEST_EXIT so a later passing
+      # stack can't mask an earlier failing one. `go build` stays unguarded:
+      # under set -eu a Go compile failure aborts immediately (exit 1, normal
+      # fix-loop failure), same as before #305.
       if [ -f go.mod ]; then
         go build ./... 2>&1
         if [ -n "$SKIP_PATTERN" ]; then
@@ -908,13 +914,17 @@ workflow BuildProduct
         else
           go test ./... 2>&1 || TEST_EXIT=$?
         fi
-      elif [ -f package.json ]; then
+      fi
+      if [ -f package.json ]; then
         npm test 2>&1 || TEST_EXIT=$?
-      elif [ -f pyproject.toml ]; then
+      fi
+      if [ -f pyproject.toml ]; then
         uv run pytest 2>&1 || TEST_EXIT=$?
-      elif [ -f Cargo.toml ]; then
+      fi
+      if [ -f Cargo.toml ]; then
         cargo test 2>&1 || TEST_EXIT=$?
-      else
+      fi
+      if [ ! -f go.mod ] && [ ! -f package.json ] && [ ! -f pyproject.toml ] && [ ! -f Cargo.toml ]; then
         echo "no known build system — skipping tests"
       fi
 
@@ -1635,16 +1645,28 @@ workflow BuildProduct
     timeout: 600s
     command:
       set -eu
+      # Run EVERY detected stack, not just the first match (issue #305).
+      # Test failures accumulate into STACK_EXIT (the `|| STACK_EXIT=$?`
+      # guards keep set -eu from aborting mid-sweep) so every stack's
+      # results are visible in one pass; the [ ... ] check below then
+      # propagates any failure as a node-level failure via set -e. `go
+      # build` stays unguarded: a compile failure aborts immediately, as
+      # before #305.
+      STACK_EXIT=0
       if [ -f go.mod ]; then
         go build ./... 2>&1
-        go test ./... 2>&1
-      elif [ -f package.json ]; then
-        npm test 2>&1
-      elif [ -f pyproject.toml ]; then
-        uv run pytest 2>&1
-      elif [ -f Cargo.toml ]; then
-        cargo test 2>&1
+        go test ./... 2>&1 || STACK_EXIT=$?
       fi
+      if [ -f package.json ]; then
+        npm test 2>&1 || STACK_EXIT=$?
+      fi
+      if [ -f pyproject.toml ]; then
+        uv run pytest 2>&1 || STACK_EXIT=$?
+      fi
+      if [ -f Cargo.toml ]; then
+        cargo test 2>&1 || STACK_EXIT=$?
+      fi
+      [ "$STACK_EXIT" -eq 0 ]
 
       # Project CI gate (issue #233 Gap 1). Sources the same shared
       # helper as TestMilestone — written by Setup; lives in exactly

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`build_product.dip` runs ALL detected build stacks in `TestMilestone` and
+  `FinalBuild`** (closes #305). Both nodes previously detected the build
+  system with a first-match `if go.mod / elif package.json / elif
+  pyproject.toml / elif Cargo.toml` chain, so a polyglot repo (e.g. Go
+  backend + JS frontend) never ran `npm test`. The chains are now
+  independent `if` blocks: every detected stack runs, failures accumulate
+  (`|| TEST_EXIT=$?` / `|| STACK_EXIT=$?` under `set -eu`), and a failure in
+  any stack fails the milestone / final build. The `known_failures` skip
+  pattern, `tests-pass` / `escalate` sentinels, no-build-system notice, and
+  single-language behavior are unchanged (pinned by a stub-toolchain test
+  harness). `build_product_with_superspec.dip` has no equivalent test-runner
+  chain — its phase-gate `if/elif` blocks are coverage-oriented quality
+  gates with a different shape, out of scope here.
+
 ## [0.37.0] - 2026-06-10
 
 ### Added
