@@ -51,8 +51,11 @@ func stackEnv(t *testing.T, stubLog string, extra ...string) []string {
 	for _, name := range []string{"go", "npm", "uv", "cargo"} {
 		writeStub(t, binDir, name)
 	}
+	// Prepend the stub bin to the host PATH: the stubs still shadow any real
+	// toolchain (first match wins) while coreutils (grep/paste/cat) stay
+	// reachable wherever the host keeps them (Copilot, PR #345).
 	env := []string{
-		"PATH=" + binDir + ":/usr/bin:/bin",
+		"PATH=" + binDir + ":" + os.Getenv("PATH"),
 		"STUB_LOG=" + stubLog,
 		"HOME=" + t.TempDir(),
 	}
@@ -213,6 +216,26 @@ func TestMilestoneKnownFailuresSkipPreserved(t *testing.T) {
 	}
 	if !strings.Contains(log, "npm test") {
 		t.Errorf("npm test not invoked alongside skip-patterned go test:\n%s", log)
+	}
+}
+
+// A FIRST-stack test failure (go test fails, go build passes) must not
+// abort before later stacks run, and must still fail the milestone —
+// symmetric with the FinalBuild accumulate case (Copilot, PR #345).
+func TestMilestoneFirstStackFailureStillRunsLater(t *testing.T) {
+	dir := setupRunDir(t, "go.mod", "package.json")
+	stubLog := filepath.Join(t.TempDir(), "stub.log")
+	env := stackEnv(t, stubLog, "STUB_GO_TEST_EXIT=7")
+	out, code := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, env)
+	if code == 0 {
+		t.Fatalf("go test failed but TestMilestone exited 0:\n%s", out)
+	}
+	if strings.Contains(out, "tests-pass") {
+		t.Errorf("tests-pass sentinel emitted despite go test failure:\n%s", out)
+	}
+	log := readLog(t, stubLog)
+	if !strings.Contains(log, "npm test") {
+		t.Errorf("npm test should still run after go test failure (#305 accumulate):\n%s", log)
 	}
 }
 
