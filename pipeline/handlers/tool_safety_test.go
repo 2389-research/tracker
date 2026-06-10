@@ -65,6 +65,10 @@ func TestCheckCommandDenylist_ExecFdRedirects(t *testing.T) {
 		{"backtick target", "exec 3>`payload`", true},
 		{"unbalanced quote", `exec 3>"unterminated`, true},
 		{"exec python", "exec python script.py", true},
+		// Known limitation, denied by design: whitespace tokenization can't
+		// prove a quoted target with spaces is a single redirection word, so
+		// it falls to the bare-word path (fail closed, never fail open).
+		{"quoted target with space", `exec 3>"/tmp/a b"`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

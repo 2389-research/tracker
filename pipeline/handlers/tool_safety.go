@@ -90,6 +90,12 @@ var (
 // target word: non-empty and free of shell metacharacters that could smuggle
 // a command (&, |, ;, <, >, backslash, backtick, parens). Quotes and $VAR /
 // ${VAR} expansions are fine — they can only ever name a file here.
+//
+// Tokenization is whitespace-based (strings.Fields), so a quoted target
+// containing whitespace (`exec >"log file"`) splits into multiple tokens and
+// the fragment after the space falls to the bare-word path — denied. That is
+// the fail-closed direction by design: the exemption recognizes only targets
+// that are provably a single redirection word without a shell-quoting parser.
 func isExecRedirTarget(tok string) bool {
 	return tok != "" && !strings.ContainsAny(tok, "&|;<>\\`()")
 }
