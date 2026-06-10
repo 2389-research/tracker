@@ -36,6 +36,29 @@ Everything about a run — prompts, responses, event stream, per-node outcomes, 
 
 Subdirectory names are node IDs verbatim. Subgraph children appear under the parent's node ID (e.g. `<parent>/<child>/`) — see [tui.md §Node list](./tui.md) for how the TUI mirrors this structure.
 
+## Run identity env vars for tool subprocesses
+
+Every tool subprocess receives the active run's identity in its environment (#323):
+
+- `TRACKER_RUN_ID` — the run identifier; matches the `.tracker/runs/<runID>/` directory name.
+- `TRACKER_RUN_DIR` — absolute path to the per-run artifact directory (the same root `WriteStageArtifacts` writes to).
+- `TRACKER_WORKDIR` — absolute path to the workflow's workdir, so scripts resolve paths unambiguously regardless of CWD.
+
+This lets a tool node read a specific upstream node's output directly:
+
+```bash
+cat "$TRACKER_RUN_DIR/PlanAgent/response.md"
+```
+
+without an `ls -dt .tracker/runs/ | head -1` mtime heuristic, which is unsafe under concurrent runs in the same workdir (a second invocation creates a newer run dir and the first run's tools pick up the wrong artifacts).
+
+Semantics:
+
+- The vars are injected after sensitive-env filtering and also on the `TRACKER_PASS_ENV=1` path, so they are always present.
+- Operator-exported values of these three names are removed from the inherited environment — a stale export can never masquerade as run identity.
+- When the run has no artifact directory (bare library engines without `WithArtifactDir`), `TRACKER_RUN_ID` and `TRACKER_RUN_DIR` are omitted entirely; `TRACKER_WORKDIR` is always set.
+- Env-only: the values are not exposed as `${ctx.*}` expansion keys in `tool_command`.
+
 ## Files written per node
 
 [pipeline/artifacts.go](../../pipeline/artifacts.go) is the single writer:

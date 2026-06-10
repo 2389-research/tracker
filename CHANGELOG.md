@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tool subprocesses receive run identity via `TRACKER_RUN_ID` /
+  `TRACKER_RUN_DIR` / `TRACKER_WORKDIR` env vars** (closes #323). Every tool
+  subprocess now gets the run identifier, the absolute per-run artifact
+  directory (the same root `WriteStageArtifacts` uses), and the absolute
+  workdir, so a tool node can read an upstream agent's output with
+  `cat "$TRACKER_RUN_DIR/<NodeID>/response.md"` instead of an `ls -dt` mtime
+  heuristic that breaks under concurrent runs in the same workdir. The vars
+  are appended after sensitive-env filtering (and on the `TRACKER_PASS_ENV=1`
+  path) so they are always present; operator-exported values of the same
+  names are removed, never duplicated. When the run has no artifact dir
+  (bare library engines), `TRACKER_RUN_ID`/`TRACKER_RUN_DIR` are omitted and
+  `TRACKER_WORKDIR` is still set. Env-only — no new `${ctx.*}` expansion keys.
+
 - **`graph.workflow_dir` is seeded from the pipeline file's parent directory**
   (closes #332). When a pipeline loads from a real on-disk path — `.dip` or
   legacy `.dot` — (via `tracker run` / `validate`, including subgraph refs;
