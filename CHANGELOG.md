@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Spec-coherence preflight (`SpecLint`) in both build_product workflows** (closes
+  #301, completing Phase 2 of epic #308). `build_product.dip` and
+  `build_product_with_superspec.dip` previously read SPEC.md and went straight into
+  decomposition — every miss in the audited code-goblin run traced to a SPEC defect
+  the workflow never checked. A new `SpecLint` agent gate now runs ONCE, strictly
+  before any spec read or decomposition (`Setup -> SpecLint`; success continues to
+  `ReadSpec`/`AnalyzeSpec`, fail routes to the existing `EscalateReview`/
+  `EscalateToHuman` human gate — never silently to Done). Critical rules hard-fail
+  the gate: (a) dangling doc/section/file references, (b) the same constant stated
+  two ways ("max 2 retries" vs "max 2 attempts"), (c) interface contracts naming
+  values their signatures never receive, (f) mandated tests too vague for any
+  milestone to own. Rules (d) uncheckable guarantees and (e) example code
+  contradicting declared signatures are warnings. Findings (with grep/file:line
+  evidence) land in `.ai/decisions/spec-quality.md`; the rule-(f) mandated-test list
+  feeds the Decompose requirement-coverage table (#300). The gate fails closed via
+  the `auto_status` last-line-wins STATUS contract (truncation leaves the early
+  `STATUS:fail` standing). Structural regression tests pin the routing
+  (`pipeline/spec_lint_preflight_test.go`); a deliberately-broken SPEC fixture +
+  manual verification procedure live in `pipeline/testdata/spec_lint_broken/`. The
+  node is intentionally duplicated across the two workflows (not a shared subgraph:
+  built-in delivery — embedded runs, library `tracker.Run`, `tracker init` — cannot
+  resolve subgraph file refs); dedup is tracked in #307.
+
 - **`reasoning_effort` wired through to Anthropic and Gemini** (closes #329). The
   unified `reasoning_effort` knob (`.dip` node attr) was only consumed by the OpenAI
   provider; the Anthropic and Gemini translate layers silently dropped it, so

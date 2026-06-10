@@ -422,6 +422,96 @@ workflow BuildProduct
 
       printf 'setup-ready'
 
+  # ─── SpecLint: spec-coherence preflight (issue #301, epic #308 Phase 2) ──
+  #
+  # Runs ONCE, strictly before any spec read or decomposition. Hard-fails the
+  # critical coherence classes (dangling refs, contradictory constants,
+  # contract/signature mismatch, unassignable mandated tests) so no agent
+  # builds on a broken spec. NOTE: this node is intentionally duplicated (not
+  # a shared subgraph) in build_product_with_superspec.dip — built-in delivery
+  # (embedded `tracker run build_product` outside the repo, library
+  # tracker.Run, `tracker init`) cannot resolve subgraph file refs; dedup of
+  # the two copies is tracked in issue #307.
+
+  agent SpecLint
+    label: "Spec Coherence Preflight"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      SPEC COHERENCE PREFLIGHT (issue #301):
+
+      STATUS contract — emit `STATUS:fail` as the FIRST line of your
+      response, before any other text. Then run the checks below. Only
+      at the very end, after every CRITICAL check passes, emit a final
+      `STATUS:success` line — alone on its line, outside any code
+      fence — to override the early fail. The workflow's `auto_status`
+      parser is last-line-wins; if your response is truncated for any
+      reason the early `STATUS:fail` remains and the gate fails closed.
+      The STATUS value must be exactly `fail` or `success`, with no
+      trailing prose on that line. Never emit STATUS:retry (this node
+      has no retry route).
+
+      You are a coherence linter for SPEC.md. You are NOT judging
+      whether the spec is good — only whether it is self-consistent
+      and buildable. Do not propose fixes; report findings. Every
+      finding must cite evidence: the SPEC.md line/section PLUS the
+      grep/ls/file check that produced it (file:line where relevant).
+
+      Run these checks across the entire SPEC.md:
+
+      CRITICAL — any finding fails the gate:
+      (a) Self-contained: every doc, file, or section SPEC.md
+          references must exist. For each reference (a "see PLAN.md",
+          a named section, a file path), verify with ls/grep that the
+          target exists in the repo or within SPEC.md itself. A
+          dangling reference means downstream agents will INVENT the
+          missing content.
+      (b) Single-source constants: every numeric or named parameter
+          must be stated exactly one way. grep SPEC.md for each
+          constant it declares (retry counts, timeouts, limits,
+          sizes) and flag any restatement that differs — "max 2
+          retries" in one section vs "max 2 attempts" in another is
+          how an off-by-one ships.
+      (c) Contract/signature coherence: for every interface or
+          function whose contract names a value (an input it derives
+          from, a header it computes, an error it returns), check
+          that the declared signature actually receives/produces that
+          value. A contract like "Idempotency-Key derived from
+          review_id+sha" on a signature receiving neither is
+          unimplementable as written.
+      (f) Mandated tests enumerated and assignable: list every test
+          SPEC.md mandates by name or by concrete behavior. This list
+          feeds the Decompose requirement-coverage table (issue
+          #300); a mandated test so vague no milestone could own it
+          is a finding.
+
+      WARN — report in the artifact, do NOT fail the gate:
+      (d) Checkable guarantees: behavioral guarantees phrased so they
+          can never become an assertion or a named test.
+      (e) Example code coherence: example code that does not parse
+          against the signatures the spec itself declares (e.g. shown
+          returning `string` where declared `(string, error)`),
+          unless explicitly marked illustrative.
+
+      Write .ai/decisions/spec-quality.md with exactly these sections:
+      ## Critical findings
+      One entry per finding: rule letter, SPEC.md line/section,
+      evidence, one line on why it blocks the build — or "none".
+      ## Warnings
+      Rule (d)/(e) findings, same evidence shape — or "none".
+      ## Mandated tests
+      Every rule-(f) test, one per line, each with its SPEC.md
+      source — or the single line "SPEC mandates no named tests".
+
+      Then your terminal STATUS line:
+      - zero critical findings -> STATUS:success (warnings alone never
+        fail the gate)
+      - any critical finding -> leave the early STATUS:fail standing
+        as the last line. The fail edge routes to a human who fixes
+        the spec — never paper over a finding to keep the build going.
+
   agent ReadSpec
     label: "Read & Analyze Spec"
     model: claude-opus-4-6
@@ -507,7 +597,10 @@ workflow BuildProduct
          threshold are NOT mandated — do not list them. State how many you
          found; if none, write the line: SPEC mandates no named
          verifications (never leave the table silently empty — a silent
-         empty table hides under-extraction). Table columns:
+         empty table hides under-extraction). Cross-check against the
+         "Mandated tests" section of .ai/decisions/spec-quality.md
+         (written by the SpecLint preflight, issue #301): every test
+         listed there must appear in this table. Table columns:
            | Mandated verification | SPEC.md source (line/section) | Owning milestone |
 
       2. THEN decompose into milestones as the rules above describe.
@@ -1809,7 +1902,11 @@ workflow BuildProduct
 
   edges
     Start -> Setup
-    Setup -> ReadSpec
+    Setup -> SpecLint
+    # Spec-coherence preflight (#301): success/fail conditions are exhaustive —
+    # no unconditional fallback (it would race the conditional edges).
+    SpecLint -> ReadSpec  when ctx.outcome = success
+    SpecLint -> EscalateReview  when ctx.outcome = fail
     ReadSpec -> Decompose  when ctx.outcome = success
     ReadSpec -> EscalateReview  when ctx.outcome = fail
     Decompose -> ApprovePlan  when ctx.outcome = success
