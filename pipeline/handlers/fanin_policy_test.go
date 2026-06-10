@@ -86,8 +86,8 @@ func TestParallelHandlerPolicyQuorum(t *testing.T) {
 		quorum string
 		want   string
 	}{
-		{"met", "2", string(pipeline.OutcomeSuccess)},   // 2/3 succeed, quorum 2
-		{"not_met", "3", string(pipeline.OutcomeFail)},  // 2/3 succeed, quorum 3
+		{"met", "2", string(pipeline.OutcomeSuccess)},        // 2/3 succeed, quorum 2
+		{"not_met", "3", string(pipeline.OutcomeFail)},       // 2/3 succeed, quorum 3
 		{"unsatisfiable", "4", string(pipeline.OutcomeFail)}, // quorum > branch count
 	}
 	for _, tc := range cases {
