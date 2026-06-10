@@ -28,10 +28,11 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-37-0">v0.37.0</a>
     <a href="#v0-36-0">v0.36.0</a>
     <a href="#v0-35-1">v0.35.1</a>
-    <a href="#v0-35-0">v0.35.0</a>
     <strong>Jump to:</strong>
+    <a href="#v0-35-0">v0.35.0</a>
     <a href="#v0-34-0">v0.34.0</a>
     <a href="#v0-33-0">v0.33.0</a>
     <a href="#v0-32-0">v0.32.0</a>
@@ -69,6 +70,34 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.37.0 ═══ -->
+  <section class="glass" id="v0-37-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.37.0" style="color: inherit; text-decoration: none;">v0.37.0</a></h2>
+      <span class="badge">2026-06-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.37.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Tool subprocesses learn the run's identity, and <code>build_product</code>'s CI gate stops crying wolf
+      to humans.</strong> Locally-executed tool subprocesses now carry <code>TRACKER_RUN_ID</code> /
+      <code>TRACKER_RUN_DIR</code> / <code>TRACKER_WORKDIR</code>, closing the <code>tool_access: none</code>
+      agent &rarr; tool data-flow gap without the concurrent-run-unsafe <code>ls -dt</code> mtime heuristic. Multi-file
+      workflow trees also get two quality-of-life fixes: <code>graph.workflow_dir</code> seeding and
+      <code>command_file:</code> resolution on the raw <code>.dip</code> load path.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Run identity env vars in tool subprocesses</strong> (<a href="https://github.com/2389-research/tracker/issues/323">#323</a>). Locally-executed tool commands receive <code>TRACKER_RUN_ID</code>, <code>TRACKER_RUN_DIR</code> (the same root <code>WriteStageArtifacts</code> uses), and <code>TRACKER_WORKDIR</code> &mdash; so a downstream tool can <code>cat "$TRACKER_RUN_DIR/&lt;NodeID&gt;/response.md"</code> for a specific upstream agent's output. Injected after sensitive-env filtering (and under <code>TRACKER_PASS_ENV=1</code>); operator exports of the same names are overridden, never duplicated. Env-only &mdash; no new <code>${ctx.*}</code> expansion keys.</li>
+      <li><strong><code>graph.workflow_dir</code> seeded from the pipeline file's parent directory</strong> (<a href="https://github.com/2389-research/tracker/issues/332">#332</a>). Workflows reference sibling files from any cwd: <code>command: bash ${graph.workflow_dir}/scripts/setup.sh</code>. Not seeded for embedded built-ins or <code>.dipx</code> bundles; an author-declared attr is never clobbered.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>build_product: a failing <code>make ci</code>/<code>check</code>/<code>lint</code> target no longer escalates to a human as &ldquo;make not installed&rdquo;</strong> (<a href="https://github.com/2389-research/tracker/issues/320">#320</a>). GNU make exits 2 on any recipe error, colliding with the rc=2 the CI probe reserves for make-missing &mdash; so fixable failures skipped the fix loop and reset the circuit breaker. Make failures now collapse to rc=1; rc=2 is sole-sourced to the <code>command -v make</code> check.</li>
+      <li><strong><code>exec *</code> denylist no longer false-positives on fd-only redirects</strong> (<a href="https://github.com/2389-research/tracker/issues/333">#333</a>). POSIX idioms like <code>exec 3&gt;"$tmp"</code> / <code>exec 3&gt;&amp;-</code> are exempt from the built-in pattern; the exemption fails closed (command substitution, unbalanced quotes, or any bare command word stays denied), and denylist matching is now whitespace-normalized so tab-separated commands can't evade space-separated patterns.</li>
+      <li><strong>Raw <code>.dip</code> load path resolves <code>command_file:</code> / <code>prompt_file:</code> / <code>system_prompt_file:</code></strong> (<a href="https://github.com/2389-research/tracker/issues/331">#331</a>). Multi-file workflow trees run via <code>tracker /path/to/foo.dip</code> from any cwd; resolution failures are fatal and name the node ID and path.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.36.0 ═══ -->
   <section class="glass" id="v0-36-0" style="border-left: 3px solid var(--orange-600);">
