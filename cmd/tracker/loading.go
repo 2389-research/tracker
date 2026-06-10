@@ -45,14 +45,44 @@ func loadPipeline(filename, formatOverride string) (*pipeline.Graph, error) {
 		return nil, fmt.Errorf("read pipeline file: %w", err)
 	}
 
+	var graph *pipeline.Graph
 	switch format {
 	case "dip":
-		return loadDippinPipeline(string(fileBytes), filename)
+		graph, err = loadDippinPipeline(string(fileBytes), filename)
 	case "dot":
-		return pipeline.ParseDOT(string(fileBytes))
+		graph, err = pipeline.ParseDOT(string(fileBytes))
 	default:
 		return nil, fmt.Errorf("unknown pipeline format: %q (valid: dip, dot)", format)
 	}
+	if err != nil {
+		return nil, err
+	}
+	seedWorkflowDir(graph, filename)
+	return graph, nil
+}
+
+// seedWorkflowDir sets graph.Attrs["workflow_dir"] to the absolute parent
+// directory of the pipeline file, so authors can reference sibling files via
+// ${graph.workflow_dir} in prompts and tool_commands (#332). The seeded value
+// is a literal path — variable expansion is single-pass, so it is never
+// re-scanned. No-op if the attr is already present (an author-declared value
+// wins — including an explicit empty one, which ParseDOT can carry from a
+// .dot graph attr) or if the path can't be made absolute.
+//
+// Only the raw on-disk load path (loadPipeline) seeds this: embedded
+// built-ins, .dipx bundles (content-addressed, no stable dir), and library
+// callers passing synthetic sources have no real workflow directory, and an
+// absent attr expands to empty string under the existing lenient-expansion
+// semantics.
+func seedWorkflowDir(graph *pipeline.Graph, filename string) {
+	if _, ok := graph.Attrs["workflow_dir"]; ok {
+		return
+	}
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		return
+	}
+	graph.Attrs["workflow_dir"] = filepath.Dir(abs)
 }
 
 // emitDOTDeprecationWarning prints a one-line warning that DOT is deprecated.

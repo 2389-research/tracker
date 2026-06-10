@@ -620,6 +620,31 @@ func TestExpandVariables_ToolCommandMode_AllowsGraphAndParams(t *testing.T) {
 	}
 }
 
+func TestExpandVariables_ToolCommandMode_WorkflowDir(t *testing.T) {
+	ctx := NewPipelineContext()
+
+	// Seeded: ${graph.workflow_dir} expands in tool_command mode (graph.* is
+	// author/operator-controlled, on the allowlist).
+	graphAttrs := map[string]string{"workflow_dir": "/abs/path/to/dev_loop"}
+	result, err := ExpandVariables("bash ${graph.workflow_dir}/scripts/setup.sh", ctx, nil, graphAttrs, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "bash /abs/path/to/dev_loop/scripts/setup.sh" {
+		t.Errorf("result = %q, want %q", result, "bash /abs/path/to/dev_loop/scripts/setup.sh")
+	}
+
+	// Not seeded (embedded built-in, .dipx, library source): lenient mode
+	// expands the absent key to empty string — pin that semantic.
+	result, err = ExpandVariables("bash ${graph.workflow_dir}/scripts/setup.sh", ctx, nil, map[string]string{}, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "bash /scripts/setup.sh" {
+		t.Errorf("absent workflow_dir: result = %q, want %q", result, "bash /scripts/setup.sh")
+	}
+}
+
 func TestExpandVariables_NormalMode_AllowsEverything(t *testing.T) {
 	ctx := NewPipelineContext()
 	ctx.Set("last_response", "hello world")
