@@ -87,6 +87,19 @@ func TestSeedWorkflowDir_PreservesExistingValue(t *testing.T) {
 	}
 }
 
+func TestSeedWorkflowDir_PreservesExplicitEmptyValue(t *testing.T) {
+	// ParseDOT copies arbitrary graph attrs, so a .dot author can declare
+	// workflow_dir="" to opt out — presence wins, not non-emptiness.
+	graph := pipeline.NewGraph("test")
+	graph.Attrs["workflow_dir"] = ""
+
+	seedWorkflowDir(graph, "/some/other/place/fixture.dot")
+
+	if got := graph.Attrs["workflow_dir"]; got != "" {
+		t.Errorf("explicit empty workflow_dir clobbered: got %q, want \"\"", got)
+	}
+}
+
 func TestLoadEmbeddedPipeline_DoesNotSeedWorkflowDir(t *testing.T) {
 	_, _, info, err := resolvePipelineSource("build_product")
 	if err != nil {
