@@ -45,12 +45,15 @@ var sensitiveEnvPatterns = []string{
 	"_PASSWORD",
 }
 
-// runIdentity carries the per-invocation run identity injected into every
-// tool subprocess environment (#323): TRACKER_RUN_ID, TRACKER_RUN_DIR,
+// runIdentity carries the per-invocation run identity injected into tool
+// subprocess environments (#323): TRACKER_RUN_ID, TRACKER_RUN_DIR,
 // TRACKER_WORKDIR. RunDir is the same directory WriteStageArtifacts uses,
 // so a tool subprocess can read an upstream agent's response.md without an
 // `ls -dt` mtime heuristic (unsafe under concurrent runs). Empty fields are
 // omitted from the env — e.g. RunID/RunDir when the run has no artifact dir.
+// Injection happens on the LocalEnvironment exec path only — the same path
+// that applies sensitive-env filtering; non-local ExecutionEnvironments run
+// via ExecCommand, which passes no environment at all.
 type runIdentity struct {
 	RunID   string
 	RunDir  string

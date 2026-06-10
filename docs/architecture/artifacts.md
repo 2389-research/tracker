@@ -38,7 +38,7 @@ Subdirectory names are node IDs verbatim. Subgraph children appear under the par
 
 ## Run identity env vars for tool subprocesses
 
-Every tool subprocess receives the active run's identity in its environment (#323):
+Tool subprocesses executed locally (the default `LocalEnvironment` exec path — the same path that applies sensitive-env filtering) receive the active run's identity in their environment (#323):
 
 - `TRACKER_RUN_ID` — the run identifier; matches the `.tracker/runs/<runID>/` directory name.
 - `TRACKER_RUN_DIR` — absolute path to the per-run artifact directory (the same root `WriteStageArtifacts` writes to).
@@ -54,7 +54,7 @@ without an `ls -dt .tracker/runs/ | head -1` mtime heuristic, which is unsafe un
 
 Semantics:
 
-- The vars are injected after sensitive-env filtering and also on the `TRACKER_PASS_ENV=1` path, so they are always present.
+- The vars are injected after sensitive-env filtering and also on the `TRACKER_PASS_ENV=1` path, so they are always present on the local exec path. Non-local `ExecutionEnvironment` implementations run via `ExecCommand`, which passes no custom environment — they get neither the filtering nor these vars.
 - Operator-exported values of these three names are removed from the inherited environment — a stale export can never masquerade as run identity.
 - When the run has no artifact directory (bare library engines without `WithArtifactDir`), `TRACKER_RUN_ID` and `TRACKER_RUN_DIR` are omitted entirely; `TRACKER_WORKDIR` is always set.
 - Env-only: the values are not exposed as `${ctx.*}` expansion keys in `tool_command`.
