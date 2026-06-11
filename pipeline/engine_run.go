@@ -695,6 +695,12 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 	if outcome.Status != "" {
 		s.pctx.Set(ContextKeyOutcome, outcome.Status)
 		s.nodeOutcomes[currentNodeID] = outcome.Status
+		// #348 defect 1: a goal gate that executes has, by definition,
+		// re-evaluated — clear any pending recheck regardless of outcome
+		// (a fresh fail re-arms via the normal exit-time gate check).
+		if isGoalGate(e.nodeOrDefault(currentNodeID)) {
+			s.cp.ClearGateRecheckPending(currentNodeID)
+		}
 	}
 	if outcome.PreferredLabel != "" {
 		s.pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)
@@ -928,6 +934,12 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		traceEntry.EdgeTo = target
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
+		// #348 defect 1: the redirect's clearDownstream below may remove the
+		// gate from CompletedNodes while the executed path routes around it
+		// to the exit. Mark the gate recheck-pending so it stays visible to
+		// this check and the next retry re-enters at the gate itself; the
+		// flag clears when the gate actually re-executes (applyOutcome).
+		s.cp.SetGateRecheckPending(gateNodeID)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
@@ -945,6 +957,9 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		})
 		traceEntry.EdgeTo = target
 		s.trace.AddEntry(*traceEntry)
+		// Same #348 marking as the retry path above: the one-shot fallback's
+		// clearDownstream must not let the gate vanish from the exit check.
+		s.cp.SetGateRecheckPending(gateNodeID)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)

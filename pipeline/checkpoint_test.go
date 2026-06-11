@@ -253,3 +253,35 @@ func TestCheckpoint_WIPRefsRoundTrip(t *testing.T) {
 		t.Errorf("expected empty WIPRefs on legacy checkpoint, got %v", old.WIPRefs)
 	}
 }
+
+func TestCheckpoint_GateRecheckPending_Roundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.json")
+
+	cp := &Checkpoint{RunID: "run-348"}
+	cp.SetGateRecheckPending("FinalSpecCheck")
+	if !cp.IsGateRecheckPending("FinalSpecCheck") {
+		t.Fatal("expected FinalSpecCheck to be recheck-pending after Set")
+	}
+	if err := SaveCheckpoint(cp, path); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+
+	loaded, err := LoadCheckpoint(path)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if !loaded.IsGateRecheckPending("FinalSpecCheck") {
+		t.Fatal("gate_recheck_pending must survive a save/load cycle so resume replays the re-entry")
+	}
+
+	loaded.ClearGateRecheckPending("FinalSpecCheck")
+	if loaded.IsGateRecheckPending("FinalSpecCheck") {
+		t.Fatal("expected pending recheck to clear")
+	}
+	// Clearing on a nil map must not panic (pre-#348 checkpoints).
+	(&Checkpoint{}).ClearGateRecheckPending("anything")
+	if (&Checkpoint{}).IsGateRecheckPending("anything") {
+		t.Fatal("empty checkpoint should report no pending rechecks")
+	}
+}

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Goal-gate retry now re-executes the gate instead of replaying the
+  escalation tail** (issue #348, defect 1). When a goal-gate retry redirected
+  to the gate's fallback/escalation path and that path reached the exit
+  without flowing back through the gate, the redirect's `clearDownstream`
+  removed the gate from the checkpoint's completed set — and since the
+  exit-time goal-gate check only scanned completed nodes, the gate vanished
+  from the check and the run completed **plain success with the gate still
+  at `outcome: fail`** (case-study run b68b532619c3: FinalSpecCheck never
+  re-ran after FinalCommit's remediation). The engine now records a
+  persisted `gate_recheck_pending` marker when a goal-gate redirect fires,
+  cleared only when the gate node actually re-executes. Pending gates stay
+  visible to the exit check even when cleared from the completed set, and
+  while retries remain a still-pending gate re-enters **at the gate itself**
+  so it re-evaluates the current (possibly remediated) tree. Retry budget
+  still flows through `retry_counts`, the one-shot fallback guard is
+  unchanged, the marker is persisted in checkpoint.json for deterministic
+  resume, and retry targets whose path flows back through the gate behave
+  exactly as before. Defect 2 of #348 (human "accept" at an escalation
+  should mark the gate overridden) remains open, blocked on #271 /
+  dippin-lang#124.
 - **auto_status no longer fails open on goal gates, and heading-mangled
   STATUS lines parse** (issue #346). Two defects from the same case-study
   run: (1) `parseStatusLine` now strips leading markdown heading markers
