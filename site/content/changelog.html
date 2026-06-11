@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-38-1">v0.38.1</a>
     <a href="#v0-38-0">v0.38.0</a>
     <a href="#v0-37-0">v0.37.0</a>
     <a href="#v0-36-0">v0.36.0</a>
@@ -71,6 +72,26 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.38.1 ═══ -->
+  <section class="glass" id="v0-38-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.38.1" style="color: inherit; text-decoration: none;">v0.38.1</a></h2>
+      <span class="badge">2026-06-11</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.38.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Two gate-integrity holes that let a failed run report success are closed.</strong> Both came from one
+      real case-study run that finished &ldquo;completed&rdquo; with its final quality gate at <code>outcome: fail</code>:
+      the gate's verdict arrived as a markdown heading the parser missed, and the goal-gate retry replayed the
+      escalation tail without ever re-running the gate.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>auto_status no longer fails open on goal gates, and heading-mangled STATUS lines parse</strong> (<a href="https://github.com/2389-research/tracker/issues/346">#346</a>). Leading markdown heading markers are stripped so <code>## STATUS:fail</code> registers like the bold shapes from #233; and when an <code>auto_status</code> node completes with no parseable STATUS line, <code>goal_gate: true</code> nodes resolve to <code>fail</code> &mdash; an unparseable verdict on a gate is an anomaly, not a pass. Plain <code>auto_status</code> nodes keep the legacy success default. Either way the anomaly is observable: a new <code>auto_status_missing</code> audit event lands in activity.jsonl and <code>tracker diagnose</code> surfaces a per-node suggestion.</li>
+      <li><strong>Goal-gate retry re-executes the gate instead of replaying the escalation tail</strong> (<a href="https://github.com/2389-research/tracker/issues/348">#348</a> defect 1). A persisted <code>gate_recheck_pending</code> marker keeps redirected gates visible to the exit-time check even after <code>clearDownstream</code> drops them from the completed set, and a still-pending gate re-enters <em>at the gate itself</em> so remediation done on the escalation path gets re-judged &mdash; a budget-free completion of the redirect cycle that fires even with <code>max_retries: 1</code>. A never-satisfied gate now drains its budget and fails the run instead of reporting plain success. Checkpoint-resume deterministic; fix-loop retry targets behave exactly as before.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.38.0 ═══ -->
   <section class="glass" id="v0-38-0" style="border-left: 3px solid var(--orange-600);">
