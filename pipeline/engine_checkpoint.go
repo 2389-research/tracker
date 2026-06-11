@@ -208,12 +208,13 @@ func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string, nodeOutcomes m
 	}
 
 	// A pending recheck wins over the budget branch (#348 defect 1, codex
-	// P2 on #360): the prior redirect already charged the retry budget but
-	// never re-ran the gate, so re-entering AT the gate is the COMPLETION
-	// of that retry cycle, not a new retry — it must fire even when the
-	// redirect consumed the last unit (max_retries=1), and handleExitNode
-	// does not charge for it. No loop risk: the re-entry executes the gate
-	// next, which clears the pending flag (applyOutcome).
+	// P2 on #360): the prior redirect — a charged retry or the uncharged
+	// one-shot fallback — routed away without re-running the gate, so
+	// re-entering AT the gate is the COMPLETION of that redirect cycle,
+	// not a new retry. It must fire even when a retry redirect consumed
+	// the last budget unit (max_retries=1), and handleExitNode does not
+	// charge for it. No loop risk: the re-entry executes the gate next,
+	// which clears the pending flag (applyOutcome).
 	if cp.IsGateRecheckPending(nodeID) {
 		return goalGateCheckResult{target: nodeID, nodeID: nodeID, shouldRetry: true, unsatisfied: true}, true
 	}
