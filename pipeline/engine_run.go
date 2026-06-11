@@ -264,7 +264,7 @@ type runState struct {
 	//
 	// Stored as a shallow copy via `s.lastOutcome = *outcome`: value-type fields
 	// (Status, OverrideActor, PreferredLabel) are safely snapshotted, but slice
-	// and pointer fields (Truncations, ChildOverride, ChildUsage, MissingMarker,
+	// and pointer fields (Truncations, ChildOverride, ChildUsage, MissingMarker, MissingStatus,
 	// MissingRoute) share backing storage with the original outcome — treat them
 	// as read-only here. Mutating those fields through s.lastOutcome would
 	// silently corrupt the handler's outcome value (and vice versa).
@@ -651,6 +651,30 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 			Message: fmt.Sprintf("tool node %q: route_required is set but no _TRACKER_ROUTE= sentinel line was emitted to stdout — failing node to avoid silent fallback",
 				currentNodeID),
 			Route: outcome.MissingRoute,
+		})
+	}
+
+	// Same shape again for auto_status (#346): the agent completed normally
+	// but emitted no parseable STATUS line. The handler already chose the
+	// status (fail-closed on goal gates, legacy success default otherwise);
+	// this is the audit-trail companion so the TUI and `tracker diagnose`
+	// can surface the anomaly instead of it registering as a silent verdict.
+	if outcome.MissingStatus != nil {
+		var msg string
+		if outcome.MissingStatus.FailClosed {
+			msg = fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — failing goal gate closed (an unparseable verdict on a gate is an anomaly, not a pass)",
+				currentNodeID)
+		} else {
+			msg = fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — keeping legacy success default (mark the node goal_gate: true to fail closed)",
+				currentNodeID)
+		}
+		e.emit(PipelineEvent{
+			Type:       EventAutoStatusMissing,
+			Timestamp:  time.Now(),
+			RunID:      s.runID,
+			NodeID:     currentNodeID,
+			Message:    msg,
+			AutoStatus: outcome.MissingStatus,
 		})
 	}
 

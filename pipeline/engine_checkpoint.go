@@ -141,7 +141,7 @@ func (e *Engine) maxRetries(node *Node) int {
 
 // isGoalGate checks whether a node is marked as a goal gate.
 func isGoalGate(node *Node) bool {
-	return node.Attrs["goal_gate"] == "true"
+	return node.IsGoalGate()
 }
 
 // goalGateRetryTarget checks if any completed goal gate node is unsatisfied and

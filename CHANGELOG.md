@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **auto_status no longer fails open on goal gates, and heading-mangled
+  STATUS lines parse** (issue #346). Two defects from the same case-study
+  run: (1) `parseStatusLine` now strips leading markdown heading markers
+  (`#`+space, any count) the same way it strips emphasis (#233 Gap 5.1), so
+  `## STATUS:fail` and `### **STATUS: fail**` register instead of being
+  silently missed; (2) when an `auto_status` node completes normally with
+  NO parseable STATUS line, nodes marked `goal_gate: true` now resolve to
+  `fail` (fail-closed — an unparseable verdict on a gate is an anomaly, not
+  a pass) instead of the legacy success default. Plain `auto_status` nodes
+  keep the success default for back-compat. Either way the anomaly is
+  observable: the handler reports it via `Outcome.MissingStatus`, the
+  engine emits a new `auto_status_missing` audit event to activity.jsonl,
+  and `tracker diagnose` surfaces a per-node suggestion distinguishing the
+  fail-closed flip from the silent default. Last-line-wins and
+  code-fence-skipping semantics are unchanged.
+
 ## [0.38.0] - 2026-06-11
 
 ### Added

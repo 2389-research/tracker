@@ -92,6 +92,13 @@ type AgentNodeConfig struct {
 	CompactionThreshold  float64
 }
 
+// IsGoalGate reports whether the node is marked `goal_gate: true`. Shared by
+// the engine's goal-gate retry logic and the codergen handler's fail-closed
+// missing-STATUS rule (#346).
+func (n *Node) IsGoalGate() bool {
+	return n.Attrs["goal_gate"] == "true"
+}
+
 // AgentConfig returns the typed agent config for the node, merging graphAttrs
 // defaults with node.Attrs overrides. Graph-level values apply to all agent
 // nodes unless a node explicitly overrides the same attr. Unparseable numeric

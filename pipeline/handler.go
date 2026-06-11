@@ -46,6 +46,14 @@ type Outcome struct {
 	// runs unconditionally; this field is populated only when the
 	// missing-sentinel + route_required combination triggers a fail.
 	MissingRoute *RouteDetail
+	// MissingStatus records an auto_status node that completed normally but
+	// produced no parseable STATUS line (#346). When non-nil the engine emits
+	// EventAutoStatusMissing. On goal_gate nodes the handler also sets
+	// Status = OutcomeFail (fail-closed: an unparseable verdict on a gate is
+	// an anomaly, not a pass); on plain auto_status nodes the legacy success
+	// default is kept and this field is the only signal. Populated only by
+	// the codergen handler.
+	MissingStatus *AutoStatusDetail
 	// OverrideActor is the Actor classification of the interviewer that produced
 	// this outcome. Populated by HumanHandler from its bound interviewer's
 	// Actor() method (via actorOf helper). The engine reads this at edge-selection

@@ -1,0 +1,8 @@
+{
+  "run_id": "auto-status-missing-run",
+  "completed_nodes": ["Start"],
+  "current_node": "",
+  "retry_counts": {},
+  "restart_count": 0,
+  "timestamp": "2026-06-10T15:58:00Z"
+}

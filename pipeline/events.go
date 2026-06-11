@@ -75,6 +75,14 @@ const (
 	// channel. Carries RouteDetail with the captured stdout tail.
 	EventToolRouteMissing PipelineEventType = "tool_route_missing"
 
+	// EventAutoStatusMissing fires when an auto_status agent node completed
+	// normally but its response contained no parseable STATUS line (#346).
+	// On goal_gate nodes the handler fails closed (an unparseable verdict on
+	// a gate is an anomaly, not a pass); on plain auto_status nodes the
+	// legacy success default is kept — either way this event makes the
+	// anomaly observable instead of a silent flip. Carries AutoStatusDetail.
+	EventAutoStatusMissing PipelineEventType = "auto_status_missing"
+
 	// EventValidationOverridden fires when the engine traverses an
 	// Edge.Override-marked edge at advanceToNextNode. Carries an
 	// OverrideDetail payload via PipelineEvent.Override. Stage-level
@@ -117,6 +125,16 @@ type MarkerDetail struct {
 // is no Pattern field — just the captured stdout tail for diagnosis.
 type RouteDetail struct {
 	CapturedTail string `json:"captured_tail,omitempty"`
+}
+
+// AutoStatusDetail is the payload for EventAutoStatusMissing (#346).
+// ResponseTail is up to 256 bytes from the end of the agent's response text
+// (where the STATUS line was expected) for diagnostic context. FailClosed is
+// true when the missing line failed the node (goal_gate nodes), false when
+// the legacy success default was kept (plain auto_status nodes).
+type AutoStatusDetail struct {
+	ResponseTail string `json:"response_tail,omitempty"`
+	FailClosed   bool   `json:"fail_closed,omitempty"`
 }
 
 // CostSnapshot is the payload for EventCostUpdated and EventBudgetExceeded events.
@@ -202,6 +220,7 @@ type PipelineEvent struct {
 	Truncation *TruncationDetail // non-nil for EventToolOutputTruncated
 	Marker     *MarkerDetail     // non-nil for EventToolMarkerMissing
 	Route      *RouteDetail      // non-nil for EventToolRouteMissing
+	AutoStatus *AutoStatusDetail // non-nil for EventAutoStatusMissing
 	// Override is non-nil on EventValidationOverridden events. Carries the
 	// gate, label, actor, and subgraph_path of the traversed override edge.
 	Override *OverrideDetail

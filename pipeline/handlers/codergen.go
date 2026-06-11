@@ -553,7 +553,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	// else→operator) rather than unconditionally failed; auto_status is honored
 	// only on normal completion, never to rescue a breach. See
 	// resolveTerminalStatus / classifyBreach.
-	status, turnLimitMsg, breachClass := h.resolveTerminalStatus(node, responseText, sessResult, native)
+	status, turnLimitMsg, breachClass, statusMissing := h.resolveTerminalStatus(node, responseText, sessResult, native)
 
 	outcome := pipeline.Outcome{
 		Status: string(status),
@@ -562,6 +562,12 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
 		},
 		Stats: buildSessionStats(sessResult),
+	}
+	if statusMissing {
+		outcome.MissingStatus = &pipeline.AutoStatusDetail{
+			ResponseTail: tailForDiag(responseText, 256),
+			FailClosed:   node.IsGoalGate(),
+		}
 	}
 	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
 	if applyDeclaredWrites(node, outcome.ContextUpdates, responseText, "Response JSON") {
@@ -682,23 +688,41 @@ func buildTurnLimitMsg(node *pipeline.Node, sessResult agent.SessionResult) stri
 }
 
 // resolveTerminalStatus determines the node's terminal status, the turn-limit
-// message, and the #303 breach class. On a breach it classifies via the
-// turn_breach_policy; auto_status (an explicit STATUS line) is authoritative on
-// NORMAL completion only — it must NOT manufacture success on a breach, since a
-// missing/early STATUS line defaults parseAutoStatus to success and would
-// silently advance unverified work (#303 decision #5).
-func (h *CodergenHandler) resolveTerminalStatus(node *pipeline.Node, responseText string, sessResult agent.SessionResult, native bool) (pipeline.TerminalStatus, string, string) {
+// message, the #303 breach class, and whether the STATUS line was missing
+// (#346). On a breach it classifies via the turn_breach_policy; auto_status
+// (an explicit STATUS line) is authoritative on NORMAL completion only — it
+// must NOT manufacture success on a breach, since a missing/early STATUS line
+// defaults parseAutoStatus to success and would silently advance unverified
+// work (#303 decision #5).
+//
+// Missing-STATUS semantics (#346): when auto_status is set and no parseable
+// STATUS line is found on normal completion, goal_gate nodes fail closed —
+// an unparseable verdict on a gate is an anomaly, not a pass. Plain
+// auto_status nodes keep the legacy success default for back-compat. Either
+// way statusMissing is returned true so the anomaly is observable
+// (Outcome.MissingStatus → EventAutoStatusMissing), never a silent flip.
+func (h *CodergenHandler) resolveTerminalStatus(node *pipeline.Node, responseText string, sessResult agent.SessionResult, native bool) (pipeline.TerminalStatus, string, string, bool) {
 	status := pipeline.OutcomeSuccess
 	turnLimitMsg := buildTurnLimitMsg(node, sessResult)
 	var breachClass string
+	var statusMissing bool
 	if turnLimitMsg != "" {
 		policy := node.AgentConfig(h.graphAttrs).TurnBreachPolicy
 		status, breachClass = classifyBreach(policy, sessResult, native)
 	}
 	if node.Attrs["auto_status"] == "true" && turnLimitMsg == "" {
-		status = parseAutoStatus(responseText)
+		parsed, found := parseAutoStatus(responseText)
+		switch {
+		case found:
+			status = parsed
+		case node.IsGoalGate():
+			status = pipeline.OutcomeFail
+			statusMissing = true
+		default:
+			statusMissing = true // keep the success default, but observable
+		}
 	}
-	return status, turnLimitMsg, breachClass
+	return status, turnLimitMsg, breachClass, statusMissing
 }
 
 // applyBreachMarker writes the #303 turn_breach_class to the context updates,
@@ -861,9 +885,13 @@ func applyTypedCompaction(config *agent.SessionConfig, cfg pipeline.AgentNodeCon
 // parseAutoStatus scans the response text for STATUS: directives and returns
 // the last one found. Case-insensitive matching. Lines inside code fences
 // (``` blocks) are skipped to avoid matching hallucinated STATUS lines.
-// Falls back to success if no valid STATUS line is found.
-func parseAutoStatus(text string) pipeline.TerminalStatus {
+// The second return reports whether any valid STATUS line was found (#346);
+// when it is false the status falls back to the legacy success default and
+// the caller decides whether that default is acceptable (it is not on a
+// goal gate — see resolveTerminalStatus).
+func parseAutoStatus(text string) (pipeline.TerminalStatus, bool) {
 	result := pipeline.OutcomeSuccess
+	found := false
 	inCodeBlock := false
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -876,9 +904,10 @@ func parseAutoStatus(text string) pipeline.TerminalStatus {
 		}
 		if s := parseStatusLine(trimmed); s != "" {
 			result = s
+			found = true
 		}
 	}
-	return result
+	return result, found
 }
 
 // parseStatusLine extracts the status value from a "STATUS: ..." line.
@@ -891,7 +920,14 @@ func parseAutoStatus(text string) pipeline.TerminalStatus {
 // italic `*`, underscore-bold `__`, underscore-italic `_`) from both
 // the full line and the value portion, so the prefix check and value
 // switch see the bare token.
+//
+// Markdown-heading tolerance (issue #346): LLMs also emit the verdict as a
+// heading (`## STATUS:fail`) when they want it to draw the eye — at least as
+// natural as bold. The leading run of '#' (any count, with or without the
+// following space) is stripped before the emphasis strip, so heading-wrapped
+// directives parse like plain ones.
 func parseStatusLine(trimmed string) pipeline.TerminalStatus {
+	trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
 	trimmed = strings.Trim(trimmed, "*_")
 	if !strings.HasPrefix(strings.ToUpper(trimmed), "STATUS:") {
 		return ""

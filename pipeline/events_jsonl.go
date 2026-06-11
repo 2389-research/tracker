@@ -85,6 +85,13 @@ type jsonlLogEntry struct {
 	// captured stdout tail for diagnosis.
 	RouteTail string `json:"route_tail,omitempty"`
 
+	// Auto-status fields — populated for auto_status_missing events
+	// (#346). Tail is up to 256 bytes from the end of the agent's
+	// response text (where the STATUS line was expected); FailClosed is
+	// true when the missing line failed a goal gate closed.
+	AutoStatusTail       string `json:"auto_status_tail,omitempty"`
+	AutoStatusFailClosed bool   `json:"auto_status_fail_closed,omitempty"`
+
 	// Override fields — populated for validation_overridden events.
 	// Identify the gate that produced the override, the edge label that
 	// selected it, who acted, and the subgraph_path when the override
@@ -238,6 +245,10 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	}
 	if evt.Route != nil {
 		entry.RouteTail = evt.Route.CapturedTail
+	}
+	if evt.AutoStatus != nil {
+		entry.AutoStatusTail = evt.AutoStatus.ResponseTail
+		entry.AutoStatusFailClosed = evt.AutoStatus.FailClosed
 	}
 	if evt.Override != nil {
 		entry.OverrideGate = evt.Override.GateNodeID
