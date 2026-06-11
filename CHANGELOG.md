@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-06-11
+
 ### Fixed
 
 - **Goal-gate retry now re-executes the gate instead of replaying the
