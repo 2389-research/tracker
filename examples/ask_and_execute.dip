@@ -377,7 +377,7 @@ workflow AskAndExecute
     auto_status: true
 
   human EscalateToHuman
-    label: "Verification failed after retry. Please review."
+    label: "Verification failed. Please review."
     mode: freeform
 
   agent CommitFinal

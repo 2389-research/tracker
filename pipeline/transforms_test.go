@@ -163,3 +163,21 @@ func TestExpandGraphVariablesPrefixCollision(t *testing.T) {
 		}
 	}
 }
+
+func TestExpandGraphVariablesSinglePass(t *testing.T) {
+	// Expansion is single-pass — a variable reference appearing inside a
+	// substituted VALUE must never be re-expanded (CLAUDE.md: "Variable
+	// expansion is single-pass — never re-scan resolved values"). Before
+	// the single-pass rewrite this depended on replacement order: the
+	// longest-first sequential ReplaceAll deterministically re-scanned
+	// $long's substituted value for $a.
+	vars := map[string]string{
+		"$long": "literal $a inside",
+		"$a":    "EXPANDED",
+	}
+	got := ExpandGraphVariables("value=$long flag=$a", vars)
+	want := "value=literal $a inside flag=EXPANDED"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

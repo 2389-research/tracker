@@ -1,7 +1,7 @@
 # Fresh-Eyes Review Fixes — 2026-06-10
 
 Full-project review (7 parallel subagent reviewers, findings personally verified).
-Branch: `review/fresh-eyes-fixes`. 36 raw findings → 19 confirmed fixes, 3 policy
+Branch: `review/fresh-eyes-fixes`. 36 raw findings → 25 confirmed fixes, 3 policy
 questions held for Doctor Biz, rest documented as skips/false-positives.
 
 ## Phase A — LLM stream errors (CLAUDE.md: never silently swallow errors)
@@ -45,7 +45,7 @@ for Doctor Biz if the warning proves noisy.
 | D3a | `pipeline/handlers/human.go:913` | `executeChoice` lacks nil-graph guard (siblings have it) | add guard |
 | D3b | `agent/session.go:320` | error msg reports N retries, N+1 empties occurred | `maxEmptyResponseRetries+1` |
 | D4 | `tui/search.go:220-250` | `HighlightLine`: byte offsets from `lowerPlain` sliced into `plain`; `ToLower` changes UTF-8 widths → panic/garble | lowered→plain offset map |
-| D5 | `agent/session_run.go:316` | dangling tool_use on restricted-tool early return — VERIFY reachability first; skip if tools stripped from request |
+| D5 | `agent/session_run.go:316` | dangling tool_use on restricted-tool early return | SKIPPED — verified dead-defensive: restricted sessions send no tools, so providers can't emit tool_use |
 
 ## Phase E — aux binaries / examples
 

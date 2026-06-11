@@ -19,7 +19,12 @@ func TestWebhookInterviewer_CancelAbortsInflightPost(t *testing.T) {
 	// Cancel() must abort an in-flight outbound POST — otherwise a hung
 	// webhook endpoint pins the gate goroutine until the 30s client timeout.
 	release := make(chan struct{})
+	reached := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select { // signal the POST arrived (non-blocking: safe on retry)
+		case reached <- struct{}{}:
+		default:
+		}
 		<-release // hang until test cleanup
 	}))
 	defer srv.Close()
@@ -29,7 +34,13 @@ func TestWebhookInterviewer_CancelAbortsInflightPost(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- w.postWebhook(WebhookGatePayload{GateID: "g1"}) }()
 
-	time.Sleep(50 * time.Millisecond) // let the POST reach the hung server
+	// Synchronize on the handler actually receiving the POST — a fixed
+	// sleep is timing-dependent and flaky under CI load.
+	select {
+	case <-reached:
+	case <-time.After(3 * time.Second):
+		t.Fatal("POST never reached the test server")
+	}
 	w.Cancel()
 
 	select {
