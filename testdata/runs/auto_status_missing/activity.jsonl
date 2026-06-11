@@ -1,0 +1,5 @@
+{"ts":"2026-06-10T15:58:00Z","type":"pipeline_started"}
+{"ts":"2026-06-10T15:58:01Z","type":"stage_started","node_id":"VerifyMilestone"}
+{"ts":"2026-06-10T15:58:08Z","type":"auto_status_missing","node_id":"VerifyMilestone","message":"node \"VerifyMilestone\": auto_status is set but no parseable STATUS line was found — failing goal gate closed (an unparseable verdict on a gate is an anomaly, not a pass)","auto_status_tail":"0 of 8 criteria met but no marker\n","auto_status_fail_closed":true}
+{"ts":"2026-06-10T15:58:09Z","type":"stage_started","node_id":"Summarize"}
+{"ts":"2026-06-10T15:58:10Z","type":"auto_status_missing","node_id":"Summarize","message":"node \"Summarize\": auto_status is set but no parseable STATUS line was found — keeping legacy success default (mark the node goal_gate: true to fail closed)","auto_status_tail":"narrative summary text\n"}

@@ -468,3 +468,49 @@ func writeCheckpoint(t *testing.T, runDir, runID string) {
 		t.Fatalf("write checkpoint: %v", err)
 	}
 }
+
+// TestDiagnose_AutoStatusMissing pins activity.jsonl parsing and the
+// SuggestionAutoStatusMissing emission for #346: an auto_status agent node
+// that completed normally without a parseable STATUS line. The fixture has
+// a fail-closed goal gate (VerifyMilestone) and a default-success plain node
+// (Summarize) — the suggestion copy must distinguish the two.
+func TestDiagnose_AutoStatusMissing(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/auto_status_missing")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+
+	var suggestions []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionAutoStatusMissing {
+			suggestions = append(suggestions, s)
+		}
+	}
+	if len(suggestions) != 2 {
+		t.Fatalf("got %d auto-status-missing suggestions, want 2", len(suggestions))
+	}
+
+	byNode := map[string]Suggestion{}
+	for _, s := range suggestions {
+		byNode[s.NodeID] = s
+	}
+
+	gate, ok := byNode["VerifyMilestone"]
+	if !ok {
+		t.Fatal("missing suggestion for VerifyMilestone (fail-closed gate path)")
+	}
+	if !strings.Contains(gate.Message, "failed closed") {
+		t.Errorf("gate suggestion should explain the fail-closed flip: %q", gate.Message)
+	}
+	if !strings.Contains(gate.Message, "0 of 8 criteria met") {
+		t.Errorf("gate suggestion should include the response tail: %q", gate.Message)
+	}
+
+	plain, ok := byNode["Summarize"]
+	if !ok {
+		t.Fatal("missing suggestion for Summarize (default-success path)")
+	}
+	if !strings.Contains(plain.Message, "defaulted to success") {
+		t.Errorf("plain suggestion should warn about the success default: %q", plain.Message)
+	}
+}

@@ -964,7 +964,7 @@ func TestParseAutoStatus_CaseInsensitive(t *testing.T) {
 		{"STATUS: SUCCESS\nAll good.", pipeline.OutcomeSuccess},
 	}
 	for _, tt := range tests {
-		got := parseAutoStatus(tt.input)
+		got, _ := parseAutoStatus(tt.input)
 		if got != tt.want {
 			t.Errorf("parseAutoStatus(%q) = %q, want %q", tt.input, got, tt.want)
 		}
@@ -973,7 +973,7 @@ func TestParseAutoStatus_CaseInsensitive(t *testing.T) {
 
 func TestParseAutoStatus_SkipsCodeBlock(t *testing.T) {
 	input := "Here is how to set status:\n```\nSTATUS:fail\n```\nSTATUS:success\nDone."
-	got := parseAutoStatus(input)
+	got, _ := parseAutoStatus(input)
 	if got != pipeline.OutcomeSuccess {
 		t.Errorf("parseAutoStatus with code block = %q, want %q", got, pipeline.OutcomeSuccess)
 	}
@@ -981,7 +981,7 @@ func TestParseAutoStatus_SkipsCodeBlock(t *testing.T) {
 
 func TestParseAutoStatus_OnlyCodeBlockDefaultsToSuccess(t *testing.T) {
 	input := "Some output.\n```\nSTATUS:fail\n```\nNo real status here."
-	got := parseAutoStatus(input)
+	got, _ := parseAutoStatus(input)
 	if got != pipeline.OutcomeSuccess {
 		t.Errorf("parseAutoStatus code-block-only = %q, want %q", got, pipeline.OutcomeSuccess)
 	}
@@ -1271,7 +1271,7 @@ func TestParseAutoStatus_V3FailFirstContract(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseAutoStatus(tc.input)
+			got, _ := parseAutoStatus(tc.input)
 			if got != tc.expect {
 				t.Fatalf("parseAutoStatus = %v, want %v", got, tc.expect)
 			}
@@ -1391,7 +1391,7 @@ func TestParseAutoStatus_Gap5_1_AuditedShapes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseAutoStatus(tc.input)
+			got, _ := parseAutoStatus(tc.input)
 			if got != tc.expect {
 				t.Errorf("parseAutoStatus(%q) = %q; want %q\n  note: %s", tc.input, got, tc.expect, tc.note)
 			}

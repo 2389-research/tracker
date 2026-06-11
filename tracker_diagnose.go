@@ -118,6 +118,12 @@ const (
 	// emitted to stdout. Surfaces the captured stdout tail and the
 	// recommended author pattern. Issue #212.
 	SuggestionToolRouteMissing SuggestionKind = "tool_route_missing"
+	// SuggestionAutoStatusMissing fires when an auto_status agent node
+	// completed normally but its response contained no parseable STATUS
+	// line (#346). Goal-gate nodes fail closed; plain auto_status nodes
+	// keep the legacy success default — the suggestion copy distinguishes
+	// the two so a silently-defaulted verdict is visible post-run.
+	SuggestionAutoStatusMissing SuggestionKind = "auto_status_missing"
 	// SuggestionAuditLogInjection fires when the integrity-protected
 	// activity log has one or more lines missing the runtime sentinel
 	// prefix (#213). Detection-only — the suggestion text is explicit
@@ -212,6 +218,7 @@ type runtimeAnomalies struct {
 	Fallthroughs   []fallthroughObservation
 	MarkerMissings []markerMissingObservation
 	RouteMissings  []routeMissingObservation
+	StatusMissings []statusMissingObservation
 	// VisitStarts records per-node stage_started events so the
 	// suggestion builder can flush stale pending truncations from a
 	// prior visit as orphans before pairing within the new visit.
@@ -242,6 +249,13 @@ type routeMissingObservation struct {
 	Seq          int
 	NodeID       string
 	CapturedTail string
+}
+
+type statusMissingObservation struct {
+	Seq          int
+	NodeID       string
+	ResponseTail string
+	FailClosed   bool
 }
 
 // Seq is a monotonically-increasing scan position shared across all
@@ -378,6 +392,10 @@ type diagnoseEntry struct {
 
 	// Tool-route-missing event fields (#212).
 	RouteTail string `json:"route_tail"`
+
+	// Auto-status-missing event fields (#346).
+	AutoStatusTail       string `json:"auto_status_tail"`
+	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
 }
 
 // enrichFromActivity streams the activity log (preferring the secure
@@ -489,6 +507,14 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 				Seq:          anomalySeq,
 				NodeID:       entry.NodeID,
 				CapturedTail: entry.RouteTail,
+			})
+		case pipeline.EventAutoStatusMissing:
+			anomalySeq++
+			anomalies.StatusMissings = append(anomalies.StatusMissings, statusMissingObservation{
+				Seq:          anomalySeq,
+				NodeID:       entry.NodeID,
+				ResponseTail: entry.AutoStatusTail,
+				FailClosed:   entry.AutoStatusFailClosed,
 			})
 		}
 		enrichFromEntry(entry, failures, stageStarts, failSignatures)
@@ -787,6 +813,43 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 		}
 		out = append(out, Suggestion{
 			NodeID: latest.NodeID, Kind: SuggestionToolMarkerMissing, Message: msg,
+		})
+	}
+
+	// Emit at most one suggestion per node for missing auto_status
+	// STATUS lines (#346). Same de-dupe shape as marker_grep above;
+	// the copy distinguishes the fail-closed goal-gate flip from the
+	// legacy success default so a silently-defaulted verdict is
+	// visible post-run.
+	lastStatusByNode := map[string]statusMissingObservation{}
+	statusCountByNode := map[string]int{}
+	for _, sm := range anomalies.StatusMissings {
+		statusCountByNode[sm.NodeID]++
+		if prev, ok := lastStatusByNode[sm.NodeID]; !ok || sm.Seq > prev.Seq {
+			lastStatusByNode[sm.NodeID] = sm
+		}
+	}
+	emittedStatus := map[string]bool{}
+	for _, sm := range anomalies.StatusMissings {
+		if emittedStatus[sm.NodeID] {
+			continue
+		}
+		emittedStatus[sm.NodeID] = true
+		latest := lastStatusByNode[sm.NodeID]
+		count := statusCountByNode[sm.NodeID]
+		var msg string
+		if latest.FailClosed {
+			msg = fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the goal gate failed closed (response tail: %q). The agent likely phrased the verdict in a shape the parser rejects, or never emitted one — tighten the prompt's STATUS contract or inspect the node's response.md.",
+				latest.NodeID, latest.ResponseTail)
+		} else {
+			msg = fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the STATUS verdict defaulted to success (response tail: %q). If this node is a verification gate, mark it goal_gate: true so a missing verdict fails closed instead.",
+				latest.NodeID, latest.ResponseTail)
+		}
+		if count > 1 {
+			msg += fmt.Sprintf(" (%d occurrences across retries/loop; showing the most recent)", count)
+		}
+		out = append(out, Suggestion{
+			NodeID: latest.NodeID, Kind: SuggestionAutoStatusMissing, Message: msg,
 		})
 	}
 	return out
