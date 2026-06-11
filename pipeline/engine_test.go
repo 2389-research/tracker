@@ -1974,3 +1974,67 @@ func TestEngine_OverrideEdge_DecisionPriorityIsOverride(t *testing.T) {
 		t.Errorf("EdgePriority = %q, want %q", observedPriority, EdgePriorityOverride)
 	}
 }
+
+func TestEngine_BudgetCheckedOnFallbackRetryTarget(t *testing.T) {
+	// A node that exhausts its retry budget (OutcomeRetry attempts) and routes
+	// to fallback_retry_target must hit the budget guard at the fallback
+	// transition — not after the fallback node has already run (ceiling
+	// overshoot by one node). The within-budget retry path and the strict
+	// failure fallback (#311) already check; exhaustion must match.
+	g := NewGraph("budget_fallback_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "flaky", Shape: "box", Label: "Flaky", Attrs: map[string]string{
+		"max_retries":           "1",
+		"base_delay":            "0s",
+		"fallback_retry_target": "recovery",
+	}})
+	g.AddNode(&Node{ID: "recovery", Shape: "box", Label: "Recovery"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "flaky"})
+	g.AddEdge(&Edge{From: "flaky", To: "end"})
+	g.AddEdge(&Edge{From: "recovery", To: "end"})
+
+	heavyStats := &SessionStats{InputTokens: 200, OutputTokens: 100, TotalTokens: 300, Provider: "test-provider"}
+
+	var mu sync.Mutex
+	recoveryRan := false
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		n := name
+		reg.Register(&testHandler{name: n, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			switch node.ID {
+			case "flaky":
+				// Transient-style failure: routes through the retry machinery.
+				return Outcome{Status: string(OutcomeRetry), Stats: heavyStats}, nil
+			case "recovery":
+				mu.Lock()
+				recoveryRan = true
+				mu.Unlock()
+				return Outcome{Status: string(OutcomeSuccess), Stats: heavyStats}, nil
+			default:
+				return Outcome{Status: string(OutcomeSuccess)}, nil
+			}
+		}})
+	}
+
+	// Attempt 1 lands at 300 tokens (under 450, retry proceeds); the final
+	// attempt lands at 600 — breached by the time exhaustion routes away.
+	guard := NewBudgetGuard(BudgetLimits{MaxTotalTokens: 450})
+	engine := NewEngine(g, reg, WithBudgetGuard(guard))
+
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine.Run returned unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Status != OutcomeBudgetExceeded {
+		t.Errorf("result.Status = %q, want %q", result.Status, OutcomeBudgetExceeded)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if recoveryRan {
+		t.Error("fallback target executed after budget breach — budget must be checked at the fallback transition")
+	}
+}

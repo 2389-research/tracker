@@ -877,8 +877,13 @@ workflow BuildProduct
       ATTEMPT_FILE=".ai/milestones/fix_attempts"
       ATTEMPTS=0
       if [ -f "$ATTEMPT_FILE" ]; then
-        ATTEMPTS=$(cat "$ATTEMPT_FILE")
+        ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
       fi
+      # Reset a corrupted/non-numeric counter so the arithmetic below can't
+      # error under `set -e` (same guard as the warm-continue counter above).
+      case "$ATTEMPTS" in
+        ''|*[!0-9]*) ATTEMPTS=0 ;;
+      esac
       ATTEMPTS=$((ATTEMPTS + 1))
       echo "$ATTEMPTS" > "$ATTEMPT_FILE"
 
@@ -896,7 +901,7 @@ workflow BuildProduct
       # Build the skip pattern from known_failures, stripping comments and blanks.
       SKIP_PATTERN=""
       if [ -f .ai/milestones/known_failures ]; then
-        SKIP_PATTERN=$(grep -v '^#' .ai/milestones/known_failures | grep -v '^$' | paste -sd'|')
+        SKIP_PATTERN=$(grep -v '^#' .ai/milestones/known_failures | grep -v '^$' | paste -sd'|' -)
       fi
 
       # Run EVERY detected stack, not just the first match (issue #305) — a

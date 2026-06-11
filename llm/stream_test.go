@@ -169,3 +169,29 @@ func TestStreamAccumulatorPreservesToolCallThoughtSignature(t *testing.T) {
 		t.Fatalf("ThoughtSigData = %q, want %q", calls[0].ThoughtSigData, "sig-123")
 	}
 }
+
+func TestStreamAccumulatorInterleavedToolCalls(t *testing.T) {
+	acc := NewStreamAccumulator()
+
+	// Chat Completions-style providers start the next tool call before the
+	// prior one's End event arrives, then emit all Ends at [DONE].
+	acc.Process(StreamEvent{Type: EventStreamStart})
+	acc.Process(StreamEvent{Type: EventToolCallStart, ToolCall: &ToolCallData{ID: "call_a", Name: "alpha"}})
+	acc.Process(StreamEvent{Type: EventToolCallDelta, Delta: `{"a":1}`})
+	acc.Process(StreamEvent{Type: EventToolCallStart, ToolCall: &ToolCallData{ID: "call_b", Name: "beta"}})
+	acc.Process(StreamEvent{Type: EventToolCallDelta, Delta: `{"b":2}`})
+	acc.Process(StreamEvent{Type: EventToolCallEnd})
+	acc.Process(StreamEvent{Type: EventToolCallEnd})
+	acc.Process(StreamEvent{Type: EventFinish, FinishReason: &FinishReason{Reason: "tool_use"}})
+
+	calls := acc.Response().ToolCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %d: %+v", len(calls), calls)
+	}
+	if calls[0].ID != "call_a" || string(calls[0].Arguments) != `{"a":1}` {
+		t.Errorf("first call corrupted: %+v", calls[0])
+	}
+	if calls[1].ID != "call_b" || string(calls[1].Arguments) != `{"b":2}` {
+		t.Errorf("second call corrupted: %+v", calls[1])
+	}
+}

@@ -65,6 +65,25 @@ func mustNewSession(t *testing.T, client Completer, cfg SessionConfig, opts ...S
 	return sess
 }
 
+func TestSessionEmptyResponseErrorCountsAllEmpties(t *testing.T) {
+	// Initial empty + 2 retries = 3 consecutive empty responses before the
+	// session gives up; the error message must report what actually happened.
+	empty := &llm.Response{
+		Message:      llm.Message{Role: llm.RoleAssistant},
+		FinishReason: llm.FinishReason{Reason: "stop"},
+	}
+	client := &mockCompleter{responses: []*llm.Response{empty, empty, empty}}
+
+	sess := mustNewSession(t, client, DefaultConfig())
+	_, err := sess.Run(context.Background(), "do something")
+	if err == nil {
+		t.Fatal("expected error after consecutive empty responses")
+	}
+	if !strings.Contains(err.Error(), "3 consecutive empty API responses") {
+		t.Errorf("error should count all 3 empties, got: %v", err)
+	}
+}
+
 func TestSessionTextOnlyResponse(t *testing.T) {
 	client := &mockCompleter{
 		responses: []*llm.Response{

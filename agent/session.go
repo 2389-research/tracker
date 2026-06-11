@@ -317,7 +317,9 @@ func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Tim
 			))
 			return false, false, nil // continue loop
 		}
-		emptyErr := fmt.Errorf("agent session failed: %d consecutive empty API responses", maxEmptyResponseRetries)
+		// maxEmptyResponseRetries counts the retries; the total number of
+		// consecutive empty responses observed is one more than that.
+		emptyErr := fmt.Errorf("agent session failed: %d consecutive empty API responses", maxEmptyResponseRetries+1)
 		result.Error = emptyErr
 		result.Duration = time.Since(start)
 		s.emit(Event{Type: EventError, SessionID: s.id, Err: emptyErr})

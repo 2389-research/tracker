@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -42,12 +43,47 @@ func ExpandGraphVariables(text string, vars map[string]string) string {
 	if text == "" || len(vars) == 0 || !strings.Contains(text, "$") {
 		return text
 	}
-	for varName, val := range vars {
-		if strings.Contains(text, varName) {
-			text = strings.ReplaceAll(text, varName, val)
+	// Try longest names first at each position so $target never clobbers
+	// $target_name — map iteration order is random, which made prefix
+	// collisions flaky.
+	names := make([]string, 0, len(vars))
+	for varName := range vars {
+		names = append(names, varName)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if len(names[i]) != len(names[j]) {
+			return len(names[i]) > len(names[j])
+		}
+		return names[i] < names[j]
+	})
+	// Single left-to-right pass: substituted values are appended to the
+	// output and never re-scanned, so a value containing a $name literal
+	// can't be expanded a second time (CLAUDE.md: variable expansion is
+	// single-pass — never re-scan resolved values). The previous
+	// sequential ReplaceAll loop re-scanned earlier substitutions.
+	var b strings.Builder
+	b.Grow(len(text))
+	for i := 0; i < len(text); {
+		if text[i] != '$' {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+		matched := false
+		for _, varName := range names {
+			if strings.HasPrefix(text[i:], varName) {
+				b.WriteString(vars[varName])
+				i += len(varName)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			b.WriteByte(text[i])
+			i++
 		}
 	}
-	return text
+	return b.String()
 }
 
 // contextKeysForInjection lists the pipeline context keys whose values should

@@ -1027,24 +1027,12 @@ func buildRunResultJSON(result *pipeline.EngineResult) map[string]any {
 
 // handleListHandlers writes the names of all registered pipeline handler types.
 func handleListHandlers(stdout, stderr io.Writer) int {
-	// Create a minimal graph to build the default registry.
-	g := pipeline.NewGraph("list-handlers")
-	registry := handlers.NewDefaultRegistry(g)
-
 	// List all handler names that the registry knows about.
 	// Use the shapeHandlerMap as the source of truth for handler names.
 	handlerNames := []string{
 		"start", "exit", "codergen", "conditional",
 		"parallel", "parallel.fan_in", "tool", "wait.human", "subgraph",
 		"stack.manager_loop",
-	}
-
-	// Filter to only those actually registered (some may not be if deps missing).
-	var available []string
-	for _, name := range handlerNames {
-		if registry.Has(name) {
-			available = append(available, name)
-		}
 	}
 
 	// Always include the full list to show what the engine supports.

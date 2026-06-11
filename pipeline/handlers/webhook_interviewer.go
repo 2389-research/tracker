@@ -253,7 +253,18 @@ func (w *WebhookInterviewer) postWebhook(payload WebhookGatePayload) error {
 		return fmt.Errorf("marshal webhook payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, w.WebhookURL, bytes.NewReader(body))
+	// Tie the POST to gate cancellation so Cancel() aborts an in-flight
+	// request instead of letting it run to the client timeout.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-w.canceled:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.WebhookURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create webhook request: %w", err)
 	}

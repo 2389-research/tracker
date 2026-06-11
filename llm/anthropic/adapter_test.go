@@ -1292,3 +1292,67 @@ func TestAdapterStreamRedactedThinking(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+func TestAdapterStreamErrorEvent(t *testing.T) {
+	cases := []struct {
+		name      string
+		errType   string
+		errMsg    string
+		wantInMsg string
+		check     func(error) bool
+	}{
+		{
+			name:      "overloaded maps to server error",
+			errType:   "overloaded_error",
+			errMsg:    "Overloaded",
+			wantInMsg: "Overloaded",
+			check:     func(err error) bool { var e *llm.ServerError; return errors.As(err, &e) },
+		},
+		{
+			name:      "rate limit maps to rate limit error",
+			errType:   "rate_limit_error",
+			errMsg:    "Number of requests has exceeded your rate limit",
+			wantInMsg: "rate limit",
+			check:     func(err error) bool { var e *llm.RateLimitError; return errors.As(err, &e) },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				events := []string{
+					`event: message_start` + "\n" + `data: {"type":"message_start","message":{"id":"msg_err","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":5,"output_tokens":0}}}`,
+					`event: error` + "\n" + fmt.Sprintf(`data: {"type":"error","error":{"type":%q,"message":%q}}`, tc.errType, tc.errMsg),
+				}
+				for _, evt := range events {
+					fmt.Fprintf(w, "%s\n\n", evt)
+				}
+			}))
+			defer server.Close()
+
+			a := New("test-key", WithBaseURL(server.URL))
+			ch := a.Stream(context.Background(), &llm.Request{
+				Model:    "claude-opus-4-6",
+				Messages: []llm.Message{llm.UserMessage("Hi")},
+			})
+
+			var streamErr error
+			for evt := range ch {
+				if evt.Type == llm.EventError && streamErr == nil {
+					streamErr = evt.Err
+				}
+			}
+
+			if streamErr == nil {
+				t.Fatal("expected EventError for SSE error event, got none")
+			}
+			if !strings.Contains(streamErr.Error(), tc.wantInMsg) {
+				t.Errorf("error %q should contain %q", streamErr.Error(), tc.wantInMsg)
+			}
+			if !tc.check(streamErr) {
+				t.Errorf("error has wrong type: %T (%v)", streamErr, streamErr)
+			}
+		})
+	}
+}

@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fresh-eyes review fixes across stream-error surfacing, pipeline core, CLI,
+  handlers, TUI, and examples** (full-project subagent review, each finding
+  individually verified; plan at
+  `docs/superpowers/plans/2026-06-10-fresh-eyes-review-fixes.md`).
+  - LLM stream errors no longer silently swallowed: the Anthropic SSE adapter
+    handles mid-stream `error` events (`overloaded_error`, `rate_limit_error`);
+    the Gemini adapter parses `{"error":...}` chunks (previously unmarshaled
+    into an empty struct and vanished); the OpenAI adapter emits an error even
+    when the SSE error payload is unparseable; the openai-compat adapter fires
+    on error chunks carrying only `code`/`type` without `message`; interleaved
+    tool-call starts (Start(0), Start(1), End(0)) no longer drop the first
+    call's arguments.
+  - Pipeline core: `ExpandGraphVariables` replaces longest names first so
+    `$target` can no longer clobber `$target_name` (map-iteration-order flake);
+    `InjectParamsIntoGraph` clones keep `DippinValidated` and build adjacency
+    via `AddEdge` (edge-index lookups on param-injected graphs were empty);
+    retry-exhaustion fallback routing now runs the same cost-emit + budget
+    check as the in-budget retry path.
+  - CLI/library: the library API treats `.dipx` as an explicit path in bare-name
+    resolution (the CLI already did); `tracker update` uses unique
+    `os.CreateTemp` names for both the write-permission probe and the staged
+    binary (fixed names could truncate real files or race concurrent updates);
+    the post-run update hint no longer delays error output after a failed run;
+    doctor provider probes use the strict gateway resolver so doctor reports
+    the same `ErrGatewayRouteRefused` a run would hard-fail on.
+  - Handlers/agent/TUI: ACP `initSession` failures reap the killed subprocess
+    (zombie + leaked pipe fds); webhook gate `Cancel()` aborts the in-flight
+    POST instead of letting it run to the client timeout; choice-mode human
+    gates error cleanly instead of panicking when constructed without a graph;
+    the empty-API-response session error reports the true count of consecutive
+    empties (N+1, matching observed responses); agent-log search highlighting
+    no longer panics or garbles output when lowercasing changes a rune's UTF-8
+    byte width (e.g. Ⱥ→ⱥ) — match offsets in the lowered string now map back
+    to the original.
+  - Aux binaries/examples: the SWE-bench agent-runner classifies context
+    deadline/cancel as `timeout` instead of `tool_error`; dead handler-name
+    filter loop removed from conformance `list-handlers`;
+    `ask_and_execute.dip` hardens two printfs against format injection
+    (`%b`/`%s`) and drops FinalVerify's `retry_target` into worktrees that
+    ApplyWinner already tore down (exhaustion now escalates to the human
+    gate); `build_product.dip` guards the `TestMilestone` `fix_attempts` read
+    against non-numeric content (same idiom as the warm-continue counter) and
+    adds the missing stdin operand to the SKIP_PATTERN `paste` (BSD/macOS
+    paste requires it — #345 regression).
+  - Test hygiene: claude-code backend env tests use `t.Setenv` (a leaked
+    `PATH=/usr/bin` broke every later subprocess-spawning test in the package
+    on macOS); `agent/exec` jail-hook tests no longer hardcode `/bin/true`
+    (absent on macOS).
+
 - **`build_product.dip` runs ALL detected build stacks in `TestMilestone` and
   `FinalBuild`** (closes #305). Both nodes previously detected the build
   system with a first-match `if go.mod / elif package.json / elif

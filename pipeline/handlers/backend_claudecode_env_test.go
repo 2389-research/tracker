@@ -58,17 +58,11 @@ func TestClassifyErrorUnknown(t *testing.T) {
 }
 
 func TestBuildEnvStripsAPIKeys(t *testing.T) {
-	// Set test API keys.
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	os.Setenv("OPENAI_API_KEY", "sk-test")
-	os.Setenv("GEMINI_API_KEY", "gem-test")
-	os.Setenv("GOOGLE_API_KEY", "goog-test")
-	defer func() {
-		os.Unsetenv("ANTHROPIC_API_KEY")
-		os.Unsetenv("OPENAI_API_KEY")
-		os.Unsetenv("GEMINI_API_KEY")
-		os.Unsetenv("GOOGLE_API_KEY")
-	}()
+	// Set test API keys. t.Setenv restores the prior values on cleanup.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("GEMINI_API_KEY", "gem-test")
+	t.Setenv("GOOGLE_API_KEY", "goog-test")
 
 	env := buildEnv()
 
@@ -82,10 +76,11 @@ func TestBuildEnvStripsAPIKeys(t *testing.T) {
 }
 
 func TestBuildEnvPreservesNonAPIKeys(t *testing.T) {
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	os.Setenv("HOME", "/test/home")
-	os.Setenv("PATH", "/usr/bin")
-	defer os.Unsetenv("ANTHROPIC_API_KEY")
+	// t.Setenv (not os.Setenv) — a leaked PATH=/usr/bin breaks every later
+	// test in the package that spawns a subprocess (sh lives in /bin on macOS).
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("HOME", "/test/home")
+	t.Setenv("PATH", "/usr/bin")
 
 	env := buildEnv()
 
@@ -108,12 +103,8 @@ func TestBuildEnvPreservesNonAPIKeys(t *testing.T) {
 }
 
 func TestBuildEnvPassthroughWithOverride(t *testing.T) {
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	os.Setenv("TRACKER_PASS_API_KEYS", "1")
-	defer func() {
-		os.Unsetenv("ANTHROPIC_API_KEY")
-		os.Unsetenv("TRACKER_PASS_API_KEYS")
-	}()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("TRACKER_PASS_API_KEYS", "1")
 
 	env := buildEnv()
 
@@ -155,12 +146,12 @@ func TestBuildEnv_PassAPIKeysFalseDoesNotPassthrough(t *testing.T) {
 }
 
 func TestBuildEnvNoKeysNoop(t *testing.T) {
-	// Ensure no API keys are set.
-	os.Unsetenv("ANTHROPIC_API_KEY")
-	os.Unsetenv("OPENAI_API_KEY")
-	os.Unsetenv("GEMINI_API_KEY")
-	os.Unsetenv("GOOGLE_API_KEY")
-	os.Unsetenv("TRACKER_PASS_API_KEYS")
+	// Ensure no API keys are set. t.Setenv first so cleanup restores the
+	// caller's real values after the unset.
+	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "TRACKER_PASS_API_KEYS"} {
+		t.Setenv(k, os.Getenv(k))
+		os.Unsetenv(k)
+	}
 
 	env := buildEnv()
 	if len(env) == 0 {

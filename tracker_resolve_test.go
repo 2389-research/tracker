@@ -187,6 +187,19 @@ func TestResolveCheckpoint_NotFound(t *testing.T) {
 	}
 }
 
+func TestResolveSource_DipxExplicitPath(t *testing.T) {
+	// A name ending in .dipx must be treated as an explicit file path
+	// (matching the CLI resolver in cmd/tracker/resolve.go), not fall
+	// through to bare-name built-in lookup.
+	_, _, err := ResolveSource("missing-bundle.dipx", "")
+	if err == nil {
+		t.Fatal("expected error for non-existent .dipx path")
+	}
+	if strings.Contains(err.Error(), "Available built-in workflows") {
+		t.Errorf(".dipx name was treated as a bare name; expected file-not-found error, got: %v", err)
+	}
+}
+
 func TestResolveCheckpoint_CheckpointFileMissing(t *testing.T) {
 	tmp := t.TempDir()
 	runDir := filepath.Join(tmp, ".tracker", "runs", "halfrun")

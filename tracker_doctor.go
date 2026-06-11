@@ -229,6 +229,18 @@ var gatewayBaseURLEnvVars = []struct {
 	{"gemini", "GEMINI_BASE_URL"},
 }
 
+// providerBaseURLEnvVar returns the canonical *_BASE_URL env var name for a
+// provider label via gatewayBaseURLEnvVars — naive ToUpper(name) renders
+// invalid names for dashed labels (OPENAI-COMPAT_BASE_URL).
+func providerBaseURLEnvVar(name string) string {
+	for _, e := range gatewayBaseURLEnvVars {
+		if e.provider == name {
+			return e.envVar
+		}
+	}
+	return strings.ReplaceAll(strings.ToUpper(name), "-", "_") + "_BASE_URL"
+}
+
 // checkGatewayRouting surfaces non-fatal gateway routing caveats (#277). It
 // runs only when TRACKER_GATEWAY_URL or TRACKER_GATEWAY_KIND is set (see
 // Doctor) and emits informational notes — never warnings or errors, since
@@ -333,8 +345,14 @@ var knownProviders = []providerDef{
 		envVars:      []string{"ANTHROPIC_API_KEY"},
 		defaultModel: "claude-haiku-4-5",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			// Strict resolver so doctor reports the same gateway-route
+			// refusal that `tracker run` would hard-fail on.
+			base, err := ResolveProviderBaseURLStrict("anthropic")
+			if err != nil {
+				return nil, err
+			}
 			var opts []anthropic.Option
-			if base := ResolveProviderBaseURL("anthropic"); base != "" {
+			if base != "" {
 				opts = append(opts, anthropic.WithBaseURL(base))
 			}
 			return anthropic.New(key, opts...), nil
@@ -345,8 +363,12 @@ var knownProviders = []providerDef{
 		envVars:      []string{"OPENAI_API_KEY"},
 		defaultModel: "gpt-4o-mini",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			base, err := ResolveProviderBaseURLStrict("openai")
+			if err != nil {
+				return nil, err
+			}
 			var opts []openai.Option
-			if base := ResolveProviderBaseURL("openai"); base != "" {
+			if base != "" {
 				opts = append(opts, openai.WithBaseURL(base))
 			}
 			return openai.New(key, opts...), nil
@@ -357,8 +379,12 @@ var knownProviders = []providerDef{
 		envVars:      []string{"OPENAI_COMPAT_API_KEY"},
 		defaultModel: "gpt-4o-mini",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			base, err := ResolveProviderBaseURLStrict("openai-compat")
+			if err != nil {
+				return nil, err
+			}
 			var opts []openaicompat.Option
-			if base := ResolveProviderBaseURL("openai-compat"); base != "" {
+			if base != "" {
 				opts = append(opts, openaicompat.WithBaseURL(base))
 			}
 			return openaicompat.New(key, opts...), nil
@@ -369,8 +395,12 @@ var knownProviders = []providerDef{
 		envVars:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 		defaultModel: "gemini-2.0-flash",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			base, err := ResolveProviderBaseURLStrict("gemini")
+			if err != nil {
+				return nil, err
+			}
 			var opts []google.Option
-			if base := ResolveProviderBaseURL("gemini"); base != "" {
+			if base != "" {
 				opts = append(opts, google.WithBaseURL(base))
 			}
 			return google.New(key, opts...), nil
@@ -415,7 +445,7 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 					// DNS, timeout, transport, context cancel, or other non-auth failure.
 					// Do NOT tell the user to rotate a working key.
 					detail.Message = fmt.Sprintf("%-15s %s=%s (probe failed: %s)", p.name, envName, masked, probeMsg)
-					detail.Hint = fmt.Sprintf("probe for %s failed on network/transport — verify connectivity and %s_BASE_URL before rotating keys", p.name, strings.ToUpper(p.name))
+					detail.Hint = fmt.Sprintf("probe for %s failed on network/transport — verify connectivity and %s before rotating keys", p.name, providerBaseURLEnvVar(p.name))
 				}
 				out.Details = append(out.Details, detail)
 				hasProviderErrors = true

@@ -760,3 +760,41 @@ func TestNew_BaseURLNormalization(t *testing.T) {
 		}
 	}
 }
+
+func TestStream_SSEInStreamErrorWithoutMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		lines := []string{
+			`data: {"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	})
+
+	var streamErr error
+	for evt := range ch {
+		if evt.Type == llm.EventError && streamErr == nil {
+			streamErr = evt.Err
+		}
+	}
+
+	if streamErr == nil {
+		t.Fatal("expected EventError for message-less in-stream error, got none")
+	}
+	if !strings.Contains(streamErr.Error(), "rate_limit") {
+		t.Errorf("error %q should reference the error code/type", streamErr.Error())
+	}
+}

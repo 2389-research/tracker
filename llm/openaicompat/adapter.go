@@ -265,14 +265,24 @@ func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
 // Returns true if an error was found and emitted.
 func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 	var errChunk chatStreamError
-	if err := json.Unmarshal([]byte(data), &errChunk); err == nil && errChunk.Error.Message != "" {
-		ch <- llm.StreamEvent{
-			Type: llm.EventError,
-			Err:  sseErrorToTyped(errChunk.Error.Code, errChunk.Error.Message),
-		}
-		return true
+	if err := json.Unmarshal([]byte(data), &errChunk); err != nil {
+		return false
 	}
-	return false
+	e := errChunk.Error
+	if e.Message == "" && e.Type == "" && e.Code == "" {
+		return false
+	}
+	msg := e.Message
+	if msg == "" {
+		// Some providers omit the message; synthesize one from code/type so
+		// the error is not silently dropped as a normal chunk.
+		msg = fmt.Sprintf("stream error (code=%q, type=%q)", e.Code, e.Type)
+	}
+	ch <- llm.StreamEvent{
+		Type: llm.EventError,
+		Err:  sseErrorToTyped(e.Code, msg),
+	}
+	return true
 }
 
 // handleSSEChoice processes a chunk that contains choices (text or tool call deltas).

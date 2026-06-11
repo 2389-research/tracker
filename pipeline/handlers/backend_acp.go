@@ -275,6 +275,7 @@ func (b *ACPBackend) initSession(ctx context.Context, conn *acp.ClientSideConnec
 	})
 	if initErr != nil {
 		killProcess(proc.cmd)
+		_ = proc.cmd.Wait() // reap the killed process; releases pipes and avoids a zombie
 		logStderr(agentName, "initialize", &proc.stderr)
 		return "", fmt.Errorf("acp: initialize failed for %s: %w", agentName, initErr)
 	}
@@ -293,6 +294,7 @@ func (b *ACPBackend) initSession(ctx context.Context, conn *acp.ClientSideConnec
 	})
 	if sessErr != nil {
 		killProcess(proc.cmd)
+		_ = proc.cmd.Wait() // reap the killed process; releases pipes and avoids a zombie
 		logStderr(agentName, "new session", &proc.stderr)
 		return "", fmt.Errorf("acp: new session failed for %s: %w", agentName, sessErr)
 	}

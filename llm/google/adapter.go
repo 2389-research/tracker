@@ -239,6 +239,21 @@ func (a *Adapter) processSSELine(data []byte, ch chan<- llm.StreamEvent, state *
 		return true
 	}
 
+	if chunk.Error != nil {
+		// The API reports errors inside HTTP-200 streams; surface them as
+		// typed errors instead of silently dropping the chunk.
+		state.flushPendingFinish(ch)
+		msg := chunk.Error.Message
+		if msg == "" {
+			msg = "unknown stream error"
+		}
+		if chunk.Error.Status != "" {
+			msg = fmt.Sprintf("%s (%s)", msg, chunk.Error.Status)
+		}
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(chunk.Error.Code, "google: "+msg, "gemini")}
+		return true
+	}
+
 	if state.first {
 		ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: data}
 		state.first = false

@@ -912,6 +912,9 @@ func normalizeInterviewQuestionKey(text string) string {
 
 // executeChoice handles choice mode: presents outgoing edge labels as options.
 func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
+	if h.graph == nil {
+		return pipeline.Outcome{}, fmt.Errorf("human gate node %q: choice mode requires graph edges but handler has no graph", node.ID)
+	}
 	edges := h.graph.OutgoingEdges(node.ID)
 	if len(edges) == 0 {
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has no outgoing edges to derive choices from", node.ID)

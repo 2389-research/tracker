@@ -289,14 +289,20 @@ func atomicSwap(exe, tmpBin, tagName string) error {
 
 // checkWritePermission verifies the process can write to the directory.
 func checkWritePermission(dir string) error {
-	tmp := filepath.Join(dir, ".tracker-update-test")
-	f, err := os.Create(tmp)
+	// CreateTemp (not a fixed name) so the probe can never truncate a real
+	// file or race a concurrent update's probe.
+	f, err := os.CreateTemp(dir, ".tracker-update-test-*")
 	if err != nil {
 		return err
 	}
-	f.Close()
+	tmp := f.Name()
+	closeErr := f.Close()
+	// Remove stays best-effort: the probe file is empty, and failing an
+	// update over leftover-cleanup would be a false negative.
 	os.Remove(tmp)
-	return nil
+	// A Close error means writes to this directory may not be durable —
+	// report it as a write-permission failure rather than masking it.
+	return closeErr
 }
 
 // downloadToTemp downloads a URL to a temp file in the given directory.
@@ -437,18 +443,27 @@ func findAndExtractBinary(tr *tar.Reader, destDir string) (string, error) {
 	return "", fmt.Errorf("tracker binary not found in archive")
 }
 
-// writeBinaryEntry writes the current tar entry to destDir/.tracker-new.
+// writeBinaryEntry writes the current tar entry to a unique temp file in
+// destDir (the caller chmods and atomically swaps the returned path).
 func writeBinaryEntry(tr *tar.Reader, destDir string) (string, error) {
-	tmpBin := filepath.Join(destDir, ".tracker-new")
-	out, err := os.Create(tmpBin)
+	// Unique name per extraction — a fixed name lets two concurrent updates
+	// interleave writes into the same file and swap in a corrupt binary.
+	out, err := os.CreateTemp(destDir, ".tracker-new-*")
 	if err != nil {
 		return "", err
 	}
+	tmpBin := out.Name()
 	n, err := io.Copy(out, io.LimitReader(tr, maxBinarySize+1))
-	out.Close()
+	closeErr := out.Close()
 	if err != nil {
 		os.Remove(tmpBin)
 		return "", err
+	}
+	// Some filesystems only report a write error on Close — accepting the
+	// binary past a failed Close could swap in a truncated executable.
+	if closeErr != nil {
+		os.Remove(tmpBin)
+		return "", closeErr
 	}
 	if n > maxBinarySize {
 		os.Remove(tmpBin)

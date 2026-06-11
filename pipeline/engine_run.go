@@ -823,6 +823,10 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
+		e.emitCostUpdate(s)
+		if lr := e.checkBudgetAfterEmit(s); lr != nil {
+			return "", false, lr.result, nil
+		}
 		e.clearDownstream(fallback, s.cp)
 		s.cp.CurrentNode = fallback
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)

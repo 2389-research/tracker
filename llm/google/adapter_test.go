@@ -873,3 +873,43 @@ func TestThoughtSignatureRoundTrip(t *testing.T) {
 		t.Errorf("expected 'ABCD1234sig', got %v", sig)
 	}
 }
+
+func TestAdapterStreamErrorChunk(t *testing.T) {
+	sseData := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]},"index":0}]}`,
+		"",
+		`data: {"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gemini-2.5-pro",
+		Messages: []llm.Message{llm.UserMessage("Say ok")},
+	})
+
+	var streamErr error
+	for evt := range ch {
+		if evt.Type == llm.EventError && streamErr == nil {
+			streamErr = evt.Err
+		}
+	}
+
+	if streamErr == nil {
+		t.Fatal("expected EventError for in-stream error chunk, got none")
+	}
+	if !strings.Contains(streamErr.Error(), "Resource has been exhausted") {
+		t.Errorf("error %q should contain the API message", streamErr.Error())
+	}
+	var rl *llm.RateLimitError
+	if !errors.As(streamErr, &rl) {
+		t.Errorf("expected *llm.RateLimitError, got %T (%v)", streamErr, streamErr)
+	}
+}
