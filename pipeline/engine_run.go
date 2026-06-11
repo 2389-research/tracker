@@ -692,15 +692,19 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 
 	s.pctx.Merge(outcome.ContextUpdates)
 
+	// #348 defect 1: a goal gate that executes has, by definition,
+	// re-evaluated — clear any pending recheck regardless of outcome,
+	// INCLUDING an empty/unknown status (a fresh fail re-arms via the
+	// normal exit-time gate check). This must not be gated on
+	// outcome.Status != "": pending re-entries are budget-free, so a
+	// still-pending flag after an empty-status execution would re-enter
+	// the gate without ever charging retry budget.
+	if isGoalGate(e.nodeOrDefault(currentNodeID)) {
+		s.cp.ClearGateRecheckPending(currentNodeID)
+	}
 	if outcome.Status != "" {
 		s.pctx.Set(ContextKeyOutcome, outcome.Status)
 		s.nodeOutcomes[currentNodeID] = outcome.Status
-		// #348 defect 1: a goal gate that executes has, by definition,
-		// re-evaluated — clear any pending recheck regardless of outcome
-		// (a fresh fail re-arms via the normal exit-time gate check).
-		if isGoalGate(e.nodeOrDefault(currentNodeID)) {
-			s.cp.ClearGateRecheckPending(currentNodeID)
-		}
 	}
 	if outcome.PreferredLabel != "" {
 		s.pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)

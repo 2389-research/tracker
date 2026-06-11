@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at `outcome: fail`** (case-study run b68b532619c3: FinalSpecCheck never
   re-ran after FinalCommit's remediation). The engine now records a
   persisted `gate_recheck_pending` marker when a goal-gate redirect fires,
-  cleared only when the gate node actually re-executes. Pending gates stay
+  cleared only when the gate node actually re-executes (on any execution,
+  even one reporting an empty status — uncharged re-entries must never
+  loop). Pending gates stay
   visible to the exit check even when cleared from the completed set, and
   a still-pending gate re-enters **at the gate itself** so it re-evaluates
   the current (possibly remediated) tree. The re-entry completes the
