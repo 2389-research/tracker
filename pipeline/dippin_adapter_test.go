@@ -387,6 +387,68 @@ func TestFromDippinIR_ParallelConfig(t *testing.T) {
 	}
 }
 
+// TestFromDippinIR_ParallelFanInParams verifies that generic Params on
+// parallel and fan_in IR nodes (dippin-lang v0.39.0) are forwarded into node
+// attrs, with typed fields taking precedence over Params keys (#313).
+func TestFromDippinIR_ParallelFanInParams(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "ParallelParamsTest",
+		Start: "start",
+		Exit:  "exit",
+		Nodes: []*ir.Node{
+			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "parallel",
+				Kind: ir.NodeParallel,
+				Config: ir.ParallelConfig{
+					Targets: []string{"task1", "task2"},
+					Params: map[string]string{
+						"fan_in_policy":    "all",
+						"parallel_targets": "evil_override", // typed field must win
+					},
+				},
+			},
+			{ID: "task1", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "task2", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{
+				ID:   "join",
+				Kind: ir.NodeFanIn,
+				Config: ir.FanInConfig{
+					Sources: []string{"task1", "task2"},
+					Params: map[string]string{
+						"fan_in_policy": "quorum",
+						"quorum":        "2",
+					},
+				},
+			},
+			{ID: "exit", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{
+			{From: "start", To: "parallel"},
+			{From: "join", To: "exit"},
+		},
+	}
+
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR failed: %v", err)
+	}
+
+	par := graph.Nodes["parallel"]
+	if par.Attrs["fan_in_policy"] != "all" {
+		t.Errorf("parallel fan_in_policy = %q, want all", par.Attrs["fan_in_policy"])
+	}
+	if par.Attrs["parallel_targets"] != "task1,task2" {
+		t.Errorf("typed Targets must win over Params, got %q", par.Attrs["parallel_targets"])
+	}
+
+	join := graph.Nodes["join"]
+	if join.Attrs["fan_in_policy"] != "quorum" || join.Attrs["quorum"] != "2" {
+		t.Errorf("fan_in params not forwarded: policy=%q quorum=%q",
+			join.Attrs["fan_in_policy"], join.Attrs["quorum"])
+	}
+}
+
 // TestFromDippinIR_FanInConfig verifies FanInConfig extraction.
 func TestFromDippinIR_FanInConfig(t *testing.T) {
 	workflow := &ir.Workflow{

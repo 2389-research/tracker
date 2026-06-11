@@ -275,6 +275,29 @@ func TestHumanConfig_TimeoutParsing(t *testing.T) {
 	}
 }
 
+// fan_in_policy / quorum attrs parse into the typed config (#313). The
+// accessor is lenient (bad quorum stays 0); the handlers validate strictly.
+func TestParallelConfig_FanInPolicy(t *testing.T) {
+	n := &Node{Attrs: map[string]string{
+		"fan_in_policy": "quorum",
+		"quorum":        "2",
+	}}
+	cfg := n.ParallelConfig()
+	if cfg.FanInPolicy != "quorum" || cfg.Quorum != 2 {
+		t.Errorf("fan-in policy mismatch: %+v", cfg)
+	}
+
+	def := (&Node{Attrs: map[string]string{}}).ParallelConfig()
+	if def.FanInPolicy != "" || def.Quorum != 0 {
+		t.Errorf("unset policy should be zero-valued, got %+v", def)
+	}
+
+	bad := (&Node{Attrs: map[string]string{"quorum": "-1"}}).ParallelConfig()
+	if bad.Quorum != 0 {
+		t.Errorf("non-positive quorum should stay 0, got %d", bad.Quorum)
+	}
+}
+
 func TestParallelConfig_StraightThrough(t *testing.T) {
 	n := &Node{Attrs: map[string]string{
 		"parallel_targets": "A,B,C",

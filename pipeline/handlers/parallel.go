@@ -44,12 +44,22 @@ func NewParallelHandler(graph *pipeline.Graph, registry *pipeline.HandlerRegistr
 // Name returns the handler name used for registry lookup.
 func (h *ParallelHandler) Name() string { return "parallel" }
 
-// Execute fans out to all outgoing edge targets concurrently, collects results,
-// and returns OutcomeSuccess if at least one branch succeeded, OutcomeFail if all failed.
+// Execute fans out to all outgoing edge targets concurrently, collects
+// results, and aggregates them per the node's fan_in_policy (#313): the
+// default "any" returns OutcomeSuccess if at least one branch succeeded,
+// "all" requires every branch, and "quorum" requires at least `quorum`
+// successful branches.
 // If the parallel node has branch.N.* attributes, those override the target node's
 // attrs (e.g., llm_model, llm_provider, fidelity) for that specific branch.
 func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	edges, err := h.resolveBranchEdges(node)
+	if err != nil {
+		return pipeline.Outcome{}, err
+	}
+
+	// Validate the aggregation policy before dispatching any branch — a
+	// misconfigured policy must fail fast, not after burning branch work.
+	policy, err := resolveFanInPolicy(node.ID, node.ParallelConfig())
 	if err != nil {
 		return pipeline.Outcome{}, err
 	}
@@ -75,13 +85,19 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	}
 	pctx.Set("parallel.results", string(resultsJSON))
 
-	status := aggregateStatus(collected)
+	status, policyDetail := aggregateStatus(collected, policy)
 
+	msg := fmt.Sprintf("fan-in complete, aggregate status: %s", status)
+	if policy.name != "any" {
+		// Surface the policy evaluation (incl. failed branch IDs) so the TUI
+		// and `tracker diagnose` can explain a policy-caused failure (#313).
+		msg += " (" + policyDetail + ")"
+	}
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:      pipeline.EventParallelCompleted,
 		Timestamp: time.Now(),
 		NodeID:    node.ID,
-		Message:   fmt.Sprintf("fan-in complete, aggregate status: %s", status),
+		Message:   msg,
 	})
 
 	outcome := pipeline.Outcome{
@@ -89,8 +105,26 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		Stats:         aggregateBranchStats(collected),
 		ChildOverride: aggregateChildOverrides(branchOverridesOut),
 	}
-	if joinID := node.ParallelConfig().JoinID; joinID != "" {
-		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
+	// Suggest the join — EXCEPT when a non-default policy is unsatisfied.
+	// Leaving the suggestion in place would let edge selection fall through
+	// selectBySuggested to the join (bypassing strict-failure because
+	// conditional edges exist), and a default-any fan-in downstream would
+	// mask the very failure the policy surfaced (Codex review, PR #344).
+	// Under the default any policy the suggestion is kept even on all-fail —
+	// existing workflows route that failure at the fan-in node.
+	policyBlocked := policy.name != "any" && status != string(pipeline.OutcomeSuccess)
+	outcome.ContextUpdates = make(map[string]string)
+	if joinID := node.ParallelConfig().JoinID; joinID != "" && !policyBlocked {
+		outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes] = joinID
+	}
+	if policy.name != "any" {
+		// Record the policy evaluation in context here too — a policy failure
+		// suppresses the join suggestion, so the fan-in node (the other
+		// fan_in.policy_detail writer) may never run, and diagnose/audit would
+		// otherwise lose the structured breadcrumb (Copilot, PR #344). Written
+		// on success as well so a later pass can't leave a stale "failed"
+		// detail in context.
+		outcome.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail] = policyDetail
 	}
 	return outcome, nil
 }
@@ -320,14 +354,16 @@ func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult) {
 	}
 }
 
-// aggregateStatus returns success if at least one branch succeeded, fail otherwise.
-func aggregateStatus(results []ParallelResult) string {
-	for _, r := range results {
-		if r.Status == string(pipeline.OutcomeSuccess) {
-			return string(pipeline.OutcomeSuccess)
-		}
+// aggregateStatus evaluates the branch results against the fan-in policy
+// (default "any": success if at least one branch succeeded) and returns the
+// aggregate status plus a human-readable policy detail string.
+func aggregateStatus(results []ParallelResult, policy fanInPolicy) (string, string) {
+	successes, failed := tallyBranches(results)
+	status := string(pipeline.OutcomeFail)
+	if policy.satisfied(successes, len(results)) {
+		status = string(pipeline.OutcomeSuccess)
 	}
-	return string(pipeline.OutcomeFail)
+	return status, policy.detail(successes, len(results), failed)
 }
 
 // aggregateBranchStats sums SessionStats from all parallel branch results.

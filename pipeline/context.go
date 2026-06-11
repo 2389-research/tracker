@@ -44,6 +44,13 @@ const (
 	ContextKeyToolRoute          = "tool_route"
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 
+	// ContextKeyFanInPolicyDetail records the most recent fan-in policy
+	// evaluation (#313) — policy name, success tally, and failed branch IDs.
+	// Written by both the parallel and fan-in handlers for non-default
+	// (all/quorum) policies, on success and failure, so the audit trail and
+	// diagnose can explain policy-caused routing.
+	ContextKeyFanInPolicyDetail = "fan_in.policy_detail"
+
 	// ContextKeyResponsePrefix is prepended to a node ID to form a per-node
 	// response key (e.g. "response.mynode"). Downstream nodes can reference
 	// specific upstream outputs without relying on last_response being current.

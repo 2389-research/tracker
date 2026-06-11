@@ -27,8 +27,14 @@ func (h *FanInHandler) Name() string { return "parallel.fan_in" }
 // Execute reads "parallel.results" from the pipeline context, unmarshals the
 // branch results, merges context updates from all successful branches (in
 // order, so later branches overwrite earlier ones for the same key), and
-// returns OutcomeSuccess if any branch succeeded or OutcomeFail if all failed.
+// evaluates the node's fan-in policy (#313) — default "any": OutcomeSuccess
+// if any branch succeeded, OutcomeFail if all failed.
 func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	policy, err := resolveFanInPolicy(node.ID, node.ParallelConfig())
+	if err != nil {
+		return pipeline.Outcome{}, err
+	}
+
 	raw, ok := pctx.Get("parallel.results")
 	if !ok {
 		return pipeline.Outcome{}, fmt.Errorf("fan-in node %q: missing parallel.results in context", node.ID)
@@ -39,10 +45,20 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 		return pipeline.Outcome{}, fmt.Errorf("fan-in node %q: failed to unmarshal parallel.results: %w", node.ID, err)
 	}
 
-	merged, anySuccess := mergeSuccessfulBranches(results)
+	merged := mergeSuccessfulBranches(results)
+	successes, failed := tallyBranches(results)
 	status := pipeline.OutcomeFail
-	if anySuccess {
+	if policy.satisfied(successes, len(results)) {
 		status = pipeline.OutcomeSuccess
+	}
+	if policy.name != "any" {
+		// Record the policy evaluation in context so the audit trail /
+		// diagnose can explain the routing (#313). Written on success too —
+		// pipeline context persists across re-review loops, so a fail-only
+		// write would leave a stale "failed" detail after a later pass
+		// succeeds. Successful-branch context still merges above so
+		// downstream escalation gates can reference partial output.
+		merged[pipeline.ContextKeyFanInPolicyDetail] = policy.detail(successes, len(results), failed)
 	}
 
 	return pipeline.Outcome{
@@ -52,17 +68,14 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 }
 
 // mergeSuccessfulBranches collects context updates from successful branches.
-// Returns the merged map and whether any branch succeeded.
-func mergeSuccessfulBranches(results []ParallelResult) (map[string]string, bool) {
+func mergeSuccessfulBranches(results []ParallelResult) map[string]string {
 	merged := make(map[string]string)
-	anySuccess := false
 	for _, r := range results {
 		if r.Status == string(pipeline.OutcomeSuccess) {
-			anySuccess = true
 			for k, v := range r.ContextUpdates {
 				merged[k] = v
 			}
 		}
 	}
-	return merged, anySuccess
+	return merged
 }

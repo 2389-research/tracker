@@ -385,6 +385,11 @@ type ParallelNodeConfig struct {
 	JoinID          string
 	MaxConcurrency  int
 	BranchTimeout   time.Duration
+	// FanInPolicy selects the branch-aggregation policy (#313): "" / "any"
+	// (success-if-any, the default), "all", or "quorum" (requires Quorum).
+	// The accessor is lenient — handlers validate strictly at execution time.
+	FanInPolicy string
+	Quorum      int
 }
 
 // ParallelConfig returns the typed parallel/fan-in config for the node.
@@ -393,6 +398,12 @@ func (n *Node) ParallelConfig() ParallelNodeConfig {
 		ParallelTargets: n.Attrs["parallel_targets"],
 		FanInSources:    n.Attrs["fan_in_sources"],
 		JoinID:          n.Attrs["parallel_join"],
+		FanInPolicy:     n.Attrs["fan_in_policy"],
+	}
+	if v := n.Attrs["quorum"]; v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			cfg.Quorum = i
+		}
 	}
 	if v := n.Attrs["max_concurrency"]; v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
