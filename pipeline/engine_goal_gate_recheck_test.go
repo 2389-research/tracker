@@ -257,3 +257,52 @@ func TestGoalGateRecheckPendingSurvivesResume(t *testing.T) {
 		t.Errorf("status = %q, want %q", result.Status, OutcomeSuccess)
 	}
 }
+
+// TestGoalGateRecheckWithSingleRetryBudget covers the codex P2 review
+// finding on #360: with max_retries=1, the tail redirect consumes the whole
+// retry budget, and an exhausted-branch-first check would route to fallback
+// before the pending re-entry could fire — the gate would still never
+// re-judge the remediated tree. The pending re-entry is the COMPLETION of
+// the redirect's retry cycle (budget was charged when the redirect fired),
+// so it must run before the exhausted branch and without a fresh charge.
+func TestGoalGateRecheckWithSingleRetryBudget(t *testing.T) {
+	g := recheckTestGraph("1")
+
+	reg := newTestRegistry()
+	gateAttempts := 0
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			switch node.ID {
+			case "gate":
+				gateAttempts++
+				if gateAttempts == 1 {
+					return Outcome{Status: string(OutcomeFail)}, nil
+				}
+				return Outcome{Status: string(OutcomeSuccess)}, nil // remediated in the tail
+			case "escalate":
+				return Outcome{
+					Status:         string(OutcomeSuccess),
+					ContextUpdates: map[string]string{"route": "accept"},
+				}, nil
+			default:
+				return Outcome{Status: string(OutcomeSuccess)}, nil
+			}
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	engine := NewEngine(g, reg)
+	result, err := engine.Run(ctx)
+	if err != nil {
+		t.Fatalf("engine.Run error: %v", err)
+	}
+
+	if gateAttempts < 2 {
+		t.Errorf("gate ran %d times, want >= 2 — the re-entry must fire even with max_retries=1", gateAttempts)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Errorf("status = %q, want %q (gate satisfied on re-run)", result.Status, OutcomeSuccess)
+	}
+}

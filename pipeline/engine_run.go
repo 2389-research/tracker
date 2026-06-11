@@ -920,16 +920,26 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus string, traceEntry *TraceEntry) (bool, string, *EngineResult) {
 	target, gateNodeID, retry, unsatisfied := e.goalGateRetryTarget(s.cp, s.nodeOutcomes)
 	if retry {
-		s.cp.IncrementRetry(gateNodeID)
+		// A pending re-entry (target == the gate itself, flagged by a prior
+		// redirect) completes that redirect's retry cycle — the budget was
+		// charged when the redirect fired, so it is not charged again here.
+		// It cannot loop: the gate executes next, clearing the pending flag.
+		reentry := s.cp.IsGateRecheckPending(gateNodeID) && target == gateNodeID
 		gateNode := e.nodeOrDefault(gateNodeID)
+		msg := fmt.Sprintf("goal-gate recheck: re-entering %q so the gate re-judges the current tree (attempt %d/%d)",
+			gateNodeID, s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
+		if !reentry {
+			s.cp.IncrementRetry(gateNodeID)
+			msg = fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
+				gateNodeID, target,
+				s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
+		}
 		e.emit(PipelineEvent{
 			Type:      EventStageRetrying,
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    gateNodeID,
-			Message: fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
-				gateNodeID, target,
-				s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode)),
+			Message:   msg,
 		})
 		traceEntry.EdgeTo = target
 		s.trace.AddEntry(*traceEntry)
