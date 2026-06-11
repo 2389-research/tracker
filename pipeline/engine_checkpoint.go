@@ -5,6 +5,7 @@ package pipeline
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -155,14 +156,35 @@ func isGoalGate(node *Node) bool {
 // and fallback_retry_target are used for one-shot escalation routing
 // (guarded by cp.FallbackTaken to prevent infinite loops).
 //
+// Gates with a pending recheck (#348 defect 1) are considered even when a
+// prior redirect's clearDownstream removed them from CompletedNodes — that
+// removal is what let a retry path that routes AROUND the gate complete the
+// run in plain success with the gate still failed.
+//
 // Returns (target, goalGateNodeID, shouldRetry, unsatisfied).
 func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, string, bool, bool) {
-	for _, nodeID := range cp.CompletedNodes {
+	for _, nodeID := range e.goalGateCandidates(cp) {
 		if result, found := e.checkGoalGateNode(cp, nodeID, nodeOutcomes); found {
 			return result.target, result.nodeID, result.shouldRetry, result.unsatisfied
 		}
 	}
 	return "", "", false, false
+}
+
+// goalGateCandidates returns the node IDs to evaluate as potential
+// unsatisfied goal gates: the completed nodes (in completion order, the
+// pre-#348 behavior) plus any recheck-pending gates that a redirect's
+// clearDownstream removed from the completed set (sorted for determinism).
+func (e *Engine) goalGateCandidates(cp *Checkpoint) []string {
+	candidates := append([]string(nil), cp.CompletedNodes...)
+	var pending []string
+	for nodeID, isPending := range cp.GateRecheckPending {
+		if isPending && !cp.IsCompleted(nodeID) {
+			pending = append(pending, nodeID)
+		}
+	}
+	sort.Strings(pending)
+	return append(candidates, pending...)
 }
 
 // goalGateCheckResult holds the output of checkGoalGateNode.
@@ -183,6 +205,18 @@ func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string, nodeOutcomes m
 	status := nodeOutcomes[nodeID]
 	if status == string(OutcomeSuccess) || status == "partial_success" {
 		return goalGateCheckResult{}, false
+	}
+
+	// A pending recheck wins over the budget branch (#348 defect 1, codex
+	// P2 on #360): the prior redirect — a charged retry or the uncharged
+	// one-shot fallback — routed away without re-running the gate, so
+	// re-entering AT the gate is the COMPLETION of that redirect cycle,
+	// not a new retry. It must fire even when a retry redirect consumed
+	// the last budget unit (max_retries=1), and handleExitNode does not
+	// charge for it. No loop risk: the re-entry executes the gate next,
+	// which clears the pending flag (applyOutcome).
+	if cp.IsGateRecheckPending(nodeID) {
+		return goalGateCheckResult{target: nodeID, nodeID: nodeID, shouldRetry: true, unsatisfied: true}, true
 	}
 
 	var t, n string
@@ -234,6 +268,8 @@ func (e *Engine) findFallbackTarget(node *Node) string {
 // goalGateRemainingPath handles the retries-still-available case for a goal gate.
 // Returns (target, nodeID, shouldRetry=true, unsatisfied=true) when a target is found,
 // or (empty, nodeID, false, true) if no valid retry target exists.
+// (The pending-recheck re-entry is handled upstream in checkGoalGateNode,
+// before the budget branch — see #348 defect 1.)
 func (e *Engine) goalGateRemainingPath(node *Node, nodeID string) (string, string, bool, bool) {
 	retryTargets := []string{
 		node.Attrs["retry_target"],

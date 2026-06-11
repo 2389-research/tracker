@@ -30,6 +30,17 @@ type Checkpoint struct {
 	// the guard survives checkpoint save/restore cycles.
 	FallbackTaken map[string]bool `json:"fallback_taken,omitempty"`
 
+	// GateRecheckPending tracks goal-gate nodes whose retry/fallback
+	// redirect has fired but which have not re-executed since (#348
+	// defect 1). Set when handleExitNode redirects away from an
+	// unsatisfied gate; cleared when the gate node executes again. While
+	// pending, the gate stays visible to the exit-time goal-gate check
+	// even after clearDownstream removed it from CompletedNodes, and a
+	// retry re-enters AT the gate so it re-evaluates the current tree
+	// instead of replaying an escalation tail that routes around it.
+	// Persisted so a resumed run replays the re-entry deterministically.
+	GateRecheckPending map[string]bool `json:"gate_recheck_pending,omitempty"`
+
 	// WIPRefs maps a failed/exhausted node ID to the recoverable git ref
 	// (a tag tracker/wip/<runID>/<nodeID>) where its uncommitted work was
 	// preserved before the engine routed away from it (#302). Additive;
@@ -95,6 +106,27 @@ func (cp *Checkpoint) MarkCompleted(nodeID string) {
 	}
 	cp.completedSet[nodeID] = true
 	cp.CompletedNodes = append(cp.CompletedNodes, nodeID)
+}
+
+// SetGateRecheckPending marks a goal-gate node as awaiting re-execution
+// after a retry/fallback redirect (#348 defect 1).
+func (cp *Checkpoint) SetGateRecheckPending(nodeID string) {
+	if cp.GateRecheckPending == nil {
+		cp.GateRecheckPending = make(map[string]bool)
+	}
+	cp.GateRecheckPending[nodeID] = true
+}
+
+// ClearGateRecheckPending records that a goal-gate node has re-executed,
+// clearing its pending recheck (#348 defect 1).
+func (cp *Checkpoint) ClearGateRecheckPending(nodeID string) {
+	delete(cp.GateRecheckPending, nodeID)
+}
+
+// IsGateRecheckPending reports whether a goal-gate node is awaiting
+// re-execution after a retry/fallback redirect (#348 defect 1).
+func (cp *Checkpoint) IsGateRecheckPending(nodeID string) bool {
+	return cp.GateRecheckPending[nodeID]
 }
 
 // SetEdgeSelection records the selected outgoing edge for a completed node.
