@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-06-11
+
 ### Added
 
 - **Configurable parallel fan-in aggregation policy** (issue #313, defect 1).
