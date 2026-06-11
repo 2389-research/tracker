@@ -246,7 +246,8 @@ func TestLocalEnvironment_CommandWrapperApplied(t *testing.T) {
 		wrapped = true
 		return cmd
 	}
-	_, err := env.ExecCommand(context.Background(), "/bin/true", nil, 5*time.Second)
+	// "sh -c true" rather than /bin/true — macOS has no /bin/true.
+	_, err := env.ExecCommand(context.Background(), "sh", []string{"-c", "true"}, 5*time.Second)
 	if err != nil {
 		t.Fatalf("ExecCommand: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestLocalEnvironment_CommandWrapperAppliedWithLimit(t *testing.T) {
 		wrapped = true
 		return cmd
 	}
-	_, err := env.ExecCommandWithLimit(context.Background(), "/bin/true", nil, 5*time.Second, 1024)
+	_, err := env.ExecCommandWithLimit(context.Background(), "sh", []string{"-c", "true"}, 5*time.Second, 1024)
 	if err != nil {
 		t.Fatalf("ExecCommandWithLimit: %v", err)
 	}
@@ -296,10 +297,10 @@ func TestLocalEnvironment_WriteOpenerApplied(t *testing.T) {
 func TestLocalEnvironment_HooksNilFallsThrough(t *testing.T) {
 	env := NewLocalEnvironment(t.TempDir())
 	// Both function fields nil — must fall through to existing behavior.
-	if _, err := env.ExecCommand(context.Background(), "/bin/true", nil, 5*time.Second); err != nil {
+	if _, err := env.ExecCommand(context.Background(), "sh", []string{"-c", "true"}, 5*time.Second); err != nil {
 		t.Errorf("ExecCommand with nil CommandWrapper = %v, want nil", err)
 	}
-	if _, err := env.ExecCommandWithLimit(context.Background(), "/bin/true", nil, 5*time.Second, 1024); err != nil {
+	if _, err := env.ExecCommandWithLimit(context.Background(), "sh", []string{"-c", "true"}, 5*time.Second, 1024); err != nil {
 		t.Errorf("ExecCommandWithLimit with nil CommandWrapper = %v, want nil", err)
 	}
 	if err := env.WriteFile(context.Background(), "test.txt", "hello"); err != nil {

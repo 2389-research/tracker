@@ -49,6 +49,17 @@ func TestHumanHandlerName(t *testing.T) {
 	}
 }
 
+func TestHumanHandlerChoiceNilGraphErrors(t *testing.T) {
+	// Choice mode derives options from outgoing graph edges; a handler
+	// constructed without a graph must error, not nil-deref.
+	h := NewHumanHandler(&AutoApproveInterviewer{}, nil)
+	node := &pipeline.Node{ID: "gate", Shape: "hexagon", Attrs: map[string]string{"prompt": "pick"}}
+	_, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err == nil {
+		t.Fatal("expected error for choice mode without graph")
+	}
+}
+
 func TestHumanHandlerWithAutoApprove(t *testing.T) {
 	graph := pipeline.NewGraph("test")
 	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})

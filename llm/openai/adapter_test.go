@@ -943,3 +943,41 @@ func TestAdapterProviderOptions(t *testing.T) {
 		t.Errorf("expected store=true from provider options, got %v", raw["store"])
 	}
 }
+
+func TestAdapterStreamUnparseableErrorPayload(t *testing.T) {
+	sseData := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_e1","model":"gpt-4.1"}}`,
+		"",
+		"event: error",
+		`data: {malformed`,
+		"",
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	a := New("test-key", WithBaseURL(server.URL))
+	ch := a.Stream(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	})
+
+	var streamErr error
+	for evt := range ch {
+		if evt.Type == llm.EventError && streamErr == nil {
+			streamErr = evt.Err
+		}
+	}
+
+	if streamErr == nil {
+		t.Fatal("expected EventError for unparseable error payload, got none")
+	}
+	if !strings.Contains(streamErr.Error(), "unparseable payload") {
+		t.Errorf("error %q should mention the unparseable payload", streamErr.Error())
+	}
+}

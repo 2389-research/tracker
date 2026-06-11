@@ -143,6 +143,10 @@ func (a *StreamAccumulator) processToolCallStart(event StreamEvent) {
 	if event.ToolCall == nil {
 		return
 	}
+	// Chat Completions-style providers can start the next tool call before
+	// the prior one's End event arrives (all Ends batched at [DONE]); finalize
+	// the in-flight call so it isn't lost. The leftover End events are no-ops.
+	a.processToolCallEnd()
 	a.activeToolCall = &ToolCallData{
 		ID:             event.ToolCall.ID,
 		Name:           event.ToolCall.Name,

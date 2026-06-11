@@ -273,6 +273,58 @@ func TestExtractBinaryFromTar(t *testing.T) {
 	})
 }
 
+func TestExtractBinaryUniqueTempPaths(t *testing.T) {
+	// Two extractions into the same directory must not share a temp path —
+	// a fixed name lets concurrent updates clobber each other's binary
+	// between extraction and the atomic swap.
+	dir := t.TempDir()
+	tarOne := createTestTar(t, dir, "one.tar.gz", "tracker", []byte("binary-one"))
+	tarTwo := createTestTar(t, dir, "two.tar.gz", "tracker", []byte("binary-two"))
+
+	first, err := extractBinaryFromTar(tarOne, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(first)
+	second, err := extractBinaryFromTar(tarTwo, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(second)
+
+	if first == second {
+		t.Fatalf("both extractions returned %q — concurrent updates would corrupt each other", first)
+	}
+	data, _ := os.ReadFile(first)
+	if string(data) != "binary-one" {
+		t.Errorf("first binary content = %q, want %q", data, "binary-one")
+	}
+	data, _ = os.ReadFile(second)
+	if string(data) != "binary-two" {
+		t.Errorf("second binary content = %q, want %q", data, "binary-two")
+	}
+}
+
+func TestCheckWritePermissionPreservesExistingFile(t *testing.T) {
+	// The write probe must not truncate-and-delete a real file that
+	// happens to collide with its probe name.
+	dir := t.TempDir()
+	existing := filepath.Join(dir, ".tracker-update-test")
+	if err := os.WriteFile(existing, []byte("user data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkWritePermission(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatalf("probe deleted pre-existing file: %v", err)
+	}
+	if string(data) != "user data" {
+		t.Errorf("probe clobbered pre-existing file: %q", data)
+	}
+}
+
 func TestAtomicSwap(t *testing.T) {
 	t.Run("successful swap", func(t *testing.T) {
 		dir := t.TempDir()

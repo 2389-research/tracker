@@ -235,20 +235,28 @@ func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.St
 			} `json:"status_details"`
 		} `json:"response"`
 	}
-	if err := json.Unmarshal(data, &errEvt); err == nil {
-		msg := errEvt.Error.Message
-		code := errEvt.Error.Code
-		if msg == "" {
-			msg = errEvt.Response.StatusDetails.Error.Message
-			code = errEvt.Response.StatusDetails.Error.Code
-		}
-		if msg == "" {
-			msg = fmt.Sprintf("unknown API error (event type: %s)", eventType)
-		}
+	if err := json.Unmarshal(data, &errEvt); err != nil {
+		// An error event whose payload cannot be parsed must still surface
+		// as an error — swallowing it would turn a failed request into a
+		// bogus empty response.
 		ch <- llm.StreamEvent{
 			Type: llm.EventError,
-			Err:  sseErrorToTyped(code, msg),
+			Err:  fmt.Errorf("openai: %s event with unparseable payload: %w", eventType, err),
 		}
+		return
+	}
+	msg := errEvt.Error.Message
+	code := errEvt.Error.Code
+	if msg == "" {
+		msg = errEvt.Response.StatusDetails.Error.Message
+		code = errEvt.Response.StatusDetails.Error.Code
+	}
+	if msg == "" {
+		msg = fmt.Sprintf("unknown API error (event type: %s)", eventType)
+	}
+	ch <- llm.StreamEvent{
+		Type: llm.EventError,
+		Err:  sseErrorToTyped(code, msg),
 	}
 }
 

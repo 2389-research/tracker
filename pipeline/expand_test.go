@@ -657,3 +657,29 @@ func TestExpandVariables_NormalMode_AllowsEverything(t *testing.T) {
 		t.Errorf("result = %q, want %q", result, "echo hello world")
 	}
 }
+
+func TestInjectParamsIntoGraphPreservesValidationAndIndexes(t *testing.T) {
+	g := NewGraph("sub")
+	g.AddNode(&Node{ID: "a", Shape: "box"})
+	g.AddNode(&Node{ID: "b", Shape: "box"})
+	g.AddEdge(&Edge{From: "a", To: "b"})
+	g.DippinValidated = true
+
+	clone, err := InjectParamsIntoGraph(g, map[string]string{})
+	if err != nil {
+		t.Fatalf("InjectParamsIntoGraph: %v", err)
+	}
+	if !clone.DippinValidated {
+		t.Error("clone lost DippinValidated flag")
+	}
+	if len(clone.outgoing["a"]) != 1 || len(clone.incoming["b"]) != 1 {
+		t.Errorf("clone adjacency indexes not populated: outgoing[a]=%d incoming[b]=%d",
+			len(clone.outgoing["a"]), len(clone.incoming["b"]))
+	}
+	if len(clone.Edges) != 1 {
+		t.Fatalf("expected 1 cloned edge, got %d", len(clone.Edges))
+	}
+	if clone.Edges[0] == g.Edges[0] {
+		t.Error("clone shares edge pointers with source graph")
+	}
+}

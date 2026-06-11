@@ -349,8 +349,67 @@ func (a *Adapter) handleSSEData(eventType string, data []byte, ch chan<- llm.Str
 		a.handleSSEBlockStop(data, ch, blockTypes)
 	case "message_delta":
 		a.handleSSEMessageDelta(data, ch, inputUsage)
+	case "error":
+		a.handleSSEErrorEvent(data, ch)
 	case "message_stop", "ping":
 		// No action needed.
+	}
+}
+
+// sseErrorEvent is the payload of an SSE "error" event delivered inside an
+// HTTP-200 stream (overloaded_error, rate_limit_error, api_error, ...).
+type sseErrorEvent struct {
+	Type  string `json:"type"`
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// handleSSEErrorEvent surfaces a mid-stream error event as a typed EventError.
+// Anthropic reports these inside HTTP-200 streams, so they are invisible to
+// status-code checks; dropping them would surface as a bogus empty response.
+func (a *Adapter) handleSSEErrorEvent(data []byte, ch chan<- llm.StreamEvent) {
+	var evt sseErrorEvent
+	if err := json.Unmarshal(data, &evt); err != nil {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("anthropic: parse error event: %w", err)}
+		return
+	}
+	errType := evt.Error.Type
+	if errType == "" {
+		errType = "api_error"
+	}
+	msg := evt.Error.Message
+	if msg == "" {
+		msg = "unknown stream error"
+	}
+	ch <- llm.StreamEvent{
+		Type: llm.EventError,
+		Err:  llm.ErrorFromStatusCode(anthropicErrorTypeToStatus(errType), fmt.Sprintf("anthropic: %s: %s", errType, msg), "anthropic"),
+	}
+}
+
+// anthropicErrorTypeToStatus maps Anthropic error type strings to the HTTP
+// status codes they correspond to outside of streams, so stream errors get
+// the same typed-error classification as non-stream errors.
+func anthropicErrorTypeToStatus(errType string) int {
+	switch errType {
+	case "invalid_request_error":
+		return 400
+	case "authentication_error":
+		return 401
+	case "permission_error":
+		return 403
+	case "not_found_error":
+		return 404
+	case "request_too_large":
+		return 413
+	case "rate_limit_error":
+		return 429
+	case "overloaded_error":
+		return 529
+	default:
+		return 500
 	}
 }
 

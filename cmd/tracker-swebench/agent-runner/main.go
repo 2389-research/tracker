@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -225,6 +226,11 @@ func main() {
 
 func classifyTerminationReason(result agent.SessionResult, err error) string {
 	if err != nil {
+		// A context-deadline/cancel kill is the harness timeout, not a tool
+		// failure — report it distinctly so eval results aren't skewed.
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return "timeout"
+		}
 		if strings.Contains(strings.ToLower(err.Error()), "empty api responses") {
 			return "empty_response"
 		}

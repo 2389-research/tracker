@@ -333,8 +333,14 @@ var knownProviders = []providerDef{
 		envVars:      []string{"ANTHROPIC_API_KEY"},
 		defaultModel: "claude-haiku-4-5",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			// Strict resolver so doctor reports the same gateway-route
+			// refusal that `tracker run` would hard-fail on.
+			base, err := ResolveProviderBaseURLStrict("anthropic")
+			if err != nil {
+				return nil, err
+			}
 			var opts []anthropic.Option
-			if base := ResolveProviderBaseURL("anthropic"); base != "" {
+			if base != "" {
 				opts = append(opts, anthropic.WithBaseURL(base))
 			}
 			return anthropic.New(key, opts...), nil
@@ -345,8 +351,12 @@ var knownProviders = []providerDef{
 		envVars:      []string{"OPENAI_API_KEY"},
 		defaultModel: "gpt-4o-mini",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			base, err := ResolveProviderBaseURLStrict("openai")
+			if err != nil {
+				return nil, err
+			}
 			var opts []openai.Option
-			if base := ResolveProviderBaseURL("openai"); base != "" {
+			if base != "" {
 				opts = append(opts, openai.WithBaseURL(base))
 			}
 			return openai.New(key, opts...), nil
@@ -357,8 +367,12 @@ var knownProviders = []providerDef{
 		envVars:      []string{"OPENAI_COMPAT_API_KEY"},
 		defaultModel: "gpt-4o-mini",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			base, err := ResolveProviderBaseURLStrict("openai-compat")
+			if err != nil {
+				return nil, err
+			}
 			var opts []openaicompat.Option
-			if base := ResolveProviderBaseURL("openai-compat"); base != "" {
+			if base != "" {
 				opts = append(opts, openaicompat.WithBaseURL(base))
 			}
 			return openaicompat.New(key, opts...), nil
@@ -369,8 +383,12 @@ var knownProviders = []providerDef{
 		envVars:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 		defaultModel: "gemini-2.0-flash",
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
+			base, err := ResolveProviderBaseURLStrict("gemini")
+			if err != nil {
+				return nil, err
+			}
 			var opts []google.Option
-			if base := ResolveProviderBaseURL("gemini"); base != "" {
+			if base != "" {
 				opts = append(opts, google.WithBaseURL(base))
 			}
 			return google.New(key, opts...), nil

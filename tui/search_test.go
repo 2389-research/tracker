@@ -156,6 +156,19 @@ func TestStripAnsi(t *testing.T) {
 	}
 }
 
+func TestHighlightLineUnicodeWidthChange(t *testing.T) {
+	// Ⱥ (U+023A, 2 bytes) lowers to ⱥ (U+2C65, 3 bytes), so byte offsets in
+	// the lowered string diverge from the original — slicing the original
+	// with lowered offsets panicked or garbled the output.
+	result := HighlightLine("ȺȺ error", "error")
+	if !strings.Contains(result, "error") {
+		t.Errorf("highlighted line lost the match: %q", result)
+	}
+	if !strings.Contains(result, "ȺȺ") {
+		t.Errorf("highlighted line lost the prefix: %q", result)
+	}
+}
+
 func TestHighlightLineNoMatch(t *testing.T) {
 	result := HighlightLine("hello world", "xyz")
 	if !strings.Contains(stripAnsi(result), "hello world") {

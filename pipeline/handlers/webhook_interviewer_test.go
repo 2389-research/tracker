@@ -15,6 +15,33 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
+func TestWebhookInterviewer_CancelAbortsInflightPost(t *testing.T) {
+	// Cancel() must abort an in-flight outbound POST — otherwise a hung
+	// webhook endpoint pins the gate goroutine until the 30s client timeout.
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release // hang until test cleanup
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	w := NewWebhookInterviewer(srv.URL, "127.0.0.1:0")
+	done := make(chan error, 1)
+	go func() { done <- w.postWebhook(WebhookGatePayload{GateID: "g1"}) }()
+
+	time.Sleep(50 * time.Millisecond) // let the POST reach the hung server
+	w.Cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error from canceled POST")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("postWebhook did not return after Cancel — POST not tied to cancellation")
+	}
+}
+
 // postCallback posts a WebhookGateResponse to the interviewer's callback server.
 // It is safe to call from goroutines: it uses t.Errorf (not t.Fatalf) so it
 // never panics when called outside the test goroutine.

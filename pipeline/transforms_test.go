@@ -147,3 +147,19 @@ func TestGraphVarMap_NilContext(t *testing.T) {
 		t.Fatalf("expected nil for nil context, got %v", vars)
 	}
 }
+
+func TestExpandGraphVariablesPrefixCollision(t *testing.T) {
+	// $target must never clobber the prefix of $target_name; map iteration
+	// order is random, so run repeatedly to defeat lucky orderings.
+	vars := map[string]string{
+		"$target":      "prod",
+		"$target_name": "api-service",
+	}
+	want := "deploy api-service to prod"
+	for i := 0; i < 100; i++ {
+		got := ExpandGraphVariables("deploy $target_name to $target", vars)
+		if got != want {
+			t.Fatalf("iteration %d: got %q, want %q", i, got, want)
+		}
+	}
+}

@@ -3,7 +3,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +115,18 @@ func TestClassifyTerminationReason(t *testing.T) {
 			name: "generic_error",
 			err:  errors.New("tool failed"),
 			want: "tool_error",
+		},
+		{
+			// Session killed by the harness timeout — must not be misreported
+			// as a tool failure. Wrapped to verify errors.Is unwrapping.
+			name: "timeout_deadline",
+			err:  fmt.Errorf("agent session failed: %w", context.DeadlineExceeded),
+			want: "timeout",
+		},
+		{
+			name: "timeout_canceled",
+			err:  context.Canceled,
+			want: "timeout",
 		},
 	}
 

@@ -282,6 +282,9 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 		NodeOrder: append([]string(nil), g.NodeOrder...),
 		StartNode: g.StartNode,
 		ExitNode:  g.ExitNode,
+		// Param injection only rewrites attribute values; the dippin
+		// shape-level validation verdict still applies to the clone.
+		DippinValidated: g.DippinValidated,
 	}
 
 	for id, node := range g.Nodes {
@@ -292,8 +295,9 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 		clone.Nodes[id] = cloned
 	}
 
+	// AddEdge (not a bare append) so the clone's adjacency indexes are built.
 	for _, e := range g.Edges {
-		clone.Edges = append(clone.Edges, &Edge{
+		clone.AddEdge(&Edge{
 			From:      e.From,
 			To:        e.To,
 			Label:     e.Label,

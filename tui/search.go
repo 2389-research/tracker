@@ -5,6 +5,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -215,6 +217,27 @@ func isAnsiTerminator(r rune) bool {
 	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '~'
 }
 
+// lowerWithOffsets lowercases s rune-by-rune and returns the lowered string
+// plus a map from each byte position in the lowered string back to the byte
+// position of the corresponding rune in s (with one extra entry mapping
+// len(lower) to len(s)). Lowercasing can change a rune's UTF-8 byte length
+// (e.g. Ⱥ U+023A is 2 bytes, ⱥ U+2C65 is 3), so lowered offsets cannot be
+// used to slice s directly.
+func lowerWithOffsets(s string) (string, []int) {
+	var b strings.Builder
+	offsets := make([]int, 0, len(s)+1)
+	for i, r := range s {
+		lr := unicode.ToLower(r)
+		n := utf8.RuneLen(lr)
+		for j := 0; j < n; j++ {
+			offsets = append(offsets, i)
+		}
+		b.WriteRune(lr)
+	}
+	offsets = append(offsets, len(s))
+	return b.String(), offsets
+}
+
 // HighlightLine highlights all occurrences of the search term in a styled line.
 // Uses rune-aware operations for correct multi-byte character handling.
 func HighlightLine(line, term string) string {
@@ -222,7 +245,7 @@ func HighlightLine(line, term string) string {
 		return line
 	}
 	plain := stripAnsi(line)
-	lowerPlain := strings.ToLower(plain)
+	lowerPlain, offsets := lowerWithOffsets(plain)
 	lowerTerm := strings.ToLower(term)
 
 	// If no match in the plain text, return original.
@@ -230,20 +253,25 @@ func HighlightLine(line, term string) string {
 		return line
 	}
 
-	// Rebuild with highlights on the plain text.
+	// Rebuild with highlights on the plain text. Matching runs on the lowered
+	// string; offsets translate match boundaries back into plain. A UTF-8
+	// substring match always lands on rune boundaries (self-synchronization),
+	// so every boundary has an offsets entry.
 	var result strings.Builder
 	pos := 0
-	termLen := len(lowerTerm) // byte length matches since ToLower preserves byte count for ASCII
+	termLen := len(lowerTerm) // byte length in the lowered domain
 	for {
 		idx := strings.Index(lowerPlain[pos:], lowerTerm)
 		if idx < 0 {
-			result.WriteString(Styles.PrimaryText.Render(plain[pos:]))
+			result.WriteString(Styles.PrimaryText.Render(plain[offsets[pos]:]))
 			break
 		}
-		if idx > 0 {
-			result.WriteString(Styles.PrimaryText.Render(plain[pos : pos+idx]))
+		start := offsets[pos+idx]
+		end := offsets[pos+idx+termLen]
+		if start > offsets[pos] {
+			result.WriteString(Styles.PrimaryText.Render(plain[offsets[pos]:start]))
 		}
-		result.WriteString(Styles.SearchMatch.Render(plain[pos+idx : pos+idx+termLen]))
+		result.WriteString(Styles.SearchMatch.Render(plain[start:end]))
 		pos += idx + termLen
 	}
 	return result.String()

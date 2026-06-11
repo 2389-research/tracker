@@ -5,6 +5,7 @@ package tracker
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,34 @@ import (
 
 	"github.com/2389-research/tracker/internal/dipxtest"
 )
+
+func TestKnownProvidersGatewayRefusalSurfaces(t *testing.T) {
+	// Doctor's adapter probes must use the strict resolver: a refused
+	// gateway route (bedrock kind defines no openai-compat suffix) must
+	// surface as an error, not silently fall back to the public SDK
+	// default endpoint while `tracker run` hard-fails on the same config.
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+
+	var def *providerDef
+	for i := range knownProviders {
+		if knownProviders[i].name == "OpenAI-Compat" {
+			def = &knownProviders[i]
+			break
+		}
+	}
+	if def == nil {
+		t.Fatal("OpenAI-Compat provider def not found")
+	}
+	_, err := def.buildAdapter("test-key")
+	if err == nil {
+		t.Fatal("expected gateway-route-refused error, got working adapter")
+	}
+	if !errors.Is(err, ErrGatewayRouteRefused) {
+		t.Errorf("error = %v, want ErrGatewayRouteRefused", err)
+	}
+}
 
 func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
 	workdir := t.TempDir()

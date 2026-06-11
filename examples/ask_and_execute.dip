@@ -214,7 +214,9 @@ workflow AskAndExecute
           RESULTS="$RESULTS\n$NAME: TESTS FAIL (exit=$TEST_EXIT), diff=$DIFF_LINES lines"
         fi
       done
-      printf "$RESULTS"
+      # %b expands the \n escapes in RESULTS while keeping it data, not a
+      # format string — test names containing % can't break the printf.
+      printf '%b' "$RESULTS"
 
   # ─── Phase 4: Cross-Critique ───────────────────────────────
 
@@ -323,7 +325,7 @@ workflow AskAndExecute
       # Clean up candidate artifacts (keep decisions)
       rm -rf .ai/worktrees .ai/candidates
 
-      printf "applied: $WINNER"
+      printf 'applied: %s' "$WINNER"
 
   # ─── Phase 6: Verify ───────────────────────────────────────
 
@@ -359,7 +361,6 @@ workflow AskAndExecute
     provider: anthropic
     reasoning_effort: high
     goal_gate: true
-    retry_target: ImplementClaude
     fallback_target: EscalateToHuman
     prompt:
       The winning implementation has been applied. Verify:

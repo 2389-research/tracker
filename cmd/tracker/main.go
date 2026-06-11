@@ -135,7 +135,9 @@ func main() {
 
 	err = executeCommand(cfg, commandDeps{})
 
-	if cfg.mode == modeRun {
+	// Only nag about updates after a successful run — on failure the error
+	// (printed below) is the headline, and the hint's ≤2s wait just delays it.
+	if cfg.mode == modeRun && err == nil {
 		printUpdateHint()
 	}
 

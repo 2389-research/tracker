@@ -289,11 +289,13 @@ func atomicSwap(exe, tmpBin, tagName string) error {
 
 // checkWritePermission verifies the process can write to the directory.
 func checkWritePermission(dir string) error {
-	tmp := filepath.Join(dir, ".tracker-update-test")
-	f, err := os.Create(tmp)
+	// CreateTemp (not a fixed name) so the probe can never truncate a real
+	// file or race a concurrent update's probe.
+	f, err := os.CreateTemp(dir, ".tracker-update-test-*")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	f.Close()
 	os.Remove(tmp)
 	return nil
@@ -437,13 +439,16 @@ func findAndExtractBinary(tr *tar.Reader, destDir string) (string, error) {
 	return "", fmt.Errorf("tracker binary not found in archive")
 }
 
-// writeBinaryEntry writes the current tar entry to destDir/.tracker-new.
+// writeBinaryEntry writes the current tar entry to a unique temp file in
+// destDir (the caller chmods and atomically swaps the returned path).
 func writeBinaryEntry(tr *tar.Reader, destDir string) (string, error) {
-	tmpBin := filepath.Join(destDir, ".tracker-new")
-	out, err := os.Create(tmpBin)
+	// Unique name per extraction — a fixed name lets two concurrent updates
+	// interleave writes into the same file and swap in a corrupt binary.
+	out, err := os.CreateTemp(destDir, ".tracker-new-*")
 	if err != nil {
 		return "", err
 	}
+	tmpBin := out.Name()
 	n, err := io.Copy(out, io.LimitReader(tr, maxBinarySize+1))
 	out.Close()
 	if err != nil {
