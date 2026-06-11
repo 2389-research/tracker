@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-38-0">v0.38.0</a>
     <a href="#v0-37-0">v0.37.0</a>
     <a href="#v0-36-0">v0.36.0</a>
     <a href="#v0-35-1">v0.35.1</a>
@@ -70,6 +71,31 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.38.0 ═══ -->
+  <section class="glass" id="v0-38-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.38.0" style="color: inherit; text-decoration: none;">v0.38.0</a></h2>
+      <span class="badge">2026-06-11</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.38.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>A parallel fan-out can finally demand that every branch succeed &mdash; and four LLM stream adapters
+      stop swallowing mid-stream errors.</strong> Parallel and fan_in nodes accept a configurable aggregation policy
+      (<code>any</code> / <code>all</code> / <code>quorum</code>), so a single failed adversarial reviewer can no
+      longer be masked by success-if-any. A full-project fresh-eyes review landed 25 individually verified fixes,
+      and <code>build_product</code> now tests every detected language stack in polyglot repos.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Configurable parallel fan-in aggregation policy</strong> (<a href="https://github.com/2389-research/tracker/issues/313">#313</a> defect 1). Parallel and fan_in nodes accept a <code>params:</code> block (dippin-lang v0.39.0) with <code>fan_in_policy: any | all | quorum</code> (plus <code>quorum: &lt;n&gt;</code>). Default stays <code>any</code> (success-if-any, back-compat); both aggregation code paths honor the policy, misconfiguration fails fast, and a policy-caused failure names the failed branch IDs in <code>EventParallelCompleted</code> and the <code>fan_in.policy_detail</code> context key. <code>build_product</code>'s <code>ReviewParallel</code> opts into <code>all</code>, routing a single failed reviewer to <code>EscalateReview</code> instead of silently proceeding with a partial review set.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Fresh-eyes review: 25 verified fixes across stream-error surfacing, pipeline core, CLI, handlers, TUI, and examples</strong> (<a href="https://github.com/2389-research/tracker/pull/356">#356</a>). Mid-stream SSE errors now surface on all four providers (Anthropic <code>overloaded_error</code>/<code>rate_limit_error</code> events, Gemini <code>{"error":...}</code> chunks, OpenAI unparseable error payloads, openai-compat code/type-only errors); interleaved tool-call starts no longer drop the first call's arguments; <code>ExpandGraphVariables</code> is a true single pass (no prefix clobbering, substituted values never re-scanned); <code>tracker update</code> stages binaries under collision-proof temp names with close-error checks; ACP init failures reap the subprocess; webhook gates abort their in-flight POST on cancel; TUI search highlighting survives UTF-8 width-changing lowercasing.</li>
+      <li><strong>build_product runs ALL detected build stacks in <code>TestMilestone</code> and <code>FinalBuild</code></strong> (<a href="https://github.com/2389-research/tracker/issues/305">#305</a>). The first-match if/elif chain skipped every stack after the first &mdash; a Go+JS repo never ran <code>npm test</code>. Every detected stack now runs and failures accumulate; sentinels, <code>known_failures</code> skips, and single-language behavior unchanged.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.37.0 ═══ -->
   <section class="glass" id="v0-37-0" style="border-left: 3px solid var(--orange-600);">
