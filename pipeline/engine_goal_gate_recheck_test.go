@@ -306,3 +306,31 @@ func TestGoalGateRecheckWithSingleRetryBudget(t *testing.T) {
 		t.Errorf("status = %q, want %q (gate satisfied on re-run)", result.Status, OutcomeSuccess)
 	}
 }
+
+// TestApplyOutcomeClearsPendingRecheckOnEmptyStatus covers the Copilot
+// review finding on #360: the pending clear must fire whenever the gate
+// node executes, NOT only when the handler returned a non-empty status.
+// An empty/unknown status leaves the gate unsatisfied at the exit check,
+// and since pending re-entries are budget-free, a still-pending flag
+// would re-enter the gate without ever charging retry budget — an
+// unbounded loop for a misbehaving handler.
+func TestApplyOutcomeClearsPendingRecheckOnEmptyStatus(t *testing.T) {
+	g := NewGraph("pending-clear-empty")
+	g.AddNode(&Node{ID: "gate", Shape: "box", Attrs: map[string]string{"goal_gate": "true"}})
+	e := NewEngine(g, newTestRegistry())
+
+	s := &runState{
+		runID:        "t",
+		pctx:         NewPipelineContext(),
+		cp:           &Checkpoint{},
+		trace:        &Trace{},
+		nodeOutcomes: map[string]string{},
+	}
+	s.cp.SetGateRecheckPending("gate")
+
+	e.applyOutcome(s, "gate", &Outcome{Status: ""})
+
+	if s.cp.IsGateRecheckPending("gate") {
+		t.Fatal("gate executed (empty status) but recheck-pending was not cleared — uncharged re-entry loop hazard")
+	}
+}
