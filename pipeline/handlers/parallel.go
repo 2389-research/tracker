@@ -124,7 +124,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		// otherwise lose the structured breadcrumb (Copilot, PR #344). Written
 		// on success as well so a later pass can't leave a stale "failed"
 		// detail in context.
-		outcome.ContextUpdates["fan_in.policy_detail"] = policyDetail
+		outcome.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail] = policyDetail
 	}
 	return outcome, nil
 }

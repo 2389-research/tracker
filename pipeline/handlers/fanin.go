@@ -58,7 +58,7 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 		// write would leave a stale "failed" detail after a later pass
 		// succeeds. Successful-branch context still merges above so
 		// downstream escalation gates can reference partial output.
-		merged["fan_in.policy_detail"] = policy.detail(successes, len(results), failed)
+		merged[pipeline.ContextKeyFanInPolicyDetail] = policy.detail(successes, len(results), failed)
 	}
 
 	return pipeline.Outcome{

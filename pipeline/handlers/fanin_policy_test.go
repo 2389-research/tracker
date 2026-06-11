@@ -167,7 +167,7 @@ func TestParallelHandlerPolicyDetailInContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	detail := failOut.ContextUpdates["fan_in.policy_detail"]
+	detail := failOut.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail]
 	if !strings.Contains(detail, "all") || !strings.Contains(detail, "branch_fail") {
 		t.Errorf("policy-failed parallel node should record fan_in.policy_detail, got %q", detail)
 	}
@@ -178,7 +178,7 @@ func TestParallelHandlerPolicyDetailInContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if d := okOut.ContextUpdates["fan_in.policy_detail"]; !strings.Contains(d, "2/2") {
+	if d := okOut.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail]; !strings.Contains(d, "2/2") {
 		t.Errorf("satisfied policy should also record detail, got %q", d)
 	}
 
@@ -188,7 +188,7 @@ func TestParallelHandlerPolicyDetailInContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, exists := anyOut.ContextUpdates["fan_in.policy_detail"]; exists {
+	if _, exists := anyOut.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail]; exists {
 		t.Error("default any policy must not write fan_in.policy_detail")
 	}
 }
@@ -324,7 +324,7 @@ func TestFanInHandlerPolicyFailureDetailInContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	detail := outcome.ContextUpdates["fan_in.policy_detail"]
+	detail := outcome.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail]
 	if !strings.Contains(detail, "all") || !strings.Contains(detail, "branch_fail") {
 		t.Errorf("fan_in.policy_detail should name the policy and failed branches, got %q", detail)
 	}
