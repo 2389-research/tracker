@@ -21,12 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persisted `gate_recheck_pending` marker when a goal-gate redirect fires,
   cleared only when the gate node actually re-executes. Pending gates stay
   visible to the exit check even when cleared from the completed set, and
-  while retries remain a still-pending gate re-enters **at the gate itself**
-  so it re-evaluates the current (possibly remediated) tree. Retry budget
-  still flows through `retry_counts`, the one-shot fallback guard is
-  unchanged, the marker is persisted in checkpoint.json for deterministic
-  resume, and retry targets whose path flows back through the gate behave
-  exactly as before. Defect 2 of #348 (human "accept" at an escalation
+  a still-pending gate re-enters **at the gate itself** so it re-evaluates
+  the current (possibly remediated) tree. The re-entry completes the
+  redirect's retry cycle without a fresh budget charge (so it fires even
+  with `max_retries: 1`); new redirects still charge `retry_counts`, the
+  one-shot fallback guard is unchanged, the marker is persisted in
+  checkpoint.json for deterministic resume, and retry targets whose path
+  flows back through the gate behave exactly as before. Defect 2 of #348 (human "accept" at an escalation
   should mark the gate overridden) remains open, blocked on #271 /
   dippin-lang#124.
 - **auto_status no longer fails open on goal gates, and heading-mangled
