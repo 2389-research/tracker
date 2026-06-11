@@ -842,7 +842,7 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 			msg = fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the goal gate failed closed (response tail: %q). The agent likely phrased the verdict in a shape the parser rejects, or never emitted one — tighten the prompt's STATUS contract or inspect the node's response.md.",
 				latest.NodeID, latest.ResponseTail)
 		} else {
-			msg = fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the node defaulted to success (response tail: %q). If this node is a verification gate, mark it goal_gate: true so a missing verdict fails closed instead.",
+			msg = fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the STATUS verdict defaulted to success (response tail: %q). If this node is a verification gate, mark it goal_gate: true so a missing verdict fails closed instead.",
 				latest.NodeID, latest.ResponseTail)
 		}
 		if count > 1 {

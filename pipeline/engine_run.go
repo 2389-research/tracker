@@ -665,7 +665,7 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 			msg = fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — failing goal gate closed (an unparseable verdict on a gate is an anomaly, not a pass)",
 				currentNodeID)
 		} else {
-			msg = fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — keeping legacy success default (mark the node goal_gate: true to fail closed)",
+			msg = fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — the STATUS verdict defaulted to success (legacy behavior; the node's final status may still differ, e.g. on a declared-writes failure; mark the node goal_gate: true to fail closed)",
 				currentNodeID)
 		}
 		e.emit(PipelineEvent{
