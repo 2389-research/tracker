@@ -156,6 +156,43 @@ func TestParallelHandlerPolicyFailureSurfacesInEvent(t *testing.T) {
 	}
 }
 
+// The PARALLEL handler also records fan_in.policy_detail for non-default
+// policies — a policy failure suppresses the join suggestion, so the fan-in
+// node (the other detail writer) may never run (Copilot, PR #344). Written
+// on success too so a later pass can't leave a stale "failed" detail.
+func TestParallelHandlerPolicyDetailInContext(t *testing.T) {
+	stub := mixedStubHandler("stub_par_detail", "branch_fail")
+	failOut, err := runParallelWithPolicy(t, []string{"branch_ok", "branch_fail"},
+		map[string]string{"fan_in_policy": "all"}, stub, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	detail := failOut.ContextUpdates["fan_in.policy_detail"]
+	if !strings.Contains(detail, "all") || !strings.Contains(detail, "branch_fail") {
+		t.Errorf("policy-failed parallel node should record fan_in.policy_detail, got %q", detail)
+	}
+
+	okStub := mixedStubHandler("stub_par_detail_ok")
+	okOut, err := runParallelWithPolicy(t, []string{"branch_a", "branch_b"},
+		map[string]string{"fan_in_policy": "all"}, okStub, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d := okOut.ContextUpdates["fan_in.policy_detail"]; !strings.Contains(d, "2/2") {
+		t.Errorf("satisfied policy should also record detail, got %q", d)
+	}
+
+	// Default any policy: no detail key (back-compat).
+	anyStub := mixedStubHandler("stub_par_detail_any", "branch_fail")
+	anyOut, err := runParallelWithPolicy(t, []string{"branch_ok", "branch_fail"}, nil, anyStub, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, exists := anyOut.ContextUpdates["fan_in.policy_detail"]; exists {
+		t.Error("default any policy must not write fan_in.policy_detail")
+	}
+}
+
 // A policy-caused failure must NOT suggest the join node — otherwise a
 // workflow with (say) only a success conditional on the parallel node falls
 // through selectBySuggested to the join and the fan-in (default any) masks

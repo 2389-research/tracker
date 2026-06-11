@@ -44,8 +44,11 @@ func NewParallelHandler(graph *pipeline.Graph, registry *pipeline.HandlerRegistr
 // Name returns the handler name used for registry lookup.
 func (h *ParallelHandler) Name() string { return "parallel" }
 
-// Execute fans out to all outgoing edge targets concurrently, collects results,
-// and returns OutcomeSuccess if at least one branch succeeded, OutcomeFail if all failed.
+// Execute fans out to all outgoing edge targets concurrently, collects
+// results, and aggregates them per the node's fan_in_policy (#313): the
+// default "any" returns OutcomeSuccess if at least one branch succeeded,
+// "all" requires every branch, and "quorum" requires at least `quorum`
+// successful branches.
 // If the parallel node has branch.N.* attributes, those override the target node's
 // attrs (e.g., llm_model, llm_provider, fidelity) for that specific branch.
 func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
@@ -110,8 +113,18 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// Under the default any policy the suggestion is kept even on all-fail —
 	// existing workflows route that failure at the fan-in node.
 	policyBlocked := policy.name != "any" && status != string(pipeline.OutcomeSuccess)
+	outcome.ContextUpdates = make(map[string]string)
 	if joinID := node.ParallelConfig().JoinID; joinID != "" && !policyBlocked {
-		outcome.ContextUpdates = map[string]string{pipeline.ContextKeySuggestedNextNodes: joinID}
+		outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes] = joinID
+	}
+	if policy.name != "any" {
+		// Record the policy evaluation in context here too — a policy failure
+		// suppresses the join suggestion, so the fan-in node (the other
+		// fan_in.policy_detail writer) may never run, and diagnose/audit would
+		// otherwise lose the structured breadcrumb (Copilot, PR #344). Written
+		// on success as well so a later pass can't leave a stale "failed"
+		// detail in context.
+		outcome.ContextUpdates["fan_in.policy_detail"] = policyDetail
 	}
 	return outcome, nil
 }
