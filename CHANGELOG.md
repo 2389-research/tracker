@@ -55,8 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Files:` lines with tracker noise, which effectively disabled the
   per-node orientation file. `build_product.dip`'s Setup now adds
   `.tracker/` to the local `.git/info/exclude` (the same idempotent
-  treatment the turn-override dir already gets), and MarkMilestoneDone
-  filters `^.tracker/` and `^.ai/build/` out of the `Files:` list as
+  treatment the turn-override dir already gets) and untracks any
+  `.tracker/` files a pre-fix run already committed (ignore rules only
+  affect untracked paths), and MarkMilestoneDone filters `^\.tracker/`
+  and `^\.ai/build/` out of the `Files:` list as
   belt-and-braces — saying "(only tracker/build metadata changed)"
   explicitly when the filter empties the list, and gating the Summary
   line on the unfiltered count so HEAD-moved detection is unchanged.

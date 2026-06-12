@@ -41,6 +41,14 @@ workflow BuildProduct
         mkdir -p "$GITDIR/info"
         grep -qxF ".tracker/" "$GITDIR/info/exclude" 2>/dev/null \
           || echo ".tracker/" >> "$GITDIR/info/exclude"
+        # Untrack any .tracker/ files committed by a pre-#351 run — ignore
+        # rules only affect UNTRACKED paths, so without this an already-
+        # polluted repo keeps committing metadata churn forever. Index-only
+        # removal (--cached, working tree untouched); the next CommitIfDirty
+        # commits the deletion, cleaning the product history going forward.
+        if git ls-files --cached -- .tracker | grep -q .; then
+          git rm -r -q --cached .tracker
+        fi
       fi
       # #318: clear any warm-continue cap counter / MaxTurns override left by a
       # prior run interrupted before its cleanup. Setup is skipped on checkpoint
