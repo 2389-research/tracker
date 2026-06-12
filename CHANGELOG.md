@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Runtime-facts block injected into every codergen prompt** (issue #347).
+  Every agent prompt is now prefixed with a machine-written `# Runtime`
+  section stating the absolute working directory ("all commands already run
+  here; never cd elsewhere. A failed cd is a hard error, never evidence of
+  completion"), the current date (YYYY-MM-DD, host clock), and the run/node
+  identity. In case-study run b68b532619c3 the absence of these facts let an
+  agent `cd` to a hallucinated path, read the resulting clean tree as "the
+  milestone is already complete," and ship an empty milestone — and stamped
+  three of three dated decision-log artifacts with wrong dates. The block
+  reflects the per-node `working_dir` override when set, covers all three
+  backends (native / claude-code / acp) uniformly, and applies to codergen
+  nodes only — tool and human nodes are unchanged. There is no opt-out
+  attribute. Mirrors #323, which exposed the same identity to tool
+  subprocess environments.
+
 ## [0.38.1] - 2026-06-11
 
 ### Fixed

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
@@ -72,6 +73,12 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if err != nil {
 		return pipeline.Outcome{}, err
 	}
+	// #347: prepend runtime facts (working dir, date, run/node identity) so
+	// the agent never fills them with priors. Applied here — after all other
+	// prompt assembly, before buildRunConfig — so the block is outermost and
+	// covers all three backends uniformly. Codergen only: tool/human nodes
+	// are untouched.
+	prompt = prependRuntimeFacts(prompt, h.effectiveWorkingDir(node), runIDFromContext(pctx), node.ID, time.Now())
 
 	backend, backendErr := h.selectBackend(node)
 	if backendErr != nil {
@@ -440,6 +447,27 @@ func (h *CodergenHandler) resolvePrompt(node *pipeline.Node, pctx *pipeline.Pipe
 		artifactDir = dir
 	}
 	return ResolvePrompt(node, pctx, h.graphAttrs, artifactDir)
+}
+
+// effectiveWorkingDir returns the directory this node's session actually runs
+// in: the per-node working_dir override when set, otherwise the handler
+// default. Mirrors buildConfig's WorkingDir resolution (#347 — the runtime
+// block must name THIS node's dir, and resolvePrompt runs before buildConfig).
+func (h *CodergenHandler) effectiveWorkingDir(node *pipeline.Node) string {
+	if wd := node.AgentConfig(h.graphAttrs).WorkingDir; wd != "" {
+		return wd
+	}
+	return h.workingDir
+}
+
+// runIDFromContext derives the run ID from the engine-seeded artifact dir
+// (basename of <artifactDir>/<runID>), mirroring the #323 tool-env pattern.
+// Empty when the run has no artifact dir (library callers).
+func runIDFromContext(pctx *pipeline.PipelineContext) string {
+	if dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir); ok && dir != "" {
+		return filepath.Base(absPathOrSelf(dir))
+	}
+	return ""
 }
 
 // resolveArtifactRoot returns the artifact directory from pipeline context or working dir.

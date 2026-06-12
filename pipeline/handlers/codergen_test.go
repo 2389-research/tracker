@@ -426,7 +426,8 @@ func TestCodergenHandlerWritesArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected prompt artifact: %v", err)
 	}
-	if string(promptBytes) != "Write hello world" {
+	// #347: the runtime block is prepended; the authored prompt follows it.
+	if !strings.HasPrefix(string(promptBytes), "# Runtime\n") || !strings.HasSuffix(string(promptBytes), "Write hello world") {
 		t.Fatalf("prompt artifact = %q", string(promptBytes))
 	}
 
@@ -536,7 +537,8 @@ func TestCodergenHandlerExpandsGoalFromContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected prompt artifact: %v", err)
 	}
-	if string(promptBytes) != "Plan for ship a hello world script" {
+	// #347: the runtime block is prepended; the expanded prompt follows it.
+	if !strings.HasSuffix(string(promptBytes), "Plan for ship a hello world script") {
 		t.Fatalf("expanded prompt = %q", string(promptBytes))
 	}
 }
