@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -312,6 +313,11 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	s.pctx.Set(ContextKeyPreferredLabel, "")
 	s.pctx.Set(ContextKeySuggestedNextNodes, "")
 
+	// #352 item 2: human_response is one-shot. Record the value visible to
+	// this node so it can be cleared after the first prompt-consuming node
+	// completes (see clearConsumedHumanResponse below).
+	preHumanResponse, _ := s.pctx.Get(ContextKeyHumanResponse)
+
 	execNode := e.prepareExecNode(node, s)
 
 	outcome, traceEntry, err := e.executeNode(ctx, s, currentNodeID, execNode)
@@ -367,6 +373,10 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, &traceEntry)
 	}
 
+	// After the retry check: a retrying node re-executes and must still see
+	// the response; a node that completed (success OR fail) has consumed it.
+	e.clearConsumedHumanResponse(s, node, preHumanResponse)
+
 	e.handleOutcomeStatus(s, currentNodeID, outcome.Status)
 
 	if currentNodeID == e.graph.ExitNode {
@@ -374,6 +384,68 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	}
 
 	return e.advanceToNextNode(s, currentNodeID, &traceEntry)
+}
+
+// consumesHumanResponse reports whether executing the node feeds pipeline
+// context into an LLM prompt: codergen does (via ResolvePrompt), and a
+// parallel node does when at least one of its branch targets is a codergen
+// node (the parallel handler resolves each branch's prompt the same way; a
+// tool-only fan-out resolves no prompts). subgraph and stack.manager_loop run
+// nested engines with their own contexts and are not consumers here.
+func (e *Engine) consumesHumanResponse(node *Node) bool {
+	switch node.Handler {
+	case "codergen":
+		return true
+	case "parallel":
+		for _, id := range e.parallelBranchTargets(node) {
+			if t, ok := e.graph.Nodes[id]; ok && t.Handler == "codergen" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parallelBranchTargets mirrors the parallel handler's branch resolution
+// (collectBranchEdges): the comma-separated parallel_targets attr when set,
+// otherwise the node's outgoing edge targets. The outgoing-edge fallback
+// includes the join node — harmless here, since a join is parallel.fan_in,
+// never codergen.
+func (e *Engine) parallelBranchTargets(node *Node) []string {
+	if attr := node.ParallelConfig().ParallelTargets; attr != "" {
+		var targets []string
+		for _, t := range strings.Split(attr, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				targets = append(targets, t)
+			}
+		}
+		return targets
+	}
+	var targets []string
+	for _, edge := range e.graph.OutgoingEdges(node.ID) {
+		targets = append(targets, edge.To)
+	}
+	return targets
+}
+
+// clearConsumedHumanResponse makes human_response one-shot (#352 item 2): the
+// first prompt-consuming node to complete with a non-empty response clears the
+// bare key so later nodes don't replay a stale human sign-off indefinitely.
+// The gate's scoped copy (node.<gateID>.human_response) keeps the full value
+// for explicit reference. The clear is an empty-set rather than a delete:
+// PipelineContext has no delete, both injection paths skip empty values, and
+// an empty value round-trips through checkpoint snapshots so a resumed run
+// cannot resurrect the stale response. MergeWithoutDirty keeps the clear out
+// of the next ScopeToNode call — no node "wrote" it.
+func (e *Engine) clearConsumedHumanResponse(s *runState, node *Node, preVal string) {
+	if preVal == "" || !e.consumesHumanResponse(node) {
+		return
+	}
+	// Don't clobber a fresh response the node itself wrote via ContextUpdates.
+	if cur, _ := s.pctx.Get(ContextKeyHumanResponse); cur != preVal {
+		return
+	}
+	s.pctx.MergeWithoutDirty(map[string]string{ContextKeyHumanResponse: ""})
 }
 
 // processRetryOutcome handles a retry outcome from a handler.

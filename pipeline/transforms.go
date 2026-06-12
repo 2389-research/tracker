@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 func ExpandPromptVariables(prompt string, ctx *PipelineContext) string {
@@ -86,26 +87,73 @@ func ExpandGraphVariables(text string, vars map[string]string) string {
 	return b.String()
 }
 
+// DefaultInjectedResponseCap is the default byte budget for the
+// "Previous Node Output" section appended by InjectPipelineContext (#352).
+// Without a cap, a prior node's full transcript (verification reports, grep
+// tables) is pasted wholesale into every downstream prompt — wasteful and,
+// when the prior node failed, actively mis-anchoring. The cap applies at
+// prompt-injection time only; the stored context value (and therefore
+// node.<id>.last_response scoping and checkpoints) keeps the full value.
+const DefaultInjectedResponseCap = 4096
+
 // contextKeysForInjection lists the pipeline context keys whose values should
 // be appended to the LLM prompt so that downstream nodes can see prior outputs.
+// capped marks keys subject to the injection byte budget: last_response is an
+// LLM transcript and gets head+tail truncation; human_response is human-typed
+// and injected whole.
 var contextKeysForInjection = []struct {
-	key   string
-	label string
+	key    string
+	label  string
+	capped bool
 }{
-	{ContextKeyHumanResponse, "Human Response"},
-	{ContextKeyLastResponse, "Previous Node Output"},
+	{ContextKeyHumanResponse, "Human Response", false},
+	{ContextKeyLastResponse, "Previous Node Output", true},
+}
+
+// capHeadTail truncates s to roughly capBytes by keeping the head and tail
+// halves and replacing the middle with an explicit elision marker. Cuts land
+// on UTF-8 rune boundaries. Head+tail (not tail-only like tool output capture)
+// because prose transcripts carry the task framing up front and the
+// conclusion at the end; there is no end-of-output routing marker to protect.
+func capHeadTail(s string, capBytes int) string {
+	if capBytes <= 0 || len(s) <= capBytes {
+		return s
+	}
+	headEnd := capBytes / 2
+	for headEnd > 0 && !utf8.RuneStart(s[headEnd]) {
+		headEnd--
+	}
+	tailStart := len(s) - (capBytes - headEnd)
+	for tailStart < len(s) && !utf8.RuneStart(s[tailStart]) {
+		tailStart++
+	}
+	elided := tailStart - headEnd
+	return s[:headEnd] +
+		fmt.Sprintf("\n\n[... tracker elided %d of %d bytes from the middle of this output ...]\n\n", elided, len(s)) +
+		s[tailStart:]
 }
 
 // InjectPipelineContext appends relevant pipeline context values to the prompt
 // so the LLM can see prior node outputs, human responses, etc.
-func InjectPipelineContext(prompt string, ctx *PipelineContext) string {
+//
+// capBytes bounds the injected "Previous Node Output" section: 0 applies
+// DefaultInjectedResponseCap, negative disables capping, positive values are
+// used as-is. Oversized values are head+tail truncated with an explicit
+// elision marker (see capHeadTail).
+func InjectPipelineContext(prompt string, ctx *PipelineContext, capBytes int) string {
 	if ctx == nil {
 		return prompt
+	}
+	if capBytes == 0 {
+		capBytes = DefaultInjectedResponseCap
 	}
 
 	var sections []string
 	for _, entry := range contextKeysForInjection {
 		if val, ok := ctx.Get(entry.key); ok && val != "" {
+			if entry.capped {
+				val = capHeadTail(val, capBytes)
+			}
 			sections = append(sections, fmt.Sprintf("## %s\n%s", entry.label, val))
 		}
 	}

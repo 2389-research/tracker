@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -39,8 +40,29 @@ func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
 		)
 		prompt = prependContextSummary(prompt, compacted, fidelity)
 	} else {
-		prompt = pipeline.InjectPipelineContext(prompt, pctx)
+		capBytes, err := resolveInjectionCap(node)
+		if err != nil {
+			return "", err
+		}
+		prompt = pipeline.InjectPipelineContext(prompt, pctx, capBytes)
 	}
 
 	return prompt, nil
+}
+
+// resolveInjectionCap reads the optional injection_cap node attr (#352): the
+// byte budget for the injected "Previous Node Output" section. 0/absent means
+// pipeline.DefaultInjectedResponseCap; negative disables capping. Strict-parse
+// raw attr read (not in AgentNodeConfig): a malformed value must fail the node
+// loudly, not silently fall back to the default cap.
+func resolveInjectionCap(node *pipeline.Node) (int, error) {
+	raw := node.Attrs["injection_cap"]
+	if raw == "" {
+		return 0, nil
+	}
+	capBytes, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("node %q has malformed injection_cap %q: %w", node.ID, raw, err)
+	}
+	return capBytes, nil
 }
