@@ -33,12 +33,9 @@ workflow DeepReview
     prompt:
       The developer wants a deep review of their codebase. Their stated goal:
 
-      ${ctx.human_response}
+      ${ctx.node.DescribeGoal.human_response}
 
-      FIRST: create .ai/review/ and save the goal above VERBATIM to
-      .ai/review/goal.txt — later review stages read it from that file.
-
-      Then explore the codebase thoroughly. Map out:
+      Explore the codebase thoroughly. Map out:
       - Architecture: packages, layers, key abstractions
       - Conventions: naming, error handling, test patterns
       - Dependencies: external packages, API boundaries
@@ -56,7 +53,8 @@ workflow DeepReview
     prompt:
       Read .ai/review/exploration.md to understand what was found.
 
-      The developer wants a review focused on their stated goal (read .ai/review/goal.txt).
+      The developer wants a review focused on their stated goal:
+      ${ctx.node.DescribeGoal.human_response}
 
       Generate 3-5 targeted questions to narrow the review scope.
       Tailor options to what the exploration actually found in this specific codebase.
@@ -97,7 +95,7 @@ workflow DeepReview
     prompt:
       You are reviewing this codebase for correctness issues.
 
-      Developer's goal: read .ai/review/goal.txt
+      Developer's goal: ${ctx.node.DescribeGoal.human_response}
       Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
       Exploration: read .ai/review/exploration.md
 
@@ -126,7 +124,7 @@ workflow DeepReview
     prompt:
       You are reviewing this codebase for security vulnerabilities.
 
-      Developer's goal: read .ai/review/goal.txt
+      Developer's goal: ${ctx.node.DescribeGoal.human_response}
       Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
       Exploration: read .ai/review/exploration.md
 
@@ -159,7 +157,7 @@ workflow DeepReview
     prompt:
       You are reviewing this codebase for design and maintainability issues.
 
-      Developer's goal: read .ai/review/goal.txt
+      Developer's goal: ${ctx.node.DescribeGoal.human_response}
       Review scope (from interview, JSON-formatted interview answers): ${ctx.scope_answers}
       Exploration: read .ai/review/exploration.md
 
