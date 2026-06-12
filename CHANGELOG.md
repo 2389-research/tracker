@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **build_product no longer leaks tracker's own issue/PR numbers into
+  agent-visible text** (issue #316). The embedded built-in carried 37
+  in-prompt references (`(issue #233 Gap 3)`, `STOP WHEN GREEN AND
+  COMMITTED (issue #297)`, …) plus 27 in tool echo strings that reach
+  agent prompts via captured tool stdout — meaningless-to-distracting
+  citations for an agent building an unrelated product. Prompt text now
+  states each rule on its own terms ("Pre-#233 this verifier…" → "An
+  earlier version of this verifier…"); dev-facing `#`-comments keep
+  their references. Doctor holds A/90.
+
 - **Embedded deep_review built-in no longer grades F/35 under dippin doctor**
   (issue #335, scope 1). The workflow ships inside the binary
   (`tracker deep_review`), so an F-graded graph was a user's first

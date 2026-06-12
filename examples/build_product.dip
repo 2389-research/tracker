@@ -91,7 +91,7 @@ workflow BuildProduct
           if [ -f "$mf" ]; then MAKEFILE="$mf"; break; fi
         done
         if [ -z "$MAKEFILE" ]; then
-          echo "INFO: no Makefile present — running language-native gates (#299)"
+          echo "INFO: no Makefile present — running language-native gates"
           run_language_native_gates
           return $?
         fi
@@ -131,7 +131,7 @@ workflow BuildProduct
             return 1
           fi
         done
-        echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint) — running language-native gates (#299)"
+        echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint) — running language-native gates"
         run_language_native_gates
         return $?
       }
@@ -153,13 +153,13 @@ workflow BuildProduct
         # Go — `go vet` is the core gate (go is present by go.mod detection).
         if [ -f go.mod ]; then
           RAN_ANY=1
-          echo "--- go vet ./... (language-native gate, #299) ---"
+          echo "--- go vet ./... (language-native gate) ---"
           go vet ./... 2>&1 || LANG_RC=$?
           if command -v golangci-lint >/dev/null 2>&1; then
-            echo "--- golangci-lint run (language-native gate, #299) ---"
+            echo "--- golangci-lint run (language-native gate) ---"
             golangci-lint run 2>&1 || LANG_RC=$?
           else
-            echo "INFO: golangci-lint not installed — skipping (optional, #299)"
+            echo "INFO: golangci-lint not installed — skipping (optional)"
           fi
         fi
         # JS/TS — run-if-present AND only if the project opted into the tool
@@ -172,13 +172,13 @@ workflow BuildProduct
           RAN_ANY=1
           if [ -f tsconfig.json ]; then
             if command -v tsc >/dev/null 2>&1; then
-              echo "--- tsc --noEmit (language-native gate, #299) ---"
+              echo "--- tsc --noEmit (language-native gate) ---"
               tsc --noEmit 2>&1 || LANG_RC=$?
             else
-              echo "INFO: tsc not installed — skipping (optional, #299)"
+              echo "INFO: tsc not installed — skipping (optional)"
             fi
           else
-            echo "INFO: no tsconfig.json — skipping tsc (not a TypeScript project, #299)"
+            echo "INFO: no tsconfig.json — skipping tsc (not a TypeScript project)"
           fi
           ESLINT_CFG=""
           for ec in eslint.config.js eslint.config.mjs eslint.config.cjs eslint.config.ts .eslintrc.js .eslintrc.cjs .eslintrc.yaml .eslintrc.yml .eslintrc.json .eslintrc; do
@@ -189,29 +189,29 @@ workflow BuildProduct
           fi
           if [ -n "$ESLINT_CFG" ]; then
             if command -v eslint >/dev/null 2>&1; then
-              echo "--- eslint . (language-native gate, #299) ---"
+              echo "--- eslint . (language-native gate) ---"
               eslint . 2>&1 || LANG_RC=$?
             else
-              echo "INFO: eslint not installed — skipping (optional, #299)"
+              echo "INFO: eslint not installed — skipping (optional)"
             fi
           else
-            echo "INFO: no eslint config — skipping eslint (not configured, #299)"
+            echo "INFO: no eslint config — skipping eslint (not configured)"
           fi
         fi
         # Python — both run-if-present.
         if [ -f pyproject.toml ]; then
           RAN_ANY=1
           if command -v ruff >/dev/null 2>&1; then
-            echo "--- ruff check . (language-native gate, #299) ---"
+            echo "--- ruff check . (language-native gate) ---"
             ruff check . 2>&1 || LANG_RC=$?
           else
-            echo "INFO: ruff not installed — skipping (optional, #299)"
+            echo "INFO: ruff not installed — skipping (optional)"
           fi
           if command -v mypy >/dev/null 2>&1; then
-            echo "--- mypy . (language-native gate, #299) ---"
+            echo "--- mypy . (language-native gate) ---"
             mypy . 2>&1 || LANG_RC=$?
           else
-            echo "INFO: mypy not installed — skipping (optional, #299)"
+            echo "INFO: mypy not installed — skipping (optional)"
           fi
         fi
         # Rust — run-if-present (cargo gates both fmt and clippy).
@@ -223,23 +223,23 @@ workflow BuildProduct
             # (same class as an optional tool not installed), not a code defect,
             # so gate each subcommand on its own availability (#299).
             if cargo fmt --version >/dev/null 2>&1; then
-              echo "--- cargo fmt --check (language-native gate, #299) ---"
+              echo "--- cargo fmt --check (language-native gate) ---"
               cargo fmt --check 2>&1 || LANG_RC=$?
             else
-              echo "INFO: cargo fmt (rustfmt) not installed — skipping (optional, #299)"
+              echo "INFO: cargo fmt (rustfmt) not installed — skipping (optional)"
             fi
             if cargo clippy --version >/dev/null 2>&1; then
-              echo "--- cargo clippy -- -D warnings (language-native gate, #299) ---"
+              echo "--- cargo clippy -- -D warnings (language-native gate) ---"
               cargo clippy -- -D warnings 2>&1 || LANG_RC=$?
             else
-              echo "INFO: cargo clippy not installed — skipping (optional, #299)"
+              echo "INFO: cargo clippy not installed — skipping (optional)"
             fi
           else
-            echo "INFO: cargo not installed — skipping (optional, #299)"
+            echo "INFO: cargo not installed — skipping (optional)"
           fi
         fi
         if [ -z "$RAN_ANY" ]; then
-          echo "INFO: no recognized toolchain (go.mod/package.json/pyproject.toml/Cargo.toml) — no language-native gate (#299)"
+          echo "INFO: no recognized toolchain (go.mod/package.json/pyproject.toml/Cargo.toml) — no language-native gate"
         fi
         if [ "$LANG_RC" -ne 0 ]; then
           return 1
@@ -466,7 +466,7 @@ workflow BuildProduct
     reasoning_effort: high
     auto_status: true
     prompt:
-      SPEC COHERENCE PREFLIGHT (issue #301):
+      SPEC COHERENCE PREFLIGHT:
 
       STATUS contract — emit `STATUS:fail` as the FIRST line of your
       response, before any other text. Then run the checks below. Only
@@ -585,7 +585,7 @@ workflow BuildProduct
         any file in this milestone's file list. One line per item, naming the
         feature and the spec section that defers it. If none apply, write "none".]
 
-      The DO NOT list is the anti-scope-creep gate (issue #233 Gap 6). The
+      The DO NOT list is the anti-scope-creep gate. The
       Implement agent reads it before writing in any file in this milestone.
       Phase 1 spec sections frequently define types/functions whose live use is
       deferred to later phases; without an explicit DO NOT, the implementing
@@ -606,7 +606,7 @@ workflow BuildProduct
       TestFooBar. The test runner uses these as a regex skip pattern. Remove
       test names from this file in the milestone where they should start passing.
 
-      ── REQUIREMENT COVERAGE (issue #300, epic #308 Phase 2) ──
+      ── REQUIREMENT COVERAGE ──
       No spec-mandated verification may be left unowned. Do this in THIS
       order — the ordering is load-bearing (it stops you from back-filling
       the table to match milestones you already wrote, which would make
@@ -625,7 +625,7 @@ workflow BuildProduct
          verifications (never leave the table silently empty — a silent
          empty table hides under-extraction). Cross-check against the
          "Mandated tests" section of .ai/decisions/spec-quality.md
-         (written by the SpecLint preflight, issue #301): every test
+         (written by the SpecLint preflight): every test
          listed there must appear in this table. Table columns:
            | Mandated verification | SPEC.md source (line/section) | Owning milestone |
 
@@ -759,7 +759,7 @@ workflow BuildProduct
         responsibility — the test runner does NOT eval verify commands from the spec.
       - Commit your work with a conventional commit message referencing the milestone.
 
-      DO NOT LIST (issue #233 Gap 6):
+      DO NOT LIST:
       - Read the "DO NOT implement" lines in .ai/milestones/current.md, if any.
         These name Phase 2+ features that the spec defers. Before writing in any
         file, check whether the DO NOT list mentions it. If yes, leave those
@@ -770,7 +770,7 @@ workflow BuildProduct
         signature; it is NOT fine to make it observably active when the spec
         says it should be a no-op until a later phase.
 
-      SPEC LITERALS (issue #233 Gap 3):
+      SPEC LITERALS:
       - Before committing: for every literal value in the spec section this
         milestone covers — exact command strings, exact JSON key names, exact
         header names, exact integer constants, exact log key names — grep your
@@ -780,7 +780,7 @@ workflow BuildProduct
         why. Silent paraphrase ("--head <branch>" when the spec says
         "--head <owner>:<branch>") is the most common way milestones ship wrong.
 
-      TESTS VERIFY THE CONTRACT, NOT YOUR CODE (issue #233 Gap 3):
+      TESTS VERIFY THE CONTRACT, NOT YOUR CODE:
       - Tests must verify the spec's requirement, not whatever your
         implementation happens to do. Read each assertion you write and ask:
         "If I deleted my production code and rewrote it differently but
@@ -797,7 +797,7 @@ workflow BuildProduct
         Add a comment to the golden file naming the spec section it was
         verified against and the date.
 
-      STOP WHEN GREEN AND COMMITTED (issue #297):
+      STOP WHEN GREEN AND COMMITTED:
       - The instant the milestone verify passes AND you have committed, emit
         DONE and STOP. Do NOT perform further verification, re-reading, or
         polishing. Committing is the precondition for stopping — never end a
@@ -1010,14 +1010,14 @@ workflow BuildProduct
       replace any SPEC.md read this prompt asks for below.
 
       Read the current milestone spec at .ai/milestones/current.md.
-      Read SPEC.md (issue #233 Gap 4). Pre-#233 this verifier only read
+      Read SPEC.md. An earlier version of this verifier only read
       .ai/milestones/current.md — if Decompose dropped a requirement
       during milestone planning, or a milestone was approved with
       incomplete criteria, the verifier had no path to discover the
       gap. Reading SPEC.md directly closes that loop.
 
       TestMilestone already handled the language-stack tests AND the
-      project CI gate (issue #233 Gap 1), so the verifier does NOT
+      project CI gate, so the verifier does NOT
       need to re-run them. Note that the "TestMilestone stdout" fenced
       block at the END of this prompt is the
       tail of TestMilestone's stdout (64KB cap by default); on a
@@ -1031,7 +1031,7 @@ workflow BuildProduct
       runner was skipped; AND the project CI gate ran and returned 0
       (a Makefile `ci`/`check`/`lint` target, OR — when no such target
       ran — the language-native gates: go vet/golangci-lint, tsc/eslint,
-      ruff/mypy, cargo fmt/clippy for each detected toolchain, #299)
+      ruff/mypy, cargo fmt/clippy for each detected toolchain)
       OR there was nothing to gate (no recognized toolchain). The
       sentinel does NOT prove every check executed —
       only that none failed. Treat its presence as authoritative for
@@ -1074,7 +1074,7 @@ workflow BuildProduct
          and review the file lists manually. Files outside the
          milestone's declared list are FAIL.
 
-      3. SPEC LITERALS (issue #233 Gap 4): For every literal value in
+      3. SPEC LITERALS: For every literal value in
          the spec sections this milestone covers — exact command
          strings, exact JSON key names, exact header names, exact
          integer constants, exact log key names — grep the
@@ -1082,7 +1082,7 @@ workflow BuildProduct
          and its result inline. A missing literal is FAIL UNLESS the
          Implement step recorded an explicit deviation in
          `.ai/decisions/` that names this literal and justifies the
-         deviation. (The Implement prompt — Gap 3, PR #246 — gives
+         deviation. (The Implement prompt gives
          the implementing agent two options for any literal mismatch:
          fix the implementation OR document the deviation in
          `.ai/decisions/`. VerifyMilestone must honor the same
@@ -1102,7 +1102,7 @@ workflow BuildProduct
              with a rationale means PASS (cite the decision file);
              no hit means FAIL (cite the missing literal).
 
-      4. TEST-VERIFIES-CONTRACT (issue #233 Gap 4): For each test
+      4. TEST-VERIFIES-CONTRACT: For each test
          touched by this milestone, read its assertions and ask: "If
          the production code were deleted and rewritten differently
          but spec-conformantly, would this assertion still pass for
@@ -1115,7 +1115,7 @@ workflow BuildProduct
 
       5. SPEC GAPS BEYOND MILESTONE NOTES: For every SPEC.md bullet
          intersecting this milestone's file list (whether or not the
-         milestone notes mention it), is it satisfied? Pre-#233 the
+         milestone notes mention it), is it satisfied? An earlier version of the
          verifier only checked .ai/milestones/current.md's done-when
          criteria — so a SPEC.md bullet that Decompose dropped
          silently passed through. Cross-check against SPEC.md directly.
@@ -1132,7 +1132,7 @@ workflow BuildProduct
          dropped requirement: STATUS:fail. (This is the code-goblin miss —
          the verifier saw the 429/cancel gap and waved it through as "future
          work" with no owning milestone.) Cross-check against
-         .ai/decisions/requirement-coverage.md (written by Decompose, #300)
+         .ai/decisions/requirement-coverage.md (written by Decompose)
          when present; if it disagrees with a live SPEC.md re-read, SPEC.md
          wins.
 
@@ -1141,7 +1141,7 @@ workflow BuildProduct
          prompt is authoritative for "TestMilestone step
          succeeded" — TestMilestone prints it when its language-stack
          runner passed-or-was-validly-skipped AND its project CI gate
-         passed (a Makefile target OR the language-native gates, #299)
+         passed (a Makefile target OR the language-native gates)
          or had nothing to gate (see the preamble above for the exact
          rules). The sentinel is emitted at
          end-of-command via `printf`, and `tool_stdout` keeps the
@@ -1161,7 +1161,7 @@ workflow BuildProduct
                 EscalateMilestone)
            (iii) TEST_EXIT!=0 && ATTEMPTS<=3 → NO marker + exit 1
                 (normal in-progress failure — routes to FixMilestone;
-                a failing language-native gate (#299) folds into
+                a failing language-native gate folds into
                 TEST_EXIT here, so it routes the same way)
          Under normal routing only path (i) reaches VerifyMilestone,
          so the contract for THIS node is: "if you see me, the
@@ -1215,7 +1215,7 @@ workflow BuildProduct
       ## TestMilestone stdout
 
       Tail of TestMilestone's stdout, 64KB cap. Delimited here under its
-      own heading (#352 item 3) — never interpolated mid-sentence.
+      own heading — never interpolated mid-sentence.
 
       ```text
       ${ctx.tool_stdout}
@@ -1346,7 +1346,7 @@ workflow BuildProduct
       The instant verification passes AND you have committed, emit DONE and
       STOP. Do NOT perform further verification, re-reading, or polishing.
       Committing is the precondition for stopping — never end a session with a
-      green-but-uncommitted tree. (issue #297)
+      green-but-uncommitted tree.
 
   # ─── Phase 3: Cross-Review ─────────────────────────────────
 
@@ -1390,7 +1390,7 @@ workflow BuildProduct
       mkdir -p .ai/build
 
       if [ ! -s "$PLAN" ]; then
-        echo "ERROR: $PLAN missing or empty — cannot reconcile declared milestone outputs (#350)"
+        echo "ERROR: $PLAN missing or empty — cannot reconcile declared milestone outputs"
         echo "Decompose writes per-milestone '**Files**:' lines there; without them this gate has no declaration to check."
         printf 'outputs-missing'
         exit 1
@@ -1413,7 +1413,7 @@ workflow BuildProduct
       ' "$PLAN" > .ai/build/declared-files.raw
 
       if [ ! -s .ai/build/declared-files.raw ]; then
-        echo "ERROR: no '**Files**:' lines found in $PLAN — the Decompose output contract was violated (#350)"
+        echo "ERROR: no '**Files**:' lines found in $PLAN — the Decompose output contract was violated"
         echo "First 30 lines of the plan for diagnosis:"
         head -30 "$PLAN"
         printf 'outputs-missing'
@@ -1466,7 +1466,7 @@ workflow BuildProduct
       done < .ai/build/declared-files.list
 
       if [ "$CHECKED" -eq 0 ]; then
-        echo "ERROR: Files lines exist in $PLAN but yielded zero path-like tokens — extraction is garbled (#350)"
+        echo "ERROR: Files lines exist in $PLAN but yielded zero path-like tokens — extraction is garbled"
         echo "Raw extracted declarations:"
         cat .ai/build/declared-files.raw
         printf 'outputs-missing'
@@ -1480,7 +1480,7 @@ workflow BuildProduct
       # would break the sub-second contract for no new signal.
       BUILD_FAIL=0
       if [ -f go.mod ]; then
-        echo "--- go build ./... (structural gate, #350) ---"
+        echo "--- go build ./... (structural gate) ---"
         go build ./... 2>&1 || BUILD_FAIL=$?
       fi
 
@@ -1496,7 +1496,7 @@ workflow BuildProduct
           echo "Declared files also not on disk (these alone would not fail the gate — may be legitimate deletions):"
           for f in $MISSING_FILES; do echo "  - $f"; done
         fi
-        echo "A declared milestone output is structurally absent. Escalating BEFORE the review fan-out spends reviewer tokens (#350)."
+        echo "A declared milestone output is structurally absent. Escalating BEFORE the review fan-out spends reviewer tokens."
         printf 'outputs-missing'
         exit 1
       fi
@@ -1550,7 +1550,7 @@ workflow BuildProduct
     prompt:
       Review the COMPLETE implementation against SPEC.md. All milestones are done.
 
-      DO NOT TRUST SPEC ✅ MARKERS (issue #233 Gap 2):
+      DO NOT TRUST SPEC ✅ MARKERS:
       - SPEC.md may contain ✅ or "Done" checkmarks. These were the author's
         plan, not evidence of completion. Treat them as nothing. Verify each
         requirement against the code yourself.
@@ -1611,7 +1611,7 @@ workflow BuildProduct
     prompt:
       Review the COMPLETE implementation against SPEC.md. All milestones are done.
 
-      DO NOT TRUST SPEC ✅ MARKERS (issue #233 Gap 2):
+      DO NOT TRUST SPEC ✅ MARKERS:
       - SPEC.md may contain ✅ or "Done" checkmarks. These were the author's
         plan, not evidence of completion. Treat them as nothing. Verify each
         requirement against the code yourself.
@@ -1672,7 +1672,7 @@ workflow BuildProduct
     prompt:
       Review the COMPLETE implementation against SPEC.md. All milestones are done.
 
-      YOUR ROLE IS ADVERSARIAL (issue #233 Gap 2): steel-man the worst
+      YOUR ROLE IS ADVERSARIAL: steel-man the worst
       case. Assume the implementation is wrong somewhere — your job is
       to find where, not to confirm correctness. If every section looks
       green, look harder. The other two reviewers are generalist /
@@ -1680,7 +1680,7 @@ workflow BuildProduct
       not doing your job. "Faithful and high-quality realization" is
       a forbidden phrase in your report.
 
-      DO NOT TRUST SPEC ✅ MARKERS (issue #233 Gap 2):
+      DO NOT TRUST SPEC ✅ MARKERS:
       - SPEC.md may contain ✅ or "Done" checkmarks. These were the author's
         plan, not evidence of completion. Treat them as nothing. Verify each
         requirement against the code yourself. Reading ✅ as evidence is
@@ -1779,12 +1779,12 @@ workflow BuildProduct
       - .ai/build/review-codex.md (quality)
       - .ai/build/review-gemini.md (adversarial)
 
-      WEIGHTING RULE (issue #233 Gap 2 — weight by evidence, not vote
+      WEIGHTING RULE (weight by evidence, not vote
       count): a finding with concrete evidence (grep output, file:line,
       snippet, test code) is stronger than two PASSes without evidence.
       When one reviewer flags a contract-level FAIL with grep / file:line
       evidence and the other two say PASS without addressing that
-      specific literal or assertion, the FAIL wins. Pre-#233 this prompt
+      specific literal or assertion, the FAIL wins. An earlier version of this prompt
       treated reviewer findings as votes — a 2-vote PASS could drown a
       1-vote FAIL with concrete evidence, and on the offending run the
       synthesis missed ~33 of the 38 real audit findings because two
@@ -1904,7 +1904,7 @@ workflow BuildProduct
     fallback_target: EscalateReview
     auto_status: true
     prompt:
-      INTERFACE REACHABILITY (issue #233 Gap 7):
+      INTERFACE REACHABILITY:
 
       STATUS contract — emit `STATUS:fail` as the FIRST line of your
       response, before any other text. Begin your enumeration. Only
@@ -1947,14 +1947,13 @@ workflow BuildProduct
       the parser requires the STATUS value to be exactly `fail`,
       `success`, or `retry`, with no trailing prose on that line.
 
-      Regression cases this check exists to catch (issue #233
-      Appendix A I9, I10): `AuthStatus(ctx) error` defined and
+      Regression cases this check exists to catch: `AuthStatus(ctx) error` defined and
       unit-tested but never called from `cmd/goblin/main.go`;
       `IsRebaseInProgress() bool` defined and tested but unused in
       `internal/review/loop.go`. Both shipped green because this
       check didn't exist.
 
-      TEST QUALITY — sleep-as-fence (issue #233 Gap 8 W17):
+      TEST QUALITY — sleep-as-fence:
 
       Grep tracked test files for sleep-class calls. `git grep` is
       used throughout so dependency directories (`node_modules/`,
@@ -2015,18 +2014,18 @@ workflow BuildProduct
         "DO NOT implement" block in .ai/decisions/milestones.md records that
         deferral, citing the spec section (cite both). A future-work deferral
         that is not SPEC-documented as deferred keeps the early STATUS:fail
-        in place — do NOT emit the terminal STATUS:success (issue #300).
+        in place — do NOT emit the terminal STATUS:success.
 
       Also verify:
       - No UNEXPECTED leftover files in .ai/build/ — the workflow
-        intentionally writes helpers (ci-probe.sh from PR #246,
-        iface-reachability-rubric.md from PR #254), the re-review
-        budget counter (review_fix_attempts from Gap 5.3 of #233),
-        the per-node build-context file (build-context.md from #298),
+        intentionally writes helpers (ci-probe.sh,
+        iface-reachability-rubric.md), the re-review
+        budget counter (review_fix_attempts),
+        the per-node build-context file (build-context.md),
         and reviewers write reports (review-claude.md,
         review-codex.md, review-gemini.md). Only flag files outside
         this explicit allowlist. (.ai/decisions/*.md workflow artifacts —
-        spec-analysis, milestones, requirement-coverage (#300), compliance —
+        spec-analysis, milestones, requirement-coverage, compliance —
         are expected outputs, never "extras".)
       - No TODO/FIXME/HACK comments added
       - All "throw away" items from the spec were actually removed
@@ -2049,7 +2048,7 @@ workflow BuildProduct
       ## FinalBuild stdout
 
       Tail of FinalBuild's stdout, 64KB cap. Delimited here under its
-      own heading (#352 item 3) — never interpolated mid-sentence.
+      own heading — never interpolated mid-sentence.
 
       ```text
       ${ctx.tool_stdout}
@@ -2152,7 +2151,7 @@ workflow BuildProduct
     auto_status: true
     fallback_target: EscalateReview
     prompt:
-      FINAL COMMIT — COMMIT-ONLY SCOPE (issue #349):
+      FINAL COMMIT — COMMIT-ONLY SCOPE:
 
       STATUS contract — emit `STATUS:fail` as the FIRST line of your
       response, before any other text. Then do the work below. Only
