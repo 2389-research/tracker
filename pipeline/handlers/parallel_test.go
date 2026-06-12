@@ -1239,3 +1239,49 @@ func TestParallelHandlerGraphLevelFallbackAllowed(t *testing.T) {
 		t.Errorf("expected 2 branch executions, got %d", stub.called.Load())
 	}
 }
+
+// TestParallelHandlerRefusesBranchFallbackRetryTarget pins the second attr
+// spelling: a .dip node-level `fallback_target:` is stored by the adapter as
+// fallback_retry_target (extractRetryAttrs), and Engine.findFallbackTarget
+// honors both. The refusal must fire on either spelling, on the node's own
+// attrs and via branch.N.* overrides (Codex P1, PR #377).
+func TestParallelHandlerRefusesBranchFallbackRetryTarget(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(g *pipeline.Graph)
+	}{
+		{"node attr", func(g *pipeline.Graph) {
+			g.Nodes["branch_a"].Attrs["fallback_retry_target"] = "EscalateToHuman"
+		}},
+		{"branch override", func(g *pipeline.Graph) {
+			g.Nodes["parallel_node"].Attrs["branch.0.target"] = "branch_a"
+			g.Nodes["parallel_node"].Attrs["branch.0.fallback_retry_target"] = "EscalateToHuman"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := buildTestGraph([]string{"branch_a"}, "stub_success")
+			tc.setup(g)
+			registry := pipeline.NewHandlerRegistry()
+			stub := &stubHandler{
+				name:    "stub_success",
+				outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+			}
+			registry.Register(stub)
+
+			h := NewParallelHandler(g, registry, nil)
+			_, err := h.Execute(context.Background(), g.Nodes["parallel_node"], pipeline.NewPipelineContext())
+			if err == nil {
+				t.Fatal("expected error for branch fallback_retry_target, got nil")
+			}
+			for _, want := range []string{"branch_a", "fallback_retry_target", "fan_in_policy"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err.Error(), want)
+				}
+			}
+			if stub.called.Load() != 0 {
+				t.Errorf("no branch should run after refusal, got %d calls", stub.called.Load())
+			}
+		})
+	}
+}
