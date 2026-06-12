@@ -16,11 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `on_failure: EscalateToHuman` catch-all plus a freeform escalation gate
   (11 agent nodes had no failure route — DIP144); the `SaveGoal` tool node
   is gone (its `${ctx.human_response}` interpolation is dippin's DIP124
-  anti-pattern, plus no timeout — DIP111/DIP125): every stage that read
-  `.ai/review/goal.txt` now interpolates the per-node scoped context key
-  `${ctx.node.DescribeGoal.human_response}` directly, so the goal reaches
-  each prompt verbatim with no LLM or file intermediary that could drop or
-  rewrite it; `AnalyzeParallel` declares `fan_in_policy: all` with a fail
+  anti-pattern, plus no timeout — DIP111/DIP125): `.ai/review/goal.txt` is
+  no longer written at all — every stage that read it now interpolates the
+  per-node scoped context key `${ctx.node.DescribeGoal.human_response}`
+  directly, so the goal reaches each prompt verbatim with no LLM or file
+  intermediary that could drop or rewrite it; `AnalyzeParallel` declares
+  `fan_in_policy: all` with a fail
   edge to the gate, so a single failed analyzer can't be masked while
   `SynthesizeFindings` silently synthesizes from two reports (#313 class);
   `ApplyFormat` failure routes to the gate instead of unconditionally to
@@ -32,8 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `registry.Execute` directly, bypassing the engine's strict-failure path
   (`checkStrictFailure`/`findFallbackTarget`) — so the failure route it
   promised was silently absent. The parallel handler now fails fast before
-  dispatching any branch (covering both the target node's own attr and a
-  `branch.N.fallback_target` override), with an error pointing at the
+  dispatching any branch (covering the target node's own attr and every
+  `branch.N.*` override group — including groups shadowed by the
+  last-branch-wins duplicate-target collapse), with an error pointing at the
   supported pattern: route branch failure at the aggregating node via
   `fan_in_policy` (#344) plus a conditional fail edge. Graph-level
   `defaults: on_failure` is unaffected. No shipped example declared the
