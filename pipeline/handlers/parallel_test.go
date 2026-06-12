@@ -1074,24 +1074,24 @@ func TestParallelHandlerBranchSecurityOverrides(t *testing.T) {
 
 // TestParallelHandlerBranchWritablePathsRefusesClaudeCode verifies the #272
 // refuse-to-start matrix applies to branch-override values: a branch
-// writable_paths override on a target node that selects the claude-code
-// backend must refuse (out-of-process backends cannot be jailed), failing
-// the branch rather than starting it unjailed.
+// writable_paths override on a target node that selects a non-native
+// backend must refuse (out-of-process backends cannot be jailed) rather
+// than starting unjailed.
+//
+// The branch node is built through the SAME clone path ParallelHandler
+// uses (parseBranchOverrides + applyBranchOverrides) and pinned against
+// the dispatcher-layer gate directly. A full handler-level run with
+// `backend: claude-code` is not hermetic: when the claude CLI is absent
+// (CI), selectBackend refuses first with "claude CLI not found" — also a
+// refuse-to-start, but it would mask whether the jail gate sees the
+// branch-override value.
 func TestParallelHandlerBranchWritablePathsRefusesClaudeCode(t *testing.T) {
-	g := pipeline.NewGraph("test")
-	parallelNode := &pipeline.Node{
-		ID:      "fanout",
-		Shape:   "component",
-		Handler: "parallel",
-		Attrs: map[string]string{
-			"parallel_targets":        "AgentA",
-			"branch.0.target":         "AgentA",
-			"branch.0.writable_paths": "src/**",
-		},
+	parallelAttrs := map[string]string{
+		"parallel_targets":        "AgentA",
+		"branch.0.target":         "AgentA",
+		"branch.0.writable_paths": "src/**",
 	}
-	g.AddNode(parallelNode)
-
-	agentA := &pipeline.Node{
+	target := &pipeline.Node{
 		ID:    "AgentA",
 		Shape: "box",
 		Attrs: map[string]string{
@@ -1099,24 +1099,31 @@ func TestParallelHandlerBranchWritablePathsRefusesClaudeCode(t *testing.T) {
 			"backend": "claude-code",
 		},
 	}
-	g.AddNode(agentA)
-	g.Nodes["AgentA"].Handler = "codergen"
-	g.AddEdge(&pipeline.Edge{From: "fanout", To: "AgentA"})
 
-	registry := pipeline.NewHandlerRegistry()
-	registry.Register(NewCodergenHandler(nil, t.TempDir()))
+	overrides := parseBranchOverrides(parallelAttrs)
+	branchNode := applyBranchOverrides(target, overrides)
 
-	h := NewParallelHandler(g, registry, nil)
-	pctx := pipeline.NewPipelineContext()
-	outcome, err := h.Execute(context.Background(), parallelNode, pctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if got := branchNode.Attrs["writable_paths"]; got != "src/**" {
+		t.Fatalf("cloned branch node writable_paths = %q, want src/**", got)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
-		t.Fatalf("expected fail (jail refusal), got %q", outcome.Status)
+	cfg := branchNode.AgentConfig(nil)
+	if !cfg.WritablePathsSet {
+		t.Fatal("branch-override writable_paths did not set WritablePathsSet")
 	}
-	results, _ := pctx.Get("parallel.results")
-	if !strings.Contains(results, "writable_paths") {
-		t.Errorf("branch failure should carry the writable_paths refusal, got results: %s", results)
+
+	// The gate dispatches on the concrete backend type; ClaudeCodeBackend
+	// (any non-*NativeBackend) must refuse the branch-override value.
+	err := refuseWritablePathsOnUnsupportedBackend(branchNode, &ClaudeCodeBackend{})
+	if err == nil {
+		t.Fatal("expected refusal for branch writable_paths + claude-code backend, got nil")
+	}
+	if !strings.Contains(err.Error(), "writable_paths refuses backend") {
+		t.Errorf("err = %v, want writable_paths refusal", err)
+	}
+
+	// And the inherit side: without the branch attr, no gate fires.
+	plain := applyBranchOverrides(&pipeline.Node{ID: "B", Shape: "box", Attrs: map[string]string{"backend": "claude-code"}}, overrides)
+	if err := refuseWritablePathsOnUnsupportedBackend(plain, &ClaudeCodeBackend{}); err != nil {
+		t.Errorf("node without writable_paths refused unexpectedly: %v", err)
 	}
 }
