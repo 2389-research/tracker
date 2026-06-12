@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-39-1">v0.39.1</a>
     <a href="#v0-39-0">v0.39.0</a>
     <a href="#v0-38-1">v0.38.1</a>
     <a href="#v0-38-0">v0.38.0</a>
@@ -73,6 +74,30 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.39.1 ═══ -->
+  <section class="glass" id="v0-39-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.39.1" style="color: inherit; text-decoration: none;">v0.39.1</a></h2>
+      <span class="badge">2026-06-12</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.39.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Case-study hardening rounds 5&ndash;6 &mdash; the audit log stops double-counting, per-branch
+      security overrides actually apply, a silently-inert failure route is refused at dispatch, and the
+      embedded built-ins clean up their act.</strong> Six fixes, no breaking changes; all four embedded
+      workflows hold A grades on <code>dippin doctor</code>.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>activity.jsonl no longer logs every LLM event twice</strong> (<a href="https://github.com/2389-research/tracker/issues/354">#354</a>). The client-level trace observer and the agent session both wrote the same stream &mdash; doubling audit volume and skewing <code>tracker diagnose</code> event counts. One writer now owns the stream.</li>
+      <li><strong>Per-branch <code>tool_access:</code> / <code>writable_paths:</code> overrides reach the runtime</strong> (<a href="https://github.com/2389-research/tracker/issues/368">#368</a>). The adapter silently dropped the per-branch security overrides the IR carries; they now propagate with the same fail-closed canonicalization and jail refuse-to-start treatment as agent-level attrs, and duplicate-target branches resolve deterministically (last branch wins).</li>
+      <li><strong>Inert per-branch <code>fallback_target</code> is refused at parallel dispatch</strong> (<a href="https://github.com/2389-research/tracker/issues/313">#313</a> defect 2 &mdash; closes the issue). A fallback declared on a parallel branch target never did anything: branches bypass the engine's strict-failure path. The handler now fails fast before dispatching any branch &mdash; either attr spelling, on the target node or any <code>branch.N.*</code> group (shadowed duplicates included) &mdash; pointing at the supported pattern: <code>fan_in_policy</code> + a conditional fail edge at the aggregating node.</li>
+      <li><strong>build_product_with_superspec: a failed cross-reviewer can no longer be masked</strong> (<a href="https://github.com/2389-research/tracker/issues/313">#313</a>). <code>ReviewParallel</code> declares <code>fan_in_policy: all</code> with a fail edge to <code>EscalateToHuman</code>, so a single failed reviewer escalates instead of vanishing into success-if-any aggregation.</li>
+      <li><strong>Embedded deep_review goes from F/35 to A/100 under <code>dippin doctor</code></strong> (<a href="https://github.com/2389-research/tracker/issues/335">#335</a> scope 1). A graph-level <code>on_failure</code> catch-all + escalation gate replace eleven dead-stop failure paths; the review goal flows verbatim via the per-node scoped context key instead of an LLM-copied file; the analysis fan-out demands all three analyzers succeed.</li>
+      <li><strong>build_product stops leaking tracker's own issue/PR numbers into agent-visible text</strong> (<a href="https://github.com/2389-research/tracker/issues/316">#316</a>). 64 references excised from prompt text and tool echo strings &mdash; rules now state themselves on their own terms (<a href="https://github.com/2389-research/tracker/issues/355">#355</a> swept the last template-domain cruft, too).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.39.0 ═══ -->
   <section class="glass" id="v0-39-0" style="border-left: 3px solid var(--orange-600);">
