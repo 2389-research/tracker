@@ -31,6 +31,17 @@ workflow BuildProduct
       mkdir -p .ai/build .ai/decisions .ai/milestones
       echo '.ai/' >> .gitignore 2>/dev/null || true
       sort -u .gitignore -o .gitignore
+      # #351: keep tracker run metadata out of the product repo. CommitIfDirty
+      # runs `git add -A`, which would otherwise commit .tracker/runs/<id>/
+      # internals (prompt.md/response.md/checkpoint.json) into the user's
+      # history. Same LOCAL .git/info/exclude treatment the turn-override dir
+      # gets in ContinueWithMoreTurns (idempotent; safe outside a git repo).
+      GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
+      if [ -n "$GITDIR" ]; then
+        mkdir -p "$GITDIR/info"
+        grep -qxF ".tracker/" "$GITDIR/info/exclude" 2>/dev/null \
+          || echo ".tracker/" >> "$GITDIR/info/exclude"
+      fi
       # #318: clear any warm-continue cap counter / MaxTurns override left by a
       # prior run interrupted before its cleanup. Setup is skipped on checkpoint
       # resume (already completed), so a deliberately-resumed run keeps its state;
@@ -1221,15 +1232,24 @@ workflow BuildProduct
         fi
         TITLE=$(head -1 .ai/milestones/current.md 2>/dev/null)
         [ -n "$TITLE" ] || TITLE="## Milestone $NEXT"
-        FILES=$(git diff --name-only "${BASE}..HEAD" 2>/dev/null | sed '/^$/d')
+        FILES_ALL=$(git diff --name-only "${BASE}..HEAD" 2>/dev/null | sed '/^$/d')
+        # #351 belt-and-braces: filter tracker run metadata and the build-context
+        # machinery itself out of the Files: lines so they carry source signal,
+        # not pipeline internals. (.ai/ is gitignored at Setup and .tracker/ is
+        # excluded via .git/info/exclude, but a pre-existing tree or an agent
+        # rewriting .gitignore can still land them in checkpoint commits.)
+        FILES=$(printf '%s\n' "$FILES_ALL" | grep -vE '^\.tracker/|^\.ai/build/' || true)
         NFILES=$(printf '%s\n' "$FILES" | grep -c . || true)
+        NALL=$(printf '%s\n' "$FILES_ALL" | grep -c . || true)
         # Summary = this milestone's newest commit subject, read from HEAD
         # directly. NOT the BASE..HEAD range: when BASE is the empty tree (first
         # milestone / unreachable START), `git log <tree>..HEAD` leans on lenient
         # `^<tree>` handling that isn't guaranteed across git versions. Gate on
-        # NFILES so a no-op "mark done" milestone (zero files, HEAD unmoved)
-        # degrades to the title instead of echoing the prior milestone's subject.
-        if [ "$NFILES" -eq 0 ]; then
+        # NALL (the unfiltered count) so a no-op "mark done" milestone (zero
+        # files, HEAD unmoved) degrades to the title instead of echoing the
+        # prior milestone's subject — metadata-only commits still moved HEAD,
+        # so their subject is genuinely this milestone's.
+        if [ "$NALL" -eq 0 ]; then
           SUMMARY="$TITLE"
         else
           SUMMARY=$(git log -1 --format=%s HEAD 2>/dev/null)
@@ -1239,7 +1259,13 @@ workflow BuildProduct
           echo
           echo "$TITLE"
           if [ "$NFILES" -eq 0 ]; then
-            echo "Files: (none)"
+            # Distinguish "nothing changed" from "everything was filtered" —
+            # an empty Files: line must say why, not print nothing (#351).
+            if [ "$NALL" -gt 0 ]; then
+              echo "Files: (only tracker/build metadata changed)"
+            else
+              echo "Files: (none)"
+            fi
           else
             printf 'Files: %s\n' "$(printf '%s\n' "$FILES" | head -12 | paste -sd, -)"
             [ "$NFILES" -gt 12 ] && echo "Files: … and $((NFILES - 12)) more"
