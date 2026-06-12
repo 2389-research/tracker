@@ -9,6 +9,9 @@ workflow DeepReview
     model: claude-sonnet-4-6
     provider: anthropic
     fidelity: summary:high
+    # Graph-level catch-all: any node failure with no node-level route
+    # escalates to a human instead of dead-stopping mid-review.
+    on_failure: EscalateToHuman
 
   agent Start
     label: Start
@@ -22,22 +25,20 @@ workflow DeepReview
     label: "What are you trying to review? Describe the codebase area, recent changes, or specific concerns."
     mode: freeform
 
-  tool SaveGoal
-    label: "Snapshot the developer's goal"
-    command:
-      mkdir -p .ai/review
-      printf '%s\n' "${ctx.human_response}" > .ai/review/goal.txt
-      echo "Goal saved to .ai/review/goal.txt"
-
   agent ExploreCodebase
     label: "Explore Codebase"
     model: claude-sonnet-4-6
     reasoning_effort: high
     fidelity: full
     prompt:
-      The developer wants a deep review of their codebase (read .ai/review/goal.txt for original goal).
+      The developer wants a deep review of their codebase. Their stated goal:
 
-      Explore the codebase thoroughly. Map out:
+      ${ctx.human_response}
+
+      FIRST: create .ai/review/ and save the goal above VERBATIM to
+      .ai/review/goal.txt — later review stages read it from that file.
+
+      Then explore the codebase thoroughly. Map out:
       - Architecture: packages, layers, key abstractions
       - Conventions: naming, error handling, test patterns
       - Dependencies: external packages, API boundaries
@@ -85,6 +86,8 @@ workflow DeepReview
   # ─── Phase 3: Deep Analysis ────────────────────────────────
 
   parallel AnalyzeParallel -> AnalyzeCorrectness, AnalyzeSecurity, AnalyzeDesign
+    params:
+      fan_in_policy: all
 
   agent AnalyzeCorrectness
     label: "Correctness Analysis"
@@ -344,15 +347,23 @@ workflow DeepReview
       3. If the plan mentions specific code changes, verify the file paths
          still exist and the line numbers are approximately correct
 
+  human EscalateToHuman
+    label: "The review hit a problem it could not recover from. Review the partial artifacts under .ai/review/ and decide how to proceed."
+    mode: freeform
+
   # ─── Edges ─────────────────────────────────────────────────
 
   edges
     Start -> DescribeGoal
-    DescribeGoal -> SaveGoal
-    SaveGoal -> ExploreCodebase
+    DescribeGoal -> ExploreCodebase
     ExploreCodebase -> GenerateScopeQuestions
     GenerateScopeQuestions -> ScopeInterview
     ScopeInterview -> AnalyzeParallel
+    # The three analyzers run as parallel branches; AnalyzeParallel declares
+    # fan_in_policy: all (issue #313), so a single failed analyzer routes
+    # here instead of being masked by success-if-any aggregation —
+    # SynthesizeFindings needs all three reports to produce a sound synthesis.
+    AnalyzeParallel -> EscalateToHuman  when ctx.outcome = fail
     AnalyzeCorrectness -> AnalyzeJoin
     AnalyzeSecurity -> AnalyzeJoin
     AnalyzeDesign -> AnalyzeJoin
@@ -366,4 +377,9 @@ workflow DeepReview
     ReviewPlan -> ApplyFormat                label: "approve"
     ReviewPlan -> WriteRemediationPlan       label: "revise"  restart: true
     ReviewPlan -> Done                       label: "reject"
-    ApplyFormat -> Done
+    # Safe fallback: a failed finalize routes to the escalation gate, not
+    # silently to Done (and gives EscalateToHuman an unconditional inbound
+    # edge so it is not skippable-only — DIP101).
+    ApplyFormat -> Done                      when ctx.outcome = success
+    ApplyFormat -> EscalateToHuman
+    EscalateToHuman -> Done
