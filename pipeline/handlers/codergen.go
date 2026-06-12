@@ -796,15 +796,13 @@ func classifyBreach(policy string, r agent.SessionResult, native bool) (pipeline
 func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	config := agent.DefaultConfig()
 
-	if h.workingDir != "" {
-		config.WorkingDir = h.workingDir
+	// Single resolver shared with the #347 runtime-facts block, so the prompt
+	// can never claim a different directory than the session actually uses.
+	if wd := h.effectiveWorkingDir(node); wd != "" {
+		config.WorkingDir = wd
 	}
 
 	cfg := node.AgentConfig(h.graphAttrs)
-
-	if cfg.WorkingDir != "" {
-		config.WorkingDir = cfg.WorkingDir
-	}
 
 	if cfg.Backend != "" {
 		// Normalize the documented "codergen" alias to "native" before the
