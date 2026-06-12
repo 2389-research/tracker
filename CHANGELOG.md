@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **build_product: domain-neutral FixMilestone example** (issue #355). The
+  "If a test expects story events to NOT merge" clause was leftover domain
+  language from whatever product the template was first written against,
+  shipping verbatim into FixMilestone's instructions on unrelated builds.
+  Now reads "two records" — same root-cause-over-symptom point, no foreign
+  domain anchor. Swept the rest of the file; no other "story" leftovers.
+
 - **Per-branch `tool_access:` / `writable_paths:` overrides are no longer
   silently dropped** (issue #368). Same silent-drop class as #366:
   `extractParallelAttrs` serialized per-branch Model/Provider/Fidelity from
