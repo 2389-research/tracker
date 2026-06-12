@@ -473,6 +473,20 @@ func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
 		if branch.Fidelity != "" {
 			attrs[prefix+"fidelity"] = branch.Fidelity
 		}
+		// Per-branch security overrides (issue #368). Empty INHERITS the
+		// target agent's value (per the IR doc comments) — the attr is
+		// only written when non-empty, so the parallel handler's clone
+		// keeps the agent's own attr otherwise; it never resets to the
+		// full tool catalog or unbounded writes. Encodings mirror the
+		// agent-level attrs exactly: tool_access trims whitespace-only to
+		// unset (#366), writable_paths comma-joins so AgentConfig parses
+		// branch values identically (incl. the #272 fail-closed states).
+		if strings.TrimSpace(branch.ToolAccess) != "" {
+			attrs[prefix+"tool_access"] = branch.ToolAccess
+		}
+		if len(branch.WritablePaths) > 0 {
+			attrs[prefix+"writable_paths"] = strings.Join(branch.WritablePaths, ",")
+		}
 	}
 	// Generic params pass-through (dippin-lang v0.39.0, #313) — e.g.
 	// fan_in_policy / quorum. Typed fields above take precedence.

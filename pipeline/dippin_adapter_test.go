@@ -2495,3 +2495,59 @@ func TestExtractAgentAttrs_ToolAccess(t *testing.T) {
 		}
 	})
 }
+
+func TestExtractParallelAttrs_BranchSecurityOverrides(t *testing.T) {
+	t.Run("tool_access and writable_paths serialize as branch attrs", func(t *testing.T) {
+		// Issue #368: per-branch security overrides were silently dropped.
+		// writable_paths uses the SAME comma-join encoding as the agent-level
+		// attr so AgentConfig parses branch values identically.
+		cfg := ir.ParallelConfig{
+			Branches: []ir.BranchConfig{
+				{Target: "A", ToolAccess: "none", WritablePaths: []string{"src/**", "docs/*.md"}},
+				{Target: "B"},
+			},
+		}
+		attrs := map[string]string{}
+		extractParallelAttrs(cfg, attrs)
+		if got := attrs["branch.0.tool_access"]; got != "none" {
+			t.Errorf("branch.0.tool_access = %q, want none", got)
+		}
+		if got := attrs["branch.0.writable_paths"]; got != "src/**,docs/*.md" {
+			t.Errorf("branch.0.writable_paths = %q, want src/**,docs/*.md", got)
+		}
+	})
+
+	t.Run("empty values inherit — no attr written", func(t *testing.T) {
+		// Per IR doc comments: empty INHERITS the target agent's value,
+		// never resets to full catalog / unbounded. Absent attr = the
+		// cloned branch node keeps the agent's own attr.
+		cfg := ir.ParallelConfig{
+			Branches: []ir.BranchConfig{
+				{Target: "A"},
+			},
+		}
+		attrs := map[string]string{}
+		extractParallelAttrs(cfg, attrs)
+		if v, ok := attrs["branch.0.tool_access"]; ok {
+			t.Errorf("branch.0.tool_access present = %q, want absent (inherit)", v)
+		}
+		if v, ok := attrs["branch.0.writable_paths"]; ok {
+			t.Errorf("branch.0.writable_paths present = %q, want absent (inherit)", v)
+		}
+	})
+
+	t.Run("whitespace-only tool_access = no attr", func(t *testing.T) {
+		// Mirrors the agent-level rule (#366): whitespace-only is
+		// semantically unset; don't claim the attr.
+		cfg := ir.ParallelConfig{
+			Branches: []ir.BranchConfig{
+				{Target: "A", ToolAccess: "   "},
+			},
+		}
+		attrs := map[string]string{}
+		extractParallelAttrs(cfg, attrs)
+		if v, ok := attrs["branch.0.tool_access"]; ok {
+			t.Errorf("branch.0.tool_access present = %q, want absent", v)
+		}
+	})
+}

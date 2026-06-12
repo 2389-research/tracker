@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Per-branch `tool_access:` / `writable_paths:` overrides are no longer
+  silently dropped** (issue #368). Same silent-drop class as #366:
+  `extractParallelAttrs` serialized per-branch Model/Provider/Fidelity from
+  block-form `parallel` branches but never read `BranchConfig.ToolAccess` or
+  `BranchConfig.WritablePaths`, so the per-branch security overrides the IR
+  carries and lints never reached the runtime. The adapter now writes
+  `branch.N.tool_access` / `branch.N.writable_paths` using the same
+  encodings as the agent-level attrs (whitespace-only tool_access stays
+  unset; writable_paths comma-joined), and only when non-empty — empty
+  inherits the target agent's own value, never resetting to the full tool
+  catalog or unbounded writes. The parallel handler's generic branch-attr
+  clone applies them, so branch values get the existing fail-closed
+  treatment for free: tool_access canonicalization (#258/#366) and the
+  #272 writable_paths refuse-to-start matrix (pinned by a test that a
+  branch writable_paths override on a claude-code-backend target refuses
+  rather than starting unjailed).
+
 - **activity.jsonl no longer logs every llm event twice** (issue #354). The
   same LLM stream was written by two independent observers — the client-level
   trace observer (short kinds: `request_start`, `text`, `finish`,

@@ -992,3 +992,159 @@ func TestParallel_NoBranchOverrides_NilAggregate(t *testing.T) {
 		t.Errorf("ChildOverride = %+v, want nil (no branches propagated overrides)", outcome.ChildOverride)
 	}
 }
+
+// TestParallelHandlerBranchSecurityOverrides verifies end-to-end that
+// branch.N.tool_access / branch.N.writable_paths flow through the generic
+// branch-override clone onto the executed node, and that a branch WITHOUT
+// the attrs inherits the target agent's own values — branch-if-non-empty-
+// else-agent, never resetting to full catalog / unbounded (issue #368).
+func TestParallelHandlerBranchSecurityOverrides(t *testing.T) {
+	g := pipeline.NewGraph("test")
+	parallelNode := &pipeline.Node{
+		ID:      "fanout",
+		Shape:   "component",
+		Handler: "parallel",
+		Attrs: map[string]string{
+			"parallel_targets":        "AgentA,AgentB",
+			"branch.0.target":         "AgentA",
+			"branch.0.tool_access":    "none",
+			"branch.0.writable_paths": "src/**,docs/*.md",
+			"branch.1.target":         "AgentB",
+			// AgentB: no security overrides — must inherit its own attrs.
+		},
+	}
+	g.AddNode(parallelNode)
+
+	agentA := &pipeline.Node{ID: "AgentA", Shape: "box", Attrs: map[string]string{}}
+	agentB := &pipeline.Node{
+		ID:    "AgentB",
+		Shape: "box",
+		// Agent-level security config that the branch must NOT reset.
+		Attrs: map[string]string{"tool_access": "none", "writable_paths": "lib/**"},
+	}
+	g.AddNode(agentA)
+	g.AddNode(agentB)
+	g.Nodes["AgentA"].Handler = "stub_security"
+	g.Nodes["AgentB"].Handler = "stub_security"
+	g.AddEdge(&pipeline.Edge{From: "fanout", To: "AgentA"})
+	g.AddEdge(&pipeline.Edge{From: "fanout", To: "AgentB"})
+
+	configs := make(map[string]pipeline.AgentNodeConfig)
+	var mu sync.Mutex
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(&stubHandler{
+		name: "stub_security",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			mu.Lock()
+			configs[node.ID] = node.AgentConfig(nil)
+			mu.Unlock()
+			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+		},
+	})
+
+	h := NewParallelHandler(g, registry, nil)
+	outcome, err := h.Execute(context.Background(), parallelNode, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
+		t.Fatalf("expected success, got %q", outcome.Status)
+	}
+
+	a := configs["AgentA"]
+	if a.ToolAccess != "none" {
+		t.Errorf("AgentA ToolAccess = %q, want none (branch override)", a.ToolAccess)
+	}
+	if !a.WritablePathsSet {
+		t.Error("AgentA WritablePathsSet = false, want true (branch override)")
+	}
+	if len(a.WritablePaths) != 2 || a.WritablePaths[0] != "src/**" || a.WritablePaths[1] != "docs/*.md" {
+		t.Errorf("AgentA WritablePaths = %v, want [src/** docs/*.md]", a.WritablePaths)
+	}
+
+	b := configs["AgentB"]
+	if b.ToolAccess != "none" {
+		t.Errorf("AgentB ToolAccess = %q, want none (inherited from agent attrs)", b.ToolAccess)
+	}
+	if !b.WritablePathsSet || len(b.WritablePaths) != 1 || b.WritablePaths[0] != "lib/**" {
+		t.Errorf("AgentB WritablePaths = %v (set=%v), want [lib/**] (inherited)", b.WritablePaths, b.WritablePathsSet)
+	}
+}
+
+// TestParallelHandlerBranchWritablePathsRefusesClaudeCode verifies the #272
+// refuse-to-start matrix applies to branch-override values: a branch
+// writable_paths override on a target node that selects a non-native
+// backend must refuse (out-of-process backends cannot be jailed) rather
+// than starting unjailed.
+//
+// The branch node is built through the SAME clone path ParallelHandler
+// uses (parseBranchOverrides + applyBranchOverrides) and pinned against
+// the dispatcher-layer gate directly. A full handler-level run with
+// `backend: claude-code` is not hermetic: when the claude CLI is absent
+// (CI), selectBackend refuses first with "claude CLI not found" — also a
+// refuse-to-start, but it would mask whether the jail gate sees the
+// branch-override value.
+func TestParallelHandlerBranchWritablePathsRefusesClaudeCode(t *testing.T) {
+	parallelAttrs := map[string]string{
+		"parallel_targets":        "AgentA",
+		"branch.0.target":         "AgentA",
+		"branch.0.writable_paths": "src/**",
+	}
+	target := &pipeline.Node{
+		ID:    "AgentA",
+		Shape: "box",
+		Attrs: map[string]string{
+			"prompt":  "do work",
+			"backend": "claude-code",
+		},
+	}
+
+	overrides := parseBranchOverrides(parallelAttrs)
+	branchNode := applyBranchOverrides(target, overrides)
+
+	if got := branchNode.Attrs["writable_paths"]; got != "src/**" {
+		t.Fatalf("cloned branch node writable_paths = %q, want src/**", got)
+	}
+	cfg := branchNode.AgentConfig(nil)
+	if !cfg.WritablePathsSet {
+		t.Fatal("branch-override writable_paths did not set WritablePathsSet")
+	}
+
+	// The gate dispatches on the concrete backend type; ClaudeCodeBackend
+	// (any non-*NativeBackend) must refuse the branch-override value.
+	err := refuseWritablePathsOnUnsupportedBackend(branchNode, &ClaudeCodeBackend{})
+	if err == nil {
+		t.Fatal("expected refusal for branch writable_paths + claude-code backend, got nil")
+	}
+	if !strings.Contains(err.Error(), "writable_paths refuses backend") {
+		t.Errorf("err = %v, want writable_paths refusal", err)
+	}
+
+	// And the inherit side: without the branch attr, no gate fires.
+	plain := applyBranchOverrides(&pipeline.Node{ID: "B", Shape: "box", Attrs: map[string]string{"backend": "claude-code"}}, overrides)
+	if err := refuseWritablePathsOnUnsupportedBackend(plain, &ClaudeCodeBackend{}); err != nil {
+		t.Errorf("node without writable_paths refused unexpectedly: %v", err)
+	}
+}
+
+// TestParseBranchOverrides_DuplicateTargetLastBranchWins pins deterministic
+// resolution when multiple branches name the same target: the highest
+// branch index wins (matching dippin's "last value wins" convention for
+// duplicate keys). Before this pin the winner was Go map iteration order —
+// nondeterministic, which matters for security overrides like tool_access
+// (Codex review on #375).
+func TestParseBranchOverrides_DuplicateTargetLastBranchWins(t *testing.T) {
+	attrs := map[string]string{}
+	for i := 0; i < 8; i++ {
+		attrs[fmt.Sprintf("branch.%d.target", i)] = "AgentA"
+		attrs[fmt.Sprintf("branch.%d.tool_access", i)] = fmt.Sprintf("value-%d", i)
+	}
+
+	for run := 0; run < 20; run++ {
+		overrides := parseBranchOverrides(attrs)
+		if got := overrides["AgentA"]["tool_access"]; got != "value-7" {
+			t.Fatalf("run %d: tool_access = %q, want value-7 (last branch wins)", run, got)
+		}
+	}
+}
