@@ -1340,7 +1340,7 @@ workflow BuildProduct
       5. Run the specific failing test to verify before committing
       6. Commit the fix with a message like "fix(milestone-N): [what was fixed]"
 
-      Do NOT make superficial patches. If a test expects story events to NOT
+      Do NOT make superficial patches. If a test expects two records to NOT
       merge, understand WHY they're merging and fix the decision logic.
 
       The instant verification passes AND you have committed, emit DONE and
