@@ -2427,3 +2427,71 @@ func TestExtractAgentAttrs_WritablePaths(t *testing.T) {
 		}
 	})
 }
+
+func TestExtractAgentAttrs_ToolAccess(t *testing.T) {
+	t.Run("typed field populates attrs", func(t *testing.T) {
+		// Issue #366: top-level `tool_access: none` is the documented form;
+		// the adapter must copy the typed IR field, not just Params.
+		cfg := ir.AgentConfig{
+			ToolAccess: "none",
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		got, ok := attrs["tool_access"]
+		if !ok {
+			t.Fatal("attrs missing tool_access key")
+		}
+		if got != "none" {
+			t.Errorf("attrs[tool_access] = %q, want %q", got, "none")
+		}
+	})
+
+	t.Run("typed field wins over conflicting Params", func(t *testing.T) {
+		cfg := ir.AgentConfig{
+			ToolAccess: "none",
+			Params:     map[string]string{"tool_access": "full"},
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		if attrs["tool_access"] != "none" {
+			t.Errorf("Params override won (got %q); typed field should have won (want %q)",
+				attrs["tool_access"], "none")
+		}
+	})
+
+	t.Run("Params form still works when typed empty", func(t *testing.T) {
+		// Back-compat: the params: spelling enforced before #366 and must
+		// keep enforcing after.
+		cfg := ir.AgentConfig{
+			Params: map[string]string{"tool_access": "none"},
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		if attrs["tool_access"] != "none" {
+			t.Errorf("attrs[tool_access] = %q, want %q", attrs["tool_access"], "none")
+		}
+	})
+
+	t.Run("whitespace-only typed field = no attr", func(t *testing.T) {
+		// Whitespace-only is semantically unset:
+		// agent.SessionConfig.IsToolAccessRestricted trims before checking,
+		// so " " would read as unrestricted anyway. Don't claim the attr.
+		cfg := ir.AgentConfig{
+			ToolAccess: "   ",
+		}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		if _, ok := attrs["tool_access"]; ok {
+			t.Errorf("attrs has tool_access key = %q, want absent", attrs["tool_access"])
+		}
+	})
+
+	t.Run("typed empty + no params = no attr", func(t *testing.T) {
+		cfg := ir.AgentConfig{}
+		attrs := map[string]string{}
+		extractAgentAttrs(cfg, attrs)
+		if _, ok := attrs["tool_access"]; ok {
+			t.Errorf("attrs has tool_access key = %q, want absent", attrs["tool_access"])
+		}
+	})
+}
