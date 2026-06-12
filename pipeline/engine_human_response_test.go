@@ -246,12 +246,14 @@ func TestEngineHumanResponseNotClearedByNonConsumingNodes(t *testing.T) {
 }
 
 func TestEngineHumanResponseConsumedByParallel(t *testing.T) {
-	// The parallel handler resolves branch prompts (which receive the
-	// injection), so a parallel node counts as a consumer.
+	// A parallel node whose branches include a codergen node resolves branch
+	// prompts (which receive the injection), so it counts as a consumer.
 	g := NewGraph("human_response_parallel")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
 	g.AddNode(&Node{ID: "Gate", Shape: "hexagon", Label: "Gate"})
-	g.AddNode(&Node{ID: "P", Shape: "component", Label: "Parallel"})
+	g.AddNode(&Node{ID: "P", Shape: "component", Label: "Parallel",
+		Attrs: map[string]string{"parallel_targets": "B1"}})
+	g.AddNode(&Node{ID: "B1", Shape: "box", Label: "Branch"})
 	g.AddNode(&Node{ID: "A", Shape: "box", Label: "A"})
 	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
 	g.AddEdge(&Edge{From: "s", To: "Gate"})
@@ -266,7 +268,36 @@ func TestEngineHumanResponseConsumedByParallel(t *testing.T) {
 		t.Fatalf("engine run failed: %v", err)
 	}
 	if got, _ := rec.last("A"); got != "" {
-		t.Errorf("parallel node should consume human_response; A got %q", got)
+		t.Errorf("parallel node with a codergen branch should consume human_response; A got %q", got)
+	}
+}
+
+func TestEngineHumanResponseNotConsumedByToolOnlyParallel(t *testing.T) {
+	// A parallel fan-out whose branches are all non-LLM handlers (a tool-only
+	// validation fan-out, say) resolves no prompts — it must NOT consume the
+	// response; the first real codergen node after the join still gets it.
+	g := NewGraph("human_response_parallel_tools")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "Gate", Shape: "hexagon", Label: "Gate"})
+	g.AddNode(&Node{ID: "P", Shape: "component", Label: "Parallel",
+		Attrs: map[string]string{"parallel_targets": "T1, T2"}})
+	g.AddNode(&Node{ID: "T1", Shape: "parallelogram", Label: "Tool1"})
+	g.AddNode(&Node{ID: "T2", Shape: "parallelogram", Label: "Tool2"})
+	g.AddNode(&Node{ID: "A", Shape: "box", Label: "A"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "Gate"})
+	g.AddEdge(&Edge{From: "Gate", To: "P"})
+	g.AddEdge(&Edge{From: "P", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "end"})
+
+	reg, rec := newHumanResponseHarness("approve")
+
+	engine := NewEngine(g, reg)
+	if _, err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if got, _ := rec.last("A"); got != "approve" {
+		t.Errorf("tool-only parallel must not consume human_response; A got %q", got)
 	}
 }
 
