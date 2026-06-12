@@ -1324,3 +1324,35 @@ func TestParallelHandlerRefusesFallbackOnShadowedDuplicateTargetBranch(t *testin
 		})
 	}
 }
+
+// TestParallelHandlerRefusalReportsHighestBranchIndexFallback pins
+// deterministic refusal output (Copilot, PR #380): when multiple branch.N.*
+// groups declare a fallback for the same target, the guard must visit
+// indices in ascending order so the highest index's value is the one
+// reported — matching the last-branch-wins duplicate-target convention
+// (#368) — instead of whichever group map iteration yields. Looped to catch
+// map-order flakiness, mirroring the #368 determinism test.
+func TestParallelHandlerRefusalReportsHighestBranchIndexFallback(t *testing.T) {
+	for run := 0; run < 20; run++ {
+		g := buildTestGraph([]string{"branch_a"}, "stub_success")
+		pn := g.Nodes["parallel_node"]
+		for i := 0; i < 8; i++ {
+			pn.Attrs[fmt.Sprintf("branch.%d.target", i)] = "branch_a"
+			pn.Attrs[fmt.Sprintf("branch.%d.fallback_target", i)] = fmt.Sprintf("Escalate%d", i)
+		}
+		registry := pipeline.NewHandlerRegistry()
+		registry.Register(&stubHandler{
+			name:    "stub_success",
+			outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		})
+
+		h := NewParallelHandler(g, registry, nil)
+		_, err := h.Execute(context.Background(), pn, pipeline.NewPipelineContext())
+		if err == nil {
+			t.Fatalf("run %d: expected refusal, got nil", run)
+		}
+		if !strings.Contains(err.Error(), `"Escalate7"`) {
+			t.Fatalf("run %d: refusal should report highest-index value Escalate7, got: %v", run, err)
+		}
+	}
+}

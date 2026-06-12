@@ -187,8 +187,14 @@ var branchFallbackAttrs = []string{"fallback_target", "fallback_retry_target"}
 func refuseBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, parallelAttrs map[string]string) error {
 	// target node ID → fallback attr spelling → declared value, across ALL
 	// branch.N.* groups naming that target (not just the surviving one).
+	// Indices are visited in ascending order so that when several groups
+	// declare a fallback for the same target, the highest index's value is
+	// the one reported — deterministic output, matching the last-branch-wins
+	// duplicate-target convention (#368).
+	indexed := indexBranchAttrs(parallelAttrs)
 	declaredByTarget := make(map[string]map[string]string)
-	for _, branchAttrs := range indexBranchAttrs(parallelAttrs) {
+	for _, idx := range slices.Sorted(maps.Keys(indexed)) {
+		branchAttrs := indexed[idx]
 		target := branchAttrs["target"]
 		if target == "" {
 			continue
