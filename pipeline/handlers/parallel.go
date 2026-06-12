@@ -73,7 +73,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// passes through Engine.checkStrictFailure/findFallbackTarget, so the
 	// attr would be silently inert at runtime. Route branch failure at the
 	// aggregating node instead (fan_in_policy + a conditional fail edge).
-	if err := refuseBranchFallbackTargets(node.ID, edges, h.graph, branchOverrides); err != nil {
+	if err := refuseBranchFallbackTargets(node.ID, edges, h.graph, node.Attrs); err != nil {
 		return pipeline.Outcome{}, err
 	}
 
@@ -173,23 +173,49 @@ func aggregateChildOverrides(branchOverrides [][]pipeline.OverrideDetail) []pipe
 // stores a .dip node-level `fallback_target:` declaration.
 var branchFallbackAttrs = []string{"fallback_target", "fallback_retry_target"}
 
-// refuseBranchFallbackTargets fails fast when any branch-target node (or a
-// branch.N.* override) declares a node-level fallback target under either
-// spelling. Branch nodes execute via registry.Execute inside runBranch and
-// never reach the engine's strict-failure path, so the attr would do nothing
-// at runtime — refusing loudly beats shipping a silently-inert failure route
-// (#313 defect 2). Graph-level fallback_target (dippin `defaults:
-// on_failure`) is unaffected: it lives on graph attrs and applies in the
-// engine's main loop.
-func refuseBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, branchOverrides map[string]map[string]string) error {
+// refuseBranchFallbackTargets fails fast when any branch-target node (or any
+// branch.N.* override group) declares a node-level fallback target under
+// either spelling. Branch nodes execute via registry.Execute inside runBranch
+// and never reach the engine's strict-failure path, so the attr would do
+// nothing at runtime — refusing loudly beats shipping a silently-inert
+// failure route (#313 defect 2). The scan reads the raw indexed branch attrs
+// rather than the collapsed target-keyed override map: with duplicate-target
+// branches the collapse keeps only the highest index wholesale (#368), which
+// would hide an earlier branch's equally-dead fallback declaration (Copilot,
+// PR #377). Graph-level fallback_target (dippin `defaults: on_failure`) is
+// unaffected: it lives on graph attrs and applies in the engine's main loop.
+func refuseBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, parallelAttrs map[string]string) error {
+	// target node ID → fallback attr spelling → declared value, across ALL
+	// branch.N.* groups naming that target (not just the surviving one).
+	// Indices are visited in ascending order so that when several groups
+	// declare a fallback for the same target, the highest index's value is
+	// the one reported — deterministic output, matching the last-branch-wins
+	// duplicate-target convention (#368).
+	indexed := indexBranchAttrs(parallelAttrs)
+	declaredByTarget := make(map[string]map[string]string)
+	for _, idx := range slices.Sorted(maps.Keys(indexed)) {
+		branchAttrs := indexed[idx]
+		target := branchAttrs["target"]
+		if target == "" {
+			continue
+		}
+		for _, attr := range branchFallbackAttrs {
+			if v := branchAttrs[attr]; v != "" {
+				if declaredByTarget[target] == nil {
+					declaredByTarget[target] = make(map[string]string)
+				}
+				declaredByTarget[target][attr] = v
+			}
+		}
+	}
 	for _, edge := range edges {
 		for _, attr := range branchFallbackAttrs {
 			declared := ""
 			if tn, ok := graph.Nodes[edge.To]; ok {
 				declared = tn.Attrs[attr]
 			}
-			if ov, ok := branchOverrides[edge.To]; ok && ov[attr] != "" {
-				declared = ov[attr]
+			if v := declaredByTarget[edge.To][attr]; v != "" {
+				declared = v
 			}
 			if declared != "" {
 				return fmt.Errorf("parallel node %q: branch target %q declares %s %q, which is never honored inside a parallel branch — remove it and route branch failure at the aggregating node via fan_in_policy (any|all|quorum) and a conditional fail edge", parallelID, edge.To, attr, declared)
