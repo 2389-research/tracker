@@ -47,6 +47,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   injection) and 4 (accept ⇒ override semantics) are tracked separately
   as #352 and #348/#271.
 
+- **CommitIfDirty no longer commits `.tracker/` run metadata into the
+  product repo** (issue #351, items 1–2). In case-study run b68b532619c3,
+  CommitIfDirty's `git add -A` swept `.tracker/runs/<id>/` internals
+  (prompt.md/response.md/checkpoint.json) into checkpoint commits —
+  polluting the product's history and dominating the #298 build-context
+  `Files:` lines with tracker noise, which effectively disabled the
+  per-node orientation file. `build_product.dip`'s Setup now adds
+  `.tracker/` to the local `.git/info/exclude` (the same idempotent
+  treatment the turn-override dir already gets) and untracks any
+  `.tracker/` files a pre-fix run already committed (ignore rules only
+  affect untracked paths), and MarkMilestoneDone filters `^\.tracker/`
+  and `^\.ai/build/` out of the `Files:` list as
+  belt-and-braces — saying "(only tracker/build metadata changed)"
+  explicitly when the filter empties the list, and gating the Summary
+  line on the unfiltered count so HEAD-moved detection is unchanged.
+  `build_product_with_superspec.dip` has no `git add -A` tool node
+  (its FinalCommit is the #349-guarded agent), so it needs no change.
+  Item 3 (refreshing the architecture section at MarkMilestoneDone) is
+  not included.
+
 ## [0.38.1] - 2026-06-11
 
 ### Fixed
