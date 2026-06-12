@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-39-0">v0.39.0</a>
     <a href="#v0-38-1">v0.38.1</a>
     <a href="#v0-38-0">v0.38.0</a>
     <a href="#v0-37-0">v0.37.0</a>
@@ -72,6 +73,33 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.39.0 ═══ -->
+  <section class="glass" id="v0-39-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.39.0" style="color: inherit; text-decoration: none;">v0.39.0</a></h2>
+      <span class="badge">2026-06-12</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.39.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>The case-study hardening arc lands &mdash; agents stop hallucinating their location, injected context
+      stops lying, and the expensive review fan-out is guarded by a sub-second structural check.</strong> All six
+      changes trace to one real run that shipped an empty final milestone &mdash; and the review pipeline spent
+      ~$10 rediscovering it.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Runtime-facts block in every codergen prompt</strong> (<a href="https://github.com/2389-research/tracker/issues/347">#347</a>). Every agent prompt opens with a machine-written <code># Runtime</code> section: the absolute working directory (&ldquo;all commands already run here; never cd elsewhere&rdquo;), the current date, and the run/node identity. In the case-study run, an agent <code>cd</code>'d to a hallucinated path, read the resulting clean tree as &ldquo;the milestone is already complete,&rdquo; and shipped nothing. Covers all three backends uniformly; codergen nodes only.</li>
+      <li><strong>build_product: structural existence gate before the review fan-out</strong> (<a href="https://github.com/2389-research/tracker/issues/350">#350</a>). A sub-second <code>CheckMilestoneOutputs</code> tool node reconciles the outputs Decompose <em>declared</em> (per-milestone <code>**Files**:</code> lists) against what is <em>on disk</em>, on both fan-out entries. A missing declared directory or a broken <code>go build ./...</code> escalates to a human before any reviewer token is spent; missing files alone only warn &mdash; deletion milestones are legitimate.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Top-level <code>tool_access:</code> now actually restricts the agent</strong> (<a href="https://github.com/2389-research/tracker/issues/366">#366</a>). The dippin adapter dropped the typed IR field, so the documented <code>tool_access: none</code> spelling was silently ignored at runtime &mdash; the agent ran with its full tool surface. The typed field now propagates into node attrs, with precedence over the <code>params:</code> spelling (which already worked).</li>
+      <li><strong>Context injection capped and one-shot</strong> (<a href="https://github.com/2389-research/tracker/issues/352">#352</a> items 1&ndash;2). The auto-appended &ldquo;Previous Node Output&rdquo; is capped at 4KB &mdash; head+tail truncation with an explicit elision marker, per-node <code>injection_cap</code> override &mdash; instead of pasting whole 9KB transcripts into every downstream prompt and mis-anchoring reviewers. And a human gate's response is consumed by the first prompt-consuming node instead of replaying one stale &ldquo;approve&rdquo; into every later prompt as implied sign-off; the gate's scoped <code>node.&lt;id&gt;.human_response</code> copy keeps it for explicit reference, and the clear persists across checkpoint resume.</li>
+      <li><strong>FinalCommit is commit-only in both build_product workflows</strong> (<a href="https://github.com/2389-research/tracker/issues/349">#349</a>). A failure report in context once led the commit node to author an entire missing milestone (~700 lines) through zero quality gates. FinalCommit now stages and commits existing work only, fails closed on truncation, and escalates instead of implementing.</li>
+      <li><strong><code>.tracker/</code> run metadata stays out of the product repo</strong> (<a href="https://github.com/2389-research/tracker/issues/351">#351</a> items 1&ndash;2). CommitIfDirty's <code>git add -A</code> swept run internals into checkpoint commits, polluting history and drowning the per-node build-context file. Setup now excludes <code>.tracker/</code> via <code>.git/info/exclude</code> and untracks anything a pre-fix run already committed.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.38.1 ═══ -->
   <section class="glass" id="v0-38-1" style="border-left: 3px solid var(--orange-600);">
