@@ -1018,7 +1018,8 @@ workflow BuildProduct
 
       TestMilestone already handled the language-stack tests AND the
       project CI gate (issue #233 Gap 1), so the verifier does NOT
-      need to re-run them. Note that `${ctx.tool_stdout}` is the
+      need to re-run them. Note that the "TestMilestone stdout" fenced
+      block at the END of this prompt is the
       tail of TestMilestone's stdout (64KB cap by default); on a
       repo with verbose test output the language-test lines may be
       elided entirely. The authoritative success signal is the
@@ -1135,8 +1136,9 @@ workflow BuildProduct
          when present; if it disagrees with a live SPEC.md re-read, SPEC.md
          wins.
 
-      6. TESTS + CI PASSED: The `tests-pass` sentinel in
-         ${ctx.tool_stdout} is authoritative for "TestMilestone step
+      6. TESTS + CI PASSED: The `tests-pass` sentinel in the
+         "TestMilestone stdout" fenced block at the END of this
+         prompt is authoritative for "TestMilestone step
          succeeded" — TestMilestone prints it when its language-stack
          runner passed-or-was-validly-skipped AND its project CI gate
          passed (a Makefile target OR the language-native gates, #299)
@@ -1208,6 +1210,16 @@ workflow BuildProduct
       If every check passes: STATUS:success
       If any check fails, describe exactly what failed (with the
       file:line, grep output, or failing assertion) and: STATUS:fail
+
+      ---
+      ## TestMilestone stdout
+
+      Tail of TestMilestone's stdout, 64KB cap. Delimited here under its
+      own heading (#352 item 3) — never interpolated mid-sentence.
+
+      ```text
+      ${ctx.tool_stdout}
+      ```
 
   tool MarkMilestoneDone
     label: "Mark Milestone Complete"
@@ -1337,6 +1349,155 @@ workflow BuildProduct
       green-but-uncommitted tree. (issue #297)
 
   # ─── Phase 3: Cross-Review ─────────────────────────────────
+
+  # Structural existence gate (issue #350). TestMilestone's `go test ./...`
+  # sentinel is blind to ABSENT packages — a package that was never created
+  # produces no failing tests, so a silently-skipped milestone sails into the
+  # review fan-out, where (case study b68b532619c3) five agents spent ~$10 and
+  # 32 minutes independently running `ls cmd/goblin` to rediscover that the
+  # final milestone shipped empty. This sub-second gate reconciles the outputs
+  # Decompose DECLARED (the per-milestone **Files**: lines in milestones.md)
+  # against what is ON DISK, before any reviewer token is spent. It guards
+  # BOTH entries to the review fan-out: the all-done path from
+  # PickNextMilestone and the capped re-review restart loop (ApplyReviewFixes
+  # can delete or move declared outputs too).
+  #
+  # Failure granularity (the deletion caveat): Decompose's Files lists include
+  # files to DELETE — destructive work is its own milestone by the Decompose
+  # rules — so a missing FILE may be a legitimate deletion, not a skipped
+  # milestone. File-level misses are therefore reported as warnings only.
+  # The gate FAILS on the structural class: a declared output DIRECTORY that
+  # does not exist (cmd/goblin/ never created — the actual #350 case), or a
+  # broken `go build ./...` on a Go stack. Failure routes to the
+  # EscalateMilestone HUMAN gate — a false positive (e.g. a whole declared
+  # directory legitimately removed) costs the operator one glance, while the
+  # silent skip it prevents costs the full review fan-out.
+  #
+  # Stack detection mirrors ci-probe (go.mod / package.json / pyproject.toml /
+  # Cargo.toml): Go gets `go build ./...` on top of the existence checks;
+  # other stacks get the existence checks only (sub-second contract — their
+  # build/test gates already ran in TestMilestone and run again in FinalBuild).
+  # The milestones.md parse follows the CLAUDE.md LLM-written-file rules:
+  # flexible header regex, blank-line stripping, empty-extraction guard that
+  # fails loudly, and the extracted tokens are only ever used in quoted
+  # `[ -d ]` / `[ -e ]` tests — never eval'd, never interpolated into a command.
+  tool CheckMilestoneOutputs
+    label: "Check Declared Milestone Outputs Exist"
+    timeout: 300s
+    command:
+      set -eu
+      PLAN=".ai/decisions/milestones.md"
+      mkdir -p .ai/build
+
+      if [ ! -s "$PLAN" ]; then
+        echo "ERROR: $PLAN missing or empty — cannot reconcile declared milestone outputs (#350)"
+        echo "Decompose writes per-milestone '**Files**:' lines there; without them this gate has no declaration to check."
+        printf 'outputs-missing'
+        exit 1
+      fi
+
+      # Extract the **Files**: declarations. LLM-written file: headers vary
+      # ("**Files**:", "Files:", "- **Files:** ..."), and the list may be
+      # inline on the header line or a bulleted block underneath it. A blank
+      # or non-bullet line ends a block.
+      awk '
+        /^[[:space:]]*[-*]?[[:space:]]*\*{0,2}[Ff]iles\*{0,2}[[:space:]]*:/ {
+          infiles = 1
+          line = $0
+          sub(/^[^:]*:[[:space:]]*/, "", line)
+          if (length(line) > 0) print line
+          next
+        }
+        infiles && /^[[:space:]]*[-*+][[:space:]]/ { print; next }
+        { infiles = 0 }
+      ' "$PLAN" > .ai/build/declared-files.raw
+
+      if [ ! -s .ai/build/declared-files.raw ]; then
+        echo "ERROR: no '**Files**:' lines found in $PLAN — the Decompose output contract was violated (#350)"
+        echo "First 30 lines of the plan for diagnosis:"
+        head -30 "$PLAN"
+        printf 'outputs-missing'
+        exit 1
+      fi
+
+      # Tokenize: split on commas/whitespace, strip markdown decoration
+      # (backticks, brackets, parens, bold markers), leading ./ and bullet
+      # dashes, trailing punctuation. Blank lines dropped per CLAUDE.md.
+      tr -s ',[:space:]' '\n' < .ai/build/declared-files.raw | \
+        sed -E 's/[][`*()"]//g; s/^-+//; s/^\.\///; s/[.:;]+$//' | \
+        grep -v '^[[:space:]]*$' > .ai/build/declared-files.list || true
+
+      MISSING_DIRS=""
+      MISSING_FILES=""
+      CHECKED=0
+      while IFS= read -r tok; do
+        # Path heuristic: keep tokens with a directory separator or a dotted
+        # filename; drop prose words. Skip absolute / home-anchored / parent-
+        # escaping tokens outright — declared outputs are repo-relative, and
+        # these must never re-anchor an existence check outside the workdir.
+        case "$tok" in
+          ''|/*|~*|*..*) continue ;;
+          */*|*.*) ;;
+          *) continue ;;
+        esac
+        CHECKED=$((CHECKED + 1))
+        case "$tok" in
+          */*)
+            DIR=$(dirname "$tok")
+            if [ ! -d "$DIR" ]; then
+              MISSING_DIRS="$MISSING_DIRS $DIR"
+              continue
+            fi
+            ;;
+        esac
+        if [ ! -e "$tok" ]; then
+          MISSING_FILES="$MISSING_FILES $tok"
+        fi
+      done < .ai/build/declared-files.list
+
+      if [ "$CHECKED" -eq 0 ]; then
+        echo "ERROR: Files lines exist in $PLAN but yielded zero path-like tokens — extraction is garbled (#350)"
+        echo "Raw extracted declarations:"
+        cat .ai/build/declared-files.raw
+        printf 'outputs-missing'
+        exit 1
+      fi
+
+      # Go stack: a declared package that exists but doesn't compile is as
+      # structurally absent as a missing directory. Detection mirrors
+      # ci-probe's go.mod check. Other stacks' build gates already ran in
+      # TestMilestone and run again in FinalBuild — re-running them here
+      # would break the sub-second contract for no new signal.
+      BUILD_FAIL=0
+      if [ -f go.mod ]; then
+        echo "--- go build ./... (structural gate, #350) ---"
+        go build ./... 2>&1 || BUILD_FAIL=$?
+      fi
+
+      if [ -n "$MISSING_DIRS" ] || [ "$BUILD_FAIL" -ne 0 ]; then
+        if [ -n "$MISSING_DIRS" ]; then
+          echo "ERROR: declared milestone output directories are MISSING from disk:"
+          for d in $MISSING_DIRS; do echo "  - $d"; done | sort -u
+        fi
+        if [ "$BUILD_FAIL" -ne 0 ]; then
+          echo "ERROR: go build ./... failed (exit $BUILD_FAIL) — see output above"
+        fi
+        if [ -n "$MISSING_FILES" ]; then
+          echo "Declared files also not on disk (these alone would not fail the gate — may be legitimate deletions):"
+          for f in $MISSING_FILES; do echo "  - $f"; done
+        fi
+        echo "A declared milestone output is structurally absent. Escalating BEFORE the review fan-out spends reviewer tokens (#350)."
+        printf 'outputs-missing'
+        exit 1
+      fi
+
+      if [ -n "$MISSING_FILES" ]; then
+        echo "WARNING: declared files not on disk (NOT failing — Decompose Files lists include files to delete, and destructive milestones are expected):"
+        for f in $MISSING_FILES; do echo "  - $f"; done
+        echo "Directory-level structure and the build are intact; a reviewer can disposition these in context."
+      fi
+      echo "structural existence gate passed: $CHECKED declared path tokens reconciled"
+      printf 'outputs-present'
 
   tool ClearStaleReviews
     label: "Clear Stale Review Reports"
@@ -1859,7 +2020,8 @@ workflow BuildProduct
         are expected outputs, never "extras".)
       - No TODO/FIXME/HACK comments added
       - All "throw away" items from the spec were actually removed
-      - Tests pass (check ${ctx.tool_stdout})
+      - Tests pass (check the "FinalBuild stdout" fenced block at the
+        END of this prompt)
 
       Write the final compliance report to .ai/decisions/compliance.md
 
@@ -1872,6 +2034,16 @@ workflow BuildProduct
       passed. Otherwise the early `STATUS:fail` from your first
       line stays in place. The parser requires `STATUS:<value>` on
       its own line, no leading characters, no fences/tables.
+
+      ---
+      ## FinalBuild stdout
+
+      Tail of FinalBuild's stdout, 64KB cap. Delimited here under its
+      own heading (#352 item 3) — never interpolated mid-sentence.
+
+      ```text
+      ${ctx.tool_stdout}
+      ```
 
   human OperatorDecision
     label: "Agent hit its turn limit mid-progress — pick how to proceed"
@@ -2021,8 +2193,24 @@ workflow BuildProduct
 
     # Build loop: pick → implement → test → verify → mark done → pick next
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
-    PickNextMilestone -> ClearStaleReviews  when ctx.tool_stdout contains all-done
+    PickNextMilestone -> CheckMilestoneOutputs  when ctx.tool_stdout contains all-done
     PickNextMilestone -> EscalateMilestone
+    # #350 structural existence gate: declared milestone outputs must be on
+    # disk (and `go build ./...` green on a Go stack) before the expensive
+    # review fan-out. Routes on the end-of-stdout markers (printed LAST via
+    # printf, so they survive tail-capture by construction). Fail routes to
+    # the operator-recoverable EscalateMilestone gate, NOT back into a fix
+    # loop: a missing-deleted-dir false positive must cost one human glance,
+    # never an auto-fail loop. The unconditional fallback catches a gate run
+    # that crashed before printing either marker (timeout, set -eu abort) —
+    # same anomaly posture as PickNextMilestone's fallback above.
+    # outputs-missing is evaluated FIRST: the gate's failure diagnostics echo
+    # LLM-written plan content, which could conceivably contain the literal
+    # "outputs-present" — with fail checked first, a both-markers stdout
+    # escalates to the human gate instead of silently passing.
+    CheckMilestoneOutputs -> EscalateMilestone  when ctx.tool_stdout contains outputs-missing
+    CheckMilestoneOutputs -> ClearStaleReviews  when ctx.tool_stdout contains outputs-present
+    CheckMilestoneOutputs -> EscalateMilestone
     Implement -> CommitIfDirty  when ctx.outcome = success
     # #318: a steady-progress turn breach (verify ran but wasn't green, no loop)
     # routes to the operator-decision gate. Narrow `= operator_decision` so a
@@ -2101,7 +2289,10 @@ workflow BuildProduct
     # escalates to a human.
     ApplyReviewFixes -> CheckReviewFixBudget  when ctx.outcome = success
     ApplyReviewFixes -> EscalateReview
-    CheckReviewFixBudget -> ClearStaleReviews  when ctx.outcome = success  restart: true
+    # #350: the re-review restart loop ALSO passes through the structural
+    # gate — ApplyReviewFixes can delete or move declared outputs, and the
+    # gate is sub-second.
+    CheckReviewFixBudget -> CheckMilestoneOutputs  when ctx.outcome = success  restart: true
     CheckReviewFixBudget -> EscalateReview  when ctx.outcome = fail
 
     # Final verification
