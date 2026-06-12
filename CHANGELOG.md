@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-06-12
+
 ### Fixed
 
 - **build_product no longer leaks tracker's own issue/PR numbers into
