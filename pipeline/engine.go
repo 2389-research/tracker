@@ -312,6 +312,11 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	s.pctx.Set(ContextKeyPreferredLabel, "")
 	s.pctx.Set(ContextKeySuggestedNextNodes, "")
 
+	// #352 item 2: human_response is one-shot. Record the value visible to
+	// this node so it can be cleared after the first prompt-consuming node
+	// completes (see clearConsumedHumanResponse below).
+	preHumanResponse, _ := s.pctx.Get(ContextKeyHumanResponse)
+
 	execNode := e.prepareExecNode(node, s)
 
 	outcome, traceEntry, err := e.executeNode(ctx, s, currentNodeID, execNode)
@@ -367,6 +372,10 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, &traceEntry)
 	}
 
+	// After the retry check: a retrying node re-executes and must still see
+	// the response; a node that completed (success OR fail) has consumed it.
+	e.clearConsumedHumanResponse(s, node, preHumanResponse)
+
 	e.handleOutcomeStatus(s, currentNodeID, outcome.Status)
 
 	if currentNodeID == e.graph.ExitNode {
@@ -374,6 +383,35 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	}
 
 	return e.advanceToNextNode(s, currentNodeID, &traceEntry)
+}
+
+// humanResponseConsumers names the handlers whose execution feeds pipeline
+// context into an LLM prompt (codergen via ResolvePrompt; parallel resolves
+// each branch's prompt the same way). subgraph and stack.manager_loop run
+// nested engines with their own contexts and are not consumers here.
+var humanResponseConsumers = map[string]bool{
+	"codergen": true,
+	"parallel": true,
+}
+
+// clearConsumedHumanResponse makes human_response one-shot (#352 item 2): the
+// first prompt-consuming node to complete with a non-empty response clears the
+// bare key so later nodes don't replay a stale human sign-off indefinitely.
+// The gate's scoped copy (node.<gateID>.human_response) keeps the full value
+// for explicit reference. The clear is an empty-set rather than a delete:
+// PipelineContext has no delete, both injection paths skip empty values, and
+// an empty value round-trips through checkpoint snapshots so a resumed run
+// cannot resurrect the stale response. MergeWithoutDirty keeps the clear out
+// of the next ScopeToNode call — no node "wrote" it.
+func (e *Engine) clearConsumedHumanResponse(s *runState, node *Node, preVal string) {
+	if preVal == "" || !humanResponseConsumers[node.Handler] {
+		return
+	}
+	// Don't clobber a fresh response the node itself wrote via ContextUpdates.
+	if cur, _ := s.pctx.Get(ContextKeyHumanResponse); cur != preVal {
+		return
+	}
+	s.pctx.MergeWithoutDirty(map[string]string{ContextKeyHumanResponse: ""})
 }
 
 // processRetryOutcome handles a retry outcome from a handler.

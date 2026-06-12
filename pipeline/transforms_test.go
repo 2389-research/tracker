@@ -5,6 +5,7 @@ package pipeline
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestExpandPromptVariables_Goal(t *testing.T) {
@@ -28,7 +29,7 @@ func TestInjectPipelineContext_HumanResponse(t *testing.T) {
 	ctx := NewPipelineContext()
 	ctx.Set(ContextKeyHumanResponse, "Build me a todo app")
 
-	result := InjectPipelineContext("Do the task.", ctx)
+	result := InjectPipelineContext("Do the task.", ctx, 0)
 	if !strings.Contains(result, "Build me a todo app") {
 		t.Fatalf("expected human response in output, got %q", result)
 	}
@@ -41,7 +42,7 @@ func TestInjectPipelineContext_LastResponse(t *testing.T) {
 	ctx := NewPipelineContext()
 	ctx.Set(ContextKeyLastResponse, "Previous node did X")
 
-	result := InjectPipelineContext("Continue.", ctx)
+	result := InjectPipelineContext("Continue.", ctx, 0)
 	if !strings.Contains(result, "Previous node did X") {
 		t.Fatalf("expected last response in output, got %q", result)
 	}
@@ -49,14 +50,14 @@ func TestInjectPipelineContext_LastResponse(t *testing.T) {
 
 func TestInjectPipelineContext_NoContext(t *testing.T) {
 	ctx := NewPipelineContext()
-	result := InjectPipelineContext("Plain prompt.", ctx)
+	result := InjectPipelineContext("Plain prompt.", ctx, 0)
 	if result != "Plain prompt." {
 		t.Fatalf("expected unchanged prompt with empty context, got %q", result)
 	}
 }
 
 func TestInjectPipelineContext_NilContext(t *testing.T) {
-	result := InjectPipelineContext("Plain prompt.", nil)
+	result := InjectPipelineContext("Plain prompt.", nil, 0)
 	if result != "Plain prompt." {
 		t.Fatalf("expected unchanged prompt with nil context, got %q", result)
 	}
@@ -67,7 +68,7 @@ func TestInjectPipelineContext_BothKeys(t *testing.T) {
 	ctx.Set(ContextKeyHumanResponse, "user said this")
 	ctx.Set(ContextKeyLastResponse, "node said that")
 
-	result := InjectPipelineContext("Do work.", ctx)
+	result := InjectPipelineContext("Do work.", ctx, 0)
 	if !strings.Contains(result, "user said this") {
 		t.Fatalf("expected human response, got %q", result)
 	}
@@ -179,5 +180,111 @@ func TestExpandGraphVariablesSinglePass(t *testing.T) {
 	want := "value=literal $a inside flag=EXPANDED"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// --- #352 item 1: cap "Previous Node Output" at injection time ---
+
+func TestInjectPipelineContext_CapsLargeLastResponse(t *testing.T) {
+	ctx := NewPipelineContext()
+	head := strings.Repeat("H", 3000)
+	middle := strings.Repeat("M", 6000)
+	tail := strings.Repeat("T", 3000)
+	ctx.Set(ContextKeyLastResponse, head+middle+tail)
+
+	result := InjectPipelineContext("Continue.", ctx, 0)
+
+	// Head and tail of the prior output survive; the middle is elided.
+	if !strings.Contains(result, strings.Repeat("H", 1000)) {
+		t.Errorf("expected head of last_response to survive capping")
+	}
+	if !strings.Contains(result, strings.Repeat("T", 1000)) {
+		t.Errorf("expected tail of last_response to survive capping")
+	}
+	if strings.Contains(result, strings.Repeat("M", 100)) {
+		t.Errorf("expected middle of last_response to be elided")
+	}
+	if !strings.Contains(result, "elided") {
+		t.Errorf("expected explicit elision marker, got %q", result[:min(len(result), 200)])
+	}
+	// The injected section is bounded: prompt + headers + cap + marker.
+	if len(result) > DefaultInjectedResponseCap+500 {
+		t.Errorf("injected prompt too large: %d bytes (cap %d)", len(result), DefaultInjectedResponseCap)
+	}
+}
+
+func TestInjectPipelineContext_SmallLastResponseUncapped(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set(ContextKeyLastResponse, "short output")
+
+	result := InjectPipelineContext("Continue.", ctx, 0)
+	if !strings.Contains(result, "short output") {
+		t.Fatalf("expected full short value, got %q", result)
+	}
+	if strings.Contains(result, "elided") {
+		t.Fatalf("unexpected elision marker on small value: %q", result)
+	}
+}
+
+func TestInjectPipelineContext_ExplicitCap(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set(ContextKeyLastResponse, strings.Repeat("x", 1000))
+
+	result := InjectPipelineContext("Continue.", ctx, 100)
+	if !strings.Contains(result, "elided") {
+		t.Fatalf("expected elision at explicit cap 100")
+	}
+	if len(result) > 400 {
+		t.Fatalf("expected result bounded by cap 100 plus marker/headers, got %d bytes", len(result))
+	}
+}
+
+func TestInjectPipelineContext_NegativeCapUnlimited(t *testing.T) {
+	ctx := NewPipelineContext()
+	big := strings.Repeat("y", DefaultInjectedResponseCap*3)
+	ctx.Set(ContextKeyLastResponse, big)
+
+	result := InjectPipelineContext("Continue.", ctx, -1)
+	if !strings.Contains(result, big) {
+		t.Fatalf("expected full value with negative (unlimited) cap")
+	}
+}
+
+func TestInjectPipelineContext_HumanResponseNotCapped(t *testing.T) {
+	// The cap targets last_response (transcript paste); human responses are
+	// human-typed and injected whole.
+	ctx := NewPipelineContext()
+	big := strings.Repeat("h", DefaultInjectedResponseCap*2)
+	ctx.Set(ContextKeyHumanResponse, big)
+
+	result := InjectPipelineContext("Continue.", ctx, 0)
+	if !strings.Contains(result, big) {
+		t.Fatalf("expected human_response injected whole")
+	}
+}
+
+func TestInjectPipelineContext_CapDoesNotMutateContext(t *testing.T) {
+	// The cap applies at prompt-injection time only — the stored context value
+	// (and therefore node.<id>.last_response scoping and checkpoints) keeps
+	// the full value.
+	ctx := NewPipelineContext()
+	full := strings.Repeat("z", DefaultInjectedResponseCap*2)
+	ctx.Set(ContextKeyLastResponse, full)
+
+	_ = InjectPipelineContext("Continue.", ctx, 0)
+
+	got, _ := ctx.Get(ContextKeyLastResponse)
+	if got != full {
+		t.Fatalf("injection mutated stored context: len %d, want %d", len(got), len(full))
+	}
+}
+
+func TestInjectPipelineContext_CapRespectsUTF8Boundaries(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set(ContextKeyLastResponse, strings.Repeat("é", 2000))
+
+	result := InjectPipelineContext("Continue.", ctx, 101)
+	if !utf8.ValidString(result) {
+		t.Fatalf("capped injection produced invalid UTF-8")
 	}
 }

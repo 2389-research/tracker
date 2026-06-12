@@ -26,6 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Context injection no longer pastes full prior transcripts or replays a
+  stale Human Response forever** (issue #352, items 1–2). In case-study run
+  b68b532619c3, every full-fidelity prompt carried the entire previous node
+  output (the ~9KB Milestone-7 verification report rode along into the
+  Milestone-8 Implement prompt and mis-anchored all three reviewers into
+  reviewing the wrong scope), and the single ApprovePlan "approve" was
+  re-injected verbatim into every subsequent prompt for the rest of the run.
+  Two changes: (1) the injected "Previous Node Output" section is now capped
+  (default 4096 bytes, head+tail truncation with an explicit elision marker;
+  per-node `injection_cap` attr overrides — negative disables, malformed
+  fails the node loudly). The cap applies at prompt-injection time only:
+  stored context, `node.<id>.last_response` scoping, and checkpoints keep
+  the full value. (2) `human_response` is now one-shot: the engine clears
+  the bare key after the first prompt-consuming node (codergen or parallel)
+  completes, the clear persists across checkpoint resume, and the gate's
+  scoped `node.<gateID>.human_response` copy retains the value for explicit
+  reference. Item 3 (fenced rendering of interpolated tool stdout) is
+  tracked in the .dip workflows separately; #352 stays open for it.
+
 - **FinalCommit is now explicitly commit-only in both build_product
   workflows** (issue #349, items 1–2). In case-study run b68b532619c3,
   FinalCommit's "ensure all changes are committed" prompt plus a failure
