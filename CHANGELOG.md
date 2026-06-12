@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Embedded deep_review built-in no longer grades F/35 under dippin doctor**
   (issue #335, scope 1). The workflow ships inside the binary
-  (`tracker run deep_review`), so an F-graded graph was a user's first
+  (`tracker deep_review`), so an F-graded graph was a user's first
   contact with built-ins. Structural fixes, now A/100: a graph-level
   `on_failure: EscalateToHuman` catch-all plus a freeform escalation gate
   (11 agent nodes had no failure route — DIP144); the `SaveGoal` tool node
