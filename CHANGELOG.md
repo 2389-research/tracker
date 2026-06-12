@@ -67,6 +67,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Item 3 (refreshing the architecture section at MarkMilestoneDone) is
   not included.
 
+- **Top-level `tool_access:` on agent nodes is no longer silently dropped**
+  (issue #366). The dippin parser populates the typed IR field
+  `AgentConfig.ToolAccess`, but the adapter only read the `params:` form, so
+  the documented top-level spelling — the one DIP139 steers authors toward —
+  ran agents with full tool access. `extractAgentAttrs` now copies the typed
+  field (same shape as `backend` / `working_dir`), and it takes precedence
+  over a conflicting `params: tool_access`. Downstream enforcement
+  (`IsToolAccessRestricted` fail-closes on any non-empty value) was already
+  correct; only the adapter wire was missing.
+
 ## [0.38.1] - 2026-06-11
 
 ### Fixed
