@@ -1442,6 +1442,16 @@ workflow BuildProduct
         esac
         CHECKED=$((CHECKED + 1))
         case "$tok" in
+          */)
+            # Trailing slash declares the DIRECTORY itself (e.g. cmd/goblin/)
+            # — its absence is the structural failure class, not a file-level
+            # warning, even when the parent dir exists.
+            DIR="${tok%/}"
+            if [ ! -d "$DIR" ]; then
+              MISSING_DIRS="$MISSING_DIRS $DIR"
+            fi
+            continue
+            ;;
           */*)
             DIR=$(dirname "$tok")
             if [ ! -d "$DIR" ]; then
