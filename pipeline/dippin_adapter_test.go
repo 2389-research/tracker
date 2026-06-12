@@ -2473,9 +2473,9 @@ func TestExtractAgentAttrs_ToolAccess(t *testing.T) {
 	})
 
 	t.Run("whitespace-only typed field = no attr", func(t *testing.T) {
-		// Whitespace-only is semantically unset: IsToolAccessRestricted
-		// trims before checking, so " " would read as unrestricted anyway.
-		// Don't claim the attr for it.
+		// Whitespace-only is semantically unset:
+		// agent.SessionConfig.IsToolAccessRestricted trims before checking,
+		// so " " would read as unrestricted anyway. Don't claim the attr.
 		cfg := ir.AgentConfig{
 			ToolAccess: "   ",
 		}
