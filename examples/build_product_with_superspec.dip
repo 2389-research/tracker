@@ -785,6 +785,8 @@ workflow BuildProductWithSuperspec
   # ═══════════════════════════════════════════════════════════════
 
   parallel ReviewParallel -> ReviewArchitect, ReviewQA, ReviewProduct
+    params:
+      fan_in_policy: all
 
   agent ReviewArchitect
     label: "Architect Review"
@@ -1072,7 +1074,7 @@ workflow BuildProductWithSuperspec
     ApprovePlan -> BuildPlan  label: "adjust"  restart: true
     ApprovePlan -> Done  label: "reject"
 
-    # Phase 1: Foundation (A + B parallel)
+    # Phase 2: Foundation (A + B parallel)
     SetupPhase1Worktrees -> Phase1Parallel
     StreamA -> Phase1Join
     StreamB -> Phase1Join
@@ -1085,7 +1087,7 @@ workflow BuildProductWithSuperspec
     GatePhase1 -> EscalateToHuman
     FixPhase1 -> GatePhase1  restart: true
 
-    # Phase 2: Core (C + E parallel)
+    # Phase 3: Core (C + E parallel)
     SetupPhase2Worktrees -> Phase2Parallel
     StreamC -> Phase2Join
     StreamE -> Phase2Join
@@ -1098,14 +1100,14 @@ workflow BuildProductWithSuperspec
     GatePhase2 -> EscalateToHuman
     FixPhase2 -> GatePhase2  restart: true
 
-    # Phase 3: Story engine (D sequential, depends on C)
+    # Phase 4: Story engine (D sequential, depends on C)
     StreamD -> GateStreamD
     GateStreamD -> SetupPhase4Worktrees  when ctx.outcome = success
     GateStreamD -> FixStreamD  when ctx.outcome = fail
     GateStreamD -> EscalateToHuman
     FixStreamD -> GateStreamD  restart: true
 
-    # Phase 4: Surface (F + G parallel)
+    # Phase 5: Surface (F + G parallel)
     SetupPhase4Worktrees -> Phase4Parallel
     StreamF -> Phase4Join
     StreamG -> Phase4Join
@@ -1118,7 +1120,7 @@ workflow BuildProductWithSuperspec
     GatePhase4 -> EscalateToHuman
     FixPhase4 -> GatePhase4  restart: true
 
-    # Phase 5: Quality & Docs (H + I parallel)
+    # Phase 6: Quality & Docs (H + I parallel)
     SetupPhase5Worktrees -> Phase5Parallel
     StreamH -> Phase5Join
     StreamI -> Phase5Join
@@ -1127,7 +1129,16 @@ workflow BuildProductWithSuperspec
     MergePhase5 -> EscalateToHuman  when ctx.outcome = fail
     MergePhase5 -> EscalateToHuman
 
-    # Phase 6: Cross-review
+    # Phase 7: Cross-review
+    # The three reviewers run as parallel branches; a branch runs via
+    # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
+    # path, so a per-branch fallback_target would be inert (the engine now
+    # refuses one at dispatch). ReviewParallel declares fan_in_policy: all
+    # (issue #313), so this edge fires when ANY of the three reviewers fails —
+    # a single missing review perspective can no longer be masked by the
+    # default success-if-any aggregation. On success the parallel handler's
+    # suggested-next routes to ReviewJoin.
+    ReviewParallel -> EscalateToHuman  when ctx.outcome = fail
     ReviewArchitect -> ReviewJoin
     ReviewQA -> ReviewJoin
     ReviewProduct -> ReviewJoin
@@ -1137,7 +1148,7 @@ workflow BuildProductWithSuperspec
     SynthesizeReviews -> Done
     ApplyReviewFixes -> FinalGates
 
-    # Phase 7: Final verification
+    # Phase 8: Final verification
     FinalGates -> TraceabilityAudit  when ctx.outcome = success
     FinalGates -> EscalateToHuman  when ctx.outcome = fail
     FinalGates -> EscalateToHuman
