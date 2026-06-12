@@ -172,3 +172,63 @@ func TestDippinAdapter_E2E_CompareWithDOT(t *testing.T) {
 		t.Errorf("edge count differs: DOT=%d, DIP=%d", len(dotGraph.Edges), len(dipGraph.Edges))
 	}
 }
+
+// TestDippinAdapter_E2E_BranchSecurityOverrides verifies that per-branch
+// tool_access / writable_paths written in real .dip source survive the
+// parser → IR → adapter path as branch.N.* attrs (issue #368). Modeled on
+// the #366 tests in PR #367: the typed IR field is the wire, and absence
+// means inherit.
+func TestDippinAdapter_E2E_BranchSecurityOverrides(t *testing.T) {
+	source := `workflow BranchSecurity
+  goal: "Branch security override wire test"
+  start: split
+  exit: join
+
+  agent locked
+    prompt: "Locked worker."
+    tool_access: none
+
+  agent sandboxed
+    prompt: "Sandboxed worker."
+
+  parallel split
+    branch: locked
+      tool_access: none
+    branch: sandboxed
+      writable_paths: src/**,docs/*.md
+
+  fan_in join <- locked, sandboxed
+
+  edges
+    split -> locked
+    split -> sandboxed
+    locked -> join
+    sandboxed -> join
+`
+	p := parser.NewParser(source, "branch_security.dip")
+	workflow, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parser.Parse() failed: %v", err)
+	}
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("FromDippinIR() failed: %v", err)
+	}
+
+	split := graph.Nodes["split"]
+	if split == nil {
+		t.Fatal("split node not found")
+	}
+	if got := split.Attrs["branch.0.tool_access"]; got != "none" {
+		t.Errorf("branch.0.tool_access = %q, want none", got)
+	}
+	if v, ok := split.Attrs["branch.0.writable_paths"]; ok {
+		t.Errorf("branch.0.writable_paths present = %q, want absent (inherit)", v)
+	}
+	if got := split.Attrs["branch.1.writable_paths"]; got != "src/**,docs/*.md" {
+		t.Errorf("branch.1.writable_paths = %q, want src/**,docs/*.md", got)
+	}
+	if v, ok := split.Attrs["branch.1.tool_access"]; ok {
+		t.Errorf("branch.1.tool_access present = %q, want absent (inherit)", v)
+	}
+}
