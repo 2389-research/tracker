@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **build_product: structural existence gate before the review fan-out**
+  (issue #350). In case-study run b68b532619c3 the final milestone shipped
+  empty (`cmd/goblin/` never created) and TestMilestone's `go test ./...`
+  sentinel is blind to absent packages, so the pipeline spent ~$10 and 32
+  minutes of review fan-out rediscovering a missing directory. A new
+  sub-second `CheckMilestoneOutputs` tool node now reconciles the outputs
+  Decompose declared (per-milestone `**Files**:` lines in milestones.md)
+  against the disk before any reviewer token is spent, on BOTH fan-out
+  entries (the all-done path and the capped re-review restart loop). It
+  fails on missing declared output directories or a broken `go build ./...`
+  (Go stacks; other stacks get existence checks only), routing to the
+  operator-recoverable EscalateMilestone gate; missing files alone are
+  warnings, not failures — Decompose Files lists legitimately include files
+  to delete. Parsing follows the LLM-written-file rules: flexible header
+  regex, blank stripping, loud empty/garbled guards, tokens used only in
+  quoted existence tests. The superspec variant has its own per-phase
+  verification gates and a different declared-outputs shape; it is
+  deliberately not changed here. VerifyMilestone and FinalSpecCheck also
+  now receive interpolated tool stdout as a delimited fenced block under
+  its own heading instead of mid-sentence (#352 item 3, .dip-side).
+
 - **Runtime-facts block injected into every codergen prompt** (issue #347).
   Every agent prompt is now prefixed with a machine-written `# Runtime`
   section stating the absolute working directory ("all commands already run

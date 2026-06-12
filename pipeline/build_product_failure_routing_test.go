@@ -238,8 +238,8 @@ func TestBuildProductIssue303GreenBreachRescuePath(t *testing.T) {
 func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	g := loadBuildProduct(t)
 
-	// Both guards are tool nodes.
-	for _, id := range []string{"CheckReviewsComplete", "ClearStaleReviews"} {
+	// All three guards are tool nodes (CheckMilestoneOutputs joined in #350).
+	for _, id := range []string{"CheckReviewsComplete", "ClearStaleReviews", "CheckMilestoneOutputs"} {
 		n, ok := g.Nodes[id]
 		if !ok {
 			t.Fatalf("%s node missing from build_product.dip (issue #313)", id)
@@ -263,27 +263,45 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 		t.Error("CheckReviewsComplete has no `ctx.outcome = fail` edge to EscalateReview — a missing review would not escalate (issue #313)")
 	}
 
-	// Pre-fan-out clear: both inbound paths to ReviewParallel go through ClearStaleReviews.
+	// Pre-fan-out guards: both inbound paths to ReviewParallel pass through
+	// the #350 structural existence gate (CheckMilestoneOutputs) and then
+	// ClearStaleReviews. The #313 invariant — stale reports cleared on BOTH
+	// entries — is preserved with the gate prepended.
 	if !hasUnconditionalEdgeTo(g, "ClearStaleReviews", "ReviewParallel") {
 		t.Error("ClearStaleReviews has no edge to ReviewParallel (issue #313)")
 	}
-	if !hasEdgeWithCondition(g, "PickNextMilestone", "ClearStaleReviews", "ctx.tool_stdout contains all-done") {
-		t.Error("PickNextMilestone all-done edge must enter ClearStaleReviews before ReviewParallel (issue #313)")
+	if !hasEdgeWithCondition(g, "PickNextMilestone", "CheckMilestoneOutputs", "ctx.tool_stdout contains all-done") {
+		t.Error("PickNextMilestone all-done edge must enter CheckMilestoneOutputs before the review fan-out (issue #350)")
 	}
-	if !hasEdgeWithCondition(g, "CheckReviewFixBudget", "ClearStaleReviews", "ctx.outcome = success") {
-		t.Error("CheckReviewFixBudget re-review edge must enter ClearStaleReviews before ReviewParallel (issue #313)")
+	if !hasEdgeWithCondition(g, "CheckReviewFixBudget", "CheckMilestoneOutputs", "ctx.outcome = success") {
+		t.Error("CheckReviewFixBudget re-review edge must enter CheckMilestoneOutputs before the review fan-out (issue #350)")
 	}
-	// The re-review edge moved from CheckReviewFixBudget->ReviewParallel to
-	// ->ClearStaleReviews; pin restart:true so a future edit can't drop the loop
-	// semantics (which would also stop clearing stale reports each pass).
-	if !hasEdgeAttr(g, "CheckReviewFixBudget", "ClearStaleReviews", "ctx.outcome = success", "restart", "true") {
-		t.Error("CheckReviewFixBudget -> ClearStaleReviews must keep restart: true (issue #313)")
+	// The re-review edge carries the restart loop; pin restart:true so a future
+	// edit can't drop the loop semantics (which would also stop clearing stale
+	// reports each pass).
+	if !hasEdgeAttr(g, "CheckReviewFixBudget", "CheckMilestoneOutputs", "ctx.outcome = success", "restart", "true") {
+		t.Error("CheckReviewFixBudget -> CheckMilestoneOutputs must keep restart: true (issues #313/#350)")
+	}
+	// Gate routing (#350): success marker proceeds to ClearStaleReviews; the
+	// missing marker escalates to the operator-recoverable human gate — never
+	// an auto-fail loop (a declared deletion can false-positive).
+	if !hasEdgeWithCondition(g, "CheckMilestoneOutputs", "ClearStaleReviews", "ctx.tool_stdout contains outputs-present") {
+		t.Error("CheckMilestoneOutputs has no outputs-present edge to ClearStaleReviews (issue #350)")
+	}
+	if !hasEdgeWithCondition(g, "CheckMilestoneOutputs", "EscalateMilestone", "ctx.tool_stdout contains outputs-missing") {
+		t.Error("CheckMilestoneOutputs has no outputs-missing edge to EscalateMilestone — a structurally absent milestone would not escalate (issue #350)")
 	}
 	if hasEdgeTo(g, "PickNextMilestone", "ReviewParallel") {
-		t.Error("PickNextMilestone still routes directly to ReviewParallel; it must clear stale reviews first (issue #313)")
+		t.Error("PickNextMilestone still routes directly to ReviewParallel; it must pass the existence gate and clear stale reviews first (issues #313/#350)")
 	}
 	if hasEdgeTo(g, "CheckReviewFixBudget", "ReviewParallel") {
-		t.Error("CheckReviewFixBudget still routes directly to ReviewParallel; it must clear stale reviews first (issue #313)")
+		t.Error("CheckReviewFixBudget still routes directly to ReviewParallel; it must pass the existence gate and clear stale reviews first (issues #313/#350)")
+	}
+	if hasEdgeTo(g, "PickNextMilestone", "ClearStaleReviews") {
+		t.Error("PickNextMilestone still routes directly to ClearStaleReviews; the #350 gate must run first")
+	}
+	if hasEdgeTo(g, "CheckReviewFixBudget", "ClearStaleReviews") {
+		t.Error("CheckReviewFixBudget still routes directly to ClearStaleReviews; the #350 gate must run first")
 	}
 }
 
