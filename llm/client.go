@@ -284,12 +284,17 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 	})
 	acc := NewStreamAccumulator()
 
+	// Request-level observers mean an agent session will re-emit these
+	// trace events as agent llm_* events; stamp SessionOwned so
+	// client-level log writers can skip them (#354).
+	sessionOwned := len(req.TraceObservers) > 0
+
 	for evt := range adapter.Stream(ctx, streamReq) {
 		if evt.Err != nil {
 			flushTraceObservers(observers)
 			return nil, evt.Err
 		}
-		processAndNotify(traceBuilder, observers, evt)
+		processAndNotify(traceBuilder, observers, evt, sessionOwned)
 		acc.Process(evt)
 	}
 
@@ -309,11 +314,14 @@ func flushTraceObservers(observers []TraceObserver) {
 	}
 }
 
-// processAndNotify processes a stream event through the trace builder and notifies observers.
-func processAndNotify(traceBuilder *TraceBuilder, observers []TraceObserver, evt StreamEvent) {
+// processAndNotify processes a stream event through the trace builder and
+// notifies observers. sessionOwned is stamped onto each emitted trace event —
+// see TraceEvent.SessionOwned.
+func processAndNotify(traceBuilder *TraceBuilder, observers []TraceObserver, evt StreamEvent, sessionOwned bool) {
 	before := len(traceBuilder.events)
 	traceBuilder.Process(evt)
 	for _, traceEvt := range traceBuilder.events[before:] {
+		traceEvt.SessionOwned = sessionOwned
 		notifyTraceObservers(observers, traceEvt)
 	}
 }

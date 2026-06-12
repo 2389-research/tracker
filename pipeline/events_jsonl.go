@@ -120,6 +120,7 @@ type JSONLEventHandler struct {
 	securePath     string
 	file           *os.File
 	bundleIdentity string
+	captureRawLLM  bool  // write provider_raw / llm_provider_raw lines (see SetCaptureRawLLM)
 	snapshotErr    error // populated by Close; readable via SnapshotErr.
 }
 
@@ -144,6 +145,24 @@ func (h *JSONLEventHandler) SetBundleIdentity(id string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.bundleIdentity = id
+}
+
+// SetCaptureRawLLM controls whether raw provider streaming chunks
+// (agent "llm_provider_raw" and trace "provider_raw" lines) are written
+// to the activity log. Off by default: per-token raw chunks are
+// debugging payload, not run telemetry, and they dominated log size
+// (~92% of lines in the #354 census). Wired from --verbose so debug
+// runs keep full capture.
+func (h *JSONLEventHandler) SetCaptureRawLLM(enabled bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.captureRawLLM = enabled
+}
+
+// isRawLLMEventType reports whether evtType is a raw provider streaming
+// chunk under either spelling (agent event or llm trace kind).
+func isRawLLMEventType(evtType string) bool {
+	return evtType == "provider_raw" || evtType == "llm_provider_raw"
 }
 
 // openFile creates the secure activity log file on first use.
@@ -296,6 +315,9 @@ func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutpu
 	if h.file == nil {
 		return
 	}
+	if isRawLLMEventType(evtType) && !h.captureRawLLM {
+		return
+	}
 
 	content := toolOutput
 	if content == "" {
@@ -338,6 +360,9 @@ func (h *JSONLEventHandler) WriteLLMEvent(kind, provider, model, toolName, previ
 	defer h.mu.Unlock()
 
 	if h.file == nil {
+		return
+	}
+	if isRawLLMEventType(kind) && !h.captureRawLLM {
 		return
 	}
 

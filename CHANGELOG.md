@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **activity.jsonl no longer logs every llm event twice** (issue #354). The
+  same LLM stream was written by two independent observers — the client-level
+  trace observer (short kinds: `request_start`, `text`, `finish`,
+  `provider_raw`, under source `llm`) and the agent session's re-emission
+  (`llm_request_start`, `llm_text`, …, under source `agent`) — doubling
+  ~92% of a 32MB / 207k-line case-study log. Trace events from requests
+  carrying request-level observers (i.e. agent sessions) are now stamped
+  `SessionOwned` and skipped by the client-level activity-log writer, so
+  session calls log once via the `llm_*` agent family while non-session
+  calls (e.g. the autopilot interviewer, which has no agent path) keep
+  logging via the trace path. Additionally, raw provider streaming chunks
+  (`provider_raw` / `llm_provider_raw` — per-token debugging payload that
+  dominated the census) are only captured in activity.jsonl under
+  `--verbose`. Diagnose continues to parse pre-existing doubled logs
+  unchanged (pinned by fixture test).
+
 ## [0.39.0] - 2026-06-12
 
 ### Added

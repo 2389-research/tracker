@@ -32,6 +32,15 @@ type TraceEvent struct {
 	RawPreview    string
 	FinishReason  string
 	Usage         Usage
+	// SessionOwned is true when the originating request carried
+	// request-level TraceObservers — in tracker only the agent session
+	// registers those, and it re-emits every trace event as an agent
+	// llm_* event. Activity-log writers listening at the client level
+	// skip SessionOwned events to avoid logging the same stream twice
+	// (issue #354); non-session calls (e.g. the autopilot interviewer)
+	// stay SessionOwned=false so the trace path remains their only,
+	// and therefore kept, log surface.
+	SessionOwned bool
 }
 
 // TraceOptions configure trace building behavior.
