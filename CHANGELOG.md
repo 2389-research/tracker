@@ -24,6 +24,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attribute. Mirrors #323, which exposed the same identity to tool
   subprocess environments.
 
+### Fixed
+
+- **FinalCommit is now explicitly commit-only in both build_product
+  workflows** (issue #349, items 1–2). In case-study run b68b532619c3,
+  FinalCommit's "ensure all changes are committed" prompt plus a failure
+  report in context led the agent to author an entire missing milestone
+  (~700 lines across 8 files) inside the commit node — shipping through
+  zero quality gates; an independent audit traced essentially all shipped
+  defects to that one ungated write path. Both `build_product.dip` and
+  `build_product_with_superspec.dip` now give FinalCommit the
+  #346-hardened early-`STATUS:fail` contract (`auto_status: true`,
+  last-line-wins, fails closed on truncation) and a commit-only scope
+  guard: stage and commit existing work and report the hash; if
+  completing the task would require ANY new implementation, do not write
+  it — fail with the reason so the pipeline escalates
+  (`fallback_target: EscalateReview` / `EscalateToHuman`; the superspec
+  variant gains the explicit `fallback_target`). No `goal_gate` was
+  added: a failing commit gate re-entering itself (#360/#361
+  `gate_recheck_pending`) cannot produce the missing implementation —
+  escalation is the correct route. Items 3 (stale "Previous Node Output"
+  injection) and 4 (accept ⇒ override semantics) are tracked separately
+  as #352 and #348/#271.
+
 ## [0.38.1] - 2026-06-11
 
 ### Fixed
