@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Inert per-branch `fallback_target` is now refused at parallel dispatch**
+  (issue #313, defect 2). A `fallback_target` declared on a parallel
+  branch-target node never did anything at runtime — `runBranch` calls
+  `registry.Execute` directly, bypassing the engine's strict-failure path
+  (`checkStrictFailure`/`findFallbackTarget`) — so the failure route it
+  promised was silently absent. The parallel handler now fails fast before
+  dispatching any branch (covering both the target node's own attr and a
+  `branch.N.fallback_target` override), with an error pointing at the
+  supported pattern: route branch failure at the aggregating node via
+  `fan_in_policy` (#344) plus a conditional fail edge. Graph-level
+  `defaults: on_failure` is unaffected. No shipped example declared the
+  inert attr (PR #312 already removed them from build_product).
+
+- **build_product_with_superspec: a failed cross-reviewer can no longer be
+  silently masked** (issue #313). `ReviewParallel` had no `fan_in_policy`
+  and no fail edge, so the default success-if-any aggregation let a failed
+  `ReviewArchitect`/`ReviewQA`/`ReviewProduct` branch vanish — the same gap
+  PR #344 closed for build_product. It now declares `fan_in_policy: all`
+  with a `when ctx.outcome = fail` edge to `EscalateToHuman`. Doctor holds
+  A/100.
+
 - **build_product: domain-neutral FixMilestone example** (issue #355). The
   "If a test expects story events to NOT merge" clause was leftover domain
   language from whatever product the template was first written against,

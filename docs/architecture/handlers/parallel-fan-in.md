@@ -253,6 +253,15 @@ the parent trace entry reflects the full cost of the fan-out.
   explicit edges for parallel target fan-out; the adapter generates them so
   the graph is structurally complete. See `CLAUDE.md` § Dippin-lang
   compatibility.
+- **`fallback_target` on a branch-target node is refused at dispatch.**
+  Branch nodes execute via `registry.Execute` inside `runBranch` and never
+  pass through the engine's strict-failure path
+  (`checkStrictFailure`/`findFallbackTarget`), so a node-level
+  `fallback_target` on a branch target would be silently inert. The parallel
+  handler fails fast before dispatching any branch instead (#313). Route
+  branch failure at the aggregating node: declare `fan_in_policy: all` (or
+  `quorum`) and add a conditional `when ctx.outcome = fail` edge. Graph-level
+  `defaults: on_failure` is unaffected.
 - **Branch overrides are keyed by target node ID, not by branch index.**
   Two parallel nodes pointing at the same target with different overrides
   will collide if they run concurrently — make the targets distinct node

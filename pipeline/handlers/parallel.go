@@ -68,6 +68,15 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	branchOverrides := parseBranchOverrides(node.Attrs)
 
+	// Refuse a branch-target fallback_target before dispatching any branch
+	// (#313 defect 2): runBranch calls registry.Execute directly and never
+	// passes through Engine.checkStrictFailure/findFallbackTarget, so the
+	// attr would be silently inert at runtime. Route branch failure at the
+	// aggregating node instead (fan_in_policy + a conditional fail edge).
+	if err := refuseBranchFallbackTargets(node.ID, edges, h.graph, branchOverrides); err != nil {
+		return pipeline.Outcome{}, err
+	}
+
 	branchIDs := make([]string, len(edges))
 	for i, edge := range edges {
 		branchIDs[i] = edge.To
@@ -156,6 +165,29 @@ func aggregateChildOverrides(branchOverrides [][]pipeline.OverrideDetail) []pipe
 		}
 	}
 	return aggregated
+}
+
+// refuseBranchFallbackTargets fails fast when any branch-target node (or a
+// branch.N.* override) declares a node-level fallback_target. Branch nodes
+// execute via registry.Execute inside runBranch and never reach the engine's
+// strict-failure path, so the attr would do nothing at runtime — refusing
+// loudly beats shipping a silently-inert failure route (#313 defect 2).
+// Graph-level fallback_target (dippin `defaults: on_failure`) is unaffected:
+// it lives on graph attrs and applies in the engine's main loop.
+func refuseBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, branchOverrides map[string]map[string]string) error {
+	for _, edge := range edges {
+		declared := ""
+		if tn, ok := graph.Nodes[edge.To]; ok {
+			declared = tn.Attrs["fallback_target"]
+		}
+		if ov, ok := branchOverrides[edge.To]; ok && ov["fallback_target"] != "" {
+			declared = ov["fallback_target"]
+		}
+		if declared != "" {
+			return fmt.Errorf("parallel node %q: branch target %q declares fallback_target %q, which is never honored inside a parallel branch — remove it and route branch failure at the aggregating node via fan_in_policy (any|all|quorum) and a conditional fail edge", parallelID, edge.To, declared)
+		}
+	}
+	return nil
 }
 
 // resolveBranchEdges determines the branch target edges for a parallel node.

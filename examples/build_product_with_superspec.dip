@@ -785,6 +785,8 @@ workflow BuildProductWithSuperspec
   # ═══════════════════════════════════════════════════════════════
 
   parallel ReviewParallel -> ReviewArchitect, ReviewQA, ReviewProduct
+    params:
+      fan_in_policy: all
 
   agent ReviewArchitect
     label: "Architect Review"
@@ -1128,6 +1130,15 @@ workflow BuildProductWithSuperspec
     MergePhase5 -> EscalateToHuman
 
     # Phase 6: Cross-review
+    # The three reviewers run as parallel branches; a branch runs via
+    # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
+    # path, so a per-branch fallback_target would be inert (the engine now
+    # refuses one at dispatch). ReviewParallel declares fan_in_policy: all
+    # (issue #313), so this edge fires when ANY of the three reviewers fails —
+    # a single missing review perspective can no longer be masked by the
+    # default success-if-any aggregation. On success the parallel handler's
+    # suggested-next routes to ReviewJoin.
+    ReviewParallel -> EscalateToHuman  when ctx.outcome = fail
     ReviewArchitect -> ReviewJoin
     ReviewQA -> ReviewJoin
     ReviewProduct -> ReviewJoin
