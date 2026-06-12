@@ -296,8 +296,8 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	}
 	// tool_access: typed IR field is authoritative over Params (issue #366).
 	// No claim-the-attr-on-empty defense needed here: downstream fail-closes
-	// on ANY non-empty value (agent.IsToolAccessRestricted), so a Params
-	// spill can only restrict, never grant, tool access.
+	// on ANY non-empty value (agent.SessionConfig.IsToolAccessRestricted),
+	// so a Params spill can only restrict, never grant, tool access.
 	if strings.TrimSpace(cfg.ToolAccess) != "" {
 		attrs["tool_access"] = cfg.ToolAccess
 	}
