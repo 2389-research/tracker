@@ -1127,3 +1127,24 @@ func TestParallelHandlerBranchWritablePathsRefusesClaudeCode(t *testing.T) {
 		t.Errorf("node without writable_paths refused unexpectedly: %v", err)
 	}
 }
+
+// TestParseBranchOverrides_DuplicateTargetLastBranchWins pins deterministic
+// resolution when multiple branches name the same target: the highest
+// branch index wins (matching dippin's "last value wins" convention for
+// duplicate keys). Before this pin the winner was Go map iteration order —
+// nondeterministic, which matters for security overrides like tool_access
+// (Codex review on #375).
+func TestParseBranchOverrides_DuplicateTargetLastBranchWins(t *testing.T) {
+	attrs := map[string]string{}
+	for i := 0; i < 8; i++ {
+		attrs[fmt.Sprintf("branch.%d.target", i)] = "AgentA"
+		attrs[fmt.Sprintf("branch.%d.tool_access", i)] = fmt.Sprintf("value-%d", i)
+	}
+
+	for run := 0; run < 20; run++ {
+		overrides := parseBranchOverrides(attrs)
+		if got := overrides["AgentA"]["tool_access"]; got != "value-7" {
+			t.Fatalf("run %d: tool_access = %q, want value-7 (last branch wins)", run, got)
+		}
+	}
+}

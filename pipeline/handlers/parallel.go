@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -454,10 +456,16 @@ func parseBranchAttrKey(key string) (int, string, bool) {
 	return idx, rest[dotIdx+1:], true
 }
 
-// groupBranchOverridesByTarget converts indexed branch attrs to a target-keyed map.
+// groupBranchOverridesByTarget converts indexed branch attrs to a target-keyed
+// map. Branch indices are visited in ascending order so that when multiple
+// branches name the same target, the highest index deterministically wins
+// (dippin's "last value wins" convention for duplicate keys) — map-order
+// iteration would pick a random branch, which matters for security overrides
+// like tool_access / writable_paths (#368 review).
 func groupBranchOverridesByTarget(indexed map[int]map[string]string) map[string]map[string]string {
 	byTarget := make(map[string]map[string]string)
-	for _, branchAttrs := range indexed {
+	for _, idx := range slices.Sorted(maps.Keys(indexed)) {
+		branchAttrs := indexed[idx]
 		target := branchAttrs["target"]
 		if target == "" {
 			continue
