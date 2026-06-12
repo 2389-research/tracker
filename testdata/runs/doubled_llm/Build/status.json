@@ -1,0 +1,7 @@
+{
+  "outcome": "fail",
+  "context_updates": {
+    "tool_stdout": "",
+    "tool_stderr": "bash: missing_tool: command not found"
+  }
+}
