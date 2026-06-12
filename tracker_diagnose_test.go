@@ -514,3 +514,25 @@ func TestDiagnose_AutoStatusMissing(t *testing.T) {
 		t.Errorf("plain suggestion should warn about the success default: %q", plain.Message)
 	}
 }
+
+// TestDiagnose_PreDedupDoubledLLMLog pins backward compatibility for
+// pre-#354 activity logs in which every llm event appears twice (the
+// short trace kind under source "llm" and the llm_* agent spelling under
+// source "agent"). Diagnose must keep parsing those logs and surface the
+// failure signal unchanged — the doubled llm lines are ignored noise,
+// never an error.
+func TestDiagnose_PreDedupDoubledLLMLog(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/doubled_llm")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if r.RunID != "doubled-llm-run" {
+		t.Errorf("run_id = %q", r.RunID)
+	}
+	if len(r.Failures) != 1 {
+		t.Fatalf("got %d failures, want 1", len(r.Failures))
+	}
+	if r.Failures[0].NodeID != "Build" {
+		t.Errorf("node = %q, want Build", r.Failures[0].NodeID)
+	}
+}

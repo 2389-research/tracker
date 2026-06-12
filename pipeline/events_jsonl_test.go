@@ -868,3 +868,68 @@ func isolateSecureLog(t *testing.T) {
 type testErr struct{ msg string }
 
 func (e *testErr) Error() string { return e.msg }
+
+func TestJSONLEventHandler_DropsRawLLMEventsByDefault(t *testing.T) {
+	dir := t.TempDir()
+	isolateSecureLog(t)
+	h := NewJSONLEventHandler(dir)
+
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "raw123",
+	})
+
+	// Raw provider chunks are debugging payload (#354): both spellings
+	// are dropped unless raw capture is enabled.
+	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m")
+	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
+	// Non-raw events still land.
+	h.WriteAgentEvent("llm_text", "gen_code", "", "", "", "hello", "", "anthropic", "m")
+	h.WriteLLMEvent("text", "anthropic", "m", "", "hello")
+	h.Close()
+
+	data, err := os.ReadFile(filepath.Join(dir, "raw123", "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines (pipeline + 2 text), got %d:\n%s", len(lines), data)
+	}
+	for _, line := range lines {
+		var entry jsonlLogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if entry.Type == "provider_raw" || entry.Type == "llm_provider_raw" {
+			t.Errorf("raw event %q written despite capture disabled", entry.Type)
+		}
+	}
+}
+
+func TestJSONLEventHandler_WritesRawLLMEventsWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	isolateSecureLog(t)
+	h := NewJSONLEventHandler(dir)
+	h.SetCaptureRawLLM(true)
+
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "raw456",
+	})
+
+	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m")
+	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
+	h.Close()
+
+	data, err := os.ReadFile(filepath.Join(dir, "raw456", "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines (pipeline + 2 raw), got %d:\n%s", len(lines), data)
+	}
+}

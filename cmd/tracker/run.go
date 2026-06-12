@@ -223,6 +223,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	}
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
 	defer activityLog.Close()
+	// Raw provider streaming chunks are debugging payload — only capture
+	// them in the activity log under --verbose (#354).
+	activityLog.SetCaptureRawLLM(verbose)
 	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
 	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
 	// registry's BundleIdentityStamper). Empty identity is a no-op for
@@ -293,12 +296,24 @@ func emitForcedBundleMismatch(activityLog *pipeline.JSONLEventHandler, info resu
 	activityLog.WriteBundleMismatchForced(info.RunID, info.OriginalIdentity, info.CurrentIdentity)
 }
 
+// llmTraceLogObserver returns the client-level trace → activity log writer.
+// Session-owned events are skipped: the agent session re-emits those as
+// llm_* agent events which reach the log via WriteAgentEvent, so writing
+// them here would log the same stream twice (#354). Non-session calls
+// (e.g. the autopilot interviewer) have no agent path and are kept.
+func llmTraceLogObserver(activityLog *pipeline.JSONLEventHandler) llm.TraceObserverFunc {
+	return func(evt llm.TraceEvent) {
+		if evt.SessionOwned {
+			return
+		}
+		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+	}
+}
+
 // wireLLMTraceToLog registers a trace observer that writes LLM events to the activity log.
 func wireLLMTraceToLog(llmClient *llm.Client, activityLog *pipeline.JSONLEventHandler) {
 	if llmClient != nil {
-		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
-		}))
+		llmClient.AddTraceObserver(llmTraceLogObserver(activityLog))
 	}
 }
 
@@ -632,6 +647,9 @@ func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph
 
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
 	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
+	// Raw provider streaming chunks are debugging payload — only capture
+	// them in the activity log under --verbose (#354).
+	activityLog.SetCaptureRawLLM(verbose)
 	return prog, store, activityLog, nil
 }
 
@@ -665,11 +683,12 @@ func formatParamOverridesForSummary(params map[string]string) string {
 // buildTUIPipelineHandler wires LLM trace events to TUI+activity log and returns the combined handler.
 func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHandler, verbose bool, llmClient *llm.Client) pipeline.PipelineEventHandler {
 	if llmClient != nil {
+		logObserver := llmTraceLogObserver(activityLog)
 		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
 			for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
 				prog.Send(m)
 			}
-			activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+			logObserver(evt)
 		}))
 	}
 	// PipelineAdapter is stateful (accumulates EventValidationOverridden so the

@@ -1,0 +1,12 @@
+{"ts":"2026-04-17T11:00:00Z","type":"pipeline_started"}
+{"ts":"2026-04-17T11:00:01Z","type":"stage_started","node_id":"Build","handler":"tool"}
+{"ts":"2026-04-17T11:00:01.100Z","source":"llm","type":"request_start","provider":"anthropic","model":"claude-sonnet-4-6"}
+{"ts":"2026-04-17T11:00:01.100Z","source":"agent","type":"llm_request_start","node_id":"Build","provider":"anthropic","model":"claude-sonnet-4-6"}
+{"ts":"2026-04-17T11:00:01.200Z","source":"llm","type":"provider_raw","provider":"anthropic","model":"claude-sonnet-4-6","content":"{\"type\":\"content_block_delta\"}"}
+{"ts":"2026-04-17T11:00:01.200Z","source":"agent","type":"llm_provider_raw","node_id":"Build","provider":"anthropic","model":"claude-sonnet-4-6","content":"{\"type\":\"content_block_delta\"}"}
+{"ts":"2026-04-17T11:00:01.300Z","source":"llm","type":"text","provider":"anthropic","model":"claude-sonnet-4-6","content":"hello"}
+{"ts":"2026-04-17T11:00:01.300Z","source":"agent","type":"llm_text","node_id":"Build","provider":"anthropic","model":"claude-sonnet-4-6","content":"hello"}
+{"ts":"2026-04-17T11:00:01.400Z","source":"llm","type":"finish","provider":"anthropic","model":"claude-sonnet-4-6"}
+{"ts":"2026-04-17T11:00:01.400Z","source":"agent","type":"llm_finish","node_id":"Build","provider":"anthropic","model":"claude-sonnet-4-6"}
+{"ts":"2026-04-17T11:00:02Z","type":"stage_failed","node_id":"Build","handler":"tool","error":"exit 127","tool_error":"missing_tool: command not found"}
+{"ts":"2026-04-17T11:00:03Z","type":"pipeline_failed"}
