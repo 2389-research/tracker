@@ -5,6 +5,7 @@ workflow SprintExec
 
   defaults
     fidelity: summary:medium
+    on_failure: FailureSummary
 
   agent Start
     label: Start

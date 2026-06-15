@@ -5,7 +5,9 @@ workflow ConsensusTask
 
   defaults
     max_retries: 3
+    max_restarts: 5
     fidelity: truncate
+    on_failure: Exit
 
   agent Start
     label: Start

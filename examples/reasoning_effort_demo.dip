@@ -9,6 +9,7 @@ workflow ReasoningEffortDemo
   defaults
     max_retries: 2
     fidelity: summary:medium
+    on_failure: Exit
 
   agent Start
     label: Start

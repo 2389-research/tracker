@@ -5,6 +5,7 @@ workflow HumanGateShowcase
 
   defaults
     fidelity: summary:medium
+    on_failure: Exit
 
   agent Start
     label: Start
