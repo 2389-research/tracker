@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`${ctx.tool_stdout}` and `${ctx.tool_stderr}` in agent prompts now render as fenced blocks** (issue #352, item 3). Previously, interpolating these context keys mid-sentence pasted raw tool output inline, garbling the instruction text. The variable expansion layer now wraps `tool_stdout`/`tool_stderr` values in a ` ```text ` fenced block under their own heading, so the output is clearly delimited regardless of which workflow uses them. Per-node scoped references (`${ctx.node.RunTests.tool_stdout}`) are also handled.
+
 ### Changed
 
 - **build-context.md now refreshed with active source files at each MarkMilestoneDone** (issue #351, item 3). The Setup node seeds the architecture map once; `MarkMilestoneDone` now appends an updated "Active source files" entry listing the milestone's changed files so agents reading the orientation file see which files are being actively worked, not just the initial entry-point list from project start. Tracker/build-metadata paths remain filtered (#351 items 1+2).

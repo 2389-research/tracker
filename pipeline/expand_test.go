@@ -658,6 +658,159 @@ func TestExpandVariables_NormalMode_AllowsEverything(t *testing.T) {
 	}
 }
 
+func TestExpandVariables_ToolStdoutFencedBlock(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("tool_stdout", "line one\nline two\nline three")
+	ctx.Set("tool_stderr", "error: something went wrong")
+	ctx.Set("outcome", "fail")
+	ctx.Set("human_response", "yes please")
+
+	tests := []struct {
+		name            string
+		input           string
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:  "tool_stdout renders as fenced block",
+			input: "The output was: ${ctx.tool_stdout} and we should proceed.",
+			wantContains: []string{
+				"## Tool Stdout",
+				"```text",
+				"line one\nline two\nline three",
+				"```",
+			},
+			wantNotContains: []string{
+				"The output was: line one",
+			},
+		},
+		{
+			name:  "tool_stderr renders as fenced block",
+			input: "Errors: ${ctx.tool_stderr} done.",
+			wantContains: []string{
+				"## Tool Stderr",
+				"```text",
+				"error: something went wrong",
+				"```",
+			},
+			wantNotContains: []string{
+				"Errors: error: something went wrong done.",
+			},
+		},
+		{
+			name:  "outcome still expands inline",
+			input: "Result: ${ctx.outcome} end.",
+			wantContains: []string{
+				"Result: fail end.",
+			},
+			wantNotContains: []string{
+				"```text",
+				"## Tool",
+			},
+		},
+		{
+			name:  "human_response still expands inline",
+			input: "User said: ${ctx.human_response}.",
+			wantContains: []string{
+				"User said: yes please.",
+			},
+			wantNotContains: []string{
+				"```text",
+				"## Tool",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ExpandVariables(tt.input, ctx, nil, nil, false)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result, want) {
+					t.Errorf("result does not contain %q\ngot: %q", want, result)
+				}
+			}
+			for _, notWant := range tt.wantNotContains {
+				if strings.Contains(result, notWant) {
+					t.Errorf("result unexpectedly contains %q\ngot: %q", notWant, result)
+				}
+			}
+		})
+	}
+}
+
+func TestExpandVariables_ToolStdoutEmpty(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("tool_stdout", "")
+
+	result, err := ExpandVariables("Before: ${ctx.tool_stdout} After.", ctx, nil, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Empty tool_stdout should not produce a spurious fenced block — it expands
+	// to empty string like any other undefined/empty ctx key.
+	if strings.Contains(result, "```text") {
+		t.Errorf("empty tool_stdout produced spurious fenced block: %q", result)
+	}
+	want := "Before:  After."
+	if result != want {
+		t.Errorf("expected %q for empty tool_stdout, got %q", want, result)
+	}
+}
+
+func TestExpandVariables_NodeScopedToolStdoutFencedBlock(t *testing.T) {
+	// Node-scoped keys like ${ctx.node.RunTests.tool_stdout} must also render
+	// as fenced blocks — not inline. Codex finding P2: the bare-key switch only
+	// matched "tool_stdout"; per-node references used key="node.RunTests.tool_stdout"
+	// and bypassed the fenced rendering.
+	ctx := NewPipelineContext()
+	ctx.Set("node.RunTests.tool_stdout", "line one\nline two")
+	ctx.Set("node.RunTests.tool_stderr", "warn: something")
+
+	tests := []struct {
+		name         string
+		input        string
+		wantContains []string
+	}{
+		{
+			name:  "node-scoped tool_stdout renders as fenced block",
+			input: "Output: ${ctx.node.RunTests.tool_stdout} done.",
+			wantContains: []string{
+				"## Tool Stdout",
+				"```text",
+				"line one\nline two",
+				"```",
+			},
+		},
+		{
+			name:  "node-scoped tool_stderr renders as fenced block",
+			input: "Errors: ${ctx.node.RunTests.tool_stderr} done.",
+			wantContains: []string{
+				"## Tool Stderr",
+				"```text",
+				"warn: something",
+				"```",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ExpandVariables(tt.input, ctx, nil, nil, false)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result, want) {
+					t.Errorf("result does not contain %q\ngot: %q", want, result)
+				}
+			}
+		})
+	}
+}
+
 func TestInjectParamsIntoGraphPreservesValidationAndIndexes(t *testing.T) {
 	g := NewGraph("sub")
 	g.AddNode(&Node{ID: "a", Shape: "box"})
