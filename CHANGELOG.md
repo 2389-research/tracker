@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **build-context.md now refreshed with active source files at each MarkMilestoneDone** (issue #351, item 3). The Setup node seeds the architecture map once; `MarkMilestoneDone` now appends an updated "Active source files" entry listing the milestone's changed files so agents reading the orientation file see which files are being actively worked, not just the initial entry-point list from project start. Tracker/build-metadata paths remain filtered (#351 items 1+2).
+
 ## [0.39.1] - 2026-06-12
 
 ### Fixed

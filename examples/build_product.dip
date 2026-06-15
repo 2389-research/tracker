@@ -1291,6 +1291,12 @@ workflow BuildProduct
             [ "$NFILES" -gt 12 ] && echo "Files: … and $((NFILES - 12)) more"
           fi
           echo "Summary: $SUMMARY"
+          # #351 item 3: refresh the active-source-files section so agents
+          # reading the orientation file see which source files are being
+          # actively worked, not just the initial entry-point list from Setup.
+          if [ "$NFILES" -gt 0 ]; then
+            echo "Active source files (as of milestone $NEXT): $(printf '%s\n' "$FILES" | head -20 | paste -sd, -)"
+          fi
         } >> .ai/build/build-context.md
       ) 2>/dev/null || true
       rm -f .ai/build/milestone-start-sha
