@@ -1217,9 +1217,7 @@ workflow BuildProduct
       Tail of TestMilestone's stdout, 64KB cap. Delimited here under its
       own heading — never interpolated mid-sentence.
 
-      ```text
       ${ctx.tool_stdout}
-      ```
 
   tool MarkMilestoneDone
     label: "Mark Milestone Complete"
@@ -2056,9 +2054,7 @@ workflow BuildProduct
       Tail of FinalBuild's stdout, 64KB cap. Delimited here under its
       own heading — never interpolated mid-sentence.
 
-      ```text
       ${ctx.tool_stdout}
-      ```
 
   human OperatorDecision
     label: "Agent hit its turn limit mid-progress — pick how to proceed"
