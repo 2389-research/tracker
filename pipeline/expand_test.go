@@ -749,9 +749,14 @@ func TestExpandVariables_ToolStdoutEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Empty tool_stdout should not produce a spurious fenced block
+	// Empty tool_stdout should not produce a spurious fenced block — it expands
+	// to empty string like any other undefined/empty ctx key.
 	if strings.Contains(result, "```text") {
 		t.Errorf("empty tool_stdout produced spurious fenced block: %q", result)
+	}
+	want := "Before:  After."
+	if result != want {
+		t.Errorf("expected %q for empty tool_stdout, got %q", want, result)
 	}
 }
 
