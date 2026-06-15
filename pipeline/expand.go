@@ -165,11 +165,14 @@ func resolveVariableValue(
 	// tool_stdout and tool_stderr are raw tool output — render as a fenced block
 	// so they're clearly delimited when pasted into agent prompts mid-sentence.
 	// Other ctx keys expand inline unchanged.
+	// Both bare keys ("tool_stdout") and per-node scoped keys
+	// ("node.RunTests.tool_stdout") are matched by checking the suffix, so
+	// ${ctx.node.RunTests.tool_stdout} also gets fenced rendering.
 	if namespace == "ctx" && !toolCommandMode && value != "" {
-		switch key {
-		case "tool_stdout":
+		switch {
+		case key == "tool_stdout" || strings.HasSuffix(key, ".tool_stdout"):
 			return "\n\n## Tool Stdout\n\n```text\n" + value + "\n```\n", nil
-		case "tool_stderr":
+		case key == "tool_stderr" || strings.HasSuffix(key, ".tool_stderr"):
 			return "\n\n## Tool Stderr\n\n```text\n" + value + "\n```\n", nil
 		}
 	}
