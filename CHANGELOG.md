@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`${ctx.tool_stdout}` and `${ctx.tool_stderr}` in agent prompts now render as fenced blocks** (issue #352, item 3). Previously, interpolating these context keys mid-sentence pasted raw tool output inline, garbling the instruction text. The variable expansion layer now wraps `tool_stdout`/`tool_stderr` values in a ` ```text ` fenced block under their own heading, so the output is clearly delimited regardless of which workflow uses them. Per-node scoped references (`${ctx.node.RunTests.tool_stdout}`) are also handled.
+- **`${ctx.tool_stdout}` and `${ctx.tool_stderr}` in agent prompts now render as fenced blocks** (issue #352, item 3). Previously, interpolating these context keys mid-sentence pasted raw tool output inline, garbling the instruction text. The variable expansion layer now wraps `tool_stdout`/`tool_stderr` values in a ````text```` fenced block under their own heading, so the output is clearly delimited regardless of which workflow uses them. Per-node scoped references (`${ctx.node.RunTests.tool_stdout}`) are also handled.
 
 ### Changed
 
