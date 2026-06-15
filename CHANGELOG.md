@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Non-embedded example workflows now hold A grades under `dippin doctor`** (#335 scope 2). Nine example `.dip` files that shipped with D or F grades (`consensus_task`, `consensus_task_parity`, `sprint_exec`, `human_gate_showcase`, `parallel-ralph-dev`, `semport_thematic`, `fix-tracker-visibility`, `human_gate_test_suite`, `reasoning_effort_demo`) have been structurally hardened: graph-level `on_failure` catch-alls, `max_restarts` defaults, corrected subgraph `ref:` paths, and removal of `label:` edges on interview-mode nodes (DIP129). All now reach A/95–A/100. Core embedded pipelines (`ask_and_execute`, `build_product`, `build_product_with_superspec`, `deep_review`) hold their existing grades with no regressions.
+
 - **`${ctx.tool_stdout}` and `${ctx.tool_stderr}` in agent prompts now render as fenced blocks** (issue #352, item 3). Previously, interpolating these context keys mid-sentence pasted raw tool output inline, garbling the instruction text. The variable expansion layer now wraps `tool_stdout`/`tool_stderr` values in a ` ```text ` fenced block under their own heading, so the output is clearly delimited regardless of which workflow uses them. Per-node scoped references (`${ctx.node.RunTests.tool_stdout}`) are also handled.
 
 ### Changed

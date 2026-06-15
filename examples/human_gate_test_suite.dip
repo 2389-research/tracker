@@ -6,6 +6,7 @@ workflow HumanGateTestSuite
   defaults
     fidelity: summary:medium
     max_retries: 1
+    on_failure: Exit
 
   tool Start
     label: "Start"
@@ -313,8 +314,8 @@ workflow HumanGateTestSuite
     # Section 7: Interview Cancel
     InterviewConfirm -> QuestionWriter2
     QuestionWriter2 -> CancelableInterview
-    CancelableInterview -> CompletedPath  when ctx.outcome = success  label: "Completed"  weight: 2
-    CancelableInterview -> CanceledPath  when ctx.outcome = fail  label: "Canceled"
+    CancelableInterview -> CompletedPath  when ctx.outcome = success  weight: 2
+    CancelableInterview -> CanceledPath  when ctx.outcome = fail
     CompletedPath -> CancelConfirm
     CanceledPath -> CancelConfirm
 

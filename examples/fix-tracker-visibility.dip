@@ -5,7 +5,9 @@ workflow FixTrackerVisibility
 
   defaults
     max_retries: 2
+    max_restarts: 20
     fidelity: summary:high
+    on_failure: Exit
 
   agent Start
     label: Start

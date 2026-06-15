@@ -5,6 +5,8 @@ workflow SemportThematic
 
   defaults
     max_retries: 5
+    max_restarts: 20
+    on_failure: Exit
 
   agent Start
     label: Start

@@ -5,7 +5,9 @@ workflow parallel_ralph_dev
 
   defaults
     max_retries: 2
+    max_restarts: 10
     fidelity: summary:high
+    on_failure: Exit
 
   agent Start
     label: Start
@@ -59,7 +61,7 @@ workflow parallel_ralph_dev
 
   subgraph Brainstorm
     label: "Brainstorm Requirements"
-    ref: subgraphs/brainstorm-human
+    ref: subgraphs/brainstorm-human.dip
 
   agent DecomposeFeature
     label: "Decompose into Streams"
@@ -201,7 +203,7 @@ workflow parallel_ralph_dev
 
   subgraph StreamA
     label: "Stream A — Adaptive Ralph"
-    ref: subgraphs/adaptive-ralph-stream
+    ref: subgraphs/adaptive-ralph-stream.dip
     params:
       stream_id: stream-a
       branch: feature/stream-a
@@ -209,7 +211,7 @@ workflow parallel_ralph_dev
 
   subgraph StreamB
     label: "Stream B — Adaptive Ralph"
-    ref: subgraphs/adaptive-ralph-stream
+    ref: subgraphs/adaptive-ralph-stream.dip
     params:
       stream_id: stream-b
       branch: feature/stream-b
