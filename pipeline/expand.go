@@ -161,6 +161,19 @@ func resolveVariableValue(
 		}
 		return "", nil
 	}
+
+	// tool_stdout and tool_stderr are raw tool output — render as a fenced block
+	// so they're clearly delimited when pasted into agent prompts mid-sentence.
+	// Other ctx keys expand inline unchanged.
+	if namespace == "ctx" && !toolCommandMode && value != "" {
+		switch key {
+		case "tool_stdout":
+			return "\n\n## Tool Stdout\n\n```text\n" + value + "\n```\n", nil
+		case "tool_stderr":
+			return "\n\n## Tool Stderr\n\n```text\n" + value + "\n```\n", nil
+		}
+	}
+
 	return value, nil
 }
 
