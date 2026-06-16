@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Remaining example workflows now hold A grades under `dippin doctor`**
+  (issue #335, scope 3). Four example `.dip` files that shipped with B or F
+  grades (`megaplan`, `megaplan_quality`, `ralph-loop`, `semport`) have been
+  structurally hardened: graph-level `on_failure: Exit` catch-alls and
+  `max_restarts` defaults added to each workflow's `defaults` block.
+  `megaplan_quality` and `ralph-loop` also had `max_retries` where
+  `max_restarts` was the correct intent for their loop-restart budgets (DIP134).
+  All four now reach A/100. No engine changes.
+
 - **`build_product` FinalCommit commit scope** (issue #349). The `FinalCommit`
   agent node now carries `commit_only: true` (engine-level scope guard) to prevent
   it from authoring new implementation when failure context is present in the
