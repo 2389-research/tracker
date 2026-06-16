@@ -290,7 +290,7 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	}
 
 	if v, ok := n.Attrs["commit_only"]; ok {
-		cfg.CommitOnly = v == "true"
+		cfg.CommitOnly = parseBoolAttr(v)
 	}
 
 	return cfg
