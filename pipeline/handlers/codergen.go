@@ -503,6 +503,10 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             runErr.Error(),
 			pipeline.ContextKeyResponsePrefix + node.ID: runErr.Error(),
+			// #304: clear guard flags so a prior retry's state doesn't
+			// persist into downstream conditional routing.
+			"node_cost_exceeded": "",
+			"node_no_progress":   "",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -644,6 +648,10 @@ func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
+			// #304: clear guard flags so a prior retry's state doesn't
+			// persist into downstream conditional routing.
+			"node_cost_exceeded": "",
+			"node_no_progress":   "",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
