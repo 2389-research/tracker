@@ -2152,6 +2152,8 @@ workflow BuildProduct
     reasoning_effort: low
     auto_status: true
     fallback_target: EscalateReview
+    params:
+      commit_only: true
     prompt:
       FINAL COMMIT — COMMIT-ONLY SCOPE:
 
