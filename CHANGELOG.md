@@ -41,8 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grades (`megaplan`, `megaplan_quality`, `ralph-loop`, `semport`) have been
   structurally hardened: graph-level `on_failure: Exit` catch-alls and
   `max_restarts` defaults added to each workflow's `defaults` block.
-  `megaplan_quality` and `ralph-loop` also had `max_retries` where
-  `max_restarts` was the correct intent for their loop-restart budgets (DIP134).
+  `megaplan_quality` and `ralph-loop` each had `max_retries` in defaults but
+  no `max_restarts`, triggering DIP134 (restart-budget vs per-node retry
+  confusion); `max_restarts` was added alongside the existing `max_retries`.
   All four now reach A/100. No engine changes.
 
 - **`build_product` FinalCommit commit scope** (issue #349). The `FinalCommit`

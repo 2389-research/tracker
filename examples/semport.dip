@@ -4,7 +4,6 @@ workflow Semport
   exit: Exit
 
   defaults
-    max_restarts: 10
     on_failure: Exit
 
   agent Start
