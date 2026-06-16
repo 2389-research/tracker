@@ -1007,10 +1007,9 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 
 	// #349: commit_only scope guard — outermost prepend so the restriction acts
 	// as the strongest constraint, overriding any node-supplied system_prompt.
-	// Enforced for native (via SessionConfig.SystemPrompt → Extra) and claude-code
-	// (buildRunConfig copies SystemPrompt into AgentRunConfig.SystemPrompt, which
-	// the claude-code backend passes as --system-prompt). ACP does not read
-	// AgentRunConfig.SystemPrompt, so the guard is silently ignored there.
+	// Enforced for all three backends: native (SessionConfig.SystemPrompt → Extra),
+	// claude-code (AgentRunConfig.SystemPrompt → --system-prompt flag), and ACP
+	// (buildACPPromptBlocks prepends AgentRunConfig.SystemPrompt as a text block).
 	if cfg.CommitOnly {
 		if config.SystemPrompt != "" {
 			config.SystemPrompt = commitOnlyScopeGuard + "\n\n" + config.SystemPrompt

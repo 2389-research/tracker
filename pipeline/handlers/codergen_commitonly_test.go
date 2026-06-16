@@ -20,11 +20,8 @@ func TestCommitOnlyScopeGuardInjected(t *testing.T) {
 		},
 	}
 	cfg := h.buildConfig(node)
-	if !strings.Contains(cfg.SystemPrompt, "SCOPE RESTRICTION") {
-		t.Errorf("commit_only: true should inject scope guard into SystemPrompt, got: %q", cfg.SystemPrompt)
-	}
-	if !strings.Contains(cfg.SystemPrompt, "STATUS: fail") {
-		t.Errorf("scope guard must include STATUS: fail escape hatch, got: %q", cfg.SystemPrompt)
+	if cfg.SystemPrompt != commitOnlyScopeGuard {
+		t.Errorf("commit_only: true should set SystemPrompt to commitOnlyScopeGuard\ngot:  %q\nwant: %q", cfg.SystemPrompt, commitOnlyScopeGuard)
 	}
 }
 
@@ -69,15 +66,8 @@ func TestCommitOnlyScopeGuardPrependedBeforeNodeSystemPrompt(t *testing.T) {
 		},
 	}
 	cfg := h.buildConfig(node)
-	guardIdx := strings.Index(cfg.SystemPrompt, "SCOPE RESTRICTION")
-	nodePromptIdx := strings.Index(cfg.SystemPrompt, nodeSystemPrompt)
-	if guardIdx == -1 {
-		t.Fatalf("scope guard not found in SystemPrompt: %q", cfg.SystemPrompt)
-	}
-	if nodePromptIdx == -1 {
-		t.Fatalf("node system_prompt not found in SystemPrompt: %q", cfg.SystemPrompt)
-	}
-	if guardIdx > nodePromptIdx {
-		t.Errorf("scope guard must come before node system_prompt (guard at %d, node prompt at %d)", guardIdx, nodePromptIdx)
+	want := commitOnlyScopeGuard + "\n\n" + nodeSystemPrompt
+	if cfg.SystemPrompt != want {
+		t.Errorf("commit_only with node system_prompt: SystemPrompt mismatch\ngot:  %q\nwant: %q", cfg.SystemPrompt, want)
 	}
 }

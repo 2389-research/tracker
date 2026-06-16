@@ -16,10 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (spec violations, missing milestones) is present in the conversation window.
   The block requires `STATUS: fail` on a standalone line (no trailing text, so
   `parseStatusLine` accepts it), then the explanation on subsequent lines. Enforced
-  for the native backend (via `SessionConfig.SystemPrompt`) and the `claude-code`
-  backend (`AgentRunConfig.SystemPrompt` is passed as `--system-prompt`). The ACP
-  backend does not read `AgentRunConfig.SystemPrompt`, so `commit_only` is silently
-  ignored there.
+  for all three backends: native (via `SessionConfig.SystemPrompt`), `claude-code`
+  (`AgentRunConfig.SystemPrompt` passed as `--system-prompt`), and ACP
+  (`buildACPPromptBlocks` prepends it as a text block).
 
 - **Per-node cost ceiling and no-progress detector for the engine** (issue #304).
   Two new guards complement the existing `max_turns` backstop. A node with
