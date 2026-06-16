@@ -94,8 +94,8 @@ func TestCodergenNodeCostExceededContextKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.ContextUpdates["node_cost_exceeded"] != "true" {
-		t.Errorf("want node_cost_exceeded=true in context updates, got %q", outcome.ContextUpdates["node_cost_exceeded"])
+	if outcome.ContextUpdates[pipeline.ContextKeyNodeCostExceeded] != "true" {
+		t.Errorf("want node_cost_exceeded=true in context updates, got %q", outcome.ContextUpdates[pipeline.ContextKeyNodeCostExceeded])
 	}
 }
 
