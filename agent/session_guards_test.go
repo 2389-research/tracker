@@ -137,6 +137,35 @@ func TestSessionNoProgressNotSetWhenLimitUnset(t *testing.T) {
 	}
 }
 
+func TestSessionNoProgressNotTriggeredByEmptyResponseRetry(t *testing.T) {
+	// An empty API response causes the session to retry (not a progress failure).
+	// With NoProgressTurns=1, the retry turn must NOT count as a no-progress turn.
+	empty := &llm.Response{
+		Message:      llm.Message{Role: llm.RoleAssistant},
+		FinishReason: llm.FinishReason{Reason: "stop"},
+		Usage:        llm.Usage{OutputTokens: 0},
+	}
+	done := &llm.Response{
+		Message:      llm.AssistantMessage("done"),
+		FinishReason: llm.FinishReason{Reason: "stop"},
+		Usage:        llm.Usage{OutputTokens: 10},
+	}
+	client := &mockCompleter{responses: []*llm.Response{empty, done}}
+
+	cfg := DefaultConfig()
+	cfg.NoProgressTurns = 1 // very aggressive — fires on first no-tool turn
+	cfg.MaxTurns = 10
+
+	sess := mustNewSession(t, client, cfg)
+	result, err := sess.Run(context.Background(), "do work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NoProgressDetected {
+		t.Error("NoProgressDetected should not fire during empty-response retry sequence")
+	}
+}
+
 func TestSessionNoProgressResetsWhenToolsCalled(t *testing.T) {
 	// Tool calls reset the no-progress counter. Pattern: no-tool, tool-call,
 	// no-tool — only one consecutive no-tool turn before and after the tool

@@ -240,6 +240,7 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			return false, err
 		}
 		prevToolCount := result.TotalToolCalls()
+		prevEmptyRetries := ts.emptyResponseRetries
 		done, stop, err := s.executeTurn(ctx, turn, start, tracker, result, ts)
 		if err != nil {
 			return false, err
@@ -253,7 +254,9 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			return false, nil
 		}
 		// #304: no-progress detector — halt after K consecutive tool-call-free turns.
-		if s.config.NoProgressTurns > 0 {
+		// Skip the check during empty-response retry sequences: the session is
+		// actively recovering from a provider hiccup, not truly stuck.
+		if s.config.NoProgressTurns > 0 && ts.emptyResponseRetries == prevEmptyRetries {
 			if result.TotalToolCalls() > prevToolCount {
 				ts.consecutiveNoToolTurns = 0
 			} else {

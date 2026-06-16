@@ -553,9 +553,10 @@ func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prom
 	msg := fmt.Sprintf("node %q: per-node cost ceiling exceeded (cost=%.4f USD)", node.ID, sessResult.Usage.EstimatedCost)
 	if h.pipelineEmitter != nil {
 		h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type:    pipeline.EventNodeCostLimitExceeded,
-			NodeID:  node.ID,
-			Message: msg,
+			Type:      pipeline.EventNodeCostLimitExceeded,
+			NodeID:    node.ID,
+			Message:   msg,
+			Timestamp: time.Now(),
 		})
 	}
 	outcome := pipeline.Outcome{
@@ -588,9 +589,10 @@ func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, prompt, ar
 	msg := fmt.Sprintf("node %q: no-progress detected (%d consecutive turns with no tool calls)", node.ID, cfg.NoProgressTurns)
 	if h.pipelineEmitter != nil {
 		h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type:    pipeline.EventNodeNoProgressDetected,
-			NodeID:  node.ID,
-			Message: msg,
+			Type:      pipeline.EventNodeNoProgressDetected,
+			NodeID:    node.ID,
+			Message:   msg,
+			Timestamp: time.Now(),
 		})
 	}
 	outcome := pipeline.Outcome{
@@ -674,6 +676,10 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             responseText,
 			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
+			// #304: clear guard signals so a prior retry's flags don't
+			// persist into downstream routing on subsequent nodes/retries.
+			"node_cost_exceeded": "",
+			"node_no_progress":   "",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
