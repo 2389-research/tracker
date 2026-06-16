@@ -60,6 +60,35 @@ func TestSessionNodeCostExceededHaltsLoop(t *testing.T) {
 	}
 }
 
+func TestSessionNodeCostExceededOnNaturalCompletion(t *testing.T) {
+	// The cost ceiling must fire even when the session completes naturally on
+	// the same turn that pushes cumulative cost over the threshold.
+	client := &mockCompleter{responses: []*llm.Response{
+		// Single turn: natural stop (FinishReason=stop), but cost=$0.02 > $0.01 limit.
+		{
+			Message:      llm.AssistantMessage("done"),
+			FinishReason: llm.FinishReason{Reason: "stop"},
+			Usage:        llm.Usage{EstimatedCost: 0.02, OutputTokens: 10},
+		},
+	}}
+
+	cfg := DefaultConfig()
+	cfg.MaxCostUSD = 0.01
+	cfg.MaxTurns = 5
+
+	sess := mustNewSession(t, client, cfg)
+	result, err := sess.Run(context.Background(), "do work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.NodeCostExceeded {
+		t.Error("NodeCostExceeded should be true when final turn pushes cost over ceiling")
+	}
+	if result.MaxTurnsUsed {
+		t.Error("MaxTurnsUsed should not be set when cost guard fires")
+	}
+}
+
 func TestSessionNodeCostExceededNotSetWhenLimitUnset(t *testing.T) {
 	// With MaxCostUSD=0 (unset), the cost guard is disabled — even expensive
 	// responses should not set NodeCostExceeded.

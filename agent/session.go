@@ -245,13 +245,15 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 		if err != nil {
 			return false, err
 		}
-		if stop {
-			return done, nil
-		}
-		// #304: per-node cost ceiling — halt when cumulative cost exceeds limit.
+		// #304: per-node cost ceiling — checked before honouring stop so the
+		// ceiling takes precedence even on the turn that naturally completes
+		// the session (cost updated by executeTurn before it returns).
 		if s.config.MaxCostUSD > 0 && result.Usage.EstimatedCost > s.config.MaxCostUSD {
 			result.NodeCostExceeded = true
 			return false, nil
+		}
+		if stop {
+			return done, nil
 		}
 		// #304: no-progress detector — halt after K consecutive tool-call-free turns.
 		// Skip the check during empty-response retry sequences: the session is
