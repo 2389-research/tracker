@@ -194,6 +194,9 @@ func (c SessionConfig) Validate() error {
 	if err := c.validateCheckpoints(); err != nil {
 		return err
 	}
+	if err := c.validateGuards(); err != nil {
+		return err
+	}
 	return c.validateResponseFormat()
 }
 
@@ -245,6 +248,18 @@ func (c SessionConfig) validateLimits() error {
 	}
 	if c.MaxVerifyRetries < 0 {
 		return fmt.Errorf("MaxVerifyRetries must be >= 0, got %d", c.MaxVerifyRetries)
+	}
+	return nil
+}
+
+// validateGuards checks the #304 per-node runaway guard fields.
+// Zero is the valid "disabled" sentinel; only negative values are rejected.
+func (c SessionConfig) validateGuards() error {
+	if c.MaxCostUSD < 0 {
+		return fmt.Errorf("MaxCostUSD must be >= 0, got %f", c.MaxCostUSD)
+	}
+	if c.NoProgressTurns < 0 {
+		return fmt.Errorf("NoProgressTurns must be >= 0, got %d", c.NoProgressTurns)
 	}
 	return nil
 }

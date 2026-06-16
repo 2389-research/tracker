@@ -13,9 +13,10 @@ import (
 // For the subset of attrs that support graph-level defaults (llm_model,
 // llm_provider, reasoning_effort, verify_after_edit, verify_command,
 // max_verify_retries, plan_before_execute, cache_tool_results,
-// context_compaction), AgentConfig resolves the value from graphAttrs first,
-// then lets node.Attrs override when the same key is set on the node. The
-// remaining fields are node-only and have no graph fallback.
+// context_compaction, turn_breach_policy, max_cost_usd, no_progress_turns),
+// AgentConfig resolves the value from graphAttrs first, then lets node.Attrs
+// override when the same key is set on the node. The remaining fields are
+// node-only and have no graph fallback.
 //
 // Unless documented otherwise on the specific field, fields absent from their
 // applicable source use the Go zero value. ReflectOnError is the one
