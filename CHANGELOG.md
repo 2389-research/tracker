@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`commit_only` node attribute for codergen agent nodes** (issue #349). Setting
+  `params: commit_only: true` on an agent node causes the codergen handler to
+  prepend a hardcoded scope-restriction block to the session's system prompt,
+  preventing the agent from authoring new implementation even when failure context
+  (spec violations, missing milestones) is present in the conversation window.
+  The block includes a `STATUS: fail` escape hatch so the pipeline can re-route
+  through the correct implement/test/verify path instead of silently shipping
+  unverified code. Only enforced for the native backend; `commit_only` on
+  `claude-code` or `acp` nodes is noted in the comment and has no effect on those
+  backends (they do not use `SessionConfig.SystemPrompt`).
+
 - **Per-node cost ceiling and no-progress detector for the engine** (issue #304).
   Two new guards complement the existing `max_turns` backstop. A node with
   `max_cost_usd: "0.50"` halts when its cumulative session cost exceeds that
@@ -22,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EventNodeCostLimitExceeded` / `EventNodeNoProgressDetected` pipeline events.
   With these guards in place, `max_turns` serves as a coarse backstop that
   should rarely bind during normal runs.
+
+### Fixed
+
+- **`build_product` FinalCommit commit scope** (issue #349). The `FinalCommit`
+  agent node now carries `commit_only: true` (engine-level scope guard) to prevent
+  it from authoring new implementation when failure context is present in the
+  conversation window. The prompt already contained explicit "do NOT implement"
+  language; the engine-level guard makes that restriction structurally enforced
+  rather than advisory-only. The case-study run `b68b532619c3` demonstrated the
+  failure mode: FinalCommit received a failure report and wrote an entire missing
+  milestone (new files, wrong model, signal-exit race, failing lint), bypassing
+  all quality gates.
 
 ## [0.39.2] - 2026-06-15
 

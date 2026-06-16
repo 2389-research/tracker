@@ -86,6 +86,12 @@ type AgentNodeConfig struct {
 	CacheToolResults    bool
 	CacheToolResultsSet bool
 
+	// CommitOnly restricts the node to commit-only operations. When true, the
+	// codergen handler prepends commitOnlyScopeGuard to the session's
+	// SystemPrompt, preventing the agent from authoring new implementation even
+	// when failure context is present. Issue: github.com/2389-research/tracker#349.
+	CommitOnly bool
+
 	// ContextCompaction carries the raw attr value. "auto" enables automatic
 	// compaction; any other non-empty value (e.g. "none") disables it; ""
 	// means the attr was absent. Kept as string so future modes can be added
@@ -281,6 +287,10 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	if raw, ok := n.Attrs["writable_paths"]; ok {
 		cfg.WritablePathsSet = true
 		cfg.WritablePaths = splitCommaNoEmpty(raw)
+	}
+
+	if v, ok := n.Attrs["commit_only"]; ok {
+		cfg.CommitOnly = v == "true"
 	}
 
 	return cfg
