@@ -568,8 +568,8 @@ func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prom
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
-			"node_cost_exceeded": "true",
-			"node_no_progress":   "", // clear sibling guard flag
+			"node_cost_exceeded":                        "true",
+			"node_no_progress":                          "", // clear sibling guard flag
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -605,8 +605,8 @@ func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, prompt, ar
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
-			"node_cost_exceeded": "", // clear sibling guard flag
-			"node_no_progress":   "true",
+			"node_cost_exceeded":                        "", // clear sibling guard flag
+			"node_no_progress":                          "true",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
