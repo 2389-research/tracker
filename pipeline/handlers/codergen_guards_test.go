@@ -61,7 +61,7 @@ func TestCodergenNoProgressDetectedRoutesToRetry(t *testing.T) {
 	node := &pipeline.Node{
 		ID: "gen", Shape: "box", Handler: "codergen",
 		Attrs: map[string]string{
-			"prompt":           "do something",
+			"prompt":            "do something",
 			"no_progress_turns": "2",
 		},
 	}
