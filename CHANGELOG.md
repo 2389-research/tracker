@@ -14,11 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prepend a hardcoded scope-restriction block to the session's system prompt,
   preventing the agent from authoring new implementation even when failure context
   (spec violations, missing milestones) is present in the conversation window.
-  The block includes a `STATUS: fail` escape hatch so the pipeline can re-route
-  through the correct implement/test/verify path instead of silently shipping
-  unverified code. Only enforced for the native backend; `commit_only` on
-  `claude-code` or `acp` nodes is noted in the comment and has no effect on those
-  backends (they do not use `SessionConfig.SystemPrompt`).
+  The block requires `STATUS: fail` on a standalone line (no trailing text, so
+  `parseStatusLine` accepts it), then the explanation on subsequent lines. Enforced
+  for the native backend (via `SessionConfig.SystemPrompt`) and the `claude-code`
+  backend (`AgentRunConfig.SystemPrompt` is passed as `--system-prompt`). The ACP
+  backend does not read `AgentRunConfig.SystemPrompt`, so `commit_only` is silently
+  ignored there.
 
 - **Per-node cost ceiling and no-progress detector for the engine** (issue #304).
   Two new guards complement the existing `max_turns` backstop. A node with

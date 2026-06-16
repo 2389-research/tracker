@@ -748,14 +748,15 @@ func (h *CodergenHandler) applyEpisodeContextUpdates(updates map[string]string, 
 // commit_only: true (#349). It is a hardcoded safety rail, not a
 // customization surface — it prevents the agent from authoring new
 // implementation even when failure context (spec violations, missing
-// milestones) is present in the conversation window. The STATUS: fail
-// escape hatch lets the pipeline re-route through the correct
-// implement/test/verify path instead of silently shipping unverified code.
+// milestones) is present in the conversation window. The STATUS: fail escape
+// hatch must appear on a standalone line (no trailing text) so parseStatusLine
+// accepts it; the explanation follows on subsequent lines.
 const commitOnlyScopeGuard = "SCOPE RESTRICTION: You are operating in commit-only mode. " +
 	"You may run git status, git add, git commit, and read files to understand what to commit. " +
 	"You must NOT create, edit, or delete source files. " +
 	"If you observe that the work tree is missing required implementation, " +
-	"respond with STATUS: fail and explain what is missing — do not implement it yourself."
+	"emit STATUS: fail on a line by itself (no trailing text on that line), " +
+	"then explain what is missing on the following lines — do not implement it yourself."
 
 // maxTurnsOverrideSubdir is the tracker-owned, working-dir-relative directory
 // holding per-node warm-continue MaxTurns overrides (#318). One file per node
@@ -1006,8 +1007,10 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 
 	// #349: commit_only scope guard — outermost prepend so the restriction acts
 	// as the strongest constraint, overriding any node-supplied system_prompt.
-	// Only enforced for the native backend (SessionConfig.SystemPrompt is not
-	// used by claude-code or ACP backends — they build their own Extra config).
+	// Enforced for native (via SessionConfig.SystemPrompt → Extra) and claude-code
+	// (buildRunConfig copies SystemPrompt into AgentRunConfig.SystemPrompt, which
+	// the claude-code backend passes as --system-prompt). ACP does not read
+	// AgentRunConfig.SystemPrompt, so the guard is silently ignored there.
 	if cfg.CommitOnly {
 		if config.SystemPrompt != "" {
 			config.SystemPrompt = commitOnlyScopeGuard + "\n\n" + config.SystemPrompt
