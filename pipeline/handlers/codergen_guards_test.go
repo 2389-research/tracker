@@ -122,3 +122,31 @@ func TestCodergenGraphDefaultMaxCostUSD(t *testing.T) {
 		t.Errorf("graph-level max_cost_usd: want %q, got %q", pipeline.OutcomeRetry, outcome.Status)
 	}
 }
+
+func TestCodergenNodeZeroMaxCostUSDDisablesGraphDefault(t *testing.T) {
+	// A per-node max_cost_usd: "0" must disable an inherited graph-level default.
+	// The session runs all responses and succeeds without hitting the guard.
+	client := &scriptedCompleter{responses: []*llm.Response{
+		truncatedCostResponse(0.006),
+		truncatedCostResponse(0.006),
+		{Message: llm.AssistantMessage("done"), FinishReason: llm.FinishReason{Reason: "stop"}},
+	}}
+	h := NewCodergenHandler(client, t.TempDir(), WithGraphAttrs(map[string]string{
+		"max_cost_usd": "0.01", // graph-level ceiling
+	}))
+	node := &pipeline.Node{
+		ID: "gen", Shape: "box", Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":       "do something",
+			"max_cost_usd": "0", // node explicitly disables the graph default
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != string(pipeline.OutcomeSuccess) {
+		t.Errorf("node max_cost_usd=0 should disable graph default: want success, got %q", outcome.Status)
+	}
+}

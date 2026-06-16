@@ -48,6 +48,9 @@ func TestSessionNodeCostExceededHaltsLoop(t *testing.T) {
 	if result.NoProgressDetected {
 		t.Error("NoProgressDetected should not be set when cost guard fires")
 	}
+	if result.MaxTurnsUsed {
+		t.Error("MaxTurnsUsed should not be set when cost guard fires — guard stop is not turn exhaustion")
+	}
 	if result.Usage.EstimatedCost <= cfg.MaxCostUSD {
 		t.Errorf("cost %.4f should exceed limit %.4f", result.Usage.EstimatedCost, cfg.MaxCostUSD)
 	}
@@ -102,6 +105,9 @@ func TestSessionNoProgressDetectedAfterKTurns(t *testing.T) {
 	}
 	if result.NodeCostExceeded {
 		t.Error("NodeCostExceeded should not be set when no-progress guard fires")
+	}
+	if result.MaxTurnsUsed {
+		t.Error("MaxTurnsUsed should not be set when no-progress guard fires — guard stop is not turn exhaustion")
 	}
 	// Guard fires after K=2 turns; third response never reached.
 	if client.calls != 2 {

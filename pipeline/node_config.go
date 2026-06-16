@@ -135,26 +135,28 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 			cfg.MaxBudgetUSD = f
 		}
 	}
-	// #304: max_cost_usd — per-node cost ceiling. Graph default then node override.
+	// #304: max_cost_usd — per-node cost ceiling. Graph default (positive only)
+	// then node override. Node-level "0" explicitly disables a graph default.
 	if v, ok := graphAttrs["max_cost_usd"]; ok && v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
 			cfg.MaxCostUSD = f
 		}
 	}
 	if v, ok := n.Attrs["max_cost_usd"]; ok && v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
-			cfg.MaxCostUSD = f
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+			cfg.MaxCostUSD = f // 0 disables the inherited graph default
 		}
 	}
-	// #304: no_progress_turns — no-progress detector K. Graph default then node override.
+	// #304: no_progress_turns — no-progress detector K. Graph default (positive
+	// only) then node override. Node-level "0" explicitly disables a graph default.
 	if v, ok := graphAttrs["no_progress_turns"]; ok && v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			cfg.NoProgressTurns = i
 		}
 	}
 	if v, ok := n.Attrs["no_progress_turns"]; ok && v != "" {
-		if i, err := strconv.Atoi(v); err == nil && i > 0 {
-			cfg.NoProgressTurns = i
+		if i, err := strconv.Atoi(v); err == nil && i >= 0 {
+			cfg.NoProgressTurns = i // 0 disables the inherited graph default
 		}
 	}
 	if v := n.Attrs["max_turns"]; v != "" {

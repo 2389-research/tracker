@@ -584,7 +584,8 @@ func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prom
 // fired after NoProgressTurns consecutive tool-call-free turns. Emits
 // EventNodeNoProgressDetected. (#304)
 func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, prompt, artifactRoot, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
-	msg := fmt.Sprintf("node %q: no-progress detected (%d consecutive turns with no tool calls)", node.ID, sessResult.Turns)
+	cfg := node.AgentConfig(h.graphAttrs)
+	msg := fmt.Sprintf("node %q: no-progress detected (%d consecutive turns with no tool calls)", node.ID, cfg.NoProgressTurns)
 	if h.pipelineEmitter != nil {
 		h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
 			Type:    pipeline.EventNodeNoProgressDetected,

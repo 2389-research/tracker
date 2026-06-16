@@ -208,7 +208,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		return result, err
 	}
 
-	if !stoppedNaturally {
+	// #304: node-level guards (NodeCostExceeded, NoProgressDetected) stop the
+	// loop early and are not turn exhaustion — skip MaxTurnsUsed and
+	// verify-on-breach so the codergen handler can route them correctly.
+	guardStop := result.NodeCostExceeded || result.NoProgressDetected
+	if !stoppedNaturally && !guardStop {
 		result.MaxTurnsUsed = true
 		// #303 verify-on-breach: only on plain exhaustion (not a detected
 		// loop), only when the pipeline asked for it via VerifyOnBreach, and
