@@ -68,6 +68,15 @@ const (
 	// (which reproduces today's guillotine exactly).
 	ContextKeyTurnBreachClass = "turn_breach_class"
 
+	// ContextKeyNodeCostExceeded is set to "true" when the per-node MaxCostUSD
+	// ceiling is breached; cleared to "" by all other outcome paths so downstream
+	// conditional routing sees a clean state after recovery. (#304)
+	ContextKeyNodeCostExceeded = "node_cost_exceeded"
+
+	// ContextKeyNodeNoProgress is set to "true" when the no-progress detector
+	// fires; cleared to "" by all other outcome paths. (#304)
+	ContextKeyNodeNoProgress = "node_no_progress"
+
 	// Turn-breach classification values (#303).
 	TurnBreachClassPathological     = "pathological"      // loop / no-progress → stop
 	TurnBreachClassVerifiedGreen    = "verified_green"    // breach verify passed → advance as success

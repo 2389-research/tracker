@@ -461,3 +461,61 @@ func TestAgentConfig_WritablePaths(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentConfigMaxCostUSDAndNoProgressTurns(t *testing.T) {
+	cases := []struct {
+		name           string
+		graphAttrs     map[string]string
+		nodeAttrs      map[string]string
+		wantMaxCostUSD float64
+		wantNoProgress int
+	}{
+		{
+			name:           "absent: both zero",
+			graphAttrs:     nil,
+			nodeAttrs:      map[string]string{},
+			wantMaxCostUSD: 0,
+			wantNoProgress: 0,
+		},
+		{
+			name:           "graph default applies",
+			graphAttrs:     map[string]string{"max_cost_usd": "1.50", "no_progress_turns": "5"},
+			nodeAttrs:      map[string]string{},
+			wantMaxCostUSD: 1.50,
+			wantNoProgress: 5,
+		},
+		{
+			name:           "node overrides graph default",
+			graphAttrs:     map[string]string{"max_cost_usd": "1.50", "no_progress_turns": "5"},
+			nodeAttrs:      map[string]string{"max_cost_usd": "0.25", "no_progress_turns": "3"},
+			wantMaxCostUSD: 0.25,
+			wantNoProgress: 3,
+		},
+		{
+			name:           "node zero disables graph default",
+			graphAttrs:     map[string]string{"max_cost_usd": "1.50", "no_progress_turns": "5"},
+			nodeAttrs:      map[string]string{"max_cost_usd": "0", "no_progress_turns": "0"},
+			wantMaxCostUSD: 0,
+			wantNoProgress: 0,
+		},
+		{
+			name:           "graph zero is not applied (positive only)",
+			graphAttrs:     map[string]string{"max_cost_usd": "0", "no_progress_turns": "0"},
+			nodeAttrs:      map[string]string{},
+			wantMaxCostUSD: 0,
+			wantNoProgress: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &Node{Attrs: tc.nodeAttrs}
+			cfg := n.AgentConfig(tc.graphAttrs)
+			if cfg.MaxCostUSD != tc.wantMaxCostUSD {
+				t.Errorf("MaxCostUSD = %v, want %v", cfg.MaxCostUSD, tc.wantMaxCostUSD)
+			}
+			if cfg.NoProgressTurns != tc.wantNoProgress {
+				t.Errorf("NoProgressTurns = %v, want %v", cfg.NoProgressTurns, tc.wantNoProgress)
+			}
+		})
+	}
+}

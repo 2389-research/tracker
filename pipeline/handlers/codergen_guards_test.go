@@ -150,3 +150,66 @@ func TestCodergenNodeZeroMaxCostUSDDisablesGraphDefault(t *testing.T) {
 		t.Errorf("node max_cost_usd=0 should disable graph default: want success, got %q", outcome.Status)
 	}
 }
+
+// stubPipelineEmitter records every pipeline event it receives.
+type stubPipelineEmitter struct {
+	events []pipeline.PipelineEvent
+}
+
+func (s *stubPipelineEmitter) HandlePipelineEvent(evt pipeline.PipelineEvent) {
+	s.events = append(s.events, evt)
+}
+
+func TestCodergenNodeCostExceededEmitsPipelineEvent(t *testing.T) {
+	client := &scriptedCompleter{responses: []*llm.Response{
+		truncatedCostResponse(0.006),
+		truncatedCostResponse(0.006),
+	}}
+	emitter := &stubPipelineEmitter{}
+	h := NewCodergenHandler(client, t.TempDir(), WithPipelineEmitter(emitter))
+	node := &pipeline.Node{
+		ID: "gen", Shape: "box", Handler: "codergen",
+		Attrs: map[string]string{"prompt": "do something", "max_cost_usd": "0.01"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var found bool
+	for _, evt := range emitter.events {
+		if evt.Type == pipeline.EventNodeCostLimitExceeded && evt.NodeID == "gen" && !evt.Timestamp.IsZero() {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected EventNodeCostLimitExceeded with NodeID=gen and non-zero Timestamp; got events: %v", emitter.events)
+	}
+}
+
+func TestCodergenNoProgressEmitsPipelineEvent(t *testing.T) {
+	client := &scriptedCompleter{responses: []*llm.Response{
+		truncatedCostResponse(0.0001),
+		truncatedCostResponse(0.0001),
+	}}
+	emitter := &stubPipelineEmitter{}
+	h := NewCodergenHandler(client, t.TempDir(), WithPipelineEmitter(emitter))
+	node := &pipeline.Node{
+		ID: "gen", Shape: "box", Handler: "codergen",
+		Attrs: map[string]string{"prompt": "do something", "no_progress_turns": "2"},
+	}
+	pctx := pipeline.NewPipelineContext()
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var found bool
+	for _, evt := range emitter.events {
+		if evt.Type == pipeline.EventNodeNoProgressDetected && evt.NodeID == "gen" && !evt.Timestamp.IsZero() {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected EventNodeNoProgressDetected with NodeID=gen and non-zero Timestamp; got events: %v", emitter.events)
+	}
+}

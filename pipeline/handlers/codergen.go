@@ -505,8 +505,8 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 			pipeline.ContextKeyResponsePrefix + node.ID: runErr.Error(),
 			// #304: clear guard flags so a prior retry's state doesn't
 			// persist into downstream conditional routing.
-			"node_cost_exceeded": "",
-			"node_no_progress":   "",
+			pipeline.ContextKeyNodeCostExceeded: "",
+			pipeline.ContextKeyNodeNoProgress:   "",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -568,8 +568,8 @@ func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prom
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
-			"node_cost_exceeded":                        "true",
-			"node_no_progress":                          "", // clear sibling guard flag
+			pipeline.ContextKeyNodeCostExceeded:         "true",
+			pipeline.ContextKeyNodeNoProgress:           "", // clear sibling guard flag
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -605,8 +605,8 @@ func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, prompt, ar
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
-			"node_cost_exceeded":                        "", // clear sibling guard flag
-			"node_no_progress":                          "true",
+			pipeline.ContextKeyNodeCostExceeded:         "", // clear sibling guard flag
+			pipeline.ContextKeyNodeNoProgress:           "true",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -652,8 +652,8 @@ func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
 			// #304: clear guard flags so a prior retry's state doesn't
 			// persist into downstream conditional routing.
-			"node_cost_exceeded": "",
-			"node_no_progress":   "",
+			pipeline.ContextKeyNodeCostExceeded: "",
+			pipeline.ContextKeyNodeNoProgress:   "",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
@@ -688,8 +688,8 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
 			// #304: clear guard signals so a prior retry's flags don't
 			// persist into downstream routing on subsequent nodes/retries.
-			"node_cost_exceeded": "",
-			"node_no_progress":   "",
+			pipeline.ContextKeyNodeCostExceeded: "",
+			pipeline.ContextKeyNodeNoProgress:   "",
 		},
 		Stats: buildSessionStats(sessResult),
 	}
