@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.2] - 2026-06-15
+
 ### Fixed
 
 - **Non-embedded example workflows now hold A grades under `dippin doctor`**
