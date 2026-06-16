@@ -13,9 +13,10 @@ import (
 // For the subset of attrs that support graph-level defaults (llm_model,
 // llm_provider, reasoning_effort, verify_after_edit, verify_command,
 // max_verify_retries, plan_before_execute, cache_tool_results,
-// context_compaction), AgentConfig resolves the value from graphAttrs first,
-// then lets node.Attrs override when the same key is set on the node. The
-// remaining fields are node-only and have no graph fallback.
+// context_compaction, turn_breach_policy, max_cost_usd, no_progress_turns),
+// AgentConfig resolves the value from graphAttrs first, then lets node.Attrs
+// override when the same key is set on the node. The remaining fields are
+// node-only and have no graph fallback.
 //
 // Unless documented otherwise on the specific field, fields absent from their
 // applicable source use the Go zero value. ReflectOnError is the one
@@ -30,6 +31,8 @@ type AgentNodeConfig struct {
 	AllowedTools    string
 	DisallowedTools string
 	MaxBudgetUSD    float64
+	MaxCostUSD      float64 // #304: per-node cost ceiling in USD; 0 = unlimited
+	NoProgressTurns int     // #304: halt after K consecutive tool-call-free turns; 0 = disabled
 	PermissionMode  string
 	ACPAgent        string
 
@@ -131,6 +134,30 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	if v := n.Attrs["max_budget_usd"]; v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.MaxBudgetUSD = f
+		}
+	}
+	// #304: max_cost_usd — per-node cost ceiling. Graph default (positive only)
+	// then node override. Node-level "0" explicitly disables a graph default.
+	if v, ok := graphAttrs["max_cost_usd"]; ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.MaxCostUSD = f
+		}
+	}
+	if v, ok := n.Attrs["max_cost_usd"]; ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+			cfg.MaxCostUSD = f // 0 disables the inherited graph default
+		}
+	}
+	// #304: no_progress_turns — no-progress detector K. Graph default (positive
+	// only) then node override. Node-level "0" explicitly disables a graph default.
+	if v, ok := graphAttrs["no_progress_turns"]; ok && v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			cfg.NoProgressTurns = i
+		}
+	}
+	if v, ok := n.Attrs["no_progress_turns"]; ok && v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i >= 0 {
+			cfg.NoProgressTurns = i // 0 disables the inherited graph default
 		}
 	}
 	if v := n.Attrs["max_turns"]; v != "" {

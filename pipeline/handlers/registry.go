@@ -285,6 +285,7 @@ func registerCodergenHandler(registry *pipeline.HandlerRegistry, cfg *registryCo
 		handler := NewCodergenHandler(cfg.llmClient, cfg.workingDir, WithGraphAttrs(graph.Attrs))
 		handler.env = cfg.execEnv
 		handler.eventHandler = cfg.agentEvents
+		handler.pipelineEmitter = cfg.pipelineEvents // #304: node-level guard events
 		if cfg.llmClient != nil {
 			handler.nativeBackend = NewNativeBackend(cfg.llmClient, cfg.execEnv)
 		}

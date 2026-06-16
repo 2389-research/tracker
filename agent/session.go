@@ -163,10 +163,11 @@ const maxReflectionTurns = 3
 
 // turnState carries per-loop mutable state for the agentic turn loop.
 type turnState struct {
-	lastToolSignature    string
-	consecutiveLoopCount int
-	emptyResponseRetries int
-	consecutiveReflected int // turns in a row that triggered reflection
+	lastToolSignature      string
+	consecutiveLoopCount   int
+	emptyResponseRetries   int
+	consecutiveReflected   int // turns in a row that triggered reflection
+	consecutiveNoToolTurns int // #304: turns in a row with no tool calls (no-progress detector)
 }
 
 // Run executes the agentic loop: send user input to the LLM, execute any tool
@@ -207,7 +208,11 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		return result, err
 	}
 
-	if !stoppedNaturally {
+	// #304: node-level guards (NodeCostExceeded, NoProgressDetected) stop the
+	// loop early and are not turn exhaustion — skip MaxTurnsUsed and
+	// verify-on-breach so the codergen handler can route them correctly.
+	guardStop := result.NodeCostExceeded || result.NoProgressDetected
+	if !stoppedNaturally && !guardStop {
 		result.MaxTurnsUsed = true
 		// #303 verify-on-breach: only on plain exhaustion (not a detected
 		// loop), only when the pipeline asked for it via VerifyOnBreach, and
@@ -234,12 +239,35 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			result.Duration = time.Since(start)
 			return false, err
 		}
+		prevToolCount := result.TotalToolCalls()
+		prevEmptyRetries := ts.emptyResponseRetries
 		done, stop, err := s.executeTurn(ctx, turn, start, tracker, result, ts)
 		if err != nil {
 			return false, err
 		}
+		// #304: per-node cost ceiling — checked before honouring stop so the
+		// ceiling takes precedence even on the turn that naturally completes
+		// the session (cost updated by executeTurn before it returns).
+		if s.config.MaxCostUSD > 0 && result.Usage.EstimatedCost > s.config.MaxCostUSD {
+			result.NodeCostExceeded = true
+			return false, nil
+		}
 		if stop {
 			return done, nil
+		}
+		// #304: no-progress detector — halt after K consecutive tool-call-free turns.
+		// Skip the check during empty-response retry sequences: the session is
+		// actively recovering from a provider hiccup, not truly stuck.
+		if s.config.NoProgressTurns > 0 && ts.emptyResponseRetries == prevEmptyRetries {
+			if result.TotalToolCalls() > prevToolCount {
+				ts.consecutiveNoToolTurns = 0
+			} else {
+				ts.consecutiveNoToolTurns++
+				if ts.consecutiveNoToolTurns >= s.config.NoProgressTurns {
+					result.NoProgressDetected = true
+					return false, nil
+				}
+			}
 		}
 	}
 	return false, nil

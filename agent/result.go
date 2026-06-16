@@ -31,6 +31,8 @@ type SessionResult struct {
 	MaxTurnsUsed       bool
 	LoopDetected       bool
 	BreachVerify       BreachVerifyState // #303: result of the verify-on-breach pass
+	NodeCostExceeded   bool              // #304: true when per-node MaxCostUSD was breached
+	NoProgressDetected bool              // #304: true when NoProgressTurns consecutive tool-call-free turns elapsed
 	ToolCalls          map[string]int
 	FilesModified      []string
 	FilesCreated       []string

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-node cost ceiling and no-progress detector for the engine** (issue #304).
+  Two new guards complement the existing `max_turns` backstop. A node with
+  `max_cost_usd: "0.50"` halts when its cumulative session cost exceeds that
+  threshold, independent of turn count, and routes `OutcomeRetry` so the
+  existing retry/escalation path handles it. A node with `no_progress_turns: 5`
+  halts after five consecutive turns without any tool calls and routes
+  `OutcomeRetry` — catching agents stuck generating text without taking action.
+  Both limits support graph-level defaults (set as graph attrs) that individual
+  nodes can override per-node. The signals are exposed as `NodeCostExceeded` and
+  `NoProgressDetected` on `agent.SessionResult` and emitted as
+  `EventNodeCostLimitExceeded` / `EventNodeNoProgressDetected` pipeline events.
+  With these guards in place, `max_turns` serves as a coarse backstop that
+  should rarely bind during normal runs.
+
 ## [0.39.2] - 2026-06-15
 
 ### Fixed
