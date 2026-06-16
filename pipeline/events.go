@@ -51,6 +51,16 @@ const (
 	// unconditional-only routing.
 	EventConditionalFallthrough PipelineEventType = "conditional_fallthrough"
 
+	// EventNodeCostLimitExceeded fires when a node's per-node MaxCostUSD
+	// ceiling is breached during the session turn loop. Carries NodeID and
+	// Message. Signals the codergen handler to route OutcomeRetry. (#304)
+	EventNodeCostLimitExceeded PipelineEventType = "node_cost_limit_exceeded"
+
+	// EventNodeNoProgressDetected fires when the no-progress detector halts a
+	// session after NoProgressTurns consecutive tool-call-free turns. Carries
+	// NodeID and Message. Signals the codergen handler to route OutcomeRetry. (#304)
+	EventNodeNoProgressDetected PipelineEventType = "node_no_progress_detected"
+
 	// EventBundleMismatchForced is emitted to activity.jsonl when resume
 	// proceeds despite a bundle-identity mismatch because --force-bundle-mismatch
 	// was set. Records both the original (checkpoint) and current identities

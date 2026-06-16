@@ -163,10 +163,11 @@ const maxReflectionTurns = 3
 
 // turnState carries per-loop mutable state for the agentic turn loop.
 type turnState struct {
-	lastToolSignature    string
-	consecutiveLoopCount int
-	emptyResponseRetries int
-	consecutiveReflected int // turns in a row that triggered reflection
+	lastToolSignature      string
+	consecutiveLoopCount   int
+	emptyResponseRetries   int
+	consecutiveReflected   int // turns in a row that triggered reflection
+	consecutiveNoToolTurns int // #304: turns in a row with no tool calls (no-progress detector)
 }
 
 // Run executes the agentic loop: send user input to the LLM, execute any tool
@@ -234,12 +235,30 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			result.Duration = time.Since(start)
 			return false, err
 		}
+		prevToolCount := result.TotalToolCalls()
 		done, stop, err := s.executeTurn(ctx, turn, start, tracker, result, ts)
 		if err != nil {
 			return false, err
 		}
 		if stop {
 			return done, nil
+		}
+		// #304: per-node cost ceiling — halt when cumulative cost exceeds limit.
+		if s.config.MaxCostUSD > 0 && result.Usage.EstimatedCost > s.config.MaxCostUSD {
+			result.NodeCostExceeded = true
+			return false, nil
+		}
+		// #304: no-progress detector — halt after K consecutive tool-call-free turns.
+		if s.config.NoProgressTurns > 0 {
+			if result.TotalToolCalls() > prevToolCount {
+				ts.consecutiveNoToolTurns = 0
+			} else {
+				ts.consecutiveNoToolTurns++
+				if ts.consecutiveNoToolTurns >= s.config.NoProgressTurns {
+					result.NoProgressDetected = true
+					return false, nil
+				}
+			}
 		}
 	}
 	return false, nil

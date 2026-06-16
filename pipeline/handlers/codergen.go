@@ -27,6 +27,7 @@ type CodergenHandler struct {
 	env                exec.ExecutionEnvironment
 	workingDir         string
 	eventHandler       agent.EventHandler
+	pipelineEmitter    pipeline.PipelineEventHandler // #304: for node-level guard events
 	graphAttrs         map[string]string
 	tokenTracker       *llm.TokenTracker     // for reporting claude-code usage
 	nativeBackend      pipeline.AgentBackend // always available
@@ -58,6 +59,14 @@ type CodergenOption func(*CodergenHandler)
 func WithGraphAttrs(attrs map[string]string) CodergenOption {
 	return func(h *CodergenHandler) {
 		h.graphAttrs = attrs
+	}
+}
+
+// WithPipelineEmitter configures the handler to emit pipeline-level events for
+// node guard signals (cost limit exceeded, no-progress detected). (#304)
+func WithPipelineEmitter(e pipeline.PipelineEventHandler) CodergenOption {
+	return func(h *CodergenHandler) {
+		h.pipelineEmitter = e
 	}
 }
 
@@ -514,6 +523,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 // through failure edges when present, stops on strict-failure-edge otherwise),
 // OutcomeFail/OutcomeRetry for empty sessions, or OutcomeSuccess for normal
 // completion. auto_status can override any of these.
+// #304: NodeCostExceeded and NoProgressDetected are checked first and route OutcomeRetry.
 func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string, native bool) (pipeline.Outcome, error) {
 	responseText := collector.text()
 	responseArtifact := collector.transcript()
@@ -522,11 +532,86 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 
+	// #304: node-level guards take priority over all other outcome paths.
+	if sessResult.NodeCostExceeded {
+		return h.buildNodeCostExceededOutcome(node, prompt, artifactRoot, responseArtifact, sessResult, priorEpisodes)
+	}
+	if sessResult.NoProgressDetected {
+		return h.buildNoProgressOutcome(node, prompt, artifactRoot, responseArtifact, sessResult, priorEpisodes)
+	}
+
 	if outcome, ok, err := h.buildEmptyResponseOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult); ok {
 		return outcome, err
 	}
 
 	return h.buildSuccessOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult, priorEpisodes, native)
+}
+
+// buildNodeCostExceededOutcome returns an OutcomeRetry when the node's per-node
+// cost ceiling was breached. Emits EventNodeCostLimitExceeded. (#304)
+func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prompt, artifactRoot, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
+	msg := fmt.Sprintf("node %q: per-node cost ceiling exceeded (cost=%.4f USD)", node.ID, sessResult.Usage.EstimatedCost)
+	if h.pipelineEmitter != nil {
+		h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type:    pipeline.EventNodeCostLimitExceeded,
+			NodeID:  node.ID,
+			Message: msg,
+		})
+	}
+	outcome := pipeline.Outcome{
+		Status: string(pipeline.OutcomeRetry),
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyLastResponse:             msg,
+			pipeline.ContextKeyResponsePrefix + node.ID: msg,
+			"node_cost_exceeded":                        "true",
+		},
+		Stats: buildSessionStats(sessResult),
+	}
+	if sessResult.Usage.EstimatedCost > 0 {
+		outcome.ContextUpdates["last_cost"] = fmt.Sprintf("%.4f", sessResult.Usage.EstimatedCost)
+	}
+	if sessResult.Turns > 0 {
+		outcome.ContextUpdates["last_turns"] = strconv.Itoa(sessResult.Turns)
+	}
+	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
+		return pipeline.Outcome{}, err
+	}
+	return outcome, nil
+}
+
+// buildNoProgressOutcome returns an OutcomeRetry when the no-progress detector
+// fired after NoProgressTurns consecutive tool-call-free turns. Emits
+// EventNodeNoProgressDetected. (#304)
+func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, prompt, artifactRoot, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
+	msg := fmt.Sprintf("node %q: no-progress detected (%d consecutive turns with no tool calls)", node.ID, sessResult.Turns)
+	if h.pipelineEmitter != nil {
+		h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type:    pipeline.EventNodeNoProgressDetected,
+			NodeID:  node.ID,
+			Message: msg,
+		})
+	}
+	outcome := pipeline.Outcome{
+		Status: string(pipeline.OutcomeRetry),
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyLastResponse:             msg,
+			pipeline.ContextKeyResponsePrefix + node.ID: msg,
+			"node_no_progress":                          "true",
+		},
+		Stats: buildSessionStats(sessResult),
+	}
+	if sessResult.Usage.EstimatedCost > 0 {
+		outcome.ContextUpdates["last_cost"] = fmt.Sprintf("%.4f", sessResult.Usage.EstimatedCost)
+	}
+	if sessResult.Turns > 0 {
+		outcome.ContextUpdates["last_turns"] = strconv.Itoa(sessResult.Turns)
+	}
+	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
+		return pipeline.Outcome{}, err
+	}
+	return outcome, nil
 }
 
 // buildEmptyResponseOutcome handles the two empty-response cases and returns
@@ -832,6 +917,13 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	}
 	if cfg.MaxTurns > 0 {
 		config.MaxTurns = cfg.MaxTurns
+	}
+	// #304: per-node cost ceiling and no-progress detector.
+	if cfg.MaxCostUSD > 0 {
+		config.MaxCostUSD = cfg.MaxCostUSD
+	}
+	if cfg.NoProgressTurns > 0 {
+		config.NoProgressTurns = cfg.NoProgressTurns
 	}
 	// #318 warm continue+N: a node-scoped, disk-driven override bumps MaxTurns
 	// on warm re-entry of this agent node (the operator-decision "continue"

@@ -133,6 +133,16 @@ type SessionConfig struct {
 	// (fail-closed) before wiring the writable_paths fs-jail. Empty string
 	// is treated as "native" by configureJail. See issue #272.
 	Backend string
+
+	// MaxCostUSD is the per-node cumulative cost ceiling in USD. The session
+	// halts after any turn whose cumulative cost exceeds this value and sets
+	// SessionResult.NodeCostExceeded. Zero means no limit. (#304)
+	MaxCostUSD float64
+
+	// NoProgressTurns is the number of consecutive turns with no tool calls
+	// after which the session halts and sets SessionResult.NoProgressDetected.
+	// Zero means the detector is disabled. (#304)
+	NoProgressTurns int
 }
 
 // IsToolAccessRestricted reports whether ToolAccess is set to any non-empty

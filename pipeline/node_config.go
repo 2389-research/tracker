@@ -30,6 +30,8 @@ type AgentNodeConfig struct {
 	AllowedTools    string
 	DisallowedTools string
 	MaxBudgetUSD    float64
+	MaxCostUSD      float64 // #304: per-node cost ceiling in USD; 0 = unlimited
+	NoProgressTurns int     // #304: halt after K consecutive tool-call-free turns; 0 = disabled
 	PermissionMode  string
 	ACPAgent        string
 
@@ -131,6 +133,28 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	if v := n.Attrs["max_budget_usd"]; v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.MaxBudgetUSD = f
+		}
+	}
+	// #304: max_cost_usd — per-node cost ceiling. Graph default then node override.
+	if v, ok := graphAttrs["max_cost_usd"]; ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.MaxCostUSD = f
+		}
+	}
+	if v, ok := n.Attrs["max_cost_usd"]; ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.MaxCostUSD = f
+		}
+	}
+	// #304: no_progress_turns — no-progress detector K. Graph default then node override.
+	if v, ok := graphAttrs["no_progress_turns"]; ok && v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			cfg.NoProgressTurns = i
+		}
+	}
+	if v, ok := n.Attrs["no_progress_turns"]; ok && v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+			cfg.NoProgressTurns = i
 		}
 	}
 	if v := n.Attrs["max_turns"]; v != "" {
