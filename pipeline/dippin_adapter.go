@@ -773,6 +773,9 @@ func extractWorkflowDefaults(defaults ir.WorkflowDefaults, attrs map[string]stri
 	if defaults.MaxWallTime > 0 {
 		attrs["max_wall_time"] = defaults.MaxWallTime.String()
 	}
+	if defaults.StallTimeout > 0 {
+		attrs["stall_timeout"] = defaults.StallTimeout.String()
+	}
 }
 
 func extractWorkflowVars(vars map[string]string, attrs map[string]string) {

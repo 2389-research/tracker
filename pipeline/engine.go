@@ -524,6 +524,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
 		return *lr
 	}
+	e.budgetGuard.NotifyProgress()
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
 	if s.cp.IsCompleted(next.To) {
@@ -671,6 +672,7 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
 		return lr
 	}
+	e.budgetGuard.NotifyProgress()
 	if s.cp.FallbackTaken == nil {
 		s.cp.FallbackTaken = map[string]bool{}
 	}

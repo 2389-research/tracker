@@ -900,6 +900,7 @@ func TestResolveBudgetLimits_FallsBackToGraphAttrs(t *testing.T) {
 		"max_total_tokens": "50000",
 		"max_cost_cents":   "250",
 		"max_wall_time":    "15m",
+		"stall_timeout":    "5m",
 	}}
 	got := ResolveBudgetLimits(pipeline.BudgetLimits{}, graph)
 	if got.MaxTotalTokens != 50000 {
@@ -911,6 +912,9 @@ func TestResolveBudgetLimits_FallsBackToGraphAttrs(t *testing.T) {
 	if got.MaxWallTime != 15*time.Minute {
 		t.Errorf("MaxWallTime = %v, want 15m", got.MaxWallTime)
 	}
+	if got.StallTimeout != 5*time.Minute {
+		t.Errorf("StallTimeout = %v, want 5m", got.StallTimeout)
+	}
 }
 
 // TestResolveBudgetLimits_ConfigWinsOverGraph verifies that explicit
@@ -921,11 +925,13 @@ func TestResolveBudgetLimits_ConfigWinsOverGraph(t *testing.T) {
 		"max_total_tokens": "50000",
 		"max_cost_cents":   "250",
 		"max_wall_time":    "15m",
+		"stall_timeout":    "5m",
 	}}
 	cfg := pipeline.BudgetLimits{
 		MaxTotalTokens: 9999,
 		MaxCostCents:   1,
 		MaxWallTime:    time.Second,
+		StallTimeout:   30 * time.Second,
 	}
 	got := ResolveBudgetLimits(cfg, graph)
 	if got.MaxTotalTokens != 9999 {
@@ -936,6 +942,9 @@ func TestResolveBudgetLimits_ConfigWinsOverGraph(t *testing.T) {
 	}
 	if got.MaxWallTime != time.Second {
 		t.Errorf("explicit MaxWallTime overridden: got %v, want 1s", got.MaxWallTime)
+	}
+	if got.StallTimeout != 30*time.Second {
+		t.Errorf("explicit StallTimeout overridden: got %v, want 30s", got.StallTimeout)
 	}
 }
 

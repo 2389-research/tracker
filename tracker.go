@@ -501,8 +501,8 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 // Returns the original cfg unchanged if graph is nil or has no attrs.
 //
 // The graph-level keys consulted are max_total_tokens, max_cost_cents,
-// and max_wall_time, which the dippin adapter writes from
-// WorkflowDefaults.Max* fields in v0.21.0+.
+// max_wall_time, and stall_timeout, which the dippin adapter writes from
+// WorkflowDefaults fields in v0.21.0+.
 //
 // Exported so the tracker CLI can merge its --max-* flag values with
 // workflow defaults without re-implementing the same logic.
@@ -528,6 +528,13 @@ func ResolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipel
 		if v, ok := graph.Attrs["max_wall_time"]; ok {
 			if d, err := time.ParseDuration(v); err == nil && d > 0 {
 				cfg.MaxWallTime = d
+			}
+		}
+	}
+	if cfg.StallTimeout == 0 {
+		if v, ok := graph.Attrs["stall_timeout"]; ok {
+			if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				cfg.StallTimeout = d
 			}
 		}
 	}
