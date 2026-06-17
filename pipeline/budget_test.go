@@ -82,3 +82,38 @@ func TestBudgetGuard_CostCeiling_RoundsBoundaryValue(t *testing.T) {
 		t.Errorf("cost %.20f should breach 50¢ ceiling after rounding, got %v", justBelow, breach.Kind)
 	}
 }
+
+func TestBudgetGuard_StallTimeout(t *testing.T) {
+	g := NewBudgetGuard(BudgetLimits{StallTimeout: 10 * time.Millisecond})
+	// Force progressAt into the past so the stall window is already exceeded.
+	g.progressAt = time.Now().Add(-time.Second)
+	breach := g.Check(nil, time.Now())
+	if breach.Kind != BudgetStall {
+		t.Errorf("got %v, want BudgetStall", breach.Kind)
+	}
+}
+
+func TestBudgetGuard_NotifyProgress_ResetsStallClock(t *testing.T) {
+	g := NewBudgetGuard(BudgetLimits{StallTimeout: 10 * time.Millisecond})
+	// Push progressAt into the past.
+	g.progressAt = time.Now().Add(-time.Second)
+	// After NotifyProgress the timer is reset — no breach.
+	g.NotifyProgress()
+	breach := g.Check(nil, time.Now())
+	if breach.Kind != BudgetOK {
+		t.Errorf("got %v after NotifyProgress, want BudgetOK", breach.Kind)
+	}
+}
+
+func TestBudgetGuard_NotifyProgress_NilSafe(t *testing.T) {
+	var g *BudgetGuard
+	g.NotifyProgress() // must not panic
+}
+
+func TestBudgetGuard_StallTimeout_OnlyLimitIsStall(t *testing.T) {
+	// A guard built with only StallTimeout should not be nil.
+	g := NewBudgetGuard(BudgetLimits{StallTimeout: time.Minute})
+	if g == nil {
+		t.Fatal("NewBudgetGuard with StallTimeout should not return nil")
+	}
+}

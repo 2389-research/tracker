@@ -625,6 +625,7 @@ func TestFromDippinIR_WorkflowBudgetDefaults(t *testing.T) {
 			MaxTotalTokens: 50000,
 			MaxCostCents:   250,
 			MaxWallTime:    15 * time.Minute,
+			StallTimeout:   5 * time.Minute,
 		},
 		Nodes: []*ir.Node{
 			{ID: "start", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
@@ -646,6 +647,9 @@ func TestFromDippinIR_WorkflowBudgetDefaults(t *testing.T) {
 	if graph.Attrs["max_wall_time"] != "15m0s" {
 		t.Errorf("max_wall_time = %q, want 15m0s", graph.Attrs["max_wall_time"])
 	}
+	if graph.Attrs["stall_timeout"] != "5m0s" {
+		t.Errorf("stall_timeout = %q, want 5m0s", graph.Attrs["stall_timeout"])
+	}
 }
 
 // TestFromDippinIR_WorkflowBudgetUnsetOmitted verifies zero-value budget
@@ -665,7 +669,7 @@ func TestFromDippinIR_WorkflowBudgetUnsetOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromDippinIR: %v", err)
 	}
-	for _, k := range []string{"max_total_tokens", "max_cost_cents", "max_wall_time"} {
+	for _, k := range []string{"max_total_tokens", "max_cost_cents", "max_wall_time", "stall_timeout"} {
 		if _, ok := graph.Attrs[k]; ok {
 			t.Errorf("expected %q to be omitted when unset, got %q", k, graph.Attrs[k])
 		}

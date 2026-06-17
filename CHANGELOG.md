@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`stall_timeout` graph-level default now enforced at runtime** (issue #310).
+  When no pipeline node completes within the declared wall-clock window, the run
+  aborts through the same `OutcomeBudgetExceeded` / `on_failure` cascade as other
+  budget breaches. Set via the `.dip` `defaults:` block (`stall_timeout: 5m`);
+  the value flows through the dippin adapter into `graph.Attrs["stall_timeout"]`,
+  is picked up by `ResolveBudgetLimits`, and enforced by `BudgetGuard` using a
+  per-node progress clock reset by `NotifyProgress()` on each node completion.
+  Closes #310 (the three graph-level budget ceilings were already wired in prior
+  work; `stall_timeout` was the remaining piece).
+
 - **`commit_only` node attribute for codergen agent nodes** (issue #349). Setting
   `params: commit_only: true` on an agent node causes the codergen handler to
   prepend a hardcoded scope-restriction block to the session's system prompt,

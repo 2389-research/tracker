@@ -13,11 +13,12 @@ type BudgetLimits struct {
 	MaxTotalTokens int
 	MaxCostCents   int
 	MaxWallTime    time.Duration
+	StallTimeout   time.Duration // abort when no node completes for this wall-clock span
 }
 
 // IsZero reports whether every limit is unset.
 func (l BudgetLimits) IsZero() bool {
-	return l.MaxTotalTokens == 0 && l.MaxCostCents == 0 && l.MaxWallTime == 0
+	return l.MaxTotalTokens == 0 && l.MaxCostCents == 0 && l.MaxWallTime == 0 && l.StallTimeout == 0
 }
 
 // BudgetBreachKind classifies which limit was hit.
@@ -28,6 +29,7 @@ const (
 	BudgetTokens
 	BudgetCost
 	BudgetWallTime
+	BudgetStall
 )
 
 // String returns a human-readable label for a breach kind.
@@ -40,6 +42,8 @@ func (k BudgetBreachKind) String() string {
 		return "cost"
 	case BudgetWallTime:
 		return "wall_time"
+	case BudgetStall:
+		return "stall"
 	default:
 		return "ok"
 	}
@@ -54,7 +58,8 @@ type BudgetBreach struct {
 // BudgetGuard evaluates BudgetLimits against a UsageSummary snapshot and a run
 // start time. The zero value is not usable; construct via NewBudgetGuard.
 type BudgetGuard struct {
-	limits BudgetLimits
+	limits     BudgetLimits
+	progressAt time.Time // last node completion; reset by NotifyProgress
 }
 
 // NewBudgetGuard constructs a BudgetGuard with the given limits. Returns nil
@@ -64,7 +69,16 @@ func NewBudgetGuard(limits BudgetLimits) *BudgetGuard {
 	if limits.IsZero() {
 		return nil
 	}
-	return &BudgetGuard{limits: limits}
+	return &BudgetGuard{limits: limits, progressAt: time.Now()}
+}
+
+// NotifyProgress resets the stall clock. Call after each node completes
+// (success or fail — both count as forward progress). Safe to call on nil.
+func (g *BudgetGuard) NotifyProgress() {
+	if g == nil {
+		return
+	}
+	g.progressAt = time.Now()
 }
 
 // Check reports whether the given usage snapshot breaches any configured
@@ -79,6 +93,9 @@ func (g *BudgetGuard) Check(usage *UsageSummary, started time.Time) BudgetBreach
 	}
 	if g.limits.MaxWallTime > 0 && time.Since(started) > g.limits.MaxWallTime {
 		return BudgetBreach{Kind: BudgetWallTime, Message: "max_wall_time exceeded"}
+	}
+	if g.limits.StallTimeout > 0 && time.Since(g.progressAt) > g.limits.StallTimeout {
+		return BudgetBreach{Kind: BudgetStall, Message: "stall_timeout exceeded"}
 	}
 	return BudgetBreach{Kind: BudgetOK}
 }
