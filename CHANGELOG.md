@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   With these guards in place, `max_turns` serves as a coarse backstop that
   should rarely bind during normal runs.
 
+### Changed
+
+- **dippin-lang upgraded to v0.42.0** (from v0.39.0). New IR fields wired in
+  subsequent commits: `Edge.Override` (v0.40.0, closes #271 input gap),
+  `AgentConfig.LastResponseTruncate` + `BranchConfig.LastResponseTruncate`
+  (v0.40.0, issue #56 chain-attack mitigation), and `Edge.Choice` (v0.42.0,
+  DIP150 explicit human-gate routing key).
+
 ### Fixed
 
 - **Remaining example workflows now hold A grades under `dippin doctor`**
