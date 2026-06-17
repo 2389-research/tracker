@@ -239,6 +239,10 @@ type Edge struct {
 	From      string
 	To        string
 	Label     string
+	// Choice is the stable routing key for human-gate edges (DIP150, dippin-lang
+	// v0.42.0). When non-empty, edge selection uses Choice instead of Label.
+	// Display in the TUI always uses Label.
+	Choice    string
 	Condition string
 	// Override marks the edge as a validation-override path. When the engine
 	// traverses an override edge from a wait.human gate, the run's terminal

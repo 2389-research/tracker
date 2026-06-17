@@ -843,6 +843,7 @@ func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 		From:     irEdge.From,
 		To:       irEdge.To,
 		Label:    irEdge.Label,
+		Choice:   irEdge.Choice,
 		Override: irEdge.Override,
 		Attrs:    make(map[string]string),
 	}

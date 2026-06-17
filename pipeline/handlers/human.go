@@ -712,11 +712,21 @@ func askFreeformWithTimeout(fi FreeformInterviewer, prompt string, labels []stri
 }
 
 // matchFreeformLabel tries to match freeform response text against outgoing edge labels.
+// When an edge has a Choice key (DIP150), matching by Label returns Choice so the
+// engine routes on the stable key rather than the display label. Direct match against
+// the Choice key is also accepted so autopilot/webhook responders can use the short key.
 func matchFreeformLabel(graph *pipeline.Graph, node *pipeline.Node, response string) string {
 	normalized := strings.ToLower(strings.TrimSpace(response))
 	for _, e := range graph.OutgoingEdges(node.ID) {
 		if e.Label != "" && strings.ToLower(e.Label) == normalized {
+			if e.Choice != "" {
+				return e.Choice
+			}
 			return e.Label
+		}
+		// Also accept a direct match against the Choice key.
+		if e.Choice != "" && strings.ToLower(e.Choice) == normalized {
+			return e.Choice
 		}
 	}
 	// matchFreeformLabel compares against the bare "default" attr (not

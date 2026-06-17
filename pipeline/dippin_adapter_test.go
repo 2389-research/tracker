@@ -1733,6 +1733,31 @@ func TestConvertEdge_NoOverride(t *testing.T) {
 	}
 }
 
+func TestConvertEdge_Choice(t *testing.T) {
+	irEdge := &ir.Edge{From: "gate", To: "next", Label: "Approve and Continue", Choice: "approve"}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if gEdge.Choice != "approve" {
+		t.Errorf("Choice = %q, want %q", gEdge.Choice, "approve")
+	}
+	if gEdge.Label != "Approve and Continue" {
+		t.Errorf("Label = %q, want %q", gEdge.Label, "Approve and Continue")
+	}
+}
+
+func TestConvertEdge_NoChoice(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b", Label: "ok"}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if gEdge.Choice != "" {
+		t.Errorf("Choice = %q, want empty for edge without choice", gEdge.Choice)
+	}
+}
+
 // TestEnsureStartExitNodes_ToolNodeKeepsHandler verifies that tool start/exit nodes
 // with a tool_command attribute keep their "tool" handler and are not overwritten
 // with the passthrough "start"/"exit" handler. This is the root cause of issue #69.

@@ -107,14 +107,26 @@ func (e *Engine) selectByCondition(runID string, edges []*Edge, pctx *PipelineCo
 	return nil, triedFalse, nil
 }
 
+// edgeRoutingKey returns the routing key for an edge: Choice when non-empty,
+// otherwise Label. Used so edges with an explicit choice: attribute route on
+// the choice key, not the display label (DIP150).
+func edgeRoutingKey(edge *Edge) string {
+	if edge.Choice != "" {
+		return edge.Choice
+	}
+	return edge.Label
+}
+
 // selectByLabel matches edges by the preferred label stored in context.
+// When an edge has a Choice key, the preferred label is compared against
+// Choice (the stable routing key) rather than Label (the display string).
 func (e *Engine) selectByLabel(runID string, edges []*Edge, pctx *PipelineContext, ctxSnap map[string]string) *Edge {
 	preferred, ok := pctx.Get(ContextKeyPreferredLabel)
 	if !ok || preferred == "" {
 		return nil
 	}
 	for _, edge := range edges {
-		if edge.Label == preferred {
+		if edgeRoutingKey(edge) == preferred {
 			e.emitEdgeSelected(runID, edge, "label", ctxSnap)
 			return edge
 		}
