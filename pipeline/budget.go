@@ -98,8 +98,16 @@ func (g *BudgetGuard) Check(usage *UsageSummary, started time.Time) BudgetBreach
 	if g.limits.MaxWallTime > 0 && time.Since(started) > g.limits.MaxWallTime {
 		return BudgetBreach{Kind: BudgetWallTime, Message: "max_wall_time exceeded"}
 	}
-	if g.limits.StallTimeout > 0 && time.Since(time.Unix(0, g.progressAt.Load())) > g.limits.StallTimeout {
-		return BudgetBreach{Kind: BudgetStall, Message: "stall_timeout exceeded"}
+	if g.limits.StallTimeout > 0 {
+		// Clamp to started so pre-run idle time (between NewBudgetGuard and
+		// Run()) does not consume the stall window before the first node fires.
+		lastProgress := time.Unix(0, g.progressAt.Load())
+		if lastProgress.Before(started) {
+			lastProgress = started
+		}
+		if time.Since(lastProgress) > g.limits.StallTimeout {
+			return BudgetBreach{Kind: BudgetStall, Message: "stall_timeout exceeded"}
+		}
 	}
 	return BudgetBreach{Kind: BudgetOK}
 }
