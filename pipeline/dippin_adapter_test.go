@@ -1711,6 +1711,28 @@ func TestConvertEdge_ZeroWeightOmitted(t *testing.T) {
 	}
 }
 
+func TestConvertEdge_Override(t *testing.T) {
+	irEdge := &ir.Edge{From: "gate", To: "accept", Label: "approve", Override: true}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if !gEdge.Override {
+		t.Error("Override = false, want true")
+	}
+}
+
+func TestConvertEdge_NoOverride(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b"}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if gEdge.Override {
+		t.Error("Override = true, want false for default edge")
+	}
+}
+
 // TestEnsureStartExitNodes_ToolNodeKeepsHandler verifies that tool start/exit nodes
 // with a tool_command attribute keep their "tool" handler and are not overwritten
 // with the passthrough "start"/"exit" handler. This is the root cause of issue #69.

@@ -840,10 +840,11 @@ func setIfNonEmpty(attrs map[string]string, key, value string) {
 // parser does this natively) or simplify the Parsed tree.
 func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 	gEdge := &Edge{
-		From:  irEdge.From,
-		To:    irEdge.To,
-		Label: irEdge.Label,
-		Attrs: make(map[string]string),
+		From:     irEdge.From,
+		To:       irEdge.To,
+		Label:    irEdge.Label,
+		Override: irEdge.Override,
+		Attrs:    make(map[string]string),
 	}
 
 	// Serialize condition if present. We prefer Raw (set by the parser) and
