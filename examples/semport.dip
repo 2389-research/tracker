@@ -3,6 +3,9 @@ workflow Semport
   start: Start
   exit: Exit
 
+  defaults
+    on_failure: Exit
+
   agent Start
     label: Start
 

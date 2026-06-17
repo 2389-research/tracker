@@ -7,6 +7,8 @@ workflow RalphLoop
     model: claude-haiku-4-5
     provider: anthropic
     max_retries: 2
+    max_restarts: 10
+    on_failure: Exit
     fidelity: summary:high
 
   agent Start

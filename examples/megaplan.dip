@@ -5,6 +5,8 @@ workflow Megaplan
 
   defaults
     max_retries: 5
+    max_restarts: 5
+    on_failure: Exit
     fidelity: summary:medium
 
   agent Start
