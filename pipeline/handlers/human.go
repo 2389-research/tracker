@@ -951,6 +951,19 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
+	// Translate the selected display label to its routing key (Choice when set),
+	// mirroring what matchFreeformLabel does in freeform mode.
+	for _, e := range edges {
+		label := e.Label
+		if label == "" {
+			label = e.To
+		}
+		if label == selected && e.Choice != "" {
+			selected = e.Choice
+			break
+		}
+	}
+
 	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), PreferredLabel: selected}, nil
 }
 

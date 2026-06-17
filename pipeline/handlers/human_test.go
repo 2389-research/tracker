@@ -1373,6 +1373,32 @@ func TestHumanHandler_PopulatesOverrideActor_Unknown(t *testing.T) {
 
 // TestMatchFreeformLabel_ChoiceKey verifies that matchFreeformLabel returns the
 // Choice key when an edge has one, and falls back to Label when Choice is empty.
+func TestHumanHandler_ChoiceMode_ChoiceKeyRouting(t *testing.T) {
+	// In default (choice) mode, when an edge has both Label and Choice,
+	// the human handler must store the Choice key (not the display Label)
+	// as PreferredLabel so the engine's selectByLabel can route correctly.
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})
+	graph.AddNode(&pipeline.Node{ID: "accept", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "reject", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "accept", Label: "Approve and Continue", Choice: "approve"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "reject", Label: "Reject"})
+
+	// Interviewer returns the display label the user sees.
+	rec := &recordingInterviewer{response: "Approve and Continue"}
+	h := NewHumanHandler(rec, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Must be the Choice routing key, not the display Label.
+	if outcome.PreferredLabel != "approve" {
+		t.Errorf("PreferredLabel = %q, want %q (Choice key)", outcome.PreferredLabel, "approve")
+	}
+}
+
 func TestMatchFreeformLabel_ChoiceKey(t *testing.T) {
 	graph := pipeline.NewGraph("test")
 	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})
