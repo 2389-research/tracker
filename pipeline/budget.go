@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"math"
+	"sync/atomic"
 	"time"
 )
 
@@ -59,7 +60,7 @@ type BudgetBreach struct {
 // start time. The zero value is not usable; construct via NewBudgetGuard.
 type BudgetGuard struct {
 	limits     BudgetLimits
-	progressAt time.Time // last node completion; reset by NotifyProgress
+	progressAt atomic.Int64 // UnixNano of last node completion; written by NotifyProgress
 }
 
 // NewBudgetGuard constructs a BudgetGuard with the given limits. Returns nil
@@ -69,16 +70,19 @@ func NewBudgetGuard(limits BudgetLimits) *BudgetGuard {
 	if limits.IsZero() {
 		return nil
 	}
-	return &BudgetGuard{limits: limits, progressAt: time.Now()}
+	g := &BudgetGuard{limits: limits}
+	g.progressAt.Store(time.Now().UnixNano())
+	return g
 }
 
 // NotifyProgress resets the stall clock. Call after each node completes
-// (success or fail — both count as forward progress). Safe to call on nil.
+// (success or fail — both count as forward progress). Safe to call on nil
+// and from concurrent goroutines.
 func (g *BudgetGuard) NotifyProgress() {
 	if g == nil {
 		return
 	}
-	g.progressAt = time.Now()
+	g.progressAt.Store(time.Now().UnixNano())
 }
 
 // Check reports whether the given usage snapshot breaches any configured
@@ -94,7 +98,7 @@ func (g *BudgetGuard) Check(usage *UsageSummary, started time.Time) BudgetBreach
 	if g.limits.MaxWallTime > 0 && time.Since(started) > g.limits.MaxWallTime {
 		return BudgetBreach{Kind: BudgetWallTime, Message: "max_wall_time exceeded"}
 	}
-	if g.limits.StallTimeout > 0 && time.Since(g.progressAt) > g.limits.StallTimeout {
+	if g.limits.StallTimeout > 0 && time.Since(time.Unix(0, g.progressAt.Load())) > g.limits.StallTimeout {
 		return BudgetBreach{Kind: BudgetStall, Message: "stall_timeout exceeded"}
 	}
 	return BudgetBreach{Kind: BudgetOK}

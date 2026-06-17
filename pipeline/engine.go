@@ -520,11 +520,11 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	traceEntry.EdgeTo = next.To
 	s.trace.AddEntry(*traceEntry)
 	e.emitGitCommit(s, currentNodeID, traceEntry)
-	e.budgetGuard.NotifyProgress()
 	e.emitCostUpdate(s)
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
 		return *lr
 	}
+	e.budgetGuard.NotifyProgress()
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
 	if s.cp.IsCompleted(next.To) {
@@ -668,11 +668,11 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	// Apply the same post-node budget check as advanceToNextNode before
 	// advancing, so a node that already breached a hard ceiling halts the run
 	// rather than spending more on the fallback node (#311 review).
-	e.budgetGuard.NotifyProgress()
 	e.emitCostUpdate(s)
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
 		return lr
 	}
+	e.budgetGuard.NotifyProgress()
 	if s.cp.FallbackTaken == nil {
 		s.cp.FallbackTaken = map[string]bool{}
 	}
