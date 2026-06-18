@@ -21,6 +21,7 @@ var (
 	ErrUnknownConfig          = errors.New("unknown config type")
 	ErrInvalidSteerContextKey = errors.New("steer_context key contains ':' which breaks block-form round-trip through the .dip formatter")
 	ErrMissingManagerLoopCfg  = errors.New("manager_loop node is missing required ir.ManagerLoopConfig")
+	ErrOverrideOnNonHumanEdge = errors.New("override: true is only valid on edges from wait.human gate nodes")
 	// ErrParenthesizedParsedCondition is returned by convertEdge when a Parsed-only
 	// ir.Condition formats to an expression containing parentheses. The pipeline
 	// edge evaluator (pipeline/condition.go) does not support parens — it tokenizes
@@ -127,6 +128,12 @@ func addIREdges(g *Graph, irEdges []*ir.Edge) error {
 	for _, irEdge := range irEdges {
 		if irEdge == nil {
 			continue
+		}
+		if irEdge.Override {
+			src, ok := g.Nodes[irEdge.From]
+			if !ok || src.Shape != "hexagon" {
+				return fmt.Errorf("edge %s -> %s: %w", irEdge.From, irEdge.To, ErrOverrideOnNonHumanEdge)
+			}
 		}
 		gEdge, err := convertEdge(irEdge)
 		if err != nil {

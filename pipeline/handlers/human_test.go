@@ -1405,9 +1405,8 @@ func TestHumanHandler_PopulatesOverrideActor_Unknown(t *testing.T) {
 // TestMatchFreeformLabel_ChoiceKey verifies that matchFreeformLabel returns the
 // Choice key when an edge has one, and falls back to Label when Choice is empty.
 func TestHumanHandler_ChoiceMode_ChoiceKeyRouting(t *testing.T) {
-	// In default (choice) mode, when an edge has both Label and Choice,
-	// the human handler must store the Choice key (not the display Label)
-	// as PreferredLabel so the engine's selectByLabel can route correctly.
+	// executeChoice returns the edge's Choice key as PreferredLabel (not the
+	// display Label) so selectByLabel can route via edgeRoutingKey.
 	graph := pipeline.NewGraph("test")
 	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})
 	graph.AddNode(&pipeline.Node{ID: "accept", Shape: "box"})

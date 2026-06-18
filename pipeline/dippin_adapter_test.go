@@ -1766,6 +1766,53 @@ func TestConvertEdge_NoOverride(t *testing.T) {
 	}
 }
 
+func TestAddIREdges_OverrideOnNonHumanNodeErrors(t *testing.T) {
+	// override: true is only valid on edges from wait.human (hexagon) nodes.
+	// The adapter must reject it on agent/tool/etc. source nodes.
+	workflow := &ir.Workflow{
+		Name:  "test",
+		Start: "agent",
+		Exit:  "done",
+		Nodes: []*ir.Node{
+			{ID: "agent", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "do work"}},
+			{ID: "done", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "done"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "agent", To: "done", Override: true},
+		},
+	}
+	_, err := FromDippinIR(workflow)
+	if err == nil {
+		t.Fatal("expected error for override: true on non-human edge, got nil")
+	}
+	if !errors.Is(err, ErrOverrideOnNonHumanEdge) {
+		t.Errorf("expected ErrOverrideOnNonHumanEdge, got: %v", err)
+	}
+}
+
+func TestAddIREdges_OverrideOnHumanNodeOK(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "test",
+		Start: "gate",
+		Exit:  "done",
+		Nodes: []*ir.Node{
+			{ID: "gate", Kind: ir.NodeHuman, Config: ir.HumanConfig{}},
+			{ID: "done", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "done"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "gate", To: "done", Label: "approve", Override: true},
+		},
+	}
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("unexpected error for override: true on human gate: %v", err)
+	}
+	edges := graph.OutgoingEdges("gate")
+	if len(edges) != 1 || !edges[0].Override {
+		t.Error("expected Override=true on cloned edge")
+	}
+}
+
 func TestConvertEdge_Choice(t *testing.T) {
 	irEdge := &ir.Edge{From: "gate", To: "next", Label: "Approve and Continue", Choice: "approve"}
 	gEdge, err := convertEdge(irEdge)
