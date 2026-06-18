@@ -236,9 +236,9 @@ type Node struct {
 
 // Edge represents a directed connection between two nodes.
 type Edge struct {
-	From      string
-	To        string
-	Label     string
+	From  string
+	To    string
+	Label string
 	// Choice is the stable routing key for human-gate edges (DIP150, dippin-lang
 	// v0.42.0). When non-empty, edge selection uses Choice instead of Label.
 	// Display in the TUI always uses Label.
