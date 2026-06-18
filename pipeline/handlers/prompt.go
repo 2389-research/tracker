@@ -78,8 +78,11 @@ func applyLastResponseTruncate(node *pipeline.Node, pctx *pipeline.PipelineConte
 	if len(runes) <= truncChars {
 		return nil, nil
 	}
-	pctx.Set(pipeline.ContextKeyLastResponse, string(runes[:truncChars]))
-	return func() { pctx.Set(pipeline.ContextKeyLastResponse, resp) }, nil
+	// Use MergeWithoutDirty so the temporary truncation is not attributed to
+	// this node if ResolvePrompt returns an error and the engine calls
+	// ScopeToNode on the error path.
+	pctx.MergeWithoutDirty(map[string]string{pipeline.ContextKeyLastResponse: string(runes[:truncChars])})
+	return func() { pctx.MergeWithoutDirty(map[string]string{pipeline.ContextKeyLastResponse: resp}) }, nil
 }
 
 // resolveLastResponseTruncate reads the optional last_response_truncate node
