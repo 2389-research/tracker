@@ -1559,6 +1559,39 @@ func TestExtractAgentAttrs_ZeroValueFieldsOmitted(t *testing.T) {
 	}
 }
 
+func TestExtractAgentAttrs_LastResponseTruncate(t *testing.T) {
+	attrs := make(map[string]string)
+	extractAgentAttrs(ir.AgentConfig{LastResponseTruncate: 500}, attrs)
+	if attrs["last_response_truncate"] != "500" {
+		t.Errorf("last_response_truncate = %q, want 500", attrs["last_response_truncate"])
+	}
+}
+
+func TestExtractAgentAttrs_ZeroLastResponseTruncateOmitted(t *testing.T) {
+	attrs := make(map[string]string)
+	extractAgentAttrs(ir.AgentConfig{}, attrs)
+	if _, ok := attrs["last_response_truncate"]; ok {
+		t.Error("last_response_truncate should be omitted when zero")
+	}
+}
+
+func TestExtractParallelAttrs_BranchLastResponseTruncate(t *testing.T) {
+	attrs := make(map[string]string)
+	cfg := ir.ParallelConfig{
+		Branches: []ir.BranchConfig{
+			{Target: "NodeA", LastResponseTruncate: 200},
+			{Target: "NodeB"},
+		},
+	}
+	extractParallelAttrs(cfg, attrs)
+	if attrs["branch.0.last_response_truncate"] != "200" {
+		t.Errorf("branch.0.last_response_truncate = %q, want 200", attrs["branch.0.last_response_truncate"])
+	}
+	if _, ok := attrs["branch.1.last_response_truncate"]; ok {
+		t.Error("branch.1.last_response_truncate should be omitted when zero")
+	}
+}
+
 func TestExtractHumanAttrs_ZeroValueFieldsOmitted(t *testing.T) {
 	attrs := map[string]string{}
 	extractHumanAttrs(ir.HumanConfig{}, attrs)
@@ -1708,6 +1741,100 @@ func TestConvertEdge_ZeroWeightOmitted(t *testing.T) {
 	}
 	if _, ok := gEdge.Attrs["restart"]; ok {
 		t.Error("false restart should not be in attrs")
+	}
+}
+
+func TestConvertEdge_Override(t *testing.T) {
+	irEdge := &ir.Edge{From: "gate", To: "accept", Label: "approve", Override: true}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if !gEdge.Override {
+		t.Error("Override = false, want true")
+	}
+}
+
+func TestConvertEdge_NoOverride(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b"}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if gEdge.Override {
+		t.Error("Override = true, want false for default edge")
+	}
+}
+
+func TestAddIREdges_OverrideOnNonHumanNodeErrors(t *testing.T) {
+	// override: true is only valid on edges from wait.human (hexagon) nodes.
+	// The adapter must reject it on agent/tool/etc. source nodes.
+	workflow := &ir.Workflow{
+		Name:  "test",
+		Start: "agent",
+		Exit:  "done",
+		Nodes: []*ir.Node{
+			{ID: "agent", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "do work"}},
+			{ID: "done", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "done"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "agent", To: "done", Override: true},
+		},
+	}
+	_, err := FromDippinIR(workflow)
+	if err == nil {
+		t.Fatal("expected error for override: true on non-human edge, got nil")
+	}
+	if !errors.Is(err, ErrOverrideOnNonHumanEdge) {
+		t.Errorf("expected ErrOverrideOnNonHumanEdge, got: %v", err)
+	}
+}
+
+func TestAddIREdges_OverrideOnHumanNodeOK(t *testing.T) {
+	workflow := &ir.Workflow{
+		Name:  "test",
+		Start: "gate",
+		Exit:  "done",
+		Nodes: []*ir.Node{
+			{ID: "gate", Kind: ir.NodeHuman, Config: ir.HumanConfig{}},
+			{ID: "done", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "done"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "gate", To: "done", Label: "approve", Override: true},
+		},
+	}
+	graph, err := FromDippinIR(workflow)
+	if err != nil {
+		t.Fatalf("unexpected error for override: true on human gate: %v", err)
+	}
+	edges := graph.OutgoingEdges("gate")
+	if len(edges) != 1 || !edges[0].Override {
+		t.Error("expected Override=true on cloned edge")
+	}
+}
+
+func TestConvertEdge_Choice(t *testing.T) {
+	irEdge := &ir.Edge{From: "gate", To: "next", Label: "Approve and Continue", Choice: "approve"}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if gEdge.Choice != "approve" {
+		t.Errorf("Choice = %q, want %q", gEdge.Choice, "approve")
+	}
+	if gEdge.Label != "Approve and Continue" {
+		t.Errorf("Label = %q, want %q", gEdge.Label, "Approve and Continue")
+	}
+}
+
+func TestConvertEdge_NoChoice(t *testing.T) {
+	irEdge := &ir.Edge{From: "a", To: "b", Label: "ok"}
+	gEdge, err := convertEdge(irEdge)
+	if err != nil {
+		t.Fatalf("convertEdge: %v", err)
+	}
+	if gEdge.Choice != "" {
+		t.Errorf("Choice = %q, want empty for edge without choice", gEdge.Choice)
 	}
 }
 

@@ -21,6 +21,7 @@ var (
 	ErrUnknownConfig          = errors.New("unknown config type")
 	ErrInvalidSteerContextKey = errors.New("steer_context key contains ':' which breaks block-form round-trip through the .dip formatter")
 	ErrMissingManagerLoopCfg  = errors.New("manager_loop node is missing required ir.ManagerLoopConfig")
+	ErrOverrideOnNonHumanEdge = errors.New("override: true is only valid on edges from wait.human gate nodes")
 	// ErrParenthesizedParsedCondition is returned by convertEdge when a Parsed-only
 	// ir.Condition formats to an expression containing parentheses. The pipeline
 	// edge evaluator (pipeline/condition.go) does not support parens — it tokenizes
@@ -127,6 +128,12 @@ func addIREdges(g *Graph, irEdges []*ir.Edge) error {
 	for _, irEdge := range irEdges {
 		if irEdge == nil {
 			continue
+		}
+		if irEdge.Override {
+			src, ok := g.Nodes[irEdge.From]
+			if !ok || src.Shape != "hexagon" {
+				return fmt.Errorf("edge %s -> %s: %w", irEdge.From, irEdge.To, ErrOverrideOnNonHumanEdge)
+			}
 		}
 		gEdge, err := convertEdge(irEdge)
 		if err != nil {
@@ -347,6 +354,9 @@ func extractAgentLimitsAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.CompactionThreshold > 0 {
 		attrs["context_compaction_threshold"] = fmt.Sprintf("%.2f", cfg.CompactionThreshold)
 	}
+	if cfg.LastResponseTruncate > 0 {
+		attrs["last_response_truncate"] = strconv.Itoa(cfg.LastResponseTruncate)
+	}
 }
 
 // extractAgentFeatureAttrs sets reasoning, fidelity, and pipeline feature flag attrs.
@@ -486,6 +496,9 @@ func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
 		}
 		if len(branch.WritablePaths) > 0 {
 			attrs[prefix+"writable_paths"] = strings.Join(branch.WritablePaths, ",")
+		}
+		if branch.LastResponseTruncate > 0 {
+			attrs[prefix+"last_response_truncate"] = strconv.Itoa(branch.LastResponseTruncate)
 		}
 	}
 	// Generic params pass-through (dippin-lang v0.39.0, #313) — e.g.
@@ -840,10 +853,12 @@ func setIfNonEmpty(attrs map[string]string, key, value string) {
 // parser does this natively) or simplify the Parsed tree.
 func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 	gEdge := &Edge{
-		From:  irEdge.From,
-		To:    irEdge.To,
-		Label: irEdge.Label,
-		Attrs: make(map[string]string),
+		From:     irEdge.From,
+		To:       irEdge.To,
+		Label:    irEdge.Label,
+		Choice:   irEdge.Choice,
+		Override: irEdge.Override,
+		Attrs:    make(map[string]string),
 	}
 
 	// Serialize condition if present. We prefer Raw (set by the parser) and

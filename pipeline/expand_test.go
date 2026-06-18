@@ -811,6 +811,24 @@ func TestExpandVariables_NodeScopedToolStdoutFencedBlock(t *testing.T) {
 	}
 }
 
+func TestInjectParamsIntoGraph_PreservesEdgeChoice(t *testing.T) {
+	g := NewGraph("sub")
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon"})
+	g.AddNode(&Node{ID: "next", Shape: "box"})
+	g.AddEdge(&Edge{From: "gate", To: "next", Label: "Approve and Continue", Choice: "approve"})
+
+	clone, err := InjectParamsIntoGraph(g, map[string]string{})
+	if err != nil {
+		t.Fatalf("InjectParamsIntoGraph: %v", err)
+	}
+	if len(clone.Edges) != 1 {
+		t.Fatalf("expected 1 edge, got %d", len(clone.Edges))
+	}
+	if clone.Edges[0].Choice != "approve" {
+		t.Errorf("cloned edge Choice = %q, want %q", clone.Edges[0].Choice, "approve")
+	}
+}
+
 func TestInjectParamsIntoGraphPreservesValidationAndIndexes(t *testing.T) {
 	g := NewGraph("sub")
 	g.AddNode(&Node{ID: "a", Shape: "box"})

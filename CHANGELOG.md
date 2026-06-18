@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`override:` edge attribute now wired end-to-end** (dippin-lang v0.40.0, closes #271 input
+  gap). Setting `override: true` on an edge in a `.dip` file now flows through the dippin adapter
+  into `pipeline.Edge.Override`, which the engine uses to produce `OutcomeValidationOverridden`
+  on success. Previously the field existed in the runtime but had no `.dip` input path.
+
+- **`last_response_truncate:` agent attribute now enforced** (dippin-lang v0.40.0, issue #56
+  chain-attack mitigation). An agent node with `last_response_truncate: 500` caps the Unicode
+  character count of the prior node's response injected into its prompt. Applies to both agent
+  nodes and per-branch overrides in parallel nodes. The stored context value is unchanged — only
+  the injected excerpt is capped.
+
+- **`choice:` edge attribute now wired for human-gate routing** (dippin-lang v0.42.0, DIP150).
+  Setting `choice: approve` on an edge declares a stable machine-readable routing key separate
+  from the human-readable `label:`. The TUI always displays `label:`; `choice:` becomes the
+  value stored in `ctx.preferred_label` and matched by the edge selector in both choice mode
+  and freeform mode.
+
 - **`stall_timeout` graph-level default now enforced at runtime** (issue #310).
   When no pipeline node completes within the declared wall-clock window, the run
   aborts through the same `OutcomeBudgetExceeded` / `on_failure` cascade as other
@@ -43,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EventNodeCostLimitExceeded` / `EventNodeNoProgressDetected` pipeline events.
   With these guards in place, `max_turns` serves as a coarse backstop that
   should rarely bind during normal runs.
+
+### Changed
+
+- **dippin-lang upgraded to v0.42.0** (from v0.39.0). New IR fields wired in
+  subsequent commits: `Edge.Override` (v0.40.0, closes #271 input gap),
+  `AgentConfig.LastResponseTruncate` + `BranchConfig.LastResponseTruncate`
+  (v0.40.0, issue #56 chain-attack mitigation), and `Edge.Choice` (v0.42.0,
+  DIP150 explicit human-gate routing key).
 
 ### Fixed
 

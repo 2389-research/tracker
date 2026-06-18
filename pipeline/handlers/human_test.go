@@ -1064,6 +1064,37 @@ func TestHumanHandler_TimeoutUsesDefault(t *testing.T) {
 	}
 }
 
+func TestHumanHandler_TimeoutUsesDefault_ChoiceKey(t *testing.T) {
+	// When default_choice is a display Label and the edge has a Choice key,
+	// handleHumanTimeout must store the Choice key as PreferredLabel.
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{
+			"timeout":        "100ms",
+			"default_choice": "Approve and Continue",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "accept", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "accept", Label: "Approve and Continue", Choice: "approve"})
+
+	h := NewHumanHandler(&blockingInterviewer{}, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.PreferredLabel != "approve" {
+		t.Errorf("PreferredLabel = %q, want %q (Choice key)", outcome.PreferredLabel, "approve")
+	}
+	// human_response should still carry the display label, not the Choice key.
+	if outcome.ContextUpdates[pipeline.ContextKeyHumanResponse] != "Approve and Continue" {
+		t.Errorf("human_response = %q, want display label", outcome.ContextUpdates[pipeline.ContextKeyHumanResponse])
+	}
+}
+
 // --- Human gate correctness: all modes must route correctly ---
 
 // yesNoInterviewer simulates a user picking a specific choice from the presented options.
@@ -1368,5 +1399,63 @@ func TestHumanHandler_PopulatesOverrideActor_Unknown(t *testing.T) {
 	if outcome.OverrideActor != pipeline.ActorUnknown {
 		t.Errorf("OverrideActor = %q, want %q",
 			outcome.OverrideActor, pipeline.ActorUnknown)
+	}
+}
+
+// TestMatchFreeformLabel_ChoiceKey verifies that matchFreeformLabel returns the
+// Choice key when an edge has one, and falls back to Label when Choice is empty.
+func TestHumanHandler_ChoiceMode_ChoiceKeyRouting(t *testing.T) {
+	// executeChoice returns the edge's Choice key as PreferredLabel (not the
+	// display Label) so selectByLabel can route via edgeRoutingKey.
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})
+	graph.AddNode(&pipeline.Node{ID: "accept", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "reject", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "accept", Label: "Approve and Continue", Choice: "approve"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "reject", Label: "Reject"})
+
+	// Interviewer returns the display label the user sees.
+	rec := &recordingInterviewer{response: "Approve and Continue"}
+	h := NewHumanHandler(rec, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Must be the Choice routing key, not the display Label.
+	if outcome.PreferredLabel != "approve" {
+		t.Errorf("PreferredLabel = %q, want %q (Choice key)", outcome.PreferredLabel, "approve")
+	}
+}
+
+func TestMatchFreeformLabel_ChoiceKey(t *testing.T) {
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon"})
+	graph.AddNode(&pipeline.Node{ID: "next", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "reject", Shape: "box"})
+	// Edge with both Label and Choice set.
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "next", Label: "Approve and Continue", Choice: "approve"})
+	// Edge with only Label (no Choice).
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "reject", Label: "Reject"})
+
+	node := graph.Nodes["gate"]
+
+	// Matching by Label should return Choice when Choice is non-empty.
+	got := matchFreeformLabel(graph, node, "Approve and Continue")
+	if got != "approve" {
+		t.Errorf("matchFreeformLabel(\"Approve and Continue\") = %q, want %q", got, "approve")
+	}
+
+	// Matching by Label when no Choice: should return the Label.
+	got = matchFreeformLabel(graph, node, "Reject")
+	if got != "Reject" {
+		t.Errorf("matchFreeformLabel(\"Reject\") = %q, want %q", got, "Reject")
+	}
+
+	// Matching by Choice key directly returns the Choice key.
+	got = matchFreeformLabel(graph, node, "approve")
+	if got != "approve" {
+		t.Errorf("matchFreeformLabel(\"approve\") = %q, want %q", got, "approve")
 	}
 }
