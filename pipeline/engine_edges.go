@@ -20,49 +20,45 @@ func (e *Engine) selectEdge(runID string, edges []*Edge, pctx *PipelineContext) 
 		return edge, err
 	}
 
-	// All conditionals (if any) evaluated false. If any *did* exist AND the
-	// fallback path we take next is an unconditional edge, the routing is a
-	// "stated-intent miss" — emit EventConditionalFallthrough so
-	// `tracker diagnose` can correlate with EventToolOutputTruncated (#208).
-	// Skip the event when the selected edge still has a Condition (label and
-	// suggested matchers can pick a conditional edge whose condition evaluated
-	// false — that's not a fallthrough, it's a re-selection by other criteria,
-	// and labeling it fallthrough would trigger misleading diagnose guidance).
-	emitFallthrough := func(selected *Edge, priority string) {
-		if len(conditionsTried) == 0 || selected == nil || selected.Condition != "" {
-			return
-		}
-		e.emit(PipelineEvent{
-			Type:      EventConditionalFallthrough,
-			Timestamp: time.Now(),
-			RunID:     runID,
-			NodeID:    selected.From,
-			Message:   fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false, fell back to %s edge -> %q", selected.From, len(conditionsTried), priority, selected.To),
-			Decision: &DecisionDetail{
-				EdgeFrom:        selected.From,
-				EdgeTo:          selected.To,
-				EdgePriority:    priority,
-				ContextSnapshot: ctxSnap,
-				ConditionsTried: conditionsTried,
-			},
-		})
-	}
-
 	if edge := e.selectByLabel(runID, edges, pctx, ctxSnap); edge != nil {
-		emitFallthrough(edge, "label")
+		e.emitFallthroughIfNeeded(runID, edge, "label", conditionsTried, ctxSnap)
 		return edge, nil
 	}
 
 	if edge := e.selectBySuggested(runID, edges, pctx, ctxSnap); edge != nil {
-		emitFallthrough(edge, "suggested")
+		e.emitFallthroughIfNeeded(runID, edge, "suggested", conditionsTried, ctxSnap)
 		return edge, nil
 	}
 
 	edge, weightPriority, err := e.selectByWeight(runID, edges, pctx, ctxSnap)
 	if err == nil && edge != nil {
-		emitFallthrough(edge, weightPriority)
+		e.emitFallthroughIfNeeded(runID, edge, weightPriority, conditionsTried, ctxSnap)
 	}
 	return edge, err
+}
+
+// emitFallthroughIfNeeded fires EventConditionalFallthrough when conditionals
+// were tried but an unconditional fallback edge was selected instead. Skip the
+// event when the selected edge itself has a Condition (re-selection by label
+// or weight on a conditional edge is not a fallthrough).
+func (e *Engine) emitFallthroughIfNeeded(runID string, selected *Edge, priority string, conditionsTried []ConditionEval, ctxSnap map[string]string) {
+	if len(conditionsTried) == 0 || selected == nil || selected.Condition != "" {
+		return
+	}
+	e.emit(PipelineEvent{
+		Type:      EventConditionalFallthrough,
+		Timestamp: time.Now(),
+		RunID:     runID,
+		NodeID:    selected.From,
+		Message:   fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false, fell back to %s edge -> %q", selected.From, len(conditionsTried), priority, selected.To),
+		Decision: &DecisionDetail{
+			EdgeFrom:        selected.From,
+			EdgeTo:          selected.To,
+			EdgePriority:    priority,
+			ContextSnapshot: ctxSnap,
+			ConditionsTried: conditionsTried,
+		},
+	})
 }
 
 // selectByCondition evaluates condition expressions on edges, returning the
@@ -76,28 +72,10 @@ func (e *Engine) selectByCondition(runID string, edges []*Edge, pctx *PipelineCo
 		if edge.Condition == "" {
 			continue
 		}
-		expandedCondition, err := ExpandVariables(edge.Condition, pctx, params, e.graph.Attrs, false)
+		match, err := e.evaluateEdgeCondition(runID, edge, pctx, params, ctxSnap)
 		if err != nil {
-			return nil, nil, fmt.Errorf("expand condition on edge %s->%s: %w", edge.From, edge.To, err)
+			return nil, nil, err
 		}
-		match, err := EvaluateCondition(expandedCondition, pctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("evaluate condition on edge %s->%s: %w", edge.From, edge.To, err)
-		}
-		e.emit(PipelineEvent{
-			Type:      EventDecisionCondition,
-			Timestamp: time.Now(),
-			RunID:     runID,
-			NodeID:    edge.From,
-			Message:   fmt.Sprintf("condition %q on edge %s->%s evaluated to %v", edge.Condition, edge.From, edge.To, match),
-			Decision: &DecisionDetail{
-				EdgeFrom:        edge.From,
-				EdgeTo:          edge.To,
-				EdgeCondition:   edge.Condition,
-				ConditionMatch:  match,
-				ContextSnapshot: ctxSnap,
-			},
-		})
 		if match {
 			e.emitEdgeSelected(runID, edge, "condition", ctxSnap)
 			return edge, nil, nil
@@ -107,9 +85,37 @@ func (e *Engine) selectByCondition(runID string, edges []*Edge, pctx *PipelineCo
 	return nil, triedFalse, nil
 }
 
+// evaluateEdgeCondition expands and evaluates a single conditional edge,
+// emits the decision event, and returns whether the condition matched.
+func (e *Engine) evaluateEdgeCondition(runID string, edge *Edge, pctx *PipelineContext, params map[string]string, ctxSnap map[string]string) (bool, error) {
+	expandedCondition, err := ExpandVariables(edge.Condition, pctx, params, e.graph.Attrs, false)
+	if err != nil {
+		return false, fmt.Errorf("expand condition on edge %s->%s: %w", edge.From, edge.To, err)
+	}
+	match, err := EvaluateCondition(expandedCondition, pctx)
+	if err != nil {
+		return false, fmt.Errorf("evaluate condition on edge %s->%s: %w", edge.From, edge.To, err)
+	}
+	e.emit(PipelineEvent{
+		Type:      EventDecisionCondition,
+		Timestamp: time.Now(),
+		RunID:     runID,
+		NodeID:    edge.From,
+		Message:   fmt.Sprintf("condition %q on edge %s->%s evaluated to %v", edge.Condition, edge.From, edge.To, match),
+		Decision: &DecisionDetail{
+			EdgeFrom:        edge.From,
+			EdgeTo:          edge.To,
+			EdgeCondition:   edge.Condition,
+			ConditionMatch:  match,
+			ContextSnapshot: ctxSnap,
+		},
+	})
+	return match, nil
+}
+
 // edgeRoutingKey returns the routing key for an edge: Choice when non-empty,
-// otherwise Label. Used so edges with an explicit choice: attribute route on
-// the choice key, not the display label (DIP150).
+// Label when non-empty, otherwise To. Used so edges with an explicit choice:
+// attribute route on the choice key, not the display label (DIP150).
 func edgeRoutingKey(edge *Edge) string {
 	if edge.Choice != "" {
 		return edge.Choice

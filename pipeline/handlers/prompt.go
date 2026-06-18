@@ -20,31 +20,24 @@ func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
 		return "", fmt.Errorf("node %q missing required attribute 'prompt'", node.ID)
 	}
 
+	// Apply last_response_truncate before any variable expansion so that
+	// ${ctx.last_response} references in the prompt template are also capped
+	// (chain-attack mitigation, issue #56 / dippin-lang v0.40.0).
+	restore, err := applyLastResponseTruncate(node, pctx)
+	if err != nil {
+		return "", err
+	}
+	if restore != nil {
+		defer restore()
+	}
+
 	params := pipeline.ExtractParamsFromGraphAttrs(graphAttrs)
-	prompt, err := pipeline.ExpandVariables(prompt, pctx, params, graphAttrs, false)
+	prompt, err = pipeline.ExpandVariables(prompt, pctx, params, graphAttrs, false)
 	if err != nil {
 		return "", fmt.Errorf("node %q variable expansion failed: %w", node.ID, err)
 	}
 
 	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
-
-	// Apply last_response_truncate: temporarily cap pctx's last_response to
-	// N Unicode characters for this prompt build, then restore. Bounds how
-	// much of a prior agent's output reaches this agent's prompt context
-	// (chain-attack mitigation, issue #56 / dippin-lang v0.40.0).
-	truncChars, err := resolveLastResponseTruncate(node)
-	if err != nil {
-		return "", err
-	}
-	if truncChars > 0 {
-		if resp, ok := pctx.Get(pipeline.ContextKeyLastResponse); ok {
-			runes := []rune(resp)
-			if len(runes) > truncChars {
-				pctx.Set(pipeline.ContextKeyLastResponse, string(runes[:truncChars]))
-				defer pctx.Set(pipeline.ContextKeyLastResponse, resp)
-			}
-		}
-	}
 
 	fidelity := pipeline.ResolveFidelity(node, graphAttrs)
 	if fidelity != pipeline.FidelityFull {
@@ -68,9 +61,30 @@ func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
 	return prompt, nil
 }
 
+// applyLastResponseTruncate caps pctx's last_response to the node's
+// last_response_truncate limit before prompt building. Returns a restore
+// function (non-nil only when truncation actually changed the value) so the
+// caller can defer-restore the original. Returns an error for invalid attrs.
+func applyLastResponseTruncate(node *pipeline.Node, pctx *pipeline.PipelineContext) (func(), error) {
+	truncChars, err := resolveLastResponseTruncate(node)
+	if err != nil || truncChars == 0 {
+		return nil, err
+	}
+	resp, ok := pctx.Get(pipeline.ContextKeyLastResponse)
+	if !ok {
+		return nil, nil
+	}
+	runes := []rune(resp)
+	if len(runes) <= truncChars {
+		return nil, nil
+	}
+	pctx.Set(pipeline.ContextKeyLastResponse, string(runes[:truncChars]))
+	return func() { pctx.Set(pipeline.ContextKeyLastResponse, resp) }, nil
+}
+
 // resolveLastResponseTruncate reads the optional last_response_truncate node
-// attr: a Unicode character cap on the ctx.last_response value injected into
-// the prompt. 0/absent means no truncation. A malformed value fails loudly.
+// attr: a Unicode character cap on the ctx.last_response value. 0/absent means
+// no truncation. Negative values and non-integers are rejected loudly.
 func resolveLastResponseTruncate(node *pipeline.Node) (int, error) {
 	raw := node.Attrs["last_response_truncate"]
 	if raw == "" {
@@ -79,6 +93,9 @@ func resolveLastResponseTruncate(node *pipeline.Node) (int, error) {
 	n, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("node %q has malformed last_response_truncate %q: %w", node.ID, raw, err)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("node %q has invalid last_response_truncate %d: must be >= 0", node.ID, n)
 	}
 	return n, nil
 }

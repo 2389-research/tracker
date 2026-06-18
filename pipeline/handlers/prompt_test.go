@@ -204,10 +204,12 @@ func TestResolvePromptInjectionCapMalformed(t *testing.T) {
 }
 
 func TestResolvePrompt_LastResponseTruncate(t *testing.T) {
+	// The prompt references ${ctx.last_response} directly — truncation must
+	// apply before variable expansion so the template reference is also capped.
 	node := &pipeline.Node{
 		ID: "TestNode",
 		Attrs: map[string]string{
-			"prompt":                 "Do the task.",
+			"prompt":                 "Previous: ${ctx.last_response}",
 			"last_response_truncate": "10",
 		},
 	}
@@ -219,13 +221,28 @@ func TestResolvePrompt_LastResponseTruncate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolvePrompt: %v", err)
 	}
+	// The first 10 chars ("hello worl") should appear; the rest must not.
+	if !strings.Contains(got, "hello worl") {
+		t.Errorf("truncated prefix missing from prompt: %s", got)
+	}
 	if strings.Contains(got, "hello world this") {
 		t.Errorf("last_response not truncated: full string appears in output")
 	}
-	// Original pctx value must be restored.
+	// Original pctx value must be restored after ResolvePrompt returns.
 	restored, _ := pctx.Get(pipeline.ContextKeyLastResponse)
 	if restored != longResp {
 		t.Errorf("pctx last_response not restored: got %q", restored)
+	}
+}
+
+func TestResolvePrompt_LastResponseTruncate_Negative(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "TestNode",
+		Attrs: map[string]string{"prompt": "Do the task.", "last_response_truncate": "-1"},
+	}
+	_, err := ResolvePrompt(node, pipeline.NewPipelineContext(), nil, "")
+	if err == nil {
+		t.Fatal("expected error for negative last_response_truncate")
 	}
 }
 
