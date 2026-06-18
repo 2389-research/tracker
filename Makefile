@@ -40,7 +40,7 @@ fmt:
 	gofmt -w .
 
 fmt-check:
-	@test -z "$$(gofmt -l .)" || { echo "gofmt: files need formatting:"; gofmt -l .; exit 1; }
+	@test -z "$$(gofmt -l . | grep -v '\.claude/')" || { echo "gofmt: files need formatting:"; gofmt -l . | grep -v '\.claude/'; exit 1; }
 
 vet:
 	go vet ./...

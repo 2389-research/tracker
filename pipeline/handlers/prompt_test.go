@@ -207,7 +207,7 @@ func TestResolvePrompt_LastResponseTruncate(t *testing.T) {
 	node := &pipeline.Node{
 		ID: "TestNode",
 		Attrs: map[string]string{
-			"prompt":                  "Do the task.",
+			"prompt":                 "Do the task.",
 			"last_response_truncate": "10",
 		},
 	}

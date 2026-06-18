@@ -17,7 +17,7 @@ echo "═══ Pre-commit Quality Gates ═══"
 # 1. Format check
 echo ""
 echo "--- Format ---"
-UNFORMATTED=$(gofmt -l . 2>&1 | grep -v vendor || true)
+UNFORMATTED=$(gofmt -l . 2>&1 | grep -v vendor | grep -v '\.claude/' || true)
 if [ -n "$UNFORMATTED" ]; then
   fail "gofmt: these files need formatting:\n$UNFORMATTED"
 fi
