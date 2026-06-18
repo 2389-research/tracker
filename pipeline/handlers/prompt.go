@@ -5,6 +5,7 @@ package handlers
 import (
 	"fmt"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -74,14 +75,21 @@ func applyLastResponseTruncate(node *pipeline.Node, pctx *pipeline.PipelineConte
 	if !ok {
 		return nil, nil
 	}
-	runes := []rune(resp)
-	if len(runes) <= truncChars {
-		return nil, nil
+	// Walk forward exactly truncChars runes to find the byte cut point.
+	// This avoids allocating a full []rune for large responses.
+	byteIdx, count := 0, 0
+	for byteIdx < len(resp) && count < truncChars {
+		_, size := utf8.DecodeRuneInString(resp[byteIdx:])
+		byteIdx += size
+		count++
+	}
+	if count < truncChars {
+		return nil, nil // fewer runes than the limit — nothing to truncate
 	}
 	// Use MergeWithoutDirty so the temporary truncation is not attributed to
 	// this node if ResolvePrompt returns an error and the engine calls
 	// ScopeToNode on the error path.
-	pctx.MergeWithoutDirty(map[string]string{pipeline.ContextKeyLastResponse: string(runes[:truncChars])})
+	pctx.MergeWithoutDirty(map[string]string{pipeline.ContextKeyLastResponse: resp[:byteIdx]})
 	return func() { pctx.MergeWithoutDirty(map[string]string{pipeline.ContextKeyLastResponse: resp}) }, nil
 }
 
