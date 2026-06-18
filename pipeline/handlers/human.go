@@ -609,9 +609,10 @@ func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome 
 			pipeline.ContextKeyHumanResponse: "timed out (no default)",
 		}}
 	}
+	routing := mapSelectionToRoutingKey(h.graph.OutgoingEdges(node.ID), def)
 	return pipeline.Outcome{
 		Status:         string(pipeline.OutcomeSuccess),
-		PreferredLabel: def,
+		PreferredLabel: routing,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            def,
 			pipeline.ContextKeyResponsePrefix + node.ID: def,
@@ -713,8 +714,8 @@ func askFreeformWithTimeout(fi FreeformInterviewer, prompt string, labels []stri
 
 // matchFreeformLabel tries to match freeform response text against outgoing edge labels.
 // When an edge has a Choice key (DIP150), matching by Label returns Choice so the
-// engine routes on the stable key rather than the display label. Direct match against
-// the Choice key is also accepted so autopilot/webhook responders can use the short key.
+// engine routes on the stable key rather than the display label. A direct match against
+// the Choice key is also accepted when the responder sends the key directly.
 func matchFreeformLabel(graph *pipeline.Graph, node *pipeline.Node, response string) string {
 	normalized := strings.ToLower(strings.TrimSpace(response))
 	for _, e := range graph.OutgoingEdges(node.ID) {
@@ -951,20 +952,24 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
-	// Translate the selected display label to its routing key (Choice when set),
-	// mirroring what matchFreeformLabel does in freeform mode.
+	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), PreferredLabel: mapSelectionToRoutingKey(edges, selected)}, nil
+}
+
+// mapSelectionToRoutingKey translates a human-selected display label to the
+// edge's Choice routing key when one is set. Falls back to the label itself
+// (or edge.To for unlabeled edges) when no Choice is present, preserving
+// the behaviour of edgeRoutingKey for the same edge.
+func mapSelectionToRoutingKey(edges []*pipeline.Edge, selected string) string {
 	for _, e := range edges {
 		label := e.Label
 		if label == "" {
 			label = e.To
 		}
 		if label == selected && e.Choice != "" {
-			selected = e.Choice
-			break
+			return e.Choice
 		}
 	}
-
-	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), PreferredLabel: selected}, nil
+	return selected
 }
 
 // executeYesNo handles yes_no mode: presents Yes/No choices and maps them to

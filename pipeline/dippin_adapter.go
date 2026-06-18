@@ -347,6 +347,9 @@ func extractAgentLimitsAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	if cfg.CompactionThreshold > 0 {
 		attrs["context_compaction_threshold"] = fmt.Sprintf("%.2f", cfg.CompactionThreshold)
 	}
+	if cfg.LastResponseTruncate > 0 {
+		attrs["last_response_truncate"] = strconv.Itoa(cfg.LastResponseTruncate)
+	}
 }
 
 // extractAgentFeatureAttrs sets reasoning, fidelity, and pipeline feature flag attrs.
@@ -486,6 +489,9 @@ func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
 		}
 		if len(branch.WritablePaths) > 0 {
 			attrs[prefix+"writable_paths"] = strings.Join(branch.WritablePaths, ",")
+		}
+		if branch.LastResponseTruncate > 0 {
+			attrs[prefix+"last_response_truncate"] = strconv.Itoa(branch.LastResponseTruncate)
 		}
 	}
 	// Generic params pass-through (dippin-lang v0.39.0, #313) — e.g.

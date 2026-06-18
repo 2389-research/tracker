@@ -1064,6 +1064,37 @@ func TestHumanHandler_TimeoutUsesDefault(t *testing.T) {
 	}
 }
 
+func TestHumanHandler_TimeoutUsesDefault_ChoiceKey(t *testing.T) {
+	// When default_choice is a display Label and the edge has a Choice key,
+	// handleHumanTimeout must store the Choice key as PreferredLabel.
+	graph := pipeline.NewGraph("test")
+	graph.AddNode(&pipeline.Node{
+		ID:    "gate",
+		Shape: "hexagon",
+		Attrs: map[string]string{
+			"timeout":        "100ms",
+			"default_choice": "Approve and Continue",
+		},
+	})
+	graph.AddNode(&pipeline.Node{ID: "accept", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "accept", Label: "Approve and Continue", Choice: "approve"})
+
+	h := NewHumanHandler(&blockingInterviewer{}, graph)
+	node := graph.Nodes["gate"]
+
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.PreferredLabel != "approve" {
+		t.Errorf("PreferredLabel = %q, want %q (Choice key)", outcome.PreferredLabel, "approve")
+	}
+	// human_response should still carry the display label, not the Choice key.
+	if outcome.ContextUpdates[pipeline.ContextKeyHumanResponse] != "Approve and Continue" {
+		t.Errorf("human_response = %q, want display label", outcome.ContextUpdates[pipeline.ContextKeyHumanResponse])
+	}
+}
+
 // --- Human gate correctness: all modes must route correctly ---
 
 // yesNoInterviewer simulates a user picking a specific choice from the presented options.

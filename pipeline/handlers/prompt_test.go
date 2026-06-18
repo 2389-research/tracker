@@ -202,3 +202,58 @@ func TestResolvePromptInjectionCapMalformed(t *testing.T) {
 		t.Errorf("expected error to name injection_cap, got: %v", err)
 	}
 }
+
+func TestResolvePrompt_LastResponseTruncate(t *testing.T) {
+	node := &pipeline.Node{
+		ID: "TestNode",
+		Attrs: map[string]string{
+			"prompt":                  "Do the task.",
+			"last_response_truncate": "10",
+		},
+	}
+	pctx := pipeline.NewPipelineContext()
+	const longResp = "hello world this is a long response from the previous node"
+	pctx.Set(pipeline.ContextKeyLastResponse, longResp)
+
+	got, err := ResolvePrompt(node, pctx, nil, "")
+	if err != nil {
+		t.Fatalf("ResolvePrompt: %v", err)
+	}
+	if strings.Contains(got, "hello world this") {
+		t.Errorf("last_response not truncated: full string appears in output")
+	}
+	// Original pctx value must be restored.
+	restored, _ := pctx.Get(pipeline.ContextKeyLastResponse)
+	if restored != longResp {
+		t.Errorf("pctx last_response not restored: got %q", restored)
+	}
+}
+
+func TestResolvePrompt_LastResponseTruncate_Zero_NoChange(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "TestNode",
+		Attrs: map[string]string{"prompt": "Do the task."},
+	}
+	pctx := pipeline.NewPipelineContext()
+	const resp = "short response"
+	pctx.Set(pipeline.ContextKeyLastResponse, resp)
+
+	got, err := ResolvePrompt(node, pctx, nil, "")
+	if err != nil {
+		t.Fatalf("ResolvePrompt: %v", err)
+	}
+	if !strings.Contains(got, resp) {
+		t.Errorf("expected %q in prompt when truncate is 0", resp)
+	}
+}
+
+func TestResolvePrompt_LastResponseTruncate_Malformed(t *testing.T) {
+	node := &pipeline.Node{
+		ID:    "TestNode",
+		Attrs: map[string]string{"prompt": "Do the task.", "last_response_truncate": "abc"},
+	}
+	_, err := ResolvePrompt(node, pipeline.NewPipelineContext(), nil, "")
+	if err == nil {
+		t.Fatal("expected error for malformed last_response_truncate")
+	}
+}

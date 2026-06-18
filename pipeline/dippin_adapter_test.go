@@ -1559,6 +1559,39 @@ func TestExtractAgentAttrs_ZeroValueFieldsOmitted(t *testing.T) {
 	}
 }
 
+func TestExtractAgentAttrs_LastResponseTruncate(t *testing.T) {
+	attrs := make(map[string]string)
+	extractAgentAttrs(ir.AgentConfig{LastResponseTruncate: 500}, attrs)
+	if attrs["last_response_truncate"] != "500" {
+		t.Errorf("last_response_truncate = %q, want 500", attrs["last_response_truncate"])
+	}
+}
+
+func TestExtractAgentAttrs_ZeroLastResponseTruncateOmitted(t *testing.T) {
+	attrs := make(map[string]string)
+	extractAgentAttrs(ir.AgentConfig{}, attrs)
+	if _, ok := attrs["last_response_truncate"]; ok {
+		t.Error("last_response_truncate should be omitted when zero")
+	}
+}
+
+func TestExtractParallelAttrs_BranchLastResponseTruncate(t *testing.T) {
+	attrs := make(map[string]string)
+	cfg := ir.ParallelConfig{
+		Branches: []ir.BranchConfig{
+			{Target: "NodeA", LastResponseTruncate: 200},
+			{Target: "NodeB"},
+		},
+	}
+	extractParallelAttrs(cfg, attrs)
+	if attrs["branch.0.last_response_truncate"] != "200" {
+		t.Errorf("branch.0.last_response_truncate = %q, want 200", attrs["branch.0.last_response_truncate"])
+	}
+	if _, ok := attrs["branch.1.last_response_truncate"]; ok {
+		t.Error("branch.1.last_response_truncate should be omitted when zero")
+	}
+}
+
 func TestExtractHumanAttrs_ZeroValueFieldsOmitted(t *testing.T) {
 	attrs := map[string]string{}
 	extractHumanAttrs(ir.HumanConfig{}, attrs)

@@ -114,7 +114,10 @@ func edgeRoutingKey(edge *Edge) string {
 	if edge.Choice != "" {
 		return edge.Choice
 	}
-	return edge.Label
+	if edge.Label != "" {
+		return edge.Label
+	}
+	return edge.To
 }
 
 // selectByLabel matches edges by the preferred label stored in context.

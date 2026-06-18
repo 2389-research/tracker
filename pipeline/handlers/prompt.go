@@ -28,6 +28,24 @@ func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
 
 	prompt = pipeline.ExpandPromptVariables(prompt, pctx)
 
+	// Apply last_response_truncate: temporarily cap pctx's last_response to
+	// N Unicode characters for this prompt build, then restore. Bounds how
+	// much of a prior agent's output reaches this agent's prompt context
+	// (chain-attack mitigation, issue #56 / dippin-lang v0.40.0).
+	truncChars, err := resolveLastResponseTruncate(node)
+	if err != nil {
+		return "", err
+	}
+	if truncChars > 0 {
+		if resp, ok := pctx.Get(pipeline.ContextKeyLastResponse); ok {
+			runes := []rune(resp)
+			if len(runes) > truncChars {
+				pctx.Set(pipeline.ContextKeyLastResponse, string(runes[:truncChars]))
+				defer pctx.Set(pipeline.ContextKeyLastResponse, resp)
+			}
+		}
+	}
+
 	fidelity := pipeline.ResolveFidelity(node, graphAttrs)
 	if fidelity != pipeline.FidelityFull {
 		compacted := pipeline.CompactContextWithPinnedKeys(
@@ -48,6 +66,21 @@ func ResolvePrompt(node *pipeline.Node, pctx *pipeline.PipelineContext,
 	}
 
 	return prompt, nil
+}
+
+// resolveLastResponseTruncate reads the optional last_response_truncate node
+// attr: a Unicode character cap on the ctx.last_response value injected into
+// the prompt. 0/absent means no truncation. A malformed value fails loudly.
+func resolveLastResponseTruncate(node *pipeline.Node) (int, error) {
+	raw := node.Attrs["last_response_truncate"]
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("node %q has malformed last_response_truncate %q: %w", node.ID, raw, err)
+	}
+	return n, nil
 }
 
 // resolveInjectionCap reads the optional injection_cap node attr (#352): the

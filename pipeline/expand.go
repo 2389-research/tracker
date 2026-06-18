@@ -317,6 +317,7 @@ func InjectParamsIntoGraph(g *Graph, params map[string]string) (*Graph, error) {
 			From:      e.From,
 			To:        e.To,
 			Label:     e.Label,
+			Choice:    e.Choice,
 			Condition: e.Condition,
 			Override:  e.Override,
 			Attrs:     copyStringMap(e.Attrs),
