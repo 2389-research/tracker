@@ -63,6 +63,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`build_product.dip` FinalCommit is now mechanically commit-only** (issue #349).
+  Building on the existing `commit_only` prompt/engine guard, the FinalCommit node
+  now also declares `writable_paths: .git/**, .ai/**`, wiring the native fs-jail
+  (#272) so its file-mutation tools — Bash + descendants AND in-process
+  Write/Edit/ApplyPatch — can only write under `.git/` and `.ai/`. `git add`/`git
+  commit` still work, but the node physically cannot author product source even
+  when upstream failure context primes it to "just fix it" (the case-study failure
+  where FinalCommit wrote an entire unreviewed milestone that shipped through zero
+  quality gates). This is the primary, mechanical defense; the `commit_only`
+  prompt/system-prompt guard remains the backstop. Linux native backend only —
+  see #272 platform/backend caveats.
 - **dippin-lang upgraded to v0.42.0** (from v0.39.0). New IR fields wired in
   subsequent commits: `Edge.Override` (v0.40.0, closes #271 input gap),
   `AgentConfig.LastResponseTruncate` + `BranchConfig.LastResponseTruncate`
@@ -71,6 +82,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Git subprocesses no longer inherit leaked `GIT_DIR`/`GIT_INDEX_FILE`**
+  (issue #399). When tracker runs from inside a git hook (or any context that
+  exports git-internal repo pointers), git honors an inherited
+  `GIT_DIR`/`GIT_INDEX_FILE` over a command's `-C <dir>`/working dir, so those
+  vars would redirect the artifact-repo `git init`/`add`/`commit` — and
+  `ExportBundle`'s `git -C runDir bundle create` — at the OUTER repository
+  instead of the isolated run-dir, corrupting/truncating the wrong index or
+  bundling the wrong repo. `gitSafeEnv` (and thus `gitProbeEnv`) now strips
+  `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY`, and
+  `GIT_COMMON_DIR`, and `ExportBundle` does the same. The redirect-pointer strip
+  is unconditional — applied even under `TRACKER_PASS_ENV=1`, which only gates
+  credential pass-through, never permission to re-anchor git at the outer repo;
+  key comparison is case-normalized so a mixed-case pointer can't slip past.
+  Git-using tests were hardened to set the same clean env, and the pre-commit
+  hook runs its `go test` gates with the pointers stripped.
+- **`build_product` milestone test-gate scope and `accept` verification bypass**
+  (issue #392). Two structural defects in `examples/build_product.dip` are fixed:
+  (T1) `TestMilestone` ran a whole-tree `go test ./...` while the fix loop
+  (`Implement`/`FixMilestone`) is milestone-scoped by construction, so a failure
+  in a package the milestone never touched (e.g. a later milestone's pre-seeded
+  code) was un-fixable on every retry — the fix budget burned on zero-progress
+  "fixes" and the run escalated. The Go test invocation is now scoped to the
+  packages this milestone actually changed (derived from the diff against
+  `.ai/build/milestone-start-sha`, the same boundary `MarkMilestoneDone` uses);
+  the whole-tree suite still runs at `FinalBuild` before anything ships, so
+  cross-milestone regressions are still caught — just not inside a loop that
+  can't act on them. `go build ./...` stays whole-tree. (T2) The `accept`
+  escalation option routed `EscalateMilestone -> Cleanup -> FinalCommit -> Done`,
+  bypassing the entire cross-review + `FinalBuild` (whole-tree test) +
+  `FinalSpecCheck` subgraph — a run could exit `Done` over a red suite with no
+  compliance report. `accept` now routes through `CheckMilestoneOutputs` (the
+  same entry the normal all-done path uses, `restart: true` to avoid a DIP005
+  cycle), so accepting still earns the structural gate, three-way cross-review,
+  final build/test, and spec-compliance check before `Cleanup`. The option's
+  prompt text is relabeled to state that verification is NOT skipped. No engine
+  changes.
 - **Remaining example workflows now hold A grades under `dippin doctor`**
   (issue #335, scope 3). Four example `.dip` files that shipped with B or F
   grades (`megaplan`, `megaplan_quality`, `ralph-loop`, `semport`) have been

@@ -29,6 +29,7 @@ func gitOutputBundle(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmdArgs := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(context.Background(), "git", cmdArgs...) //nolint:gosec
+	cmd.Env = cleanGitEnv()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -102,6 +103,7 @@ func TestExportBundle_RoundTrip(t *testing.T) {
 	// Clone the bundle into a restore dir.
 	restoreDir := filepath.Join(t.TempDir(), "restored")
 	cmd := exec.CommandContext(context.Background(), "git", "clone", bundlePath, restoreDir) //nolint:gosec
+	cmd.Env = cleanGitEnv()
 	var cloneOut bytes.Buffer
 	cmd.Stdout = &cloneOut
 	cmd.Stderr = &cloneOut
@@ -183,4 +185,35 @@ type alwaysSucceedHandler struct{ name string }
 func (h *alwaysSucceedHandler) Name() string { return h.name }
 func (h *alwaysSucceedHandler) Execute(_ context.Context, _ *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+}
+
+// TestBundleGitEnv_StripsMixedCaseRedirectVars pins the #401 review finding
+// (coderabbit): bundleGitEnv normalizes key case before the pointer lookup, so
+// a mixed-case redirect var can't slip past the strip the way a raw-key compare
+// against an upper-cased map would allow.
+func TestBundleGitEnv_StripsMixedCaseRedirectVars(t *testing.T) {
+	t.Setenv("Git_Dir", "/outer/.git")
+	t.Setenv("git_index_file", "/outer/.git/index")
+	t.Setenv("KEEP_ME", "yes")
+
+	env := bundleGitEnv()
+	// Compare case-insensitively: an OS that canonicalizes env-var casing
+	// (Windows) must not let a leaked redirect var slip past a case-sensitive
+	// prefix check and mask a real failure.
+	for _, bad := range []string{"git_dir=", "git_index_file="} {
+		for _, e := range env {
+			if strings.HasPrefix(strings.ToLower(e), bad) {
+				t.Errorf("bundleGitEnv leaked mixed-case redirect var %q (#401)", bad)
+			}
+		}
+	}
+	kept := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "KEEP_ME=") {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Error("bundleGitEnv dropped an unrelated env var KEEP_ME")
+	}
 }

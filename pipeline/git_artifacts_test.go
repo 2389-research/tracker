@@ -27,6 +27,12 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmdArgs := append([]string{"-C", dir}, args...)
 	cmd := exec.Command("git", cmdArgs...) //nolint:gosec
+	// Strip git-internal repo pointers (GIT_DIR/GIT_INDEX_FILE/...) that leak
+	// from a calling `git commit`'s hook environment. Without this, this helper's
+	// `-C dir` is overridden by GIT_DIR/GIT_INDEX_FILE and writes to the OUTER
+	// repo's index instead of the test's temp dir — clobbering it when the suite
+	// runs under a pre-commit hook. Mirrors cleanGitEnv usage in git_preflight_test.go.
+	cmd.Env = cleanGitEnv()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -838,4 +844,60 @@ func TestEngine_CommitWIP_HandlerErrorPreservesWork(t *testing.T) {
 	if traceRef != wantRef {
 		t.Errorf("trace WIPRef for Implement: got %q want %q", traceRef, wantRef)
 	}
+}
+
+// hasEnvPrefix reports whether any env entry starts with the given "KEY=" prefix.
+func hasEnvPrefix(env []string, prefix string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestGitSafeEnv_StripsRedirectVarsEvenUnderPassEnv pins the #401 review finding
+// (codex P1 + Copilot ×2): git-internal repository pointers must be stripped
+// from the git-subprocess env UNCONDITIONALLY — including under
+// TRACKER_PASS_ENV=1, which is a credential pass-through escape hatch, not
+// permission to re-anchor git at the outer repo. The earlier code returned
+// os.Environ() unfiltered in pass-env mode, re-leaking GIT_DIR/GIT_INDEX_FILE.
+func TestGitSafeEnv_StripsRedirectVarsEvenUnderPassEnv(t *testing.T) {
+	t.Setenv("GIT_DIR", "/outer/.git")
+	t.Setenv("GIT_INDEX_FILE", "/outer/.git/index")
+	t.Setenv("GIT_WORK_TREE", "/outer")
+	t.Setenv("GIT_OBJECT_DIRECTORY", "/outer/.git/objects")
+	t.Setenv("GIT_COMMON_DIR", "/outer/.git")
+	t.Setenv("EXAMPLE_API_KEY", "sekret")
+
+	redirects := []string{
+		"GIT_DIR=", "GIT_INDEX_FILE=", "GIT_WORK_TREE=",
+		"GIT_OBJECT_DIRECTORY=", "GIT_COMMON_DIR=",
+	}
+
+	t.Run("pass-env off strips redirects and credentials", func(t *testing.T) {
+		t.Setenv("TRACKER_PASS_ENV", "")
+		env := gitSafeEnv()
+		for _, r := range redirects {
+			if hasEnvPrefix(env, r) {
+				t.Errorf("gitSafeEnv leaked %q without TRACKER_PASS_ENV", r)
+			}
+		}
+		if hasEnvPrefix(env, "EXAMPLE_API_KEY=") {
+			t.Error("gitSafeEnv leaked EXAMPLE_API_KEY without TRACKER_PASS_ENV")
+		}
+	})
+
+	t.Run("pass-env on still strips redirects but passes credentials", func(t *testing.T) {
+		t.Setenv("TRACKER_PASS_ENV", "1")
+		env := gitSafeEnv()
+		for _, r := range redirects {
+			if hasEnvPrefix(env, r) {
+				t.Errorf("gitSafeEnv leaked %q under TRACKER_PASS_ENV=1 — redirect strip must be unconditional (#401)", r)
+			}
+		}
+		if !hasEnvPrefix(env, "EXAMPLE_API_KEY=") {
+			t.Error("gitSafeEnv dropped EXAMPLE_API_KEY under TRACKER_PASS_ENV=1 — credential pass-through broken")
+		}
+	})
 }

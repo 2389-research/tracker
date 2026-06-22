@@ -58,31 +58,39 @@ func (r *gitArtifactRepo) Init() error {
 		return fmt.Errorf("create artifact dir %q: %w", r.dir, err)
 	}
 
-	// Initialize git repo if .git doesn't already exist. Any Stat error
-	// other than "not exist" (permission, IO) is treated as fatal so we
-	// don't silently skip init and hit confusing downstream failures.
+	// Initialize git repo if .git doesn't already exist, set local-only
+	// identity, and create .gitignore.
+	if err := r.ensureGitDir(); err != nil {
+		r.failed = true
+		return err
+	}
+
+	return r.ensureInitialCommit()
+}
+
+// ensureGitDir creates the .git repo (if absent), sets local-only git user
+// config (so we don't pollute the global config), and writes a .gitignore.
+// Any Stat error other than "not exist" (permission, IO) on the .git dir is
+// fatal so we don't silently skip init and hit confusing downstream failures.
+// Caller is responsible for setting r.failed on error.
+func (r *gitArtifactRepo) ensureGitDir() error {
 	gitDir := filepath.Join(r.dir, ".git")
 	gitDirExists := false
 	if _, err := os.Stat(gitDir); err == nil {
 		gitDirExists = true
 	} else if !errors.Is(err, os.ErrNotExist) {
-		r.failed = true
 		return fmt.Errorf("stat %q: %w", gitDir, err)
 	}
 	if !gitDirExists {
 		if out, err := r.git("init", "--quiet"); err != nil {
-			r.failed = true
 			return fmt.Errorf("git init: %w\n%s", err, out)
 		}
 	}
 
-	// Set local-only git user config so we don't pollute the global config.
 	if out, err := r.git("config", "user.name", "tracker"); err != nil {
-		r.failed = true
 		return fmt.Errorf("git config user.name: %w\n%s", err, out)
 	}
 	if out, err := r.git("config", "user.email", "tracker@local"); err != nil {
-		r.failed = true
 		return fmt.Errorf("git config user.email: %w\n%s", err, out)
 	}
 
@@ -92,11 +100,14 @@ func (r *gitArtifactRepo) Init() error {
 	if _, err := os.Stat(gitignorePath); errors.Is(err, os.ErrNotExist) {
 		_ = os.WriteFile(gitignorePath, []byte("*.tmp\ncheckpoint.json\n"), 0o644)
 	}
+	return nil
+}
 
-	// Only create the "run started" commit if the repo has no existing
-	// HEAD. On checkpoint resume, the artifact dir already has history
-	// from the earlier attempt and another empty commit would just add
-	// noise.
+// ensureInitialCommit makes the "run started" commit, but only if the repo has
+// no existing HEAD. On checkpoint resume the artifact dir already has history
+// from the earlier attempt and another empty commit would just add noise.
+// Sets r.failed on error.
+func (r *gitArtifactRepo) ensureInitialCommit() error {
 	if out, err := r.git("rev-parse", "--verify", "HEAD"); err == nil && strings.TrimSpace(out) != "" {
 		// Existing HEAD — this is a resume. Skip the initial commit.
 		return nil
@@ -287,26 +298,52 @@ func gitProbeEnv() []string {
 // Mirrors the filterSensitiveEnv logic used by the tool handler, including
 // the TRACKER_PASS_ENV=1 escape hatch.
 func gitSafeEnv() []string {
-	if os.Getenv("TRACKER_PASS_ENV") == "1" {
-		return os.Environ()
-	}
+	passEnv := os.Getenv("TRACKER_PASS_ENV") == "1"
 	env := os.Environ()
-	var filtered []string
+	filtered := make([]string, 0, len(env))
 	for _, e := range env {
 		name := strings.ToUpper(strings.SplitN(e, "=", 2)[0])
-		if gitEnvIsSafe(name) {
-			filtered = append(filtered, e)
+		// Git-internal repository pointers are stripped UNCONDITIONALLY — even
+		// under TRACKER_PASS_ENV=1. That flag is a credential pass-through escape
+		// hatch, not permission to re-anchor git at the OUTER repo: an inherited
+		// GIT_DIR/GIT_INDEX_FILE overrides cmd.Dir and corrupts the wrong index
+		// regardless of credential intent. This is the single source of truth for
+		// the redirect-pointer strip across all of tracker's git subprocesses.
+		if isGitRedirectVar(name) {
+			continue
 		}
+		// Credential-shaped vars pass through only when the operator opts in.
+		if !passEnv && !gitEnvIsCredentialSafe(name) {
+			continue
+		}
+		filtered = append(filtered, e)
 	}
 	return filtered
 }
 
-// gitEnvIsSafe returns true if the env var is safe to pass to git subprocesses.
-func gitEnvIsSafe(name string) bool {
+// gitEnvIsCredentialSafe returns false for credential-shaped env vars that must
+// not leak into git subprocesses unless TRACKER_PASS_ENV=1 is set.
+func gitEnvIsCredentialSafe(name string) bool {
 	for _, pattern := range []string{"_API_KEY", "_SECRET", "_TOKEN", "_PASSWORD"} {
 		if strings.Contains(name, pattern) {
 			return false
 		}
 	}
 	return true
+}
+
+// isGitRedirectVar reports whether name is a git-internal repository pointer.
+// When tracker runs from inside a git hook (or any context that exports these),
+// they would otherwise redirect the artifact-repo `git init`/`add`/`commit` at
+// the OUTER repository's gitdir and staging index — committing into, or
+// truncating, the wrong index instead of the isolated artifact run-dir. The
+// artifact repo is always addressed via cmd.Dir, so these pointers are never
+// wanted; they are stripped even under TRACKER_PASS_ENV=1. Name is expected
+// upper-cased by the caller.
+func isGitRedirectVar(name string) bool {
+	switch name {
+	case "GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR":
+		return true
+	}
+	return false
 }

@@ -929,14 +929,67 @@ workflow BuildProduct
       # stack can't mask an earlier failing one. `go build` stays unguarded:
       # under set -eu a Go compile failure aborts immediately (exit 1, normal
       # fix-loop failure), same as before #305.
+      #
+      # Milestone-scoped Go test target (issue #392). The fix loop
+      # (FixMilestone) is milestone-scoped by construction — the Implement and
+      # FixMilestone prompts forbid touching files outside the current
+      # milestone's scope. A WHOLE-TREE `go test ./...` gate therefore creates
+      # an unwinnable loop: a failure in a package the milestone never touched
+      # (e.g. a later milestone's pre-seeded code) is un-fixable by every fix
+      # attempt, so the cap is burned on zero-progress "fixes" and the run
+      # escalates. We reconcile the two halves by scoping THIS gate to the
+      # packages this milestone actually changed; the WHOLE-tree suite still
+      # runs at FinalBuild before anything ships, so cross-milestone regressions
+      # are caught — just not inside a loop that can't act on them. `go build
+      # ./...` stays whole-tree: a broken compile anywhere is a real blocker and
+      # aborts immediately under set -eu.
+      #
+      # Scope = Go package dirs containing a .go file changed since this
+      # milestone's start commit (.ai/build/milestone-start-sha, written by
+      # PickNextMilestone — the same boundary MarkMilestoneDone diffs against).
+      # Empty/unreachable START (first milestone, or a retry that rewrote
+      # history) degrades to the empty tree, scoping to every touched package —
+      # correct, because on the first milestone every change IS this
+      # milestone's. Zero changed Go packages (a milestone that touched only
+      # non-Go files) falls back to `./...` so the gate still runs the suite
+      # rather than silently testing nothing. The derived package tokens are
+      # ONLY ever passed as `go test` package arguments — never eval'd, never
+      # interpolated into a shell command (CLAUDE.md tool-node rule).
       if [ -f go.mod ]; then
         go build ./... 2>&1
+        GO_TEST_TARGET="./..."
+        MS_START=$(cat .ai/build/milestone-start-sha 2>/dev/null || true)
+        if [ -z "$MS_START" ] || ! git cat-file -e "${MS_START}^{commit}" 2>/dev/null; then
+          MS_BASE=$(git hash-object -t tree /dev/null)
+        else
+          MS_BASE="$MS_START"
+        fi
+        # Changed .go files -> their package dirs as `go test` arguments,
+        # unique. A repo-ROOT .go file (no slash, e.g. `main.go`) maps to the
+        # root-package arg `.` — NOT `./main.go`: a single *.go FILE arg makes
+        # `go test` build the synthetic command-line-arguments package, which
+        # silently skips the sibling _test.go AND aborts (setup-failed) when
+        # mixed with directory args. A file in a subdir maps to `./<dir>`.
+        # Deleted files are excluded (--diff-filter=d) so we never target a dir
+        # git removed. The tokens are word-split into `go test` package args
+        # under POSIX sh (how tracker runs tool nodes) — never eval'd.
+        CHANGED_PKGS=$(git diff --name-only --diff-filter=d "${MS_BASE}..HEAD" 2>/dev/null \
+          | grep -E '\.go$' \
+          | awk -F/ 'NF==1 { print "." } NF>1 { sub(/\/[^/]*$/, ""); print "./" $0 }' \
+          | sort -u \
+          | paste -sd' ' -)
+        if [ -n "$CHANGED_PKGS" ]; then
+          GO_TEST_TARGET="$CHANGED_PKGS"
+          echo "--- milestone-scoped go test: $GO_TEST_TARGET ---"
+        else
+          echo "--- no changed Go packages in milestone range — testing ./... ---"
+        fi
         if [ -n "$SKIP_PATTERN" ]; then
           echo "--- skipping known failures: $SKIP_PATTERN ---"
           # Use -skip (Go 1.24+) which supports simple regex without lookahead.
-          go test ./... -skip "$SKIP_PATTERN" 2>&1 || TEST_EXIT=$?
+          go test $GO_TEST_TARGET -skip "$SKIP_PATTERN" 2>&1 || TEST_EXIT=$?
         else
-          go test ./... 2>&1 || TEST_EXIT=$?
+          go test $GO_TEST_TARGET 2>&1 || TEST_EXIT=$?
         fi
       fi
       if [ -f package.json ]; then
@@ -1552,7 +1605,10 @@ workflow BuildProduct
     provider: anthropic
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. All milestones are done.
+      Review the COMPLETE implementation against SPEC.md. The build loop has
+      finished — either every planned milestone completed, or the operator chose
+      to stop early (the "accept" gate) and ship what exists. Review what is
+      actually present; do not assume unfinished work will arrive later.
 
       DO NOT TRUST SPEC ✅ MARKERS:
       - SPEC.md may contain ✅ or "Done" checkmarks. These were the author's
@@ -1613,7 +1669,10 @@ workflow BuildProduct
     provider: openai
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. All milestones are done.
+      Review the COMPLETE implementation against SPEC.md. The build loop has
+      finished — either every planned milestone completed, or the operator chose
+      to stop early (the "accept" gate) and ship what exists. Review what is
+      actually present; do not assume unfinished work will arrive later.
 
       DO NOT TRUST SPEC ✅ MARKERS:
       - SPEC.md may contain ✅ or "Done" checkmarks. These were the author's
@@ -1674,7 +1733,10 @@ workflow BuildProduct
     provider: gemini
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. All milestones are done.
+      Review the COMPLETE implementation against SPEC.md. The build loop has
+      finished — either every planned milestone completed, or the operator chose
+      to stop early (the "accept" gate) and ship what exists. Review what is
+      actually present; do not assume unfinished work will arrive later.
 
       YOUR ROLE IS ADVERSARIAL: steel-man the worst
       case. Assume the implementation is wrong somewhere — your job is
@@ -2102,7 +2164,7 @@ workflow BuildProduct
       Options:
       - **mark done**: Override the test failure — you've verified the milestone is complete. Continues to the next milestone.
       - **retry**: Re-implement this milestone from scratch. Does NOT re-plan.
-      - **accept**: Stop building milestones, skip to cleanup/commit.
+      - **accept**: Stop building more milestones and ship what exists — but still run the full cross-review, final build/test, and spec-compliance gates first (does NOT skip verification).
       - **abandon**: Kill the pipeline immediately.
 
   human EscalateReview
@@ -2152,6 +2214,17 @@ workflow BuildProduct
     reasoning_effort: low
     auto_status: true
     fallback_target: EscalateReview
+    # #349 mechanical scope guard (primary defense): bound this node's file-
+    # mutation tools to git internals + tracker's .ai/ scratch via the native
+    # fs-jail (#272). Bash + its descendants AND in-process Write/Edit/ApplyPatch
+    # may only write under .git/ and .ai/ — so `git add`/`git commit` still work,
+    # but the node CANNOT author product source even when upstream failure context
+    # primes it to "just fix it" (the case-study failure: FinalCommit wrote an
+    # entire unreviewed milestone). Landlock bounds the Bash subprocess at the
+    # directory ancestor of each glob's static prefix, so `.git/**` -> `.git`,
+    # `.ai/**` -> `.ai`. The commit_only prompt/system-prompt guard below is the
+    # backstop. Linux native backend only — see #272 platform/backend caveats.
+    writable_paths: .git/**, .ai/**
     params:
       commit_only: true
     prompt:
@@ -2259,7 +2332,22 @@ workflow BuildProduct
     # Milestone escalation — human decides per-milestone
     EscalateMilestone -> MarkMilestoneDone  label: "mark done"
     EscalateMilestone -> Implement  label: "retry"  restart: true
-    EscalateMilestone -> Cleanup  label: "accept"
+    # #392: "accept" means "stop building more milestones, ship what exists" —
+    # but it must NOT ship UNVERIFIED. The pre-#392 edge jumped straight to
+    # Cleanup -> FinalCommit -> Done, bypassing the entire cross-review +
+    # FinalBuild (whole-tree `go test ./...`) + FinalSpecCheck subgraph, so a
+    # run could exit Done over a red suite with no compliance report. Route it
+    # instead to CheckMilestoneOutputs — the SAME entry the normal all-done
+    # path uses — so accepting still earns the structural gate, the three-way
+    # cross-review, the final build/test, and the spec-compliance check before
+    # Cleanup. CheckMilestoneOutputs's own fallback routes BACK to
+    # EscalateMilestone, so `restart: true` breaks what would otherwise be an
+    # unconditional EscalateMilestone -> CheckMilestoneOutputs ->
+    # EscalateMilestone cycle (DIP005) — the same mechanism the
+    # CheckReviewFixBudget -> CheckMilestoneOutputs re-review edge uses. accept
+    # is a forward transition out of the per-milestone loop into the review
+    # phase, so restart-on-entry semantics are correct.
+    EscalateMilestone -> CheckMilestoneOutputs  label: "accept"  restart: true
     EscalateMilestone -> Done  label: "abandon"
 
     # Cross-review
