@@ -32,7 +32,9 @@ func requireGit(t *testing.T) {
 // hook (which exports those vars), an un-sanitized `git init` re-inits — and a
 // follow-up `git add`/`commit` truncates — the OUTER repo's index instead of
 // the temp dir. Set cmd.Env = cleanGitEnv() on every git subprocess in tests.
-// Mirrors the same-named helper in pipeline/git_preflight_test.go.
+// Modeled on the same-named helper in pipeline/git_preflight_test.go, with an
+// added ToUpper so a mixed-case redirect var can't slip past on environments
+// that canonicalize env-var casing.
 func cleanGitEnv() []string {
 	stripped := map[string]bool{
 		"GIT_DIR":              true,
