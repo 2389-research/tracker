@@ -25,6 +25,33 @@ func requireGit(t *testing.T) {
 	}
 }
 
+// cleanGitEnv returns os.Environ() with git-internal repository pointers
+// stripped. Tests in this package create throwaway git repos via `git init`
+// in t.TempDir(); git honors an inherited GIT_DIR/GIT_INDEX_FILE over a
+// command's working directory, so when `go test ./...` runs from inside a git
+// hook (which exports those vars), an un-sanitized `git init` re-inits — and a
+// follow-up `git add`/`commit` truncates — the OUTER repo's index instead of
+// the temp dir. Set cmd.Env = cleanGitEnv() on every git subprocess in tests.
+// Mirrors the same-named helper in pipeline/git_preflight_test.go.
+func cleanGitEnv() []string {
+	stripped := map[string]bool{
+		"GIT_DIR":              true,
+		"GIT_INDEX_FILE":       true,
+		"GIT_WORK_TREE":        true,
+		"GIT_OBJECT_DIRECTORY": true,
+		"GIT_COMMON_DIR":       true,
+	}
+	src := os.Environ()
+	out := make([]string, 0, len(src))
+	for _, e := range src {
+		name := strings.SplitN(e, "=", 2)[0]
+		if !stripped[name] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 const integrationFixtureRequiresGit = `workflow PreflightIntegration
   goal: "integration test"
   requires: git
@@ -78,6 +105,7 @@ func TestIntegration_Preflight_GitInitClears(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init", "-q")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}

@@ -703,6 +703,7 @@ func TestDoctor_GitRequires_UnbornHEADReportsError(t *testing.T) {
 	// `git init` only — HEAD is unborn.
 	cmd := exec.CommandContext(context.Background(), "git", "init", "-q")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
@@ -772,6 +773,7 @@ func TestDoctor_GitRequires_BareRepoHintMentionsCheckout(t *testing.T) {
 	tmp := t.TempDir()
 	bare := filepath.Join(tmp, "bare.git")
 	cmd := exec.CommandContext(context.Background(), "git", "init", "--bare", "-q", bare)
+	cmd.Env = cleanGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v: %s", err, out)
 	}
@@ -809,6 +811,7 @@ func TestDoctor_GitRequires_BareRepoReportsError(t *testing.T) {
 	tmp := t.TempDir()
 	bare := filepath.Join(tmp, "bare.git")
 	cmd := exec.CommandContext(context.Background(), "git", "init", "--bare", "-q", bare)
+	cmd.Env = cleanGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v: %s", err, out)
 	}
@@ -885,6 +888,7 @@ func mustGitInitForDoctor(t *testing.T, dir string) {
 	requireGit(t)
 	cmd := exec.CommandContext(context.Background(), "git", "init", "-q")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init in %s: %v: %s", dir, err, out)
 	}
@@ -897,6 +901,7 @@ func mustGitInitForDoctor(t *testing.T, dir string) {
 		"-c", "user.name=t", "-c", "user.email=t@t",
 		"commit", "--allow-empty", "-q", "-m", "init")
 	commitCmd.Dir = dir
+	commitCmd.Env = cleanGitEnv()
 	if out, err := commitCmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit --allow-empty in %s: %v: %s", dir, err, out)
 	}

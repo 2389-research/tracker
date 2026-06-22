@@ -71,6 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Git subprocesses no longer inherit leaked `GIT_DIR`/`GIT_INDEX_FILE`**
+  (issue #399). When tracker runs from inside a git hook (or any context that
+  exports git-internal repo pointers), git honors an inherited
+  `GIT_DIR`/`GIT_INDEX_FILE` over a command's `-C <dir>`/working dir, so those
+  vars would redirect the artifact-repo `git init`/`add`/`commit` — and
+  `ExportBundle`'s `git -C runDir bundle create` — at the OUTER repository
+  instead of the isolated run-dir, corrupting/truncating the wrong index or
+  bundling the wrong repo. `gitSafeEnv` (and thus `gitProbeEnv`) now strips
+  `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY`, and
+  `GIT_COMMON_DIR`, and `ExportBundle` does the same. Git-using tests were
+  hardened to set the same clean env, and the pre-commit hook runs its `go test`
+  gates with the pointers stripped.
 - **Remaining example workflows now hold A grades under `dippin doctor`**
   (issue #335, scope 3). Four example `.dip` files that shipped with B or F
   grades (`megaplan`, `megaplan_quality`, `ralph-loop`, `semport`) have been

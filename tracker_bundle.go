@@ -6,9 +6,39 @@ package tracker
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
+
+// gitInternalEnvPointers are the git-internal repository pointers that, when
+// present in the environment, override a command's `-C <dir>` and redirect it
+// at the OUTER repository. ExportBundle addresses the artifact repo via `-C
+// runDir`, so inheriting these (e.g. when tracker runs from inside a git hook)
+// would bundle the wrong repo — or silently succeed against the ambient repo
+// instead of failing for a non-repo runDir. Stripped before invoking git.
+var gitInternalEnvPointers = map[string]bool{
+	"GIT_DIR":              true,
+	"GIT_INDEX_FILE":       true,
+	"GIT_WORK_TREE":        true,
+	"GIT_OBJECT_DIRECTORY": true,
+	"GIT_COMMON_DIR":       true,
+}
+
+// bundleGitEnv returns os.Environ() with the git-internal repository pointers
+// stripped so `git -C runDir` is honored against runDir, not an inherited
+// GIT_DIR/GIT_INDEX_FILE.
+func bundleGitEnv() []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src))
+	for _, e := range src {
+		if !gitInternalEnvPointers[strings.SplitN(e, "=", 2)[0]] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
 
 // ExportBundle writes a git bundle of the run directory's artifact repository
 // to outPath. The bundle captures all commits and tags (including checkpoint
@@ -31,6 +61,7 @@ func ExportBundle(runDir, outPath string) error {
 		return fmt.Errorf("resolve output path %q: %w", outPath, err)
 	}
 	cmd := exec.Command("git", "-C", runDir, "bundle", "create", absPath, "--all") //nolint:gosec
+	cmd.Env = bundleGitEnv()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

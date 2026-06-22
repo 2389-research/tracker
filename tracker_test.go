@@ -1190,6 +1190,7 @@ func TestNewEngine_PreflightPassesAfterGitInit(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init", "-q")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	if out, runErr := cmd.CombinedOutput(); runErr != nil {
 		t.Fatalf("git init: %v: %s", runErr, out)
 	}
@@ -1252,6 +1253,7 @@ func TestNewEngine_PreflightPassesFromSourceLevelRequiresAfterInit(t *testing.T)
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init", "-q")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	if out, runErr := cmd.CombinedOutput(); runErr != nil {
 		t.Fatalf("git init: %v: %s", runErr, out)
 	}

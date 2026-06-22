@@ -27,6 +27,12 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmdArgs := append([]string{"-C", dir}, args...)
 	cmd := exec.Command("git", cmdArgs...) //nolint:gosec
+	// Strip git-internal repo pointers (GIT_DIR/GIT_INDEX_FILE/...) that leak
+	// from a calling `git commit`'s hook environment. Without this, this helper's
+	// `-C dir` is overridden by GIT_DIR/GIT_INDEX_FILE and writes to the OUTER
+	// repo's index instead of the test's temp dir — clobbering it when the suite
+	// runs under a pre-commit hook. Mirrors cleanGitEnv usage in git_preflight_test.go.
+	cmd.Env = cleanGitEnv()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

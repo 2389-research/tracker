@@ -58,31 +58,39 @@ func (r *gitArtifactRepo) Init() error {
 		return fmt.Errorf("create artifact dir %q: %w", r.dir, err)
 	}
 
-	// Initialize git repo if .git doesn't already exist. Any Stat error
-	// other than "not exist" (permission, IO) is treated as fatal so we
-	// don't silently skip init and hit confusing downstream failures.
+	// Initialize git repo if .git doesn't already exist, set local-only
+	// identity, and create .gitignore.
+	if err := r.ensureGitDir(); err != nil {
+		r.failed = true
+		return err
+	}
+
+	return r.ensureInitialCommit()
+}
+
+// ensureGitDir creates the .git repo (if absent), sets local-only git user
+// config (so we don't pollute the global config), and writes a .gitignore.
+// Any Stat error other than "not exist" (permission, IO) on the .git dir is
+// fatal so we don't silently skip init and hit confusing downstream failures.
+// Caller is responsible for setting r.failed on error.
+func (r *gitArtifactRepo) ensureGitDir() error {
 	gitDir := filepath.Join(r.dir, ".git")
 	gitDirExists := false
 	if _, err := os.Stat(gitDir); err == nil {
 		gitDirExists = true
 	} else if !errors.Is(err, os.ErrNotExist) {
-		r.failed = true
 		return fmt.Errorf("stat %q: %w", gitDir, err)
 	}
 	if !gitDirExists {
 		if out, err := r.git("init", "--quiet"); err != nil {
-			r.failed = true
 			return fmt.Errorf("git init: %w\n%s", err, out)
 		}
 	}
 
-	// Set local-only git user config so we don't pollute the global config.
 	if out, err := r.git("config", "user.name", "tracker"); err != nil {
-		r.failed = true
 		return fmt.Errorf("git config user.name: %w\n%s", err, out)
 	}
 	if out, err := r.git("config", "user.email", "tracker@local"); err != nil {
-		r.failed = true
 		return fmt.Errorf("git config user.email: %w\n%s", err, out)
 	}
 
@@ -92,11 +100,14 @@ func (r *gitArtifactRepo) Init() error {
 	if _, err := os.Stat(gitignorePath); errors.Is(err, os.ErrNotExist) {
 		_ = os.WriteFile(gitignorePath, []byte("*.tmp\ncheckpoint.json\n"), 0o644)
 	}
+	return nil
+}
 
-	// Only create the "run started" commit if the repo has no existing
-	// HEAD. On checkpoint resume, the artifact dir already has history
-	// from the earlier attempt and another empty commit would just add
-	// noise.
+// ensureInitialCommit makes the "run started" commit, but only if the repo has
+// no existing HEAD. On checkpoint resume the artifact dir already has history
+// from the earlier attempt and another empty commit would just add noise.
+// Sets r.failed on error.
+func (r *gitArtifactRepo) ensureInitialCommit() error {
 	if out, err := r.git("rev-parse", "--verify", "HEAD"); err == nil && strings.TrimSpace(out) != "" {
 		// Existing HEAD — this is a resume. Skip the initial commit.
 		return nil
@@ -307,6 +318,16 @@ func gitEnvIsSafe(name string) bool {
 		if strings.Contains(name, pattern) {
 			return false
 		}
+	}
+	// Strip git-internal repository pointers. When tracker runs from inside a git
+	// hook (or any context that exports these), they would otherwise redirect the
+	// artifact-repo `git init`/`add`/`commit` at the OUTER repository's gitdir and
+	// staging index — committing into, or truncating, the wrong index instead of
+	// the isolated artifact run-dir. The artifact repo is always addressed via
+	// cmd.Dir, so these pointers are never wanted.
+	switch name {
+	case "GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR":
+		return false
 	}
 	return true
 }
