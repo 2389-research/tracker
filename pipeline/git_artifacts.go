@@ -307,7 +307,8 @@ func gitSafeEnv() []string {
 		// under TRACKER_PASS_ENV=1. That flag is a credential pass-through escape
 		// hatch, not permission to re-anchor git at the OUTER repo: an inherited
 		// GIT_DIR/GIT_INDEX_FILE overrides cmd.Dir and corrupts the wrong index
-		// regardless of credential intent (mirrors bundleGitEnv's strip).
+		// regardless of credential intent. This is the single source of truth for
+		// the redirect-pointer strip across all of tracker's git subprocesses.
 		if isGitRedirectVar(name) {
 			continue
 		}
