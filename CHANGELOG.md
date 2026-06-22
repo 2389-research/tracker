@@ -83,6 +83,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GIT_COMMON_DIR`, and `ExportBundle` does the same. Git-using tests were
   hardened to set the same clean env, and the pre-commit hook runs its `go test`
   gates with the pointers stripped.
+- **`build_product` milestone test-gate scope and `accept` verification bypass**
+  (issue #392). Two structural defects in `examples/build_product.dip` are fixed:
+  (T1) `TestMilestone` ran a whole-tree `go test ./...` while the fix loop
+  (`Implement`/`FixMilestone`) is milestone-scoped by construction, so a failure
+  in a package the milestone never touched (e.g. a later milestone's pre-seeded
+  code) was un-fixable on every retry — the fix budget burned on zero-progress
+  "fixes" and the run escalated. The Go test invocation is now scoped to the
+  packages this milestone actually changed (derived from the diff against
+  `.ai/build/milestone-start-sha`, the same boundary `MarkMilestoneDone` uses);
+  the whole-tree suite still runs at `FinalBuild` before anything ships, so
+  cross-milestone regressions are still caught — just not inside a loop that
+  can't act on them. `go build ./...` stays whole-tree. (T2) The `accept`
+  escalation option routed `EscalateMilestone -> Cleanup -> FinalCommit -> Done`,
+  bypassing the entire cross-review + `FinalBuild` (whole-tree test) +
+  `FinalSpecCheck` subgraph — a run could exit `Done` over a red suite with no
+  compliance report. `accept` now routes through `CheckMilestoneOutputs` (the
+  same entry the normal all-done path uses, `restart: true` to avoid a DIP005
+  cycle), so accepting still earns the structural gate, three-way cross-review,
+  final build/test, and spec-compliance check before `Cleanup`. The option's
+  prompt text is relabeled to state that verification is NOT skipped. No engine
+  changes.
 - **Remaining example workflows now hold A grades under `dippin doctor`**
   (issue #335, scope 3). Four example `.dip` files that shipped with B or F
   grades (`megaplan`, `megaplan_quality`, `ralph-loop`, `semport`) have been
