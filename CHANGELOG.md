@@ -63,6 +63,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`build_product.dip` FinalCommit is now mechanically commit-only** (issue #349).
+  Building on the existing `commit_only` prompt/engine guard, the FinalCommit node
+  now also declares `writable_paths: .git/**, .ai/**`, wiring the native fs-jail
+  (#272) so its file-mutation tools — Bash + descendants AND in-process
+  Write/Edit/ApplyPatch — can only write under `.git/` and `.ai/`. `git add`/`git
+  commit` still work, but the node physically cannot author product source even
+  when upstream failure context primes it to "just fix it" (the case-study failure
+  where FinalCommit wrote an entire unreviewed milestone that shipped through zero
+  quality gates). This is the primary, mechanical defense; the `commit_only`
+  prompt/system-prompt guard remains the backstop. Linux native backend only —
+  see #272 platform/backend caveats.
 - **dippin-lang upgraded to v0.42.0** (from v0.39.0). New IR fields wired in
   subsequent commits: `Edge.Override` (v0.40.0, closes #271 input gap),
   `AgentConfig.LastResponseTruncate` + `BranchConfig.LastResponseTruncate`
