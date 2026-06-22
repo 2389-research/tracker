@@ -44,7 +44,7 @@ func cleanGitEnv() []string {
 	src := os.Environ()
 	out := make([]string, 0, len(src))
 	for _, e := range src {
-		name := strings.SplitN(e, "=", 2)[0]
+		name := strings.ToUpper(strings.SplitN(e, "=", 2)[0])
 		if !stripped[name] {
 			out = append(out, e)
 		}

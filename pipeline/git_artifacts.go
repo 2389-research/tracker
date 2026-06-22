@@ -300,7 +300,7 @@ func gitProbeEnv() []string {
 func gitSafeEnv() []string {
 	passEnv := os.Getenv("TRACKER_PASS_ENV") == "1"
 	env := os.Environ()
-	var filtered []string
+	filtered := make([]string, 0, len(env))
 	for _, e := range env {
 		name := strings.ToUpper(strings.SplitN(e, "=", 2)[0])
 		// Git-internal repository pointers are stripped UNCONDITIONALLY — even

@@ -1605,7 +1605,10 @@ workflow BuildProduct
     provider: anthropic
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. All milestones are done.
+      Review the COMPLETE implementation against SPEC.md. The build loop has
+      finished — either every planned milestone completed, or the operator chose
+      to stop early (the "accept" gate) and ship what exists. Review what is
+      actually present; do not assume unfinished work will arrive later.
 
       DO NOT TRUST SPEC ✅ MARKERS:
       - SPEC.md may contain ✅ or "Done" checkmarks. These were the author's
@@ -1666,7 +1669,10 @@ workflow BuildProduct
     provider: openai
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. All milestones are done.
+      Review the COMPLETE implementation against SPEC.md. The build loop has
+      finished — either every planned milestone completed, or the operator chose
+      to stop early (the "accept" gate) and ship what exists. Review what is
+      actually present; do not assume unfinished work will arrive later.
 
       DO NOT TRUST SPEC ✅ MARKERS:
       - SPEC.md may contain ✅ or "Done" checkmarks. These were the author's
@@ -1727,7 +1733,10 @@ workflow BuildProduct
     provider: gemini
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. All milestones are done.
+      Review the COMPLETE implementation against SPEC.md. The build loop has
+      finished — either every planned milestone completed, or the operator chose
+      to stop early (the "accept" gate) and ship what exists. Review what is
+      actually present; do not assume unfinished work will arrive later.
 
       YOUR ROLE IS ADVERSARIAL: steel-man the worst
       case. Assume the implementation is wrong somewhere — your job is

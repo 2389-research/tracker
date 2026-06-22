@@ -49,7 +49,7 @@ pass "go build"
 # 4. Tests (short mode for speed)
 echo ""
 echo "--- Tests ---"
-RESULT=$(gotest ./... -short -count=1 2>&1)
+RESULT=$(gotest ./... -short -count=1 2>&1) || true
 PASS_COUNT=$(echo "$RESULT" | grep -c '^ok' || true)
 FAIL_COUNT=$(echo "$RESULT" | grep -c '^FAIL' || true)
 if [ "$FAIL_COUNT" -gt 0 ]; then

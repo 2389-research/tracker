@@ -197,9 +197,12 @@ func TestBundleGitEnv_StripsMixedCaseRedirectVars(t *testing.T) {
 	t.Setenv("KEEP_ME", "yes")
 
 	env := bundleGitEnv()
-	for _, bad := range []string{"Git_Dir=", "git_index_file="} {
+	// Compare case-insensitively: an OS that canonicalizes env-var casing
+	// (Windows) must not let a leaked redirect var slip past a case-sensitive
+	// prefix check and mask a real failure.
+	for _, bad := range []string{"git_dir=", "git_index_file="} {
 		for _, e := range env {
-			if strings.HasPrefix(e, bad) {
+			if strings.HasPrefix(strings.ToLower(e), bad) {
 				t.Errorf("bundleGitEnv leaked mixed-case redirect var %q (#401)", bad)
 			}
 		}
