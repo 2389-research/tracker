@@ -186,3 +186,31 @@ func (h *alwaysSucceedHandler) Name() string { return h.name }
 func (h *alwaysSucceedHandler) Execute(_ context.Context, _ *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
 }
+
+// TestBundleGitEnv_StripsMixedCaseRedirectVars pins the #401 review finding
+// (coderabbit): bundleGitEnv normalizes key case before the pointer lookup, so
+// a mixed-case redirect var can't slip past the strip the way a raw-key compare
+// against an upper-cased map would allow.
+func TestBundleGitEnv_StripsMixedCaseRedirectVars(t *testing.T) {
+	t.Setenv("Git_Dir", "/outer/.git")
+	t.Setenv("git_index_file", "/outer/.git/index")
+	t.Setenv("KEEP_ME", "yes")
+
+	env := bundleGitEnv()
+	for _, bad := range []string{"Git_Dir=", "git_index_file="} {
+		for _, e := range env {
+			if strings.HasPrefix(e, bad) {
+				t.Errorf("bundleGitEnv leaked mixed-case redirect var %q (#401)", bad)
+			}
+		}
+	}
+	kept := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "KEEP_ME=") {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Error("bundleGitEnv dropped an unrelated env var KEEP_ME")
+	}
+}

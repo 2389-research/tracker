@@ -33,7 +33,10 @@ func bundleGitEnv() []string {
 	src := os.Environ()
 	out := make([]string, 0, len(src))
 	for _, e := range src {
-		if !gitInternalEnvPointers[strings.SplitN(e, "=", 2)[0]] {
+		// Normalize key case before lookup (the map is upper-cased), matching
+		// gitSafeEnv — so a mixed-case GIT_DIR can't slip past the strip.
+		name := strings.ToUpper(strings.SplitN(e, "=", 2)[0])
+		if !gitInternalEnvPointers[name] {
 			out = append(out, e)
 		}
 	}

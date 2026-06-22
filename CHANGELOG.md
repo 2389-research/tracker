@@ -91,9 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of the isolated run-dir, corrupting/truncating the wrong index or
   bundling the wrong repo. `gitSafeEnv` (and thus `gitProbeEnv`) now strips
   `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY`, and
-  `GIT_COMMON_DIR`, and `ExportBundle` does the same. Git-using tests were
-  hardened to set the same clean env, and the pre-commit hook runs its `go test`
-  gates with the pointers stripped.
+  `GIT_COMMON_DIR`, and `ExportBundle` does the same. The redirect-pointer strip
+  is unconditional — applied even under `TRACKER_PASS_ENV=1`, which only gates
+  credential pass-through, never permission to re-anchor git at the outer repo;
+  key comparison is case-normalized so a mixed-case pointer can't slip past.
+  Git-using tests were hardened to set the same clean env, and the pre-commit
+  hook runs its `go test` gates with the pointers stripped.
 - **`build_product` milestone test-gate scope and `accept` verification bypass**
   (issue #392). Two structural defects in `examples/build_product.dip` are fixed:
   (T1) `TestMilestone` ran a whole-tree `go test ./...` while the fix loop
