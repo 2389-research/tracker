@@ -54,7 +54,13 @@ func LoadDippinWorkflowFromIR(workflow *ir.Workflow, filename string) (*Graph, [
 	// Run Dippin structural validation (DIP001–DIP009).
 	valResult := validator.Validate(workflow)
 	if valResult.HasErrors() {
-		return nil, valResult.Diagnostics, fmt.Errorf("%d validation error(s) in %s", len(valResult.Errors()), filename)
+		errCount := 0
+		for _, d := range valResult.Diagnostics {
+			if d.Severity == validator.SeverityError {
+				errCount++
+			}
+		}
+		return nil, valResult.Diagnostics, fmt.Errorf("%d validation error(s) in %s", errCount, filename)
 	}
 
 	// Run Dippin lint checks (DIP101+). Warnings only — don't block.

@@ -23,7 +23,7 @@ import (
 
 // PinnedDippinVersion is the dippin-lang version from go.mod. Kept in sync
 // with go.mod by TestPinnedDippinVersionMatchesGoMod.
-const PinnedDippinVersion = "v0.42.0"
+const PinnedDippinVersion = "v0.43.0"
 
 // DoctorConfig configures a Doctor() run.
 type DoctorConfig struct {
@@ -142,31 +142,13 @@ func Doctor(ctx context.Context, cfg DoctorConfig, opts ...DoctorOption) (*Docto
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		opt(&cfg)
-	}
-	if cfg.WorkDir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("cannot determine working directory: %w", err)
-		}
-		cfg.WorkDir = wd
+	applyDoctorOptions(&cfg, opts)
+	if err := resolveDoctorWorkDir(&cfg); err != nil {
+		return nil, err
 	}
 
 	r := &DoctorReport{}
-	r.Checks = append(r.Checks,
-		checkEnvWarnings(),
-		checkProviders(ctx, cfg.ProbeProviders),
-		checkDippin(ctx),
-		checkVersionCompat(ctx, cfg.versionInfo.version, cfg.versionInfo.commit),
-		checkOtherBinaries(ctx, cfg.Backend),
-		checkWorkdir(cfg.WorkDir),
-		checkArtifactDirs(cfg.WorkDir),
-		checkDiskSpace(cfg.WorkDir),
-	)
+	r.Checks = baseDoctorChecks(ctx, cfg)
 	// Gateway routing caveats only matter when a gateway is actually
 	// configured (#277). Appending unconditionally would add noise to the
 	// common no-gateway run, so gate on the env presence here.
@@ -180,6 +162,50 @@ func Doctor(ctx context.Context, cfg DoctorConfig, opts ...DoctorOption) (*Docto
 		)
 	}
 
+	tallyDoctorReport(r)
+	return r, nil
+}
+
+// applyDoctorOptions applies each non-nil functional option to cfg.
+func applyDoctorOptions(cfg *DoctorConfig, opts []DoctorOption) {
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(cfg)
+	}
+}
+
+// resolveDoctorWorkDir defaults cfg.WorkDir to the current working directory
+// when unset.
+func resolveDoctorWorkDir(cfg *DoctorConfig) error {
+	if cfg.WorkDir != "" {
+		return nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("cannot determine working directory: %w", err)
+	}
+	cfg.WorkDir = wd
+	return nil
+}
+
+// baseDoctorChecks runs the checks that always execute regardless of config.
+func baseDoctorChecks(ctx context.Context, cfg DoctorConfig) []CheckResult {
+	return []CheckResult{
+		checkEnvWarnings(),
+		checkProviders(ctx, cfg.ProbeProviders),
+		checkDippin(ctx),
+		checkVersionCompat(ctx, cfg.versionInfo.version, cfg.versionInfo.commit),
+		checkOtherBinaries(ctx, cfg.Backend),
+		checkWorkdir(cfg.WorkDir),
+		checkArtifactDirs(cfg.WorkDir),
+		checkDiskSpace(cfg.WorkDir),
+	}
+}
+
+// tallyDoctorReport sets OK and counts warnings/errors across all checks.
+func tallyDoctorReport(r *DoctorReport) {
 	r.OK = true
 	for _, c := range r.Checks {
 		switch c.Status {
@@ -190,7 +216,6 @@ func Doctor(ctx context.Context, cfg DoctorConfig, opts ...DoctorOption) (*Docto
 			r.OK = false
 		}
 	}
-	return r, nil
 }
 
 // checkEnvWarnings warns when opt-in security overrides are active.
@@ -263,73 +288,93 @@ func checkGatewayRouting() CheckResult {
 		kindLabel = string(GatewayKindCFAIG) + " (default)"
 	}
 
-	// Context line: describe what routing is in effect.
-	if gatewayURL != "" {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusOK,
-			Message: fmt.Sprintf("TRACKER_GATEWAY_URL=%s (kind=%s)", gatewayURL, kindLabel),
-		})
-	} else {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusOK,
-			Message: fmt.Sprintf("TRACKER_GATEWAY_KIND=%s (no TRACKER_GATEWAY_URL — per-provider *_BASE_URL or SDK defaults in effect)", kindLabel),
-		})
-	}
+	out.Details = append(out.Details, gatewayContextDetail(gatewayURL, kindLabel))
 
 	notes := 0
-
-	// B.1 — OpenAI→Claude masquerade under the bedrock gateway. The note fires
-	// only when OpenAI traffic actually traverses the bedrock gateway:
-	//   - kind must be bedrock;
-	//   - a gateway URL must be configured — without one, openai resolves to
-	//     the SDK default (api.openai.com), so there is no gateway and no
-	//     masquerade;
-	//   - OPENAI_BASE_URL must be unset — it wins over the gateway in the
-	//     resolver, so when set, openai bypasses the gateway. The B.2
-	//     precedence note covers that case instead.
-	//
-	// Residual gap: an OPENAI_BASE_URL pointed explicitly at the bedrock
-	// gateway (e.g. <gateway>/v1) would still masquerade, but an arbitrary
-	// URL can't be reliably recognized as a gateway endpoint, so we defer to
-	// the B.2 note rather than guess.
-	if kind == string(GatewayKindBedrock) && gatewayURL != "" && os.Getenv("OPENAI_BASE_URL") == "" {
-		if key, _ := findProviderKey([]string{"OPENAI_API_KEY"}); key != "" {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusHint,
-				Message: "TRACKER_GATEWAY_KIND=bedrock: gpt-* / o*-* model strings route to Claude Sonnet 4.6 today (the bedrock gateway translates because AWS hasn't added OpenAI to Bedrock yet). When AWS adds it, the gateway updates its mapping without tracker changes.",
-			})
-			notes++
-		}
+	if note, ok := bedrockMasqueradeNote(kind, gatewayURL); ok {
+		out.Details = append(out.Details, note)
+		notes++
+	}
+	if note, ok := baseURLOverrideNote(gatewayURL); ok {
+		out.Details = append(out.Details, note)
+		notes++
 	}
 
-	// B.2 — per-provider *_BASE_URL overrides win over the gateway URL.
+	out.Message = gatewayRoutingMessage(gatewayURL, kindLabel, notes)
+	return out
+}
+
+// gatewayContextDetail returns the leading "what routing is in effect" line.
+func gatewayContextDetail(gatewayURL, kindLabel string) CheckDetail {
 	if gatewayURL != "" {
-		var overridden []string
-		for _, p := range gatewayBaseURLEnvVars {
-			if os.Getenv(p.envVar) != "" {
-				overridden = append(overridden, fmt.Sprintf("%s (%s)", p.provider, p.envVar))
-			}
-		}
-		if len(overridden) > 0 {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusHint,
-				Message: fmt.Sprintf("per-provider overrides win over TRACKER_GATEWAY_URL: %s", strings.Join(overridden, ", ")),
-			})
-			notes++
+		return CheckDetail{
+			Status:  CheckStatusOK,
+			Message: fmt.Sprintf("TRACKER_GATEWAY_URL=%s (kind=%s)", gatewayURL, kindLabel),
 		}
 	}
+	return CheckDetail{
+		Status:  CheckStatusOK,
+		Message: fmt.Sprintf("TRACKER_GATEWAY_KIND=%s (no TRACKER_GATEWAY_URL — per-provider *_BASE_URL or SDK defaults in effect)", kindLabel),
+	}
+}
 
+// bedrockMasqueradeNote returns the B.1 OpenAI→Claude masquerade hint when
+// OpenAI traffic actually traverses the bedrock gateway:
+//   - kind must be bedrock;
+//   - a gateway URL must be configured — without one, openai resolves to the
+//     SDK default (api.openai.com), so there is no gateway and no masquerade;
+//   - OPENAI_BASE_URL must be unset — it wins over the gateway in the resolver,
+//     so when set, openai bypasses the gateway (the B.2 note covers that case).
+//
+// Residual gap: an OPENAI_BASE_URL pointed explicitly at the bedrock gateway
+// (e.g. <gateway>/v1) would still masquerade, but an arbitrary URL can't be
+// reliably recognized as a gateway endpoint, so we defer to the B.2 note.
+func bedrockMasqueradeNote(kind, gatewayURL string) (CheckDetail, bool) {
+	if kind != string(GatewayKindBedrock) || gatewayURL == "" || os.Getenv("OPENAI_BASE_URL") != "" {
+		return CheckDetail{}, false
+	}
+	if key, _ := findProviderKey([]string{"OPENAI_API_KEY"}); key == "" {
+		return CheckDetail{}, false
+	}
+	return CheckDetail{
+		Status:  CheckStatusHint,
+		Message: "TRACKER_GATEWAY_KIND=bedrock: gpt-* / o*-* model strings route to Claude Sonnet 4.6 today (the bedrock gateway translates because AWS hasn't added OpenAI to Bedrock yet). When AWS adds it, the gateway updates its mapping without tracker changes.",
+	}, true
+}
+
+// baseURLOverrideNote returns the B.2 hint listing per-provider *_BASE_URL
+// overrides that win over TRACKER_GATEWAY_URL.
+func baseURLOverrideNote(gatewayURL string) (CheckDetail, bool) {
+	if gatewayURL == "" {
+		return CheckDetail{}, false
+	}
+	var overridden []string
+	for _, p := range gatewayBaseURLEnvVars {
+		if os.Getenv(p.envVar) != "" {
+			overridden = append(overridden, fmt.Sprintf("%s (%s)", p.provider, p.envVar))
+		}
+	}
+	if len(overridden) == 0 {
+		return CheckDetail{}, false
+	}
+	return CheckDetail{
+		Status:  CheckStatusHint,
+		Message: fmt.Sprintf("per-provider overrides win over TRACKER_GATEWAY_URL: %s", strings.Join(overridden, ", ")),
+	}, true
+}
+
+// gatewayRoutingMessage composes the summary line from the routing context.
+func gatewayRoutingMessage(gatewayURL, kindLabel string, notes int) string {
 	switch {
 	case gatewayURL == "":
 		// Only the kind is set; without a URL the resolver never routes via a
 		// gateway, so don't imply one is in use.
-		out.Message = fmt.Sprintf("TRACKER_GATEWAY_KIND=%s set without TRACKER_GATEWAY_URL — no gateway routing in effect", kindLabel)
+		return fmt.Sprintf("TRACKER_GATEWAY_KIND=%s set without TRACKER_GATEWAY_URL — no gateway routing in effect", kindLabel)
 	case notes > 0:
-		out.Message = fmt.Sprintf("gateway configured (%d routing note(s))", notes)
+		return fmt.Sprintf("gateway configured (%d routing note(s))", notes)
 	default:
-		out.Message = "gateway configured (no routing caveats)"
+		return "gateway configured (no routing caveats)"
 	}
-	return out
 }
 
 type providerDef struct {
@@ -412,6 +457,16 @@ var probeProviderFn = probeProvider
 
 // checkProviders reports on each configured LLM provider. When probe
 // is true, a 1-token API call verifies auth for each configured provider.
+// providerState classifies one provider's configuration outcome inside
+// checkProviders, so the main loop can route the detail line and tallies.
+type providerState int
+
+const (
+	stateMissing    providerState = iota // no key found — optional, not an error
+	stateInvalid                         // key present but invalid-format or probe-failed
+	stateConfigured                      // key present and (when probed) auth-verified
+)
+
 func checkProviders(ctx context.Context, probe bool) CheckResult {
 	out := CheckResult{Name: "LLM Providers"}
 	var configuredNames []string
@@ -419,69 +474,98 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 	hasProviderErrors := false
 
 	for _, p := range knownProviders {
-		key, envName := findProviderKey(p.envVars)
-		if key == "" {
+		detail, state := evaluateProvider(ctx, p, probe)
+		switch state {
+		case stateMissing:
 			missingNames = append(missingNames, p.name)
-			continue
-		}
-		masked := maskKey(key)
-		if !isValidAPIKey(p.name, key) {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusError,
-				Message: fmt.Sprintf("%-15s %s=%s (invalid format)", p.name, envName, masked),
-				Hint:    fmt.Sprintf("%s keys should match expected format — run `tracker setup`", p.name),
-			})
+		case stateInvalid:
+			out.Details = append(out.Details, detail)
 			hasProviderErrors = true
-			continue
+		case stateConfigured:
+			out.Details = append(out.Details, detail)
+			configuredNames = append(configuredNames, p.name)
 		}
-		if probe && p.buildAdapter != nil {
-			ok, probeMsg, isAuth := probeProviderFn(ctx, p, key)
-			if !ok {
-				detail := CheckDetail{Status: CheckStatusError}
-				if isAuth {
-					detail.Message = fmt.Sprintf("%-15s %s=%s (auth failed: %s)", p.name, envName, masked, probeMsg)
-					detail.Hint = fmt.Sprintf("your %s key is invalid or expired — export a fresh key or run `tracker setup`", p.name)
-				} else {
-					// DNS, timeout, transport, context cancel, or other non-auth failure.
-					// Do NOT tell the user to rotate a working key.
-					detail.Message = fmt.Sprintf("%-15s %s=%s (probe failed: %s)", p.name, envName, masked, probeMsg)
-					detail.Hint = fmt.Sprintf("probe for %s failed on network/transport — verify connectivity and %s before rotating keys", p.name, providerBaseURLEnvVar(p.name))
-				}
-				out.Details = append(out.Details, detail)
-				hasProviderErrors = true
-				continue
-			}
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusOK,
-				Message: fmt.Sprintf("%-15s %s=%s (auth verified)", p.name, envName, masked),
-			})
-		} else {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusOK,
-				Message: fmt.Sprintf("%-15s %s=%s", p.name, envName, masked),
-			})
-		}
-		configuredNames = append(configuredNames, p.name)
 	}
 
 	if len(configuredNames) == 0 {
-		for _, name := range missingNames {
-			for _, pd := range knownProviders {
-				if pd.name == name {
-					out.Details = append(out.Details, CheckDetail{
-						Status:  CheckStatusError,
-						Message: fmt.Sprintf("%-15s %s not set", pd.name, pd.envVars[0]),
-					})
-					break
-				}
+		return providersNoneConfigured(out, missingNames)
+	}
+	finalizeProvidersStatus(&out, configuredNames, missingNames, hasProviderErrors, probe)
+	return out
+}
+
+// evaluateProvider resolves one provider's key, validates its format, and
+// (when probe is set and an adapter exists) live-probes auth, returning the
+// detail line to surface plus the classified state.
+func evaluateProvider(ctx context.Context, p providerDef, probe bool) (CheckDetail, providerState) {
+	key, envName := findProviderKey(p.envVars)
+	if key == "" {
+		return CheckDetail{}, stateMissing
+	}
+	masked := maskKey(key)
+	if !isValidAPIKey(p.name, key) {
+		return CheckDetail{
+			Status:  CheckStatusError,
+			Message: fmt.Sprintf("%-15s %s=%s (invalid format)", p.name, envName, masked),
+			Hint:    fmt.Sprintf("%s keys should match expected format — run `tracker setup`", p.name),
+		}, stateInvalid
+	}
+	if probe && p.buildAdapter != nil {
+		return probeProviderDetail(ctx, p, key, envName, masked)
+	}
+	return CheckDetail{
+		Status:  CheckStatusOK,
+		Message: fmt.Sprintf("%-15s %s=%s", p.name, envName, masked),
+	}, stateConfigured
+}
+
+// probeProviderDetail live-probes a validated provider key and maps the result
+// to a detail line, distinguishing auth failures (rotate the key) from
+// network/transport failures (don't rotate a working key).
+func probeProviderDetail(ctx context.Context, p providerDef, key, envName, masked string) (CheckDetail, providerState) {
+	ok, probeMsg, isAuth := probeProviderFn(ctx, p, key)
+	if !ok {
+		detail := CheckDetail{Status: CheckStatusError}
+		if isAuth {
+			detail.Message = fmt.Sprintf("%-15s %s=%s (auth failed: %s)", p.name, envName, masked, probeMsg)
+			detail.Hint = fmt.Sprintf("your %s key is invalid or expired — export a fresh key or run `tracker setup`", p.name)
+		} else {
+			// DNS, timeout, transport, context cancel, or other non-auth failure.
+			// Do NOT tell the user to rotate a working key.
+			detail.Message = fmt.Sprintf("%-15s %s=%s (probe failed: %s)", p.name, envName, masked, probeMsg)
+			detail.Hint = fmt.Sprintf("probe for %s failed on network/transport — verify connectivity and %s before rotating keys", p.name, providerBaseURLEnvVar(p.name))
+		}
+		return detail, stateInvalid
+	}
+	return CheckDetail{
+		Status:  CheckStatusOK,
+		Message: fmt.Sprintf("%-15s %s=%s (auth verified)", p.name, envName, masked),
+	}, stateConfigured
+}
+
+// providersNoneConfigured builds the terminal "no providers" result, listing
+// each known provider's primary env var as a not-set error line.
+func providersNoneConfigured(out CheckResult, missingNames []string) CheckResult {
+	for _, name := range missingNames {
+		for _, pd := range knownProviders {
+			if pd.name == name {
+				out.Details = append(out.Details, CheckDetail{
+					Status:  CheckStatusError,
+					Message: fmt.Sprintf("%-15s %s not set", pd.name, pd.envVars[0]),
+				})
+				break
 			}
 		}
-		out.Status = CheckStatusError
-		out.Message = "no LLM providers configured"
-		out.Hint = "run `tracker setup` or export ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
-		return out
 	}
+	out.Status = CheckStatusError
+	out.Message = "no LLM providers configured"
+	out.Hint = "run `tracker setup` or export ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
+	return out
+}
 
+// finalizeProvidersStatus appends the optional "not configured" hint and sets
+// the summary status/message when at least one provider is configured.
+func finalizeProvidersStatus(out *CheckResult, configuredNames, missingNames []string, hasProviderErrors, probe bool) {
 	if len(missingNames) > 0 {
 		// "not configured" is informational when at least one provider works —
 		// rendered as a hint line, not an error or warning, so Status=hint.
@@ -490,7 +574,6 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 			Message: fmt.Sprintf("not configured: %s (optional)", strings.Join(missingNames, ", ")),
 		})
 	}
-
 	if hasProviderErrors {
 		out.Status = CheckStatusWarn
 	} else {
@@ -501,7 +584,6 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 	} else {
 		out.Message = fmt.Sprintf("%d provider(s) configured: %s", len(configuredNames), strings.Join(configuredNames, ", "))
 	}
-	return out
 }
 
 func findProviderKey(envVars []string) (key, envName string) {
@@ -637,25 +719,11 @@ func getDippinVersion(ctx context.Context, path string) string {
 func checkVersionCompat(ctx context.Context, trackerVersion, trackerCommit string) CheckResult {
 	out := CheckResult{Name: "Version Compatibility"}
 	if trackerVersion != "" {
-		msg := fmt.Sprintf("tracker   %s", trackerVersion)
-		if trackerCommit != "" {
-			msg = fmt.Sprintf("tracker   %s (commit %s)", trackerVersion, trackerCommit)
-		}
-		out.Details = append(out.Details, CheckDetail{Status: CheckStatusOK, Message: msg})
+		out.Details = append(out.Details, CheckDetail{Status: CheckStatusOK, Message: trackerVersionLine(trackerVersion, trackerCommit)})
 	}
 	dippinPath, err := exec.LookPath("dippin")
 	if err != nil {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusWarn,
-			Message: "dippin not found — skipping version compatibility check",
-		})
-		out.Status = CheckStatusWarn
-		if trackerVersion != "" {
-			out.Message = fmt.Sprintf("tracker %s / dippin not found", trackerVersion)
-		} else {
-			out.Message = "dippin not found"
-		}
-		return out
+		return versionCompatNoDippin(out, trackerVersion)
 	}
 	cliVer := getDippinVersion(ctx, dippinPath)
 	out.Details = append(out.Details, CheckDetail{
@@ -664,18 +732,7 @@ func checkVersionCompat(ctx context.Context, trackerVersion, trackerCommit strin
 	})
 
 	if mismatch, msg := checkDippinVersionMismatch(cliVer, PinnedDippinVersion); mismatch {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusWarn,
-			Message: fmt.Sprintf("dippin version mismatch: %s", msg),
-		})
-		out.Status = CheckStatusWarn
-		if trackerVersion != "" {
-			out.Message = fmt.Sprintf("tracker %s / dippin %s (mismatched — expected %s)", trackerVersion, cliVer, PinnedDippinVersion)
-		} else {
-			out.Message = fmt.Sprintf("dippin %s (mismatched — expected %s)", cliVer, PinnedDippinVersion)
-		}
-		out.Hint = fmt.Sprintf("install dippin %s to match the go.mod pin", PinnedDippinVersion)
-		return out
+		return versionCompatMismatch(out, cliVer, trackerVersion, msg)
 	}
 	out.Status = CheckStatusOK
 	if trackerVersion != "" {
@@ -683,6 +740,46 @@ func checkVersionCompat(ctx context.Context, trackerVersion, trackerCommit strin
 	} else {
 		out.Message = fmt.Sprintf("dippin %s", cliVer)
 	}
+	return out
+}
+
+// trackerVersionLine formats the leading "tracker <ver> (commit <c>)" detail.
+func trackerVersionLine(version, commit string) string {
+	if commit != "" {
+		return fmt.Sprintf("tracker   %s (commit %s)", version, commit)
+	}
+	return fmt.Sprintf("tracker   %s", version)
+}
+
+// versionCompatNoDippin builds the warn result when dippin isn't on PATH.
+func versionCompatNoDippin(out CheckResult, trackerVersion string) CheckResult {
+	out.Details = append(out.Details, CheckDetail{
+		Status:  CheckStatusWarn,
+		Message: "dippin not found — skipping version compatibility check",
+	})
+	out.Status = CheckStatusWarn
+	if trackerVersion != "" {
+		out.Message = fmt.Sprintf("tracker %s / dippin not found", trackerVersion)
+	} else {
+		out.Message = "dippin not found"
+	}
+	return out
+}
+
+// versionCompatMismatch builds the warn result when the installed dippin
+// diverges from the go.mod pin on major/minor.
+func versionCompatMismatch(out CheckResult, cliVer, trackerVersion, msg string) CheckResult {
+	out.Details = append(out.Details, CheckDetail{
+		Status:  CheckStatusWarn,
+		Message: fmt.Sprintf("dippin version mismatch: %s", msg),
+	})
+	out.Status = CheckStatusWarn
+	if trackerVersion != "" {
+		out.Message = fmt.Sprintf("tracker %s / dippin %s (mismatched — expected %s)", trackerVersion, cliVer, PinnedDippinVersion)
+	} else {
+		out.Message = fmt.Sprintf("dippin %s (mismatched — expected %s)", cliVer, PinnedDippinVersion)
+	}
+	out.Hint = fmt.Sprintf("install dippin %s to match the go.mod pin", PinnedDippinVersion)
 	return out
 }
 
@@ -791,19 +888,7 @@ func checkWorkdir(workdir string) CheckResult {
 	out := CheckResult{Name: "Working Directory"}
 	info, err := os.Stat(workdir)
 	if err != nil {
-		out.Status = CheckStatusError
-		switch {
-		case os.IsNotExist(err):
-			out.Message = fmt.Sprintf("%s does not exist", workdir)
-			out.Hint = fmt.Sprintf("create the directory: mkdir -p %s", workdir)
-		case os.IsPermission(err):
-			out.Message = fmt.Sprintf("permission denied accessing %s", workdir)
-			out.Hint = fmt.Sprintf("check permissions on %s or a parent directory", workdir)
-		default:
-			out.Message = fmt.Sprintf("cannot stat %s: %v", workdir, err)
-			out.Hint = "check the path and its parent directories"
-		}
-		return out
+		return workdirStatError(out, workdir, err)
 	}
 	if !info.IsDir() {
 		out.Status = CheckStatusError
@@ -811,16 +896,36 @@ func checkWorkdir(workdir string) CheckResult {
 		out.Hint = "point --workdir at a directory, not a file"
 		return out
 	}
-	f, err := os.CreateTemp(workdir, ".tracker_probe_*")
-	if err != nil {
+	if !isDirWritable(workdir) {
 		out.Status = CheckStatusError
 		out.Message = fmt.Sprintf("%s is not writable", workdir)
 		out.Hint = fmt.Sprintf("check permissions: chmod u+w %s", workdir)
 		return out
 	}
-	f.Close()
-	os.Remove(f.Name())
+	return workdirWarnings(out, workdir)
+}
 
+// workdirStatError maps an os.Stat failure on the working directory to an
+// error result with path-specific guidance.
+func workdirStatError(out CheckResult, workdir string, err error) CheckResult {
+	out.Status = CheckStatusError
+	switch {
+	case os.IsNotExist(err):
+		out.Message = fmt.Sprintf("%s does not exist", workdir)
+		out.Hint = fmt.Sprintf("create the directory: mkdir -p %s", workdir)
+	case os.IsPermission(err):
+		out.Message = fmt.Sprintf("permission denied accessing %s", workdir)
+		out.Hint = fmt.Sprintf("check permissions on %s or a parent directory", workdir)
+	default:
+		out.Message = fmt.Sprintf("cannot stat %s: %v", workdir, err)
+		out.Hint = "check the path and its parent directories"
+	}
+	return out
+}
+
+// workdirWarnings appends non-fatal advisories (home/root location, missing
+// .gitignore entries) for a writable working directory and sets the summary.
+func workdirWarnings(out CheckResult, workdir string) CheckResult {
 	hasWarn := false
 	home, _ := os.UserHomeDir()
 	if workdir == home || workdir == "/" {
@@ -863,14 +968,7 @@ func missingGitignoreEntries(workdir string) string {
 	if err != nil {
 		return ".gitignore not found — add .tracker/, runs/, and .ai/ to prevent committing run artifacts"
 	}
-	entries := make(map[string]bool)
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		entries[strings.TrimRight(line, "/")] = true
-	}
+	entries := parseGitignoreEntries(string(content))
 	want := []struct {
 		bare    string
 		display string
@@ -891,64 +989,96 @@ func missingGitignoreEntries(workdir string) string {
 	return ""
 }
 
+// parseGitignoreEntries returns the set of bare (trailing-slash-stripped)
+// .gitignore patterns, skipping blank lines and comments.
+func parseGitignoreEntries(content string) map[string]bool {
+	entries := make(map[string]bool)
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		entries[strings.TrimRight(line, "/")] = true
+	}
+	return entries
+}
+
 // checkArtifactDirs verifies the .ai artifact directory is usable
 // (either exists and is writable, or can be created).
 func checkArtifactDirs(workdir string) CheckResult {
 	out := CheckResult{Name: "Artifact Directories"}
-	allOk := true
 	aiDir := filepath.Join(workdir, ".ai")
 	info, err := os.Stat(aiDir)
+
+	var detail CheckDetail
+	allOk := true
 	switch {
 	case err == nil:
-		switch {
-		case !info.IsDir():
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusError,
-				Message: ".ai is not a directory",
-			})
-			allOk = false
-		case !isDirWritable(aiDir):
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusError,
-				Message: fmt.Sprintf("%s exists but is not writable", aiDir),
-				Hint:    fmt.Sprintf("check permissions: chmod u+w %s", aiDir),
-			})
-			allOk = false
-		default:
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusOK,
-				Message: fmt.Sprintf("%s exists and is writable", aiDir),
-			})
-		}
+		detail, allOk = artifactExistingDirDetail(aiDir, info)
 	case os.IsNotExist(err):
-		if isDirWritable(workdir) {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusOK,
-				Message: fmt.Sprintf("%s will be created on first run", aiDir),
-			})
-		} else {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusError,
-				Message: fmt.Sprintf("%s cannot be created (parent not writable)", aiDir),
-			})
-			allOk = false
-		}
+		detail, allOk = artifactMissingDirDetail(aiDir, workdir)
 	default:
 		// Non-ENOENT stat failure — permission denied, I/O error, etc.
 		// Report the real failure instead of pretending .ai is missing.
-		out.Details = append(out.Details, CheckDetail{
+		detail = CheckDetail{
 			Status:  CheckStatusError,
 			Message: fmt.Sprintf("cannot inspect %s: %v", aiDir, err),
 			Hint:    fmt.Sprintf("check permissions on %s and its parents", aiDir),
-		})
+		}
 		allOk = false
 	}
+	out.Details = append(out.Details, detail)
+
 	if allOk {
 		out.Status = CheckStatusOK
 		out.Message = "artifact directories writable"
 		return out
 	}
-	// Promote to "error" if any detail is an error (not just a warning).
+	finalizeArtifactErrorStatus(&out)
+	return out
+}
+
+// artifactExistingDirDetail classifies an existing .ai path (must be a
+// writable directory), returning the detail line and whether it's OK.
+func artifactExistingDirDetail(aiDir string, info os.FileInfo) (CheckDetail, bool) {
+	switch {
+	case !info.IsDir():
+		return CheckDetail{
+			Status:  CheckStatusError,
+			Message: ".ai is not a directory",
+		}, false
+	case !isDirWritable(aiDir):
+		return CheckDetail{
+			Status:  CheckStatusError,
+			Message: fmt.Sprintf("%s exists but is not writable", aiDir),
+			Hint:    fmt.Sprintf("check permissions: chmod u+w %s", aiDir),
+		}, false
+	default:
+		return CheckDetail{
+			Status:  CheckStatusOK,
+			Message: fmt.Sprintf("%s exists and is writable", aiDir),
+		}, true
+	}
+}
+
+// artifactMissingDirDetail handles a not-yet-existing .ai path: OK when the
+// parent is writable (created on first run), error otherwise.
+func artifactMissingDirDetail(aiDir, workdir string) (CheckDetail, bool) {
+	if isDirWritable(workdir) {
+		return CheckDetail{
+			Status:  CheckStatusOK,
+			Message: fmt.Sprintf("%s will be created on first run", aiDir),
+		}, true
+	}
+	return CheckDetail{
+		Status:  CheckStatusError,
+		Message: fmt.Sprintf("%s cannot be created (parent not writable)", aiDir),
+	}, false
+}
+
+// finalizeArtifactErrorStatus sets the summary for a not-all-OK result,
+// promoting to error when any detail is an error rather than a warning.
+func finalizeArtifactErrorStatus(out *CheckResult) {
 	out.Status = CheckStatusWarn
 	for _, d := range out.Details {
 		if d.Status == CheckStatusError {
@@ -958,7 +1088,6 @@ func checkArtifactDirs(workdir string) CheckResult {
 	}
 	out.Message = "some artifact directories have permission issues"
 	out.Hint = "fix directory permissions: chmod u+w .ai"
-	return out
 }
 
 func isDirWritable(dir string) bool {
@@ -1008,16 +1137,32 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		return out
 	}
 
-	deps := graph.RequiredDeps()
 	policy := cfg.gitCfg.policy
+	requiresGit, hasUnknownDeps := scanGitRequiresDeps(&out, graph.RequiredDeps())
 
-	// Walk declared deps FIRST: classify each and surface unrecognized deps
-	// as CheckDetail warnings so the doctor preview matches what runtime
-	// pipeline.Preflight will emit on stderr. The off-bypass below must
-	// not silence these — runtime preflight scans deps before its own off
-	// bypass for the same reason (forward-declared deps stay visible).
-	requiresGit := false
-	hasUnknownDeps := false
+	// Off-bypass comes AFTER the dep scan so unrecognized-dep warnings
+	// still surface under --git=off. Top-level Status escalates to Warn
+	// when any details warn, so `tracker doctor`'s exit code reflects
+	// the diagnostic (Doctor() counts CheckResult.Status, not Details).
+	if policy == GitPreflightOff {
+		return gitRequiresOffBypass(out, hasUnknownDeps)
+	}
+
+	if policy == GitPreflightRequire || policy == GitPreflightInit {
+		requiresGit = true
+	}
+	if !requiresGit {
+		return gitRequiresNotRequired(out, hasUnknownDeps)
+	}
+	return evaluateGitState(ctx, out, cfg, hasUnknownDeps)
+}
+
+// scanGitRequiresDeps classifies the workflow's declared deps, surfacing
+// unrecognized entries as CheckDetail warnings so the doctor preview matches
+// what runtime pipeline.Preflight emits on stderr. The off-bypass in the
+// caller must not silence these — runtime preflight scans deps before its own
+// off bypass for the same reason (forward-declared deps stay visible).
+func scanGitRequiresDeps(out *CheckResult, deps []string) (requiresGit, hasUnknownDeps bool) {
 	for _, d := range deps {
 		switch strings.ToLower(strings.TrimSpace(d)) {
 		case "":
@@ -1032,37 +1177,40 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 			})
 		}
 	}
+	return requiresGit, hasUnknownDeps
+}
 
-	// Off-bypass comes AFTER the dep scan so unrecognized-dep warnings
-	// still surface under --git=off. Top-level Status escalates to Warn
-	// when any details warn, so `tracker doctor`'s exit code reflects
-	// the diagnostic (Doctor() counts CheckResult.Status, not Details).
-	if policy == GitPreflightOff {
-		if hasUnknownDeps {
-			out.Status = CheckStatusWarn
-			out.Message = "--git=off; bypassing git check (unrecognized requires: entries surfaced as warnings)"
-		} else {
-			out.Status = CheckStatusSkip
-			out.Message = "--git=off; bypassing"
-		}
-		return out
+// gitRequiresOffBypass renders the --git=off result, still escalating to Warn
+// when unrecognized deps were surfaced.
+func gitRequiresOffBypass(out CheckResult, hasUnknownDeps bool) CheckResult {
+	if hasUnknownDeps {
+		out.Status = CheckStatusWarn
+		out.Message = "--git=off; bypassing git check (unrecognized requires: entries surfaced as warnings)"
+	} else {
+		out.Status = CheckStatusSkip
+		out.Message = "--git=off; bypassing"
 	}
+	return out
+}
 
-	if policy == GitPreflightRequire || policy == GitPreflightInit {
-		requiresGit = true
+// gitRequiresNotRequired renders the result when git isn't required; unknown
+// deps may still warrant a top-level Warn.
+func gitRequiresNotRequired(out CheckResult, hasUnknownDeps bool) CheckResult {
+	if hasUnknownDeps {
+		out.Status = CheckStatusWarn
+		out.Message = "workflow does not require git; unrecognized requires: entries surfaced as warnings"
+	} else {
+		out.Status = CheckStatusOK
+		out.Message = "workflow does not require git"
 	}
-	if !requiresGit {
-		// No git required, but unknown deps may still warrant a top-level Warn.
-		if hasUnknownDeps {
-			out.Status = CheckStatusWarn
-			out.Message = "workflow does not require git; unrecognized requires: entries surfaced as warnings"
-		} else {
-			out.Status = CheckStatusOK
-			out.Message = "workflow does not require git"
-		}
-		return out
-	}
+	return out
+}
 
+// evaluateGitState probes the working directory's git state and routes to the
+// matching remediation: probe failure, git-not-installed, bare repo, no repo
+// (auto-init preview), or born-HEAD verification.
+func evaluateGitState(ctx context.Context, out CheckResult, cfg DoctorConfig, hasUnknownDeps bool) CheckResult {
+	policy := cfg.gitCfg.policy
 	installed, isRepo, isBare, probeErr := probeGitForDoctor(ctx, cfg.WorkDir)
 	if probeErr != nil {
 		// ctx cancellation or unexpected execution failure. Treat as Error
@@ -1089,63 +1237,73 @@ func checkGitRequires(ctx context.Context, cfg DoctorConfig) CheckResult {
 		return out
 	}
 	if !isRepo {
-		// Auto-init preview: under --git=init, runtime would call
-		// runAutoInit which gates on (a) --allow-init or interactive
-		// confirmation, (b) safety latches, and (c) the workdir-content
-		// latch (refuses if the dir has files outside `.git`). Doctor
-		// doesn't have interactivity, so a non-interactive run
-		// effectively requires allowInit=true. Model both latches so
-		// `doctor --git=init --allow-init` doesn't say OK in a workdir
-		// where the runtime would refuse.
-		if policy == GitPreflightInit && cfg.gitCfg.allowInit {
-			if latchErr := pipeline.SafetyLatches(ctx, cfg.WorkDir); latchErr != nil {
-				out.Status = CheckStatusError
-				out.Message = fmt.Sprintf("auto-init would refuse: %v", latchErr)
-				out.Hint = "cd into a project subdirectory, or run `git init` manually"
-				return out
-			}
-			hasContent, contentErr := pipeline.WorkdirHasContent(cfg.WorkDir)
-			if contentErr != nil {
-				out.Status = CheckStatusError
-				out.Message = fmt.Sprintf("could not scan workdir for auto-init preview: %v", contentErr)
-				out.Hint = "check filesystem permissions on the workdir"
-				return out
-			}
-			if hasContent {
-				out.Status = CheckStatusError
-				out.Message = fmt.Sprintf("auto-init would refuse: %s is not empty (auto-init makes an empty initial commit; user files would stay untracked)", cfg.WorkDir)
-				out.Hint = "stage your own initial commit: `git init && git add . && git commit -m initial`"
-				return out
-			}
-			// Auto-init preview is OK. Preserve unknown-dependency warn
-			// severity at the check level (CodeRabbit:3260803551) — the
-			// parallel born-HEAD-success branch below already does this;
-			// pre-fix the auto-init branch returned CheckStatusOK
-			// unconditionally, suppressing the warning even though the
-			// individual unrecognized-dep warnings had been emitted.
-			if hasUnknownDeps {
-				out.Status = CheckStatusWarn
-				out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start (unrecognized requires: entries surfaced as warnings)", cfg.WorkDir)
-			} else {
-				out.Status = CheckStatusOK
-				out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start", cfg.WorkDir)
-			}
-			out.Hint = ".git will be created here at run start, before the first node executes"
-			return out
-		}
-		out.Status = doctorStatusForPolicy(policy, CheckStatusError)
-		out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
-		// Offer both paths so a workdir with existing files doesn't end
-		// up with a born-but-empty HEAD (Copilot:3261104615) — the
-		// `--allow-empty` path is correct only for an empty workdir; a
-		// dir with source files almost always wants `git add .` first.
-		out.Hint = "run `git init && git add . && git commit -m initial` to capture existing files, OR `git init && git commit --allow-empty -m initial` for an empty baseline, OR `tracker <workflow> --git=init --allow-init` in an empty directory"
+		return gitRequiresNoRepo(ctx, out, cfg, hasUnknownDeps)
+	}
+	return gitRequiresBornHEAD(ctx, out, cfg, hasUnknownDeps)
+}
+
+// gitRequiresNoRepo handles a workdir that is not inside a repo: model the
+// auto-init outcome under --git=init --allow-init, else report the plain
+// not-a-repo error.
+func gitRequiresNoRepo(ctx context.Context, out CheckResult, cfg DoctorConfig, hasUnknownDeps bool) CheckResult {
+	policy := cfg.gitCfg.policy
+	if policy == GitPreflightInit && cfg.gitCfg.allowInit {
+		return gitRequiresAutoInitPreview(ctx, out, cfg, hasUnknownDeps)
+	}
+	out.Status = doctorStatusForPolicy(policy, CheckStatusError)
+	out.Message = fmt.Sprintf("workflow requires a git repository; %s is not inside one", cfg.WorkDir)
+	// Offer both paths so a workdir with existing files doesn't end up with a
+	// born-but-empty HEAD (Copilot:3261104615) — the `--allow-empty` path is
+	// correct only for an empty workdir; a dir with source files almost always
+	// wants `git add .` first.
+	out.Hint = "run `git init && git add . && git commit -m initial` to capture existing files, OR `git init && git commit --allow-empty -m initial` for an empty baseline, OR `tracker <workflow> --git=init --allow-init` in an empty directory"
+	return out
+}
+
+// gitRequiresAutoInitPreview models what runAutoInit would do under
+// --git=init --allow-init: it gates on (a) safety latches and (b) the
+// workdir-content latch (refuses if the dir has files outside `.git`), so
+// `doctor --git=init --allow-init` doesn't say OK where the runtime refuses.
+func gitRequiresAutoInitPreview(ctx context.Context, out CheckResult, cfg DoctorConfig, hasUnknownDeps bool) CheckResult {
+	if latchErr := pipeline.SafetyLatches(ctx, cfg.WorkDir); latchErr != nil {
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("auto-init would refuse: %v", latchErr)
+		out.Hint = "cd into a project subdirectory, or run `git init` manually"
 		return out
 	}
-	// Workdir IS a repo. Verify HEAD is born — same probe Preflight uses,
-	// so the doctor preview agrees with the runtime check. Pre-fix the
-	// doctor reported "OK" for unborn-HEAD repos while the actual run
-	// failed in preflight (Copilot:3260568737).
+	hasContent, contentErr := pipeline.WorkdirHasContent(cfg.WorkDir)
+	if contentErr != nil {
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("could not scan workdir for auto-init preview: %v", contentErr)
+		out.Hint = "check filesystem permissions on the workdir"
+		return out
+	}
+	if hasContent {
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("auto-init would refuse: %s is not empty (auto-init makes an empty initial commit; user files would stay untracked)", cfg.WorkDir)
+		out.Hint = "stage your own initial commit: `git init && git add . && git commit -m initial`"
+		return out
+	}
+	// Auto-init preview is OK. Preserve unknown-dependency warn severity at
+	// the check level (CodeRabbit:3260803551) — pre-fix this branch returned
+	// CheckStatusOK unconditionally, suppressing the warning even though the
+	// individual unrecognized-dep warnings had been emitted.
+	if hasUnknownDeps {
+		out.Status = CheckStatusWarn
+		out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start (unrecognized requires: entries surfaced as warnings)", cfg.WorkDir)
+	} else {
+		out.Status = CheckStatusOK
+		out.Message = fmt.Sprintf("workflow requires git; --git=init --allow-init would auto-init %s at run start", cfg.WorkDir)
+	}
+	out.Hint = ".git will be created here at run start, before the first node executes"
+	return out
+}
+
+// gitRequiresBornHEAD handles a workdir that IS a repo: verify HEAD is born —
+// the same probe Preflight uses, so the doctor preview agrees with the runtime
+// check (Copilot:3260568737).
+func gitRequiresBornHEAD(ctx context.Context, out CheckResult, cfg DoctorConfig, hasUnknownDeps bool) CheckResult {
+	policy := cfg.gitCfg.policy
 	born, headErr := pipeline.HasBornHEAD(ctx, cfg.WorkDir)
 	if headErr != nil {
 		out.Status = CheckStatusError
@@ -1252,16 +1410,29 @@ func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isR
 	cmd.Env = pipeline.GitProbeEnv()
 	out, runErr := cmd.Output()
 	if runErr == nil {
-		stdout := strings.TrimSpace(string(out))
-		switch stdout {
-		case "true":
-			return true, true, false, nil
-		case "false":
-			return true, false, true, nil
-		default:
-			return true, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: unexpected output %q", stdout)
-		}
+		return classifyGitWorkTree(string(out))
 	}
+	return classifyGitProbeError(ctx, runErr)
+}
+
+// classifyGitWorkTree maps successful `rev-parse --is-inside-work-tree` stdout
+// to the (installed, isRepo, isBare) probe contract.
+func classifyGitWorkTree(out string) (installed bool, isRepo bool, isBare bool, err error) {
+	stdout := strings.TrimSpace(out)
+	switch stdout {
+	case "true":
+		return true, true, false, nil
+	case "false":
+		return true, false, true, nil
+	default:
+		return true, false, false, fmt.Errorf("git rev-parse --is-inside-work-tree: unexpected output %q", stdout)
+	}
+}
+
+// classifyGitProbeError discriminates a failed git probe: context
+// cancellation, benign "not a repo" stderr, dubious-ownership / safe.directory
+// refusals, and unexpected execution failures.
+func classifyGitProbeError(ctx context.Context, runErr error) (installed bool, isRepo bool, isBare bool, err error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return true, false, false, ctxErr
 	}
@@ -1279,19 +1450,7 @@ func probeGitForDoctor(ctx context.Context, workDir string) (installed bool, isR
 func checkPipelineFile(pipelineFile string) CheckResult {
 	out := CheckResult{Name: "Pipeline File"}
 	if _, err := os.Stat(pipelineFile); err != nil {
-		out.Status = CheckStatusError
-		switch {
-		case os.IsNotExist(err):
-			out.Message = fmt.Sprintf("%s does not exist", pipelineFile)
-			out.Hint = fmt.Sprintf("check the file path: %s", pipelineFile)
-		case os.IsPermission(err):
-			out.Message = fmt.Sprintf("permission denied reading %s", pipelineFile)
-			out.Hint = fmt.Sprintf("check permissions: chmod +r %s", pipelineFile)
-		default:
-			out.Message = fmt.Sprintf("cannot stat %s: %v", pipelineFile, err)
-			out.Hint = "check the file path and permissions"
-		}
-		return out
+		return pipelineFileStatError(out, pipelineFile, err)
 	}
 	// .dipx bundles are ZIP archives produced by `dippin pack`, not text source.
 	// dispatch through LoadDipxBundle so dipx.Open can verify the manifest and
@@ -1322,41 +1481,37 @@ func checkPipelineFile(pipelineFile string) CheckResult {
 		out.Hint = "run `tracker validate " + pipelineFile + "` for full details"
 		return out
 	}
+	return validatePipelineGraph(out, pipelineFile, graph, hasWarn)
+}
+
+// pipelineFileStatError maps an os.Stat failure on the pipeline file to an
+// error result with path-specific guidance.
+func pipelineFileStatError(out CheckResult, pipelineFile string, err error) CheckResult {
+	out.Status = CheckStatusError
+	switch {
+	case os.IsNotExist(err):
+		out.Message = fmt.Sprintf("%s does not exist", pipelineFile)
+		out.Hint = fmt.Sprintf("check the file path: %s", pipelineFile)
+	case os.IsPermission(err):
+		out.Message = fmt.Sprintf("permission denied reading %s", pipelineFile)
+		out.Hint = fmt.Sprintf("check permissions: chmod +r %s", pipelineFile)
+	default:
+		out.Message = fmt.Sprintf("cannot stat %s: %v", pipelineFile, err)
+		out.Hint = "check the file path and permissions"
+	}
+	return out
+}
+
+// validatePipelineGraph runs tracker's semantic validation + lint on a parsed
+// graph and renders the result (errors, warnings-only, or clean).
+func validatePipelineGraph(out CheckResult, pipelineFile string, graph *pipeline.Graph, hasWarn bool) CheckResult {
 	registry := buildDoctorValidationRegistry()
 	ve := pipeline.ValidateAllWithLint(graph, registry)
 	if ve != nil && len(ve.Errors) > 0 {
-		for _, e := range ve.Errors {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusError,
-				Message: fmt.Sprintf("error: %s", e),
-			})
-		}
-		for _, w := range ve.Warnings {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusWarn,
-				Message: w,
-			})
-		}
-		out.Status = CheckStatusError
-		out.Message = fmt.Sprintf("%s failed validation (%d error(s))", pipelineFile, len(ve.Errors))
-		out.Hint = "run `tracker validate " + pipelineFile + "` for full details"
-		return out
+		return pipelineValidationErrors(out, pipelineFile, ve)
 	}
 	if ve != nil && len(ve.Warnings) > 0 {
-		for _, w := range ve.Warnings {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusWarn,
-				Message: w,
-			})
-		}
-		out.Details = append(out.Details, CheckDetail{
-			Status: CheckStatusOK,
-			Message: fmt.Sprintf("%s valid (%d nodes, %d edges, %d warning(s))",
-				pipelineFile, len(graph.Nodes), len(graph.Edges), len(ve.Warnings)),
-		})
-		out.Status = CheckStatusWarn
-		out.Message = fmt.Sprintf("%s valid with %d warning(s)", pipelineFile, len(ve.Warnings))
-		return out
+		return pipelineValidationWarnings(out, pipelineFile, graph, ve)
 	}
 	out.Details = append(out.Details, CheckDetail{
 		Status:  CheckStatusOK,
@@ -1369,6 +1524,46 @@ func checkPipelineFile(pipelineFile string) CheckResult {
 		out.Status = CheckStatusOK
 		out.Message = fmt.Sprintf("%s is valid", pipelineFile)
 	}
+	return out
+}
+
+// pipelineValidationErrors renders the failed-validation result, listing every
+// error and warning detail.
+func pipelineValidationErrors(out CheckResult, pipelineFile string, ve *pipeline.ValidationError) CheckResult {
+	for _, e := range ve.Errors {
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusError,
+			Message: fmt.Sprintf("error: %s", e),
+		})
+	}
+	for _, w := range ve.Warnings {
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusWarn,
+			Message: w,
+		})
+	}
+	out.Status = CheckStatusError
+	out.Message = fmt.Sprintf("%s failed validation (%d error(s))", pipelineFile, len(ve.Errors))
+	out.Hint = "run `tracker validate " + pipelineFile + "` for full details"
+	return out
+}
+
+// pipelineValidationWarnings renders the warnings-only result for a graph that
+// validated with no errors.
+func pipelineValidationWarnings(out CheckResult, pipelineFile string, graph *pipeline.Graph, ve *pipeline.ValidationError) CheckResult {
+	for _, w := range ve.Warnings {
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusWarn,
+			Message: w,
+		})
+	}
+	out.Details = append(out.Details, CheckDetail{
+		Status: CheckStatusOK,
+		Message: fmt.Sprintf("%s valid (%d nodes, %d edges, %d warning(s))",
+			pipelineFile, len(graph.Nodes), len(graph.Edges), len(ve.Warnings)),
+	})
+	out.Status = CheckStatusWarn
+	out.Message = fmt.Sprintf("%s valid with %d warning(s)", pipelineFile, len(ve.Warnings))
 	return out
 }
 
@@ -1397,27 +1592,9 @@ func checkPipelineBundle(bundlePath string) CheckResult {
 	// dipx.Open + LoadDippinWorkflowFromIR already covered structural
 	// validation; this layer adds tracker's handler-aware checks.
 	registry := buildDoctorValidationRegistry()
-	tracerWarnings := 0
-	if ve := pipeline.ValidateAllWithLint(entry, registry); ve != nil {
-		for _, e := range ve.Errors {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusError,
-				Message: fmt.Sprintf("error: %s", e),
-			})
-		}
-		for _, w := range ve.Warnings {
-			out.Details = append(out.Details, CheckDetail{
-				Status:  CheckStatusWarn,
-				Message: w,
-			})
-		}
-		if len(ve.Errors) > 0 {
-			out.Status = CheckStatusError
-			out.Message = fmt.Sprintf("%s failed validation (%d error(s))", bundlePath, len(ve.Errors))
-			out.Hint = "run `tracker validate " + bundlePath + "` for full details"
-			return out
-		}
-		tracerWarnings = len(ve.Warnings)
+	tracerWarnings, failed := appendBundleValidation(&out, bundlePath, pipeline.ValidateAllWithLint(entry, registry))
+	if failed {
+		return out
 	}
 	totalWarnings := len(diags) + tracerWarnings
 	out.Details = append(out.Details, CheckDetail{
@@ -1433,6 +1610,34 @@ func checkPipelineBundle(bundlePath string) CheckResult {
 		out.Message = fmt.Sprintf("%s is valid", bundlePath)
 	}
 	return out
+}
+
+// appendBundleValidation renders tracker-side validation diagnostics onto the
+// bundle result. It returns the warning count (when clean) and whether errors
+// were found — in which case the caller returns out immediately.
+func appendBundleValidation(out *CheckResult, bundlePath string, ve *pipeline.ValidationError) (tracerWarnings int, failed bool) {
+	if ve == nil {
+		return 0, false
+	}
+	for _, e := range ve.Errors {
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusError,
+			Message: fmt.Sprintf("error: %s", e),
+		})
+	}
+	for _, w := range ve.Warnings {
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusWarn,
+			Message: w,
+		})
+	}
+	if len(ve.Errors) > 0 {
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("%s failed validation (%d error(s))", bundlePath, len(ve.Errors))
+		out.Hint = "run `tracker validate " + bundlePath + "` for full details"
+		return 0, true
+	}
+	return len(ve.Warnings), false
 }
 
 // buildDoctorValidationRegistry creates a handler registry stocked with

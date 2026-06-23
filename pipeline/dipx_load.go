@@ -63,25 +63,10 @@ func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph
 		return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: entry %s: %w", path, manifest.Entry, err)
 	}
 
-	subgraphs := make(map[string]*Graph)
-	for _, file := range manifest.Files {
-		if file.Path == manifest.Entry {
-			continue
-		}
-		wf, err := bundle.Lookup(file.Path)
-		if err != nil {
-			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: lookup %s: %w", path, file.Path, err)
-		}
-		sub, subDiags, err := LoadDippinWorkflowFromIR(wf, file.Path)
-		diagnostics = append(diagnostics, filterBundleLintNoise(subDiags)...)
-		if err != nil {
-			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
-		}
-		sub.LintWarnings = filterBundleLintWarnings(sub.LintWarnings)
-		if err := canonicalizeSubgraphRefs(sub, bundle, file.Path); err != nil {
-			return nil, nil, BundleInfo{}, diagnostics, fmt.Errorf("load bundle %s: subgraph %s: %w", path, file.Path, err)
-		}
-		subgraphs[file.Path] = sub
+	subgraphs, subDiags, err := loadBundleSubgraphs(ctx, bundle, manifest, path)
+	diagnostics = append(diagnostics, subDiags...)
+	if err != nil {
+		return nil, nil, BundleInfo{}, diagnostics, err
 	}
 
 	id := bundle.Identity()
@@ -91,6 +76,50 @@ func LoadDipxBundle(ctx context.Context, path string) (*Graph, map[string]*Graph
 		Manifest:  manifest,
 	}
 	return entryGraph, subgraphs, info, diagnostics, nil
+}
+
+// loadBundleSubgraphs converts every non-entry workflow in the bundle to a
+// tracker Graph, keyed by canonical bundle path. It accumulates each
+// subgraph's (lint-filtered) diagnostics so the caller can surface them even
+// when a later subgraph fails. On error it returns the diagnostics collected
+// so far alongside the already-wrapped error.
+func loadBundleSubgraphs(ctx context.Context, bundle *dipx.Bundle, manifest dipx.Manifest, bundleName string) (map[string]*Graph, []validator.Diagnostic, error) {
+	subgraphs := make(map[string]*Graph)
+	var diagnostics []validator.Diagnostic
+	for _, file := range manifest.Files {
+		if file.Path == manifest.Entry {
+			continue
+		}
+		sub, subDiags, err := loadBundleSubgraph(ctx, bundle, bundleName, file.Path)
+		diagnostics = append(diagnostics, subDiags...)
+		if err != nil {
+			return nil, diagnostics, err
+		}
+		subgraphs[file.Path] = sub
+	}
+	return subgraphs, diagnostics, nil
+}
+
+// loadBundleSubgraph loads a single bundle-relative workflow to a Graph,
+// canonicalizing its subgraph refs. The returned diagnostics are already
+// lint-noise-filtered and are non-nil whenever the IR validated far enough to
+// produce them (so the caller appends them on both success and validate/
+// canonicalize failure, mirroring the entry-graph handling).
+func loadBundleSubgraph(ctx context.Context, bundle *dipx.Bundle, bundleName, filePath string) (*Graph, []validator.Diagnostic, error) {
+	wf, err := bundle.Workflow(ctx, filePath, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("load bundle %s: lookup %s: %w", bundleName, filePath, err)
+	}
+	sub, subDiags, err := LoadDippinWorkflowFromIR(wf, filePath)
+	subDiags = filterBundleLintNoise(subDiags)
+	if err != nil {
+		return nil, subDiags, fmt.Errorf("load bundle %s: subgraph %s: %w", bundleName, filePath, err)
+	}
+	sub.LintWarnings = filterBundleLintWarnings(sub.LintWarnings)
+	if err := canonicalizeSubgraphRefs(sub, bundle, filePath); err != nil {
+		return nil, subDiags, fmt.Errorf("load bundle %s: subgraph %s: %w", bundleName, filePath, err)
+	}
+	return sub, subDiags, nil
 }
 
 // filterBundleLintNoise drops diagnostics that don't apply when the source is
