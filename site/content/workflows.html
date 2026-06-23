@@ -1,14 +1,14 @@
 ---
 title: "Built-in Workflows"
-description: "The three pipelines that ship with Tracker — ask_and_execute, build_product, and build_product_with_superspec — and how to author your own .dip files for headless autonomous builds."
+description: "The four pipelines that ship with Tracker — ask_and_execute, build_product, build_product_with_superspec, and deep_review — and how to author your own .dip files for headless autonomous builds."
 og_title: "Built-in Workflows — Tracker"
-og_description: "The three pipelines that ship with Tracker, plus a reference for authoring your own .dip files."
+og_description: "The four pipelines that ship with Tracker, plus a reference for authoring your own .dip files."
 mermaid: true
 jsonld:
   "@context": "https://schema.org"
   "@type": "TechArticle"
   headline: "Built-in Workflows — Tracker"
-  description: "The three pipelines that ship with Tracker — ask_and_execute, build_product, and build_product_with_superspec — and how to author your own .dip files."
+  description: "The four pipelines that ship with Tracker — ask_and_execute, build_product, build_product_with_superspec, and deep_review — and how to author your own .dip files."
   url: "https://2389-research.github.io/tracker/workflows.html"
   author:
     "@type": "Organization"
@@ -306,8 +306,16 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
         <p>Set <code>timeout</code> and <code>timeout_action</code> per human gate so unattended runs keep moving if no one responds. Works with freeform, choice, and interview modes.</p>
       </div>
       <div class="glass glass-sm">
+        <h4>Stall &amp; per-node guards</h4>
+        <p>A <code>stall_timeout</code> in <code>defaults:</code> is enforced by the budget guard to halt runs that stop making progress. Per-node <code>max_cost_usd</code> and <code>no_progress_turns</code> cap individual nodes, emitting <code>EventNodeCostLimitExceeded</code> / <code>EventNodeNoProgressDetected</code>.</p>
+      </div>
+      <div class="glass glass-sm">
         <h4>Manager loops in <code>.dip</code></h4>
         <p>Declare <code>stack.manager_loop</code> supervisors directly via <code>ir.NodeManagerLoop</code>. Six flat attrs &mdash; no DOT escape hatch. Snippet below.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Commit-only fs-jail</h4>
+        <p>Bound a node&rsquo;s file writes with <code>writable_paths</code> (native Landlock fs-jail) plus <code>params: commit_only: true</code> to keep it from authoring source. <code>build_product</code>&rsquo;s <code>FinalCommit</code> declares <code>writable_paths: .git/**, .ai/**</code> so <code>git add</code>/<code>git commit</code> work but the node cannot write product code.</p>
       </div>
     </div>
 
@@ -336,7 +344,7 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
       overrides inject conditions, assertions verify the routing path. No LLM calls.
     </p>
     <pre data-lang="json"><code>{
-  <span class="string">"name"</span>: <span class="string">"milestone escalation — mark done continues build"</span>,
+  <span class="string">"name"</span>: <span class="string">"milestone escalation default — mark done continues build"</span>,
   <span class="string">"scenario"</span>: {
     <span class="string">"TestMilestone.tool_stdout"</span>: <span class="string">"escalate"</span>,
     <span class="string">"TestMilestone.outcome"</span>: <span class="string">"fail"</span>
