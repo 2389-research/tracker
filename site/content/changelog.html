@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-40-0">v0.40.0</a>
     <a href="#v0-39-1">v0.39.1</a>
     <a href="#v0-39-0">v0.39.0</a>
     <a href="#v0-38-1">v0.38.1</a>
@@ -74,6 +75,43 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.40.0 ═══ -->
+  <section class="glass" id="v0-40-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.40.0" style="color: inherit; text-decoration: none;">v0.40.0</a></h2>
+      <span class="badge">2026-06-22</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.40.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>dippin-lang v0.43.0 lands four newly-wired IR fields, the engine grows per-node cost
+      and no-progress guards, and the commit-only node gains a real filesystem jail.</strong> Five
+      additions, three behavioral changes, four fixes; no breaking changes; core embedded workflows
+      hold their A grades on <code>dippin doctor</code>.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>override:</code> edge attribute wired end-to-end</strong> (dippin-lang v0.40.0, closes <a href="https://github.com/2389-research/tracker/issues/271">#271</a> input gap). <code>override: true</code> on a <code>.dip</code> edge now flows through the adapter into <code>pipeline.Edge.Override</code>, producing <code>OutcomeValidationOverridden</code> on success. The runtime field finally has a <code>.dip</code> input path.</li>
+      <li><strong><code>last_response_truncate:</code> agent attribute enforced</strong> (dippin-lang v0.40.0, <a href="https://github.com/2389-research/tracker/issues/56">#56</a> chain-attack mitigation). Caps the Unicode character count of the prior node's response injected into a prompt, on both agent nodes and per-branch parallel overrides. The stored context value is unchanged &mdash; only the injected excerpt is capped.</li>
+      <li><strong><code>choice:</code> edge attribute wired for human-gate routing</strong> (dippin-lang v0.42.0, DIP150). <code>choice: approve</code> declares a stable machine-readable routing key separate from the human-readable <code>label:</code>. The TUI always shows <code>label:</code>; <code>choice:</code> becomes the <code>ctx.preferred_label</code> value matched by the edge selector in both choice and freeform mode.</li>
+      <li><strong><code>stall_timeout</code> graph-level default enforced at runtime</strong> (<a href="https://github.com/2389-research/tracker/issues/310">#310</a>). When no node completes within the declared wall-clock window, the run aborts through the same <code>OutcomeBudgetExceeded</code> / <code>on_failure</code> cascade as other budget breaches. Set via the <code>defaults:</code> block; flows through the adapter into <code>graph.Attrs</code>, resolved by <code>ResolveBudgetLimits</code>, enforced by <code>BudgetGuard</code> with a per-node progress clock reset on each node completion.</li>
+      <li><strong>Per-node cost ceiling and no-progress detector</strong> (<a href="https://github.com/2389-research/tracker/issues/304">#304</a>). <code>max_cost_usd: "0.50"</code> halts a node when its cumulative session cost exceeds the threshold; <code>no_progress_turns: 5</code> halts after five consecutive turns with no tool calls. Both route <code>OutcomeRetry</code> into the existing retry/escalation path, support graph-level defaults with per-node overrides, and emit <code>EventNodeCostLimitExceeded</code> / <code>EventNodeNoProgressDetected</code>. <code>max_turns</code> is now a coarse backstop that should rarely bind.</li>
+      <li><strong><code>commit_only</code> node attribute for codergen agents</strong> (<a href="https://github.com/2389-research/tracker/issues/349">#349</a>). <code>params: commit_only: true</code> prepends a hardcoded scope-restriction block to the system prompt, preventing the agent from authoring new implementation even when failure context is present. Enforced across all three backends (native, claude-code, ACP).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang upgraded to v0.43.0</strong> (from v0.39.0). Wires the four IR fields above and adapts two internal load paths to the v0.43.0 API cleanup that removed <code>validator.Result.Errors()</code> (now counts <code>SeverityError</code> diagnostics directly) and <code>dipx.Bundle.Lookup</code> (replaced by <code>Bundle.Workflow(ctx, refPath, relativeTo)</code>); also carries validator explain-text fixes (DIP109/113/114/116). The v0.43.0 <code>else -&gt;</code> section-level funnel default is not yet wired in the adapter (follow-up).</li>
+      <li><strong><code>build_product.dip</code> FinalCommit is now mechanically commit-only</strong> (<a href="https://github.com/2389-research/tracker/issues/349">#349</a>). On top of the <code>commit_only</code> prompt/engine guard, FinalCommit declares <code>writable_paths: .git/**, .ai/**</code>, wiring the native fs-jail (<a href="https://github.com/2389-research/tracker/issues/272">#272</a>) so its file-mutation tools can only write under <code>.git/</code> and <code>.ai/</code>. It physically cannot author product source even when failure context primes it to "just fix it." Linux native backend only.</li>
+      <li><strong>build-context.md refreshed with active source files at each MarkMilestoneDone</strong> (<a href="https://github.com/2389-research/tracker/issues/351">#351</a> item 3). <code>MarkMilestoneDone</code> appends an updated "Active source files" entry per milestone so agents reading the orientation file see what's being actively worked, not just the initial entry-point list.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Git subprocesses no longer inherit leaked <code>GIT_DIR</code>/<code>GIT_INDEX_FILE</code></strong> (<a href="https://github.com/2389-research/tracker/issues/399">#399</a>). When tracker runs from inside a git hook, git honors inherited repo pointers over a command's <code>-C &lt;dir&gt;</code>, redirecting the artifact-repo <code>git init</code>/<code>add</code>/<code>commit</code> &mdash; and <code>ExportBundle</code>'s <code>git bundle create</code> &mdash; at the outer repository. <code>gitSafeEnv</code> now strips <code>GIT_DIR</code>, <code>GIT_INDEX_FILE</code>, <code>GIT_WORK_TREE</code>, <code>GIT_OBJECT_DIRECTORY</code>, and <code>GIT_COMMON_DIR</code> unconditionally (even under <code>TRACKER_PASS_ENV=1</code>), with case-normalized key comparison.</li>
+      <li><strong><code>build_product</code> milestone test-gate scope and <code>accept</code> verification bypass</strong> (<a href="https://github.com/2389-research/tracker/issues/392">#392</a>). (T1) <code>TestMilestone</code> ran a whole-tree <code>go test ./...</code> inside a milestone-scoped fix loop, so an unrelated package failure was un-fixable on every retry; the test run is now scoped to the packages the milestone actually changed, with the whole-tree suite still gating at <code>FinalBuild</code>. (T2) The <code>accept</code> escalation option bypassed cross-review + final build/test + spec-check; it now routes through <code>CheckMilestoneOutputs</code> so accepting still earns every gate. No engine changes.</li>
+      <li><strong>Remaining example workflows now hold A grades under <code>dippin doctor</code></strong> (<a href="https://github.com/2389-research/tracker/issues/335">#335</a> scope 3). <code>megaplan</code>, <code>megaplan_quality</code>, <code>ralph-loop</code>, and <code>semport</code> were structurally hardened with graph-level <code>on_failure: Exit</code> catch-alls and <code>max_restarts</code> defaults (resolving DIP134 restart-budget confusion). All four now reach A/100.</li>
+      <li><strong><code>${ctx.tool_stdout}</code> / <code>${ctx.tool_stderr}</code> in agent prompts render as fenced blocks</strong> (<a href="https://github.com/2389-research/tracker/issues/352">#352</a> item 3). Interpolating these keys mid-sentence previously pasted raw tool output inline, garbling instructions. The expansion layer now wraps the values in a <code>```text</code> fenced block under their own heading, including per-node scoped references.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.39.1 ═══ -->
   <section class="glass" id="v0-39-1" style="border-left: 3px solid var(--orange-600);">
