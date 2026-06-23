@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-06-22
+
 ### Added
 
 - **`override:` edge attribute now wired end-to-end** (dippin-lang v0.40.0, closes #271 input
@@ -74,11 +76,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quality gates). This is the primary, mechanical defense; the `commit_only`
   prompt/system-prompt guard remains the backstop. Linux native backend only —
   see #272 platform/backend caveats.
-- **dippin-lang upgraded to v0.42.0** (from v0.39.0). New IR fields wired in
+- **dippin-lang upgraded to v0.43.0** (from v0.39.0). New IR fields wired in
   subsequent commits: `Edge.Override` (v0.40.0, closes #271 input gap),
   `AgentConfig.LastResponseTruncate` + `BranchConfig.LastResponseTruncate`
   (v0.40.0, issue #56 chain-attack mitigation), and `Edge.Choice` (v0.42.0,
-  DIP150 explicit human-gate routing key).
+  DIP150 explicit human-gate routing key). The v0.43.0 bump also adapts two
+  internal load paths to the dippin API cleanup that removed `validator.Result.Errors()`
+  (now counts `SeverityError` diagnostics directly) and `dipx.Bundle.Lookup`
+  (replaced by `Bundle.Workflow(ctx, refPath, relativeTo)`); v0.43.0 additionally
+  carries dippin validator explain-text fixes (DIP109/113/114/116). The v0.43.0
+  `else ->` section-level funnel default is not yet wired in the adapter
+  (tracked as a follow-up).
+- **build-context.md now refreshed with active source files at each MarkMilestoneDone** (issue #351, item 3). The Setup node seeds the architecture map once; `MarkMilestoneDone` now appends an updated "Active source files" entry listing the milestone's changed files so agents reading the orientation file see which files are being actively worked, not just the initial entry-point list from project start. Tracker/build-metadata paths remain filtered (#351 items 1+2).
 
 ### Fixed
 
@@ -139,10 +148,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   milestone (new files, wrong model, signal-exit race, failing lint), bypassing
   all quality gates.
 
-## [0.39.2] - 2026-06-15
-
-### Fixed
-
 - **Non-embedded example workflows now hold A grades under `dippin doctor`**
   (issue #335, scope 2). Nine example `.dip` files that shipped with D or F
   grades (`consensus_task`, `consensus_task_parity`, `sprint_exec`,
@@ -156,10 +161,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no regressions.
 
 - **`${ctx.tool_stdout}` and `${ctx.tool_stderr}` in agent prompts now render as fenced blocks** (issue #352, item 3). Previously, interpolating these context keys mid-sentence pasted raw tool output inline, garbling the instruction text. The variable expansion layer now wraps `tool_stdout`/`tool_stderr` values in a ` ```text ` fenced block under their own heading, so the output is clearly delimited regardless of which workflow uses them. Per-node scoped references (`${ctx.node.RunTests.tool_stdout}`) are also handled.
-
-### Changed
-
-- **build-context.md now refreshed with active source files at each MarkMilestoneDone** (issue #351, item 3). The Setup node seeds the architecture map once; `MarkMilestoneDone` now appends an updated "Active source files" entry listing the milestone's changed files so agents reading the orientation file see which files are being actively worked, not just the initial entry-point list from project start. Tracker/build-metadata paths remain filtered (#351 items 1+2).
 
 ## [0.39.1] - 2026-06-12
 
