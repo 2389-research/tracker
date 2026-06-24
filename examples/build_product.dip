@@ -959,12 +959,17 @@ workflow BuildProduct
       # delimited read (POSIX sh — tracker runs tool nodes under dash, where
       # `read -d ''` is illegal); git quotes any pathname with embedded newlines,
       # so such a name simply fails the `[ -x ]` test and is left for `git add
-      # -A` rather than mis-ignored.
+      # -A` rather than mis-ignored. The `-- "$f"` end-of-options separator on the
+      # diff keeps a leading-dash artifact name (e.g. `-weird`) from being parsed
+      # as switches (which would error, yield empty, miss the `-` case, and leak
+      # the binary into `git add -A`). The pattern is sed-escaped before being
+      # written so gitignore metacharacters (`* ? [ ] \ ! #`) in an LLM-influenced
+      # artifact name match the literal path only, never a broader source set.
       git ls-files --others --exclude-standard \
         | while IFS= read -r f; do
             [ -x "$f" ] && [ -s "$f" ] || continue
-            case "$(git diff --no-index --numstat /dev/null "$f" 2>/dev/null | cut -f1)" in
-              -) echo "/$f" >> .gitignore ;;
+            case "$(git diff --no-index --numstat /dev/null -- "$f" 2>/dev/null | cut -f1)" in
+              -) printf '/%s\n' "$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')" >> .gitignore ;;
             esac
           done
       sort -u .gitignore -o .gitignore 2>/dev/null || true
@@ -2460,8 +2465,14 @@ workflow BuildProduct
     # the same durable-persistence node the #318 commit_advance path uses, then
     # re-verify through TestMilestone. Narrow `= verified_green` so a normal
     # (non-breach) fix carries no turn_breach_class and still falls through to
-    # the warm restart loop below; a pathological/non-green breach has no commit
-    # edge and reaches EscalateMilestone via fallback_target (strict-fail).
+    # the warm restart loop below. NOTE: adding this conditional edge makes
+    # FixMilestone `hasAnyConditionalEdge`, which disables engine strict-fail on
+    # this node — so a pathological/non-green breach no longer escalates via
+    # fallback_target. Instead it falls through the unconditional TestMilestone
+    # edge below, which deterministically re-runs verify.sh on the (still non-
+    # green) tree, increments the on-disk fix-attempt counter, and escalates to
+    # EscalateMilestone once that counter exceeds its cap (bounded, counter-
+    # driven escalation; no infinite loop, no work loss).
     FixMilestone -> CommitIfDirty  when ctx.turn_breach_class = verified_green  restart: true
     FixMilestone -> TestMilestone  restart: true
 

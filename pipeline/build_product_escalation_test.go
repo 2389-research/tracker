@@ -27,4 +27,17 @@ func TestBuildProductEscalateMilestoneSurfacesVerifyState(t *testing.T) {
 	if !strings.Contains(strings.ToLower(p), "verify currently") {
 		t.Error("EscalateMilestone prompt does not surface the live verify result — a green tree can be abandoned without the operator being told it passes (issue #407 AC1)")
 	}
+	// The heading alone is hollow: the ${ctx.tool_stdout} interpolation is the
+	// mechanism that actually injects the live verify output under it (this is a
+	// prompt, where LLM-origin ctx.* keys are allowed). Without it the operator
+	// sees an empty "Verify currently" section — exactly the regression #407
+	// exists to prevent.
+	if !strings.Contains(p, "${ctx.tool_stdout}") {
+		t.Error("EscalateMilestone prompt has the \"Verify currently\" heading but no ${ctx.tool_stdout} interpolation — the live verify state is never actually surfaced (issue #407 AC1)")
+	}
+	// abandon must stay demoted to a FAIL-gated last resort so a green tree is
+	// not offered as a casual default choice.
+	if !strings.Contains(p, "LAST RESORT") {
+		t.Error("EscalateMilestone prompt no longer demotes `abandon` to a LAST RESORT — a green tree can be abandoned as a first-class option (issue #407)")
+	}
 }
