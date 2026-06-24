@@ -275,6 +275,38 @@ func TestMilestoneFirstStackFailureStillRunsLater(t *testing.T) {
 	}
 }
 
+// PR #411 finding #1 (Codex/Copilot/CodeRabbit consensus): verify.sh exit code 2
+// is RESERVED for "Makefile present but `make` not installed" — TestMilestone
+// routes exit 2 straight to `escalate`. A language test runner can legitimately
+// exit 2 (pytest collection error, an arbitrary npm script), which must NOT be
+// mistaken for that env-missing escalate. verify.sh must collapse every non-zero
+// TEST runner exit to 1, reserving 2 for the CI/Makefile path. Run the extracted
+// verify.sh directly so the assertion pins the source of the exit code.
+func TestVerifyScriptCollapsesTestRunnerExit2(t *testing.T) {
+	dir := setupRunDir(t, "package.json")
+	verify := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF")
+	stubLog := filepath.Join(t.TempDir(), "stub.log")
+	out, code := runToolCmd(t, verify, dir, stackEnv(t, stubLog, "STUB_NPM_EXIT=2"))
+	if code == 0 {
+		t.Fatalf("npm test failed (exit 2) but verify.sh exited 0:\n%s", out)
+	}
+	if code == 2 {
+		t.Errorf("npm test exited 2 (a legitimate test-runner failure) but verify.sh propagated exit 2, which TestMilestone treats as `make` missing → escalate; a normal fixable failure gets falsely escalated (PR #411 finding #1):\n%s", out)
+	}
+}
+
+// PR #411 finding #1 at the routing layer: a test runner exiting 2 must route to
+// the fix loop (no sentinel), never to EscalateMilestone via the `escalate`
+// sentinel that exit 2 (`make` missing) would emit.
+func TestMilestoneTestRunnerExit2DoesNotFalselyEscalate(t *testing.T) {
+	dir := setupRunDir(t, "package.json")
+	stubLog := filepath.Join(t.TempDir(), "stub.log")
+	out, _ := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog, "STUB_NPM_EXIT=2"))
+	if strings.Contains(out, "escalate") {
+		t.Errorf("a test runner exiting 2 falsely escalated (the `escalate` sentinel is reserved for `make` missing / fix-loop exhaustion) instead of routing to the fix loop (PR #411 finding #1):\n%s", out)
+	}
+}
+
 // No stack files → the no-build-system notice still prints and the node passes.
 func TestMilestoneNoStackNoticePreserved(t *testing.T) {
 	dir := setupRunDir(t)

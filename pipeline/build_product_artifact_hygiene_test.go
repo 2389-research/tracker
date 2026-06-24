@@ -74,9 +74,16 @@ func TestBuildProductCommitIfDirtySkipsBinaryArtifact(t *testing.T) {
 	if strings.Contains(tracked, "goblin") {
 		t.Errorf("compiled `goblin` binary was committed into the checkpoint — Verify will FAIL the milestone for out-of-scope work (issue #405 AC1):\n%s", tracked)
 	}
-	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	if !strings.Contains(string(gi), "goblin") {
-		t.Errorf("CommitIfDirty did not gitignore the untracked binary artifact:\n%s", gi)
+	// PR #411 finding #2: the runtime binary-artifact exclusion must go to the
+	// LOCAL, untracked .git/info/exclude — NOT the tracked .gitignore. A runtime
+	// write to the tracked .gitignore is itself an out-of-scope tree change that
+	// VerifyMilestone would FAIL, defeating the purpose of skipping the binary.
+	excl, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	if !strings.Contains(string(excl), "goblin") {
+		t.Errorf("CommitIfDirty did not exclude the untracked binary artifact via .git/info/exclude:\n%s", excl)
+	}
+	if gi, err := os.ReadFile(filepath.Join(dir, ".gitignore")); err == nil && strings.Contains(string(gi), "goblin") {
+		t.Errorf("CommitIfDirty wrote the binary-artifact ignore into the TRACKED .gitignore — that runtime tree mutation is itself out-of-scope work VerifyMilestone FAILs (PR #411 finding #2):\n%s", gi)
 	}
 }
 

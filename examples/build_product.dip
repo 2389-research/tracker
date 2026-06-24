@@ -269,10 +269,15 @@ workflow BuildProduct
       # lives here, exactly as it did inline in TestMilestone (mirrors the
       # ci-probe.sh single-place discipline above).
       cat > .ai/build/verify.sh <<'VERIFY_EOF'
-      # Source nothing — run this directly (`sh .ai/build/verify.sh`). Exit code:
+      # Run this directly (`sh .ai/build/verify.sh`) — do NOT source it. It
+      # sources .ai/build/ci-probe.sh internally for the project CI gate. Exit:
       #   0  green: build + every detected stack's tests + project CI gate pass
-      #   2  Makefile present but `make` not installed (environment; escalate)
-      #   1  build/test/CI failure (normal fix-loop failure)
+      #   2  Makefile present but `make` not installed (environment; escalate) —
+      #      RESERVED for that env-missing case ONLY. TestMilestone routes exit 2
+      #      straight to `escalate`, so no language test runner's exit may reach it.
+      #   1  any build/test/CI failure (normal fix-loop failure). Every non-zero
+      #      TEST-runner exit collapses to 1 below (a runner exiting 2 — e.g. a
+      #      pytest collection error — must NOT masquerade as the make-missing 2).
       set -eu
       TEST_EXIT=0
 
@@ -283,8 +288,11 @@ workflow BuildProduct
       fi
 
       # Run EVERY detected stack, not just the first match (issue #305).
-      # Failures accumulate into TEST_EXIT so a later passing stack can't mask an
-      # earlier failing one. `go build` stays unguarded: under set -eu a Go
+      # Each runner's non-zero exit collapses to TEST_EXIT=1 (NOT $?) so a runner
+      # that legitimately exits 2 (e.g. a pytest collection error) can't be
+      # mistaken for the make-missing escalate (exit 2) reserved below (PR #411).
+      # The 1 is sticky: once a stack fails a later passing stack can't reset it,
+      # so failures still can't be masked. `go build` stays unguarded: under set -eu a Go
       # compile failure aborts immediately (exit 1, normal fix-loop failure).
       # Milestone-scoped Go test target (issue #392): scope `go test` to the
       # packages this milestone changed since .ai/build/milestone-start-sha; the
@@ -312,19 +320,19 @@ workflow BuildProduct
         fi
         if [ -n "$SKIP_PATTERN" ]; then
           echo "--- skipping known failures: $SKIP_PATTERN ---"
-          go test $GO_TEST_TARGET -skip "$SKIP_PATTERN" 2>&1 || TEST_EXIT=$?
+          go test $GO_TEST_TARGET -skip "$SKIP_PATTERN" 2>&1 || TEST_EXIT=1
         else
-          go test $GO_TEST_TARGET 2>&1 || TEST_EXIT=$?
+          go test $GO_TEST_TARGET 2>&1 || TEST_EXIT=1
         fi
       fi
       if [ -f package.json ]; then
-        npm test 2>&1 || TEST_EXIT=$?
+        npm test 2>&1 || TEST_EXIT=1
       fi
       if [ -f pyproject.toml ]; then
-        uv run pytest 2>&1 || TEST_EXIT=$?
+        uv run pytest 2>&1 || TEST_EXIT=1
       fi
       if [ -f Cargo.toml ]; then
-        cargo test 2>&1 || TEST_EXIT=$?
+        cargo test 2>&1 || TEST_EXIT=1
       fi
       if [ ! -f go.mod ] && [ ! -f package.json ] && [ ! -f pyproject.toml ] && [ ! -f Cargo.toml ]; then
         echo "no known build system — skipping tests"
@@ -340,7 +348,9 @@ workflow BuildProduct
         exit 2
       fi
       if [ "$CI_RC" -ne 0 ]; then
-        TEST_EXIT="$CI_RC"
+        # Non-2 CI failure → normal fix-loop failure (exit 2 already handled above
+        # and is reserved for make-missing). Collapse to 1, never propagate raw.
+        TEST_EXIT=1
       fi
       exit "$TEST_EXIT"
       VERIFY_EOF
@@ -946,33 +956,45 @@ workflow BuildProduct
       # `go build -o <name>` drops an executable into the tree (Go binaries have
       # no fixed extension, so Setup's static .gitignore seed can't catch them);
       # `git add -A` would commit it and Verify then FAILs the milestone for
-      # out-of-scope work. Gitignore any UNTRACKED, executable, BINARY,
-      # non-empty file before staging — real source (text) and executable shell
-      # scripts (text) survive; only opaque binaries are filtered. Binary-ness
-      # comes from git itself: `git diff --no-index --numstat /dev/null <f>`
-      # reports `-` in the added-lines column for a binary file, a number for
-      # text. Using git (already required by this node) avoids depending on a
-      # GNU-only `grep -I`, whose unrecognized-flag failure mode would mis-ignore
-      # real source. The `[ -s ]` guard keeps an empty placeholder from being
-      # mistaken for an artifact. Listing comes from git's own untracked-not-
-      # ignored set, so nothing already tracked or ignored is touched. Newline-
-      # delimited read (POSIX sh — tracker runs tool nodes under dash, where
-      # `read -d ''` is illegal); git quotes any pathname with embedded newlines,
-      # so such a name simply fails the `[ -x ]` test and is left for `git add
-      # -A` rather than mis-ignored. The `-- "$f"` end-of-options separator on the
-      # diff keeps a leading-dash artifact name (e.g. `-weird`) from being parsed
-      # as switches (which would error, yield empty, miss the `-` case, and leak
-      # the binary into `git add -A`). The pattern is sed-escaped before being
-      # written so gitignore metacharacters (`* ? [ ] \ ! #`) in an LLM-influenced
-      # artifact name match the literal path only, never a broader source set.
-      git ls-files --others --exclude-standard \
-        | while IFS= read -r f; do
-            [ -x "$f" ] && [ -s "$f" ] || continue
-            case "$(git diff --no-index --numstat /dev/null -- "$f" 2>/dev/null | cut -f1)" in
-              -) printf '/%s\n' "$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')" >> .gitignore ;;
-            esac
-          done
-      sort -u .gitignore -o .gitignore 2>/dev/null || true
+      # out-of-scope work. Exclude any UNTRACKED, executable, BINARY, non-empty
+      # file before staging — real source (text) and executable shell scripts
+      # (text) survive; only opaque binaries are filtered. The exclusion goes to
+      # the LOCAL, untracked .git/info/exclude — NOT the tracked .gitignore (PR
+      # #411): a runtime write to the tracked .gitignore is itself an out-of-scope
+      # tree change VerifyMilestone would FAIL, defeating the point of skipping
+      # the artifact. Same .git/info/exclude treatment .tracker/ (Setup) and the
+      # turn-override dir (ContinueWithMoreTurns) already get. Binary-ness comes
+      # from git itself: `git diff --no-index --numstat /dev/null <f>` reports `-`
+      # in the added-lines column for a binary file, a number for text. Using git
+      # (already required by this node) avoids depending on a GNU-only `grep -I`,
+      # whose unrecognized-flag failure mode would mis-ignore real source. The
+      # `[ -s ]` guard keeps an empty placeholder from being mistaken for an
+      # artifact. Listing comes from git's own untracked-not-excluded set (it
+      # already honors .git/info/exclude), so nothing already tracked or excluded
+      # is touched and re-runs are idempotent. Newline-delimited read (POSIX sh —
+      # tracker runs tool nodes under dash, where `read -d ''` is illegal); git
+      # quotes any pathname with embedded newlines, so such a name simply fails
+      # the `[ -x ]` test and is left for `git add -A` rather than mis-excluded.
+      # The `-- "$f"` end-of-options separator on the diff keeps a leading-dash
+      # artifact name (e.g. `-weird`) from being parsed as switches (which would
+      # error, yield empty, miss the `-` case, and leak the binary into `git add
+      # -A`). The pattern is sed-escaped before being written so gitignore
+      # metacharacters (`* ? [ ] \ ! #`) in an LLM-influenced artifact name match
+      # the literal path only, never a broader source set; grep -qxF keeps the
+      # append idempotent.
+      GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
+      if [ -n "$GITDIR" ]; then
+        mkdir -p "$GITDIR/info"
+        git ls-files --others --exclude-standard \
+          | while IFS= read -r f; do
+              [ -x "$f" ] && [ -s "$f" ] || continue
+              case "$(git diff --no-index --numstat /dev/null -- "$f" 2>/dev/null | cut -f1)" in
+                -) PAT="/$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')"
+                   grep -qxF "$PAT" "$GITDIR/info/exclude" 2>/dev/null \
+                     || printf '%s\n' "$PAT" >> "$GITDIR/info/exclude" ;;
+              esac
+            done
+      fi
 
       if [ -n "$(git status --porcelain)" ]; then
         git add -A
@@ -2465,14 +2487,30 @@ workflow BuildProduct
     # the same durable-persistence node the #318 commit_advance path uses, then
     # re-verify through TestMilestone. Narrow `= verified_green` so a normal
     # (non-breach) fix carries no turn_breach_class and still falls through to
-    # the warm restart loop below. NOTE: adding this conditional edge makes
-    # FixMilestone `hasAnyConditionalEdge`, which disables engine strict-fail on
-    # this node — so a pathological/non-green breach no longer escalates via
-    # fallback_target. Instead it falls through the unconditional TestMilestone
-    # edge below, which deterministically re-runs verify.sh on the (still non-
-    # green) tree, increments the on-disk fix-attempt counter, and escalates to
-    # EscalateMilestone once that counter exceeds its cap (bounded, counter-
-    # driven escalation; no infinite loop, no work loss).
+    # the warm restart loop below.
+    #
+    # PR #411 (Codex P1): turn_breach_class is STICKY in context, so a
+    # verified_green value left by an EARLIER milestone's breach could route a
+    # later NORMAL fail (outcome=fail) down the commit edge and checkpoint a
+    # non-green tree. The ideal guard is a compound `verified_green AND
+    # outcome=success`, but compound conditions are unavailable on this path —
+    # dippin rejects `&&` (DIP010) and tracker's edge evaluator can't parse the
+    # `and` keyword (it splits only on `&&`/`||`). Instead we exploit first-match
+    # edge ordering (selectByCondition returns the first matching edge in
+    # declaration order): a `when ctx.outcome = fail -> TestMilestone` edge
+    # declared BEFORE the commit edge short-circuits EVERY fail back to re-verify,
+    # so a stale verified_green class can never commit a non-green tree. Only a
+    # genuine green breach (outcome=success) falls past it to the commit edge.
+    #
+    # NOTE: these conditional edges make FixMilestone `hasAnyConditionalEdge`,
+    # which disables engine strict-fail on this node — so a pathological/non-green
+    # breach no longer escalates via fallback_target. Instead its outcome=fail
+    # routes it (via the first edge below) to TestMilestone, which deterministically
+    # re-runs verify.sh on the (still non-green) tree, increments the on-disk
+    # fix-attempt counter, and escalates to EscalateMilestone once that counter
+    # exceeds its cap (bounded, counter-driven escalation; no infinite loop, no
+    # work loss).
+    FixMilestone -> TestMilestone  when ctx.outcome = fail  restart: true
     FixMilestone -> CommitIfDirty  when ctx.turn_breach_class = verified_green  restart: true
     FixMilestone -> TestMilestone  restart: true
 

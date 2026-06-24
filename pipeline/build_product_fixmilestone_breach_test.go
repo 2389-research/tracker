@@ -2,7 +2,22 @@
 // ABOUTME: guard must apply to the FixMilestone fix-loop node, not just Implement.
 package pipeline
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// hasEdgeConditionContaining reports whether the node has an outgoing edge to
+// the target whose condition contains the given substring (tolerant of compound
+// `&&`/`||` conditions and dippin's whitespace normalization).
+func hasEdgeConditionContaining(g *Graph, from, to, sub string) bool {
+	for _, e := range g.OutgoingEdges(from) {
+		if e.To == to && strings.Contains(e.Condition, sub) {
+			return true
+		}
+	}
+	return false
+}
 
 // Case study run 634a2527ff56: FixMilestone repaired every VerifyMilestone
 // finding and reached a fully green tree at turn 47, then burned turns 48–50 on
@@ -44,8 +59,32 @@ func TestBuildProductFixMilestoneCarriesVerifyCommand(t *testing.T) {
 func TestBuildProductFixMilestoneGreenBreachCommits(t *testing.T) {
 	g := loadBuildProduct(t)
 
-	if !hasEdgeWithCondition(g, "FixMilestone", "CommitIfDirty", "ctx.turn_breach_class = verified_green") {
+	if !hasEdgeConditionContaining(g, "FixMilestone", "CommitIfDirty", "ctx.turn_breach_class = verified_green") {
 		t.Error("FixMilestone has no `ctx.turn_breach_class = verified_green` edge to CommitIfDirty — a green-at-breach fix is left uncommitted and abandoned (issue #406 AC1)")
+	}
+	// PR #411 finding #3 (Codex P1): turn_breach_class is STICKY in context, so a
+	// verified_green value left by an EARLIER milestone's breach could route a
+	// later NORMAL fail (outcome=fail) down the commit edge and checkpoint a
+	// non-green tree. A compound `verified_green AND outcome=success` guard is
+	// unavailable (dippin rejects `&&`; tracker's evaluator can't parse `and`), so
+	// the fix exploits first-match edge ordering: a `when ctx.outcome = fail ->
+	// TestMilestone` edge declared BEFORE the verified_green commit edge
+	// short-circuits every fail back to re-verify. Assert both the edge exists and
+	// that it precedes the commit edge.
+	if !hasEdgeWithCondition(g, "FixMilestone", "TestMilestone", "ctx.outcome = fail") {
+		t.Error("FixMilestone has no `ctx.outcome = fail -> TestMilestone` short-circuit edge — a stale verified_green class could commit a non-green tree on a normal fail (PR #411 finding #3)")
+	}
+	failIdx, commitIdx := -1, -1
+	for i, e := range g.OutgoingEdges("FixMilestone") {
+		if e.To == "TestMilestone" && e.Condition == "ctx.outcome = fail" && failIdx == -1 {
+			failIdx = i
+		}
+		if e.To == "CommitIfDirty" && strings.Contains(e.Condition, "verified_green") {
+			commitIdx = i
+		}
+	}
+	if failIdx == -1 || commitIdx == -1 || failIdx > commitIdx {
+		t.Errorf("the `ctx.outcome = fail -> TestMilestone` short-circuit must be declared BEFORE the verified_green commit edge (first-match ordering is the guard) — failIdx=%d commitIdx=%d (PR #411 finding #3)", failIdx, commitIdx)
 	}
 	// commit_advance/green-breach must continue the milestone, not dead-end.
 	if !hasEdgeTo(g, "CommitIfDirty", "TestMilestone") {
@@ -82,7 +121,7 @@ func TestBuildProductFixMilestonePathologicalStillEscalates(t *testing.T) {
 
 	// The verified_green edge is what disables strict-fail; if it were ever
 	// removed, the assertions below would mis-describe the routing.
-	if !hasEdgeWithCondition(g, "FixMilestone", "CommitIfDirty", "ctx.turn_breach_class = verified_green") {
+	if !hasEdgeConditionContaining(g, "FixMilestone", "CommitIfDirty", "ctx.turn_breach_class = verified_green") {
 		t.Fatal("FixMilestone lost its verified_green conditional edge — strict-fail analysis below no longer applies (issue #406)")
 	}
 

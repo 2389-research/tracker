@@ -42,6 +42,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     self-applies the same `TEST-VERIFIES-CONTRACT` rubric `VerifyMilestone` grades
     against, including a test-shape rule: a "built binary" smoke test must spawn
     the built binary, not call an unexported function in-process.
+  - **PR #411 review hardening** (automated multi-bot review of the super-PR).
+    - `verify.sh` now collapses every non-zero language-test-runner exit to `1`,
+      reserving exit `2` strictly for the "`make` present but not installed"
+      escalation; a test runner that legitimately exits `2` (e.g. a pytest
+      collection error) no longer masquerades as the env-missing escalate.
+    - `CommitIfDirty` writes the runtime binary-artifact ignore to the local,
+      untracked `.git/info/exclude` instead of the tracked `.gitignore`, so the
+      skip itself is no longer an out-of-scope tree change `VerifyMilestone` FAILs.
+    - The `FixMilestone` green-breach commit edge is now guarded by a
+      `when ctx.outcome = fail -> TestMilestone` short-circuit declared ahead of
+      it, so a stale (sticky) `verified_green` class from an earlier milestone can
+      no longer route a normal fail down the commit path and checkpoint a
+      non-green tree.
 
 ## [0.40.0] - 2026-06-22
 
