@@ -66,9 +66,39 @@ func stackEnv(t *testing.T, stubLog string, extra ...string) []string {
 	return append(env, extra...)
 }
 
+// extractHeredoc returns the body of the `<<'EOF' … EOF` heredoc written into
+// `path` by `cmd`, i.e. the bytes between `cat > <path> <<'<term>'` and the
+// terminator line. Used to provision the SAME .ai/build/verify.sh that Setup
+// writes at runtime, so the TestMilestone suite exercises the real shared gate
+// (issue #406 — single source of truth) instead of a hand-copied duplicate.
+func extractHeredoc(t *testing.T, cmd, path, term string) string {
+	t.Helper()
+	open := "cat > " + path + " <<'" + term + "'"
+	lines := strings.Split(cmd, "\n")
+	start := -1
+	for i, ln := range lines {
+		if strings.TrimSpace(ln) == open {
+			start = i + 1
+			break
+		}
+	}
+	if start == -1 {
+		t.Fatalf("heredoc opener %q not found in tool_command", open)
+	}
+	for i := start; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == term {
+			return strings.Join(lines[start:i], "\n") + "\n"
+		}
+	}
+	t.Fatalf("heredoc terminator %q not found after opener", term)
+	return ""
+}
+
 // setupRunDir creates a workdir with the .ai scaffolding both tool nodes
-// expect: a no-op ci-probe.sh (the #299 gate is covered by its own suite)
-// and the milestones dir TestMilestone writes its attempt counter into.
+// expect: a no-op ci-probe.sh (the #299 gate is covered by its own suite),
+// the .ai/build/verify.sh shared green-gate extracted from Setup (the script
+// TestMilestone now delegates to — issue #406), and the milestones dir
+// TestMilestone writes its attempt counter into.
 func setupRunDir(t *testing.T, stackFiles ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -79,6 +109,8 @@ func setupRunDir(t *testing.T, stackFiles ...string) string {
 	}
 	mustWrite(t, filepath.Join(dir, ".ai/build/ci-probe.sh"),
 		"run_project_ci_gate() { return \"${STUB_CI_RC:-0}\"; }\n")
+	mustWrite(t, filepath.Join(dir, ".ai/build/verify.sh"),
+		extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF"))
 	for _, f := range stackFiles {
 		mustWrite(t, filepath.Join(dir, f), "{}\n")
 	}
@@ -240,6 +272,38 @@ func TestMilestoneFirstStackFailureStillRunsLater(t *testing.T) {
 	log := readLog(t, stubLog)
 	if !strings.Contains(log, "npm test") {
 		t.Errorf("npm test should still run after go test failure (#305 accumulate):\n%s", log)
+	}
+}
+
+// PR #411 finding #1 (Codex/Copilot/CodeRabbit consensus): verify.sh exit code 2
+// is RESERVED for "Makefile present but `make` not installed" — TestMilestone
+// routes exit 2 straight to `escalate`. A language test runner can legitimately
+// exit 2 (pytest collection error, an arbitrary npm script), which must NOT be
+// mistaken for that env-missing escalate. verify.sh must collapse every non-zero
+// TEST runner exit to 1, reserving 2 for the CI/Makefile path. Run the extracted
+// verify.sh directly so the assertion pins the source of the exit code.
+func TestVerifyScriptCollapsesTestRunnerExit2(t *testing.T) {
+	dir := setupRunDir(t, "package.json")
+	verify := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF")
+	stubLog := filepath.Join(t.TempDir(), "stub.log")
+	out, code := runToolCmd(t, verify, dir, stackEnv(t, stubLog, "STUB_NPM_EXIT=2"))
+	if code == 0 {
+		t.Fatalf("npm test failed (exit 2) but verify.sh exited 0:\n%s", out)
+	}
+	if code == 2 {
+		t.Errorf("npm test exited 2 (a legitimate test-runner failure) but verify.sh propagated exit 2, which TestMilestone treats as `make` missing → escalate; a normal fixable failure gets falsely escalated (PR #411 finding #1):\n%s", out)
+	}
+}
+
+// PR #411 finding #1 at the routing layer: a test runner exiting 2 must route to
+// the fix loop (no sentinel), never to EscalateMilestone via the `escalate`
+// sentinel that exit 2 (`make` missing) would emit.
+func TestMilestoneTestRunnerExit2DoesNotFalselyEscalate(t *testing.T) {
+	dir := setupRunDir(t, "package.json")
+	stubLog := filepath.Join(t.TempDir(), "stub.log")
+	out, _ := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog, "STUB_NPM_EXIT=2"))
+	if strings.Contains(out, "escalate") {
+		t.Errorf("a test runner exiting 2 falsely escalated (the `escalate` sentinel is reserved for `make` missing / fix-loop exhaustion) instead of routing to the fix loop (PR #411 finding #1):\n%s", out)
 	}
 }
 

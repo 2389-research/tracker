@@ -30,6 +30,19 @@ workflow BuildProduct
       set -eu
       mkdir -p .ai/build .ai/decisions .ai/milestones
       echo '.ai/' >> .gitignore 2>/dev/null || true
+      # #405: seed common build-output patterns so a milestone whose tests
+      # compile/install artifacts doesn't have them swept into a CommitIfDirty
+      # checkpoint and then FAILed by Verify as out-of-scope work. This is the
+      # STATIC half (named/dir artifacts across the toolchains build_product
+      # targets); arbitrary-named compiled binaries (Go `go build -o <name>` has
+      # no fixed extension) are caught dynamically in CommitIfDirty. Appended +
+      # deduped exactly like `.ai/` above; idempotent across re-runs.
+      for pat in \
+        'node_modules/' 'dist/' 'build/' 'target/' 'coverage/' \
+        '__pycache__/' '.venv/' 'venv/' '*.pyc' \
+        '*.exe' '*.test' '*.out' '*.o' '*.a'; do
+        echo "$pat" >> .gitignore 2>/dev/null || true
+      done
       sort -u .gitignore -o .gitignore
       # #351: keep tracker run metadata out of the product repo. CommitIfDirty
       # runs `git add -A`, which would otherwise commit .tracker/runs/<id>/
@@ -247,6 +260,100 @@ workflow BuildProduct
         return 0
       }
       PROBE_EOF
+
+      # Shared milestone green-gate (issue #406). TestMilestone wraps this with
+      # the fix-attempt counter + tests-pass/escalate sentinels; the
+      # Implement/FixMilestone breach verify_command runs the SAME script, so a
+      # turn-limit breach on a green tree classifies verified_green and commits
+      # the work instead of abandoning it. One source of truth — the gate logic
+      # lives here, exactly as it did inline in TestMilestone (mirrors the
+      # ci-probe.sh single-place discipline above).
+      cat > .ai/build/verify.sh <<'VERIFY_EOF'
+      # Run this directly (`sh .ai/build/verify.sh`) — do NOT source it. It
+      # sources .ai/build/ci-probe.sh internally for the project CI gate. Exit:
+      #   0  green: build + every detected stack's tests + project CI gate pass
+      #   2  Makefile present but `make` not installed (environment; escalate) —
+      #      RESERVED for that env-missing case ONLY. TestMilestone routes exit 2
+      #      straight to `escalate`, so no language test runner's exit may reach it.
+      #   1  any build/test/CI failure (normal fix-loop failure). Every non-zero
+      #      TEST-runner exit collapses to 1 below (a runner exiting 2 — e.g. a
+      #      pytest collection error — must NOT masquerade as the make-missing 2).
+      set -eu
+      TEST_EXIT=0
+
+      # Build the skip pattern from known_failures, stripping comments and blanks.
+      SKIP_PATTERN=""
+      if [ -f .ai/milestones/known_failures ]; then
+        SKIP_PATTERN=$(grep -v '^#' .ai/milestones/known_failures | grep -v '^$' | paste -sd'|' -)
+      fi
+
+      # Run EVERY detected stack, not just the first match (issue #305).
+      # Each runner's non-zero exit collapses to TEST_EXIT=1 (NOT $?) so a runner
+      # that legitimately exits 2 (e.g. a pytest collection error) can't be
+      # mistaken for the make-missing escalate (exit 2) reserved below (PR #411).
+      # The 1 is sticky: once a stack fails a later passing stack can't reset it,
+      # so failures still can't be masked. `go build` stays unguarded: under set -eu a Go
+      # compile failure aborts immediately (exit 1, normal fix-loop failure).
+      # Milestone-scoped Go test target (issue #392): scope `go test` to the
+      # packages this milestone changed since .ai/build/milestone-start-sha; the
+      # WHOLE-tree suite still runs at FinalBuild. The derived package tokens are
+      # ONLY ever passed as `go test` package arguments — never eval'd.
+      if [ -f go.mod ]; then
+        go build ./... 2>&1
+        GO_TEST_TARGET="./..."
+        MS_START=$(cat .ai/build/milestone-start-sha 2>/dev/null || true)
+        if [ -z "$MS_START" ] || ! git cat-file -e "${MS_START}^{commit}" 2>/dev/null; then
+          MS_BASE=$(git hash-object -t tree /dev/null)
+        else
+          MS_BASE="$MS_START"
+        fi
+        CHANGED_PKGS=$(git diff --name-only --diff-filter=d "${MS_BASE}..HEAD" 2>/dev/null \
+          | grep -E '\.go$' \
+          | awk -F/ 'NF==1 { print "." } NF>1 { sub(/\/[^/]*$/, ""); print "./" $0 }' \
+          | sort -u \
+          | paste -sd' ' -)
+        if [ -n "$CHANGED_PKGS" ]; then
+          GO_TEST_TARGET="$CHANGED_PKGS"
+          echo "--- milestone-scoped go test: $GO_TEST_TARGET ---"
+        else
+          echo "--- no changed Go packages in milestone range — testing ./... ---"
+        fi
+        if [ -n "$SKIP_PATTERN" ]; then
+          echo "--- skipping known failures: $SKIP_PATTERN ---"
+          go test $GO_TEST_TARGET -skip "$SKIP_PATTERN" 2>&1 || TEST_EXIT=1
+        else
+          go test $GO_TEST_TARGET 2>&1 || TEST_EXIT=1
+        fi
+      fi
+      if [ -f package.json ]; then
+        npm test 2>&1 || TEST_EXIT=1
+      fi
+      if [ -f pyproject.toml ]; then
+        uv run pytest 2>&1 || TEST_EXIT=1
+      fi
+      if [ -f Cargo.toml ]; then
+        cargo test 2>&1 || TEST_EXIT=1
+      fi
+      if [ ! -f go.mod ] && [ ! -f package.json ] && [ ! -f pyproject.toml ] && [ ! -f Cargo.toml ]; then
+        echo "no known build system — skipping tests"
+      fi
+
+      # Project CI gate (issue #233 Gap 1). Source the shared helper; rc=2 means
+      # a Makefile is present but `make` isn't installed — an environment problem
+      # the LLM fix loop can't resolve, surfaced as exit 2 so the caller escalates.
+      . .ai/build/ci-probe.sh
+      CI_RC=0
+      run_project_ci_gate || CI_RC=$?
+      if [ "$CI_RC" -eq 2 ]; then
+        exit 2
+      fi
+      if [ "$CI_RC" -ne 0 ]; then
+        # Non-2 CI failure → normal fix-loop failure (exit 2 already handled above
+        # and is reserved for make-missing). Collapse to 1, never propagate raw.
+        TEST_EXIT=1
+      fi
+      exit "$TEST_EXIT"
+      VERIFY_EOF
 
       # Shared interface-reachability rubric (issue #233 Gap 7).
       # FinalSpecCheck and the three reviewer prompts source this file
@@ -737,6 +844,13 @@ workflow BuildProduct
     fidelity: full
     max_turns: 50
     fallback_target: EscalateMilestone
+    # Turn-limit commit-if-green guard (#297/#303/#406). If this session
+    # exhausts its turn budget on a GREEN tree, the breach verifier runs this
+    # command; exit 0 classifies the breach verified_green (outcome=success) so
+    # the finished work is committed instead of abandoned. Same script the
+    # TestMilestone gate wraps — one source of truth.
+    params:
+      verify_command: sh .ai/build/verify.sh
     prompt:
       FIRST, in one turn, read .ai/build/build-context.md for orientation — it
       holds an architecture map and a one-entry-per-milestone log (files touched
@@ -780,7 +894,13 @@ workflow BuildProduct
         why. Silent paraphrase ("--head <branch>" when the spec says
         "--head <owner>:<branch>") is the most common way milestones ship wrong.
 
-      TESTS VERIFY THE CONTRACT, NOT YOUR CODE:
+      TEST-VERIFIES-CONTRACT (run this rubric BEFORE you emit DONE):
+      - This is the SAME rubric VerifyMilestone grades you against (its check
+        "TEST-VERIFIES-CONTRACT"). Apply it yourself first so a passing-but-
+        non-verifying test never ships — that asymmetry is what forces an
+        expensive Fix loop (run 634a2527ff56: a green smoke test that called the
+        function in-process FAILed Verify and the fix had to invent a whole
+        subprocess seam from scratch).
       - Tests must verify the spec's requirement, not whatever your
         implementation happens to do. Read each assertion you write and ask:
         "If I deleted my production code and rewrote it differently but
@@ -790,6 +910,18 @@ workflow BuildProduct
         `attempts == 2` when the spec says "max 2 retries" (= 3 attempts):
         the test green-lights the off-by-one because it was written from the
         code, not from the spec.
+      - TEST SHAPE: when a milestone's done-when names a concrete test SHAPE —
+        a "built binary" smoke test, a "subprocess", a "real `gh`", an
+        end-to-end run through `main()` — the test MUST exercise that exact
+        harness. A "built binary" smoke contract requires actually spawning the
+        built binary (compile it, run the process, assert on its behavior); an
+        in-process call to an unexported function is a WEAKER reading that
+        passes locally but does NOT prove the wiring the contract demands, and
+        Verify will FAIL it. List each named test shape from the done-when as a
+        checklist item, satisfy it with the real harness, and cite the shape you
+        matched. If satisfying it needs production plumbing (an injection seam,
+        a build tag, fake-dependency flags), build that plumbing NOW — do not
+        defer it to a Fix loop.
       - Snapshot / golden-file tests: the FIRST version of every snapshot
         must be hand-verified against the spec, not regenerated from the
         current implementation's output. If your test framework supports an
@@ -820,6 +952,50 @@ workflow BuildProduct
       # dirty — a milestone that only adds new files would otherwise look clean
       # to `git diff` and skip the commit, leaving exactly the green-but-
       # uncommitted tree this node exists to prevent.
+      # #405: never checkpoint a compiled build artifact. A test that runs
+      # `go build -o <name>` drops an executable into the tree (Go binaries have
+      # no fixed extension, so Setup's static .gitignore seed can't catch them);
+      # `git add -A` would commit it and Verify then FAILs the milestone for
+      # out-of-scope work. Exclude any UNTRACKED, executable, BINARY, non-empty
+      # file before staging — real source (text) and executable shell scripts
+      # (text) survive; only opaque binaries are filtered. The exclusion goes to
+      # the LOCAL, untracked .git/info/exclude — NOT the tracked .gitignore (PR
+      # #411): a runtime write to the tracked .gitignore is itself an out-of-scope
+      # tree change VerifyMilestone would FAIL, defeating the point of skipping
+      # the artifact. Same .git/info/exclude treatment .tracker/ (Setup) and the
+      # turn-override dir (ContinueWithMoreTurns) already get. Binary-ness comes
+      # from git itself: `git diff --no-index --numstat /dev/null <f>` reports `-`
+      # in the added-lines column for a binary file, a number for text. Using git
+      # (already required by this node) avoids depending on a GNU-only `grep -I`,
+      # whose unrecognized-flag failure mode would mis-ignore real source. The
+      # `[ -s ]` guard keeps an empty placeholder from being mistaken for an
+      # artifact. Listing comes from git's own untracked-not-excluded set (it
+      # already honors .git/info/exclude), so nothing already tracked or excluded
+      # is touched and re-runs are idempotent. Newline-delimited read (POSIX sh —
+      # tracker runs tool nodes under dash, where `read -d ''` is illegal); git
+      # quotes any pathname with embedded newlines, so such a name simply fails
+      # the `[ -x ]` test and is left for `git add -A` rather than mis-excluded.
+      # The `-- "$f"` end-of-options separator on the diff keeps a leading-dash
+      # artifact name (e.g. `-weird`) from being parsed as switches (which would
+      # error, yield empty, miss the `-` case, and leak the binary into `git add
+      # -A`). The pattern is sed-escaped before being written so gitignore
+      # metacharacters (`* ? [ ] \ ! #`) in an LLM-influenced artifact name match
+      # the literal path only, never a broader source set; grep -qxF keeps the
+      # append idempotent.
+      GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
+      if [ -n "$GITDIR" ]; then
+        mkdir -p "$GITDIR/info"
+        git ls-files --others --exclude-standard \
+          | while IFS= read -r f; do
+              [ -x "$f" ] && [ -s "$f" ] || continue
+              case "$(git diff --no-index --numstat /dev/null -- "$f" 2>/dev/null | cut -f1)" in
+                -) PAT="/$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')"
+                   grep -qxF "$PAT" "$GITDIR/info/exclude" 2>/dev/null \
+                     || printf '%s\n' "$PAT" >> "$GITDIR/info/exclude" ;;
+              esac
+            done
+      fi
+
       if [ -n "$(git status --porcelain)" ]; then
         git add -A
         git -c user.name="build_product" -c user.email="build_product@tracker.local" \
@@ -906,137 +1082,36 @@ workflow BuildProduct
       ATTEMPTS=$((ATTEMPTS + 1))
       echo "$ATTEMPTS" > "$ATTEMPT_FILE"
 
-      # Run tests AND the project CI gate. If both pass, the milestone is
-      # done regardless of how many fix attempts we've burned. The CI gate
-      # (added per #233 Gap 1, further down in this command) can fail
-      # after the language-stack tests pass — that's intentional: a green
-      # `go test ./...` doesn't catch lint/vet/format failures that the
-      # project's own `make ci` would, and the previous version of this
-      # node reported "Done" on a commit whose CI was red because it only
-      # ran the language-stack default.
-      TEST_EXIT=0
-
-      # Run the project's test suite.
-      # Build the skip pattern from known_failures, stripping comments and blanks.
-      SKIP_PATTERN=""
-      if [ -f .ai/milestones/known_failures ]; then
-        SKIP_PATTERN=$(grep -v '^#' .ai/milestones/known_failures | grep -v '^$' | paste -sd'|' -)
-      fi
-
-      # Run EVERY detected stack, not just the first match (issue #305) — a
-      # polyglot repo (e.g. Go backend + JS frontend) must exercise all of its
-      # test suites. Failures accumulate into TEST_EXIT so a later passing
-      # stack can't mask an earlier failing one. `go build` stays unguarded:
-      # under set -eu a Go compile failure aborts immediately (exit 1, normal
-      # fix-loop failure), same as before #305.
+      # Run the ONE shared milestone green-gate (issue #406). The full
+      # build + per-stack tests + project CI logic lives in .ai/build/verify.sh
+      # (written by Setup) so this node, the Implement breach verify_command,
+      # and the FixMilestone breach verify_command all adjudicate "green" with
+      # the SAME script — a single source of truth. This node is the only place
+      # that wraps it with the fix-attempt counter and the tracker routing
+      # sentinels (tests-pass / escalate); verify.sh itself prints no markers.
       #
-      # Milestone-scoped Go test target (issue #392). The fix loop
-      # (FixMilestone) is milestone-scoped by construction — the Implement and
-      # FixMilestone prompts forbid touching files outside the current
-      # milestone's scope. A WHOLE-TREE `go test ./...` gate therefore creates
-      # an unwinnable loop: a failure in a package the milestone never touched
-      # (e.g. a later milestone's pre-seeded code) is un-fixable by every fix
-      # attempt, so the cap is burned on zero-progress "fixes" and the run
-      # escalates. We reconcile the two halves by scoping THIS gate to the
-      # packages this milestone actually changed; the WHOLE-tree suite still
-      # runs at FinalBuild before anything ships, so cross-milestone regressions
-      # are caught — just not inside a loop that can't act on them. `go build
-      # ./...` stays whole-tree: a broken compile anywhere is a real blocker and
-      # aborts immediately under set -eu.
-      #
-      # Scope = Go package dirs containing a .go file changed since this
-      # milestone's start commit (.ai/build/milestone-start-sha, written by
-      # PickNextMilestone — the same boundary MarkMilestoneDone diffs against).
-      # Empty/unreachable START (first milestone, or a retry that rewrote
-      # history) degrades to the empty tree, scoping to every touched package —
-      # correct, because on the first milestone every change IS this
-      # milestone's. Zero changed Go packages (a milestone that touched only
-      # non-Go files) falls back to `./...` so the gate still runs the suite
-      # rather than silently testing nothing. The derived package tokens are
-      # ONLY ever passed as `go test` package arguments — never eval'd, never
-      # interpolated into a shell command (CLAUDE.md tool-node rule).
-      if [ -f go.mod ]; then
-        go build ./... 2>&1
-        GO_TEST_TARGET="./..."
-        MS_START=$(cat .ai/build/milestone-start-sha 2>/dev/null || true)
-        if [ -z "$MS_START" ] || ! git cat-file -e "${MS_START}^{commit}" 2>/dev/null; then
-          MS_BASE=$(git hash-object -t tree /dev/null)
-        else
-          MS_BASE="$MS_START"
-        fi
-        # Changed .go files -> their package dirs as `go test` arguments,
-        # unique. A repo-ROOT .go file (no slash, e.g. `main.go`) maps to the
-        # root-package arg `.` — NOT `./main.go`: a single *.go FILE arg makes
-        # `go test` build the synthetic command-line-arguments package, which
-        # silently skips the sibling _test.go AND aborts (setup-failed) when
-        # mixed with directory args. A file in a subdir maps to `./<dir>`.
-        # Deleted files are excluded (--diff-filter=d) so we never target a dir
-        # git removed. The tokens are word-split into `go test` package args
-        # under POSIX sh (how tracker runs tool nodes) — never eval'd.
-        CHANGED_PKGS=$(git diff --name-only --diff-filter=d "${MS_BASE}..HEAD" 2>/dev/null \
-          | grep -E '\.go$' \
-          | awk -F/ 'NF==1 { print "." } NF>1 { sub(/\/[^/]*$/, ""); print "./" $0 }' \
-          | sort -u \
-          | paste -sd' ' -)
-        if [ -n "$CHANGED_PKGS" ]; then
-          GO_TEST_TARGET="$CHANGED_PKGS"
-          echo "--- milestone-scoped go test: $GO_TEST_TARGET ---"
-        else
-          echo "--- no changed Go packages in milestone range — testing ./... ---"
-        fi
-        if [ -n "$SKIP_PATTERN" ]; then
-          echo "--- skipping known failures: $SKIP_PATTERN ---"
-          # Use -skip (Go 1.24+) which supports simple regex without lookahead.
-          go test $GO_TEST_TARGET -skip "$SKIP_PATTERN" 2>&1 || TEST_EXIT=$?
-        else
-          go test $GO_TEST_TARGET 2>&1 || TEST_EXIT=$?
-        fi
-      fi
-      if [ -f package.json ]; then
-        npm test 2>&1 || TEST_EXIT=$?
-      fi
-      if [ -f pyproject.toml ]; then
-        uv run pytest 2>&1 || TEST_EXIT=$?
-      fi
-      if [ -f Cargo.toml ]; then
-        cargo test 2>&1 || TEST_EXIT=$?
-      fi
-      if [ ! -f go.mod ] && [ ! -f package.json ] && [ ! -f pyproject.toml ] && [ ! -f Cargo.toml ]; then
-        echo "no known build system — skipping tests"
-      fi
+      # verify.sh exit codes:
+      #   0  green: build + every detected stack's tests + project CI gate pass
+      #   2  environment escalation (e.g. Makefile present but `make` absent) —
+      #      the LLM fix loop can't resolve it, so route straight to escalate
+      #   1  ordinary build/test/CI failure — hand to the fix loop
+      VERIFY_RC=0
+      sh .ai/build/verify.sh 2>&1 || VERIFY_RC=$?
 
-      # Project CI gate (issue #233 Gap 1). Source the shared helper
-      # written by Setup so the probe/run logic lives in exactly one
-      # place — see Setup for the full design. Helper returns 2 when
-      # a Makefile is present but `make` isn't installed; that's an
-      # environment problem the LLM fix loop can't resolve, so we
-      # route directly to EscalateMilestone via the `escalate`
-      # marker instead of burning fix attempts (#246 Copilot round-5).
-      . .ai/build/ci-probe.sh
-      CI_RC=0
-      run_project_ci_gate || CI_RC=$?
-      if [ "$CI_RC" -eq 2 ]; then
+      if [ "$VERIFY_RC" -eq 2 ]; then
         echo "0" > "$ATTEMPT_FILE"
         printf 'escalate'
         exit 1
       fi
-      if [ "$CI_RC" -ne 0 ]; then
-        TEST_EXIT="$CI_RC"
-      fi
 
-      # Note: milestone-specific verification is handled by the Implement agent
-      # (which runs the verify command as part of its session) and the VerifyMilestone
-      # agent (which checks completion criteria). We do NOT eval LLM-generated
-      # commands here — that would be arbitrary code execution from free-form text.
-
-      # Tests passed — reset counter and succeed
-      if [ "$TEST_EXIT" -eq 0 ]; then
+      # Green — reset counter and succeed.
+      if [ "$VERIFY_RC" -eq 0 ]; then
         echo "0" > "$ATTEMPT_FILE"
         printf 'tests-pass'
         exit 0
       fi
 
-      # Tests failed — check if we've exhausted fix attempts
+      # Failure — check if we've exhausted fix attempts.
       echo "--- attempt $ATTEMPTS of 3 ---"
       if [ "$ATTEMPTS" -gt 3 ]; then
         echo "ESCALATE: milestone failed after $ATTEMPTS attempts"
@@ -1132,28 +1207,46 @@ workflow BuildProduct
          strings, exact JSON key names, exact header names, exact
          integer constants, exact log key names — grep the
          implementation for that literal and write the grep command
-         and its result inline. A missing literal is FAIL UNLESS the
-         Implement step recorded an explicit deviation in
-         `.ai/decisions/` that names this literal and justifies the
-         deviation. (The Implement prompt gives
-         the implementing agent two options for any literal mismatch:
-         fix the implementation OR document the deviation in
-         `.ai/decisions/`. VerifyMilestone must honor the same
-         contract.) Concretely: when a literal is missing, before
-         declaring FAIL run
+         and its result inline. A missing literal resolves to one of
+         three severities (see the SEVERITY TIERS rule below); decide
+         per literal and cite your evidence:
+           - FAIL (blocking): the literal is a CONTRACT value — a wire
+             format, a JSON key, a header name, a numeric constant, an
+             exact command string — where a paraphrase changes observable
+             behavior. Missing + no covering ADR = FAIL. Silent paraphrase
+             (`--head <branch>` for `--head <owner>:<branch>`) is the
+             canonical ship-wrong; stays FAIL.
+           - WARN (non-blocking): the literal is an ILLUSTRATIVE API
+             identifier named in spec PROSE (e.g. `signal.NotifyContext`
+             when the code uses `signal.Notify` + a manual channel) AND
+             the milestone's own behavioral tests prove the implemented
+             form is equivalent (the relevant tests are green) AND a
+             `.ai/decisions/` ADR documents the deviation. All three
+             hold → WARN, not FAIL: cite the ADR path, the passing test,
+             and why the behavior is equivalent. (Run 634a2527ff56 hard-
+             FAILed behaviorally-correct signal handling on exactly this
+             prose-identifier mismatch and triggered the fix loop that
+             collapsed the run.)
+           - PASS: the literal is present byte-for-byte, OR missing but an
+             ADR names it AND it is a contract value the ADR justifies a
+             genuine substitution for.
+         Concretely: when a literal is missing, before deciding run
            grep -rn '<literal>' .ai/decisions/
-         to look for a documented deviation. If one exists and names
-         this literal, treat it as PASS (and surface the decision-log
-         path + rationale in your report so the operator can audit
-         it). If no decision-log entry exists, FAIL.
+         to look for a documented deviation, and check whether the
+         milestone's behavioral tests for that area are green. Surface the
+         decision-log path + rationale in your report so the operator can
+         audit it. No ADR (or failing behavioral tests) for a deviated
+         identifier ⇒ FAIL.
          Example workflow:
            - Spec section says: `gh pr list --head <owner>:<branch> --json number,headRefName,headRepository`
            - Run: `grep -rn '<owner>:<branch>' --include='*.go' .`
            - Run: `grep -rn 'headRepository' --include='*.go' .`
            - If output is empty, run `grep -rn '<owner>:<branch>' .ai/decisions/`
              and `grep -rn 'headRepository' .ai/decisions/` — a hit
-             with a rationale means PASS (cite the decision file);
-             no hit means FAIL (cite the missing literal).
+             with a rationale on a contract value means PASS (cite the
+             decision file); an ADR on a behaviorally-verified PROSE
+             identifier means WARN; no hit means FAIL (cite the missing
+             literal).
 
       4. TEST-VERIFIES-CONTRACT: For each test
          touched by this milestone, read its assertions and ask: "If
@@ -1165,6 +1258,17 @@ workflow BuildProduct
          spec says "max 2 retries" (= 3 attempts) is FAIL. A test
          asserting a populated field that the spec marks as deferred
          (a "DO NOT implement" entry from this milestone) is FAIL.
+         TEST SHAPE: when the done-when names a concrete test shape — a
+         "built binary" smoke test, a "subprocess", a "real `gh`", an
+         end-to-end run through `main()` — the test must exercise that
+         exact harness. A "built binary" smoke contract requires
+         spawning the built binary (compile + run the process); an
+         in-process call to an unexported function is a weaker reading
+         that does NOT prove the wiring and is FAIL. This is the SAME
+         rubric the Implement prompt now self-applies before DONE, so a
+         test reaching here should already satisfy it — if it does not,
+         name the shape the done-when required and the weaker shape the
+         test used.
 
       5. SPEC GAPS BEYOND MILESTONE NOTES: For every SPEC.md bullet
          intersecting this milestone's file list (whether or not the
@@ -1260,8 +1364,29 @@ workflow BuildProduct
          outside scope. Walk the diff for files / functions / fields
          the milestone didn't ask for.
 
-      If every check passes: STATUS:success
-      If any check fails, describe exactly what failed (with the
+      SEVERITY TIERS (applies to every finding above):
+      Tag each finding FAIL, WARN, or PASS.
+        - FAIL = a contract or behavioral violation: the milestone does
+          not do what the spec requires, or a test does not verify the
+          contract, or a CONTRACT literal is wrong. Blocking.
+        - WARN = a deviation that is behaviorally correct and documented:
+          an illustrative/prose-named identifier differs from the spec
+          wording, the milestone's behavioral tests for it are green, AND
+          a `.ai/decisions/` ADR records the deviation. Non-blocking —
+          show your work (ADR path + passing test) but do NOT fail on it.
+        - PASS = satisfied as written.
+      WARN is reserved for the check-3 SPEC-LITERAL prose-identifier case
+      ONLY. Scope violations (check 2 / check 7), unmet behavior, and tests
+      that don't verify the contract (check 4) are FAIL when violated —
+      never WARN, even with an ADR.
+      WARN findings are recorded, not gated: a milestone whose only
+      open items are WARN still passes. Do NOT escalate a WARN to FAIL
+      just because an identifier didn't match prose — that false-positive
+      FAIL is what this tier exists to prevent.
+
+      If every check is PASS or WARN: STATUS:success (list any WARNs with
+      their ADR + passing-test citations so the operator can audit them).
+      If any check is FAIL, describe exactly what failed (with the
       file:line, grep output, or failing assertion) and: STATUS:fail
 
       ---
@@ -1371,6 +1496,13 @@ workflow BuildProduct
     retry_target: TestMilestone
     max_retries: 5
     fallback_target: EscalateMilestone
+    # Turn-limit commit-if-green guard (#406). The fix loop is the node that
+    # actually reached green at turn 47 in run 634a2527ff56 and then burned the
+    # budget on read-only `git status` — without this verifier its breach
+    # classified operator_decision and the green fix was abandoned uncommitted.
+    # Exit 0 → verified_green → the verified_green edge below commits the tree.
+    params:
+      verify_command: sh .ai/build/verify.sh
     prompt:
       FIRST, in one turn, read .ai/build/build-context.md for orientation — it
       holds an architecture map and a one-entry-per-milestone log (files touched
@@ -2156,16 +2288,39 @@ workflow BuildProduct
   human EscalateMilestone
     label: "Milestone stuck — pick how to proceed"
     mode: freeform
+    # #407: `mark done` is FIRST and the default so the unattended path (freeform
+    # labels[0] fallback + default_choice) preserves work — it NEVER discards.
+    # `abandon` is demoted to the destructive last resort. The "Verify currently"
+    # block surfaces the live build/verify output that routed here so a green,
+    # passing tree is never thrown away by an operator who wasn't told it passes
+    # (run 634a2527ff56 abandoned a green build). A green-at-breach turn limit no
+    # longer even reaches this gate — #406 routes it to CommitIfDirty — but other
+    # paths (a Verify false-positive over passing tests, an escalate sentinel)
+    # can still land here on a green tree, so the state must be shown.
     default: mark done
     prompt:
       The build loop hit a wall on the current milestone.
       The agent tried to fix it but couldn't get tests to pass.
 
+      READ "Verify currently" at the END of this prompt before choosing. If it
+      shows PASS the tree is GREEN — do NOT abandon; pick **mark done** (or
+      **accept** to ship). Abandoning a passing tree discards finished work.
+
       Options:
-      - **mark done**: Override the test failure — you've verified the milestone is complete. Continues to the next milestone.
-      - **retry**: Re-implement this milestone from scratch. Does NOT re-plan.
+      - **mark done** (default; chosen automatically for unattended runs): Override the failure — you've confirmed the milestone is complete. Commits/continues to the next milestone. Preserves work.
+      - **retry**: Re-implement this milestone from scratch. Does NOT re-plan. Preserves prior commits.
       - **accept**: Stop building more milestones and ship what exists — but still run the full cross-review, final build/test, and spec-compliance gates first (does NOT skip verification).
-      - **abandon**: Kill the pipeline immediately.
+      - **abandon**: DESTRUCTIVE LAST RESORT. Kill the pipeline immediately and discard uncommitted work. Only pick this if "Verify currently" is FAIL and the build is genuinely unsalvageable.
+
+      ---
+      ## Verify currently
+
+      Tail of the most recent build/verify output (64KB cap) that routed here —
+      the live milestone state. A green `tests-pass` / passing build means the
+      tree is COMPLETE; a failure or `escalate` marker means it is not. Delimited
+      under its own heading — never interpolated mid-sentence.
+
+      ${ctx.tool_stdout}
 
   human EscalateReview
     label: "Review flagged issues — pick how to proceed"
@@ -2327,6 +2482,36 @@ workflow BuildProduct
     VerifyMilestone -> FixMilestone  when ctx.outcome = fail
     VerifyMilestone -> EscalateMilestone
     MarkMilestoneDone -> PickNextMilestone  restart: true
+    # #406: a turn-limit breach that reached a GREEN tree (verify_command exit 0)
+    # classifies verified_green (outcome=success). Commit the finished work via
+    # the same durable-persistence node the #318 commit_advance path uses, then
+    # re-verify through TestMilestone. Narrow `= verified_green` so a normal
+    # (non-breach) fix carries no turn_breach_class and still falls through to
+    # the warm restart loop below.
+    #
+    # PR #411 (Codex P1): turn_breach_class is STICKY in context, so a
+    # verified_green value left by an EARLIER milestone's breach could route a
+    # later NORMAL fail (outcome=fail) down the commit edge and checkpoint a
+    # non-green tree. The ideal guard is a compound `verified_green AND
+    # outcome=success`, but compound conditions are unavailable on this path —
+    # dippin rejects `&&` (DIP010) and tracker's edge evaluator can't parse the
+    # `and` keyword (it splits only on `&&`/`||`). Instead we exploit first-match
+    # edge ordering (selectByCondition returns the first matching edge in
+    # declaration order): a `when ctx.outcome = fail -> TestMilestone` edge
+    # declared BEFORE the commit edge short-circuits EVERY fail back to re-verify,
+    # so a stale verified_green class can never commit a non-green tree. Only a
+    # genuine green breach (outcome=success) falls past it to the commit edge.
+    #
+    # NOTE: these conditional edges make FixMilestone `hasAnyConditionalEdge`,
+    # which disables engine strict-fail on this node — so a pathological/non-green
+    # breach no longer escalates via fallback_target. Instead its outcome=fail
+    # routes it (via the first edge below) to TestMilestone, which deterministically
+    # re-runs verify.sh on the (still non-green) tree, increments the on-disk
+    # fix-attempt counter, and escalates to EscalateMilestone once that counter
+    # exceeds its cap (bounded, counter-driven escalation; no infinite loop, no
+    # work loss).
+    FixMilestone -> TestMilestone  when ctx.outcome = fail  restart: true
+    FixMilestone -> CommitIfDirty  when ctx.turn_breach_class = verified_green  restart: true
     FixMilestone -> TestMilestone  restart: true
 
     # Milestone escalation — human decides per-milestone
