@@ -64,16 +64,13 @@ func TestBuildProductIssue392AcceptDoesNotBypassVerification(t *testing.T) {
 // later milestone's pre-seeded package is red. The whole-tree suite still runs
 // at FinalBuild before anything ships.
 //
-// This is a string-level guard because the gate logic lives inline in the .dip
-// tool command; issue #398 tracks extracting it to a bats-testable script file,
-// at which point this becomes a real script test.
+// This is a string-level guard. As of #406 the gate logic lives in the shared
+// .ai/build/verify.sh script (written by Setup, delegated to by TestMilestone
+// and the Implement/FixMilestone breach verify_command) — a single source of
+// truth — so the guard reads that extracted script, not TestMilestone's thin
+// wrapper.
 func TestBuildProductIssue392MilestoneScopedTestGate(t *testing.T) {
-	g := loadBuildProduct(t)
-	n, ok := g.Nodes["TestMilestone"]
-	if !ok {
-		t.Fatal("TestMilestone node missing from build_product.dip (issue #392)")
-	}
-	cmd := n.ToolConfig().Command
+	cmd := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF")
 	for _, marker := range []string{"milestone-start-sha", "GO_TEST_TARGET"} {
 		if !strings.Contains(cmd, marker) {
 			t.Errorf("TestMilestone command no longer references %q — the milestone-scoped go test gate may have reverted to whole-tree (issue #392)", marker)

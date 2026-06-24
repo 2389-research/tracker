@@ -66,9 +66,39 @@ func stackEnv(t *testing.T, stubLog string, extra ...string) []string {
 	return append(env, extra...)
 }
 
+// extractHeredoc returns the body of the `<<'EOF' … EOF` heredoc written into
+// `path` by `cmd`, i.e. the bytes between `cat > <path> <<'<term>'` and the
+// terminator line. Used to provision the SAME .ai/build/verify.sh that Setup
+// writes at runtime, so the TestMilestone suite exercises the real shared gate
+// (issue #406 — single source of truth) instead of a hand-copied duplicate.
+func extractHeredoc(t *testing.T, cmd, path, term string) string {
+	t.Helper()
+	open := "cat > " + path + " <<'" + term + "'"
+	lines := strings.Split(cmd, "\n")
+	start := -1
+	for i, ln := range lines {
+		if strings.TrimSpace(ln) == open {
+			start = i + 1
+			break
+		}
+	}
+	if start == -1 {
+		t.Fatalf("heredoc opener %q not found in tool_command", open)
+	}
+	for i := start; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == term {
+			return strings.Join(lines[start:i], "\n") + "\n"
+		}
+	}
+	t.Fatalf("heredoc terminator %q not found after opener", term)
+	return ""
+}
+
 // setupRunDir creates a workdir with the .ai scaffolding both tool nodes
-// expect: a no-op ci-probe.sh (the #299 gate is covered by its own suite)
-// and the milestones dir TestMilestone writes its attempt counter into.
+// expect: a no-op ci-probe.sh (the #299 gate is covered by its own suite),
+// the .ai/build/verify.sh shared green-gate extracted from Setup (the script
+// TestMilestone now delegates to — issue #406), and the milestones dir
+// TestMilestone writes its attempt counter into.
 func setupRunDir(t *testing.T, stackFiles ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -79,6 +109,8 @@ func setupRunDir(t *testing.T, stackFiles ...string) string {
 	}
 	mustWrite(t, filepath.Join(dir, ".ai/build/ci-probe.sh"),
 		"run_project_ci_gate() { return \"${STUB_CI_RC:-0}\"; }\n")
+	mustWrite(t, filepath.Join(dir, ".ai/build/verify.sh"),
+		extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF"))
 	for _, f := range stackFiles {
 		mustWrite(t, filepath.Join(dir, f), "{}\n")
 	}

@@ -112,11 +112,17 @@ func TestQualityGateRc2OnlyMakeMissing(t *testing.T) {
 
 // Test 7 — regression-pin: the gate stays CENTRALIZED. Both callers must still
 // source ci-probe.sh and call run_project_ci_gate (one helper, two callers — no
-// duplicated gate logic in the caller bodies).
+// duplicated gate logic in the caller bodies). As of #406 the per-milestone
+// caller is the shared .ai/build/verify.sh (written by Setup, run by
+// TestMilestone and the Implement/FixMilestone breach verify_command), so the
+// guard reads that extracted script in place of TestMilestone's thin wrapper.
 func TestQualityGateStaysCentralized(t *testing.T) {
 	g := loadBuildProduct(t)
-	for _, id := range []string{"TestMilestone", "FinalBuild"} {
-		cmd := g.Nodes[id].Attrs["tool_command"]
+	gateCallers := map[string]string{
+		"verify.sh":  extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF"),
+		"FinalBuild": g.Nodes["FinalBuild"].Attrs["tool_command"],
+	}
+	for id, cmd := range gateCallers {
 		if !strings.Contains(cmd, ". .ai/build/ci-probe.sh") {
 			t.Errorf("%s no longer sources ci-probe.sh (#299)", id)
 		}

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`build_product` dogfood hardening — green-tree durability, artifact hygiene,
+  and spec-contract grading** (case study: run `634a2527ff56`; closes #405, #406,
+  #407, #408, #409). One super-PR fixing a cascade where a finished, green build
+  was discarded:
+  - **#406 — turn-limit green fix abandoned uncommitted.** The `commit-if-green`
+    breach guard (#303/#297) was never reached on the `Implement`/`FixMilestone`
+    fix loop because no `verify_command` was wired, so a breach with a passing
+    tree classified as `operator_decision` instead of `verified_green`. Fixed by
+    wiring a single shared green gate: `Setup` writes `.ai/build/verify.sh`,
+    `TestMilestone` delegates to it, and `Implement`/`FixMilestone` set
+    `params: verify_command: sh .ai/build/verify.sh`. A
+    `FixMilestone -> CommitIfDirty when ctx.turn_breach_class = verified_green`
+    edge (`restart: true`) now commits the green tree before escalating.
+  - **#405 — build artifacts swept into checkpoint commits.** `Setup` now seeds
+    `.gitignore` with toolchain build outputs (not just `.ai/`), and
+    `CommitIfDirty` detects untracked executable binaries (git-native
+    `git diff --no-index --numstat` binary check) and gitignores them instead of
+    committing, so a compiled binary like `goblin` no longer FAILs Verify as
+    out-of-scope work.
+  - **#407 — escalation discarded green trees silently.** `EscalateMilestone` now
+    surfaces the live verify result (`${ctx.tool_stdout}`), defaults to "mark
+    done" (preserving finished work on the unattended path), and reframes
+    `abandon` as a destructive last resort.
+  - **#408 — behaviorally-correct code FAILed over prose identifiers.**
+    `VerifyMilestone` gains an ADR-aware three-tier severity system (FAIL / WARN /
+    PASS). A prose-named identifier that differs from the spec wording but whose
+    behavioral tests are green and which is documented in a `.ai/decisions/` ADR
+    now WARNs instead of hard-FAILing. WARN is reserved for the spec-literal case;
+    scope, unmet-behavior, and test-contract violations remain categorical FAILs.
+  - **#409 — tests that pass but don't verify the contract.** `Implement` now
+    self-applies the same `TEST-VERIFIES-CONTRACT` rubric `VerifyMilestone` grades
+    against, including a test-shape rule: a "built binary" smoke test must spawn
+    the built binary, not call an unexported function in-process.
+
 ## [0.40.0] - 2026-06-22
 
 ### Added
