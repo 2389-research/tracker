@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Multi-Agent Pipeline Orchestration on Tracker</title><link>https://2389-research.github.io/tracker/index.html</link><description>Recent content in Multi-Agent Pipeline Orchestration on Tracker</description><generator>Hugo</generator><language>en</language><atom:link href="https://2389-research.github.io/tracker/index.xml" rel="self" type="application/rss+xml"/><item><title>Architecture</title><link>https://2389-research.github.io/tracker/architecture.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/architecture.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Architecture&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Three layers, clean boundaries. The engine doesn&amp;rsquo;t know about parallel execution. The LLM client doesn&amp;rsquo;t know about pipelines.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#layers"&gt;System layers&lt;/a&gt;
+ &lt;a href="#engine"&gt;Run loop&lt;/a&gt;
+ &lt;a href="#handlers"&gt;Handlers&lt;/a&gt;
+ &lt;a href="#adapter"&gt;Dippin adapter&lt;/a&gt;
+ &lt;a href="#backends"&gt;Agent backends&lt;/a&gt;
+ &lt;a href="#agent-tools"&gt;Agent tools&lt;/a&gt;
+ &lt;a href="#state"&gt;State &amp;amp; resume&lt;/a&gt;
+ &lt;a href="#llm-client"&gt;LLM client&lt;/a&gt;
+ &lt;a href="#tui"&gt;TUI&lt;/a&gt;
+ &lt;a href="#library-api"&gt;Library API&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ System layers ═══ --&gt;
+ &lt;section class="glass" id="layers"&gt;
+ &lt;h2&gt;System &lt;span class="accent"&gt;layers&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="layers-key"&gt;
+ Each box: &lt;strong&gt;layer name&lt;/strong&gt; &amp;middot; &lt;code&gt;source path&lt;/code&gt; &amp;middot; what it owns.
+ &lt;/p&gt;
+ &lt;div class="diagram diagram-layers"&gt;
+ &lt;div class="mermaid"&gt;
+graph TB
+ CLI["&lt;span class='ly-name'&gt;CLI&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;cmd/tracker&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;flags &amp;middot; name resolution &amp;middot; TUI &amp;middot; embedded workflows&lt;/span&gt;"]
+ Engine["&lt;span class='ly-name'&gt;Pipeline Engine&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;pipeline/&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;run loop &amp;middot; edge selection &amp;middot; checkpoints &amp;middot; budget guard &amp;middot; steering channel&lt;/span&gt;"]
+ Handlers["&lt;span class='ly-name'&gt;Handlers&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;pipeline/handlers&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;codergen &amp;middot; tool &amp;middot; human &amp;middot; parallel &amp;middot; fan_in &amp;middot; conditional &amp;middot; subgraph &amp;middot; manager_loop&lt;/span&gt;"]
+ Backends["&lt;span class='ly-name'&gt;Agent Backends&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;pipeline/backend.go&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;native &amp;middot; claude-code &amp;middot; acp&lt;/span&gt;"]
+ Agent["&lt;span class='ly-name'&gt;Agent Session&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;agent/&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;turn loop &amp;middot; tool registry &amp;middot; context compaction &amp;middot; episodic memory &amp;middot; verify-after-edit&lt;/span&gt;"]
+ LLM["&lt;span class='ly-name'&gt;LLM Client&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;llm/&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;Anthropic &amp;middot; OpenAI &amp;middot; Gemini &amp;middot; OpenAI-compat &amp;middot; retry &amp;middot; cost estimation&lt;/span&gt;"]
+
+ CLI --&gt; Engine --&gt; Handlers --&gt; Backends --&gt; Agent --&gt; LLM
+ &lt;/div&gt;
+ &lt;/div&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ Engine run loop ═══ --&gt;
+ &lt;section class="glass" id="engine"&gt;
+ &lt;h2&gt;The engine &lt;span class="accent"&gt;run loop&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="lead"&gt;
+ Every node is treated the same: execute the handler, evaluate edges, advance.
+ Parallel, subgraphs, human gates &amp;mdash; handlers encapsulate it all.
+ &lt;/p&gt;</description></item><item><title>Built-in Workflows</title><link>https://2389-research.github.io/tracker/workflows.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/workflows.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Built-in Workflows&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Four pipelines embedded in the binary. Run by name; customize with &lt;code&gt;tracker init&lt;/code&gt;.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#build-product"&gt;&lt;code&gt;build_product&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#ask-and-execute"&gt;&lt;code&gt;ask_and_execute&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#superspec"&gt;&lt;code&gt;build_product_with_superspec&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#deep-review"&gt;&lt;code&gt;deep_review&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#unattended"&gt;Run unattended&lt;/a&gt;
+ &lt;a href="#customize"&gt;Customize&lt;/a&gt;
+ &lt;a href="#testing"&gt;Testing&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ Honest framing ═══ --&gt;
+ &lt;section class="glass" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;p style="margin: 0;"&gt;
+ All four embedded workflows are &lt;strong&gt;coding-flavored&lt;/strong&gt; &amp;mdash; they shipped with
+ the binary because they were the original use case. The pipeline framework itself is
+ general: any sequence of LLM calls plus parallel branches plus human gates fits the
+ same &lt;code&gt;.dip&lt;/code&gt; shape. RAG, eval, content moderation, agent triage are all doable;
+ we just haven&amp;rsquo;t shipped opinionated templates for them yet. Pull requests welcome.
+ &lt;/p&gt;</description></item><item><title>Changelog</title><link>https://2389-research.github.io/tracker/changelog.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/changelog.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Changelog&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Every feature, fix, and breaking change. &lt;a href="https://github.com/2389-research/tracker/releases"&gt;All GitHub Releases &amp;rarr;&lt;/a&gt;&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="Versions"&gt;
+ &lt;a href="#v0-40-2"&gt;v0.40.2&lt;/a&gt;
+ &lt;a href="#v0-40-1"&gt;v0.40.1&lt;/a&gt;
+ &lt;a href="#v0-40-0"&gt;v0.40.0&lt;/a&gt;
+ &lt;a href="#v0-39-1"&gt;v0.39.1&lt;/a&gt;
+ &lt;a href="#v0-39-0"&gt;v0.39.0&lt;/a&gt;
+ &lt;a href="#v0-38-1"&gt;v0.38.1&lt;/a&gt;
+ &lt;a href="#v0-38-0"&gt;v0.38.0&lt;/a&gt;
+ &lt;a href="#v0-37-0"&gt;v0.37.0&lt;/a&gt;
+ &lt;a href="#v0-36-0"&gt;v0.36.0&lt;/a&gt;
+ &lt;a href="#v0-35-1"&gt;v0.35.1&lt;/a&gt;
+ &lt;strong&gt;Jump to:&lt;/strong&gt;
+ &lt;a href="#v0-35-0"&gt;v0.35.0&lt;/a&gt;
+ &lt;a href="#v0-34-0"&gt;v0.34.0&lt;/a&gt;
+ &lt;a href="#v0-33-0"&gt;v0.33.0&lt;/a&gt;
+ &lt;a href="#v0-32-0"&gt;v0.32.0&lt;/a&gt;
+ &lt;a href="#v0-31-0"&gt;v0.31.0&lt;/a&gt;
+ &lt;a href="#v0-30-0"&gt;v0.30.0&lt;/a&gt;
+ &lt;a href="#v0-29-2"&gt;v0.29.2&lt;/a&gt;
+ &lt;a href="#v0-29-1"&gt;v0.29.1&lt;/a&gt;
+ &lt;a href="#v0-29-0"&gt;v0.29.0&lt;/a&gt;
+ &lt;a href="#v0-28-2"&gt;v0.28.2&lt;/a&gt;
+ &lt;a href="#v0-28-1"&gt;v0.28.1&lt;/a&gt;
+ &lt;a href="#v0-28-0"&gt;v0.28.0&lt;/a&gt;
+ &lt;a href="#v0-27-0"&gt;v0.27.0&lt;/a&gt;
+ &lt;a href="#v0-26-0"&gt;v0.26.0&lt;/a&gt;
+ &lt;a href="#v0-25-1"&gt;v0.25.1&lt;/a&gt;
+ &lt;a href="#v0-25-0"&gt;v0.25.0&lt;/a&gt;
+ &lt;a href="#v0-24-2"&gt;v0.24.2&lt;/a&gt;
+ &lt;a href="#v0-24-1"&gt;v0.24.1&lt;/a&gt;
+ &lt;a href="#v0-24-0"&gt;v0.24.0&lt;/a&gt;
+ &lt;a href="#v0-23-0"&gt;v0.23.0&lt;/a&gt;
+ &lt;a href="#v0-22-0"&gt;v0.22.0&lt;/a&gt;
+ &lt;a href="#v0-21-0"&gt;v0.21.0&lt;/a&gt;
+ &lt;a href="#v0-20-0"&gt;v0.20.0&lt;/a&gt;
+ &lt;a href="#v0-19-0"&gt;v0.19.0&lt;/a&gt;
+ &lt;a href="#v0-18-0"&gt;v0.18.0&lt;/a&gt;
+ &lt;a href="#v0-17-0"&gt;v0.17.0&lt;/a&gt;
+ &lt;a href="#v0-16-x"&gt;v0.16.x&lt;/a&gt;
+ &lt;a href="#v0-15-0"&gt;v0.15.0&lt;/a&gt;
+ &lt;a href="#v0-14-0"&gt;v0.14.0&lt;/a&gt;
+ &lt;a href="#v0-13-0"&gt;v0.13.0&lt;/a&gt;
+ &lt;a href="#v0-12-1"&gt;v0.12.1&lt;/a&gt;
+ &lt;a href="#v0-12-0"&gt;v0.12.0&lt;/a&gt;
+ &lt;a href="#v0-11-2"&gt;v0.11.2&lt;/a&gt;
+ &lt;a href="#v0-11-0"&gt;v0.11.0&lt;/a&gt;
+ &lt;a href="#v0-10-x"&gt;v0.10.x&lt;/a&gt;
+ &lt;a href="#v0-9-x"&gt;v0.9.x&lt;/a&gt;
+ &lt;a href="#v0-8-0"&gt;v0.8.0&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ v0.40.2 ═══ --&gt;
+ &lt;section class="glass" id="v0-40-2" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.40.2" style="color: inherit; text-decoration: none;"&gt;v0.40.2&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-06-24&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.40.2" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;p style="color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;strong&gt;Human gates now display their authored &lt;code&gt;prompt:&lt;/code&gt; body, and &lt;code&gt;build_product&lt;/code&gt;'s
+ plan-approval gate finally shows the actual plan.&lt;/strong&gt; One fix, one behavioral change; no breaking
+ changes; core embedded workflows hold their A grades on &lt;code&gt;dippin doctor&lt;/code&gt;.
+ &lt;/p&gt;</description></item><item><title>CLI Reference</title><link>https://2389-research.github.io/tracker/cli.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/cli.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;CLI Reference&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Every command, flag, and resolution rule. Install and operate tracker from the terminal.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#install"&gt;Install&lt;/a&gt;
+ &lt;a href="#commands"&gt;Commands&lt;/a&gt;
+ &lt;a href="#flags"&gt;Flags&lt;/a&gt;
+ &lt;a href="#exit-codes"&gt;Exit codes&lt;/a&gt;
+ &lt;a href="#tool-safety"&gt;Tool safety&lt;/a&gt;
+ &lt;a href="#name-resolution"&gt;Name resolution&lt;/a&gt;
+ &lt;a href="#env-vars"&gt;Environment variables&lt;/a&gt;
+ &lt;a href="#autopilot"&gt;Autopilot&lt;/a&gt;
+ &lt;a href="#backends"&gt;Backends&lt;/a&gt;
+ &lt;a href="#swebench"&gt;&lt;code&gt;tracker-swebench&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#troubleshooting"&gt;Troubleshooting&lt;/a&gt;
+ &lt;a href="#diagnose"&gt;Diagnose intelligence&lt;/a&gt;
+ &lt;a href="#quick-reference"&gt;Quick reference&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ Install ═══ --&gt;
+ &lt;section class="glass" id="install"&gt;
+ &lt;h2&gt;&lt;span class="accent"&gt;Install&lt;/span&gt;&lt;/h2&gt;
+ &lt;pre data-lang="bash"&gt;&lt;code&gt;&lt;span class="comment"&gt;# Go install (binary includes embedded workflows)&lt;/span&gt;
+&lt;span class="keyword"&gt;go install&lt;/span&gt; github.com/2389-research/tracker/cmd/tracker@latest
+
+&lt;span class="comment"&gt;# Homebrew&lt;/span&gt;
+&lt;span class="keyword"&gt;brew install&lt;/span&gt; 2389-research/tap/tracker
+
+&lt;span class="comment"&gt;# Or build from source&lt;/span&gt;
+&lt;span class="keyword"&gt;git clone&lt;/span&gt; https://github.com/2389-research/tracker
+&lt;span class="keyword"&gt;cd&lt;/span&gt; tracker &amp;&amp; &lt;span class="keyword"&gt;make&lt;/span&gt; install
+
+&lt;span class="comment"&gt;# Verify installation&lt;/span&gt;
+tracker doctor
+
+&lt;span class="comment"&gt;# Stay current (checks automatically, or run manually)&lt;/span&gt;
+tracker update&lt;/code&gt;&lt;/pre&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ Commands ═══ --&gt;
+ &lt;section class="glass" id="commands"&gt;
+ &lt;h2&gt;Commands&lt;/h2&gt;
+
+ &lt;h3 style="margin-top: 1.5rem;"&gt;Running Pipelines&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Run a pipeline. Accepts a file path (&lt;code&gt;build_product.dip&lt;/code&gt;, &lt;code&gt;build.dipx&lt;/code&gt;), bare name (&lt;code&gt;build_product&lt;/code&gt;), or path with slash. &lt;code&gt;.dipx&lt;/code&gt; bundles are SHA-256-verified at load time and the bundle identity is threaded through every audit surface. &lt;span class="badge"&gt;.dipx v0.26.0&lt;/span&gt; Opens TUI dashboard by default.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker -r &amp;lt;id&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Resume a previous run by ID. Prefix matching works &amp;mdash; &lt;code&gt;-r 7813b&lt;/code&gt; is enough if unambiguous.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --no-tui &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Run in console mode (no dashboard). Human gates use inline prompts. Auto-selected when stdin is not a TTY.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --json &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Stream events as newline-delimited JSON to stdout. Implies &lt;code&gt;--no-tui&lt;/code&gt;. For CI/programmatic consumption.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Workflow Management&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker workflows&lt;/code&gt;
+ &lt;div class="desc"&gt;List all embedded built-in workflows with display names and goals.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker init &amp;lt;name&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Copy a built-in workflow to &lt;code&gt;./name.dip&lt;/code&gt; in the current directory. Refuses to overwrite existing files.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Validation &amp;amp; Simulation&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker validate &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Check pipeline structure &amp;mdash; parsing, structural validation, semantic validation, lint. Exits 1 on errors. Supports bare names. Accepts &lt;code&gt;.dip&lt;/code&gt;, &lt;code&gt;.dot&lt;/code&gt;, and &lt;code&gt;.dipx&lt;/code&gt; bundles. &lt;span class="badge"&gt;.dipx v0.26.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker simulate &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes, and graph-level attrs (sorted, deterministic). No LLM calls. Supports bare names. Accepts &lt;code&gt;.dip&lt;/code&gt;, &lt;code&gt;.dot&lt;/code&gt;, and &lt;code&gt;.dipx&lt;/code&gt; bundles. &lt;span class="badge"&gt;.dipx v0.26.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Headless &amp;amp; Integration&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --webhook-url &amp;lt;url&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Fully headless. Every human gate is POSTed as JSON to &lt;code&gt;&amp;lt;url&amp;gt;&lt;/code&gt;; the pipeline blocks until a callback arrives at the local callback server. Slack bots, email approval, mobile push. Mutually exclusive with &lt;code&gt;--autopilot&lt;/code&gt; and &lt;code&gt;--auto-approve&lt;/code&gt;. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --param key=value &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Override a workflow's top-level &lt;code&gt;vars&lt;/code&gt; (available as &lt;code&gt;${params.key}&lt;/code&gt;). Repeatable. Unknown keys hard-fail at startup. &lt;span class="badge"&gt;v0.19.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --export-bundle &amp;lt;path&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;After the pipeline completes, package the full artifact run directory as a portable git bundle (&lt;code&gt;git bundle create --all&lt;/code&gt;). Clone with &lt;code&gt;git clone &amp;lt;bundle&amp;gt;&lt;/code&gt; on any machine to inspect every commit and checkpoint tag. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --gateway-url &amp;lt;url&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Route every provider through a &lt;a href="https://developers.cloudflare.com/ai-gateway/"&gt;Cloudflare AI Gateway&lt;/a&gt;. Tracker appends the per-provider suffix (&lt;code&gt;/anthropic&lt;/code&gt;, &lt;code&gt;/openai&lt;/code&gt;, &lt;code&gt;/google-ai-studio&lt;/code&gt;, &lt;code&gt;/compat&lt;/code&gt;). Equivalent to &lt;code&gt;TRACKER_GATEWAY_URL&lt;/code&gt;. Per-provider &lt;code&gt;*_BASE_URL&lt;/code&gt; env vars still win. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Autopilot&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --autopilot &amp;lt;persona&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Replace all human gates with LLM-backed decisions. Personas: &lt;code&gt;lax&lt;/code&gt;, &lt;code&gt;mid&lt;/code&gt; (default), &lt;code&gt;hard&lt;/code&gt;, &lt;code&gt;mentor&lt;/code&gt;.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --auto-approve &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Deterministic auto-approval of all human gates. No LLM calls &amp;mdash; always picks the default or first option. For CI and testing.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Diagnostics&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker doctor [pipeline]&lt;/code&gt;
+ &lt;div class="desc"&gt;Preflight health check. Per-provider API key validation (masked), dippin binary version, &lt;code&gt;.ai/&lt;/code&gt; writability, disk space, &lt;code&gt;.gitignore&lt;/code&gt; hygiene, dangerous env var warnings. Live per-provider auth validation with a 1-token call runs by default; pass &lt;code&gt;--probe=false&lt;/code&gt; to skip it. Optional pipeline arg runs full lint. Exit code 2 on warnings-only. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker diagnose [runID]&lt;/code&gt;
+ &lt;div class="desc"&gt;Deep failure analysis. Reads &lt;code&gt;status.json&lt;/code&gt; + &lt;code&gt;activity.jsonl&lt;/code&gt;. Shows tool output, stderr, errors, timing anomalies, actionable suggestions (deterministic failure pattern, escalation hit, suspicious timing, budget halt). Without ID, analyzes the most recent run.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker audit &amp;lt;runID&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Full audit report: timeline, retries, errors, recommendations. For post-hoc analysis of any run.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker list&lt;/code&gt;
+ &lt;div class="desc"&gt;List recent pipeline runs with timestamps, status, and node count.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Setup&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker setup&lt;/code&gt;
+ &lt;div class="desc"&gt;Interactive provider configuration wizard. Saves keys to &lt;code&gt;~/.config/tracker/.env&lt;/code&gt;.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker version&lt;/code&gt;
+ &lt;div class="desc"&gt;Show version, commit hash, build time, and configured providers.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker update&lt;/code&gt;
+ &lt;div class="desc"&gt;Self-update to latest release. Downloads from GitHub, verifies SHA256 checksum, smoke-tests the binary, and atomically replaces with &lt;code&gt;.bak&lt;/code&gt; rollback. Detects Homebrew and &lt;code&gt;go install&lt;/code&gt; and advises accordingly.&lt;/div&gt;
+ &lt;/div&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ Flags ═══ --&gt;
+ &lt;section class="glass" id="flags"&gt;
+ &lt;h2&gt;Flags&lt;/h2&gt;
+ &lt;p&gt;Flags can appear before or after the pipeline argument.&lt;/p&gt;</description></item><item><title>Glossary</title><link>https://2389-research.github.io/tracker/glossary.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/glossary.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Glossary&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Terminology used across Tracker pipelines, the Dippin language, and the multi-agent runtime.&lt;/p&gt;
+&lt;/section&gt;
+
+&lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#pipeline"&gt;Pipeline &amp;amp; runtime&lt;/a&gt;
+ &lt;a href="#dippin"&gt;Dippin language&lt;/a&gt;
+ &lt;a href="#agents"&gt;Agents &amp;amp; backends&lt;/a&gt;
+ &lt;a href="#handlers"&gt;Node handlers&lt;/a&gt;
+ &lt;a href="#routing"&gt;Routing &amp;amp; outcome&lt;/a&gt;
+ &lt;a href="#governance"&gt;Governance&lt;/a&gt;
+ &lt;a href="#artifacts"&gt;Artifacts &amp;amp; inspection&lt;/a&gt;
+&lt;/nav&gt;
+
+&lt;section class="glass" id="pipeline"&gt;
+ &lt;h2&gt;Pipeline &amp;amp; &lt;span class="accent"&gt;runtime&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="lead"&gt;The core abstractions the engine works with.&lt;/p&gt;
+ &lt;div class="grid-2" style="margin-top: 1.25rem;"&gt;
+ &lt;div class="glass glass-sm"&gt;&lt;h4&gt;Pipeline&lt;/h4&gt;&lt;p&gt;A directed graph of nodes connected by edges, plus shared context. Defined in a &lt;code&gt;.dip&lt;/code&gt; file and executed by the engine.&lt;/p&gt;&lt;/div&gt;
+ &lt;div class="glass glass-sm"&gt;&lt;h4&gt;Engine&lt;/h4&gt;&lt;p&gt;The Tracker runtime that walks the graph: pick a node, execute its handler, evaluate outgoing edges, advance. Treats every node the same &amp;mdash; no special-cases for parallel or fan-in.&lt;/p&gt;</description></item></channel></rss>

@@ -1,0 +1,19 @@
+# Tracker
+
+> Multi-agent LLM pipeline orchestration with hard cost ceilings, parallel branches in git worktrees, and a live TUI. Define workflows in a small text file (`.dip`); every run is a git commit you can diff and replay. Built by 2389.ai.
+
+## Documentation
+
+- [Home](https://2389-research.github.io/tracker/): What tracker is and how to install + run it in 60 seconds.
+- [Workflows](https://2389-research.github.io/tracker/workflows.html): Built-in pipelines (`ask_and_execute`, `build_product`, `build_product_with_superspec`) and how `.dip` files are structured.
+- [Architecture](https://2389-research.github.io/tracker/architecture.html): Engine, nodes, edges, backends (native / Claude Code / ACP), checkpoints, parallel execution, budget governance.
+- [CLI Reference](https://2389-research.github.io/tracker/cli.html): Every flag and subcommand — `run`, `validate`, `simulate`, `doctor`, `diagnose`, `audit`, `init`, `workflows`, `update`, `version`.
+- [Changelog](https://2389-research.github.io/tracker/changelog.html): Release history with breaking changes and feature notes.
+- [Glossary](https://2389-research.github.io/tracker/glossary.html): Terminology used across the docs and `.dip` files.
+
+## Source
+
+- [GitHub repository](https://github.com/2389-research/tracker): Source code, issue tracker, and tagged releases.
+- [AGENTS.md](https://2389-research.github.io/tracker/AGENTS.md): Agent-readable orientation for this site.
+- [sitemap.xml](https://2389-research.github.io/tracker/sitemap.xml): Machine-readable URL index.
+- [sitemap.md](https://2389-research.github.io/tracker/sitemap.md): Human-readable URL index.
