@@ -112,18 +112,21 @@ func TestVerifyMilestoneMentionsCoverageGate(t *testing.T) {
 }
 
 // Test 7 — regression-pin: Decompose's out-edges are EXACTLY the conditional
-// success→ApprovePlan and fail→EscalateReview pair. No new edge, no unconditional
+// success→ShowPlan and fail→EscalateReview pair. No new edge, no unconditional
 // fallback (which CLAUDE.md forbids near loop targets). Use OutgoingEdges (filters
 // on e.From) — NOT a loose g.Edges scan, which the incoming restart edges
 // ApprovePlan->Decompose and ResetReviewBudget->Decompose would pollute.
+// (Success now funnels through ShowPlan, which reads the plan files into
+// ctx.tool_stdout before the ApprovePlan review gate — see
+// build_product_plan_review_test.go.)
 func TestDecomposeOutEdgesUnchanged(t *testing.T) {
 	g := loadBuildProduct(t)
 	out := g.OutgoingEdges("Decompose")
 	if len(out) != 2 {
 		t.Fatalf("Decompose has %d out-edges, want exactly 2 (#300)", len(out))
 	}
-	if !hasEdgeWithCondition(g, "Decompose", "ApprovePlan", "ctx.outcome = success") {
-		t.Error("Decompose lost its success→ApprovePlan edge (#300)")
+	if !hasEdgeWithCondition(g, "Decompose", "ShowPlan", "ctx.outcome = success") {
+		t.Error("Decompose lost its success→ShowPlan plan-review edge (#300)")
 	}
 	if !hasEdgeWithCondition(g, "Decompose", "EscalateReview", "ctx.outcome = fail") {
 		t.Error("Decompose lost its fail→EscalateReview edge (#300)")

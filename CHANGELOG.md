@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.2] - 2026-06-24
+
+### Changed
+
+- **`build_product` plan-approval gate now shows the actual plan.** The
+  `ApprovePlan` human gate previously displayed only its one-line label, so an
+  operator had no plan to review and could only rubber-stamp `approve`. A new
+  `ShowPlan` tool node cats `.ai/decisions/milestones.md` (the milestone plan)
+  and `.ai/decisions/requirement-coverage.md` (the spec-coverage table, with the
+  `COVERAGE_GAPS` count) into `ctx.tool_stdout`, and `ApprovePlan` interpolates
+  it under a `## Plan under review` heading — rendering the full plan in the
+  fullscreen review modal (same pattern as the #407 `EscalateMilestone` gate).
+  `Decompose` success now routes `-> ShowPlan -> ApprovePlan`; the
+  approve/adjust/reject routes are unchanged.
+
 ## [0.40.1] - 2026-06-24
 
 ### Fixed
