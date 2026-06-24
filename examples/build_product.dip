@@ -884,7 +884,13 @@ workflow BuildProduct
         why. Silent paraphrase ("--head <branch>" when the spec says
         "--head <owner>:<branch>") is the most common way milestones ship wrong.
 
-      TESTS VERIFY THE CONTRACT, NOT YOUR CODE:
+      TEST-VERIFIES-CONTRACT (run this rubric BEFORE you emit DONE):
+      - This is the SAME rubric VerifyMilestone grades you against (its check
+        "TEST-VERIFIES-CONTRACT"). Apply it yourself first so a passing-but-
+        non-verifying test never ships — that asymmetry is what forces an
+        expensive Fix loop (run 634a2527ff56: a green smoke test that called the
+        function in-process FAILed Verify and the fix had to invent a whole
+        subprocess seam from scratch).
       - Tests must verify the spec's requirement, not whatever your
         implementation happens to do. Read each assertion you write and ask:
         "If I deleted my production code and rewrote it differently but
@@ -894,6 +900,18 @@ workflow BuildProduct
         `attempts == 2` when the spec says "max 2 retries" (= 3 attempts):
         the test green-lights the off-by-one because it was written from the
         code, not from the spec.
+      - TEST SHAPE: when a milestone's done-when names a concrete test SHAPE —
+        a "built binary" smoke test, a "subprocess", a "real `gh`", an
+        end-to-end run through `main()` — the test MUST exercise that exact
+        harness. A "built binary" smoke contract requires actually spawning the
+        built binary (compile it, run the process, assert on its behavior); an
+        in-process call to an unexported function is a WEAKER reading that
+        passes locally but does NOT prove the wiring the contract demands, and
+        Verify will FAIL it. List each named test shape from the done-when as a
+        checklist item, satisfy it with the real harness, and cite the shape you
+        matched. If satisfying it needs production plumbing (an injection seam,
+        a build tag, fake-dependency flags), build that plumbing NOW — do not
+        defer it to a Fix loop.
       - Snapshot / golden-file tests: the FIRST version of every snapshot
         must be hand-verified against the spec, not regenerated from the
         current implementation's output. If your test framework supports an
@@ -1213,6 +1231,17 @@ workflow BuildProduct
          spec says "max 2 retries" (= 3 attempts) is FAIL. A test
          asserting a populated field that the spec marks as deferred
          (a "DO NOT implement" entry from this milestone) is FAIL.
+         TEST SHAPE: when the done-when names a concrete test shape — a
+         "built binary" smoke test, a "subprocess", a "real `gh`", an
+         end-to-end run through `main()` — the test must exercise that
+         exact harness. A "built binary" smoke contract requires
+         spawning the built binary (compile + run the process); an
+         in-process call to an unexported function is a weaker reading
+         that does NOT prove the wiring and is FAIL. This is the SAME
+         rubric the Implement prompt now self-applies before DONE, so a
+         test reaching here should already satisfy it — if it does not,
+         name the shape the done-when required and the weaker shape the
+         test used.
 
       5. SPEC GAPS BEYOND MILESTONE NOTES: For every SPEC.md bullet
          intersecting this milestone's file list (whether or not the
