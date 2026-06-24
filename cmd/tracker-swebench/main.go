@@ -166,7 +166,7 @@ Flags:
 		CacheDir:  cacheDir,
 		Timeout:   *timeout,
 		MemoryMB:  4096, // 4 GB
-		CPUs:      2.0,
+		CPUs:      1.0,
 		PidsLimit: 512,
 		RunLabel:  time.Now().Format("20060102-150405"),
 	}
@@ -241,7 +241,7 @@ Flags:
 		// Write the instance prompt to a temp file for mounting into the
 		// container. The prompt can be multiline and contain special chars
 		// that break Docker's --env-file format.
-		promptFile, promptErr := os.CreateTemp("", "swebench-prompt-*")
+		promptFile, promptErr := os.CreateTemp(absResultsDir, "swebench-prompt-*")
 		if promptErr != nil {
 			log.Printf("[%s] create prompt file: %v", inst.InstanceID, promptErr)
 			stats.addError(runErrorHarness)
