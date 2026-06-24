@@ -1162,28 +1162,46 @@ workflow BuildProduct
          strings, exact JSON key names, exact header names, exact
          integer constants, exact log key names — grep the
          implementation for that literal and write the grep command
-         and its result inline. A missing literal is FAIL UNLESS the
-         Implement step recorded an explicit deviation in
-         `.ai/decisions/` that names this literal and justifies the
-         deviation. (The Implement prompt gives
-         the implementing agent two options for any literal mismatch:
-         fix the implementation OR document the deviation in
-         `.ai/decisions/`. VerifyMilestone must honor the same
-         contract.) Concretely: when a literal is missing, before
-         declaring FAIL run
+         and its result inline. A missing literal resolves to one of
+         three severities (see the SEVERITY TIERS rule below); decide
+         per literal and cite your evidence:
+           - FAIL (blocking): the literal is a CONTRACT value — a wire
+             format, a JSON key, a header name, a numeric constant, an
+             exact command string — where a paraphrase changes observable
+             behavior. Missing + no covering ADR = FAIL. Silent paraphrase
+             (`--head <branch>` for `--head <owner>:<branch>`) is the
+             canonical ship-wrong; stays FAIL.
+           - WARN (non-blocking): the literal is an ILLUSTRATIVE API
+             identifier named in spec PROSE (e.g. `signal.NotifyContext`
+             when the code uses `signal.Notify` + a manual channel) AND
+             the milestone's own behavioral tests prove the implemented
+             form is equivalent (the relevant tests are green) AND a
+             `.ai/decisions/` ADR documents the deviation. All three
+             hold → WARN, not FAIL: cite the ADR path, the passing test,
+             and why the behavior is equivalent. (Run 634a2527ff56 hard-
+             FAILed behaviorally-correct signal handling on exactly this
+             prose-identifier mismatch and triggered the fix loop that
+             collapsed the run.)
+           - PASS: the literal is present byte-for-byte, OR missing but an
+             ADR names it AND it is a contract value the ADR justifies a
+             genuine substitution for.
+         Concretely: when a literal is missing, before deciding run
            grep -rn '<literal>' .ai/decisions/
-         to look for a documented deviation. If one exists and names
-         this literal, treat it as PASS (and surface the decision-log
-         path + rationale in your report so the operator can audit
-         it). If no decision-log entry exists, FAIL.
+         to look for a documented deviation, and check whether the
+         milestone's behavioral tests for that area are green. Surface the
+         decision-log path + rationale in your report so the operator can
+         audit it. No ADR (or failing behavioral tests) for a deviated
+         identifier ⇒ FAIL.
          Example workflow:
            - Spec section says: `gh pr list --head <owner>:<branch> --json number,headRefName,headRepository`
            - Run: `grep -rn '<owner>:<branch>' --include='*.go' .`
            - Run: `grep -rn 'headRepository' --include='*.go' .`
            - If output is empty, run `grep -rn '<owner>:<branch>' .ai/decisions/`
              and `grep -rn 'headRepository' .ai/decisions/` — a hit
-             with a rationale means PASS (cite the decision file);
-             no hit means FAIL (cite the missing literal).
+             with a rationale on a contract value means PASS (cite the
+             decision file); an ADR on a behaviorally-verified PROSE
+             identifier means WARN; no hit means FAIL (cite the missing
+             literal).
 
       4. TEST-VERIFIES-CONTRACT: For each test
          touched by this milestone, read its assertions and ask: "If
@@ -1290,8 +1308,29 @@ workflow BuildProduct
          outside scope. Walk the diff for files / functions / fields
          the milestone didn't ask for.
 
-      If every check passes: STATUS:success
-      If any check fails, describe exactly what failed (with the
+      SEVERITY TIERS (applies to every finding above):
+      Tag each finding FAIL, WARN, or PASS.
+        - FAIL = a contract or behavioral violation: the milestone does
+          not do what the spec requires, or a test does not verify the
+          contract, or a CONTRACT literal is wrong. Blocking.
+        - WARN = a deviation that is behaviorally correct and documented:
+          an illustrative/prose-named identifier differs from the spec
+          wording, the milestone's behavioral tests for it are green, AND
+          a `.ai/decisions/` ADR records the deviation. Non-blocking —
+          show your work (ADR path + passing test) but do NOT fail on it.
+        - PASS = satisfied as written.
+      WARN is reserved for the check-3 SPEC-LITERAL prose-identifier case
+      ONLY. Scope violations (check 2 / check 7), unmet behavior, and tests
+      that don't verify the contract (check 4) are FAIL when violated —
+      never WARN, even with an ADR.
+      WARN findings are recorded, not gated: a milestone whose only
+      open items are WARN still passes. Do NOT escalate a WARN to FAIL
+      just because an identifier didn't match prose — that false-positive
+      FAIL is what this tier exists to prevent.
+
+      If every check is PASS or WARN: STATUS:success (list any WARNs with
+      their ADR + passing-test citations so the operator can audit them).
+      If any check is FAIL, describe exactly what failed (with the
       file:line, grep output, or failing assertion) and: STATUS:fail
 
       ---
