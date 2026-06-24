@@ -766,10 +766,69 @@ workflow BuildProduct
       fence, alone on its line. Emit only success or fail — never
       STATUS:retry (this node has no retry route).
 
+  # ShowPlan reads the plan artifacts Decompose just wrote into ctx.tool_stdout
+  # so the ApprovePlan gate can render them for review. Without this the operator
+  # saw only the bare label and could not actually review anything — they'd
+  # rubber-stamp `approve`. Safe pattern (CLAUDE.md): a tool node cats the files,
+  # the human prompt interpolates ${ctx.tool_stdout} (allowed in prompts). The
+  # files are guarded so a (shouldn't-happen) missing file can't strict-fail the
+  # gate out of the run.
+  tool ShowPlan
+    label: "Show Plan for Review"
+    timeout: 10s
+    # ctx.tool_stdout keeps only the tail up to this cap (default 64KB). Raise it
+    # to 1MB so a large plan + coverage table isn't clipped before the operator
+    # sees it at ApprovePlan (PR #414 review).
+    output_limit: 1048576
+    command:
+      set -u
+      echo "# Milestone plan (.ai/decisions/milestones.md)"
+      echo
+      if [ -f .ai/decisions/milestones.md ]; then
+        cat .ai/decisions/milestones.md
+      else
+        echo "_(milestones.md not found — Decompose did not write a plan)_"
+      fi
+      echo
+      echo "# Requirement coverage (.ai/decisions/requirement-coverage.md)"
+      echo
+      if [ -f .ai/decisions/requirement-coverage.md ]; then
+        cat .ai/decisions/requirement-coverage.md
+      else
+        echo "_(requirement-coverage.md not found)_"
+      fi
+
   human ApprovePlan
-    label: "Review the milestone plan. Approve, adjust, or reject."
+    label: "Review the milestone plan — approve, adjust, or reject"
     mode: freeform
     default: approve
+    # The plan + spec-coverage table is interpolated below via ${ctx.tool_stdout}
+    # (populated by the ShowPlan tool node) so this renders in the fullscreen
+    # review modal with the real plan, not a bare one-line label.
+    prompt:
+      Review the milestone plan the planner just produced, then choose:
+
+      - **approve** (default): the plan is sound — start building milestone 1.
+      - **adjust**: send it back to re-plan. Use the freeform box to say what to
+        change (scope, ordering, a missing requirement, an over-broad milestone).
+      - **reject**: abandon the build entirely.
+
+      Before approving, skim the plan below for: milestones in a sensible build
+      order, each with a concrete "Done when" and a verify command; a sane
+      "DO NOT implement" scope line; and — in the coverage table — every
+      spec-mandated verification mapped to an owning (or deferred) milestone with
+      `COVERAGE_GAPS: 0`. A non-zero gap count or an over-broad milestone is a
+      reason to **adjust**.
+
+      ---
+      ## Plan under review
+
+      The milestone plan and the spec requirement-coverage table the planner
+      wrote — each file's contents verbatim under a section heading that names
+      its source path. Delimited under its own heading — never interpolated
+      mid-sentence.
+
+      ${ctx.tool_stdout}
 
   # ─── Phase 2: Build Loop ───────────────────────────────────
   #
@@ -2426,8 +2485,10 @@ workflow BuildProduct
     SpecLint -> EscalateReview  when ctx.outcome = fail
     ReadSpec -> Decompose  when ctx.outcome = success
     ReadSpec -> EscalateReview  when ctx.outcome = fail
-    Decompose -> ApprovePlan  when ctx.outcome = success
+    Decompose -> ShowPlan  when ctx.outcome = success
     Decompose -> EscalateReview  when ctx.outcome = fail
+    # ShowPlan reads the plan files into ctx.tool_stdout, then the human reviews.
+    ShowPlan -> ApprovePlan
     ApprovePlan -> PickNextMilestone  label: "approve"
     ApprovePlan -> Decompose  label: "adjust"  restart: true
     ApprovePlan -> Done  label: "reject"
