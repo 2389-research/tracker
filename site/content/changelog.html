@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-40-1">v0.40.1</a>
     <a href="#v0-40-0">v0.40.0</a>
     <a href="#v0-39-1">v0.39.1</a>
     <a href="#v0-39-0">v0.39.0</a>
@@ -75,6 +76,30 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.40.1 ═══ -->
+  <section class="glass" id="v0-40-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.40.1" style="color: inherit; text-decoration: none;">v0.40.1</a></h2>
+      <span class="badge">2026-06-24</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.40.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong><code>build_product</code> dogfood hardening &mdash; a single super-PR fixing a real case-study
+      cascade (run <code>634a2527ff56</code>) where a finished, green build was discarded.</strong> Five fixes
+      plus the automated-review hardening pass; no breaking changes; core embedded workflows hold their A
+      grades on <code>dippin doctor</code>.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Turn-limit green fix no longer abandoned uncommitted</strong> (<a href="https://github.com/2389-research/tracker/issues/406">#406</a>). The <code>commit-if-green</code> breach guard (<a href="https://github.com/2389-research/tracker/issues/303">#303</a>/<a href="https://github.com/2389-research/tracker/issues/297">#297</a>) never fired on the <code>Implement</code>/<code>FixMilestone</code> fix loop because no <code>verify_command</code> was wired, so a breach with a passing tree classified as <code>operator_decision</code> instead of <code>verified_green</code>. Fixed with one shared green gate: <code>Setup</code> writes <code>.ai/build/verify.sh</code>, <code>TestMilestone</code> delegates to it, and the fix-loop nodes set <code>verify_command: sh .ai/build/verify.sh</code>; a <code>FixMilestone -&gt; CommitIfDirty when ctx.turn_breach_class = verified_green</code> edge commits the green tree before escalating.</li>
+      <li><strong>Build artifacts no longer swept into checkpoint commits</strong> (<a href="https://github.com/2389-research/tracker/issues/405">#405</a>). <code>Setup</code> seeds <code>.gitignore</code> with toolchain build outputs (not just <code>.ai/</code>), and <code>CommitIfDirty</code> detects untracked executable binaries (git-native <code>git diff --no-index --numstat</code> binary check) and gitignores them instead of committing &mdash; a compiled binary like <code>goblin</code> no longer FAILs Verify as out-of-scope work.</li>
+      <li><strong>Escalation no longer discards green trees silently</strong> (<a href="https://github.com/2389-research/tracker/issues/407">#407</a>). <code>EscalateMilestone</code> surfaces the live verify result (<code>${ctx.tool_stdout}</code>), defaults to "mark done" to preserve finished work on the unattended path, and reframes <code>abandon</code> as a destructive last resort.</li>
+      <li><strong>Behaviorally-correct code no longer FAILed over prose identifiers</strong> (<a href="https://github.com/2389-research/tracker/issues/408">#408</a>). <code>VerifyMilestone</code> gains an ADR-aware three-tier severity system (FAIL / WARN / PASS): a prose-named identifier that differs from the spec wording but whose behavioral tests are green and which is documented in a <code>.ai/decisions/</code> ADR now WARNs instead of hard-FAILing. Scope, unmet-behavior, and test-contract violations remain categorical FAILs.</li>
+      <li><strong>Tests that pass but don't verify the contract</strong> (<a href="https://github.com/2389-research/tracker/issues/409">#409</a>). <code>Implement</code> self-applies the same <code>TEST-VERIFIES-CONTRACT</code> rubric <code>VerifyMilestone</code> grades against, including a test-shape rule: a "built binary" smoke test must spawn the built binary, not call an unexported function in-process.</li>
+      <li><strong>PR <a href="https://github.com/2389-research/tracker/pull/411">#411</a> review hardening</strong> (automated multi-bot review of the super-PR). <code>verify.sh</code> collapses every non-zero language-test-runner exit to <code>1</code>, reserving exit <code>2</code> strictly for the "<code>make</code> present but not installed" escalation (a pytest collection error exiting <code>2</code> no longer masquerades as the env-missing escalate); <code>CommitIfDirty</code> writes the runtime binary-artifact ignore to the local, untracked <code>.git/info/exclude</code> rather than the tracked <code>.gitignore</code>, so the skip itself is not an out-of-scope tree change; and the <code>FixMilestone</code> green-breach commit edge is guarded by a <code>when ctx.outcome = fail -&gt; TestMilestone</code> short-circuit declared ahead of it, so a stale (sticky) <code>verified_green</code> class from an earlier milestone can no longer checkpoint a non-green tree on a normal fail.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.40.0 ═══ -->
   <section class="glass" id="v0-40-0" style="border-left: 3px solid var(--orange-600);">
