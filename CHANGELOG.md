@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.40.2] - 2026-06-24
 
+### Fixed
+
+- **Human gates now display their `prompt:` body, not just the `label:`.** The
+  `wait.human` handler built the gate prompt from `node.Label` alone and silently
+  dropped `node.Attrs["prompt"]` for freeform/choice/yes_no modes. Every human
+  gate that authored a multi-line `prompt:` — including v0.40.1's
+  `EscalateMilestone` "Verify currently" block (#407) and the new `ApprovePlan`
+  plan review — was therefore showing only its one-line label at runtime, and any
+  `${ctx.tool_stdout}` / `${ctx.*}` interpolation the gate relied on to surface
+  live state never rendered. `resolveHumanPrompt` now appends the expanded prompt
+  body to the label; label-only gates are unchanged. (Surfaced by automated
+  review of the #414 super-PR; the prior #407 test only asserted the attribute's
+  content, never that it was displayed.)
+
 ### Changed
 
 - **`build_product` plan-approval gate now shows the actual plan.** The
@@ -16,11 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operator had no plan to review and could only rubber-stamp `approve`. A new
   `ShowPlan` tool node cats `.ai/decisions/milestones.md` (the milestone plan)
   and `.ai/decisions/requirement-coverage.md` (the spec-coverage table, with the
-  `COVERAGE_GAPS` count) into `ctx.tool_stdout`, and `ApprovePlan` interpolates
-  it under a `## Plan under review` heading — rendering the full plan in the
-  fullscreen review modal (same pattern as the #407 `EscalateMilestone` gate).
-  `Decompose` success now routes `-> ShowPlan -> ApprovePlan`; the
-  approve/adjust/reject routes are unchanged.
+  `COVERAGE_GAPS` count) into `ctx.tool_stdout` (with a 1MB `output_limit` so a
+  large plan isn't clipped), and `ApprovePlan` interpolates it under a
+  `## Plan under review` heading — rendering the full plan in the fullscreen
+  review modal (same pattern as the #407 `EscalateMilestone` gate, which this
+  release also makes actually display). `Decompose` success now routes
+  `-> ShowPlan -> ApprovePlan`; the approve/adjust/reject routes are unchanged.
 
 ## [0.40.1] - 2026-06-24
 

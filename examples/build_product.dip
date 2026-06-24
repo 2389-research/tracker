@@ -776,6 +776,10 @@ workflow BuildProduct
   tool ShowPlan
     label: "Show Plan for Review"
     timeout: 10s
+    # ctx.tool_stdout keeps only the tail up to this cap (default 64KB). Raise it
+    # to 1MB so a large plan + coverage table isn't clipped before the operator
+    # sees it at ApprovePlan (PR #414 review).
+    output_limit: 1048576
     command:
       set -u
       echo "# Milestone plan (.ai/decisions/milestones.md)"
@@ -820,7 +824,8 @@ workflow BuildProduct
       ## Plan under review
 
       The milestone plan and the spec requirement-coverage table the planner
-      wrote, shown verbatim. Delimited under its own heading — never interpolated
+      wrote — each file's contents verbatim under a section heading that names
+      its source path. Delimited under its own heading — never interpolated
       mid-sentence.
 
       ${ctx.tool_stdout}

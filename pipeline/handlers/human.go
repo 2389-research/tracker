@@ -627,6 +627,17 @@ func (h *HumanHandler) resolveHumanPrompt(node *pipeline.Node, pctx *pipeline.Pi
 		prompt = fmt.Sprintf("Human gate: %s", node.ID)
 	}
 
+	// A human gate may author a full multi-line `prompt:` body (like an agent
+	// node) in addition to the short `label:` title. Historically this body was
+	// dropped for freeform/choice/yes_no modes — only Label was shown — so any
+	// ${ctx.*} interpolation the gate relied on to surface live state (e.g.
+	// EscalateMilestone's verify result, ApprovePlan's plan files) never
+	// rendered. Append it to the label so authored prompt bodies are displayed;
+	// label-only gates are unchanged. Expansion below covers both.
+	if body := strings.TrimSpace(node.Attrs["prompt"]); body != "" {
+		prompt = prompt + "\n\n" + body
+	}
+
 	var graphAttrs map[string]string
 	if h.graph != nil {
 		graphAttrs = h.graph.Attrs
@@ -719,26 +730,34 @@ func askFreeformWithTimeout(fi FreeformInterviewer, prompt string, labels []stri
 func matchFreeformLabel(graph *pipeline.Graph, node *pipeline.Node, response string) string {
 	normalized := strings.ToLower(strings.TrimSpace(response))
 	for _, e := range graph.OutgoingEdges(node.ID) {
-		if e.Label != "" && strings.ToLower(e.Label) == normalized {
-			if e.Choice != "" {
-				return e.Choice
-			}
-			return e.Label
-		}
-		// Also accept a direct match against the Choice key.
-		if e.Choice != "" && strings.ToLower(e.Choice) == normalized {
-			return e.Choice
+		if m, ok := matchEdgeByLabelOrChoice(e, normalized); ok {
+			return m
 		}
 	}
 	// matchFreeformLabel compares against the bare "default" attr (not
 	// DefaultChoice) because this is only used for label matching in
 	// freeform mode, which keys on edge labels.
-	if defLabel := node.Attrs["default"]; defLabel != "" {
-		if strings.ToLower(defLabel) == normalized {
-			return defLabel
-		}
+	if defLabel := node.Attrs["default"]; defLabel != "" && strings.ToLower(defLabel) == normalized {
+		return defLabel
 	}
 	return ""
+}
+
+// matchEdgeByLabelOrChoice reports whether the normalized response matches this
+// edge's label or its Choice key. On a label match it returns the Choice key
+// (DIP150) when present so the engine routes on the stable key, else the label.
+func matchEdgeByLabelOrChoice(e *pipeline.Edge, normalized string) (string, bool) {
+	if e.Label != "" && strings.ToLower(e.Label) == normalized {
+		if e.Choice != "" {
+			return e.Choice, true
+		}
+		return e.Label, true
+	}
+	// Also accept a direct match against the Choice key.
+	if e.Choice != "" && strings.ToLower(e.Choice) == normalized {
+		return e.Choice, true
+	}
+	return "", false
 }
 
 // executeInterview handles interview mode: parses questions from context and presents
@@ -882,22 +901,25 @@ func buildInterviewAnswersObjectJSON(result *InterviewResult) (string, error) {
 		if answer == "" {
 			continue
 		}
-		if key := strings.TrimSpace(q.ID); key != "" {
-			if _, exists := obj[key]; !exists {
-				obj[key] = answer
-			}
-		}
-		if key := normalizeInterviewQuestionKey(q.Text); key != "" {
-			if _, exists := obj[key]; !exists {
-				obj[key] = answer
-			}
-		}
+		putAnswerIfAbsent(obj, strings.TrimSpace(q.ID), answer)
+		putAnswerIfAbsent(obj, normalizeInterviewQuestionKey(q.Text), answer)
 	}
 	b, err := json.Marshal(obj)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// putAnswerIfAbsent stores answer under key (skipping empty keys) without
+// clobbering an existing value, so the first question to claim a key wins.
+func putAnswerIfAbsent(obj map[string]string, key, answer string) {
+	if key == "" {
+		return
+	}
+	if _, exists := obj[key]; !exists {
+		obj[key] = answer
+	}
 }
 
 func normalizeInterviewQuestionKey(text string) string {
@@ -908,7 +930,7 @@ func normalizeInterviewQuestionKey(text string) string {
 	var b strings.Builder
 	lastUnderscore := false
 	for _, r := range text {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+		if isKeyRune(r) {
 			b.WriteRune(r)
 			lastUnderscore = false
 			continue
@@ -919,6 +941,12 @@ func normalizeInterviewQuestionKey(text string) string {
 		}
 	}
 	return strings.Trim(b.String(), "_")
+}
+
+// isKeyRune reports whether r is a lowercase alphanumeric — the only runes kept
+// verbatim when normalizing a question into a context key.
+func isKeyRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
 // executeChoice handles choice mode: presents outgoing edge labels as options.
