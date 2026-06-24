@@ -2193,16 +2193,39 @@ workflow BuildProduct
   human EscalateMilestone
     label: "Milestone stuck — pick how to proceed"
     mode: freeform
+    # #407: `mark done` is FIRST and the default so the unattended path (freeform
+    # labels[0] fallback + default_choice) preserves work — it NEVER discards.
+    # `abandon` is demoted to the destructive last resort. The "Verify currently"
+    # block surfaces the live build/verify output that routed here so a green,
+    # passing tree is never thrown away by an operator who wasn't told it passes
+    # (run 634a2527ff56 abandoned a green build). A green-at-breach turn limit no
+    # longer even reaches this gate — #406 routes it to CommitIfDirty — but other
+    # paths (a Verify false-positive over passing tests, an escalate sentinel)
+    # can still land here on a green tree, so the state must be shown.
     default: mark done
     prompt:
       The build loop hit a wall on the current milestone.
       The agent tried to fix it but couldn't get tests to pass.
 
+      READ "Verify currently" at the END of this prompt before choosing. If it
+      shows PASS the tree is GREEN — do NOT abandon; pick **mark done** (or
+      **accept** to ship). Abandoning a passing tree discards finished work.
+
       Options:
-      - **mark done**: Override the test failure — you've verified the milestone is complete. Continues to the next milestone.
-      - **retry**: Re-implement this milestone from scratch. Does NOT re-plan.
+      - **mark done** (default; chosen automatically for unattended runs): Override the failure — you've confirmed the milestone is complete. Commits/continues to the next milestone. Preserves work.
+      - **retry**: Re-implement this milestone from scratch. Does NOT re-plan. Preserves prior commits.
       - **accept**: Stop building more milestones and ship what exists — but still run the full cross-review, final build/test, and spec-compliance gates first (does NOT skip verification).
-      - **abandon**: Kill the pipeline immediately.
+      - **abandon**: DESTRUCTIVE LAST RESORT. Kill the pipeline immediately and discard uncommitted work. Only pick this if "Verify currently" is FAIL and the build is genuinely unsalvageable.
+
+      ---
+      ## Verify currently
+
+      Tail of the most recent build/verify output (64KB cap) that routed here —
+      the live milestone state. A green `tests-pass` / passing build means the
+      tree is COMPLETE; a failure or `escalate` marker means it is not. Delimited
+      under its own heading — never interpolated mid-sentence.
+
+      ${ctx.tool_stdout}
 
   human EscalateReview
     label: "Review flagged issues — pick how to proceed"
