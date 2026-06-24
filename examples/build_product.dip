@@ -30,6 +30,19 @@ workflow BuildProduct
       set -eu
       mkdir -p .ai/build .ai/decisions .ai/milestones
       echo '.ai/' >> .gitignore 2>/dev/null || true
+      # #405: seed common build-output patterns so a milestone whose tests
+      # compile/install artifacts doesn't have them swept into a CommitIfDirty
+      # checkpoint and then FAILed by Verify as out-of-scope work. This is the
+      # STATIC half (named/dir artifacts across the toolchains build_product
+      # targets); arbitrary-named compiled binaries (Go `go build -o <name>` has
+      # no fixed extension) are caught dynamically in CommitIfDirty. Appended +
+      # deduped exactly like `.ai/` above; idempotent across re-runs.
+      for pat in \
+        'node_modules/' 'dist/' 'build/' 'target/' 'coverage/' \
+        '__pycache__/' '.venv/' 'venv/' '*.pyc' \
+        '*.exe' '*.test' '*.out' '*.o' '*.a'; do
+        echo "$pat" >> .gitignore 2>/dev/null || true
+      done
       sort -u .gitignore -o .gitignore
       # #351: keep tracker run metadata out of the product repo. CommitIfDirty
       # runs `git add -A`, which would otherwise commit .tracker/runs/<id>/
@@ -911,6 +924,33 @@ workflow BuildProduct
       # dirty — a milestone that only adds new files would otherwise look clean
       # to `git diff` and skip the commit, leaving exactly the green-but-
       # uncommitted tree this node exists to prevent.
+      # #405: never checkpoint a compiled build artifact. A test that runs
+      # `go build -o <name>` drops an executable into the tree (Go binaries have
+      # no fixed extension, so Setup's static .gitignore seed can't catch them);
+      # `git add -A` would commit it and Verify then FAILs the milestone for
+      # out-of-scope work. Gitignore any UNTRACKED, executable, BINARY,
+      # non-empty file before staging — real source (text) and executable shell
+      # scripts (text) survive; only opaque binaries are filtered. Binary-ness
+      # comes from git itself: `git diff --no-index --numstat /dev/null <f>`
+      # reports `-` in the added-lines column for a binary file, a number for
+      # text. Using git (already required by this node) avoids depending on a
+      # GNU-only `grep -I`, whose unrecognized-flag failure mode would mis-ignore
+      # real source. The `[ -s ]` guard keeps an empty placeholder from being
+      # mistaken for an artifact. Listing comes from git's own untracked-not-
+      # ignored set, so nothing already tracked or ignored is touched. Newline-
+      # delimited read (POSIX sh — tracker runs tool nodes under dash, where
+      # `read -d ''` is illegal); git quotes any pathname with embedded newlines,
+      # so such a name simply fails the `[ -x ]` test and is left for `git add
+      # -A` rather than mis-ignored.
+      git ls-files --others --exclude-standard \
+        | while IFS= read -r f; do
+            [ -x "$f" ] && [ -s "$f" ] || continue
+            case "$(git diff --no-index --numstat /dev/null "$f" 2>/dev/null | cut -f1)" in
+              -) echo "/$f" >> .gitignore ;;
+            esac
+          done
+      sort -u .gitignore -o .gitignore 2>/dev/null || true
+
       if [ -n "$(git status --porcelain)" ]; then
         git add -A
         git -c user.name="build_product" -c user.email="build_product@tracker.local" \
