@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-40-2">v0.40.2</a>
     <a href="#v0-40-1">v0.40.1</a>
     <a href="#v0-40-0">v0.40.0</a>
     <a href="#v0-39-1">v0.39.1</a>
@@ -76,6 +77,28 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.40.2 ═══ -->
+  <section class="glass" id="v0-40-2" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.40.2" style="color: inherit; text-decoration: none;">v0.40.2</a></h2>
+      <span class="badge">2026-06-24</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.40.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Human gates now display their authored <code>prompt:</code> body, and <code>build_product</code>'s
+      plan-approval gate finally shows the actual plan.</strong> One fix, one behavioral change; no breaking
+      changes; core embedded workflows hold their A grades on <code>dippin doctor</code>.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Human gates now display their <code>prompt:</code> body, not just the <code>label:</code>.</strong> The <code>wait.human</code> handler built the gate prompt from <code>node.Label</code> alone and silently dropped <code>node.Attrs["prompt"]</code> for freeform/choice/yes_no modes. Every human gate that authored a multi-line <code>prompt:</code> &mdash; including v0.40.1's <code>EscalateMilestone</code> "Verify currently" block (<a href="https://github.com/2389-research/tracker/issues/407">#407</a>) and the new <code>ApprovePlan</code> plan review &mdash; was therefore showing only its one-line label at runtime, and any <code>${ctx.tool_stdout}</code> / <code>${ctx.*}</code> interpolation the gate relied on to surface live state never rendered. <code>resolveHumanPrompt</code> now appends the expanded prompt body to the label; label-only gates are unchanged. (Surfaced by automated review of the <a href="https://github.com/2389-research/tracker/pull/414">#414</a> super-PR; the prior <a href="https://github.com/2389-research/tracker/issues/407">#407</a> test only asserted the attribute's content, never that it was displayed.)</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>build_product</code> plan-approval gate now shows the actual plan.</strong> The <code>ApprovePlan</code> human gate previously displayed only its one-line label, so an operator had no plan to review and could only rubber-stamp <code>approve</code>. A new <code>ShowPlan</code> tool node cats <code>.ai/decisions/milestones.md</code> (the milestone plan) and <code>.ai/decisions/requirement-coverage.md</code> (the spec-coverage table, with the <code>COVERAGE_GAPS</code> count) into <code>ctx.tool_stdout</code> (with a 1MB <code>output_limit</code> so a large plan isn't clipped), and <code>ApprovePlan</code> interpolates it under a <code>## Plan under review</code> heading &mdash; rendering the full plan in the fullscreen review modal. <code>Decompose</code> success now routes <code>-&gt; ShowPlan -&gt; ApprovePlan</code>; the approve/adjust/reject routes are unchanged.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.40.1 ═══ -->
   <section class="glass" id="v0-40-1" style="border-left: 3px solid var(--orange-600);">
