@@ -105,6 +105,12 @@ const (
 	// field so external consumers that only watch DecisionEdge can still
 	// identify the traversal as an override.
 	EventValidationOverridden PipelineEventType = "validation_overridden"
+
+	// EventNodeMemoReplayed fires when a memoize:true node is re-entered with
+	// identical hashed inputs and its prior successful outcome is replayed
+	// instead of re-invoking the handler (#421). Stage-level (NodeID = the
+	// replayed node).
+	EventNodeMemoReplayed PipelineEventType = "node_memo_replayed"
 )
 
 // EdgePriorityOverride identifies an edge selected at advanceToNextNode

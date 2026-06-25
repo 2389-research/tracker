@@ -239,6 +239,28 @@ func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
 	return ref, nil
 }
 
+// TreeFingerprint returns a conservative content hash of the working tree for
+// node-output memoization (#421): the porcelain status (staged + unstaged +
+// untracked drift) concatenated with the index's per-path mode+blob-SHA. This
+// is MORE conservative than `git write-tree` (index-only) — it also reflects
+// untracked/unstaged changes a side-effecting handler would observe, so any
+// drift between two entries of a memoized node invalidates the memo key.
+//
+// Reuses r.git so the #399 GIT_DIR-leak guard (gitSafeEnv) applies. Any git
+// error is returned (not swallowed): the caller treats it as a cache miss and
+// runs the handler rather than replaying on an uncertain key.
+func (r *gitArtifactRepo) TreeFingerprint() (string, error) {
+	status, err := r.git("status", "--porcelain=v1", "-z")
+	if err != nil {
+		return "", fmt.Errorf("git status for tree fingerprint: %w\n%s", err, status)
+	}
+	index, err := r.git("ls-files", "-s", "-z")
+	if err != nil {
+		return "", fmt.Errorf("git ls-files for tree fingerprint: %w\n%s", err, index)
+	}
+	return status + "\x00" + index, nil
+}
+
 // git runs a git command in r.dir with a sanitized environment.
 // Returns combined output and any error.
 func (r *gitArtifactRepo) git(args ...string) (string, error) {

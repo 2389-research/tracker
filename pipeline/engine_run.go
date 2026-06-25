@@ -269,6 +269,14 @@ type runState struct {
 	// as read-only here. Mutating those fields through s.lastOutcome would
 	// silently corrupt the handler's outcome value (and vice versa).
 	lastOutcome Outcome
+
+	// pendingMemoKey is the content-hash memo key (#421) computed for the node
+	// currently executing, threaded from the lookup site to the store site so
+	// the tree fingerprint is computed once per entry and the store uses the
+	// exact key the lookup did. Empty when the node did not opt into memoize
+	// or the key could not be computed — neither GetMemo nor PutMemo is reached
+	// in that case (default-off guarantee). Reset at the top of processActiveNode.
+	pendingMemoKey string
 }
 
 // appendOverride appends an OverrideDetail to BOTH the in-memory hot-path
@@ -311,22 +319,7 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	// copied into the first node's scoped namespace when ScopeToNode is called.
 	pctx.ClearDirty()
 
-	// Initialize git artifact repo if requested and an artifact dir is set.
-	var gitRepo *gitArtifactRepo
-	if e.gitArtifacts && e.artifactDir != "" {
-		repoDir := filepath.Join(e.artifactDir, runID)
-		gitRepo = newGitArtifactRepo(repoDir, runID)
-		if err := gitRepo.Init(); err != nil {
-			// Best-effort: emit a warning and continue without git tracking.
-			e.emit(PipelineEvent{
-				Type:      EventWarning,
-				Timestamp: time.Now(),
-				RunID:     runID,
-				Message:   fmt.Sprintf("git artifact init failed (continuing without git tracking): %v", err),
-			})
-			gitRepo = nil
-		}
-	}
+	gitRepo := e.initGitRepo(runID)
 
 	// Seed the in-memory sticky list from any prior checkpoint so a resumed
 	// run preserves overrides that fired before the kill / SIGINT. The cp
@@ -346,6 +339,28 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		gitRepo:             gitRepo,
 		validationOverrides: stickyOverrides,
 	}, nil
+}
+
+// initGitRepo initializes the git artifact repo when git artifacts are enabled
+// and an artifact dir is set. Best-effort: an Init failure emits a warning and
+// returns nil so the run continues without git tracking. Extracted from
+// initRunState to keep it under the complexity gate; behavior is unchanged.
+func (e *Engine) initGitRepo(runID string) *gitArtifactRepo {
+	if !e.gitArtifacts || e.artifactDir == "" {
+		return nil
+	}
+	repoDir := filepath.Join(e.artifactDir, runID)
+	gitRepo := newGitArtifactRepo(repoDir, runID)
+	if err := gitRepo.Init(); err != nil {
+		e.emit(PipelineEvent{
+			Type:      EventWarning,
+			Timestamp: time.Now(),
+			RunID:     runID,
+			Message:   fmt.Sprintf("git artifact init failed (continuing without git tracking): %v", err),
+		})
+		return nil
+	}
+	return gitRepo
 }
 
 // buildInitialContext creates a PipelineContext seeded with graph and initial context values.
@@ -595,6 +610,17 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	traceEntry.Stats = outcome.Stats
 	traceEntry.ChildUsage = outcome.ChildUsage
 
+	e.emitOutcomeAnomalies(s, currentNodeID, &outcome)
+
+	return &outcome, traceEntry, nil
+}
+
+// emitOutcomeAnomalies surfaces structured audit events for any anomaly fields
+// the handler populated on a successful (non-error) outcome: tool-output
+// truncation (#208), marker_grep no-match (#210), missing route sentinel
+// (#212), and auto_status missing STATUS (#346). Extracted from executeNode to
+// keep it under the complexity gate; behavior is unchanged.
+func (e *Engine) emitOutcomeAnomalies(s *runState, currentNodeID string, outcome *Outcome) {
 	// Surface tool-output truncation as structured events so `tracker
 	// diagnose`, the TUI activity log, and NDJSON consumers can correlate
 	// routing misses with dropped output (issue #208). One event per
@@ -621,20 +647,12 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	// was invalid (author error), an empty Error means the regex was
 	// fine but matched nothing in the captured stdout.
 	if outcome.MissingMarker != nil {
-		var msg string
-		if outcome.MissingMarker.Error != "" {
-			msg = fmt.Sprintf("tool node %q: marker_grep regex %q failed to compile: %s — failing node to avoid silent fallback",
-				currentNodeID, outcome.MissingMarker.Pattern, outcome.MissingMarker.Error)
-		} else {
-			msg = fmt.Sprintf("tool node %q: marker_grep %q matched nothing in captured stdout — failing node to avoid silent fallback",
-				currentNodeID, outcome.MissingMarker.Pattern)
-		}
 		e.emit(PipelineEvent{
 			Type:      EventToolMarkerMissing,
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    currentNodeID,
-			Message:   msg,
+			Message:   markerMissingMessage(currentNodeID, outcome.MissingMarker),
 			Marker:    outcome.MissingMarker,
 		})
 	}
@@ -660,25 +678,38 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	// this is the audit-trail companion so the TUI and `tracker diagnose`
 	// can surface the anomaly instead of it registering as a silent verdict.
 	if outcome.MissingStatus != nil {
-		var msg string
-		if outcome.MissingStatus.FailClosed {
-			msg = fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — failing goal gate closed (an unparseable verdict on a gate is an anomaly, not a pass)",
-				currentNodeID)
-		} else {
-			msg = fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — the STATUS verdict defaulted to success (legacy behavior; the node's final status may still differ, e.g. on a declared-writes failure; mark the node goal_gate: true to fail closed)",
-				currentNodeID)
-		}
 		e.emit(PipelineEvent{
 			Type:       EventAutoStatusMissing,
 			Timestamp:  time.Now(),
 			RunID:      s.runID,
 			NodeID:     currentNodeID,
-			Message:    msg,
+			Message:    autoStatusMissingMessage(currentNodeID, outcome.MissingStatus),
 			AutoStatus: outcome.MissingStatus,
 		})
 	}
+}
 
-	return &outcome, traceEntry, nil
+// markerMissingMessage builds the EventToolMarkerMissing message. A populated
+// Error means the regex itself failed to compile (author error); an empty Error
+// means the regex was valid but matched nothing in the captured stdout (#210).
+func markerMissingMessage(nodeID string, m *MarkerDetail) string {
+	if m.Error != "" {
+		return fmt.Sprintf("tool node %q: marker_grep regex %q failed to compile: %s — failing node to avoid silent fallback",
+			nodeID, m.Pattern, m.Error)
+	}
+	return fmt.Sprintf("tool node %q: marker_grep %q matched nothing in captured stdout — failing node to avoid silent fallback",
+		nodeID, m.Pattern)
+}
+
+// autoStatusMissingMessage builds the EventAutoStatusMissing message, branching
+// on whether the gate failed closed or defaulted to legacy success (#346).
+func autoStatusMissingMessage(nodeID string, d *AutoStatusDetail) string {
+	if d.FailClosed {
+		return fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — failing goal gate closed (an unparseable verdict on a gate is an anomaly, not a pass)",
+			nodeID)
+	}
+	return fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — the STATUS verdict defaulted to success (legacy behavior; the node's final status may still differ, e.g. on a declared-writes failure; mark the node goal_gate: true to fail closed)",
+		nodeID)
 }
 
 // applyOutcome merges handler outcome into pipeline context and emits the decision_outcome event.
@@ -925,40 +956,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus string, traceEntry *TraceEntry) (bool, string, *EngineResult) {
 	target, gateNodeID, retry, unsatisfied := e.goalGateRetryTarget(s.cp, s.nodeOutcomes)
 	if retry {
-		// A pending re-entry (target == the gate itself, flagged by a prior
-		// redirect) completes that redirect's retry cycle — the budget was
-		// charged when the redirect fired, so it is not charged again here.
-		// It cannot loop: the gate executes next, clearing the pending flag.
-		reentry := s.cp.IsGateRecheckPending(gateNodeID) && target == gateNodeID
-		gateNode := e.nodeOrDefault(gateNodeID)
-		msg := fmt.Sprintf("goal-gate recheck: re-entering %q so the gate re-judges the current tree (attempt %d/%d)",
-			gateNodeID, s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
-		if !reentry {
-			s.cp.IncrementRetry(gateNodeID)
-			msg = fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
-				gateNodeID, target,
-				s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
-		}
-		e.emit(PipelineEvent{
-			Type:      EventStageRetrying,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    gateNodeID,
-			Message:   msg,
-		})
-		traceEntry.EdgeTo = target
-		s.trace.AddEntry(*traceEntry)
-		e.emitGitCommit(s, currentNodeID, traceEntry)
-		// #348 defect 1: the redirect's clearDownstream below may remove the
-		// gate from CompletedNodes while the executed path routes around it
-		// to the exit. Mark the gate recheck-pending so it stays visible to
-		// this check and the next retry re-enters at the gate itself; the
-		// flag clears when the gate actually re-executes (applyOutcome).
-		s.cp.SetGateRecheckPending(gateNodeID)
-		e.clearDownstream(target, s.cp)
-		s.cp.CurrentNode = target
-		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
-		return false, target, nil
+		return e.handleGoalGateRetry(s, currentNodeID, traceEntry, target, gateNodeID)
 	}
 	// Fallback/escalation: target is set but not a retry (one-time redirect).
 	if unsatisfied && target != "" {
@@ -1015,6 +1013,50 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 	}
 	e.budgetGuard.NotifyProgress()
 	return true, "", nil
+}
+
+// handleGoalGateRetry processes a goal-gate retry redirect at the exit node:
+// it increments the retry counter (unless this is a pending re-entry that
+// completes a prior redirect's cycle), emits the retry event, records the trace
+// edge, marks the gate recheck-pending (#348 defect 1), clears downstream, and
+// checkpoints. Returns (false, target, nil) so the caller advances to target.
+// Extracted from handleExitNode to keep it under the complexity gate; behavior
+// is unchanged.
+func (e *Engine) handleGoalGateRetry(s *runState, currentNodeID string, traceEntry *TraceEntry, target, gateNodeID string) (bool, string, *EngineResult) {
+	// A pending re-entry (target == the gate itself, flagged by a prior
+	// redirect) completes that redirect's retry cycle — the budget was
+	// charged when the redirect fired, so it is not charged again here.
+	// It cannot loop: the gate executes next, clearing the pending flag.
+	reentry := s.cp.IsGateRecheckPending(gateNodeID) && target == gateNodeID
+	gateNode := e.nodeOrDefault(gateNodeID)
+	msg := fmt.Sprintf("goal-gate recheck: re-entering %q so the gate re-judges the current tree (attempt %d/%d)",
+		gateNodeID, s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
+	if !reentry {
+		s.cp.IncrementRetry(gateNodeID)
+		msg = fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
+			gateNodeID, target,
+			s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
+	}
+	e.emit(PipelineEvent{
+		Type:      EventStageRetrying,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    gateNodeID,
+		Message:   msg,
+	})
+	traceEntry.EdgeTo = target
+	s.trace.AddEntry(*traceEntry)
+	e.emitGitCommit(s, currentNodeID, traceEntry)
+	// #348 defect 1: the redirect's clearDownstream below may remove the
+	// gate from CompletedNodes while the executed path routes around it
+	// to the exit. Mark the gate recheck-pending so it stays visible to
+	// this check and the next retry re-enters at the gate itself; the
+	// flag clears when the gate actually re-executes (applyOutcome).
+	s.cp.SetGateRecheckPending(gateNodeID)
+	e.clearDownstream(target, s.cp)
+	s.cp.CurrentNode = target
+	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
+	return false, target, nil
 }
 
 // handleLoopRestart processes a loop-back to an already-completed node.

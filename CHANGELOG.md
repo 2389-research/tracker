@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in content-hash node-output memoization (#421).** Annotate an agent
+  node with `params: { memoize: true }` and a loop-restart that re-enters the
+  already-green node with identical resolved inputs now REPLAYS the stored
+  successful outcome instead of re-running the handler. The memo key is a
+  SHA-256 over the node's resolved attrs (post-interpolation prompt/command)
+  and the bare-namespace context it reads — including the `last_response` and
+  `human_response` prompt inputs injected into every agent prompt, which are
+  hashed unconditionally so an intervening node's new critique invalidates the
+  replay. Memoization is **agent-node-only**. A node declaring `writable_paths`
+  has working-tree side effects and **requires a working-tree fingerprint to
+  replay**: without a live git repo (or on a fingerprint error) it is a hard
+  cache miss and re-runs, never replaying on an unproven tree. Any input change
+  yields a different key and re-runs the node. Only successful outcomes are
+  memoized (failures never replay), the memo table is persisted in
+  `checkpoint.json` so replay survives resume. Off by default: a `.dip` file
+  lacking the attr has byte-identical behavior and writes no `memo_entries`.
+  Emits `node_memo_replayed` on a replay.
+
 ## [0.40.2] - 2026-06-24
 
 ### Fixed
