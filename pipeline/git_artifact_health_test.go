@@ -242,6 +242,127 @@ func TestCommitWIPBeforeRouting_MidRoutingStaysWarning(t *testing.T) {
 	}
 }
 
+// breakRepoOnStatusHandler returns a registry whose breakNode dirties the tree,
+// destroys the artifact repo, then returns the given outcome status (no Go
+// error) — driving the retry-exhausted and strict-failure terminal halt paths
+// (rather than the handler-error path that breakRepoHandler exercises).
+func breakRepoOnStatusHandler(t *testing.T, breakNode, status string) *HandlerRegistry {
+	t.Helper()
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		reg.Register(&testHandler{name: name, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			if node.ID == breakNode {
+				dir, _ := pctx.GetInternal(InternalKeyArtifactDir)
+				_ = os.WriteFile(filepath.Join(dir, node.ID+".go"), []byte("package x\n"), 0o644)
+				_ = os.RemoveAll(filepath.Join(dir, ".git"))
+				_ = os.Chmod(dir, 0o500)
+				return Outcome{Status: status}, nil
+			}
+			return Outcome{Status: string(OutcomeSuccess)}, nil
+		}})
+	}
+	return reg
+}
+
+// assertTerminalPreserveHardFail asserts the AC2 contract on a terminal halt:
+// Status stays OutcomeFail, WorkPreserveFailed is set, and a hard
+// EventStageFailed carries the repo-unavailable preserve diagnostic.
+func assertTerminalPreserveHardFail(t *testing.T, result *EngineResult, events []PipelineEvent) {
+	t.Helper()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Status != OutcomeFail {
+		t.Fatalf("Status must stay original OutcomeFail (not masked), got %q", result.Status)
+	}
+	if !result.WorkPreserveFailed {
+		t.Error("expected WorkPreserveFailed=true on terminal path when artifact repo is unrecoverable")
+	}
+	for _, e := range events {
+		if e.Type == EventStageFailed && strings.Contains(e.Message, "artifact") && strings.Contains(e.Message, "preserve") {
+			return
+		}
+	}
+	t.Errorf("expected EventStageFailed carrying the repo-unavailable preserve diagnostic; events=%v", events)
+}
+
+// TestRetryExhaustedNoFallback_TerminalHardFail drives the retry-exhausted
+// no-fallback terminal halt (handleRetryExhausted) with an unrecoverable
+// artifact repo and asserts AC2: the preserve error hard-escalates rather than
+// being silently discarded (the bug the review caught).
+func TestRetryExhaustedNoFallback_TerminalHardFail(t *testing.T) {
+	requireGit(t)
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod 0500 does not prevent writes")
+	}
+	artifactBase := t.TempDir()
+
+	g := NewGraph("wip_retry_exhausted_terminal_test")
+	g.Attrs["default_max_retry"] = "1"
+	g.Attrs["default_retry_policy"] = "none"
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	// No fallback_retry_target — exhaustion must dead-stop, not route.
+	g.AddNode(&Node{ID: "flaky", Shape: "box", Label: "Flaky"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "flaky"})
+	g.AddEdge(&Edge{From: "flaky", To: "end"})
+
+	var mu sync.Mutex
+	var events []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+
+	reg := breakRepoOnStatusHandler(t, "flaky", string(OutcomeRetry))
+	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
+	result, _ := engine.Run(context.Background())
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700) })
+
+	mu.Lock()
+	defer mu.Unlock()
+	assertTerminalPreserveHardFail(t, result, events)
+}
+
+// TestStrictFailureNoFallback_TerminalHardFail drives the strict-failure
+// no-fallback terminal halt (checkStrictFailure) with an unrecoverable artifact
+// repo and asserts AC2: the preserve error hard-escalates rather than being
+// silently discarded.
+func TestStrictFailureNoFallback_TerminalHardFail(t *testing.T) {
+	requireGit(t)
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod 0500 does not prevent writes")
+	}
+	artifactBase := t.TempDir()
+
+	g := NewGraph("wip_strict_failure_terminal_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	// Only an unconditional edge and no fallback_target — a fail here is a
+	// strict-failure dead stop.
+	g.AddNode(&Node{ID: "Build", Shape: "box", Label: "Build"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "Build"})
+	g.AddEdge(&Edge{From: "Build", To: "end"})
+
+	var mu sync.Mutex
+	var events []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+
+	reg := breakRepoOnStatusHandler(t, "Build", string(OutcomeFail))
+	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
+	result, _ := engine.Run(context.Background())
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700) })
+
+	mu.Lock()
+	defer mu.Unlock()
+	assertTerminalPreserveHardFail(t, result, events)
+}
+
 // TestEngine_HealthyRepo_NoWorkPreserveFailed is the AC3 regression: a healthy
 // device + healthy repo run produces WorkPreserveFailed=false and no new
 // repo-unavailable EventStageFailed.

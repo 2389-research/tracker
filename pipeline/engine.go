@@ -635,12 +635,13 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	// work is never discarded by the routing decision (#302). No-op on a clean
 	// tree; warns and skips when no git adapter is configured.
 	//
-	// MID-ROUTING (#423): the routing decision (halt vs strictFailureFallback)
-	// is not yet known here, so an unavailable-repo error stays a WARNING and is
-	// discarded — escalating would change the routing outcome, violating the
-	// commitWIPBeforeRouting contract. The hard escalation lives only on the
-	// unambiguous terminal-halt sites.
-	_ = e.commitWIPBeforeRouting(s, nodeID, traceEntry)
+	// (#423) Two outcomes follow: strictFailureFallback may route this node
+	// onward to a safety node (MID-ROUTING — a preserve error stays a discarded
+	// WARNING so escalating cannot override the routing decision), or the run
+	// dead-stops with no onward edge (TERMINAL — the preserve error must
+	// hard-escalate). Capture the error here and branch on it at the terminal
+	// site below.
+	preserveErr := e.commitWIPBeforeRouting(s, nodeID, traceEntry)
 	// Before dead-stopping, consult the node/graph-level fallback_target so an
 	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
 	// instead of skipping every downstream node (#295). One-shot per node.
@@ -649,6 +650,9 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 			return lr
 		}
 	}
+	// TERMINAL halt with no onward edge — hard-escalate an unrecoverable preserve
+	// failure (#423) so silently-lost work is surfaced.
+	workPreserveFailed := e.escalateWorkPreserve(s, nodeID, preserveErr)
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),
@@ -667,6 +671,7 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 			Trace:               s.trace,
 			Usage:               s.trace.AggregateUsage(),
 			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
+			WorkPreserveFailed:  workPreserveFailed,
 		},
 		err: fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
 	}

@@ -907,11 +907,13 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	// Preserve any dirty (possibly green) tree to a recoverable ref before
 	// routing away from the exhausted node (#302). No-op on a clean tree.
 	//
-	// MID-ROUTING (#423): this node may route to fallback_retry_target, so an
-	// unavailable-repo error stays a WARNING (discarded) rather than escalating
-	// — escalating would override the fallback routing decision. Terminal
-	// hard-escalation is reserved for the no-onward-edge halt sites.
-	_ = e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
+	// (#423) This node has two outcomes below: it either routes onward to
+	// fallback_retry_target (MID-ROUTING — an unavailable-repo error stays a
+	// discarded WARNING so escalating cannot override the routing decision) or
+	// it dead-stops the run with no onward edge (TERMINAL — the preserve error
+	// must hard-escalate so unrecoverable work loss is surfaced). Capture the
+	// error here and branch on it at the terminal site below.
+	preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
@@ -927,7 +929,10 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		return fallback, true, nil, nil
 	}
 
-	// No fallback — fail.
+	// No fallback — TERMINAL halt. Hard-escalate an unrecoverable preserve
+	// failure (#423): this is a no-onward-edge dead stop with no later commit,
+	// so a discarded preserve error would silently lose work.
+	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 	s.trace.AddEntry(*traceEntry)
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
@@ -939,6 +944,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	e.emitGitCommit(s, currentNodeID, traceEntry)
 	s.trace.EndTime = time.Now()
 	result := e.failResult(s)
+	result.WorkPreserveFailed = workPreserveFailed
 	return "", false, result, nil
 }
 
