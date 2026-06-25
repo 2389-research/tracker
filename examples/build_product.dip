@@ -625,6 +625,18 @@ workflow BuildProduct
           value and normative constant, note the required verification
           shape: "a test asserts this exact value as a hard-coded
           expectation (not via the production constant)".
+      (g) External-tool invocation literals verifiable: for every exact
+          external-tool invocation SPEC.md prescribes — a `gh` / `git` /
+          other CLI command with a specific flag string (e.g.
+          `gh pr create --head <owner>:<branch>`) — record the literal flag
+          string as a behavioral contract whose verification method is "the
+          real tool accepts this literal". A literal that is wrong on its
+          face against the tool's own flag grammar (the canonical case:
+          `gh ... -b -`, where `-b` expects an argument and `-` is consumed
+          as that argument, silently mis-parsing) is an UNVERIFIABLE
+          contract — flag it here rather than letting a downstream grep
+          "find the string" and pass. Detection keys on the SHAPE "spec
+          prescribes a literal CLI invocation", never on a specific tool.
 
       WARN — report in the artifact, do NOT fail the gate:
       (d) Checkable guarantees: behavioral guarantees phrased so they
@@ -1969,6 +1981,19 @@ workflow BuildProduct
          (which checks the literal exists in the code); point 6 checks a
          TEST pins it to the spec literal independent of the production
          constant.
+      7. CONTRACT-FIDELITY AT EXTERNAL SEAMS: For every EXTERNAL SEAM — an
+         LLM provider adapter, a VCS-host CLI invocation (e.g. `gh`), or a
+         subprocess whose argument shape or response shape is contractual —
+         FAIL when the ONLY test exercising that seam uses a fake that the
+         PRODUCTION code also defines (a fake the code under test ships and
+         the test reuses ratifies the code's own assumptions, proving
+         nothing about the real seam). Cite the seam (file:line of the
+         production call) and the test path. A passing seam requires EITHER
+         a recorded/golden REAL-provider response (cite the fixture) OR a
+         CI-reachable REAL-CLI invocation (cite the test that shells the
+         actual tool). Detection keys on the seam's ROLE (crosses a process
+         or provider boundary whose arg/response shape is a contract) —
+         never on a specific provider, tool, or language.
 
       Your lane emphasis (after the rubric): missing requirements,
       architectural violations, leftover artifacts. Cite spec section
@@ -2046,6 +2071,19 @@ workflow BuildProduct
          (which checks the literal exists in the code); point 6 checks a
          TEST pins it to the spec literal independent of the production
          constant.
+      7. CONTRACT-FIDELITY AT EXTERNAL SEAMS: For every EXTERNAL SEAM — an
+         LLM provider adapter, a VCS-host CLI invocation (e.g. `gh`), or a
+         subprocess whose argument shape or response shape is contractual —
+         FAIL when the ONLY test exercising that seam uses a fake that the
+         PRODUCTION code also defines (a fake the code under test ships and
+         the test reuses ratifies the code's own assumptions, proving
+         nothing about the real seam). Cite the seam (file:line of the
+         production call) and the test path. A passing seam requires EITHER
+         a recorded/golden REAL-provider response (cite the fixture) OR a
+         CI-reachable REAL-CLI invocation (cite the test that shells the
+         actual tool). Detection keys on the seam's ROLE (crosses a process
+         or provider boundary whose arg/response shape is a contract) —
+         never on a specific provider, tool, or language.
 
       Your lane emphasis (after the rubric): code quality, test coverage,
       edge cases the spec calls out, whether "throw away" items were
@@ -2134,6 +2172,19 @@ workflow BuildProduct
          (which checks the literal exists in the code); point 6 checks a
          TEST pins it to the spec literal independent of the production
          constant.
+      7. CONTRACT-FIDELITY AT EXTERNAL SEAMS: For every EXTERNAL SEAM — an
+         LLM provider adapter, a VCS-host CLI invocation (e.g. `gh`), or a
+         subprocess whose argument shape or response shape is contractual —
+         FAIL when the ONLY test exercising that seam uses a fake that the
+         PRODUCTION code also defines (a fake the code under test ships and
+         the test reuses ratifies the code's own assumptions, proving
+         nothing about the real seam). Cite the seam (file:line of the
+         production call) and the test path. A passing seam requires EITHER
+         a recorded/golden REAL-provider response (cite the fixture) OR a
+         CI-reachable REAL-CLI invocation (cite the test that shells the
+         actual tool). Detection keys on the seam's ROLE (crosses a process
+         or provider boundary whose arg/response shape is a contract) —
+         never on a specific provider, tool, or language.
 
       Your lane emphasis (after the rubric): the things the other two
       reviewers will miss. Edge cases the spec implies but doesn't state
@@ -2432,6 +2483,14 @@ workflow BuildProduct
       value. A spec-emitted value with no literal-asserting test keeps the
       early STATUS:fail in place.
 
+      CONTRACT-FIDELITY AT EXTERNAL SEAMS (issue #416): For every external
+      seam (LLM provider adapter / VCS-host CLI like `gh` / subprocess
+      whose arg or response shape is contractual), FAIL when the only test
+      exercising it uses a fake the production code also defines. Require a
+      recorded/golden real-provider response OR a CI-reachable real-CLI
+      invocation; cite the seam file:line and the test path. An
+      undispositioned external seam keeps the early STATUS:fail in place.
+
       This is the final gate. Read SPEC.md line by line.
 
       For EVERY requirement, prescription, and instruction in the spec:
@@ -2472,8 +2531,10 @@ workflow BuildProduct
       carve-out), TEST QUALITY (every sleep-fence hit dispositioned),
       BEHAVIORAL CONTRACTS (every contract dispositioned with evidence,
       every ambiguity ruling followed), SPEC-EMITTED-VALUE ASSERTIONS
-      (every emitted value pinned to its spec literal by a test), and
-      SPEC.md compliance (every requirement implemented, no
+      (every emitted value pinned to its spec literal by a test),
+      CONTRACT-FIDELITY AT EXTERNAL SEAMS (every seam backed by a golden
+      real response or a real-CLI invocation, not a self-defined fake),
+      and SPEC.md compliance (every requirement implemented, no
       extras, no TODO/FIXME/HACK, tests pass, no unexpected files
       in .ai/build/ outside the allowlist enumerated above) all
       passed. Otherwise the early `STATUS:fail` from your first

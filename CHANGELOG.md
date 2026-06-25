@@ -32,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value-asserting verification method, and `SpecLint` rule (f) / the `Decompose`
   coverage table now enumerate spec-emitted values and normative constants so
   none is silently unowned.
+- **`build_product` enforces contract-fidelity at external seams (#416).** A new
+  rubric point 7 (CONTRACT-FIDELITY AT EXTERNAL SEAMS) in all three reviewers and
+  in `FinalSpecCheck`: for every external seam (LLM provider adapter, VCS-host CLI
+  like `gh`, or a subprocess whose arg/response shape is contractual), FAIL when
+  the only test exercising it uses a fake the production code also defines —
+  require a recorded/golden real-provider response OR a CI-reachable real-CLI
+  invocation, citing the seam file:line and the test path. Detection keys on the
+  seam's ROLE, never on a specific provider/tool/language. `SpecLint` rule (g)
+  records an exact external-tool invocation literal (a `gh`/`git` flag string) as
+  a contract whose verification method is "the real tool accepts this literal," so
+  a wrong-on-its-face literal (e.g. `gh ... -b -`) is flagged as unverifiable
+  rather than silently grepped-and-passed.
 
 ## [0.40.2] - 2026-06-24
 
