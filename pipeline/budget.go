@@ -92,19 +92,29 @@ type BudgetGuard struct {
 	limits     BudgetLimits
 	progressAt atomic.Int64 // UnixNano of last node completion (default-path stall)
 
-	clk        clock         // time source; defaults to realClock
-	sleepAware bool          // opt-in: drive wall/stall off Mono() so suspend is excluded
-	monoStart  time.Duration // Mono() at construction (sleep-aware elapsed baseline)
+	clk        clock // time source; defaults to realClock
+	sleepAware bool  // opt-in: drive wall/stall off Mono() so suspend is excluded
 
 	// mu guards the sleep-aware accounting fields below: they must move together
 	// (a paused window and its accumulated span) for correctness. A slept-laptop
 	// guard is not a hot path, so a mutex over atomics is acceptable.
-	mu               sync.Mutex
+	mu sync.Mutex
+	// monoAnchor is the monotonic baseline for sleep-aware wall/stall accounting,
+	// anchored lazily on the FIRST Check call (run start, right after the first
+	// node) — NOT at construction. A guard built before the run starts must not
+	// charge pre-run AWAKE idle against MaxWallTime or the initial StallTimeout
+	// (mirrors the default path, which measures from `started`).
+	monoAnchor       time.Duration
+	monoAnchored     bool          // monoAnchor has been set by the first Check
 	monoProgress     time.Duration // Mono() at last NotifyProgress (sleep-aware stall)
-	pausedMono       time.Duration // Mono() at Pause(); 0 = not paused
+	pausedMono       time.Duration // Mono() at Pause(); -1 = not paused
 	pausedDuration   time.Duration // accumulated explicit awake-idle span (since run start)
 	pausedAtProgress time.Duration // pausedDuration snapshot at last NotifyProgress
 }
+
+// pauseSentinelNone marks "not currently paused". A zero value is a legitimate
+// Mono() reading at run start, so 0 cannot mean "not paused"; use -1.
+const pauseSentinelNone time.Duration = -1
 
 // NewBudgetGuard constructs a BudgetGuard with the given limits. Returns nil
 // when limits.IsZero() so callers can use the nil-guard pattern to skip checks
@@ -121,9 +131,9 @@ func newBudgetGuardWithClock(limits BudgetLimits, clk clock) *BudgetGuard {
 	}
 	g := &BudgetGuard{limits: limits, clk: clk, sleepAware: limits.SleepAware}
 	g.progressAt.Store(g.clk.Now().UnixNano())
-	mono := g.clk.Mono()
-	g.monoStart = mono
-	g.monoProgress = mono
+	g.pausedMono = pauseSentinelNone
+	// monoAnchor/monoProgress are left unset here and anchored lazily on the first
+	// Check (run start), so pre-run AWAKE idle is excluded (F1).
 	return g
 }
 
@@ -156,7 +166,11 @@ func (g *BudgetGuard) Pause() {
 	}
 	mono := g.clk.Mono()
 	g.mu.Lock()
-	g.pausedMono = mono
+	// Idempotent (F2): only record the pause baseline when not already paused, so a
+	// double Pause does not overwrite (and under-count) the in-flight span.
+	if g.pausedMono == pauseSentinelNone {
+		g.pausedMono = mono
+	}
 	g.mu.Unlock()
 }
 
@@ -169,9 +183,9 @@ func (g *BudgetGuard) Resume() {
 	}
 	mono := g.clk.Mono()
 	g.mu.Lock()
-	if g.pausedMono != 0 {
+	if g.pausedMono != pauseSentinelNone {
 		g.pausedDuration += mono - g.pausedMono
-		g.pausedMono = 0
+		g.pausedMono = pauseSentinelNone
 	}
 	g.mu.Unlock()
 }
@@ -183,6 +197,9 @@ func (g *BudgetGuard) Check(usage *UsageSummary, started time.Time) BudgetBreach
 	if g == nil {
 		return BudgetBreach{Kind: BudgetOK}
 	}
+	if g.sleepAware {
+		g.anchorMono()
+	}
 	if breach := g.checkUsage(usage); breach.Kind != BudgetOK {
 		return breach
 	}
@@ -192,21 +209,55 @@ func (g *BudgetGuard) Check(usage *UsageSummary, started time.Time) BudgetBreach
 	return g.checkStall(started)
 }
 
+// anchorMono lazily fixes the sleep-aware monotonic baseline at run start — the
+// first Check call, which the engine issues right after the first node — so
+// pre-run AWAKE idle between NewBudgetGuard and the run is excluded (F1). Called
+// only on the sleep-aware path.
+func (g *BudgetGuard) anchorMono() {
+	mono := g.clk.Mono()
+	g.mu.Lock()
+	if !g.monoAnchored {
+		g.monoAnchor = mono
+		g.monoAnchored = true
+		// If no NotifyProgress has fired yet, anchor the stall baseline here too.
+		// A NotifyProgress that already ran records its own (clamped at read time).
+		if g.monoProgress < mono {
+			g.monoProgress = mono
+		}
+	}
+	g.mu.Unlock()
+}
+
+// pausedSpanLocked returns the accumulated paused duration plus any in-flight
+// pause window (Pause without a matching Resume). Callers must hold g.mu.
+func (g *BudgetGuard) pausedSpanLocked(now time.Duration) time.Duration {
+	paused := g.pausedDuration
+	if g.pausedMono != pauseSentinelNone {
+		paused += now - g.pausedMono
+	}
+	return paused
+}
+
 // checkWall evaluates MaxWallTime. Default path uses wall elapsed (byte-identical
-// to today). Sleep-aware path uses monotonic elapsed minus the explicit paused
-// span: monotonic is frozen during OS suspend (so a slept laptop is excluded
-// with no threshold) but advances during genuine work (so a long node correctly
-// trips).
+// to today). Sleep-aware path uses monotonic elapsed (from the run-start anchor)
+// minus the paused span — including any in-flight pause window (F3): monotonic is
+// frozen during OS suspend (so a slept laptop is excluded with no threshold) but
+// advances during genuine work (so a long node correctly trips).
 func (g *BudgetGuard) checkWall(started time.Time) BudgetBreach {
 	if g.limits.MaxWallTime <= 0 {
 		return BudgetBreach{Kind: BudgetOK}
 	}
 	var elapsed time.Duration
 	if g.sleepAware {
+		now := g.clk.Mono()
 		g.mu.Lock()
-		paused := g.pausedDuration
+		paused := g.pausedSpanLocked(now)
+		anchor := g.monoAnchor
 		g.mu.Unlock()
-		elapsed = g.clk.Mono() - g.monoStart - paused
+		elapsed = now - anchor - paused
+		if elapsed < 0 {
+			elapsed = 0
+		}
 	} else {
 		elapsed = g.clk.Now().Sub(started)
 	}
@@ -218,32 +269,58 @@ func (g *BudgetGuard) checkWall(started time.Time) BudgetBreach {
 
 // checkStall evaluates StallTimeout against the time since last progress. Default
 // path uses wall clock; sleep-aware path uses monotonic-since-progress minus the
-// explicit paused span (suspend excluded, genuine hangs still trip).
+// paused span — including any in-flight pause window (F4), and clamping the
+// progress baseline to the run-start anchor so pre-run idle cannot consume the
+// stall window (the default path's "clamp to started" semantics).
 func (g *BudgetGuard) checkStall(started time.Time) BudgetBreach {
 	if g.limits.StallTimeout <= 0 {
 		return BudgetBreach{Kind: BudgetOK}
 	}
 	var stall time.Duration
 	if g.sleepAware {
-		g.mu.Lock()
-		sinceProgress := g.clk.Mono() - g.monoProgress
-		pausedSinceProgress := g.pausedDuration - g.pausedAtProgress
-		g.mu.Unlock()
-		stall = sinceProgress - pausedSinceProgress
+		stall = g.sleepAwareStall()
 	} else {
-		now := g.clk.Now()
-		// Clamp to started so pre-run idle time (between NewBudgetGuard and Run())
-		// does not consume the stall window before the first node fires.
-		lastProgress := time.Unix(0, g.progressAt.Load())
-		if lastProgress.Before(started) {
-			lastProgress = started
-		}
-		stall = now.Sub(lastProgress)
+		stall = g.defaultStall(started)
 	}
 	if stall > g.limits.StallTimeout {
 		return BudgetBreach{Kind: BudgetStall, Message: "stall_timeout exceeded"}
 	}
 	return BudgetBreach{Kind: BudgetOK}
+}
+
+// sleepAwareStall computes monotonic-since-progress minus the paused span
+// (including any in-flight pause window, F4), clamping the progress baseline to
+// the run-start anchor so pre-run idle cannot consume the stall window.
+func (g *BudgetGuard) sleepAwareStall() time.Duration {
+	now := g.clk.Mono()
+	g.mu.Lock()
+	// Clamp the progress baseline to the run-start anchor: progress recorded
+	// before run start (NotifyProgress called pre-Check) must not let pre-run
+	// idle accrue against the stall window.
+	lastProgress := g.monoProgress
+	if lastProgress < g.monoAnchor {
+		lastProgress = g.monoAnchor
+	}
+	pausedSinceProgress := g.pausedSpanLocked(now) - g.pausedAtProgress
+	g.mu.Unlock()
+	stall := now - lastProgress - pausedSinceProgress
+	if stall < 0 {
+		stall = 0
+	}
+	return stall
+}
+
+// defaultStall computes wall-clock since last progress, clamped to the run start
+// (byte-identical to the original default path).
+func (g *BudgetGuard) defaultStall(started time.Time) time.Duration {
+	now := g.clk.Now()
+	// Clamp to started so pre-run idle time (between NewBudgetGuard and Run())
+	// does not consume the stall window before the first node fires.
+	lastProgress := time.Unix(0, g.progressAt.Load())
+	if lastProgress.Before(started) {
+		lastProgress = started
+	}
+	return now.Sub(lastProgress)
 }
 
 // checkUsage evaluates token and cost limits against a usage snapshot.

@@ -152,6 +152,7 @@ func TestBudgetGuard_SleepAware_WallExcludesSuspend(t *testing.T) {
 	fc := newFakeClock()
 	started := fc.Now()
 	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+	g.Check(nil, started) // anchor monotonic baseline at run start (F1)
 
 	fc.advanceWork(10 * time.Minute)
 	if b := g.Check(nil, started); b.Kind != BudgetOK {
@@ -171,6 +172,7 @@ func TestBudgetGuard_SleepAware_GenuineLongWorkTripsWall(t *testing.T) {
 	fc := newFakeClock()
 	started := fc.Now()
 	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+	g.Check(nil, started) // anchor monotonic baseline at run start (F1)
 
 	// One long node: 70m of genuine work with no intervening Check (Check runs
 	// only at node boundaries). Monotonic advances the full 70m.
@@ -187,6 +189,7 @@ func TestBudgetGuard_SleepAware_GenuineLongWorkMultiSpanTripsWall(t *testing.T) 
 	fc := newFakeClock()
 	started := fc.Now()
 	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+	g.Check(nil, started) // anchor monotonic baseline at run start (F1)
 
 	tripped := false
 	for i := 0; i < 10; i++ {
@@ -209,6 +212,7 @@ func TestBudgetGuard_SleepAware_GenuineHangTripsStall(t *testing.T) {
 	started := fc.Now()
 	g := newBudgetGuardWithClock(BudgetLimits{StallTimeout: 30 * time.Minute, SleepAware: true}, fc)
 	g.NotifyProgress()
+	g.Check(nil, started) // anchor monotonic baseline at run start (F1)
 
 	fc.advanceWork(90 * time.Minute) // genuine no-progress hang
 	if b := g.Check(nil, started); b.Kind != BudgetStall {
@@ -261,6 +265,7 @@ func TestBudgetGuard_PauseResume_SubtractsSpan(t *testing.T) {
 	fc := newFakeClock()
 	started := fc.Now()
 	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+	g.Check(nil, started) // anchor monotonic baseline at run start (F1)
 
 	fc.advanceWork(50 * time.Minute)
 	g.Pause()
@@ -300,5 +305,112 @@ func TestBudgetGuard_DefaultOff_WallTripsOnElapsed(t *testing.T) {
 	fc.advanceWork(time.Hour) // genuine 70m elapsed
 	if b := g.Check(nil, started); b.Kind != BudgetWallTime {
 		t.Fatalf("after 70m genuine elapsed: got %v, want BudgetWallTime", b.Kind)
+	}
+}
+
+// F1: a guard constructed BEFORE the run starts must not charge pre-run AWAKE
+// idle against MaxWallTime — the monotonic baseline anchors at the first Check
+// (run start), so 50m of awake idle before the run does not consume the hour.
+func TestBudgetGuard_SleepAware_PreRunIdleNotChargedToWall(t *testing.T) {
+	fc := newFakeClock()
+	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+
+	// Construction-to-run-start gap: 50m of awake idle (mono advances) before the
+	// run begins. The engine's first Check marks run start here.
+	fc.advanceWork(50 * time.Minute)
+	started := fc.Now()
+	if b := g.Check(nil, started); b.Kind != BudgetOK {
+		t.Fatalf("at run start with 50m pre-run idle: got %v, want BudgetOK", b.Kind)
+	}
+	// 30m of genuine in-run work — total since run start is 30m, well under 1h.
+	fc.advanceWork(30 * time.Minute)
+	if b := g.Check(nil, started); b.Kind != BudgetOK {
+		t.Fatalf("30m in-run (80m since construction): got %v, want BudgetOK (pre-run idle excluded)", b.Kind)
+	}
+}
+
+// F1: pre-run AWAKE idle must not consume the initial StallTimeout either — the
+// stall baseline clamps to the run-start anchor.
+func TestBudgetGuard_SleepAware_PreRunIdleNotChargedToStall(t *testing.T) {
+	fc := newFakeClock()
+	g := newBudgetGuardWithClock(BudgetLimits{StallTimeout: 30 * time.Minute, SleepAware: true}, fc)
+
+	fc.advanceWork(50 * time.Minute) // pre-run awake idle, no NotifyProgress yet
+	started := fc.Now()
+	if b := g.Check(nil, started); b.Kind != BudgetOK {
+		t.Fatalf("at run start with 50m pre-run idle: got %v, want BudgetOK (stall clamped to run start)", b.Kind)
+	}
+	fc.advanceWork(10 * time.Minute) // 10m since run start, under 30m
+	if b := g.Check(nil, started); b.Kind != BudgetOK {
+		t.Fatalf("10m in-run: got %v, want BudgetOK", b.Kind)
+	}
+}
+
+// F2: Pause is idempotent. A double Pause before a single Resume must subtract
+// the bracketed span exactly once (not zero, not double). pausedMono is recorded
+// only on the first Pause; the second is a no-op.
+func TestBudgetGuard_PauseResume_DoublePauseIdempotent(t *testing.T) {
+	fc := newFakeClock()
+	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+	g.Check(nil, fc.Now()) // anchor at run start
+
+	fc.advanceWork(40 * time.Minute)
+	g.Pause()                        // pause baseline = mono at 40m
+	fc.advanceWork(2 * time.Minute)  // a second Pause arrives mid-window
+	g.Pause()                        // must NOT overwrite the 40m baseline (F2)
+	fc.advanceWork(28 * time.Minute) // total paused span = 30m (40m -> 70m)
+	g.Resume()
+	// Effective elapsed = 70m mono - 30m paused = 40m. Under 1h.
+	fc.advanceWork(15 * time.Minute) // effective 55m
+	if b := g.Check(nil, fc.Now()); b.Kind != BudgetOK {
+		t.Fatalf("effective 55m after idempotent double-pause: got %v, want BudgetOK", b.Kind)
+	}
+	// Now advance 10m: correct accounting (30m subtracted once) -> effective 65m,
+	// which must TRIP. The F2 bug (second Pause overwrites baseline at 42m, so
+	// only 28m is subtracted) -> effective 67m, which also trips — so a trip here
+	// does not distinguish. The distinguishing observation is the boundary BELOW:
+	// with the span subtracted exactly once, effective 59m must still be OK; the
+	// over-subtraction bug (if Pause had instead added spans) would read lower.
+	fc.advanceWork(4 * time.Minute) // correct effective 59m, still under 1h
+	if b := g.Check(nil, fc.Now()); b.Kind != BudgetOK {
+		t.Fatalf("effective 59m: got %v, want BudgetOK (span subtracted exactly once)", b.Kind)
+	}
+	fc.advanceWork(2 * time.Minute) // correct effective 61m -> must trip
+	if b := g.Check(nil, fc.Now()); b.Kind != BudgetWallTime {
+		t.Fatalf("effective 61m: got %v, want BudgetWallTime", b.Kind)
+	}
+}
+
+// F3: while currently paused (Pause without Resume), the in-flight pause window
+// must be subtracted from wall accounting — MaxWallTime must NOT trip mid-pause
+// even when the paused span alone exceeds the limit.
+func TestBudgetGuard_PauseResume_WallNotTrippedWhilePaused(t *testing.T) {
+	fc := newFakeClock()
+	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+	g.Check(nil, fc.Now()) // anchor at run start
+
+	fc.advanceWork(10 * time.Minute)
+	g.Pause()
+	fc.advanceWork(2 * time.Hour) // long awake idle while paused — exceeds 1h alone
+	// Still paused (no Resume): the in-flight span must be excluded (F3).
+	if b := g.Check(nil, fc.Now()); b.Kind != BudgetOK {
+		t.Fatalf("mid-pause wall: got %v, want BudgetOK (in-flight pause span not subtracted, F3)", b.Kind)
+	}
+}
+
+// F4: while currently paused, the in-flight pause window must be subtracted from
+// stall accounting — StallTimeout must NOT trip mid-pause even when the paused
+// span alone exceeds the timeout.
+func TestBudgetGuard_PauseResume_StallNotTrippedWhilePaused(t *testing.T) {
+	fc := newFakeClock()
+	g := newBudgetGuardWithClock(BudgetLimits{StallTimeout: 30 * time.Minute, SleepAware: true}, fc)
+	g.NotifyProgress()
+	g.Check(nil, fc.Now()) // anchor at run start
+
+	fc.advanceWork(5 * time.Minute)
+	g.Pause()
+	fc.advanceWork(2 * time.Hour) // long awake idle while paused — exceeds 30m alone
+	if b := g.Check(nil, fc.Now()); b.Kind != BudgetOK {
+		t.Fatalf("mid-pause stall: got %v, want BudgetOK (in-flight pause span not subtracted, F4)", b.Kind)
 	}
 }
