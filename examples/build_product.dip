@@ -553,6 +553,16 @@ workflow BuildProduct
         echo "## Milestones landed"
       } > .ai/build/build-context.md 2>/dev/null || true
 
+      # #418: capture the run's base commit ONCE at Setup so the cross-review
+      # diff node can compute a cumulative base..HEAD without a per-milestone
+      # marker (those are deleted at each MarkMilestoneDone). Same non-leaking
+      # idiom as PickNextMilestone's start marker: --verify --quiet prints
+      # nothing and exits non-zero on a commitless repo, so a fresh repo
+      # genuinely records an empty base. Goes to a FILE so the routing marker
+      # below stays last on stdout.
+      RUN_BASE=$(git rev-parse --verify --quiet HEAD || true)
+      printf '%s\n' "$RUN_BASE" > .ai/build/run-base-sha
+
       printf 'setup-ready'
 
   # ─── SpecLint: spec-coherence preflight (issue #301, epic #308 Phase 2) ──
@@ -1894,6 +1904,45 @@ workflow BuildProduct
       rm -f .ai/build/review-claude.md .ai/build/review-codex.md .ai/build/review-gemini.md
       printf 'cleared stale review reports\n'
 
+  # #418: compute the cumulative base..HEAD review diff ONCE so the three
+  # reviewers read a bounded diff as their PRIMARY input instead of each
+  # re-reading the whole tree (the ~90%-of-tokens problem). BASE is the run's
+  # base commit captured at Setup (.ai/build/run-base-sha); degrade to the
+  # empty tree when it is empty (fresh repo) or unreachable (history rewrite)
+  # — the SAME two-dot + empty-tree-fallback idiom verify.sh and
+  # MarkMilestoneDone already use. The full tree stays available on demand
+  # (the reviewers may read any file); this only POINTS their primary read.
+  # The diff is advisory context, so the whole body is best-effort and the
+  # routing marker is printed last.
+  tool ComputeReviewDiff
+    label: "Compute Cumulative Review Diff"
+    timeout: 60s
+    # Cap matches ShowPlan: a large cumulative diff must not be clipped before
+    # the reviewers read the file (they read the FILE, not ctx, but keep the
+    # node's own stdout generous for diagnose).
+    output_limit: 1048576
+    command:
+      set -u
+      mkdir -p .ai/build
+      BASE=$(cat .ai/build/run-base-sha 2>/dev/null || true)
+      if [ -z "$BASE" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+        BASE=$(git hash-object -t tree /dev/null)
+      fi
+      {
+        echo "# Cumulative review diff (base..HEAD)"
+        echo
+        echo "_Base: ${BASE} → HEAD. This is the complete set of changes the"
+        echo "build produced. It is your PRIMARY read; the full working tree is"
+        echo "available on demand if a finding needs surrounding context._"
+        echo
+        echo '## Files changed'
+        git diff --name-status "${BASE}..HEAD" 2>/dev/null
+        echo
+        echo '## Full diff'
+        git diff "${BASE}..HEAD" 2>/dev/null
+      } > .ai/build/review-diff.md 2>/dev/null || true
+      printf 'review-diff-ready'
+
   parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
     params:
       fan_in_policy: all
@@ -1912,11 +1961,15 @@ workflow BuildProduct
 
   agent ReviewClaude
     label: "Claude Review (general)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. The build loop has
+      Review the implementation against SPEC.md. Your PRIMARY read is the
+      cumulative base..HEAD review diff at .ai/build/review-diff.md — it is
+      the complete set of changes this build produced. Read the full working
+      tree ON DEMAND only when a finding needs surrounding context (it is
+      available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
       to stop early (the "accept" gate) and ship what exists. Review what is
       actually present; do not assume unfinished work will arrive later.
@@ -2003,11 +2056,15 @@ workflow BuildProduct
 
   agent ReviewCodex
     label: "Codex Review (quality)"
-    model: gpt-5.4
+    model: gpt-5.2
     provider: openai
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. The build loop has
+      Review the implementation against SPEC.md. Your PRIMARY read is the
+      cumulative base..HEAD review diff at .ai/build/review-diff.md — it is
+      the complete set of changes this build produced. Read the full working
+      tree ON DEMAND only when a finding needs surrounding context (it is
+      available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
       to stop early (the "accept" gate) and ship what exists. Review what is
       actually present; do not assume unfinished work will arrive later.
@@ -2098,7 +2155,11 @@ workflow BuildProduct
     provider: gemini
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. The build loop has
+      Review the implementation against SPEC.md. Your PRIMARY read is the
+      cumulative base..HEAD review diff at .ai/build/review-diff.md — it is
+      the complete set of changes this build produced. Read the full working
+      tree ON DEMAND only when a finding needs surrounding context (it is
+      available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
       to stop early (the "accept" gate) and ship what exists. Review what is
       actually present; do not assume unfinished work will arrive later.
@@ -2514,7 +2575,8 @@ workflow BuildProduct
         iface-reachability-rubric.md), the re-review
         budget counter (review_fix_attempts),
         the per-node build-context file (build-context.md),
-        and reviewers write reports (review-claude.md,
+        the run base marker (run-base-sha) and cumulative review diff
+        (review-diff.md), and reviewers write reports (review-claude.md,
         review-codex.md, review-gemini.md). Only flag files outside
         this explicit allowlist. (.ai/decisions/*.md workflow artifacts —
         spec-analysis, milestones, requirement-coverage, compliance —
@@ -2840,7 +2902,8 @@ workflow BuildProduct
     # ClearStaleReviews wipes prior-round reports before fan-out so the
     # post-join CheckReviewsComplete guard (issue #313) can't be satisfied by a
     # stale file from an earlier re-review pass.
-    ClearStaleReviews -> ReviewParallel
+    ClearStaleReviews -> ComputeReviewDiff
+    ComputeReviewDiff -> ReviewParallel
     # The three reviewers run as parallel branches; a branch runs via
     # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
     # path, so a per-branch fallback_target would be inert. Route failure on the

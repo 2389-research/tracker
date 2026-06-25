@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`build_product` review panel reads a bounded diff and tiers its models
+  (#418).** A new `ComputeReviewDiff` tool node (inserted
+  `ClearStaleReviews -> ComputeReviewDiff -> ReviewParallel`) computes the
+  cumulative `base..HEAD` diff once into `.ai/build/review-diff.md` — base is the
+  run's commit captured at `Setup` (`run-base-sha`), with the same empty-tree
+  fallback the per-milestone diffs already use (no hard-coded path/range). Each
+  reviewer's scope sentence now points its PRIMARY read at that diff (full tree
+  available on demand, not mandated); the 5→7-point rubric is unchanged.
+  `ReviewClaude` drops to `claude-sonnet-4-6` and `ReviewCodex` to `gpt-5.2`;
+  `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
+  unchanged. Steady-state this is the dominant input-token cost (reviewers no
+  longer each re-walk the whole tree ×3, and 2 of 3 lanes run mid-tier).
+
 ### Added
 
 - **`build_product` now derives spec-contract artifacts (#306).** `ReadSpec`
