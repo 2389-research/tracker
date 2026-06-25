@@ -169,6 +169,15 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 // caller threads a signal.NotifyContext created before the LLM client
 // setup so cancellation works uniformly across preflight and engine.
 func applyGitPreflight(ctx context.Context, graph *pipeline.Graph, workdir string) error {
+	// Sandbox device-node hygiene (#423): verify standard device nodes (at
+	// minimum /dev/null is a usable char device) BEFORE any git or subprocess
+	// handler runs. A suspended/restored sandbox can corrupt /dev/null, which
+	// silently breaks git and reviewer CLIs deep mid-run. Runs ahead of (and
+	// independent of) the git policy below, since subprocess handlers depend on
+	// the device regardless of whether the workflow requires git.
+	if err := checkDeviceNodes(nil); err != nil {
+		return err
+	}
 	return pipeline.Preflight(ctx, pipeline.PreflightConfig{
 		WorkDir:        workdir,
 		Requires:       graph.RequiredDeps(),
@@ -191,14 +200,8 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, bundleInfo, err := loadAndPreflightPipeline(ctx, pipelineFile, format, workdir)
 	if err != nil {
-		return err
-	}
-	if err := applyRunParamOverrides(graph); err != nil {
-		return err
-	}
-	if err := applyGitPreflight(ctx, graph, workdir); err != nil {
 		return err
 	}
 
@@ -217,27 +220,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		defer c.Cancel()
 	}
 
-	artifactDir := activeArtifactDir
-	if artifactDir == "" {
-		artifactDir = filepath.Join(workdir, ".tracker", "runs")
-	}
-	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
+	artifactDir := resolveArtifactDir(workdir)
+	activityLog := setupActivityLog(artifactDir, verbose, bundleInfo.Identity)
 	defer activityLog.Close()
-	// Raw provider streaming chunks are debugging payload — only capture
-	// them in the activity log under --verbose (#354).
-	activityLog.SetCaptureRawLLM(verbose)
-	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
-	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
-	// registry's BundleIdentityStamper). Empty identity is a no-op for
-	// plain .dip runs.
-	activityLog.SetBundleIdentity(bundleInfo.Identity)
-
-	// If this resume only proceeded because --force-bundle-mismatch was
-	// passed, record the override in activity.jsonl now — the engine
-	// hasn't fired yet, so without this the audit trail would lack the
-	// signal that the run executed against a different bundle than its
-	// checkpoint claimed. No-op when no resume / no forced mismatch.
-	emitForcedBundleMismatch(activityLog, activeResumeInfo)
 
 	wireLLMTraceToLog(llmClient, activityLog)
 
@@ -263,12 +248,68 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 
 	result, runErr := engine.Run(ctx)
 
+	return finishRun(result, runErr, pipelineFile, artifactDir)
+}
+
+// finishRun interprets the engine result, prints the summary, and exports the
+// run bundle when a run ID is present. Extracted from run for the complexity
+// gate; returns the user-facing pipeline error.
+func finishRun(result *pipeline.EngineResult, runErr error, pipelineFile, artifactDir string) error {
 	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
 	printRunSummary(result, pipelineErr, pipelineFile)
 	if result != nil && result.RunID != "" {
 		maybeExportBundle(artifactDir, result.RunID)
 	}
 	return pipelineErr
+}
+
+// loadAndPreflightPipeline loads + validates the pipeline, applies --param
+// overrides, and runs the device/git preflight. Shared prelude for run and
+// runTUI; extracted to keep both under the complexity gate.
+func loadAndPreflightPipeline(ctx context.Context, pipelineFile, format, workdir string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
+	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
+	if err != nil {
+		return nil, nil, pipeline.BundleInfo{}, err
+	}
+	if err := applyRunParamOverrides(graph); err != nil {
+		return nil, nil, pipeline.BundleInfo{}, err
+	}
+	if err := applyGitPreflight(ctx, graph, workdir); err != nil {
+		return nil, nil, pipeline.BundleInfo{}, err
+	}
+	return graph, subgraphs, bundleInfo, nil
+}
+
+// resolveArtifactDir returns the configured artifact dir, defaulting to
+// <workdir>/.tracker/runs when none was set. Extracted from run/runTUI for the
+// complexity gate.
+func resolveArtifactDir(workdir string) string {
+	if activeArtifactDir != "" {
+		return activeArtifactDir
+	}
+	return filepath.Join(workdir, ".tracker", "runs")
+}
+
+// setupActivityLog constructs the JSONL activity-log handler, configures raw-LLM
+// capture and bundle identity, and records any forced bundle-mismatch resume.
+// Extracted from run/runTUI for the complexity gate. Caller owns Close().
+func setupActivityLog(artifactDir string, verbose bool, bundleIdentity string) *pipeline.JSONLEventHandler {
+	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
+	// Raw provider streaming chunks are debugging payload — only capture
+	// them in the activity log under --verbose (#354).
+	activityLog.SetCaptureRawLLM(verbose)
+	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
+	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
+	// registry's BundleIdentityStamper). Empty identity is a no-op for
+	// plain .dip runs.
+	activityLog.SetBundleIdentity(bundleIdentity)
+	// If this resume only proceeded because --force-bundle-mismatch was
+	// passed, record the override in activity.jsonl now — the engine
+	// hasn't fired yet, so without this the audit trail would lack the
+	// signal that the run executed against a different bundle than its
+	// checkpoint claimed. No-op when no resume / no forced mismatch.
+	emitForcedBundleMismatch(activityLog, activeResumeInfo)
+	return activityLog
 }
 
 // prepareNativeLLMClient creates the LLM client, returning nil without error
@@ -473,26 +514,9 @@ func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[
 		return nil, nil, pipeline.BundleInfo{}, err
 	}
 
-	var (
-		graph     *pipeline.Graph
-		subgraphs map[string]*pipeline.Graph
-		bundle    pipeline.BundleInfo
-	)
-	if isEmbedded {
-		// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
-		graph, err = loadEmbeddedPipeline(info)
-		if err != nil {
-			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
-		}
-		subgraphs, err = loadSubgraphs(graph, info.File)
-		if err != nil {
-			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load subgraphs: %w", err)
-		}
-	} else {
-		graph, subgraphs, bundle, err = loadPipelineAndBundle(resolved, format)
-		if err != nil {
-			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
-		}
+	graph, subgraphs, bundle, err := loadGraphAndSubgraphs(resolved, format, info, isEmbedded)
+	if err != nil {
+		return nil, nil, pipeline.BundleInfo{}, err
 	}
 
 	if err := pipeline.Validate(graph); err != nil {
@@ -504,6 +528,29 @@ func loadAndValidatePipeline(pipelineFile, format string) (*pipeline.Graph, map[
 	return graph, subgraphs, bundle, nil
 }
 
+// loadGraphAndSubgraphs loads the graph + subgraphs from either an embedded
+// workflow or a filesystem path / .dipx bundle. Extracted from
+// loadAndValidatePipeline for the complexity gate.
+func loadGraphAndSubgraphs(resolved, format string, info WorkflowInfo, isEmbedded bool) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
+	if !isEmbedded {
+		graph, subgraphs, bundle, err := loadPipelineAndBundle(resolved, format)
+		if err != nil {
+			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
+		}
+		return graph, subgraphs, bundle, nil
+	}
+	// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).
+	graph, err := loadEmbeddedPipeline(info)
+	if err != nil {
+		return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
+	}
+	subgraphs, err := loadSubgraphs(graph, info.File)
+	if err != nil {
+		return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load subgraphs: %w", err)
+	}
+	return graph, subgraphs, pipeline.BundleInfo{}, nil
+}
+
 func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
 	// Signal context covers preflight + engine for consistent Ctrl+C
 	// handling. The TUI's tea.Program owns the terminal once running,
@@ -512,14 +559,8 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
+	graph, subgraphs, bundleInfo, err := loadAndPreflightPipeline(ctx, pipelineFile, format, workdir)
 	if err != nil {
-		return err
-	}
-	if err := applyRunParamOverrides(graph); err != nil {
-		return err
-	}
-	if err := applyGitPreflight(ctx, graph, workdir); err != nil {
 		return err
 	}
 
@@ -534,10 +575,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	execEnv := exec.NewLocalEnvironment(workdir)
 	pipelineName := resolvePipelineName(graph, pipelineFile)
-	artifactDir := activeArtifactDir
-	if artifactDir == "" {
-		artifactDir = filepath.Join(workdir, ".tracker", "runs")
-	}
+	artifactDir := resolveArtifactDir(workdir)
 
 	prog, store, activityLog, err := setupTUIProgram(graph, subgraphs, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
 	if err != nil {
@@ -547,14 +585,8 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
 	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
 	// registry's BundleIdentityStamper). Empty identity is a no-op for
-	// plain .dip runs.
+	// plain .dip runs. Then record any forced bundle-mismatch resume.
 	activityLog.SetBundleIdentity(bundleInfo.Identity)
-
-	// If this resume only proceeded because --force-bundle-mismatch was
-	// passed, record the override in activity.jsonl now — the engine
-	// hasn't fired yet, so without this the audit trail would lack the
-	// signal that the run executed against a different bundle than its
-	// checkpoint claimed. No-op when no resume / no forced mismatch.
 	emitForcedBundleMismatch(activityLog, activeResumeInfo)
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
@@ -575,6 +607,13 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		return err
 	}
 
+	return finishTUIRun(outcome, pipelineName, pipelineFile, artifactDir)
+}
+
+// finishTUIRun prints the summary, fires the completion notification, and
+// exports the bundle when a run ID is present. Extracted from runTUI for the
+// complexity gate.
+func finishTUIRun(outcome pipelineOutcome, pipelineName, pipelineFile, artifactDir string) error {
 	printRunSummary(outcome.result, outcome.err, pipelineFile)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
@@ -984,22 +1023,33 @@ func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Cl
 		return newWebhookInterviewerFromCfg(activeWebhookGate)
 	}
 	if cfg.persona != "" {
-		persona, _ := handlers.ParsePersona(cfg.persona)
-		// Use claude-code autopilot when backend is claude-code.
-		if backend == "claude-code" {
-			ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(persona)
-			if ccErr == nil {
-				return tui.NewAutopilotTUIInterviewer(ccAutopilot, send)
-			}
-			fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
+		if iv := chooseTUIAutopilotInterviewer(send, cfg.persona, llmClient, backend); iv != nil {
+			return iv
 		}
-		if llmClient != nil {
-			autopilot := handlers.NewAutopilotInterviewer(llmClient, persona)
-			return tui.NewAutopilotTUIInterviewer(autopilot, send)
-		}
-		fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to interactive\n")
 	}
 	return tui.NewBubbleteaInterviewer(send)
+}
+
+// chooseTUIAutopilotInterviewer builds the persona-backed TUI autopilot
+// interviewer (claude-code subprocess when the backend is claude-code, else the
+// native LLM client). Returns nil to signal a fall-back to the interactive
+// Bubbletea interviewer. Extracted from chooseTUIInterviewer for the
+// complexity gate.
+func chooseTUIAutopilotInterviewer(send tui.SendFunc, persona string, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
+	parsed, _ := handlers.ParsePersona(persona)
+	if backend == "claude-code" {
+		ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(parsed)
+		if ccErr == nil {
+			return tui.NewAutopilotTUIInterviewer(ccAutopilot, send)
+		}
+		fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
+	}
+	if llmClient != nil {
+		autopilot := handlers.NewAutopilotInterviewer(llmClient, parsed)
+		return tui.NewAutopilotTUIInterviewer(autopilot, send)
+	}
+	fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to interactive\n")
+	return nil
 }
 
 // maybeExportBundle exports a git bundle of the run artifact repository when

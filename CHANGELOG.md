@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sandbox device-node hygiene preflight (#423).** Before any git or subprocess
+  handler runs — on both fresh runs and resume — `applyGitPreflight` now verifies
+  standard device nodes are usable (at minimum `/dev/null` is a readable+writable
+  character device). A suspended/restored sandbox can silently corrupt `/dev/null`
+  (e.g. it becomes unreadable or a regular file masquerading as the device),
+  which breaks git and reviewer CLIs deep mid-run; that previously surfaced only
+  as an opaque `context canceled` failure during the terminal commit. The probe
+  now fails fast with a specific, actionable diagnostic (including a `mknod`
+  remediation) instead. The probe is portability-guarded (POSIX real check,
+  Windows no-op) and injectable, so it runs ahead of and independent of the git
+  policy and never touches the host device in tests. No new behavior when
+  `/dev/null` is healthy.
+
+### Changed
+
+- **Artifact-repo health check + reattach on the never-lose-work commit path
+  (#423).** `commitWIPBeforeRouting` now probes artifact-repo availability via a
+  new `gitArtifactRepo.ensureHealthy()` before committing work-in-progress; if
+  the repo has gone unreachable post-suspend it attempts a single reattach
+  (clear the latched failure + idempotent re-`Init`, capturing the current tree).
+  On the **terminal** never-lose-work paths (handler-error halt and failing exit
+  node) an unrecoverable repo is now surfaced as a HARD signal — a new
+  `EventStageFailed` diagnostic plus an `EngineResult.WorkPreserveFailed` flag —
+  rather than degrading silently to a best-effort `EventWarning`. The original
+  node failure is never masked (`Status` stays `OutcomeFail`). **Mid-routing**
+  call sites (strict-failure pre-decision, retry-exhausted with a
+  `fallback_retry_target`) keep the warning-only behavior so the routing outcome
+  is never changed. No behavior change when devices and the artifact repo are
+  healthy.
+
 ## [0.40.2] - 2026-06-24
 
 ### Fixed

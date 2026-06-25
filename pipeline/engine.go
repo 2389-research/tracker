@@ -30,6 +30,13 @@ type EngineResult struct {
 	// len(ValidationOverrides) > 0 AND the run reached the success exit;
 	// failure paths return fail/budget regardless of override presence.
 	ValidationOverrides []OverrideDetail
+	// WorkPreserveFailed is true when a TERMINAL halt path could not preserve a
+	// failed node's uncommitted work because the artifact git repo went
+	// unavailable and reattach failed (#423). The never-lose-work guarantee
+	// degraded; Status remains the original OutcomeFail (the original node
+	// failure is never masked). Zero value (false) on every healthy run, so the
+	// success-path serialization is unchanged.
+	WorkPreserveFailed bool
 }
 
 // OutcomeBudgetExceeded signals that a BudgetGuard halted the run.
@@ -253,6 +260,12 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	}
 
 done:
+	return e.successResult(s), nil
+}
+
+// successResult finalizes the trace, emits EventPipelineCompleted, and builds
+// the terminal success EngineResult. Extracted from Run for the complexity gate.
+func (e *Engine) successResult(s *runState) *EngineResult {
 	s.trace.EndTime = time.Now()
 
 	e.emit(PipelineEvent{
@@ -277,7 +290,7 @@ done:
 		Trace:               s.trace,
 		Usage:               s.trace.AggregateUsage(),
 		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-	}, nil
+	}
 }
 
 // processNode handles a single iteration of the main engine loop.
@@ -327,7 +340,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 		// died, or a cancellation mid-write. No-op on a clean tree. executeNode
 		// already appended this node's trace entry, so mirror the recorded ref
 		// onto it after the helper sets it on our local copy.
-		e.commitWIPBeforeRouting(s, currentNodeID, &traceEntry)
+		preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, &traceEntry)
 		if traceEntry.WIPRef != "" && len(s.trace.Entries) > 0 {
 			s.trace.Entries[len(s.trace.Entries)-1].WIPRef = traceEntry.WIPRef
 		}
@@ -336,6 +349,11 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 		s.pctx.ScopeToNode(currentNodeID)
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		s.trace.EndTime = time.Now()
+		// TERMINAL never-lose-work path (#423): if the artifact repo went
+		// unavailable and reattach failed, surface a HARD signal — Status stays
+		// the original OutcomeFail (original failure not masked) but the
+		// degradation is loud (EventStageFailed) and machine-detectable.
+		workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 		return loopResult{
 			action: loopReturn,
 			result: &EngineResult{
@@ -346,6 +364,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 				Trace:               s.trace,
 				Usage:               s.trace.AggregateUsage(),
 				ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
+				WorkPreserveFailed:  workPreserveFailed,
 			},
 			err: fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
 		}
@@ -615,7 +634,13 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	// BEFORE deciding to halt or route to a fallback, so green-but-uncommitted
 	// work is never discarded by the routing decision (#302). No-op on a clean
 	// tree; warns and skips when no git adapter is configured.
-	e.commitWIPBeforeRouting(s, nodeID, traceEntry)
+	//
+	// MID-ROUTING (#423): the routing decision (halt vs strictFailureFallback)
+	// is not yet known here, so an unavailable-repo error stays a WARNING and is
+	// discarded — escalating would change the routing outcome, violating the
+	// commitWIPBeforeRouting contract. The hard escalation lives only on the
+	// unambiguous terminal-halt sites.
+	_ = e.commitWIPBeforeRouting(s, nodeID, traceEntry)
 	// Before dead-stopping, consult the node/graph-level fallback_target so an
 	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
 	// instead of skipping every downstream node (#295). One-shot per node.

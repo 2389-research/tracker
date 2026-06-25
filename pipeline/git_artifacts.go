@@ -12,6 +12,12 @@ import (
 	"strings"
 )
 
+// ErrArtifactRepoUnavailable — the artifact git repo went unreachable mid-run
+// (e.g. its gitdir was lost across a sandbox suspend, #423) and the reattach /
+// reinit recovery attempt failed. On the terminal never-lose-work commit path
+// this is surfaced as a HARD signal, not a best-effort warning.
+var ErrArtifactRepoUnavailable = errors.New("git artifact repository unavailable")
+
 // gitArtifactRepo manages a git repo backing the artifact dir for a run.
 // All operations are best-effort — if git fails, the engine logs a warning
 // via the event handler and continues without git tracking (not a fatal error).
@@ -237,6 +243,34 @@ func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
 		return "", fmt.Errorf("git tag %q for WIP: %w\n%s", ref, err, out)
 	}
 	return ref, nil
+}
+
+// ensureHealthy probes the artifact repo's git dir and, if it has gone
+// unreachable (e.g. lost across a sandbox suspend, #423), attempts a single
+// reattach: clear the latched failure and re-run the idempotent Init.
+//
+// Returns nil when the repo is reachable — and in that healthy case makes NO
+// state change and NO commit, so the happy path is byte-identical to before.
+// Returns a wrapped ErrArtifactRepoUnavailable when the repo is unreachable and
+// recovery fails (or does not restore reachability). NOTE: a reattach against a
+// wiped .git reinitializes a fresh repo capturing the CURRENT tree — prior WIP
+// refs / history are gone; this preserves the working tree so the terminal
+// commit can still land, not full history.
+func (r *gitArtifactRepo) ensureHealthy() error {
+	if out, err := r.git("rev-parse", "--git-dir"); err == nil && strings.TrimSpace(out) != "" {
+		return nil // reachable — no recovery, no mutation
+	}
+	// Unreachable. Clear the latch (otherwise Init/CommitWIP no-op after a prior
+	// failure) and re-run the idempotent Init to reattach.
+	r.failed = false
+	if err := r.Init(); err != nil {
+		return fmt.Errorf("%w: reattach failed: %v", ErrArtifactRepoUnavailable, err)
+	}
+	// Re-probe so we never silently "un-fail" a still-dead repo.
+	if out, err := r.git("rev-parse", "--git-dir"); err != nil || strings.TrimSpace(out) == "" {
+		return fmt.Errorf("%w: still unreachable after reattach: %v", ErrArtifactRepoUnavailable, err)
+	}
+	return nil
 }
 
 // git runs a git command in r.dir with a sanitized environment.
