@@ -240,33 +240,71 @@ func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
 }
 
 // TreeFingerprint returns a conservative content hash of the working tree for
-// node-output memoization (#421): the porcelain status (staged + unstaged +
-// untracked drift) concatenated with the index's per-path mode+blob-SHA. This
-// is MORE conservative than `git write-tree` (index-only) — it also reflects
-// untracked/unstaged changes a side-effecting handler would observe, so any
-// drift between two entries of a memoized node invalidates the memo key.
+// node-output memoization (#421): the porcelain status (path + status markers)
+// concatenated with a tree object SHA that hashes the actual CONTENT of every
+// tracked-modified AND untracked file. The content tree is built in a throwaway
+// index so the real index is never touched (side-effect-free). This closes the
+// #425-review gap where `ls-files -s` only reflected STAGED blobs, so an
+// intervening node that modified an unstaged-tracked or untracked file without
+// changing its path/status produced an identical fingerprint and could replay
+// stale output against a different worktree.
 //
-// Reuses r.git so the #399 GIT_DIR-leak guard (gitSafeEnv) applies. Any git
-// error is returned (not swallowed): the caller treats it as a cache miss and
-// runs the handler rather than replaying on an uncertain key.
+// Reuses r.git/gitEnv so the #399 GIT_DIR-leak guard (gitSafeEnv) applies. Any
+// git error is returned (not swallowed): the caller treats it as a cache miss
+// and runs the handler rather than replaying on an uncertain key.
 func (r *gitArtifactRepo) TreeFingerprint() (string, error) {
 	status, err := r.git("status", "--porcelain=v1", "-z")
 	if err != nil {
 		return "", fmt.Errorf("git status for tree fingerprint: %w\n%s", err, status)
 	}
-	index, err := r.git("ls-files", "-s", "-z")
+	tree, err := r.worktreeContentTree()
 	if err != nil {
-		return "", fmt.Errorf("git ls-files for tree fingerprint: %w\n%s", err, index)
+		return "", err
 	}
-	return status + "\x00" + index, nil
+	return status + "\x00" + tree, nil
+}
+
+// worktreeContentTree stages the FULL worktree (tracked-modified + untracked,
+// honoring .gitignore) into a throwaway index seeded from HEAD, then returns the
+// resulting tree object SHA — a content hash over actual file bytes, with
+// deletions reflected. The real index is never touched; the dangling blob/tree
+// objects it writes are unreferenced and reclaimed by git gc (same posture as
+// `git stash create`). Used only by TreeFingerprint.
+func (r *gitArtifactRepo) worktreeContentTree() (string, error) {
+	tmpDir, err := os.MkdirTemp("", "tracker-memo-index-")
+	if err != nil {
+		return "", fmt.Errorf("temp index dir for tree fingerprint: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	env := append(gitSafeEnv(), "GIT_INDEX_FILE="+filepath.Join(tmpDir, "index"))
+	// Seed from HEAD so a deleted-but-tracked file registers as a removal. A repo
+	// with no commits yet has no HEAD — that's fine, the index just starts empty.
+	if out, err := r.gitEnv(env, "read-tree", "HEAD"); err != nil {
+		_ = out // no HEAD yet — proceed with an empty index
+	}
+	if out, err := r.gitEnv(env, "add", "-A"); err != nil {
+		return "", fmt.Errorf("git add -A (temp index) for tree fingerprint: %w\n%s", err, out)
+	}
+	tree, err := r.gitEnv(env, "write-tree")
+	if err != nil {
+		return "", fmt.Errorf("git write-tree (temp index) for tree fingerprint: %w\n%s", err, tree)
+	}
+	return strings.TrimSpace(tree), nil
 }
 
 // git runs a git command in r.dir with a sanitized environment.
 // Returns combined output and any error.
 func (r *gitArtifactRepo) git(args ...string) (string, error) {
+	return r.gitEnv(gitSafeEnv(), args...)
+}
+
+// gitEnv runs a git command in r.dir with an explicit environment (already
+// sanitized by the caller). Used by TreeFingerprint to inject a throwaway
+// GIT_INDEX_FILE without touching the real index.
+func (r *gitArtifactRepo) gitEnv(env []string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", r.dir}, args...)
 	cmd := exec.Command("git", cmdArgs...) //nolint:gosec // controlled args
-	cmd.Env = gitSafeEnv()
+	cmd.Env = env
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

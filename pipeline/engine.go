@@ -475,8 +475,14 @@ func (e *Engine) replayMemoizedNode(s *runState, currentNodeID string, node, exe
 		Message:   fmt.Sprintf("memoize: replayed prior successful outcome for node %q", currentNodeID),
 	})
 
-	outcome := &Outcome{Status: rec.Status, ContextUpdates: rec.ContextUpdates}
+	outcome := &Outcome{
+		Status:             rec.Status,
+		ContextUpdates:     rec.ContextUpdates,
+		PreferredLabel:     rec.PreferredLabel,
+		SuggestedNextNodes: rec.SuggestedNextNodes,
+	}
 	traceEntry := TraceEntry{
+		Timestamp:   time.Now(),
 		NodeID:      currentNodeID,
 		HandlerName: "<memoized>",
 		Status:      rec.Status,

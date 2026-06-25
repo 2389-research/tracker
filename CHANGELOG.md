@@ -25,7 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memoized (failures never replay), the memo table is persisted in
   `checkpoint.json` so replay survives resume. Off by default: a `.dip` file
   lacking the attr has byte-identical behavior and writes no `memo_entries`.
-  Emits `node_memo_replayed` on a replay.
+  Emits `node_memo_replayed` on a replay. Review hardening: the memo key now
+  re-includes a bare key the node self-aliased on a prior pass once an
+  intervening node OVERWRITES it (so replay can't serve stale output against a
+  changed input); the `writable_paths` tree fingerprint now hashes actual
+  worktree CONTENT via a throwaway-index `write-tree` (catching unstaged/untracked
+  file edits that the prior staged-blob listing missed); the persisted
+  `MemoEntry` now carries the `PreferredLabel`/`SuggestedNextNodes` routing hints
+  so a replayed node follows the same edge the original did; and replayed trace
+  entries are stamped with a real timestamp.
 
 ## [0.40.2] - 2026-06-24
 

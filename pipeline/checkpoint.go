@@ -74,11 +74,16 @@ type Checkpoint struct {
 
 // MemoEntry is the JSON-tagged, serializable projection of a successful Outcome
 // (which has no JSON tags) persisted in the checkpoint for memoization (#421).
-// Only Status + ContextUpdates are replayed; other Outcome fields are routing
-// or accounting artifacts that the replay path does not need.
+// Status, ContextUpdates, and the routing hints (PreferredLabel,
+// SuggestedNextNodes) are replayed — the hints are required so a memoized node
+// that selected its next edge via them replays onto the SAME path the original
+// execution took (#425 review). Other Outcome fields are accounting artifacts
+// the replay path does not need.
 type MemoEntry struct {
-	Status         string            `json:"status"`
-	ContextUpdates map[string]string `json:"context_updates,omitempty"`
+	Status             string            `json:"status"`
+	ContextUpdates     map[string]string `json:"context_updates,omitempty"`
+	PreferredLabel     string            `json:"preferred_label,omitempty"`
+	SuggestedNextNodes []string          `json:"suggested_next_nodes,omitempty"`
 }
 
 // ensureSet lazily initializes the completed set from the slice.
@@ -198,7 +203,16 @@ func (cp *Checkpoint) PutMemo(key string, o *Outcome) {
 	for k, v := range o.ContextUpdates {
 		cu[k] = v
 	}
-	cp.MemoEntries[key] = MemoEntry{Status: o.Status, ContextUpdates: cu}
+	var snn []string
+	if len(o.SuggestedNextNodes) > 0 {
+		snn = append(snn, o.SuggestedNextNodes...)
+	}
+	cp.MemoEntries[key] = MemoEntry{
+		Status:             o.Status,
+		ContextUpdates:     cu,
+		PreferredLabel:     o.PreferredLabel,
+		SuggestedNextNodes: snn,
+	}
 }
 
 // GetMemo returns the stored outcome projection for a key, if any (#421).

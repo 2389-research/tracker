@@ -381,6 +381,21 @@ func TestComputeMemoKey(t *testing.T) {
 	if ks != k1 {
 		t.Error("routing-scratch keys must be excluded from the memo key")
 	}
+
+	// #425 review (Codex P1): a bare key this node self-aliased on a prior pass
+	// is skipped ONLY while unchanged. An UNCHANGED self-output (bare == scoped)
+	// must not affect the key; an OVERWRITTEN one (bare != scoped) is a genuine
+	// changed input and MUST change the key, else replay is stale.
+	unchangedSelf := mkState(map[string]string{"a": "1", "selfk": "out", "node.work.selfk": "out"})
+	kSelf, _ := e.computeMemoKey(unchangedSelf, node)
+	if kSelf != k1 {
+		t.Error("unchanged self-output bare key must be excluded from the memo key")
+	}
+	overwrittenSelf := mkState(map[string]string{"a": "1", "selfk": "REWRITTEN", "node.work.selfk": "out"})
+	kOver, _ := e.computeMemoKey(overwrittenSelf, node)
+	if kOver == kSelf {
+		t.Error("overwritten self-output (bare != scoped) must change the memo key, not replay stale")
+	}
 }
 
 // Verify MemoEntry round-trips through JSON.
@@ -401,6 +416,76 @@ func TestMemoEntryJSONRoundTrip(t *testing.T) {
 	}
 	if rec.Status != string(OutcomeSuccess) || rec.ContextUpdates["x"] != "y" {
 		t.Errorf("memo entry corrupted: %+v", rec)
+	}
+}
+
+// #425 review (CodeRabbit): a memoized node that selected its next edge via
+// PreferredLabel / SuggestedNextNodes must replay onto the SAME path. Verify
+// both routing hints survive PutMemo + a JSON checkpoint round-trip.
+func TestMemoEntryPersistsRoutingHints(t *testing.T) {
+	cp := &Checkpoint{RunID: "r"}
+	cp.PutMemo("k", &Outcome{
+		Status:             string(OutcomeSuccess),
+		PreferredLabel:     "approve",
+		SuggestedNextNodes: []string{"join", "fanin"},
+	})
+	data, err := json.Marshal(cp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var loaded Checkpoint
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	rec, ok := loaded.GetMemo("k")
+	if !ok {
+		t.Fatal("expected memo entry after round-trip")
+	}
+	if rec.PreferredLabel != "approve" {
+		t.Errorf("PreferredLabel not persisted: got %q", rec.PreferredLabel)
+	}
+	if len(rec.SuggestedNextNodes) != 2 || rec.SuggestedNextNodes[0] != "join" || rec.SuggestedNextNodes[1] != "fanin" {
+		t.Errorf("SuggestedNextNodes not persisted: got %v", rec.SuggestedNextNodes)
+	}
+}
+
+// #425 review (Codex P2): TreeFingerprint must reflect actual worktree CONTENT,
+// not just staged blobs. A content change to an existing tracked file that is
+// neither staged nor changes its status marker must still flip the fingerprint.
+func TestTreeFingerprintDetectsUnstagedTrackedContentChange(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	repo := newGitArtifactRepo(dir, "unstaged01")
+	if err := repo.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Commit a tracked file so it lives in HEAD and the index.
+	path := filepath.Join(dir, "tracked.txt")
+	if err := os.WriteFile(path, []byte("original"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if out, err := repo.git("add", "tracked.txt"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if out, err := repo.git("commit", "-m", "seed"); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+
+	fp1, err := repo.TreeFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint 1: %v", err)
+	}
+	// Modify the tracked file in the worktree WITHOUT staging — `ls-files -s`
+	// (the old impl) would still show the committed blob and miss this.
+	if err := os.WriteFile(path, []byte("CHANGED-UNSTAGED"), 0o644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	fp2, err := repo.TreeFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint 2: %v", err)
+	}
+	if fp1 == fp2 {
+		t.Error("expected fingerprint to change on an unstaged tracked-file content change")
 	}
 }
 

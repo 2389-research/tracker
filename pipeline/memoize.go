@@ -118,13 +118,17 @@ func hashSortedMap(h interface{ Write([]byte) (int, error) }, m map[string]strin
 //   - per-node scoped keys (node.* prefix),
 //   - routing-scratch keys reset before execution (outcome, preferred_label,
 //     suggested_next_nodes),
-//   - bare keys this node itself wrote on a prior entry. After a node runs its
-//     dirty bare keys are aliased to node.<id>.<key> (ScopeToNode); on loop
-//     re-entry those bare values linger, so hashing them would fold the node's
-//     OWN output into its input key and defeat replay. A bare key K is treated
-//     as a self-output (skipped) when node.<execNode.ID>.K exists in the
-//     snapshot. Upstream keys never carry this node's prefix, so they survive —
-//     conservative on inputs, blind only to self-outputs.
+//   - bare keys this node itself wrote on a prior entry AND that still hold that
+//     written value. After a node runs its dirty bare keys are aliased to
+//     node.<id>.<key> (ScopeToNode); on loop re-entry those bare values linger,
+//     so hashing them would fold the node's OWN output into its input key and
+//     defeat replay. A bare key K is treated as a self-output (skipped) ONLY
+//     when node.<execNode.ID>.K exists AND the current bare K equals it. If an
+//     intervening node overwrote bare K with a DIFFERENT value before a loop
+//     restart, K is now a genuine changed INPUT and is hashed — otherwise the
+//     node could replay stale output against changed input (#425 review).
+//     Upstream keys never carry this node's prefix, so they survive — blind only
+//     to unchanged self-outputs.
 //
 // EXCEPTION — ContextKeyLastResponse and ContextKeyHumanResponse are ALWAYS
 // hashed, even when this node wrote them on a prior entry. InjectPipelineContext
@@ -142,7 +146,7 @@ func memoizableContext(pctx *PipelineContext, execNode *Node) map[string]string 
 	selfScopePrefix := "node." + execNode.ID + "."
 	out := make(map[string]string, len(snap))
 	for k, v := range snap {
-		if isMemoizableContextKey(k, selfScopePrefix, snap) {
+		if isMemoizableContextKey(k, v, selfScopePrefix, snap) {
 			out[k] = v
 		}
 	}
@@ -153,7 +157,7 @@ func memoizableContext(pctx *PipelineContext, execNode *Node) map[string]string 
 // to hash (see memoizableContext). It rejects node-scoped keys, routing-scratch
 // keys, and self-outputs — but ContextKeyLastResponse / ContextKeyHumanResponse
 // are always accepted (the EXCEPTION: they are injected prompt inputs).
-func isMemoizableContextKey(k, selfScopePrefix string, snap map[string]string) bool {
+func isMemoizableContextKey(k, v, selfScopePrefix string, snap map[string]string) bool {
 	if strings.HasPrefix(k, "node.") {
 		return false
 	}
@@ -163,6 +167,12 @@ func isMemoizableContextKey(k, selfScopePrefix string, snap map[string]string) b
 	if k == ContextKeyLastResponse || k == ContextKeyHumanResponse {
 		return true
 	}
-	_, isSelfOutput := snap[selfScopePrefix+k]
-	return !isSelfOutput
+	scoped, selfAliased := snap[selfScopePrefix+k]
+	if !selfAliased {
+		return true // never this node's output — a genuine upstream input
+	}
+	// Self-aliased on a prior pass. Skip it as stale self-output ONLY while the
+	// bare value is unchanged; if an intervening node overwrote it, it is now a
+	// genuine changed input and must be hashed (#425 review).
+	return v != scoped
 }
