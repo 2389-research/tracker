@@ -554,7 +554,7 @@ workflow BuildProduct
       } > .ai/build/build-context.md 2>/dev/null || true
 
       # #418: capture the run's base commit ONCE at Setup so the cross-review
-      # diff node can compute a cumulative base..HEAD without a per-milestone
+      # diff node can compute a cumulative base..worktree without a per-milestone
       # marker (those are deleted at each MarkMilestoneDone). Same non-leaking
       # idiom as PickNextMilestone's start marker: --verify --quiet prints
       # nothing and exits non-zero on a commitless repo, so a fresh repo
@@ -1904,7 +1904,7 @@ workflow BuildProduct
       rm -f .ai/build/review-claude.md .ai/build/review-codex.md .ai/build/review-gemini.md
       printf 'cleared stale review reports\n'
 
-  # #418: compute the cumulative base..HEAD review diff ONCE so the three
+  # #418: compute the cumulative base..worktree review diff ONCE so the three
   # reviewers read a bounded diff as their PRIMARY input instead of each
   # re-reading the whole tree (the ~90%-of-tokens problem). BASE is the run's
   # base commit captured at Setup (.ai/build/run-base-sha); degrade to the
@@ -1917,30 +1917,57 @@ workflow BuildProduct
   tool ComputeReviewDiff
     label: "Compute Cumulative Review Diff"
     timeout: 60s
-    # Cap matches ShowPlan: a large cumulative diff must not be clipped before
-    # the reviewers read the file (they read the FILE, not ctx, but keep the
-    # node's own stdout generous for diagnose).
+    # Reviewers read the FILE (.ai/build/review-diff.md), not this node's stdout
+    # — which is only the short readiness marker. output_limit stays large so
+    # that if diff generation fails and we fall back to dumping git stderr, the
+    # diagnostic is not clipped in `tracker diagnose`.
     output_limit: 1048576
     command:
       set -u
       mkdir -p .ai/build
+      OUT=.ai/build/review-diff.md
       BASE=$(cat .ai/build/run-base-sha 2>/dev/null || true)
       if [ -z "$BASE" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
         BASE=$(git hash-object -t tree /dev/null)
       fi
+      # #424 review: diff BASE against the WORKING TREE (not BASE..HEAD), so
+      # accepted-but-uncommitted milestone work — the `accept` gate routes here
+      # WITHOUT committing first — is included instead of silently omitted from
+      # what reviewers are told is "the complete set of changes". `git diff
+      # <commit>` (no ..HEAD) compares the commit to the worktree, capturing
+      # committed + staged + unstaged tracked changes; untracked files are listed
+      # separately below. On a clean tree this is identical to BASE..HEAD.
+      #
+      # git stderr is kept IN the artifact (2>&1, not 2>/dev/null) and the outer
+      # `|| true` is dropped, so a diff failure surfaces instead of yielding a
+      # silently-empty PRIMARY input (CLAUDE.md: never silently swallow errors).
       {
-        echo "# Cumulative review diff (base..HEAD)"
+        echo "# Cumulative review diff (base..worktree)"
         echo
-        echo "_Base: ${BASE} → HEAD. This is the complete set of changes the"
-        echo "build produced. It is your PRIMARY read; the full working tree is"
+        echo "_Base: ${BASE} → working tree. This is the complete set of changes"
+        echo "the build produced, INCLUDING staged/unstaged and untracked work not"
+        echo "yet committed. It is your PRIMARY read; the full working tree is"
         echo "available on demand if a finding needs surrounding context._"
         echo
         echo '## Files changed'
-        git diff --name-status "${BASE}..HEAD" 2>/dev/null
+        git diff --name-status "${BASE}" 2>&1
+        UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
+        if [ -n "$UNTRACKED" ]; then
+          echo
+          echo '## Untracked files (not yet in any commit)'
+          printf '%s\n' "$UNTRACKED"
+        fi
         echo
         echo '## Full diff'
-        git diff "${BASE}..HEAD" 2>/dev/null
-      } > .ai/build/review-diff.md 2>/dev/null || true
+        git diff "${BASE}" 2>&1
+      } > "$OUT"
+      # Fail loudly if the artifact is empty — reviewers depend on it as their
+      # PRIMARY input. Don't dead-stop (the diff is advisory routing context),
+      # but warn on stderr and stamp the file so the gap is visible, not silent.
+      if [ ! -s "$OUT" ]; then
+        echo "WARNING: review diff generation produced no output; reviewers must read the working tree directly" >&2
+        echo "# Review diff UNAVAILABLE — diff generation failed. Read the working tree directly." > "$OUT"
+      fi
       printf 'review-diff-ready'
 
   parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
@@ -1966,7 +1993,7 @@ workflow BuildProduct
     reasoning_effort: high
     prompt:
       Review the implementation against SPEC.md. Your PRIMARY read is the
-      cumulative base..HEAD review diff at .ai/build/review-diff.md — it is
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it is
       the complete set of changes this build produced. Read the full working
       tree ON DEMAND only when a finding needs surrounding context (it is
       available, not mandated). The build loop has
@@ -1979,7 +2006,7 @@ workflow BuildProduct
         plan, not evidence of completion. Treat them as nothing. Verify each
         requirement against the code yourself.
 
-      RUBRIC — for every spec section, answer these five questions in
+      RUBRIC — for every spec section, answer these seven questions in
       .ai/build/review-claude.md, in order, with PASS or FAIL per question
       and concrete evidence (grep output, file:line, snippet) for any FAIL:
 
@@ -2061,7 +2088,7 @@ workflow BuildProduct
     reasoning_effort: high
     prompt:
       Review the implementation against SPEC.md. Your PRIMARY read is the
-      cumulative base..HEAD review diff at .ai/build/review-diff.md — it is
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it is
       the complete set of changes this build produced. Read the full working
       tree ON DEMAND only when a finding needs surrounding context (it is
       available, not mandated). The build loop has
@@ -2074,7 +2101,7 @@ workflow BuildProduct
         plan, not evidence of completion. Treat them as nothing. Verify each
         requirement against the code yourself.
 
-      RUBRIC — for every spec section, answer these five questions in
+      RUBRIC — for every spec section, answer these seven questions in
       .ai/build/review-codex.md, in order, with PASS or FAIL per question
       and concrete evidence (grep output, file:line, snippet) for any FAIL:
 
@@ -2156,7 +2183,7 @@ workflow BuildProduct
     reasoning_effort: high
     prompt:
       Review the implementation against SPEC.md. Your PRIMARY read is the
-      cumulative base..HEAD review diff at .ai/build/review-diff.md — it is
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it is
       the complete set of changes this build produced. Read the full working
       tree ON DEMAND only when a finding needs surrounding context (it is
       available, not mandated). The build loop has
@@ -2178,7 +2205,7 @@ workflow BuildProduct
         requirement against the code yourself. Reading ✅ as evidence is
         the exact failure mode this lane exists to prevent.
 
-      RUBRIC — for every spec section, answer these five questions in
+      RUBRIC — for every spec section, answer these seven questions in
       .ai/build/review-gemini.md, in order, with PASS or FAIL per question
       and concrete evidence (grep output, file:line, snippet) for any FAIL:
 

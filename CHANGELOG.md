@@ -12,11 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`build_product` review panel reads a bounded diff and tiers its models
   (#418).** A new `ComputeReviewDiff` tool node (inserted
   `ClearStaleReviews -> ComputeReviewDiff -> ReviewParallel`) computes the
-  cumulative `base..HEAD` diff once into `.ai/build/review-diff.md` — base is the
-  run's commit captured at `Setup` (`run-base-sha`), with the same empty-tree
-  fallback the per-milestone diffs already use (no hard-coded path/range). Each
-  reviewer's scope sentence now points its PRIMARY read at that diff (full tree
-  available on demand, not mandated); the 5→7-point rubric is unchanged.
+  cumulative `base..worktree` diff once into `.ai/build/review-diff.md` — base is
+  the run's commit captured at `Setup` (`run-base-sha`), with the same empty-tree
+  fallback the per-milestone diffs already use (no hard-coded path/range). `git
+  diff <base>` (no `..HEAD`) compares base to the working tree, so
+  accepted-but-uncommitted milestone work is included; untracked files are listed
+  separately. Each reviewer's scope sentence now points its PRIMARY read at that
+  diff (full tree available on demand, not mandated). The reviewer rubric is
+  untouched by this PR — its original five points are unchanged, and points 6
+  (#417) and 7 (#416) were added additively by their own PRs.
   `ReviewClaude` drops to `claude-sonnet-4-6` and `ReviewCodex` to `gpt-5.2`;
   `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
   unchanged. Steady-state this is the dominant input-token cost (reviewers no

@@ -76,13 +76,18 @@ func TestBuildProductComputeReviewDiffNodeExists(t *testing.T) {
 	if cmd == "" {
 		t.Fatal("ComputeReviewDiff has no tool_command (#418a)")
 	}
-	for _, want := range []string{"run-base-sha", "> .ai/build/review-diff.md"} {
+	for _, want := range []string{"run-base-sha", "OUT=.ai/build/review-diff.md"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("ComputeReviewDiff tool_command missing %q (#418a)", want)
 		}
 	}
 	for _, id := range []string{"ReviewClaude", "ReviewCodex", "ReviewGemini"} {
-		if p := g.Nodes[id].Attrs["prompt"]; !strings.Contains(p, "review-diff.md") {
+		rn := g.Nodes[id]
+		if rn == nil {
+			t.Errorf("reviewer node %q missing (#418a)", id)
+			continue
+		}
+		if p := rn.Attrs["prompt"]; !strings.Contains(p, "review-diff.md") {
 			t.Errorf("%s prompt does not point at review-diff.md (#418a)", id)
 		}
 	}
