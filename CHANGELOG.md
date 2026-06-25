@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`build_product` now derives spec-contract artifacts (#306).** `ReadSpec`
+  additionally writes `.ai/decisions/spec-ambiguities.md` (one DEFINITE ruling
+  per detected SPEC.md contradiction) and `.ai/decisions/behavioral-contracts.md`
+  (every non-literal prose guarantee — MUST/never/timing/cardinality — paired
+  with a concrete test or grep verification method). Detection keys on the SHAPE
+  of the prose (modal verbs, timing/ordering phrases, two-statement
+  contradictions), never on a product/language. `ApprovePlan` surfaces both
+  artifacts to the operator before the build; `Implement` cites the binding
+  ruling; `VerifyMilestone` (new check 5b) and `FinalSpecCheck` disposition each
+  in-scope behavioral contract with concrete evidence at the same show-your-work
+  bar as the spec-literal grep — an undispositioned contract or an
+  absent-but-needed ruling is `STATUS:fail`.
+
 ## [0.40.2] - 2026-06-24
 
 ### Fixed

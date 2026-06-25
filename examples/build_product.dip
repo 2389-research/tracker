@@ -665,6 +665,55 @@ workflow BuildProduct
       ## Implicit requirements (things the spec assumes but doesn't state)
       ## Risks and ambiguities
 
+      ── SPEC-CONTRACT ARTIFACTS (issue #306) ──
+      Beyond the analysis above, derive TWO machine-checkable contract
+      artifacts from SPEC.md. Detection keys on the SHAPE of the prose
+      (modal verbs, timing/ordering phrases, contradiction between two
+      statements) — NEVER on the product, language, or domain.
+
+      (i) .ai/decisions/spec-ambiguities.md — one DEFINITE ruling per
+          detected contradiction. A contradiction is two statements in
+          SPEC.md that cannot both hold (a constant stated two ways, an
+          ordering asserted one place and contradicted another, a value
+          "required" here and "optional" there). For EACH, write one entry:
+          ## Ambiguity N
+          **Conflicting statements**: quote both, each with its SPEC.md
+            location (section / line).
+          **Ruling**: the single resolution this build will follow,
+            stated as a concrete buildable decision.
+          **Rationale**: one line.
+          The ruling MUST be definite — never "it depends", never "either
+          is acceptable", never deferred to the implementer. If SPEC.md is
+          internally consistent, write the single line: "no contradictions
+          detected". (A retry-count stated as "max 2 retries" in one
+          section and "retries up to 3 times" in another is ONE
+          contradiction and gets ONE ruling, e.g. "3 total attempts (2
+          retries after the initial try)".)
+
+      (ii) .ai/decisions/behavioral-contracts.md — every NON-LITERAL prose
+          guarantee, each with a concrete verification method. A prose
+          guarantee is any sentence whose SHAPE is a behavioral obligation:
+          a modal verb (MUST / MUST NOT / SHALL / never / always), a
+          timing/ordering phrase ("at startup, not at runtime", "before
+          X", "within N ms", "on the first call"), or a cardinality
+          guarantee ("exactly once", "at most one"). For EACH, write:
+          ## Contract N
+          **Guarantee**: the prose, quoted, with its SPEC.md location.
+          **Verification method**: a SPECIFIC test (named test function /
+            test shape) OR a SPECIFIC grep that would prove the guarantee
+            holds. "Manual review" is not a verification method. A
+            "rejects at startup, not at runtime" guarantee is verified by
+            a startup-path test/grep (e.g. a test that constructs the
+            component with a bad config and asserts it fails at
+            construction), NOT skipped as untestable.
+          If SPEC.md states no such guarantees, write the single line:
+          "no behavioral contracts detected".
+
+      Both files are inputs to ApprovePlan (the human sees them before the
+      build) and to VerifyMilestone / FinalSpecCheck (which disposition
+      each in-scope contract). Do not editorialize SPEC.md — extract and
+      rule, do not invent guarantees the spec does not make.
+
   agent Decompose
     label: "Decompose into Milestones"
     model: claude-opus-4-6
@@ -797,6 +846,22 @@ workflow BuildProduct
       else
         echo "_(requirement-coverage.md not found)_"
       fi
+      echo
+      echo "# Spec ambiguity rulings (.ai/decisions/spec-ambiguities.md)"
+      echo
+      if [ -f .ai/decisions/spec-ambiguities.md ]; then
+        cat .ai/decisions/spec-ambiguities.md
+      else
+        echo "_(spec-ambiguities.md not found — ReadSpec did not write rulings)_"
+      fi
+      echo
+      echo "# Behavioral contracts (.ai/decisions/behavioral-contracts.md)"
+      echo
+      if [ -f .ai/decisions/behavioral-contracts.md ]; then
+        cat .ai/decisions/behavioral-contracts.md
+      else
+        echo "_(behavioral-contracts.md not found)_"
+      fi
 
   human ApprovePlan
     label: "Review the milestone plan — approve, adjust, or reject"
@@ -819,6 +884,13 @@ workflow BuildProduct
       spec-mandated verification mapped to an owning (or deferred) milestone with
       `COVERAGE_GAPS: 0`. A non-zero gap count or an over-broad milestone is a
       reason to **adjust**.
+
+      Also review the spec ambiguity rulings and behavioral contracts below
+      (written by ReadSpec): each contradiction has exactly ONE definite
+      ruling, and each prose guarantee has a concrete verification method.
+      A ruling you disagree with, or a missing/needed ruling, is a reason to
+      **adjust** — this is your one chance to correct a wrong interpretation
+      before the build commits to it.
 
       ---
       ## Plan under review
@@ -924,6 +996,10 @@ workflow BuildProduct
 
       RULES:
       - Implement EXACTLY what this milestone requires. Nothing more.
+      - Read .ai/decisions/spec-ambiguities.md. Where SPEC.md was
+        contradictory, the ruling there is binding — implement the ruling,
+        and in your commit message or a .ai/decisions/ note cite the
+        ambiguity number you followed. Do NOT re-litigate a ruling.
       - Only touch the files listed in the milestone spec.
       - Follow the codebase's existing patterns and conventions.
       - Do NOT create documentation files unless the milestone requires them.
@@ -1351,6 +1427,21 @@ workflow BuildProduct
          .ai/decisions/requirement-coverage.md (written by Decompose)
          when present; if it disagrees with a live SPEC.md re-read, SPEC.md
          wins.
+
+      5b. BEHAVIORAL CONTRACTS (issue #306): Read
+         .ai/decisions/behavioral-contracts.md. For every contract whose
+         SPEC.md guarantee intersects THIS milestone's file list,
+         disposition it with concrete evidence — the same show-your-work
+         bar as the SPEC LITERALS grep in check 3: run the contract's
+         stated verification method (the named test or the grep) and paste
+         the command + its result inline. A contract that is in-scope for
+         this milestone but left undispositioned (no test/grep evidence
+         shown) is FAIL. If SPEC.md was contradictory in this milestone's
+         area, confirm a ruling exists in .ai/decisions/spec-ambiguities.md
+         and the implementation follows it; an absent-but-needed ruling is
+         FAIL. Contracts whose guarantee does not touch this milestone's
+         files are out of scope here (FinalSpecCheck dispositions the full
+         set) — say so, do not invent evidence.
 
       6. TESTS + CI PASSED: The `tests-pass` sentinel in the
          "TestMilestone stdout" fenced block at the END of this
@@ -2256,6 +2347,22 @@ workflow BuildProduct
       ReviewCodex / ReviewGemini) — not detected here. W21
       (subname collision) is out of scope.
 
+      BEHAVIORAL CONTRACTS (issue #306):
+
+      Read .ai/decisions/behavioral-contracts.md and
+      .ai/decisions/spec-ambiguities.md (both written by ReadSpec). For
+      EVERY behavioral contract, disposition it with concrete evidence —
+      the same show-your-work bar as the interface-reachability and
+      spec-literal checks: run its stated verification method (the named
+      test or the grep) and paste the command + result. An undispositioned
+      contract (no evidence shown) keeps the early STATUS:fail in place.
+      For every ambiguity ruling, confirm the shipped code follows the
+      ruling (cite file:line); a ruling the code contradicts, or a
+      contradiction with no ruling, keeps the early STATUS:fail in place.
+      A "rejects at startup, not at runtime"-class guarantee must be
+      dispositioned with the startup-path test/grep its verification method
+      names — not skipped as untestable.
+
       This is the final gate. Read SPEC.md line by line.
 
       For EVERY requirement, prescription, and instruction in the spec:
@@ -2294,7 +2401,9 @@ workflow BuildProduct
       Emit `STATUS:success` as your terminal line ONLY if INTERFACE
       REACHABILITY (every method has a production caller or
       carve-out), TEST QUALITY (every sleep-fence hit dispositioned),
-      and SPEC.md compliance (every requirement implemented, no
+      BEHAVIORAL CONTRACTS (every contract dispositioned with evidence,
+      every ambiguity ruling followed), and SPEC.md compliance (every
+      requirement implemented, no
       extras, no TODO/FIXME/HACK, tests pass, no unexpected files
       in .ai/build/ outside the allowlist enumerated above) all
       passed. Otherwise the early `STATUS:fail` from your first
