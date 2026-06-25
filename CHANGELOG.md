@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
   unchanged. Steady-state this is the dominant input-token cost (reviewers no
   longer each re-walk the whole tree ×3, and 2 of 3 lanes run mid-tier).
+- **`build_product` tiers cheaply-verified agent nodes (#419).** `SpecLint`
+  (gated by its own `STATUS:fail`-first contract) and `ReadSpec` (gated by the
+  `ApprovePlan` human review) drop to `claude-sonnet-4-6` + `reasoning_effort:
+  medium`; their downstream gates are unchanged. `SynthesizeReviews`,
+  `FinalSpecCheck`, and the adversarial `ReviewGemini` lane stay frontier/high.
 
 ### Added
 

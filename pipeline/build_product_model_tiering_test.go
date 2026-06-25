@@ -48,6 +48,24 @@ func TestBuildProductSynthesisAndAdversarialStayFrontier(t *testing.T) {
 	}
 }
 
+func TestBuildProductCheaplyVerifiedNodesAreMidTier(t *testing.T) {
+	g := loadBuildProduct(t)
+	// #419: SpecLint (gated by its STATUS contract) and ReadSpec (gated by
+	// ApprovePlan) drop to mid-tier model AND medium effort.
+	for _, id := range []string{"SpecLint", "ReadSpec"} {
+		n := g.Nodes[id]
+		if n == nil {
+			t.Fatalf("%s node missing", id)
+		}
+		if got := n.Attrs["llm_model"]; got != "claude-sonnet-4-6" {
+			t.Errorf("%s llm_model = %q, want claude-sonnet-4-6 (#419)", id, got)
+		}
+		if got := n.Attrs["reasoning_effort"]; got != "medium" {
+			t.Errorf("%s reasoning_effort = %q, want medium (#419)", id, got)
+		}
+	}
+}
+
 func TestBuildProductComputeReviewDiffNodeExists(t *testing.T) {
 	g := loadBuildProduct(t)
 	n := g.Nodes["ComputeReviewDiff"]

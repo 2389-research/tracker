@@ -578,9 +578,9 @@ workflow BuildProduct
 
   agent SpecLint
     label: "Spec Coherence Preflight"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
-    reasoning_effort: high
+    reasoning_effort: medium
     auto_status: true
     prompt:
       SPEC COHERENCE PREFLIGHT:
@@ -678,9 +678,9 @@ workflow BuildProduct
 
   agent ReadSpec
     label: "Read & Analyze Spec"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
-    reasoning_effort: high
+    reasoning_effort: medium
     prompt:
       Read SPEC.md thoroughly. Understand:
       - What is being built (the product)
