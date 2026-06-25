@@ -614,11 +614,17 @@ workflow BuildProduct
           value. A contract like "Idempotency-Key derived from
           review_id+sha" on a signature receiving neither is
           unimplementable as written.
-      (f) Mandated tests enumerated and assignable: list every test
-          SPEC.md mandates by name or by concrete behavior. This list
-          feeds the Decompose requirement-coverage table (issue
-          #300); a mandated test so vague no milestone could own it
-          is a finding.
+      (f) Mandated tests, spec-emitted values, and normative constants
+          enumerated and assignable: list every test SPEC.md mandates by
+          name or by concrete behavior, PLUS every spec-prescribed EMITTED
+          value (log event name, error code, status string) and every
+          constant SPEC.md marks "normative". This list feeds the Decompose
+          requirement-coverage table (issue #300) so none can be silently
+          unowned; a mandated test / emitted value / normative constant so
+          vague no milestone could own it is a finding. For each emitted
+          value and normative constant, note the required verification
+          shape: "a test asserts this exact value as a hard-coded
+          expectation (not via the production constant)".
 
       WARN — report in the artifact, do NOT fail the gate:
       (d) Checkable guarantees: behavioral guarantees phrased so they
@@ -635,8 +641,11 @@ workflow BuildProduct
       ## Warnings
       Rule (d)/(e) findings, same evidence shape — or "none".
       ## Mandated tests
-      Every rule-(f) test, one per line, each with its SPEC.md
-      source — or the single line "SPEC mandates no named tests".
+      Every rule-(f) item, one per line, each with its SPEC.md source and
+      its kind (test / emitted-value / normative-constant); emitted-value
+      and normative-constant lines must carry the verification shape "a
+      test asserts this exact value as a hard-coded expectation" — or the
+      single line "SPEC mandates no named tests".
 
       Then your terminal STATUS line:
       - zero critical findings -> STATUS:success (warnings alone never
@@ -708,6 +717,13 @@ workflow BuildProduct
             construction), NOT skipped as untestable.
           If SPEC.md states no such guarantees, write the single line:
           "no behavioral contracts detected".
+          When SPEC.md marks a constant "normative" (a value the spec says
+          implementations must use exactly — not merely a default or an
+          example), record it as a contract with
+          **Verification method**: "a test asserts this exact value as a
+          hard-coded expectation" (the point-6 / SPEC-EMITTED-VALUE bar — a
+          test asserting against the production constant does NOT satisfy
+          it).
 
       Both files are inputs to ApprovePlan (the human sees them before the
       build) and to VerifyMilestone / FinalSpecCheck (which disposition
@@ -781,8 +797,9 @@ workflow BuildProduct
          verifications (never leave the table silently empty — a silent
          empty table hides under-extraction). Cross-check against the
          "Mandated tests" section of .ai/decisions/spec-quality.md
-         (written by the SpecLint preflight): every test
-         listed there must appear in this table. Table columns:
+         (written by the SpecLint preflight): every item listed there —
+         test, spec-emitted value, or normative constant — must appear in
+         this table, so none is silently unowned. Table columns:
            | Mandated verification | SPEC.md source (line/section) | Owning milestone |
 
       2. THEN decompose into milestones as the rules above describe.
@@ -1938,6 +1955,20 @@ workflow BuildProduct
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
          sections followed? Are leftover artifacts from removed code gone?
+      6. SPEC-EMITTED-VALUE ASSERTIONS: For every value the spec prescribes
+         that the code EMITS — a log event name, an error code, a status
+         string (e.g. a skip reason like "no_branch"), a wire/JSON value —
+         find a test whose ASSERTED EXPECTED value is the SPEC LITERAL
+         itself, not a variable that references the production constant.
+         `assert(emitted == prod.Constant)` is FAIL — it ratifies whatever
+         the production constant happens to be, so a wrong constant ships
+         green. `assert(emitted == "review.skip")` (the spec literal,
+         hard-coded in the test) is PASS. Cite the assertion file:line and
+         quote the asserted expected value. A spec-emitted value with no
+         test asserting the literal is FAIL. This is distinct from point 1
+         (which checks the literal exists in the code); point 6 checks a
+         TEST pins it to the spec literal independent of the production
+         constant.
 
       Your lane emphasis (after the rubric): missing requirements,
       architectural violations, leftover artifacts. Cite spec section
@@ -2001,6 +2032,20 @@ workflow BuildProduct
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
          sections followed? Are leftover artifacts from removed code gone?
+      6. SPEC-EMITTED-VALUE ASSERTIONS: For every value the spec prescribes
+         that the code EMITS — a log event name, an error code, a status
+         string (e.g. a skip reason like "no_branch"), a wire/JSON value —
+         find a test whose ASSERTED EXPECTED value is the SPEC LITERAL
+         itself, not a variable that references the production constant.
+         `assert(emitted == prod.Constant)` is FAIL — it ratifies whatever
+         the production constant happens to be, so a wrong constant ships
+         green. `assert(emitted == "review.skip")` (the spec literal,
+         hard-coded in the test) is PASS. Cite the assertion file:line and
+         quote the asserted expected value. A spec-emitted value with no
+         test asserting the literal is FAIL. This is distinct from point 1
+         (which checks the literal exists in the code); point 6 checks a
+         TEST pins it to the spec literal independent of the production
+         constant.
 
       Your lane emphasis (after the rubric): code quality, test coverage,
       edge cases the spec calls out, whether "throw away" items were
@@ -2075,6 +2120,20 @@ workflow BuildProduct
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
          sections followed? Are leftover artifacts from removed code gone?
+      6. SPEC-EMITTED-VALUE ASSERTIONS: For every value the spec prescribes
+         that the code EMITS — a log event name, an error code, a status
+         string (e.g. a skip reason like "no_branch"), a wire/JSON value —
+         find a test whose ASSERTED EXPECTED value is the SPEC LITERAL
+         itself, not a variable that references the production constant.
+         `assert(emitted == prod.Constant)` is FAIL — it ratifies whatever
+         the production constant happens to be, so a wrong constant ships
+         green. `assert(emitted == "review.skip")` (the spec literal,
+         hard-coded in the test) is PASS. Cite the assertion file:line and
+         quote the asserted expected value. A spec-emitted value with no
+         test asserting the literal is FAIL. This is distinct from point 1
+         (which checks the literal exists in the code); point 6 checks a
+         TEST pins it to the spec literal independent of the production
+         constant.
 
       Your lane emphasis (after the rubric): the things the other two
       reviewers will miss. Edge cases the spec implies but doesn't state
@@ -2363,6 +2422,16 @@ workflow BuildProduct
       dispositioned with the startup-path test/grep its verification method
       names — not skipped as untestable.
 
+      SPEC-EMITTED-VALUE ASSERTIONS (issue #417): For every spec-prescribed
+      EMITTED value (log event name, error code, status string), confirm a
+      test asserts the SPEC LITERAL as a hard-coded expectation — NOT a
+      variable referencing the production constant. A test of the form
+      `assert(emitted == prod.Constant)` does not count: it ratifies the
+      constant rather than pinning it to the spec, so a wrong constant
+      ships green. Cite the asserting file:line and the quoted expected
+      value. A spec-emitted value with no literal-asserting test keeps the
+      early STATUS:fail in place.
+
       This is the final gate. Read SPEC.md line by line.
 
       For EVERY requirement, prescription, and instruction in the spec:
@@ -2402,8 +2471,9 @@ workflow BuildProduct
       REACHABILITY (every method has a production caller or
       carve-out), TEST QUALITY (every sleep-fence hit dispositioned),
       BEHAVIORAL CONTRACTS (every contract dispositioned with evidence,
-      every ambiguity ruling followed), and SPEC.md compliance (every
-      requirement implemented, no
+      every ambiguity ruling followed), SPEC-EMITTED-VALUE ASSERTIONS
+      (every emitted value pinned to its spec literal by a test), and
+      SPEC.md compliance (every requirement implemented, no
       extras, no TODO/FIXME/HACK, tests pass, no unexpected files
       in .ai/build/ outside the allowlist enumerated above) all
       passed. Otherwise the early `STATUS:fail` from your first

@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-scope behavioral contract with concrete evidence at the same show-your-work
   bar as the spec-literal grep — an undispositioned contract or an
   absent-but-needed ruling is `STATUS:fail`.
+- **`build_product` reviewers now catch self-ratifying tests (#417).** A new
+  rubric point 6 (SPEC-EMITTED-VALUE ASSERTIONS) in all three reviewers and in
+  `FinalSpecCheck` requires, for every spec-prescribed emitted value (log event
+  name, error code, status string), a test whose asserted expected value is the
+  SPEC literal itself — `assert(emitted == prod.Constant)` is FAIL (it ratifies
+  the constant rather than pinning it to the spec), `assert(emitted ==
+  "review.skip")` is PASS — with a cited assertion file:line. `ReadSpec` records
+  spec-marked "normative" constants in `behavioral-contracts.md` with the same
+  value-asserting verification method, and `SpecLint` rule (f) / the `Decompose`
+  coverage table now enumerate spec-emitted values and normative constants so
+  none is silently unowned.
 
 ## [0.40.2] - 2026-06-24
 
