@@ -948,6 +948,46 @@ func TestResolveBudgetLimits_ConfigWinsOverGraph(t *testing.T) {
 	}
 }
 
+// TestResolveBudgetLimits_SleepAwareAttr verifies the opt-in sleep_aware_budget
+// attr threads through ResolveBudgetLimits: absent => false (default-off, AC4),
+// "true" => true, malformed => left default-off. #422.
+func TestResolveBudgetLimits_SleepAwareAttr(t *testing.T) {
+	t.Run("absent defaults off", func(t *testing.T) {
+		graph := &pipeline.Graph{Attrs: map[string]string{"max_wall_time": "15m"}}
+		got := ResolveBudgetLimits(pipeline.BudgetLimits{}, graph)
+		if got.SleepAware {
+			t.Errorf("absent attr: SleepAware = true, want false")
+		}
+	})
+	t.Run("true enables", func(t *testing.T) {
+		graph := &pipeline.Graph{Attrs: map[string]string{
+			"max_wall_time":      "15m",
+			"sleep_aware_budget": "true",
+		}}
+		got := ResolveBudgetLimits(pipeline.BudgetLimits{}, graph)
+		if !got.SleepAware {
+			t.Errorf("attr true: SleepAware = false, want true")
+		}
+	})
+	t.Run("garbage stays off", func(t *testing.T) {
+		graph := &pipeline.Graph{Attrs: map[string]string{
+			"max_wall_time":      "15m",
+			"sleep_aware_budget": "garbage",
+		}}
+		got := ResolveBudgetLimits(pipeline.BudgetLimits{}, graph)
+		if got.SleepAware {
+			t.Errorf("garbage attr: SleepAware = true, want false")
+		}
+	})
+	t.Run("config true wins over absent attr", func(t *testing.T) {
+		graph := &pipeline.Graph{Attrs: map[string]string{"max_wall_time": "15m"}}
+		got := ResolveBudgetLimits(pipeline.BudgetLimits{SleepAware: true}, graph)
+		if !got.SleepAware {
+			t.Errorf("config SleepAware true overridden: got false")
+		}
+	})
+}
+
 // TestResolveBudgetLimits_NilGraph verifies the no-op case.
 func TestResolveBudgetLimits_NilGraph(t *testing.T) {
 	cfg := pipeline.BudgetLimits{MaxTotalTokens: 100}

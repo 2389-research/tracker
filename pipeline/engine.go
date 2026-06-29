@@ -235,6 +235,13 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		Message:   "pipeline started",
 	})
 
+	// Anchor the sleep-aware budget baseline at TRUE run start — before the first
+	// node executes — so the first node's runtime counts toward MaxWallTime and
+	// the initial StallTimeout. Check runs only at node boundaries, so the first
+	// Check (after the first node) would otherwise be the anchor (#426). No-op off
+	// the sleep-aware path and safe on a nil guard.
+	e.budgetGuard.AnchorRunStart()
+
 	currentNodeID := e.graph.StartNode
 	if s.cp.CurrentNode != "" {
 		currentNodeID = s.cp.CurrentNode
