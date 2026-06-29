@@ -560,7 +560,7 @@ workflow BuildProduct
       # nothing and exits non-zero on a commitless repo, so a fresh repo
       # genuinely records an empty base. Goes to a FILE so the routing marker
       # below stays last on stdout.
-      RUN_BASE=$(git rev-parse --verify --quiet HEAD || true)
+      RUN_BASE=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
       printf '%s\n' "$RUN_BASE" > .ai/build/run-base-sha
 
       printf 'setup-ready'
@@ -1002,7 +1002,7 @@ workflow BuildProduct
       # silently empty milestone 1's file record). Written on the has-next path
       # only — the all-done branch returned earlier. Goes to a FILE so the
       # routing marker below stays last on stdout.
-      START=$(git rev-parse --verify --quiet HEAD || true)
+      START=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
       printf '%s\n' "$START" > .ai/build/milestone-start-sha
 
       printf "milestone-$NEXT"
@@ -1961,10 +1961,11 @@ workflow BuildProduct
       {
         echo "# Cumulative review diff (base..worktree)"
         echo
-        echo "_Base: ${BASE} → working tree. This is the complete set of changes"
-        echo "the build produced, INCLUDING staged/unstaged and untracked work not"
-        echo "yet committed. It is your PRIMARY read; the full working tree is"
-        echo "available on demand if a finding needs surrounding context._"
+        echo "_Base: ${BASE} → working tree. The diff below covers committed plus"
+        echo "staged/unstaged changes to TRACKED files; untracked files are listed"
+        echo "by path in their own section (their content is NOT diffed here). It is"
+        echo "your PRIMARY read; the full working tree is available on demand if a"
+        echo "finding needs surrounding context._"
         echo
         echo '## Files changed'
         git diff --name-status "${BASE}" 2>&1 || DIFF_ERR=1
