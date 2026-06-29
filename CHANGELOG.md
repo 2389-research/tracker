@@ -25,7 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ReviewClaude` drops to `claude-sonnet-4-6` and `ReviewCodex` to `gpt-5.2`;
   `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
   unchanged. Steady-state this is the dominant input-token cost (reviewers no
-  longer each re-walk the whole tree ×3, and 2 of 3 lanes run mid-tier).
+  longer each re-walk the whole tree ×3, and 2 of 3 lanes run mid-tier). Review
+  hardening: `ComputeReviewDiff` guards against running outside a git work tree
+  and now captures each `git diff` exit status — most git failures
+  (safe.directory, corrupt repo, bad object) exit non-zero while still printing
+  error text, so an empty-output check alone would let git errors masquerade as
+  a valid diff; on any failure the artifact is overwritten with an UNAVAILABLE
+  header so reviewers fall back to reading the working tree directly.
 - **`build_product` tiers cheaply-verified agent nodes (#419).** `SpecLint`
   (gated by its own `STATUS:fail`-first contract) and `ReadSpec` (gated by the
   `ApprovePlan` human review) drop to `claude-sonnet-4-6` + `reasoning_effort:

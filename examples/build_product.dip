@@ -1948,9 +1948,15 @@ workflow BuildProduct
       # committed + staged + unstaged tracked changes; untracked files are listed
       # separately below. On a clean tree this is identical to BASE..HEAD.
       #
-      # git stderr is kept IN the artifact (2>&1, not 2>/dev/null) and the outer
-      # `|| true` is dropped, so a diff failure surfaces instead of yielding a
-      # silently-empty PRIMARY input (CLAUDE.md: never silently swallow errors).
+      # git stderr is kept IN the artifact (2>&1, not 2>/dev/null) so a failure
+      # is diagnosable, but #424 review: an empty-output guard alone is not
+      # enough — most git failure modes (safe.directory, corrupt repo, bad
+      # object) exit non-zero while STILL printing error text, so the artifact
+      # is non-empty and reviewers see git errors dressed up as a valid diff.
+      # Capture each `git diff` exit status explicitly (the brace group runs in
+      # this shell, not a subshell, so DIFF_ERR persists) and stamp UNAVAILABLE
+      # on any failure (CLAUDE.md: never silently swallow errors).
+      DIFF_ERR=0
       {
         echo "# Cumulative review diff (base..worktree)"
         echo
@@ -1960,7 +1966,7 @@ workflow BuildProduct
         echo "available on demand if a finding needs surrounding context._"
         echo
         echo '## Files changed'
-        git diff --name-status "${BASE}" 2>&1
+        git diff --name-status "${BASE}" 2>&1 || DIFF_ERR=1
         UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
         if [ -n "$UNTRACKED" ]; then
           echo
@@ -1969,13 +1975,14 @@ workflow BuildProduct
         fi
         echo
         echo '## Full diff'
-        git diff "${BASE}" 2>&1
+        git diff "${BASE}" 2>&1 || DIFF_ERR=1
       } > "$OUT"
-      # Fail loudly if the artifact is empty — reviewers depend on it as their
-      # PRIMARY input. Don't dead-stop (the diff is advisory routing context),
-      # but warn on stderr and stamp the file so the gap is visible, not silent.
-      if [ ! -s "$OUT" ]; then
-        echo "WARNING: review diff generation produced no output; reviewers must read the working tree directly" >&2
+      # Fail loudly if a diff command errored OR the artifact is empty —
+      # reviewers depend on it as their PRIMARY input. Don't dead-stop (the diff
+      # is advisory routing context), but warn on stderr and OVERWRITE the file
+      # with the UNAVAILABLE header so a git error can't masquerade as a diff.
+      if [ "$DIFF_ERR" -ne 0 ] || [ ! -s "$OUT" ]; then
+        echo "WARNING: review diff generation failed or produced no output; reviewers must read the working tree directly" >&2
         echo "# Review diff UNAVAILABLE — diff generation failed. Read the working tree directly." > "$OUT"
       fi
       printf 'review-diff-ready'
