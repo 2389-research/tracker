@@ -234,17 +234,20 @@ func (g *BudgetGuard) Check(usage *UsageSummary, started time.Time) BudgetBreach
 // the first Check (the fallback for direct-Check callers). Pre-run AWAKE idle
 // between NewBudgetGuard and the anchor is excluded (F1). Idempotent; called only
 // on the sleep-aware path.
+//
+// It deliberately does NOT touch monoProgress: the stall baseline is derived in
+// sleepAwareStall, which clamps lastProgress up to monoAnchor. That clamp covers
+// every case — no progress yet (monoProgress == 0 < anchor → anchor), pre-run
+// progress (monoProgress < anchor → anchor), and genuine post-anchor progress
+// (monoProgress > anchor → used as-is). Initializing monoProgress here would only
+// risk overwriting a real progress mark with the (later) anchor time, undercounting
+// stall.
 func (g *BudgetGuard) anchorMono() {
 	mono := g.clk.Mono()
 	g.mu.Lock()
 	if !g.monoAnchored {
 		g.monoAnchor = mono
 		g.monoAnchored = true
-		// If no NotifyProgress has fired yet, anchor the stall baseline here too.
-		// A NotifyProgress that already ran records its own (clamped at read time).
-		if g.monoProgress < mono {
-			g.monoProgress = mono
-		}
 	}
 	g.mu.Unlock()
 }

@@ -31,7 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Check` runs only at node boundaries, so anchoring on it would silently drop
   the entire first node); `Pause()` is idempotent (a double `Pause` records the
   window once); and an in-flight pause (Pause without Resume) is now subtracted
-  from both wall and stall accounting, so neither trips mid-pause.
+  from both wall and stall accounting, so neither trips mid-pause. `anchorMono`
+  no longer initializes the stall progress baseline (`monoProgress`): that
+  baseline is derived solely in `sleepAwareStall`, which clamps the last-progress
+  mark up to the run-start anchor — covering "no progress yet", pre-run progress,
+  and genuine post-anchor progress without the risk of overwriting a real
+  progress mark with the (later) anchor time and undercounting stall (#426
+  review).
 
 ### Notes
 
