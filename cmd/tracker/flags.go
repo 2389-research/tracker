@@ -147,22 +147,7 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 	}
 	cfg.pipelineFile = positional[0]
 
-	if err := validateBackend(cfg.backend); err != nil {
-		return cfg, err
-	}
-	if err := validateBudgetLimits(cfg); err != nil {
-		return cfg, err
-	}
-	if err := validateWebhookFlags(cfg); err != nil {
-		return cfg, err
-	}
-	if err := validateToolSafetyFlags(cfg); err != nil {
-		return cfg, err
-	}
-	if err := validateGitFlag(cfg); err != nil {
-		return cfg, err
-	}
-	if err := validateGatewayKind(cfg.gatewayKind); err != nil {
+	if err := validateRunConfig(cfg); err != nil {
 		return cfg, err
 	}
 	// Normalize the "auto" alias to empty so downstream comparisons stay simple.
@@ -170,6 +155,27 @@ func parseRunFlags(args []string, cfg runConfig) (runConfig, error) {
 		cfg.git = ""
 	}
 	return cfg, nil
+}
+
+// validateRunConfig runs the run-mode flag validators in order, returning the
+// first error. Extracted from parseRunFlags to keep its complexity bounded.
+func validateRunConfig(cfg runConfig) error {
+	if err := validateBackend(cfg.backend); err != nil {
+		return err
+	}
+	if err := validateBudgetLimits(cfg); err != nil {
+		return err
+	}
+	if err := validateWebhookFlags(cfg); err != nil {
+		return err
+	}
+	if err := validateToolSafetyFlags(cfg); err != nil {
+		return err
+	}
+	if err := validateGitFlag(cfg); err != nil {
+		return err
+	}
+	return validateGatewayKind(cfg.gatewayKind)
 }
 
 // validateBudgetLimits returns an error if any budget limit is negative.
@@ -241,6 +247,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.IntVar(&cfg.maxTokens, "max-tokens", 0, "Halt if total tokens across the run exceed this value (0 = no limit)")
 	fs.IntVar(&cfg.maxCostCents, "max-cost", 0, "Halt if total cost in cents exceeds this value (0 = no limit)")
 	fs.DurationVar(&cfg.maxWallTime, "max-wall-time", 0, "Halt if pipeline wall time exceeds this duration (0 = no limit)")
+	fs.BoolVar(&cfg.sleepAware, "sleep-aware-budget", false, "Exclude detected suspend spans (e.g. a closed laptop) from wall-time and stall budgets")
 	fs.BoolVar(&cfg.failOnOverride, "fail-on-override", false, "Exit code 2 if the run terminates via validation_overridden (default: exit 0)")
 	fs.Var(paramMapFlag{target: &cfg.params}, "param", "Override workflow param (repeatable): key=value")
 	fs.StringVar(&cfg.gatewayURL, "gateway-url", "", "Cloudflare AI Gateway root URL (per-provider *_BASE_URL env vars override this)")

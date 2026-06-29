@@ -228,6 +228,13 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		Message:   "pipeline started",
 	})
 
+	// Anchor the sleep-aware budget baseline at TRUE run start — before the first
+	// node executes — so the first node's runtime counts toward MaxWallTime and
+	// the initial StallTimeout. Check runs only at node boundaries, so the first
+	// Check (after the first node) would otherwise be the anchor (#426). No-op off
+	// the sleep-aware path and safe on a nil guard.
+	e.budgetGuard.AnchorRunStart()
+
 	currentNodeID := e.graph.StartNode
 	if s.cp.CurrentNode != "" {
 		currentNodeID = s.cp.CurrentNode
@@ -262,9 +269,14 @@ done:
 		Message:   "pipeline completed",
 	})
 
-	// Terminal-status rule: a success exit becomes validation_overridden if
-	// any override fired during the run. Failure paths return fail/budget
-	// regardless of override presence; only this success path flips.
+	return e.successResult(s), nil
+}
+
+// successResult builds the terminal EngineResult for a normal run completion.
+// Terminal-status rule: a success exit becomes validation_overridden if any
+// override fired during the run. Failure paths return fail/budget regardless of
+// override presence; only this success path flips.
+func (e *Engine) successResult(s *runState) *EngineResult {
 	status := OutcomeSuccess
 	if len(s.validationOverrides) > 0 {
 		status = OutcomeValidationOverridden
@@ -277,7 +289,7 @@ done:
 		Trace:               s.trace,
 		Usage:               s.trace.AggregateUsage(),
 		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-	}, nil
+	}
 }
 
 // processNode handles a single iteration of the main engine loop.
