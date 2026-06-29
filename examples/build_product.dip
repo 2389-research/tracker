@@ -1910,8 +1910,11 @@ workflow BuildProduct
   # re-reading the whole tree (the ~90%-of-tokens problem). BASE is the run's
   # base commit captured at Setup (.ai/build/run-base-sha); degrade to the
   # empty tree when it is empty (fresh repo) or unreachable (history rewrite)
-  # — the SAME two-dot + empty-tree-fallback idiom verify.sh and
-  # MarkMilestoneDone already use. The full tree stays available on demand
+  # — the SAME empty-tree-fallback idiom verify.sh and MarkMilestoneDone
+  # already use. Unlike those two-dot (BASE..HEAD) call sites, this is a
+  # one-arg `git diff <BASE>` WORKTREE compare: the "accept" gate routes here
+  # WITHOUT committing first, so the diff must capture accepted-but-uncommitted
+  # work, not just commits. The full tree stays available on demand
   # (the reviewers may read any file); this only POINTS their primary read.
   # The diff is advisory context, so the whole body is best-effort and the
   # routing marker is printed last.
@@ -2012,8 +2015,10 @@ workflow BuildProduct
     reasoning_effort: high
     prompt:
       Review the implementation against SPEC.md. Your PRIMARY read is the
-      cumulative base..worktree review diff at .ai/build/review-diff.md — it is
-      the complete set of changes this build produced. Read the full working
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it
+      captures every tracked-file change this build produced. Newly-created
+      UNTRACKED files are listed there by path only; their contents are NOT in
+      the diff, so open those files directly. Read the rest of the full working
       tree ON DEMAND only when a finding needs surrounding context (it is
       available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
@@ -2107,8 +2112,10 @@ workflow BuildProduct
     reasoning_effort: high
     prompt:
       Review the implementation against SPEC.md. Your PRIMARY read is the
-      cumulative base..worktree review diff at .ai/build/review-diff.md — it is
-      the complete set of changes this build produced. Read the full working
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it
+      captures every tracked-file change this build produced. Newly-created
+      UNTRACKED files are listed there by path only; their contents are NOT in
+      the diff, so open those files directly. Read the rest of the full working
       tree ON DEMAND only when a finding needs surrounding context (it is
       available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
@@ -2202,8 +2209,10 @@ workflow BuildProduct
     reasoning_effort: high
     prompt:
       Review the implementation against SPEC.md. Your PRIMARY read is the
-      cumulative base..worktree review diff at .ai/build/review-diff.md — it is
-      the complete set of changes this build produced. Read the full working
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it
+      captures every tracked-file change this build produced. Newly-created
+      UNTRACKED files are listed there by path only; their contents are NOT in
+      the diff, so open those files directly. Read the rest of the full working
       tree ON DEMAND only when a finding needs surrounding context (it is
       available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
