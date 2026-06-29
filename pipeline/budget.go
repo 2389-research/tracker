@@ -99,13 +99,18 @@ type BudgetGuard struct {
 	// (a paused window and its accumulated span) for correctness. A slept-laptop
 	// guard is not a hot path, so a mutex over atomics is acceptable.
 	mu sync.Mutex
-	// monoAnchor is the monotonic baseline for sleep-aware wall/stall accounting,
-	// anchored lazily on the FIRST Check call (run start, right after the first
-	// node) — NOT at construction. A guard built before the run starts must not
-	// charge pre-run AWAKE idle against MaxWallTime or the initial StallTimeout
-	// (mirrors the default path, which measures from `started`).
+	// monoAnchor is the monotonic baseline for sleep-aware wall/stall accounting.
+	// The engine anchors it at TRUE run start via AnchorRunStart — before the
+	// first node executes — so the first node's runtime is counted (Check runs
+	// only at node boundaries, so anchoring on the first Check would exclude the
+	// entire first node). It is NOT anchored at construction: a guard built
+	// before the run starts must not charge pre-run AWAKE idle against
+	// MaxWallTime or the initial StallTimeout (this mirrors the default path,
+	// which measures from `started`). For direct-Check callers that never call
+	// AnchorRunStart (unit tests, embedded uses), the first Check anchors lazily
+	// as a fallback.
 	monoAnchor       time.Duration
-	monoAnchored     bool          // monoAnchor has been set by the first Check
+	monoAnchored     bool          // monoAnchor has been set (by AnchorRunStart or the first Check)
 	monoProgress     time.Duration // Mono() at last NotifyProgress (sleep-aware stall)
 	pausedMono       time.Duration // Mono() at Pause(); -1 = not paused
 	pausedDuration   time.Duration // accumulated explicit awake-idle span (since run start)
@@ -132,9 +137,24 @@ func newBudgetGuardWithClock(limits BudgetLimits, clk clock) *BudgetGuard {
 	g := &BudgetGuard{limits: limits, clk: clk, sleepAware: limits.SleepAware}
 	g.progressAt.Store(g.clk.Now().UnixNano())
 	g.pausedMono = pauseSentinelNone
-	// monoAnchor/monoProgress are left unset here and anchored lazily on the first
-	// Check (run start), so pre-run AWAKE idle is excluded (F1).
+	// monoAnchor/monoProgress are left unset here and anchored at TRUE run start
+	// by AnchorRunStart (or lazily on the first Check as a fallback), so pre-run
+	// AWAKE idle is excluded (F1) while the first node's runtime is still counted.
 	return g
+}
+
+// AnchorRunStart fixes the sleep-aware monotonic baseline at the TRUE run start
+// — before the first node executes. The engine calls this once, right after the
+// run begins, so the first node's runtime is charged against MaxWallTime and the
+// initial StallTimeout. BudgetGuard.Check runs only at node boundaries (after a
+// node completes), so relying on the first Check to anchor would silently exclude
+// the entire first node's runtime (#426 review). Idempotent and safe on nil;
+// no-op off the sleep-aware path.
+func (g *BudgetGuard) AnchorRunStart() {
+	if g == nil || !g.sleepAware {
+		return
+	}
+	g.anchorMono()
 }
 
 // NotifyProgress resets the stall clock. Call after each node completes
@@ -209,10 +229,11 @@ func (g *BudgetGuard) Check(usage *UsageSummary, started time.Time) BudgetBreach
 	return g.checkStall(started)
 }
 
-// anchorMono lazily fixes the sleep-aware monotonic baseline at run start — the
-// first Check call, which the engine issues right after the first node — so
-// pre-run AWAKE idle between NewBudgetGuard and the run is excluded (F1). Called
-// only on the sleep-aware path.
+// anchorMono fixes the sleep-aware monotonic baseline once, on whichever comes
+// first: AnchorRunStart (the engine's TRUE run start, before the first node) or
+// the first Check (the fallback for direct-Check callers). Pre-run AWAKE idle
+// between NewBudgetGuard and the anchor is excluded (F1). Idempotent; called only
+// on the sleep-aware path.
 func (g *BudgetGuard) anchorMono() {
 	mono := g.clk.Mono()
 	g.mu.Lock()

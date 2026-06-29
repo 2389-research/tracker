@@ -24,11 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   follow-up. Default behavior is byte-identical when the flag is absent: the
   wall-clock path is used and suspend time is still counted (strict semantics
   preserved). Review fixes (#422): the sleep-aware monotonic baseline now
-  anchors at run start (first `Check`), not guard construction, so pre-run awake
-  idle is excluded from `max_wall_time` and the initial `stall_timeout`;
-  `Pause()` is idempotent (a double `Pause` records the window once); and an
-  in-flight pause (Pause without Resume) is now subtracted from both wall and
-  stall accounting, so neither trips mid-pause.
+  anchors at TRUE run start — the engine calls `BudgetGuard.AnchorRunStart()`
+  before the first node executes, not guard construction and not the first
+  `Check` — so pre-run awake idle is excluded from `max_wall_time` and the
+  initial `stall_timeout` while the FIRST node's runtime is still counted
+  (`Check` runs only at node boundaries, so anchoring on it would silently drop
+  the entire first node); `Pause()` is idempotent (a double `Pause` records the
+  window once); and an in-flight pause (Pause without Resume) is now subtracted
+  from both wall and stall accounting, so neither trips mid-pause.
 
 ### Notes
 

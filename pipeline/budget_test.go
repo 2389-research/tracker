@@ -346,6 +346,49 @@ func TestBudgetGuard_SleepAware_PreRunIdleNotChargedToStall(t *testing.T) {
 	}
 }
 
+// F1 (#426 review): the engine anchors the baseline at TRUE run start via
+// AnchorRunStart — BEFORE the first node runs — so a long first node counts
+// toward MaxWallTime, while pre-run AWAKE idle is still excluded. Check fires
+// only at node boundaries, so anchoring on the first Check would silently drop
+// the entire first node's runtime. This proves both halves at once.
+func TestBudgetGuard_SleepAware_AnchorRunStartCountsFirstNodeExcludesPreRunIdle(t *testing.T) {
+	fc := newFakeClock()
+	g := newBudgetGuardWithClock(BudgetLimits{MaxWallTime: time.Hour, SleepAware: true}, fc)
+
+	// 50m awake idle between construction and run start — must NOT be charged.
+	fc.advanceWork(50 * time.Minute)
+	started := fc.Now()
+	g.AnchorRunStart() // engine anchors here, before the first node executes
+
+	// 40m first node, no intervening Check (Check runs only after a node). 40m
+	// since run start, well under 1h → OK (pre-run idle excluded).
+	fc.advanceWork(40 * time.Minute)
+	if b := g.Check(nil, started); b.Kind != BudgetOK {
+		t.Fatalf("40m first node (90m since construction): got %v, want BudgetOK (pre-run idle excluded)", b.Kind)
+	}
+	// 25m more genuine work → 65m since run start → trips (first node counted).
+	fc.advanceWork(25 * time.Minute)
+	if b := g.Check(nil, started); b.Kind != BudgetWallTime {
+		t.Fatalf("65m since run start: got %v, want BudgetWallTime (first node runtime must count)", b.Kind)
+	}
+}
+
+// F1 (#426 review): the same first-node accounting applies to StallTimeout — a
+// first node that hangs with no progress must trip the stall even though Check
+// hasn't run yet, because AnchorRunStart seeded the stall baseline at run start.
+func TestBudgetGuard_SleepAware_AnchorRunStartFirstNodeStall(t *testing.T) {
+	fc := newFakeClock()
+	g := newBudgetGuardWithClock(BudgetLimits{StallTimeout: 30 * time.Minute, SleepAware: true}, fc)
+	started := fc.Now()
+	g.AnchorRunStart() // before the first node; no NotifyProgress yet
+
+	// First node hangs 40m with no progress → stall trips (first node counts).
+	fc.advanceWork(40 * time.Minute)
+	if b := g.Check(nil, started); b.Kind != BudgetStall {
+		t.Fatalf("40m hung first node: got %v, want BudgetStall (first node must count)", b.Kind)
+	}
+}
+
 // F2: Pause is idempotent. A double Pause before a single Resume must subtract
 // the bracketed span exactly once (not zero, not double). pausedMono is recorded
 // only on the first Pause; the second is a no-op.
