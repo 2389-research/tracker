@@ -38,7 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   genuinely missing HEAD proceeds with an empty index — otherwise a tracked
   deletion could yield a stale fingerprint / false cache hit); and the replay
   Outcome deep-copies its `ContextUpdates`/`SuggestedNextNodes` so downstream
-  mutation can never corrupt the persisted memo record.
+  mutation can never corrupt the persisted memo record; and the replay path now
+  threads the run's `ctx` (instead of `context.Background()`) into `finishNode`
+  so cancellation/deadlines still apply and a non-success memo record from a
+  corrupted/hand-edited checkpoint routes through the same ctx-aware tail.
 
 ## [0.40.2] - 2026-06-24
 

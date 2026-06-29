@@ -338,7 +338,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	// #421: opt-in node-output memoization — replay a prior successful outcome
 	// when resolved inputs match, without invoking the handler. Returns a
 	// non-nil result only when a replay actually fires.
-	if lr := e.maybeReplayMemoized(s, currentNodeID, node, execNode, preHumanResponse); lr != nil {
+	if lr := e.maybeReplayMemoized(ctx, s, currentNodeID, node, execNode, preHumanResponse); lr != nil {
 		return *lr
 	}
 
@@ -356,7 +356,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 // replayed loopResult; otherwise it records the pending key (for the store
 // site) and returns nil so the handler runs. An uncertain key (hash error)
 // warns and runs live — never replays on an uncertain key.
-func (e *Engine) maybeReplayMemoized(s *runState, currentNodeID string, node, execNode *Node, preHumanResponse string) *loopResult {
+func (e *Engine) maybeReplayMemoized(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, preHumanResponse string) *loopResult {
 	if !memoizeEnabled(execNode) {
 		return nil
 	}
@@ -376,7 +376,7 @@ func (e *Engine) maybeReplayMemoized(s *runState, currentNodeID string, node, ex
 	if !hit {
 		return nil
 	}
-	lr := e.replayMemoizedNode(s, currentNodeID, node, execNode, rec, preHumanResponse)
+	lr := e.replayMemoizedNode(ctx, s, currentNodeID, node, execNode, rec, preHumanResponse)
 	return &lr
 }
 
@@ -466,7 +466,7 @@ func (e *Engine) finishNode(ctx context.Context, s *runState, currentNodeID stri
 // routing, scoping, and checkpointing are identical. The handler is never
 // called, so a node memoized on a prior pass keeps its handler call count flat
 // across re-entries (acceptance criterion 1).
-func (e *Engine) replayMemoizedNode(s *runState, currentNodeID string, node, execNode *Node, rec MemoEntry, preHumanResponse string) loopResult {
+func (e *Engine) replayMemoizedNode(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, rec MemoEntry, preHumanResponse string) loopResult {
 	e.emit(PipelineEvent{
 		Type:      EventNodeMemoReplayed,
 		Timestamp: time.Now(),
@@ -488,8 +488,12 @@ func (e *Engine) replayMemoizedNode(s *runState, currentNodeID string, node, exe
 	}
 	// pendingMemoKey is already set to this node's key; PutMemo on the replay is
 	// an idempotent no-op (same key, same record), so finishNode's store branch
-	// is harmless here.
-	return e.finishNode(context.Background(), s, currentNodeID, node, execNode, outcome, &traceEntry, preHumanResponse)
+	// is harmless here. Thread the run's ctx (not context.Background) so any
+	// cancellation/deadline still applies — and so a non-success memo record
+	// (e.g. a hand-edited/corrupted checkpoint) routes through ctx-aware
+	// finishNode work correctly rather than dropping the run's context (#425
+	// review).
+	return e.finishNode(ctx, s, currentNodeID, node, execNode, outcome, &traceEntry, preHumanResponse)
 }
 
 // consumesHumanResponse reports whether executing the node feeds pipeline
