@@ -654,7 +654,7 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
 	// instead of skipping every downstream node (#295). One-shot per node.
 	if node := e.graph.Nodes[nodeID]; node != nil {
-		if lr := e.strictFailureFallback(s, node, traceEntry); lr != nil {
+		if lr := e.strictFailureFallback(s, node, traceEntry, preserveErr); lr != nil {
 			return lr
 		}
 	}
@@ -693,13 +693,27 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 // checkpoint) to prevent loop-backs from re-escalating forever. Returns an
 // advancing loopResult when a fallback resolves, or nil to let the caller
 // perform today's terminal halt.
-func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry) *loopResult {
+func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry, preserveErr error) *loopResult {
 	if s.cp.FallbackTaken[node.ID] {
 		return nil
 	}
 	fb := e.findFallbackTarget(node)
 	if fb == "" {
 		return nil
+	}
+	// MID-ROUTING: the preserve error is discarded so it cannot override this
+	// routing decision (the terminal branch in checkStrictFailure hard-escalates
+	// instead), but surface it once as a WARNING — never silently swallow a
+	// never-lose-work degradation (CLAUDE.md). Mirrors handleRetryExhausted's
+	// fallback branch (#428 review).
+	if preserveErr != nil {
+		e.emit(PipelineEvent{
+			Type:      EventWarning,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    node.ID,
+			Message:   fmt.Sprintf("could not preserve uncommitted work for node %q before routing to fallback %q: %v", node.ID, fb, preserveErr),
+		})
 	}
 	traceEntry.EdgeTo = fb
 	s.trace.AddEntry(*traceEntry)

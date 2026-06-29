@@ -452,6 +452,89 @@ func TestStrictFailureNoFallback_TerminalHardFail(t *testing.T) {
 	assertTerminalPreserveHardFail(t, result, events)
 }
 
+// TestStrictFailureFallback_MidRoutingStaysWarning drives the strict-failure
+// MID-ROUTING fallback path (strictFailureFallback resolves a fallback_target)
+// with an unrecoverable artifact repo and asserts the preserve error surfaces as
+// a single EventWarning rather than being silently discarded — while routing is
+// unchanged: the fallback node still runs and WorkPreserveFailed stays false.
+func TestStrictFailureFallback_MidRoutingStaysWarning(t *testing.T) {
+	requireGit(t)
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod 0500 does not prevent writes")
+	}
+	artifactBase := t.TempDir()
+
+	g := NewGraph("wip_strict_failure_midrouting_test")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
+	// Only an unconditional edge, but a node-level fallback_target — a fail here
+	// routes to Escalate instead of dead-stopping.
+	g.AddNode(&Node{ID: "Build", Shape: "box", Label: "Build", Attrs: map[string]string{"fallback_target": "Escalate"}})
+	g.AddNode(&Node{ID: "Escalate", Shape: "box", Label: "Escalate"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "start", To: "Build"})
+	g.AddEdge(&Edge{From: "Build", To: "end"})
+	g.AddEdge(&Edge{From: "Escalate", To: "end"})
+
+	var mu sync.Mutex
+	var events []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+
+	reg := NewHandlerRegistry()
+	escalateRan := false
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		reg.Register(&testHandler{name: name, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			switch node.ID {
+			case "Build":
+				breakArtifactRepo(t, pctx, node.ID)
+				return Outcome{Status: string(OutcomeFail)}, nil
+			case "Escalate":
+				escalateRan = true
+				return Outcome{Status: string(OutcomeSuccess)}, nil
+			default:
+				return Outcome{Status: string(OutcomeSuccess)}, nil
+			}
+		}})
+	}
+
+	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
+	result, _ := engine.Run(context.Background())
+	t.Cleanup(func() {
+		if result != nil {
+			_ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700)
+		}
+	})
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.WorkPreserveFailed {
+		t.Error("mid-routing fallback path must NOT set WorkPreserveFailed (preserves routing contract)")
+	}
+	if !escalateRan {
+		t.Error("mid-routing fallback path must still route to the fallback target")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, e := range events {
+		if e.Type == EventWarning && e.NodeID == "Build" &&
+			strings.Contains(e.Message, "preserve uncommitted work") && strings.Contains(e.Message, "fallback") {
+			found = true
+		}
+		if e.Type == EventWorkPreserveFailed {
+			t.Errorf("mid-routing path must not emit a hard EventWorkPreserveFailed; got %q", e.Message)
+		}
+	}
+	if !found {
+		t.Errorf("expected an EventWarning surfacing the discarded mid-routing preserve error; events=%v", events)
+	}
+}
+
 // TestEngine_HealthyRepo_NoWorkPreserveFailed is the AC3 regression: a healthy
 // device + healthy repo run produces WorkPreserveFailed=false and no new
 // repo-unavailable EventWorkPreserveFailed.

@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EventWarning` (the mid-routing path emits the single discarded warning at its
   own site); and the device-probe remediation hint no longer presents the
   Linux-specific `mknod ... c 1 3` device numbers as if they were portable.
+  Follow-up review fixes (#428): the strict-failure mid-routing fallback site
+  (`strictFailureFallback`) now actually emits that discarded-preserve
+  `EventWarning` — it was previously dropped silently, leaving only the
+  retry-exhausted fallback branch warning; and `checkRootedHere` now includes
+  git's combined output in the `rev-parse --show-toplevel` error so a
+  repo-unavailable diagnostic stays actionable (e.g. surfaces `safe.directory`
+  or corrupt-object causes) instead of reporting a bare exit status.
 
 - **Sleep-aware budgets (#422, part A).** Opt-in `BudgetLimits.SleepAware` (CLI
   `--sleep-aware-budget`) excludes OS-suspend spans — e.g. a suspended laptop —

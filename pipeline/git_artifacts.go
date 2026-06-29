@@ -285,7 +285,11 @@ func (r *gitArtifactRepo) ensureHealthy() error {
 func (r *gitArtifactRepo) checkRootedHere() error {
 	out, err := r.git("rev-parse", "--show-toplevel")
 	if err != nil {
-		return fmt.Errorf("rev-parse --show-toplevel: %w", err)
+		// Include git's combined output (the 'not a git repository', 'cannot
+		// change to ...', etc. text) like every other error in this file, so the
+		// resulting ErrArtifactRepoUnavailable diagnostic stays actionable (#428
+		// review).
+		return fmt.Errorf("rev-parse --show-toplevel: %w\n%s", err, strings.TrimSpace(out))
 	}
 	top := strings.TrimSpace(out)
 	if top == "" {
