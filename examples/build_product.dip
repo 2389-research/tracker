@@ -1926,6 +1926,16 @@ workflow BuildProduct
       set -u
       mkdir -p .ai/build
       OUT=.ai/build/review-diff.md
+      # #424 review: bail loudly if this isn't a git work tree. Otherwise the
+      # git commands below emit error text, the file is non-empty so the
+      # empty-artifact guard never trips, and reviewers see git errors dressed
+      # up as a valid diff. Stamp UNAVAILABLE and route on (the diff is advisory).
+      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "WARNING: not inside a git work tree; cannot compute review diff" >&2
+        echo "# Review diff UNAVAILABLE — not a git work tree. Read the working tree directly." > "$OUT"
+        printf 'review-diff-ready'
+        exit 0
+      fi
       BASE=$(cat .ai/build/run-base-sha 2>/dev/null || true)
       if [ -z "$BASE" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
         BASE=$(git hash-object -t tree /dev/null)

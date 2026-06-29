@@ -18,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diff <base>` (no `..HEAD`) compares base to the working tree, so
   accepted-but-uncommitted milestone work is included; untracked files are listed
   separately. Each reviewer's scope sentence now points its PRIMARY read at that
-  diff (full tree available on demand, not mandated). The reviewer rubric is
-  untouched by this PR — its original five points are unchanged, and points 6
-  (#417) and 7 (#416) were added additively by their own PRs.
+  diff (full tree available on demand, not mandated). The diff-scoping and model
+  tiering do not touch the reviewer rubric — its original five points are
+  unchanged. (Points 6 (#417) and 7 (#416) are additive rubric extensions,
+  documented in their own entries below.)
   `ReviewClaude` drops to `claude-sonnet-4-6` and `ReviewCodex` to `gpt-5.2`;
   `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
   unchanged. Steady-state this is the dominant input-token cost (reviewers no
