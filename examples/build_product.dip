@@ -1984,11 +1984,29 @@ workflow BuildProduct
       } > "$OUT"
       # Fail loudly if a diff command errored OR the artifact is empty —
       # reviewers depend on it as their PRIMARY input. Don't dead-stop (the diff
-      # is advisory routing context), but warn on stderr and OVERWRITE the file
-      # with the UNAVAILABLE header so a git error can't masquerade as a diff.
+      # is advisory routing context), but warn on stderr and prepend a clear
+      # UNAVAILABLE banner so a git error can't masquerade as a valid diff. The
+      # git stderr captured into the file (2>&1) is PRESERVED below the banner in
+      # a fenced block — overwriting it outright would discard the underlying
+      # cause (safe.directory / corrupt repo / bad object) and make the failure
+      # undebuggable (#424 review). The banner removes the masquerade risk; the
+      # preserved output keeps it diagnosable.
       if [ "$DIFF_ERR" -ne 0 ] || [ ! -s "$OUT" ]; then
         echo "WARNING: review diff generation failed or produced no output; reviewers must read the working tree directly" >&2
-        echo "# Review diff UNAVAILABLE — diff generation failed. Read the working tree directly." > "$OUT"
+        CAPTURED=$(cat "$OUT" 2>/dev/null)
+        {
+          echo "# Review diff UNAVAILABLE — diff generation failed. Read the working tree directly."
+          echo
+          if [ -n "$CAPTURED" ]; then
+            echo "Captured git output (likely the underlying cause — e.g. safe.directory, corrupt repo, bad object):"
+            echo
+            echo '```'
+            printf '%s\n' "$CAPTURED"
+            echo '```'
+          else
+            echo "(no git output was captured)"
+          fi
+        } > "$OUT"
       fi
       printf 'review-diff-ready'
 
