@@ -73,24 +73,26 @@ func (e *Engine) computeMemoKey(s *runState, execNode *Node) (string, bool) {
 		return "", false
 	}
 
+	// 6. writable_paths side effects: an UNCONDITIONAL hard miss, checked BEFORE
+	// any hashing so a side-effecting node mistakenly marked memoize:true costs no
+	// snapshot/hash work. The node mutates and reads the agent's session
+	// working_dir, but tracker has no fingerprint of that tree — s.gitRepo is the
+	// ARTIFACT repo (<artifactDir>/<runID>), a different directory than the agent's
+	// working tree, so its fingerprint proves nothing about what the agent
+	// read/wrote. Replaying on it could fire against a changed working tree (the
+	// stale-replay class this feature prevents, #425 review). Until we can
+	// fingerprint the agent's real working_dir, side-effecting nodes are not
+	// memoizable (CLAUDE.md: over-invalidate, never replay stale).
+	if strings.TrimSpace(execNode.Attrs["writable_paths"]) != "" {
+		return "", false
+	}
+
 	h := sha256.New()
 	writeLP(h, "v1")
 	writeLP(h, execNode.ID)
 	writeLP(h, execNode.Handler)
 	hashSortedMap(h, execNode.Attrs)                      // 4. resolved attrs
 	hashSortedMap(h, memoizableContext(s.pctx, execNode)) // 5. bare ctx inputs
-
-	// 6. writable_paths side effects: an UNCONDITIONAL hard miss. The node mutates
-	// and reads the agent's session working_dir, but tracker has no fingerprint of
-	// that tree — s.gitRepo is the ARTIFACT repo (<artifactDir>/<runID>), a different
-	// directory than the agent's working tree, so its fingerprint proves nothing
-	// about what the agent read/wrote. Replaying on it could fire against a changed
-	// working tree (the stale-replay class this feature prevents, #425 review).
-	// Until we can fingerprint the agent's real working_dir, side-effecting nodes
-	// are not memoizable (CLAUDE.md: over-invalidate, never replay stale).
-	if strings.TrimSpace(execNode.Attrs["writable_paths"]) != "" {
-		return "", false
-	}
 
 	return hex.EncodeToString(h.Sum(nil)), true
 }
