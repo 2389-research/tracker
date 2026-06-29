@@ -268,8 +268,10 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	// ClearStaleReviews. The #313 invariant — stale reports cleared on BOTH
 	// entries — is preserved with the gate prepended.
 	// #418 inserts ComputeReviewDiff between ClearStaleReviews and the fan-out
-	// so the reviewers read a bounded base..HEAD diff; the #313 invariant (stale
-	// reports cleared before the fan-out runs) is preserved across the extra hop.
+	// so the reviewers read a bounded base..worktree diff (BASE vs the working
+	// tree, capturing uncommitted edits — not BASE..HEAD); the #313 invariant
+	// (stale reports cleared before the fan-out runs) is preserved across the
+	// extra hop.
 	if !hasUnconditionalEdgeTo(g, "ClearStaleReviews", "ComputeReviewDiff") {
 		t.Error("ClearStaleReviews has no edge to ComputeReviewDiff (issues #313/#418)")
 	}
