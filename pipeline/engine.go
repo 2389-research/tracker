@@ -381,6 +381,15 @@ func (e *Engine) maybeReplayMemoized(ctx context.Context, s *runState, currentNo
 	if !hit {
 		return nil
 	}
+	// Only successful outcomes are ever stored (PutMemo is gated on
+	// OutcomeSuccess), but enforce the "failures never replay" contract on the
+	// read side too: a non-success record can only come from a corrupted or
+	// hand-edited checkpoint, so treat it as a miss and re-run the node live
+	// rather than replaying a stored failure into the routing decision (#425
+	// review).
+	if rec.Status != string(OutcomeSuccess) {
+		return nil
+	}
 	lr := e.replayMemoizedNode(ctx, s, currentNodeID, node, execNode, rec, preHumanResponse)
 	return &lr
 }

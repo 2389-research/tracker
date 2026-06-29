@@ -34,9 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamp; the replay Outcome deep-copies its `ContextUpdates`/`SuggestedNextNodes`
   so downstream mutation can never corrupt the persisted memo record; and the
   replay path threads the run's `ctx` (instead of `context.Background()`) into
-  `finishNode` so cancellation/deadlines still apply and a non-success memo
-  record from a corrupted/hand-edited checkpoint routes through the same
-  ctx-aware tail. A node declaring `writable_paths` is an **unconditional** hard
+  `finishNode` so cancellation/deadlines still apply; and the replay lookup now
+  enforces the "failures never replay" contract on the READ side too — a
+  non-success memo record (only reachable via a corrupted/hand-edited checkpoint,
+  since the store site is gated on `OutcomeSuccess`) is treated as a cache miss
+  and the node re-runs live rather than replaying a stored failure into routing.
+  A node declaring `writable_paths` is an **unconditional** hard
   miss — it always re-runs and is never replayed, with no warning (a by-design
   policy skip, not a key-computation failure). Such a node mutates and reads the
   agent's session `working_dir`, but tracker can only fingerprint the ARTIFACT

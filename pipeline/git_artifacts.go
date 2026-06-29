@@ -239,15 +239,19 @@ func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
 	return ref, nil
 }
 
-// TreeFingerprint returns a conservative content hash of the working tree for
-// node-output memoization (#421): the porcelain status (path + status markers)
-// concatenated with a tree object SHA that hashes the actual CONTENT of every
-// tracked-modified AND untracked file. The content tree is built in a throwaway
-// index so the real index is never touched (side-effect-free). This closes the
-// #425-review gap where `ls-files -s` only reflected STAGED blobs, so an
-// intervening node that modified an unstaged-tracked or untracked file without
-// changing its path/status produced an identical fingerprint and could replay
-// stale output against a different worktree.
+// TreeFingerprint returns a conservative content hash of the working tree: the
+// porcelain status (path + status markers) concatenated with a tree object SHA
+// that hashes the actual CONTENT of every tracked-modified AND untracked file.
+// The content tree is built in a throwaway index so the real index is never
+// touched (side-effect-free).
+//
+// NOTE: the current memoization path (#421) does NOT use this. A `writable_paths`
+// node is an unconditional hard miss in computeMemoKey, and this fingerprint is
+// taken from the ARTIFACT repo (`<artifactDir>/<runID>`) — a different directory
+// than the agent's session `working_dir` where side effects actually land — so
+// it could not validate a side-effecting node's inputs anyway. TreeFingerprint
+// is retained as the building block for a future fingerprint of the agent's real
+// `working_dir`; until that lands it is unused by the memo key.
 //
 // Reuses r.git/gitEnv so the #399 GIT_DIR-leak guard (gitSafeEnv) applies. Any
 // git error is returned (not swallowed): the caller treats it as a cache miss

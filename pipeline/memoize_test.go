@@ -398,6 +398,39 @@ func TestComputeMemoKey(t *testing.T) {
 	}
 }
 
+// A non-success memo record (only reachable via a corrupted or hand-edited
+// checkpoint, since PutMemo is gated on OutcomeSuccess at the call site) must be
+// treated as a cache MISS — the "failures never replay" contract is enforced on
+// the read side too, not just the write side (#425 review).
+func TestMemoNonSuccessRecordIsNotReplayed(t *testing.T) {
+	g := NewGraph("memo_nonsuccess")
+	e := NewEngine(g, newTestRegistry())
+
+	pctx := NewPipelineContext()
+	pctx.Set("a", "1")
+	s := &runState{pctx: pctx, cp: &Checkpoint{}}
+
+	node := &Node{ID: "work", Handler: "codergen", Attrs: map[string]string{"memoize": "true", "prompt": "abc"}}
+	key, ok := e.computeMemoKey(s, node)
+	if !ok {
+		t.Fatal("expected a memoizable key for the memoize node")
+	}
+	// Inject a stored FAILURE under the exact key the node will compute.
+	s.cp.PutMemo(key, &Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"work_out": "stale"}})
+	if _, hit := s.cp.GetMemo(key); !hit {
+		t.Fatal("precondition: the fail record must be present under the computed key")
+	}
+
+	lr := e.maybeReplayMemoized(context.Background(), s, "work", node, node, "")
+	if lr != nil {
+		t.Errorf("a non-success memo record must be a cache miss (nil loopResult, re-run live), got %+v", lr)
+	}
+	// The key must still be recorded so a fresh successful run can store under it.
+	if s.pendingMemoKey != key {
+		t.Errorf("pendingMemoKey = %q, want the computed key %q (store site must still fire on the live re-run)", s.pendingMemoKey, key)
+	}
+}
+
 // Verify MemoEntry round-trips through JSON.
 func TestMemoEntryJSONRoundTrip(t *testing.T) {
 	cp := &Checkpoint{RunID: "r"}
