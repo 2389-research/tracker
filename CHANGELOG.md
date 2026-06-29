@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hashed unconditionally so an intervening node's new critique invalidates the
   replay. Memoization is **agent-node-only**. A node declaring `writable_paths`
   has working-tree side effects and is **never memoized** — an unconditional hard
-  cache miss, so it always re-runs (see the third review-round note below for why).
+  cache miss, so it always re-runs (see the `writable_paths` note below for why).
   Any input change
   yields a different key and re-runs the node. Only successful outcomes are
   memoized (failures never replay), the memo table is persisted in
@@ -28,29 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Emits `node_memo_replayed` on a replay. Review hardening: the memo key now
   re-includes a bare key the node self-aliased on a prior pass once an
   intervening node OVERWRITES it (so replay can't serve stale output against a
-  changed input); the `writable_paths` tree fingerprint now hashes actual
-  worktree CONTENT via a throwaway-index `write-tree` (catching unstaged/untracked
-  file edits that the prior staged-blob listing missed); the persisted
-  `MemoEntry` now carries the `PreferredLabel`/`SuggestedNextNodes` routing hints
-  so a replayed node follows the same edge the original did; and replayed trace
-  entries are stamped with a real timestamp. Second review round: the worktree
-  fingerprint now fails closed on an unexpected `read-tree HEAD` error (only a
-  genuinely missing HEAD proceeds with an empty index — otherwise a tracked
-  deletion could yield a stale fingerprint / false cache hit); and the replay
-  Outcome deep-copies its `ContextUpdates`/`SuggestedNextNodes` so downstream
-  mutation can never corrupt the persisted memo record; and the replay path now
-  threads the run's `ctx` (instead of `context.Background()`) into `finishNode`
-  so cancellation/deadlines still apply and a non-success memo record from a
-  corrupted/hand-edited checkpoint routes through the same ctx-aware tail. Third
-  review round: a `writable_paths` node is now an **unconditional** hard miss
-  rather than replaying on an artifact-repo tree fingerprint. The fingerprint was
-  taken from `s.gitRepo` — the artifact repo at `<artifactDir>/<runID>`, a
-  different directory than the agent's session `working_dir` where `writable_paths`
-  actually takes effect — so it proved nothing about the tree the agent read/wrote
-  and could have replayed against a changed working tree. Until tracker can
-  fingerprint the agent's real `working_dir`, side-effecting nodes are simply not
-  memoizable (the `TreeFingerprint` helper is retained as the building block for
-  that follow-up).
+  changed input); the persisted `MemoEntry` now carries the
+  `PreferredLabel`/`SuggestedNextNodes` routing hints so a replayed node follows
+  the same edge the original did; replayed trace entries are stamped with a real
+  timestamp; the replay Outcome deep-copies its `ContextUpdates`/`SuggestedNextNodes`
+  so downstream mutation can never corrupt the persisted memo record; and the
+  replay path threads the run's `ctx` (instead of `context.Background()`) into
+  `finishNode` so cancellation/deadlines still apply and a non-success memo
+  record from a corrupted/hand-edited checkpoint routes through the same
+  ctx-aware tail. A node declaring `writable_paths` is an **unconditional** hard
+  miss — it always re-runs and is never replayed, with no warning (a by-design
+  policy skip, not a key-computation failure). Such a node mutates and reads the
+  agent's session `working_dir`, but tracker can only fingerprint the ARTIFACT
+  repo (`<artifactDir>/<runID>`), a different directory — so any content
+  fingerprint would prove nothing about the tree the agent actually read/wrote
+  and could replay against a changed working tree. Until tracker can fingerprint
+  the agent's real `working_dir`, side-effecting nodes are simply not memoizable
+  (the `TreeFingerprint` helper is retained as the building block for that
+  follow-up, but is not used in the memo key today).
 - **Sleep-aware budgets (#422, part A).** Opt-in `BudgetLimits.SleepAware` (CLI
   `--sleep-aware-budget`) excludes OS-suspend spans — e.g. a suspended laptop —
   from `max_wall_time` and `stall_timeout` accounting, so a machine that sleeps

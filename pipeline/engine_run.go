@@ -272,10 +272,11 @@ type runState struct {
 
 	// pendingMemoKey is the content-hash memo key (#421) computed for the node
 	// currently executing, threaded from the lookup site to the store site so
-	// the tree fingerprint is computed once per entry and the store uses the
-	// exact key the lookup did. Empty when the node did not opt into memoize
-	// or the key could not be computed — neither GetMemo nor PutMemo is reached
-	// in that case (default-off guarantee). Reset at the top of processActiveNode.
+	// the memo key is computed once per entry and the store uses the exact key
+	// the lookup did. Empty when the node did not opt into memoize or is not
+	// memoizable (e.g. writable_paths side effects → unconditional hard miss) —
+	// neither GetMemo nor PutMemo is reached in that case (default-off
+	// guarantee). Reset at the top of processActiveNode.
 	pendingMemoKey string
 }
 

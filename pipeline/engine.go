@@ -361,22 +361,20 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 // iteration. When the node opted in and its resolved-input hash matches a prior
 // successful execution (in this run or a resumed checkpoint), it returns the
 // replayed loopResult; otherwise it records the pending key (for the store
-// site) and returns nil so the handler runs. An uncertain key (hash error)
-// warns and runs live — never replays on an uncertain key.
+// site) and returns nil so the handler runs. A node that opted in but is not
+// memoizable (computeMemoKey ok=false) simply runs the handler live — that is a
+// deterministic, by-design hard miss (currently only writable_paths side
+// effects), never a runtime computation failure, so it is NOT warned about
+// (#425 review). The conservative "never replay on an uncertain key" contract
+// is enforced inside computeMemoKey, which returns ok=false rather than a
+// best-guess key.
 func (e *Engine) maybeReplayMemoized(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, preHumanResponse string) *loopResult {
 	if !memoizeEnabled(execNode) {
 		return nil
 	}
 	key, ok := e.computeMemoKey(s, execNode)
 	if !ok {
-		e.emit(PipelineEvent{
-			Type:      EventWarning,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    currentNodeID,
-			Message:   fmt.Sprintf("memoize: could not compute memo key for node %q; running handler", currentNodeID),
-		})
-		return nil
+		return nil // not memoizable (policy hard miss) — run the handler live
 	}
 	s.pendingMemoKey = key
 	rec, hit := s.cp.GetMemo(key)
