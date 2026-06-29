@@ -32,7 +32,7 @@ func TestBuildProductReviewPanelTiering(t *testing.T) {
 	}
 }
 
-func TestBuildProductSynthesisAndAdversarialStayFrontier(t *testing.T) {
+func TestBuildProductSynthesisAndFinalSpecCheckStayFrontier(t *testing.T) {
 	g := loadBuildProduct(t)
 	for _, id := range []string{"SynthesizeReviews", "FinalSpecCheck"} {
 		n := g.Nodes[id]

@@ -666,8 +666,9 @@ workflow BuildProduct
       Every rule-(f) item, one per line, each with its SPEC.md source and
       its kind (test / emitted-value / normative-constant); emitted-value
       and normative-constant lines must carry the verification shape "a
-      test asserts this exact value as a hard-coded expectation" — or the
-      single line "SPEC mandates no named tests".
+      test asserts this exact value as a hard-coded expectation" — or, only
+      when SPEC.md mandates no rule-(f) items of ANY kind, the single line
+      "SPEC mandates no tests, emitted values, or normative constants".
 
       Then your terminal STATUS line:
       - zero critical findings -> STATUS:success (warnings alone never
