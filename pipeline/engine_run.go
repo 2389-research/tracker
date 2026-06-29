@@ -99,16 +99,20 @@ func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *
 
 // escalateWorkPreserve handles the TERMINAL never-lose-work degradation (#423).
 // When commitWIPBeforeRouting reported the artifact repo unavailable (and
-// reattach failed), it emits a HARD EventStageFailed and returns true so the
-// caller can set EngineResult.WorkPreserveFailed. Returns false (no event) when
-// preserveErr is nil, so the healthy path is byte-identical. This NEVER changes
-// Status — the original node failure remains the primary cause.
+// reattach failed), it emits a HARD EventWorkPreserveFailed and returns true so
+// the caller can set EngineResult.WorkPreserveFailed. Returns false (no event)
+// when preserveErr is nil, so the healthy path is byte-identical. This NEVER
+// changes Status — the original node failure remains the primary cause.
+//
+// The event is intentionally EventWorkPreserveFailed, NOT EventStageFailed:
+// this is not another execution attempt for the node, so `tracker diagnose`
+// must not fold it into that node's RetryCount / IdenticalRetries (#428 review).
 func (e *Engine) escalateWorkPreserve(s *runState, nodeID string, preserveErr error) bool {
 	if preserveErr == nil {
 		return false
 	}
 	e.emit(PipelineEvent{
-		Type:      EventStageFailed,
+		Type:      EventWorkPreserveFailed,
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		NodeID:    nodeID,

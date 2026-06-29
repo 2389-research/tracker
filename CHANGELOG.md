@@ -35,13 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the user's enclosing repository.
   On the **terminal** never-lose-work paths (handler-error halt and failing exit
   node) an unrecoverable repo is now surfaced as a HARD signal — a new
-  `EventStageFailed` diagnostic plus an `EngineResult.WorkPreserveFailed` flag —
-  rather than degrading silently to a best-effort `EventWarning`. The original
-  node failure is never masked (`Status` stays `OutcomeFail`). **Mid-routing**
-  call sites (strict-failure pre-decision, retry-exhausted with a
-  `fallback_retry_target`) keep the warning-only behavior so the routing outcome
-  is never changed. No behavior change when devices and the artifact repo are
-  healthy.
+  dedicated `EventWorkPreserveFailed` diagnostic plus an
+  `EngineResult.WorkPreserveFailed` flag — rather than degrading silently to a
+  best-effort `EventWarning`. The signal is a distinct event type (not an extra
+  `EventStageFailed`) precisely so `tracker diagnose` does **not** count it as
+  another per-node execution attempt — emitting it as `stage_failed` would have
+  inflated the failed node's `RetryCount` / `IdenticalRetries` (#428 review).
+  The TUI adapter maps `EventWorkPreserveFailed` to the same `MsgNodeFailed`
+  failure line, so the operator still sees it. The original node failure is never
+  masked (`Status` stays `OutcomeFail`). **Mid-routing** call sites
+  (strict-failure pre-decision, retry-exhausted with a `fallback_retry_target`)
+  keep the warning-only behavior so the routing outcome is never changed. No
+  behavior change when devices and the artifact repo are healthy.
 
 ## [0.40.2] - 2026-06-24
 

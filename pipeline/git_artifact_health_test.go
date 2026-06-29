@@ -163,7 +163,9 @@ func breakRepoHandler(t *testing.T, breakNode string) *HandlerRegistry {
 
 // TestCommitWIPBeforeRouting_TerminalHardFail drives the handler-error terminal
 // path with an unrecoverable artifact repo and asserts AC2: WorkPreserveFailed
-// is set, an EventStageFailed carrying the repo-unavailable diagnostic fires,
+// is set, an EventWorkPreserveFailed carrying the repo-unavailable diagnostic
+// fires (a hard signal that, unlike EventStageFailed, is NOT counted by
+// `tracker diagnose` as another per-node execution attempt — #428 review),
 // and Status stays the original OutcomeFail (original failure not masked).
 func TestCommitWIPBeforeRouting_TerminalHardFail(t *testing.T) {
 	requireGit(t)
@@ -206,13 +208,13 @@ func TestCommitWIPBeforeRouting_TerminalHardFail(t *testing.T) {
 	defer mu.Unlock()
 	foundHardSignal := false
 	for _, e := range events {
-		if e.Type == EventStageFailed && strings.Contains(e.Message, "artifact") &&
+		if e.Type == EventWorkPreserveFailed && strings.Contains(e.Message, "artifact") &&
 			strings.Contains(e.Message, "preserve") {
 			foundHardSignal = true
 		}
 	}
 	if !foundHardSignal {
-		t.Errorf("expected EventStageFailed carrying the repo-unavailable preserve diagnostic; events=%v", events)
+		t.Errorf("expected EventWorkPreserveFailed carrying the repo-unavailable preserve diagnostic; events=%v", events)
 	}
 }
 
@@ -283,8 +285,8 @@ func TestCommitWIPBeforeRouting_MidRoutingStaysWarning(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, e := range events {
-		if e.Type == EventStageFailed && strings.Contains(e.Message, "preserve") && strings.Contains(e.Message, "artifact") {
-			t.Errorf("mid-routing path must not emit a hard EventStageFailed for the repo; got %q", e.Message)
+		if e.Type == EventWorkPreserveFailed && strings.Contains(e.Message, "preserve") && strings.Contains(e.Message, "artifact") {
+			t.Errorf("mid-routing path must not emit a hard EventWorkPreserveFailed for the repo; got %q", e.Message)
 		}
 	}
 }
@@ -313,7 +315,9 @@ func breakRepoOnStatusHandler(t *testing.T, breakNode, status string) *HandlerRe
 
 // assertTerminalPreserveHardFail asserts the AC2 contract on a terminal halt:
 // Status stays OutcomeFail, WorkPreserveFailed is set, and a hard
-// EventStageFailed carries the repo-unavailable preserve diagnostic.
+// EventWorkPreserveFailed carries the repo-unavailable preserve diagnostic. The
+// event is intentionally NOT EventStageFailed so `tracker diagnose` does not
+// count it as another per-node execution attempt (#428 review).
 func assertTerminalPreserveHardFail(t *testing.T, result *EngineResult, events []PipelineEvent) {
 	t.Helper()
 	if result == nil {
@@ -326,11 +330,11 @@ func assertTerminalPreserveHardFail(t *testing.T, result *EngineResult, events [
 		t.Error("expected WorkPreserveFailed=true on terminal path when artifact repo is unrecoverable")
 	}
 	for _, e := range events {
-		if e.Type == EventStageFailed && strings.Contains(e.Message, "artifact") && strings.Contains(e.Message, "preserve") {
+		if e.Type == EventWorkPreserveFailed && strings.Contains(e.Message, "artifact") && strings.Contains(e.Message, "preserve") {
 			return
 		}
 	}
-	t.Errorf("expected EventStageFailed carrying the repo-unavailable preserve diagnostic; events=%v", events)
+	t.Errorf("expected EventWorkPreserveFailed carrying the repo-unavailable preserve diagnostic; events=%v", events)
 }
 
 // TestRetryExhaustedNoFallback_TerminalHardFail drives the retry-exhausted
@@ -412,7 +416,7 @@ func TestStrictFailureNoFallback_TerminalHardFail(t *testing.T) {
 
 // TestEngine_HealthyRepo_NoWorkPreserveFailed is the AC3 regression: a healthy
 // device + healthy repo run produces WorkPreserveFailed=false and no new
-// repo-unavailable EventStageFailed.
+// repo-unavailable EventWorkPreserveFailed.
 func TestEngine_HealthyRepo_NoWorkPreserveFailed(t *testing.T) {
 	requireGit(t)
 	artifactBase := t.TempDir()
