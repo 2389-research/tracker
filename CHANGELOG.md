@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new `gitArtifactRepo.ensureHealthy()` before committing work-in-progress; if
   the repo has gone unreachable post-suspend it attempts a single reattach
   (clear the latched failure + idempotent re-`Init`, capturing the current tree).
+  The health probe compares `git rev-parse --show-toplevel` against the artifact
+  dir, so a nested run dir whose own `.git` was lost is treated as unhealthy
+  (and reattached) instead of silently resolving against — and committing into —
+  the user's enclosing repository.
   On the **terminal** never-lose-work paths (handler-error halt and failing exit
   node) an unrecoverable repo is now surfaced as a HARD signal — a new
   `EventStageFailed` diagnostic plus an `EngineResult.WorkPreserveFailed` flag —

@@ -257,18 +257,46 @@ func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
 // refs / history are gone; this preserves the working tree so the terminal
 // commit can still land, not full history.
 func (r *gitArtifactRepo) ensureHealthy() error {
-	if out, err := r.git("rev-parse", "--git-dir"); err == nil && strings.TrimSpace(out) != "" {
-		return nil // reachable — no recovery, no mutation
+	if err := r.checkRootedHere(); err == nil {
+		return nil // reachable AND rooted at r.dir — no recovery, no mutation
 	}
-	// Unreachable. Clear the latch (otherwise Init/CommitWIP no-op after a prior
-	// failure) and re-run the idempotent Init to reattach.
+	// Unreachable, or rev-parse discovered a PARENT repo (a nested artifact dir
+	// whose own .git was lost would otherwise resolve against the user's
+	// enclosing repo — #428 review). Clear the latch (otherwise Init/CommitWIP
+	// no-op after a prior failure) and re-run the idempotent Init to reattach a
+	// fresh repo rooted at r.dir.
 	r.failed = false
 	if err := r.Init(); err != nil {
-		return fmt.Errorf("%w: reattach failed: %v", ErrArtifactRepoUnavailable, err)
+		return fmt.Errorf("%w: reattach failed: %w", ErrArtifactRepoUnavailable, err)
 	}
-	// Re-probe so we never silently "un-fail" a still-dead repo.
-	if out, err := r.git("rev-parse", "--git-dir"); err != nil || strings.TrimSpace(out) == "" {
-		return fmt.Errorf("%w: still unreachable after reattach: %v", ErrArtifactRepoUnavailable, err)
+	// Re-probe so we never silently "un-fail" a still-dead repo or one that
+	// still resolves to a parent.
+	if err := r.checkRootedHere(); err != nil {
+		return fmt.Errorf("%w: still unreachable after reattach: %w", ErrArtifactRepoUnavailable, err)
+	}
+	return nil
+}
+
+// checkRootedHere reports nil only when r.dir is itself the root of a git work
+// tree. git rev-parse walks UP the directory tree, so a nested artifact dir
+// whose own .git was lost resolves against the enclosing user repo; comparing
+// --show-toplevel to r.dir rejects that parent-repo discovery (#428 review).
+// Returns a descriptive (never nil-interpolated) error on any non-rooted state.
+func (r *gitArtifactRepo) checkRootedHere() error {
+	out, err := r.git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return fmt.Errorf("rev-parse --show-toplevel: %w", err)
+	}
+	top := strings.TrimSpace(out)
+	if top == "" {
+		return errors.New("git reported no work-tree root")
+	}
+	want := r.dir
+	if abs, err := filepath.Abs(want); err == nil {
+		want = abs
+	}
+	if !samePathForLatch(resolveSymlinksOrFallback(top), resolveSymlinksOrFallback(want)) {
+		return fmt.Errorf("git resolved to %q, not artifact dir %q (parent-repo discovery)", top, r.dir)
 	}
 	return nil
 }

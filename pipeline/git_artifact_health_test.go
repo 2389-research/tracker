@@ -1,5 +1,7 @@
 // ABOUTME: Tests for artifact-repo health probe + reattach and terminal-path hard escalation (#423).
 // ABOUTME: Injects an unavailable artifact repo to assert a HARD failure (not silent degradation) on the terminal commit path.
+//go:build unix
+
 package pipeline
 
 import (
@@ -58,6 +60,51 @@ func TestEnsureHealthy_ReattachSucceeds(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		t.Errorf(".git not re-created after reattach: %v", err)
+	}
+}
+
+// TestEnsureHealthy_RejectsParentRepoDiscovery verifies the #428-review P1: when
+// the artifact dir is NESTED under the user's git repo and its own .git is lost,
+// `git rev-parse` walks up and resolves against the PARENT worktree. ensureHealthy
+// must reject that (not declare healthy) and reattach a fresh repo rooted at the
+// nested dir — so subsequent commits never mutate the user's repository.
+func TestEnsureHealthy_RejectsParentRepoDiscovery(t *testing.T) {
+	requireGit(t)
+	parent := t.TempDir()
+	// Make the parent a git repo (the user's enclosing repository).
+	parentRepo := newGitArtifactRepo(parent, "parent")
+	if err := parentRepo.Init(); err != nil {
+		t.Fatalf("parent Init: %v", err)
+	}
+
+	// Nested artifact run dir under the parent, with its own repo.
+	nested := filepath.Join(parent, "runs", "nested")
+	r := newGitArtifactRepo(nested, "nested")
+	if err := r.Init(); err != nil {
+		t.Fatalf("nested Init: %v", err)
+	}
+	// Lose the nested .git — now rev-parse from `nested` discovers the parent.
+	if err := os.RemoveAll(filepath.Join(nested, ".git")); err != nil {
+		t.Fatalf("RemoveAll nested .git: %v", err)
+	}
+
+	// Sanity: parent discovery really happens (guards against the test passing
+	// for the wrong reason if git ever stopped walking up).
+	top := gitOutput(t, nested, "rev-parse", "--show-toplevel")
+	if samePathForLatch(resolveSymlinksOrFallback(top), resolveSymlinksOrFallback(nested)) {
+		t.Fatalf("precondition: expected parent discovery, but --show-toplevel already == nested (%s)", top)
+	}
+
+	if err := r.ensureHealthy(); err != nil {
+		t.Fatalf("ensureHealthy should reattach a nested repo, got %v", err)
+	}
+	// .git must be re-created at the nested dir, and rev-parse must now root there.
+	if _, err := os.Stat(filepath.Join(nested, ".git")); err != nil {
+		t.Errorf("nested .git not re-created after reattach: %v", err)
+	}
+	gotTop := gitOutput(t, nested, "rev-parse", "--show-toplevel")
+	if !samePathForLatch(resolveSymlinksOrFallback(gotTop), resolveSymlinksOrFallback(nested)) {
+		t.Errorf("after reattach, work-tree root = %q, want nested dir %q (still resolving to parent)", gotTop, nested)
 	}
 }
 
