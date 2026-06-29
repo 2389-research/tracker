@@ -46,7 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   masked (`Status` stays `OutcomeFail`). **Mid-routing** call sites
   (strict-failure pre-decision, retry-exhausted with a `fallback_retry_target`)
   keep the warning-only behavior so the routing outcome is never changed. No
-  behavior change when devices and the artifact repo are healthy.
+  behavior change when devices and the artifact repo are healthy. Review fixes
+  (#428): the repo-unavailable diagnostic is now emitted by the caller, not
+  inside `commitWIPBeforeRouting`, so a terminal halt logs the hard
+  `EventWorkPreserveFailed` ONCE rather than alongside a redundant
+  `EventWarning` (the mid-routing path emits the single discarded warning at its
+  own site); and the device-probe remediation hint no longer presents the
+  Linux-specific `mknod ... c 1 3` device numbers as if they were portable.
 
 - **Sleep-aware budgets (#422, part A).** Opt-in `BudgetLimits.SleepAware` (CLI
   `--sleep-aware-budget`) excludes OS-suspend spans — e.g. a suspended laptop —

@@ -26,8 +26,9 @@ func checkDeviceNodes(probe func() error) error {
 	if err := probe(); err != nil {
 		return fmt.Errorf("%w: %v\n"+
 			"a suspended/restored sandbox can corrupt device nodes; git and subprocess "+
-			"handlers will fail. Restore it (e.g. `mknod -m 666 /dev/null c 1 3`) or "+
-			"restart the sandbox, then re-run", ErrDeviceNodeUnusable, err)
+			"handlers will fail. Recreate /dev/null (on Linux: `mknod -m 666 /dev/null "+
+			"c 1 3`; device numbers differ on other platforms) or restart the sandbox, "+
+			"then re-run", ErrDeviceNodeUnusable, err)
 	}
 	return nil
 }

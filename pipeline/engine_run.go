@@ -67,16 +67,12 @@ func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *
 		return nil
 	}
 	// Probe artifact-repo availability and reattach if it went unreachable
-	// post-suspend (#423). Only an unrecoverable repo returns non-nil; the
-	// caller hard-escalates on terminal paths and discards on routing paths.
+	// post-suspend (#423). Only an unrecoverable repo returns non-nil. We emit
+	// NO diagnostic here: the caller owns severity, so emitting one here too
+	// would double-log the same cause on terminal halts (#428 review). Terminal
+	// paths hard-escalate via escalateWorkPreserve (EventWorkPreserveFailed);
+	// the mid-routing path emits a single discarded EventWarning at its site.
 	if err := s.gitRepo.ensureHealthy(); err != nil {
-		e.emit(PipelineEvent{
-			Type:      EventWarning,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    nodeID,
-			Message:   fmt.Sprintf("cannot preserve uncommitted work for failed node %q: %v", nodeID, err),
-		})
 		return err
 	}
 	ref, err := s.gitRepo.CommitWIP(nodeID)
@@ -919,6 +915,18 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	// error here and branch on it at the terminal site below.
 	preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
+		// MID-ROUTING: the preserve error is discarded so it cannot override the
+		// routing decision, but surface it once as a WARNING (never silently
+		// swallow — CLAUDE.md). The terminal branch below hard-escalates instead.
+		if preserveErr != nil {
+			e.emit(PipelineEvent{
+				Type:      EventWarning,
+				Timestamp: time.Now(),
+				RunID:     s.runID,
+				NodeID:    currentNodeID,
+				Message:   fmt.Sprintf("could not preserve uncommitted work for node %q before routing to %q: %v", currentNodeID, fallback, preserveErr),
+			})
+		}
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
