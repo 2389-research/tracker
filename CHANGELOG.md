@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `human_response` prompt inputs injected into every agent prompt, which are
   hashed unconditionally so an intervening node's new critique invalidates the
   replay. Memoization is **agent-node-only**. A node declaring `writable_paths`
-  has working-tree side effects and **requires a working-tree fingerprint to
-  replay**: without a live git repo (or on a fingerprint error) it is a hard
-  cache miss and re-runs, never replaying on an unproven tree. Any input change
+  has working-tree side effects and is **never memoized** — an unconditional hard
+  cache miss, so it always re-runs (see the third review-round note below for why).
+  Any input change
   yields a different key and re-runs the node. Only successful outcomes are
   memoized (failures never replay), the memo table is persisted in
   `checkpoint.json` so replay survives resume. Off by default: a `.dip` file
@@ -41,7 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mutation can never corrupt the persisted memo record; and the replay path now
   threads the run's `ctx` (instead of `context.Background()`) into `finishNode`
   so cancellation/deadlines still apply and a non-success memo record from a
-  corrupted/hand-edited checkpoint routes through the same ctx-aware tail.
+  corrupted/hand-edited checkpoint routes through the same ctx-aware tail. Third
+  review round: a `writable_paths` node is now an **unconditional** hard miss
+  rather than replaying on an artifact-repo tree fingerprint. The fingerprint was
+  taken from `s.gitRepo` — the artifact repo at `<artifactDir>/<runID>`, a
+  different directory than the agent's session `working_dir` where `writable_paths`
+  actually takes effect — so it proved nothing about the tree the agent read/wrote
+  and could have replayed against a changed working tree. Until tracker can
+  fingerprint the agent's real `working_dir`, side-effecting nodes are simply not
+  memoizable (the `TreeFingerprint` helper is retained as the building block for
+  that follow-up).
 
 ## [0.40.2] - 2026-06-24
 

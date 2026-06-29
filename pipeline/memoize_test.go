@@ -489,9 +489,13 @@ func TestTreeFingerprintDetectsUnstagedTrackedContentChange(t *testing.T) {
 	}
 }
 
-// AC2(iii): for a writable_paths agent backed by a live repo, a working-tree
-// change between entries flips the tree fingerprint and thus the memo key.
-func TestMemoKeyTreeFingerprintSensitivity(t *testing.T) {
+// A writable_paths node is an UNCONDITIONAL hard miss even when a live artifact
+// repo is present. s.gitRepo is the artifact repo (<artifactDir>/<runID>), NOT
+// the agent's session working_dir, so its fingerprint proves nothing about the
+// tree the agent read/wrote — memoizing on it would risk a stale replay against
+// a changed working tree (#425 review). Until we can fingerprint the agent's
+// real working_dir, side-effecting nodes are not memoizable.
+func TestMemoKeyWritablePathsAlwaysMissesWithLiveRepo(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
 	repo := newGitArtifactRepo(dir, "treerun01")
@@ -507,38 +511,8 @@ func TestMemoKeyTreeFingerprintSensitivity(t *testing.T) {
 	}}
 	s := &runState{pctx: NewPipelineContext(), cp: &Checkpoint{}, gitRepo: repo}
 
-	k1, ok := e.computeMemoKey(s, node)
-	if !ok {
-		t.Fatal("expected ok=true with live repo")
-	}
-
-	// Mutate the working tree.
-	if err := os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	k2, ok := e.computeMemoKey(s, node)
-	if !ok {
-		t.Fatal("expected ok=true after tree change")
-	}
-	if k1 == k2 {
-		t.Error("AC2(tree): expected memo key to change after working-tree mutation")
-	}
-}
-
-// A tree-fingerprint error yields a cache miss (ok=false), not a stale replay.
-func TestMemoKeyTreeFingerprintErrorIsMiss(t *testing.T) {
-	g := NewGraph("memo_tree_err")
-	e := NewEngine(g, newTestRegistry())
-	node := &Node{ID: "work", Handler: "codergen", Attrs: map[string]string{
-		"memoize":        "true",
-		"writable_paths": "out/**",
-	}}
-	// gitRepo points at a non-existent dir → git status fails → ok=false.
-	badRepo := newGitArtifactRepo(filepath.Join(t.TempDir(), "does-not-exist"), "bad")
-	s := &runState{pctx: NewPipelineContext(), cp: &Checkpoint{}, gitRepo: badRepo}
-
 	if _, ok := e.computeMemoKey(s, node); ok {
-		t.Error("expected ok=false (cache miss) when tree fingerprint errors")
+		t.Error("expected ok=false (hard miss) for a writable_paths node even with a live artifact repo")
 	}
 }
 
@@ -608,7 +582,7 @@ func TestMemoInvalidatesOnChangedInjectedLastResponse(t *testing.T) {
 // production callers). With no tree fingerprint available there is no way to
 // prove the working tree is unchanged, so computeMemoKey MUST return ok=false
 // (hard miss) rather than replay a side-effecting node on a stale tree.
-func TestMemoKeyWritablePathsRequiresTreeFingerprint(t *testing.T) {
+func TestMemoKeyWritablePathsMissesWithoutRepo(t *testing.T) {
 	g := NewGraph("memo_b2")
 	e := NewEngine(g, newTestRegistry())
 	node := &Node{ID: "work", Handler: "codergen", Attrs: map[string]string{
@@ -619,7 +593,7 @@ func TestMemoKeyWritablePathsRequiresTreeFingerprint(t *testing.T) {
 	s := &runState{pctx: NewPipelineContext(), cp: &Checkpoint{}}
 
 	if _, ok := e.computeMemoKey(s, node); ok {
-		t.Error("B2: expected ok=false (cache miss) for a writable_paths node with no tree fingerprint")
+		t.Error("B2: expected ok=false (hard miss) for a writable_paths node")
 	}
 }
 

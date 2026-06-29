@@ -54,11 +54,16 @@ func writeLP(h interface{ Write([]byte) (int, error) }, s string) {
 //     in an attr; a handler can READ context (last_response, tool_stdout, ...) it
 //     was never templated with. Over-hashing the bare namespace makes ANY upstream
 //     drift invalidate — conservative by design (over-invalidate, never replay stale).
-//  6. tree fingerprint     — REQUIRED when the node declares writable_paths (an
-//     agent with working-tree side effects). writeLP("tree")+writeLP(sha). If no
-//     git repo is active (s.gitRepo == nil) or the tree hash ERRORS, return
-//     ok=false (hard miss) — never replay a side-effecting node whose tree input
-//     cannot be proven unchanged.
+//  6. writable_paths side effects — a node that declares writable_paths is an
+//     UNCONDITIONAL hard miss (ok=false → handler re-runs). Such a node reads and
+//     mutates the agent's SESSION working_dir, but tracker cannot currently
+//     fingerprint that tree: s.gitRepo is the ARTIFACT repo (<artifactDir>/<runID>),
+//     a DIFFERENT directory that holds stage artifacts and node-outcome commits —
+//     not the agent's working tree. Fingerprinting it would prove nothing about
+//     what the agent actually read/wrote, so a replay could fire against a changed
+//     working tree — the exact stale-replay class this feature prevents (#425
+//     review). Until we can fingerprint the agent's real working_dir, side-effecting
+//     nodes are simply not memoizable.
 //
 // The opt-in contract: by setting memoize:true the operator asserts the node is
 // a pure function of these hashed inputs. Non-deterministic output (timestamps,
@@ -75,25 +80,16 @@ func (e *Engine) computeMemoKey(s *runState, execNode *Node) (string, bool) {
 	hashSortedMap(h, execNode.Attrs)                      // 4. resolved attrs
 	hashSortedMap(h, memoizableContext(s.pctx, execNode)) // 5. bare ctx inputs
 
-	// 6. tree fingerprint for side-effecting agents (writable_paths). A node that
-	// declares writable_paths has working-tree side effects, so a usable tree
-	// fingerprint is REQUIRED to prove its tree input is unchanged before replay.
-	// If no git repo is active (s.gitRepo == nil — the default tracker run /
-	// library Run config, since WithGitArtifacts has no production callers) or
-	// the fingerprint errors, return ok=false (hard miss → handler re-runs).
-	// Never replay a side-effecting node when its tree input cannot be proven
-	// unchanged (CLAUDE.md: over-invalidate, never replay stale).
+	// 6. writable_paths side effects: an UNCONDITIONAL hard miss. The node mutates
+	// and reads the agent's session working_dir, but tracker has no fingerprint of
+	// that tree — s.gitRepo is the ARTIFACT repo (<artifactDir>/<runID>), a different
+	// directory than the agent's working tree, so its fingerprint proves nothing
+	// about what the agent read/wrote. Replaying on it could fire against a changed
+	// working tree (the stale-replay class this feature prevents, #425 review).
+	// Until we can fingerprint the agent's real working_dir, side-effecting nodes
+	// are not memoizable (CLAUDE.md: over-invalidate, never replay stale).
 	if strings.TrimSpace(execNode.Attrs["writable_paths"]) != "" {
-		if s.gitRepo == nil {
-			return "", false
-		}
-		sha, err := s.gitRepo.TreeFingerprint()
-		if err != nil {
-			// Uncertain key — hard miss, never replay. Caller emits a warning.
-			return "", false
-		}
-		writeLP(h, "tree")
-		writeLP(h, sha)
+		return "", false
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), true
