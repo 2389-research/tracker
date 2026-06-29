@@ -192,7 +192,11 @@ func TestCommitWIPBeforeRouting_TerminalHardFail(t *testing.T) {
 	reg := breakRepoHandler(t, "Implement")
 	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
 	result, _ := engine.Run(context.Background())
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700) })
+	t.Cleanup(func() {
+		if result != nil {
+			_ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700)
+		}
+	})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -270,7 +274,11 @@ func TestCommitWIPBeforeRouting_MidRoutingStaysWarning(t *testing.T) {
 
 	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
 	result, _ := engine.Run(context.Background())
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700) })
+	t.Cleanup(func() {
+		if result != nil {
+			_ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700)
+		}
+	})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -369,7 +377,11 @@ func TestRetryExhaustedNoFallback_TerminalHardFail(t *testing.T) {
 	reg := breakRepoOnStatusHandler(t, "flaky", string(OutcomeRetry))
 	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
 	result, _ := engine.Run(context.Background())
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700) })
+	t.Cleanup(func() {
+		if result != nil {
+			_ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700)
+		}
+	})
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -407,7 +419,11 @@ func TestStrictFailureNoFallback_TerminalHardFail(t *testing.T) {
 	reg := breakRepoOnStatusHandler(t, "Build", string(OutcomeFail))
 	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
 	result, _ := engine.Run(context.Background())
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700) })
+	t.Cleanup(func() {
+		if result != nil {
+			_ = os.Chmod(filepath.Join(artifactBase, result.RunID), 0o700)
+		}
+	})
 
 	mu.Lock()
 	defer mu.Unlock()

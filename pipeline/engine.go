@@ -352,7 +352,8 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 		// TERMINAL never-lose-work path (#423): if the artifact repo went
 		// unavailable and reattach failed, surface a HARD signal — Status stays
 		// the original OutcomeFail (original failure not masked) but the
-		// degradation is loud (EventStageFailed) and machine-detectable.
+		// degradation is loud (escalateWorkPreserve emits EventWorkPreserveFailed
+		// and sets EngineResult.WorkPreserveFailed) and machine-detectable.
 		workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 		return loopResult{
 			action: loopReturn,
