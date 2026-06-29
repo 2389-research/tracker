@@ -139,6 +139,34 @@ func TestEnsureHealthy_ReattachFails(t *testing.T) {
 	}
 }
 
+// breakArtifactRepo dirties the artifact tree then destroys the repo (RemoveAll
+// .git + chmod 0500) so the next commitWIPBeforeRouting hits an unrecoverable
+// repo. It REFUSES to act on a missing/empty/relative artifact dir: otherwise
+// filepath.Join("", ".git") resolves to a relative ".git" and os.RemoveAll could
+// delete the .git of the repo checkout the test runs in. Every step's error is
+// surfaced via t.Errorf (safe from a handler goroutine — it calls Fail, not
+// FailNow) rather than swallowed, so a broken precondition fails the test loudly
+// instead of silently invalidating the signal.
+func breakArtifactRepo(t *testing.T, pctx *PipelineContext, breakNode string) {
+	t.Helper()
+	dir, ok := pctx.GetInternal(InternalKeyArtifactDir)
+	if !ok || dir == "" || !filepath.IsAbs(dir) {
+		t.Errorf("breakArtifactRepo: artifact dir not set to an absolute path (ok=%v dir=%q); refusing destructive ops", ok, dir)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, breakNode+".go"), []byte("package x\n"), 0o644); err != nil {
+		t.Errorf("breakArtifactRepo: dirty-tree write failed: %v", err)
+		return
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+		t.Errorf("breakArtifactRepo: removing .git failed: %v", err)
+		return
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Errorf("breakArtifactRepo: chmod 0500 failed: %v", err)
+	}
+}
+
 // breakRepoHandler returns a registry whose target node dirties the tree, then
 // destroys the artifact repo (RemoveAll .git + chmod 0500), then returns a
 // handler ERROR — driving the terminal halt path (engine.go:330) into
@@ -149,10 +177,7 @@ func breakRepoHandler(t *testing.T, breakNode string) *HandlerRegistry {
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		reg.Register(&testHandler{name: name, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == breakNode {
-				dir, _ := pctx.GetInternal(InternalKeyArtifactDir)
-				_ = os.WriteFile(filepath.Join(dir, node.ID+".go"), []byte("package x\n"), 0o644)
-				_ = os.RemoveAll(filepath.Join(dir, ".git"))
-				_ = os.Chmod(dir, 0o500)
+				breakArtifactRepo(t, pctx, node.ID)
 				return Outcome{}, errors.New("simulated handler crash after sandbox suspend")
 			}
 			return Outcome{Status: string(OutcomeSuccess)}, nil
@@ -309,10 +334,7 @@ func breakRepoOnStatusHandler(t *testing.T, breakNode, status string) *HandlerRe
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		reg.Register(&testHandler{name: name, executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == breakNode {
-				dir, _ := pctx.GetInternal(InternalKeyArtifactDir)
-				_ = os.WriteFile(filepath.Join(dir, node.ID+".go"), []byte("package x\n"), 0o644)
-				_ = os.RemoveAll(filepath.Join(dir, ".git"))
-				_ = os.Chmod(dir, 0o500)
+				breakArtifactRepo(t, pctx, node.ID)
 				return Outcome{Status: status}, nil
 			}
 			return Outcome{Status: string(OutcomeSuccess)}, nil

@@ -52,8 +52,9 @@ func TestApplyGitPreflight_DeviceCheckedFirst(t *testing.T) {
 	g.Attrs["requires"] = "git"
 	// Force the git check on too, so a passing device probe would otherwise
 	// reach the git not-a-repo failure.
+	origPolicy := activeGitConfig.policy
 	activeGitConfig.policy = string(pipeline.GitPreflightRequire)
-	t.Cleanup(func() { activeGitConfig.policy = "" })
+	t.Cleanup(func() { activeGitConfig.policy = origPolicy })
 
 	tmp := t.TempDir() // NOT a git repo
 	err := applyGitPreflight(context.Background(), g, tmp)
