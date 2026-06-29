@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sleep-aware budgets (#422, part A).** Opt-in `BudgetLimits.SleepAware` (CLI
+  `--sleep-aware-budget`) excludes OS-suspend spans — e.g. a suspended laptop —
+  from `max_wall_time` and `stall_timeout` accounting, so a machine that sleeps
+  mid-run no longer spuriously trips `OutcomeBudgetExceeded` on resume. The
+  exclusion is driven by the monotonic clock (Linux `CLOCK_MONOTONIC`, which is
+  frozen during OS suspend but advances during genuine work) — there is **no**
+  wall-delta threshold, so genuine long-running nodes are still budgeted: a 70m
+  node correctly trips a 1h `max_wall_time`, and a 90m no-progress hang correctly
+  trips a 30m `stall_timeout`. `BudgetGuard` now takes a clock exposing both a
+  wall reading and a monotonic elapsed reading. New `BudgetGuard.Pause()` /
+  `Resume()` subtract an explicit awake-idle window (e.g. a human gate) from
+  sleep-aware accounting; engine wiring around blocking gate waits is a
+  follow-up. Default behavior is byte-identical when the flag is absent: the
+  wall-clock path is used and suspend time is still counted (strict semantics
+  preserved). Review fixes (#422): the sleep-aware monotonic baseline now
+  anchors at TRUE run start — the engine calls `BudgetGuard.AnchorRunStart()`
+  before the first node executes, not guard construction and not the first
+  `Check` — so pre-run awake idle is excluded from `max_wall_time` and the
+  initial `stall_timeout` while the FIRST node's runtime is still counted
+  (`Check` runs only at node boundaries, so anchoring on it would silently drop
+  the entire first node); `Pause()` is idempotent (a double `Pause` records the
+  window once); and an in-flight pause (Pause without Resume) is now subtracted
+  from both wall and stall accounting, so neither trips mid-pause. `anchorMono`
+  no longer initializes the stall progress baseline (`monoProgress`): that
+  baseline is derived solely in `sleepAwareStall`, which clamps the last-progress
+  mark up to the run-start anchor — covering "no progress yet", pre-run progress,
+  and genuine post-anchor progress without the risk of overwriting a real
+  progress mark with the (later) anchor time and undercounting stall (#426
+  review).
+
+### Notes
+
+- `sleep_aware_budget` is read from `graph.Attrs` by `ResolveBudgetLimits` for
+  parity with the other budget keys, but dippin-lang v0.43.0 has no `defaults:`
+  field or pass-through that delivers a bare `sleep_aware_budget` attribute to
+  the graph (verified: `dippin doctor` rejects it as an unknown defaults field).
+  The opt-in surface for operators is therefore the `--sleep-aware-budget` CLI
+  flag / `Config.Budget.SleepAware`, not a `.dip` attribute, until a future
+  dippin-lang release exposes a generic workflow-attr pass-through.
+- **#422 part B (AC3) is a tracked follow-up, not in this release.** Sub-node
+  turn checkpointing — letting a long-running agent node resume mid-node from
+  its last turn boundary with conversation/episode state intact — requires
+  net-new serialization of `agent.Session` in-memory state (`messages`,
+  `episodeLog`, turn counter), provider message round-trip fidelity tests, a
+  working-tree SHA capture/restore, a `pipeline/checkpoint.go` schema extension,
+  and an engine + `CodergenHandler` resume path. That is ~300–700 LOC across 4+
+  files with medium-high state-corruption risk, so it is deferred per the
+  scope decision. See "#422 follow-up" in the PR description.
+
 ## [0.40.2] - 2026-06-24
 
 ### Fixed

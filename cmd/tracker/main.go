@@ -31,6 +31,7 @@ type runConfig struct {
 	maxTokens    int           // halt if total tokens exceed this value (0 = no limit)
 	maxCostCents int           // halt if total cost in cents exceeds this value (0 = no limit)
 	maxWallTime  time.Duration // halt if wall time exceeds this duration (0 = no limit)
+	sleepAware   bool          // opt-in: exclude detected suspend spans from wall/stall budgets (#422)
 	// failOnOverride causes the CLI to exit with code 2 (not 0) when the run
 	// terminates as pipeline.OutcomeValidationOverridden. Default false keeps
 	// validation_overridden a success-equivalent exit, matching IsSuccess().
@@ -129,36 +130,49 @@ func main() {
 		cfg.workdir = resolveMainWorkDir()
 	}
 
+	if err := runCommand(cfg); err != nil {
+		exitWithError(err)
+	}
+}
+
+// runCommand performs the non-jail-exec, post-flag-parse work: an optional
+// pre-run update check, command execution, and a post-success update hint.
+// Returns the command's error (handled by exitWithError in main).
+func runCommand(cfg runConfig) error {
 	if cfg.mode == modeRun {
 		maybeCheckForUpdate()
 	}
 
-	err = executeCommand(cfg, commandDeps{})
+	err := executeCommand(cfg, commandDeps{})
 
 	// Only nag about updates after a successful run — on failure the error
-	// (printed below) is the headline, and the hint's ≤2s wait just delays it.
+	// (printed by exitWithError) is the headline, and the hint's ≤2s wait
+	// just delays it.
 	if cfg.mode == modeRun && err == nil {
 		printUpdateHint()
 	}
+	return err
+}
 
-	if err != nil {
-		var doctorWarn *DoctorWarningsError
-		if errors.As(err, &doctorWarn) {
-			// exit 2 = doctor finished with warnings but no failures
-			os.Exit(2)
-		}
-		// --fail-on-override turns a validation_overridden run-mode terminal
-		// status into exit 2 (distinct from generic fail=1, doctor-warning=2
-		// only applies to `tracker doctor` so the two exit-2 codepaths can't
-		// both fire on the same invocation). The detailed stderr message was
-		// already printed by interpretRunResult (spec-format with gate ID and
-		// preferred label), so we don't re-print the bare sentinel here.
-		if errors.Is(err, pipeline.ErrValidationOverridden) {
-			os.Exit(2)
-		}
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+// exitWithError maps a command error to the process exit code and exits.
+// It never returns.
+func exitWithError(err error) {
+	var doctorWarn *DoctorWarningsError
+	if errors.As(err, &doctorWarn) {
+		// exit 2 = doctor finished with warnings but no failures
+		os.Exit(2)
 	}
+	// --fail-on-override turns a validation_overridden run-mode terminal
+	// status into exit 2 (distinct from generic fail=1, doctor-warning=2
+	// only applies to `tracker doctor` so the two exit-2 codepaths can't
+	// both fire on the same invocation). The detailed stderr message was
+	// already printed by interpretRunResult (spec-format with gate ID and
+	// preferred label), so we don't re-print the bare sentinel here.
+	if errors.Is(err, pipeline.ErrValidationOverridden) {
+		os.Exit(2)
+	}
+	fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	os.Exit(1)
 }
 
 // handleFlagsError prints usage or error and exits for flag parsing failures.

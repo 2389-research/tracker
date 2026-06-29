@@ -511,34 +511,57 @@ func ResolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipel
 		return cfg
 	}
 	if cfg.MaxTotalTokens == 0 {
-		if v, ok := graph.Attrs["max_total_tokens"]; ok {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				cfg.MaxTotalTokens = n
-			}
-		}
+		cfg.MaxTotalTokens = positiveIntAttr(graph, "max_total_tokens")
 	}
 	if cfg.MaxCostCents == 0 {
-		if v, ok := graph.Attrs["max_cost_cents"]; ok {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				cfg.MaxCostCents = n
-			}
-		}
+		cfg.MaxCostCents = positiveIntAttr(graph, "max_cost_cents")
 	}
 	if cfg.MaxWallTime == 0 {
-		if v, ok := graph.Attrs["max_wall_time"]; ok {
-			if d, err := time.ParseDuration(v); err == nil && d > 0 {
-				cfg.MaxWallTime = d
-			}
-		}
+		cfg.MaxWallTime = positiveDurationAttr(graph, "max_wall_time")
 	}
 	if cfg.StallTimeout == 0 {
-		if v, ok := graph.Attrs["stall_timeout"]; ok {
-			if d, err := time.ParseDuration(v); err == nil && d > 0 {
-				cfg.StallTimeout = d
-			}
-		}
+		cfg.StallTimeout = positiveDurationAttr(graph, "stall_timeout")
+	}
+	// Opt-in sleep-awareness (#422). A bool can't use the == 0 zero gate, so a
+	// Config value of true wins; otherwise consult the attr. A malformed bool
+	// falls through to the default (off) — it does not silently mis-enable.
+	if !cfg.SleepAware {
+		cfg.SleepAware = boolAttr(graph, "sleep_aware_budget")
 	}
 	return cfg
+}
+
+// positiveIntAttr returns the positive int value of graph.Attrs[key], or 0 when
+// absent, unparseable, or non-positive (leaving the caller's field unchanged).
+func positiveIntAttr(graph *pipeline.Graph, key string) int {
+	if v, ok := graph.Attrs[key]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// positiveDurationAttr returns the positive duration value of graph.Attrs[key],
+// or 0 when absent, unparseable, or non-positive.
+func positiveDurationAttr(graph *pipeline.Graph, key string) time.Duration {
+	if v, ok := graph.Attrs[key]; ok {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+// boolAttr returns the parsed bool value of graph.Attrs[key], or false when
+// absent or unparseable (malformed values stay default-off, never mis-enabled).
+func boolAttr(graph *pipeline.Graph, key string) bool {
+	if v, ok := graph.Attrs[key]; ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return false
 }
 
 // parsePipelineSource parses a pipeline source string using the given format.
@@ -669,27 +692,39 @@ const (
 func gatewaySuffix(kind GatewayKind, provider string) (string, bool) {
 	switch kind {
 	case "", GatewayKindCFAIG:
-		switch provider {
-		case "anthropic":
-			return "/anthropic", true
-		case "openai":
-			return "/openai", true
-		case "gemini":
-			return "/google-ai-studio", true
-		case "openai-compat":
-			return "/compat", true
-		}
+		return cfAIGSuffix(provider)
 	case GatewayKindBedrock:
-		switch provider {
-		case "anthropic":
-			return "", true // Anthropic SDK appends /v1/messages itself
-		case "openai":
-			return "/v1", true
-		case "gemini":
-			return "/v1", true
-		case "openai-compat":
-			return "", false // refuse: bedrock gateway has no /compat
-		}
+		return bedrockSuffix(provider)
+	}
+	return "", false
+}
+
+// cfAIGSuffix maps a provider to its Cloudflare AI Gateway path suffix.
+func cfAIGSuffix(provider string) (string, bool) {
+	switch provider {
+	case "anthropic":
+		return "/anthropic", true
+	case "openai":
+		return "/openai", true
+	case "gemini":
+		return "/google-ai-studio", true
+	case "openai-compat":
+		return "/compat", true
+	}
+	return "", false
+}
+
+// bedrockSuffix maps a provider to its Bedrock gateway path suffix.
+func bedrockSuffix(provider string) (string, bool) {
+	switch provider {
+	case "anthropic":
+		return "", true // Anthropic SDK appends /v1/messages itself
+	case "openai":
+		return "/v1", true
+	case "gemini":
+		return "/v1", true
+	case "openai-compat":
+		return "", false // refuse: bedrock gateway has no /compat
 	}
 	return "", false
 }
@@ -700,6 +735,22 @@ func gatewaySuffix(kind GatewayKind, provider string) (string, bool) {
 // SDK-default fallback (e.g. openai-compat defaulting to openrouter.ai)
 // that contradicts the documented fail-closed semantics of #276.
 var ErrGatewayRouteRefused = errors.New("gateway route refused: kind/provider combination unsupported or unknown")
+
+// providerBaseURLEnvKey returns the per-provider *_BASE_URL env var name, or
+// "" for an unknown provider.
+func providerBaseURLEnvKey(provider string) string {
+	switch provider {
+	case "anthropic":
+		return "ANTHROPIC_BASE_URL"
+	case "openai":
+		return "OPENAI_BASE_URL"
+	case "gemini":
+		return "GEMINI_BASE_URL"
+	case "openai-compat":
+		return "OPENAI_COMPAT_BASE_URL"
+	}
+	return ""
+}
 
 // resolveProviderBaseURLWithGateway resolves the base URL for a provider,
 // consulting sources in priority order:
@@ -721,17 +772,8 @@ var ErrGatewayRouteRefused = errors.New("gateway route refused: kind/provider co
 // fallback that would otherwise leak requests (carrying the gateway
 // token) to the public default endpoint.
 func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind GatewayKind) (string, error) {
-	var envKey string
-	switch provider {
-	case "anthropic":
-		envKey = "ANTHROPIC_BASE_URL"
-	case "openai":
-		envKey = "OPENAI_BASE_URL"
-	case "gemini":
-		envKey = "GEMINI_BASE_URL"
-	case "openai-compat":
-		envKey = "OPENAI_COMPAT_BASE_URL"
-	default:
+	envKey := providerBaseURLEnvKey(provider)
+	if envKey == "" {
 		return "", nil
 	}
 	if v := os.Getenv(envKey); v != "" {

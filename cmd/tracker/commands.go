@@ -284,6 +284,7 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		MaxTotalTokens: cfg.maxTokens,
 		MaxCostCents:   cfg.maxCostCents,
 		MaxWallTime:    cfg.maxWallTime,
+		SleepAware:     cfg.sleepAware,
 	}
 	activeRunParams = maps.Clone(cfg.params)
 	activeEffectiveRunParams = nil
@@ -308,15 +309,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// through Config without touching os.Environ. The CLI uses os.Setenv because
 	// run/runTUI have fixed signatures that can't be extended without breaking tests.
 	// Per-provider *_BASE_URL env vars always win over TRACKER_GATEWAY_URL.
-	if cfg.gatewayURL != "" {
-		if err := os.Setenv("TRACKER_GATEWAY_URL", cfg.gatewayURL); err != nil {
-			return fmt.Errorf("set TRACKER_GATEWAY_URL: %w", err)
-		}
-	}
-	if cfg.gatewayKind != "" {
-		if err := os.Setenv("TRACKER_GATEWAY_KIND", cfg.gatewayKind); err != nil {
-			return fmt.Errorf("set TRACKER_GATEWAY_KIND: %w", err)
-		}
+	if err := applyGatewayEnv(cfg); err != nil {
+		return err
 	}
 
 	if err := printRunPreamble(cfg); err != nil {
@@ -338,6 +332,23 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	activeResumeInfo = resume
 
 	return selectAndRunMode(cfg, deps, resume.CheckpointPath)
+}
+
+// applyGatewayEnv sets the TRACKER_GATEWAY_* env vars from cfg before any
+// provider constructor runs (see the timing note in executeRun). Per-provider
+// *_BASE_URL env vars still win over TRACKER_GATEWAY_URL downstream.
+func applyGatewayEnv(cfg runConfig) error {
+	if cfg.gatewayURL != "" {
+		if err := os.Setenv("TRACKER_GATEWAY_URL", cfg.gatewayURL); err != nil {
+			return fmt.Errorf("set TRACKER_GATEWAY_URL: %w", err)
+		}
+	}
+	if cfg.gatewayKind != "" {
+		if err := os.Setenv("TRACKER_GATEWAY_KIND", cfg.gatewayKind); err != nil {
+			return fmt.Errorf("set TRACKER_GATEWAY_KIND: %w", err)
+		}
+	}
+	return nil
 }
 
 // printRunPreamble prints backend and autopilot status messages and validates persona.
