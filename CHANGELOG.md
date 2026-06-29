@@ -33,7 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file edits that the prior staged-blob listing missed); the persisted
   `MemoEntry` now carries the `PreferredLabel`/`SuggestedNextNodes` routing hints
   so a replayed node follows the same edge the original did; and replayed trace
-  entries are stamped with a real timestamp.
+  entries are stamped with a real timestamp. Second review round: the worktree
+  fingerprint now fails closed on an unexpected `read-tree HEAD` error (only a
+  genuinely missing HEAD proceeds with an empty index — otherwise a tracked
+  deletion could yield a stale fingerprint / false cache hit); and the replay
+  Outcome deep-copies its `ContextUpdates`/`SuggestedNextNodes` so downstream
+  mutation can never corrupt the persisted memo record.
 
 ## [0.40.2] - 2026-06-24
 

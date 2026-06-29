@@ -634,3 +634,29 @@ func TestPutMemoDeepCopiesContextUpdates(t *testing.T) {
 		t.Errorf("expected stored record to be insulated from caller mutation, got %q", rec.ContextUpdates["x"])
 	}
 }
+
+// memoOutcome must deep-copy the reference-typed fields so mutating the replay
+// Outcome cannot reach back into the checkpoint memo record (#425 review).
+func TestMemoOutcomeIsolatesRecordFromMutation(t *testing.T) {
+	rec := MemoEntry{
+		Status:             string(OutcomeSuccess),
+		ContextUpdates:     map[string]string{"x": "v1"},
+		PreferredLabel:     "approve",
+		SuggestedNextNodes: []string{"join"},
+	}
+	out := memoOutcome(rec)
+	// Mutate every reference field on the replay Outcome.
+	out.ContextUpdates["x"] = "mutated"
+	out.ContextUpdates["y"] = "added"
+	out.SuggestedNextNodes[0] = "elsewhere"
+
+	if rec.ContextUpdates["x"] != "v1" {
+		t.Errorf("record ContextUpdates corrupted: x=%q, want v1", rec.ContextUpdates["x"])
+	}
+	if _, ok := rec.ContextUpdates["y"]; ok {
+		t.Error("record ContextUpdates gained a key from replay mutation")
+	}
+	if rec.SuggestedNextNodes[0] != "join" {
+		t.Errorf("record SuggestedNextNodes corrupted: [0]=%q, want join", rec.SuggestedNextNodes[0])
+	}
+}

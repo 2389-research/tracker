@@ -279,8 +279,14 @@ func (r *gitArtifactRepo) worktreeContentTree() (string, error) {
 	env := append(gitSafeEnv(), "GIT_INDEX_FILE="+filepath.Join(tmpDir, "index"))
 	// Seed from HEAD so a deleted-but-tracked file registers as a removal. A repo
 	// with no commits yet has no HEAD — that's fine, the index just starts empty.
+	// But fail closed on any OTHER read-tree failure: silently proceeding with an
+	// empty index would make `git add -A` miss tracked deletions and yield a stale
+	// fingerprint (a false cache hit) instead of the required miss.
 	if out, err := r.gitEnv(env, "read-tree", "HEAD"); err != nil {
-		_ = out // no HEAD yet — proceed with an empty index
+		if _, headErr := r.gitEnv(env, "rev-parse", "--verify", "HEAD"); headErr == nil {
+			return "", fmt.Errorf("git read-tree HEAD (temp index) for tree fingerprint: %w\n%s", err, out)
+		}
+		// no HEAD yet — proceed with an empty index
 	}
 	if out, err := r.gitEnv(env, "add", "-A"); err != nil {
 		return "", fmt.Errorf("git add -A (temp index) for tree fingerprint: %w\n%s", err, out)

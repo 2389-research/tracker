@@ -153,6 +153,30 @@ func memoizableContext(pctx *PipelineContext, execNode *Node) map[string]string 
 	return out
 }
 
+// memoOutcome rebuilds a replay Outcome from a stored MemoEntry, deep-copying
+// the reference-typed fields (ContextUpdates map, SuggestedNextNodes slice) so
+// the replay path and anything it hands the Outcome to (e.g. s.lastOutcome via
+// applyOutcome) can never mutate the checkpoint memo record (#425 review).
+func memoOutcome(rec MemoEntry) *Outcome {
+	var ctxUpdates map[string]string
+	if rec.ContextUpdates != nil {
+		ctxUpdates = make(map[string]string, len(rec.ContextUpdates))
+		for k, v := range rec.ContextUpdates {
+			ctxUpdates[k] = v
+		}
+	}
+	var suggested []string
+	if rec.SuggestedNextNodes != nil {
+		suggested = append([]string(nil), rec.SuggestedNextNodes...)
+	}
+	return &Outcome{
+		Status:             rec.Status,
+		ContextUpdates:     ctxUpdates,
+		PreferredLabel:     rec.PreferredLabel,
+		SuggestedNextNodes: suggested,
+	}
+}
+
 // isMemoizableContextKey reports whether bare context key k is a genuine input
 // to hash (see memoizableContext). It rejects node-scoped keys, routing-scratch
 // keys, and self-outputs — but ContextKeyLastResponse / ContextKeyHumanResponse

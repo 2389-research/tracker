@@ -475,12 +475,11 @@ func (e *Engine) replayMemoizedNode(s *runState, currentNodeID string, node, exe
 		Message:   fmt.Sprintf("memoize: replayed prior successful outcome for node %q", currentNodeID),
 	})
 
-	outcome := &Outcome{
-		Status:             rec.Status,
-		ContextUpdates:     rec.ContextUpdates,
-		PreferredLabel:     rec.PreferredLabel,
-		SuggestedNextNodes: rec.SuggestedNextNodes,
-	}
+	// Deep-copy the reference-typed fields so the replay Outcome (and the
+	// s.lastOutcome copy applyOutcome makes from it) can never mutate the
+	// checkpoint memo record backing rec — the record must stay immutable
+	// across replays.
+	outcome := memoOutcome(rec)
 	traceEntry := TraceEntry{
 		Timestamp:   time.Now(),
 		NodeID:      currentNodeID,
