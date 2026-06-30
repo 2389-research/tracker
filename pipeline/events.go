@@ -63,6 +63,16 @@ const (
 	// NodeID and Message. (#304)
 	EventNodeNoProgressDetected PipelineEventType = "node_no_progress_detected"
 
+	// EventWorkPreserveFailed fires on a TERMINAL never-lose-work halt (#423)
+	// when uncommitted work for the failed node could NOT be preserved because
+	// the artifact git repo went unavailable and reattach failed. It is a HARD
+	// signal (paired with EngineResult.WorkPreserveFailed), but it is
+	// deliberately NOT a stage_failed event: it is not another execution attempt
+	// for the node, so `tracker diagnose` must not count it toward that node's
+	// RetryCount / IdenticalRetries (#428 review). The TUI still surfaces it as a
+	// failure line. Carries NodeID and a diagnostic Message.
+	EventWorkPreserveFailed PipelineEventType = "work_preserve_failed"
+
 	// EventBundleMismatchForced is emitted to activity.jsonl when resume
 	// proceeds despite a bundle-identity mismatch because --force-bundle-mismatch
 	// was set. Records both the original (checkpoint) and current identities
