@@ -553,6 +553,16 @@ workflow BuildProduct
         echo "## Milestones landed"
       } > .ai/build/build-context.md 2>/dev/null || true
 
+      # #418: capture the run's base commit ONCE at Setup so the cross-review
+      # diff node can compute a cumulative base..worktree without a per-milestone
+      # marker (those are deleted at each MarkMilestoneDone). Same non-leaking
+      # idiom as PickNextMilestone's start marker: --verify --quiet prints
+      # nothing and exits non-zero on a commitless repo, so a fresh repo
+      # genuinely records an empty base. Goes to a FILE so the routing marker
+      # below stays last on stdout.
+      RUN_BASE=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
+      printf '%s\n' "$RUN_BASE" > .ai/build/run-base-sha
+
       printf 'setup-ready'
 
   # ─── SpecLint: spec-coherence preflight (issue #301, epic #308 Phase 2) ──
@@ -568,9 +578,9 @@ workflow BuildProduct
 
   agent SpecLint
     label: "Spec Coherence Preflight"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
-    reasoning_effort: high
+    reasoning_effort: medium
     auto_status: true
     prompt:
       SPEC COHERENCE PREFLIGHT:
@@ -614,11 +624,29 @@ workflow BuildProduct
           value. A contract like "Idempotency-Key derived from
           review_id+sha" on a signature receiving neither is
           unimplementable as written.
-      (f) Mandated tests enumerated and assignable: list every test
-          SPEC.md mandates by name or by concrete behavior. This list
-          feeds the Decompose requirement-coverage table (issue
-          #300); a mandated test so vague no milestone could own it
-          is a finding.
+      (f) Mandated tests, spec-emitted values, and normative constants
+          enumerated and assignable: list every test SPEC.md mandates by
+          name or by concrete behavior, PLUS every spec-prescribed EMITTED
+          value (log event name, error code, status string) and every
+          constant SPEC.md marks "normative". This list feeds the Decompose
+          requirement-coverage table (issue #300) so none can be silently
+          unowned; a mandated test / emitted value / normative constant so
+          vague no milestone could own it is a finding. For each emitted
+          value and normative constant, note the required verification
+          shape: "a test asserts this exact value as a hard-coded
+          expectation (not via the production constant)".
+      (g) External-tool invocation literals verifiable: for every exact
+          external-tool invocation SPEC.md prescribes — a `gh` / `git` /
+          other CLI command with a specific flag string (e.g.
+          `gh pr create --head <owner>:<branch>`) — record the literal flag
+          string as a behavioral contract whose verification method is "the
+          real tool accepts this literal". A literal that is wrong on its
+          face against the tool's own flag grammar (the canonical case:
+          `gh ... -b -`, where `-b` expects an argument and `-` is consumed
+          as that argument, silently mis-parsing) is an UNVERIFIABLE
+          contract — flag it here rather than letting a downstream grep
+          "find the string" and pass. Detection keys on the SHAPE "spec
+          prescribes a literal CLI invocation", never on a specific tool.
 
       WARN — report in the artifact, do NOT fail the gate:
       (d) Checkable guarantees: behavioral guarantees phrased so they
@@ -635,8 +663,12 @@ workflow BuildProduct
       ## Warnings
       Rule (d)/(e) findings, same evidence shape — or "none".
       ## Mandated tests
-      Every rule-(f) test, one per line, each with its SPEC.md
-      source — or the single line "SPEC mandates no named tests".
+      Every rule-(f) item, one per line, each with its SPEC.md source and
+      its kind (test / emitted-value / normative-constant); emitted-value
+      and normative-constant lines must carry the verification shape "a
+      test asserts this exact value as a hard-coded expectation" — or, only
+      when SPEC.md mandates no rule-(f) items of ANY kind, the single line
+      "SPEC mandates no tests, emitted values, or normative constants".
 
       Then your terminal STATUS line:
       - zero critical findings -> STATUS:success (warnings alone never
@@ -647,9 +679,9 @@ workflow BuildProduct
 
   agent ReadSpec
     label: "Read & Analyze Spec"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
-    reasoning_effort: high
+    reasoning_effort: medium
     prompt:
       Read SPEC.md thoroughly. Understand:
       - What is being built (the product)
@@ -664,6 +696,64 @@ workflow BuildProduct
       ## Key technical decisions prescribed by the spec
       ## Implicit requirements (things the spec assumes but doesn't state)
       ## Risks and ambiguities
+
+      ── SPEC-CONTRACT ARTIFACTS (issue #306) ──
+      Beyond the analysis above, WRITE TWO machine-checkable contract
+      artifact FILES to disk at the exact paths below (both are required —
+      do not skip either; downstream nodes read them off disk). Derive their
+      content from SPEC.md. Detection keys on the SHAPE of the prose
+      (modal verbs, timing/ordering phrases, contradiction between two
+      statements) — NEVER on the product, language, or domain.
+
+      (i) .ai/decisions/spec-ambiguities.md — one DEFINITE ruling per
+          detected contradiction. A contradiction is two statements in
+          SPEC.md that cannot both hold (a constant stated two ways, an
+          ordering asserted one place and contradicted another, a value
+          "required" here and "optional" there). For EACH, write one entry:
+          ## Ambiguity N
+          **Conflicting statements**: quote both, each with its SPEC.md
+            location (section / line).
+          **Ruling**: the single resolution this build will follow,
+            stated as a concrete buildable decision.
+          **Rationale**: one line.
+          The ruling MUST be definite — never "it depends", never "either
+          is acceptable", never deferred to the implementer. If SPEC.md is
+          internally consistent, write the single line: "no contradictions
+          detected". (A retry-count stated as "max 2 retries" in one
+          section and "retries up to 3 times" in another is ONE
+          contradiction and gets ONE ruling, e.g. "3 total attempts (2
+          retries after the initial try)".)
+
+      (ii) .ai/decisions/behavioral-contracts.md — every NON-LITERAL prose
+          guarantee, each with a concrete verification method. A prose
+          guarantee is any sentence whose SHAPE is a behavioral obligation:
+          a modal verb (MUST / MUST NOT / SHALL / never / always), a
+          timing/ordering phrase ("at startup, not at runtime", "before
+          X", "within N ms", "on the first call"), or a cardinality
+          guarantee ("exactly once", "at most one"). For EACH, write:
+          ## Contract N
+          **Guarantee**: the prose, quoted, with its SPEC.md location.
+          **Verification method**: a SPECIFIC test (named test function /
+            test shape) OR a SPECIFIC grep that would prove the guarantee
+            holds. "Manual review" is not a verification method. A
+            "rejects at startup, not at runtime" guarantee is verified by
+            a startup-path test/grep (e.g. a test that constructs the
+            component with a bad config and asserts it fails at
+            construction), NOT skipped as untestable.
+          If SPEC.md states no such guarantees, write the single line:
+          "no behavioral contracts detected".
+          When SPEC.md marks a constant "normative" (a value the spec says
+          implementations must use exactly — not merely a default or an
+          example), record it as a contract with
+          **Verification method**: "a test asserts this exact value as a
+          hard-coded expectation" (the point-6 / SPEC-EMITTED-VALUE bar — a
+          test asserting against the production constant does NOT satisfy
+          it).
+
+      Both files are inputs to ApprovePlan (the human sees them before the
+      build) and to VerifyMilestone / FinalSpecCheck (which disposition
+      each in-scope contract). Do not editorialize SPEC.md — extract and
+      rule, do not invent guarantees the spec does not make.
 
   agent Decompose
     label: "Decompose into Milestones"
@@ -732,8 +822,9 @@ workflow BuildProduct
          verifications (never leave the table silently empty — a silent
          empty table hides under-extraction). Cross-check against the
          "Mandated tests" section of .ai/decisions/spec-quality.md
-         (written by the SpecLint preflight): every test
-         listed there must appear in this table. Table columns:
+         (written by the SpecLint preflight): every item listed there —
+         test, spec-emitted value, or normative constant — must appear in
+         this table, so none is silently unowned. Table columns:
            | Mandated verification | SPEC.md source (line/section) | Owning milestone |
 
       2. THEN decompose into milestones as the rules above describe.
@@ -797,6 +888,22 @@ workflow BuildProduct
       else
         echo "_(requirement-coverage.md not found)_"
       fi
+      echo
+      echo "# Spec ambiguity rulings (.ai/decisions/spec-ambiguities.md)"
+      echo
+      if [ -f .ai/decisions/spec-ambiguities.md ]; then
+        cat .ai/decisions/spec-ambiguities.md
+      else
+        echo "_(spec-ambiguities.md not found — ReadSpec did not write rulings)_"
+      fi
+      echo
+      echo "# Behavioral contracts (.ai/decisions/behavioral-contracts.md)"
+      echo
+      if [ -f .ai/decisions/behavioral-contracts.md ]; then
+        cat .ai/decisions/behavioral-contracts.md
+      else
+        echo "_(behavioral-contracts.md not found)_"
+      fi
 
   human ApprovePlan
     label: "Review the milestone plan — approve, adjust, or reject"
@@ -819,6 +926,13 @@ workflow BuildProduct
       spec-mandated verification mapped to an owning (or deferred) milestone with
       `COVERAGE_GAPS: 0`. A non-zero gap count or an over-broad milestone is a
       reason to **adjust**.
+
+      Also review the spec ambiguity rulings and behavioral contracts below
+      (written by ReadSpec): each contradiction has exactly ONE definite
+      ruling, and each prose guarantee has a concrete verification method.
+      A ruling you disagree with, or a missing/needed ruling, is a reason to
+      **adjust** — this is your one chance to correct a wrong interpretation
+      before the build commits to it.
 
       ---
       ## Plan under review
@@ -890,7 +1004,7 @@ workflow BuildProduct
       # silently empty milestone 1's file record). Written on the has-next path
       # only — the all-done branch returned earlier. Goes to a FILE so the
       # routing marker below stays last on stdout.
-      START=$(git rev-parse --verify --quiet HEAD || true)
+      START=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
       printf '%s\n' "$START" > .ai/build/milestone-start-sha
 
       printf "milestone-$NEXT"
@@ -924,6 +1038,10 @@ workflow BuildProduct
 
       RULES:
       - Implement EXACTLY what this milestone requires. Nothing more.
+      - Read .ai/decisions/spec-ambiguities.md. Where SPEC.md was
+        contradictory, the ruling there is binding — implement the ruling,
+        and in your commit message or a .ai/decisions/ note cite the
+        ambiguity number you followed. Do NOT re-litigate a ruling.
       - Only touch the files listed in the milestone spec.
       - Follow the codebase's existing patterns and conventions.
       - Do NOT create documentation files unless the milestone requires them.
@@ -1352,6 +1470,21 @@ workflow BuildProduct
          when present; if it disagrees with a live SPEC.md re-read, SPEC.md
          wins.
 
+      5b. BEHAVIORAL CONTRACTS (issue #306): Read
+         .ai/decisions/behavioral-contracts.md. For every contract whose
+         SPEC.md guarantee intersects THIS milestone's file list,
+         disposition it with concrete evidence — the same show-your-work
+         bar as the SPEC LITERALS grep in check 3: run the contract's
+         stated verification method (the named test or the grep) and paste
+         the command + its result inline. A contract that is in-scope for
+         this milestone but left undispositioned (no test/grep evidence
+         shown) is FAIL. If SPEC.md was contradictory in this milestone's
+         area, confirm a ruling exists in .ai/decisions/spec-ambiguities.md
+         and the implementation follows it; an absent-but-needed ruling is
+         FAIL. Contracts whose guarantee does not touch this milestone's
+         files are out of scope here (FinalSpecCheck dispositions the full
+         set) — say so, do not invent evidence.
+
       6. TESTS + CI PASSED: The `tests-pass` sentinel in the
          "TestMilestone stdout" fenced block at the END of this
          prompt is authoritative for "TestMilestone step
@@ -1774,6 +1907,130 @@ workflow BuildProduct
       rm -f .ai/build/review-claude.md .ai/build/review-codex.md .ai/build/review-gemini.md
       printf 'cleared stale review reports\n'
 
+  # #418: compute the cumulative base..worktree review diff ONCE so the three
+  # reviewers read a bounded diff as their PRIMARY input instead of each
+  # re-reading the whole tree (the ~90%-of-tokens problem). BASE is the run's
+  # base commit captured at Setup (.ai/build/run-base-sha); degrade to the
+  # empty tree when it is empty (fresh repo) or unreachable (history rewrite)
+  # — the SAME empty-tree-fallback idiom verify.sh and MarkMilestoneDone
+  # already use. Unlike those two-dot (BASE..HEAD) call sites, this is a
+  # one-arg `git diff <BASE>` WORKTREE compare: the "accept" gate routes here
+  # WITHOUT committing first, so the diff must capture accepted-but-uncommitted
+  # work, not just commits. The full tree stays available on demand
+  # (the reviewers may read any file); this only POINTS their primary read.
+  # The diff is advisory context, so the whole body is best-effort and the
+  # routing marker is printed last.
+  tool ComputeReviewDiff
+    label: "Compute Cumulative Review Diff"
+    timeout: 60s
+    # Reviewers read the FILE (.ai/build/review-diff.md), not this node's
+    # streams: stdout is only the short readiness marker and stderr is only the
+    # failure WARNING (any git error text is redirected INTO the file via 2>&1,
+    # not onto a node stream). So output_limit does not bound the diff/error
+    # content reviewers consume — it only caps this node's marker + warning
+    # streams as surfaced by `tracker diagnose`. Kept generous purely as harmless
+    # headroom so a future stderr diagnostic is never clipped.
+    output_limit: 1048576
+    command:
+      set -u
+      mkdir -p .ai/build
+      OUT=.ai/build/review-diff.md
+      # #424 review: bail loudly if this isn't a git work tree. Otherwise the
+      # git commands below emit error text, the file is non-empty so the
+      # empty-artifact guard never trips, and reviewers see git errors dressed
+      # up as a valid diff. Stamp UNAVAILABLE and route on (the diff is advisory).
+      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "WARNING: not inside a git work tree; cannot compute review diff" >&2
+        echo "# Review diff UNAVAILABLE — not a git work tree. Read the working tree directly." > "$OUT"
+        printf 'review-diff-ready'
+        exit 0
+      fi
+      BASE=$(cat .ai/build/run-base-sha 2>/dev/null || true)
+      if [ -z "$BASE" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+        BASE=$(git hash-object -t tree /dev/null)
+      fi
+      # #424 review: diff BASE against the WORKING TREE (not BASE..HEAD), so
+      # accepted-but-uncommitted milestone work — the `accept` gate routes here
+      # WITHOUT committing first — is included instead of silently omitted from
+      # what reviewers are told is "the complete set of changes". `git diff
+      # <commit>` (no ..HEAD) compares the commit to the WORKING TREE, so it
+      # reflects the current on-disk content of tracked files (committed work plus
+      # any uncommitted edits present in the worktree). It compares against the
+      # worktree, NOT the index, so a staged change that doesn't match the worktree
+      # (#424 review: stage version B, then revert the file on disk) isn't captured
+      # — but in this workflow the worktree IS the source of truth (agents edit
+      # files, they don't manage a staging area), so worktree state is exactly what
+      # reviewers should see. Untracked files are listed separately below. On a
+      # clean tree this is identical to BASE..HEAD.
+      #
+      # git stderr is kept IN the artifact (2>&1, not 2>/dev/null) so a failure
+      # is diagnosable, but #424 review: an empty-output guard alone is not
+      # enough — most git failure modes (safe.directory, corrupt repo, bad
+      # object) exit non-zero while STILL printing error text, so the artifact
+      # is non-empty and reviewers see git errors dressed up as a valid diff.
+      # Capture each `git diff` exit status explicitly (the brace group runs in
+      # this shell, not a subshell, so DIFF_ERR persists) and stamp UNAVAILABLE
+      # on any failure (CLAUDE.md: never silently swallow errors).
+      DIFF_ERR=0
+      {
+        echo "# Cumulative review diff (base..worktree)"
+        echo
+        echo "_Base: ${BASE} → working tree. The diff below covers every TRACKED-file"
+        echo "change present in the working tree relative to base (committed work plus"
+        echo "any uncommitted edits on disk); untracked files are listed"
+        echo "by path in their own section (their content is NOT diffed here). It is"
+        echo "your PRIMARY read; the full working tree is available on demand if a"
+        echo "finding needs surrounding context._"
+        echo
+        echo '## Files changed'
+        git diff --name-status "${BASE}" 2>&1 || DIFF_ERR=1
+        UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
+        if [ -n "$UNTRACKED" ]; then
+          echo
+          echo '## Untracked files (not yet in any commit)'
+          printf '%s\n' "$UNTRACKED"
+        fi
+        echo
+        echo '## Full diff'
+        git diff "${BASE}" 2>&1 || DIFF_ERR=1
+      } > "$OUT"
+      # Fail loudly if a diff command errored OR the artifact is empty —
+      # reviewers depend on it as their PRIMARY input. Don't dead-stop (the diff
+      # is advisory routing context), but warn on stderr and prepend a clear
+      # UNAVAILABLE banner so a git error can't masquerade as a valid diff. The
+      # git stderr captured into the file (2>&1) is PRESERVED below the banner in
+      # a fenced block — overwriting it outright would discard the underlying
+      # cause (safe.directory / corrupt repo / bad object) and make the failure
+      # undebuggable (#424 review). The banner removes the masquerade risk; the
+      # preserved output keeps it diagnosable.
+      if [ "$DIFF_ERR" -ne 0 ] || [ ! -s "$OUT" ]; then
+        echo "WARNING: review diff generation failed or produced no output; reviewers must read the working tree directly" >&2
+        # Stream the captured git output through a temp file instead of slurping
+        # the whole artifact into a shell variable: a partial failure (e.g.
+        # name-status succeeds and writes a large diff, then `git diff` fails)
+        # can leave a large $OUT, and `CAPTURED=$(cat "$OUT")` would risk shell
+        # memory / arg-length limits — turning a recoverable diff failure into a
+        # node failure or OOM (#424 review). We can't `cat "$OUT"` into a
+        # redirect to "$OUT" (truncation race), so build the banner+block in a
+        # temp file and atomically mv it over the artifact.
+        TMP="${OUT}.tmp"
+        {
+          echo "# Review diff UNAVAILABLE — diff generation failed. Read the working tree directly."
+          echo
+          if [ -s "$OUT" ]; then
+            echo "Captured git output (likely the underlying cause — e.g. safe.directory, corrupt repo, bad object):"
+            echo
+            echo '```'
+            cat "$OUT"
+            echo '```'
+          else
+            echo "(no git output was captured)"
+          fi
+        } > "$TMP"
+        mv "$TMP" "$OUT"
+      fi
+      printf 'review-diff-ready'
+
   parallel ReviewParallel -> ReviewClaude, ReviewCodex, ReviewGemini
     params:
       fan_in_policy: all
@@ -1792,11 +2049,17 @@ workflow BuildProduct
 
   agent ReviewClaude
     label: "Claude Review (general)"
-    model: claude-opus-4-6
+    model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. The build loop has
+      Review the implementation against SPEC.md. Your PRIMARY read is the
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it
+      captures every tracked-file change this build produced. Newly-created
+      UNTRACKED files are listed there by path only; their contents are NOT in
+      the diff, so open those files directly. Read the rest of the full working
+      tree ON DEMAND only when a finding needs surrounding context (it is
+      available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
       to stop early (the "accept" gate) and ship what exists. Review what is
       actually present; do not assume unfinished work will arrive later.
@@ -1806,7 +2069,7 @@ workflow BuildProduct
         plan, not evidence of completion. Treat them as nothing. Verify each
         requirement against the code yourself.
 
-      RUBRIC — for every spec section, answer these five questions in
+      RUBRIC — for every spec section, answer these seven questions in
       .ai/build/review-claude.md, in order, with PASS or FAIL per question
       and concrete evidence (grep output, file:line, snippet) for any FAIL:
 
@@ -1847,6 +2110,33 @@ workflow BuildProduct
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
          sections followed? Are leftover artifacts from removed code gone?
+      6. SPEC-EMITTED-VALUE ASSERTIONS: For every value the spec prescribes
+         that the code EMITS — a log event name, an error code, a status
+         string (e.g. a skip reason like "no_branch"), a wire/JSON value —
+         find a test whose ASSERTED EXPECTED value is the SPEC LITERAL
+         itself, not a variable that references the production constant.
+         `assert(emitted == prod.Constant)` is FAIL — it ratifies whatever
+         the production constant happens to be, so a wrong constant ships
+         green. `assert(emitted == "review.skip")` (the spec literal,
+         hard-coded in the test) is PASS. Cite the assertion file:line and
+         quote the asserted expected value. A spec-emitted value with no
+         test asserting the literal is FAIL. This is distinct from point 1
+         (which checks the literal exists in the code); point 6 checks a
+         TEST pins it to the spec literal independent of the production
+         constant.
+      7. CONTRACT-FIDELITY AT EXTERNAL SEAMS: For every EXTERNAL SEAM — an
+         LLM provider adapter, a VCS-host CLI invocation (e.g. `gh`), or a
+         subprocess whose argument shape or response shape is contractual —
+         FAIL when the ONLY test exercising that seam uses a fake that the
+         PRODUCTION code also defines (a fake the code under test ships and
+         the test reuses ratifies the code's own assumptions, proving
+         nothing about the real seam). Cite the seam (file:line of the
+         production call) and the test path. A passing seam requires EITHER
+         a recorded/golden REAL-provider response (cite the fixture) OR a
+         CI-reachable REAL-CLI invocation (cite the test that shells the
+         actual tool). Detection keys on the seam's ROLE (crosses a process
+         or provider boundary whose arg/response shape is a contract) —
+         never on a specific provider, tool, or language.
 
       Your lane emphasis (after the rubric): missing requirements,
       architectural violations, leftover artifacts. Cite spec section
@@ -1856,11 +2146,17 @@ workflow BuildProduct
 
   agent ReviewCodex
     label: "Codex Review (quality)"
-    model: gpt-5.4
+    model: gpt-5.2
     provider: openai
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. The build loop has
+      Review the implementation against SPEC.md. Your PRIMARY read is the
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it
+      captures every tracked-file change this build produced. Newly-created
+      UNTRACKED files are listed there by path only; their contents are NOT in
+      the diff, so open those files directly. Read the rest of the full working
+      tree ON DEMAND only when a finding needs surrounding context (it is
+      available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
       to stop early (the "accept" gate) and ship what exists. Review what is
       actually present; do not assume unfinished work will arrive later.
@@ -1870,7 +2166,7 @@ workflow BuildProduct
         plan, not evidence of completion. Treat them as nothing. Verify each
         requirement against the code yourself.
 
-      RUBRIC — for every spec section, answer these five questions in
+      RUBRIC — for every spec section, answer these seven questions in
       .ai/build/review-codex.md, in order, with PASS or FAIL per question
       and concrete evidence (grep output, file:line, snippet) for any FAIL:
 
@@ -1910,6 +2206,33 @@ workflow BuildProduct
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
          sections followed? Are leftover artifacts from removed code gone?
+      6. SPEC-EMITTED-VALUE ASSERTIONS: For every value the spec prescribes
+         that the code EMITS — a log event name, an error code, a status
+         string (e.g. a skip reason like "no_branch"), a wire/JSON value —
+         find a test whose ASSERTED EXPECTED value is the SPEC LITERAL
+         itself, not a variable that references the production constant.
+         `assert(emitted == prod.Constant)` is FAIL — it ratifies whatever
+         the production constant happens to be, so a wrong constant ships
+         green. `assert(emitted == "review.skip")` (the spec literal,
+         hard-coded in the test) is PASS. Cite the assertion file:line and
+         quote the asserted expected value. A spec-emitted value with no
+         test asserting the literal is FAIL. This is distinct from point 1
+         (which checks the literal exists in the code); point 6 checks a
+         TEST pins it to the spec literal independent of the production
+         constant.
+      7. CONTRACT-FIDELITY AT EXTERNAL SEAMS: For every EXTERNAL SEAM — an
+         LLM provider adapter, a VCS-host CLI invocation (e.g. `gh`), or a
+         subprocess whose argument shape or response shape is contractual —
+         FAIL when the ONLY test exercising that seam uses a fake that the
+         PRODUCTION code also defines (a fake the code under test ships and
+         the test reuses ratifies the code's own assumptions, proving
+         nothing about the real seam). Cite the seam (file:line of the
+         production call) and the test path. A passing seam requires EITHER
+         a recorded/golden REAL-provider response (cite the fixture) OR a
+         CI-reachable REAL-CLI invocation (cite the test that shells the
+         actual tool). Detection keys on the seam's ROLE (crosses a process
+         or provider boundary whose arg/response shape is a contract) —
+         never on a specific provider, tool, or language.
 
       Your lane emphasis (after the rubric): code quality, test coverage,
       edge cases the spec calls out, whether "throw away" items were
@@ -1924,7 +2247,13 @@ workflow BuildProduct
     provider: gemini
     reasoning_effort: high
     prompt:
-      Review the COMPLETE implementation against SPEC.md. The build loop has
+      Review the implementation against SPEC.md. Your PRIMARY read is the
+      cumulative base..worktree review diff at .ai/build/review-diff.md — it
+      captures every tracked-file change this build produced. Newly-created
+      UNTRACKED files are listed there by path only; their contents are NOT in
+      the diff, so open those files directly. Read the rest of the full working
+      tree ON DEMAND only when a finding needs surrounding context (it is
+      available, not mandated). The build loop has
       finished — either every planned milestone completed, or the operator chose
       to stop early (the "accept" gate) and ship what exists. Review what is
       actually present; do not assume unfinished work will arrive later.
@@ -1943,7 +2272,7 @@ workflow BuildProduct
         requirement against the code yourself. Reading ✅ as evidence is
         the exact failure mode this lane exists to prevent.
 
-      RUBRIC — for every spec section, answer these five questions in
+      RUBRIC — for every spec section, answer these seven questions in
       .ai/build/review-gemini.md, in order, with PASS or FAIL per question
       and concrete evidence (grep output, file:line, snippet) for any FAIL:
 
@@ -1984,6 +2313,33 @@ workflow BuildProduct
          for? Phase 2+ features built in a Phase 1 milestone are FAIL.
       5. ARCHITECTURE & LEFTOVERS: Were the spec's technical-guidance
          sections followed? Are leftover artifacts from removed code gone?
+      6. SPEC-EMITTED-VALUE ASSERTIONS: For every value the spec prescribes
+         that the code EMITS — a log event name, an error code, a status
+         string (e.g. a skip reason like "no_branch"), a wire/JSON value —
+         find a test whose ASSERTED EXPECTED value is the SPEC LITERAL
+         itself, not a variable that references the production constant.
+         `assert(emitted == prod.Constant)` is FAIL — it ratifies whatever
+         the production constant happens to be, so a wrong constant ships
+         green. `assert(emitted == "review.skip")` (the spec literal,
+         hard-coded in the test) is PASS. Cite the assertion file:line and
+         quote the asserted expected value. A spec-emitted value with no
+         test asserting the literal is FAIL. This is distinct from point 1
+         (which checks the literal exists in the code); point 6 checks a
+         TEST pins it to the spec literal independent of the production
+         constant.
+      7. CONTRACT-FIDELITY AT EXTERNAL SEAMS: For every EXTERNAL SEAM — an
+         LLM provider adapter, a VCS-host CLI invocation (e.g. `gh`), or a
+         subprocess whose argument shape or response shape is contractual —
+         FAIL when the ONLY test exercising that seam uses a fake that the
+         PRODUCTION code also defines (a fake the code under test ships and
+         the test reuses ratifies the code's own assumptions, proving
+         nothing about the real seam). Cite the seam (file:line of the
+         production call) and the test path. A passing seam requires EITHER
+         a recorded/golden REAL-provider response (cite the fixture) OR a
+         CI-reachable REAL-CLI invocation (cite the test that shells the
+         actual tool). Detection keys on the seam's ROLE (crosses a process
+         or provider boundary whose arg/response shape is a contract) —
+         never on a specific provider, tool, or language.
 
       Your lane emphasis (after the rubric): the things the other two
       reviewers will miss. Edge cases the spec implies but doesn't state
@@ -2256,6 +2612,40 @@ workflow BuildProduct
       ReviewCodex / ReviewGemini) — not detected here. W21
       (subname collision) is out of scope.
 
+      BEHAVIORAL CONTRACTS (issue #306):
+
+      Read .ai/decisions/behavioral-contracts.md and
+      .ai/decisions/spec-ambiguities.md (both written by ReadSpec). For
+      EVERY behavioral contract, disposition it with concrete evidence —
+      the same show-your-work bar as the interface-reachability and
+      spec-literal checks: run its stated verification method (the named
+      test or the grep) and paste the command + result. An undispositioned
+      contract (no evidence shown) keeps the early STATUS:fail in place.
+      For every ambiguity ruling, confirm the shipped code follows the
+      ruling (cite file:line); a ruling the code contradicts, or a
+      contradiction with no ruling, keeps the early STATUS:fail in place.
+      A "rejects at startup, not at runtime"-class guarantee must be
+      dispositioned with the startup-path test/grep its verification method
+      names — not skipped as untestable.
+
+      SPEC-EMITTED-VALUE ASSERTIONS (issue #417): For every spec-prescribed
+      EMITTED value (log event name, error code, status string), confirm a
+      test asserts the SPEC LITERAL as a hard-coded expectation — NOT a
+      variable referencing the production constant. A test of the form
+      `assert(emitted == prod.Constant)` does not count: it ratifies the
+      constant rather than pinning it to the spec, so a wrong constant
+      ships green. Cite the asserting file:line and the quoted expected
+      value. A spec-emitted value with no literal-asserting test keeps the
+      early STATUS:fail in place.
+
+      CONTRACT-FIDELITY AT EXTERNAL SEAMS (issue #416): For every external
+      seam (LLM provider adapter / VCS-host CLI like `gh` / subprocess
+      whose arg or response shape is contractual), FAIL when the only test
+      exercising it uses a fake the production code also defines. Require a
+      recorded/golden real-provider response OR a CI-reachable real-CLI
+      invocation; cite the seam file:line and the test path. An
+      undispositioned external seam keeps the early STATUS:fail in place.
+
       This is the final gate. Read SPEC.md line by line.
 
       For EVERY requirement, prescription, and instruction in the spec:
@@ -2279,7 +2669,8 @@ workflow BuildProduct
         iface-reachability-rubric.md), the re-review
         budget counter (review_fix_attempts),
         the per-node build-context file (build-context.md),
-        and reviewers write reports (review-claude.md,
+        the run base marker (run-base-sha) and cumulative review diff
+        (review-diff.md), and reviewers write reports (review-claude.md,
         review-codex.md, review-gemini.md). Only flag files outside
         this explicit allowlist. (.ai/decisions/*.md workflow artifacts —
         spec-analysis, milestones, requirement-coverage, compliance —
@@ -2294,6 +2685,11 @@ workflow BuildProduct
       Emit `STATUS:success` as your terminal line ONLY if INTERFACE
       REACHABILITY (every method has a production caller or
       carve-out), TEST QUALITY (every sleep-fence hit dispositioned),
+      BEHAVIORAL CONTRACTS (every contract dispositioned with evidence,
+      every ambiguity ruling followed), SPEC-EMITTED-VALUE ASSERTIONS
+      (every emitted value pinned to its spec literal by a test),
+      CONTRACT-FIDELITY AT EXTERNAL SEAMS (every seam backed by a golden
+      real response or a real-CLI invocation, not a self-defined fake),
       and SPEC.md compliance (every requirement implemented, no
       extras, no TODO/FIXME/HACK, tests pass, no unexpected files
       in .ai/build/ outside the allowlist enumerated above) all
@@ -2600,7 +2996,8 @@ workflow BuildProduct
     # ClearStaleReviews wipes prior-round reports before fan-out so the
     # post-join CheckReviewsComplete guard (issue #313) can't be satisfied by a
     # stale file from an earlier re-review pass.
-    ClearStaleReviews -> ReviewParallel
+    ClearStaleReviews -> ComputeReviewDiff
+    ComputeReviewDiff -> ReviewParallel
     # The three reviewers run as parallel branches; a branch runs via
     # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
     # path, so a per-branch fallback_target would be inert. Route failure on the

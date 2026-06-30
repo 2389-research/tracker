@@ -52,6 +52,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the agent's real `working_dir`, side-effecting nodes are simply not memoizable
   (the `TreeFingerprint` helper is retained as the building block for that
   follow-up, but is not used in the memo key today).
+- **`build_product` now derives spec-contract artifacts (#306).** `ReadSpec`
+  additionally writes `.ai/decisions/spec-ambiguities.md` (one DEFINITE ruling
+  per detected SPEC.md contradiction) and `.ai/decisions/behavioral-contracts.md`
+  (every non-literal prose guarantee — MUST/never/timing/cardinality — paired
+  with a concrete test or grep verification method). Detection keys on the SHAPE
+  of the prose (modal verbs, timing/ordering phrases, two-statement
+  contradictions), never on a product/language. `ApprovePlan` surfaces both
+  artifacts to the operator before the build; `Implement` cites the binding
+  ruling; `VerifyMilestone` (new check 5b) and `FinalSpecCheck` disposition each
+  in-scope behavioral contract with concrete evidence at the same show-your-work
+  bar as the spec-literal grep — an undispositioned contract or an
+  absent-but-needed ruling is `STATUS:fail`.
+- **`build_product` reviewers now catch self-ratifying tests (#417).** A new
+  rubric point 6 (SPEC-EMITTED-VALUE ASSERTIONS) in all three reviewers and in
+  `FinalSpecCheck` requires, for every spec-prescribed emitted value (log event
+  name, error code, status string), a test whose asserted expected value is the
+  SPEC literal itself — `assert(emitted == prod.Constant)` is FAIL (it ratifies
+  the constant rather than pinning it to the spec), `assert(emitted ==
+  "review.skip")` is PASS — with a cited assertion file:line. `ReadSpec` records
+  spec-marked "normative" constants in `behavioral-contracts.md` with the same
+  value-asserting verification method, and `SpecLint` rule (f) / the `Decompose`
+  coverage table now enumerate spec-emitted values and normative constants so
+  none is silently unowned.
+- **`build_product` enforces contract-fidelity at external seams (#416).** A new
+  rubric point 7 (CONTRACT-FIDELITY AT EXTERNAL SEAMS) in all three reviewers and
+  in `FinalSpecCheck`: for every external seam (LLM provider adapter, VCS-host CLI
+  like `gh`, or a subprocess whose arg/response shape is contractual), FAIL when
+  the only test exercising it uses a fake the production code also defines —
+  require a recorded/golden real-provider response OR a CI-reachable real-CLI
+  invocation, citing the seam file:line and the test path. Detection keys on the
+  seam's ROLE, never on a specific provider/tool/language. `SpecLint` rule (g)
+  records an exact external-tool invocation literal (a `gh`/`git` flag string) as
+  a contract whose verification method is "the real tool accepts this literal," so
+  a wrong-on-its-face literal (e.g. `gh ... -b -`) is flagged as unverifiable
+  rather than silently grepped-and-passed. The `SpecLint` rule-(f)/(g) and
+  Mandated-tests sentinel changes are mirrored into the intentionally-duplicated
+  `SpecLint` node in `build_product_with_superspec.dip` so the two shipped copies
+  keep the same prompt/rules and sentinel text in sync (dedup tracked in #307).
+  The superspec copy deliberately retains its higher model tier
+  (`claude-opus-4-6` / `reasoning_effort: high` vs `claude-sonnet-4-6` / `medium`
+  in `build_product.dip`), so the nodes are not byte-identical — only the spec-lint
+  contract they enforce is.
 - **Sandbox device-node hygiene preflight (#423).** Before any git or subprocess
   handler runs — on both fresh runs and resume — `applyGitPreflight` now verifies
   standard device nodes are usable (at minimum `/dev/null` is a readable+writable
@@ -67,6 +109,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`build_product` review panel reads a bounded diff and tiers its models
+  (#418).** A new `ComputeReviewDiff` tool node (inserted
+  `ClearStaleReviews -> ComputeReviewDiff -> ReviewParallel`) computes the
+  cumulative `base..worktree` diff once into `.ai/build/review-diff.md` — base is
+  the run's commit captured at `Setup` (`run-base-sha`), with the same empty-tree
+  fallback the per-milestone diffs already use (no hard-coded path/range). `git
+  diff <base>` (no `..HEAD`) compares base to the working tree, so
+  accepted-but-uncommitted milestone work is included; untracked files are listed
+  separately. Each reviewer's scope sentence now points its PRIMARY read at that
+  diff (full tree available on demand, not mandated). The diff-scoping and model
+  tiering do not touch the reviewer rubric — its original five points are
+  unchanged. (Points 6 (#417) and 7 (#416) are additive rubric extensions,
+  documented in their own entries below.)
+  `ReviewClaude` drops to `claude-sonnet-4-6` and `ReviewCodex` to `gpt-5.2`;
+  `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
+  unchanged. Steady-state this is the dominant input-token cost (reviewers no
+  longer each re-walk the whole tree ×3, and 2 of 3 lanes run mid-tier). Review
+  hardening: `ComputeReviewDiff` guards against running outside a git work tree
+  and now captures each `git diff` exit status — most git failures
+  (safe.directory, corrupt repo, bad object) exit non-zero while still printing
+  error text, so an empty-output check alone would let git errors masquerade as
+  a valid diff; on any failure the artifact is overwritten with an UNAVAILABLE
+  header so reviewers fall back to reading the working tree directly.
+- **`build_product` tiers cheaply-verified agent nodes (#419).** `SpecLint`
+  (gated by its own `STATUS:fail`-first contract) and `ReadSpec` (gated by the
+  `ApprovePlan` human review) drop to `claude-sonnet-4-6` + `reasoning_effort:
+  medium`; their downstream gates are unchanged. `SynthesizeReviews`,
+  `FinalSpecCheck`, and the adversarial `ReviewGemini` lane stay frontier/high.
 - **Artifact-repo health check + reattach on the never-lose-work commit path
   (#423).** `commitWIPBeforeRouting` now probes artifact-repo availability via a
   new `gitArtifactRepo.ensureHealthy()` before committing work-in-progress; if
