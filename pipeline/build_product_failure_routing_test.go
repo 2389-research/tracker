@@ -267,8 +267,16 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	// the #350 structural existence gate (CheckMilestoneOutputs) and then
 	// ClearStaleReviews. The #313 invariant — stale reports cleared on BOTH
 	// entries — is preserved with the gate prepended.
-	if !hasUnconditionalEdgeTo(g, "ClearStaleReviews", "ReviewParallel") {
-		t.Error("ClearStaleReviews has no edge to ReviewParallel (issue #313)")
+	// #418 inserts ComputeReviewDiff between ClearStaleReviews and the fan-out
+	// so the reviewers read a bounded base..worktree diff (BASE vs the working
+	// tree, capturing uncommitted edits — not BASE..HEAD); the #313 invariant
+	// (stale reports cleared before the fan-out runs) is preserved across the
+	// extra hop.
+	if !hasUnconditionalEdgeTo(g, "ClearStaleReviews", "ComputeReviewDiff") {
+		t.Error("ClearStaleReviews has no edge to ComputeReviewDiff (issues #313/#418)")
+	}
+	if !hasUnconditionalEdgeTo(g, "ComputeReviewDiff", "ReviewParallel") {
+		t.Error("ComputeReviewDiff has no edge to ReviewParallel (issues #313/#418)")
 	}
 	if !hasEdgeWithCondition(g, "PickNextMilestone", "CheckMilestoneOutputs", "ctx.tool_stdout contains all-done") {
 		t.Error("PickNextMilestone all-done edge must enter CheckMilestoneOutputs before the review fan-out (issue #350)")
