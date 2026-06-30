@@ -41,7 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the node re-runs live rather than replaying a stored failure into routing.
   A node declaring `writable_paths` is an **unconditional** hard
   miss — it always re-runs and is never replayed, with no warning (a by-design
-  policy skip, not a key-computation failure). Such a node mutates and reads the
+  policy skip, not a key-computation failure). The miss is keyed on attr
+  **presence**, not a non-empty value, mirroring `AgentConfig.WritablePathsSet`
+  and the fs-jail gate — so the adapter's `writable_paths: ""` bypass-defense
+  sentinel still refuses memoization (#425 review). Such a node mutates and reads the
   agent's session `working_dir`, but tracker can only fingerprint the ARTIFACT
   repo (`<artifactDir>/<runID>`), a different directory — so any content
   fingerprint would prove nothing about the tree the agent actually read/wrote

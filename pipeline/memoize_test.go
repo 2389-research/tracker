@@ -549,6 +549,25 @@ func TestMemoKeyWritablePathsAlwaysMissesWithLiveRepo(t *testing.T) {
 	}
 }
 
+// A PRESENT-but-EMPTY writable_paths attr (writable_paths:"") is still a hard
+// miss. The adapter emits that sentinel as a bypass-defense (an empty glob set
+// jails the node to nothing rather than dropping the signal), and the jail keys
+// on presence via AgentConfig.WritablePathsSet — so memoization must too, or a
+// side-effecting node could be replayed (#425 review).
+func TestMemoKeyWritablePathsEmptyStillMisses(t *testing.T) {
+	g := NewGraph("memo_tree_empty")
+	e := NewEngine(g, newTestRegistry())
+	node := &Node{ID: "work", Handler: "codergen", Attrs: map[string]string{
+		"memoize":        "true",
+		"writable_paths": "",
+	}}
+	s := &runState{pctx: NewPipelineContext(), cp: &Checkpoint{}}
+
+	if _, ok := e.computeMemoKey(s, node); ok {
+		t.Error("expected ok=false (hard miss) for a present-but-empty writable_paths node")
+	}
+}
+
 // BLOCKER 1 (run-b65fb64 shape): work writes bare last_response on entry 1
 // (so node.work.last_response gets aliased — the old self-output exclusion would
 // drop last_response from the key). The intervening check node OVERWRITES bare

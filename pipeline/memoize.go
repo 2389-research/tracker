@@ -83,7 +83,14 @@ func (e *Engine) computeMemoKey(s *runState, execNode *Node) (string, bool) {
 	// stale-replay class this feature prevents, #425 review). Until we can
 	// fingerprint the agent's real working_dir, side-effecting nodes are not
 	// memoizable (CLAUDE.md: over-invalidate, never replay stale).
-	if strings.TrimSpace(execNode.Attrs["writable_paths"]) != "" {
+	//
+	// Keyed on attr PRESENCE, not non-emptiness, to mirror AgentConfig's
+	// WritablePathsSet (node_config.go) and the jail gate (codergen_jail.go): the
+	// adapter can emit writable_paths:"" as a bypass-defense sentinel (an empty
+	// glob set jails the node to nothing rather than silently dropping the
+	// signal), so a present-but-empty value must still be treated as a
+	// side-effecting node and refused memoization (#425 review).
+	if _, ok := execNode.Attrs["writable_paths"]; ok {
 		return "", false
 	}
 
