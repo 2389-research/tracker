@@ -1953,9 +1953,15 @@ workflow BuildProduct
       # accepted-but-uncommitted milestone work — the `accept` gate routes here
       # WITHOUT committing first — is included instead of silently omitted from
       # what reviewers are told is "the complete set of changes". `git diff
-      # <commit>` (no ..HEAD) compares the commit to the worktree, capturing
-      # committed + staged + unstaged tracked changes; untracked files are listed
-      # separately below. On a clean tree this is identical to BASE..HEAD.
+      # <commit>` (no ..HEAD) compares the commit to the WORKING TREE, so it
+      # reflects the current on-disk content of tracked files (committed work plus
+      # any uncommitted edits present in the worktree). It compares against the
+      # worktree, NOT the index, so a staged change that doesn't match the worktree
+      # (#424 review: stage version B, then revert the file on disk) isn't captured
+      # — but in this workflow the worktree IS the source of truth (agents edit
+      # files, they don't manage a staging area), so worktree state is exactly what
+      # reviewers should see. Untracked files are listed separately below. On a
+      # clean tree this is identical to BASE..HEAD.
       #
       # git stderr is kept IN the artifact (2>&1, not 2>/dev/null) so a failure
       # is diagnosable, but #424 review: an empty-output guard alone is not
@@ -1969,8 +1975,9 @@ workflow BuildProduct
       {
         echo "# Cumulative review diff (base..worktree)"
         echo
-        echo "_Base: ${BASE} → working tree. The diff below covers committed plus"
-        echo "staged/unstaged changes to TRACKED files; untracked files are listed"
+        echo "_Base: ${BASE} → working tree. The diff below covers every TRACKED-file"
+        echo "change present in the working tree relative to base (committed work plus"
+        echo "any uncommitted edits on disk); untracked files are listed"
         echo "by path in their own section (their content is NOT diffed here). It is"
         echo "your PRIMARY read; the full working tree is available on demand if a"
         echo "finding needs surrounding context._"
