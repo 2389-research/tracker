@@ -16,8 +16,16 @@ import (
 // Truthy is exactly "true" (case-insensitive, trimmed); any other value
 // (absent, "false", "1") is off. Default-off is an acceptance criterion: a
 // .dip file lacking the attr never reaches the memo lookup or store sites.
+//
+// Memoization is agent-node-only by contract. The `memoize` attr only reaches
+// node.Attrs for agent nodes via the dippin adapter's Params pass-through, but
+// a DOT graph or a programmatic Graph could set it on any handler — so enforce
+// the codergen scope here rather than relying on the adapter. Replaying a
+// tool/wait.human/conditional node would skip a side-effecting or
+// non-deterministic handler (#425 review).
 func memoizeEnabled(execNode *Node) bool {
-	return strings.EqualFold(strings.TrimSpace(execNode.Attrs["memoize"]), "true")
+	return execNode.Handler == "codergen" &&
+		strings.EqualFold(strings.TrimSpace(execNode.Attrs["memoize"]), "true")
 }
 
 // writeLP writes a length-prefixed string into the hash buffer: a uint32

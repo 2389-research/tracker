@@ -568,6 +568,26 @@ func TestMemoKeyWritablePathsEmptyStillMisses(t *testing.T) {
 	}
 }
 
+// Memoization is agent-node-only by contract. A non-codergen node carrying
+// memoize:true (only reachable via a DOT/programmatic Graph — the dippin
+// adapter surfaces the attr for agent nodes only) must be a hard miss so a
+// side-effecting/non-deterministic handler is never replayed (#425 review).
+func TestMemoKeyNonAgentNodeNeverMemoizes(t *testing.T) {
+	g := NewGraph("memo_non_agent")
+	e := NewEngine(g, newTestRegistry())
+	s := &runState{pctx: NewPipelineContext(), cp: &Checkpoint{}}
+
+	for _, handler := range []string{"tool", "wait.human", "conditional"} {
+		node := &Node{ID: "n", Handler: handler, Attrs: map[string]string{
+			"memoize": "true",
+			"prompt":  "abc",
+		}}
+		if _, ok := e.computeMemoKey(s, node); ok {
+			t.Errorf("handler %q: expected ok=false (hard miss) — memoization is agent-node-only", handler)
+		}
+	}
+}
+
 // BLOCKER 1 (run-b65fb64 shape): work writes bare last_response on entry 1
 // (so node.work.last_response gets aliased — the old self-output exclusion would
 // drop last_response from the key). The intervening check node OVERWRITES bare
