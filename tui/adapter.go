@@ -26,7 +26,12 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 		return MsgNodeStarted{NodeID: evt.NodeID}
 	case pipeline.EventStageCompleted:
 		return MsgNodeCompleted{NodeID: evt.NodeID, Outcome: "success"}
-	case pipeline.EventStageFailed:
+	case pipeline.EventStageFailed, pipeline.EventWorkPreserveFailed:
+		// EventWorkPreserveFailed (#423) is the terminal never-lose-work HARD
+		// signal. It surfaces in the TUI identically to a stage failure — a hard
+		// failure line — but is a distinct event type upstream only so that
+		// `tracker diagnose` does NOT count it as another per-node execution
+		// attempt toward RetryCount / IdenticalRetries (#428 review).
 		return MsgNodeFailed{NodeID: evt.NodeID, Error: pipelineEventMsg(evt)}
 	case pipeline.EventStageRetrying:
 		return MsgNodeRetrying{NodeID: evt.NodeID, Message: evt.Message}
@@ -122,6 +127,15 @@ func AdaptAgentEvent(evt agent.Event, nodeID string) tea.Msg {
 		return MsgThinkingStopped{NodeID: nodeID}
 	case agent.EventTextDelta:
 		return MsgTextChunk{NodeID: nodeID, Text: evt.Text}
+	default:
+		return adaptAgentToolEvent(evt, nodeID)
+	}
+}
+
+// adaptAgentToolEvent handles the tool-call and status agent events. Split out
+// of AdaptAgentEvent so each switch stays under the complexity gate.
+func adaptAgentToolEvent(evt agent.Event, nodeID string) tea.Msg {
+	switch evt.Type {
 	case agent.EventToolCallStart:
 		return MsgToolCallStart{NodeID: nodeID, ToolName: evt.ToolName, ToolInput: evt.ToolInput}
 	case agent.EventToolCallEnd:

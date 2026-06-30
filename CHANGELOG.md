@@ -7,37 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **`build_product` review panel reads a bounded diff and tiers its models
-  (#418).** A new `ComputeReviewDiff` tool node (inserted
-  `ClearStaleReviews -> ComputeReviewDiff -> ReviewParallel`) computes the
-  cumulative `base..worktree` diff once into `.ai/build/review-diff.md` — base is
-  the run's commit captured at `Setup` (`run-base-sha`), with the same empty-tree
-  fallback the per-milestone diffs already use (no hard-coded path/range). `git
-  diff <base>` (no `..HEAD`) compares base to the working tree, so
-  accepted-but-uncommitted milestone work is included; untracked files are listed
-  separately. Each reviewer's scope sentence now points its PRIMARY read at that
-  diff (full tree available on demand, not mandated). The diff-scoping and model
-  tiering do not touch the reviewer rubric — its original five points are
-  unchanged. (Points 6 (#417) and 7 (#416) are additive rubric extensions,
-  documented in their own entries below.)
-  `ReviewClaude` drops to `claude-sonnet-4-6` and `ReviewCodex` to `gpt-5.2`;
-  `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
-  unchanged. Steady-state this is the dominant input-token cost (reviewers no
-  longer each re-walk the whole tree ×3, and 2 of 3 lanes run mid-tier). Review
-  hardening: `ComputeReviewDiff` guards against running outside a git work tree
-  and now captures each `git diff` exit status — most git failures
-  (safe.directory, corrupt repo, bad object) exit non-zero while still printing
-  error text, so an empty-output check alone would let git errors masquerade as
-  a valid diff; on any failure the artifact is overwritten with an UNAVAILABLE
-  header so reviewers fall back to reading the working tree directly.
-- **`build_product` tiers cheaply-verified agent nodes (#419).** `SpecLint`
-  (gated by its own `STATUS:fail`-first contract) and `ReadSpec` (gated by the
-  `ApprovePlan` human review) drop to `claude-sonnet-4-6` + `reasoning_effort:
-  medium`; their downstream gates are unchanged. `SynthesizeReviews`,
-  `FinalSpecCheck`, and the adversarial `ReviewGemini` lane stay frontier/high.
-
 ### Added
 
 - **`build_product` now derives spec-contract artifacts (#306).** `ReadSpec`
@@ -78,6 +47,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Mandated-tests sentinel changes are mirrored into the intentionally-duplicated
   `SpecLint` node in `build_product_with_superspec.dip` so the two shipped copies
   stay behaviorally identical (dedup tracked in #307) (#424 review).
+- **Sandbox device-node hygiene preflight (#423).** Before any git or subprocess
+  handler runs — on both fresh runs and resume — `applyGitPreflight` now verifies
+  standard device nodes are usable (at minimum `/dev/null` is a readable+writable
+  character device). A suspended/restored sandbox can silently corrupt `/dev/null`
+  (e.g. it becomes unreadable or a regular file masquerading as the device),
+  which breaks git and reviewer CLIs deep mid-run; that previously surfaced only
+  as an opaque `context canceled` failure during the terminal commit. The probe
+  now fails fast with a specific, actionable diagnostic (including a `mknod`
+  remediation) instead. The probe is portability-guarded (POSIX real check,
+  Windows no-op) and injectable, so it runs ahead of and independent of the git
+  policy and never touches the host device in tests. No new behavior when
+  `/dev/null` is healthy.
+
+### Changed
+
+- **`build_product` review panel reads a bounded diff and tiers its models
+  (#418).** A new `ComputeReviewDiff` tool node (inserted
+  `ClearStaleReviews -> ComputeReviewDiff -> ReviewParallel`) computes the
+  cumulative `base..worktree` diff once into `.ai/build/review-diff.md` — base is
+  the run's commit captured at `Setup` (`run-base-sha`), with the same empty-tree
+  fallback the per-milestone diffs already use (no hard-coded path/range). `git
+  diff <base>` (no `..HEAD`) compares base to the working tree, so
+  accepted-but-uncommitted milestone work is included; untracked files are listed
+  separately. Each reviewer's scope sentence now points its PRIMARY read at that
+  diff (full tree available on demand, not mandated). The diff-scoping and model
+  tiering do not touch the reviewer rubric — its original five points are
+  unchanged. (Points 6 (#417) and 7 (#416) are additive rubric extensions,
+  documented in their own entries below.)
+  `ReviewClaude` drops to `claude-sonnet-4-6` and `ReviewCodex` to `gpt-5.2`;
+  `ReviewGemini` (adversarial) stays `gemini-2.5-pro` and `SynthesizeReviews` is
+  unchanged. Steady-state this is the dominant input-token cost (reviewers no
+  longer each re-walk the whole tree ×3, and 2 of 3 lanes run mid-tier). Review
+  hardening: `ComputeReviewDiff` guards against running outside a git work tree
+  and now captures each `git diff` exit status — most git failures
+  (safe.directory, corrupt repo, bad object) exit non-zero while still printing
+  error text, so an empty-output check alone would let git errors masquerade as
+  a valid diff; on any failure the artifact is overwritten with an UNAVAILABLE
+  header so reviewers fall back to reading the working tree directly.
+- **`build_product` tiers cheaply-verified agent nodes (#419).** `SpecLint`
+  (gated by its own `STATUS:fail`-first contract) and `ReadSpec` (gated by the
+  `ApprovePlan` human review) drop to `claude-sonnet-4-6` + `reasoning_effort:
+  medium`; their downstream gates are unchanged. `SynthesizeReviews`,
+  `FinalSpecCheck`, and the adversarial `ReviewGemini` lane stay frontier/high.
+- **Artifact-repo health check + reattach on the never-lose-work commit path
+  (#423).** `commitWIPBeforeRouting` now probes artifact-repo availability via a
+  new `gitArtifactRepo.ensureHealthy()` before committing work-in-progress; if
+  the repo has gone unreachable post-suspend it attempts a single reattach
+  (clear the latched failure + idempotent re-`Init`, capturing the current tree).
+  The health probe compares `git rev-parse --show-toplevel` against the artifact
+  dir, so a nested run dir whose own `.git` was lost is treated as unhealthy
+  (and reattached) instead of silently resolving against — and committing into —
+  the user's enclosing repository.
+  On the **terminal** never-lose-work paths (handler-error halt and failing exit
+  node) an unrecoverable repo is now surfaced as a HARD signal — a new
+  dedicated `EventWorkPreserveFailed` diagnostic plus an
+  `EngineResult.WorkPreserveFailed` flag — rather than degrading silently to a
+  best-effort `EventWarning`. The signal is a distinct event type (not an extra
+  `EventStageFailed`) precisely so `tracker diagnose` does **not** count it as
+  another per-node execution attempt — emitting it as `stage_failed` would have
+  inflated the failed node's `RetryCount` / `IdenticalRetries` (#428 review).
+  The TUI adapter maps `EventWorkPreserveFailed` to the same `MsgNodeFailed`
+  failure line, so the operator still sees it. The original node failure is never
+  masked (`Status` stays `OutcomeFail`). **Mid-routing** call sites
+  (strict-failure pre-decision, retry-exhausted with a `fallback_retry_target`)
+  keep the warning-only behavior so the routing outcome is never changed. No
+  behavior change when devices and the artifact repo are healthy. Review fixes
+  (#428): the repo-unavailable diagnostic is now emitted by the caller, not
+  inside `commitWIPBeforeRouting`, so a terminal halt logs the hard
+  `EventWorkPreserveFailed` ONCE rather than alongside a redundant
+  `EventWarning` (the mid-routing path emits the single discarded warning at its
+  own site); and the device-probe remediation hint no longer presents the
+  Linux-specific `mknod ... c 1 3` device numbers as if they were portable.
+  Follow-up review fixes (#428): the strict-failure mid-routing fallback site
+  (`strictFailureFallback`) now actually emits that discarded-preserve
+  `EventWarning` — it was previously dropped silently, leaving only the
+  retry-exhausted fallback branch warning; and `checkRootedHere` now includes
+  git's combined output in the `rev-parse --show-toplevel` error so a
+  repo-unavailable diagnostic stays actionable (e.g. surfaces `safe.directory`
+  or corrupt-object causes) instead of reporting a bare exit status.
+
 - **Sleep-aware budgets (#422, part A).** Opt-in `BudgetLimits.SleepAware` (CLI
   `--sleep-aware-budget`) excludes OS-suspend spans — e.g. a suspended laptop —
   from `max_wall_time` and `stall_timeout` accounting, so a machine that sleeps
