@@ -46,7 +46,13 @@ func (e *Engine) emitGitCommit(s *runState, nodeID string, traceEntry *TraceEntr
 // it never reaches into the user's real working repo. A WIP-commit failure is
 // surfaced as a warning and never masks the original node failure or changes
 // the routing outcome (CLAUDE.md: never silently swallow errors).
-func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *TraceEntry) {
+// Returns nil on every path EXCEPT when the artifact repo has gone unavailable
+// post-suspend and reattach failed (#423) — that returns a wrapped
+// ErrArtifactRepoUnavailable so the caller can decide terminal-vs-routing. A
+// WIP-commit failure on a HEALTHY repo, or the no-repo-configured case, keeps
+// today's warning-and-skip (returns nil) — those are not the never-lose-work
+// degradation incident and must not start hard-failing.
+func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *TraceEntry) error {
 	if s.gitRepo == nil {
 		// gitRepo is nil when git artifacts are disabled, when enabled but no
 		// artifact dir was configured, or when repo init failed (initRunState
@@ -58,7 +64,16 @@ func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *
 			NodeID:    nodeID,
 			Message:   fmt.Sprintf("cannot preserve uncommitted work for failed node %q: git artifact repository unavailable (enable with --git-artifacts and an artifact dir, or see the earlier init-failure warning)", nodeID),
 		})
-		return
+		return nil
+	}
+	// Probe artifact-repo availability and reattach if it went unreachable
+	// post-suspend (#423). Only an unrecoverable repo returns non-nil. We emit
+	// NO diagnostic here: the caller owns severity, so emitting one here too
+	// would double-log the same cause on terminal halts (#428 review). Terminal
+	// paths hard-escalate via escalateWorkPreserve (EventWorkPreserveFailed);
+	// the mid-routing path emits a single discarded EventWarning at its site.
+	if err := s.gitRepo.ensureHealthy(); err != nil {
+		return err
 	}
 	ref, err := s.gitRepo.CommitWIP(nodeID)
 	if err != nil {
@@ -69,11 +84,43 @@ func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *
 			NodeID:    nodeID,
 			Message:   fmt.Sprintf("WIP commit failed for node %q (work may be unpreserved): %v", nodeID, err),
 		})
-		return
+		return nil
 	}
 	if ref == "" {
-		return // clean tree — nothing to preserve
+		return nil // clean tree — nothing to preserve
 	}
+	e.recordWIPRef(s, nodeID, ref, traceEntry)
+	return nil
+}
+
+// escalateWorkPreserve handles the TERMINAL never-lose-work degradation (#423).
+// When commitWIPBeforeRouting reported the artifact repo unavailable (and
+// reattach failed), it emits a HARD EventWorkPreserveFailed and returns true so
+// the caller can set EngineResult.WorkPreserveFailed. Returns false (no event)
+// when preserveErr is nil, so the healthy path is byte-identical. This NEVER
+// changes Status — the original node failure remains the primary cause.
+//
+// The event is intentionally EventWorkPreserveFailed, NOT EventStageFailed:
+// this is not another execution attempt for the node, so `tracker diagnose`
+// must not fold it into that node's RetryCount / IdenticalRetries (#428 review).
+func (e *Engine) escalateWorkPreserve(s *runState, nodeID string, preserveErr error) bool {
+	if preserveErr == nil {
+		return false
+	}
+	e.emit(PipelineEvent{
+		Type:      EventWorkPreserveFailed,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("FATAL: could not preserve uncommitted work for failed node %q — artifact git repository unavailable and recovery failed: %v", nodeID, preserveErr),
+	})
+	return true
+}
+
+// recordWIPRef persists a freshly-created WIP ref on the trace entry and the
+// checkpoint, and surfaces a discoverability warning. Extracted from
+// commitWIPBeforeRouting to keep that function under the complexity gate (#423).
+func (e *Engine) recordWIPRef(s *runState, nodeID, ref string, traceEntry *TraceEntry) {
 	s.cp.RecordWIPRef(nodeID, ref)
 	if traceEntry != nil {
 		traceEntry.WIPRef = ref
@@ -342,10 +389,10 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	}, nil
 }
 
-// initGitRepo initializes the git artifact repo when git artifacts are enabled
-// and an artifact dir is set. Best-effort: an Init failure emits a warning and
-// returns nil so the run continues without git tracking. Extracted from
-// initRunState to keep it under the complexity gate; behavior is unchanged.
+// initGitRepo initializes the git artifact repo when requested and an artifact
+// dir is set. Best-effort: on init failure it warns and returns nil so the run
+// continues without git tracking. Extracted from initRunState for the
+// complexity gate.
 func (e *Engine) initGitRepo(runID string) *gitArtifactRepo {
 	if !e.gitArtifacts || e.artifactDir == "" {
 		return nil
@@ -611,21 +658,17 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	traceEntry.Stats = outcome.Stats
 	traceEntry.ChildUsage = outcome.ChildUsage
 
-	e.emitOutcomeAnomalies(s, currentNodeID, &outcome)
+	e.emitNodeDiagnostics(s, currentNodeID, &outcome)
 
 	return &outcome, traceEntry, nil
 }
 
-// emitOutcomeAnomalies surfaces structured audit events for any anomaly fields
-// the handler populated on a successful (non-error) outcome: tool-output
-// truncation (#208), marker_grep no-match (#210), missing route sentinel
-// (#212), and auto_status missing STATUS (#346). Extracted from executeNode to
-// keep it under the complexity gate; behavior is unchanged.
-func (e *Engine) emitOutcomeAnomalies(s *runState, currentNodeID string, outcome *Outcome) {
-	// Surface tool-output truncation as structured events so `tracker
-	// diagnose`, the TUI activity log, and NDJSON consumers can correlate
-	// routing misses with dropped output (issue #208). One event per
-	// truncated stream — stdout and stderr can both fire if both
+// emitNodeDiagnostics surfaces post-execution audit events (tool-output
+// truncation #208, marker_grep no-match #210, missing route sentinel #212, and
+// missing auto_status #346) as typed PipelineEvents. Extracted from executeNode
+// for the complexity gate; behavior is unchanged.
+func (e *Engine) emitNodeDiagnostics(s *runState, currentNodeID string, outcome *Outcome) {
+	// One event per truncated stream — stdout and stderr can both fire if both
 	// overflowed the per-stream cap.
 	for i := range outcome.Truncations {
 		td := &outcome.Truncations[i]
@@ -639,28 +682,20 @@ func (e *Engine) emitOutcomeAnomalies(s *runState, currentNodeID string, outcome
 		})
 	}
 
-	// Surface marker_grep no-match as a typed audit event so `tracker
-	// diagnose` can call out exactly why a node failed (issue #210).
-	// The tool handler already set Status = OutcomeFail; this is the
-	// audit-trail companion. Emit before returning so the event ordering
-	// matches the rest of the per-node emissions. The message branches
-	// on MissingMarker.Error: a populated Error means the regex itself
-	// was invalid (author error), an empty Error means the regex was
-	// fine but matched nothing in the captured stdout.
+	// marker_grep no-match: a populated Error means the regex failed to compile
+	// (author error); an empty Error means it matched nothing in stdout.
 	if outcome.MissingMarker != nil {
 		e.emit(PipelineEvent{
 			Type:      EventToolMarkerMissing,
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    currentNodeID,
-			Message:   markerMissingMessage(currentNodeID, outcome.MissingMarker),
+			Message:   missingMarkerMessage(currentNodeID, outcome.MissingMarker),
 			Marker:    outcome.MissingMarker,
 		})
 	}
 
-	// Same shape as the MissingMarker emission above, different
-	// mechanism: route_required: true was set on the node but no
-	// _TRACKER_ROUTE= sentinel was present in captured stdout (#212).
+	// route_required: true but no _TRACKER_ROUTE= sentinel in captured stdout.
 	if outcome.MissingRoute != nil {
 		e.emit(PipelineEvent{
 			Type:      EventToolRouteMissing,
@@ -673,27 +708,23 @@ func (e *Engine) emitOutcomeAnomalies(s *runState, currentNodeID string, outcome
 		})
 	}
 
-	// Same shape again for auto_status (#346): the agent completed normally
-	// but emitted no parseable STATUS line. The handler already chose the
-	// status (fail-closed on goal gates, legacy success default otherwise);
-	// this is the audit-trail companion so the TUI and `tracker diagnose`
-	// can surface the anomaly instead of it registering as a silent verdict.
+	// auto_status set but no parseable STATUS line; the handler already chose
+	// the status (fail-closed on goal gates, legacy success default otherwise).
 	if outcome.MissingStatus != nil {
 		e.emit(PipelineEvent{
 			Type:       EventAutoStatusMissing,
 			Timestamp:  time.Now(),
 			RunID:      s.runID,
 			NodeID:     currentNodeID,
-			Message:    autoStatusMissingMessage(currentNodeID, outcome.MissingStatus),
+			Message:    missingStatusMessage(currentNodeID, outcome.MissingStatus),
 			AutoStatus: outcome.MissingStatus,
 		})
 	}
 }
 
-// markerMissingMessage builds the EventToolMarkerMissing message. A populated
-// Error means the regex itself failed to compile (author error); an empty Error
-// means the regex was valid but matched nothing in the captured stdout (#210).
-func markerMissingMessage(nodeID string, m *MarkerDetail) string {
+// missingMarkerMessage builds the marker_grep no-match diagnostic. A populated
+// Error means the regex failed to compile; empty means it matched nothing.
+func missingMarkerMessage(nodeID string, m *MarkerDetail) string {
 	if m.Error != "" {
 		return fmt.Sprintf("tool node %q: marker_grep regex %q failed to compile: %s — failing node to avoid silent fallback",
 			nodeID, m.Pattern, m.Error)
@@ -702,10 +733,10 @@ func markerMissingMessage(nodeID string, m *MarkerDetail) string {
 		nodeID, m.Pattern)
 }
 
-// autoStatusMissingMessage builds the EventAutoStatusMissing message, branching
-// on whether the gate failed closed or defaulted to legacy success (#346).
-func autoStatusMissingMessage(nodeID string, d *AutoStatusDetail) string {
-	if d.FailClosed {
+// missingStatusMessage builds the auto_status no-verdict diagnostic, branching
+// on whether the gate fails closed or defaults to legacy success.
+func missingStatusMessage(nodeID string, ms *AutoStatusDetail) string {
+	if ms.FailClosed {
 		return fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — failing goal gate closed (an unparseable verdict on a gate is an anomaly, not a pass)",
 			nodeID)
 	}
@@ -884,8 +915,27 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	// Preserve any dirty (possibly green) tree to a recoverable ref before
 	// routing away from the exhausted node (#302). No-op on a clean tree.
-	e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
+	//
+	// (#423) This node has two outcomes below: it either routes onward to
+	// fallback_retry_target (MID-ROUTING — an unavailable-repo error stays a
+	// discarded WARNING so escalating cannot override the routing decision) or
+	// it dead-stops the run with no onward edge (TERMINAL — the preserve error
+	// must hard-escalate so unrecoverable work loss is surfaced). Capture the
+	// error here and branch on it at the terminal site below.
+	preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
+		// MID-ROUTING: the preserve error is discarded so it cannot override the
+		// routing decision, but surface it once as a WARNING (never silently
+		// swallow — CLAUDE.md). The terminal branch below hard-escalates instead.
+		if preserveErr != nil {
+			e.emit(PipelineEvent{
+				Type:      EventWarning,
+				Timestamp: time.Now(),
+				RunID:     s.runID,
+				NodeID:    currentNodeID,
+				Message:   fmt.Sprintf("could not preserve uncommitted work for node %q before routing to %q: %v", currentNodeID, fallback, preserveErr),
+			})
+		}
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
@@ -900,7 +950,10 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		return fallback, true, nil, nil
 	}
 
-	// No fallback — fail.
+	// No fallback — TERMINAL halt. Hard-escalate an unrecoverable preserve
+	// failure (#423): this is a no-onward-edge dead stop with no later commit,
+	// so a discarded preserve error would silently lose work.
+	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 	s.trace.AddEntry(*traceEntry)
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
@@ -912,6 +965,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	e.emitGitCommit(s, currentNodeID, traceEntry)
 	s.trace.EndTime = time.Now()
 	result := e.failResult(s)
+	result.WorkPreserveFailed = workPreserveFailed
 	return "", false, result, nil
 }
 
@@ -950,6 +1004,47 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 	}
 }
 
+// handleGoalGateRetry processes the goal-gate retry redirect extracted from
+// handleExitNode to keep that function under the complexity gate. It emits the
+// retry/recheck event, records the trace, and redirects the run to target.
+// Returns (false, target, nil) so the caller re-enters at target.
+func (e *Engine) handleGoalGateRetry(s *runState, currentNodeID, target, gateNodeID string, traceEntry *TraceEntry) (bool, string, *EngineResult) {
+	// A pending re-entry (target == the gate itself, flagged by a prior
+	// redirect) completes that redirect's retry cycle — the budget was
+	// charged when the redirect fired, so it is not charged again here.
+	// It cannot loop: the gate executes next, clearing the pending flag.
+	reentry := s.cp.IsGateRecheckPending(gateNodeID) && target == gateNodeID
+	gateNode := e.nodeOrDefault(gateNodeID)
+	msg := fmt.Sprintf("goal-gate recheck: re-entering %q so the gate re-judges the current tree (attempt %d/%d)",
+		gateNodeID, s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
+	if !reentry {
+		s.cp.IncrementRetry(gateNodeID)
+		msg = fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
+			gateNodeID, target,
+			s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
+	}
+	e.emit(PipelineEvent{
+		Type:      EventStageRetrying,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    gateNodeID,
+		Message:   msg,
+	})
+	traceEntry.EdgeTo = target
+	s.trace.AddEntry(*traceEntry)
+	e.emitGitCommit(s, currentNodeID, traceEntry)
+	// #348 defect 1: the redirect's clearDownstream below may remove the
+	// gate from CompletedNodes while the executed path routes around it
+	// to the exit. Mark the gate recheck-pending so it stays visible to
+	// this check and the next retry re-enters at the gate itself; the
+	// flag clears when the gate actually re-executes (applyOutcome).
+	s.cp.SetGateRecheckPending(gateNodeID)
+	e.clearDownstream(target, s.cp)
+	s.cp.CurrentNode = target
+	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
+	return false, target, nil
+}
+
 // handleExitNode processes the exit node. Returns (shouldBreak, result, error).
 // If shouldBreak is true, the main loop should break (success).
 // If result is non-nil, return early with that result.
@@ -957,7 +1052,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus string, traceEntry *TraceEntry) (bool, string, *EngineResult) {
 	target, gateNodeID, retry, unsatisfied := e.goalGateRetryTarget(s.cp, s.nodeOutcomes)
 	if retry {
-		return e.handleGoalGateRetry(s, currentNodeID, traceEntry, target, gateNodeID)
+		return e.handleGoalGateRetry(s, currentNodeID, target, gateNodeID, traceEntry)
 	}
 	// Fallback/escalation: target is set but not a retry (one-time redirect).
 	if unsatisfied && target != "" {
@@ -999,11 +1094,14 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 	if outcomeStatus == string(OutcomeFail) {
 		// Preserve any dirty (possibly green) tree to a recoverable ref before
 		// the failing exit node halts the run (#302). No-op on a clean tree.
-		e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
+		// TERMINAL never-lose-work path (#423): hard-escalate if the artifact
+		// repo went unavailable and reattach failed.
+		preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s)
+		result.WorkPreserveFailed = e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 		return false, "", result
 	}
 	s.trace.AddEntry(*traceEntry)
@@ -1014,50 +1112,6 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 	}
 	e.budgetGuard.NotifyProgress()
 	return true, "", nil
-}
-
-// handleGoalGateRetry processes a goal-gate retry redirect at the exit node:
-// it increments the retry counter (unless this is a pending re-entry that
-// completes a prior redirect's cycle), emits the retry event, records the trace
-// edge, marks the gate recheck-pending (#348 defect 1), clears downstream, and
-// checkpoints. Returns (false, target, nil) so the caller advances to target.
-// Extracted from handleExitNode to keep it under the complexity gate; behavior
-// is unchanged.
-func (e *Engine) handleGoalGateRetry(s *runState, currentNodeID string, traceEntry *TraceEntry, target, gateNodeID string) (bool, string, *EngineResult) {
-	// A pending re-entry (target == the gate itself, flagged by a prior
-	// redirect) completes that redirect's retry cycle — the budget was
-	// charged when the redirect fired, so it is not charged again here.
-	// It cannot loop: the gate executes next, clearing the pending flag.
-	reentry := s.cp.IsGateRecheckPending(gateNodeID) && target == gateNodeID
-	gateNode := e.nodeOrDefault(gateNodeID)
-	msg := fmt.Sprintf("goal-gate recheck: re-entering %q so the gate re-judges the current tree (attempt %d/%d)",
-		gateNodeID, s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
-	if !reentry {
-		s.cp.IncrementRetry(gateNodeID)
-		msg = fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
-			gateNodeID, target,
-			s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
-	}
-	e.emit(PipelineEvent{
-		Type:      EventStageRetrying,
-		Timestamp: time.Now(),
-		RunID:     s.runID,
-		NodeID:    gateNodeID,
-		Message:   msg,
-	})
-	traceEntry.EdgeTo = target
-	s.trace.AddEntry(*traceEntry)
-	e.emitGitCommit(s, currentNodeID, traceEntry)
-	// #348 defect 1: the redirect's clearDownstream below may remove the
-	// gate from CompletedNodes while the executed path routes around it
-	// to the exit. Mark the gate recheck-pending so it stays visible to
-	// this check and the next retry re-enters at the gate itself; the
-	// flag clears when the gate actually re-executes (applyOutcome).
-	s.cp.SetGateRecheckPending(gateNodeID)
-	e.clearDownstream(target, s.cp)
-	s.cp.CurrentNode = target
-	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
-	return false, target, nil
 }
 
 // handleLoopRestart processes a loop-back to an already-completed node.

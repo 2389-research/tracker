@@ -30,6 +30,13 @@ type EngineResult struct {
 	// len(ValidationOverrides) > 0 AND the run reached the success exit;
 	// failure paths return fail/budget regardless of override presence.
 	ValidationOverrides []OverrideDetail
+	// WorkPreserveFailed is true when a TERMINAL halt path could not preserve a
+	// failed node's uncommitted work because the artifact git repo went
+	// unavailable and reattach failed (#423). The never-lose-work guarantee
+	// degraded; Status remains the original OutcomeFail (the original node
+	// failure is never masked). Zero value (false) on every healthy run, so the
+	// success-path serialization is unchanged.
+	WorkPreserveFailed bool
 }
 
 // OutcomeBudgetExceeded signals that a BudgetGuard halted the run.
@@ -286,6 +293,9 @@ func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 		Message:   "pipeline completed",
 	})
 
+	// Terminal-status rule: a success exit becomes validation_overridden if
+	// any override fired during the run. Failure paths return fail/budget
+	// regardless of override presence; only this success path flips.
 	status := OutcomeSuccess
 	if len(s.validationOverrides) > 0 {
 		status = OutcomeValidationOverridden
@@ -402,7 +412,7 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 	// died, or a cancellation mid-write. No-op on a clean tree. executeNode
 	// already appended this node's trace entry, so mirror the recorded ref
 	// onto it after the helper sets it on our local copy.
-	e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
+	preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 	if traceEntry.WIPRef != "" && len(s.trace.Entries) > 0 {
 		s.trace.Entries[len(s.trace.Entries)-1].WIPRef = traceEntry.WIPRef
 	}
@@ -411,6 +421,12 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 	s.pctx.ScopeToNode(currentNodeID)
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
+	// TERMINAL never-lose-work path (#423): if the artifact repo went
+	// unavailable and reattach failed, surface a HARD signal — Status stays
+	// the original OutcomeFail (original failure not masked) but the
+	// degradation is loud (escalateWorkPreserve emits EventWorkPreserveFailed
+	// and sets EngineResult.WorkPreserveFailed) and machine-detectable.
+	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 	return loopResult{
 		action: loopReturn,
 		result: &EngineResult{
@@ -421,6 +437,7 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 			Trace:               s.trace,
 			Usage:               s.trace.AggregateUsage(),
 			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
+			WorkPreserveFailed:  workPreserveFailed,
 		},
 		err: fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
 	}
@@ -739,15 +756,25 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	// BEFORE deciding to halt or route to a fallback, so green-but-uncommitted
 	// work is never discarded by the routing decision (#302). No-op on a clean
 	// tree; warns and skips when no git adapter is configured.
-	e.commitWIPBeforeRouting(s, nodeID, traceEntry)
+	//
+	// (#423) Two outcomes follow: strictFailureFallback may route this node
+	// onward to a safety node (MID-ROUTING — a preserve error stays a discarded
+	// WARNING so escalating cannot override the routing decision), or the run
+	// dead-stops with no onward edge (TERMINAL — the preserve error must
+	// hard-escalate). Capture the error here and branch on it at the terminal
+	// site below.
+	preserveErr := e.commitWIPBeforeRouting(s, nodeID, traceEntry)
 	// Before dead-stopping, consult the node/graph-level fallback_target so an
 	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
 	// instead of skipping every downstream node (#295). One-shot per node.
 	if node := e.graph.Nodes[nodeID]; node != nil {
-		if lr := e.strictFailureFallback(s, node, traceEntry); lr != nil {
+		if lr := e.strictFailureFallback(s, node, traceEntry, preserveErr); lr != nil {
 			return lr
 		}
 	}
+	// TERMINAL halt with no onward edge — hard-escalate an unrecoverable preserve
+	// failure (#423) so silently-lost work is surfaced.
+	workPreserveFailed := e.escalateWorkPreserve(s, nodeID, preserveErr)
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),
@@ -766,6 +793,7 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 			Trace:               s.trace,
 			Usage:               s.trace.AggregateUsage(),
 			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
+			WorkPreserveFailed:  workPreserveFailed,
 		},
 		err: fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
 	}
@@ -779,13 +807,27 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 // checkpoint) to prevent loop-backs from re-escalating forever. Returns an
 // advancing loopResult when a fallback resolves, or nil to let the caller
 // perform today's terminal halt.
-func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry) *loopResult {
+func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry, preserveErr error) *loopResult {
 	if s.cp.FallbackTaken[node.ID] {
 		return nil
 	}
 	fb := e.findFallbackTarget(node)
 	if fb == "" {
 		return nil
+	}
+	// MID-ROUTING: the preserve error is discarded so it cannot override this
+	// routing decision (the terminal branch in checkStrictFailure hard-escalates
+	// instead), but surface it once as a WARNING — never silently swallow a
+	// never-lose-work degradation (CLAUDE.md). Mirrors handleRetryExhausted's
+	// fallback branch (#428 review).
+	if preserveErr != nil {
+		e.emit(PipelineEvent{
+			Type:      EventWarning,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    node.ID,
+			Message:   fmt.Sprintf("could not preserve uncommitted work for node %q before routing to fallback %q: %v", node.ID, fb, preserveErr),
+		})
 	}
 	traceEntry.EdgeTo = fb
 	s.trace.AddEntry(*traceEntry)
