@@ -74,7 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records an exact external-tool invocation literal (a `gh`/`git` flag string) as
   a contract whose verification method is "the real tool accepts this literal," so
   a wrong-on-its-face literal (e.g. `gh ... -b -`) is flagged as unverifiable
-  rather than silently grepped-and-passed.
+  rather than silently grepped-and-passed. The `SpecLint` rule-(f)/(g) and
+  Mandated-tests sentinel changes are mirrored into the intentionally-duplicated
+  `SpecLint` node in `build_product_with_superspec.dip` so the two shipped copies
+  stay behaviorally identical (dedup tracked in #307) (#424 review).
 - **Sleep-aware budgets (#422, part A).** Opt-in `BudgetLimits.SleepAware` (CLI
   `--sleep-aware-budget`) excludes OS-suspend spans — e.g. a suspended laptop —
   from `max_wall_time` and `stall_timeout` accounting, so a machine that sleeps

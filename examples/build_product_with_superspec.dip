@@ -98,11 +98,29 @@ workflow BuildProductWithSuperspec
           value. A contract like "Idempotency-Key derived from
           review_id+sha" on a signature receiving neither is
           unimplementable as written.
-      (f) Mandated tests enumerated and assignable: list every test
-          SPEC.md mandates by name or by concrete behavior. This list
-          feeds the Decompose requirement-coverage table (issue
-          #300); a mandated test so vague no milestone could own it
-          is a finding.
+      (f) Mandated tests, spec-emitted values, and normative constants
+          enumerated and assignable: list every test SPEC.md mandates by
+          name or by concrete behavior, PLUS every spec-prescribed EMITTED
+          value (log event name, error code, status string) and every
+          constant SPEC.md marks "normative". This list feeds the Decompose
+          requirement-coverage table (issue #300) so none can be silently
+          unowned; a mandated test / emitted value / normative constant so
+          vague no milestone could own it is a finding. For each emitted
+          value and normative constant, note the required verification
+          shape: "a test asserts this exact value as a hard-coded
+          expectation (not via the production constant)".
+      (g) External-tool invocation literals verifiable: for every exact
+          external-tool invocation SPEC.md prescribes — a `gh` / `git` /
+          other CLI command with a specific flag string (e.g.
+          `gh pr create --head <owner>:<branch>`) — record the literal flag
+          string as a behavioral contract whose verification method is "the
+          real tool accepts this literal". A literal that is wrong on its
+          face against the tool's own flag grammar (the canonical case:
+          `gh ... -b -`, where `-b` expects an argument and `-` is consumed
+          as that argument, silently mis-parsing) is an UNVERIFIABLE
+          contract — flag it here rather than letting a downstream grep
+          "find the string" and pass. Detection keys on the SHAPE "spec
+          prescribes a literal CLI invocation", never on a specific tool.
 
       WARN — report in the artifact, do NOT fail the gate:
       (d) Checkable guarantees: behavioral guarantees phrased so they
@@ -119,8 +137,12 @@ workflow BuildProductWithSuperspec
       ## Warnings
       Rule (d)/(e) findings, same evidence shape — or "none".
       ## Mandated tests
-      Every rule-(f) test, one per line, each with its SPEC.md
-      source — or the single line "SPEC mandates no named tests".
+      Every rule-(f) item, one per line, each with its SPEC.md source and
+      its kind (test / emitted-value / normative-constant); emitted-value
+      and normative-constant lines must carry the verification shape "a
+      test asserts this exact value as a hard-coded expectation" — or, only
+      when SPEC.md mandates no rule-(f) items of ANY kind, the single line
+      "SPEC mandates no tests, emitted values, or normative constants".
 
       Then your terminal STATUS line:
       - zero critical findings -> STATUS:success (warnings alone never

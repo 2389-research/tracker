@@ -1921,10 +1921,13 @@ workflow BuildProduct
   tool ComputeReviewDiff
     label: "Compute Cumulative Review Diff"
     timeout: 60s
-    # Reviewers read the FILE (.ai/build/review-diff.md), not this node's stdout
-    # — which is only the short readiness marker. output_limit stays large so
-    # that if diff generation fails and we fall back to dumping git stderr, the
-    # diagnostic is not clipped in `tracker diagnose`.
+    # Reviewers read the FILE (.ai/build/review-diff.md), not this node's
+    # streams: stdout is only the short readiness marker and stderr is only the
+    # failure WARNING (any git error text is redirected INTO the file via 2>&1,
+    # not onto a node stream). So output_limit does not bound the diff/error
+    # content reviewers consume — it only caps this node's marker + warning
+    # streams as surfaced by `tracker diagnose`. Kept generous purely as harmless
+    # headroom so a future stderr diagnostic is never clipped.
     output_limit: 1048576
     command:
       set -u
