@@ -1,6 +1,8 @@
 //go:build !windows
 
-// ABOUTME: POSIX real implementation of the /dev/null device probe (#423).
+// ABOUTME: non-Windows real implementation of the /dev/null device probe (#423).
+// Build tag is !windows (mirrors device_probe_windows.go's windows-only stub); the
+// _posix filename is descriptive only — Go assigns no build meaning to it.
 package main
 
 import (
