@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -318,12 +317,18 @@ func TestMemoOffByDefault(t *testing.T) {
 	mu.Unlock()
 
 	// The on-disk checkpoint must have no memo_entries key (omitempty proves
-	// zero serialization footprint when the feature is off).
+	// zero serialization footprint when the feature is off). Parse into a generic
+	// map and assert key absence rather than substring-matching the raw JSON, which
+	// could false-positive on the value of an unrelated field.
 	data, err := os.ReadFile(cpPath)
 	if err != nil {
 		t.Fatalf("read checkpoint: %v", err)
 	}
-	if strings.Contains(string(data), "memo_entries") {
+	var cp map[string]any
+	if err := json.Unmarshal(data, &cp); err != nil {
+		t.Fatalf("unmarshal checkpoint: %v\n%s", err, data)
+	}
+	if _, ok := cp["memo_entries"]; ok {
 		t.Errorf("AC4: checkpoint must not contain memo_entries when feature is off:\n%s", data)
 	}
 }

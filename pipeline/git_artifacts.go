@@ -280,6 +280,35 @@ func (r *gitArtifactRepo) TreeFingerprint() (string, error) {
 // deletions reflected. The real index is never touched; the dangling blob/tree
 // objects it writes are unreferenced and reclaimed by git gc (same posture as
 // `git stash create`). Used only by TreeFingerprint.
+// seedTreeIndexFromHEAD populates the temp index (selected via GIT_INDEX_FILE in
+// env) from HEAD so a deleted-but-tracked file later registers as a removal under
+// `git add -A`. Probe HEAD FIRST so we can tell "truly unborn" (no commits
+// anywhere) from "HEAD exists but is unreadable/corrupt": only the unborn case may
+// proceed with an empty index. Every other failure must fail closed — silently
+// proceeding would make `git add -A` miss tracked deletions and yield a stale
+// fingerprint (a false cache hit) instead of the required miss.
+func (r *gitArtifactRepo) seedTreeIndexFromHEAD(env []string) error {
+	if _, headErr := r.gitEnv(env, "rev-parse", "--verify", "HEAD"); headErr != nil {
+		// HEAD did not resolve. Distinguish a truly-unborn repo (no commits at all)
+		// from a corrupt/unreadable HEAD: if any commit is reachable, HEAD is broken,
+		// so fail closed rather than fingerprint against an empty index.
+		out, err := r.gitEnv(env, "rev-list", "-n", "1", "--all")
+		if err != nil {
+			return fmt.Errorf("git rev-list --all probe for tree fingerprint: %w\n%s", err, out)
+		}
+		if strings.TrimSpace(out) != "" {
+			return fmt.Errorf("git HEAD unresolved but commits exist (corrupt HEAD?) for tree fingerprint: %w", headErr)
+		}
+		// no commits anywhere — truly unborn, proceed with an empty index
+		return nil
+	}
+	// HEAD resolves — read-tree must succeed; any error is hard.
+	if out, err := r.gitEnv(env, "read-tree", "HEAD"); err != nil {
+		return fmt.Errorf("git read-tree HEAD (temp index) for tree fingerprint: %w\n%s", err, out)
+	}
+	return nil
+}
+
 func (r *gitArtifactRepo) worktreeContentTree() (string, error) {
 	tmpDir, err := os.MkdirTemp("", "tracker-memo-index-")
 	if err != nil {
@@ -287,16 +316,8 @@ func (r *gitArtifactRepo) worktreeContentTree() (string, error) {
 	}
 	defer os.RemoveAll(tmpDir)
 	env := append(gitSafeEnv(), "GIT_INDEX_FILE="+filepath.Join(tmpDir, "index"))
-	// Seed from HEAD so a deleted-but-tracked file registers as a removal. A repo
-	// with no commits yet has no HEAD — that's fine, the index just starts empty.
-	// But fail closed on any OTHER read-tree failure: silently proceeding with an
-	// empty index would make `git add -A` miss tracked deletions and yield a stale
-	// fingerprint (a false cache hit) instead of the required miss.
-	if out, err := r.gitEnv(env, "read-tree", "HEAD"); err != nil {
-		if _, headErr := r.gitEnv(env, "rev-parse", "--verify", "HEAD"); headErr == nil {
-			return "", fmt.Errorf("git read-tree HEAD (temp index) for tree fingerprint: %w\n%s", err, out)
-		}
-		// no HEAD yet — proceed with an empty index
+	if err := r.seedTreeIndexFromHEAD(env); err != nil {
+		return "", err
 	}
 	if out, err := r.gitEnv(env, "add", "-A"); err != nil {
 		return "", fmt.Errorf("git add -A (temp index) for tree fingerprint: %w\n%s", err, out)
