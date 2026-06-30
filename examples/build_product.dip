@@ -698,8 +698,10 @@ workflow BuildProduct
       ## Risks and ambiguities
 
       ── SPEC-CONTRACT ARTIFACTS (issue #306) ──
-      Beyond the analysis above, derive TWO machine-checkable contract
-      artifacts from SPEC.md. Detection keys on the SHAPE of the prose
+      Beyond the analysis above, WRITE TWO machine-checkable contract
+      artifact FILES to disk at the exact paths below (both are required —
+      do not skip either; downstream nodes read them off disk). Derive their
+      content from SPEC.md. Detection keys on the SHAPE of the prose
       (modal verbs, timing/ordering phrases, contradiction between two
       statements) — NEVER on the product, language, or domain.
 

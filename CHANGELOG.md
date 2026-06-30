@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The superspec copy deliberately retains its higher model tier
   (`claude-opus-4-6` / `reasoning_effort: high` vs `claude-sonnet-4-6` / `medium`
   in `build_product.dip`), so the nodes are not byte-identical — only the spec-lint
-  contract they enforce is (#424 review).
+  contract they enforce is.
 - **Sandbox device-node hygiene preflight (#423).** Before any git or subprocess
   handler runs — on both fresh runs and resume — `applyGitPreflight` now verifies
   standard device nodes are usable (at minimum `/dev/null` is a readable+writable
