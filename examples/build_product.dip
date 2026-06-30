@@ -1996,20 +1996,29 @@ workflow BuildProduct
       # preserved output keeps it diagnosable.
       if [ "$DIFF_ERR" -ne 0 ] || [ ! -s "$OUT" ]; then
         echo "WARNING: review diff generation failed or produced no output; reviewers must read the working tree directly" >&2
-        CAPTURED=$(cat "$OUT" 2>/dev/null)
+        # Stream the captured git output through a temp file instead of slurping
+        # the whole artifact into a shell variable: a partial failure (e.g.
+        # name-status succeeds and writes a large diff, then `git diff` fails)
+        # can leave a large $OUT, and `CAPTURED=$(cat "$OUT")` would risk shell
+        # memory / arg-length limits — turning a recoverable diff failure into a
+        # node failure or OOM (#424 review). We can't `cat "$OUT"` into a
+        # redirect to "$OUT" (truncation race), so build the banner+block in a
+        # temp file and atomically mv it over the artifact.
+        TMP="${OUT}.tmp"
         {
           echo "# Review diff UNAVAILABLE — diff generation failed. Read the working tree directly."
           echo
-          if [ -n "$CAPTURED" ]; then
+          if [ -s "$OUT" ]; then
             echo "Captured git output (likely the underlying cause — e.g. safe.directory, corrupt repo, bad object):"
             echo
             echo '```'
-            printf '%s\n' "$CAPTURED"
+            cat "$OUT"
             echo '```'
           else
             echo "(no git output was captured)"
           fi
-        } > "$OUT"
+        } > "$TMP"
+        mv "$TMP" "$OUT"
       fi
       printf 'review-diff-ready'
 

@@ -46,7 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than silently grepped-and-passed. The `SpecLint` rule-(f)/(g) and
   Mandated-tests sentinel changes are mirrored into the intentionally-duplicated
   `SpecLint` node in `build_product_with_superspec.dip` so the two shipped copies
-  stay behaviorally identical (dedup tracked in #307) (#424 review).
+  keep the same prompt/rules and sentinel text in sync (dedup tracked in #307).
+  The superspec copy deliberately retains its higher model tier
+  (`claude-opus-4-6` / `reasoning_effort: high` vs `claude-sonnet-4-6` / `medium`
+  in `build_product.dip`), so the nodes are not byte-identical — only the spec-lint
+  contract they enforce is (#424 review).
 - **Sandbox device-node hygiene preflight (#423).** Before any git or subprocess
   handler runs — on both fresh runs and resume — `applyGitPreflight` now verifies
   standard device nodes are usable (at minimum `/dev/null` is a readable+writable
