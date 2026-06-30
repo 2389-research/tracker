@@ -245,6 +245,90 @@ func (r *gitArtifactRepo) CommitWIP(nodeID string) (string, error) {
 	return ref, nil
 }
 
+// TreeFingerprint returns a conservative content hash of the working tree: the
+// porcelain status (path + status markers) concatenated with a tree object SHA
+// that hashes the actual CONTENT of every tracked-modified AND untracked file.
+// The content tree is built in a throwaway index so the real index is never
+// touched (side-effect-free).
+//
+// NOTE: the current memoization path (#421) does NOT use this. A `writable_paths`
+// node is an unconditional hard miss in computeMemoKey, and this fingerprint is
+// taken from the ARTIFACT repo (`<artifactDir>/<runID>`) — a different directory
+// than the agent's session `working_dir` where side effects actually land — so
+// it could not validate a side-effecting node's inputs anyway. TreeFingerprint
+// is retained as the building block for a future fingerprint of the agent's real
+// `working_dir`; until that lands it is unused by the memo key.
+//
+// Reuses r.git/gitEnv so the #399 GIT_DIR-leak guard (gitSafeEnv) applies. Any
+// git error is returned (not swallowed): the caller treats it as a cache miss
+// and runs the handler rather than replaying on an uncertain key.
+func (r *gitArtifactRepo) TreeFingerprint() (string, error) {
+	status, err := r.git("status", "--porcelain=v1", "-z")
+	if err != nil {
+		return "", fmt.Errorf("git status for tree fingerprint: %w\n%s", err, status)
+	}
+	tree, err := r.worktreeContentTree()
+	if err != nil {
+		return "", err
+	}
+	return status + "\x00" + tree, nil
+}
+
+// worktreeContentTree stages the FULL worktree (tracked-modified + untracked,
+// honoring .gitignore) into a throwaway index seeded from HEAD, then returns the
+// resulting tree object SHA — a content hash over actual file bytes, with
+// deletions reflected. The real index is never touched; the dangling blob/tree
+// objects it writes are unreferenced and reclaimed by git gc (same posture as
+// `git stash create`). Used only by TreeFingerprint.
+// seedTreeIndexFromHEAD populates the temp index (selected via GIT_INDEX_FILE in
+// env) from HEAD so a deleted-but-tracked file later registers as a removal under
+// `git add -A`. Probe HEAD FIRST so we can tell "truly unborn" (no commits
+// anywhere) from "HEAD exists but is unreadable/corrupt": only the unborn case may
+// proceed with an empty index. Every other failure must fail closed — silently
+// proceeding would make `git add -A` miss tracked deletions and yield a stale
+// fingerprint (a false cache hit) instead of the required miss.
+func (r *gitArtifactRepo) seedTreeIndexFromHEAD(env []string) error {
+	if _, headErr := r.gitEnv(env, "rev-parse", "--verify", "HEAD"); headErr != nil {
+		// HEAD did not resolve. Distinguish a truly-unborn repo (no commits at all)
+		// from a corrupt/unreadable HEAD: if any commit is reachable, HEAD is broken,
+		// so fail closed rather than fingerprint against an empty index.
+		out, err := r.gitEnv(env, "rev-list", "-n", "1", "--all")
+		if err != nil {
+			return fmt.Errorf("git rev-list --all probe for tree fingerprint: %w\n%s", err, out)
+		}
+		if strings.TrimSpace(out) != "" {
+			return fmt.Errorf("git HEAD unresolved but commits exist (corrupt HEAD?) for tree fingerprint: %w", headErr)
+		}
+		// no commits anywhere — truly unborn, proceed with an empty index
+		return nil
+	}
+	// HEAD resolves — read-tree must succeed; any error is hard.
+	if out, err := r.gitEnv(env, "read-tree", "HEAD"); err != nil {
+		return fmt.Errorf("git read-tree HEAD (temp index) for tree fingerprint: %w\n%s", err, out)
+	}
+	return nil
+}
+
+func (r *gitArtifactRepo) worktreeContentTree() (string, error) {
+	tmpDir, err := os.MkdirTemp("", "tracker-memo-index-")
+	if err != nil {
+		return "", fmt.Errorf("temp index dir for tree fingerprint: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	env := append(gitSafeEnv(), "GIT_INDEX_FILE="+filepath.Join(tmpDir, "index"))
+	if err := r.seedTreeIndexFromHEAD(env); err != nil {
+		return "", err
+	}
+	if out, err := r.gitEnv(env, "add", "-A"); err != nil {
+		return "", fmt.Errorf("git add -A (temp index) for tree fingerprint: %w\n%s", err, out)
+	}
+	tree, err := r.gitEnv(env, "write-tree")
+	if err != nil {
+		return "", fmt.Errorf("git write-tree (temp index) for tree fingerprint: %w\n%s", err, tree)
+	}
+	return strings.TrimSpace(tree), nil
+}
+
 // ensureHealthy probes the artifact repo's git dir and, if it has gone
 // unreachable (e.g. lost across a sandbox suspend, #423), attempts a single
 // reattach: clear the latched failure and re-run the idempotent Init.
@@ -308,9 +392,16 @@ func (r *gitArtifactRepo) checkRootedHere() error {
 // git runs a git command in r.dir with a sanitized environment.
 // Returns combined output and any error.
 func (r *gitArtifactRepo) git(args ...string) (string, error) {
+	return r.gitEnv(gitSafeEnv(), args...)
+}
+
+// gitEnv runs a git command in r.dir with an explicit environment (already
+// sanitized by the caller). Used by TreeFingerprint to inject a throwaway
+// GIT_INDEX_FILE without touching the real index.
+func (r *gitArtifactRepo) gitEnv(env []string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", r.dir}, args...)
 	cmd := exec.Command("git", cmdArgs...) //nolint:gosec // controlled args
-	cmd.Env = gitSafeEnv()
+	cmd.Env = env
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

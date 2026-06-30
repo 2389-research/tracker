@@ -247,32 +247,43 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		currentNodeID = s.cp.CurrentNode
 	}
 
-	resumeVisited := make(map[string]bool)
+	if result, err, done := e.runLoop(ctx, s, currentNodeID); !done {
+		return result, err
+	}
 
+	return e.buildSuccessResult(s), nil
+}
+
+// runLoop drives the main node-processing loop. It returns (result, err, false)
+// when a node iteration produced a terminal result (return) — the caller
+// returns it directly; it returns (nil, nil, true) when the loop broke on a
+// successful exit, signaling the caller to build the success result.
+func (e *Engine) runLoop(ctx context.Context, s *runState, currentNodeID string) (*EngineResult, error, bool) {
+	resumeVisited := make(map[string]bool)
 	for {
 		if err := ctx.Err(); err != nil {
-			return e.cancelledResult(s, err)
+			result, cerr := e.cancelledResult(s, err)
+			return result, cerr, false
 		}
 
 		lr := e.processNode(ctx, s, currentNodeID, resumeVisited)
 		switch lr.action {
 		case loopReturn:
-			return lr.result, lr.err
+			return lr.result, lr.err, false
 		case loopBreak:
-			goto done
+			return nil, nil, true
 		case loopContinue:
 			currentNodeID = lr.nextNodeID
-			continue
 		}
 	}
-
-done:
-	return e.successResult(s), nil
 }
 
-// successResult finalizes the trace, emits EventPipelineCompleted, and builds
-// the terminal success EngineResult. Extracted from Run for the complexity gate.
-func (e *Engine) successResult(s *runState) *EngineResult {
+// buildSuccessResult emits the completion event and assembles the terminal
+// success EngineResult. Terminal-status rule: a success exit becomes
+// validation_overridden if any override fired during the run. Failure paths
+// return fail/budget regardless of override presence; only this success path
+// flips.
+func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 	s.trace.EndTime = time.Now()
 
 	e.emit(PipelineEvent{
@@ -332,6 +343,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	s.pctx.Set(ContextKeyOutcome, "")
 	s.pctx.Set(ContextKeyPreferredLabel, "")
 	s.pctx.Set(ContextKeySuggestedNextNodes, "")
+	s.pendingMemoKey = ""
 
 	// #352 item 2: human_response is one-shot. Record the value visible to
 	// this node so it can be cleared after the first prompt-consuming node
@@ -340,44 +352,103 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 
 	execNode := e.prepareExecNode(node, s)
 
-	outcome, traceEntry, err := e.executeNode(ctx, s, currentNodeID, execNode)
-	if err != nil {
-		// Preserve any dirty (possibly green) tree before this terminal handler
-		// error halts the run (#302) — e.g. a tool/agent that wrote files then
-		// died, or a cancellation mid-write. No-op on a clean tree. executeNode
-		// already appended this node's trace entry, so mirror the recorded ref
-		// onto it after the helper sets it on our local copy.
-		preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, &traceEntry)
-		if traceEntry.WIPRef != "" && len(s.trace.Entries) > 0 {
-			s.trace.Entries[len(s.trace.Entries)-1].WIPRef = traceEntry.WIPRef
-		}
-		// Scope any keys written before the error so checkpoints and downstream
-		// nodes can still access this node's partial output via the scoped namespace.
-		s.pctx.ScopeToNode(currentNodeID)
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
-		s.trace.EndTime = time.Now()
-		// TERMINAL never-lose-work path (#423): if the artifact repo went
-		// unavailable and reattach failed, surface a HARD signal — Status stays
-		// the original OutcomeFail (original failure not masked) but the
-		// degradation is loud (escalateWorkPreserve emits EventWorkPreserveFailed
-		// and sets EngineResult.WorkPreserveFailed) and machine-detectable.
-		workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
-		return loopResult{
-			action: loopReturn,
-			result: &EngineResult{
-				RunID:               s.runID,
-				Status:              OutcomeFail,
-				CompletedNodes:      s.cp.CompletedNodes,
-				Context:             s.pctx.Snapshot(),
-				Trace:               s.trace,
-				Usage:               s.trace.AggregateUsage(),
-				ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-				WorkPreserveFailed:  workPreserveFailed,
-			},
-			err: fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
-		}
+	// #421: opt-in node-output memoization — replay a prior successful outcome
+	// when resolved inputs match, without invoking the handler. Returns a
+	// non-nil result only when a replay actually fires.
+	if lr := e.maybeReplayMemoized(ctx, s, currentNodeID, node, execNode, preHumanResponse); lr != nil {
+		return *lr
 	}
 
+	outcome, traceEntry, err := e.executeNode(ctx, s, currentNodeID, execNode)
+	if err != nil {
+		return e.handleNodeError(s, currentNodeID, &traceEntry, err)
+	}
+
+	return e.finishNode(ctx, s, currentNodeID, node, execNode, outcome, &traceEntry, preHumanResponse)
+}
+
+// maybeReplayMemoized handles the #421 memoization lookup at the top of a node
+// iteration. When the node opted in and its resolved-input hash matches a prior
+// successful execution (in this run or a resumed checkpoint), it returns the
+// replayed loopResult; otherwise it records the pending key (for the store
+// site) and returns nil so the handler runs. A node that opted in but is not
+// memoizable (computeMemoKey ok=false) simply runs the handler live — that is a
+// deterministic, by-design hard miss (currently only writable_paths side
+// effects), never a runtime computation failure, so it is NOT warned about
+// (#425 review). The conservative "never replay on an uncertain key" contract
+// is enforced inside computeMemoKey, which returns ok=false rather than a
+// best-guess key.
+func (e *Engine) maybeReplayMemoized(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, preHumanResponse string) *loopResult {
+	if !memoizeEnabled(execNode) {
+		return nil
+	}
+	key, ok := e.computeMemoKey(s, execNode)
+	if !ok {
+		return nil // not memoizable (policy hard miss) — run the handler live
+	}
+	s.pendingMemoKey = key
+	rec, hit := s.cp.GetMemo(key)
+	if !hit {
+		return nil
+	}
+	// Only successful outcomes are ever stored (PutMemo is gated on
+	// OutcomeSuccess), but enforce the "failures never replay" contract on the
+	// read side too: a non-success record can only come from a corrupted or
+	// hand-edited checkpoint, so treat it as a miss and re-run the node live
+	// rather than replaying a stored failure into the routing decision (#425
+	// review).
+	if rec.Status != string(OutcomeSuccess) {
+		return nil
+	}
+	lr := e.replayMemoizedNode(ctx, s, currentNodeID, node, execNode, rec, preHumanResponse)
+	return &lr
+}
+
+// handleNodeError builds the terminal-fail loopResult for a handler error,
+// preserving any dirty (possibly green) tree before the run halts (#302).
+func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *TraceEntry, err error) loopResult {
+	// Preserve any dirty (possibly green) tree before this terminal handler
+	// error halts the run (#302) — e.g. a tool/agent that wrote files then
+	// died, or a cancellation mid-write. No-op on a clean tree. executeNode
+	// already appended this node's trace entry, so mirror the recorded ref
+	// onto it after the helper sets it on our local copy.
+	preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
+	if traceEntry.WIPRef != "" && len(s.trace.Entries) > 0 {
+		s.trace.Entries[len(s.trace.Entries)-1].WIPRef = traceEntry.WIPRef
+	}
+	// Scope any keys written before the error so checkpoints and downstream
+	// nodes can still access this node's partial output via the scoped namespace.
+	s.pctx.ScopeToNode(currentNodeID)
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	s.trace.EndTime = time.Now()
+	// TERMINAL never-lose-work path (#423): if the artifact repo went
+	// unavailable and reattach failed, surface a HARD signal — Status stays
+	// the original OutcomeFail (original failure not masked) but the
+	// degradation is loud (escalateWorkPreserve emits EventWorkPreserveFailed
+	// and sets EngineResult.WorkPreserveFailed) and machine-detectable.
+	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
+	return loopResult{
+		action: loopReturn,
+		result: &EngineResult{
+			RunID:               s.runID,
+			Status:              OutcomeFail,
+			CompletedNodes:      s.cp.CompletedNodes,
+			Context:             s.pctx.Snapshot(),
+			Trace:               s.trace,
+			Usage:               s.trace.AggregateUsage(),
+			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
+			WorkPreserveFailed:  workPreserveFailed,
+		},
+		err: fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
+	}
+}
+
+// finishNode runs the shared post-handler tail: apply outcome, scope, drain
+// steering, retry/human-response handling, status, and edge advance. Extracted
+// from processActiveNode so the memoization replay path (replayMemoizedNode)
+// reuses the IDENTICAL tail without re-invoking the handler (#421), and to keep
+// processActiveNode under the complexity gate.
+func (e *Engine) finishNode(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, outcome *Outcome, traceEntry *TraceEntry, preHumanResponse string) loopResult {
 	e.applyOutcome(s, currentNodeID, outcome)
 
 	// Copy every key written during this node's execution into the per-node
@@ -397,7 +468,7 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 	e.drainSteering(s)
 
 	if outcome.Status == string(OutcomeRetry) {
-		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, &traceEntry)
+		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, traceEntry)
 	}
 
 	// After the retry check: a retrying node re-executes and must still see
@@ -406,11 +477,54 @@ func (e *Engine) processActiveNode(ctx context.Context, s *runState, currentNode
 
 	e.handleOutcomeStatus(s, currentNodeID, outcome.Status)
 
-	if currentNodeID == e.graph.ExitNode {
-		return e.processExitNode(s, currentNodeID, outcome.Status, &traceEntry)
+	// #421: memoize ONLY successful outcomes (never replay a failure). Reached
+	// only when this node opted in and a key was computed (pendingMemoKey set);
+	// the retry path returned above, so fail/unknown never reach here as success.
+	if s.pendingMemoKey != "" && outcome.Status == string(OutcomeSuccess) {
+		s.cp.PutMemo(s.pendingMemoKey, outcome)
 	}
 
-	return e.advanceToNextNode(s, currentNodeID, &traceEntry)
+	if currentNodeID == e.graph.ExitNode {
+		return e.processExitNode(s, currentNodeID, outcome.Status, traceEntry)
+	}
+
+	return e.advanceToNextNode(s, currentNodeID, traceEntry)
+}
+
+// replayMemoizedNode replays a stored successful outcome (#421) instead of
+// invoking the handler: it synthesizes the Outcome + a marker trace entry and
+// runs the SAME post-handler tail (finishNode) as a live execution, so edge
+// routing, scoping, and checkpointing are identical. The handler is never
+// called, so a node memoized on a prior pass keeps its handler call count flat
+// across re-entries (acceptance criterion 1).
+func (e *Engine) replayMemoizedNode(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, rec MemoEntry, preHumanResponse string) loopResult {
+	e.emit(PipelineEvent{
+		Type:      EventNodeMemoReplayed,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    currentNodeID,
+		Message:   fmt.Sprintf("memoize: replayed prior successful outcome for node %q", currentNodeID),
+	})
+
+	// Deep-copy the reference-typed fields so the replay Outcome (and the
+	// s.lastOutcome copy applyOutcome makes from it) can never mutate the
+	// checkpoint memo record backing rec — the record must stay immutable
+	// across replays.
+	outcome := memoOutcome(rec)
+	traceEntry := TraceEntry{
+		Timestamp:   time.Now(),
+		NodeID:      currentNodeID,
+		HandlerName: "<memoized>",
+		Status:      rec.Status,
+	}
+	// pendingMemoKey is already set to this node's key; PutMemo on the replay is
+	// an idempotent no-op (same key, same record), so finishNode's store branch
+	// is harmless here. Thread the run's ctx (not context.Background) so any
+	// cancellation/deadline still applies — and so a non-success memo record
+	// (e.g. a hand-edited/corrupted checkpoint) routes through ctx-aware
+	// finishNode work correctly rather than dropping the run's context (#425
+	// review).
+	return e.finishNode(ctx, s, currentNodeID, node, execNode, outcome, &traceEntry, preHumanResponse)
 }
 
 // consumesHumanResponse reports whether executing the node feeds pipeline

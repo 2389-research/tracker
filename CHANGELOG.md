@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Opt-in content-hash node-output memoization (#421).** Annotate an agent
+  node with `params: { memoize: true }` and a loop-restart that re-enters the
+  already-green node with identical resolved inputs now REPLAYS the stored
+  successful outcome instead of re-running the handler. The memo key is a
+  SHA-256 over the node's resolved attrs (post-interpolation prompt/command)
+  and the bare-namespace context it reads — including the `last_response` and
+  `human_response` prompt inputs injected into every agent prompt, which are
+  hashed unconditionally so an intervening node's new critique invalidates the
+  replay. Memoization is **agent-node-only**. A node declaring `writable_paths`
+  has working-tree side effects and is **never memoized** — an unconditional hard
+  cache miss, so it always re-runs (see the `writable_paths` note below for why).
+  Any input change
+  yields a different key and re-runs the node. Only successful outcomes are
+  memoized (failures never replay), the memo table is persisted in
+  `checkpoint.json` so replay survives resume. Off by default: a `.dip` file
+  lacking the attr has byte-identical behavior and writes no `memo_entries`.
+  Emits `node_memo_replayed` on a replay. Review hardening: the memo key now
+  re-includes a bare key the node self-aliased on a prior pass once an
+  intervening node OVERWRITES it (so replay can't serve stale output against a
+  changed input); the persisted `MemoEntry` now carries the
+  `PreferredLabel`/`SuggestedNextNodes` routing hints so a replayed node follows
+  the same edge the original did; replayed trace entries are stamped with a real
+  timestamp; the replay Outcome deep-copies its `ContextUpdates`/`SuggestedNextNodes`
+  so downstream mutation can never corrupt the persisted memo record; and the
+  replay path threads the run's `ctx` (instead of `context.Background()`) into
+  `finishNode` so cancellation/deadlines still apply; and the replay lookup now
+  enforces the "failures never replay" contract on the READ side too — a
+  non-success memo record (only reachable via a corrupted/hand-edited checkpoint,
+  since the store site is gated on `OutcomeSuccess`) is treated as a cache miss
+  and the node re-runs live rather than replaying a stored failure into routing.
+  A node declaring `writable_paths` is an **unconditional** hard
+  miss — it always re-runs and is never replayed, with no warning (a by-design
+  policy skip, not a key-computation failure). The miss is keyed on attr
+  **presence**, not a non-empty value, mirroring `AgentConfig.WritablePathsSet`
+  and the fs-jail gate — so the adapter's `writable_paths: ""` bypass-defense
+  sentinel still refuses memoization (#425 review). Such a node mutates and reads the
+  agent's session `working_dir`, but tracker can only fingerprint the ARTIFACT
+  repo (`<artifactDir>/<runID>`), a different directory — so any content
+  fingerprint would prove nothing about the tree the agent actually read/wrote
+  and could replay against a changed working tree. Until tracker can fingerprint
+  the agent's real `working_dir`, side-effecting nodes are simply not memoizable
+  (the `TreeFingerprint` helper is retained as the building block for that
+  follow-up, but is not used in the memo key today).
 - **`build_product` now derives spec-contract artifacts (#306).** `ReadSpec`
   additionally writes `.ai/decisions/spec-ambiguities.md` (one DEFINITE ruling
   per detected SPEC.md contradiction) and `.ai/decisions/behavioral-contracts.md`

@@ -59,9 +59,31 @@ type Checkpoint struct {
 	// checkpoints (absent = "no overrides happened").
 	ValidationOverrides []OverrideDetail `json:"validation_overrides,omitempty"`
 
+	// MemoEntries maps a content-hash memo key to a stored SUCCESSFUL outcome
+	// projection (#421). Deliberately NOT cleared by clearDownstream — replay
+	// must survive loop restarts; a changed input yields a different key and
+	// misses naturally. The map round-trips natively through JSON (no derived
+	// set to rebuild, unlike completedSet). omitempty keeps pre-feature
+	// checkpoints byte-identical (default-off acceptance criterion).
+	MemoEntries map[string]MemoEntry `json:"memo_entries,omitempty"`
+
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
 	completedSet map[string]bool `json:"-"`
+}
+
+// MemoEntry is the JSON-tagged, serializable projection of a successful Outcome
+// (which has no JSON tags) persisted in the checkpoint for memoization (#421).
+// Status, ContextUpdates, and the routing hints (PreferredLabel,
+// SuggestedNextNodes) are replayed — the hints are required so a memoized node
+// that selected its next edge via them replays onto the SAME path the original
+// execution took (#425 review). Other Outcome fields are accounting artifacts
+// the replay path does not need.
+type MemoEntry struct {
+	Status             string            `json:"status"`
+	ContextUpdates     map[string]string `json:"context_updates,omitempty"`
+	PreferredLabel     string            `json:"preferred_label,omitempty"`
+	SuggestedNextNodes []string          `json:"suggested_next_nodes,omitempty"`
 }
 
 // ensureSet lazily initializes the completed set from the slice.
@@ -168,6 +190,38 @@ func (cp *Checkpoint) ClearCompleted(nodeID string) {
 			break
 		}
 	}
+}
+
+// PutMemo records a successful outcome under the given content-hash key (#421).
+// ContextUpdates is deep-copied so a later pctx mutation cannot retroactively
+// corrupt the stored record.
+func (cp *Checkpoint) PutMemo(key string, o *Outcome) {
+	if cp.MemoEntries == nil {
+		cp.MemoEntries = make(map[string]MemoEntry)
+	}
+	cu := make(map[string]string, len(o.ContextUpdates))
+	for k, v := range o.ContextUpdates {
+		cu[k] = v
+	}
+	var snn []string
+	if len(o.SuggestedNextNodes) > 0 {
+		snn = append(snn, o.SuggestedNextNodes...)
+	}
+	cp.MemoEntries[key] = MemoEntry{
+		Status:             o.Status,
+		ContextUpdates:     cu,
+		PreferredLabel:     o.PreferredLabel,
+		SuggestedNextNodes: snn,
+	}
+}
+
+// GetMemo returns the stored outcome projection for a key, if any (#421).
+func (cp *Checkpoint) GetMemo(key string) (MemoEntry, bool) {
+	if cp.MemoEntries == nil {
+		return MemoEntry{}, false
+	}
+	e, ok := cp.MemoEntries[key]
+	return e, ok
 }
 
 // SaveCheckpoint writes the checkpoint to disk as JSON, creating directories as needed.

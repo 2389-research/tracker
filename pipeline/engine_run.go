@@ -316,6 +316,15 @@ type runState struct {
 	// as read-only here. Mutating those fields through s.lastOutcome would
 	// silently corrupt the handler's outcome value (and vice versa).
 	lastOutcome Outcome
+
+	// pendingMemoKey is the content-hash memo key (#421) computed for the node
+	// currently executing, threaded from the lookup site to the store site so
+	// the memo key is computed once per entry and the store uses the exact key
+	// the lookup did. Empty when the node did not opt into memoize or is not
+	// memoizable (e.g. writable_paths side effects → unconditional hard miss) —
+	// neither GetMemo nor PutMemo is reached in that case (default-off
+	// guarantee). Reset at the top of processActiveNode.
+	pendingMemoKey string
 }
 
 // appendOverride appends an OverrideDetail to BOTH the in-memory hot-path
