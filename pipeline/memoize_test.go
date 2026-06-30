@@ -552,7 +552,7 @@ func TestMemoKeyWritablePathsAlwaysMissesWithLiveRepo(t *testing.T) {
 // A PRESENT-but-EMPTY writable_paths attr (writable_paths:"") is still a hard
 // miss. The adapter emits that sentinel as a bypass-defense (an empty glob set
 // jails the node to nothing rather than dropping the signal), and the jail keys
-// on presence via AgentConfig.WritablePathsSet — so memoization must too, or a
+// on presence via AgentNodeConfig.WritablePathsSet — so memoization must too, or a
 // side-effecting node could be replayed (#425 review).
 func TestMemoKeyWritablePathsEmptyStillMisses(t *testing.T) {
 	g := NewGraph("memo_tree_empty")

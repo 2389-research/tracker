@@ -92,7 +92,7 @@ func (e *Engine) computeMemoKey(s *runState, execNode *Node) (string, bool) {
 	// fingerprint the agent's real working_dir, side-effecting nodes are not
 	// memoizable (CLAUDE.md: over-invalidate, never replay stale).
 	//
-	// Keyed on attr PRESENCE, not non-emptiness, to mirror AgentConfig's
+	// Keyed on attr PRESENCE, not non-emptiness, to mirror AgentNodeConfig's
 	// WritablePathsSet (node_config.go) and the jail gate (codergen_jail.go): the
 	// adapter can emit writable_paths:"" as a bypass-defense sentinel (an empty
 	// glob set jails the node to nothing rather than silently dropping the
