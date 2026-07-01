@@ -95,7 +95,10 @@ func dispatchPipelineCommands(cfg runConfig) (error, bool) {
 
 func executeVersion() error {
 	// Load env so provider status reflects .env files.
-	wd, _ := os.Getwd()
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve working directory: %w", err)
+	}
 	if err := loadEnvFiles(wd); err != nil {
 		return err
 	}
