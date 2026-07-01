@@ -1,5 +1,5 @@
 // ABOUTME: Model catalog providing a registry of known LLM models and their capabilities.
-// ABOUTME: Supports lookup by ID/alias, listing by provider, and filtering by capability.
+// ABOUTME: Supports lookup by ID/alias and listing by provider.
 package llm
 
 // ModelInfo describes a known LLM model and its capabilities.
@@ -18,8 +18,8 @@ type ModelInfo struct {
 }
 
 // defaultCatalog is the built-in registry of known models.
-// Each provider section is ordered newest-first so GetLatestModel returns the
-// most recent model for a given capability.
+// Each provider section is ordered newest-first so ListModels returns each
+// provider's most recent models first.
 var defaultCatalog = []ModelInfo{
 	// ── Anthropic ────────────────────────────────────────────
 	{
@@ -353,38 +353,4 @@ func ListModels(provider string) []ModelInfo {
 		}
 	}
 	return result
-}
-
-// GetLatestModel returns the first model matching the given provider and
-// optional capability filter. Supported capability values are "reasoning",
-// "vision", and "tools". Pass an empty string for no capability filter.
-// Returns nil if no model matches.
-func GetLatestModel(provider string, capability string) *ModelInfo {
-	for i := range defaultCatalog {
-		m := &defaultCatalog[i]
-		if m.Provider != provider {
-			continue
-		}
-		if !matchesCapability(m, capability) {
-			continue
-		}
-		return m
-	}
-	return nil
-}
-
-// matchesCapability checks whether a model supports the requested capability.
-func matchesCapability(m *ModelInfo, capability string) bool {
-	switch capability {
-	case "reasoning":
-		return m.SupportsReasoning
-	case "vision":
-		return m.SupportsVision
-	case "tools":
-		return m.SupportsTools
-	case "":
-		return true
-	default:
-		return false
-	}
 }

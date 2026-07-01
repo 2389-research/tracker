@@ -20,13 +20,11 @@ var _ handlers.InterviewInterviewer = (*AutopilotTUIInterviewer)(nil)
 // MsgGateAutopilot tells the TUI to show the autopilot decision in the modal
 // for a brief moment, then auto-close by sending the reply.
 type MsgGateAutopilot struct {
-	NodeID    string
-	Prompt    string
-	Decision  string
-	Reasoning string
-	Labels    []string
-	Default   string
-	ReplyCh   chan<- string
+	Prompt   string
+	Decision string
+	Labels   []string
+	Default  string
+	ReplyCh  chan<- string
 }
 
 // AutopilotTUIInterviewer wraps an AutopilotInterviewer and routes its
@@ -50,7 +48,7 @@ func (a *AutopilotTUIInterviewer) Ask(prompt string, choices []string, defaultCh
 	if err != nil {
 		return "", err
 	}
-	a.flashDecision(prompt, decision, "", choices, defaultChoice)
+	a.flashDecision(prompt, decision, choices, defaultChoice)
 	return decision, nil
 }
 
@@ -59,7 +57,7 @@ func (a *AutopilotTUIInterviewer) AskFreeform(prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	a.flashDecision(prompt, decision, "", nil, "")
+	a.flashDecision(prompt, decision, nil, "")
 	return decision, nil
 }
 
@@ -68,7 +66,7 @@ func (a *AutopilotTUIInterviewer) AskFreeformWithLabels(prompt string, labels []
 	if err != nil {
 		return "", err
 	}
-	a.flashDecision(prompt, decision, "", labels, defaultLabel)
+	a.flashDecision(prompt, decision, labels, defaultLabel)
 	return decision, nil
 }
 
@@ -84,7 +82,7 @@ func (a *AutopilotTUIInterviewer) AskInterview(questions []handlers.Question, pr
 		return nil, err
 	}
 	summary := fmt.Sprintf("Autopilot answered %d questions", len(result.Questions))
-	a.flashDecision("", summary, "", nil, "")
+	a.flashDecision("", summary, nil, "")
 	return result, nil
 }
 
@@ -98,16 +96,15 @@ func (a *AutopilotTUIInterviewer) AskInterview(questions []handlers.Question, pr
 // the timer goroutine or a user action), it calls close(done) to signal the
 // goroutine to exit. The goroutine's select on <-done ensures it never
 // outlives the caller.
-func (a *AutopilotTUIInterviewer) flashDecision(prompt, decision, reasoning string, labels []string, defaultLabel string) {
+func (a *AutopilotTUIInterviewer) flashDecision(prompt, decision string, labels []string, defaultLabel string) {
 	ch := make(chan string, 1)
 	done := make(chan struct{})
 	a.send(MsgGateAutopilot{
-		Prompt:    prompt,
-		Decision:  decision,
-		Reasoning: reasoning,
-		Labels:    labels,
-		Default:   defaultLabel,
-		ReplyCh:   ch,
+		Prompt:   prompt,
+		Decision: decision,
+		Labels:   labels,
+		Default:  defaultLabel,
+		ReplyCh:  ch,
 	})
 	// Give the TUI time to render the decision, then auto-close.
 	go func() {
@@ -134,9 +131,4 @@ func (a *AutopilotTUIInterviewer) flashDecision(prompt, decision, reasoning stri
 	a.send(MsgModalDismiss{})
 	// Small gap so the dismiss renders before the next node starts.
 	time.Sleep(100 * time.Millisecond)
-}
-
-// DecisionString formats the autopilot decision for display.
-func DecisionString(decision string) string {
-	return fmt.Sprintf("Autopilot chose: %s", decision)
 }

@@ -26,7 +26,6 @@ type clientConfig struct {
 	providers       map[string]ProviderAdapter
 	defaultProvider string
 	middleware      []Middleware
-	traceObservers  []TraceObserver
 }
 
 // WithProvider registers a provider adapter with the client.
@@ -47,15 +46,6 @@ func WithDefaultProvider(name string) ClientOption {
 func WithMiddleware(mw Middleware) ClientOption {
 	return func(c *clientConfig) {
 		c.middleware = append(c.middleware, mw)
-	}
-}
-
-// WithTraceObserver registers a live trace observer for completions.
-func WithTraceObserver(obs TraceObserver) ClientOption {
-	return func(c *clientConfig) {
-		if obs != nil {
-			c.traceObservers = append(c.traceObservers, obs)
-		}
 	}
 }
 
@@ -84,7 +74,6 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 		providers:       cfg.providers,
 		defaultProvider: cfg.defaultProvider,
 		middleware:      cfg.middleware,
-		traceObservers:  cfg.traceObservers,
 	}, nil
 }
 

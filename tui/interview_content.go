@@ -614,15 +614,6 @@ func (ic *InterviewContent) cancel() tea.Cmd {
 	return ic.cancelForm()
 }
 
-// wrapText wraps text to fit within the interview content width with a left indent.
-func (ic *InterviewContent) wrapText(text string, indent int) string {
-	maxW := ic.width - indent - 2 // 2 for margin
-	if maxW < 20 {
-		maxW = 20
-	}
-	return lipgloss.NewStyle().Width(maxW).Render(text)
-}
-
 // View renders the interview form — one question at a time with progress summary.
 func (ic *InterviewContent) View() string {
 	var sb strings.Builder

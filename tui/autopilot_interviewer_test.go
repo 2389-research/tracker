@@ -238,13 +238,6 @@ func TestAutopilotTUIInterviewerAskInterviewNoSupport(t *testing.T) {
 	}
 }
 
-func TestDecisionString(t *testing.T) {
-	got := DecisionString("approve")
-	if got != "Autopilot chose: approve" {
-		t.Errorf("expected 'Autopilot chose: approve', got %q", got)
-	}
-}
-
 func TestAutopilotTUIInterviewer_Actor(t *testing.T) {
 	// Actor() doesn't touch the inner autopilot or send func — zero-value is fine.
 	var iv handlers.Interviewer = &AutopilotTUIInterviewer{}
