@@ -219,6 +219,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marked the routing key on each labeled human-gate edge with `choice:` (DIP150),
   leaving `label:` for display — no change to the suite's semantic purpose of
   exercising every human-gate mode.
+- **Silent error swallowing in the Gemini translator, TUI review, and CLI env
+  loading (#397).** The Google adapter now propagates tool-call argument
+  (un)marshal errors (`translateToolCallPart`, `extractCandidateContent`, and the
+  streaming `processGeminiPart` which emits an `EventError`) instead of dropping a
+  malformed blob; `writeTempPlan` returns write/close errors; and `tracker version`
+  / `tracker doctor` surface `loadEnvFiles` errors the same way `tracker run` does.
 
 ### Removed
 

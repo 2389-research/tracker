@@ -26,13 +26,14 @@ const reviewChrome = 9
 // (e.g., execution plans). Top pane is a scrollable glamour-rendered
 // viewport, bottom pane is a textarea for the user's response.
 type ReviewContent struct {
-	viewport viewport.Model
-	textarea textarea.Model
-	replyCh  chan<- string
-	done     bool
-	width    int
-	height   int
-	tmpFile  string // path to temp file with the plan markdown
+	viewport   viewport.Model
+	textarea   textarea.Model
+	replyCh    chan<- string
+	done       bool
+	width      int
+	height     int
+	tmpFile    string // path to temp file with the plan markdown ("" if unavailable)
+	tmpFileErr error  // non-nil if writing the temp file failed; surfaced in the divider
 }
 
 // IsFullscreen signals the modal wrapper to skip centering and use the full terminal.
@@ -85,16 +86,19 @@ func NewReviewContent(prompt string, replyCh chan<- string, width, height int) *
 	ta.Focus()
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 
-	// Write plan to temp file for external reading.
-	tmpFile := writeTempPlan(plan)
+	// Write plan to temp file for external reading (best-effort — a failure
+	// just disables the external-read affordance, surfaced in the divider so it
+	// isn't silently swallowed; the review modal still works without it).
+	tmpFile, tmpFileErr := writeTempPlan(plan)
 
 	return &ReviewContent{
-		viewport: vp,
-		textarea: ta,
-		replyCh:  replyCh,
-		width:    width,
-		height:   height,
-		tmpFile:  tmpFile,
+		viewport:   vp,
+		textarea:   ta,
+		replyCh:    replyCh,
+		width:      width,
+		height:     height,
+		tmpFile:    tmpFile,
+		tmpFileErr: tmpFileErr,
 	}
 }
 
@@ -188,6 +192,8 @@ func (r *ReviewContent) View() string {
 		int(r.viewport.ScrollPercent()*100)))
 	if r.tmpFile != "" {
 		divider += Styles.DimText.Render(fmt.Sprintf("[ %s ]", r.tmpFile))
+	} else if r.tmpFileErr != nil {
+		divider += Styles.DimText.Render(fmt.Sprintf("[ external read unavailable: %v ]", r.tmpFileErr))
 	}
 	sb.WriteString(divider)
 	sb.WriteString("\n")
@@ -228,13 +234,26 @@ func renderMarkdownForReview(md string, width int) string {
 	return strings.TrimSpace(rendered)
 }
 
+// createTempPlanFile creates the temp file backing writeTempPlan. It is a
+// package var so tests can inject write failures (#397).
+var createTempPlanFile = func() (*os.File, error) {
+	return os.CreateTemp("", "tracker-plan-*.md")
+}
+
 // writeTempPlan writes the plan markdown to a temp file and returns the path.
-func writeTempPlan(plan string) string {
-	f, err := os.CreateTemp("", "tracker-plan-*.md")
+func writeTempPlan(plan string) (string, error) {
+	f, err := createTempPlanFile()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("create temp plan: %w", err)
 	}
-	defer f.Close()
-	f.WriteString(plan)
-	return f.Name()
+	if _, err := f.WriteString(plan); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write temp plan: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("close temp plan: %w", err)
+	}
+	return f.Name(), nil
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -94,7 +95,11 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 	gr := geminiRequest{}
 
 	// Extract system/developer messages into systemInstruction.
-	gr.SystemInstruction, gr.Contents = extractSystemAndContents(req.Messages)
+	var err error
+	gr.SystemInstruction, gr.Contents, err = extractSystemAndContents(req.Messages)
+	if err != nil {
+		return nil, err
+	}
 
 	// Tool definitions.
 	gr.Tools = translateGeminiTools(req.Tools)
@@ -117,22 +122,37 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 
 // extractSystemAndContents separates system/developer messages into a
 // systemInstruction and converts remaining messages to Gemini contents.
-func extractSystemAndContents(messages []llm.Message) (*geminiContent, []geminiContent) {
+func extractSystemAndContents(messages []llm.Message) (*geminiContent, []geminiContent, error) {
 	var sysParts []geminiPart
 	var contents []geminiContent
 	for _, m := range messages {
 		if m.Role == llm.RoleSystem || m.Role == llm.RoleDeveloper {
 			sysParts = append(sysParts, extractSystemParts(m)...)
-		} else {
-			if content := translateMessageToContent(m); content != nil {
-				contents = append(contents, *content)
-			}
+			continue
+		}
+		var err error
+		contents, err = appendMessageContent(contents, m)
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 	if len(sysParts) == 0 {
-		return nil, contents
+		return nil, contents, nil
 	}
-	return &geminiContent{Parts: sysParts}, contents
+	return &geminiContent{Parts: sysParts}, contents, nil
+}
+
+// appendMessageContent translates a non-system message and appends it to
+// contents, skipping empty results. Returns an error if translation fails.
+func appendMessageContent(contents []geminiContent, m llm.Message) ([]geminiContent, error) {
+	content, err := translateMessageToContent(m)
+	if err != nil {
+		return nil, err
+	}
+	if content != nil {
+		contents = append(contents, *content)
+	}
+	return contents, nil
 }
 
 // extractSystemParts collects text parts from a system/developer message.
@@ -188,7 +208,7 @@ func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 	// (preserving prior behavior) instead of breaking shipped 2.5-pro reviewers.
 	useThinking := req.ReasoningEffort != "" && geminiSupportsThinkingLevel(req.Model)
 
-	if req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil && len(req.StopSequences) == 0 && !needsResponseFormat && !useThinking {
+	if genConfigUnset(req, needsResponseFormat, useThinking) {
 		return nil
 	}
 
@@ -209,6 +229,13 @@ func buildGenerationConfig(req *llm.Request) *geminiGenConfig {
 		gc.ThinkingConfig = &geminiThinkingConfig{ThinkingLevel: req.ReasoningEffort}
 	}
 	return gc
+}
+
+// genConfigUnset reports whether no generation-config field is set, so
+// buildGenerationConfig can return nil (no config block on the wire).
+func genConfigUnset(req *llm.Request, needsResponseFormat, useThinking bool) bool {
+	return req.Temperature == nil && req.MaxTokens == nil && req.TopP == nil &&
+		len(req.StopSequences) == 0 && !needsResponseFormat && !useThinking
 }
 
 // responseFormatRequired returns true when the request specifies a JSON response format.
@@ -246,50 +273,59 @@ func mergeProviderOptions(body []byte, providerOpts map[string]any, providerKey 
 }
 
 // translateMessageToContent converts a unified llm.Message to a Gemini content item.
-func translateMessageToContent(m llm.Message) *geminiContent {
+func translateMessageToContent(m llm.Message) (*geminiContent, error) {
 	role := geminiRole(m.Role)
-	parts := translateContentParts(m.Content)
-	if len(parts) == 0 {
-		return nil
+	parts, err := translateContentParts(m.Content)
+	if err != nil {
+		return nil, err
 	}
-	return &geminiContent{Role: role, Parts: parts}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	return &geminiContent{Role: role, Parts: parts}, nil
 }
 
 // translateContentParts converts a slice of unified content parts to Gemini parts.
-func translateContentParts(content []llm.ContentPart) []geminiPart {
+func translateContentParts(content []llm.ContentPart) ([]geminiPart, error) {
 	var parts []geminiPart
 	for _, part := range content {
-		if p := translateSingleContentPart(part); p != nil {
+		p, err := translateSingleContentPart(part)
+		if err != nil {
+			return nil, err
+		}
+		if p != nil {
 			parts = append(parts, *p)
 		}
 	}
-	return parts
+	return parts, nil
 }
 
 // translateSingleContentPart converts a single unified ContentPart to a Gemini part.
 // Returns nil for unsupported or empty parts.
-func translateSingleContentPart(part llm.ContentPart) *geminiPart {
+func translateSingleContentPart(part llm.ContentPart) (*geminiPart, error) {
 	switch part.Kind {
 	case llm.KindText:
 		p := geminiPart{Text: part.Text}
-		return &p
+		return &p, nil
 	case llm.KindToolCall:
 		return translateToolCallPart(part)
 	case llm.KindToolResult:
-		return translateToolResultPart(part)
+		return translateToolResultPart(part), nil
 	}
 	// Image content parts can be added when KindImage is defined in the core types.
-	return nil
+	return nil, nil
 }
 
 // translateToolCallPart converts a tool call content part to a Gemini function call part.
-func translateToolCallPart(part llm.ContentPart) *geminiPart {
+func translateToolCallPart(part llm.ContentPart) (*geminiPart, error) {
 	if part.ToolCall == nil {
-		return nil
+		return nil, nil
 	}
 	var args map[string]any
 	if len(part.ToolCall.Arguments) > 0 {
-		json.Unmarshal(part.ToolCall.Arguments, &args)
+		if err := json.Unmarshal(part.ToolCall.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("google: unmarshal tool call arguments for %q: %w", part.ToolCall.Name, err)
+		}
 	}
 	return &geminiPart{
 		FunctionCall: &geminiFunctionCall{
@@ -297,7 +333,7 @@ func translateToolCallPart(part llm.ContentPart) *geminiPart {
 			Args: args,
 		},
 		ThoughtSignature: part.ToolCall.ThoughtSigData,
-	}
+	}, nil
 }
 
 // translateToolResultPart converts a tool result content part to a Gemini function response part.
@@ -388,7 +424,10 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		return nil, err
 	}
 
-	content, finishReason := extractCandidateContent(gr.Candidates)
+	content, finishReason, err := extractCandidateContent(gr.Candidates)
+	if err != nil {
+		return nil, err
+	}
 	usage := extractUsage(gr.UsageMetadata)
 	fr := translateFinishReason(finishReason, hasToolCalls(content))
 
@@ -406,30 +445,45 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 }
 
 // extractCandidateContent pulls content parts and finish reason from the first candidate.
-func extractCandidateContent(candidates []geminiCandidate) ([]llm.ContentPart, string) {
+func extractCandidateContent(candidates []geminiCandidate) ([]llm.ContentPart, string, error) {
 	if len(candidates) == 0 {
-		return nil, ""
+		return nil, "", nil
 	}
 	candidate := candidates[0]
 	var content []llm.ContentPart
 	for _, part := range candidate.Content.Parts {
-		if part.Text != "" {
-			content = append(content, llm.ContentPart{Kind: llm.KindText, Text: part.Text})
+		parts, err := candidateContentParts(part)
+		if err != nil {
+			return nil, "", err
 		}
-		if part.FunctionCall != nil {
-			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-			content = append(content, llm.ContentPart{
-				Kind: llm.KindToolCall,
-				ToolCall: &llm.ToolCallData{
-					ID:             syntheticID(),
-					Name:           part.FunctionCall.Name,
-					Arguments:      argsJSON,
-					ThoughtSigData: part.ThoughtSignature,
-				},
-			})
-		}
+		content = append(content, parts...)
 	}
-	return content, candidate.FinishReason
+	return content, candidate.FinishReason, nil
+}
+
+// candidateContentParts converts one Gemini response part into unified content
+// parts, surfacing any function-call args-marshal error.
+func candidateContentParts(part geminiPart) ([]llm.ContentPart, error) {
+	var parts []llm.ContentPart
+	if part.Text != "" {
+		parts = append(parts, llm.ContentPart{Kind: llm.KindText, Text: part.Text})
+	}
+	if part.FunctionCall != nil {
+		argsJSON, err := json.Marshal(part.FunctionCall.Args)
+		if err != nil {
+			return nil, fmt.Errorf("google: marshal function call args for %q: %w", part.FunctionCall.Name, err)
+		}
+		parts = append(parts, llm.ContentPart{
+			Kind: llm.KindToolCall,
+			ToolCall: &llm.ToolCallData{
+				ID:             syntheticID(),
+				Name:           part.FunctionCall.Name,
+				Arguments:      argsJSON,
+				ThoughtSigData: part.ThoughtSignature,
+			},
+		})
+	}
+	return parts, nil
 }
 
 // extractUsage converts Gemini usage metadata to the unified Usage struct.
