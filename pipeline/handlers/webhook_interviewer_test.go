@@ -201,6 +201,7 @@ func TestWebhookInterviewer_LabeledGate(t *testing.T) {
 	// capturedPayload is written from the webhook server handler goroutine; protect with mu.
 	var mu sync.Mutex
 	var capturedPayload WebhookGatePayload
+	payloads := make(chan WebhookGatePayload, 1)
 
 	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload WebhookGatePayload
@@ -209,10 +210,7 @@ func TestWebhookInterviewer_LabeledGate(t *testing.T) {
 		capturedPayload = payload
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
-		go func() {
-			time.Sleep(20 * time.Millisecond)
-			postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "needs-work"}, payload.GateToken)
-		}()
+		payloads <- payload
 	}))
 	defer webhookSrv.Close()
 
@@ -224,12 +222,36 @@ func TestWebhookInterviewer_LabeledGate(t *testing.T) {
 	}
 
 	labels := []string{"approved", "needs-work", "rejected"}
-	result, err := wi.AskFreeformWithLabels("Review the PR", labels, "approved")
-	if err != nil {
-		t.Fatalf("AskFreeformWithLabels returned error: %v", err)
+	type askResult struct {
+		result string
+		err    error
 	}
-	if result != "needs-work" {
-		t.Errorf("result = %q, want %q", result, "needs-work")
+	done := make(chan askResult, 1)
+	go func() {
+		result, err := wi.AskFreeformWithLabels("Review the PR", labels, "approved")
+		done <- askResult{result: result, err: err}
+	}()
+
+	var payload WebhookGatePayload
+	select {
+	case payload = <-payloads:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for webhook payload")
+	}
+
+	postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "needs-work"}, payload.GateToken)
+
+	var result askResult
+	select {
+	case result = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for labeled gate result")
+	}
+	if result.err != nil {
+		t.Fatalf("AskFreeformWithLabels returned error: %v", result.err)
+	}
+	if result.result != "needs-work" {
+		t.Errorf("result = %q, want %q", result.result, "needs-work")
 	}
 
 	// Verify choices were sent (read under lock).
