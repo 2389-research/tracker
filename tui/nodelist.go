@@ -138,11 +138,6 @@ func (nl *NodeList) applyScrollWindow(all []indexedLine) []indexedLine {
 	return all[nl.scroll:end]
 }
 
-// renderNodeLine builds the display line for a single node entry.
-func (nl *NodeList) renderNodeLine(node NodeEntry) string {
-	return nl.renderNodeLineAt(node, -1)
-}
-
 // renderNodeLineAt builds the display line, highlighting if nodeIdx matches selectedIdx.
 func (nl *NodeList) renderNodeLineAt(node NodeEntry, nodeIdx int) string {
 	status := nl.store.NodeStatus(node.ID)

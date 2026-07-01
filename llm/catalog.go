@@ -354,37 +354,3 @@ func ListModels(provider string) []ModelInfo {
 	}
 	return result
 }
-
-// GetLatestModel returns the first model matching the given provider and
-// optional capability filter. Supported capability values are "reasoning",
-// "vision", and "tools". Pass an empty string for no capability filter.
-// Returns nil if no model matches.
-func GetLatestModel(provider string, capability string) *ModelInfo {
-	for i := range defaultCatalog {
-		m := &defaultCatalog[i]
-		if m.Provider != provider {
-			continue
-		}
-		if !matchesCapability(m, capability) {
-			continue
-		}
-		return m
-	}
-	return nil
-}
-
-// matchesCapability checks whether a model supports the requested capability.
-func matchesCapability(m *ModelInfo, capability string) bool {
-	switch capability {
-	case "reasoning":
-		return m.SupportsReasoning
-	case "vision":
-		return m.SupportsVision
-	case "tools":
-		return m.SupportsTools
-	case "":
-		return true
-	default:
-		return false
-	}
-}

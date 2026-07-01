@@ -3,7 +3,6 @@
 package pipeline
 
 import (
-	"fmt"
 	"strings"
 	"time"
 )
@@ -230,26 +229,4 @@ func (t *Trace) AggregateToolCalls() map[string]int {
 		}
 	}
 	return calls
-}
-
-// Summary returns a human-readable summary of the trace.
-func (tr *Trace) Summary() string {
-	var b strings.Builder
-
-	totalDuration := tr.EndTime.Sub(tr.StartTime)
-	fmt.Fprintf(&b, "Trace: run=%s entries=%d duration=%s\n", tr.RunID, len(tr.Entries), totalDuration)
-
-	for i, e := range tr.Entries {
-		line := fmt.Sprintf("  [%d] node=%s handler=%s status=%s duration=%s",
-			i, e.NodeID, e.HandlerName, e.Status, e.Duration)
-		if e.EdgeTo != "" {
-			line += fmt.Sprintf(" -> %s", e.EdgeTo)
-		}
-		if e.Error != "" {
-			line += fmt.Sprintf(" error=%q", e.Error)
-		}
-		fmt.Fprintln(&b, line)
-	}
-
-	return b.String()
 }

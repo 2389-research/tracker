@@ -12,12 +12,6 @@ type retryable interface {
 	Retryable() bool
 }
 
-// retryAfterHint is the interface checked to extract a provider-suggested retry delay.
-type retryAfterHint interface {
-	retryable
-	GetRetryAfter() *float64
-}
-
 // RetryMiddleware retries failed requests with exponential backoff when the
 // error is retryable. Non-retryable and unknown errors are returned immediately.
 type RetryMiddleware struct {

@@ -204,6 +204,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   progress mark with the (later) anchor time and undercounting stall (#426
   review).
 
+### Removed
+
+- **Remove dead code and unwired middleware abstractions (#394).** Deleted
+  `llm/transform.go` and `llm/activity_tracker.go` (and their test files).
+  Removed exported symbols with no production callers: `GetLatestModel`,
+  `matchesCapability`, `MiddlewareFunc`, `WithTraceObserver` (ClientOption),
+  `FormatCoalescedLine`, `FormatModelHeader`, `WithSteering`, `Trace.Summary`,
+  `render.Prompt`, and the `MsgGateAutopilot.Reasoning` field. Also removed
+  unexported dead code: `retryAfterHint`, `wrapText`,
+  `(*NodeList).renderNodeLine`, `DecisionString`, and the `flashDecision`
+  reasoning parameter. Deletion-only — no behavior changes.
+
 ### Notes
 
 - `sleep_aware_budget` is read from `graph.Attrs` by `ResolveBudgetLimits` for

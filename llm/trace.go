@@ -225,30 +225,6 @@ func formatFinishLine(evt TraceEvent) string {
 	return line
 }
 
-// FormatCoalescedLine formats an accumulated text or reasoning block for the TUI log.
-// Shows clean content without the `preview="..."` wrapping, for a chat-like display.
-// The provider/model is shown in a separate header line via FormatModelHeader.
-func FormatCoalescedLine(kind TraceKind, accumulated string) string {
-	label := "◉ "
-	if kind == TraceReasoning {
-		label = "◉ thinking: "
-	}
-	text := strings.TrimSpace(accumulated)
-	return label + text
-}
-
-// FormatModelHeader returns a display string like "anthropic/claude-opus-4-6"
-// for use as a section header in the activity log.
-func FormatModelHeader(provider, model string) string {
-	if provider != "" && model != "" {
-		return provider + "/" + model
-	}
-	if provider != "" {
-		return provider
-	}
-	return model
-}
-
 func formatBaseLine(prefix string, evt TraceEvent) string {
 	suffix := formatProviderModelSuffix(evt.Provider, evt.Model)
 	if suffix == "" {

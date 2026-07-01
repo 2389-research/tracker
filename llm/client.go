@@ -50,15 +50,6 @@ func WithMiddleware(mw Middleware) ClientOption {
 	}
 }
 
-// WithTraceObserver registers a live trace observer for completions.
-func WithTraceObserver(obs TraceObserver) ClientOption {
-	return func(c *clientConfig) {
-		if obs != nil {
-			c.traceObservers = append(c.traceObservers, obs)
-		}
-	}
-}
-
 // NewClient creates a Client from the given options.
 func NewClient(opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{

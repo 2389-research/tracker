@@ -53,13 +53,3 @@ func TestGetModelInfo_Sonnet46(t *testing.T) {
 		t.Errorf("ContextWindow = %d, want 1000000", info.ContextWindow)
 	}
 }
-
-func TestGetLatestModel(t *testing.T) {
-	m := GetLatestModel("anthropic", "")
-	if m == nil {
-		t.Fatal("expected a latest anthropic model")
-	}
-	if m.Provider != "anthropic" {
-		t.Errorf("expected anthropic, got %q", m.Provider)
-	}
-}

@@ -5,7 +5,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 )
@@ -92,73 +91,6 @@ func TestTraceAddEntry(t *testing.T) {
 
 	if len(tr.Entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(tr.Entries))
-	}
-}
-
-func TestTraceSummary(t *testing.T) {
-	start := time.Date(2026, 3, 5, 10, 0, 0, 0, time.UTC)
-	tr := &Trace{
-		RunID:     "summary-run",
-		StartTime: start,
-		EndTime:   start.Add(500 * time.Millisecond),
-	}
-	tr.AddEntry(TraceEntry{
-		Timestamp:   start,
-		NodeID:      "s",
-		HandlerName: "start",
-		Status:      string(OutcomeSuccess),
-		Duration:    10 * time.Millisecond,
-		EdgeTo:      "step1",
-	})
-	tr.AddEntry(TraceEntry{
-		Timestamp:   start.Add(10 * time.Millisecond),
-		NodeID:      "step1",
-		HandlerName: "codergen",
-		Status:      string(OutcomeSuccess),
-		Duration:    200 * time.Millisecond,
-		EdgeTo:      "end",
-	})
-	tr.AddEntry(TraceEntry{
-		Timestamp:   start.Add(210 * time.Millisecond),
-		NodeID:      "end",
-		HandlerName: "exit",
-		Status:      string(OutcomeSuccess),
-		Duration:    5 * time.Millisecond,
-	})
-
-	summary := tr.Summary()
-
-	// Summary should contain run ID.
-	if !strings.Contains(summary, "summary-run") {
-		t.Errorf("summary should contain run ID, got:\n%s", summary)
-	}
-	// Summary should contain node IDs.
-	for _, nodeID := range []string{"s", "step1", "end"} {
-		if !strings.Contains(summary, nodeID) {
-			t.Errorf("summary should contain node %q, got:\n%s", nodeID, summary)
-		}
-	}
-	// Summary should mention entry count.
-	if !strings.Contains(summary, "3") {
-		t.Errorf("summary should mention 3 entries, got:\n%s", summary)
-	}
-	// Summary should be non-empty and readable.
-	if len(summary) < 20 {
-		t.Errorf("summary seems too short: %q", summary)
-	}
-}
-
-func TestTraceSummaryEmpty(t *testing.T) {
-	tr := &Trace{
-		RunID:     "empty-run",
-		StartTime: time.Now(),
-	}
-	summary := tr.Summary()
-	if !strings.Contains(summary, "empty-run") {
-		t.Errorf("empty summary should still contain run ID, got:\n%s", summary)
-	}
-	if !strings.Contains(summary, "0") {
-		t.Errorf("empty summary should mention 0 entries, got:\n%s", summary)
 	}
 }
 
