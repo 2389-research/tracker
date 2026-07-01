@@ -270,24 +270,24 @@ workflow HumanGateTestSuite
   edges
     # Section 1: Yes/No
     Start -> YesNoGate
-    YesNoGate -> YesPath  when ctx.outcome = success  label: "[Y] Yes"  weight: 2
-    YesNoGate -> NoPath  when ctx.outcome = fail  label: "[N] No"
+    YesNoGate -> YesPath  when ctx.outcome = success  choice: "[Y] Yes"  label: "[Y] Yes"
+    YesNoGate -> NoPath  when ctx.outcome = fail  choice: "[N] No"  label: "[N] No"
     YesPath -> YesNoConfirm
     NoPath -> YesNoConfirm
 
     # Section 2: Choice
     YesNoConfirm -> ChoiceGate
-    ChoiceGate -> NorthPath  label: "North"  weight: 2
-    ChoiceGate -> SouthPath  label: "South"
-    ChoiceGate -> EastPath  label: "East"
+    ChoiceGate -> NorthPath  choice: "North"  label: "North"
+    ChoiceGate -> SouthPath  choice: "South"  label: "South"
+    ChoiceGate -> EastPath  choice: "East"  label: "East"
     NorthPath -> ChoiceConfirm
     SouthPath -> ChoiceConfirm
     EastPath -> ChoiceConfirm
 
     # Section 3: Binary Choice
     ChoiceConfirm -> BinaryChoiceGate
-    BinaryChoiceGate -> ContinuePath  label: "[Y] Yes"  weight: 2
-    BinaryChoiceGate -> SkipPath  label: "[N] No"
+    BinaryChoiceGate -> ContinuePath  choice: "[Y] Yes"  label: "[Y] Yes"
+    BinaryChoiceGate -> SkipPath  choice: "[N] No"  label: "[N] No"
     ContinuePath -> BinaryConfirm
     SkipPath -> BinaryConfirm
 
@@ -298,9 +298,9 @@ workflow HumanGateTestSuite
 
     # Section 5: Hybrid Freeform
     FreeformConfirm -> HybridGate
-    HybridGate -> ApproveRoute  label: "Approve"  weight: 2
-    HybridGate -> RejectRoute  label: "Reject"
-    HybridGate -> EscalateRoute  label: "Escalate"
+    HybridGate -> ApproveRoute  choice: "Approve"  label: "Approve"
+    HybridGate -> RejectRoute  choice: "Reject"  label: "Reject"
+    HybridGate -> EscalateRoute  choice: "Escalate"  label: "Escalate"
     ApproveRoute -> HybridConfirm
     RejectRoute -> HybridConfirm
     EscalateRoute -> HybridConfirm
@@ -314,22 +314,22 @@ workflow HumanGateTestSuite
     # Section 7: Interview Cancel
     InterviewConfirm -> QuestionWriter2
     QuestionWriter2 -> CancelableInterview
-    CancelableInterview -> CompletedPath  when ctx.outcome = success  weight: 2
+    CancelableInterview -> CompletedPath  when ctx.outcome = success
     CancelableInterview -> CanceledPath  when ctx.outcome = fail
     CompletedPath -> CancelConfirm
     CanceledPath -> CancelConfirm
 
     # Section 8: Timed Yes/No
     CancelConfirm -> TimedGate
-    TimedGate -> TimedYesPath  when ctx.outcome = success  label: "[Y] Yes"  weight: 2
-    TimedGate -> TimedFailPath  when ctx.outcome = fail  label: "[N] No / Timeout"
+    TimedGate -> TimedYesPath  when ctx.outcome = success  choice: "[Y] Yes"  label: "[Y] Yes"
+    TimedGate -> TimedFailPath  when ctx.outcome = fail  choice: "[N] No / Timeout"  label: "[N] No / Timeout"
     TimedYesPath -> TimeoutConfirm
     TimedFailPath -> TimeoutConfirm
 
     # Section 9: Timed Choice with Default
     TimeoutConfirm -> DefaultTimedGate
-    DefaultTimedGate -> SafePath  label: "Safe"  weight: 2
-    DefaultTimedGate -> RiskyPath  label: "Risky"
+    DefaultTimedGate -> SafePath  choice: "Safe"  label: "Safe"
+    DefaultTimedGate -> RiskyPath  choice: "Risky"  label: "Risky"
     SafePath -> DefaultConfirm
     RiskyPath -> DefaultConfirm
 
