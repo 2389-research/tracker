@@ -242,7 +242,7 @@ var createTempPlanFile = func() (*os.File, error) {
 func writeTempPlan(plan string) (string, error) {
 	f, err := createTempPlanFile()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create temp plan: %w", err)
 	}
 	if _, err := f.WriteString(plan); err != nil {
 		f.Close()
