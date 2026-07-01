@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Behavior-preserving decomposition of the config parsers to satisfy the
+  complexity gate (#393 follow-up).** `(*Node).AgentConfig`, `(*Node).RetryConfig`,
+  `(*Node).ParallelConfig` (`pipeline/node_config.go`) and
+  `(*CodergenHandler).buildConfig` (`pipeline/handlers/codergen.go`) were split
+  into small focused helpers so both gocyclo and gocognit report <=8 for every
+  function. Pure mechanical extraction: the graph-default-then-node-override
+  order, all conditions, and evaluation semantics are unchanged — no new attrs,
+  no API changes, no behavior change.
 - **`build_product` review panel reads a bounded diff and tiers its models
   (#418).** A new `ComputeReviewDiff` tool node (inserted
   `ClearStaleReviews -> ComputeReviewDiff -> ReviewParallel`) computes the
@@ -206,6 +214,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`examples/human_gate_test_suite.dip` now grades A/100 under `dippin` v0.43
+  doctor (#335).** Removed the unused `weight:` edge attributes (DIP151) and
+  marked the routing key on each labeled human-gate edge with `choice:` (DIP150),
+  leaving `label:` for display — no change to the suite's semantic purpose of
+  exercising every human-gate mode.
 - **Silent error swallowing in the Gemini translator, TUI review, and CLI env
   loading (#397).** The Google adapter now propagates tool-call argument
   (un)marshal errors (`translateToolCallPart`, `extractCandidateContent`, and the

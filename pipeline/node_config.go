@@ -137,11 +137,41 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	cfg.ResponseFormat = n.Attrs["response_format"]
 	cfg.ResponseSchema = n.Attrs["response_schema"]
 
+	// Numeric/duration/tri-state cascades are extracted into focused helpers so
+	// each stays under the complexity gate; every helper preserves the exact
+	// graph-default-then-node-override order and conditions of the original.
+	n.applyMaxBudget(&cfg)
+	n.applyMaxCostGraph(&cfg, graphAttrs)
+	n.applyMaxCostNode(&cfg)
+	n.applyNoProgressGraph(&cfg, graphAttrs)
+	n.applyNoProgressNode(&cfg)
+	n.applyMaxTurns(&cfg)
+	n.applyTurnBreach(&cfg, graphAttrs)
+	n.applyCommandTimeout(&cfg)
+	n.applyAutoStatusAndReflect(&cfg)
+	n.applyVerifyDefaults(&cfg, graphAttrs)
+	n.applyVerifyOverrides(&cfg)
+	n.applyPlanBeforeExecute(&cfg, graphAttrs)
+	n.applyModelProvider(&cfg, graphAttrs)
+	n.applyReasoningEffort(&cfg, graphAttrs)
+	n.applyCache(&cfg, graphAttrs)
+	n.applyCompaction(&cfg, graphAttrs)
+	n.applyWritablePathsAndCommitOnly(&cfg)
+
+	return cfg
+}
+
+// applyMaxBudget resolves the node-only max_budget_usd attr.
+func (n *Node) applyMaxBudget(cfg *AgentNodeConfig) {
 	if v := n.Attrs["max_budget_usd"]; v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.MaxBudgetUSD = f
 		}
 	}
+}
+
+// applyMaxCostGraph applies the graph-level max_cost_usd default (positive only).
+func (n *Node) applyMaxCostGraph(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	// #304: max_cost_usd — per-node cost ceiling. Graph default (positive only)
 	// then node override. Node-level "0" explicitly disables a graph default.
 	if v, ok := graphAttrs["max_cost_usd"]; ok && v != "" {
@@ -149,11 +179,19 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 			cfg.MaxCostUSD = f
 		}
 	}
+}
+
+// applyMaxCostNode applies the node-level max_cost_usd override ("0" disables).
+func (n *Node) applyMaxCostNode(cfg *AgentNodeConfig) {
 	if v, ok := n.Attrs["max_cost_usd"]; ok && v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
 			cfg.MaxCostUSD = f // 0 disables the inherited graph default
 		}
 	}
+}
+
+// applyNoProgressGraph applies the graph-level no_progress_turns default (positive only).
+func (n *Node) applyNoProgressGraph(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	// #304: no_progress_turns — no-progress detector K. Graph default (positive
 	// only) then node override. Node-level "0" explicitly disables a graph default.
 	if v, ok := graphAttrs["no_progress_turns"]; ok && v != "" {
@@ -161,16 +199,28 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 			cfg.NoProgressTurns = i
 		}
 	}
+}
+
+// applyNoProgressNode applies the node-level no_progress_turns override ("0" disables).
+func (n *Node) applyNoProgressNode(cfg *AgentNodeConfig) {
 	if v, ok := n.Attrs["no_progress_turns"]; ok && v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i >= 0 {
 			cfg.NoProgressTurns = i // 0 disables the inherited graph default
 		}
 	}
+}
+
+// applyMaxTurns resolves the node-only max_turns attr (positive only).
+func (n *Node) applyMaxTurns(cfg *AgentNodeConfig) {
 	if v := n.Attrs["max_turns"]; v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			cfg.MaxTurns = i
 		}
 	}
+}
+
+// applyTurnBreach resolves turn_breach_policy: graph default then node override.
+func (n *Node) applyTurnBreach(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	// #303 turn_breach_policy: graph default then node override. Arrives via a
 	// dippin params: block, spilled into n.Attrs by the adapter.
 	if v, ok := graphAttrs["turn_breach_policy"]; ok && v != "" {
@@ -179,12 +229,19 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	if v, ok := n.Attrs["turn_breach_policy"]; ok && v != "" {
 		cfg.TurnBreachPolicy = v
 	}
+}
+
+// applyCommandTimeout resolves the node-only command_timeout attr (positive only).
+func (n *Node) applyCommandTimeout(cfg *AgentNodeConfig) {
 	if v := n.Attrs["command_timeout"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.CommandTimeout = d
 		}
 	}
+}
 
+// applyAutoStatusAndReflect resolves the node-only auto_status and reflect_on_error attrs.
+func (n *Node) applyAutoStatusAndReflect(cfg *AgentNodeConfig) {
 	if v, ok := n.Attrs["auto_status"]; ok {
 		cfg.AutoStatus = v == "true"
 	}
@@ -195,7 +252,11 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		cfg.ReflectOnError = v != "false"
 		cfg.ReflectOnErrorSet = true
 	}
+}
 
+// applyVerifyDefaults applies the graph-level verify_after_edit / verify_command
+// / max_verify_retries defaults.
+func (n *Node) applyVerifyDefaults(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	// verify_after_edit + verify_command + max_verify_retries: graph-level
 	// defaults then node-level overrides.
 	if v, ok := graphAttrs["verify_after_edit"]; ok {
@@ -210,6 +271,11 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 			cfg.MaxVerifyRetries = i
 		}
 	}
+}
+
+// applyVerifyOverrides applies the node-level verify_after_edit / verify_command
+// / max_verify_retries overrides.
+func (n *Node) applyVerifyOverrides(cfg *AgentNodeConfig) {
 	if v, ok := n.Attrs["verify_after_edit"]; ok {
 		cfg.VerifyAfterEdit = v == "true"
 		cfg.VerifyAfterEditSet = true
@@ -222,8 +288,11 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 			cfg.MaxVerifyRetries = i
 		}
 	}
+}
 
-	// plan_before_execute (with "plan" shorthand alias): graph then node.
+// applyPlanBeforeExecute resolves plan_before_execute (with "plan" shorthand
+// alias): graph default then node override.
+func (n *Node) applyPlanBeforeExecute(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	if v, ok := graphAttrs["plan_before_execute"]; ok {
 		cfg.PlanBeforeExecute = v == "true"
 		cfg.PlanBeforeExecuteSet = true
@@ -235,7 +304,11 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		cfg.PlanBeforeExecute = v == "true"
 		cfg.PlanBeforeExecuteSet = true
 	}
+}
 
+// applyModelProvider resolves llm_model and llm_provider with graph defaults
+// then node overrides.
+func (n *Node) applyModelProvider(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	// Model/provider with graph defaults.
 	if v, ok := graphAttrs["llm_model"]; ok {
 		cfg.Model = v
@@ -249,16 +322,21 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	if v, ok := n.Attrs["llm_provider"]; ok {
 		cfg.Provider = v
 	}
+}
 
-	// reasoning_effort: graph then node; non-empty wins.
+// applyReasoningEffort resolves reasoning_effort: graph then node; non-empty wins.
+func (n *Node) applyReasoningEffort(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	if v, ok := graphAttrs["reasoning_effort"]; ok && v != "" {
 		cfg.ReasoningEffort = v
 	}
 	if v, ok := n.Attrs["reasoning_effort"]; ok && v != "" {
 		cfg.ReasoningEffort = v
 	}
+}
 
-	// cache_tool_results: graph default true-only; node-level tri-state override.
+// applyCache resolves cache_tool_results: graph default true-only; node-level
+// tri-state override.
+func (n *Node) applyCache(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	if v, ok := graphAttrs["cache_tool_results"]; ok && v == "true" {
 		cfg.CacheToolResults = true
 		cfg.CacheToolResultsSet = true
@@ -267,7 +345,11 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 		cfg.CacheToolResults = v == "true"
 		cfg.CacheToolResultsSet = true
 	}
+}
 
+// applyCompaction resolves context_compaction (graph "auto" default, node
+// override) and the compaction threshold.
+func (n *Node) applyCompaction(cfg *AgentNodeConfig, graphAttrs map[string]string) {
 	// context_compaction: graph "auto" default, node override.
 	if v, ok := graphAttrs["context_compaction"]; ok && v == "auto" {
 		cfg.ContextCompaction = "auto"
@@ -283,7 +365,11 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 			cfg.CompactionThreshold = f
 		}
 	}
+}
 
+// applyWritablePathsAndCommitOnly resolves the node-only writable_paths and
+// commit_only attrs.
+func (n *Node) applyWritablePathsAndCommitOnly(cfg *AgentNodeConfig) {
 	if raw, ok := n.Attrs["writable_paths"]; ok {
 		cfg.WritablePathsSet = true
 		cfg.WritablePaths = splitCommaNoEmpty(raw)
@@ -292,8 +378,6 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	if v, ok := n.Attrs["commit_only"]; ok {
 		cfg.CommitOnly = parseBoolAttr(v)
 	}
-
-	return cfg
 }
 
 // splitCommaNoEmpty splits s on commas, trims whitespace from each entry, and
@@ -444,22 +528,37 @@ func (n *Node) ParallelConfig() ParallelNodeConfig {
 		JoinID:          n.Attrs["parallel_join"],
 		FanInPolicy:     n.Attrs["fan_in_policy"],
 	}
+	n.applyQuorum(&cfg)
+	n.applyMaxConcurrency(&cfg)
+	n.applyBranchTimeout(&cfg)
+	return cfg
+}
+
+// applyQuorum resolves the quorum attr (positive only).
+func (n *Node) applyQuorum(cfg *ParallelNodeConfig) {
 	if v := n.Attrs["quorum"]; v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			cfg.Quorum = i
 		}
 	}
+}
+
+// applyMaxConcurrency resolves the max_concurrency attr (positive only).
+func (n *Node) applyMaxConcurrency(cfg *ParallelNodeConfig) {
 	if v := n.Attrs["max_concurrency"]; v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			cfg.MaxConcurrency = i
 		}
 	}
+}
+
+// applyBranchTimeout resolves the branch_timeout attr (positive only).
+func (n *Node) applyBranchTimeout(cfg *ParallelNodeConfig) {
 	if v := n.Attrs["branch_timeout"]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.BranchTimeout = d
 		}
 	}
-	return cfg
 }
 
 // RetryConfig is a typed view over the retry-related attributes shared
@@ -485,12 +584,27 @@ type RetryConfig struct {
 func (n *Node) RetryConfig(graphAttrs map[string]string) RetryConfig {
 	cfg := RetryConfig{}
 
+	n.applyRetryPolicyName(&cfg, graphAttrs)
+	n.applyMaxRetriesNode(&cfg)
+	n.applyMaxRetriesGraphDefault(&cfg, graphAttrs)
+	n.applyBaseDelayNode(&cfg)
+	n.applyBaseDelayGraphDefault(&cfg, graphAttrs)
+
+	return cfg
+}
+
+// applyRetryPolicyName resolves retry_policy (node) with fallback to the graph
+// default_retry_policy.
+func (n *Node) applyRetryPolicyName(cfg *RetryConfig, graphAttrs map[string]string) {
 	if v, ok := n.Attrs["retry_policy"]; ok && v != "" {
 		cfg.PolicyName = v
 	} else if v, ok := graphAttrs["default_retry_policy"]; ok && v != "" {
 		cfg.PolicyName = v
 	}
+}
 
+// applyMaxRetriesNode resolves the node-level max_retries value.
+func (n *Node) applyMaxRetriesNode(cfg *RetryConfig) {
 	// max_retries: try node first; if present but unparseable, cascade to
 	// graph default rather than leaving MaxRetriesSet=false. Preserves the
 	// old engine_checkpoint.maxRetries fall-through semantics.
@@ -500,6 +614,11 @@ func (n *Node) RetryConfig(graphAttrs map[string]string) RetryConfig {
 			cfg.MaxRetriesSet = true
 		}
 	}
+}
+
+// applyMaxRetriesGraphDefault applies the graph default_max_retry when the node
+// did not set a parseable max_retries.
+func (n *Node) applyMaxRetriesGraphDefault(cfg *RetryConfig, graphAttrs map[string]string) {
 	if !cfg.MaxRetriesSet {
 		if v, ok := graphAttrs["default_max_retry"]; ok && v != "" {
 			if i, err := strconv.Atoi(v); err == nil {
@@ -508,7 +627,10 @@ func (n *Node) RetryConfig(graphAttrs map[string]string) RetryConfig {
 			}
 		}
 	}
+}
 
+// applyBaseDelayNode resolves the node-level base_delay value.
+func (n *Node) applyBaseDelayNode(cfg *RetryConfig) {
 	// base_delay: same cascade pattern as max_retries. The graph key
 	// `default_base_delay` is reserved for symmetry with the other retry
 	// attrs even though the current codebase doesn't set it from pipelines
@@ -519,6 +641,11 @@ func (n *Node) RetryConfig(graphAttrs map[string]string) RetryConfig {
 			cfg.BaseDelaySet = true
 		}
 	}
+}
+
+// applyBaseDelayGraphDefault applies the graph default_base_delay when the node
+// did not set a parseable base_delay.
+func (n *Node) applyBaseDelayGraphDefault(cfg *RetryConfig, graphAttrs map[string]string) {
 	if !cfg.BaseDelaySet {
 		if v, ok := graphAttrs["default_base_delay"]; ok && v != "" {
 			if d, err := time.ParseDuration(v); err == nil {
@@ -527,6 +654,4 @@ func (n *Node) RetryConfig(graphAttrs map[string]string) RetryConfig {
 			}
 		}
 	}
-
-	return cfg
 }
