@@ -137,6 +137,22 @@ func (e *errorTool) Execute(_ context.Context, _ json.RawMessage) (string, error
 	return "", e.err
 }
 
+type steeringTool struct {
+	name string
+	ch   chan<- string
+}
+
+func (s *steeringTool) Name() string        { return s.name }
+func (s *steeringTool) Description() string { return "tool that queues steering" }
+func (s *steeringTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (s *steeringTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	s.ch <- "first steering"
+	s.ch <- "second steering"
+	return "tool completed", nil
+}
+
 func TestParityToolExecutionErrorsBecomeNamedErrorResults(t *testing.T) {
 	client := &inspectingCompleter{
 		responses: []*llm.Response{
@@ -191,6 +207,57 @@ func TestParityToolExecutionErrorsBecomeNamedErrorResults(t *testing.T) {
 	}
 	if toolResult.Content != "Tool error (broken_tool): boom" {
 		t.Fatalf("tool error content = %q", toolResult.Content)
+	}
+}
+
+func TestParitySteeringDrainsQueuedMessagesBetweenToolRounds(t *testing.T) {
+	ch := make(chan string, 2)
+	client := &inspectingCompleter{
+		responses: []*llm.Response{
+			{
+				Message: llm.Message{
+					Role: llm.RoleAssistant,
+					Content: []llm.ContentPart{{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "call_1",
+							Name:      "queue_steering",
+							Arguments: json.RawMessage(`{}`),
+						},
+					}},
+				},
+				FinishReason: llm.FinishReason{Reason: "tool_calls"},
+			},
+			{
+				Message:      llm.AssistantMessage("Done after steering."),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+			},
+		},
+	}
+
+	sess := mustNewSession(t, client, DefaultConfig(), WithSteering(ch), WithTools(&steeringTool{name: "queue_steering", ch: ch}))
+	result, err := sess.Run(context.Background(), "Do the task")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Turns != 2 {
+		t.Fatalf("turns = %d, want 2", result.Turns)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(client.requests))
+	}
+
+	var steeringMessages []string
+	for _, msg := range client.requests[1].Messages {
+		if msg.Role == llm.RoleUser && strings.HasPrefix(msg.Text(), "[STEERING] ") {
+			steeringMessages = append(steeringMessages, strings.TrimPrefix(msg.Text(), "[STEERING] "))
+		}
+	}
+	if len(steeringMessages) != 2 {
+		t.Fatalf("steering message count = %d, want 2 (%v)", len(steeringMessages), steeringMessages)
+	}
+	if steeringMessages[0] != "first steering" || steeringMessages[1] != "second steering" {
+		t.Fatalf("steering messages = %v", steeringMessages)
 	}
 }
 

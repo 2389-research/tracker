@@ -20,7 +20,6 @@ var _ handlers.InterviewInterviewer = (*AutopilotTUIInterviewer)(nil)
 // MsgGateAutopilot tells the TUI to show the autopilot decision in the modal
 // for a brief moment, then auto-close by sending the reply.
 type MsgGateAutopilot struct {
-	NodeID   string
 	Prompt   string
 	Decision string
 	Labels   []string

@@ -141,7 +141,7 @@ Before v0.20.0, pricing was duplicated between `pricing.go` and a hardcoded map 
 
 ## Catalog
 
-[catalog.go](../../llm/catalog.go) is a single `defaultCatalog` slice of `ModelInfo` entries ordered **newest-first per provider** so `GetLatestModel(provider, capability)` returns the freshest match. Each entry carries:
+[catalog.go](../../llm/catalog.go) is a single `defaultCatalog` slice of `ModelInfo` entries ordered **newest-first per provider** so `ListModels(provider)` surfaces the freshest match first. Each entry carries:
 
 - `ID` (canonical).
 - `Aliases` (short names users type; resolved by `GetModelInfo`).
@@ -292,7 +292,7 @@ c, err := llm.NewClientFromEnv(map[string]func(string) (llm.ProviderAdapter, err
 - [llm/token_tracker.go](../../llm/token_tracker.go) — per-provider accumulator and model normalization.
 - [llm/token_tracker_cost.go](../../llm/token_tracker_cost.go) — `CostByProvider`, `TotalCostUSD`.
 - [llm/pricing.go](../../llm/pricing.go) — `EstimateCost`.
-- [llm/catalog.go](../../llm/catalog.go) — `ModelInfo`, `GetModelInfo`, `ListModels`, `GetLatestModel`.
+- [llm/catalog.go](../../llm/catalog.go) — `ModelInfo`, `GetModelInfo`, `ListModels`.
 - [llm/retry.go](../../llm/retry.go) — `RetryMiddleware` with `Retryable()` detection.
 - [llm/errors.go](../../llm/errors.go) — typed error hierarchy.
 - [llm/trace.go](../../llm/trace.go) / [llm/trace_logger.go](../../llm/trace_logger.go) — `TraceBuilder`, `TraceObserver`, file logger.

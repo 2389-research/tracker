@@ -206,15 +206,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **Remove dead code and unwired middleware abstractions (#394).** Deleted
-  `llm/transform.go` and `llm/activity_tracker.go` (and their test files).
-  Removed exported symbols with no production callers: `GetLatestModel`,
+- **Remove dead code and unwired middleware abstractions (#431, closes #394).**
+  Deleted `llm/transform.go` and `llm/activity_tracker.go` (and their test
+  files). Removed exported symbols with no production callers: `GetLatestModel`,
   `matchesCapability`, `MiddlewareFunc`, `WithTraceObserver` (ClientOption),
-  `FormatCoalescedLine`, `FormatModelHeader`, `WithSteering`, `Trace.Summary`,
-  `render.Prompt`, and the `MsgGateAutopilot.Reasoning` field. Also removed
+  `FormatCoalescedLine`, `FormatModelHeader`, `Trace.Summary`, `render.Prompt`,
+  and the `MsgGateAutopilot.Reasoning` and `NodeID` fields. Also removed
   unexported dead code: `retryAfterHint`, `wrapText`,
   `(*NodeList).renderNodeLine`, `DecisionString`, and the `flashDecision`
-  reasoning parameter. Deletion-only — no behavior changes.
+  reasoning parameter. `agent.WithSteering` was retained (review): it is the
+  sole assigner of the live `drainSteering` consumer, so removing it would
+  orphan the mid-session steering feature. Deletion-only — no behavior changes.
 
 ### Notes
 

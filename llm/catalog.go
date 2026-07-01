@@ -18,8 +18,8 @@ type ModelInfo struct {
 }
 
 // defaultCatalog is the built-in registry of known models.
-// Each provider section is ordered newest-first so GetLatestModel returns the
-// most recent model for a given capability.
+// Each provider section is ordered newest-first so ListModels surfaces the
+// most recent model for a given capability first.
 var defaultCatalog = []ModelInfo{
 	// ── Anthropic ────────────────────────────────────────────
 	{
