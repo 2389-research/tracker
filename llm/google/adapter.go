@@ -346,6 +346,10 @@ func (a *Adapter) processGeminiPart(part geminiPart, ch chan<- llm.StreamEvent, 
 		}
 		argsJSON, err := json.Marshal(part.FunctionCall.Args)
 		if err != nil {
+			// Flush any buffered finish reason before the error so accumulators
+			// record work completed before the stream broke (flushPendingFinish
+			// invariant: flush before any EventError).
+			state.flushPendingFinish(ch)
 			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: marshal function call args for %q: %w", part.FunctionCall.Name, err)}
 			return
 		}
