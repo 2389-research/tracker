@@ -204,6 +204,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   progress mark with the (later) anchor time and undercounting stall (#426
   review).
 
+### Fixed
+
+- **`examples/human_gate_test_suite.dip` now grades A/100 under `dippin` v0.43
+  doctor (#335).** Removed the unused `weight:` edge attributes (DIP151) and
+  marked the routing key on each labeled human-gate edge with `choice:` (DIP150),
+  leaving `label:` for display — no change to the suite's semantic purpose of
+  exercising every human-gate mode.
+
 ### Notes
 
 - `sleep_aware_budget` is read from `graph.Attrs` by `ResolveBudgetLimits` for
