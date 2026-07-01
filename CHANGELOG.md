@@ -222,7 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **Remove dead code and unwired middleware abstractions (#431, closes #394).**
+- **Remove dead code and unwired middleware abstractions (#394).**
   Deleted `llm/transform.go` and `llm/activity_tracker.go` (and their test
   files). Removed exported symbols with no production callers: `GetLatestModel`,
   `matchesCapability`, `MiddlewareFunc`, `WithTraceObserver` (ClientOption),
