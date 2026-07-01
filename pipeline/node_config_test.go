@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -177,6 +178,35 @@ func TestAgentConfig_NumericParseSuccesses(t *testing.T) {
 	}
 	if cfg.CompactionThreshold != 0.8 {
 		t.Errorf("CompactionThreshold = %v, want 0.8", cfg.CompactionThreshold)
+	}
+}
+
+// TestAgentConfig_MaxBudgetUSDParseErrorSurfaced verifies that an unparseable
+// max_budget_usd does not silently drop to zero: MaxBudgetUSDErr must carry the
+// parse error so the claude-code applyMaxBudget path can hard-fail (#393).
+func TestAgentConfig_MaxBudgetUSDParseErrorSurfaced(t *testing.T) {
+	n := &Node{Attrs: map[string]string{"max_budget_usd": "$$"}}
+	cfg := n.AgentConfig(nil)
+	if cfg.MaxBudgetUSDErr == nil {
+		t.Fatal("MaxBudgetUSDErr = nil, want a parse error for unparseable max_budget_usd")
+	}
+	if !strings.Contains(cfg.MaxBudgetUSDErr.Error(), "invalid max_budget_usd") {
+		t.Errorf("MaxBudgetUSDErr = %q, want it to name the offending attr", cfg.MaxBudgetUSDErr)
+	}
+	if cfg.MaxBudgetUSD != 0 {
+		t.Errorf("MaxBudgetUSD = %v, want 0 on parse failure", cfg.MaxBudgetUSD)
+	}
+
+	// A valid value leaves MaxBudgetUSDErr nil.
+	ok := (&Node{Attrs: map[string]string{"max_budget_usd": "5.25"}}).AgentConfig(nil)
+	if ok.MaxBudgetUSDErr != nil {
+		t.Errorf("MaxBudgetUSDErr = %v, want nil for a valid value", ok.MaxBudgetUSDErr)
+	}
+
+	// Absent attr leaves both zero-valued.
+	absent := (&Node{Attrs: map[string]string{}}).AgentConfig(nil)
+	if absent.MaxBudgetUSDErr != nil {
+		t.Errorf("MaxBudgetUSDErr = %v, want nil when attr absent", absent.MaxBudgetUSDErr)
 	}
 }
 

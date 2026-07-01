@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Codergen claude-code/ACP config now reads through the typed
+  `AgentNodeConfig` accessor (#393).** The claude-code/ACP backend parsers
+  (`selectBackend`, `applyMCPServers`, `applyToolLists`,
+  `isNodeToolAccessRestricted`, `applyMaxBudget`, `applyPermissionMode`,
+  `buildACPConfig`, and the `auto_status` check) no longer read `node.Attrs`
+  directly; the `max_budget_usd` accessor now surfaces its `ParseFloat` error via
+  `AgentNodeConfig.MaxBudgetUSDErr` so an unparseable value still hard-fails
+  instead of being silently dropped.
 - **Behavior-preserving decomposition of the config parsers to satisfy the
   complexity gate (#393 follow-up).** `(*Node).AgentConfig`, `(*Node).RetryConfig`,
   `(*Node).ParallelConfig` (`pipeline/node_config.go`) and
