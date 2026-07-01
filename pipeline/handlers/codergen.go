@@ -164,7 +164,7 @@ func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBacken
 // global --backend flag is "claude-code", enabling mixed-backend pipelines.
 func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
 	// Check node-level backend attr (explicit override always wins).
-	if backend := node.Attrs["backend"]; backend != "" {
+	if backend := node.AgentConfig(h.graphAttrs).Backend; backend != "" {
 		switch backend {
 		case "claude-code":
 			return h.ensureClaudeCodeBackend()
@@ -316,8 +316,8 @@ func parseClaudeCodeToolAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeCon
 
 // applyMCPServers parses and sets MCPServers from node attrs if present.
 func applyMCPServers(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	raw, ok := node.Attrs["mcp_servers"]
-	if !ok || raw == "" {
+	raw := node.AgentConfig(nil).McpServers
+	if raw == "" {
 		return nil
 	}
 	servers, err := pipeline.ParseMCPServers(raw)
@@ -340,10 +340,11 @@ func applyToolLists(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
 	if isNodeToolAccessRestricted(node) {
 		return
 	}
-	if raw := node.Attrs["allowed_tools"]; raw != "" {
+	cfg := node.AgentConfig(nil)
+	if raw := cfg.AllowedTools; raw != "" {
 		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
 	}
-	if raw := node.Attrs["disallowed_tools"]; raw != "" {
+	if raw := cfg.DisallowedTools; raw != "" {
 		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
 	}
 }
@@ -353,7 +354,7 @@ func applyToolLists(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
 // agent.SessionConfig.IsToolAccessRestricted; defined here to avoid an
 // import cycle. Issue: github.com/2389-research/tracker#258.
 func isNodeToolAccessRestricted(node *pipeline.Node) bool {
-	return strings.TrimSpace(node.Attrs["tool_access"]) != ""
+	return strings.TrimSpace(node.AgentConfig(nil).ToolAccess) != ""
 }
 
 // canonicalClaudeCodeToolDenyList is the best-effort enumeration of
@@ -404,16 +405,12 @@ func parseClaudeCodeBudgetAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeC
 
 // applyMaxBudget parses and applies the max_budget_usd attribute if present.
 func applyMaxBudget(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	raw, ok := node.Attrs["max_budget_usd"]
-	if !ok || raw == "" {
-		return nil
+	cfg := node.AgentConfig(nil)
+	if cfg.MaxBudgetUSDErr != nil {
+		return fmt.Errorf("node %q: %w", node.ID, cfg.MaxBudgetUSDErr)
 	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
-	}
-	if v > 0 {
-		ccCfg.MaxBudgetUSD = v
+	if cfg.MaxBudgetUSD > 0 {
+		ccCfg.MaxBudgetUSD = cfg.MaxBudgetUSD
 	}
 	return nil
 }
@@ -428,8 +425,8 @@ func applyPermissionMode(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) 
 	if isNodeToolAccessRestricted(node) {
 		return nil
 	}
-	raw, ok := node.Attrs["permission_mode"]
-	if !ok || raw == "" {
+	raw := node.AgentConfig(nil).PermissionMode
+	if raw == "" {
 		return nil
 	}
 	mode := pipeline.PermissionMode(raw)
@@ -443,7 +440,7 @@ func applyPermissionMode(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) 
 // buildACPConfig constructs an ACPConfig from node attributes.
 func buildACPConfig(node *pipeline.Node) *pipeline.ACPConfig {
 	cfg := &pipeline.ACPConfig{}
-	if agent, ok := node.Attrs["acp_agent"]; ok && agent != "" {
+	if agent := node.AgentConfig(nil).ACPAgent; agent != "" {
 		cfg.Agent = agent
 	}
 	return cfg
@@ -854,7 +851,7 @@ func (h *CodergenHandler) resolveTerminalStatus(node *pipeline.Node, responseTex
 		policy := node.AgentConfig(h.graphAttrs).TurnBreachPolicy
 		status, breachClass = classifyBreach(policy, sessResult, native)
 	}
-	if node.Attrs["auto_status"] == "true" && turnLimitMsg == "" {
+	if node.AgentConfig(h.graphAttrs).AutoStatus && turnLimitMsg == "" {
 		parsed, found := parseAutoStatus(responseText)
 		switch {
 		case found:

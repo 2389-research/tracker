@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,12 @@ type AgentNodeConfig struct {
 	AllowedTools    string
 	DisallowedTools string
 	MaxBudgetUSD    float64
+	// MaxBudgetUSDErr carries a non-nil error when max_budget_usd was present
+	// but failed to parse as a float. Unlike the other numeric attrs (which
+	// fall back to the zero value silently), the claude-code applyMaxBudget
+	// path surfaces this error to hard-fail node config — so the accessor must
+	// preserve it rather than swallow it (#393).
+	MaxBudgetUSDErr error
 	MaxCostUSD      float64 // #304: per-node cost ceiling in USD; 0 = unlimited
 	NoProgressTurns int     // #304: halt after K consecutive tool-call-free turns; 0 = disabled
 	PermissionMode  string
@@ -162,10 +169,16 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 }
 
 // applyMaxBudget resolves the node-only max_budget_usd attr.
+//
+// max_budget_usd is the one numeric attr whose parse failure is not silently
+// dropped: MaxBudgetUSDErr carries the error so the claude-code path can
+// hard-fail (#393). All other unparseable numerics fall back to the zero value.
 func (n *Node) applyMaxBudget(cfg *AgentNodeConfig) {
 	if v := n.Attrs["max_budget_usd"]; v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.MaxBudgetUSD = f
+		} else {
+			cfg.MaxBudgetUSDErr = fmt.Errorf("invalid max_budget_usd %q: %w", v, err)
 		}
 	}
 }
