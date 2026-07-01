@@ -26,13 +26,14 @@ const reviewChrome = 9
 // (e.g., execution plans). Top pane is a scrollable glamour-rendered
 // viewport, bottom pane is a textarea for the user's response.
 type ReviewContent struct {
-	viewport viewport.Model
-	textarea textarea.Model
-	replyCh  chan<- string
-	done     bool
-	width    int
-	height   int
-	tmpFile  string // path to temp file with the plan markdown
+	viewport   viewport.Model
+	textarea   textarea.Model
+	replyCh    chan<- string
+	done       bool
+	width      int
+	height     int
+	tmpFile    string // path to temp file with the plan markdown ("" if unavailable)
+	tmpFileErr error  // non-nil if writing the temp file failed; surfaced in the divider
 }
 
 // IsFullscreen signals the modal wrapper to skip centering and use the full terminal.
@@ -85,20 +86,19 @@ func NewReviewContent(prompt string, replyCh chan<- string, width, height int) *
 	ta.Focus()
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 
-	// Write plan to temp file for external reading (best-effort — an empty
-	// path just disables the external-read affordance).
-	tmpFile, err := writeTempPlan(plan)
-	if err != nil {
-		tmpFile = ""
-	}
+	// Write plan to temp file for external reading (best-effort — a failure
+	// just disables the external-read affordance, surfaced in the divider so it
+	// isn't silently swallowed; the review modal still works without it).
+	tmpFile, tmpFileErr := writeTempPlan(plan)
 
 	return &ReviewContent{
-		viewport: vp,
-		textarea: ta,
-		replyCh:  replyCh,
-		width:    width,
-		height:   height,
-		tmpFile:  tmpFile,
+		viewport:   vp,
+		textarea:   ta,
+		replyCh:    replyCh,
+		width:      width,
+		height:     height,
+		tmpFile:    tmpFile,
+		tmpFileErr: tmpFileErr,
 	}
 }
 
@@ -192,6 +192,8 @@ func (r *ReviewContent) View() string {
 		int(r.viewport.ScrollPercent()*100)))
 	if r.tmpFile != "" {
 		divider += Styles.DimText.Render(fmt.Sprintf("[ %s ]", r.tmpFile))
+	} else if r.tmpFileErr != nil {
+		divider += Styles.DimText.Render(fmt.Sprintf("[ external read unavailable: %v ]", r.tmpFileErr))
 	}
 	sb.WriteString(divider)
 	sb.WriteString("\n")
