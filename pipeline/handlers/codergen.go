@@ -920,6 +920,38 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 
 	cfg := node.AgentConfig(h.graphAttrs)
 
+	applyBackendAndPaths(&config, cfg)
+	applyModelIdentity(&config, cfg)
+	// #318 warm continue+N: a node-scoped, disk-driven override bumps MaxTurns
+	// on warm re-entry of this agent node (the operator-decision "continue"
+	// path writes it via a capped tool node). Consulted here because MaxTurns
+	// is otherwise read statically and nothing reads context for it. A missing
+	// or malformed override is a no-op, so normal runs are unaffected. (The
+	// conditional lives in resolveMaxTurns to keep buildConfig's branch count flat.)
+	config.MaxTurns = resolveMaxTurns(config.WorkingDir, node.ID, config.MaxTurns)
+	applyGenerationParams(&config, cfg)
+	applyTypedCompaction(&config, cfg)
+	applyReflectAndVerify(&config, cfg)
+
+	// #349: commit_only scope guard — outermost prepend so the restriction acts
+	// as the strongest constraint, overriding any node-supplied system_prompt.
+	// Enforced for all three backends: native (SessionConfig.SystemPrompt → Extra),
+	// claude-code (AgentRunConfig.SystemPrompt → --system-prompt flag), and ACP
+	// (buildACPPromptBlocks prepends AgentRunConfig.SystemPrompt as a text block).
+	if cfg.CommitOnly {
+		if config.SystemPrompt != "" {
+			config.SystemPrompt = commitOnlyScopeGuard + "\n\n" + config.SystemPrompt
+		} else {
+			config.SystemPrompt = commitOnlyScopeGuard
+		}
+	}
+
+	return config
+}
+
+// applyBackendAndPaths copies the backend selection and writable-paths jail
+// config from the typed AgentNodeConfig onto the session config.
+func applyBackendAndPaths(config *agent.SessionConfig, cfg pipeline.AgentNodeConfig) {
 	if cfg.Backend != "" {
 		// Normalize the documented "codergen" alias to "native" before the
 		// jail check. selectBackend already treats both as native; carrying
@@ -936,7 +968,11 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 		config.WritablePathsSet = true
 		config.WritablePaths = append([]string(nil), cfg.WritablePaths...) // defensive copy
 	}
+}
 
+// applyModelIdentity copies model/provider/system-prompt and the turn/cost
+// ceilings from the typed AgentNodeConfig onto the session config.
+func applyModelIdentity(config *agent.SessionConfig, cfg pipeline.AgentNodeConfig) {
 	if cfg.Model != "" {
 		config.Model = cfg.Model
 	}
@@ -956,13 +992,11 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if cfg.NoProgressTurns > 0 {
 		config.NoProgressTurns = cfg.NoProgressTurns
 	}
-	// #318 warm continue+N: a node-scoped, disk-driven override bumps MaxTurns
-	// on warm re-entry of this agent node (the operator-decision "continue"
-	// path writes it via a capped tool node). Consulted here because MaxTurns
-	// is otherwise read statically and nothing reads context for it. A missing
-	// or malformed override is a no-op, so normal runs are unaffected. (The
-	// conditional lives in resolveMaxTurns to keep buildConfig's branch count flat.)
-	config.MaxTurns = resolveMaxTurns(config.WorkingDir, node.ID, config.MaxTurns)
+}
+
+// applyGenerationParams copies the timeout/reasoning/response-format/cache
+// generation parameters from the typed AgentNodeConfig onto the session config.
+func applyGenerationParams(config *agent.SessionConfig, cfg pipeline.AgentNodeConfig) {
 	if cfg.CommandTimeout > 0 {
 		config.CommandTimeout = cfg.CommandTimeout
 	}
@@ -978,7 +1012,12 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if cfg.CacheToolResultsSet {
 		config.CacheToolResults = cfg.CacheToolResults
 	}
-	applyTypedCompaction(&config, cfg)
+}
+
+// applyReflectAndVerify copies the reflect-on-error, verify, turn-breach,
+// plan, and tool-access settings from the typed AgentNodeConfig onto the
+// session config.
+func applyReflectAndVerify(config *agent.SessionConfig, cfg pipeline.AgentNodeConfig) {
 	if cfg.ReflectOnErrorSet && !cfg.ReflectOnError {
 		config.ReflectOnError = false
 	}
@@ -1004,21 +1043,6 @@ func (h *CodergenHandler) buildConfig(node *pipeline.Node) agent.SessionConfig {
 	if cfg.ToolAccess != "" {
 		config.ToolAccess = cfg.ToolAccess
 	}
-
-	// #349: commit_only scope guard — outermost prepend so the restriction acts
-	// as the strongest constraint, overriding any node-supplied system_prompt.
-	// Enforced for all three backends: native (SessionConfig.SystemPrompt → Extra),
-	// claude-code (AgentRunConfig.SystemPrompt → --system-prompt flag), and ACP
-	// (buildACPPromptBlocks prepends AgentRunConfig.SystemPrompt as a text block).
-	if cfg.CommitOnly {
-		if config.SystemPrompt != "" {
-			config.SystemPrompt = commitOnlyScopeGuard + "\n\n" + config.SystemPrompt
-		} else {
-			config.SystemPrompt = commitOnlyScopeGuard
-		}
-	}
-
-	return config
 }
 
 // applyTypedCompaction applies the context-compaction mode + threshold from
