@@ -298,9 +298,9 @@ workflow HumanGateTestSuite
 
     # Section 5: Hybrid Freeform
     FreeformConfirm -> HybridGate
-    HybridGate -> ApproveRoute  label: "Approve"
-    HybridGate -> RejectRoute  label: "Reject"
-    HybridGate -> EscalateRoute  label: "Escalate"
+    HybridGate -> ApproveRoute  choice: "Approve"  label: "Approve"
+    HybridGate -> RejectRoute  choice: "Reject"  label: "Reject"
+    HybridGate -> EscalateRoute  choice: "Escalate"  label: "Escalate"
     ApproveRoute -> HybridConfirm
     RejectRoute -> HybridConfirm
     EscalateRoute -> HybridConfirm
