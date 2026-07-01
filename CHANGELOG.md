@@ -204,6 +204,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   progress mark with the (later) anchor time and undercounting stall (#426
   review).
 
+### Fixed
+
+- **Silent error swallowing in the Gemini translator, TUI review, and CLI env
+  loading (#397).** The Google adapter now propagates tool-call argument
+  (un)marshal errors (`translateToolCallPart`, `extractCandidateContent`, and the
+  streaming `processGeminiPart` which emits an `EventError`) instead of dropping a
+  malformed blob; `writeTempPlan` returns write/close errors; and `tracker version`
+  / `tracker doctor` surface `loadEnvFiles` errors the same way `tracker run` does.
+
 ### Notes
 
 - `sleep_aware_budget` is read from `graph.Attrs` by `ResolveBudgetLimits` for

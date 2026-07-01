@@ -85,8 +85,12 @@ func NewReviewContent(prompt string, replyCh chan<- string, width, height int) *
 	ta.Focus()
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 
-	// Write plan to temp file for external reading.
-	tmpFile := writeTempPlan(plan)
+	// Write plan to temp file for external reading (best-effort — an empty
+	// path just disables the external-read affordance).
+	tmpFile, err := writeTempPlan(plan)
+	if err != nil {
+		tmpFile = ""
+	}
 
 	return &ReviewContent{
 		viewport: vp,
@@ -228,13 +232,26 @@ func renderMarkdownForReview(md string, width int) string {
 	return strings.TrimSpace(rendered)
 }
 
+// createTempPlanFile creates the temp file backing writeTempPlan. It is a
+// package var so tests can inject write failures (#397).
+var createTempPlanFile = func() (*os.File, error) {
+	return os.CreateTemp("", "tracker-plan-*.md")
+}
+
 // writeTempPlan writes the plan markdown to a temp file and returns the path.
-func writeTempPlan(plan string) string {
-	f, err := os.CreateTemp("", "tracker-plan-*.md")
+func writeTempPlan(plan string) (string, error) {
+	f, err := createTempPlanFile()
 	if err != nil {
-		return ""
+		return "", err
 	}
-	defer f.Close()
-	f.WriteString(plan)
-	return f.Name()
+	if _, err := f.WriteString(plan); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write temp plan: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("close temp plan: %w", err)
+	}
+	return f.Name(), nil
 }

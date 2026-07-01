@@ -96,7 +96,9 @@ func dispatchPipelineCommands(cfg runConfig) (error, bool) {
 func executeVersion() error {
 	// Load env so provider status reflects .env files.
 	wd, _ := os.Getwd()
-	_ = loadEnvFiles(wd)
+	if err := loadEnvFiles(wd); err != nil {
+		return err
+	}
 
 	fmt.Printf("tracker %s\n", version)
 	fmt.Printf("  commit: %s\n", commit)
@@ -114,7 +116,9 @@ func executeDiagnose(cfg runConfig) error {
 }
 
 func executeDoctor(cfg runConfig) error {
-	_ = loadEnvFiles(cfg.workdir)
+	if err := loadEnvFiles(cfg.workdir); err != nil {
+		return err
+	}
 	doctorCfg := DoctorConfig{
 		probe:        cfg.probe,
 		pipelineFile: cfg.pipelineFile,

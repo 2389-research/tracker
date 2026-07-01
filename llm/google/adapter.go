@@ -239,18 +239,7 @@ func (a *Adapter) processSSELine(data []byte, ch chan<- llm.StreamEvent, state *
 		return true
 	}
 
-	if chunk.Error != nil {
-		// The API reports errors inside HTTP-200 streams; surface them as
-		// typed errors instead of silently dropping the chunk.
-		state.flushPendingFinish(ch)
-		msg := chunk.Error.Message
-		if msg == "" {
-			msg = "unknown stream error"
-		}
-		if chunk.Error.Status != "" {
-			msg = fmt.Sprintf("%s (%s)", msg, chunk.Error.Status)
-		}
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(chunk.Error.Code, "google: "+msg, "gemini")}
+	if a.emitStreamError(&chunk, ch, state) {
 		return true
 	}
 
@@ -277,6 +266,25 @@ func (a *Adapter) processSSELine(data []byte, ch chan<- llm.StreamEvent, state *
 
 	a.processCandidate(chunk.Candidates[0], &chunk, ch, state)
 	return false
+}
+
+// emitStreamError surfaces an API error carried inside an HTTP-200 stream and
+// returns true so the caller stops scanning. Returns false when the chunk
+// carries no error.
+func (a *Adapter) emitStreamError(chunk *geminiResponse, ch chan<- llm.StreamEvent, state *geminiStreamState) bool {
+	if chunk.Error == nil {
+		return false
+	}
+	state.flushPendingFinish(ch)
+	msg := chunk.Error.Message
+	if msg == "" {
+		msg = "unknown stream error"
+	}
+	if chunk.Error.Status != "" {
+		msg = fmt.Sprintf("%s (%s)", msg, chunk.Error.Status)
+	}
+	ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(chunk.Error.Code, "google: "+msg, "gemini")}
+	return true
 }
 
 // processCandidate handles a single candidate from a Gemini SSE chunk.
@@ -336,7 +344,11 @@ func (a *Adapter) processGeminiPart(part geminiPart, ch chan<- llm.StreamEvent, 
 			ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: state.textID}
 			state.textActive = false
 		}
-		argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+		argsJSON, err := json.Marshal(part.FunctionCall.Args)
+		if err != nil {
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: marshal function call args for %q: %w", part.FunctionCall.Name, err)}
+			return
+		}
 		ch <- llm.StreamEvent{
 			Type: llm.EventToolCallStart,
 			ToolCall: &llm.ToolCallData{
