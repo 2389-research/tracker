@@ -1,5 +1,5 @@
 // ABOUTME: Shared prompt rendering for human gate UIs.
-// ABOUTME: Renders markdown content with word wrapping for terminal display.
+// ABOUTME: Provides plain-text word wrapping for terminal display.
 package render
 
 import (

@@ -1,5 +1,5 @@
 // ABOUTME: Model catalog providing a registry of known LLM models and their capabilities.
-// ABOUTME: Supports lookup by ID/alias, listing by provider, and filtering by capability.
+// ABOUTME: Supports lookup by ID/alias and listing by provider.
 package llm
 
 // ModelInfo describes a known LLM model and its capabilities.
@@ -18,8 +18,8 @@ type ModelInfo struct {
 }
 
 // defaultCatalog is the built-in registry of known models.
-// Each provider section is ordered newest-first so ListModels surfaces the
-// most recent model for a given capability first.
+// Each provider section is ordered newest-first so ListModels returns each
+// provider's most recent models first.
 var defaultCatalog = []ModelInfo{
 	// ── Anthropic ────────────────────────────────────────────
 	{
