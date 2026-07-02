@@ -1790,6 +1790,29 @@ workflow BuildProduct
         exit 1
       fi
 
+      # Scope the manifest to milestones actually BUILT (issue #439). This gate
+      # also runs on the early `accept` ship path (EscalateMilestone -accept->),
+      # where later milestones don't exist yet — validating the whole plan there
+      # flags their unbuilt dirs as missing. DONE_COUNT is the number of markers
+      # PickNextMilestone wrote to .ai/milestones/done. 0/unreadable → fall back
+      # to the whole plan (fail safe toward catching a real skip). At the normal
+      # all-done entry DONE_COUNT == TOTAL, so behavior is unchanged there.
+      DONE_COUNT=$(ls -1 .ai/milestones/done 2>/dev/null | wc -l | tr -d ' ')
+      case "$DONE_COUNT" in ''|*[!0-9]*) DONE_COUNT=0 ;; esac
+      SCOPED_PLAN="$PLAN"
+      if [ "$DONE_COUNT" -gt 0 ]; then
+        awk -v last="$DONE_COUNT" '
+          /^#+ *[Mm]ilestone *[0-9]+/ {
+            match($0, /[0-9]+/); n = substr($0, RSTART, RLENGTH) + 0
+            keep = (n >= 1 && n <= last)
+          }
+          keep { print }
+        ' "$PLAN" > .ai/build/scoped-milestones.md
+        if [ -s .ai/build/scoped-milestones.md ]; then
+          SCOPED_PLAN=".ai/build/scoped-milestones.md"
+        fi
+      fi
+
       # Extract the **Files**: declarations. LLM-written file: headers vary
       # ("**Files**:", "Files:", "- **Files:** ..."), and the list may be
       # inline on the header line or a bulleted block underneath it. A blank
@@ -1804,7 +1827,7 @@ workflow BuildProduct
         }
         infiles && /^[[:space:]]*[-*+][[:space:]]/ { print; next }
         { infiles = 0 }
-      ' "$PLAN" > .ai/build/declared-files.raw
+      ' "$SCOPED_PLAN" > .ai/build/declared-files.raw
 
       if [ ! -s .ai/build/declared-files.raw ]; then
         echo "ERROR: no '**Files**:' lines found in $PLAN — the Decompose output contract was violated"

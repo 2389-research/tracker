@@ -73,3 +73,17 @@ func TestBuildProductIssue440ParserTakesFirstBacktickPath(t *testing.T) {
 		t.Errorf("first-backtick parser got %q, want internal/openai/client.go (issue #440 greedy-match regression)", got)
 	}
 }
+
+// TestBuildProductIssue439OutputsScopedToBuiltMilestones pins #439: the outputs
+// gate runs on the early-`accept` ship path where later milestones aren't built
+// yet, so it must scope its declared-file manifest to completed milestones
+// (via the .ai/milestones/done count), not validate the whole plan.
+func TestBuildProductIssue439OutputsScopedToBuiltMilestones(t *testing.T) {
+	cmd := toolCmd(t, "CheckMilestoneOutputs")
+	if !strings.Contains(cmd, ".ai/milestones/done") {
+		t.Error("CheckMilestoneOutputs must count completed milestones from .ai/milestones/done to scope the manifest (issue #439)")
+	}
+	if !strings.Contains(cmd, "SCOPED_PLAN") {
+		t.Error("CheckMilestoneOutputs must extract Files from a milestone-scoped plan slice, not the whole milestones.md (issue #439)")
+	}
+}
