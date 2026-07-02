@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -47,5 +48,28 @@ func TestBuildProductIssue440FirstBacktickParser(t *testing.T) {
 	}
 	if strings.Contains(cmd, "tr -s ',[:space:]'") {
 		t.Error("CheckMilestoneOutputs still whitespace-tokenizes prose into phantom paths (issue #440 regression)")
+	}
+}
+
+// TestBuildProductIssue440ParserTakesFirstBacktickPath is a BEHAVIORAL guard:
+// the declared-file parser must capture the FIRST backticked token so a bullet
+// that also backticks a type name (e.g. "`Client` struct") doesn't lose the
+// real path. A string-only guard missed the original greedy-`.*` regression.
+func TestBuildProductIssue440ParserTakesFirstBacktickPath(t *testing.T) {
+	cmd := toolCmd(t, "CheckMilestoneOutputs")
+	if !strings.Contains(cmd, "s/^[^") {
+		t.Error("CheckMilestoneOutputs backtick parser must anchor with ^[^`]* to take the FIRST backticked token, not a greedy .* that takes the last (issue #440)")
+	}
+	// Prove the anchored sed the .dip uses picks the FIRST path when a bullet
+	// contains two backtick pairs (path + a backticked type name).
+	sed := "sed -n 's/^[^`]*`\\([^`]*\\)`.*/\\1/p'"
+	c := exec.Command("sh", "-c", sed)
+	c.Stdin = strings.NewReader("- `internal/openai/client.go` (create `Client` struct)\n")
+	out, err := c.Output()
+	if err != nil {
+		t.Fatalf("running the parser sed failed: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "internal/openai/client.go" {
+		t.Errorf("first-backtick parser got %q, want internal/openai/client.go (issue #440 greedy-match regression)", got)
 	}
 }

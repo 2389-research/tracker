@@ -1823,7 +1823,7 @@ workflow BuildProduct
       # the extracted tokens are only ever used in quoted [ -d ]/[ -e ] tests.
       : > .ai/build/declared-files.list
       while IFS= read -r line; do
-        tok=$(printf '%s\n' "$line" | sed -n 's/.*`\([^`]*\)`.*/\1/p' | head -1)
+        tok=$(printf '%s\n' "$line" | sed -n 's/^[^`]*`\([^`]*\)`.*/\1/p' | head -1)
         if [ -z "$tok" ]; then
           tok=$(printf '%s\n' "$line" \
             | sed -E 's/[(#].*$//' \
