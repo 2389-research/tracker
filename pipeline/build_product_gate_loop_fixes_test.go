@@ -123,3 +123,15 @@ func TestBuildProductIssue441LintSuppressionHatch(t *testing.T) {
 		t.Error("EscalateMilestone prompt must name both suppression files to edit (issue #441)")
 	}
 }
+
+// TestBuildProductIssue442LintSkipIsLoud pins #442: an absent golangci-lint must
+// WARN that enforcement is disabled, not silently skip as "optional".
+func TestBuildProductIssue442LintSkipIsLoud(t *testing.T) {
+	probe := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/ci-probe.sh", "PROBE_EOF")
+	if !strings.Contains(probe, "WARNING: golangci-lint not installed") {
+		t.Error("ci-probe.sh must WARN loudly when golangci-lint is absent (issue #442)")
+	}
+	if strings.Contains(probe, "golangci-lint not installed — skipping (optional)") {
+		t.Error("ci-probe.sh still prints the quiet `skipping (optional)` INFO for golangci-lint (issue #442 regression)")
+	}
+}

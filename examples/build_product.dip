@@ -188,7 +188,8 @@ workflow BuildProduct
             fi
             golangci-lint run ${LINT_NEW_FROM_REV:+--new-from-rev "$LINT_NEW_FROM_REV"} $LINT_EXCLUDES 2>&1 || LANG_RC=$?
           else
-            echo "INFO: golangci-lint not installed — skipping (optional)"
+            echo "WARNING: golangci-lint not installed — lint enforcement is DISABLED for this run."
+            echo "WARNING: install a pinned golangci-lint for reproducible gating (results may differ across environments)."
           fi
         fi
         # JS/TS — run-if-present AND only if the project opted into the tool
