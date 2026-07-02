@@ -105,3 +105,21 @@ func TestBuildProductIssue436LintMilestoneScoped(t *testing.T) {
 		t.Error("verify.sh must set LINT_NEW_FROM_REV from the milestone base so lint is scoped like go test (issue #436)")
 	}
 }
+
+// TestBuildProductIssue441LintSuppressionHatch pins #441: an operator must be
+// able to suppress a LINT failure (not just go-test failures) via a named file,
+// and EscalateMilestone must tell them the exact files to edit.
+func TestBuildProductIssue441LintSuppressionHatch(t *testing.T) {
+	probe := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/ci-probe.sh", "PROBE_EOF")
+	if !strings.Contains(probe, "known_lint_failures") {
+		t.Error("ci-probe.sh must read .ai/milestones/known_lint_failures (issue #441)")
+	}
+	if !strings.Contains(probe, "--exclude") {
+		t.Error("ci-probe.sh must feed known_lint_failures into golangci-lint --exclude (issue #441)")
+	}
+	g := loadBuildProduct(t)
+	esc := nodePrompt(t, g, "EscalateMilestone")
+	if !strings.Contains(esc, "known_lint_failures") || !strings.Contains(esc, "known_failures") {
+		t.Error("EscalateMilestone prompt must name both suppression files to edit (issue #441)")
+	}
+}

@@ -174,7 +174,19 @@ workflow BuildProduct
             # LINT_NEW_FROM_REV to the milestone base, only NEW issues fail —
             # matching the milestone-scoped `go test`. FinalBuild leaves it unset
             # → whole-tree lint.
-            golangci-lint run ${LINT_NEW_FROM_REV:+--new-from-rev "$LINT_NEW_FROM_REV"} 2>&1 || LANG_RC=$?
+            # Lint escape hatch (issue #441): non-comment lines in
+            # .ai/milestones/known_lint_failures become --exclude patterns, so an
+            # operator can suppress a lint failure the milestone can't fix (the
+            # go-test hatch known_failures can't). Patterns are operator-authored
+            # and only ever passed as golangci-lint args — never eval'd.
+            LINT_EXCLUDES=""
+            if [ -f .ai/milestones/known_lint_failures ]; then
+              while IFS= read -r pat; do
+                case "$pat" in ''|\#*) continue ;; esac
+                LINT_EXCLUDES="$LINT_EXCLUDES --exclude $pat"
+              done < .ai/milestones/known_lint_failures
+            fi
+            golangci-lint run ${LINT_NEW_FROM_REV:+--new-from-rev "$LINT_NEW_FROM_REV"} $LINT_EXCLUDES 2>&1 || LANG_RC=$?
           else
             echo "INFO: golangci-lint not installed — skipping (optional)"
           fi
@@ -2823,6 +2835,11 @@ workflow BuildProduct
       Options:
       - **mark done** (default; chosen automatically for unattended runs): Override the failure — you've confirmed the milestone is complete. Commits/continues to the next milestone. Preserves work.
       - **retry**: Re-implement this milestone from scratch. Does NOT re-plan. Preserves prior commits.
+      - **mark a known failure, then retry**: if a specific test or lint rule is a
+        false positive the milestone can't fix, add it and pick **retry**. Test
+        names go in `.ai/milestones/known_failures` (one per line); golangci-lint
+        exclude patterns go in `.ai/milestones/known_lint_failures`. The next
+        attempt re-runs the gate with those suppressions applied.
       - **accept**: Stop building more milestones and ship what exists — but still run the full cross-review, final build/test, and spec-compliance gates first (does NOT skip verification).
       - **abandon**: DESTRUCTIVE LAST RESORT. Kill the pipeline immediately and discard uncommitted work. Only pick this if "Verify currently" is FAIL and the build is genuinely unsalvageable.
 
