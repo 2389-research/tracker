@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Milestone lint gate is now milestone-scoped (#436).** `.ai/build/ci-probe.sh`
-  passes `golangci-lint run --new-from-rev "$MS_BASE"` when `verify.sh` sets the
+  passes `golangci-lint run --new-from-rev "$LINT_NEW_FROM_REV"` when `verify.sh` sets the
   milestone base, so a milestone no longer fails on earlier, already-accepted
   milestones' lint debt. FinalBuild still lints the whole tree.
 - **FixMilestone now sees the failing gate's real stdout (#437).** The prompt

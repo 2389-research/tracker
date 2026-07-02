@@ -117,6 +117,9 @@ func TestBuildProductIssue441LintSuppressionHatch(t *testing.T) {
 	if !strings.Contains(probe, "--exclude") {
 		t.Error("ci-probe.sh must feed known_lint_failures into golangci-lint --exclude (issue #441)")
 	}
+	if !strings.Contains(probe, `read -r pat || [ -n "$pat" ]`) {
+		t.Error("known_lint_failures loop must handle a final line without a trailing newline (|| [ -n \"$pat\" ]) so a newline-less suppression file isn't silently dropped (issue #441)")
+	}
 	g := loadBuildProduct(t)
 	esc := nodePrompt(t, g, "EscalateMilestone")
 	if !strings.Contains(esc, "known_lint_failures") || !strings.Contains(esc, "known_failures") {

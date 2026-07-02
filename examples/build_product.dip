@@ -181,7 +181,7 @@ workflow BuildProduct
             # and only ever passed as golangci-lint args — never eval'd.
             LINT_EXCLUDES=""
             if [ -f .ai/milestones/known_lint_failures ]; then
-              while IFS= read -r pat; do
+              while IFS= read -r pat || [ -n "$pat" ]; do
                 case "$pat" in ''|\#*) continue ;; esac
                 LINT_EXCLUDES="$LINT_EXCLUDES --exclude $pat"
               done < .ai/milestones/known_lint_failures
