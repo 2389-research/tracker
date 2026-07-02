@@ -19,3 +19,20 @@ func TestBuildProductIssue443AttemptCapBoundary(t *testing.T) {
 		t.Error("TestMilestone still uses `-gt 3` — runs a 4th attempt before escalating (issue #443 regression)")
 	}
 }
+
+// TestBuildProductIssue437FixMilestoneSeesGateOutput pins #437: FixMilestone
+// must be handed the failing gate's real stdout (not the prior node's DONE
+// narrative) and told to re-run the exact gate, not just `go test`.
+func TestBuildProductIssue437FixMilestoneSeesGateOutput(t *testing.T) {
+	g := loadBuildProduct(t)
+	p := nodePrompt(t, g, "FixMilestone")
+	if !strings.Contains(p, "## Failing gate output") {
+		t.Error("FixMilestone prompt must include a `## Failing gate output` heading (issue #437)")
+	}
+	if !strings.Contains(p, "${ctx.tool_stdout}") {
+		t.Error("FixMilestone prompt must interpolate ${ctx.tool_stdout} so the fixer sees the real failure (issue #437)")
+	}
+	if !strings.Contains(p, "sh .ai/build/verify.sh") {
+		t.Error("FixMilestone prompt must instruct re-running `sh .ai/build/verify.sh`, not just go test (issue #437)")
+	}
+}

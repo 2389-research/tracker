@@ -1706,7 +1706,9 @@ workflow BuildProduct
 
       The current milestone failed verification. Read:
       - The milestone spec: .ai/milestones/current.md
-      - The test output showing failures (in context from the previous node)
+      - The failing gate's real stdout — the "## Failing gate output" block at
+        the END of this prompt (build / test / lint / CI output from the gate
+        that routed you here)
       - The relevant source files causing the failures
 
       This is a FULL implementation session, not a quick patch. You have the
@@ -1718,7 +1720,8 @@ workflow BuildProduct
       2. Read the source code being tested to understand the current behavior
       3. Identify the root cause (not just the symptom)
       4. Implement the correct fix
-      5. Run the specific failing test to verify before committing
+      5. Re-run the EXACT failing gate to confirm the fix: `sh .ai/build/verify.sh`
+         (this runs build + every stack's tests + the lint/CI gate — not just `go test`)
       6. Commit the fix with a message like "fix(milestone-N): [what was fixed]"
 
       Do NOT make superficial patches. If a test expects two records to NOT
@@ -1728,6 +1731,16 @@ workflow BuildProduct
       STOP. Do NOT perform further verification, re-reading, or polishing.
       Committing is the precondition for stopping — never end a session with a
       green-but-uncommitted tree.
+
+      ---
+      ## Failing gate output
+
+      Tail of the failing gate's stdout (64KB cap) that routed here — the real
+      failure signal (go build / go test and the project CI / golangci-lint gate
+      from .ai/build/verify.sh). Delimited under its own heading — never
+      interpolated mid-sentence.
+
+      ${ctx.tool_stdout}
 
   # ─── Phase 3: Cross-Review ─────────────────────────────────
 
