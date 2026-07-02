@@ -1290,7 +1290,7 @@ workflow BuildProduct
 
       # Failure — check if we've exhausted fix attempts.
       echo "--- attempt $ATTEMPTS of 3 ---"
-      if [ "$ATTEMPTS" -gt 3 ]; then
+      if [ "$ATTEMPTS" -ge 3 ]; then
         echo "ESCALATE: milestone failed after $ATTEMPTS attempts"
         printf 'escalate'
         exit 1
