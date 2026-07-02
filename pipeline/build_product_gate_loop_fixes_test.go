@@ -36,3 +36,16 @@ func TestBuildProductIssue437FixMilestoneSeesGateOutput(t *testing.T) {
 		t.Error("FixMilestone prompt must instruct re-running `sh .ai/build/verify.sh`, not just go test (issue #437)")
 	}
 }
+
+// TestBuildProductIssue440FirstBacktickParser pins #440: declared-file
+// extraction must take the first backticked path per bullet, not whitespace-
+// tokenize prose into phantom paths (go.sum, git.Fake, gh.Fake).
+func TestBuildProductIssue440FirstBacktickParser(t *testing.T) {
+	cmd := toolCmd(t, "CheckMilestoneOutputs")
+	if !strings.Contains(cmd, `sed -E 's/[(#].*$//'`) {
+		t.Error("CheckMilestoneOutputs must strip inline prose after `(`/`#` in the path parser (issue #440)")
+	}
+	if strings.Contains(cmd, "tr -s ',[:space:]'") {
+		t.Error("CheckMilestoneOutputs still whitespace-tokenizes prose into phantom paths (issue #440 regression)")
+	}
+}
