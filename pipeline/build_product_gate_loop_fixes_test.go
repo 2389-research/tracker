@@ -87,3 +87,21 @@ func TestBuildProductIssue439OutputsScopedToBuiltMilestones(t *testing.T) {
 		t.Error("CheckMilestoneOutputs must extract Files from a milestone-scoped plan slice, not the whole milestones.md (issue #439)")
 	}
 }
+
+// TestBuildProductIssue436LintMilestoneScoped pins #436: the lint gate must be
+// milestone-scoped like `go test`, via --new-from-rev fed from the milestone
+// base, while FinalBuild (which leaves the env var unset) still lints whole-tree.
+func TestBuildProductIssue436LintMilestoneScoped(t *testing.T) {
+	setup := toolCmd(t, "Setup")
+	probe := extractHeredoc(t, setup, ".ai/build/ci-probe.sh", "PROBE_EOF")
+	if !strings.Contains(probe, `--new-from-rev "$LINT_NEW_FROM_REV"`) {
+		t.Error("ci-probe.sh golangci-lint must honor $LINT_NEW_FROM_REV via --new-from-rev (issue #436)")
+	}
+	if !strings.Contains(probe, `${LINT_NEW_FROM_REV:+`) {
+		t.Error("ci-probe.sh must only pass --new-from-rev when LINT_NEW_FROM_REV is set (whole-tree at FinalBuild) (issue #436)")
+	}
+	verify := extractHeredoc(t, setup, ".ai/build/verify.sh", "VERIFY_EOF")
+	if !strings.Contains(verify, "LINT_NEW_FROM_REV=") {
+		t.Error("verify.sh must set LINT_NEW_FROM_REV from the milestone base so lint is scoped like go test (issue #436)")
+	}
+}

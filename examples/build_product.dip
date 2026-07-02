@@ -170,7 +170,11 @@ workflow BuildProduct
           go vet ./... 2>&1 || LANG_RC=$?
           if command -v golangci-lint >/dev/null 2>&1; then
             echo "--- golangci-lint run (language-native gate) ---"
-            golangci-lint run 2>&1 || LANG_RC=$?
+            # Milestone-scope the lint gate (issue #436): when verify.sh set
+            # LINT_NEW_FROM_REV to the milestone base, only NEW issues fail —
+            # matching the milestone-scoped `go test`. FinalBuild leaves it unset
+            # → whole-tree lint.
+            golangci-lint run ${LINT_NEW_FROM_REV:+--new-from-rev "$LINT_NEW_FROM_REV"} 2>&1 || LANG_RC=$?
           else
             echo "INFO: golangci-lint not installed — skipping (optional)"
           fi
@@ -306,6 +310,12 @@ workflow BuildProduct
           MS_BASE=$(git hash-object -t tree /dev/null)
         else
           MS_BASE="$MS_START"
+          # Milestone-scope the lint gate too (issue #436) — only when we have a
+          # real base commit (never the empty-tree fallback, which is not a rev
+          # golangci-lint --new-from-rev accepts). ci-probe.sh, sourced below in
+          # the same shell, reads this to pass --new-from-rev.
+          LINT_NEW_FROM_REV="$MS_START"
+          export LINT_NEW_FROM_REV
         fi
         CHANGED_PKGS=$(git diff --name-only --diff-filter=d "${MS_BASE}..HEAD" 2>/dev/null \
           | grep -E '\.go$' \
