@@ -170,9 +170,26 @@ workflow BuildProduct
           go vet ./... 2>&1 || LANG_RC=$?
           if command -v golangci-lint >/dev/null 2>&1; then
             echo "--- golangci-lint run (language-native gate) ---"
-            golangci-lint run 2>&1 || LANG_RC=$?
+            # Milestone-scope the lint gate (issue #436): when verify.sh set
+            # LINT_NEW_FROM_REV to the milestone base, only NEW issues fail —
+            # matching the milestone-scoped `go test`. FinalBuild leaves it unset
+            # → whole-tree lint.
+            # Lint escape hatch (issue #441): non-comment lines in
+            # .ai/milestones/known_lint_failures become --exclude patterns, so an
+            # operator can suppress a lint failure the milestone can't fix (the
+            # go-test hatch known_failures can't). Patterns are operator-authored
+            # and only ever passed as golangci-lint args — never eval'd.
+            LINT_EXCLUDES=""
+            if [ -f .ai/milestones/known_lint_failures ]; then
+              while IFS= read -r pat || [ -n "$pat" ]; do
+                case "$pat" in ''|\#*) continue ;; esac
+                LINT_EXCLUDES="$LINT_EXCLUDES --exclude $pat"
+              done < .ai/milestones/known_lint_failures
+            fi
+            golangci-lint run ${LINT_NEW_FROM_REV:+--new-from-rev "$LINT_NEW_FROM_REV"} $LINT_EXCLUDES 2>&1 || LANG_RC=$?
           else
-            echo "INFO: golangci-lint not installed — skipping (optional)"
+            echo "WARNING: golangci-lint not installed — lint enforcement is DISABLED for this run."
+            echo "WARNING: install a pinned golangci-lint for reproducible gating (results may differ across environments)."
           fi
         fi
         # JS/TS — run-if-present AND only if the project opted into the tool
@@ -306,6 +323,12 @@ workflow BuildProduct
           MS_BASE=$(git hash-object -t tree /dev/null)
         else
           MS_BASE="$MS_START"
+          # Milestone-scope the lint gate too (issue #436) — only when we have a
+          # real base commit (never the empty-tree fallback, which is not a rev
+          # golangci-lint --new-from-rev accepts). ci-probe.sh, sourced below in
+          # the same shell, reads this to pass --new-from-rev.
+          LINT_NEW_FROM_REV="$MS_START"
+          export LINT_NEW_FROM_REV
         fi
         CHANGED_PKGS=$(git diff --name-only --diff-filter=d "${MS_BASE}..HEAD" 2>/dev/null \
           | grep -E '\.go$' \
@@ -1290,7 +1313,7 @@ workflow BuildProduct
 
       # Failure — check if we've exhausted fix attempts.
       echo "--- attempt $ATTEMPTS of 3 ---"
-      if [ "$ATTEMPTS" -gt 3 ]; then
+      if [ "$ATTEMPTS" -ge 3 ]; then
         echo "ESCALATE: milestone failed after $ATTEMPTS attempts"
         printf 'escalate'
         exit 1
@@ -1706,7 +1729,9 @@ workflow BuildProduct
 
       The current milestone failed verification. Read:
       - The milestone spec: .ai/milestones/current.md
-      - The test output showing failures (in context from the previous node)
+      - The failing gate's real stdout — the "## Failing gate output" block at
+        the END of this prompt (build / test / lint / CI output from the gate
+        that routed you here)
       - The relevant source files causing the failures
 
       This is a FULL implementation session, not a quick patch. You have the
@@ -1718,7 +1743,8 @@ workflow BuildProduct
       2. Read the source code being tested to understand the current behavior
       3. Identify the root cause (not just the symptom)
       4. Implement the correct fix
-      5. Run the specific failing test to verify before committing
+      5. Re-run the EXACT failing gate to confirm the fix: `sh .ai/build/verify.sh`
+         (this runs build + every stack's tests + the lint/CI gate — not just `go test`)
       6. Commit the fix with a message like "fix(milestone-N): [what was fixed]"
 
       Do NOT make superficial patches. If a test expects two records to NOT
@@ -1728,6 +1754,16 @@ workflow BuildProduct
       STOP. Do NOT perform further verification, re-reading, or polishing.
       Committing is the precondition for stopping — never end a session with a
       green-but-uncommitted tree.
+
+      ---
+      ## Failing gate output
+
+      Tail of the failing gate's stdout (64KB cap) that routed here — the real
+      failure signal (go build / go test and the project CI / golangci-lint gate
+      from .ai/build/verify.sh). Delimited under its own heading — never
+      interpolated mid-sentence.
+
+      ${ctx.tool_stdout}
 
   # ─── Phase 3: Cross-Review ─────────────────────────────────
 
@@ -1777,6 +1813,29 @@ workflow BuildProduct
         exit 1
       fi
 
+      # Scope the manifest to milestones actually BUILT (issue #439). This gate
+      # also runs on the early `accept` ship path (EscalateMilestone -accept->),
+      # where later milestones don't exist yet — validating the whole plan there
+      # flags their unbuilt dirs as missing. DONE_COUNT is the number of markers
+      # PickNextMilestone wrote to .ai/milestones/done. 0/unreadable → fall back
+      # to the whole plan (fail safe toward catching a real skip). At the normal
+      # all-done entry DONE_COUNT == TOTAL, so behavior is unchanged there.
+      DONE_COUNT=$(ls -1 .ai/milestones/done 2>/dev/null | wc -l | tr -d ' ')
+      case "$DONE_COUNT" in ''|*[!0-9]*) DONE_COUNT=0 ;; esac
+      SCOPED_PLAN="$PLAN"
+      if [ "$DONE_COUNT" -gt 0 ]; then
+        awk -v last="$DONE_COUNT" '
+          /^#+ *[Mm]ilestone *[0-9]+/ {
+            match($0, /[0-9]+/); n = substr($0, RSTART, RLENGTH) + 0
+            keep = (n >= 1 && n <= last)
+          }
+          keep { print }
+        ' "$PLAN" > .ai/build/scoped-milestones.md
+        if [ -s .ai/build/scoped-milestones.md ]; then
+          SCOPED_PLAN=".ai/build/scoped-milestones.md"
+        fi
+      fi
+
       # Extract the **Files**: declarations. LLM-written file: headers vary
       # ("**Files**:", "Files:", "- **Files:** ..."), and the list may be
       # inline on the header line or a bulleted block underneath it. A blank
@@ -1791,7 +1850,7 @@ workflow BuildProduct
         }
         infiles && /^[[:space:]]*[-*+][[:space:]]/ { print; next }
         { infiles = 0 }
-      ' "$PLAN" > .ai/build/declared-files.raw
+      ' "$SCOPED_PLAN" > .ai/build/declared-files.raw
 
       if [ ! -s .ai/build/declared-files.raw ]; then
         echo "ERROR: no '**Files**:' lines found in $PLAN — the Decompose output contract was violated"
@@ -1801,12 +1860,25 @@ workflow BuildProduct
         exit 1
       fi
 
-      # Tokenize: split on commas/whitespace, strip markdown decoration
-      # (backticks, brackets, parens, bold markers), leading ./ and bullet
-      # dashes, trailing punctuation. Blank lines dropped per CLAUDE.md.
-      tr -s ',[:space:]' '\n' < .ai/build/declared-files.raw | \
-        sed -E 's/[][`*()"]//g; s/^-+//; s/^\.\///; s/[.:;]+$//' | \
-        grep -v '^[[:space:]]*$' > .ai/build/declared-files.list || true
+      # Parse ONE path per bullet (issue #440): prefer the FIRST backticked
+      # token; else strip inline prose after the first `(` or `#`, drop the
+      # bullet marker, and take the first whitespace token. Whitespace-tokenizing
+      # the whole bullet turned prose ("Deps struct", "go.sum", "NewRepo(t)")
+      # into phantom paths. The single-quoted sed expressions make the backticks
+      # literal (sh does not run command-substitution inside single quotes), and
+      # the extracted tokens are only ever used in quoted [ -d ]/[ -e ] tests.
+      : > .ai/build/declared-files.list
+      while IFS= read -r line; do
+        tok=$(printf '%s\n' "$line" | sed -n 's/^[^`]*`\([^`]*\)`.*/\1/p' | head -1)
+        if [ -z "$tok" ]; then
+          tok=$(printf '%s\n' "$line" \
+            | sed -E 's/[(#].*$//' \
+            | sed -E 's/^[[:space:]]*[-*+][[:space:]]*//' \
+            | awk '{print $1}')
+        fi
+        tok=$(printf '%s\n' "$tok" | sed -E 's/[][`*()"]//g; s/^\.\///; s/[.:;]+$//')
+        [ -n "$tok" ] && printf '%s\n' "$tok" >> .ai/build/declared-files.list
+      done < .ai/build/declared-files.raw
 
       MISSING_DIRS=""
       MISSING_FILES=""
@@ -2764,6 +2836,11 @@ workflow BuildProduct
       Options:
       - **mark done** (default; chosen automatically for unattended runs): Override the failure — you've confirmed the milestone is complete. Commits/continues to the next milestone. Preserves work.
       - **retry**: Re-implement this milestone from scratch. Does NOT re-plan. Preserves prior commits.
+      - **mark a known failure, then retry**: if a specific test or lint rule is a
+        false positive the milestone can't fix, add it and pick **retry**. Test
+        names go in `.ai/milestones/known_failures` (one per line); golangci-lint
+        exclude patterns go in `.ai/milestones/known_lint_failures`. The next
+        attempt re-runs the gate with those suppressions applied.
       - **accept**: Stop building more milestones and ship what exists — but still run the full cross-review, final build/test, and spec-compliance gates first (does NOT skip verification).
       - **abandon**: DESTRUCTIVE LAST RESORT. Kill the pipeline immediately and discard uncommitted work. Only pick this if "Verify currently" is FAIL and the build is genuinely unsalvageable.
 

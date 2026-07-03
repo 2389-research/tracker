@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Milestone lint gate is now milestone-scoped (#436).** `.ai/build/ci-probe.sh`
+  passes `golangci-lint run --new-from-rev "$LINT_NEW_FROM_REV"` when `verify.sh` sets the
+  milestone base, so a milestone no longer fails on earlier, already-accepted
+  milestones' lint debt. FinalBuild still lints the whole tree.
+- **FixMilestone now sees the failing gate's real stdout (#437).** The prompt
+  includes a `## Failing gate output` block with `${ctx.tool_stdout}` and
+  instructs re-running `sh .ai/build/verify.sh` — the fixer is no longer blind to
+  a lint/CI failure it never ran.
+- **CheckMilestoneOutputs no longer flags unbuilt future milestones (#439).** The
+  declared-outputs manifest is scoped to completed milestones (`.ai/milestones/done`
+  count), so the early `accept` ship path stops reporting not-yet-built milestone
+  directories as missing.
+- **CheckMilestoneOutputs parses declared paths, not prose (#440).** Declared-file
+  extraction takes the first backticked token per bullet instead of whitespace-
+  tokenizing prose, eliminating phantom "missing" entries (`go.sum`, `git.Fake`).
+- **Milestone retry cap is exact (#443).** A cap of 3 now runs exactly 3 attempts
+  (was `-gt 3`, which ran a 4th and logged "attempt 4 of 3").
+- **CheckMilestoneOutputs already probed the working tree (#438).** Verified the
+  node `os.Stat`s disk (`[ -d ]`/`[ -e ]`, since #350); no git-tree probe exists.
+  The post-mortem's "MISSING from disk" false positives are resolved by #439/#440.
+
+### Changed
+
+- **Lint failures now have an in-band escape hatch (#441).** Lines in
+  `.ai/milestones/known_lint_failures` become `golangci-lint --exclude` patterns,
+  and the `EscalateMilestone` gate names the exact suppression files to edit
+  before retrying.
+- **Absent golangci-lint warns loudly (#442).** The gate still runs when the
+  linter is missing, but now emits a `WARNING` that lint enforcement is disabled
+  (was a quiet `INFO … skipping (optional)`).
+
 ## [0.41.0] - 2026-07-01
 
 ### Added
