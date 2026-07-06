@@ -162,6 +162,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Run `dippin doctor` on ALL example .dip files — aim for A grade across the board
 - Run `dippin simulate -all-paths` on the three core pipelines
 - Update CHANGELOG.md and README.md
+- Update ROADMAP.md — promote/retire workstreams, close finished milestones (see ROADMAP.md § How this file is maintained)
 - After the `release: vX.Y.Z` PR merges, tag the merge commit and push:
   - `git tag -a vX.Y.Z <merge-commit-sha> -m "release: vX.Y.Z"`
   - `git push origin vX.Y.Z`

@@ -10,8 +10,11 @@ bin/
 /mammoth
 /tracker
 /tracker-conformance
+/tracker-swebench
+/agent-runner
 /generate
 /jailcheck
+/predictions.jsonl
 .DS_Store
 .tracker/
 .scratch/
