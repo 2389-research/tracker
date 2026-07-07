@@ -149,9 +149,7 @@ func TestSpecForgeLoopHalts(t *testing.T) {
 	reachedFailed := false
 
 	reg := NewHandlerRegistry()
-	fail := func(id string) Outcome {
-		return Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail"}}
-	}
+	fail := Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail"}}
 	ok := Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}}
 
 	codergen := func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
@@ -159,7 +157,7 @@ func TestSpecForgeLoopHalts(t *testing.T) {
 		defer mu.Unlock()
 		switch node.ID {
 		case "SpecLint":
-			return fail("SpecLint"), nil // always fails -> drives the loop
+			return fail, nil // always fails -> drives the loop
 		case "ForgeSpec":
 			forgeRuns++
 			return ok, nil
@@ -174,12 +172,12 @@ func TestSpecForgeLoopHalts(t *testing.T) {
 		case "CheckSpecForgeBudget":
 			budgetEntries++
 			if budgetEntries > 3 { // -gt 3 semantics: 4th entry fails
-				return fail("CheckSpecForgeBudget"), nil
+				return fail, nil
 			}
 			return ok, nil
 		case "SpecForgeFailed":
 			reachedFailed = true
-			return fail("SpecForgeFailed"), nil // exit 1 hard stop
+			return fail, nil // exit 1 hard stop
 		default: // Setup and any other tool
 			return ok, nil
 		}
