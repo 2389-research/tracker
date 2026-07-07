@@ -53,8 +53,8 @@ func TestSpecForgeLoopEdges(t *testing.T) {
 	if !hasEdgeWithCondition(g, "CheckSpecForgeBudget", "ForgeSpec", "ctx.outcome = success") {
 		t.Error("CheckSpecForgeBudget success must route to ForgeSpec")
 	}
-	if !hasEdgeWithCondition(g, "CheckSpecForgeBudget", "SpecForgeFailed", "ctx.outcome = fail") {
-		t.Error("CheckSpecForgeBudget budget-exhausted must hard-stop at SpecForgeFailed")
+	if !hasUnconditionalEdgeTo(g, "CheckSpecForgeBudget", "SpecForgeFailed") {
+		t.Error("CheckSpecForgeBudget must fall back unconditionally to SpecForgeFailed on budget exhaustion (also keeps the tool node dippin-covered)")
 	}
 	// ForgeSpec: success -> fidelity, unconditional fallback -> hard stop.
 	if !hasEdgeWithCondition(g, "ForgeSpec", "CheckSpecFidelity", "ctx.outcome = success") {

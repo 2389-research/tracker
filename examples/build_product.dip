@@ -3131,7 +3131,7 @@ workflow BuildProduct
     # budget and a fidelity oracle, failing CLOSED if it can't converge.
     SpecLint -> CheckSpecForgeBudget  when ctx.outcome = fail
     CheckSpecForgeBudget -> ForgeSpec  when ctx.outcome = success
-    CheckSpecForgeBudget -> SpecForgeFailed  when ctx.outcome = fail
+    CheckSpecForgeBudget -> SpecForgeFailed
     ForgeSpec -> CheckSpecFidelity  when ctx.outcome = success
     # Unconditional fallback (safe: SpecForgeFailed is a terminal, not a loop
     # target) catches fail / too-thin / unexpected — mirrors TestMilestone.
