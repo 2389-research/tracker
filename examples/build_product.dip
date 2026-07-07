@@ -1098,6 +1098,16 @@ workflow BuildProduct
       else
         echo "_(behavioral-contracts.md not found)_"
       fi
+      echo
+      echo "# Spec auto-hardening log (.ai/decisions/spec-forge-log.md)"
+      echo
+      if [ -f .ai/decisions/spec-forge-log.md ]; then
+        echo "_NOTE: SPEC.md was auto-edited by the spec-forge loop. Each ruling below changed the source of truth — review before approving._"
+        echo
+        cat .ai/decisions/spec-forge-log.md
+      else
+        echo "_(no auto-hardening — SPEC.md passed coherence as written)_"
+      fi
 
   human ApprovePlan
     label: "Review the milestone plan — approve, adjust, or reject"
@@ -1127,6 +1137,12 @@ workflow BuildProduct
       A ruling you disagree with, or a missing/needed ruling, is a reason to
       **adjust** — this is your one chance to correct a wrong interpretation
       before the build commits to it.
+
+      If the "Spec auto-hardening log" below is non-empty, SPEC.md was
+      **auto-hardened** by the spec-forge loop before planning — each entry
+      changed the source of truth. A ruling or elaboration you disagree with is
+      a reason to **adjust**; this is your one checkpoint on the machine's
+      interpretation before the build commits to it.
 
       ---
       ## Plan under review

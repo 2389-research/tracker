@@ -203,3 +203,17 @@ func TestSpecForgeLoopHalts(t *testing.T) {
 		t.Error("run did not reach SpecForgeFailed — the loop did not fail closed on non-convergence")
 	}
 }
+
+// TestForgeSurfacedAtApprovePlan pins the safety net: the forge log is shown at
+// ShowPlan and ApprovePlan flags that SPEC.md was auto-edited — so the human
+// approves the FORGED spec knowingly, not a silently rewritten one.
+func TestForgeSurfacedAtApprovePlan(t *testing.T) {
+	if !strings.Contains(toolCmd(t, "ShowPlan"), "spec-forge-log.md") {
+		t.Error("ShowPlan must cat .ai/decisions/spec-forge-log.md so the operator sees what was auto-edited (spec-forge)")
+	}
+	g := loadBuildProduct(t)
+	p := g.Nodes["ApprovePlan"].Attrs["prompt"]
+	if !strings.Contains(p, "auto-hardened") {
+		t.Error("ApprovePlan prompt must flag that SPEC.md was auto-hardened and a disputed ruling is a reason to adjust (spec-forge)")
+	}
+}
