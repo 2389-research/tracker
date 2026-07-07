@@ -586,6 +586,13 @@ workflow BuildProduct
       RUN_BASE=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
       printf '%s\n' "$RUN_BASE" > .ai/build/run-base-sha
 
+      # Spec-forge loop hygiene (fresh-run reset). Setup is skipped on
+      # checkpoint resume, so an intentional resume keeps loop state — but a NEW
+      # run in a workdir left dirty by a prior abandoned run must not inherit a
+      # poisoned budget counter or a stale original-spec snapshot (PR #264).
+      rm -f .ai/build/spec_forge_attempts
+      rm -f .ai/decisions/SPEC.original.md .ai/decisions/spec-forge-log.md
+
       printf 'setup-ready'
 
   # ─── SpecLint: spec-coherence preflight (issue #301, epic #308 Phase 2) ──
@@ -647,6 +654,16 @@ workflow BuildProduct
           value. A contract like "Idempotency-Key derived from
           review_id+sha" on a signature receiving neither is
           unimplementable as written.
+      (h) Buildable substance: the spec must contain enough concrete,
+          buildable intent to decompose — at least ONE named component or
+          interface AND at least ONE checkable acceptance statement (a
+          sentence that could become a test assertion). A bare title, a
+          one-line idea, or a spec of pure aspirations with no named
+          component and no verifiable acceptance criterion is a finding.
+          Cite WHICH required element is absent (no named component / no
+          checkable acceptance statement) — the same evidence discipline as
+          (a)-(g); never fail on a gestalt "feels thin". A terse but concrete
+          spec (one named component with one checkable criterion) PASSES.
       (f) Mandated tests, spec-emitted values, and normative constants
           enumerated and assignable: list every test SPEC.md mandates by
           name or by concrete behavior, PLUS every spec-prescribed EMITTED
