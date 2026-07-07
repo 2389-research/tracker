@@ -4,9 +4,11 @@
 package pipeline
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -129,5 +131,75 @@ func TestCheckSpecForgeBudgetCounter(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir3, ".ai/build/spec_forge_attempts"), []byte("garbage\n"), 0o644)
 	if _, code := runToolCmd(t, cmd, dir3, env); code != 0 {
 		t.Errorf("corrupted counter: exit %d, want 0 (numeric guard resets to 0, treats as attempt 1)", code)
+	}
+}
+
+// TestSpecForgeLoopHalts drives the REAL build_product graph through the engine
+// with scripted node outcomes: SpecLint fails forever, the budget gate passes 3
+// times then fails. It proves the loop halts at SpecForgeFailed after exactly 3
+// ForgeSpec runs — independent of max_restarts. String tests can't prove
+// termination (the #443 lesson); this does.
+func TestSpecForgeLoopHalts(t *testing.T) {
+	g := loadBuildProduct(t)
+	g.Attrs["max_restarts"] = "100" // prove the budget, not the global pool, bounds the loop
+
+	var mu sync.Mutex
+	forgeRuns := 0
+	budgetEntries := 0
+	reachedFailed := false
+
+	reg := NewHandlerRegistry()
+	fail := func(id string) Outcome {
+		return Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail"}}
+	}
+	ok := Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}}
+
+	codergen := func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch node.ID {
+		case "SpecLint":
+			return fail("SpecLint"), nil // always fails -> drives the loop
+		case "ForgeSpec":
+			forgeRuns++
+			return ok, nil
+		default: // Start, CheckSpecFidelity, and any other agent
+			return ok, nil
+		}
+	}
+	tool := func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch node.ID {
+		case "CheckSpecForgeBudget":
+			budgetEntries++
+			if budgetEntries > 3 { // -gt 3 semantics: 4th entry fails
+				return fail("CheckSpecForgeBudget"), nil
+			}
+			return ok, nil
+		case "SpecForgeFailed":
+			reachedFailed = true
+			return fail("SpecForgeFailed"), nil // exit 1 hard stop
+		default: // Setup and any other tool
+			return ok, nil
+		}
+	}
+	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
+		fn := tool
+		if name == "codergen" || name == "start" {
+			fn = codergen
+		}
+		reg.Register(&testHandler{name: name, executeFn: fn})
+	}
+
+	_, _ = NewEngine(g, reg).Run(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if forgeRuns != 3 {
+		t.Errorf("ForgeSpec ran %d times, want exactly 3 (budget cap) — loop is unbounded or mis-capped", forgeRuns)
+	}
+	if !reachedFailed {
+		t.Error("run did not reach SpecForgeFailed — the loop did not fail closed on non-convergence")
 	}
 }
