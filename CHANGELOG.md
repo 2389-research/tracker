@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Autonomous spec-forge loop in `build_product` (spec-forge).** A failing
+  `SpecLint` coherence gate no longer dead-ends at a human. An autonomous
+  `ForgeSpec` agent edits `SPEC.md` to resolve the findings (reconciling, never
+  deleting, requirements; elaborating only gaps with a cited seed span), a
+  `CheckSpecFidelity` oracle proves no requirement was silently dropped, and the
+  loop re-lints until clean — capped at 3 attempts by an on-disk budget and
+  failing **closed** via a `SpecForgeFailed` hard-stop (so `--auto-approve` /
+  `--autopilot` can't ship a broken spec). The original spec is snapshotted to
+  `.ai/decisions/SPEC.original.md` and every ruling is logged to
+  `.ai/decisions/spec-forge-log.md`, surfaced to the operator at `ApprovePlan`
+  before any build spend. SpecLint also gains a "buildable substance" check so a
+  too-thin spec is caught instead of reaching Decompose. This hardens
+  **structural coherence**; it does not certify semantic consistency.
+
 ## [0.42.0] - 2026-07-02
 
 ### Fixed

@@ -85,7 +85,7 @@ func assertSpecLintGate(t *testing.T, g *Graph, successTarget, escalateTarget st
 		t.Errorf("SpecLint must continue to %s only when ctx.outcome = success", successTarget)
 	}
 	if !hasEdgeWithCondition(g, "SpecLint", escalateTarget, "ctx.outcome = fail") {
-		t.Errorf("SpecLint must route ctx.outcome = fail to %s (human fixes the spec; never silently to Done)", escalateTarget)
+		t.Errorf("SpecLint must route ctx.outcome = fail to %s (never silently to Done)", escalateTarget)
 	}
 	for _, e := range g.OutgoingEdges("SpecLint") {
 		if e.Condition == "" {
@@ -98,7 +98,7 @@ func assertSpecLintGate(t *testing.T, g *Graph, successTarget, escalateTarget st
 // build_product.dip: Setup -> SpecLint -> ReadSpec (success) / EscalateReview (fail).
 func TestBuildProductSpecLintPreflight(t *testing.T) {
 	g := loadBuildProduct(t)
-	assertSpecLintGate(t, g, "ReadSpec", "EscalateReview")
+	assertSpecLintGate(t, g, "ReadSpec", "CheckSpecForgeBudget")
 }
 
 // TestBuildProductSpecLintGatesDecomposition asserts ReadSpec and Decompose are
