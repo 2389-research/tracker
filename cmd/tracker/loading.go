@@ -90,6 +90,31 @@ func emitDOTDeprecationWarning(w io.Writer) {
 	fmt.Fprintln(w, "WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
 }
 
+// guardPackedWorkflowDir fails a packed (.dipx) run that references
+// ${graph.workflow_dir} but has no seeded value. workflow_dir is the SOURCE
+// .dip's directory (seeded by seedWorkflowDir); a content-addressed bundle has
+// no stable source dir, so the value is absent and expands to "" — degrading a
+// tool body like `. "${graph.workflow_dir}/scripts/x.sh"` to `. "/scripts/x.sh"`,
+// which aborts mysteriously under `set -eu`. Fail loud, before any node runs,
+// with actionable guidance instead of that silent degrade (#430). Only the run
+// path calls this; validate/simulate stay non-fatal.
+func guardPackedWorkflowDir(graph *pipeline.Graph, packed bool) error {
+	if !packed || graph.Attrs["workflow_dir"] != "" {
+		return nil
+	}
+	refs := pipeline.NodesReferencingWorkflowDir(graph)
+	if len(refs) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"this workflow references ${graph.workflow_dir} (node(s): %s) but it is unavailable in a packed .dipx "+
+			"run — workflow_dir resolves the SOURCE .dip's directory, which is not part of a content-addressed "+
+			"bundle. Run the workflow from its source .dip directory (where workflow_dir is seeded), or remove the "+
+			"${graph.workflow_dir} reference. See https://github.com/2389-research/tracker/issues/430",
+		strings.Join(refs, ", "),
+	)
+}
+
 // loadSubgraphs scans the graph for subgraph nodes and loads their referenced
 // .dip files. Refs are resolved relative to the parent pipeline file's directory.
 // Returns a map of ref → *Graph suitable for handlers.WithSubgraphs().
