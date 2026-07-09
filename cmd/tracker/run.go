@@ -537,6 +537,11 @@ func loadGraphAndSubgraphs(resolved, format string, info WorkflowInfo, isEmbedde
 		if err != nil {
 			return nil, nil, pipeline.BundleInfo{}, fmt.Errorf("load pipeline: %w", err)
 		}
+		// A packed .dipx has no source dir, so ${graph.workflow_dir} would
+		// expand to "" and abort under `set -eu`. Fail loud before running (#430).
+		if err := guardPackedWorkflowDir(graph, bundle.Identity != ""); err != nil {
+			return nil, nil, pipeline.BundleInfo{}, err
+		}
 		return graph, subgraphs, bundle, nil
 	}
 	// Embedded workflows have no subgraphs (none of the 3 core pipelines use them).

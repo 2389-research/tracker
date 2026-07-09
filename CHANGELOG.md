@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too-thin spec is caught instead of reaching Decompose. This hardens
   **structural coherence**; it does not certify semantic consistency.
 
+### Fixed
+
+- **Packed `.dipx` runs fail loud when a workflow needs `${graph.workflow_dir}`
+  (#430).** `graph.workflow_dir` is the source `.dip`'s directory, seeded only on
+  source-tree loads; a content-addressed `.dipx` bundle has no source dir, so the
+  value was empty and a tool body like `. "${graph.workflow_dir}/scripts/x.sh"`
+  silently degraded to `. "/scripts/x.sh"` and aborted under `set -eu`. A packed
+  run that references `${graph.workflow_dir}` now errors before any node executes,
+  naming the offending node(s) and pointing at the fix (run from source, or drop
+  the reference). Source-tree runs, `validate`, and `simulate` are unchanged.
+
 ## [0.42.0] - 2026-07-02
 
 ### Fixed
