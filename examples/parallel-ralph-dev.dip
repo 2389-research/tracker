@@ -211,7 +211,7 @@ workflow parallel_ralph_dev
 
   subgraph StreamB
     label: "Stream B — Adaptive Ralph"
-    ref: subgraphs/adaptive-ralph-stream-b.dip
+    ref: subgraphs/adaptive-ralph-stream.dip
     params:
       stream_id: stream-b
       branch: feature/stream-b
