@@ -21,7 +21,7 @@ func PackTestBundle(t *testing.T, entryPath string) string {
 	if err != nil {
 		t.Fatalf("create bundle file: %v", err)
 	}
-	if _, err := dipx.Pack(context.Background(), entryPath, f); err != nil {
+	if _, err := dipx.Pack(context.Background(), entryPath, f, dipx.PackOptions{}); err != nil {
 		_ = f.Close() // best-effort on the error path; primary error wins
 		t.Fatalf("dipx.Pack: %v", err)
 	}
