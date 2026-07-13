@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Condition evaluator no longer misroutes on `||`/`&&` inside values (#444).**
+  Splitting is now quote-aware, so a condition value that legitimately contains
+  `||`/`&&` (a URL, regex, or stderr fragment) evaluates correctly instead of
+  silently splitting into phantom clauses. `contains`/`startswith`/`endswith`/`in`
+  now strip surrounding quotes on their operand like `=`/`==`/`!=` already did.
+- **Human-gate timeouts no longer leak the interviewer goroutine (#446).** On
+  timeout the handler now cancels the interviewer (when it implements `Cancel()`),
+  turning a permanently-blocked goroutine into orderly teardown.
+- **claude-code error classification is no longer flipped by benign output (#447).**
+  The network/budget matchers are anchored to error-shaped phrases (e.g.
+  `connection refused`, `budget exceeded`) instead of bare `connection`/`budget`,
+  so an unrelated log line can't turn a hard failure into an infinite retry.
+  (Parsing the CLI's NDJSON error events as the primary signal is a follow-up.)
+- **The interview-result handler fails the node instead of panicking (#448).** A
+  JSON marshal failure now returns an error routed as a node failure rather than
+  crashing the pipeline process.
+
+### Changed
+
+- **`Outcome.Status` is now typed `TerminalStatus` (#445).** Engine comparisons
+  drop their `string(...)` casts and a typoed status string (`"succes"`) now fails
+  to compile instead of silently routing to the wrong branch. Persisted JSON
+  fields stay `string` (unchanged on-disk format).
+
 ## [0.43.0] - 2026-07-09
 
 ### Added
