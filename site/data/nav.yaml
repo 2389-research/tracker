@@ -9,6 +9,8 @@ items:
     url: cli.html
   - label: Changelog
     url: changelog.html
+  - label: Roadmap
+    url: roadmap.html
   - label: Glossary
     url: glossary.html
   - label: GitHub
