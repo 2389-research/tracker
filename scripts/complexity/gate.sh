@@ -21,9 +21,26 @@ list_files() {
     -not -path './cmd/tracker-conformance/*' | sort
 }
 
+# Verify a pinned analyzer actually builds and runs before we trust an empty
+# result to mean "no violations". A trivial file with an impossible threshold
+# exits 0 iff the tool ran; a module-fetch/build failure exits non-zero and we
+# hard-fail loudly instead of silently scanning nothing (#468).
+ensure_tool() { # <module> <version>
+  local tmp; tmp=$(mktemp -d)
+  printf 'package p\nfunc F() {}\n' > "$tmp/x.go"
+  if ! go run "$1@$2" -over 999 "$tmp/x.go" >/dev/null 2>&1; then
+    rm -rf "$tmp"
+    echo "FATAL: cannot run $1@$2 (module fetch / build failure?) — the complexity gate cannot verify anything, refusing to pass" >&2
+    exit 1
+  fi
+  rm -rf "$tmp"
+}
+
 # Emit current violations, normalized to metric|file|func|value (line-insensitive:
 # file path only, no :line:col, so entries survive ordinary edits).
 scan() {
+  ensure_tool "github.com/fzipp/gocyclo/cmd/gocyclo" "$GOCYCLO_VERSION"
+  ensure_tool "github.com/uudashr/gocognit/cmd/gocognit" "$GOCOGNIT_VERSION"
   local files; files=$(list_files)
   # gocyclo/gocognit exit 1 when they find over-threshold functions (by design,
   # for use as a CI gate); under pipefail that would abort the scan early via
