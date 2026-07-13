@@ -5,9 +5,9 @@ workflow Megaplan
 
   defaults
     max_retries: 5
+    fidelity: summary:medium
     max_restarts: 5
     on_failure: Exit
-    fidelity: summary:medium
 
   agent Start
     label: Start
@@ -17,7 +17,7 @@ workflow Megaplan
 
   tool SetupEnvironment
     label: "Setup .ai workspace"
-    timeout: 60s
+    timeout: 1m
     command:
       set -eu
       mkdir -p .ai/drafts .ai/sprints
@@ -28,7 +28,7 @@ workflow Megaplan
 
   tool DetermineSprintId
     label: "Determine Sprint ID"
-    timeout: 60s
+    timeout: 1m
     command:
       set -eu
       mkdir -p .ai
@@ -325,7 +325,7 @@ workflow Megaplan
 
   tool PersistSprintPlaceholder
     label: "Persist Sprint Placeholder"
-    timeout: 60s
+    timeout: 1m
     command:
       set -eu
       mkdir -p .ai/sprints
@@ -342,7 +342,7 @@ workflow Megaplan
 
   tool SyncLedger
     label: "Sync Ledger"
-    timeout: 60s
+    timeout: 1m
     command:
       set -eu
       mkdir -p .ai
@@ -371,73 +371,23 @@ workflow Megaplan
     Start -> SetupEnvironment
     SetupEnvironment -> DetermineSprintId
     DetermineSprintId -> OrientParallel
-    OrientParallel -> OrientConventions
-    OrientParallel -> OrientLedger
-    OrientParallel -> OrientRecent
-    OrientParallel -> OrientSeedExplore
-    OrientConventions -> OrientJoin
-    OrientLedger -> OrientJoin
-    OrientRecent -> OrientJoin
-    OrientSeedExplore -> OrientJoin
     OrientJoin -> SynthesizeOrientation
     SynthesizeOrientation -> IntentParallel
-    IntentParallel -> IntentClaude
-    IntentParallel -> IntentCodex
-    IntentParallel -> IntentGemini
-    IntentClaude -> IntentJoin
-    IntentCodex -> IntentJoin
-    IntentGemini -> IntentJoin
     IntentJoin -> InitialDraftParallel
-    InitialDraftParallel -> DraftClaude
-    InitialDraftParallel -> DraftCodex
-    InitialDraftParallel -> DraftGemini
-    DraftClaude -> InitialDraftJoin
-    DraftCodex -> InitialDraftJoin
-    DraftGemini -> InitialDraftJoin
     InitialDraftJoin -> QuestionsParallel
-    QuestionsParallel -> QuestionsClaude
-    QuestionsParallel -> QuestionsCodex
-    QuestionsParallel -> QuestionsGemini
-    QuestionsClaude -> QuestionsJoin
-    QuestionsCodex -> QuestionsJoin
-    QuestionsGemini -> QuestionsJoin
     QuestionsJoin -> InterviewGate
     InterviewGate -> SkipInterview  label: "[S] Skip interview"
     InterviewGate -> CaptureInterview  label: "[A] Answer interview"
     CaptureInterview -> RevisedDraftParallel
     SkipInterview -> RevisedDraftParallel
-    RevisedDraftParallel -> ReviseClaude
-    RevisedDraftParallel -> ReviseCodex
-    RevisedDraftParallel -> ReviseGemini
-    ReviseClaude -> RevisedDraftJoin
-    ReviseCodex -> RevisedDraftJoin
-    ReviseGemini -> RevisedDraftJoin
     RevisedDraftJoin -> CritiquesParallel
-    CritiquesParallel -> CritiqueClaudeOnCodex
-    CritiquesParallel -> CritiqueClaudeOnGemini
-    CritiquesParallel -> CritiqueCodexOnClaude
-    CritiquesParallel -> CritiqueCodexOnGemini
-    CritiquesParallel -> CritiqueGeminiOnClaude
-    CritiquesParallel -> CritiqueGeminiOnCodex
-    CritiqueClaudeOnCodex -> CritiquesJoin
-    CritiqueClaudeOnGemini -> CritiquesJoin
-    CritiqueCodexOnClaude -> CritiquesJoin
-    CritiqueCodexOnGemini -> CritiquesJoin
-    CritiqueGeminiOnClaude -> CritiquesJoin
-    CritiqueGeminiOnCodex -> CritiquesJoin
     CritiquesJoin -> MergeAnalysisParallel
-    MergeAnalysisParallel -> CompareArchitectures
-    MergeAnalysisParallel -> ExtractBestIdeas
-    MergeAnalysisParallel -> SynthesizeCritiques
-    CompareArchitectures -> MergeAnalysisJoin
-    ExtractBestIdeas -> MergeAnalysisJoin
-    SynthesizeCritiques -> MergeAnalysisJoin
     MergeAnalysisJoin -> WriteMergeNotes
     WriteMergeNotes -> WriteFinalSprint
     WriteFinalSprint -> FinalQualityGate
-    FinalQualityGate -> PersistSprintPlaceholder  when ctx.outcome = success  label: pass
-    FinalQualityGate -> RevisedDraftParallel  when ctx.outcome = retry  label: rework  restart: true
-    FinalQualityGate -> Exit  when ctx.outcome = fail  label: blocked
+    FinalQualityGate -> PersistSprintPlaceholder  on success  label: pass
+    FinalQualityGate -> RevisedDraftParallel  on retry  label: rework  loop
+    FinalQualityGate -> Exit  on fail  label: blocked
     FinalQualityGate -> Exit
     PersistSprintPlaceholder -> SyncLedger
     SyncLedger -> Exit

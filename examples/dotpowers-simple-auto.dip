@@ -5,7 +5,9 @@ workflow dotpowers_simple_auto
 
   defaults
     max_retries: 2
+    max_restarts: 50
     fidelity: summary:high
+    on_failure: Exit
 
   agent Start
     label: Start
@@ -19,7 +21,7 @@ workflow dotpowers_simple_auto
 
   tool CheckExistingPlans
     label: "Check Existing Plans"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       if [ -f docs/plans/plan.md ] && grep -q '^- \[ \]' docs/plans/plan.md 2>/dev/null; then
@@ -30,7 +32,7 @@ workflow dotpowers_simple_auto
 
   tool ArchiveOldPlans
     label: "Archive Old Plans"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       if ls docs/plans/*.md 1>/dev/null 2>&1; then
@@ -49,8 +51,8 @@ workflow dotpowers_simple_auto
     provider: anthropic
     fidelity: full
     goal_gate: true
-    retry_target: ExploreIdea
     max_retries: 3
+    retry_target: ExploreIdea
     prompt:
       You are working in `run.working_dir`.
 
@@ -88,8 +90,8 @@ workflow dotpowers_simple_auto
     provider: anthropic
     fidelity: full
     goal_gate: true
-    retry_target: AutoBrainstorm
     max_retries: 3
+    retry_target: AutoBrainstorm
     prompt:
       You are working in `run.working_dir`.
 
@@ -126,7 +128,7 @@ workflow dotpowers_simple_auto
 
   tool CheckBrainstormDone
     label: "Brainstorm Complete?"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       if grep -q 'READY_FOR_DESIGN' docs/plans/brainstorm.md 2>/dev/null; then
@@ -140,8 +142,8 @@ workflow dotpowers_simple_auto
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: WriteDesignBrief
     max_retries: 3
+    retry_target: WriteDesignBrief
     prompt:
       You are working in `run.working_dir`.
 
@@ -178,8 +180,8 @@ workflow dotpowers_simple_auto
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: CommitBrief
     max_retries: 3
+    retry_target: CommitBrief
     prompt:
       You are working in `run.working_dir`.
 
@@ -261,7 +263,7 @@ workflow dotpowers_simple_auto
 
   tool ValidatePlanFormat
     label: "Validate Plan Format"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -305,8 +307,8 @@ workflow dotpowers_simple_auto
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: PatchPlan
     max_retries: 3
+    retry_target: PatchPlan
     prompt:
       You are working in `run.working_dir`.
 
@@ -389,8 +391,8 @@ workflow dotpowers_simple_auto
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: CommitPlan
     max_retries: 3
+    retry_target: CommitPlan
     prompt:
       You are working in `run.working_dir`.
 
@@ -405,8 +407,8 @@ workflow dotpowers_simple_auto
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: SetupProject
     max_retries: 3
+    retry_target: SetupProject
     prompt:
       You are working in `run.working_dir`.
 
@@ -446,7 +448,7 @@ workflow dotpowers_simple_auto
 
   tool VerifyBaseline
     label: "Verify Baseline"
-    timeout: 120s
+    timeout: 2m
     command:
       set -eu
       mkdir -p .tracker
@@ -471,7 +473,7 @@ workflow dotpowers_simple_auto
 
   tool PickNextTask
     label: "Pick Next Task"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -594,8 +596,8 @@ workflow dotpowers_simple_auto
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: ImplementTask
     max_retries: 3
+    retry_target: ImplementTask
     prompt:
       You are working in `run.working_dir`.
 
@@ -642,8 +644,8 @@ workflow dotpowers_simple_auto
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: ImplementTask
     max_retries: 3
+    retry_target: ImplementTask
     prompt:
       You are working in `run.working_dir`.
 
@@ -686,7 +688,7 @@ workflow dotpowers_simple_auto
 
   tool CheckImplementBudget
     label: "Check Implement Budget"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -705,7 +707,7 @@ workflow dotpowers_simple_auto
 
   tool MarkTaskComplete
     label: "Mark Task Complete"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -803,8 +805,8 @@ workflow dotpowers_simple_auto
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: AutoRecover
     max_retries: 3
+    retry_target: AutoRecover
     prompt:
       You are working in `run.working_dir`.
 
@@ -836,7 +838,7 @@ workflow dotpowers_simple_auto
 
   tool ValidateBuild
     label: "Validate Full Build"
-    timeout: 120s
+    timeout: 2m
     command:
       set -eu
       echo '=== Running full validation ==='
@@ -879,8 +881,8 @@ workflow dotpowers_simple_auto
     label: "Final Review (Opus)"
     fidelity: summary:high
     goal_gate: true
-    retry_target: FinalReview
     max_retries: 3
+    retry_target: FinalReview
     prompt:
       You are working in `run.working_dir`.
 
@@ -922,7 +924,7 @@ workflow dotpowers_simple_auto
 
   tool CheckReworkBudget
     label: "Check Rework Budget"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -943,8 +945,8 @@ workflow dotpowers_simple_auto
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: FailureSummary
     max_retries: 3
+    retry_target: FailureSummary
     prompt:
       You are working in `run.working_dir`.
 
@@ -952,7 +954,7 @@ workflow dotpowers_simple_auto
 
   tool VerifyTestsFinal
     label: "Final Test Verification"
-    timeout: 120s
+    timeout: 2m
     command:
       set -eu
       echo '=== Final verification before ship ==='
@@ -972,8 +974,8 @@ workflow dotpowers_simple_auto
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: CreatePR
     max_retries: 3
+    retry_target: CreatePR
     prompt:
       You are working in `run.working_dir`.
 
@@ -998,68 +1000,68 @@ workflow dotpowers_simple_auto
 
   edges
     Start -> CheckExistingPlans
-    CheckExistingPlans -> PickNextTask  when ctx.tool_stdout = resume  label: "resume — plan exists"  weight: 2
+    CheckExistingPlans -> PickNextTask  when ctx.tool_stdout = resume  label: "resume — plan exists"
     CheckExistingPlans -> ArchiveOldPlans  when ctx.tool_stdout = fresh  label: "fresh start"
     CheckExistingPlans -> ArchiveOldPlans  label: fallback
     ArchiveOldPlans -> ExploreIdea
     ExploreIdea -> AutoBrainstorm
     AutoBrainstorm -> CheckBrainstormDone
-    CheckBrainstormDone -> AutoBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  restart: true
-    CheckBrainstormDone -> WriteDesignBrief  when ctx.tool_stdout = done  label: "ready for design"  weight: 2
-    CheckBrainstormDone -> AutoBrainstorm  label: fallback  restart: true
+    CheckBrainstormDone -> AutoBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  loop
+    CheckBrainstormDone -> WriteDesignBrief  when ctx.tool_stdout = done  label: "ready for design"
+    CheckBrainstormDone -> AutoBrainstorm  label: fallback  loop
     WriteDesignBrief -> CommitBrief
     CommitBrief -> DraftPlan
     DraftPlan -> ValidatePlanFormat
-    ValidatePlanFormat -> AuditPlanSpec  when ctx.tool_stdout = format_ok  label: "format ok"  weight: 2
+    ValidatePlanFormat -> AuditPlanSpec  when ctx.tool_stdout = format_ok  label: "format ok"
     ValidatePlanFormat -> AutoRecover  when ctx.tool_stdout = fail_retries_exhausted  label: "plan loop exhausted"
-    ValidatePlanFormat -> DraftPlan  when ctx.tool_stdout != format_ok and ctx.tool_stdout != fail_retries_exhausted  label: "format fail"  restart: true
+    ValidatePlanFormat -> DraftPlan  when ctx.tool_stdout != format_ok and ctx.tool_stdout != fail_retries_exhausted  label: "format fail"  loop
     ValidatePlanFormat -> AutoRecover  label: fallback
-    AuditPlanSpec -> CommitPlan  when ctx.outcome = success  label: "plan approved"  weight: 2
-    AuditPlanSpec -> PatchPlan  when ctx.outcome = fail  label: "gaps found"
+    AuditPlanSpec -> CommitPlan  on success  label: "plan approved"
+    AuditPlanSpec -> PatchPlan  on fail  label: "gaps found"
     AuditPlanSpec -> PatchPlan  label: fallback
-    PatchPlan -> ValidatePlanFormat  restart: true
+    PatchPlan -> ValidatePlanFormat  loop
     CommitPlan -> SetupProject
     SetupProject -> VerifyBaseline
     VerifyBaseline -> PickNextTask
-    PickNextTask -> ImplementTask  when ctx.tool_stdout != all_complete and ctx.tool_stdout != no_tasks_found  label: "has task"  weight: 2
+    PickNextTask -> ImplementTask  when ctx.tool_stdout != all_complete and ctx.tool_stdout != no_tasks_found  label: "has task"
     PickNextTask -> ValidateBuild  when ctx.tool_stdout = all_complete  label: "all done"
     PickNextTask -> AutoRecover  when ctx.tool_stdout = no_tasks_found  label: "no tasks in plan"
     PickNextTask -> AutoRecover  label: fallback
     ImplementTask -> SpecReview
-    SpecReview -> QualityReview  when ctx.outcome = success  label: "spec pass"  weight: 2
-    SpecReview -> CheckImplementBudget  when ctx.outcome = fail  label: "spec fail"
+    SpecReview -> QualityReview  on success  label: "spec pass"
+    SpecReview -> CheckImplementBudget  on fail  label: "spec fail"
     SpecReview -> CheckImplementBudget  label: fallback
-    QualityReview -> MarkTaskComplete  when ctx.outcome = success  label: "quality pass"  weight: 2
-    QualityReview -> CheckImplementBudget  when ctx.outcome = fail  label: "quality fail"
+    QualityReview -> MarkTaskComplete  on success  label: "quality pass"
+    QualityReview -> CheckImplementBudget  on fail  label: "quality fail"
     QualityReview -> MarkTaskComplete  label: fallback
-    CheckImplementBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "retry ok"  weight: 2  restart: true
+    CheckImplementBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "retry ok"  loop
     CheckImplementBudget -> AutoRecover  when ctx.tool_stdout = budget_exhausted  label: "too many attempts"
     CheckImplementBudget -> AutoRecover  label: fallback
-    MarkTaskComplete -> PickNextTask  restart: true
-    ImplementTask -> DebugInvestigate  when ctx.outcome = fail  label: "retries exhausted"
-    DebugInvestigate -> ImplementTask  when ctx.outcome = success  label: "fixed, re-verify"  weight: 2  restart: true
-    DebugInvestigate -> ReplanTask  when ctx.outcome = fail  label: "can't fix"
+    MarkTaskComplete -> PickNextTask  loop
+    ImplementTask -> DebugInvestigate  on fail  label: "retries exhausted"
+    DebugInvestigate -> ImplementTask  on success  label: "fixed, re-verify"  loop
+    DebugInvestigate -> ReplanTask  on fail  label: "can't fix"
     DebugInvestigate -> ReplanTask  label: fallback
-    ReplanTask -> PickNextTask  when ctx.outcome = success  label: replanned  weight: 2  restart: true
-    ReplanTask -> AutoRecover  when ctx.outcome = fail  label: stuck
+    ReplanTask -> PickNextTask  on success  label: replanned  loop
+    ReplanTask -> AutoRecover  on fail  label: stuck
     ReplanTask -> AutoRecover  label: fallback
-    AutoRecover -> PickNextTask  when ctx.outcome = success  label: recovered  weight: 2  restart: true
-    AutoRecover -> FailureSummary  when ctx.outcome = fail  label: unrecoverable
+    AutoRecover -> PickNextTask  on success  label: recovered  loop
+    AutoRecover -> FailureSummary  on fail  label: unrecoverable
     AutoRecover -> FailureSummary  label: fallback
-    ValidateBuild -> FinalReview  when ctx.outcome = success  label: "build pass"  weight: 2
+    ValidateBuild -> FinalReview  when ctx.outcome = success  label: "build pass"
     ValidateBuild -> CheckReworkBudget  when ctx.outcome = fail  label: "build fail"
     ValidateBuild -> FailureSummary  label: fallback
-    FinalReview -> VerifyTestsFinal  when ctx.outcome = success  label: pass  weight: 2
-    FinalReview -> CheckReworkBudget  when ctx.outcome = retry  label: rework
-    FinalReview -> FailureSummary  when ctx.outcome = fail  label: blocked
+    FinalReview -> VerifyTestsFinal  on success  label: pass
+    FinalReview -> CheckReworkBudget  on retry  label: rework
+    FinalReview -> FailureSummary  on fail  label: blocked
     FinalReview -> VerifyTestsFinal  label: fallback
-    CheckReworkBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "rework ok"  weight: 2  restart: true
+    CheckReworkBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "rework ok"  loop
     CheckReworkBudget -> FailureSummary  when ctx.tool_stdout = budget_exhausted  label: "rework budget exhausted"
     CheckReworkBudget -> FailureSummary  label: fallback
     FailureSummary -> Exit
-    VerifyTestsFinal -> CreatePR  when ctx.outcome = success  label: "tests pass"  weight: 2
+    VerifyTestsFinal -> CreatePR  when ctx.outcome = success  label: "tests pass"
     VerifyTestsFinal -> CheckReworkBudget  when ctx.outcome = fail  label: "tests fail"
     VerifyTestsFinal -> FailureSummary  label: fallback
-    CreatePR -> FailureSummary  when ctx.outcome = fail  label: "PR failed"
-    CreatePR -> Exit  when ctx.outcome = success  label: shipped  weight: 2
+    CreatePR -> FailureSummary  on fail  label: "PR failed"
+    CreatePR -> Exit  on success  label: shipped
     CreatePR -> Exit  label: fallback

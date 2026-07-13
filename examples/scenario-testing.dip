@@ -6,6 +6,8 @@ workflow dotpowers
   defaults
     max_retries: 2
     fidelity: summary:high
+    max_restarts: 50
+    on_failure: Exit
 
   agent Start
     label: Start
@@ -19,7 +21,7 @@ workflow dotpowers
 
   tool CheckExistingPlans
     label: "Check Existing Plans"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       if [ -f docs/plans/plan.md ] && grep -q '^- \[ \]' docs/plans/plan.md 2>/dev/null; then
@@ -30,7 +32,7 @@ workflow dotpowers
 
   tool ArchiveOldPlans
     label: "Archive Old Plans"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       if ls docs/plans/*.md 1>/dev/null 2>&1; then
@@ -49,8 +51,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: full
     goal_gate: true
-    retry_target: ExploreIdea
     max_retries: 3
+    retry_target: ExploreIdea
     prompt:
       You are working in `run.working_dir`.
 
@@ -92,8 +94,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: full
     goal_gate: true
-    retry_target: RefineUnderstanding
     max_retries: 3
+    retry_target: RefineUnderstanding
     prompt:
       You are working in `run.working_dir`.
 
@@ -129,7 +131,7 @@ workflow dotpowers
 
   tool CheckBrainstormDone
     label: "Brainstorm Complete?"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       if grep -q 'READY_FOR_DESIGN' docs/plans/brainstorm.md 2>/dev/null; then
@@ -143,8 +145,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: WriteDesignBrief
     max_retries: 3
+    retry_target: WriteDesignBrief
     prompt:
       You are working in `run.working_dir`.
 
@@ -191,8 +193,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: full
     goal_gate: true
-    retry_target: IncorporateDesignFeedback
     max_retries: 3
+    retry_target: IncorporateDesignFeedback
     prompt:
       You are working in `run.working_dir`.
 
@@ -212,8 +214,8 @@ workflow dotpowers
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: CommitBrief
     max_retries: 3
+    retry_target: CommitBrief
     prompt:
       You are working in `run.working_dir`.
 
@@ -295,7 +297,7 @@ workflow dotpowers
 
   tool ValidatePlanFormat
     label: "Validate Plan Format"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -339,8 +341,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: PatchPlan
     max_retries: 3
+    retry_target: PatchPlan
     prompt:
       You are working in `run.working_dir`.
 
@@ -423,8 +425,8 @@ workflow dotpowers
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: CommitPlan
     max_retries: 3
+    retry_target: CommitPlan
     prompt:
       You are working in `run.working_dir`.
 
@@ -439,8 +441,8 @@ workflow dotpowers
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: SetupProject
     max_retries: 3
+    retry_target: SetupProject
     prompt:
       You are working in `run.working_dir`.
 
@@ -480,7 +482,7 @@ workflow dotpowers
 
   tool VerifyBaseline
     label: "Verify Baseline"
-    timeout: 120s
+    timeout: 2m
     command:
       set -eu
       mkdir -p .tracker
@@ -505,7 +507,7 @@ workflow dotpowers
 
   tool PickNextTask
     label: "Pick Next Task"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -635,8 +637,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: ImplementTask
     max_retries: 3
+    retry_target: ImplementTask
     prompt:
       You are working in `run.working_dir`.
 
@@ -683,8 +685,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: ImplementTask
     max_retries: 3
+    retry_target: ImplementTask
     prompt:
       You are working in `run.working_dir`.
 
@@ -727,7 +729,7 @@ workflow dotpowers
 
   tool CheckImplementBudget
     label: "Check Implement Budget"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -746,7 +748,7 @@ workflow dotpowers
 
   tool CheckImplementerReady
     label: "Implementer Ready?"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       if grep -q 'READY_TO_IMPLEMENT' docs/plans/implementer-status.txt 2>/dev/null; then
@@ -761,7 +763,7 @@ workflow dotpowers
 
   tool MarkTaskComplete
     label: "Mark Task Complete"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -864,8 +866,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: full
     goal_gate: true
-    retry_target: ResumeAfterHelp
     max_retries: 3
+    retry_target: ResumeAfterHelp
     prompt:
       You are working in `run.working_dir`.
 
@@ -881,8 +883,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: full
     goal_gate: true
-    retry_target: WriteScenarios
     max_retries: 3
+    retry_target: WriteScenarios
     prompt:
       You are working in `run.working_dir`.
 
@@ -926,7 +928,7 @@ workflow dotpowers
 
   tool RunScenarios
     label: "Run Scenarios"
-    timeout: 120s
+    timeout: 2m
     command:
       #!/bin/sh
       set -eu
@@ -998,8 +1000,8 @@ workflow dotpowers
   agent ExtractScenarioPatterns
     label: "Extract Scenario Patterns"
     goal_gate: true
-    retry_target: ExtractScenarioPatterns
     max_retries: 3
+    retry_target: ExtractScenarioPatterns
     prompt:
       You are working in `run.working_dir`.
 
@@ -1035,7 +1037,7 @@ workflow dotpowers
 
   tool ValidateBuild
     label: "Validate Full Build"
-    timeout: 120s
+    timeout: 2m
     command:
       set -eu
       echo '=== Running full validation ==='
@@ -1082,8 +1084,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: summary:high
     goal_gate: true
-    retry_target: FinalReviewOpus
     max_retries: 3
+    retry_target: FinalReviewOpus
     prompt:
       You are working in `run.working_dir`.
 
@@ -1124,8 +1126,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: summary:high
     goal_gate: true
-    retry_target: FinalReviewGPT
     max_retries: 3
+    retry_target: FinalReviewGPT
     prompt:
       You are working in `run.working_dir`.
 
@@ -1161,8 +1163,8 @@ workflow dotpowers
     provider: anthropic
     fidelity: summary:high
     goal_gate: true
-    retry_target: FinalReviewGemini
     max_retries: 3
+    retry_target: FinalReviewGemini
     prompt:
       You are working in `run.working_dir`.
 
@@ -1200,8 +1202,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: CritiqueOpusOnGPT
     max_retries: 3
+    retry_target: CritiqueOpusOnGPT
     prompt:
       You are working in `run.working_dir`.
 
@@ -1212,8 +1214,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: CritiqueOpusOnGemini
     max_retries: 3
+    retry_target: CritiqueOpusOnGemini
     prompt:
       You are working in `run.working_dir`.
 
@@ -1224,8 +1226,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: CritiqueGPTOnOpus
     max_retries: 3
+    retry_target: CritiqueGPTOnOpus
     prompt:
       You are working in `run.working_dir`.
 
@@ -1236,8 +1238,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: CritiqueGPTOnGemini
     max_retries: 3
+    retry_target: CritiqueGPTOnGemini
     prompt:
       You are working in `run.working_dir`.
 
@@ -1248,8 +1250,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: CritiqueGeminiOnOpus
     max_retries: 3
+    retry_target: CritiqueGeminiOnOpus
     prompt:
       You are working in `run.working_dir`.
 
@@ -1260,8 +1262,8 @@ workflow dotpowers
     model: claude-sonnet-4-6
     provider: anthropic
     goal_gate: true
-    retry_target: CritiqueGeminiOnGPT
     max_retries: 3
+    retry_target: CritiqueGeminiOnGPT
     prompt:
       You are working in `run.working_dir`.
 
@@ -1300,7 +1302,7 @@ workflow dotpowers
 
   tool CheckReworkBudget
     label: "Check Rework Budget"
-    timeout: 60s
+    timeout: 1m
     command:
       #!/bin/sh
       set -eu
@@ -1321,8 +1323,8 @@ workflow dotpowers
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: FailureSummary
     max_retries: 3
+    retry_target: FailureSummary
     prompt:
       You are working in `run.working_dir`.
 
@@ -1330,7 +1332,7 @@ workflow dotpowers
 
   tool VerifyTestsFinal
     label: "Final Test Verification"
-    timeout: 120s
+    timeout: 2m
     command:
       set -eu
       echo '=== Final verification before ship ==='
@@ -1350,8 +1352,8 @@ workflow dotpowers
     model: claude-haiku-4-5
     provider: anthropic
     goal_gate: true
-    retry_target: CreatePR
     max_retries: 3
+    retry_target: CreatePR
     prompt:
       You are working in `run.working_dir`.
 
@@ -1376,103 +1378,85 @@ workflow dotpowers
 
   edges
     Start -> CheckExistingPlans
-    CheckExistingPlans -> PickNextTask  when ctx.tool_stdout = resume  label: "resume — plan exists"  weight: 2
+    CheckExistingPlans -> PickNextTask  when ctx.tool_stdout = resume  label: "resume — plan exists"
     CheckExistingPlans -> ArchiveOldPlans  when ctx.tool_stdout = fresh  label: "fresh start"
     CheckExistingPlans -> ArchiveOldPlans  label: fallback
     ArchiveOldPlans -> ExploreIdea
     ExploreIdea -> HumanBrainstorm
     HumanBrainstorm -> RefineUnderstanding
     RefineUnderstanding -> CheckBrainstormDone
-    CheckBrainstormDone -> HumanBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  restart: true
-    CheckBrainstormDone -> WriteDesignBrief  when ctx.tool_stdout = done  label: "ready for design"  weight: 2
-    CheckBrainstormDone -> HumanBrainstorm  label: fallback  restart: true
+    CheckBrainstormDone -> HumanBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  loop
+    CheckBrainstormDone -> WriteDesignBrief  when ctx.tool_stdout = done  label: "ready for design"
+    CheckBrainstormDone -> HumanBrainstorm  label: fallback  loop
     WriteDesignBrief -> ApproveDesign
-    ApproveDesign -> CommitBrief  when ctx.outcome = success  label: "[Y] Approve"  weight: 2
+    ApproveDesign -> CommitBrief  when ctx.outcome = success  label: "[Y] Approve"
     ApproveDesign -> DesignFeedback  when ctx.outcome = fail  label: "[N] Revise"
     ApproveDesign -> DesignFeedback  label: fallback
     DesignFeedback -> IncorporateDesignFeedback
-    IncorporateDesignFeedback -> ApproveDesign  restart: true
+    IncorporateDesignFeedback -> ApproveDesign  loop
     CommitBrief -> DraftPlan
     DraftPlan -> ValidatePlanFormat
-    ValidatePlanFormat -> AuditPlanSpec  when ctx.tool_stdout = format_ok  label: "format ok"  weight: 2
+    ValidatePlanFormat -> AuditPlanSpec  when ctx.tool_stdout = format_ok  label: "format ok"
     ValidatePlanFormat -> HumanHelp  when ctx.tool_stdout = fail_retries_exhausted  label: "plan loop exhausted"
-    ValidatePlanFormat -> DraftPlan  when ctx.tool_stdout != format_ok and ctx.tool_stdout != fail_retries_exhausted  label: "format fail"  restart: true
+    ValidatePlanFormat -> DraftPlan  when ctx.tool_stdout != format_ok and ctx.tool_stdout != fail_retries_exhausted  label: "format fail"  loop
     ValidatePlanFormat -> HumanHelp  label: fallback
-    AuditPlanSpec -> CommitPlan  when ctx.outcome = success  label: "plan approved"  weight: 2
-    AuditPlanSpec -> PatchPlan  when ctx.outcome = fail  label: "gaps found"
+    AuditPlanSpec -> CommitPlan  on success  label: "plan approved"
+    AuditPlanSpec -> PatchPlan  on fail  label: "gaps found"
     AuditPlanSpec -> PatchPlan  label: fallback
-    PatchPlan -> ValidatePlanFormat  restart: true
+    PatchPlan -> ValidatePlanFormat  loop
     CommitPlan -> SetupProject
     SetupProject -> VerifyBaseline
     VerifyBaseline -> PickNextTask
-    PickNextTask -> ImplementTask  when ctx.tool_stdout != all_complete and ctx.tool_stdout != no_tasks_found  label: "has task"  weight: 2
+    PickNextTask -> ImplementTask  when ctx.tool_stdout != all_complete and ctx.tool_stdout != no_tasks_found  label: "has task"
     PickNextTask -> WriteScenarios  when ctx.tool_stdout = all_complete  label: "all done"
     PickNextTask -> HumanHelp  when ctx.tool_stdout = no_tasks_found  label: "no tasks in plan"
     PickNextTask -> HumanHelp  label: fallback
     ImplementTask -> CheckImplementerReady
-    CheckImplementerReady -> SpecReview  when ctx.tool_stdout = ready  label: "ready to review"  weight: 2
+    CheckImplementerReady -> SpecReview  when ctx.tool_stdout = ready  label: "ready to review"
     CheckImplementerReady -> ImplementerQuestion  when ctx.tool_stdout = has_question  label: "has question"
     CheckImplementerReady -> ImplementerQuestion  label: fallback
-    ImplementerQuestion -> ImplementTask  restart: true
-    SpecReview -> QualityReview  when ctx.outcome = success  label: "spec pass"  weight: 2
-    SpecReview -> CheckImplementBudget  when ctx.outcome = fail  label: "spec fail"
+    ImplementerQuestion -> ImplementTask  loop
+    SpecReview -> QualityReview  on success  label: "spec pass"
+    SpecReview -> CheckImplementBudget  on fail  label: "spec fail"
     SpecReview -> CheckImplementBudget  label: fallback
-    QualityReview -> MarkTaskComplete  when ctx.outcome = success  label: "quality pass"  weight: 2
-    QualityReview -> CheckImplementBudget  when ctx.outcome = fail  label: "quality fail"
+    QualityReview -> MarkTaskComplete  on success  label: "quality pass"
+    QualityReview -> CheckImplementBudget  on fail  label: "quality fail"
     QualityReview -> MarkTaskComplete  label: fallback
-    CheckImplementBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "retry ok"  weight: 2  restart: true
+    CheckImplementBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "retry ok"  loop
     CheckImplementBudget -> HumanHelp  when ctx.tool_stdout = budget_exhausted  label: "too many attempts"
     CheckImplementBudget -> HumanHelp  label: fallback
-    MarkTaskComplete -> PickNextTask  restart: true
-    ImplementTask -> DebugInvestigate  when ctx.outcome = fail  label: "retries exhausted"
-    DebugInvestigate -> ImplementTask  when ctx.outcome = success  label: "fixed, re-verify"  weight: 2  restart: true
-    DebugInvestigate -> ReplanTask  when ctx.outcome = fail  label: "can't fix"
+    MarkTaskComplete -> PickNextTask  loop
+    ImplementTask -> DebugInvestigate  on fail  label: "retries exhausted"
+    DebugInvestigate -> ImplementTask  on success  label: "fixed, re-verify"  loop
+    DebugInvestigate -> ReplanTask  on fail  label: "can't fix"
     DebugInvestigate -> ReplanTask  label: fallback
-    ReplanTask -> PickNextTask  when ctx.outcome = success  label: replanned  weight: 2  restart: true
-    ReplanTask -> HumanHelp  when ctx.outcome = fail  label: stuck
+    ReplanTask -> PickNextTask  on success  label: replanned  loop
+    ReplanTask -> HumanHelp  on fail  label: stuck
     ReplanTask -> HumanHelp  label: fallback
     HumanHelp -> ResumeAfterHelp
-    ResumeAfterHelp -> PickNextTask  restart: true
+    ResumeAfterHelp -> PickNextTask  loop
     WriteScenarios -> RunScenarios
-    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout = scenarios_pass  label: "all pass"  weight: 2
+    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout = scenarios_pass  label: "all pass"
     RunScenarios -> FixScenarioFailures  when ctx.tool_stdout = scenarios_fail  label: failures
     RunScenarios -> FixScenarioFailures  label: fallback
-    FixScenarioFailures -> RunScenarios  restart: true
+    FixScenarioFailures -> RunScenarios  loop
     ExtractScenarioPatterns -> ValidateBuild
-    ValidateBuild -> ReviewFanOut  when ctx.outcome = success  label: "build pass"  weight: 2
+    ValidateBuild -> ReviewFanOut  when ctx.outcome = success  label: "build pass"
     ValidateBuild -> CheckReworkBudget  when ctx.outcome = fail  label: "build fail"
     ValidateBuild -> FailureSummary  label: fallback
-    ReviewFanOut -> FinalReviewOpus
-    ReviewFanOut -> FinalReviewGPT
-    ReviewFanOut -> FinalReviewGemini
-    FinalReviewOpus -> ReviewsJoin
-    FinalReviewGPT -> ReviewsJoin
-    FinalReviewGemini -> ReviewsJoin
     ReviewsJoin -> CritiqueFanOut
-    CritiqueFanOut -> CritiqueOpusOnGPT
-    CritiqueFanOut -> CritiqueOpusOnGemini
-    CritiqueFanOut -> CritiqueGPTOnOpus
-    CritiqueFanOut -> CritiqueGPTOnGemini
-    CritiqueFanOut -> CritiqueGeminiOnOpus
-    CritiqueFanOut -> CritiqueGeminiOnGPT
-    CritiqueOpusOnGPT -> CritiquesJoin
-    CritiqueOpusOnGemini -> CritiquesJoin
-    CritiqueGPTOnOpus -> CritiquesJoin
-    CritiqueGPTOnGemini -> CritiquesJoin
-    CritiqueGeminiOnOpus -> CritiquesJoin
-    CritiqueGeminiOnGPT -> CritiquesJoin
     CritiquesJoin -> ReviewConsensus
-    ReviewConsensus -> VerifyTestsFinal  when ctx.outcome = success  label: pass  weight: 2
-    ReviewConsensus -> CheckReworkBudget  when ctx.outcome = retry  label: rework
-    ReviewConsensus -> FailureSummary  when ctx.outcome = fail  label: blocked
+    ReviewConsensus -> VerifyTestsFinal  on success  label: pass
+    ReviewConsensus -> CheckReworkBudget  on retry  label: rework
+    ReviewConsensus -> FailureSummary  on fail  label: blocked
     ReviewConsensus -> VerifyTestsFinal  label: fallback
-    CheckReworkBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "rework ok"  weight: 2
+    CheckReworkBudget -> ImplementTask  when ctx.tool_stdout = budget_ok  label: "rework ok"
     CheckReworkBudget -> FailureSummary  when ctx.tool_stdout = budget_exhausted  label: "rework budget exhausted"
     CheckReworkBudget -> FailureSummary  label: fallback
     FailureSummary -> Exit
-    VerifyTestsFinal -> CreatePR  when ctx.outcome = success  label: "tests pass"  weight: 2
+    VerifyTestsFinal -> CreatePR  when ctx.outcome = success  label: "tests pass"
     VerifyTestsFinal -> CheckReworkBudget  when ctx.outcome = fail  label: "tests fail"
     VerifyTestsFinal -> FailureSummary  label: fallback
-    CreatePR -> FailureSummary  when ctx.outcome = fail  label: "PR failed"
-    CreatePR -> Exit  when ctx.outcome = success  label: shipped  weight: 2
+    CreatePR -> FailureSummary  on fail  label: "PR failed"
+    CreatePR -> Exit  on success  label: shipped
     CreatePR -> Exit  label: fallback

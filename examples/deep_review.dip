@@ -362,9 +362,6 @@ workflow DeepReview
     # here instead of being masked by success-if-any aggregation —
     # SynthesizeFindings needs all three reports to produce a sound synthesis.
     AnalyzeParallel -> EscalateToHuman  when ctx.outcome = fail
-    AnalyzeCorrectness -> AnalyzeJoin
-    AnalyzeSecurity -> AnalyzeJoin
-    AnalyzeDesign -> AnalyzeJoin
     AnalyzeJoin -> SynthesizeFindings
     SynthesizeFindings -> GenerateFindingsQuestions
     GenerateFindingsQuestions -> FindingsInterview

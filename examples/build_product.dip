@@ -3291,9 +3291,6 @@ workflow BuildProduct
     # EscalateReview (catches a reviewer that "succeeds" without writing its
     # report, which no aggregation policy can see).
     ReviewParallel -> EscalateReview  when ctx.outcome = fail
-    ReviewClaude -> ReviewJoin
-    ReviewCodex -> ReviewJoin
-    ReviewGemini -> ReviewJoin
     ReviewJoin -> CheckReviewsComplete
     CheckReviewsComplete -> SynthesizeReviews  when ctx.outcome = success
     CheckReviewsComplete -> EscalateReview  when ctx.outcome = fail

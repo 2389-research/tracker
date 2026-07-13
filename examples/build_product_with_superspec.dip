@@ -1098,8 +1098,6 @@ workflow BuildProductWithSuperspec
 
     # Phase 2: Foundation (A + B parallel)
     SetupPhase1Worktrees -> Phase1Parallel
-    StreamA -> Phase1Join
-    StreamB -> Phase1Join
     Phase1Join -> MergePhase1
     MergePhase1 -> GatePhase1  when ctx.outcome = success
     MergePhase1 -> EscalateToHuman  when ctx.outcome = fail
@@ -1111,8 +1109,6 @@ workflow BuildProductWithSuperspec
 
     # Phase 3: Core (C + E parallel)
     SetupPhase2Worktrees -> Phase2Parallel
-    StreamC -> Phase2Join
-    StreamE -> Phase2Join
     Phase2Join -> MergePhase2
     MergePhase2 -> GatePhase2  when ctx.outcome = success
     MergePhase2 -> EscalateToHuman  when ctx.outcome = fail
@@ -1131,8 +1127,6 @@ workflow BuildProductWithSuperspec
 
     # Phase 5: Surface (F + G parallel)
     SetupPhase4Worktrees -> Phase4Parallel
-    StreamF -> Phase4Join
-    StreamG -> Phase4Join
     Phase4Join -> MergePhase4
     MergePhase4 -> GatePhase4  when ctx.outcome = success
     MergePhase4 -> EscalateToHuman  when ctx.outcome = fail
@@ -1144,8 +1138,6 @@ workflow BuildProductWithSuperspec
 
     # Phase 6: Quality & Docs (H + I parallel)
     SetupPhase5Worktrees -> Phase5Parallel
-    StreamH -> Phase5Join
-    StreamI -> Phase5Join
     Phase5Join -> MergePhase5
     MergePhase5 -> ReviewParallel  when ctx.outcome = success
     MergePhase5 -> EscalateToHuman  when ctx.outcome = fail
@@ -1161,9 +1153,6 @@ workflow BuildProductWithSuperspec
     # default success-if-any aggregation. On success the parallel handler's
     # suggested-next routes to ReviewJoin.
     ReviewParallel -> EscalateToHuman  when ctx.outcome = fail
-    ReviewArchitect -> ReviewJoin
-    ReviewQA -> ReviewJoin
-    ReviewProduct -> ReviewJoin
     ReviewJoin -> SynthesizeReviews
     SynthesizeReviews -> FinalGates  when ctx.outcome = success
     SynthesizeReviews -> ApplyReviewFixes  when ctx.outcome = fail

@@ -16,7 +16,7 @@ workflow SemportThematic
 
   tool EnsureWorkspace
     label: "Ensure semport workspace files"
-    timeout: 60s
+    timeout: 1m
     command:
       set -eu
       mkdir -p .ai/semport/$target_name
@@ -93,7 +93,7 @@ workflow SemportThematic
 
   tool BuildGate
     label: "Build gate (must pass)"
-    timeout: 60s
+    timeout: 1m
     command:
       set -eu
       swift build --target $target_name >/tmp/semport-thematic-$target_name-build.log 2>&1 || {
@@ -145,7 +145,7 @@ workflow SemportThematic
 
   tool CheckCompletion
     label: "Check if checklist fully complete"
-    timeout: 60s
+    timeout: 1m
     command:
       set -eu
       if rg -n '^- \[ \]' .ai/semport/$target_name/thematic-spec.md >/dev/null 2>&1; then
@@ -157,26 +157,14 @@ workflow SemportThematic
   edges
     Start -> EnsureWorkspace
     EnsureWorkspace -> PlanParallel
-    PlanParallel -> PlanGPT
-    PlanParallel -> PlanOpus
-    PlanParallel -> PlanGemini
-    PlanGPT -> PlanJoin
-    PlanOpus -> PlanJoin
-    PlanGemini -> PlanJoin
     PlanJoin -> ConsolidatePlan
     ConsolidatePlan -> ImplementSlice
     ImplementSlice -> BuildGate
     BuildGate -> ValidateParallel  when ctx.outcome = success  label: build_passed
-    BuildGate -> PlanParallel  when ctx.outcome = fail  label: build_failed_replan  restart: true
+    BuildGate -> PlanParallel  when ctx.outcome = fail  label: build_failed_replan  loop
     BuildGate -> ValidateParallel  label: "fallback to validate"
-    ValidateParallel -> ValidateGPT
-    ValidateParallel -> ValidateOpus
-    ValidateParallel -> ValidateGemini
-    ValidateGPT -> ValidateJoin
-    ValidateOpus -> ValidateJoin
-    ValidateGemini -> ValidateJoin
     ValidateJoin -> ConsolidateValidation
     ConsolidateValidation -> CheckCompletion
     CheckCompletion -> Exit  when ctx.outcome = success  label: all_checked_and_validated
-    CheckCompletion -> PlanParallel  when ctx.outcome = fail  label: needs_more_porting  restart: true
+    CheckCompletion -> PlanParallel  when ctx.outcome = fail  label: needs_more_porting  loop
     CheckCompletion -> Exit  label: "fallback to exit"
