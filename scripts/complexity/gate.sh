@@ -25,9 +25,12 @@ list_files() {
 # file path only, no :line:col, so entries survive ordinary edits).
 scan() {
   local files; files=$(list_files)
-  printf '%s\n' "$files" | xargs go run "github.com/fzipp/gocyclo/cmd/gocyclo@${GOCYCLO_VERSION}" -over "$CYCLO_MAX" 2>/dev/null \
+  # gocyclo/gocognit exit 1 when they find over-threshold functions (by design,
+  # for use as a CI gate); under pipefail that would abort the scan early via
+  # xargs's propagated failure, so tolerate it here — we WANT their findings.
+  printf '%s\n' "$files" | { xargs go run "github.com/fzipp/gocyclo/cmd/gocyclo@${GOCYCLO_VERSION}" -over "$CYCLO_MAX" 2>/dev/null || true; } \
     | awk '{ split($4,a,":"); print "cyclo|" a[1] "|" $3 "|" $1 }'
-  printf '%s\n' "$files" | xargs go run "github.com/uudashr/gocognit/cmd/gocognit@${GOCOGNIT_VERSION}" -over "$COGNITIVE_MAX" 2>/dev/null \
+  printf '%s\n' "$files" | { xargs go run "github.com/uudashr/gocognit/cmd/gocognit@${GOCOGNIT_VERSION}" -over "$COGNITIVE_MAX" 2>/dev/null || true; } \
     | awk '{ split($4,a,":"); print "cognitive|" a[1] "|" $3 "|" $1 }'
   printf '%s\n' "$files" | while IFS= read -r f; do
     n=$(wc -l < "$f" | tr -d ' ')
