@@ -31,7 +31,7 @@ func TestEngine_SteeringChan_MergesContext(t *testing.T) {
 				val, _ := pctx.Get("steer_key")
 				step2SeesSteerKey = val
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 
@@ -70,7 +70,7 @@ func TestEngine_SteeringChan_NilIsNoop(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 
@@ -105,7 +105,7 @@ func TestEngine_SteeringChan_MultipleUpdates(t *testing.T) {
 				seenA, _ = pctx.Get("key_a")
 				seenB, _ = pctx.Get("key_b")
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 
@@ -146,7 +146,7 @@ func TestEngine_SteeringChan_NotAttributedToNodeScope(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 

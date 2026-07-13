@@ -62,7 +62,7 @@ func TestParityCodergenUsesExecutionEnvironmentAndTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("status = %q, want success", outcome.Status)
 	}
 	if len(client.requests) != 2 {

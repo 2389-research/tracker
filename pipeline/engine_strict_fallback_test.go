@@ -42,12 +42,12 @@ func TestStrictFailureRoutesToGraphFallbackTarget(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			switch node.ID {
 			case "agentFail":
-				return Outcome{Status: string(OutcomeFail)}, nil
+				return Outcome{Status: OutcomeFail}, nil
 			case "escalate":
 				escalateVisited = true
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -94,12 +94,12 @@ func TestStrictFailureNodeFallbackPrecedesGraph(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			switch node.ID {
 			case "agentFail":
-				return Outcome{Status: string(OutcomeFail)}, nil
+				return Outcome{Status: OutcomeFail}, nil
 			case "nodeEscalate", "graphEscalate":
 				visited = node.ID
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -145,12 +145,12 @@ func TestStrictFailureFallbackTakenAtMostOnce(t *testing.T) {
 			switch node.ID {
 			case "agentFail":
 				agentFailCalls++
-				return Outcome{Status: string(OutcomeFail)}, nil
+				return Outcome{Status: OutcomeFail}, nil
 			case "rescue":
 				rescueCalls++
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -201,12 +201,12 @@ func TestStrictFailureFallbackRespectsBudget(t *testing.T) {
 			switch node.ID {
 			case "agentFail":
 				// Spend past the 1000-token ceiling before failing.
-				return Outcome{Status: string(OutcomeFail), Stats: &SessionStats{TotalTokens: 5000}}, nil
+				return Outcome{Status: OutcomeFail, Stats: &SessionStats{TotalTokens: 5000}}, nil
 			case "escalate":
 				escalateVisited = true
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -240,9 +240,9 @@ func TestStrictFailureNoFallbackPreservesHalt(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "agentFail" {
-				return Outcome{Status: string(OutcomeFail)}, nil
+				return Outcome{Status: OutcomeFail}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 

@@ -654,7 +654,7 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 		return nil, traceEntry, err
 	}
 
-	traceEntry.Status = outcome.Status
+	traceEntry.Status = string(outcome.Status)
 	traceEntry.Stats = outcome.Stats
 	traceEntry.ChildUsage = outcome.ChildUsage
 
@@ -766,8 +766,8 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 		s.cp.ClearGateRecheckPending(currentNodeID)
 	}
 	if outcome.Status != "" {
-		s.pctx.Set(ContextKeyOutcome, outcome.Status)
-		s.nodeOutcomes[currentNodeID] = outcome.Status
+		s.pctx.Set(ContextKeyOutcome, string(outcome.Status))
+		s.nodeOutcomes[currentNodeID] = string(outcome.Status)
 	}
 	if outcome.PreferredLabel != "" {
 		s.pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)
@@ -777,7 +777,7 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 	}
 
 	detail := &DecisionDetail{
-		OutcomeStatus:   outcome.Status,
+		OutcomeStatus:   string(outcome.Status),
 		ContextUpdates:  outcome.ContextUpdates,
 		ContextSnapshot: e.routingContextSnapshot(s.pctx),
 	}
@@ -970,9 +970,9 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 }
 
 // handleOutcomeStatus emits events and marks completion for non-retry outcomes.
-func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status string) {
+func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status TerminalStatus) {
 	switch status {
-	case string(OutcomeFail):
+	case OutcomeFail:
 		e.emit(PipelineEvent{
 			Type:      EventStageFailed,
 			Timestamp: time.Now(),
@@ -982,7 +982,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status s
 		})
 		s.cp.MarkCompleted(currentNodeID)
 
-	case string(OutcomeSuccess):
+	case OutcomeSuccess:
 		e.emit(PipelineEvent{
 			Type:      EventStageCompleted,
 			Timestamp: time.Now(),
@@ -1049,7 +1049,7 @@ func (e *Engine) handleGoalGateRetry(s *runState, currentNodeID, target, gateNod
 // If shouldBreak is true, the main loop should break (success).
 // If result is non-nil, return early with that result.
 // If neither, a retry target was found and currentNodeID should be updated by the caller.
-func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus string, traceEntry *TraceEntry) (bool, string, *EngineResult) {
+func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus TerminalStatus, traceEntry *TraceEntry) (bool, string, *EngineResult) {
 	target, gateNodeID, retry, unsatisfied := e.goalGateRetryTarget(s.cp, s.nodeOutcomes)
 	if retry {
 		return e.handleGoalGateRetry(s, currentNodeID, target, gateNodeID, traceEntry)
@@ -1091,7 +1091,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		result := e.failResult(s)
 		return false, "", result
 	}
-	if outcomeStatus == string(OutcomeFail) {
+	if outcomeStatus == OutcomeFail {
 		// Preserve any dirty (possibly green) tree to a recoverable ref before
 		// the failing exit node halts the run (#302). No-op on a clean tree.
 		// TERMINAL never-lose-work path (#423): hard-escalate if the artifact

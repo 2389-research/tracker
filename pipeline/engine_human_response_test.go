@@ -40,7 +40,7 @@ func newHumanResponseHarness(gateResponse string) (*HandlerRegistry, *humanRespo
 		name: "wait.human",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				ContextUpdates: map[string]string{ContextKeyHumanResponse: gateResponse},
 			}, nil
 		},
@@ -50,7 +50,7 @@ func newHumanResponseHarness(gateResponse string) (*HandlerRegistry, *humanRespo
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			val, _ := pctx.Get(ContextKeyHumanResponse)
 			rec.record(node.ID, val)
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	return reg, rec
@@ -130,7 +130,7 @@ func TestEngineHumanResponseSurvivesRetry(t *testing.T) {
 		name: "wait.human",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				ContextUpdates: map[string]string{ContextKeyHumanResponse: "approve"},
 			}, nil
 		},
@@ -148,10 +148,10 @@ func TestEngineHumanResponseSurvivesRetry(t *testing.T) {
 				current := attempts
 				mu.Unlock()
 				if current < 2 {
-					return Outcome{Status: string(OutcomeRetry)}, nil
+					return Outcome{Status: OutcomeRetry}, nil
 				}
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 
@@ -191,7 +191,7 @@ func TestEngineHumanResponseFreshWriteNotClobbered(t *testing.T) {
 		name: "wait.human",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				ContextUpdates: map[string]string{ContextKeyHumanResponse: "approve"},
 			}, nil
 		},
@@ -203,11 +203,11 @@ func TestEngineHumanResponseFreshWriteNotClobbered(t *testing.T) {
 			rec.record(node.ID, val)
 			if node.ID == "A" {
 				return Outcome{
-					Status:         string(OutcomeSuccess),
+					Status:         OutcomeSuccess,
 					ContextUpdates: map[string]string{ContextKeyHumanResponse: "fresh"},
 				}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 
@@ -314,7 +314,7 @@ func TestEngineHumanResponseClearPersistsAcrossResume(t *testing.T) {
 		name: "wait.human",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				ContextUpdates: map[string]string{ContextKeyHumanResponse: "approve"},
 			}, nil
 		},
@@ -325,9 +325,9 @@ func TestEngineHumanResponseClearPersistsAcrossResume(t *testing.T) {
 			val, _ := pctx.Get(ContextKeyHumanResponse)
 			rec1.record(node.ID, val)
 			if node.ID == "B" {
-				return Outcome{Status: string(OutcomeFail)}, nil
+				return Outcome{Status: OutcomeFail}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	engine1 := NewEngine(g, reg1, WithCheckpointPath(cpPath))

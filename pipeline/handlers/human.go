@@ -608,19 +608,19 @@ func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome 
 		action = "default"
 	}
 	if action == "fail" {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out",
 		}}
 	}
 	def := cfg.DefaultChoice
 	if def == "" {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out (no default)",
 		}}
 	}
 	routing := mapSelectionToRoutingKey(h.graph.OutgoingEdges(node.ID), def)
 	return pipeline.Outcome{
-		Status:         string(pipeline.OutcomeSuccess),
+		Status:         pipeline.OutcomeSuccess,
 		PreferredLabel: routing,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            def,
@@ -692,7 +692,7 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	}
 
 	outcome := pipeline.Outcome{
-		Status: string(pipeline.OutcomeSuccess),
+		Status: pipeline.OutcomeSuccess,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            response,
 			pipeline.ContextKeyResponsePrefix + node.ID: response,
@@ -868,7 +868,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 
 	jsonStr, err := SerializeInterviewResult(*result)
 	if err != nil {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, fmt.Errorf("serialize interview result for node %q: %w", node.ID, err)
+		return pipeline.Outcome{Status: pipeline.OutcomeFail}, fmt.Errorf("serialize interview result for node %q: %w", node.ID, err)
 	}
 	summary := BuildMarkdownSummary(*result)
 
@@ -878,7 +878,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 	}
 
 	outcome := pipeline.Outcome{
-		Status: string(status),
+		Status: status,
 		ContextUpdates: map[string]string{
 			answersKey:                                  jsonStr,
 			pipeline.ContextKeyHumanResponse:            summary,
@@ -886,7 +886,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		},
 	}
 	if applyInterviewDeclaredWrites(node, outcome.ContextUpdates, result) {
-		outcome.Status = string(pipeline.OutcomeFail)
+		outcome.Status = pipeline.OutcomeFail
 	}
 	return outcome, nil
 }
@@ -992,7 +992,7 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
-	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), PreferredLabel: mapSelectionToRoutingKey(edges, selected)}, nil
+	return pipeline.Outcome{Status: pipeline.OutcomeSuccess, PreferredLabel: mapSelectionToRoutingKey(edges, selected)}, nil
 }
 
 // mapSelectionToRoutingKey translates a human-selected display label to the
@@ -1028,5 +1028,5 @@ func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipelin
 	if selected == "No" {
 		status = pipeline.OutcomeFail
 	}
-	return pipeline.Outcome{Status: string(status), PreferredLabel: selected}, nil
+	return pipeline.Outcome{Status: status, PreferredLabel: selected}, nil
 }

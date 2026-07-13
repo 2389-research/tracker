@@ -66,7 +66,7 @@ func TestSubgraphHandler_ContextPropagation(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				ContextUpdates: map[string]string{"child_key": "child_value"},
 			}, nil
 		},
@@ -91,7 +91,7 @@ func TestSubgraphHandler_ContextPropagation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
-	if outcome.Status != string(OutcomeSuccess) {
+	if outcome.Status != OutcomeSuccess {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -119,7 +119,7 @@ func TestSubgraphHandler_MissingSubgraph(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing subgraph ref")
 	}
-	if outcome.Status != string(OutcomeFail) {
+	if outcome.Status != OutcomeFail {
 		t.Errorf("expected fail outcome, got %q", outcome.Status)
 	}
 }
@@ -143,7 +143,7 @@ func TestSubgraphHandler_MissingRef(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing subgraph_ref attribute")
 	}
-	if outcome.Status != string(OutcomeFail) {
+	if outcome.Status != OutcomeFail {
 		t.Errorf("expected fail outcome, got %q", outcome.Status)
 	}
 }
@@ -163,7 +163,7 @@ func TestSubgraphHandler_SubgraphFailure(t *testing.T) {
 	reg.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: string(OutcomeFail)}, nil
+			return Outcome{Status: OutcomeFail}, nil
 		},
 	})
 
@@ -183,7 +183,7 @@ func TestSubgraphHandler_SubgraphFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(OutcomeFail) {
+	if outcome.Status != OutcomeFail {
 		t.Errorf("expected fail outcome for failed sub-pipeline, got %q", outcome.Status)
 	}
 }
@@ -390,7 +390,7 @@ func TestSubgraph_BudgetBypass_Fix_UsageRollup(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "expensive" {
 				return Outcome{
-					Status: string(OutcomeSuccess),
+					Status: OutcomeSuccess,
 					Stats: &SessionStats{
 						InputTokens:  childTokens / 2,
 						OutputTokens: childTokens / 2,
@@ -400,7 +400,7 @@ func TestSubgraph_BudgetBypass_Fix_UsageRollup(t *testing.T) {
 					},
 				}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -461,12 +461,12 @@ func TestSubgraph_BudgetBypass_Fix_ParentGuardHaltsAfterOverspend(t *testing.T) 
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "burn" {
-				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{
 					TotalTokens: 10_000,
 					Provider:    "anthropic",
 				}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -531,13 +531,13 @@ func TestSubgraph_BudgetBypass_Fix_ChildGuardHaltsMidSubgraph(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			switch node.ID {
 			case "parent_pre":
-				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
 			case "burn1":
-				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
 			case "burn2":
-				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 40, Provider: "anthropic"}}, nil
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 40, Provider: "anthropic"}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -603,13 +603,13 @@ func TestSubgraph_BudgetBypass_Fix_NestedSubgraph(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "burn" {
-				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{
 					TotalTokens: 777,
 					CostUSD:     0.12,
 					Provider:    "openai",
 				}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -668,11 +668,11 @@ func TestSubgraph_BudgetExceededEvent_ReportsCombinedSnapshot(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			switch node.ID {
 			case "parent_pre":
-				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 50, Provider: "anthropic"}}, nil
 			case "burn1":
-				return Outcome{Status: string(OutcomeSuccess), Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
+				return Outcome{Status: OutcomeSuccess, Stats: &SessionStats{TotalTokens: 60, Provider: "anthropic"}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -757,7 +757,7 @@ func TestSubgraph_ChildOverridePropagates(t *testing.T) {
 		name: "wait.human",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				PreferredLabel: "accept",
 				OverrideActor:  ActorHuman,
 			}, nil
@@ -846,7 +846,7 @@ func TestSubgraph_ThreeLevelNesting(t *testing.T) {
 		name: "wait.human",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				PreferredLabel: "accept",
 				OverrideActor:  ActorHuman,
 			}, nil
@@ -918,7 +918,7 @@ func TestSubgraph_ChildOverride_ParentFails(t *testing.T) {
 		name: "wait.human",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				PreferredLabel: "accept",
 				OverrideActor:  ActorHuman,
 			}, nil
@@ -931,9 +931,9 @@ func TestSubgraph_ChildOverride_ParentFails(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "Post" {
-				return Outcome{Status: string(OutcomeFail)}, nil
+				return Outcome{Status: OutcomeFail}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(&testHandler{

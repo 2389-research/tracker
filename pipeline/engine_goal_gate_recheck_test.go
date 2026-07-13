@@ -72,17 +72,17 @@ func TestGoalGateRetryReRunsGateAfterEscalationTail(t *testing.T) {
 			case "gate":
 				gateAttempts++
 				if gateAttempts == 1 {
-					return Outcome{Status: string(OutcomeFail)}, nil
+					return Outcome{Status: OutcomeFail}, nil
 				}
 				// Remediation happened in the tail (cleanup); re-run passes.
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			case "escalate":
 				return Outcome{
-					Status:         string(OutcomeSuccess),
+					Status:         OutcomeSuccess,
 					ContextUpdates: map[string]string{"route": "accept"},
 				}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -121,14 +121,14 @@ func TestGoalGateNeverSatisfiedCannotEndInPlainSuccess(t *testing.T) {
 			switch node.ID {
 			case "gate":
 				gateAttempts++
-				return Outcome{Status: string(OutcomeFail)}, nil // never satisfied
+				return Outcome{Status: OutcomeFail}, nil // never satisfied
 			case "escalate":
 				return Outcome{
-					Status:         string(OutcomeSuccess),
+					Status:         OutcomeSuccess,
 					ContextUpdates: map[string]string{"route": "accept"},
 				}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -164,19 +164,19 @@ func TestGoalGateRetryViaFixPathStillWorks(t *testing.T) {
 			case "gate":
 				gateAttempts++
 				if gateAttempts == 1 {
-					return Outcome{Status: string(OutcomeFail)}, nil
+					return Outcome{Status: OutcomeFail}, nil
 				}
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			case "escalate":
 				return Outcome{
-					Status:         string(OutcomeSuccess),
+					Status:         OutcomeSuccess,
 					ContextUpdates: map[string]string{"route": "fix"},
 				}, nil
 			case "fix":
 				fixRuns++
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -230,14 +230,14 @@ func TestGoalGateRecheckPendingSurvivesResume(t *testing.T) {
 			switch node.ID {
 			case "gate":
 				gateAttempts++
-				return Outcome{Status: string(OutcomeSuccess)}, nil // remediated pre-kill
+				return Outcome{Status: OutcomeSuccess}, nil // remediated pre-kill
 			case "escalate":
 				return Outcome{
-					Status:         string(OutcomeSuccess),
+					Status:         OutcomeSuccess,
 					ContextUpdates: map[string]string{"route": "accept"},
 				}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})
@@ -277,16 +277,16 @@ func TestGoalGateRecheckWithSingleRetryBudget(t *testing.T) {
 			case "gate":
 				gateAttempts++
 				if gateAttempts == 1 {
-					return Outcome{Status: string(OutcomeFail)}, nil
+					return Outcome{Status: OutcomeFail}, nil
 				}
-				return Outcome{Status: string(OutcomeSuccess)}, nil // remediated in the tail
+				return Outcome{Status: OutcomeSuccess}, nil // remediated in the tail
 			case "escalate":
 				return Outcome{
-					Status:         string(OutcomeSuccess),
+					Status:         OutcomeSuccess,
 					ContextUpdates: map[string]string{"route": "accept"},
 				}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		},
 	})

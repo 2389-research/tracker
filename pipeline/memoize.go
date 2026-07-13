@@ -183,7 +183,7 @@ func memoOutcome(rec MemoEntry) *Outcome {
 		suggested = append([]string(nil), rec.SuggestedNextNodes...)
 	}
 	return &Outcome{
-		Status:             rec.Status,
+		Status:             TerminalStatus(rec.Status),
 		ContextUpdates:     ctxUpdates,
 		PreferredLabel:     rec.PreferredLabel,
 		SuggestedNextNodes: suggested,

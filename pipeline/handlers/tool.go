@@ -459,13 +459,7 @@ func (h *ToolHandler) parseOutputLimit(node *pipeline.Node) (int, error) {
 // execAndBuildOutcome runs the command and builds the pipeline outcome from the result.
 // Layer 4: uses ExecCommandWithLimit on LocalEnvironment, ExecCommand otherwise.
 func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.Node, command, artifactRoot string, identity runIdentity, timeout time.Duration, outputLimit int) (pipeline.Outcome, error) {
-	var result exec.CommandResult
-	var err error
-	if le, ok := h.env.(*exec.LocalEnvironment); ok {
-		result, err = le.ExecCommandWithLimit(ctx, "sh", []string{"-c", command}, timeout, outputLimit, buildToolEnv(identity))
-	} else {
-		result, err = h.env.ExecCommand(ctx, "sh", []string{"-c", command}, timeout)
-	}
+	result, err := h.runToolCommand(ctx, command, identity, timeout, outputLimit)
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("tool command failed for node %q: %w", node.ID, err)
 	}
@@ -483,26 +477,46 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 	stderr := strings.TrimRight(result.Stderr, " \t\n\r")
 
 	outcome := pipeline.Outcome{
-		Status: string(status),
+		Status: status,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyToolStdout: stdout,
 			pipeline.ContextKeyToolStderr: stderr,
 		},
 	}
-	// Surface truncation as structured outcome metadata so the engine can
-	// emit EventToolOutputTruncated and `tracker diagnose` can correlate
-	// routing misses with dropped output (issue #208). Tail-window capture
-	// preserves the routing-relevant trailing bytes; the event tells
-	// operators that earlier bytes were elided.
-	//
-	// Byte accounting reflects the *raw* (pre-trim) captured tail and
-	// dropped head — i.e., what the process actually emitted, not what
-	// ended up in ctx.tool_stdout / ctx.tool_stderr after TrimRight.
-	// This keeps the documented invariant from pipeline/events.go
-	// (TotalBytes = CapturedBytes + DroppedBytes) and matches the
-	// "how big was this stream" question operators ask. Trimming is a
-	// separate presentation concern for routing conditions; consumers
-	// that need the trimmed length can compute len(ctx.tool_stdout).
+	appendTruncations(&outcome, result, outputLimit)
+	applyMarkerGrep(&outcome, node, stdout)
+	applyToolRoute(&outcome, node, stdout)
+
+	if applyDeclaredWrites(node, outcome.ContextUpdates, stdout, "Tool stdout JSON") {
+		outcome.Status = pipeline.OutcomeFail
+	}
+	return outcome, pipeline.WriteStatusArtifact(artifactRoot, node.ID, outcome)
+}
+
+// runToolCommand executes the shell command. Layer 4: uses
+// ExecCommandWithLimit on LocalEnvironment, ExecCommand otherwise.
+func (h *ToolHandler) runToolCommand(ctx context.Context, command string, identity runIdentity, timeout time.Duration, outputLimit int) (exec.CommandResult, error) {
+	if le, ok := h.env.(*exec.LocalEnvironment); ok {
+		return le.ExecCommandWithLimit(ctx, "sh", []string{"-c", command}, timeout, outputLimit, buildToolEnv(identity))
+	}
+	return h.env.ExecCommand(ctx, "sh", []string{"-c", command}, timeout)
+}
+
+// appendTruncations records structured Truncation metadata so the engine can
+// emit EventToolOutputTruncated and `tracker diagnose` can correlate routing
+// misses with dropped output (issue #208). Tail-window capture preserves the
+// routing-relevant trailing bytes; the event tells operators that earlier
+// bytes were elided.
+//
+// Byte accounting reflects the *raw* (pre-trim) captured tail and dropped
+// head — i.e., what the process actually emitted, not what ended up in
+// ctx.tool_stdout / ctx.tool_stderr after TrimRight. This keeps the
+// documented invariant from pipeline/events.go (TotalBytes = CapturedBytes +
+// DroppedBytes) and matches the "how big was this stream" question
+// operators ask. Trimming is a separate presentation concern for routing
+// conditions; consumers that need the trimmed length can compute
+// len(ctx.tool_stdout).
+func appendTruncations(outcome *pipeline.Outcome, result exec.CommandResult, outputLimit int) {
 	if result.StdoutTruncated {
 		outcome.Truncations = append(outcome.Truncations, pipeline.TruncationDetail{
 			Stream:        "stdout",
@@ -521,69 +535,72 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 			TotalBytes:    len(result.Stderr) + result.StderrBytesDropped,
 		})
 	}
-	// Extract the routing marker if marker_grep is declared. This is the
-	// typed alternative to "route on ctx.tool_stdout suffix" (#210): the
-	// regex matches against captured stdout, the last match wins, and
-	// ctx.tool_marker is populated with capture group 1 (or the full
-	// match if no group). On no-match the node fails loudly via
-	// EventToolMarkerMissing rather than silently falling through to an
-	// unconditional edge — the whole point of marker_grep is to remove
-	// that foot-gun (the #208 root cause).
-	if pattern := node.ToolConfig().MarkerGrep; pattern != "" {
-		// Reset marker-related keys at the start of every marker_grep-
-		// declaring node so a prior node's value can't leak into this
-		// node's routing context on the missing-match or compile-error
-		// paths (where only some branches set the key).
-		outcome.ContextUpdates[pipeline.ContextKeyToolMarker] = ""
-		outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = ""
+}
 
-		marker, missing, err := extractToolMarker(pattern, stdout)
-		switch {
-		case err != nil:
-			// Bad regex on the node — author error, fail loud at runtime
-			// (validate-time lint #211 will catch this earlier when it
-			// lands). The compile error is surfaced both via
-			// MissingMarker.Error (so EventToolMarkerMissing carries it
-			// into activity.jsonl + tracker diagnose) and via
-			// ctx.tool_marker_error so routing conditions can read it.
-			outcome.Status = string(pipeline.OutcomeFail)
-			outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = err.Error()
-			outcome.MissingMarker = &pipeline.MarkerDetail{
-				Pattern: pattern,
-				Error:   err.Error(),
-			}
-		case missing:
-			outcome.Status = string(pipeline.OutcomeFail)
-			outcome.MissingMarker = &pipeline.MarkerDetail{
-				Pattern:      pattern,
-				CapturedTail: tailForDiag(stdout, 256),
-			}
-		default:
-			outcome.ContextUpdates[pipeline.ContextKeyToolMarker] = marker
-		}
+// applyMarkerGrep extracts the routing marker when marker_grep is declared —
+// the typed alternative to "route on ctx.tool_stdout suffix" (#210): the
+// regex matches against captured stdout, the last match wins, and
+// ctx.tool_marker is populated with capture group 1 (or the full match if no
+// group). On no-match the node fails loudly via EventToolMarkerMissing
+// rather than silently falling through to an unconditional edge — the whole
+// point of marker_grep is to remove that foot-gun (the #208 root cause).
+// No-op when marker_grep isn't declared on the node.
+func applyMarkerGrep(outcome *pipeline.Outcome, node *pipeline.Node, stdout string) {
+	pattern := node.ToolConfig().MarkerGrep
+	if pattern == "" {
+		return
 	}
+	// Reset marker-related keys at the start of every marker_grep-
+	// declaring node so a prior node's value can't leak into this
+	// node's routing context on the missing-match or compile-error
+	// paths (where only some branches set the key).
+	outcome.ContextUpdates[pipeline.ContextKeyToolMarker] = ""
+	outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = ""
 
-	// _TRACKER_ROUTE= sentinel scanning is always-on for tool nodes
-	// (issue #212). The author opts in by emitting the sentinel line
-	// from the tool; no per-node attribute required. The last matching
-	// line wins, value goes to ctx.tool_route. Always-clear before
-	// extract so a prior node's value doesn't leak into routing.
-	// When route_required: true is set on the node AND no sentinel
-	// was extracted, the node fails (symmetric to marker_grep's
-	// missing-match handling). The matcher is built-in so there is
-	// no regex-compile error path; only the missing-sentinel path.
+	marker, missing, err := extractToolMarker(pattern, stdout)
+	switch {
+	case err != nil:
+		// Bad regex on the node — author error, fail loud at runtime
+		// (validate-time lint #211 will catch this earlier when it
+		// lands). The compile error is surfaced both via
+		// MissingMarker.Error (so EventToolMarkerMissing carries it
+		// into activity.jsonl + tracker diagnose) and via
+		// ctx.tool_marker_error so routing conditions can read it.
+		outcome.Status = pipeline.OutcomeFail
+		outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = err.Error()
+		outcome.MissingMarker = &pipeline.MarkerDetail{
+			Pattern: pattern,
+			Error:   err.Error(),
+		}
+	case missing:
+		outcome.Status = pipeline.OutcomeFail
+		outcome.MissingMarker = &pipeline.MarkerDetail{
+			Pattern:      pattern,
+			CapturedTail: tailForDiag(stdout, 256),
+		}
+	default:
+		outcome.ContextUpdates[pipeline.ContextKeyToolMarker] = marker
+	}
+}
+
+// applyToolRoute scans for the always-on _TRACKER_ROUTE= sentinel (issue
+// #212). The author opts in by emitting the sentinel line from the tool; no
+// per-node attribute required. The last matching line wins, value goes to
+// ctx.tool_route. Always-clear before extract so a prior node's value
+// doesn't leak into routing. When route_required: true is set on the node
+// AND no sentinel was extracted, the node fails (symmetric to marker_grep's
+// missing-match handling). The matcher is built-in so there is no
+// regex-compile error path; only the missing-sentinel path.
+func applyToolRoute(outcome *pipeline.Outcome, node *pipeline.Node, stdout string) {
 	outcome.ContextUpdates[pipeline.ContextKeyToolRoute] = ""
 	if route := extractToolRoute(stdout); route != "" {
 		outcome.ContextUpdates[pipeline.ContextKeyToolRoute] = route
-	} else if node.ToolConfig().RouteRequired {
-		outcome.Status = string(pipeline.OutcomeFail)
+		return
+	}
+	if node.ToolConfig().RouteRequired {
+		outcome.Status = pipeline.OutcomeFail
 		outcome.MissingRoute = &pipeline.RouteDetail{
 			CapturedTail: tailForDiag(stdout, 256),
 		}
 	}
-
-	if applyDeclaredWrites(node, outcome.ContextUpdates, stdout, "Tool stdout JSON") {
-		outcome.Status = string(pipeline.OutcomeFail)
-	}
-	return outcome, pipeline.WriteStatusArtifact(artifactRoot, node.ID, outcome)
 }

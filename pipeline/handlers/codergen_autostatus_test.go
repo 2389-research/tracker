@@ -113,7 +113,7 @@ func TestCodergenHandler_AutoStatusMissing_GoalGateFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("goal-gate node with no STATUS line = %q, want fail (fail-closed)", outcome.Status)
 	}
 	if outcome.MissingStatus == nil {
@@ -142,7 +142,7 @@ func TestCodergenHandler_AutoStatusMissing_PlainNodeKeepsSuccessDefault(t *testi
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("plain auto_status node with no STATUS line = %q, want success (back-compat)", outcome.Status)
 	}
 	if outcome.MissingStatus == nil {
@@ -168,7 +168,7 @@ func TestCodergenHandler_AutoStatusHeading_GoalGateParsesFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("heading STATUS:fail on goal gate = %q, want fail", outcome.Status)
 	}
 	if outcome.MissingStatus != nil {
@@ -189,7 +189,7 @@ func TestCodergenHandler_AutoStatusPresent_NoMissingDetail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("status = %q, want success", outcome.Status)
 	}
 	if outcome.MissingStatus != nil {
@@ -210,7 +210,7 @@ func TestCodergenHandler_NoAutoStatus_NoMissingDetail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("status = %q, want success", outcome.Status)
 	}
 	if outcome.MissingStatus != nil {

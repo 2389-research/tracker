@@ -29,7 +29,7 @@ func TestSprintExecIntegration(t *testing.T) {
 	// so conditional edges (outcome=success) are taken.
 	codergenStub := func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 		return pipeline.Outcome{
-			Status: string(pipeline.OutcomeSuccess),
+			Status: pipeline.OutcomeSuccess,
 			ContextUpdates: map[string]string{
 				"outcome": "success",
 			},
@@ -39,7 +39,7 @@ func TestSprintExecIntegration(t *testing.T) {
 	// Stub tool: returns success.
 	toolStub := func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 		return pipeline.Outcome{
-			Status: string(pipeline.OutcomeSuccess),
+			Status: pipeline.OutcomeSuccess,
 			ContextUpdates: map[string]string{
 				"outcome": "success",
 			},
@@ -49,7 +49,7 @@ func TestSprintExecIntegration(t *testing.T) {
 	// Stub human: returns success.
 	humanStub := func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 		return pipeline.Outcome{
-			Status: string(pipeline.OutcomeSuccess),
+			Status: pipeline.OutcomeSuccess,
 		}, nil
 	}
 

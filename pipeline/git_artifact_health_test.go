@@ -180,7 +180,7 @@ func breakRepoHandler(t *testing.T, breakNode string) *HandlerRegistry {
 				breakArtifactRepo(t, pctx, node.ID)
 				return Outcome{}, errors.New("simulated handler crash after sandbox suspend")
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		}})
 	}
 	return reg
@@ -287,12 +287,12 @@ func TestCommitWIPBeforeRouting_MidRoutingStaysWarning(t *testing.T) {
 				_ = os.WriteFile(filepath.Join(dir, "flaky.go"), []byte("package x\n"), 0o644)
 				_ = os.RemoveAll(filepath.Join(dir, ".git"))
 				_ = os.Chmod(dir, 0o500)
-				return Outcome{Status: string(OutcomeRetry)}, nil
+				return Outcome{Status: OutcomeRetry}, nil
 			case "Escalate":
 				escalateRan = true
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		}})
 	}
@@ -328,7 +328,7 @@ func TestCommitWIPBeforeRouting_MidRoutingStaysWarning(t *testing.T) {
 // destroys the artifact repo, then returns the given outcome status (no Go
 // error) — driving the retry-exhausted and strict-failure terminal halt paths
 // (rather than the handler-error path that breakRepoHandler exercises).
-func breakRepoOnStatusHandler(t *testing.T, breakNode, status string) *HandlerRegistry {
+func breakRepoOnStatusHandler(t *testing.T, breakNode string, status TerminalStatus) *HandlerRegistry {
 	t.Helper()
 	reg := NewHandlerRegistry()
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
@@ -337,7 +337,7 @@ func breakRepoOnStatusHandler(t *testing.T, breakNode, status string) *HandlerRe
 				breakArtifactRepo(t, pctx, node.ID)
 				return Outcome{Status: status}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		}})
 	}
 	return reg
@@ -396,7 +396,7 @@ func TestRetryExhaustedNoFallback_TerminalHardFail(t *testing.T) {
 		mu.Unlock()
 	})
 
-	reg := breakRepoOnStatusHandler(t, "flaky", string(OutcomeRetry))
+	reg := breakRepoOnStatusHandler(t, "flaky", OutcomeRetry)
 	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
 	result, _ := engine.Run(context.Background())
 	t.Cleanup(func() {
@@ -438,7 +438,7 @@ func TestStrictFailureNoFallback_TerminalHardFail(t *testing.T) {
 		mu.Unlock()
 	})
 
-	reg := breakRepoOnStatusHandler(t, "Build", string(OutcomeFail))
+	reg := breakRepoOnStatusHandler(t, "Build", OutcomeFail)
 	engine := NewEngine(g, reg, WithArtifactDir(artifactBase), WithGitArtifacts(true), WithPipelineEventHandler(handler))
 	result, _ := engine.Run(context.Background())
 	t.Cleanup(func() {
@@ -490,12 +490,12 @@ func TestStrictFailureFallback_MidRoutingStaysWarning(t *testing.T) {
 			switch node.ID {
 			case "Build":
 				breakArtifactRepo(t, pctx, node.ID)
-				return Outcome{Status: string(OutcomeFail)}, nil
+				return Outcome{Status: OutcomeFail}, nil
 			case "Escalate":
 				escalateRan = true
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			default:
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
 		}})
 	}

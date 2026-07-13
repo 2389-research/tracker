@@ -92,65 +92,93 @@ func parseManagerLoopConfig(nodeID string, attrs map[string]string) (managerLoop
 		return cfg, fmt.Errorf("manager_loop: missing required attribute \"subgraph_ref\"")
 	}
 
-	if v := managerAttr(attrs, "poll_interval"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return cfg, fmt.Errorf("manager_loop: invalid poll_interval %q: %w", v, err)
-		}
-		if d <= 0 {
-			return cfg, fmt.Errorf("manager_loop: poll_interval must be > 0, got %q", v)
-		}
-		cfg.pollInterval = d
+	if err := applyPollInterval(&cfg, attrs); err != nil {
+		return cfg, err
 	}
-
-	if v := managerAttr(attrs, "max_cycles"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return cfg, fmt.Errorf("manager_loop: invalid max_cycles %q: %w", v, err)
-		}
-		if n <= 0 {
-			return cfg, fmt.Errorf("manager_loop: max_cycles must be > 0, got %q", v)
-		}
-		cfg.maxCycles = n
+	if err := applyMaxCycles(&cfg, attrs); err != nil {
+		return cfg, err
 	}
 
 	cfg.stopCondition = managerAttr(attrs, "stop_condition")
 	cfg.steerExpr = managerAttr(attrs, "steer_condition")
 	warnUnknownStackChildKeys(nodeID, "stop_condition", cfg.stopCondition)
 	warnUnknownStackChildKeys(nodeID, "steer_condition", cfg.steerExpr)
-	rawSteerContext := managerAttr(attrs, "steer_context")
-	steerKeys, err := namespaceSteerKeys(parseSteerContext(rawSteerContext))
-	if err != nil {
-		return cfg, fmt.Errorf("manager_loop: steer_context: %w", err)
-	}
-	cfg.steerKeys = steerKeys
 
-	// Two independent checks:
-	//
-	// 1. If the author wrote anything for steer_context, it must parse
-	//    cleanly — malformed input is never silently treated as an empty
-	//    map, regardless of whether steer_condition is also set.
-	//    Previously this only fired when steer_condition was non-empty;
-	//    with an empty condition, a malformed map slipped through as if
-	//    the attr were unset.
-	//
-	// 2. Both sides of steering must be set together or neither — a
-	//    condition without a context map is inert (nothing to inject) and
-	//    a context map without a condition never fires. Either case is
-	//    almost certainly an author mistake.
-	//
-	// Rejecting at parse time honors CLAUDE.md "never silently swallow errors".
-	if rawSteerContext != "" && len(cfg.steerKeys) == 0 {
-		return cfg, fmt.Errorf("manager_loop: steer_context %q is invalid (expected \"k=v,k=v\")", rawSteerContext)
-	}
-	if cfg.steerExpr != "" && len(cfg.steerKeys) == 0 {
-		return cfg, fmt.Errorf("manager_loop: steer_condition is set but steer_context is empty — nothing to inject")
-	}
-	if cfg.steerExpr == "" && len(cfg.steerKeys) > 0 {
-		return cfg, fmt.Errorf("manager_loop: steer_context is set but steer_condition is empty — no trigger for injection")
+	if err := applySteerContext(&cfg, attrs); err != nil {
+		return cfg, err
 	}
 
 	return cfg, nil
+}
+
+// applyPollInterval parses the poll_interval attr (a no-op when unset) onto cfg.
+func applyPollInterval(cfg *managerLoopConfig, attrs map[string]string) error {
+	v := managerAttr(attrs, "poll_interval")
+	if v == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return fmt.Errorf("manager_loop: invalid poll_interval %q: %w", v, err)
+	}
+	if d <= 0 {
+		return fmt.Errorf("manager_loop: poll_interval must be > 0, got %q", v)
+	}
+	cfg.pollInterval = d
+	return nil
+}
+
+// applyMaxCycles parses the max_cycles attr (a no-op when unset) onto cfg.
+func applyMaxCycles(cfg *managerLoopConfig, attrs map[string]string) error {
+	v := managerAttr(attrs, "max_cycles")
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fmt.Errorf("manager_loop: invalid max_cycles %q: %w", v, err)
+	}
+	if n <= 0 {
+		return fmt.Errorf("manager_loop: max_cycles must be > 0, got %q", v)
+	}
+	cfg.maxCycles = n
+	return nil
+}
+
+// applySteerContext parses steer_context and populates cfg.steerKeys, then
+// validates two independent invariants:
+//
+//  1. If the author wrote anything for steer_context, it must parse
+//     cleanly — malformed input is never silently treated as an empty
+//     map, regardless of whether steer_condition is also set.
+//     Previously this only fired when steer_condition was non-empty;
+//     with an empty condition, a malformed map slipped through as if
+//     the attr were unset.
+//
+//  2. Both sides of steering must be set together or neither — a
+//     condition without a context map is inert (nothing to inject) and
+//     a context map without a condition never fires. Either case is
+//     almost certainly an author mistake.
+//
+// Rejecting at parse time honors CLAUDE.md "never silently swallow errors".
+func applySteerContext(cfg *managerLoopConfig, attrs map[string]string) error {
+	rawSteerContext := managerAttr(attrs, "steer_context")
+	steerKeys, err := namespaceSteerKeys(parseSteerContext(rawSteerContext))
+	if err != nil {
+		return fmt.Errorf("manager_loop: steer_context: %w", err)
+	}
+	cfg.steerKeys = steerKeys
+
+	if rawSteerContext != "" && len(cfg.steerKeys) == 0 {
+		return fmt.Errorf("manager_loop: steer_context %q is invalid (expected \"k=v,k=v\")", rawSteerContext)
+	}
+	if cfg.steerExpr != "" && len(cfg.steerKeys) == 0 {
+		return fmt.Errorf("manager_loop: steer_condition is set but steer_context is empty — nothing to inject")
+	}
+	if cfg.steerExpr == "" && len(cfg.steerKeys) > 0 {
+		return fmt.Errorf("manager_loop: steer_context is set but steer_condition is empty — no trigger for injection")
+	}
+	return nil
 }
 
 // stackChildObservables enumerates the canonical `stack.child.*` context keys
@@ -325,13 +353,8 @@ func namespaceSteerKeys(m map[string]string) (map[string]string, error) {
 	if len(m) == 0 {
 		return m, nil
 	}
-	for k := range m {
-		if strings.HasPrefix(k, SteerContextKeyPrefix) {
-			continue
-		}
-		if _, dup := m[SteerContextKeyPrefix+k]; dup {
-			return nil, fmt.Errorf("%w: %q and %q both present", ErrAmbiguousSteerKey, k, SteerContextKeyPrefix+k)
-		}
+	if err := checkAmbiguousSteerKeys(m); err != nil {
+		return nil, err
 	}
 	out := make(map[string]string, len(m))
 	for k, v := range m {
@@ -342,6 +365,22 @@ func namespaceSteerKeys(m map[string]string) (map[string]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// checkAmbiguousSteerKeys rejects a steer_context map that contains both a
+// bare key and its already-namespaced form (e.g., both "hint" and
+// "steer.hint") — see namespaceSteerKeys for why this must fail loud rather
+// than pick a winner.
+func checkAmbiguousSteerKeys(m map[string]string) error {
+	for k := range m {
+		if strings.HasPrefix(k, SteerContextKeyPrefix) {
+			continue
+		}
+		if _, dup := m[SteerContextKeyPrefix+k]; dup {
+			return fmt.Errorf("%w: %q and %q both present", ErrAmbiguousSteerKey, k, SteerContextKeyPrefix+k)
+		}
+	}
+	return nil
 }
 
 // ErrAmbiguousSteerKey is returned by namespaceSteerKeys when the input
@@ -391,90 +430,18 @@ type engineResultMsg struct {
 func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 	cfg, err := parseManagerLoopConfig(node.ID, node.Attrs)
 	if err != nil {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, err
+		return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 	}
 
-	// Look up the child graph.
-	if h.graphs == nil {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
-			fmt.Errorf("manager_loop: no subgraphs available, cannot find %q", cfg.subgraphRef)
-	}
-	childGraph, ok := h.graphs[cfg.subgraphRef]
-	if !ok {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
-			fmt.Errorf("manager_loop: subgraph %q not found", cfg.subgraphRef)
-	}
-
-	// Build child engine with scoped events, matching SubgraphHandler pattern.
-	scopedPipeline := pipeline.NodeScopedPipelineHandler(node.ID, h.pipelineEvents)
-	childRegistry := h.registry
-	if h.registryFactory != nil {
-		childRegistry = h.registryFactory(childGraph, node.ID)
-	}
-	// Defensive: if both registry and factory are nil we'd pass a nil
-	// registry to NewEngine and panic on the first handler lookup.
-	// Report clearly instead.
-	if childRegistry == nil {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
-			fmt.Errorf("manager_loop: no handler registry available for child subgraph %q", cfg.subgraphRef)
+	childGraph, childRegistry, err := h.resolveChildGraph(node.ID, cfg)
+	if err != nil {
+		return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 	}
 
 	childCtx, cancelChild := context.WithCancel(ctx)
 	defer cancelChild()
 
-	// Create steering channel if steering is configured.
-	var steeringCh chan map[string]string
-	if cfg.steerExpr != "" && cfg.steerKeys != nil {
-		steeringCh = make(chan map[string]string, 1)
-	}
-
-	engineOpts := []pipeline.EngineOption{
-		pipeline.WithInitialContext(pctx.Snapshot()),
-		pipeline.WithPipelineEventHandler(scopedPipeline),
-	}
-	if steeringCh != nil {
-		engineOpts = append(engineOpts, pipeline.WithSteeringChan(steeringCh))
-	}
-	// Propagate the parent engine's BudgetGuard + baseline-usage snapshot
-	// stashed on ctx at handler dispatch time. Without this, the child
-	// engine's between-node checks are no-ops and --max-tokens /
-	// --max-cost ceilings become silently non-binding for any work that
-	// runs inside a manager_loop supervisor (#188, sibling of #183).
-	if runCtx := pipeline.ChildRunContextFromContext(ctx); runCtx != nil {
-		if runCtx.BudgetGuard != nil {
-			engineOpts = append(engineOpts, pipeline.WithBudgetGuard(runCtx.BudgetGuard))
-		}
-		if runCtx.Baseline != nil {
-			engineOpts = append(engineOpts, pipeline.WithBaselineUsage(runCtx.Baseline))
-		}
-	}
-	engine := pipeline.NewEngine(childGraph, childRegistry, engineOpts...)
-
-	// Launch child pipeline in a goroutine.
-	resultCh := make(chan engineResultMsg, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				resultCh <- engineResultMsg{
-					err: fmt.Errorf("panic in manager_loop child %q: %v", cfg.subgraphRef, r),
-				}
-			}
-		}()
-		result, runErr := engine.Run(childCtx)
-		resultCh <- engineResultMsg{result: result, err: runErr}
-	}()
-
-	// Emit child-started event. Handler-emitted events deliberately
-	// leave RunID unset — it is not surfaced to handlers through
-	// PipelineContext today. Observability tools should correlate via
-	// NodeID + Timestamp for now.
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-		Type:      pipeline.EventStageStarted,
-		Timestamp: time.Now(),
-		NodeID:    node.ID,
-		Message:   fmt.Sprintf("manager_loop: child %q launched", cfg.subgraphRef),
-	})
-	pctx.Set("stack.child.status", "running")
+	resultCh, steeringCh := h.startChildRun(ctx, childCtx, node.ID, pctx, cfg, childGraph, childRegistry)
 
 	// Poll loop. Using an explicit time.NewTimer (rather than time.After
 	// inside the select) so we can Stop+Reset it per iteration. time.After
@@ -486,126 +453,253 @@ func (h *ManagerLoopHandler) Execute(ctx context.Context, node *pipeline.Node, p
 	for {
 		select {
 		case <-ctx.Done():
-			cancelChild()
-			waitForChild(resultCh)
-			pctx.Set("stack.child.status", "cancelled")
-			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-				Type:      pipeline.EventStageFailed,
-				Timestamp: time.Now(),
-				NodeID:    node.ID,
-				Message:   fmt.Sprintf("manager_loop: cancelled: %v", ctx.Err()),
-			})
-			return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
-				fmt.Errorf("manager_loop: cancelled: %w", ctx.Err())
+			return h.abortLoop(cancelChild, resultCh, pctx, node.ID, "cancelled",
+				fmt.Sprintf("manager_loop: cancelled: %v", ctx.Err()),
+				fmt.Errorf("manager_loop: cancelled: %w", ctx.Err()))
 
 		case msg := <-resultCh:
 			return h.handleChildResult(ctx, node.ID, msg, cycles, pctx)
 
 		case <-pollTimer.C:
-			// If the child's result became ready concurrently with this
-			// tick, prefer completion — select among ready cases is
-			// nondeterministic, so without this check a tick could win
-			// the race and trigger max_cycles failure even when the
-			// child already finished.
-			select {
-			case msg := <-resultCh:
-				return h.handleChildResult(ctx, node.ID, msg, cycles, pctx)
-			default:
-			}
-
-			cycles++
-			pctx.Set("stack.child.cycles", strconv.Itoa(cycles))
-
-			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-				Type:      pipeline.EventManagerCycleTick,
-				Timestamp: time.Now(),
-				NodeID:    node.ID,
-				Message:   fmt.Sprintf("manager_loop: cycle %d/%d", cycles, cfg.maxCycles),
-			})
-
-			if cycles >= cfg.maxCycles {
-				cancelChild()
-				waitForChild(resultCh)
-				pctx.Set("stack.child.status", "max_cycles_exceeded")
-				h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-					Type:      pipeline.EventStageFailed,
-					Timestamp: time.Now(),
-					NodeID:    node.ID,
-					Message:   fmt.Sprintf("manager_loop: max_cycles %d reached", cfg.maxCycles),
-				})
-				return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
-					fmt.Errorf("manager_loop: max_cycles %d reached", cfg.maxCycles)
-			}
-
-			// Evaluate stop condition against the parent context. A parse
-			// error here means the author wrote a malformed condition —
-			// fail the manager loop with a clear error rather than
-			// silently treating as "never match", which would hide the
-			// misconfiguration until max_cycles.
-			if cfg.stopCondition != "" {
-				match, condErr := pipeline.EvaluateCondition(cfg.stopCondition, pctx)
-				if condErr != nil {
-					cancelChild()
-					waitForChild(resultCh)
-					pctx.Set("stack.child.status", "stop_condition_invalid")
-					h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-						Type:      pipeline.EventStageFailed,
-						Timestamp: time.Now(),
-						NodeID:    node.ID,
-						Message:   fmt.Sprintf("manager_loop: stop_condition %q is invalid: %v", cfg.stopCondition, condErr),
-					})
-					return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
-						fmt.Errorf("manager_loop: stop_condition %q is invalid: %w", cfg.stopCondition, condErr)
-				}
-				if match {
-					cancelChild()
-					waitForChild(resultCh)
-					pctx.Set("stack.child.status", "stop_condition_met")
-					h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-						Type:      pipeline.EventStageCompleted,
-						Timestamp: time.Now(),
-						NodeID:    node.ID,
-						Message:   fmt.Sprintf("manager_loop: stop_condition met after %d cycles", cycles),
-					})
-					return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
-				}
-			}
-
-			// Steering: inject context into running child when condition matches.
-			if cfg.steerExpr != "" && steeringCh != nil {
-				match, condErr := pipeline.EvaluateCondition(cfg.steerExpr, pctx)
-				if condErr != nil {
-					cancelChild()
-					waitForChild(resultCh)
-					pctx.Set("stack.child.status", "steer_condition_invalid")
-					h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-						Type:      pipeline.EventStageFailed,
-						Timestamp: time.Now(),
-						NodeID:    node.ID,
-						Message:   fmt.Sprintf("manager_loop: steer_condition %q is invalid: %v", cfg.steerExpr, condErr),
-					})
-					return pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
-						fmt.Errorf("manager_loop: steer_condition %q is invalid: %w", cfg.steerExpr, condErr)
-				}
-				if match {
-					select {
-					case steeringCh <- cfg.steerKeys:
-						h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-							Type:      pipeline.EventManagerCycleTick,
-							Timestamp: time.Now(),
-							NodeID:    node.ID,
-							Message:   fmt.Sprintf("manager_loop: steered %d keys into child", len(cfg.steerKeys)),
-						})
-					default:
-						// Channel full — child hasn't drained yet. Skip this cycle.
-					}
-				}
+			outcome, tickErr, done := h.pollCycle(ctx, node.ID, cfg, &cycles, resultCh, cancelChild, steeringCh, pctx)
+			if done {
+				return outcome, tickErr
 			}
 			// Reset for the next poll. The timer is already drained by the
 			// case firing above, so Reset is safe here.
 			pollTimer.Reset(cfg.pollInterval)
 		}
 	}
+}
+
+// resolveChildGraph looks up the manager_loop's referenced subgraph and
+// resolves the registry that will execute it, matching SubgraphHandler's
+// lookup pattern.
+func (h *ManagerLoopHandler) resolveChildGraph(nodeID string, cfg managerLoopConfig) (*pipeline.Graph, *pipeline.HandlerRegistry, error) {
+	if h.graphs == nil {
+		return nil, nil, fmt.Errorf("manager_loop: no subgraphs available, cannot find %q", cfg.subgraphRef)
+	}
+	childGraph, ok := h.graphs[cfg.subgraphRef]
+	if !ok {
+		return nil, nil, fmt.Errorf("manager_loop: subgraph %q not found", cfg.subgraphRef)
+	}
+	childRegistry := h.registry
+	if h.registryFactory != nil {
+		childRegistry = h.registryFactory(childGraph, nodeID)
+	}
+	// Defensive: if both registry and factory are nil we'd pass a nil
+	// registry to NewEngine and panic on the first handler lookup.
+	// Report clearly instead.
+	if childRegistry == nil {
+		return nil, nil, fmt.Errorf("manager_loop: no handler registry available for child subgraph %q", cfg.subgraphRef)
+	}
+	return childGraph, childRegistry, nil
+}
+
+// buildChildEngine assembles the child engine options: scoped events, the
+// initial context snapshot, optional steering channel, and (when present on
+// ctx) the parent's BudgetGuard + baseline-usage propagation (#188, sibling
+// of #183) so --max-tokens / --max-cost ceilings stay binding inside a
+// manager_loop supervisor.
+func (h *ManagerLoopHandler) buildChildEngine(ctx context.Context, pctx *pipeline.PipelineContext, childGraph *pipeline.Graph, childRegistry *pipeline.HandlerRegistry, nodeID string, steeringCh chan map[string]string) *pipeline.Engine {
+	scopedPipeline := pipeline.NodeScopedPipelineHandler(nodeID, h.pipelineEvents)
+	engineOpts := []pipeline.EngineOption{
+		pipeline.WithInitialContext(pctx.Snapshot()),
+		pipeline.WithPipelineEventHandler(scopedPipeline),
+	}
+	if steeringCh != nil {
+		engineOpts = append(engineOpts, pipeline.WithSteeringChan(steeringCh))
+	}
+	if runCtx := pipeline.ChildRunContextFromContext(ctx); runCtx != nil {
+		if runCtx.BudgetGuard != nil {
+			engineOpts = append(engineOpts, pipeline.WithBudgetGuard(runCtx.BudgetGuard))
+		}
+		if runCtx.Baseline != nil {
+			engineOpts = append(engineOpts, pipeline.WithBaselineUsage(runCtx.Baseline))
+		}
+	}
+	return pipeline.NewEngine(childGraph, childRegistry, engineOpts...)
+}
+
+// startChildRun builds the steering channel (if configured), assembles and
+// launches the child engine in its own goroutine, and emits the
+// child-started event. Handler-emitted events deliberately leave RunID
+// unset — it is not surfaced to handlers through PipelineContext today.
+// Observability tools should correlate via NodeID + Timestamp for now.
+func (h *ManagerLoopHandler) startChildRun(ctx, childCtx context.Context, nodeID string, pctx *pipeline.PipelineContext, cfg managerLoopConfig, childGraph *pipeline.Graph, childRegistry *pipeline.HandlerRegistry) (chan engineResultMsg, chan map[string]string) {
+	var steeringCh chan map[string]string
+	if cfg.steerExpr != "" && cfg.steerKeys != nil {
+		steeringCh = make(chan map[string]string, 1)
+	}
+
+	engine := h.buildChildEngine(ctx, pctx, childGraph, childRegistry, nodeID, steeringCh)
+
+	resultCh := make(chan engineResultMsg, 1)
+	go runManagerLoopChild(childCtx, engine, cfg.subgraphRef, resultCh)
+
+	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventStageStarted,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("manager_loop: child %q launched", cfg.subgraphRef),
+	})
+	pctx.Set("stack.child.status", "running")
+
+	return resultCh, steeringCh
+}
+
+// runManagerLoopChild runs the child engine to completion and sends the
+// result (or a synthesized panic error) on resultCh. Runs in its own
+// goroutine, launched by startChildRun.
+func runManagerLoopChild(ctx context.Context, engine *pipeline.Engine, subgraphRef string, resultCh chan<- engineResultMsg) {
+	defer func() {
+		if r := recover(); r != nil {
+			resultCh <- engineResultMsg{
+				err: fmt.Errorf("panic in manager_loop child %q: %v", subgraphRef, r),
+			}
+		}
+	}()
+	result, runErr := engine.Run(ctx)
+	resultCh <- engineResultMsg{result: result, err: runErr}
+}
+
+// abortLoop cancels the child, waits (bounded) for it to exit, records the
+// given status on the pipeline context, emits a StageFailed event, and
+// returns the standard OutcomeFail/err pair used by every early-exit path
+// in the poll loop.
+func (h *ManagerLoopHandler) abortLoop(cancelChild context.CancelFunc, resultCh chan engineResultMsg, pctx *pipeline.PipelineContext, nodeID, status, msg string, err error) (pipeline.Outcome, error) {
+	cancelChild()
+	waitForChild(resultCh)
+	pctx.Set("stack.child.status", status)
+	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventStageFailed,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   msg,
+	})
+	return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
+}
+
+// tickAndCheckMaxCycles advances the cycle counter, records it on the
+// pipeline context, emits the per-tick EventManagerCycleTick, and aborts the
+// loop if max_cycles has been reached. Returns done=true when max_cycles was
+// hit (loop must return); done=false to keep polling.
+func (h *ManagerLoopHandler) tickAndCheckMaxCycles(cfg managerLoopConfig, cycles *int, resultCh chan engineResultMsg, cancelChild context.CancelFunc, nodeID string, pctx *pipeline.PipelineContext) (pipeline.Outcome, error, bool) {
+	*cycles++
+	pctx.Set("stack.child.cycles", strconv.Itoa(*cycles))
+	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventManagerCycleTick,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("manager_loop: cycle %d/%d", *cycles, cfg.maxCycles),
+	})
+
+	if *cycles < cfg.maxCycles {
+		return pipeline.Outcome{}, nil, false
+	}
+	outcome, err := h.abortLoop(cancelChild, resultCh, pctx, nodeID, "max_cycles_exceeded",
+		fmt.Sprintf("manager_loop: max_cycles %d reached", cfg.maxCycles),
+		fmt.Errorf("manager_loop: max_cycles %d reached", cfg.maxCycles))
+	return outcome, err, true
+}
+
+// pollCycle handles a single pollTimer tick: it first prefers an
+// already-ready child result (a race between the timer and resultCh — select
+// among ready cases is nondeterministic, so without this check a tick could
+// win the race and trigger max_cycles failure even when the child already
+// finished), then advances the cycle count and checks max_cycles,
+// stop_condition, and steering in turn. Returns done=true when the poll loop
+// should return (outcome, err) to its caller; done=false to keep polling.
+func (h *ManagerLoopHandler) pollCycle(ctx context.Context, nodeID string, cfg managerLoopConfig, cycles *int, resultCh chan engineResultMsg, cancelChild context.CancelFunc, steeringCh chan map[string]string, pctx *pipeline.PipelineContext) (pipeline.Outcome, error, bool) {
+	select {
+	case msg := <-resultCh:
+		outcome, err := h.handleChildResult(ctx, nodeID, msg, *cycles, pctx)
+		return outcome, err, true
+	default:
+	}
+
+	if outcome, err, done := h.tickAndCheckMaxCycles(cfg, cycles, resultCh, cancelChild, nodeID, pctx); done {
+		return outcome, err, true
+	}
+
+	// Evaluate stop condition against the parent context. A parse error here
+	// means the author wrote a malformed condition — fail the manager loop
+	// with a clear error rather than silently treating as "never match",
+	// which would hide the misconfiguration until max_cycles.
+	if outcome, err, done := h.checkStopCondition(cfg, *cycles, resultCh, cancelChild, nodeID, pctx); done {
+		return outcome, err, true
+	}
+
+	// Steering: inject context into running child when condition matches.
+	if outcome, err, done := h.checkSteering(cfg, resultCh, cancelChild, steeringCh, nodeID, pctx); done {
+		return outcome, err, true
+	}
+
+	return pipeline.Outcome{}, nil, false
+}
+
+// checkStopCondition evaluates cfg.stopCondition (a no-op when unset) and,
+// on a match, cancels the child and returns success. Returns done=true
+// whenever the poll loop must return immediately (invalid condition or a
+// match); done=false to keep polling.
+func (h *ManagerLoopHandler) checkStopCondition(cfg managerLoopConfig, cycles int, resultCh chan engineResultMsg, cancelChild context.CancelFunc, nodeID string, pctx *pipeline.PipelineContext) (pipeline.Outcome, error, bool) {
+	if cfg.stopCondition == "" {
+		return pipeline.Outcome{}, nil, false
+	}
+	match, condErr := pipeline.EvaluateCondition(cfg.stopCondition, pctx)
+	if condErr != nil {
+		outcome, err := h.abortLoop(cancelChild, resultCh, pctx, nodeID, "stop_condition_invalid",
+			fmt.Sprintf("manager_loop: stop_condition %q is invalid: %v", cfg.stopCondition, condErr),
+			fmt.Errorf("manager_loop: stop_condition %q is invalid: %w", cfg.stopCondition, condErr))
+		return outcome, err, true
+	}
+	if !match {
+		return pipeline.Outcome{}, nil, false
+	}
+	cancelChild()
+	waitForChild(resultCh)
+	pctx.Set("stack.child.status", "stop_condition_met")
+	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventStageCompleted,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("manager_loop: stop_condition met after %d cycles", cycles),
+	})
+	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil, true
+}
+
+// checkSteering evaluates cfg.steerExpr (a no-op when steering isn't
+// configured) and, on a match, injects cfg.steerKeys into the running child
+// (best-effort — skipped if the child hasn't drained the previous injection
+// yet). Returns done=true only when the condition itself is invalid (poll
+// loop must abort); a successful or skipped injection always returns
+// done=false so polling continues.
+func (h *ManagerLoopHandler) checkSteering(cfg managerLoopConfig, resultCh chan engineResultMsg, cancelChild context.CancelFunc, steeringCh chan map[string]string, nodeID string, pctx *pipeline.PipelineContext) (pipeline.Outcome, error, bool) {
+	if cfg.steerExpr == "" || steeringCh == nil {
+		return pipeline.Outcome{}, nil, false
+	}
+	match, condErr := pipeline.EvaluateCondition(cfg.steerExpr, pctx)
+	if condErr != nil {
+		outcome, err := h.abortLoop(cancelChild, resultCh, pctx, nodeID, "steer_condition_invalid",
+			fmt.Sprintf("manager_loop: steer_condition %q is invalid: %v", cfg.steerExpr, condErr),
+			fmt.Errorf("manager_loop: steer_condition %q is invalid: %w", cfg.steerExpr, condErr))
+		return outcome, err, true
+	}
+	if !match {
+		return pipeline.Outcome{}, nil, false
+	}
+	select {
+	case steeringCh <- cfg.steerKeys:
+		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type:      pipeline.EventManagerCycleTick,
+			Timestamp: time.Now(),
+			NodeID:    nodeID,
+			Message:   fmt.Sprintf("manager_loop: steered %d keys into child", len(cfg.steerKeys)),
+		})
+	default:
+		// Channel full — child hasn't drained yet. Skip this cycle.
+	}
+	return pipeline.Outcome{}, nil, false
 }
 
 // handleChildResult processes the child engine's result and returns the appropriate outcome.
@@ -640,123 +734,141 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 	// broad) check accepted any cancellation-shaped err and broke
 	// failure-edge routing for child-internal timeouts.
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		pctx.Set("stack.child.status", "cancelled")
-		// Use ctx.Err() (typically `context.Canceled` / `context.DeadlineExceeded`)
-		// as the canonical cause for the audit message. The other cancellation
-		// path (the <-ctx.Done() arm in Execute) emits the same bare cause; the
-		// `msg.err` available here is the engine-wrapped form ("handler error
-		// at node ...: context canceled"), so using it would make the two paths
-		// produce different audit lines for the same observable event.
-		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type:      pipeline.EventStageFailed,
-			Timestamp: time.Now(),
-			NodeID:    nodeID,
-			Message:   fmt.Sprintf("manager_loop: cancelled: %v", ctxErr),
-		})
-		out := pipeline.Outcome{Status: string(pipeline.OutcomeFail)}
-		if msg.result != nil {
-			out.ChildUsage = msg.result.Usage
-		}
-		return out, fmt.Errorf("manager_loop: cancelled: %w", ctxErr)
+		return h.handleChildCancelled(nodeID, msg, ctxErr, pctx)
 	}
 
 	// Engine may return both result + error (e.g. node failed with no failure edge).
 	// When a result is available, use its status/context rather than treating as a crash.
 	if msg.result != nil {
-		result := msg.result
-		if result.Status == pipeline.OutcomeSuccess {
-			pctx.Set("stack.child.status", "success")
-			pctx.Set("stack.child.exit_status", string(pipeline.OutcomeSuccess))
-			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-				Type:      pipeline.EventStageCompleted,
-				Timestamp: time.Now(),
-				NodeID:    nodeID,
-				Message:   fmt.Sprintf("manager_loop: child completed successfully after %d cycles", cycles),
-			})
-			return pipeline.Outcome{
-				Status:         string(pipeline.OutcomeSuccess),
-				ContextUpdates: result.Context,
-				ChildUsage:     result.Usage,
-			}, nil
-		}
+		return h.handleChildEngineResult(nodeID, msg.result, cycles, pctx)
+	}
 
-		// Validation override: the child engine terminated with
-		// Status=OutcomeValidationOverridden via the engine's terminal-status
-		// rule (s.validationOverrides was non-empty at the success exit).
-		// Map to OutcomeSuccess for parent routing — the override is an
-		// audit-only signal that doesn't redirect parent edge selection —
-		// and propagate the child's ValidationOverrides via ChildOverride
-		// so the parent engine absorbs them into its own sticky list and
-		// the parent's terminal-status rule flips Status → validation_overridden
-		// in turn. Mirrors the SubgraphHandler propagation path (#271).
-		//
-		// Why this branch must come before the generic non-success fallback
-		// below: that fallback returns OutcomeFail (or OutcomeSuccess for
-		// child-side budget halts) and never populates ChildOverride, so a
-		// child that succeeded-with-overrides would otherwise be reported
-		// to the parent as a plain failure with no override trail.
-		if result.Status == pipeline.OutcomeValidationOverridden {
-			pctx.Set("stack.child.status", "success")
-			pctx.Set("stack.child.exit_status", string(pipeline.OutcomeValidationOverridden))
-			h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-				Type:      pipeline.EventStageCompleted,
-				Timestamp: time.Now(),
-				NodeID:    nodeID,
-				Message:   fmt.Sprintf("manager_loop: child completed with validation_overridden after %d cycles", cycles),
-			})
-			return pipeline.Outcome{
-				Status:         string(pipeline.OutcomeSuccess),
-				ContextUpdates: result.Context,
-				ChildUsage:     result.Usage,
-				ChildOverride:  pipeline.PrependSubgraphPath(result.ValidationOverrides, nodeID),
-			}, nil
-		}
+	return h.handleChildCrash(nodeID, msg.err, pctx)
+}
 
-		// Child pipeline failed (non-success status). Record the child's
-		// real exit status (e.g. OutcomeBudgetExceeded) in context for
-		// inspection, but return a valid handler-level outcome. Handler
-		// Status values must be from the handler-outcome set
-		// (success/fail/retry) — engine-level statuses like
-		// OutcomeBudgetExceeded would fall through the engine's outcome
-		// switch and be silently treated as success.
-		childStatus := result.Status
-		if childStatus == "" {
-			childStatus = pipeline.OutcomeFail
-		}
-		pctx.Set("stack.child.status", "failed")
-		pctx.Set("stack.child.exit_status", string(childStatus))
+// handleChildCancelled reports the manager_loop's own ctx cancellation as the
+// authoritative cause of a child-result race (see handleChildResult's
+// cancellation-cascade comment for why ctx.Err() — not msg.err — is
+// canonical here).
+func (h *ManagerLoopHandler) handleChildCancelled(nodeID string, msg engineResultMsg, ctxErr error, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	pctx.Set("stack.child.status", "cancelled")
+	// Use ctx.Err() (typically `context.Canceled` / `context.DeadlineExceeded`)
+	// as the canonical cause for the audit message. The other cancellation
+	// path (the <-ctx.Done() arm in Execute) emits the same bare cause; the
+	// `msg.err` available here is the engine-wrapped form ("handler error
+	// at node ...: context canceled"), so using it would make the two paths
+	// produce different audit lines for the same observable event.
+	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventStageFailed,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("manager_loop: cancelled: %v", ctxErr),
+	})
+	out := pipeline.Outcome{Status: pipeline.OutcomeFail}
+	if msg.result != nil {
+		out.ChildUsage = msg.result.Usage
+	}
+	return out, fmt.Errorf("manager_loop: cancelled: %w", ctxErr)
+}
+
+// handleChildEngineResult maps a completed child EngineResult to the
+// manager_loop's own Outcome: success, validation-overridden (treated as
+// success with override propagation), or failure.
+func (h *ManagerLoopHandler) handleChildEngineResult(nodeID string, result *pipeline.EngineResult, cycles int, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	if result.Status == pipeline.OutcomeSuccess {
+		pctx.Set("stack.child.status", "success")
+		pctx.Set("stack.child.exit_status", string(pipeline.OutcomeSuccess))
 		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
-			Type:      pipeline.EventStageFailed,
+			Type:      pipeline.EventStageCompleted,
 			Timestamp: time.Now(),
 			NodeID:    nodeID,
-			Message:   fmt.Sprintf("manager_loop: child completed with status %q", childStatus),
+			Message:   fmt.Sprintf("manager_loop: child completed successfully after %d cycles", cycles),
 		})
-		// A child-side budget halt is mapped to parent OutcomeSuccess (not
-		// OutcomeFail) so the parent's own between-node budget check can
-		// fire with the correct OutcomeBudgetExceeded status after folding
-		// in the child's ChildUsage. Returning OutcomeFail here would trip
-		// the engine's strict-failure-edges rule before the parent's
-		// budget check runs — same reasoning as SubgraphHandler (#183 fix).
-		handlerStatus := pipeline.OutcomeFail
-		if childStatus == pipeline.OutcomeBudgetExceeded {
-			handlerStatus = pipeline.OutcomeSuccess
-		}
-		// Propagate any validation overrides the child accumulated even on
-		// fail / budget_exceeded — the spec promise is that override
-		// forensics survive failure-after-override scenarios. Matches
-		// SubgraphHandler.Execute's unconditional propagation.
 		return pipeline.Outcome{
-			Status:         string(handlerStatus),
+			Status:         pipeline.OutcomeSuccess,
+			ContextUpdates: result.Context,
+			ChildUsage:     result.Usage,
+		}, nil
+	}
+
+	// Validation override: the child engine terminated with
+	// Status=OutcomeValidationOverridden via the engine's terminal-status
+	// rule (s.validationOverrides was non-empty at the success exit).
+	// Map to OutcomeSuccess for parent routing — the override is an
+	// audit-only signal that doesn't redirect parent edge selection —
+	// and propagate the child's ValidationOverrides via ChildOverride
+	// so the parent engine absorbs them into its own sticky list and
+	// the parent's terminal-status rule flips Status → validation_overridden
+	// in turn. Mirrors the SubgraphHandler propagation path (#271).
+	//
+	// Why this branch must come before the generic non-success fallback
+	// below: that fallback returns OutcomeFail (or OutcomeSuccess for
+	// child-side budget halts) and never populates ChildOverride, so a
+	// child that succeeded-with-overrides would otherwise be reported
+	// to the parent as a plain failure with no override trail.
+	if result.Status == pipeline.OutcomeValidationOverridden {
+		pctx.Set("stack.child.status", "success")
+		pctx.Set("stack.child.exit_status", string(pipeline.OutcomeValidationOverridden))
+		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+			Type:      pipeline.EventStageCompleted,
+			Timestamp: time.Now(),
+			NodeID:    nodeID,
+			Message:   fmt.Sprintf("manager_loop: child completed with validation_overridden after %d cycles", cycles),
+		})
+		return pipeline.Outcome{
+			Status:         pipeline.OutcomeSuccess,
 			ContextUpdates: result.Context,
 			ChildUsage:     result.Usage,
 			ChildOverride:  pipeline.PrependSubgraphPath(result.ValidationOverrides, nodeID),
 		}, nil
 	}
 
-	// No result at all — child crashed or panicked before producing one.
-	// Guarantee a non-nil error so callers never see (OutcomeFail, nil):
-	// if the goroutine sent neither result nor err, synthesize one.
-	err := msg.err
+	// Child pipeline failed (non-success status). Record the child's
+	// real exit status (e.g. OutcomeBudgetExceeded) in context for
+	// inspection, but return a valid handler-level outcome. Handler
+	// Status values must be from the handler-outcome set
+	// (success/fail/retry) — engine-level statuses like
+	// OutcomeBudgetExceeded would fall through the engine's outcome
+	// switch and be silently treated as success.
+	childStatus := result.Status
+	if childStatus == "" {
+		childStatus = pipeline.OutcomeFail
+	}
+	pctx.Set("stack.child.status", "failed")
+	pctx.Set("stack.child.exit_status", string(childStatus))
+	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventStageFailed,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("manager_loop: child completed with status %q", childStatus),
+	})
+	// A child-side budget halt is mapped to parent OutcomeSuccess (not
+	// OutcomeFail) so the parent's own between-node budget check can
+	// fire with the correct OutcomeBudgetExceeded status after folding
+	// in the child's ChildUsage. Returning OutcomeFail here would trip
+	// the engine's strict-failure-edges rule before the parent's
+	// budget check runs — same reasoning as SubgraphHandler (#183 fix).
+	handlerStatus := pipeline.OutcomeFail
+	if childStatus == pipeline.OutcomeBudgetExceeded {
+		handlerStatus = pipeline.OutcomeSuccess
+	}
+	// Propagate any validation overrides the child accumulated even on
+	// fail / budget_exceeded — the spec promise is that override
+	// forensics survive failure-after-override scenarios. Matches
+	// SubgraphHandler.Execute's unconditional propagation.
+	return pipeline.Outcome{
+		Status:         handlerStatus,
+		ContextUpdates: result.Context,
+		ChildUsage:     result.Usage,
+		ChildOverride:  pipeline.PrependSubgraphPath(result.ValidationOverrides, nodeID),
+	}, nil
+}
+
+// handleChildCrash handles the no-result case: the child crashed or panicked
+// before producing an EngineResult. Guarantees a non-nil error so callers
+// never see (OutcomeFail, nil).
+func (h *ManagerLoopHandler) handleChildCrash(nodeID string, msgErr error, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+	err := msgErr
 	if err == nil {
 		err = fmt.Errorf("manager_loop: child exited with no result and no error")
 	}
@@ -767,5 +879,5 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: child error: %v", err),
 	})
-	return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, err
+	return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 }

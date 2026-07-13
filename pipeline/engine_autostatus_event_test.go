@@ -26,11 +26,11 @@ func TestEngineEmitsAutoStatusMissingEvent(t *testing.T) {
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			if node.ID == "verify" {
 				return Outcome{
-					Status:        string(OutcomeFail),
+					Status:        OutcomeFail,
 					MissingStatus: &AutoStatusDetail{ResponseTail: "no marker here", FailClosed: true},
 				}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 

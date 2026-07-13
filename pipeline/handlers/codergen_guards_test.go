@@ -45,7 +45,7 @@ func TestCodergenNodeCostExceededRoutesToRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeRetry) {
+	if outcome.Status != pipeline.OutcomeRetry {
 		t.Errorf("want %q on cost limit exceeded, got %q", pipeline.OutcomeRetry, outcome.Status)
 	}
 }
@@ -70,7 +70,7 @@ func TestCodergenNoProgressDetectedRoutesToRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeRetry) {
+	if outcome.Status != pipeline.OutcomeRetry {
 		t.Errorf("want %q on no-progress detection, got %q", pipeline.OutcomeRetry, outcome.Status)
 	}
 }
@@ -118,7 +118,7 @@ func TestCodergenGraphDefaultMaxCostUSD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeRetry) {
+	if outcome.Status != pipeline.OutcomeRetry {
 		t.Errorf("graph-level max_cost_usd: want %q, got %q", pipeline.OutcomeRetry, outcome.Status)
 	}
 }
@@ -146,7 +146,7 @@ func TestCodergenNodeZeroMaxCostUSDDisablesGraphDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("node max_cost_usd=0 should disable graph default: want success, got %q", outcome.Status)
 	}
 }
