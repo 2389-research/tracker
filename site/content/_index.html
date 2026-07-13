@@ -34,7 +34,7 @@ jsonld:
     </p>
 
     <ul class="hero-bullets">
-      <li><strong>Hard cost ceilings.</strong> <code>--max-cost 500 --max-tokens 100k --max-wall-time 30m</code>. Halts mid-run with a snapshot.</li>
+      <li><strong>Hard cost ceilings.</strong> <code>--max-cost 500 --max-tokens 100000 --max-wall-time 30m</code>. Halts mid-run with a snapshot.</li>
       <li><strong>Parallel branches in worktrees.</strong> Three model variants race in isolated checkouts. No filesystem stomping.</li>
       <li><strong>Every run is a git commit.</strong> Replay any past run, diff the artifacts, export as a portable bundle.</li>
     </ul>
@@ -146,7 +146,7 @@ tracker <span class="flag">--json</span> build_product</code></pre>
       <div class="glass glass-sm outcome-card">
         <h3>Kill a runaway agent at $5, not $500.</h3>
         <p>Hard caps on tokens, cost (cents), and wall-time as CLI flags or workflow defaults. The engine checks between every node and halts with a <code>CostSnapshot</code> on breach.</p>
-        <p class="outcome-cli"><code>--max-cost 500 --max-tokens 100k --max-wall-time 30m</code></p>
+        <p class="outcome-cli"><code>--max-cost 500 --max-tokens 100000 --max-wall-time 30m</code></p>
       </div>
 
       <div class="glass glass-sm outcome-card">

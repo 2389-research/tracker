@@ -89,7 +89,7 @@ graph TB
 
     subgraph xreview ["Cross-Review"]
       Review["Parallel Fan-Out"] --> Claude["Claude Review<br/><i>opus</i>"]
-      Review --> Codex["Codex Review<br/><i>gpt-5.4</i>"]
+      Review --> Codex["Codex Review<br/><i>gpt-5.2</i>"]
       Review --> Gemini["Gemini Review<br/><i>gemini-2.5-pro</i>"]
       Claude --> Join["Fan-In Join"]
       Codex --> Join
