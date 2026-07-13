@@ -5,8 +5,8 @@ workflow ConsensusTaskParity
 
   defaults
     max_retries: 3
-    max_restarts: 5
     fidelity: truncate
+    max_restarts: 5
     on_failure: Exit
 
   agent Start
@@ -162,35 +162,17 @@ workflow ConsensusTaskParity
   edges
     Start -> CheckDoD
     CheckDoD -> DoDParallel
-    DoDParallel -> DefineDoD_Gemini
-    DoDParallel -> DefineDoD_GPT
-    DoDParallel -> DefineDoD_Opus
-    DefineDoD_Gemini -> DoDJoin
-    DefineDoD_GPT -> DoDJoin
-    DefineDoD_Opus -> DoDJoin
     DoDJoin -> ConsolidateDoD
     ConsolidateDoD -> PlanParallel
-    PlanParallel -> PlanGemini
-    PlanParallel -> PlanGPT
-    PlanParallel -> PlanOpus
-    PlanGemini -> PlanJoin
-    PlanGPT -> PlanJoin
-    PlanOpus -> PlanJoin
     PlanJoin -> DebateConsolidate
     DebateConsolidate -> Implement
     Implement -> VerifyOutputs
     VerifyOutputs -> ReviewParallel
-    ReviewParallel -> ReviewGemini
-    ReviewParallel -> ReviewGPT
-    ReviewParallel -> ReviewOpus
-    ReviewGemini -> ReviewJoin
-    ReviewGPT -> ReviewJoin
-    ReviewOpus -> ReviewJoin
     ReviewJoin -> ReviewConsensus
-    ReviewConsensus -> Exit  when ctx.outcome = success  label: pass
-    ReviewConsensus -> Postmortem  when ctx.outcome = retry  label: retry
-    ReviewConsensus -> Exit  when ctx.outcome = fail  label: fail
+    ReviewConsensus -> Exit  on success  label: pass
+    ReviewConsensus -> Postmortem  on retry  label: retry
+    ReviewConsensus -> Exit  on fail  label: fail
     ReviewConsensus -> Exit  label: "fallback to exit"
-    Postmortem -> PlanParallel  when ctx.internal.loop_restart_count = 0  label: retry_once  restart: true
+    Postmortem -> PlanParallel  when ctx.internal.loop_restart_count = 0  label: retry_once  loop
     Postmortem -> Exit  when ctx.internal.loop_restart_count != 0  label: stop_after_retry
     Postmortem -> Exit  label: "fallback to exit"

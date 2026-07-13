@@ -5,8 +5,8 @@ workflow ConsensusTask
 
   defaults
     max_retries: 3
-    max_restarts: 5
     fidelity: truncate
+    max_restarts: 5
     on_failure: Exit
 
   agent Start
@@ -22,8 +22,6 @@ workflow ConsensusTask
     reasoning_effort: high
     prompt:
       Refine the definition-of-done requirements for the current task and identify missing acceptance criteria.
-
-  # ─── Phase 1: Multi-model DoD (parallel) ───────────────────
 
   parallel DoDParallel -> DefineDoDGemini, DefineDoDGPT, DefineDoDOpus
 
@@ -61,8 +59,6 @@ workflow ConsensusTask
     prompt:
       Merge DoD drafts into a single final DoD.
 
-  # ─── Phase 2: Multi-model Planning (parallel) ──────────────
-
   parallel PlanParallel -> PlanGemini, PlanGPT, PlanOpus
 
   agent PlanGemini
@@ -99,8 +95,6 @@ workflow ConsensusTask
     prompt:
       Synthesize the three plans into one final execution plan.
 
-  # ─── Phase 3: Implement & Verify (sequential) ──────────────
-
   agent Implement
     label: Implement
     model: claude-sonnet-4-6
@@ -116,8 +110,6 @@ workflow ConsensusTask
     reasoning_effort: high
     prompt:
       Verify outputs against DoD and summarize evidence.
-
-  # ─── Phase 4: Multi-model Review (parallel) ────────────────
 
   parallel ReviewParallel -> ReviewGemini, ReviewGPT, ReviewOpus
 
@@ -168,25 +160,16 @@ workflow ConsensusTask
   edges
     Start -> RefineDoD
     RefineDoD -> DoDParallel
-    DefineDoDGemini -> DoDJoin
-    DefineDoDGPT -> DoDJoin
-    DefineDoDOpus -> DoDJoin
     DoDJoin -> ConsolidateDoD
     ConsolidateDoD -> PlanParallel
-    PlanGemini -> PlanJoin
-    PlanGPT -> PlanJoin
-    PlanOpus -> PlanJoin
     PlanJoin -> DebateConsolidate
     DebateConsolidate -> Implement
     Implement -> VerifyOutputs
     VerifyOutputs -> ReviewParallel
-    ReviewGemini -> ReviewJoin
-    ReviewGPT -> ReviewJoin
-    ReviewOpus -> ReviewJoin
     ReviewJoin -> ReviewConsensus
-    ReviewConsensus -> Exit  when ctx.outcome = success  label: pass
-    ReviewConsensus -> Postmortem  when ctx.outcome = retry  label: retry
+    ReviewConsensus -> Exit  on success  label: pass
+    ReviewConsensus -> Postmortem  on retry  label: retry
     ReviewConsensus -> Exit
-    Postmortem -> PlanParallel  when ctx.internal.loop_restart_count = 0  label: retry_once  restart: true
+    Postmortem -> PlanParallel  when ctx.internal.loop_restart_count = 0  label: retry_once  loop
     Postmortem -> Exit  when ctx.internal.loop_restart_count != 0  label: stop_after_retry
     Postmortem -> Exit  label: "fallback to exit"
