@@ -20,5 +20,5 @@ func (h *ExitHandler) Name() string { return "exit" }
 
 // Execute is a no-op that returns a success outcome.
 func (h *ExitHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
-	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 }

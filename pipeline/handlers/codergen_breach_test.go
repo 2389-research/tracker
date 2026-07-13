@@ -82,7 +82,7 @@ func TestExecute_BreachGreen_AdvancesAsSuccessWithMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if out.Status != string(pipeline.OutcomeSuccess) {
+	if out.Status != pipeline.OutcomeSuccess {
 		t.Errorf("status = %q, want success (verified-green breach)", out.Status)
 	}
 	if out.ContextUpdates[pipeline.ContextKeyTurnBreachClass] != pipeline.TurnBreachClassVerifiedGreen {
@@ -105,7 +105,7 @@ func TestExecute_BreachRed_FailsWithOperatorMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if out.Status != string(pipeline.OutcomeFail) {
+	if out.Status != pipeline.OutcomeFail {
 		t.Errorf("status = %q, want fail", out.Status)
 	}
 	if out.ContextUpdates[pipeline.ContextKeyTurnBreachClass] != pipeline.TurnBreachClassOperatorDecision {
@@ -133,7 +133,7 @@ func TestExecute_TurnBreachPolicyFail_PinsGuillotine(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	// Byte-for-byte today's behavior: fail + exact message, NO marker.
-	if out.Status != string(pipeline.OutcomeFail) {
+	if out.Status != pipeline.OutcomeFail {
 		t.Errorf("opt-out status = %q, want fail", out.Status)
 	}
 	wantMsg := `node "Implement": agent exhausted turn limit (3 turns) without completing`
@@ -166,7 +166,7 @@ func TestExecute_BreachRed_AutoStatusCannotForceSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if out.Status != string(pipeline.OutcomeFail) {
+	if out.Status != pipeline.OutcomeFail {
 		t.Errorf("status = %q, want fail (auto_status must not rescue a red breach)", out.Status)
 	}
 }

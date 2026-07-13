@@ -557,3 +557,35 @@ func TestConditionANDORPrecedenceAllFalse(t *testing.T) {
 		t.Error("expected (a=1 && b=wrong) || c=wrong to be false")
 	}
 }
+
+func TestConditionQuoteAwareSplitAndOperands(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("url", "http://a||b")
+	ctx.Set("msg", "x && y")
+	ctx.Set("resp", "saw an error here")
+
+	cases := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{"or-inside-quoted-value", `ctx.url = "http://a||b"`, true},
+		{"and-inside-quoted-value", `ctx.msg = "x && y"`, true},
+		{"contains-strips-quotes", `ctx.resp contains "error"`, true},
+		{"top-level-or-still-splits", `ctx.url = "nope" || ctx.resp contains "error"`, true},
+		{"top-level-and-still-splits", `ctx.resp contains "error" && ctx.url = "http://a||b"`, true},
+		{"not-contains-strips-quotes", `ctx.resp not contains "absent"`, true},
+		{"not-contains-present-word", `ctx.resp not contains "error"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := EvaluateCondition(c.expr, ctx)
+			if err != nil {
+				t.Fatalf("EvaluateCondition(%q) error: %v", c.expr, err)
+			}
+			if got != c.want {
+				t.Errorf("EvaluateCondition(%q) = %v, want %v", c.expr, got, c.want)
+			}
+		})
+	}
+}

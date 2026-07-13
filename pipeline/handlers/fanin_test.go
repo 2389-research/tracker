@@ -52,7 +52,7 @@ func TestFanInHandlerAllSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 
@@ -85,7 +85,7 @@ func TestFanInHandlerAllFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("expected 'fail', got %q", outcome.Status)
 	}
 	if len(outcome.ContextUpdates) != 0 {
@@ -118,7 +118,7 @@ func TestFanInHandlerPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected 'success' (partial failure), got %q", outcome.Status)
 	}
 	// Only successful branch context should be merged.
@@ -142,7 +142,7 @@ func TestFanInHandlerEmptyResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("expected 'fail' for empty results, got %q", outcome.Status)
 	}
 }

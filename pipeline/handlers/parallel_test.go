@@ -91,7 +91,7 @@ func TestParallelHandlerSuccess(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	stub := &stubHandler{
 		name:    "stub_success",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), ContextUpdates: map[string]string{"done": "yes"}},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess, ContextUpdates: map[string]string{"done": "yes"}},
 	}
 	registry.Register(stub)
 
@@ -103,7 +103,7 @@ func TestParallelHandlerSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected 'success', got %q", outcome.Status)
 	}
 	if stub.called.Load() != 2 {
@@ -121,10 +121,10 @@ func TestParallelHandlerPartialFailure(t *testing.T) {
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			n := callCount.Add(1)
 			if node.ID == "branch_fail" {
-				return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, nil
+				return pipeline.Outcome{Status: pipeline.OutcomeFail}, nil
 			}
 			_ = n
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	}
 	registry.Register(mixed)
@@ -138,7 +138,7 @@ func TestParallelHandlerPartialFailure(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// At least one succeeded, so overall should be success.
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected 'success' (partial failure), got %q", outcome.Status)
 	}
 }
@@ -148,7 +148,7 @@ func TestParallelHandlerAllFail(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	stub := &stubHandler{
 		name:    "stub_fail",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeFail)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeFail},
 	}
 	registry.Register(stub)
 
@@ -160,7 +160,7 @@ func TestParallelHandlerAllFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("expected 'fail' (all failed), got %q", outcome.Status)
 	}
 }
@@ -179,9 +179,9 @@ func TestParallelHandlerContextIsolation(t *testing.T) {
 			// Read back -- should see its own write, not the other branch's.
 			val, _ := pctx.Get("writer")
 			if val != node.ID {
-				return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, fmt.Errorf("context leak: expected %q, got %q", node.ID, val)
+				return pipeline.Outcome{Status: pipeline.OutcomeFail}, fmt.Errorf("context leak: expected %q, got %q", node.ID, val)
 			}
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	}
 	registry.Register(writer)
@@ -195,7 +195,7 @@ func TestParallelHandlerContextIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected 'success', got %q — branches may have leaked context", outcome.Status)
 	}
 
@@ -217,7 +217,7 @@ func TestParallelHandlerResultsInContext(t *testing.T) {
 	stub := &stubHandler{
 		name: "stub_ctx",
 		outcome: pipeline.Outcome{
-			Status:         string(pipeline.OutcomeSuccess),
+			Status:         pipeline.OutcomeSuccess,
 			ContextUpdates: map[string]string{"result": "done"},
 		},
 	}
@@ -345,7 +345,7 @@ func TestParallelHandlerBranchOverrides(t *testing.T) {
 			mu.Lock()
 			models[node.ID] = node.Attrs["llm_model"]
 			mu.Unlock()
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	})
 
@@ -356,7 +356,7 @@ func TestParallelHandlerBranchOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -395,7 +395,7 @@ func TestParallelHandlerBranchOverridesPreserveOriginal(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	registry.Register(&stubHandler{
 		name:    "stub_preserve",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 	})
 
 	h := NewParallelHandler(g, registry, nil)
@@ -434,7 +434,7 @@ func TestParallelHandlerAggregatesBranchStats(t *testing.T) {
 				FilesCreated:   []string{node.ID + "/new.go"},
 				ToolCalls:      map[string]int{"read": 3, "write": 2},
 			}
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), Stats: stats}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess, Stats: stats}, nil
 		},
 	}
 	registry.Register(stub)
@@ -447,7 +447,7 @@ func TestParallelHandlerAggregatesBranchStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 	if outcome.Stats == nil {
@@ -506,7 +506,7 @@ func TestParallelHandlerNilStatsWhenNoBranchStats(t *testing.T) {
 
 	stub := &stubHandler{
 		name:    "stub_nostats",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 	}
 	registry.Register(stub)
 
@@ -555,7 +555,7 @@ func TestParallelHandlerCapturesSideEffectWrites(t *testing.T) {
 		name: "stub_sideeffect",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			pctx.Set("side_key", "side_value")
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	}
 	registry.Register(stub)
@@ -592,7 +592,7 @@ func TestParallelHandlerExplicitOverridesSideEffects(t *testing.T) {
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			pctx.Set("key", "from_set")
 			return pipeline.Outcome{
-				Status:         string(pipeline.OutcomeSuccess),
+				Status:         pipeline.OutcomeSuccess,
 				ContextUpdates: map[string]string{"key": "from_outcome"},
 			}, nil
 		},
@@ -627,9 +627,9 @@ func TestParallelHandlerPreservesInternalArtifactDir(t *testing.T) {
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			dir, ok := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
 			if !ok || dir == "" {
-				return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, fmt.Errorf("missing internal artifact dir")
+				return pipeline.Outcome{Status: pipeline.OutcomeFail}, fmt.Errorf("missing internal artifact dir")
 			}
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	}
 	registry.Register(stub)
@@ -643,7 +643,7 @@ func TestParallelHandlerPreservesInternalArtifactDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 }
@@ -694,7 +694,7 @@ func TestParallelHandlerMaxConcurrency(t *testing.T) {
 
 			// Sleep long enough that concurrency is observable.
 			time.Sleep(30 * time.Millisecond)
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	})
 
@@ -705,7 +705,7 @@ func TestParallelHandlerMaxConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -749,9 +749,9 @@ func TestParallelHandlerBranchTimeout(t *testing.T) {
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			select {
 			case <-time.After(500 * time.Millisecond):
-				return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+				return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 			case <-ctx.Done():
-				return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, ctx.Err()
+				return pipeline.Outcome{Status: pipeline.OutcomeFail}, ctx.Err()
 			}
 		},
 	})
@@ -767,7 +767,7 @@ func TestParallelHandlerBranchTimeout(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// All branches should fail due to timeout.
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("expected fail (all branches timed out), got %q", outcome.Status)
 	}
 	// Should complete well before the 500ms sleep.
@@ -782,7 +782,7 @@ func TestParallelHandlerBranchTimeoutNoEffect(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	registry.Register(&stubHandler{
 		name:    "stub_fast",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 	})
 
 	h := NewParallelHandler(g, registry, nil)
@@ -793,7 +793,7 @@ func TestParallelHandlerBranchTimeoutNoEffect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 }
@@ -878,7 +878,7 @@ func TestParallel_BranchOverrideAggregates(t *testing.T) {
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			if node.ID == "branch_a" {
 				return pipeline.Outcome{
-					Status: string(pipeline.OutcomeSuccess),
+					Status: pipeline.OutcomeSuccess,
 					ChildOverride: []pipeline.OverrideDetail{{
 						GateNodeID:   "Gate",
 						Label:        "accept",
@@ -887,7 +887,7 @@ func TestParallel_BranchOverrideAggregates(t *testing.T) {
 					}},
 				}, nil
 			}
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	})
 
@@ -899,7 +899,7 @@ func TestParallel_BranchOverrideAggregates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("Status = %q, want success", outcome.Status)
 	}
 	if len(outcome.ChildOverride) != 1 {
@@ -932,7 +932,7 @@ func TestParallel_BothBranchesOverride(t *testing.T) {
 		name: "stub_both_override",
 		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			return pipeline.Outcome{
-				Status: string(pipeline.OutcomeSuccess),
+				Status: pipeline.OutcomeSuccess,
 				ChildOverride: []pipeline.OverrideDetail{{
 					GateNodeID:   "Gate_" + node.ID,
 					Label:        "accept",
@@ -951,7 +951,7 @@ func TestParallel_BothBranchesOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("Status = %q, want success", outcome.Status)
 	}
 	if len(outcome.ChildOverride) != 2 {
@@ -977,7 +977,7 @@ func TestParallel_NoBranchOverrides_NilAggregate(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	registry.Register(&stubHandler{
 		name:    "stub_clean",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 	})
 
 	h := NewParallelHandler(g, registry, nil)
@@ -1039,7 +1039,7 @@ func TestParallelHandlerBranchSecurityOverrides(t *testing.T) {
 			mu.Lock()
 			configs[node.ID] = node.AgentConfig(nil)
 			mu.Unlock()
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	})
 
@@ -1048,7 +1048,7 @@ func TestParallelHandlerBranchSecurityOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Fatalf("expected success, got %q", outcome.Status)
 	}
 
@@ -1161,7 +1161,7 @@ func TestParallelHandlerRefusesBranchFallbackTarget(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	stub := &stubHandler{
 		name:    "stub_success",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 	}
 	registry.Register(stub)
 
@@ -1192,7 +1192,7 @@ func TestParallelHandlerRefusesBranchFallbackTargetViaOverride(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	stub := &stubHandler{
 		name:    "stub_success",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 	}
 	registry.Register(stub)
 
@@ -1221,7 +1221,7 @@ func TestParallelHandlerGraphLevelFallbackAllowed(t *testing.T) {
 	registry := pipeline.NewHandlerRegistry()
 	stub := &stubHandler{
 		name:    "stub_success",
-		outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+		outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 	}
 	registry.Register(stub)
 
@@ -1232,7 +1232,7 @@ func TestParallelHandlerGraphLevelFallbackAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph-level fallback_target must not refuse dispatch: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 	if stub.called.Load() != 2 {
@@ -1265,7 +1265,7 @@ func TestParallelHandlerRefusesBranchFallbackRetryTarget(t *testing.T) {
 			registry := pipeline.NewHandlerRegistry()
 			stub := &stubHandler{
 				name:    "stub_success",
-				outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+				outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 			}
 			registry.Register(stub)
 
@@ -1306,7 +1306,7 @@ func TestParallelHandlerRefusesFallbackOnShadowedDuplicateTargetBranch(t *testin
 			registry := pipeline.NewHandlerRegistry()
 			stub := &stubHandler{
 				name:    "stub_success",
-				outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+				outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 			}
 			registry.Register(stub)
 
@@ -1343,7 +1343,7 @@ func TestParallelHandlerRefusalReportsHighestBranchIndexFallback(t *testing.T) {
 		registry := pipeline.NewHandlerRegistry()
 		registry.Register(&stubHandler{
 			name:    "stub_success",
-			outcome: pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)},
+			outcome: pipeline.Outcome{Status: pipeline.OutcomeSuccess},
 		})
 
 		h := NewParallelHandler(g, registry, nil)

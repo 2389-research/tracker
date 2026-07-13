@@ -467,7 +467,7 @@ func (e *Engine) finishNode(ctx context.Context, s *runState, currentNodeID stri
 	// never flow into any node's per-node scope.
 	e.drainSteering(s)
 
-	if outcome.Status == string(OutcomeRetry) {
+	if outcome.Status == OutcomeRetry {
 		return e.processRetryOutcome(ctx, s, currentNodeID, execNode, traceEntry)
 	}
 
@@ -480,7 +480,7 @@ func (e *Engine) finishNode(ctx context.Context, s *runState, currentNodeID stri
 	// #421: memoize ONLY successful outcomes (never replay a failure). Reached
 	// only when this node opted in and a key was computed (pendingMemoKey set);
 	// the retry path returned above, so fail/unknown never reach here as success.
-	if s.pendingMemoKey != "" && outcome.Status == string(OutcomeSuccess) {
+	if s.pendingMemoKey != "" && outcome.Status == OutcomeSuccess {
 		s.cp.PutMemo(s.pendingMemoKey, outcome)
 	}
 
@@ -605,7 +605,7 @@ func (e *Engine) processRetryOutcome(ctx context.Context, s *runState, currentNo
 }
 
 // processExitNode handles the pipeline exit node.
-func (e *Engine) processExitNode(s *runState, currentNodeID string, outcomeStatus string, traceEntry *TraceEntry) loopResult {
+func (e *Engine) processExitNode(s *runState, currentNodeID string, outcomeStatus TerminalStatus, traceEntry *TraceEntry) loopResult {
 	shouldBreak, target, result := e.handleExitNode(s, currentNodeID, outcomeStatus, traceEntry)
 	if result != nil {
 		return loopResult{action: loopReturn, result: result}

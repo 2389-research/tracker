@@ -43,7 +43,7 @@ func WriteStatusArtifact(rootDir, nodeID string, outcome Outcome) error {
 		return fmt.Errorf("create stage dir: %w", err)
 	}
 	payload := stageStatus{
-		Outcome:            outcome.Status,
+		Outcome:            string(outcome.Status),
 		PreferredNextLabel: outcome.PreferredLabel,
 		SuggestedNextIDs:   outcome.SuggestedNextNodes,
 		ContextUpdates:     outcome.ContextUpdates,

@@ -149,8 +149,8 @@ func TestSpecForgeLoopHalts(t *testing.T) {
 	reachedFailed := false
 
 	reg := NewHandlerRegistry()
-	fail := Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail"}}
-	ok := Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}}
+	fail := Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail"}}
+	ok := Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}
 
 	codergen := func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 		mu.Lock()

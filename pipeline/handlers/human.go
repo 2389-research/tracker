@@ -19,14 +19,23 @@ import (
 
 var errHumanTimeout = fmt.Errorf("human gate timed out waiting for input")
 
+// cancelInterviewer tears down an interviewer that supports cancellation. Called
+// when a gate times out so the blocked Ask goroutine unblocks instead of leaking
+// (#446). Non-cancellable interviewers are a documented no-op.
+// Cancel() implementations MUST be idempotent and safe to call after Ask has
+// already returned — a select-race can invoke this after fn completed.
+func cancelInterviewer(i Interviewer) {
+	if c, ok := i.(interface{ Cancel() }); ok {
+		c.Cancel()
+	}
+}
+
 // withTimeout runs fn in a goroutine and returns its result, or errHumanTimeout
 // if the duration elapses first. A zero timeout means no timeout.
 //
-// Note: on timeout, the goroutine running fn is NOT canceled (the Interviewer
-// interface has no cancellation mechanism). The goroutine may leak until the
-// underlying I/O unblocks. This is an accepted tradeoff to avoid changing the
-// Interviewer interface.
-func withTimeout(timeout time.Duration, fn func() (string, error)) (string, error) {
+// On timeout, the goroutine running fn is canceled via cancelInterviewer when i
+// implements Cancel(); otherwise it may leak until the underlying I/O unblocks.
+func withTimeout(timeout time.Duration, i Interviewer, fn func() (string, error)) (string, error) {
 	if timeout <= 0 {
 		return fn()
 	}
@@ -43,12 +52,13 @@ func withTimeout(timeout time.Duration, fn func() (string, error)) (string, erro
 	case r := <-ch:
 		return r.val, r.err
 	case <-time.After(timeout):
+		cancelInterviewer(i)
 		return "", errHumanTimeout
 	}
 }
 
 // withTimeoutOutcome is like withTimeout but for functions returning (Outcome, error).
-func withTimeoutOutcome(timeout time.Duration, fn func() (pipeline.Outcome, error)) (pipeline.Outcome, error) {
+func withTimeoutOutcome(timeout time.Duration, i Interviewer, fn func() (pipeline.Outcome, error)) (pipeline.Outcome, error) {
 	if timeout <= 0 {
 		return fn()
 	}
@@ -65,6 +75,7 @@ func withTimeoutOutcome(timeout time.Duration, fn func() (pipeline.Outcome, erro
 	case r := <-ch:
 		return r.val, r.err
 	case <-time.After(timeout):
+		cancelInterviewer(i)
 		return pipeline.Outcome{}, errHumanTimeout
 	}
 }
@@ -579,7 +590,7 @@ func (h *HumanHandler) dispatchHumanMode(ctx context.Context, node *pipeline.Nod
 	cfg := node.HumanConfig()
 	switch cfg.Mode {
 	case "interview":
-		return withTimeoutOutcome(cfg.Timeout, func() (pipeline.Outcome, error) {
+		return withTimeoutOutcome(cfg.Timeout, h.interviewer, func() (pipeline.Outcome, error) {
 			return h.executeInterview(ctx, node, pctx)
 		})
 	case "freeform":
@@ -599,19 +610,19 @@ func (h *HumanHandler) handleHumanTimeout(node *pipeline.Node) pipeline.Outcome 
 		action = "default"
 	}
 	if action == "fail" {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out",
 		}}
 	}
 	def := cfg.DefaultChoice
 	if def == "" {
-		return pipeline.Outcome{Status: string(pipeline.OutcomeFail), ContextUpdates: map[string]string{
+		return pipeline.Outcome{Status: pipeline.OutcomeFail, ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse: "timed out (no default)",
 		}}
 	}
 	routing := mapSelectionToRoutingKey(h.graph.OutgoingEdges(node.ID), def)
 	return pipeline.Outcome{
-		Status:         string(pipeline.OutcomeSuccess),
+		Status:         pipeline.OutcomeSuccess,
 		PreferredLabel: routing,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            def,
@@ -683,7 +694,7 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	}
 
 	outcome := pipeline.Outcome{
-		Status: string(pipeline.OutcomeSuccess),
+		Status: pipeline.OutcomeSuccess,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyHumanResponse:            response,
 			pipeline.ContextKeyResponsePrefix + node.ID: response,
@@ -714,11 +725,11 @@ func collectEdgeLabels(graph *pipeline.Graph, nodeID string) []string {
 // askFreeformWithTimeout dispatches to the labeled or plain freeform variant with a timeout.
 func askFreeformWithTimeout(fi FreeformInterviewer, prompt string, labels []string, defaultLabel string, timeout time.Duration) (string, error) {
 	if lfi, ok := fi.(LabeledFreeformInterviewer); ok && len(labels) > 0 {
-		return withTimeout(timeout, func() (string, error) {
+		return withTimeout(timeout, lfi, func() (string, error) {
 			return lfi.AskFreeformWithLabels(prompt, labels, defaultLabel)
 		})
 	}
-	return withTimeout(timeout, func() (string, error) {
+	return withTimeout(timeout, fi, func() (string, error) {
 		return fi.AskFreeform(prompt)
 	})
 }
@@ -857,7 +868,10 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		return pipeline.Outcome{}, fmt.Errorf("interview failed for node %q: %w", node.ID, err)
 	}
 
-	jsonStr := SerializeInterviewResult(*result)
+	jsonStr, err := SerializeInterviewResult(*result)
+	if err != nil {
+		return pipeline.Outcome{Status: pipeline.OutcomeFail}, fmt.Errorf("serialize interview result for node %q: %w", node.ID, err)
+	}
 	summary := BuildMarkdownSummary(*result)
 
 	status := pipeline.OutcomeSuccess
@@ -866,7 +880,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 	}
 
 	outcome := pipeline.Outcome{
-		Status: string(status),
+		Status: status,
 		ContextUpdates: map[string]string{
 			answersKey:                                  jsonStr,
 			pipeline.ContextKeyHumanResponse:            summary,
@@ -874,7 +888,7 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		},
 	}
 	if applyInterviewDeclaredWrites(node, outcome.ContextUpdates, result) {
-		outcome.Status = string(pipeline.OutcomeFail)
+		outcome.Status = pipeline.OutcomeFail
 	}
 	return outcome, nil
 }
@@ -969,7 +983,7 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 	}
 
 	cfg := node.HumanConfig()
-	selected, err := withTimeout(cfg.Timeout, func() (string, error) {
+	selected, err := withTimeout(cfg.Timeout, h.interviewer, func() (string, error) {
 		// Choice mode specifically uses the bare default_choice attr —
 		// HumanConfig.DefaultChoice would fall back to "default", which
 		// is wrong here because "default" means edge-label in freeform
@@ -980,7 +994,7 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
 
-	return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess), PreferredLabel: mapSelectionToRoutingKey(edges, selected)}, nil
+	return pipeline.Outcome{Status: pipeline.OutcomeSuccess, PreferredLabel: mapSelectionToRoutingKey(edges, selected)}, nil
 }
 
 // mapSelectionToRoutingKey translates a human-selected display label to the
@@ -1005,7 +1019,7 @@ func mapSelectionToRoutingKey(edges []*pipeline.Edge, selected string) string {
 // ctx.outcome = success / ctx.outcome = fail conditions.
 func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
 	timeout := parseHumanTimeout(node)
-	selected, err := withTimeout(timeout, func() (string, error) {
+	selected, err := withTimeout(timeout, h.interviewer, func() (string, error) {
 		return h.interviewer.Ask(prompt, []string{"Yes", "No"}, "")
 	})
 	if err != nil {
@@ -1016,5 +1030,5 @@ func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipelin
 	if selected == "No" {
 		status = pipeline.OutcomeFail
 	}
-	return pipeline.Outcome{Status: string(status), PreferredLabel: selected}, nil
+	return pipeline.Outcome{Status: status, PreferredLabel: selected}, nil
 }

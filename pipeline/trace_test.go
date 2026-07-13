@@ -171,7 +171,7 @@ func TestEngineTraceRecordsEdgeSelections(t *testing.T) {
 		name: "start",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status:         string(OutcomeSuccess),
+				Status:         OutcomeSuccess,
 				PreferredLabel: "right",
 			}, nil
 		},
@@ -259,7 +259,7 @@ func TestEngineTraceRecordsErrors(t *testing.T) {
 	reg2.Register(&testHandler{
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
-			return Outcome{Status: string(OutcomeFail)}, nil
+			return Outcome{Status: OutcomeFail}, nil
 		},
 	})
 
@@ -386,7 +386,7 @@ func TestTraceEntryWithoutStats(t *testing.T) {
 
 func TestOutcomeWithStats(t *testing.T) {
 	outcome := Outcome{
-		Status: string(OutcomeSuccess),
+		Status: OutcomeSuccess,
 		Stats: &SessionStats{
 			Turns:          3,
 			TotalToolCalls: 15,
@@ -413,7 +413,7 @@ func TestEngineTracePropagatesStats(t *testing.T) {
 		name: "codergen",
 		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status: string(OutcomeSuccess),
+				Status: OutcomeSuccess,
 				Stats: &SessionStats{
 					Turns:          5,
 					TotalToolCalls: 20,
@@ -690,7 +690,7 @@ func TestEngineResultUsageFromTraceStats(t *testing.T) {
 		name: "codergen",
 		executeFn: func(_ context.Context, _ *Node, _ *PipelineContext) (Outcome, error) {
 			return Outcome{
-				Status: string(OutcomeSuccess),
+				Status: OutcomeSuccess,
 				Stats: &SessionStats{
 					Turns:        5,
 					InputTokens:  2000,

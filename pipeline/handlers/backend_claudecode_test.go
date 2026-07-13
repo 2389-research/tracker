@@ -41,7 +41,7 @@ func TestClassifyError(t *testing.T) {
 		{"budget exceeded", "Error: budget limit reached", 1, pipeline.OutcomeFail},
 		{"spending limit", "Error: spending limit exceeded", 1, pipeline.OutcomeFail},
 		{"econnrefused", "Error: ECONNREFUSED 127.0.0.1:443", 1, pipeline.OutcomeRetry},
-		{"network error", "network error: timeout", 1, pipeline.OutcomeRetry},
+		{"network is unreachable", "Network is unreachable", 1, pipeline.OutcomeRetry},
 		{"connection reset", "connection reset by peer", 1, pipeline.OutcomeRetry},
 		{"oom killed", "", 137, pipeline.OutcomeFail},
 		{"unknown error", "something weird happened", 1, pipeline.OutcomeFail},
@@ -1069,5 +1069,29 @@ func TestClaudeCodeBackend_ContextCancelKillsSubprocess(t *testing.T) {
 		// Returned promptly after cancellation — process group kill worked.
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return within 5 seconds after context cancellation; subprocess may be orphaned")
+	}
+}
+
+func TestClassifyErrorNarrowMatches(t *testing.T) {
+	cases := []struct {
+		name     string
+		stderr   string
+		exitCode int
+		want     pipeline.TerminalStatus
+	}{
+		{"real-network-econnrefused", "dial tcp: econnrefused", 1, pipeline.OutcomeRetry},
+		{"real-network-conn-refused", "connection refused", 1, pipeline.OutcomeRetry},
+		{"benign-connection-mention", "database connection established for the tool", 1, pipeline.OutcomeFail},
+		{"real-budget", "budget exceeded for this run", 1, pipeline.OutcomeFail},
+		{"benign-budget-mention", "the monthly budget is $500", 1, pipeline.OutcomeFail},
+		{"rate-limit-still-retries", "rate limit reached (429)", 1, pipeline.OutcomeRetry},
+		{"sigkill", "", 137, pipeline.OutcomeFail},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := classifyError(c.stderr, c.exitCode); got != c.want {
+				t.Errorf("classifyError(%q, %d) = %v, want %v", c.stderr, c.exitCode, got, c.want)
+			}
+		})
 	}
 }

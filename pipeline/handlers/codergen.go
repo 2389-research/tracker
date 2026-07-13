@@ -499,7 +499,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 	}
 
 	outcome := pipeline.Outcome{
-		Status: string(pipeline.OutcomeRetry),
+		Status: pipeline.OutcomeRetry,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             runErr.Error(),
 			pipeline.ContextKeyResponsePrefix + node.ID: runErr.Error(),
@@ -564,7 +564,7 @@ func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prom
 		})
 	}
 	outcome := pipeline.Outcome{
-		Status: string(pipeline.OutcomeRetry),
+		Status: pipeline.OutcomeRetry,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
@@ -601,7 +601,7 @@ func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, prompt, ar
 		})
 	}
 	outcome := pipeline.Outcome{
-		Status: string(pipeline.OutcomeRetry),
+		Status: pipeline.OutcomeRetry,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
@@ -646,7 +646,7 @@ func (h *CodergenHandler) buildEmptyResponseOutcome(node *pipeline.Node, prompt,
 
 	status, msg := emptyResponseStatusMsg(node.ID, emptyAPIResponse)
 	outcome := pipeline.Outcome{
-		Status: string(status),
+		Status: status,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
@@ -682,7 +682,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	status, turnLimitMsg, breachClass, statusMissing := h.resolveTerminalStatus(node, responseText, sessResult, native)
 
 	outcome := pipeline.Outcome{
-		Status: string(status),
+		Status: status,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             responseText,
 			pipeline.ContextKeyResponsePrefix + node.ID: responseText,
@@ -701,7 +701,7 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 	}
 	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
 	if applyDeclaredWrites(node, outcome.ContextUpdates, responseText, "Response JSON") {
-		outcome.Status = string(pipeline.OutcomeFail)
+		outcome.Status = pipeline.OutcomeFail
 	}
 	applyBreachMarker(outcome.ContextUpdates, outcome.Status, breachClass)
 	if turnLimitMsg != "" {
@@ -873,11 +873,11 @@ func (h *CodergenHandler) resolveTerminalStatus(node *pipeline.Node, responseTex
 // using the FINAL status. It never leaves a verified_green marker on a Fail (a
 // declared-writes failure can demote a green breach to fail). No-op when
 // breachClass is empty (opt-out / non-native / non-breach).
-func applyBreachMarker(updates map[string]string, status, breachClass string) {
+func applyBreachMarker(updates map[string]string, status pipeline.TerminalStatus, breachClass string) {
 	if breachClass == "" {
 		return
 	}
-	if status == string(pipeline.OutcomeFail) && breachClass == pipeline.TurnBreachClassVerifiedGreen {
+	if status == pipeline.OutcomeFail && breachClass == pipeline.TurnBreachClassVerifiedGreen {
 		breachClass = pipeline.TurnBreachClassOperatorDecision
 	}
 	updates[pipeline.ContextKeyTurnBreachClass] = breachClass

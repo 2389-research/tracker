@@ -24,15 +24,15 @@ type InterviewResult struct {
 	Canceled   bool              `json:"canceled"`
 }
 
-// SerializeInterviewResult marshals an InterviewResult to a JSON string.
-// Panics on marshal failure (which cannot happen for this struct type,
-// but we enforce rather than silently returning empty).
-func SerializeInterviewResult(r InterviewResult) string {
+// SerializeInterviewResult marshals an InterviewResult to a JSON string. A
+// marshal failure is a runtime data condition, not a programmer invariant, so it
+// is returned (the caller fails the node) rather than panicking the process (#448).
+func SerializeInterviewResult(r InterviewResult) (string, error) {
 	b, err := json.Marshal(r)
 	if err != nil {
-		panic(fmt.Sprintf("interview result marshal failed: %v", err))
+		return "", fmt.Errorf("interview result marshal failed: %w", err)
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // DeserializeInterviewResult unmarshals an InterviewResult from a JSON string.

@@ -339,6 +339,7 @@ func isClaudeModel(model string) bool {
 
 // classifyError maps stderr content and exit codes to pipeline outcome strings.
 // Returns the outcome status that should be used for retry/fail decisions.
+// Note: NDJSON-error-event parsing (e.g., claude CLI's "error" event type) is a deferred follow-up.
 func classifyError(stderr string, exitCode int) pipeline.TerminalStatus {
 	if exitCode == 0 {
 		return pipeline.OutcomeSuccess
@@ -391,15 +392,22 @@ func isRateLimitError(lower string) bool {
 		containsThrottle(lower)
 }
 
+// Anchored to error-shaped phrases (#447) — bare "budget" matched benign agent
+// output ("the budget is $5") and flipped classification.
 func isBudgetError(lower string) bool {
-	return strings.Contains(lower, "budget") ||
+	return strings.Contains(lower, "budget exceeded") ||
+		strings.Contains(lower, "budget limit") ||
 		strings.Contains(lower, "spending limit")
 }
 
+// Anchored to error-shaped phrases (#447) — bare "connection"/"network" matched
+// benign lines (a DB "connection" message) and flipped fails into retries.
 func isNetworkError(lower string) bool {
 	return strings.Contains(lower, "econnrefused") ||
-		strings.Contains(lower, "network") ||
-		strings.Contains(lower, "connection")
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "connection reset") ||
+		strings.Contains(lower, "network is unreachable") ||
+		strings.Contains(lower, "dial tcp")
 }
 
 // containsThrottle returns true if lower contains "throttled" or "throttling"

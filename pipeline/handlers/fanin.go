@@ -62,7 +62,7 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 	}
 
 	return pipeline.Outcome{
-		Status:         string(status),
+		Status:         status,
 		ContextUpdates: merged,
 	}, nil
 }

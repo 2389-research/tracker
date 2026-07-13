@@ -49,7 +49,7 @@ func TestInterview_Integration(t *testing.T) {
 	}
 
 	// 5. Verify outcome
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -124,7 +124,7 @@ func TestInterview_Integration_ZeroQuestions(t *testing.T) {
 	}
 
 	// Falls back to freeform — outcome is still success
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -175,7 +175,11 @@ func TestInterview_Integration_RetryPreFill(t *testing.T) {
 			{ID: "q2", Text: "Are there performance constraints?", Answer: "yes"},
 		},
 	}
-	pctx.Set("interview_answers", SerializeInterviewResult(previousResult))
+	js, err := SerializeInterviewResult(previousResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx.Set("interview_answers", js)
 
 	mock := &retryCapturingInterviewer{}
 	handler := NewHumanHandler(mock, graph)
@@ -186,7 +190,7 @@ func TestInterview_Integration_RetryPreFill(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 
@@ -235,7 +239,7 @@ func TestInterview_Integration_StructuredJSON(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected success, got %q", outcome.Status)
 	}
 

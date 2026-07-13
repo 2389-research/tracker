@@ -21,9 +21,9 @@ func mixedStubHandler(name string, failIDs ...string) *stubHandler {
 		name: name,
 		execFunc: func(_ context.Context, node *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
 			if failSet[node.ID] {
-				return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, nil
+				return pipeline.Outcome{Status: pipeline.OutcomeFail}, nil
 			}
-			return pipeline.Outcome{Status: string(pipeline.OutcomeSuccess)}, nil
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
 		},
 	}
 }
@@ -51,7 +51,7 @@ func TestParallelHandlerDefaultPolicyIsAny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("default policy must remain success-if-any, got %q", outcome.Status)
 	}
 }
@@ -63,7 +63,7 @@ func TestParallelHandlerPolicyAllFailsOnPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("policy=all with a failed branch should aggregate fail, got %q", outcome.Status)
 	}
 }
@@ -75,7 +75,7 @@ func TestParallelHandlerPolicyAllSucceedsWhenAllSucceed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("policy=all with all branches succeeding should be success, got %q", outcome.Status)
 	}
 }
@@ -84,11 +84,11 @@ func TestParallelHandlerPolicyQuorum(t *testing.T) {
 	cases := []struct {
 		name   string
 		quorum string
-		want   string
+		want   pipeline.TerminalStatus
 	}{
-		{"met", "2", string(pipeline.OutcomeSuccess)},        // 2/3 succeed, quorum 2
-		{"not_met", "3", string(pipeline.OutcomeFail)},       // 2/3 succeed, quorum 3
-		{"unsatisfiable", "4", string(pipeline.OutcomeFail)}, // quorum > branch count
+		{"met", "2", pipeline.OutcomeSuccess},        // 2/3 succeed, quorum 2
+		{"not_met", "3", pipeline.OutcomeFail},       // 2/3 succeed, quorum 3
+		{"unsatisfiable", "4", pipeline.OutcomeFail}, // quorum > branch count
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,7 +139,7 @@ func TestParallelHandlerPolicyFailureSurfacesInEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Fatalf("expected fail, got %q", outcome.Status)
 	}
 	var completed *pipeline.PipelineEvent
@@ -204,7 +204,7 @@ func TestParallelHandlerPolicyFailureSuppressesJoinSuggestion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Fatalf("expected fail, got %q", outcome.Status)
 	}
 	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "" {
@@ -222,7 +222,7 @@ func TestParallelHandlerDefaultPolicyAllFailStillSuggestsJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Fatalf("expected fail, got %q", outcome.Status)
 	}
 	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "join_node" {
@@ -266,7 +266,7 @@ func TestFanInHandlerPolicyAllFailsOnPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeFail) {
+	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("policy=all with a failed branch should be fail, got %q", outcome.Status)
 	}
 	// Successful-branch context still merges so downstream escalation gates
@@ -286,14 +286,14 @@ func TestFanInHandlerPolicyQuorum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if met.Status != string(pipeline.OutcomeSuccess) {
+	if met.Status != pipeline.OutcomeSuccess {
 		t.Errorf("quorum=2 with 2/3 succeeding should be success, got %q", met.Status)
 	}
 	notMet, err := runFanInWithPolicy(t, results, map[string]string{"fan_in_policy": "quorum", "quorum": "3"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if notMet.Status != string(pipeline.OutcomeFail) {
+	if notMet.Status != pipeline.OutcomeFail {
 		t.Errorf("quorum=3 with 2/3 succeeding should be fail, got %q", notMet.Status)
 	}
 }
@@ -340,7 +340,7 @@ func TestFanInHandlerDefaultPolicyIsAny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Status != string(pipeline.OutcomeSuccess) {
+	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("default policy must remain success-if-any, got %q", outcome.Status)
 	}
 }

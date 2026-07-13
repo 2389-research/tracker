@@ -45,7 +45,7 @@ func buildFallthroughGraph(t *testing.T, branchOutcome Outcome, conditionalEdgeO
 // unconditional edge. EventConditionalFallthrough must fire.
 func TestSelectEdge_AllConditionalsFalse_FiresFallthrough(t *testing.T) {
 	g, reg, eventsPtr, mu := buildFallthroughGraph(t,
-		Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail"}},
+		Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail"}},
 		false,
 	)
 	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
@@ -94,7 +94,7 @@ func TestSelectEdge_AllConditionalsFalse_FiresFallthrough(t *testing.T) {
 // Conditional edge matches; no fallthrough event.
 func TestSelectEdge_ConditionalMatches_NoFallthrough(t *testing.T) {
 	g, reg, eventsPtr, mu := buildFallthroughGraph(t,
-		Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}},
+		Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}},
 		false,
 	)
 	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {

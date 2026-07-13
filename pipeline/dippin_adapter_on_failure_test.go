@@ -55,7 +55,7 @@ func TestOnFailureRoutesFailingAgentAtRuntime(t *testing.T) {
 		t.Fatalf("LoadDippinWorkflow: %v", err)
 	}
 	reg := newTestRegistryWithOutcomes(map[string]Outcome{
-		"Work": {Status: string(OutcomeFail)},
+		"Work": {Status: OutcomeFail},
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -109,7 +109,7 @@ func TestNodeFallbackBeatsGraphOnFailure(t *testing.T) {
 		t.Fatalf("graph fallback_target = %q, want %q (precondition for the precedence test)", got, "GraphEscalate")
 	}
 	reg := newTestRegistryWithOutcomes(map[string]Outcome{
-		"Work": {Status: string(OutcomeFail)},
+		"Work": {Status: OutcomeFail},
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

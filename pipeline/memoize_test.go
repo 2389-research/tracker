@@ -44,9 +44,9 @@ func failOnceCheckHandler(mu *sync.Mutex, attempts *int) *testHandler {
 			a := *attempts
 			mu.Unlock()
 			if a == 1 {
-				return Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail"}}, nil
+				return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail"}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}}, nil
+			return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}, nil
 		},
 	}
 }
@@ -68,9 +68,9 @@ func TestMemoReplaySkipsHandlerOnRestart(t *testing.T) {
 				mu.Lock()
 				workCalls++
 				mu.Unlock()
-				return Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"work_out": "v1"}}, nil
+				return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"work_out": "v1"}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(failOnceCheckHandler(&mu, &checkAttempts))
@@ -116,9 +116,9 @@ func TestMemoInvalidatesOnChangedCtxInput(t *testing.T) {
 				mu.Lock()
 				workCalls++
 				mu.Unlock()
-				return Outcome{Status: string(OutcomeSuccess)}, nil
+				return Outcome{Status: OutcomeSuccess}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	// check fails first time AND mutates a bare ctx key so work's hashed input
@@ -131,9 +131,9 @@ func TestMemoInvalidatesOnChangedCtxInput(t *testing.T) {
 			a := checkAttempts
 			mu.Unlock()
 			if a == 1 {
-				return Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail", "drift": "changed"}}, nil
+				return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail", "drift": "changed"}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}}, nil
+			return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}, nil
 		},
 	})
 
@@ -178,7 +178,7 @@ func TestMemoInvalidatesOnChangedPrompt(t *testing.T) {
 				workCalls++
 				mu.Unlock()
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(&testHandler{
@@ -189,9 +189,9 @@ func TestMemoInvalidatesOnChangedPrompt(t *testing.T) {
 			a := checkAttempts
 			mu.Unlock()
 			if a == 1 {
-				return Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"outcome": "fail", "knob": "two"}}, nil
+				return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail", "knob": "two"}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}}, nil
+			return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}, nil
 		},
 	})
 
@@ -229,9 +229,9 @@ func TestMemoSurvivesCheckpointRoundTrip(t *testing.T) {
 				mu.Lock()
 				calls++
 				mu.Unlock()
-				return Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"work_out": "persisted"}}, nil
+				return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"work_out": "persisted"}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 
@@ -300,7 +300,7 @@ func TestMemoOffByDefault(t *testing.T) {
 				workCalls++
 				mu.Unlock()
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	reg.Register(failOnceCheckHandler(&mu, &checkAttempts))
@@ -421,7 +421,7 @@ func TestMemoNonSuccessRecordIsNotReplayed(t *testing.T) {
 		t.Fatal("expected a memoizable key for the memoize node")
 	}
 	// Inject a stored FAILURE under the exact key the node will compute.
-	s.cp.PutMemo(key, &Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{"work_out": "stale"}})
+	s.cp.PutMemo(key, &Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"work_out": "stale"}})
 	if _, hit := s.cp.GetMemo(key); !hit {
 		t.Fatal("precondition: the fail record must be present under the computed key")
 	}
@@ -439,7 +439,7 @@ func TestMemoNonSuccessRecordIsNotReplayed(t *testing.T) {
 // Verify MemoEntry round-trips through JSON.
 func TestMemoEntryJSONRoundTrip(t *testing.T) {
 	cp := &Checkpoint{RunID: "r"}
-	cp.PutMemo("k", &Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"x": "y"}})
+	cp.PutMemo("k", &Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"x": "y"}})
 	data, err := json.Marshal(cp)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -463,7 +463,7 @@ func TestMemoEntryJSONRoundTrip(t *testing.T) {
 func TestMemoEntryPersistsRoutingHints(t *testing.T) {
 	cp := &Checkpoint{RunID: "r"}
 	cp.PutMemo("k", &Outcome{
-		Status:             string(OutcomeSuccess),
+		Status:             OutcomeSuccess,
 		PreferredLabel:     "approve",
 		SuggestedNextNodes: []string{"join", "fanin"},
 	})
@@ -616,11 +616,11 @@ func TestMemoInvalidatesOnChangedInjectedLastResponse(t *testing.T) {
 				mu.Unlock()
 				// work writes bare last_response — on scope it aliases to
 				// node.work.last_response, the trigger for the old self-output bug.
-				return Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{
+				return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{
 					ContextKeyLastResponse: "work output",
 				}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess)}, nil
+			return Outcome{Status: OutcomeSuccess}, nil
 		},
 	})
 	// check fails first time and overwrites bare last_response with a NEW critique,
@@ -633,12 +633,12 @@ func TestMemoInvalidatesOnChangedInjectedLastResponse(t *testing.T) {
 			a := checkAttempts
 			mu.Unlock()
 			if a == 1 {
-				return Outcome{Status: string(OutcomeFail), ContextUpdates: map[string]string{
+				return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{
 					"outcome":              "fail",
 					ContextKeyLastResponse: "review critique: fix X",
 				}}, nil
 			}
-			return Outcome{Status: string(OutcomeSuccess), ContextUpdates: map[string]string{"outcome": "success"}}, nil
+			return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}, nil
 		},
 	})
 
@@ -678,7 +678,7 @@ func TestMemoKeyWritablePathsMissesWithoutRepo(t *testing.T) {
 func TestPutMemoDeepCopiesContextUpdates(t *testing.T) {
 	cp := &Checkpoint{}
 	cu := map[string]string{"x": "v1"}
-	cp.PutMemo("k", &Outcome{Status: string(OutcomeSuccess), ContextUpdates: cu})
+	cp.PutMemo("k", &Outcome{Status: OutcomeSuccess, ContextUpdates: cu})
 	cu["x"] = "mutated"
 	rec, _ := cp.GetMemo("k")
 	if rec.ContextUpdates["x"] != "v1" {

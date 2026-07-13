@@ -581,7 +581,15 @@ func (ic *InterviewContent) submit() tea.Cmd {
 	ic.done = true
 	result := ic.collectAnswers()
 	if ic.replyCh != nil {
-		ic.replyCh <- handlers.SerializeInterviewResult(result)
+		s, err := handlers.SerializeInterviewResult(result)
+		if err != nil {
+			// TODO(#448 follow-up): a marshal error here is currently indistinguishable
+			// from a legitimate user cancel (empty reply -> Canceled). Surface it via a
+			// tea error message instead of silently degrading. json.Marshal cannot fail on
+			// this all-strings/bools struct today, so this path is effectively unreachable.
+			s = "" // Send empty string on error; receiver treats as canceled
+		}
+		ic.replyCh <- s
 		ic.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
@@ -602,7 +610,15 @@ func (ic *InterviewContent) cancelForm() tea.Cmd {
 	if ic.replyCh != nil {
 		result := ic.collectAnswers()
 		result.Canceled = true
-		ic.replyCh <- handlers.SerializeInterviewResult(result)
+		s, err := handlers.SerializeInterviewResult(result)
+		if err != nil {
+			// TODO(#448 follow-up): a marshal error here is currently indistinguishable
+			// from a legitimate user cancel (empty reply -> Canceled). Surface it via a
+			// tea error message instead of silently degrading. json.Marshal cannot fail on
+			// this all-strings/bools struct today, so this path is effectively unreachable.
+			s = "" // Send empty string on error; receiver treats as canceled
+		}
+		ic.replyCh <- s
 		close(ic.replyCh)
 		ic.replyCh = nil
 	}

@@ -77,16 +77,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, err
 	}
 
-	branchIDs := make([]string, len(edges))
-	for i, edge := range edges {
-		branchIDs[i] = edge.To
-	}
-	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
-		Type:      pipeline.EventParallelStarted,
-		Timestamp: time.Now(),
-		NodeID:    node.ID,
-		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
-	})
+	h.emitParallelStarted(node.ID, edges)
 
 	collected, branchOverridesOut := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
 
@@ -97,47 +88,76 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	pctx.Set("parallel.results", string(resultsJSON))
 
 	status, policyDetail := aggregateStatus(collected, policy)
+	h.emitParallelCompleted(node.ID, status, policy, policyDetail)
 
+	return buildParallelOutcome(node, policy, status, policyDetail, collected, branchOverridesOut), nil
+}
+
+// emitParallelStarted emits the fan-out EventParallelStarted event naming
+// every dispatched branch target.
+func (h *ParallelHandler) emitParallelStarted(nodeID string, edges []*pipeline.Edge) {
+	branchIDs := make([]string, len(edges))
+	for i, edge := range edges {
+		branchIDs[i] = edge.To
+	}
+	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventParallelStarted,
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
+	})
+}
+
+// emitParallelCompleted emits the fan-in EventParallelCompleted event,
+// surfacing the policy evaluation (incl. failed branch IDs) for non-default
+// policies so the TUI and `tracker diagnose` can explain a policy-caused
+// failure (#313).
+func (h *ParallelHandler) emitParallelCompleted(nodeID string, status pipeline.TerminalStatus, policy fanInPolicy, policyDetail string) {
 	msg := fmt.Sprintf("fan-in complete, aggregate status: %s", status)
 	if policy.name != "any" {
-		// Surface the policy evaluation (incl. failed branch IDs) so the TUI
-		// and `tracker diagnose` can explain a policy-caused failure (#313).
 		msg += " (" + policyDetail + ")"
 	}
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type:      pipeline.EventParallelCompleted,
 		Timestamp: time.Now(),
-		NodeID:    node.ID,
+		NodeID:    nodeID,
 		Message:   msg,
 	})
+}
 
+// buildParallelOutcome assembles the aggregate Outcome for a completed
+// fan-out: status/stats/child-overrides, the join suggestion, and (for
+// non-default policies) the fan_in.policy_detail breadcrumb.
+//
+// The join is suggested EXCEPT when a non-default policy is unsatisfied.
+// Leaving the suggestion in place would let edge selection fall through
+// selectBySuggested to the join (bypassing strict-failure because
+// conditional edges exist), and a default-any fan-in downstream would mask
+// the very failure the policy surfaced (Codex review, PR #344). Under the
+// default any policy the suggestion is kept even on all-fail — existing
+// workflows route that failure at the fan-in node.
+//
+// The policy-detail breadcrumb is recorded here too (not just at the
+// fan-in node) — a policy failure suppresses the join suggestion, so the
+// fan-in node (the other fan_in.policy_detail writer) may never run, and
+// diagnose/audit would otherwise lose the structured breadcrumb (Copilot,
+// PR #344). Written on success as well so a later pass can't leave a stale
+// "failed" detail in context.
+func buildParallelOutcome(node *pipeline.Node, policy fanInPolicy, status pipeline.TerminalStatus, policyDetail string, collected []ParallelResult, branchOverridesOut [][]pipeline.OverrideDetail) pipeline.Outcome {
 	outcome := pipeline.Outcome{
-		Status:        status,
-		Stats:         aggregateBranchStats(collected),
-		ChildOverride: aggregateChildOverrides(branchOverridesOut),
+		Status:         status,
+		Stats:          aggregateBranchStats(collected),
+		ChildOverride:  aggregateChildOverrides(branchOverridesOut),
+		ContextUpdates: make(map[string]string),
 	}
-	// Suggest the join — EXCEPT when a non-default policy is unsatisfied.
-	// Leaving the suggestion in place would let edge selection fall through
-	// selectBySuggested to the join (bypassing strict-failure because
-	// conditional edges exist), and a default-any fan-in downstream would
-	// mask the very failure the policy surfaced (Codex review, PR #344).
-	// Under the default any policy the suggestion is kept even on all-fail —
-	// existing workflows route that failure at the fan-in node.
-	policyBlocked := policy.name != "any" && status != string(pipeline.OutcomeSuccess)
-	outcome.ContextUpdates = make(map[string]string)
+	policyBlocked := policy.name != "any" && status != pipeline.OutcomeSuccess
 	if joinID := node.ParallelConfig().JoinID; joinID != "" && !policyBlocked {
 		outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes] = joinID
 	}
 	if policy.name != "any" {
-		// Record the policy evaluation in context here too — a policy failure
-		// suppresses the join suggestion, so the fan-in node (the other
-		// fan_in.policy_detail writer) may never run, and diagnose/audit would
-		// otherwise lose the structured breadcrumb (Copilot, PR #344). Written
-		// on success as well so a later pass can't leave a stale "failed"
-		// detail in context.
 		outcome.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail] = policyDetail
 	}
-	return outcome, nil
+	return outcome
 }
 
 // aggregateChildOverrides unions OverrideDetail slices across parallel branches
@@ -185,41 +205,82 @@ var branchFallbackAttrs = []string{"fallback_target", "fallback_retry_target"}
 // PR #377). Graph-level fallback_target (dippin `defaults: on_failure`) is
 // unaffected: it lives on graph attrs and applies in the engine's main loop.
 func refuseBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, parallelAttrs map[string]string) error {
-	// target node ID → fallback attr spelling → declared value, across ALL
-	// branch.N.* groups naming that target (not just the surviving one).
-	// Indices are visited in ascending order so that when several groups
-	// declare a fallback for the same target, the highest index's value is
-	// the one reported — deterministic output, matching the last-branch-wins
-	// duplicate-target convention (#368).
 	indexed := indexBranchAttrs(parallelAttrs)
+	declaredByTarget := collectDeclaredBranchFallbacks(indexed)
+	return checkBranchFallbackTargets(parallelID, edges, graph, declaredByTarget)
+}
+
+// collectDeclaredBranchFallbacks scans branch.N.* attr groups for declared
+// fallback targets, building target node ID → fallback attr spelling →
+// declared value, across ALL branch.N.* groups naming that target (not just
+// the surviving one — with duplicate-target branches the collapse keeps
+// only the highest index wholesale (#368), which would hide an earlier
+// branch's equally-dead fallback declaration, Copilot PR #377). Indices are
+// visited in ascending order so that when several groups declare a fallback
+// for the same target, the highest index's value is the one reported —
+// deterministic output, matching the last-branch-wins duplicate-target
+// convention (#368).
+func collectDeclaredBranchFallbacks(indexed map[int]map[string]string) map[string]map[string]string {
 	declaredByTarget := make(map[string]map[string]string)
 	for _, idx := range slices.Sorted(maps.Keys(indexed)) {
-		branchAttrs := indexed[idx]
-		target := branchAttrs["target"]
-		if target == "" {
+		recordBranchFallbacks(declaredByTarget, indexed[idx])
+	}
+	return declaredByTarget
+}
+
+// recordBranchFallbacks copies every declared fallback attr from a single
+// branch.N.* group onto declaredByTarget, keyed by the group's target node.
+// No-op when the group names no target.
+func recordBranchFallbacks(declaredByTarget map[string]map[string]string, branchAttrs map[string]string) {
+	target := branchAttrs["target"]
+	if target == "" {
+		return
+	}
+	for _, attr := range branchFallbackAttrs {
+		v := branchAttrs[attr]
+		if v == "" {
 			continue
 		}
-		for _, attr := range branchFallbackAttrs {
-			if v := branchAttrs[attr]; v != "" {
-				if declaredByTarget[target] == nil {
-					declaredByTarget[target] = make(map[string]string)
-				}
-				declaredByTarget[target][attr] = v
-			}
+		if declaredByTarget[target] == nil {
+			declaredByTarget[target] = make(map[string]string)
+		}
+		declaredByTarget[target][attr] = v
+	}
+}
+
+// checkBranchFallbackTargets fails fast when any branch-target edge's
+// target node (via graph attrs or a declared branch.N.* override) carries a
+// node-level fallback target under either spelling in branchFallbackAttrs.
+// Branch nodes execute via registry.Execute inside runBranch and never
+// reach the engine's strict-failure path, so the attr would do nothing at
+// runtime — refusing loudly beats shipping a silently-inert failure route
+// (#313 defect 2). Graph-level fallback_target (dippin `defaults:
+// on_failure`) is unaffected: it lives on graph attrs and applies in the
+// engine's main loop.
+func checkBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, declaredByTarget map[string]map[string]string) error {
+	for _, edge := range edges {
+		if err := checkEdgeFallbackTargets(parallelID, edge, graph, declaredByTarget); err != nil {
+			return err
 		}
 	}
-	for _, edge := range edges {
-		for _, attr := range branchFallbackAttrs {
-			declared := ""
-			if tn, ok := graph.Nodes[edge.To]; ok {
-				declared = tn.Attrs[attr]
-			}
-			if v := declaredByTarget[edge.To][attr]; v != "" {
-				declared = v
-			}
-			if declared != "" {
-				return fmt.Errorf("parallel node %q: branch target %q declares %s %q, which is never honored inside a parallel branch — remove it and route branch failure at the aggregating node via fan_in_policy (any|all|quorum) and a conditional fail edge", parallelID, edge.To, attr, declared)
-			}
+	return nil
+}
+
+// checkEdgeFallbackTargets checks a single branch-target edge for a declared
+// fallback under any spelling in branchFallbackAttrs, preferring the
+// branch.N.* override over the target node's own graph attrs (matching the
+// last-branch-wins convention used to build declaredByTarget).
+func checkEdgeFallbackTargets(parallelID string, edge *pipeline.Edge, graph *pipeline.Graph, declaredByTarget map[string]map[string]string) error {
+	for _, attr := range branchFallbackAttrs {
+		declared := ""
+		if tn, ok := graph.Nodes[edge.To]; ok {
+			declared = tn.Attrs[attr]
+		}
+		if v := declaredByTarget[edge.To][attr]; v != "" {
+			declared = v
+		}
+		if declared != "" {
+			return fmt.Errorf("parallel node %q: branch target %q declares %s %q, which is never honored inside a parallel branch — remove it and route branch failure at the aggregating node via fan_in_policy (any|all|quorum) and a conditional fail edge", parallelID, edge.To, attr, declared)
 		}
 	}
 	return nil
@@ -388,7 +449,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 // buildBranchResult assembles a ParallelResult from the branch execution outcome.
 func buildBranchResult(nodeID string, outcome pipeline.Outcome, mergedUpdates map[string]string, err error) ParallelResult {
-	pr := ParallelResult{NodeID: nodeID, Status: outcome.Status, ContextUpdates: mergedUpdates, Stats: outcome.Stats}
+	pr := ParallelResult{NodeID: nodeID, Status: string(outcome.Status), ContextUpdates: mergedUpdates, Stats: outcome.Stats}
 	if err != nil {
 		pr.Status = string(pipeline.OutcomeFail)
 		pr.Error = err.Error()
@@ -426,11 +487,11 @@ func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult) {
 // aggregateStatus evaluates the branch results against the fan-in policy
 // (default "any": success if at least one branch succeeded) and returns the
 // aggregate status plus a human-readable policy detail string.
-func aggregateStatus(results []ParallelResult, policy fanInPolicy) (string, string) {
+func aggregateStatus(results []ParallelResult, policy fanInPolicy) (pipeline.TerminalStatus, string) {
 	successes, failed := tallyBranches(results)
-	status := string(pipeline.OutcomeFail)
+	status := pipeline.OutcomeFail
 	if policy.satisfied(successes, len(results)) {
-		status = string(pipeline.OutcomeSuccess)
+		status = pipeline.OutcomeSuccess
 	}
 	return status, policy.detail(successes, len(results), failed)
 }

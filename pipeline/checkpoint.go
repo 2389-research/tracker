@@ -208,7 +208,7 @@ func (cp *Checkpoint) PutMemo(key string, o *Outcome) {
 		snn = append(snn, o.SuggestedNextNodes...)
 	}
 	cp.MemoEntries[key] = MemoEntry{
-		Status:             o.Status,
+		Status:             string(o.Status),
 		ContextUpdates:     cu,
 		PreferredLabel:     o.PreferredLabel,
 		SuggestedNextNodes: snn,
