@@ -53,7 +53,6 @@ cognitive|./cmd/tracker-swebench/analyze.go|writePerRepo|9
 cognitive|./cmd/tracker-swebench/analyze.go|writeTopEmpty|9
 cognitive|./cmd/tracker-swebench/dataset.go|LoadDataset|9
 cognitive|./cmd/tracker-swebench/docker.go|(*DockerRunner).RunInstance|23
-cognitive|./cmd/tracker-swebench/main.go|main|74
 cognitive|./cmd/tracker-swebench/results.go|NewResultsWriter|11
 cognitive|./cmd/tracker/doctor.go|checkGitignore|11
 cognitive|./cmd/tracker/doctor.go|maybeFixGitignore|9
@@ -144,7 +143,6 @@ cyclo|./cmd/tracker-swebench/analyze.go|findEvaluatorReport|12
 cyclo|./cmd/tracker-swebench/analyze.go|parseInstanceLog|19
 cyclo|./cmd/tracker-swebench/analyze.go|scanLogsDir|13
 cyclo|./cmd/tracker-swebench/docker.go|(*DockerRunner).RunInstance|21
-cyclo|./cmd/tracker-swebench/main.go|main|44
 cyclo|./cmd/tracker-swebench/results.go|classifyRunError|13
 cyclo|./cmd/tracker/doctor.go|checkGitignore|10
 cyclo|./cmd/tracker/doctor.go|printCheckResult|15
