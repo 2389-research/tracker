@@ -6,6 +6,7 @@ workflow AskAndExecute
 
   defaults
     max_retries: 2
+    max_restarts: 50
     fidelity: summary:high
     model: claude-sonnet-4-6
     provider: anthropic
@@ -403,9 +404,6 @@ workflow AskAndExecute
     ApproveSpec -> WriteSpec  label: "refine"  restart: true
     ApproveSpec -> Done  label: "reject"
     SetupWorktrees -> ImplementParallel
-    ImplementClaude -> ImplementJoin
-    ImplementCodex -> ImplementJoin
-    ImplementGemini -> ImplementJoin
     ImplementJoin -> CaptureAndTest
     CaptureAndTest -> CrossCritique
     CrossCritique -> SelectWinner

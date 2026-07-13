@@ -1,0 +1,231 @@
+workflow adaptive_ralph_stream
+  goal: "Parameterized iterative implementation loop with velocity-aware model switching. Starts on sonnet for orientation, downshifts to haiku when cruising, escalates back to sonnet when stuck."
+  start: Start
+  exit: Exit
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  agent Start
+    label: Start
+
+  agent Exit
+    label: Exit
+
+  tool Setup
+    label: "Setup Stream State"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      stream_dir=".ai/streams/${params.stream_id}"
+      mkdir -p "$stream_dir"
+      if [ ! -f "$stream_dir/max-iterations.txt" ]; then
+        printf '${params.max_iterations}' > "$stream_dir/max-iterations.txt"
+      fi
+      if [ ! -f "$stream_dir/iteration-count.txt" ]; then
+        printf '0' > "$stream_dir/iteration-count.txt"
+      fi
+      if [ ! -f "$stream_dir/iteration-log.md" ]; then
+        printf '# Stream ${params.stream_id} — Iteration Log\n\n' > "$stream_dir/iteration-log.md"
+      fi
+      # Store initial commit ref for velocity tracking
+      git rev-parse HEAD > "$stream_dir/last-commit-ref.txt" 2>/dev/null || true
+      printf 'ready'
+
+  tool IncrementCounter
+    label: "Increment Iteration"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      counter_file=".ai/streams/${params.stream_id}/iteration-count.txt"
+      if [ -f "$counter_file" ]; then
+        count=$(cat "$counter_file")
+      else
+        count=0
+      fi
+      count=$((count + 1))
+      printf '%d' "$count" > "$counter_file"
+      printf '%d' "$count"
+
+  tool CheckVelocity
+    label: "Check Velocity"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      stream_dir=".ai/streams/${params.stream_id}"
+      count=$(cat "$stream_dir/iteration-count.txt" 2>/dev/null || printf '0')
+
+      # First 2 iterations: sonnet for orientation
+      if [ "$count" -le 2 ]; then
+        printf 'orientation'
+        exit 0
+      fi
+
+      # Check if last iteration produced a commit
+      last_ref=$(cat "$stream_dir/last-commit-ref.txt" 2>/dev/null || printf '')
+      current_ref=$(git rev-parse HEAD 2>/dev/null || printf '')
+
+      if [ -n "$last_ref" ] && [ "$last_ref" = "$current_ref" ]; then
+        printf 'struggling'
+      else
+        printf 'cruising'
+      fi
+
+  tool RecordProgress
+    label: "Record Progress"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      # Save current HEAD so next iteration can detect new commits
+      git rev-parse HEAD > ".ai/streams/${params.stream_id}/last-commit-ref.txt" 2>/dev/null || true
+      printf 'recorded'
+
+  agent RalphSonnet
+    label: "Ralph (Sonnet)"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    max_turns: 50
+    max_retries: 3
+    retry_target: RalphSonnet
+    prompt:
+      You are working in `run.working_dir` on branch `${params.branch}`.
+
+      ## Philosophy
+      Iteration > Perfection. Failures are Data. Persistence Wins.
+
+      ## Setup
+      Run `git checkout ${params.branch}` before making any changes.
+
+      ## Task
+      Read `.ai/streams/${params.stream_id}/task.md` for your assignment. This file contains:
+      - The task description and checklist
+      - File ownership (ONLY modify files listed in your ownership section)
+      - Interface contracts you must implement against
+
+      ## Process
+      1. Read `.ai/streams/${params.stream_id}/task.md` to understand what you need to do
+      2. Read `.ai/streams/${params.stream_id}/iteration-log.md` to see what previous iterations did
+      3. Check `git log --oneline -10` and `git diff` for recent changes
+      4. Pick the NEXT uncompleted checklist item from task.md
+      5. Implement it — write the actual code changes
+      6. Run `go build ./...` to verify compilation
+      7. Run `go test ./...` to verify tests pass
+      8. If tests fail, fix them before moving on
+      9. Update `.ai/streams/${params.stream_id}/iteration-log.md` with what you did
+      10. Mark the item as done in task.md: `- [x]`
+      11. Commit your changes with a descriptive message
+
+      ## File Ownership
+      You may ONLY modify files listed in the ownership section of your task.md.
+      Shared contracts in `.ai/contracts/` are READ-ONLY — implement against them, do not change them.
+
+      ## Completion
+      When ALL checklist items in task.md are marked `[x]`:
+      - Write "RALPH_COMPLETE" as the final line of `.ai/streams/${params.stream_id}/iteration-log.md`
+      - Set STATUS: success
+
+      When you made progress but items remain:
+      - Set STATUS: fail (this triggers the next iteration)
+
+      ## Important
+      - ONE checklist item per iteration — small, testable increments
+      - If stuck on the same item for 2 iterations, skip it and note why
+      - Always run go build before committing
+
+  agent RalphHaiku
+    label: "Ralph (Haiku)"
+    model: claude-haiku-4-5
+    provider: anthropic
+    reasoning_effort: high
+    goal_gate: true
+    max_turns: 50
+    max_retries: 3
+    retry_target: RalphHaiku
+    prompt:
+      You are working in `run.working_dir` on branch `${params.branch}`.
+
+      ## Setup
+      Run `git checkout ${params.branch}` before making any changes.
+
+      ## Task
+      Read `.ai/streams/${params.stream_id}/task.md` for your assignment.
+      Read `.ai/streams/${params.stream_id}/iteration-log.md` for prior iteration context.
+
+      ## Process
+      1. Pick the NEXT uncompleted `- [ ]` item from task.md
+      2. Implement it — write code, respecting file ownership in task.md
+      3. Run `go build ./...` and `go test ./...`
+      4. Fix any failures
+      5. Update iteration-log.md, mark task done `- [x]`, commit
+
+      ## File Ownership
+      ONLY modify files listed in the ownership section of task.md.
+      Contracts in `.ai/contracts/` are READ-ONLY.
+
+      ## Completion
+      All items done → write "RALPH_COMPLETE" in iteration-log.md, STATUS: success.
+      Progress but more work → STATUS: fail.
+
+  tool CheckCompletion
+    label: "Check Completion"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      log_file=".ai/streams/${params.stream_id}/iteration-log.md"
+      if [ -f "$log_file" ] && grep -q 'RALPH_COMPLETE' "$log_file" 2>/dev/null; then
+        printf 'complete'
+      else
+        printf 'continue'
+      fi
+
+  tool CheckBudget
+    label: "Check Iteration Budget"
+    timeout: 1m
+    command:
+      #!/bin/sh
+      stream_dir=".ai/streams/${params.stream_id}"
+      count=$(cat "$stream_dir/iteration-count.txt" 2>/dev/null || printf '0')
+      max=$(cat "$stream_dir/max-iterations.txt" 2>/dev/null || printf '8')
+      if [ "$count" -ge "$max" ]; then
+        printf 'budget_exhausted'
+      else
+        printf 'budget_ok'
+      fi
+
+  agent WrapUp
+    label: "Wrap Up (Budget Exhausted)"
+    model: claude-haiku-4-5
+    provider: anthropic
+    prompt:
+      You are working in `run.working_dir` on branch `${params.branch}`.
+
+      The iteration budget for stream ${params.stream_id} has been exhausted.
+      Read `.ai/streams/${params.stream_id}/iteration-log.md` for what was accomplished.
+
+      Write a summary to `.ai/streams/${params.stream_id}/summary.md` with:
+      - **Completed**: Checklist items finished
+      - **Remaining**: What's left unfinished
+      - **Blockers**: Any issues encountered
+      Commit this summary.
+
+  edges
+    Start -> Setup
+    Setup -> IncrementCounter
+    IncrementCounter -> CheckVelocity
+    CheckVelocity -> RalphSonnet  when ctx.tool_stdout = orientation  label: "orientation phase"
+    CheckVelocity -> RalphHaiku   when ctx.tool_stdout = cruising     label: "cruising — use haiku"
+    CheckVelocity -> RalphSonnet  when ctx.tool_stdout = struggling   label: "stuck — use sonnet"
+    CheckVelocity -> RalphSonnet  label: "fallback"
+    RalphSonnet -> RecordProgress
+    RalphHaiku -> RecordProgress
+    RecordProgress -> CheckCompletion
+    CheckCompletion -> Exit        when ctx.tool_stdout = complete  label: "stream done"
+    CheckCompletion -> CheckBudget when ctx.tool_stdout = continue  label: "more work"
+    CheckCompletion -> CheckBudget label: "fallback"
+    CheckBudget -> IncrementCounter  when ctx.tool_stdout = budget_ok  label: "next iteration"  restart: true
+    CheckBudget -> WrapUp  when ctx.tool_stdout = budget_exhausted  label: "out of iterations"
+    CheckBudget -> WrapUp  label: "fallback"
+    WrapUp -> Exit

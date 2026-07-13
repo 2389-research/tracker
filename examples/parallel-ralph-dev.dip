@@ -211,7 +211,7 @@ workflow parallel_ralph_dev
 
   subgraph StreamB
     label: "Stream B — Adaptive Ralph"
-    ref: subgraphs/adaptive-ralph-stream.dip
+    ref: subgraphs/adaptive-ralph-stream-b.dip
     params:
       stream_id: stream-b
       branch: feature/stream-b
@@ -443,10 +443,6 @@ workflow parallel_ralph_dev
     # Phase 2: Parallel Implementation
     CommitContracts -> CreateBranches
     CreateBranches -> ParallelStreams
-    ParallelStreams -> StreamA
-    ParallelStreams -> StreamB
-    StreamA -> StreamsJoin
-    StreamB -> StreamsJoin
 
     # Phase 3: Integration
     StreamsJoin -> ContractCheck
@@ -454,7 +450,7 @@ workflow parallel_ralph_dev
     ContractCheck -> IntegrationFix     when ctx.tool_stdout = merge_conflict  label: "merge conflict"
     ContractCheck -> IntegrationFix     when ctx.tool_stdout = contracts_fail  label: "contract tests fail"
     ContractCheck -> IntegrationFix     label: "fallback"
-    MergeBranches -> IntegrationTest
+    MergeBranches -> IntegrationTest    when ctx.tool_stdout = merged  label: "merged"
     MergeBranches -> IntegrationFix     label: "fallback"
     IntegrationTest -> ObjectiveGates   when ctx.tool_stdout = tests_pass  label: "tests pass"
     IntegrationTest -> IntegrationFix   when ctx.tool_stdout = tests_fail  label: "tests fail"
