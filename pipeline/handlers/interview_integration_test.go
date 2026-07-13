@@ -175,7 +175,11 @@ func TestInterview_Integration_RetryPreFill(t *testing.T) {
 			{ID: "q2", Text: "Are there performance constraints?", Answer: "yes"},
 		},
 	}
-	pctx.Set("interview_answers", SerializeInterviewResult(previousResult))
+	js, err := SerializeInterviewResult(previousResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx.Set("interview_answers", js)
 
 	mock := &retryCapturingInterviewer{}
 	handler := NewHumanHandler(mock, graph)

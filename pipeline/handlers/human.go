@@ -866,7 +866,10 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		return pipeline.Outcome{}, fmt.Errorf("interview failed for node %q: %w", node.ID, err)
 	}
 
-	jsonStr := SerializeInterviewResult(*result)
+	jsonStr, err := SerializeInterviewResult(*result)
+	if err != nil {
+		return pipeline.Outcome{Status: string(pipeline.OutcomeFail)}, fmt.Errorf("serialize interview result for node %q: %w", node.ID, err)
+	}
 	summary := BuildMarkdownSummary(*result)
 
 	status := pipeline.OutcomeSuccess

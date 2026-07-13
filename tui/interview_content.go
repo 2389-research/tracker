@@ -581,7 +581,11 @@ func (ic *InterviewContent) submit() tea.Cmd {
 	ic.done = true
 	result := ic.collectAnswers()
 	if ic.replyCh != nil {
-		ic.replyCh <- handlers.SerializeInterviewResult(result)
+		s, err := handlers.SerializeInterviewResult(result)
+		if err != nil {
+			s = "" // Send empty string on error; receiver treats as canceled
+		}
+		ic.replyCh <- s
 		ic.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
@@ -602,7 +606,11 @@ func (ic *InterviewContent) cancelForm() tea.Cmd {
 	if ic.replyCh != nil {
 		result := ic.collectAnswers()
 		result.Canceled = true
-		ic.replyCh <- handlers.SerializeInterviewResult(result)
+		s, err := handlers.SerializeInterviewResult(result)
+		if err != nil {
+			s = "" // Send empty string on error; receiver treats as canceled
+		}
+		ic.replyCh <- s
 		close(ic.replyCh)
 		ic.replyCh = nil
 	}

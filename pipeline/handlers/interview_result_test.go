@@ -27,7 +27,10 @@ func TestSerializeInterviewResult(t *testing.T) {
 		Canceled:   false,
 	}
 
-	s := SerializeInterviewResult(r)
+	s, err := SerializeInterviewResult(r)
+	if err != nil {
+		t.Fatalf("SerializeInterviewResult: %v", err)
+	}
 	if s == "" {
 		t.Fatal("expected non-empty serialized string")
 	}
@@ -84,7 +87,10 @@ func TestSerializeInterviewResult_Flags(t *testing.T) {
 		Canceled:   true,
 	}
 
-	s := SerializeInterviewResult(r)
+	s, err := SerializeInterviewResult(r)
+	if err != nil {
+		t.Fatalf("SerializeInterviewResult: %v", err)
+	}
 	got, err := DeserializeInterviewResult(s)
 	if err != nil {
 		t.Fatalf("round-trip deserialize: %v", err)

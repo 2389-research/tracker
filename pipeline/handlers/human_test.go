@@ -602,7 +602,11 @@ func TestHumanHandler_InterviewMode_RetryPreFill(t *testing.T) {
 			{ID: "q1", Text: "What auth model?", Options: []string{"API key", "OAuth"}, Answer: "API key"},
 		},
 	}
-	pctx.Set("interview_answers", SerializeInterviewResult(prev))
+	js, err := SerializeInterviewResult(prev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pctx.Set("interview_answers", js)
 
 	final := &InterviewResult{
 		Questions: []InterviewAnswer{
@@ -613,7 +617,7 @@ func TestHumanHandler_InterviewMode_RetryPreFill(t *testing.T) {
 	h := NewHumanHandler(mock, graph)
 	node := graph.Nodes["gate"]
 
-	_, err := h.Execute(context.Background(), node, pctx)
+	_, err = h.Execute(context.Background(), node, pctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
