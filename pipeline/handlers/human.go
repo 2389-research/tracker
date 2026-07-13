@@ -22,6 +22,8 @@ var errHumanTimeout = fmt.Errorf("human gate timed out waiting for input")
 // cancelInterviewer tears down an interviewer that supports cancellation. Called
 // when a gate times out so the blocked Ask goroutine unblocks instead of leaking
 // (#446). Non-cancellable interviewers are a documented no-op.
+// Cancel() implementations MUST be idempotent and safe to call after Ask has
+// already returned — a select-race can invoke this after fn completed.
 func cancelInterviewer(i Interviewer) {
 	if c, ok := i.(interface{ Cancel() }); ok {
 		c.Cancel()
