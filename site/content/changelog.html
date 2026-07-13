@@ -28,6 +28,10 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-44-0">v0.44.0</a>
+    <a href="#v0-43-0">v0.43.0</a>
+    <a href="#v0-42-0">v0.42.0</a>
+    <a href="#v0-41-0">v0.41.0</a>
     <a href="#v0-40-2">v0.40.2</a>
     <a href="#v0-40-1">v0.40.1</a>
     <a href="#v0-40-0">v0.40.0</a>
@@ -77,6 +81,107 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.44.0 ═══ -->
+  <section class="glass" id="v0-44-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.44.0" style="color: inherit; text-decoration: none;">v0.44.0</a></h2>
+      <span class="badge">2026-07-13</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.44.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Engine-correctness hardening and a real, CI-enforced complexity gate.</strong> dippin-lang bumped
+      v0.43.0 &rarr; v0.48.0; no breaking changes; core embedded workflows hold their A grades on
+      <code>dippin doctor</code>.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Condition evaluator no longer misroutes on <code>||</code>/<code>&amp;&amp;</code> inside values</strong> (<a href="https://github.com/2389-research/tracker/issues/444">#444</a>). Splitting is now quote-aware, so a condition value containing <code>||</code>/<code>&amp;&amp;</code> (a URL, regex, or stderr fragment) evaluates correctly instead of silently splitting into phantom clauses.</li>
+      <li><strong>Human-gate timeouts no longer leak the interviewer goroutine</strong> (<a href="https://github.com/2389-research/tracker/issues/446">#446</a>). On timeout the handler now cancels the interviewer, turning a permanently-blocked goroutine into orderly teardown.</li>
+      <li><strong>claude-code error classification is no longer flipped by benign output</strong> (<a href="https://github.com/2389-research/tracker/issues/447">#447</a>). Network/budget matchers are anchored to error-shaped phrases instead of bare words, so an unrelated log line can't turn a hard failure into an infinite retry.</li>
+      <li><strong>The interview-result handler fails the node instead of panicking</strong> (<a href="https://github.com/2389-research/tracker/issues/448">#448</a>) on a JSON marshal failure.</li>
+      <li><strong>The <code>make ci</code> complexity gate is real, green, and CI-enforced</strong> (<a href="https://github.com/2389-research/tracker/issues/468">#468</a>). A checked-in ratchet baseline grandfathers existing debt and may only shrink; a new or worsened violation now fails the build.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>Outcome.Status</code> is now typed <code>TerminalStatus</code></strong> (<a href="https://github.com/2389-research/tracker/issues/445">#445</a>). A typoed status string now fails to compile instead of silently routing to the wrong branch.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.43.0 ═══ -->
+  <section class="glass" id="v0-43-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.43.0" style="color: inherit; text-decoration: none;">v0.43.0</a></h2>
+      <span class="badge">2026-07-09</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.43.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>An autonomous spec-forge loop lets <code>build_product</code> self-heal a failing spec-coherence gate
+      instead of dead-ending at a human.</strong> No breaking changes; core embedded workflows hold their A
+      grades on <code>dippin doctor</code>.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Autonomous spec-forge loop in <code>build_product</code>.</strong> A failing <code>SpecLint</code> gate now routes to a <code>ForgeSpec</code> agent that edits <code>SPEC.md</code> to resolve findings, a <code>CheckSpecFidelity</code> oracle proves no requirement was silently dropped, and the loop re-lints until clean &mdash; capped at 3 attempts and failing <strong>closed</strong> via <code>SpecForgeFailed</code> so autopilot/auto-approve can't ship a broken spec. The original spec is snapshotted and every ruling logged to <code>.ai/decisions/</code>, surfaced to the operator at <code>ApprovePlan</code>.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Packed <code>.dipx</code> runs fail loud when a workflow needs <code>${graph.workflow_dir}</code></strong> (<a href="https://github.com/2389-research/tracker/issues/430">#430</a>). A content-addressed bundle has no source dir, so the value was silently empty; a packed run referencing it now errors before any node executes, naming the offending node(s).</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.42.0 ═══ -->
+  <section class="glass" id="v0-42-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.42.0" style="color: inherit; text-decoration: none;">v0.42.0</a></h2>
+      <span class="badge">2026-07-02</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.42.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong><code>build_product</code>'s milestone gate loop gets six fixes</strong> closing a cluster of
+      false-positive "missing output" and lint-scope bugs found during dogfooding. No breaking changes; core
+      embedded workflows hold their A grades on <code>dippin doctor</code>.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Milestone lint gate is now milestone-scoped</strong> (<a href="https://github.com/2389-research/tracker/issues/436">#436</a>), so a milestone no longer fails on earlier, already-accepted milestones' lint debt.</li>
+      <li><strong>FixMilestone now sees the failing gate's real stdout</strong> (<a href="https://github.com/2389-research/tracker/issues/437">#437</a>) instead of being blind to the lint/CI failure it never ran.</li>
+      <li><strong>CheckMilestoneOutputs no longer flags unbuilt future milestones</strong> (<a href="https://github.com/2389-research/tracker/issues/439">#439</a>) or misparses declared paths from prose instead of backticked tokens (<a href="https://github.com/2389-research/tracker/issues/440">#440</a>).</li>
+      <li><strong>Milestone retry cap is exact</strong> (<a href="https://github.com/2389-research/tracker/issues/443">#443</a>) &mdash; a cap of 3 now runs exactly 3 attempts, not 4.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Lint failures now have an in-band escape hatch</strong> (<a href="https://github.com/2389-research/tracker/issues/441">#441</a>) via a checked-in suppression file, and absent <code>golangci-lint</code> now warns loudly instead of silently skipping (<a href="https://github.com/2389-research/tracker/issues/442">#442</a>).</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.41.0 ═══ -->
+  <section class="glass" id="v0-41-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.41.0" style="color: inherit; text-decoration: none;">v0.41.0</a></h2>
+      <span class="badge">2026-07-01</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.41.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Review-fidelity hardening for <code>build_product</code> plus two new engine-resilience primitives:
+      opt-in node-output memoization and sleep-aware budgets.</strong> No breaking changes; core embedded
+      workflows hold their A grades on <code>dippin doctor</code>.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Opt-in content-hash node-output memoization</strong> (<a href="https://github.com/2389-research/tracker/issues/421">#421</a>). Annotating an agent node with <code>params: { memoize: true }</code> lets a loop-restart replay a stored successful outcome instead of re-running &mdash; keyed on a SHA-256 of resolved inputs; off by default; never applied to <code>writable_paths</code> nodes.</li>
+      <li><strong>Sleep-aware budgets</strong> (<a href="https://github.com/2389-research/tracker/issues/422">#422</a>). Opt-in <code>--sleep-aware-budget</code> excludes OS-suspend spans from <code>max_wall_time</code> and <code>stall_timeout</code> accounting via the monotonic clock, so a laptop that sleeps mid-run no longer spuriously trips the budget on resume.</li>
+      <li><strong><code>build_product</code> derives spec-contract artifacts</strong> (<a href="https://github.com/2389-research/tracker/issues/306">#306</a>) and catches self-ratifying tests (<a href="https://github.com/2389-research/tracker/issues/417">#417</a>) and contract-fidelity gaps at external seams (<a href="https://github.com/2389-research/tracker/issues/416">#416</a>).</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Silent error swallowing in the Gemini translator, TUI review, and CLI env loading</strong> (<a href="https://github.com/2389-research/tracker/issues/397">#397</a>) is now surfaced instead of dropped.</li>
+    </ul>
+    <h4>Removed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Dead code and unwired middleware abstractions removed</strong> (<a href="https://github.com/2389-research/tracker/issues/394">#394</a>) &mdash; deletion-only, no behavior changes.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.40.2 ═══ -->
   <section class="glass" id="v0-40-2" style="border-left: 3px solid var(--orange-600);">
