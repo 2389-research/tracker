@@ -42,13 +42,34 @@ scan() {
   ensure_tool "github.com/fzipp/gocyclo/cmd/gocyclo" "$GOCYCLO_VERSION"
   ensure_tool "github.com/uudashr/gocognit/cmd/gocognit" "$GOCOGNIT_VERSION"
   local files; files=$(list_files)
+  [ -n "$files" ] || { echo "FATAL: complexity scan matched no Go files — scope is empty, refusing to pass" >&2; exit 1; }
+
   # gocyclo/gocognit exit 1 when they find over-threshold functions (by design,
   # for use as a CI gate); under pipefail that would abort the scan early via
   # xargs's propagated failure, so tolerate it here — we WANT their findings.
-  printf '%s\n' "$files" | { xargs go run "github.com/fzipp/gocyclo/cmd/gocyclo@${GOCYCLO_VERSION}" -over "$CYCLO_MAX" 2>/dev/null || true; } \
-    | awk '{ split($4,a,":"); print "cyclo|" a[1] "|" $3 "|" $1 }'
-  printf '%s\n' "$files" | { xargs go run "github.com/uudashr/gocognit/cmd/gocognit@${GOCOGNIT_VERSION}" -over "$COGNITIVE_MAX" 2>/dev/null || true; } \
-    | awk '{ split($4,a,":"); print "cognitive|" a[1] "|" $3 "|" $1 }'
+  # But that same exit-1 is indistinguishable by code alone from a real abort
+  # (unparseable file etc), which prints NOTHING to stdout and would silently
+  # scan as "0 findings". The discriminator is stderr: normal findings runs
+  # write nothing to stderr from the tool itself (go run's own "exit status N"
+  # trailer, which it always emits when the wrapped binary exits non-zero, is
+  # filtered out as expected noise); real errors (parse failure, bad args,
+  # build failure) additionally write a message before that trailer. Capture
+  # stderr, strip the trailer, and FATAL if anything real remains — instead of
+  # letting `|| true` swallow a broken scan (#468).
+  run_metric() { # <module> <version> <threshold> <metric-label>
+    local err; err=$(mktemp)
+    { printf '%s\n' "$files" | xargs go run "$1@$2" -over "$3" 2>"$err" | awk -v m="$4" '{ split($4,a,":"); print m "|" a[1] "|" $3 "|" $1 }'; } || true
+    grep -vE '^exit status [0-9]+$' "$err" > "$err.real" || true
+    if [ -s "$err.real" ]; then
+      cat "$err.real" >&2
+      rm -f "$err" "$err.real"
+      echo "FATAL: $1 errored during scan (see above) — refusing to scan nothing (#468)" >&2
+      exit 1
+    fi
+    rm -f "$err" "$err.real"
+  }
+  run_metric "github.com/fzipp/gocyclo/cmd/gocyclo" "$GOCYCLO_VERSION" "$CYCLO_MAX" cyclo
+  run_metric "github.com/uudashr/gocognit/cmd/gocognit" "$GOCOGNIT_VERSION" "$COGNITIVE_MAX" cognitive
   printf '%s\n' "$files" | while IFS= read -r f; do
     n=$(wc -l < "$f" | tr -d ' ')
     if [ "$n" -gt "$FILE_MAX_LINES" ]; then printf 'filesize|%s|-|%s\n' "$f" "$n"; fi
