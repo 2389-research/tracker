@@ -2,12 +2,13 @@
 // ABOUTME: Supports =, !=, ==, contains, startswith, endswith, in, not, &&, and || operators against pipeline context.
 
 // Limitations:
-//   - Operator splitting uses strings.Split on "||" and "&&" before clause parsing.
-//     Values containing these literals will be misinterpreted even if quoted.
+//   - Operator splitting is quote-aware (splitOutsideQuotes): || and && inside a
+//     double-quoted value are NOT treated as operators, so a value legitimately
+//     containing them (a URL, regex, stderr fragment) is not split (#444).
 //   - No parentheses support for grouping. || is lowest precedence, && is higher.
 //   - Both = and == are accepted for equality. Use = for consistency with .dip convention.
-//   - Quote stripping (surrounding "") is applied only to =, ==, and != comparisons;
-//     contains/startswith/endswith/in do not strip quotes.
+//   - Quote stripping (surrounding "") is applied uniformly to =, ==, != AND the
+//     word operators contains/startswith/endswith/in (and their `not` variants).
 
 package pipeline
 

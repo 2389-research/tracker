@@ -574,6 +574,8 @@ func TestConditionQuoteAwareSplitAndOperands(t *testing.T) {
 		{"contains-strips-quotes", `ctx.resp contains "error"`, true},
 		{"top-level-or-still-splits", `ctx.url = "nope" || ctx.resp contains "error"`, true},
 		{"top-level-and-still-splits", `ctx.resp contains "error" && ctx.url = "http://a||b"`, true},
+		{"not-contains-strips-quotes", `ctx.resp not contains "absent"`, true},
+		{"not-contains-present-word", `ctx.resp not contains "error"`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
