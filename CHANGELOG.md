@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-07-13
+
 ### Changed
 
+- **dippin-lang bumped v0.43.0 → v0.48.0.** `dipx.Pack` migrated to its new
+  `(ctx, entry, io.Writer, PackOptions)` signature. (`PackOptions.NoInline` — ship
+  referenced files as bundle assets — is now available upstream.)
 - **Example pipelines restored to grade A under dippin v0.48 (dippin bump follow-up).**
   After the dippin-lang bump to v0.48, `make doctor` (which runs dippin via
   `go run …@$(DIPPIN_VERSION)` read from `go.mod`) flagged redundant fan-out edges
