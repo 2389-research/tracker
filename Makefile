@@ -2,7 +2,7 @@
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
 .PHONY: build test test-race test-short lint fmt fmt-check vet coverage \
-        doctor complexity complexity-report ci install clean setup-hooks \
+        doctor complexity complexity-update complexity-report ci install clean setup-hooks \
         tools-jail-check
 
 GOCACHE ?= $(CURDIR)/.gocache
@@ -16,6 +16,8 @@ COVERAGE_THRESHOLD ?= 80
 CYCLO_MAX     ?= 8
 COGNITIVE_MAX ?= 8
 FILE_MAX_LINES ?= 500
+GOCYCLO_VERSION   ?= v0.6.0
+GOCOGNIT_VERSION  ?= v1.2.1
 
 # ─── Build ───────────────────────────────────────────────
 
@@ -66,56 +68,27 @@ coverage:
 
 # ─── Complexity ──────────────────────────────────────────
 
+# Complexity ratchet (#468): grandfathered baseline that may only shrink.
+# Fails only on NEW or WORSE violations vs scripts/complexity/baseline.txt.
 complexity:
-	@FAIL=0; \
-	echo "--- Cyclomatic complexity (max $(CYCLO_MAX)) ---"; \
-	VIOLATIONS=$$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' | wc -l | tr -d ' '); \
-	if [ "$$VIOLATIONS" -gt 0 ]; then \
-		gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/'; \
-		echo "FAIL: $$VIOLATIONS functions exceed cyclomatic complexity $(CYCLO_MAX)"; \
-		FAIL=1; \
-	else \
-		echo "OK: all functions within limit"; \
-	fi; \
-	echo ""; \
-	echo "--- Cognitive complexity (max $(COGNITIVE_MAX)) ---"; \
-	VIOLATIONS=$$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' | wc -l | tr -d ' '); \
-	if [ "$$VIOLATIONS" -gt 0 ]; then \
-		gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/'; \
-		echo "FAIL: $$VIOLATIONS functions exceed cognitive complexity $(COGNITIVE_MAX)"; \
-		FAIL=1; \
-	else \
-		echo "OK: all functions within limit"; \
-	fi; \
-	echo ""; \
-	echo "--- File size (max $(FILE_MAX_LINES) lines, excluding tests) ---"; \
-	OVERSIZED=0; \
-	for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*'); do \
-		LINES=$$(wc -l < "$$f" | tr -d ' '); \
-		if [ "$$LINES" -gt $(FILE_MAX_LINES) ]; then \
-			printf "  %6d  %s\n" "$$LINES" "$$f"; \
-			OVERSIZED=$$((OVERSIZED + 1)); \
-		fi; \
-	done; \
-	if [ "$$OVERSIZED" -gt 0 ]; then \
-		echo "FAIL: $$OVERSIZED files exceed $(FILE_MAX_LINES) lines"; \
-		FAIL=1; \
-	else \
-		echo "OK: all files within limit"; \
-	fi; \
-	if [ "$$FAIL" -gt 0 ]; then exit 1; fi
+	@bash scripts/complexity/gate.sh gate
+
+# Regenerate the grandfathered baseline after a legitimate decomposition.
+# The committed baseline may only shrink (enforced in CI).
+complexity-update:
+	@bash scripts/complexity/gate.sh update
 
 complexity-report:
 	@echo "═══ Complexity Report ═══"
 	@echo ""
 	@echo "--- Top 10 cyclomatic complexity (production code) ---"
-	@gocyclo -top 10 . 2>&1 | grep -v '_test.go' | head -10
+	@gocyclo -top 10 . 2>&1 | grep -v '_test.go' | grep -v -e '/.worktrees/' -e '/.claude/' | head -10
 	@echo ""
 	@echo "--- Top 10 cognitive complexity (production code) ---"
-	@gocognit -top 10 . 2>&1 | grep -v '_test.go' | head -10
+	@gocognit -top 10 . 2>&1 | grep -v '_test.go' | grep -v -e '/.worktrees/' -e '/.claude/' | head -10
 	@echo ""
 	@echo "--- Files over $(FILE_MAX_LINES) lines (production code) ---"
-	@for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*'); do \
+	@for f in $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*' -not -path './.worktrees/*' -not -path './.claude/*'); do \
 		LINES=$$(wc -l < "$$f" | tr -d ' '); \
 		if [ "$$LINES" -gt $(FILE_MAX_LINES) ]; then \
 			printf "  %6d  %s\n" "$$LINES" "$$f"; \
@@ -123,9 +96,9 @@ complexity-report:
 	done | sort -rn
 	@echo ""
 	@echo "--- Summary ---"
-	@echo "  Cyclomatic > $(CYCLO_MAX):  $$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' ') functions"
-	@echo "  Cognitive > $(COGNITIVE_MAX): $$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | wc -l | tr -d ' ') functions"
-	@echo "  Files > $(FILE_MAX_LINES) LOC:  $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*' -exec sh -c 'test $$(wc -l < "$$1" | tr -d " ") -gt $(FILE_MAX_LINES) && echo 1' _ {} \; | wc -l | tr -d ' ') files"
+	@echo "  Cyclomatic > $(CYCLO_MAX):  $$(gocyclo -over $(CYCLO_MAX) . 2>&1 | grep -v '_test.go' | grep -v -e '/.worktrees/' -e '/.claude/' | wc -l | tr -d ' ') functions"
+	@echo "  Cognitive > $(COGNITIVE_MAX): $$(gocognit -over $(COGNITIVE_MAX) . 2>&1 | grep -v '_test.go' | grep -v -e '/.worktrees/' -e '/.claude/' | wc -l | tr -d ' ') functions"
+	@echo "  Files > $(FILE_MAX_LINES) LOC:  $$(find . -name '*.go' -not -name '*_test.go' -not -path './vendor/*' -not -path './cmd/tracker-conformance/*' -not -path './.worktrees/*' -not -path './.claude/*' -exec sh -c 'test $$(wc -l < "$$1" | tr -d " ") -gt $(FILE_MAX_LINES) && echo 1' _ {} \; | wc -l | tr -d ' ') files"
 
 # ─── Lint ────────────────────────────────────────────────
 

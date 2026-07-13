@@ -52,6 +52,13 @@ jobs:
       - name: Agent-tool jail lint
         run: make tools-jail-check
 
+      - name: Complexity gate
+        run: bash scripts/complexity/gate.sh gate
+
+      - name: Complexity baseline may only shrink
+        if: github.event_name == 'pull_request'
+        run: bash scripts/complexity/gate.sh baseline-shrinks "${{ github.event.pull_request.base.sha }}"
+
       - name: Verify tracker binary
         run: ./bin/tracker --help
 

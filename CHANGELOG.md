@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The interview-result handler fails the node instead of panicking (#448).** A
   JSON marshal failure now returns an error routed as a node failure rather than
   crashing the pipeline process.
+- **The canonical `make ci` complexity gate is real, green, and CI-enforced (#468).**
+  It previously could not pass: `ci.yml` never ran it, the pre-commit hook only
+  checked staged files, and the whole-repo scan double-counted `.worktrees/`
+  copies (~10× inflation). The gate now runs a **ratchet** — a checked-in
+  `scripts/complexity/baseline.txt` grandfathers the current cyclo/cognitive/
+  file-size debt and may **only shrink**; a new or worsened violation fails the
+  build. Analyzers are pinned (gocyclo v0.6.0, gocognit v1.2.1) and run in
+  GitHub Actions. Limits are unchanged (8/8/500); the baseline burns down over
+  time via `make complexity-update`.
 
 ### Changed
 
