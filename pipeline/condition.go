@@ -32,9 +32,32 @@ func EvaluateCondition(expr string, ctx *PipelineContext) (bool, error) {
 	return evaluateOr(expr, ctx)
 }
 
+// splitOutsideQuotes splits s on the two-character sep ("||" or "&&"), but only
+// where sep occurs OUTSIDE a double-quoted span. A value that legitimately
+// contains || or && (a URL, a regex, a stderr fragment) is no longer split into
+// phantom clauses (#444). An unterminated quote treats the rest as quoted, so a
+// stray operator inside it never splits — a loud non-match beats a silent split.
+func splitOutsideQuotes(s, sep string) []string {
+	var parts []string
+	start := 0
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if !inQuote && strings.HasPrefix(s[i:], sep) {
+			parts = append(parts, s[start:i])
+			i += len(sep) - 1
+			start = i + 1
+		}
+	}
+	return append(parts, s[start:])
+}
+
 // evaluateOr splits on "||" and returns true if any branch is true (short-circuit).
 func evaluateOr(expr string, ctx *PipelineContext) (bool, error) {
-	branches := strings.Split(expr, "||")
+	branches := splitOutsideQuotes(expr, "||")
 	for _, branch := range branches {
 		result, err := evaluateAnd(strings.TrimSpace(branch), ctx)
 		if err != nil {
@@ -49,7 +72,7 @@ func evaluateOr(expr string, ctx *PipelineContext) (bool, error) {
 
 // evaluateAnd splits on "&&" and returns true only if all clauses are true (short-circuit).
 func evaluateAnd(expr string, ctx *PipelineContext) (bool, error) {
-	clauses := strings.Split(expr, "&&")
+	clauses := splitOutsideQuotes(expr, "&&")
 	for _, clause := range clauses {
 		result, err := evaluateClause(strings.TrimSpace(clause), ctx)
 		if err != nil {
@@ -129,7 +152,7 @@ func tryNegatedWordOp(clause string, ctx *PipelineContext) (bool, bool) {
 			continue
 		}
 		key := strings.TrimSpace(clause[:idx])
-		value := strings.TrimSpace(clause[idx+len(op):])
+		value := strings.Trim(strings.TrimSpace(clause[idx+len(op):]), `"`)
 		actual := resolveAndWarnVar(key, ctx)
 		positiveOp := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(op), "not "))
 		result := evalWordOp(positiveOp, actual, value)
@@ -147,7 +170,7 @@ func tryWordOp(clause string, ctx *PipelineContext) (bool, bool) {
 			continue
 		}
 		key := strings.TrimSpace(clause[:idx])
-		value := strings.TrimSpace(clause[idx+len(op):])
+		value := strings.Trim(strings.TrimSpace(clause[idx+len(op):]), `"`)
 		actual := resolveAndWarnVar(key, ctx)
 		return evalWordOp(strings.TrimSpace(op), actual, value), true
 	}
