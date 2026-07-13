@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -1457,5 +1458,51 @@ func TestMatchFreeformLabel_ChoiceKey(t *testing.T) {
 	got = matchFreeformLabel(graph, node, "approve")
 	if got != "approve" {
 		t.Errorf("matchFreeformLabel(\"approve\") = %q, want %q", got, "approve")
+	}
+}
+
+// blockingCancelInterviewer blocks in Ask until Cancel() closes its release
+// channel; it records that Cancel() fired. Used to prove a gate timeout tears
+// the interviewer down instead of leaking the goroutine (#446).
+type blockingCancelInterviewer struct {
+	release  chan struct{}
+	canceled chan struct{}
+	done     chan struct{}
+}
+
+func newBlockingCancelInterviewer() *blockingCancelInterviewer {
+	return &blockingCancelInterviewer{
+		release:  make(chan struct{}),
+		canceled: make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+}
+func (b *blockingCancelInterviewer) Ask(string, []string, string) (string, error) {
+	<-b.release
+	close(b.done)
+	return "", nil
+}
+func (b *blockingCancelInterviewer) Cancel() {
+	close(b.canceled)
+	close(b.release)
+}
+
+func TestWithTimeoutCancelsInterviewer(t *testing.T) {
+	b := newBlockingCancelInterviewer()
+	_, err := withTimeout(10*time.Millisecond, b, func() (string, error) {
+		return b.Ask("p", nil, "")
+	})
+	if err != errHumanTimeout {
+		t.Fatalf("want errHumanTimeout, got %v", err)
+	}
+	select {
+	case <-b.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("Cancel() was not called on timeout — interviewer goroutine leaks (#446)")
+	}
+	select {
+	case <-b.done:
+	case <-time.After(time.Second):
+		t.Fatal("Ask goroutine did not unblock after Cancel()")
 	}
 }
