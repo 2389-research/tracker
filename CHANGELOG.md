@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Example pipelines restored to grade A under dippin v0.48 (dippin bump follow-up).**
-  The v0.48 dippin lint flags redundant fan-out edges (DIP153), unused `weight:`
-  attributes (DIP151), and a few missing failure-route / `max_restarts` hints that
-  dropped 18 examples below A on `dippin doctor` (errors stayed 0, so runtime was
-  unaffected). All are behavior-preserving cleanups; core pipelines keep their
-  design comments. The CI dippin CLI is bumped v0.22.0 → v0.48.0 to enforce it.
+  After the dippin-lang bump to v0.48, `make doctor` (which runs dippin via
+  `go run …@$(DIPPIN_VERSION)` read from `go.mod`) flagged redundant fan-out edges
+  (DIP153), unused `weight:` attributes (DIP151), and a few missing failure-route /
+  `max_restarts` hints — dropping 18 examples below A (errors stayed 0, so runtime
+  was unaffected, but the grade gate was red). All fixes are behavior-preserving
+  cleanups; core pipelines keep their design comments. (`.github/workflows/ci.yml`'s
+  standalone `dippin` CLI pin is also bumped v0.22.0 → v0.48.0 to keep it in sync
+  with the go.mod dep, though the enforcing channel is go.mod, not that install.)
 
 ### Fixed
 
