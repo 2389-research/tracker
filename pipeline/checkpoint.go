@@ -41,6 +41,15 @@ type Checkpoint struct {
 	// Persisted so a resumed run replays the re-entry deterministically.
 	GateRecheckPending map[string]bool `json:"gate_recheck_pending,omitempty"`
 
+	// OverriddenGates records goal-gate node IDs whose last (failed) outcome
+	// a human resolved by traversing an override edge from the gate's
+	// escalation (#348 defect 2). An overridden gate is treated as satisfied
+	// by the exit-time goal-gate check and is not re-entered; the run
+	// completes validation_overridden. Cleared when the gate re-executes so a
+	// fresh failure on new work re-prompts the human. Persisted so a resumed
+	// run stays resolved.
+	OverriddenGates map[string]bool `json:"overridden_gates,omitempty"`
+
 	// WIPRefs maps a failed/exhausted node ID to the recoverable git ref
 	// (a tag tracker/wip/<runID>/<nodeID>) where its uncommitted work was
 	// preserved before the engine routed away from it (#302). Additive;
@@ -149,6 +158,27 @@ func (cp *Checkpoint) ClearGateRecheckPending(nodeID string) {
 // re-execution after a retry/fallback redirect (#348 defect 1).
 func (cp *Checkpoint) IsGateRecheckPending(nodeID string) bool {
 	return cp.GateRecheckPending[nodeID]
+}
+
+// MarkGateOverridden records that a human resolved a failed goal gate via an
+// override edge from its escalation (#348 defect 2).
+func (cp *Checkpoint) MarkGateOverridden(nodeID string) {
+	if cp.OverriddenGates == nil {
+		cp.OverriddenGates = make(map[string]bool)
+	}
+	cp.OverriddenGates[nodeID] = true
+}
+
+// ClearGateOverridden drops a gate's override when the gate re-executes, so a
+// fresh failure on new work re-prompts the human (#348 defect 2).
+func (cp *Checkpoint) ClearGateOverridden(nodeID string) {
+	delete(cp.OverriddenGates, nodeID)
+}
+
+// IsGateOverridden reports whether a goal gate was human-overridden (#348
+// defect 2). A nil map returns false.
+func (cp *Checkpoint) IsGateOverridden(nodeID string) bool {
+	return cp.OverriddenGates[nodeID]
 }
 
 // SetEdgeSelection records the selected outgoing edge for a completed node.

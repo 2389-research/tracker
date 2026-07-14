@@ -3,8 +3,10 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -283,5 +285,42 @@ func TestCheckpoint_GateRecheckPending_Roundtrip(t *testing.T) {
 	(&Checkpoint{}).ClearGateRecheckPending("anything")
 	if (&Checkpoint{}).IsGateRecheckPending("anything") {
 		t.Fatal("empty checkpoint should report no pending rechecks")
+	}
+}
+
+func TestCheckpoint_OverriddenGates_Roundtrip(t *testing.T) {
+	cp := &Checkpoint{}
+	// nil-map safety: read/clear before any write must not panic.
+	if cp.IsGateOverridden("gate") {
+		t.Fatal("IsGateOverridden on nil map = true, want false")
+	}
+	cp.ClearGateOverridden("gate") // must not panic on nil map
+
+	cp.MarkGateOverridden("gate")
+	if !cp.IsGateOverridden("gate") {
+		t.Fatal("IsGateOverridden after Mark = false, want true")
+	}
+
+	data, err := json.Marshal(cp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got Checkpoint
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !got.IsGateOverridden("gate") {
+		t.Fatal("overridden gate did not survive JSON round-trip")
+	}
+
+	got.ClearGateOverridden("gate")
+	if got.IsGateOverridden("gate") {
+		t.Fatal("IsGateOverridden after Clear = true, want false")
+	}
+
+	// omitempty: an empty set must not appear in JSON (backward-compat).
+	empty, _ := json.Marshal(&Checkpoint{})
+	if strings.Contains(string(empty), "overridden_gates") {
+		t.Fatalf("empty checkpoint JSON contains overridden_gates: %s", empty)
 	}
 }
