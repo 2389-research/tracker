@@ -97,6 +97,34 @@ func mustGitInit(t *testing.T, dir string) {
 	}
 }
 
+func mustGitInitBare(t *testing.T, dir string) {
+	t.Helper()
+	requireGit(t)
+	cmd := exec.Command("git", "init", "--bare", "-q", dir)
+	cmd.Env = cleanGitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare in %s: %v: %s", dir, err, out)
+	}
+}
+
+func TestBareGitHelperIgnoresInheritedRepositoryRedirects(t *testing.T) {
+	outer := t.TempDir()
+	mustGitInit(t, outer)
+	t.Setenv("GIT_DIR", filepath.Join(outer, ".git"))
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(outer, ".git", "index"))
+	t.Setenv("GIT_WORK_TREE", outer)
+
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	mustGitInitBare(t, bare)
+	installed, isRepo, isBare, err := checkGit(context.Background(), bare)
+	if err != nil {
+		t.Fatalf("checkGit bare fixture: %v", err)
+	}
+	if !installed || isRepo || !isBare {
+		t.Fatalf("checkGit bare fixture = installed %v, worktree %v, bare %v", installed, isRepo, isBare)
+	}
+}
+
 func TestCheckGit_Installed(t *testing.T) {
 	requireGit(t)
 	installed, _, _, err := checkGit(context.Background(), t.TempDir())
@@ -162,10 +190,7 @@ func TestCheckGit_CtxCancellationPropagates(t *testing.T) {
 func TestCheckGit_BareRepoIsNotRepo(t *testing.T) {
 	requireGit(t)
 	bare := filepath.Join(t.TempDir(), "bare.git")
-	cmd := exec.Command("git", "init", "--bare", "-q", bare)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init --bare: %v: %s", err, out)
-	}
+	mustGitInitBare(t, bare)
 	installed, isRepo, isBare, err := checkGit(context.Background(), bare)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -311,10 +336,7 @@ func TestSafetyLatches_NestedRefused_Worktree(t *testing.T) {
 func TestSafetyLatches_NestedRefused_BareRepo(t *testing.T) {
 	requireGit(t)
 	bare := filepath.Join(t.TempDir(), "bare.git")
-	cmd := exec.Command("git", "init", "--bare", "-q", bare)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init --bare: %v: %s", err, out)
-	}
+	mustGitInitBare(t, bare)
 	if err := safetyLatches(context.Background(), bare); err == nil {
 		t.Fatalf("expected refusal for bare repo dir")
 	}

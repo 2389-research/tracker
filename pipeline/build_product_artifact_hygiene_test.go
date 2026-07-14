@@ -26,6 +26,7 @@ func gitInit(t *testing.T, dir string) {
 	} {
 		c := exec.Command("git", args...)
 		c.Dir = dir
+		c.Env = cleanGitEnv()
 		if b, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, b)
 		}
@@ -37,11 +38,32 @@ func gitTracked(t *testing.T, dir string) string {
 	t.Helper()
 	c := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
 	c.Dir = dir
+	c.Env = cleanGitEnv()
 	b, err := c.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git ls-tree: %v\n%s", err, b)
 	}
 	return string(b)
+}
+
+func TestGitHelpersIgnoreInheritedRepositoryRedirects(t *testing.T) {
+	outer := t.TempDir()
+	gitInit(t, outer)
+	inner := t.TempDir()
+
+	t.Setenv("GIT_DIR", filepath.Join(outer, ".git"))
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(outer, ".git", "index"))
+	t.Setenv("GIT_WORK_TREE", outer)
+
+	gitInit(t, inner)
+	mustWrite(t, filepath.Join(inner, "main.go"), "package main\n")
+	out, code := runToolCmd(t, toolCmd(t, "CommitIfDirty"), inner, append(cleanGitEnv(), "HOME="+t.TempDir()))
+	if code != 0 {
+		t.Fatalf("CommitIfDirty exit=%d under inherited git redirects:\n%s", code, out)
+	}
+	if tracked := gitTracked(t, inner); !strings.Contains(tracked, "main.go") {
+		t.Fatalf("inner repository did not commit main.go under inherited git redirects:\n%s", tracked)
+	}
 }
 
 // TestBuildProductCommitIfDirtySkipsBinaryArtifact pins #405 AC1: a compiled,
@@ -62,7 +84,7 @@ func TestBuildProductCommitIfDirtySkipsBinaryArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, code := runToolCmd(t, toolCmd(t, "CommitIfDirty"), dir, append(os.Environ(), "HOME="+t.TempDir()))
+	out, code := runToolCmd(t, toolCmd(t, "CommitIfDirty"), dir, append(cleanGitEnv(), "HOME="+t.TempDir()))
 	if code != 0 {
 		t.Fatalf("CommitIfDirty exit=%d:\n%s", code, out)
 	}
