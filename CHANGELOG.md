@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-07-14
+
+### Changed
+
+- **dippin-lang bumped v0.48.0 → v0.49.0.** Reconciles tracker's condition
+  handling with the parser fixes in
+  [dippin v0.49.0](https://github.com/2389-research/dippin-lang/releases/tag/v0.49.0).
+  All three pins move together: the go.mod library dep, the `.github/workflows/ci.yml`
+  standalone `dippin` CLI, and `tracker_doctor.go`'s `PinnedDippinVersion`.
+- **Condition parsing is now escape-aware (#444 reconciliation, #470).** Logical
+  splitting (`||`/`&&`) and comparison-operator discovery (`=`/`==`/`!=` and the
+  word operators) both ignore content inside double quotes. Exactly one surrounding
+  quote pair is removed from every RHS, and `\"`/`\\` are decoded inside it. A quote
+  preceded by an odd run of backslashes is escaped; an even run closes the operand;
+  an **unmatched double quote is now a loud error** (carrying the original
+  expression and, at load time, the `.dip` source location) instead of a silent
+  mis-parse. Semantic validation applies the same quote-aware grammar to **every
+  logical branch independently**, so a malformed later branch is rejected even when
+  an earlier branch would short-circuit at runtime.
+- **`tracker-swebench` `main()` decomposed (#469).** The ~200-line entrypoint
+  (cyclomatic 44 / cognitive 74) was split into focused, behavior-preserving helpers,
+  each under the complexity-8 gate; the two grandfathered `main()` entries burn out
+  of the ratchet baseline (218 → 216). Each SWE-bench container is now bounded to
+  1.0 CPU (was 2.0) so concurrent instances don't oversubscribe the host, and the
+  per-instance prompt temp file is written under the run's results dir instead of the
+  system temp dir.
+- **Docs:** added a rolling `ROADMAP.md` (Now/Next/Later workstreams) and a matching
+  website Roadmap page; corrected inaccurate CLI/workflow examples on the site
+  (`--max-tokens` takes an integer, `tracker-swebench --dataset`, Codex reviewer
+  model).
+
 ## [0.44.0] - 2026-07-13
 
 ### Changed
