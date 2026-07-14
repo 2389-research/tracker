@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a human actor resolves a failed gate (autopilot/`--auto-approve`/webhook still
   fail an unsatisfied goal gate); the override is recorded against the specific
   gate (`OverrideDetail.CoveredGates`) and cleared if the gate re-executes.
+  The `build_product` and `build_product_with_superspec` workflows now mark their
+  post-build escalation "accept" edges (`EscalateReview`/`EscalateToHuman → Cleanup`)
+  with `override: true`, so accepting a flagged `FinalSpecCheck` failure completes
+  the run as `validation_overridden` (routing unchanged; clears the TRK102 lint hint).
 
 ## [0.45.0] - 2026-07-14
 

@@ -1166,7 +1166,9 @@ workflow BuildProductWithSuperspec
     TraceabilityAudit -> Cleanup  when ctx.outcome = success
     TraceabilityAudit -> EscalateToHuman  when ctx.outcome = fail
     TraceabilityAudit -> EscalateToHuman
-    EscalateToHuman -> Cleanup  label: "accept"
+    # "accept" overrides the failed goal gate (#348 defect 2): the run completes
+    # as validation_overridden instead of the gate re-running. Routing unchanged.
+    EscalateToHuman -> Cleanup  label: "accept"  override: true
     EscalateToHuman -> Done  label: "abandon"
     Cleanup -> FinalCommit
     FinalCommit -> Done
