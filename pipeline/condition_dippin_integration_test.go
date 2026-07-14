@@ -1,5 +1,5 @@
 // ABOUTME: Real dippin parser-to-tracker regressions for quoted edge conditions.
-// ABOUTME: Proves escaped quotes survive adapter loading and malformed quotes retain source locations.
+// ABOUTME: Proves escaped quotes/backslashes survive adapter loading and malformed quotes retain source locations.
 package pipeline
 
 import (
@@ -36,6 +36,42 @@ func TestLoadDippinWorkflowPreservesEscapedQuotesInCondition(t *testing.T) {
 	}
 	if !got {
 		t.Fatalf("loaded condition %q did not match literal quoted tool output", graph.Edges[0].Condition)
+	}
+}
+
+func TestLoadDippinWorkflowPreservesEscapedBackslashInCondition(t *testing.T) {
+	source := `workflow condition_backslash
+  start: Emit
+  exit: Done
+
+  tool Emit
+    command: true
+
+  tool Done
+    command: true
+
+  edges
+    Emit -> Done when ctx.path = "C:\\"
+`
+	graph, diagnostics, err := LoadDippinWorkflow(source, "escaped_backslash_condition.dip")
+	if err != nil {
+		t.Fatalf("LoadDippinWorkflow: %v\ndiagnostics: %v", err, diagnostics)
+	}
+	if len(graph.Edges) != 1 {
+		t.Fatalf("edge count = %d, want 1", len(graph.Edges))
+	}
+	const wantCondition = `ctx.path = "C:\\"`
+	if got := graph.Edges[0].Condition; got != wantCondition {
+		t.Fatalf("adapted condition = %q, want exact raw form %q", got, wantCondition)
+	}
+	ctx := NewPipelineContext()
+	ctx.Set("path", `C:\`)
+	got, err := EvaluateCondition(graph.Edges[0].Condition, ctx)
+	if err != nil {
+		t.Fatalf("EvaluateCondition(%q): %v", graph.Edges[0].Condition, err)
+	}
+	if !got {
+		t.Fatalf("loaded condition %q did not match path ending in one literal backslash", graph.Edges[0].Condition)
 	}
 }
 
