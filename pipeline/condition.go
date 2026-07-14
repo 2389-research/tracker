@@ -2,13 +2,12 @@
 // ABOUTME: Supports =, !=, ==, contains, startswith, endswith, in, not, &&, and || operators against pipeline context.
 
 // Limitations:
-//   - Operator splitting is quote-aware (splitOutsideQuotes): || and && inside a
-//     double-quoted value are NOT treated as operators, so a value legitimately
-//     containing them (a URL, regex, stderr fragment) is not split (#444).
+//   - Logical splitting and operator discovery are double-quote-aware. Escaped
+//     quotes do not close a value; unmatched double quotes return an error.
 //   - No parentheses support for grouping. || is lowest precedence, && is higher.
 //   - Both = and == are accepted for equality. Use = for consistency with .dip convention.
-//   - Quote stripping (surrounding "") is applied uniformly to =, ==, != AND the
-//     word operators contains/startswith/endswith/in (and their `not` variants).
+//   - One surrounding double-quote pair is removed uniformly from every RHS;
+//     escaped quotes and backslashes are decoded inside that pair.
 
 package pipeline
 
@@ -33,32 +32,58 @@ func EvaluateCondition(expr string, ctx *PipelineContext) (bool, error) {
 	return evaluateOr(expr, ctx)
 }
 
-// splitOutsideQuotes splits s on the two-character sep ("||" or "&&"), but only
-// where sep occurs OUTSIDE a double-quoted span. A value that legitimately
-// contains || or && (a URL, a regex, a stderr fragment) is no longer split into
-// phantom clauses (#444). An unterminated quote treats the rest as quoted, so a
-// stray operator inside it never splits — a loud non-match beats a silent split.
-func splitOutsideQuotes(s, sep string) []string {
-	var parts []string
-	start := 0
+// scanOutsideDoubleQuotes marks bytes outside double-quoted spans. A quote is
+// escaped only when preceded by an odd run of backslashes; even runs leave the
+// quote free to close the span.
+func scanOutsideDoubleQuotes(s string) ([]bool, error) {
+	outside := make([]bool, len(s))
 	inQuote := false
+	backslashes := 0
 	for i := 0; i < len(s); i++ {
-		if s[i] == '"' {
-			inQuote = !inQuote
+		if s[i] == '\\' {
+			outside[i] = !inQuote
+			backslashes++
 			continue
 		}
-		if !inQuote && strings.HasPrefix(s[i:], sep) {
+		if s[i] == '"' && backslashes%2 == 0 {
+			inQuote = !inQuote
+			backslashes = 0
+			continue
+		}
+		outside[i] = !inQuote
+		backslashes = 0
+	}
+	if inQuote {
+		return nil, fmt.Errorf("unmatched double quote in condition: %s", s)
+	}
+	return outside, nil
+}
+
+// splitOutsideQuotes splits s on sep only where the delimiter is outside a
+// double-quoted span.
+func splitOutsideQuotes(s, sep string) ([]string, error) {
+	outside, err := scanOutsideDoubleQuotes(s)
+	if err != nil {
+		return nil, err
+	}
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if outside[i] && strings.HasPrefix(s[i:], sep) {
 			parts = append(parts, s[start:i])
 			i += len(sep) - 1
 			start = i + 1
 		}
 	}
-	return append(parts, s[start:])
+	return append(parts, s[start:]), nil
 }
 
 // evaluateOr splits on "||" and returns true if any branch is true (short-circuit).
 func evaluateOr(expr string, ctx *PipelineContext) (bool, error) {
-	branches := splitOutsideQuotes(expr, "||")
+	branches, err := splitOutsideQuotes(expr, "||")
+	if err != nil {
+		return false, err
+	}
 	for _, branch := range branches {
 		result, err := evaluateAnd(strings.TrimSpace(branch), ctx)
 		if err != nil {
@@ -73,7 +98,10 @@ func evaluateOr(expr string, ctx *PipelineContext) (bool, error) {
 
 // evaluateAnd splits on "&&" and returns true only if all clauses are true (short-circuit).
 func evaluateAnd(expr string, ctx *PipelineContext) (bool, error) {
-	clauses := splitOutsideQuotes(expr, "&&")
+	clauses, err := splitOutsideQuotes(expr, "&&")
+	if err != nil {
+		return false, err
+	}
 	for _, clause := range clauses {
 		result, err := evaluateClause(strings.TrimSpace(clause), ctx)
 		if err != nil {
@@ -97,42 +125,83 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 		return !result, nil
 	}
 
-	// Try negated word-based operators first.
-	if result, ok := tryNegatedWordOp(clause, ctx); ok {
-		return result, nil
-	}
-
-	// Try word-based operators.
-	if result, ok := tryWordOp(clause, ctx); ok {
-		return result, nil
-	}
-
-	return evaluateEqualityClause(clause, ctx)
+	return evaluateComparisonClause(clause, ctx)
 }
 
-// evaluateEqualityClause handles =, ==, and != comparison operators.
-func evaluateEqualityClause(clause string, ctx *PipelineContext) (bool, error) {
-	// Try != first since it contains = as a substring.
-	if idx := strings.Index(clause, "!="); idx >= 0 {
-		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
-		expected := strings.Trim(strings.TrimSpace(clause[idx+2:]), `"`)
+type conditionOperator struct {
+	raw      string
+	word     string
+	index    int
+	negated  bool
+	equality bool
+}
+
+var conditionOperators = []conditionOperator{
+	{raw: " not contains ", word: "contains", negated: true},
+	{raw: " not startswith ", word: "startswith", negated: true},
+	{raw: " not endswith ", word: "endswith", negated: true},
+	{raw: " not in ", word: "in", negated: true},
+	{raw: " contains ", word: "contains"},
+	{raw: " startswith ", word: "startswith"},
+	{raw: " endswith ", word: "endswith"},
+	{raw: " in ", word: "in"},
+	{raw: "!=", equality: true},
+	{raw: " == ", equality: true},
+	{raw: "=", equality: true},
+}
+
+// findConditionOperator finds the first priority-ordered operator outside quotes.
+func findConditionOperator(clause string) (conditionOperator, bool, error) {
+	outside, err := scanOutsideDoubleQuotes(clause)
+	if err != nil {
+		return conditionOperator{}, false, err
+	}
+	for _, candidate := range conditionOperators {
+		for i := 0; i+len(candidate.raw) <= len(clause); i++ {
+			if outside[i] && strings.HasPrefix(clause[i:], candidate.raw) {
+				candidate.index = i
+				return candidate, true, nil
+			}
+		}
+	}
+	return conditionOperator{}, false, nil
+}
+
+func evaluateComparisonClause(clause string, ctx *PipelineContext) (bool, error) {
+	op, ok, err := findConditionOperator(clause)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("invalid condition clause: %q (expected key=value, key==value, key!=value, or word operator like contains/startswith/endswith/in)", clause)
+	}
+	actual := resolveAndWarnVar(strings.TrimSpace(clause[:op.index]), ctx)
+	expected := normalizeConditionOperand(clause[op.index+len(op.raw):])
+	if !op.equality {
+		result := evalWordOp(op.word, actual, expected)
+		if op.negated {
+			return !result, nil
+		}
+		return result, nil
+	}
+	switch op.raw {
+	case "!=":
 		return actual != expected, nil
-	}
-
-	// Check for == operator (space-delimited to avoid matching == inside values).
-	if idx := strings.Index(clause, " == "); idx >= 0 {
-		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
-		expected := strings.Trim(strings.TrimSpace(clause[idx+4:]), `"`)
+	default:
 		return actual == expected, nil
 	}
+}
 
-	if idx := strings.Index(clause, "="); idx >= 0 {
-		actual := resolveAndWarnVar(strings.TrimSpace(clause[:idx]), ctx)
-		expected := strings.Trim(strings.TrimSpace(clause[idx+1:]), `"`)
-		return actual == expected, nil
+// normalizeConditionOperand removes one surrounding quote pair and decodes
+// dippin's supported double-quoted escapes in parser order.
+func normalizeConditionOperand(raw string) string {
+	value := strings.TrimSpace(raw)
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return value
 	}
-
-	return false, fmt.Errorf("invalid condition clause: %q (expected key=value, key==value, key!=value, or word operator like contains/startswith/endswith/in)", clause)
+	value = value[1 : len(value)-1]
+	value = strings.ReplaceAll(value, `\"`, `"`)
+	return strings.ReplaceAll(value, `\\`, `\`)
 }
 
 // resolveAndWarnVar resolves a variable and logs a warning if not found.
@@ -142,40 +211,6 @@ func resolveAndWarnVar(name string, ctx *PipelineContext) string {
 		log.Printf("warning: unresolved condition variable %q (defaulting to empty string)", name)
 	}
 	return val
-}
-
-// tryNegatedWordOp checks for "key not contains/startswith/endswith/in value" operators.
-// Returns (result, true) if matched, (false, false) if no match.
-func tryNegatedWordOp(clause string, ctx *PipelineContext) (bool, bool) {
-	for _, op := range []string{" not contains ", " not startswith ", " not endswith ", " not in "} {
-		idx := strings.Index(clause, op)
-		if idx < 0 {
-			continue
-		}
-		key := strings.TrimSpace(clause[:idx])
-		value := strings.Trim(strings.TrimSpace(clause[idx+len(op):]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
-		positiveOp := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(op), "not "))
-		result := evalWordOp(positiveOp, actual, value)
-		return !result, true
-	}
-	return false, false
-}
-
-// tryWordOp checks for "key contains/startswith/endswith/in value" operators.
-// Returns (result, true) if matched, (false, false) if no match.
-func tryWordOp(clause string, ctx *PipelineContext) (bool, bool) {
-	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
-		idx := strings.Index(clause, op)
-		if idx < 0 {
-			continue
-		}
-		key := strings.TrimSpace(clause[:idx])
-		value := strings.Trim(strings.TrimSpace(clause[idx+len(op):]), `"`)
-		actual := resolveAndWarnVar(key, ctx)
-		return evalWordOp(strings.TrimSpace(op), actual, value), true
-	}
-	return false, false
 }
 
 // evalWordOp evaluates a single word-based operator.

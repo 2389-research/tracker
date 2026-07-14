@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -585,6 +586,86 @@ func TestConditionQuoteAwareSplitAndOperands(t *testing.T) {
 			}
 			if got != c.want {
 				t.Errorf("EvaluateCondition(%q) = %v, want %v", c.expr, got, c.want)
+			}
+		})
+	}
+}
+
+func TestConditionEscapedDoubleQuoteMatchesLiteralQuote(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("message", `say "alpha||beta"`)
+	expr := `message = "say \"alpha||beta\""`
+
+	got, err := EvaluateCondition(expr, ctx)
+	if err != nil {
+		t.Fatalf("EvaluateCondition(%q) error: %v", expr, err)
+	}
+	if !got {
+		t.Fatalf("EvaluateCondition(%q) = false, want true", expr)
+	}
+}
+
+func TestConditionEvenBackslashesCloseQuoteBeforeLogicalDelimiter(t *testing.T) {
+	expr := `path = "C:\\" || status = success`
+	for _, tt := range []struct {
+		name   string
+		path   string
+		status string
+	}{
+		{name: "decode even backslashes", path: `C:\`, status: "failed"},
+		{name: "split external delimiter", path: "different", status: "success"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := NewPipelineContext()
+			ctx.Set("path", tt.path)
+			ctx.Set("status", tt.status)
+			got, err := EvaluateCondition(expr, ctx)
+			if err != nil {
+				t.Fatalf("EvaluateCondition(%q) error: %v", expr, err)
+			}
+			if !got {
+				t.Fatalf("EvaluateCondition(%q) = false, want true", expr)
+			}
+		})
+	}
+}
+
+func TestConditionOddBackslashLeavesUnmatchedDoubleQuote(t *testing.T) {
+	ctx := NewPipelineContext()
+	expr := `message = "trailing\"`
+
+	_, err := EvaluateCondition(expr, ctx)
+	if err == nil {
+		t.Fatalf("EvaluateCondition(%q) error = nil, want unmatched quote error", expr)
+	}
+	if !strings.Contains(err.Error(), expr) {
+		t.Fatalf("error %q does not contain original expression %q", err, expr)
+	}
+}
+
+func TestConditionOperatorDiscoveryIgnoresQuotedWordOperators(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("message", "foo contains bar")
+
+	tests := []struct {
+		name         string
+		contextValue string
+		expr         string
+		want         bool
+	}{
+		{name: "endswith", contextValue: "foo contains bar", expr: `message endswith "foo contains bar"`, want: true},
+		{name: "negated endswith", contextValue: "foo not contains bar", expr: `message not endswith "foo not contains bar"`, want: false},
+		{name: "equality", contextValue: "foo contains bar", expr: `message = "foo contains bar"`, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx.Set("message", tt.contextValue)
+			got, err := EvaluateCondition(tt.expr, ctx)
+			if err != nil {
+				t.Fatalf("EvaluateCondition(%q) error: %v", tt.expr, err)
+			}
+			if got != tt.want {
+				t.Fatalf("EvaluateCondition(%q) = %v, want %v", tt.expr, got, tt.want)
 			}
 		})
 	}

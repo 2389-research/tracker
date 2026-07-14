@@ -85,7 +85,11 @@ func checkConditionSyntax(condition string, ctx *PipelineContext) error {
 
 // checkLogicalBranches validates that no branch of a logical expression is empty.
 func checkLogicalBranches(condition string) error {
-	for _, branch := range strings.Split(condition, "||") {
+	branches, err := splitOutsideQuotes(condition, "||")
+	if err != nil {
+		return err
+	}
+	for _, branch := range branches {
 		branch = strings.TrimSpace(branch)
 		if branch == "" {
 			return fmt.Errorf("empty operand in condition")
@@ -99,7 +103,11 @@ func checkLogicalBranches(condition string) error {
 
 // checkAndClauses validates the individual AND clauses within an OR branch.
 func checkAndClauses(branch string) error {
-	for _, clause := range strings.Split(branch, "&&") {
+	clauses, err := splitOutsideQuotes(branch, "&&")
+	if err != nil {
+		return err
+	}
+	for _, clause := range clauses {
 		clause = strings.TrimSpace(clause)
 		if clause == "" {
 			return fmt.Errorf("empty operand in condition")
@@ -138,20 +146,14 @@ func checkClauseSyntax(clause string) error {
 
 // checkClauseOperands checks that the recognized operator in the clause has non-empty operands.
 func checkClauseOperands(inner, original string) error {
-	// Check word-based operators first.
-	for _, op := range []string{" contains ", " startswith ", " endswith ", " in "} {
-		if idx := strings.Index(inner, op); idx >= 0 {
-			return checkOperandPair(inner[:idx], inner[idx+len(op):], strings.TrimSpace(op), original)
-		}
+	op, ok, err := findConditionOperator(inner)
+	if err != nil {
+		return err
 	}
-	// Check != before = to avoid partial match.
-	if idx := strings.Index(inner, "!="); idx >= 0 {
-		return checkOperandPair(inner[:idx], inner[idx+2:], "!=", original)
+	if !ok {
+		return fmt.Errorf("invalid condition clause: %q (missing comparison operator)", original)
 	}
-	if idx := strings.Index(inner, "="); idx >= 0 {
-		return checkOperandPair(inner[:idx], inner[idx+1:], "=", original)
-	}
-	return nil
+	return checkOperandPair(inner[:op.index], inner[op.index+len(op.raw):], strings.TrimSpace(op.raw), original)
 }
 
 // checkOperandPair validates that neither side of an operator is empty.
