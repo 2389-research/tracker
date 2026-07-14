@@ -123,3 +123,35 @@ func TestGoalGateOverride_HumanAcceptCompletesValidationOverridden(t *testing.T)
 		t.Errorf("RetryCount(gate) = %d, want 0 (budget untouched)", cp.RetryCount("gate"))
 	}
 }
+
+func TestGoalGateOverride_ClearedWhenGateReExecutes(t *testing.T) {
+	// gate fails; escalate --accept(override)--> loop --> gate (re-run).
+	// A gate that runs a 2nd time must NOT stay overridden: it should be
+	// re-judged, so the override is cleared on re-execution.
+	g := NewGraph("goal-gate-override-loop")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "gate", Shape: "box", Attrs: map[string]string{"goal_gate": "true", "fallback_target": "escalate", "max_retries": "1"}})
+	g.AddNode(&Node{ID: "escalate", Shape: "hexagon", Attrs: map[string]string{"label": "Accept?"}})
+	g.AddNode(&Node{ID: "loop", Shape: "box"})
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "start", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "done", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "gate", To: "escalate", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "escalate", To: "loop", Label: "accept", Override: true})
+	g.AddEdge(&Edge{From: "loop", To: "gate"})
+
+	// Directly exercise applyOutcome's clear: after a human override marks the
+	// gate, a subsequent gate execution must clear the override flag.
+	cp := &Checkpoint{}
+	cp.MarkGateOverridden("gate")
+	if !cp.IsGateOverridden("gate") {
+		t.Fatal("precondition: gate not marked overridden")
+	}
+	// Simulate the gate re-executing.
+	e := NewEngine(g, newTestRegistry())
+	s := &runState{cp: cp}
+	e.clearGoalGateFlagsOnExecute(s, "gate")
+	if cp.IsGateOverridden("gate") {
+		t.Fatal("override not cleared when the gate re-executed")
+	}
+}

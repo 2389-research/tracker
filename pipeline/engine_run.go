@@ -744,6 +744,13 @@ func missingStatusMessage(nodeID string, ms *AutoStatusDetail) string {
 		nodeID)
 }
 
+// clearGoalGateFlagsOnExecute clears the recheck-pending (#348 defect 1) and
+// human-override (#348 defect 2) flags so neither leaks into a re-execution.
+func (e *Engine) clearGoalGateFlagsOnExecute(s *runState, nodeID string) {
+	s.cp.ClearGateRecheckPending(nodeID)
+	s.cp.ClearGateOverridden(nodeID)
+}
+
 // applyOutcome merges handler outcome into pipeline context and emits the decision_outcome event.
 func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcome) {
 	// Snapshot the outcome so advanceToNextNode can read OverrideActor (and
@@ -755,15 +762,8 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 
 	s.pctx.Merge(outcome.ContextUpdates)
 
-	// #348 defect 1: a goal gate that executes has, by definition,
-	// re-evaluated — clear any pending recheck regardless of outcome,
-	// INCLUDING an empty/unknown status (a fresh fail re-arms via the
-	// normal exit-time gate check). This must not be gated on
-	// outcome.Status != "": pending re-entries are budget-free, so a
-	// still-pending flag after an empty-status execution would re-enter
-	// the gate without ever charging retry budget.
 	if isGoalGate(e.nodeOrDefault(currentNodeID)) {
-		s.cp.ClearGateRecheckPending(currentNodeID)
+		e.clearGoalGateFlagsOnExecute(s, currentNodeID)
 	}
 	if outcome.Status != "" {
 		s.pctx.Set(ContextKeyOutcome, string(outcome.Status))
