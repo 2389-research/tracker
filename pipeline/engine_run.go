@@ -744,8 +744,8 @@ func missingStatusMessage(nodeID string, ms *AutoStatusDetail) string {
 		nodeID)
 }
 
-// clearGoalGateFlagsOnExecute clears the recheck-pending (#348 defect 1) and
-// human-override (#348 defect 2) flags so neither leaks into a re-execution.
+// clearGoalGateFlagsOnExecute clears recheck-pending (#348 defect 1) and override
+// (#348 defect 2) flags. Call unconditionally — gating on outcome.Status revives defect 1.
 func (e *Engine) clearGoalGateFlagsOnExecute(s *runState, nodeID string) {
 	s.cp.ClearGateRecheckPending(nodeID)
 	s.cp.ClearGateOverridden(nodeID)
