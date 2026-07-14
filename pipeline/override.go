@@ -35,6 +35,11 @@ type OverrideDetail struct {
 	// Actor identifies who took the override edge.
 	Actor Actor `json:"actor"`
 
+	// CoveredGates lists the goal-gate node IDs this override resolved as
+	// satisfied (#348 defect 2). Empty for a plain override edge that covers
+	// no failed goal gate.
+	CoveredGates []string `json:"covered_gates,omitempty"`
+
 	// SubgraphPath is populated when this override was propagated from a child
 	// run via Outcome.ChildOverride. Outermost-to-innermost subgraph node IDs;
 	// the leaf gate node ID lives in GateNodeID, not in SubgraphPath. Empty for

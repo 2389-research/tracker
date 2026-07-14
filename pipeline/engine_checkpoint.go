@@ -207,6 +207,14 @@ func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string, nodeOutcomes m
 		return goalGateCheckResult{}, false
 	}
 
+	// #348 defect 2: a human accept at this gate's escalation resolved it.
+	// Must precede the recheck-pending branch (a gate can be both) and is the
+	// only guard on resume, where nodeOutcomes is empty and the success
+	// early-return above does not fire.
+	if cp.IsGateOverridden(nodeID) {
+		return goalGateCheckResult{}, false
+	}
+
 	// A pending recheck wins over the budget branch (#348 defect 1, codex
 	// P2 on #360): the prior redirect — a charged retry or the uncharged
 	// one-shot fallback — routed away without re-running the gate, so
@@ -245,6 +253,56 @@ func (e *Engine) goalGateExhaustedPath(cp *Checkpoint, node *Node, nodeID string
 	}
 	cp.FallbackTaken[nodeID] = true
 	return fb, nodeID, false, true
+}
+
+// gateRoutesTo reports whether goal-gate node gate's fail path leads to
+// escalationID — either a direct outgoing edge gate->escalationID, or gate's
+// resolved fallback target (node/graph fallback_target or fallback_retry_target).
+func (e *Engine) gateRoutesTo(gate *Node, escalationID string) bool {
+	if e.findFallbackTarget(gate) == escalationID {
+		return true
+	}
+	for _, edge := range e.graph.OutgoingEdges(gate.ID) {
+		if edge.To == escalationID {
+			return true
+		}
+	}
+	return false
+}
+
+// coveredGoalGates returns the goal-gate node IDs that an override edge taken
+// from escalationID resolves: gates that actually executed and failed and whose
+// fail path routes to escalationID. Sorted; empty when none apply (#348 defect 2).
+func (e *Engine) coveredGoalGates(s *runState, escalationID string) []string {
+	var covered []string
+	for id, node := range e.graph.Nodes {
+		if !isGoalGate(node) {
+			continue
+		}
+		if s.nodeOutcomes[id] != string(OutcomeFail) {
+			continue
+		}
+		if e.gateRoutesTo(node, escalationID) {
+			covered = append(covered, id)
+		}
+	}
+	sort.Strings(covered)
+	return covered
+}
+
+// markCoveredGoalGates marks (and returns) the goal gates a human override at
+// escalationID resolves. Non-human actors resolve nothing — a failed quality
+// gate must not be auto-satisfied headless (#348 defect 2, squad I1).
+func (e *Engine) markCoveredGoalGates(s *runState, escalationID string, actor Actor) []string {
+	if actor != ActorHuman {
+		return nil
+	}
+	covered := e.coveredGoalGates(s, escalationID)
+	for _, g := range covered {
+		s.cp.MarkGateOverridden(g)
+		s.cp.ClearGateRecheckPending(g) // defensive: pending is moot once overridden
+	}
+	return covered
 }
 
 // findFallbackTarget returns the first valid fallback node ID from node and graph attrs.

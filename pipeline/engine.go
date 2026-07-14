@@ -692,19 +692,15 @@ func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next
 	if next == nil || !next.Override {
 		return
 	}
-	if overrideAlreadyRecorded(s.validationOverrides, currentNodeID, next.Label) {
-		return
-	}
 	actor := s.lastOutcome.OverrideActor
 	if actor == "" {
 		actor = ActorUnknown
 	}
-	detail := OverrideDetail{
-		GateNodeID: currentNodeID,
-		Label:      next.Label,
-		Actor:      actor,
-		Timestamp:  time.Now(),
+	covered := e.markCoveredGoalGates(s, currentNodeID, actor)
+	if overrideAlreadyRecorded(s.validationOverrides, currentNodeID, next.Label) {
+		return
 	}
+	detail := OverrideDetail{GateNodeID: currentNodeID, Label: next.Label, Actor: actor, CoveredGates: covered, Timestamp: time.Now()}
 	s.appendOverride(detail)
 	e.emit(PipelineEvent{
 		Type:      EventValidationOverridden,
