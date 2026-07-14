@@ -124,6 +124,182 @@ func TestGoalGateOverride_HumanAcceptCompletesValidationOverridden(t *testing.T)
 	}
 }
 
+func TestGoalGateOverride_NonHumanActorDoesNotCover(t *testing.T) {
+	var attempts int
+	var mu sync.Mutex
+	g := overrideGateGraph(true)
+	reg := failingGoalGateRegistry(t, &attempts, &mu, ActorAutopilot)
+	result, _ := NewEngine(g, reg).Run(context.Background())
+	if result.Status == OutcomeValidationOverridden {
+		t.Error("autopilot override wrongly resolved a failed goal gate")
+	}
+	// The gate stays unsatisfied → run does not succeed via override.
+	if result.Status == OutcomeSuccess {
+		t.Error("failed goal gate reported plain success under autopilot")
+	}
+}
+
+func TestGoalGateOverride_DirectEdgeArm(t *testing.T) {
+	var attempts int
+	var mu sync.Mutex
+	g := overrideGateGraph(false) // direct gate->escalate edge, no fallback_target
+	reg := failingGoalGateRegistry(t, &attempts, &mu, ActorHuman)
+	result, err := NewEngine(g, reg).Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Status != OutcomeValidationOverridden || attempts != 1 {
+		t.Errorf("direct-edge arm: Status=%q attempts=%d, want validation_overridden / 1", result.Status, attempts)
+	}
+}
+
+func TestGoalGateOverride_NeverRunGateNotCovered(t *testing.T) {
+	// escalate is reachable from an early node; a later goal gate that has not
+	// executed shares the escalation but must NOT be marked overridden.
+	g := NewGraph("goal-gate-override-neverrun")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "early", Shape: "box"})
+	g.AddNode(&Node{ID: "lategate", Shape: "box", Attrs: map[string]string{"goal_gate": "true", "fallback_target": "escalate"}})
+	g.AddNode(&Node{ID: "escalate", Shape: "hexagon", Attrs: map[string]string{"label": "Accept?"}})
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "start", To: "early"})
+	g.AddEdge(&Edge{From: "early", To: "escalate", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "early", To: "lategate", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "lategate", To: "done"})
+	g.AddEdge(&Edge{From: "escalate", To: "done", Label: "accept", Override: true})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "codergen", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		if node.ID == "early" {
+			return Outcome{Status: OutcomeFail}, nil // routes to escalate; lategate never runs
+		}
+		return Outcome{Status: OutcomeSuccess}, nil
+	}})
+	reg.Register(&testHandler{name: "wait.human", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		return Outcome{Status: OutcomeSuccess, PreferredLabel: "accept", OverrideActor: ActorHuman}, nil
+	}})
+
+	cpPath := t.TempDir() + "/cp.json"
+	NewEngine(g, reg, WithCheckpointPath(cpPath)).Run(context.Background())
+	cp, err := LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("load checkpoint: %v", err)
+	}
+	if cp.IsGateOverridden("lategate") {
+		t.Error("a never-run goal gate was wrongly marked overridden")
+	}
+}
+
+func TestGoalGateOverride_NonOverrideEdgeMarksNothing(t *testing.T) {
+	// Human takes a plain (non-override) edge; the gate must not be resolved.
+	g := NewGraph("goal-gate-override-negative")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "gate", Shape: "box", Attrs: map[string]string{"goal_gate": "true", "fallback_target": "escalate", "max_retries": "1"}})
+	g.AddNode(&Node{ID: "escalate", Shape: "hexagon", Attrs: map[string]string{"label": "Accept?"}})
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "start", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "done", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "gate", To: "escalate", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "escalate", To: "done", Label: "reject"}) // no Override
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "codergen", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		return Outcome{Status: OutcomeFail}, nil
+	}})
+	reg.Register(&testHandler{name: "wait.human", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		return Outcome{Status: OutcomeSuccess, PreferredLabel: "reject", OverrideActor: ActorHuman}, nil
+	}})
+
+	cpPath := t.TempDir() + "/cp.json"
+	result, _ := NewEngine(g, reg, WithCheckpointPath(cpPath)).Run(context.Background())
+	if result.Status == OutcomeValidationOverridden {
+		t.Error("non-override edge produced validation_overridden")
+	}
+	if len(result.ValidationOverrides) != 0 {
+		t.Errorf("ValidationOverrides = %d, want 0", len(result.ValidationOverrides))
+	}
+	cp, _ := LoadCheckpoint(cpPath)
+	if cp.IsGateOverridden("gate") {
+		t.Error("gate marked overridden on a non-override edge")
+	}
+}
+
+func TestGoalGateOverride_SurvivesResume(t *testing.T) {
+	// Seed a checkpoint as if a human already overrode the gate, then resume:
+	// the gate must not execute (attempts == 0) and the run completes overridden.
+	var attempts int
+	var mu sync.Mutex
+	g := overrideGateGraph(true)
+	reg := failingGoalGateRegistry(t, &attempts, &mu, ActorHuman)
+
+	cpPath := t.TempDir() + "/cp.json"
+	seed := &Checkpoint{CurrentNode: "done", CompletedNodes: []string{"start", "gate", "escalate", "cleanup"}}
+	seed.MarkGateOverridden("gate")
+	seed.ValidationOverrides = []OverrideDetail{{GateNodeID: "escalate", Label: "accept", Actor: ActorHuman, CoveredGates: []string{"gate"}}}
+	if err := SaveCheckpoint(seed, cpPath); err != nil {
+		t.Fatalf("save seed checkpoint: %v", err)
+	}
+
+	result, err := NewEngine(g, reg, WithCheckpointPath(cpPath)).Run(context.Background())
+	if err != nil {
+		t.Fatalf("resume run: %v", err)
+	}
+	if attempts != 0 {
+		t.Errorf("gate executed %d times on resume, want 0 (already resolved)", attempts)
+	}
+	if result.Status != OutcomeValidationOverridden {
+		t.Errorf("resume Status = %q, want validation_overridden", result.Status)
+	}
+}
+
+func TestGoalGateOverride_MultiHopNotCovered(t *testing.T) {
+	// gate -> mid -> escalate(human, override). No direct gate->escalate edge
+	// and no fallback_target: the gate is NOT covered (documented limitation).
+	g := NewGraph("goal-gate-override-multihop")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "gate", Shape: "box", Attrs: map[string]string{"goal_gate": "true"}})
+	g.AddNode(&Node{ID: "mid", Shape: "box"})
+	g.AddNode(&Node{ID: "escalate", Shape: "hexagon", Attrs: map[string]string{"label": "Accept?"}})
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "start", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "mid", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "mid", To: "escalate"})
+	g.AddEdge(&Edge{From: "escalate", To: "done", Label: "accept", Override: true})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "codergen", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		if node.ID == "gate" {
+			return Outcome{Status: OutcomeFail}, nil
+		}
+		return Outcome{Status: OutcomeSuccess}, nil
+	}})
+	reg.Register(&testHandler{name: "wait.human", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		return Outcome{Status: OutcomeSuccess, PreferredLabel: "accept", OverrideActor: ActorHuman}, nil
+	}})
+
+	cpPath := t.TempDir() + "/cp.json"
+	NewEngine(g, reg, WithCheckpointPath(cpPath)).Run(context.Background())
+	cp, _ := LoadCheckpoint(cpPath)
+	if cp.IsGateOverridden("gate") {
+		t.Error("multi-hop escalation wrongly covered the gate (should be out of scope)")
+	}
+}
+
+func TestGoalGateOverride_OverrideWinsOverPending(t *testing.T) {
+	// A gate that is BOTH recheck-pending AND overridden must NOT re-enter:
+	// the IsGateOverridden short-circuit must precede the IsGateRecheckPending
+	// branch in checkGoalGateNode. Guards against a future reordering.
+	g := overrideGateGraph(true)
+	e := NewEngine(g, newTestRegistry())
+	cp := &Checkpoint{CompletedNodes: []string{"gate"}}
+	cp.SetGateRecheckPending("gate")
+	cp.MarkGateOverridden("gate")
+	target, gateID, retry, unsatisfied := e.goalGateRetryTarget(cp, map[string]string{"gate": string(OutcomeFail)})
+	if retry || unsatisfied || target != "" || gateID != "" {
+		t.Errorf("overridden+pending gate re-entered: target=%q gate=%q retry=%v unsatisfied=%v (override must win)", target, gateID, retry, unsatisfied)
+	}
+}
+
 func TestGoalGateOverride_ClearedWhenGateReExecutes(t *testing.T) {
 	// gate fails; escalate --accept(override)--> loop --> gate (re-run).
 	// A gate that runs a 2nd time must NOT stay overridden: it should be
