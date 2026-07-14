@@ -82,6 +82,27 @@ jsonld:
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
 
+  <!-- ═══ v0.45.0 ═══ -->
+  <section class="glass" id="v0-45-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.45.0" style="color: inherit; text-decoration: none;">v0.45.0</a></h2>
+      <span class="badge">2026-07-14</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.45.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Escape-aware condition parsing, reconciled with dippin v0.49.</strong> dippin-lang bumped
+      v0.48.0 &rarr; v0.49.0; no breaking changes; core embedded workflows hold their A grades on
+      <code>dippin doctor</code>.
+    </p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Condition parsing is now escape-aware</strong> (<a href="https://github.com/2389-research/tracker/issues/444">#444</a> reconciliation, <a href="https://github.com/2389-research/tracker/pull/470">#470</a>). Logical splitting (<code>||</code>/<code>&amp;&amp;</code>) and comparison-operator discovery (<code>=</code>/<code>==</code>/<code>!=</code> and the word operators) both ignore content inside double quotes; exactly one surrounding quote pair is stripped from every RHS and <code>\"</code>/<code>\\</code> are decoded inside it. An unmatched double quote is now a loud error — carrying the original expression and, at load, the <code>.dip</code> source location — instead of a silent mis-parse. Semantic validation applies the same quote-aware grammar to every logical branch independently.</li>
+      <li><strong>dippin-lang bumped v0.48.0 &rarr; v0.49.0.</strong> The library dep, the CI <code>dippin</code> CLI, and <code>tracker_doctor.go</code>'s pinned version move together.</li>
+      <li><strong><code>tracker-swebench</code> <code>main()</code> decomposed</strong> (<a href="https://github.com/2389-research/tracker/pull/469">#469</a>). The 200-line entrypoint (cyclomatic 44 / cognitive 74) was split into behavior-preserving helpers under the complexity-8 gate; each container is now bounded to 1 CPU and the prompt temp file is co-located under the run's results dir.</li>
+      <li><strong>Added a rolling <code>ROADMAP.md</code></strong> (Now/Next/Later) and a matching website Roadmap page; corrected inaccurate CLI/workflow examples on the site.</li>
+    </ul>
+  </section>
+
   <!-- ═══ v0.44.0 ═══ -->
   <section class="glass" id="v0-44-0" style="border-left: 3px solid var(--orange-600);">
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
