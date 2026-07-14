@@ -25,8 +25,8 @@ Supported forms, parsed in priority order: `||` (lowest) → `&&` → clause.
 
 | Operator | Form | Semantics |
 |----------|------|-----------|
-| `=` / `==` | `ctx.outcome = success` | String equality; surrounding quotes stripped on RHS |
-| `!=` | `ctx.outcome != fail` | String inequality; surrounding quotes stripped on RHS |
+| `=` / `==` | `ctx.outcome = success` | String equality |
+| `!=` | `ctx.outcome != fail` | String inequality |
 | `contains` | `ctx.last_response contains error` | Substring match |
 | `startswith` | `ctx.tool_stdout startswith ERROR` | Prefix match |
 | `endswith` | `ctx.last_response endswith .json` | Suffix match |
@@ -39,16 +39,26 @@ Supported forms, parsed in priority order: `||` (lowest) → `&&` → clause.
 Empty or whitespace-only conditions evaluate to `true` (equivalent to an
 unconditional edge).
 
+Double-quoted right-hand operands may contain operator text and logical
+delimiters literally. Tracker removes exactly one surrounding quote pair and
+decodes `\"` as `"`, then `\\` as `\`, for equality and word operators alike.
+Logical splitting and comparison-operator discovery both ignore content inside
+double quotes. A quote preceded by an odd run of backslashes is escaped; a quote
+preceded by an even run closes the operand. An unmatched double quote is an
+error that includes the original expression.
+
+Semantic validation applies the same quote-aware grammar to every logical
+branch independently. An invalid later branch is rejected even when runtime
+evaluation of an earlier branch would short-circuit.
+
 ### Known limitations
 
 Documented at the top of
 [`pipeline/condition.go`](../../../pipeline/condition.go):
 
-- Operator splitting uses `strings.Split` on `||` and `&&` before clause
-  parsing — a quoted value that contains these literals is still split.
 - No parentheses for grouping. Precedence is fixed: `||` < `&&` < clause.
-- Quote stripping applies only to `=`, `==`, `!=` comparisons — the word
-  operators (`contains`, `startswith`, etc.) take their RHS verbatim.
+- Only double quotes define quoted operands. Single quotes retain their existing
+  literal behavior.
 
 ## Namespace handling
 

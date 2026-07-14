@@ -312,3 +312,37 @@ func TestValidateSemantic_MixedErrors(t *testing.T) {
 		t.Errorf("expected at least 3 errors, got %d: %v", len(ve.Errors), ve.Errors)
 	}
 }
+
+func TestCheckConditionSyntaxQuotedLogicalRunsAreOperands(t *testing.T) {
+	for _, expr := range []string{
+		`message = "||||"`,
+		`message = "&&&&"`,
+		`message endswith "foo contains bar"`,
+	} {
+		t.Run(expr, func(t *testing.T) {
+			if err := checkConditionSyntax(expr, NewPipelineContext()); err != nil {
+				t.Fatalf("checkConditionSyntax(%q) error: %v", expr, err)
+			}
+		})
+	}
+}
+
+func TestCheckConditionSyntaxRejectsEveryInvalidBranch(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+	}{
+		{name: "short-circuited operatorless branch", expr: `missing = "" || operatorless`},
+		{name: "invalid outer operator", expr: `message bogus "foo contains bar"`},
+		{name: "empty OR operand", expr: `a = 1 || || b = 2`},
+		{name: "empty AND operand", expr: `a = 1 && && b = 2`},
+		{name: "unmatched double quote", expr: `message = "unterminated`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := checkConditionSyntax(tt.expr, NewPipelineContext()); err == nil {
+				t.Fatalf("checkConditionSyntax(%q) error = nil, want syntax error", tt.expr)
+			}
+		})
+	}
+}
