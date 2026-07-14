@@ -3,6 +3,7 @@
 package main
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,19 @@ func TestRunRoutesQuotedLogicalDelimiterToolOutput(t *testing.T) {
 	}
 }
 
+func TestCaptureRunOutputCapturesStandardLogger(t *testing.T) {
+	output, err := captureRunOutput(t, func() error {
+		log.Print("warning: sentinel")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("captureRunOutput returned error: %v", err)
+	}
+	if !strings.Contains(output, "warning: sentinel") {
+		t.Fatalf("captured output %q does not contain standard logger warning", output)
+	}
+}
+
 func captureRunOutput(t *testing.T, runFunc func() error) (string, error) {
 	t.Helper()
 	stdout, err := os.CreateTemp(t.TempDir(), "stdout-*.log")
@@ -85,14 +99,18 @@ func captureRunOutput(t *testing.T, runFunc func() error) (string, error) {
 		t.Fatal(err)
 	}
 	originalStdout, originalStderr := os.Stdout, os.Stderr
+	originalLogWriter := log.Writer()
 	os.Stdout, os.Stderr = stdout, stderr
+	log.SetOutput(stderr)
 	defer func() {
 		os.Stdout, os.Stderr = originalStdout, originalStderr
+		log.SetOutput(originalLogWriter)
 		_ = stdout.Close()
 		_ = stderr.Close()
 	}()
 	runErr := runFunc()
 	os.Stdout, os.Stderr = originalStdout, originalStderr
+	log.SetOutput(originalLogWriter)
 	if err := stdout.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -112,15 +130,21 @@ func captureRunOutput(t *testing.T, runFunc func() error) (string, error) {
 
 func TestCaptureRunOutputRestoresStreamsAfterPanic(t *testing.T) {
 	originalStdout, originalStderr := os.Stdout, os.Stderr
+	originalLogWriter := log.Writer()
 	func() {
 		defer func() { _ = recover() }()
 		_, _ = captureRunOutput(t, func() error { panic("boom") })
 	}()
 	gotStdout, gotStderr := os.Stdout, os.Stderr
+	gotLogWriter := log.Writer()
 	os.Stdout, os.Stderr = originalStdout, originalStderr
-	if gotStdout != originalStdout || gotStderr != originalStderr {
+	log.SetOutput(originalLogWriter)
+	streamsRestored := gotStdout == originalStdout && gotStderr == originalStderr
+	if !streamsRestored {
 		_ = gotStdout.Close()
 		_ = gotStderr.Close()
-		t.Fatal("captureRunOutput did not restore stdout and stderr after panic")
+	}
+	if !streamsRestored || gotLogWriter != originalLogWriter {
+		t.Fatal("captureRunOutput did not restore stdout, stderr, and the standard logger after panic")
 	}
 }
