@@ -381,6 +381,14 @@ Not a distinct outcome status. Escalation is a routing convention:
 - The one-shot fallback/escalation path is guarded by `cp.FallbackTaken[gateID]`
   to prevent infinite fallback loops.
 
+When a human user chooses "accept" at a failed goal gate's escalation via an `override: true`
+edge, the gate is marked overridden in the checkpoint (`Checkpoint.OverriddenGates`). The
+exit-time goal-gate validation treats an overridden gate as satisfied, allowing the pipeline
+to complete with terminal status `validation_overridden` instead of failing. Only human actors
+can resolve a failed goal gate; autopilot, `--auto-approve`, and webhook actors still fail an
+unsatisfied gate. The override is cleared if the gate re-executes, so looping workflows
+re-prompt the user.
+
 ## Budget guard
 
 `pipeline.BudgetGuard` ([`pipeline/budget.go`](../../pipeline/budget.go))

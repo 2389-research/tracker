@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Goal-gate escalations honor a human override (#348 defect 2).** A human who
+  chooses "accept" at a failed `goal_gate`'s escalation now resolves that gate
+  as overridden, so the run completes `validation_overridden` instead of
+  draining retry budget and failing with the gate still at `outcome=fail`. Only
+  a human actor resolves a failed gate (autopilot/`--auto-approve`/webhook still
+  fail an unsatisfied goal gate); the override is recorded against the specific
+  gate (`OverrideDetail.CoveredGates`) and cleared if the gate re-executes.
+
 ## [0.45.0] - 2026-07-14
 
 ### Changed
