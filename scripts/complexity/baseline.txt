@@ -86,9 +86,6 @@ cognitive|./pipeline/handlers/declared_writes.go|applyDeclaredWrites|16
 cognitive|./pipeline/handlers/tool_safety.go|checkCommandDenylist|16
 cognitive|./pipeline/handlers/tool_safety.go|isExecFdRedirectOnly|14
 cognitive|./pipeline/handlers/webhook_interviewer.go|resolveWebhookChoice|9
-cognitive|./pipeline/lint_tracker.go|lintTRK101|17
-cognitive|./pipeline/lint_tracker.go|lintTRK102|12
-cognitive|./pipeline/lint_tracker.go|trk102ReverseDFSFail|11
 cognitive|./pipeline/params.go|ApplyGraphParamOverrides|9
 cognitive|./pipeline/transforms.go|ExpandGraphVariables|15
 cognitive|./pipeline/transforms.go|InjectPipelineContext|10
@@ -170,7 +167,6 @@ cyclo|./pipeline/handlers/codergen_jail.go|configureJail|13
 cyclo|./pipeline/handlers/codergen_jail.go|matchOneGlob|11
 cyclo|./pipeline/handlers/declared_writes.go|applyDeclaredWrites|14
 cyclo|./pipeline/handlers/tool_safety.go|isExecFdRedirectOnly|14
-cyclo|./pipeline/lint_tracker.go|lintTRK101|10
 cyclo|./pipeline/transforms.go|ExpandGraphVariables|11
 cyclo|./tracker_activity.go|findRunDirMatchLib|9
 cyclo|./tracker_activity.go|mostRecentRunID|9
@@ -195,7 +191,7 @@ filesize|./llm/anthropic/adapter.go|-|502
 filesize|./llm/google/translate.go|-|540
 filesize|./llm/openai/translate.go|-|548
 filesize|./pipeline/dippin_adapter.go|-|931
-filesize|./pipeline/engine.go|-|947
+filesize|./pipeline/engine.go|-|943
 filesize|./pipeline/engine_run.go|-|1179
 filesize|./pipeline/events_jsonl.go|-|578
 filesize|./pipeline/git_artifacts.go|-|506

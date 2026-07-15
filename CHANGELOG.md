@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **TRK102 lint no longer false-positives on plan-approval gates.** The
+  "unmarked override edge" rule (#348 follow-up) used an unbounded transitive
+  reverse walk for its "gate reachable from a failure" predicate, which in a
+  cyclic workflow reached unrelated upstream failures on the shared forward spine
+  and wrongly flagged plan-approval gates like `build_product`'s `ApprovePlan`.
+  The predicate is now **direct**: a gate qualifies only if a failure escalates
+  straight into it (a direct `outcome = fail` incoming edge, or the gate being a
+  node/graph `fallback_target`) — matching the rule's own stated intent.
+
 - **Goal-gate escalations honor a human override (#348 defect 2).** A human who
   chooses "accept" at a failed `goal_gate`'s escalation now resolves that gate
   as overridden, so the run completes `validation_overridden` instead of

@@ -399,3 +399,70 @@ func TestLintTRK101_TeeWordBoundary(t *testing.T) {
 		})
 	}
 }
+
+// buildApprovePlanCyclicGraph models build_product's real structure: a
+// plan-approval gate entered via forward/unconditional flow (ShowPlan ->
+// ApprovePlan), while an unrelated fail edge lives elsewhere on the shared
+// forward spine (a SpecLint/ForgeSpec remediation loop). ApprovePlan is
+// transitively reachable-backward from that fail edge but is NOT a direct
+// escalation target of it. The old transitive reverse-DFS predicate mis-flagged
+// this shape (TRK102 false positive on plan-approval gates in cyclic graphs);
+// the direct predicate must suppress it.
+func buildApprovePlanCyclicGraph() *Graph {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Shape: "Mdiamond", Handler: "start"})
+	g.AddNode(&Node{ID: "SpecLint", Handler: "tool", Attrs: map[string]string{"tool_command": "true"}})
+	g.AddNode(&Node{ID: "ForgeSpec", Handler: "codergen", Attrs: map[string]string{"prompt": "forge"}})
+	g.AddNode(&Node{ID: "ShowPlan", Handler: "tool", Attrs: map[string]string{"tool_command": "true"}})
+	g.AddNode(&Node{ID: "ApprovePlan", Handler: "wait.human", Attrs: map[string]string{"prompt": "Approve the plan?"}})
+	g.AddNode(&Node{ID: "Execute", Handler: "tool", Attrs: map[string]string{"tool_command": "true"}})
+	g.AddNode(&Node{ID: "Done", Shape: "Msquare", Handler: "exit"})
+
+	g.AddEdge(&Edge{From: "Start", To: "SpecLint"})
+	// Remediation loop with a fail edge — the "unrelated upstream failure" the
+	// transitive reverse walk wrongly latched onto.
+	g.AddEdge(&Edge{From: "SpecLint", To: "ForgeSpec", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "ForgeSpec", To: "SpecLint"})
+	g.AddEdge(&Edge{From: "SpecLint", To: "ShowPlan", Condition: "ctx.outcome = success"})
+	// Forward/unconditional entry into the plan gate — NOT a fail edge.
+	g.AddEdge(&Edge{From: "ShowPlan", To: "ApprovePlan"})
+	g.AddEdge(&Edge{From: "ApprovePlan", To: "Execute", Label: "approve"})
+	g.AddEdge(&Edge{From: "ApprovePlan", To: "Start", Label: "reject"})
+	g.AddEdge(&Edge{From: "Execute", To: "Done"})
+	return g
+}
+
+func TestLintTRK102_SuppressesPlanGateWithTransitiveUpstreamFail(t *testing.T) {
+	warnings := LintTrackerRules(buildApprovePlanCyclicGraph())
+	if containsWarning(warnings, "TRK102", "ApprovePlan") {
+		t.Errorf("TRK102 false-positive: fired on a plan-approval gate reachable only "+
+			"transitively (not directly) from an upstream fail: %v", warnings)
+	}
+}
+
+// buildFallbackOnlyEscalationGraph reaches a wait.human escalation gate ONLY via
+// a node's fallback_target (no direct fail edge into the gate). It is still a
+// failure escalation, so an unmarked "accept" edge should fire TRK102.
+func buildFallbackOnlyEscalationGraph() *Graph {
+	g := NewGraph("test")
+	g.AddNode(&Node{ID: "Start", Shape: "Mdiamond", Handler: "start"})
+	g.AddNode(&Node{ID: "Work", Handler: "codergen", Attrs: map[string]string{"prompt": "x", "fallback_target": "Escalate"}})
+	g.AddNode(&Node{ID: "Escalate", Handler: "wait.human", Attrs: map[string]string{"prompt": "Accept?"}})
+	g.AddNode(&Node{ID: "Cleanup", Handler: "tool", Attrs: map[string]string{"tool_command": "true"}})
+	g.AddNode(&Node{ID: "Done", Shape: "Msquare", Handler: "exit"})
+
+	g.AddEdge(&Edge{From: "Start", To: "Work"})
+	g.AddEdge(&Edge{From: "Work", To: "Cleanup", Condition: "ctx.outcome = success"})
+	// Escalate reached only via Work's fallback_target — no direct edge into it.
+	g.AddEdge(&Edge{From: "Escalate", To: "Cleanup", Label: "accept"})
+	g.AddEdge(&Edge{From: "Cleanup", To: "Done"})
+	return g
+}
+
+func TestLintTRK102_FiresOnFallbackTargetEscalation(t *testing.T) {
+	warnings := LintTrackerRules(buildFallbackOnlyEscalationGraph())
+	if !containsWarning(warnings, "TRK102", "Escalate") {
+		t.Errorf("TRK102 should fire on a fallback_target-only escalation gate with an "+
+			"unmarked accept edge: %v", warnings)
+	}
+}

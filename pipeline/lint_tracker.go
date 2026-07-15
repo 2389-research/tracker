@@ -60,39 +60,45 @@ func LintTrackerRules(g *Graph) []string {
 func lintTRK101(g *Graph) []string {
 	var warnings []string
 	for _, node := range g.Nodes {
-		if node.Handler != "tool" {
-			continue
+		if trk101NodeViolates(g, node) {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[TRK101]: tool node %q routes on ctx.tool_stdout with a single conditional edge plus an unconditional fallback, AND its command emits unbounded output (tee or 2>&1 detected). If total output exceeds output_limit (default 64KB) the tail-window keeps only trailing bytes, so a truncated marker silently routes via the fallback edge — the #208 failure shape. Fix options: (a) declare marker_grep: '<regex>' for a typed routing channel — see CHANGELOG v0.27.0+; (b) set output_limit: <size> large enough for the worst-case output; (c) split the volume-emitting body and the routing-signal printf into two separate tool nodes; (d) enumerate every expected marker as its own conditional edge so any miss surfaces as an unexpected fallback rather than a silent classification flip",
+				node.ID))
 		}
-		cfg := node.ToolConfig()
-		if cfg.MarkerGrep != "" {
-			continue
-		}
-		if cfg.OutputLimit > 0 {
-			continue
-		}
-		edges := g.OutgoingEdges(node.ID)
-		stdoutCondCount := countConditionsReferencing(edges, "tool_stdout")
-		if stdoutCondCount == 0 {
-			continue
-		}
-		if stdoutCondCount >= 2 {
-			// Exhaustive enumeration — author has named the expected outputs.
-			continue
-		}
-		if edgesReferenceCtxOutcome(edges) {
-			continue
-		}
-		if !edgesHaveUnconditionalFallback(edges) {
-			continue
-		}
-		if !commandHasVolumeIndicator(cfg.Command) {
-			continue
-		}
-		warnings = append(warnings, fmt.Sprintf(
-			"warning[TRK101]: tool node %q routes on ctx.tool_stdout with a single conditional edge plus an unconditional fallback, AND its command emits unbounded output (tee or 2>&1 detected). If total output exceeds output_limit (default 64KB) the tail-window keeps only trailing bytes, so a truncated marker silently routes via the fallback edge — the #208 failure shape. Fix options: (a) declare marker_grep: '<regex>' for a typed routing channel — see CHANGELOG v0.27.0+; (b) set output_limit: <size> large enough for the worst-case output; (c) split the volume-emitting body and the routing-signal printf into two separate tool nodes; (d) enumerate every expected marker as its own conditional edge so any miss surfaces as an unexpected fallback rather than a silent classification flip",
-			node.ID))
 	}
 	return warnings
+}
+
+// trk101NodeViolates reports whether a node exhibits the #208 silent-fallback
+// foot-gun: a tool node with no marker_grep / output_limit guard, whose edges
+// route silently on a single tool_stdout marker, and whose command emits
+// unbounded output. Guard order preserved from the original inline checks.
+func trk101NodeViolates(g *Graph, node *Node) bool {
+	if node.Handler != "tool" {
+		return false
+	}
+	cfg := node.ToolConfig()
+	if cfg.MarkerGrep != "" || cfg.OutputLimit > 0 {
+		return false
+	}
+	if !trk101EdgesRouteSilently(g.OutgoingEdges(node.ID)) {
+		return false
+	}
+	return commandHasVolumeIndicator(cfg.Command)
+}
+
+// trk101EdgesRouteSilently reports whether the outgoing edges form the
+// silent-fallback shape: exactly one tool_stdout conditional edge (0 = no
+// stdout routing, >=2 = exhaustive enumeration — both safe), no ctx.outcome
+// routing already adopted, and at least one unconditional fallback edge.
+func trk101EdgesRouteSilently(edges []*Edge) bool {
+	if countConditionsReferencing(edges, "tool_stdout") != 1 {
+		return false
+	}
+	if edgesReferenceCtxOutcome(edges) {
+		return false
+	}
+	return edgesHaveUnconditionalFallback(edges)
 }
 
 // countConditionsReferencing returns the number of edges whose
@@ -199,28 +205,34 @@ var trk102OverrideLabels = map[string]bool{
 func lintTRK102(g *Graph) []string {
 	var warnings []string
 	for _, e := range g.Edges {
-		if e.Override {
-			continue // already marked — no warning needed
+		if trk102EdgeIsUnmarkedOverride(g, e) {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning[TRK102]: edge from wait.human node %q to forward-progress node %q via label %q is not marked override: true. The gate is reachable from an upstream failure (ctx.outcome = fail), which suggests this edge represents accepting a failed validation. Add override: true on the edge so the run's terminal status is reported as validation_overridden (audit-only; routing is unaffected). See spec §7.4.",
+				e.From, e.To, e.Label))
 		}
-		labelLower := strings.ToLower(strings.TrimSpace(e.Label))
-		if !trk102OverrideLabels[labelLower] {
-			continue // predicate 2: label must match
-		}
-		srcNode, ok := g.Nodes[e.From]
-		if !ok || srcNode.Handler != "wait.human" {
-			continue // predicate 1: source must be wait.human
-		}
-		if !trk102TargetReachesExitWithoutGate(g, e.To) {
-			continue // predicate 3: target must reach exit without another gate
-		}
-		if !trk102GateReachableViaFailEdge(g, e.From) {
-			continue // predicate 4: gate must be reachable from outcome=fail
-		}
-		warnings = append(warnings, fmt.Sprintf(
-			"warning[TRK102]: edge from wait.human node %q to forward-progress node %q via label %q is not marked override: true. The gate is reachable from an upstream failure (ctx.outcome = fail), which suggests this edge represents accepting a failed validation. Add override: true on the edge so the run's terminal status is reported as validation_overridden (audit-only; routing is unaffected). See spec §7.4.",
-			e.From, e.To, e.Label))
 	}
 	return warnings
+}
+
+// trk102EdgeIsUnmarkedOverride reports whether e is an accept-shape edge from a
+// wait.human gate that escalates a failed validation and forwards to the exit
+// without another gate, but is not marked override: true. The four predicates
+// mirror the rule's original inline guards.
+func trk102EdgeIsUnmarkedOverride(g *Graph, e *Edge) bool {
+	if e.Override {
+		return false // already marked — no warning needed
+	}
+	if !trk102OverrideLabels[strings.ToLower(strings.TrimSpace(e.Label))] {
+		return false // predicate 2: label must match
+	}
+	srcNode, ok := g.Nodes[e.From]
+	if !ok || srcNode.Handler != "wait.human" {
+		return false // predicate 1: source must be wait.human
+	}
+	if !trk102TargetReachesExitWithoutGate(g, e.To) {
+		return false // predicate 3: target must reach exit without another gate
+	}
+	return trk102GateReachableViaFailEdge(g, e.From) // predicate 4
 }
 
 // trk102TargetReachesExitWithoutGate reports whether there is a path
@@ -267,45 +279,44 @@ func trk102DFSExit(g *Graph, node, exitID string, visited map[string]bool) bool 
 	return false
 }
 
-// trk102GateReachableViaFailEdge reports whether any edge in the graph
-// (incoming directly to gateNodeID OR somewhere on a path leading to
-// gateNodeID without passing through another wait.human gate) carries
-// a condition that references ctx.outcome = fail. This predicate is
-// what makes the rule skip plan-approval gates: those have no
-// outcome=fail signal upstream, only success.
+// trk102GateReachableViaFailEdge reports whether the gate node is a DIRECT
+// escalation target of a validation failure: at least one edge INCOMING to
+// gateNodeID carries an outcome=fail condition, or the gate is named as a
+// node/graph fallback_target (which fires on failure/exhaustion).
+//
+// Direct — not transitive — is the disambiguator that separates escalation
+// gates from plan-approval gates. An escalation gate like EscalateReview has a
+// direct `X -> gate when ctx.outcome = fail` edge; a plan-approval gate like
+// ApprovePlan is entered via forward/unconditional flow (`ShowPlan -> ApprovePlan`).
+// A transitive reverse walk mis-flags plan gates in cyclic workflows: it reaches
+// unrelated upstream failures on the shared forward spine (e.g. build_product's
+// spec-forge loop), which is not a failure escalating INTO the plan gate. This
+// matches the rule's own stated intent — "only failures that flow directly into
+// the current gate count."
 //
 // We accept "outcome=fail", "outcome = fail", "ctx.outcome=fail",
 // "context.outcome = fail" — the same shapes the runtime condition
 // evaluator accepts.
 func trk102GateReachableViaFailEdge(g *Graph, gateNodeID string) bool {
-	visited := make(map[string]bool)
-	return trk102ReverseDFSFail(g, gateNodeID, visited, true)
-}
-
-// trk102ReverseDFSFail walks incoming edges from node. It returns true
-// if any of those edges (or any edge along an ancestor path that does
-// not cross a wait.human gate) carries an outcome=fail condition.
-//
-// The gate-stop guard mirrors the forward-DFS contract: a failure
-// signal that has already been "consumed" by an upstream gate is not
-// what this rule cares about. Only failures that flow *directly* into
-// the current gate count.
-func trk102ReverseDFSFail(g *Graph, node string, visited map[string]bool, startNode bool) bool {
-	if visited[node] {
-		return false
-	}
-	visited[node] = true
-	if !startNode {
-		n, ok := g.Nodes[node]
-		if ok && n.Handler == "wait.human" {
-			return false
-		}
-	}
-	for _, e := range g.incoming[node] {
+	for _, e := range g.incoming[gateNodeID] {
 		if edgeConditionMatchesOutcomeFail(e.Condition) {
 			return true
 		}
-		if trk102ReverseDFSFail(g, e.From, visited, false) {
+	}
+	// A fallback_target (node-level or graph-level on_failure) routes to the
+	// gate on failure/exhaustion — a direct failure-escalation signal too, and
+	// never a plan-approval gate.
+	return trk102IsFallbackTarget(g, gateNodeID)
+}
+
+// trk102IsFallbackTarget reports whether gateNodeID is named as a node-level or
+// graph-level fallback_target / fallback_retry_target.
+func trk102IsFallbackTarget(g *Graph, gateNodeID string) bool {
+	if g.Attrs["fallback_target"] == gateNodeID || g.Attrs["fallback_retry_target"] == gateNodeID {
+		return true
+	}
+	for _, n := range g.Nodes {
+		if n.Attrs["fallback_target"] == gateNodeID || n.Attrs["fallback_retry_target"] == gateNodeID {
 			return true
 		}
 	}
