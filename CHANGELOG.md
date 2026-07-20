@@ -84,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`Engine.Close` cancels a cancellable interviewer it owns (#478).** When the
+  library builds the human-gate interviewer (e.g. a webhook interviewer via
+  `Config.WebhookGate`), `Engine.Close` now calls its `Cancel()` so the callback
+  server is torn down with the run instead of leaking. Interviewers supplied via
+  `Config.Interviewer` that implement `Cancel()` are also cancelled. Part of the
+  Transport boundary workstream (#472).
+
 - **Webhook gate callback port defaults to an ephemeral `:0` for library callers
   (#476).** When `Config.WebhookGate.CallbackAddr` is empty, the callback server
   now binds an OS-assigned port instead of the fixed `:8789`, so a service

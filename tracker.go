@@ -17,10 +17,6 @@ import (
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
-	"github.com/2389-research/tracker/llm/anthropic"
-	"github.com/2389-research/tracker/llm/google"
-	"github.com/2389-research/tracker/llm/openai"
-	"github.com/2389-research/tracker/llm/openaicompat"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
@@ -197,6 +193,7 @@ type Engine struct {
 	inner          *pipeline.Engine
 	client         *llm.Client // nil if caller provided their own Completer
 	tokenTracker   *llm.TokenTracker
+	interviewer    handlers.Interviewer // resolved gate handler; cancelled on Close if it supports it
 	closeOnce      sync.Once
 	closeErr       error
 	artifactDir    string // base artifact directory; "" if not set
@@ -331,7 +328,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	// per-provider usage during native backend runs. Works for both
 	// auto-created clients and user-provided *llm.Client via Config.LLMClient.
 	attachClientObservers(client, completer, tokenTracker, cfg)
-	registry, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
+	registry, interviewer, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
 	if err != nil {
 		return nil, err
 	}
@@ -343,6 +340,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		inner:          inner,
 		client:         client,
 		tokenTracker:   tokenTracker,
+		interviewer:    interviewer,
 		artifactDir:    cfg.ArtifactDir,
 		bundleIdentity: cfg.BundleIdentity,
 	}, nil
@@ -435,7 +433,7 @@ func optionalRegistryOpts(cfg Config) []handlers.RegistryOption {
 }
 
 // buildRegistry creates a handler registry with all dependencies wired.
-func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) (*pipeline.HandlerRegistry, error) {
+func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) (*pipeline.HandlerRegistry, handlers.Interviewer, error) {
 	env := exec.NewLocalEnvironment(workDir)
 	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(completer, workDir),
@@ -445,12 +443,12 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 	registryOpts = append(registryOpts, optionalRegistryOpts(cfg)...)
 	interviewer, err := resolveInterviewer(cfg, client, completer)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if interviewer != nil {
 		registryOpts = append(registryOpts, handlers.WithInterviewer(interviewer, graph))
 	}
-	return handlers.NewDefaultRegistry(graph, registryOpts...), nil
+	return handlers.NewDefaultRegistry(graph, registryOpts...), interviewer, nil
 }
 
 // buildEngineOpts constructs engine options from Config. When a config
@@ -724,151 +722,6 @@ func bedrockSuffix(provider string) (string, bool) {
 // that contradicts the documented fail-closed semantics of #276.
 var ErrGatewayRouteRefused = errors.New("gateway route refused: kind/provider combination unsupported or unknown")
 
-// providerBaseURLEnvKey returns the per-provider *_BASE_URL env var name, or
-// "" for an unknown provider.
-func providerBaseURLEnvKey(provider string) string {
-	switch provider {
-	case "anthropic":
-		return "ANTHROPIC_BASE_URL"
-	case "openai":
-		return "OPENAI_BASE_URL"
-	case "gemini":
-		return "GEMINI_BASE_URL"
-	case "openai-compat":
-		return "OPENAI_COMPAT_BASE_URL"
-	}
-	return ""
-}
-
-// resolveProviderBaseURLWithGateway resolves the base URL for a provider,
-// consulting sources in priority order:
-//
-//  1. Per-provider env var (*_BASE_URL) — always wins.
-//  2. gatewayURL argument (from Config.GatewayURL) with kind-dependent suffix appended.
-//  3. TRACKER_GATEWAY_URL env var with kind-dependent suffix appended.
-//  4. Empty string — use provider SDK default.
-//
-// The kind argument (from Config.GatewayKind) selects the suffix map; if
-// empty, TRACKER_GATEWAY_KIND env var is consulted, and if that is also
-// empty the default is cf-aig.
-//
-// **Fail-closed contract:** when a gateway URL is configured (either via
-// the gatewayURL argument or TRACKER_GATEWAY_URL) AND the (kind,
-// provider) pair is unsupported OR the kind is unknown, this function
-// returns ErrGatewayRouteRefused. Adapter constructors propagate the
-// error so client construction fails — preventing the silent SDK-default
-// fallback that would otherwise leak requests (carrying the gateway
-// token) to the public default endpoint.
-func resolveProviderBaseURLWithGateway(provider, gatewayURL string, gatewayKind GatewayKind) (string, error) {
-	envKey := providerBaseURLEnvKey(provider)
-	if envKey == "" {
-		return "", nil
-	}
-	if v := os.Getenv(envKey); v != "" {
-		return v, nil
-	}
-
-	gateway := strings.TrimRight(gatewayURL, "/")
-	if gateway == "" {
-		gateway = strings.TrimRight(os.Getenv("TRACKER_GATEWAY_URL"), "/")
-	}
-	if gateway == "" {
-		return "", nil
-	}
-
-	kind := gatewayKind
-	if kind == "" {
-		kind = GatewayKind(os.Getenv("TRACKER_GATEWAY_KIND"))
-	}
-	suffix, ok := gatewaySuffix(kind, provider)
-	if !ok {
-		return "", fmt.Errorf("%w: kind=%q provider=%q", ErrGatewayRouteRefused, kind, provider)
-	}
-	return gateway + suffix, nil
-}
-
-// ResolveProviderBaseURL returns the base URL a provider's HTTP client should
-// use. Resolution order:
-//
-//  1. The provider-specific env var (ANTHROPIC_BASE_URL, OPENAI_BASE_URL,
-//     GEMINI_BASE_URL, OPENAI_COMPAT_BASE_URL).
-//  2. TRACKER_GATEWAY_URL with a per-provider suffix appended; the suffix
-//     map is selected by TRACKER_GATEWAY_KIND (default cf-aig — Cloudflare
-//     AI Gateway conventions).
-//  3. Empty string, meaning the provider's SDK default.
-//
-// Per-provider env vars always win over TRACKER_GATEWAY_URL.
-//
-// **Lax variant.** This function returns the empty string for BOTH "no
-// gateway configured" AND "gateway configured but routing refused." It
-// is preserved for backward compatibility with library callers that
-// existed before #276 added kind dispatch. New code on the adapter
-// construction path MUST use [ResolveProviderBaseURLStrict] so that
-// refuse-to-route surfaces as an error rather than a silent SDK-default
-// fallback.
-func ResolveProviderBaseURL(provider string) string {
-	base, _ := ResolveProviderBaseURLStrict(provider)
-	return base
-}
-
-// ResolveProviderBaseURLStrict is the fail-closed sibling of
-// [ResolveProviderBaseURL]. It returns the same URL resolution but
-// distinguishes "no gateway needed" (returns "", nil) from "gateway
-// configured but routing refused" (returns "", [ErrGatewayRouteRefused]
-// wrapped). Adapter constructors call this so a misconfigured gateway
-// cannot silently leak requests to public SDK default endpoints.
-func ResolveProviderBaseURLStrict(provider string) (string, error) {
-	return resolveProviderBaseURLWithGateway(provider, "", "")
-}
-
-func newAnthropicAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
-	base, err := resolveProviderBaseURLWithGateway("anthropic", gatewayURL, gatewayKind)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic adapter: %w", err)
-	}
-	var opts []anthropic.Option
-	if base != "" {
-		opts = append(opts, anthropic.WithBaseURL(base))
-	}
-	return anthropic.New(key, opts...), nil
-}
-
-func newOpenAIAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
-	base, err := resolveProviderBaseURLWithGateway("openai", gatewayURL, gatewayKind)
-	if err != nil {
-		return nil, fmt.Errorf("openai adapter: %w", err)
-	}
-	var opts []openai.Option
-	if base != "" {
-		opts = append(opts, openai.WithBaseURL(base))
-	}
-	return openai.New(key, opts...), nil
-}
-
-func newGeminiAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
-	base, err := resolveProviderBaseURLWithGateway("gemini", gatewayURL, gatewayKind)
-	if err != nil {
-		return nil, fmt.Errorf("gemini adapter: %w", err)
-	}
-	var opts []google.Option
-	if base != "" {
-		opts = append(opts, google.WithBaseURL(base))
-	}
-	return google.New(key, opts...), nil
-}
-
-func newOpenAICompatAdapter(key, gatewayURL string, gatewayKind GatewayKind) (llm.ProviderAdapter, error) {
-	base, err := resolveProviderBaseURLWithGateway("openai-compat", gatewayURL, gatewayKind)
-	if err != nil {
-		return nil, fmt.Errorf("openai-compat adapter: %w", err)
-	}
-	var opts []openaicompat.Option
-	if base != "" {
-		opts = append(opts, openaicompat.WithBaseURL(base))
-	}
-	return openaicompat.New(key, opts...), nil
-}
-
 // Run executes the pipeline to completion.
 func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	engineResult, err := e.inner.Run(ctx)
@@ -943,6 +796,11 @@ func (e *Engine) defaultModelResolver() llm.ModelResolver {
 // with NewEngine. Safe for concurrent use; idempotent.
 func (e *Engine) Close() error {
 	e.closeOnce.Do(func() {
+		// Cancel a cancellable interviewer (e.g. the webhook interviewer's
+		// callback server) that the engine owns, so it doesn't leak past the run.
+		if c, ok := e.interviewer.(interface{ Cancel() }); ok {
+			c.Cancel()
+		}
 		if e.client != nil {
 			e.closeErr = e.client.Close()
 		}
