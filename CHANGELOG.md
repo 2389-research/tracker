@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Config.Interviewer` — custom in-process human-gate seam (#474).** Library
+  callers can now inject their own `handlers.Interviewer` (optionally implementing
+  the richer `FreeformInterviewer` / `LabeledFreeformInterviewer` /
+  `InterviewInterviewer` extensions, plus the optional `Actor()` / `Cancel()` /
+  `ContextSetter` side-interfaces). When set it takes precedence over
+  `AutoApprove`, `WebhookGate`, and `Autopilot`; nil is a no-op. This is the seam
+  that lets interactive transports (Slack, web, mobile) drive gates through the
+  convenience `tracker.Run` / `tracker.Config` API instead of dropping to the
+  lower `handlers.WithInterviewer` layer — the first step of the Transport
+  boundary workstream (#472).
+
 ### Fixed
 
 - **TRK102 lint no longer false-positives on plan-approval gates.** The
