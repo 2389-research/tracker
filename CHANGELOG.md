@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Webhook gate callback port defaults to an ephemeral `:0` for library callers
+  (#476).** When `Config.WebhookGate.CallbackAddr` is empty, the callback server
+  now binds an OS-assigned port instead of the fixed `:8789`, so a service
+  running many webhook-gated pipelines in one process no longer collides on the
+  second `net.Listen`. The bound address is advertised to the external service
+  via each gate payload's `callback_url`, so an ephemeral port is transparent.
+  The `tracker` CLI is unchanged (its `--gate-callback-addr` still defaults to
+  `:8789`); set `CallbackAddr` explicitly to pin a port. Part of the Transport
+  boundary workstream (#472). (Investigation also confirmed the codergen
+  `nativeOnce` is a per-handler field, not shared across runs, and the library
+  path sets no process-global gateway env — so no further isolation changes were
+  needed.)
+
 - **`PromptPlain` moved from `tui/render` to `pipeline/handlers` (#477).** The
   plain-text prompt word-wrap helper used by `ConsoleInterviewer` lived under
   `tui/` but was imported only by the core human-gate handler, giving the engine

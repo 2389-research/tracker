@@ -44,7 +44,11 @@ func resolveWebhookInterviewer(wgc *WebhookGateConfig) (handlers.FreeformIntervi
 	}
 	addr := wgc.CallbackAddr
 	if addr == "" {
-		addr = ":8789"
+		// Default to an OS-assigned ephemeral port so concurrent library-driven
+		// runs (e.g. a service running many pipelines) never collide on a fixed
+		// port. The actual bound address is advertised to the external service
+		// via each gate payload's callback_url, so a random port is transparent.
+		addr = ":0"
 	}
 	wi := handlers.NewWebhookInterviewer(wgc.WebhookURL, addr)
 	if wgc.Timeout > 0 {

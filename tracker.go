@@ -130,7 +130,7 @@ func ResolveGitConfig(cfg Config) (GitPreflight, bool) {
 // waits for a callback POST to the local callback server.
 type WebhookGateConfig struct {
 	WebhookURL    string        // required: URL to post gate payloads to
-	CallbackAddr  string        // local listen addr for callback server (default: :8789)
+	CallbackAddr  string        // local listen addr for callback server (default: :0, an OS-assigned ephemeral port; the bound address is advertised via each gate's callback_url)
 	Timeout       time.Duration // wait timeout per gate (default: 10m)
 	TimeoutAction string        // "fail" (default) or "success" on timeout
 	AuthHeader    string        // Authorization header for outbound requests
