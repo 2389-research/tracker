@@ -84,16 +84,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The `tracker run` (non-TUI) path now routes through the library engine
-  (#478).** `cmd/tracker`'s plain/JSON run builds a `tracker.Config` and calls
-  `tracker.NewEngineFromGraph` instead of hand-assembling the LLM client,
-  registry, and engine — deleting that duplication and making the library the
-  single orchestration path. The CLI keeps its own pipeline loading (including
-  subgraph-file resolution, passed via `Config.Subgraphs`), git preflight, and
-  interviewer selection (translated into `Config` fields); the library owns the
-  client, token tracker, and interviewer lifecycle. No user-facing behavior
-  change. (The TUI path is unified next.) Part of the Transport boundary
-  workstream (#472).
+- **Both `tracker run` paths (plain/JSON and the TUI dashboard) now route
+  through the library engine (#478).** `cmd/tracker` builds a `tracker.Config`
+  and calls `tracker.NewEngineFromGraph` instead of hand-assembling the LLM
+  client, registry, and engine — deleting `buildTUIRegistry`/`buildTUIEngine`
+  and the plain-path equivalents, making the library the single orchestration
+  path. The CLI keeps its own pipeline loading (subgraph-file resolution via
+  `Config.Subgraphs`), git preflight, TUI wiring (event/agent/trace handlers →
+  `prog.Send`), and interviewer selection; the library owns the client, token
+  tracker (shared with the dashboard via the new `Config.TokenTracker`), and
+  interviewer lifecycle. No user-facing behavior change. Part of the Transport
+  boundary workstream (#472).
 
 - **`Engine.Close` cancels a cancellable interviewer it owns (#478).** When the
   library builds the human-gate interviewer (e.g. a webhook interviewer via

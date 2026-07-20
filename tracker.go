@@ -43,6 +43,12 @@ type Config struct {
 	AgentEvents   agent.EventHandler            // optional: live agent session events
 	LLMTrace      llm.TraceObserver             // optional: raw LLM trace events (attached to the auto-created or provided *llm.Client)
 	LLMClient     agent.Completer               // optional: override auto-created client
+	// TokenTracker optionally injects the per-provider token/cost tracker instead
+	// of the engine creating its own. An in-process transport that renders spend
+	// (the TUI) shares one tracker between its view model and the engine. When
+	// set, pass a *llm.Client via LLMClient that does NOT already have this
+	// tracker as middleware — the engine attaches it exactly once.
+	TokenTracker *llm.TokenTracker
 	Context       map[string]string             // optional: initial pipeline context
 	Params        map[string]string             // optional: override declared workflow params (keys without "params." prefix)
 	// Subgraphs are pre-loaded child graphs keyed by subgraph_ref, for a graph
@@ -323,7 +329,10 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	}
 	injectGraphDefaults(graph, cfg)
 
-	tokenTracker := llm.NewTokenTracker()
+	tokenTracker := cfg.TokenTracker
+	if tokenTracker == nil {
+		tokenTracker = llm.NewTokenTracker()
+	}
 	// Attach token tracker as middleware to the LLM client so it captures
 	// per-provider usage during native backend runs. Works for both
 	// auto-created clients and user-provided *llm.Client via Config.LLMClient.

@@ -15,7 +15,6 @@ import (
 
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/agent"
-	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/llm/anthropic"
 	"github.com/2389-research/tracker/llm/google"
@@ -28,12 +27,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 )
-
-// canceller is satisfied by interviewers that hold resources (e.g. WebhookInterviewer
-// starts an HTTP server) and need cleanup when the run finishes or is interrupted.
-type canceller interface {
-	Cancel()
-}
 
 // autopilotCfg holds just the autopilot settings needed by chooseInterviewer.
 // Set by executeRun before calling run/runTUI, because commandDeps.run has a
@@ -564,8 +557,12 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		return err
 	}
 
+	// The token tracker is shared between the TUI view model (StateStore) and
+	// the engine, so the dashboard's live cost readout matches the run. The
+	// client is built bare (no token-tracker middleware); the library attaches
+	// the shared tracker exactly once via Config.TokenTracker.
 	tokenTracker := llm.NewTokenTracker()
-	llmClient, err := resolveLLMClient(tokenTracker, backend)
+	llmClient, err := resolveLLMClient(nil, backend)
 	if err != nil {
 		return err
 	}
@@ -573,11 +570,10 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		defer llmClient.Close()
 	}
 
-	execEnv := exec.NewLocalEnvironment(workdir)
 	pipelineName := resolvePipelineName(graph, pipelineFile)
 	artifactDir := resolveArtifactDir(workdir)
 
-	prog, store, activityLog, err := setupTUIProgram(graph, subgraphs, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
+	prog, _, activityLog, err := setupTUIProgram(graph, subgraphs, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
 	if err != nil {
 		return err
 	}
@@ -591,18 +587,32 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
 	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
-	if c, ok := interviewer.(canceller); ok {
-		defer c.Cancel()
+
+	cfg := tracker.Config{
+		WorkingDir:     workdir,
+		CheckpointDir:  checkpoint,
+		ArtifactDir:    artifactDir,
+		Backend:        backend,
+		Budget:         activeBudgetLimits,
+		Subgraphs:      subgraphs,
+		BundleIdentity: bundleInfo.Identity,
+		ToolSafety:     &activeToolSafety,
+		Git:            &tracker.GitConfig{Preflight: tracker.GitPreflightOff},
+		EventHandler:   buildTUIPipelineHandler(prog, activityLog),
+		AgentEvents:    buildTUIAgentHandler(prog, activityLog),
+		LLMTrace:       buildTUITraceObserver(prog, activityLog, verbose),
+		LLMClient:      llmClient,
+		TokenTracker:   tokenTracker,
+		Interviewer:    interviewer, // cancelled by eng.Close() if it is a canceller
 	}
-	_ = store // store used only in setupTUIProgram
 
-	pipelineCombo := buildTUIPipelineHandler(prog, activityLog, verbose, llmClient)
+	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)
+	if err != nil {
+		return err
+	}
+	defer eng.Close()
 
-	registry := buildTUIRegistry(graph, llmClient, workdir, execEnv, interviewer, activityLog, pipelineCombo, subgraphs, backend, tokenTracker, prog, bundleInfo.Identity)
-
-	engine := buildTUIEngine(graph, registry, artifactDir, checkpoint, pipelineCombo, bundleInfo.Identity)
-
-	outcome, err := runTUIWithEngine(ctx, engine, prog)
+	outcome, err := runTUIWithEngine(ctx, eng, prog)
 	if err != nil {
 		return err
 	}
@@ -637,7 +647,7 @@ func resolveLLMClient(tokenTracker *llm.TokenTracker, backend string) (*llm.Clie
 // runTUIWithEngine runs the TUI program and waits for pipeline completion.
 // ctx is the signal-aware context created in runTUI so preflight, engine,
 // and the TUI program share a single cancellation surface.
-func runTUIWithEngine(ctx context.Context, engine *pipeline.Engine, prog *tea.Program) (pipelineOutcome, error) {
+func runTUIWithEngine(ctx context.Context, engine *tracker.Engine, prog *tea.Program) (pipelineOutcome, error) {
 	pipelineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -719,17 +729,9 @@ func formatParamOverridesForSummary(params map[string]string) string {
 	return strings.Join(pairs, ", ")
 }
 
-// buildTUIPipelineHandler wires LLM trace events to TUI+activity log and returns the combined handler.
-func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHandler, verbose bool, llmClient *llm.Client) pipeline.PipelineEventHandler {
-	if llmClient != nil {
-		logObserver := llmTraceLogObserver(activityLog)
-		llmClient.AddTraceObserver(llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-			for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
-				prog.Send(m)
-			}
-			logObserver(evt)
-		}))
-	}
+// buildTUIPipelineHandler returns the pipeline event handler that drives the TUI
+// (via prog.Send) and mirrors to the activity log.
+func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHandler) pipeline.PipelineEventHandler {
 	// PipelineAdapter is stateful (accumulates EventValidationOverridden so the
 	// terminal MsgPipelineCompleted carries Status + headline Override for the
 	// completion-row renderer per Gap 5.2 D17). Scope it to one pipeline run —
@@ -743,57 +745,32 @@ func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEvent
 	return pipeline.PipelineMultiHandler(pipelineHandler, activityLog)
 }
 
-// buildTUIRegistry builds the handler registry for TUI mode.
-//
-// bundleIdentity is the .dipx bundle identity threaded into
-// handlers.WithHandlerBundleIdentity so handler-package emissions
-// (parallel, manager_loop) get stamped to match engine emissions. Empty
-// for plain .dip runs / embedded workflows is a no-op.
-func buildTUIRegistry(graph *pipeline.Graph, llmClient *llm.Client, workdir string, execEnv *exec.LocalEnvironment, interviewer handlers.LabeledFreeformInterviewer, activityLog *pipeline.JSONLEventHandler, pipelineCombo pipeline.PipelineEventHandler, subgraphs map[string]*pipeline.Graph, backend string, tokenTracker *llm.TokenTracker, prog *tea.Program, bundleIdentity string) *pipeline.HandlerRegistry {
-	return handlers.NewDefaultRegistry(graph,
-		handlers.WithLLMClient(llmClient, workdir),
-		handlers.WithExecEnvironment(execEnv),
-		handlers.WithInterviewer(interviewer, graph),
-		handlers.WithAgentEventHandler(agent.EventHandlerFunc(func(evt agent.Event) {
-			if msg := tui.AdaptAgentEvent(evt, evt.NodeID); msg != nil {
-				prog.Send(msg)
-			}
-			errMsg := ""
-			if evt.Err != nil {
-				errMsg = evt.Err.Error()
-			}
-			activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
-		})),
-		handlers.WithPipelineEventHandler(pipelineCombo),
-		handlers.WithHandlerBundleIdentity(bundleIdentity),
-		handlers.WithSubgraphs(subgraphs),
-		handlers.WithDefaultBackend(backend),
-		handlers.WithTokenTracker(tokenTracker),
-		handlers.WithToolHandlerConfig(activeToolSafety),
-	)
+// buildTUITraceObserver returns the LLM trace observer for TUI mode: it drives
+// the dashboard (prog.Send) and mirrors to the activity log. Returned (not
+// attached to a client) so it can be passed via tracker.Config.LLMTrace.
+func buildTUITraceObserver(prog *tea.Program, activityLog *pipeline.JSONLEventHandler, verbose bool) llm.TraceObserver {
+	logObserver := llmTraceLogObserver(activityLog)
+	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+		for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
+			prog.Send(m)
+		}
+		logObserver(evt)
+	})
 }
 
-// buildTUIEngine creates and configures the pipeline engine for TUI mode.
-//
-// bundleIdentity is the .dipx bundle identity threaded into
-// pipeline.WithBundleIdentity so engine-stamped events carry provenance.
-// Empty for plain .dip runs / embedded workflows is a no-op.
-func buildTUIEngine(graph *pipeline.Graph, registry *pipeline.HandlerRegistry, artifactDir, checkpoint string, pipelineCombo pipeline.PipelineEventHandler, bundleIdentity string) *pipeline.Engine {
-	var engineOpts []pipeline.EngineOption
-	engineOpts = append(engineOpts, pipeline.WithArtifactDir(artifactDir))
-	engineOpts = append(engineOpts, pipeline.WithPipelineEventHandler(pipelineCombo))
-	engineOpts = append(engineOpts, pipeline.WithStylesheetResolution(true))
-	if checkpoint != "" {
-		engineOpts = append(engineOpts, pipeline.WithCheckpointPath(checkpoint))
-	}
-	if bundleIdentity != "" {
-		engineOpts = append(engineOpts, pipeline.WithBundleIdentity(bundleIdentity))
-	}
-	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
-	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {
-		engineOpts = append(engineOpts, pipeline.WithBudgetGuard(guard))
-	}
-	return pipeline.NewEngine(graph, registry, engineOpts...)
+// buildTUIAgentHandler returns the agent event handler for TUI mode: it drives
+// the dashboard (prog.Send) and mirrors to the activity log.
+func buildTUIAgentHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHandler) agent.EventHandler {
+	return agent.EventHandlerFunc(func(evt agent.Event) {
+		if msg := tui.AdaptAgentEvent(evt, evt.NodeID); msg != nil {
+			prog.Send(msg)
+		}
+		errMsg := ""
+		if evt.Err != nil {
+			errMsg = evt.Err.Error()
+		}
+		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+	})
 }
 
 // pipelineOutcome holds the result of a pipeline run.
@@ -808,7 +785,7 @@ type pipelineOutcome struct {
 // shares one source of truth with the non-TUI path: failure dominates, override
 // only fires when --fail-on-override is set, and validation_overridden returns
 // nil by default (because IsSuccess() covers it).
-func runPipelineAsync(engine *pipeline.Engine, ctx context.Context, prog *tea.Program) chan pipelineOutcome {
+func runPipelineAsync(engine *tracker.Engine, ctx context.Context, prog *tea.Program) chan pipelineOutcome {
 	outcomeCh := make(chan pipelineOutcome, 1)
 	go func() {
 		defer func() {
@@ -818,7 +795,8 @@ func runPipelineAsync(engine *pipeline.Engine, ctx context.Context, prog *tea.Pr
 				prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
 			}
 		}()
-		result, runErr := engine.Run(ctx)
+		res, runErr := engine.Run(ctx)
+		result := engineResultOf(res)
 		pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
 		outcomeCh <- pipelineOutcome{result: result, err: pipelineErr}
 		prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
