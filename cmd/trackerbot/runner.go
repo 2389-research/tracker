@@ -190,8 +190,7 @@ func (r *Runner) handleAdmission(ui ThreadUI, err error) {
 func (r *Runner) watch(threadTS string, run *tracker.ManagedRun, ui ThreadUI) {
 	<-run.Done()
 	r.unregister(threadTS)
-	res, runErr := run.Result()
-	deliver(ui, res, runErr)
+	deliver(context.Background(), ui, run)
 }
 
 func (r *Runner) register(threadTS string, iv *SlackInterviewer) {
