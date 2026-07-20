@@ -37,11 +37,13 @@ func main() {
 		tracker.WithWorkDirBase(runsBase),
 		tracker.WithMaxConcurrent(maxConcurrent),
 	)
+	configBase := tracker.Config{Backend: os.Getenv("TRACKERBOT_BACKEND")}
 	runner := NewRunner(rm, RunnerDeps{
 		NewThreadUI: bot.NewThreadUI,
 		WorkDir:     workDir,
 		NewID:       newGateID,
-		ConfigBase:  tracker.Config{Backend: os.Getenv("TRACKERBOT_BACKEND")},
+		ConfigBase:  configBase,
+		Intent:      buildIntentResolver(configBase),
 	})
 	bot.SetRunner(runner)
 
@@ -53,6 +55,19 @@ func main() {
 		log.Fatalf("trackerbot: %v", err)
 	}
 	log.Println("trackerbot: shut down")
+}
+
+// buildIntentResolver enables natural-language routing when an LLM is available,
+// falling back to the deterministic "run <workflow>" grammar otherwise.
+func buildIntentResolver(cfg tracker.Config) IntentResolver {
+	client, err := tracker.NewLLMClient(cfg)
+	if err != nil {
+		log.Printf("trackerbot: LLM intent unavailable (%v) — using the 'run <workflow>' grammar", err)
+		return grammarResolver{}
+	}
+	model := envOr("TRACKERBOT_MODEL", "claude-haiku-4-5-20251001")
+	log.Printf("trackerbot: natural-language intent enabled (model %s)", model)
+	return newLLMIntentResolver(client, model)
 }
 
 func envOr(key, def string) string {

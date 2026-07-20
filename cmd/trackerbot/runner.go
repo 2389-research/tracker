@@ -22,6 +22,9 @@ type RunnerDeps struct {
 	WorkDir string
 	// NewID returns a fresh unique gate id per call.
 	NewID func() string
+	// Intent resolves @mention text to a workflow + params. Nil falls back to the
+	// deterministic grammar ("[run] <workflow> [k=v ...]").
+	Intent IntentResolver
 	// ConfigBase carries provider/budget/backend config; the runner overlays the
 	// per-run Interviewer, EventHandler, and Params onto a copy of it.
 	ConfigBase tracker.Config
@@ -47,9 +50,9 @@ func NewRunner(rm *tracker.RunManager, deps RunnerDeps) *Runner {
 func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) {
 	ui := r.deps.NewThreadUI(channel, threadTS)
 
-	intent, err := resolveIntent(text)
+	intent, err := r.resolveIntent(ctx, text)
 	if err != nil {
-		_ = ui.Post("I couldn't parse that: " + err.Error())
+		_ = ui.Post("I couldn't work out what to run: " + err.Error())
 		return
 	}
 	source, info, err := tracker.ResolveSource(intent.Workflow, r.deps.WorkDir)
@@ -75,6 +78,14 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 	r.register(threadTS, iv)
 	_ = ui.Post(fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName))
 	go r.watch(threadTS, run, ui)
+}
+
+// resolveIntent uses the configured IntentResolver, or the grammar by default.
+func (r *Runner) resolveIntent(ctx context.Context, text string) (Intent, error) {
+	if r.deps.Intent != nil {
+		return r.deps.Intent.Resolve(ctx, text)
+	}
+	return parseGrammar(text)
 }
 
 // OnInteraction routes an inbound button/modal/reply to the right run's pending

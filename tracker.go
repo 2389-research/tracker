@@ -618,6 +618,14 @@ func parseDIPSource(source string) (*pipeline.Graph, error) {
 // consulted after per-provider *_BASE_URL env vars and before the
 // TRACKER_GATEWAY_URL / TRACKER_GATEWAY_KIND env-var fallbacks (see
 // resolveProviderBaseURLWithGateway).
+// NewLLMClient builds a standalone LLM client from Config (Provider, GatewayURL,
+// GatewayKind) for embedders that need model calls outside a pipeline run — e.g.
+// request classification or routing. It carries the same transport-retry
+// middleware as a run's client. The caller owns Close().
+func NewLLMClient(cfg Config) (*llm.Client, error) {
+	return buildClient(cfg.Provider, cfg.GatewayURL, cfg.GatewayKind)
+}
+
 func buildClient(provider, gatewayURL string, gatewayKind GatewayKind) (*llm.Client, error) {
 	constructors := allProviderConstructors(gatewayURL, gatewayKind)
 
