@@ -49,6 +49,11 @@ type Config struct {
 	LLMClient     agent.Completer               // optional: override auto-created client
 	Context       map[string]string             // optional: initial pipeline context
 	Params        map[string]string             // optional: override declared workflow params (keys without "params." prefix)
+	// Subgraphs are pre-loaded child graphs, keyed by subgraph_ref, for a graph
+	// that contains subgraph nodes. Callers that resolve subgraph_ref files
+	// themselves (e.g. the CLI) pass the loaded map here; it is wired into the
+	// registry via handlers.WithSubgraphs. Nil/empty for flat pipelines.
+	Subgraphs map[string]*pipeline.Graph
 	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
 	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
 	AutoApprove   bool                          // auto-approve all human gates with default/first option
@@ -224,7 +229,15 @@ func NewEngineWithContext(ctx context.Context, source string, cfg Config) (*Engi
 	if err != nil {
 		return nil, err
 	}
+	return NewEngineFromGraph(ctx, graph, cfg)
+}
 
+// NewEngineFromGraph assembles an Engine from an already-parsed graph, skipping
+// source parsing. Use it when the caller has loaded the graph itself and, for a
+// pipeline with subgraph nodes, resolved the subgraph_ref files into
+// Config.Subgraphs — as the CLI does. Otherwise identical to
+// NewEngineWithContext (validate → git preflight → resume → client → assemble).
+func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) (*Engine, error) {
 	if err := pipeline.Validate(graph); err != nil {
 		return nil, fmt.Errorf("validate graph: %w", err)
 	}
@@ -406,6 +419,9 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 	}
 	if cfg.Backend != "" {
 		registryOpts = append(registryOpts, handlers.WithDefaultBackend(cfg.Backend))
+	}
+	if len(cfg.Subgraphs) > 0 {
+		registryOpts = append(registryOpts, handlers.WithSubgraphs(cfg.Subgraphs))
 	}
 	interviewer, err := resolveInterviewer(cfg, client, completer)
 	if err != nil {
@@ -909,6 +925,13 @@ func (e *Engine) Close() error {
 	})
 	return e.closeErr
 }
+
+// TokenTracker returns the per-provider token/cost tracker attached to this
+// engine's run. A transport that renders spend in-process (e.g. the TUI status
+// bar and per-node cost) shares this rather than reconstructing usage from the
+// event stream. Non-nil whenever the engine has an observable *llm.Client (the
+// auto-created client, or a *llm.Client supplied via Config.LLMClient).
+func (e *Engine) TokenTracker() *llm.TokenTracker { return e.tokenTracker }
 
 // ValidationResult contains the outcome of pipeline validation.
 type ValidationResult struct {

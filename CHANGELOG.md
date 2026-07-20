@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`NewEngineFromGraph`, `Config.Subgraphs`, `Engine.TokenTracker()` (#478).**
+  The engine assembly now accepts a pre-parsed `*pipeline.Graph` and a pre-loaded
+  subgraph map, so a caller that loads/validates the graph and resolves
+  `subgraph_ref` files itself (the CLI) can share the library's client/registry/
+  budget/interviewer wiring instead of duplicating it. `Engine.TokenTracker()`
+  exposes the run's token/cost tracker for an in-process transport (the TUI).
+  Groundwork for routing the CLI/TUI through the library `Config` path. Part of
+  the Transport boundary workstream (#472).
+
 - **`Config.LLMTrace` — raw LLM trace stream for library callers (#478/#475).**
   A caller can now attach an `llm.TraceObserver` via `Config.LLMTrace`; it is
   wired onto whichever `*llm.Client` backs the run (auto-created or supplied via
