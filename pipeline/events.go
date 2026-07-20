@@ -262,11 +262,35 @@ type PipelineEvent struct {
 	// signal and headline, without reconstructing it from accumulated state.
 	TerminalStatus string
 
+	// Snapshot is non-nil on EventPipelineStarted. It carries the node
+	// inventory plus any resume state so a subscriber joining at run start can
+	// seed its progress model without separate access to the graph or checkpoint.
+	Snapshot *RunSnapshot
+
 	// BundleIdentity is the content-addressed identity of the .dipx bundle
 	// the run was started against ("sha256:<hex>"). Empty for runs from a
 	// plain .dip file. The engine stamps this on every emitted event so
 	// activity.jsonl carries provenance on every line.
 	BundleIdentity string
+}
+
+// RunSnapshot is the payload on EventPipelineStarted. Nodes are the top-level
+// graph nodes sorted by ID (subgraph children are not expanded here); the
+// ordering is stable but is not execution order. CurrentNode and CompletedNodes
+// are populated only on resume.
+type RunSnapshot struct {
+	Nodes          []SnapshotNode
+	StartNode      string
+	ExitNode       string
+	CurrentNode    string   // resume point; empty for a fresh run
+	CompletedNodes []string // completed on resume; empty for a fresh run
+}
+
+// SnapshotNode is one node in a RunSnapshot.
+type SnapshotNode struct {
+	ID      string
+	Label   string
+	Handler string
 }
 
 // PipelineEventHandler receives pipeline events for observability purposes.

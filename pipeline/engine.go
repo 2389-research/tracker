@@ -233,6 +233,7 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		Message:   "pipeline started",
+		Snapshot:  e.buildRunSnapshot(s),
 	})
 
 	// Anchor the sleep-aware budget baseline at TRUE run start — before the first

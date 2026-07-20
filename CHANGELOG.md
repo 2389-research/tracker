@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Run-start snapshot event (#475).** `EventPipelineStarted` now carries a
+  `RunSnapshot` (`PipelineEvent.Snapshot`): the node inventory (id, label,
+  handler) plus start/exit nodes and, on resume, the current node and
+  already-completed nodes. A subscriber that joins at run start can seed its
+  progress model directly from the stream instead of separately reading the
+  graph and checkpoint. Part of the Transport boundary workstream (#472).
+
 - **Authoritative terminal-status event (#475).** A pipeline run's terminal
   event now carries a `TerminalStatus` field — `PipelineEvent.TerminalStatus`
   on the live stream and `terminal_status` on the NDJSON (`--json`) wire format.
