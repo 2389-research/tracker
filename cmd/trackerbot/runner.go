@@ -77,6 +77,11 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 	cfg.EventHandler = pipeline.PipelineEventHandlerFunc(nf.HandlePipelineEvent)
 	cfg.Params = intent.Params
 
+	// Order matters: register AFTER a successful Start. Registering before would
+	// let a duplicate mention that Start rejects (ErrRunKeyActive) clobber the
+	// live run's interviewer in byThread. The gap between Start returning and
+	// register (two statements) is far shorter than the run reaching its first
+	// gate, so no inbound answer is lost in practice.
 	run, err := r.rm.Start(ctx, threadTS, source, cfg)
 	if err != nil {
 		r.handleAdmission(ui, err)

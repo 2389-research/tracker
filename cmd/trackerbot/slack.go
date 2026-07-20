@@ -69,12 +69,14 @@ func (b *SlackBot) consume(ctx context.Context) {
 
 // onEventsAPI handles app_mention (start a run) and message (thread reply).
 func (b *SlackBot) onEventsAPI(ctx context.Context, evt socketmode.Event) {
+	// Ack every dispatched envelope (before any shape check) so Socket Mode does
+	// not redeliver it.
+	if evt.Request != nil {
+		_ = b.sm.Ack(*evt.Request)
+	}
 	api, ok := evt.Data.(slackevents.EventsAPIEvent)
 	if !ok {
 		return
-	}
-	if evt.Request != nil {
-		_ = b.sm.Ack(*evt.Request)
 	}
 	if api.Type != slackevents.CallbackEvent {
 		return
@@ -113,12 +115,12 @@ func (b *SlackBot) onThreadReply(m *slackevents.MessageEvent) {
 
 // onInteractive handles button clicks (choice/yes_no gates).
 func (b *SlackBot) onInteractive(evt socketmode.Event) {
+	if evt.Request != nil {
+		_ = b.sm.Ack(*evt.Request)
+	}
 	cb, ok := evt.Data.(slack.InteractionCallback)
 	if !ok {
 		return
-	}
-	if evt.Request != nil {
-		_ = b.sm.Ack(*evt.Request)
 	}
 	if cb.Type != slack.InteractionTypeBlockActions {
 		return
@@ -151,6 +153,16 @@ func (b *SlackBot) takePendingFreeform(threadTS string) string {
 	return id
 }
 
+// clearPendingFreeform removes a thread's pending freeform entry, but only if it
+// still points at gateID — so it doesn't clobber a newer gate in that thread.
+func (b *SlackBot) clearPendingFreeform(threadTS, gateID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pendingFree[threadTS] == gateID {
+		delete(b.pendingFree, threadTS)
+	}
+}
+
 // gateActionPrefix namespaces our button action ids so unrelated interactions
 // are ignored. Encoding is "gate|<gateID>|<index>".
 const gateActionPrefix = "gate"
@@ -172,6 +184,12 @@ type slackThreadUI struct {
 	bot      *SlackBot
 	channel  string
 	threadTS string
+}
+
+// clearPending implements the pendingClearer capability: drop this thread's
+// pending freeform entry when its gate stops waiting.
+func (u *slackThreadUI) clearPending(gateID string) {
+	u.bot.clearPendingFreeform(u.threadTS, gateID)
 }
 
 func (u *slackThreadUI) Post(text string) error {

@@ -58,8 +58,20 @@ var (
 // Actor marks answers as human-driven for override auditing.
 func (s *SlackInterviewer) Actor() pipeline.Actor { return pipeline.ActorHuman }
 
-// SetPipelineContext lets a run cancellation unblock a waiting gate.
-func (s *SlackInterviewer) SetPipelineContext(ctx context.Context) { s.pctx = ctx }
+// SetPipelineContext lets a run cancellation unblock a waiting gate. Guarded
+// because parallel-branch human gates can drive one interviewer concurrently.
+func (s *SlackInterviewer) SetPipelineContext(ctx context.Context) {
+	s.mu.Lock()
+	s.pctx = ctx
+	s.mu.Unlock()
+}
+
+// pendingClearer is an optional ThreadUI capability: clear a thread's pending
+// freeform gate when it stops waiting (resolved or abandoned), so a later
+// unrelated reply isn't consumed by a stale gate.
+type pendingClearer interface {
+	clearPending(gateID string)
+}
 
 // Cancel abandons every waiting gate (idempotent). The Slack transport calls it
 // on run teardown; tracker's Engine.Close also calls it.
@@ -177,19 +189,10 @@ func (s *SlackInterviewer) await(g Gate) (GateAnswer, error) {
 	s.mu.Lock()
 	s.pending[g.ID] = ch
 	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		delete(s.pending, g.ID)
-		s.mu.Unlock()
-	}()
+	defer s.cleanup(g)
 
 	if err := s.ui.PostGate(g); err != nil {
 		return GateAnswer{}, err
-	}
-
-	var ctxDone <-chan struct{}
-	if s.pctx != nil {
-		ctxDone = s.pctx.Done()
 	}
 
 	select {
@@ -198,11 +201,36 @@ func (s *SlackInterviewer) await(g Gate) (GateAnswer, error) {
 			return GateAnswer{}, errGateCanceled
 		}
 		return ans, nil
-	case <-ctxDone:
+	case <-s.pipelineDone():
 		return GateAnswer{}, errGateCanceled
 	case <-s.canceled:
 		return GateAnswer{}, errGateCanceled
 	}
+}
+
+// cleanup removes the gate's pending channel and, for a freeform gate, asks the
+// transport to clear its per-thread pending entry.
+func (s *SlackInterviewer) cleanup(g Gate) {
+	s.mu.Lock()
+	delete(s.pending, g.ID)
+	s.mu.Unlock()
+	if g.Kind == GateFreeform {
+		if pc, ok := s.ui.(pendingClearer); ok {
+			pc.clearPending(g.ID)
+		}
+	}
+}
+
+// pipelineDone returns the pipeline context's Done channel, or nil (which blocks
+// forever in a select) when no context has been set.
+func (s *SlackInterviewer) pipelineDone() <-chan struct{} {
+	s.mu.Lock()
+	pctx := s.pctx
+	s.mu.Unlock()
+	if pctx == nil {
+		return nil
+	}
+	return pctx.Done()
 }
 
 // isYesNo reports whether choices are exactly a Yes/No pair (order-insensitive),
