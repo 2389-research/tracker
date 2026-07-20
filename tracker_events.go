@@ -31,6 +31,10 @@ type StreamEvent struct {
 	Model     string `json:"model,omitempty"`     // LLM model
 	ToolName  string `json:"tool_name,omitempty"` // tool name for agent/LLM tool events
 	Content   string `json:"content,omitempty"`   // text content (LLM output, tool output)
+	// TerminalStatus is set only on a pipeline run's terminal event
+	// (pipeline_completed / pipeline_failed / budget_exceeded): "success",
+	// "validation_overridden", "fail", or "budget_exceeded". Empty otherwise.
+	TerminalStatus string `json:"terminal_status,omitempty"`
 }
 
 // NDJSONWriter is a thread-safe writer that serializes StreamEvents line by
@@ -90,12 +94,13 @@ func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 	return pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
 		defer s.recoverPanic("pipeline")
 		entry := StreamEvent{
-			Timestamp: evt.Timestamp.Format(ndjsonTimestampLayout),
-			Source:    "pipeline",
-			Type:      string(evt.Type),
-			RunID:     evt.RunID,
-			NodeID:    evt.NodeID,
-			Message:   evt.Message,
+			Timestamp:      evt.Timestamp.Format(ndjsonTimestampLayout),
+			Source:         "pipeline",
+			Type:           string(evt.Type),
+			RunID:          evt.RunID,
+			NodeID:         evt.NodeID,
+			Message:        evt.Message,
+			TerminalStatus: evt.TerminalStatus,
 		}
 		if evt.Err != nil {
 			entry.Error = evt.Err.Error()

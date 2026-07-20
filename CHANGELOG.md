@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Authoritative terminal-status event (#475).** A pipeline run's terminal
+  event now carries a `TerminalStatus` field — `PipelineEvent.TerminalStatus`
+  on the live stream and `terminal_status` on the NDJSON (`--json`) wire format.
+  It is set only on the single terminal event of a run (`pipeline_completed`,
+  `pipeline_failed`, or `budget_exceeded`) to one of `success`,
+  `validation_overridden`, `fail`, or `budget_exceeded`, and empty on every
+  other event. A subscriber that joins mid-run can now treat "any event with a
+  non-empty `TerminalStatus`" as the authoritative run-finished signal and
+  headline, instead of reconstructing it from accumulated state. Part of the
+  Transport boundary workstream (#472).
+
 - **`Config.Interviewer` — custom in-process human-gate seam (#474).** Library
   callers can now inject their own `handlers.Interviewer` (optionally implementing
   the richer `FreeformInterviewer` / `LabeledFreeformInterviewer` /

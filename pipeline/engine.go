@@ -286,20 +286,20 @@ func (e *Engine) runLoop(ctx context.Context, s *runState, currentNodeID string)
 func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 	s.trace.EndTime = time.Now()
 
-	e.emit(PipelineEvent{
-		Type:      EventPipelineCompleted,
-		Timestamp: time.Now(),
-		RunID:     s.runID,
-		Message:   "pipeline completed",
-	})
-
-	// Terminal-status rule: a success exit becomes validation_overridden if
-	// any override fired during the run. Failure paths return fail/budget
-	// regardless of override presence; only this success path flips.
+	// Per the terminal-status rule (see doc above); computed before the emit so
+	// the completion event carries the authoritative status.
 	status := OutcomeSuccess
 	if len(s.validationOverrides) > 0 {
 		status = OutcomeValidationOverridden
 	}
+
+	e.emit(PipelineEvent{
+		Type:           EventPipelineCompleted,
+		Timestamp:      time.Now(),
+		RunID:          s.runID,
+		Message:        "pipeline completed",
+		TerminalStatus: string(status),
+	})
 	return &EngineResult{
 		RunID:               s.runID,
 		Status:              status,
@@ -873,13 +873,7 @@ func (e *Engine) handleCompletedTarget(s *runState, nextTo string, traceEntry *T
 func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) {
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
-	e.emit(PipelineEvent{
-		Type:      EventPipelineFailed,
-		Timestamp: time.Now(),
-		RunID:     s.runID,
-		Message:   "context cancelled",
-		Err:       err,
-	})
+	e.emitFailed(s.runID, "context cancelled", err)
 	return &EngineResult{
 		RunID:               s.runID,
 		Status:              OutcomeFail,
@@ -902,16 +896,21 @@ func (e *Engine) emit(evt PipelineEvent) {
 	e.eventHandler.HandlePipelineEvent(evt)
 }
 
+// emitFailed emits the terminal EventPipelineFailed event stamped with the
+// fail terminal status. Every non-budget failure exit routes through here so
+// the authoritative status is set in exactly one place.
+func (e *Engine) emitFailed(runID, msg string, err error) {
+	e.emit(PipelineEvent{
+		Type: EventPipelineFailed, Timestamp: time.Now(), RunID: runID,
+		Message: msg, Err: err, TerminalStatus: string(OutcomeFail),
+	})
+}
+
 // failResult builds an EngineResult with fail status. Populates
 // ValidationOverrides from the run's sticky list so forensics see "this run
 // had an override AND it failed."
 func (e *Engine) failResult(s *runState) *EngineResult {
-	e.emit(PipelineEvent{
-		Type:      EventPipelineFailed,
-		Timestamp: time.Now(),
-		RunID:     s.runID,
-		Message:   "pipeline failed",
-	})
+	e.emitFailed(s.runID, "pipeline failed", nil)
 	return &EngineResult{
 		RunID:               s.runID,
 		Status:              OutcomeFail,

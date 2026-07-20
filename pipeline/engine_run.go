@@ -213,11 +213,12 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 		}
 	}
 	e.emit(PipelineEvent{
-		Type:      EventBudgetExceeded,
-		Timestamp: time.Now(),
-		RunID:     s.runID,
-		Message:   breach.Message,
-		Cost:      costSnap,
+		Type:           EventBudgetExceeded,
+		Timestamp:      time.Now(),
+		RunID:          s.runID,
+		Message:        breach.Message,
+		Cost:           costSnap,
+		TerminalStatus: string(OutcomeBudgetExceeded),
 	})
 	return loopResult{
 		action: loopReturn,
@@ -1119,12 +1120,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	maxRestarts := e.maxRestartsAllowed()
 	if s.cp.RestartCount >= maxRestarts {
-		e.emit(PipelineEvent{
-			Type:      EventPipelineFailed,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			Message:   fmt.Sprintf("max restarts (%d) exceeded", maxRestarts),
-		})
+		e.emitFailed(s.runID, fmt.Sprintf("max restarts (%d) exceeded", maxRestarts), nil)
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		s.trace.EndTime = time.Now()
 		return "", false, &EngineResult{

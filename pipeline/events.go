@@ -253,6 +253,15 @@ type PipelineEvent struct {
 	// gate, label, actor, and subgraph_path of the traversed override edge.
 	Override *OverrideDetail
 
+	// TerminalStatus is the run's terminal status, set only on the single
+	// terminal event of a run — EventPipelineCompleted, EventPipelineFailed,
+	// or EventBudgetExceeded. One of "success", "validation_overridden",
+	// "fail", or "budget_exceeded" (the TerminalStatus enum). Empty on every
+	// non-terminal event. A subscriber that joins mid-run can treat "any event
+	// with a non-empty TerminalStatus" as the authoritative run-finished
+	// signal and headline, without reconstructing it from accumulated state.
+	TerminalStatus string
+
 	// BundleIdentity is the content-addressed identity of the .dipx bundle
 	// the run was started against ("sha256:<hex>"). Empty for runs from a
 	// plain .dip file. The engine stamps this on every emitted event so
