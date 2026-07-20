@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	tracker "github.com/2389-research/tracker"
@@ -50,6 +51,12 @@ func NewRunner(rm *tracker.RunManager, deps RunnerDeps) *Runner {
 func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) {
 	ui := r.deps.NewThreadUI(channel, threadTS)
 
+	// A mention may be a control command (help/status/cancel/runs) rather than a
+	// request to start a run — including inside an already-active thread.
+	if r.handleCommand(ui, threadTS, text) {
+		return
+	}
+
 	intent, err := r.resolveIntent(ctx, text)
 	if err != nil {
 		_ = ui.Post("I couldn't work out what to run: " + err.Error())
@@ -78,6 +85,69 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 	r.register(threadTS, iv)
 	_ = ui.Post(fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName))
 	go r.watch(threadTS, run, ui)
+}
+
+const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
+	"• `@trackerbot <what you want>` — start a run (I'll pick a workflow), or `run <workflow> [k=v …]`\n" +
+	"• `@trackerbot status` — this thread's run state\n" +
+	"• `@trackerbot cancel` — stop this thread's run\n" +
+	"• `@trackerbot runs` — list active runs\n" +
+	"• `@trackerbot help` — this message"
+
+// handleCommand handles control verbs (help/status/cancel/runs). Returns true if
+// the mention was a command and no run should be started.
+func (r *Runner) handleCommand(ui ThreadUI, threadTS, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(stripMention(text))) {
+	case "", "help", "?":
+		_ = ui.Post(helpText)
+	case "status":
+		r.postStatus(ui, threadTS)
+	case "cancel", "stop":
+		r.postCancel(ui, threadTS)
+	case "runs", "list":
+		r.postRuns(ui)
+	default:
+		return false
+	}
+	return true
+}
+
+func (r *Runner) postStatus(ui ThreadUI, threadTS string) {
+	run, ok := r.rm.Get(threadTS)
+	if !ok {
+		_ = ui.Post("No run in this thread.")
+		return
+	}
+	_ = ui.Post(fmt.Sprintf("Status: *%s*%s", run.State(), runIDSuffix(run.RunID())))
+}
+
+func (r *Runner) postCancel(ui ThreadUI, threadTS string) {
+	if r.rm.Cancel(threadTS) {
+		_ = ui.Post("🛑 cancelling this run…")
+		return
+	}
+	_ = ui.Post("No active run in this thread to cancel.")
+}
+
+func (r *Runner) postRuns(ui ThreadUI) {
+	runs := r.rm.List()
+	if len(runs) == 0 {
+		_ = ui.Post("No runs right now.")
+		return
+	}
+	var b strings.Builder
+	b.WriteString("*Active runs:*\n")
+	for _, run := range runs {
+		fmt.Fprintf(&b, "• `%s` — %s\n", run.Key, run.State())
+	}
+	_ = ui.Post(b.String())
+}
+
+func runIDSuffix(runID string) string {
+	if runID == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (run `%s`)", runID)
 }
 
 // resolveIntent uses the configured IntentResolver, or the grammar by default.
