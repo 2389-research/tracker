@@ -205,50 +205,83 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		return err
 	}
 
-	tokenTracker := llm.NewTokenTracker()
-	llmClient, err := prepareNativeLLMClient(tokenTracker, backend)
-	if err != nil {
-		return err
-	}
-	if llmClient != nil {
-		defer llmClient.Close()
-	}
-
-	execEnv := exec.NewLocalEnvironment(workdir)
-	interviewer := chooseInterviewer(isatty.IsTerminal(os.Stdin.Fd()), activeAutopilotCfg, llmClient, backend)
-	if c, ok := interviewer.(canceller); ok {
-		defer c.Cancel()
-	}
-
 	artifactDir := resolveArtifactDir(workdir)
 	activityLog := setupActivityLog(artifactDir, verbose, bundleInfo.Identity)
 	defer activityLog.Close()
 
-	wireLLMTraceToLog(llmClient, activityLog)
+	agentHandler, pipelineHandler, traceObs := buildConsoleEventHandlers(activityLog, verbose, jsonOut)
 
-	agentEventHandler, pipelineEventHandler := buildConsoleEventHandlers(
-		activityLog, llmClient, verbose, jsonOut,
-	)
+	cfg := tracker.Config{
+		WorkingDir:     workdir,
+		CheckpointDir:  checkpoint,
+		ArtifactDir:    artifactDir,
+		Backend:        backend,
+		Budget:         activeBudgetLimits,
+		Subgraphs:      subgraphs,
+		BundleIdentity: bundleInfo.Identity,
+		ToolSafety:     &activeToolSafety,
+		// loadAndPreflightPipeline already ran the CLI git preflight (with TTY
+		// prompting); disable the library's non-interactive one.
+		Git:          &tracker.GitConfig{Preflight: tracker.GitPreflightOff},
+		EventHandler: pipelineHandler,
+		AgentEvents:  agentHandler,
+		LLMTrace:     traceObs,
+	}
+	applyInterviewerToConfig(&cfg, isatty.IsTerminal(os.Stdin.Fd()))
 
-	engineOpts := buildEngineOptions(artifactDir, checkpoint, pipelineEventHandler, graph, bundleInfo.Identity)
-	registry := handlers.NewDefaultRegistry(graph,
-		handlers.WithLLMClient(llmClient, workdir),
-		handlers.WithExecEnvironment(execEnv),
-		handlers.WithInterviewer(interviewer, graph),
-		handlers.WithAgentEventHandler(agentEventHandler),
-		handlers.WithPipelineEventHandler(pipelineEventHandler),
-		handlers.WithHandlerBundleIdentity(bundleInfo.Identity),
-		handlers.WithSubgraphs(subgraphs),
-		handlers.WithDefaultBackend(backend),
-		handlers.WithTokenTracker(tokenTracker),
-		handlers.WithToolHandlerConfig(activeToolSafety),
-	)
+	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)
+	if err != nil {
+		return err
+	}
+	defer eng.Close()
 
-	engine := pipeline.NewEngine(graph, registry, engineOpts...)
+	res, runErr := eng.Run(ctx)
+	return finishRun(engineResultOf(res), runErr, pipelineFile, artifactDir)
+}
 
-	result, runErr := engine.Run(ctx)
+// engineResultOf extracts the pipeline.EngineResult from a tracker.Result (nil-safe).
+func engineResultOf(res *tracker.Result) *pipeline.EngineResult {
+	if res == nil {
+		return nil
+	}
+	return res.EngineResult
+}
 
-	return finishRun(result, runErr, pipelineFile, artifactDir)
+// applyInterviewerToConfig translates the CLI's interviewer selection
+// (auto-approve, webhook, autopilot persona, or interactive) into tracker.Config
+// fields so the library owns the interviewer and its lifecycle/cleanup. Mirrors
+// the priority in the former chooseInterviewer.
+func applyInterviewerToConfig(cfg *tracker.Config, isTerminal bool) {
+	switch {
+	case activeAutopilotCfg.autoApprove:
+		cfg.AutoApprove = true
+	case activeWebhookGate != nil:
+		cfg.WebhookGate = toTrackerWebhookGate(activeWebhookGate)
+	case activeAutopilotCfg.persona != "":
+		cfg.Autopilot = activeAutopilotCfg.persona
+	default:
+		cfg.Interviewer = interactiveInterviewer(isTerminal)
+	}
+}
+
+// interactiveInterviewer returns the human interviewer for an interactive plain
+// run: an inline per-gate bubbletea modal on a TTY, else a stdin/stdout console.
+func interactiveInterviewer(isTerminal bool) handlers.Interviewer {
+	if isTerminal {
+		return tui.NewMode1Interviewer()
+	}
+	return handlers.NewConsoleInterviewer()
+}
+
+// toTrackerWebhookGate maps the CLI webhook gate config to the library config.
+func toTrackerWebhookGate(w *webhookGateCfg) *tracker.WebhookGateConfig {
+	return &tracker.WebhookGateConfig{
+		WebhookURL:    w.webhookURL,
+		CallbackAddr:  w.gateCallbackAddr,
+		Timeout:       w.gateTimeout,
+		TimeoutAction: w.gateTimeoutAction,
+		AuthHeader:    w.webhookAuthHeader,
+	}
 }
 
 // finishRun interprets the engine result, prints the summary, and exports the
@@ -312,20 +345,6 @@ func setupActivityLog(artifactDir string, verbose bool, bundleIdentity string) *
 	return activityLog
 }
 
-// prepareNativeLLMClient creates the LLM client, returning nil without error
-// when an external backend is used and no native client is needed.
-func prepareNativeLLMClient(tokenTracker *llm.TokenTracker, backend string) (*llm.Client, error) {
-	client, err := buildLLMClient(tokenTracker)
-	if err != nil && backend != "claude-code" && backend != "acp" {
-		return nil, formatLLMClientError(err)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
-		return nil, nil
-	}
-	return client, nil
-}
-
 // emitForcedBundleMismatch writes the bundle_mismatch_forced audit entry to
 // activity.jsonl when --force-bundle-mismatch allowed resume despite a
 // .dipx bundle identity change. No-op for new runs and for resumes whose
@@ -349,42 +368,6 @@ func llmTraceLogObserver(activityLog *pipeline.JSONLEventHandler) llm.TraceObser
 		}
 		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
 	}
-}
-
-// wireLLMTraceToLog registers a trace observer that writes LLM events to the activity log.
-func wireLLMTraceToLog(llmClient *llm.Client, activityLog *pipeline.JSONLEventHandler) {
-	if llmClient != nil {
-		llmClient.AddTraceObserver(llmTraceLogObserver(activityLog))
-	}
-}
-
-// buildEngineOptions assembles the engine option slice from config values.
-// Budget limits are the effective merge of activeBudgetLimits (CLI --max-*
-// flags) over workflow-level defaults from graph.Attrs (populated by the
-// dippin adapter from WorkflowDefaults.Max*). CLI flags always win.
-//
-// bundleIdentity is the content-addressed identity of the .dipx bundle the
-// run was started against (empty for plain .dip runs / embedded workflows).
-// When non-empty it is threaded to pipeline.WithBundleIdentity so engine
-// emissions are stamped — the registry-side companion stamping for handler
-// emissions is wired separately via handlers.WithHandlerBundleIdentity.
-func buildEngineOptions(artifactDir, checkpoint string, evtHandler pipeline.PipelineEventHandler, graph *pipeline.Graph, bundleIdentity string) []pipeline.EngineOption {
-	opts := []pipeline.EngineOption{
-		pipeline.WithArtifactDir(artifactDir),
-		pipeline.WithPipelineEventHandler(evtHandler),
-		pipeline.WithStylesheetResolution(true),
-	}
-	if checkpoint != "" {
-		opts = append(opts, pipeline.WithCheckpointPath(checkpoint))
-	}
-	if bundleIdentity != "" {
-		opts = append(opts, pipeline.WithBundleIdentity(bundleIdentity))
-	}
-	effectiveBudget := tracker.ResolveBudgetLimits(activeBudgetLimits, graph)
-	if guard := pipeline.NewBudgetGuard(effectiveBudget); guard != nil {
-		opts = append(opts, pipeline.WithBudgetGuard(guard))
-	}
-	return opts
 }
 
 // interpretRunResult converts a raw engine run result into a pipeline-level
@@ -432,12 +415,15 @@ func headlineOverride(in []pipeline.OverrideDetail) pipeline.OverrideDetail {
 
 // buildConsoleEventHandlers creates the agent and pipeline event handlers for
 // console (non-TUI) mode, branching on whether JSON output is requested.
+// buildConsoleEventHandlers returns the agent + pipeline event handlers and the
+// LLM trace observer for a plain/JSON (non-TUI) run. The trace observer is
+// returned (not attached to a client) so the caller can pass it via
+// tracker.Config.LLMTrace and let the library own the client.
 func buildConsoleEventHandlers(
 	activityLog *pipeline.JSONLEventHandler,
-	llmClient *llm.Client,
 	verbose bool,
 	jsonOut bool,
-) (agent.EventHandler, pipeline.PipelineEventHandler) {
+) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
 	// Agent event handler that always logs to activity log.
 	logAgentEvent := func(evt agent.Event) {
 		errMsg := ""
@@ -446,41 +432,36 @@ func buildConsoleEventHandlers(
 		}
 		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
 	}
+	activityTrace := llmTraceLogObserver(activityLog)
 
 	if jsonOut {
-		return buildJSONEventHandlers(activityLog, llmClient, logAgentEvent)
+		return buildJSONEventHandlers(activityLog, logAgentEvent, activityTrace)
 	}
-	return buildPlainEventHandlers(activityLog, llmClient, verbose, logAgentEvent)
+	return buildPlainEventHandlers(activityLog, verbose, logAgentEvent, activityTrace)
 }
 
 // buildJSONEventHandlers creates event handlers for JSON streaming mode.
 func buildJSONEventHandlers(
 	activityLog *pipeline.JSONLEventHandler,
-	llmClient *llm.Client,
 	logAgentEvent func(agent.Event),
-) (agent.EventHandler, pipeline.PipelineEventHandler) {
+	activityTrace llm.TraceObserver,
+) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
 	stream := tracker.NewNDJSONWriter(os.Stdout)
-	if llmClient != nil {
-		llmClient.AddTraceObserver(stream.TraceObserver())
-	}
 	agentHandler := agent.EventHandlerFunc(func(evt agent.Event) {
 		logAgentEvent(evt)
 		stream.AgentHandler().HandleEvent(evt)
 	})
 	pipelineHandler := pipeline.PipelineMultiHandler(stream.PipelineHandler(), activityLog)
-	return agentHandler, pipelineHandler
+	return agentHandler, pipelineHandler, combineTraceObservers(activityTrace, stream.TraceObserver())
 }
 
 // buildPlainEventHandlers creates event handlers for human-readable console output.
 func buildPlainEventHandlers(
 	activityLog *pipeline.JSONLEventHandler,
-	llmClient *llm.Client,
 	verbose bool,
 	logAgentEvent func(agent.Event),
-) (agent.EventHandler, pipeline.PipelineEventHandler) {
-	if llmClient != nil {
-		llmClient.AddTraceObserver(llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose}))
-	}
+	activityTrace llm.TraceObserver,
+) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
 	agentHandler := agent.EventHandlerFunc(func(evt agent.Event) {
 		logAgentEvent(evt)
 		line := agent.FormatEventLine(evt)
@@ -497,7 +478,21 @@ func buildPlainEventHandlers(
 		&pipeline.LoggingEventHandler{Writer: os.Stdout},
 		activityLog,
 	)
-	return agentHandler, pipelineHandler
+	stdoutTrace := llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose})
+	return agentHandler, pipelineHandler, combineTraceObservers(activityTrace, stdoutTrace)
+}
+
+// combineTraceObservers fans one LLM trace stream out to several observers, so
+// the run's single tracker.Config.LLMTrace covers the activity log plus the
+// mode-specific console/NDJSON trace sink.
+func combineTraceObservers(obs ...llm.TraceObserver) llm.TraceObserver {
+	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
+		for _, o := range obs {
+			if o != nil {
+				o.HandleTraceEvent(evt)
+			}
+		}
+	})
 }
 
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
