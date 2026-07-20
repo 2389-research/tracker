@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `subgraph_ref` files itself (the CLI) can share the library's client/registry/
   budget/interviewer wiring instead of duplicating it. `Engine.TokenTracker()`
   exposes the run's token/cost tracker for an in-process transport (the TUI).
-  Groundwork for routing the CLI/TUI through the library `Config` path. Part of
-  the Transport boundary workstream (#472).
+  `Config.ToolSafety` threads the tool-handler security config (denylist/
+  allowlist, output limits, env passthrough) through the library, and the client
+  builder now tolerates a missing native LLM client for the claude-code/acp
+  backends (they run out-of-process). Groundwork for routing the CLI/TUI through
+  the library `Config` path. Part of the Transport boundary workstream (#472).
 
 - **`Config.LLMTrace` — raw LLM trace stream for library callers (#478/#475).**
   A caller can now attach an `llm.TraceObserver` via `Config.LLMTrace`; it is

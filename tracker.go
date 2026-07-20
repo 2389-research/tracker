@@ -55,6 +55,11 @@ type Config struct {
 	// registry via handlers.WithSubgraphs. Nil/empty for flat pipelines.
 	Subgraphs map[string]*pipeline.Graph
 	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
+	// ToolSafety overrides the tool-handler security config (denylist/allowlist,
+	// output limits, env passthrough). Nil uses the registry defaults; the CLI
+	// threads the resolved config from its --tool-allowlist / --bypass-denylist /
+	// --max-output-limit flags here.
+	ToolSafety *handlers.ToolHandlerConfig
 	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
 	AutoApprove   bool                          // auto-approve all human gates with default/first option
 	Budget        pipeline.BudgetLimits         // configures pipeline-level token, cost, and wall-time ceilings
@@ -374,6 +379,14 @@ func resolveCompleter(cfg Config) (*llm.Client, agent.Completer, error) {
 	}
 	client, err := buildClient(cfg.Provider, cfg.GatewayURL, cfg.GatewayKind)
 	if err != nil {
+		// The claude-code and acp backends run out-of-process (claude-code uses
+		// subscription auth; acp is an external agent) and need no native LLM
+		// client, so a missing one is tolerated for them — matching the CLI's
+		// prepareNativeLLMClient. A native-backend node without a client still
+		// fails later in ensureNativeBackend with actionable guidance.
+		if cfg.Backend == "claude-code" || cfg.Backend == "acp" {
+			return nil, nil, nil
+		}
 		return nil, nil, fmt.Errorf("create LLM client: %w", err)
 	}
 	return client, client, nil
@@ -400,6 +413,31 @@ func injectGraphAttrIfAbsent(graph *pipeline.Graph, key, value string) {
 	}
 }
 
+// optionalRegistryOpts returns the registry options that are only wired when the
+// matching Config field is set.
+func optionalRegistryOpts(cfg Config) []handlers.RegistryOption {
+	var opts []handlers.RegistryOption
+	if cfg.AgentEvents != nil {
+		opts = append(opts, handlers.WithAgentEventHandler(cfg.AgentEvents))
+	}
+	if cfg.EventHandler != nil {
+		opts = append(opts, handlers.WithPipelineEventHandler(cfg.EventHandler))
+	}
+	if cfg.BundleIdentity != "" {
+		opts = append(opts, handlers.WithHandlerBundleIdentity(cfg.BundleIdentity))
+	}
+	if cfg.Backend != "" {
+		opts = append(opts, handlers.WithDefaultBackend(cfg.Backend))
+	}
+	if len(cfg.Subgraphs) > 0 {
+		opts = append(opts, handlers.WithSubgraphs(cfg.Subgraphs))
+	}
+	if cfg.ToolSafety != nil {
+		opts = append(opts, handlers.WithToolHandlerConfig(*cfg.ToolSafety))
+	}
+	return opts
+}
+
 // buildRegistry creates a handler registry with all dependencies wired.
 func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) (*pipeline.HandlerRegistry, error) {
 	env := exec.NewLocalEnvironment(workDir)
@@ -408,21 +446,7 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 		handlers.WithExecEnvironment(env),
 		handlers.WithTokenTracker(tokenTracker),
 	}
-	if cfg.AgentEvents != nil {
-		registryOpts = append(registryOpts, handlers.WithAgentEventHandler(cfg.AgentEvents))
-	}
-	if cfg.EventHandler != nil {
-		registryOpts = append(registryOpts, handlers.WithPipelineEventHandler(cfg.EventHandler))
-	}
-	if cfg.BundleIdentity != "" {
-		registryOpts = append(registryOpts, handlers.WithHandlerBundleIdentity(cfg.BundleIdentity))
-	}
-	if cfg.Backend != "" {
-		registryOpts = append(registryOpts, handlers.WithDefaultBackend(cfg.Backend))
-	}
-	if len(cfg.Subgraphs) > 0 {
-		registryOpts = append(registryOpts, handlers.WithSubgraphs(cfg.Subgraphs))
-	}
+	registryOpts = append(registryOpts, optionalRegistryOpts(cfg)...)
 	interviewer, err := resolveInterviewer(cfg, client, completer)
 	if err != nil {
 		return nil, err
