@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Config.LLMTrace` — raw LLM trace stream for library callers (#478/#475).**
+  A caller can now attach an `llm.TraceObserver` via `Config.LLMTrace`; it is
+  wired onto whichever `*llm.Client` backs the run (auto-created or supplied via
+  `Config.LLMClient`), so a library consumer gets raw request/reasoning/text/
+  tool trace events without owning the client. Previously only the CLI, which
+  builds its own client, could attach a trace observer. A prerequisite for
+  routing the CLI/TUI through the library `Config` path. Part of the Transport
+  boundary workstream (#472).
+
 - **`RunManager` — concurrent run owner for services (#479).** A transport-neutral
   library type that owns many pipeline runs at once, keyed by a caller-chosen
   external id (e.g. a Slack `thread_ts`). `Start` launches a run in its own

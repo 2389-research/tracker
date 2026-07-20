@@ -45,6 +45,7 @@ type Config struct {
 	RetryPolicy   string                        // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
 	EventHandler  pipeline.PipelineEventHandler // optional: live pipeline events
 	AgentEvents   agent.EventHandler            // optional: live agent session events
+	LLMTrace      llm.TraceObserver             // optional: raw LLM trace events (attached to the auto-created or provided *llm.Client)
 	LLMClient     agent.Completer               // optional: override auto-created client
 	Context       map[string]string             // optional: initial pipeline context
 	Params        map[string]string             // optional: override declared workflow params (keys without "params." prefix)
@@ -315,11 +316,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	// Attach token tracker as middleware to the LLM client so it captures
 	// per-provider usage during native backend runs. Works for both
 	// auto-created clients and user-provided *llm.Client via Config.LLMClient.
-	if client != nil {
-		client.AddMiddleware(tokenTracker)
-	} else if lc, ok := completer.(*llm.Client); ok {
-		lc.AddMiddleware(tokenTracker)
-	}
+	attachClientObservers(client, completer, tokenTracker, cfg)
 	registry, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
 	if err != nil {
 		return nil, err
@@ -335,6 +332,26 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		artifactDir:    cfg.ArtifactDir,
 		bundleIdentity: cfg.BundleIdentity,
 	}, nil
+}
+
+// attachClientObservers wires the token tracker, and any Config.LLMTrace
+// observer, onto whichever *llm.Client backs this run (the auto-created client
+// or a *llm.Client supplied via Config.LLMClient). A non-*llm.Client completer
+// carries no observable transport, so it is a no-op there.
+func attachClientObservers(client *llm.Client, completer agent.Completer, tokenTracker *llm.TokenTracker, cfg Config) {
+	c := client
+	if c == nil {
+		if lc, ok := completer.(*llm.Client); ok {
+			c = lc
+		}
+	}
+	if c == nil {
+		return
+	}
+	c.AddMiddleware(tokenTracker)
+	if cfg.LLMTrace != nil {
+		c.AddTraceObserver(cfg.LLMTrace)
+	}
 }
 
 // resolveCompleter returns the LLM client and completer, building a client from env if needed.
