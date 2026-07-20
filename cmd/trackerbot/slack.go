@@ -188,12 +188,6 @@ func (u *slackThreadUI) PostGate(g Gate) error {
 	case GateFreeform:
 		u.bot.setPendingFreeform(u.threadTS, g.ID)
 		return u.Post("✍️ " + g.Prompt + "\n_Reply in this thread with your answer._")
-	case GateInterview:
-		// Interview (structured multi-field form) needs a Slack modal, a v-next
-		// item. Cancel so the pipeline routes on cancellation rather than hangs.
-		_ = u.Post("⚠️ This step needs a structured form (interview mode), not yet wired for Slack — skipping it.")
-		u.bot.runner.OnInteraction(u.threadTS, g.ID, GateAnswer{Canceled: true})
-		return nil
 	}
 	return nil
 }

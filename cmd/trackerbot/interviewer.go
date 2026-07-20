@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -101,20 +102,53 @@ func (s *SlackInterviewer) AskFreeformWithLabels(prompt string, labels []string,
 	return ans.Choice, nil
 }
 
-// AskInterview presents a structured form. A cancelled interview returns a
-// Canceled result (not an error) so the pipeline routes on cancellation.
+// AskInterview presents a structured form as a sequence of one-question-at-a-time
+// thread gates (buttons for options / yes-no, a reply for open-ended), matching
+// the TUI's flow and reusing the same button/reply machinery — no Slack modal
+// needed. A cancelled interview returns a Canceled result (not an error) so the
+// pipeline routes on cancellation.
 func (s *SlackInterviewer) AskInterview(questions []handlers.Question, _ *handlers.InterviewResult) (*handlers.InterviewResult, error) {
-	ans, err := s.await(Gate{Kind: GateInterview, Questions: questions})
-	if errors.Is(err, errGateCanceled) {
-		return &handlers.InterviewResult{Canceled: true}, nil
+	answers := make([]handlers.InterviewAnswer, 0, len(questions))
+	for i, q := range questions {
+		ans, err := s.await(questionGate(q, i+1, len(questions)))
+		if errors.Is(err, errGateCanceled) {
+			return &handlers.InterviewResult{Questions: answers, Canceled: true, Incomplete: true}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		answers = append(answers, handlers.InterviewAnswer{
+			ID:      fmt.Sprintf("q%d", q.Index),
+			Text:    q.Text,
+			Options: q.Options,
+			Answer:  interviewAnswerText(ans),
+		})
 	}
-	if err != nil {
-		return nil, err
+	return &handlers.InterviewResult{Questions: answers}, nil
+}
+
+// questionGate renders one interview question as a thread gate: yes/no or option
+// buttons when the question is closed, else an open-ended reply.
+func questionGate(q handlers.Question, n, total int) Gate {
+	prompt := fmt.Sprintf("*(%d/%d)* %s", n, total, q.Text)
+	if q.Context != "" {
+		prompt += "\n_" + q.Context + "_"
 	}
-	if ans.Interview == nil {
-		return &handlers.InterviewResult{Canceled: true}, nil
+	switch {
+	case q.IsYesNo:
+		return Gate{Kind: GateYesNo, Prompt: prompt, Choices: []string{"Yes", "No"}}
+	case len(q.Options) > 0:
+		return Gate{Kind: GateChoice, Prompt: prompt, Choices: q.Options}
+	default:
+		return Gate{Kind: GateFreeform, Prompt: prompt}
 	}
-	return ans.Interview, nil
+}
+
+func interviewAnswerText(ans GateAnswer) string {
+	if ans.Freeform != "" {
+		return ans.Freeform
+	}
+	return ans.Choice
 }
 
 // Resolve delivers a human's answer to the gate identified by gateID. The Slack

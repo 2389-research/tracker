@@ -108,19 +108,33 @@ func TestSlackInterviewer_Interview(t *testing.T) {
 	ui := newFakeUI()
 	iv := NewSlackInterviewer(ui, seqIDs())
 
-	got := make(chan *handlers.InterviewResult, 1)
-	go func() {
-		r, _ := iv.AskInterview([]handlers.Question{{Index: 1, Text: "name?"}}, nil)
-		got <- r
-	}()
-	g := awaitGate(t, ui)
-	if g.Kind != GateInterview || len(g.Questions) != 1 {
-		t.Fatalf("bad interview gate: %+v", g)
+	questions := []handlers.Question{
+		{Index: 1, Text: "name?"},                                  // open-ended → freeform
+		{Index: 2, Text: "color?", Options: []string{"red", "blue"}}, // options → choice
 	}
-	want := &handlers.InterviewResult{Questions: []handlers.InterviewAnswer{{ID: "q1", Answer: "Ada"}}}
-	iv.Resolve(g.ID, GateAnswer{Interview: want})
-	if r := <-got; r == nil || len(r.Questions) != 1 || r.Questions[0].Answer != "Ada" {
+	got := make(chan *handlers.InterviewResult, 1)
+	go func() { r, _ := iv.AskInterview(questions, nil); got <- r }()
+
+	// Q1 is presented as a freeform gate; reply.
+	g1 := awaitGate(t, ui)
+	if g1.Kind != GateFreeform {
+		t.Fatalf("q1 kind = %q, want freeform", g1.Kind)
+	}
+	iv.Resolve(g1.ID, GateAnswer{Freeform: "Ada"})
+
+	// Q2 is presented as a choice gate; click.
+	g2 := awaitGate(t, ui)
+	if g2.Kind != GateChoice || len(g2.Choices) != 2 {
+		t.Fatalf("q2 gate = %+v", g2)
+	}
+	iv.Resolve(g2.ID, GateAnswer{Choice: "blue"})
+
+	r := <-got
+	if r == nil || len(r.Questions) != 2 {
 		t.Fatalf("interview result = %+v", r)
+	}
+	if r.Questions[0].Answer != "Ada" || r.Questions[1].Answer != "blue" {
+		t.Fatalf("answers = %+v", r.Questions)
 	}
 }
 
