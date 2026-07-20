@@ -162,12 +162,15 @@ func (e *Engine) saveCheckpointWithTag(cp *Checkpoint, pctx *PipelineContext, ru
 }
 
 // emitCostUpdate emits an EventCostUpdated carrying the current aggregate
-// usage. For child engines running under a parent (subgraph), this is the
-// combined parent-baseline + child-trace snapshot that BudgetGuard also
-// sees, so operator-facing cost events match the numbers that actually
-// trigger budget halts. Safe to call when no LLM activity has occurred yet —
+// usage. nodeID is the node whose completion triggered this update; it is
+// stamped on the event so a subscriber can attribute cost to a node and derive
+// per-node deltas by diffing consecutive (cumulative) snapshots. For child
+// engines running under a parent (subgraph), this is the combined
+// parent-baseline + child-trace snapshot that BudgetGuard also sees, so
+// operator-facing cost events match the numbers that actually trigger budget
+// halts. Safe to call when no LLM activity has occurred yet —
 // combinedUsageForBudget returns nil and the event is suppressed.
-func (e *Engine) emitCostUpdate(s *runState) {
+func (e *Engine) emitCostUpdate(s *runState, nodeID string) {
 	summary := e.combinedUsageForBudget(s)
 	if summary == nil {
 		return
@@ -176,6 +179,7 @@ func (e *Engine) emitCostUpdate(s *runState) {
 		Type:      EventCostUpdated,
 		Timestamp: time.Now(),
 		RunID:     s.runID,
+		NodeID:    nodeID,
 		Cost: &CostSnapshot{
 			TotalTokens:    summary.TotalTokens,
 			TotalCostUSD:   summary.TotalCostUSD,
@@ -901,7 +905,7 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 	traceEntry.EdgeTo = target
 	s.trace.AddEntry(*traceEntry)
 	e.emitGitCommit(s, currentNodeID, traceEntry)
-	e.emitCostUpdate(s)
+	e.emitCostUpdate(s, currentNodeID)
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
 		return "", false, lr.result, nil
 	}
@@ -940,7 +944,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		traceEntry.EdgeTo = fallback
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
-		e.emitCostUpdate(s)
+		e.emitCostUpdate(s, currentNodeID)
 		if lr := e.checkBudgetAfterEmit(s); lr != nil {
 			return "", false, lr.result, nil
 		}
@@ -1107,7 +1111,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 	}
 	s.trace.AddEntry(*traceEntry)
 	e.emitGitCommit(s, currentNodeID, traceEntry)
-	e.emitCostUpdate(s)
+	e.emitCostUpdate(s, currentNodeID)
 	if halt := e.checkBudgetHaltForExit(s); halt != nil {
 		return false, "", halt
 	}

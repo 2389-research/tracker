@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Node-attributed cost events (#475).** `EventCostUpdated` now carries the
+  `NodeID` of the node whose completion triggered it (on the live stream and the
+  NDJSON `node_id`). A subscriber can attribute cumulative cost to a node and
+  derive per-node deltas by diffing consecutive snapshots — enough for a remote
+  UI (Slack/web/mobile) to render per-node spend from the stream alone, without
+  in-process access to the `llm.TokenTracker`. (The in-process TUI continues to
+  read the tracker directly; retiring that side channel is deferred.) Part of
+  the Transport boundary workstream (#472).
+
 - **Run-start snapshot event (#475).** `EventPipelineStarted` now carries a
   `RunSnapshot` (`PipelineEvent.Snapshot`): the node inventory (id, label,
   handler) plus start/exit nodes and, on resume, the current node and
