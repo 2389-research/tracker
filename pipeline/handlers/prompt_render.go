@@ -1,10 +1,8 @@
-// ABOUTME: Shared prompt rendering for human gate UIs.
-// ABOUTME: Provides plain-text word wrapping for terminal display.
-package render
+// ABOUTME: Plain-text prompt rendering for human gate UIs.
+// ABOUTME: Lives in handlers (not tui/) so the core has no dependency on the TUI package.
+package handlers
 
-import (
-	"strings"
-)
+import "strings"
 
 // PromptPlain renders a prompt string with word wrapping but no ANSI styling.
 // Used by ConsoleInterviewer so piped/CI output stays free of escape sequences.
@@ -22,13 +20,13 @@ func PromptPlain(prompt string, width int) string {
 			lines = append(lines, "")
 			continue
 		}
-		lines = append(lines, wrapLine(paragraph, width)...)
+		lines = append(lines, wrapPromptLine(paragraph, width)...)
 	}
 	return strings.Join(lines, "\n")
 }
 
-// wrapLine splits a single paragraph into lines that fit within width.
-func wrapLine(line string, width int) []string {
+// wrapPromptLine splits a single paragraph into lines that fit within width.
+func wrapPromptLine(line string, width int) []string {
 	words := strings.Fields(line)
 	if len(words) == 0 {
 		return []string{""}

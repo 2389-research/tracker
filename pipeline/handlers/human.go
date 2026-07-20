@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/2389-research/tracker/pipeline"
-	"github.com/2389-research/tracker/tui/render"
 )
 
 var errHumanTimeout = fmt.Errorf("human gate timed out waiting for input")
@@ -296,7 +295,7 @@ func (c *ConsoleInterviewer) Ask(prompt string, choices []string, defaultChoice 
 
 // printChoices writes the numbered choice list to the writer.
 func (c *ConsoleInterviewer) printChoices(prompt string, choices []string, defaultChoice string) {
-	fmt.Fprintf(c.Writer, "\n%s\n", render.PromptPlain(prompt, 76))
+	fmt.Fprintf(c.Writer, "\n%s\n", PromptPlain(prompt, 76))
 	for i, choice := range choices {
 		marker := "  "
 		if choice == defaultChoice {
@@ -331,7 +330,7 @@ func matchConsoleChoice(input string, choices []string) (string, error) {
 // AskFreeform displays the prompt and reads a line of freeform text input.
 // Returns an error if the input is empty.
 func (c *ConsoleInterviewer) AskFreeform(prompt string) (string, error) {
-	fmt.Fprintf(c.Writer, "\n%s\n> ", render.PromptPlain(prompt, 76))
+	fmt.Fprintf(c.Writer, "\n%s\n> ", PromptPlain(prompt, 76))
 
 	line, err := c.readLine()
 	if err != nil {

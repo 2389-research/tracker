@@ -47,6 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lower `handlers.WithInterviewer` layer — the first step of the Transport
   boundary workstream (#472).
 
+### Changed
+
+- **`PromptPlain` moved from `tui/render` to `pipeline/handlers` (#477).** The
+  plain-text prompt word-wrap helper used by `ConsoleInterviewer` lived under
+  `tui/` but was imported only by the core human-gate handler, giving the engine
+  a package-path dependency on the TUI tree. It now lives in `pipeline/handlers`
+  (as `handlers.PromptPlain`) and the `tui/render` package is removed, so no
+  core package imports anything under `tui/`. Behavior is unchanged. Part of the
+  Transport boundary workstream (#472).
+
 ### Fixed
 
 - **TRK102 lint no longer false-positives on plan-approval gates.** The
