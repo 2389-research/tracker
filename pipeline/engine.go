@@ -287,8 +287,7 @@ func (e *Engine) runLoop(ctx context.Context, s *runState, currentNodeID string)
 func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 	s.trace.EndTime = time.Now()
 
-	// Per the terminal-status rule (see doc above); computed before the emit so
-	// the completion event carries the authoritative status.
+	// Per the terminal-status rule above; computed before the emit.
 	status := OutcomeSuccess
 	if len(s.validationOverrides) > 0 {
 		status = OutcomeValidationOverridden
@@ -428,6 +427,7 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 	// degradation is loud (escalateWorkPreserve emits EventWorkPreserveFailed
 	// and sets EngineResult.WorkPreserveFailed) and machine-detectable.
 	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
+	e.emitFailed(s.runID, fmt.Sprintf("handler error at node %q: %v", currentNodeID, err), err)
 	return loopResult{
 		action: loopReturn,
 		result: &EngineResult{

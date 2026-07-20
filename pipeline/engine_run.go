@@ -165,11 +165,10 @@ func (e *Engine) saveCheckpointWithTag(cp *Checkpoint, pctx *PipelineContext, ru
 // usage. nodeID is the node whose completion triggered this update; it is
 // stamped on the event so a subscriber can attribute cost to a node and derive
 // per-node deltas by diffing consecutive (cumulative) snapshots. For child
-// engines running under a parent (subgraph), this is the combined
-// parent-baseline + child-trace snapshot that BudgetGuard also sees, so
-// operator-facing cost events match the numbers that actually trigger budget
-// halts. Safe to call when no LLM activity has occurred yet —
-// combinedUsageForBudget returns nil and the event is suppressed.
+// engines under a parent (subgraph), this is the combined parent-baseline +
+// child-trace snapshot that BudgetGuard also sees, so operator-facing cost
+// events match the numbers that trigger budget halts. Safe to call before any
+// LLM activity — combinedUsageForBudget returns nil and the event is suppressed.
 func (e *Engine) emitCostUpdate(s *runState, nodeID string) {
 	summary := e.combinedUsageForBudget(s)
 	if summary == nil {
@@ -878,6 +877,7 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 		case <-ctx.Done():
 			e.saveCheckpoint(s.cp, s.pctx, s.runID)
 			s.trace.EndTime = time.Now()
+			e.emitFailed(s.runID, "pipeline cancelled during retry backoff", ctx.Err())
 			return "", false, &EngineResult{
 				RunID:               s.runID,
 				Status:              OutcomeFail,
