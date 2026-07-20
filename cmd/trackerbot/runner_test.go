@@ -47,11 +47,12 @@ func writeWorkflow(t *testing.T, dir, name, src string) {
 
 func newTestRunner(t *testing.T, workDir string) (*Runner, *tracker.RunManager, *uiRegistry) {
 	t.Helper()
-	rm := tracker.NewRunManager(tracker.WithWorkDirBase(t.TempDir()))
+	rm := tracker.NewRunManager()
 	uis := newUIRegistry()
 	r := NewRunner(rm, RunnerDeps{
 		NewThreadUI: uis.newUI,
 		WorkDir:     workDir,
+		RunsBase:    t.TempDir(),
 		NewID:       seqIDs(),
 		ConfigBase:  tracker.Config{Format: "dip", LLMClient: stubCompleter{}},
 	})

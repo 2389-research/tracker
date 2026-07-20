@@ -33,22 +33,32 @@ func main() {
 		log.Fatalf("trackerbot: %v", err)
 	}
 
-	rm := tracker.NewRunManager(
-		tracker.WithWorkDirBase(runsBase),
-		tracker.WithMaxConcurrent(maxConcurrent),
-	)
+	// The runner pins a deterministic workdir + checkpoint per thread, so the
+	// RunManager only provides concurrency/lifecycle here.
+	rm := tracker.NewRunManager(tracker.WithMaxConcurrent(maxConcurrent))
 	configBase := tracker.Config{Backend: os.Getenv("TRACKERBOT_BACKEND")}
+	st := openStore(filepath.Join(runsBase, "trackerbot-state.json"))
 	runner := NewRunner(rm, RunnerDeps{
 		NewThreadUI: bot.NewThreadUI,
 		WorkDir:     workDir,
+		RunsBase:    runsBase,
 		NewID:       newGateID,
 		ConfigBase:  configBase,
 		Intent:      buildIntentResolver(configBase),
+		Store:       st,
 	})
 	bot.SetRunner(runner)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	// Resume any runs that were active when a previous process exited.
+	if orphans := st.list(); len(orphans) > 0 {
+		log.Printf("trackerbot: resuming %d interrupted run(s) from a previous session", len(orphans))
+		for _, rec := range orphans {
+			go runner.Resume(ctx, rec)
+		}
+	}
 
 	log.Printf("trackerbot: connecting via Socket Mode (max %d concurrent runs; runs under %s)…", maxConcurrent, runsBase)
 	if err := bot.Run(ctx); err != nil && ctx.Err() == nil {

@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -19,13 +21,18 @@ type RunnerDeps struct {
 	// the transport (slack.go) so the runner stays Slack-agnostic.
 	NewThreadUI func(channel, threadTS string) ThreadUI
 	// WorkDir is where ResolveSource looks for local .dip files (built-ins
-	// resolve regardless). Per-run execution dirs are isolated by the RunManager.
+	// resolve regardless).
 	WorkDir string
+	// RunsBase is the parent directory for per-thread isolated run workdirs
+	// (base/<sanitized thread_ts>), each holding that run's checkpoint.
+	RunsBase string
 	// NewID returns a fresh unique gate id per call.
 	NewID func() string
 	// Intent resolves @mention text to a workflow + params. Nil falls back to the
 	// deterministic grammar ("[run] <workflow> [k=v ...]").
 	Intent IntentResolver
+	// Store persists active runs for resume-after-restart. Nil disables it.
+	Store *store
 	// ConfigBase carries provider/budget/backend config; the runner overlays the
 	// per-run Interviewer, EventHandler, and Params onto a copy of it.
 	ConfigBase tracker.Config
@@ -68,28 +75,81 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 		return
 	}
 
+	rec := RunRecord{ThreadTS: threadTS, Channel: channel, Workflow: intent.Workflow, Params: intent.Params}
+	r.launch(ctx, ui, source, rec,
+		fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName))
+}
+
+// Resume re-launches an interrupted run after a restart. Each thread has a
+// deterministic workdir + checkpoint path; because the checkpoint file still
+// exists, launching again replays from it (the engine loads a checkpoint at its
+// configured path automatically). No run-id bookkeeping required.
+func (r *Runner) Resume(ctx context.Context, rec RunRecord) {
+	ui := r.deps.NewThreadUI(rec.Channel, rec.ThreadTS)
+	source, _, err := tracker.ResolveSource(rec.Workflow, r.deps.WorkDir)
+	if err != nil {
+		_ = ui.Post("Couldn't resume (workflow gone): " + err.Error())
+		r.deps.Store.remove(rec.ThreadTS)
+		return
+	}
+	r.launch(ctx, ui, source, rec, "🔄 resuming this run after a restart…")
+}
+
+// launch wires a per-run interviewer + notifier onto a copy of the base config,
+// pins the deterministic per-thread workdir + checkpoint path (so the run is
+// resumable and so a resume replays from it), starts the run, records it, and
+// watches it to completion.
+func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec RunRecord, ack string) {
+	workDir, checkpoint := r.runPaths(rec.ThreadTS)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		_ = ui.Post("Couldn't prepare a workspace: " + err.Error())
+		return
+	}
+
 	iv := NewSlackInterviewer(ui, r.deps.NewID)
 	nf := newNotifier(ui)
-
 	cfg := r.deps.ConfigBase
-	cfg.WorkingDir = "" // let the RunManager assign an isolated per-thread workdir
+	cfg.WorkingDir = workDir
+	cfg.CheckpointDir = checkpoint
+	cfg.Params = rec.Params
 	cfg.Interviewer = iv
 	cfg.EventHandler = pipeline.PipelineEventHandlerFunc(nf.HandlePipelineEvent)
-	cfg.Params = intent.Params
 
-	// Order matters: register AFTER a successful Start. Registering before would
-	// let a duplicate mention that Start rejects (ErrRunKeyActive) clobber the
-	// live run's interviewer in byThread. The gap between Start returning and
-	// register (two statements) is far shorter than the run reaching its first
-	// gate, so no inbound answer is lost in practice.
-	run, err := r.rm.Start(ctx, threadTS, source, cfg)
+	// Register AFTER a successful Start: registering earlier would let a duplicate
+	// mention that Start rejects (ErrRunKeyActive) clobber the live run's
+	// interviewer. The window before register is far shorter than the run
+	// reaching its first gate, so no inbound answer is lost in practice.
+	run, err := r.rm.Start(ctx, rec.ThreadTS, source, cfg)
 	if err != nil {
 		r.handleAdmission(ui, err)
 		return
 	}
-	r.register(threadTS, iv)
-	_ = ui.Post(fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName))
-	go r.watch(threadTS, run, ui)
+	r.register(rec.ThreadTS, iv)
+	r.deps.Store.put(rec)
+	_ = ui.Post(ack)
+	go r.watch(rec.ThreadTS, run, ui)
+}
+
+// runPaths returns the deterministic workdir and checkpoint path for a thread.
+func (r *Runner) runPaths(threadTS string) (workDir, checkpoint string) {
+	workDir = filepath.Join(r.deps.RunsBase, sanitizeThread(threadTS))
+	return workDir, filepath.Join(workDir, "checkpoint.json")
+}
+
+// sanitizeThread turns a thread_ts into a safe single path segment.
+func sanitizeThread(threadTS string) string {
+	out := strings.Map(func(rn rune) rune {
+		switch {
+		case rn >= 'a' && rn <= 'z', rn >= 'A' && rn <= 'Z', rn >= '0' && rn <= '9', rn == '-', rn == '_':
+			return rn
+		default:
+			return '_'
+		}
+	}, threadTS)
+	if out == "" {
+		return "thread"
+	}
+	return out
 }
 
 const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
@@ -195,6 +255,13 @@ func (r *Runner) handleAdmission(ui ThreadUI, err error) {
 func (r *Runner) watch(threadTS string, run *tracker.ManagedRun, ui ThreadUI) {
 	<-run.Done()
 	r.unregister(threadTS)
+	r.deps.Store.remove(threadTS) // finished — no longer resumable
+	r.rm.Forget(threadTS)         // free the thread for a future run
+	// Drop the checkpoint so a later run in the same thread starts fresh instead
+	// of replaying this one. (A crash before here leaves it for resume.)
+	if _, checkpoint := r.runPaths(threadTS); checkpoint != "" {
+		_ = os.Remove(checkpoint)
+	}
 	deliver(context.Background(), ui, run)
 }
 

@@ -98,10 +98,17 @@ Four spots are marked `DECISION POINT` for tuning:
 - **`delivery.go` (D3)** — adapt success delivery to what was built.
 - **`runner.go` (D4)** — at-capacity policy (reject / queue / preempt).
 
+## Durability
+
+Each thread gets a deterministic workdir + checkpoint under `TRACKERBOT_RUNS`,
+and active runs are recorded in `trackerbot-state.json`. On startup the bot
+**resumes** any run that was interrupted by a previous exit — it replays from the
+checkpoint and posts "🔄 resuming…" in the thread. Completed runs clear their
+record and checkpoint.
+
 ## Limitations
 
-- Runs live in memory; a process restart stops in-flight runs. Durable resume
-  (persist `thread_ts → {runID, workdir}`, recover via `MostRecentRunID` /
-  `Config.ResumeRunID`) is a follow-up.
-- The live Slack rendering is verified manually; the routing/gate logic is
-  unit-tested.
+- Human gates inside *parallel* pipeline branches share one interviewer; freeform
+  replies are single-slot per thread. Fine for sequential gates (the norm).
+- The live Slack rendering is verified manually; the routing, gate, resume, and
+  intent logic are unit-tested.
