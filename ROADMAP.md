@@ -122,9 +122,12 @@ Backlog. Real, but not scheduled.
 ### Transports
 - **#473** — Slack transport (`cmd/trackerbot`): drive Tracker from Slack via
   Socket Mode — `@trackerbot` starts runs, threads receive notifications and
-  clarifying gate questions, artifacts land back in the thread. The first
-  non-TUI consumer that proves the boundary. Promotes to Next once the Transport
-  boundary milestone (#472) closes. (Slack sub-issues: #480–#485.)
+  clarifying gate questions, results land back in the thread. The first non-TUI
+  consumer that proves the boundary. **A v1 is implemented** (all four gate
+  modes, natural-language intent, control commands, per-thread concurrency,
+  failure diagnosis; sub-issues #480–#485). Remaining: durable resume across
+  process restarts, and live-Slack verification. See
+  [`cmd/trackerbot/README.md`](cmd/trackerbot/README.md).
 
 ### Product & positioning
 - **#460** — naming & discoverability: "tracker" is ungoogleable.

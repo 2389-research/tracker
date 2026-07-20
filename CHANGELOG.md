@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` — drive Tracker pipelines from Slack (#473).** A new
+  `cmd/trackerbot` binary: mention `@trackerbot make me an app that …` (or
+  `run <workflow>`) and it starts a pipeline in a Slack thread, streams
+  notifications and human-gate questions to that thread, and delivers the result
+  — arbitrarily many runs at once, one per thread, each isolated. Natural-language
+  intent routes free text onto a workflow (LLM classifier with a grammar
+  fast-path); all four gate modes (choice / yes-no / freeform / interview) work
+  in-thread; control commands (`status` / `cancel` / `runs` / `help`); a failed
+  run posts a real diagnosis. Built as a pure consumer of the library boundary
+  (`Config.Interviewer`, the event stream, `RunManager`) — plus `tracker.NewLLMClient`
+  for standalone classification. Socket Mode (no public endpoint). See
+  [`cmd/trackerbot/README.md`](cmd/trackerbot/README.md). Part of the Transport
+  boundary workstream (#472).
+
 - **`NewEngineFromGraph`, `Config.Subgraphs`, `Engine.TokenTracker()` (#478).**
   The engine assembly now accepts a pre-parsed `*pipeline.Graph` and a pre-loaded
   subgraph map, so a caller that loads/validates the graph and resolves
