@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`RunManager` — concurrent run owner for services (#479).** A transport-neutral
+  library type that owns many pipeline runs at once, keyed by a caller-chosen
+  external id (e.g. a Slack `thread_ts`). `Start` launches a run in its own
+  goroutine with an isolated per-key working directory (`WithWorkDirBase`),
+  honors an optional concurrency cap (`WithMaxConcurrent` → `ErrAtCapacity`) and
+  an active-key guard (`ErrRunKeyActive`), and exposes lifecycle via
+  `ManagedRun` (`State`, `Done`, `Result`, `RunID`) plus `Get`/`List`/`Cancel`/
+  `Forget`. It provides the mechanism (isolation, lifecycle, capacity) and leaves
+  admission policy to the caller. Resume-on-restart is a caller concern: each run
+  has its own workdir, so a caller persists key→workdir and uses `MostRecentRunID`
+  + `Config.ResumeRunID` after a restart. The direct concurrency substrate for
+  the forthcoming Slack transport (#473). Part of the Transport boundary
+  workstream (#472).
+
 - **Node-attributed cost events (#475).** `EventCostUpdated` now carries the
   `NodeID` of the node whose completion triggered it (on the live stream and the
   NDJSON `node_id`). A subscriber can attribute cumulative cost to a node and
