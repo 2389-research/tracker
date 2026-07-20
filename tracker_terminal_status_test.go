@@ -105,6 +105,47 @@ func TestRun_EmitsTerminalStatusOnFailure(t *testing.T) {
 	}
 }
 
+const strictFailDip = `workflow strictfail
+  start: T
+  exit: Done
+
+  tool T
+    command:
+      exit 1
+
+  agent Done
+    label: Done
+
+  edges
+    T -> Done
+`
+
+// TestRun_EmitsTerminalStatusOnStrictFailure covers the strict-failure halt: a
+// node returns outcome=fail with only unconditional edges, so the engine stops
+// without routing. This path emits EventStageFailed but historically no
+// terminal event — the Run backstop must still emit exactly one status-bearing
+// terminal event so a stream-only subscriber sees the run finish.
+func TestRun_EmitsTerminalStatusOnStrictFailure(t *testing.T) {
+	var mu sync.Mutex
+	var terminal []pipeline.PipelineEvent
+
+	// A failing tool node (exit 1) yields outcome=fail via the normal outcome
+	// path (not a Go handler error), so it exercises the strict-failure halt.
+	_, _ = Run(context.Background(), strictFailDip, Config{
+		Format:       "dip",
+		WorkingDir:   t.TempDir(),
+		LLMClient:    successStub(),
+		EventHandler: collectTerminal(&mu, &terminal),
+	})
+
+	if len(terminal) != 1 {
+		t.Fatalf("expected exactly one terminal-status event on strict failure, got %d", len(terminal))
+	}
+	if got := terminal[0].TerminalStatus; got != string(pipeline.OutcomeFail) {
+		t.Fatalf("TerminalStatus = %q, want %q", got, pipeline.OutcomeFail)
+	}
+}
+
 // TestNDJSON_CarriesTerminalStatus asserts the NDJSON wire format surfaces the
 // terminal status on the completion line.
 func TestNDJSON_CarriesTerminalStatus(t *testing.T) {

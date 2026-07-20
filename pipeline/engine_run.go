@@ -189,55 +189,6 @@ func (e *Engine) emitCostUpdate(s *runState, nodeID string) {
 	})
 }
 
-// haltForBudget produces the terminal loopResult emitted when a BudgetGuard
-// trips. It saves the checkpoint (so restarts skip already-completed nodes),
-// sets the trace end time, emits EventBudgetExceeded with the same combined
-// usage snapshot the guard used to detect the breach (so diagnostics report
-// the actual trigger value, not a child-local sub-total that sits below the
-// ceiling), and packages an EngineResult with Status=OutcomeBudgetExceeded.
-//
-// EngineResult.Usage intentionally holds the child-local aggregate only,
-// not the combined snapshot. The subgraph handler copies this onto
-// Outcome.ChildUsage and the parent trace's AggregateUsage folds it back
-// in; using the combined value here would double-count the parent's own
-// spend once the parent aggregates a second time.
-func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
-	e.saveCheckpoint(s.cp, s.pctx, s.runID)
-	s.trace.EndTime = time.Now()
-	combined := e.combinedUsageForBudget(s)
-	var costSnap *CostSnapshot
-	if combined != nil {
-		costSnap = &CostSnapshot{
-			TotalTokens:    combined.TotalTokens,
-			TotalCostUSD:   combined.TotalCostUSD,
-			ProviderTotals: combined.ProviderTotals,
-			WallElapsed:    time.Since(s.trace.StartTime),
-			Estimated:      combined.Estimated,
-		}
-	}
-	e.emit(PipelineEvent{
-		Type:           EventBudgetExceeded,
-		Timestamp:      time.Now(),
-		RunID:          s.runID,
-		Message:        breach.Message,
-		Cost:           costSnap,
-		TerminalStatus: string(OutcomeBudgetExceeded),
-	})
-	return loopResult{
-		action: loopReturn,
-		result: &EngineResult{
-			RunID:               s.runID,
-			Status:              OutcomeBudgetExceeded,
-			CompletedNodes:      s.cp.CompletedNodes,
-			Context:             s.pctx.Snapshot(),
-			Trace:               s.trace,
-			Usage:               s.trace.AggregateUsage(),
-			BudgetLimitsHit:     []string{breach.Kind.String()},
-			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-		},
-	}
-}
-
 // checkBudgetAfterEmit runs the BudgetGuard against the current aggregate
 // usage (combined with any baseline from a parent run). Returns a non-nil
 // loopResult when a breach halts the run, or nil to continue.
@@ -300,6 +251,12 @@ type runState struct {
 	nodeOutcomes map[string]string
 	stylesheet   *Stylesheet
 	gitRepo      *gitArtifactRepo // non-nil when git artifact tracking is enabled
+	// terminalEmitted is set once a terminal event carrying TerminalStatus has
+	// been emitted (by buildSuccessResult, emitFailed, or haltForBudget). The
+	// Run backstop uses it to guarantee exactly one terminal event even for
+	// exits that return a result without emitting one (strict-failure halt,
+	// invariant errors). See emitTerminalBackstop.
+	terminalEmitted bool
 
 	// validationOverrides is the per-run sticky list of override events
 	// appended at the flip-point in advanceToNextNode. Mirrors
@@ -877,7 +834,7 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 		case <-ctx.Done():
 			e.saveCheckpoint(s.cp, s.pctx, s.runID)
 			s.trace.EndTime = time.Now()
-			e.emitFailed(s.runID, "pipeline cancelled during retry backoff", ctx.Err())
+			e.emitFailed(s, "pipeline cancelled during retry backoff", ctx.Err())
 			return "", false, &EngineResult{
 				RunID:               s.runID,
 				Status:              OutcomeFail,
@@ -1124,7 +1081,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	maxRestarts := e.maxRestartsAllowed()
 	if s.cp.RestartCount >= maxRestarts {
-		e.emitFailed(s.runID, fmt.Sprintf("max restarts (%d) exceeded", maxRestarts), nil)
+		e.emitFailed(s, fmt.Sprintf("max restarts (%d) exceeded", maxRestarts), nil)
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		s.trace.EndTime = time.Now()
 		return "", false, &EngineResult{

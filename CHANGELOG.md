@@ -107,6 +107,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every terminal exit now emits a `TerminalStatus` (#475 follow-up).** A
+  fresh-eyes review found the strict-failure halt (a node returns `outcome=fail`
+  with only unconditional edges — the common "tool step failed, no fail edge"
+  stop) and several invariant-error exits emitted `EventStageFailed` but no
+  terminal event, so a stream-only subscriber (Slack/web) never saw the run
+  finish. `Engine.Run` now has a backstop that guarantees exactly one terminal
+  event carrying `TerminalStatus` on every exit (per-path emits still fire; the
+  backstop only covers the gaps, and `haltForBudget` is marked so it is not
+  double-emitted).
+
+- **`Engine.Run` / `tracker.Run` return the terminal `Result` alongside the
+  error on a failed run.** Previously a handler-error / strict-failure /
+  cancelled exit returned `(nil, err)`, discarding `RunID` and `Status`. It now
+  returns the populated fail `Result` with the error, so callers (notably
+  `RunManager`) can correlate and diagnose a failed run. Only an init/invariant
+  failure before any terminal result yields `(nil, err)`. `RunManager` also no
+  longer reports `RunCanceled` for a run that genuinely succeeded in the
+  cancellation race window.
+
 - **TRK102 lint no longer false-positives on plan-approval gates.** The
   "unmarked override edge" rule (#348 follow-up) used an unbounded transitive
   reverse walk for its "gate reachable from a failure" predicate, which in a

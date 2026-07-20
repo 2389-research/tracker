@@ -49,16 +49,12 @@ type Config struct {
 	LLMClient     agent.Completer               // optional: override auto-created client
 	Context       map[string]string             // optional: initial pipeline context
 	Params        map[string]string             // optional: override declared workflow params (keys without "params." prefix)
-	// Subgraphs are pre-loaded child graphs, keyed by subgraph_ref, for a graph
-	// that contains subgraph nodes. Callers that resolve subgraph_ref files
-	// themselves (e.g. the CLI) pass the loaded map here; it is wired into the
-	// registry via handlers.WithSubgraphs. Nil/empty for flat pipelines.
+	// Subgraphs are pre-loaded child graphs keyed by subgraph_ref, for a graph
+	// with subgraph nodes; nil/empty for flat pipelines. See NewEngineFromGraph.
 	Subgraphs map[string]*pipeline.Graph
 	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
 	// ToolSafety overrides the tool-handler security config (denylist/allowlist,
-	// output limits, env passthrough). Nil uses the registry defaults; the CLI
-	// threads the resolved config from its --tool-allowlist / --bypass-denylist /
-	// --max-output-limit flags here.
+	// output limits, env passthrough); nil uses the registry defaults.
 	ToolSafety *handlers.ToolHandlerConfig
 	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
 	AutoApprove   bool                          // auto-approve all human gates with default/first option
@@ -876,20 +872,24 @@ func newOpenAICompatAdapter(key, gatewayURL string, gatewayKind GatewayKind) (ll
 // Run executes the pipeline to completion.
 func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	engineResult, err := e.inner.Run(ctx)
-	if err != nil {
+	if engineResult == nil {
+		// No terminal result was produced (an init/invariant failure before the
+		// run loop yielded one) — return the error alone.
 		return nil, err
 	}
 	result := resultFromEngine(engineResult)
 	e.populateResultTokensAndCost(result, engineResult)
 	e.populateBudgetHaltIfNeeded(result, engineResult)
-	if engineResult != nil && engineResult.Trace != nil {
+	if engineResult.Trace != nil {
 		result.ToolCallsByName = engineResult.Trace.AggregateToolCalls()
 	}
 	if e.artifactDir != "" && result.RunID != "" {
 		result.ArtifactRunDir = filepath.Join(e.artifactDir, result.RunID)
 	}
 	result.BundleIdentity = e.bundleIdentity
-	return result, nil
+	// Return the terminal result alongside any error so a caller can read
+	// RunID/Status/diagnostics for a failed run (e.g. RunManager correlation).
+	return result, err
 }
 
 // populateResultTokensAndCost fills in per-provider token counts and cost report from the tracker.
@@ -953,8 +953,9 @@ func (e *Engine) Close() error {
 // TokenTracker returns the per-provider token/cost tracker attached to this
 // engine's run. A transport that renders spend in-process (e.g. the TUI status
 // bar and per-node cost) shares this rather than reconstructing usage from the
-// event stream. Non-nil whenever the engine has an observable *llm.Client (the
-// auto-created client, or a *llm.Client supplied via Config.LLMClient).
+// event stream. Always non-nil for a successfully constructed engine (it
+// reports zeros when no LLM client is attached, e.g. --backend claude-code
+// without keys).
 func (e *Engine) TokenTracker() *llm.TokenTracker { return e.tokenTracker }
 
 // ValidationResult contains the outcome of pipeline validation.

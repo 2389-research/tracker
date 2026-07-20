@@ -64,9 +64,11 @@ func (m *ManagedRun) State() RunState {
 func (m *ManagedRun) Done() <-chan struct{} { return m.done }
 
 // Result returns the run's result and error once it has finished. Before the
-// run is Done, it returns (nil, nil). After Done, exactly one of result/err
-// reflects the outcome (a failing run has a non-nil result with a fail Status
-// and a nil error, mirroring tracker.Run).
+// run is Done, it returns (nil, nil). After Done it mirrors tracker.Run: a run
+// that produced a terminal result has a non-nil *Result (with RunID and a
+// terminal Status) — accompanied by a non-nil error for handler-error,
+// strict-failure, or cancelled exits. Only an init/invariant failure before any
+// terminal result yields (nil, err).
 func (m *ManagedRun) Result() (*Result, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -193,12 +195,15 @@ func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string,
 	m.mu.Lock()
 	m.result, m.err = res, err
 	switch {
+	case err == nil && res != nil && pipeline.TerminalStatus(res.Status).IsSuccess():
+		// A genuine success wins even if the context was cancelled in the
+		// completion window — the result is a real success, so State() must not
+		// disagree with a successful Result().
+		m.state = RunSucceeded
 	case m.canceled || ctx.Err() != nil:
 		m.state = RunCanceled
-	case err != nil || res == nil || !pipeline.TerminalStatus(res.Status).IsSuccess():
-		m.state = RunFailed
 	default:
-		m.state = RunSucceeded
+		m.state = RunFailed
 	}
 	cancel := m.cancel
 	m.mu.Unlock()
