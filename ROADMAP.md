@@ -46,6 +46,22 @@ Get a real, published benchmark number.
 
 Directional. Expected to promote to Now as the milestones above close.
 
+### Transport boundary — *milestone: Transport boundary*
+Make the core fully UI-agnostic so TUI, Slack, web, and mobile are first-class
+transport peers on one `tracker.Config` → `Engine` path. The core is already
+mostly transport-neutral (correct dependency direction, a proven `Interviewer`
+seam, a near-sufficient event stream) — this finishes the boundary. Precedes the
+Slack transport (below).
+- **#472** — the epic: UI-agnostic core.
+- **#474** — `Config.Interviewer` injection seam.
+- **#475** — event-stream completeness (terminal-status + snapshot + cost-as-events).
+- **#476** — make N concurrent runs safe (per-run port/gateway/client).
+- **#477** — relocate the `tui/render` path leak.
+- **#478** — full unification: TUI becomes just another `Config` consumer.
+- **#479** — thin `RunManager` (transport-neutral concurrency owner).
+- Absorbs **#396** (globals → `runOptions`), **#450** / **#451** (public API vs
+  assembly; `suggested_next_nodes` off the context string).
+
 ### Parallel-first resilience
 First-class parallel milestone execution, so branches retry and resume
 independently instead of sharing global counters.
@@ -68,14 +84,12 @@ The things a brand-new user hits first.
 
 ### Load-bearing refactors
 Untangle the accessors and package seams that slow every future change.
-- **#396** — replace 11 config-smuggling package globals in `cmd/tracker`
-  with an explicit `runOptions` struct.
 - **#393** — claude-code / ACP parsers bypass typed `AgentNodeConfig`
   accessors (9 raw `node.Attrs` reads).
 - **#449** — route ~140 raw `log.Printf`/`fmt.Printf` diagnostics through a
   real logger.
-- **#450** / **#451** — split the public API from assembly helpers; get
-  `suggested_next_nodes` off the comma-joined context string.
+- *(#396, #450, #451 moved up into the Transport boundary workstream, which
+  depends on them.)*
 
 ---
 
@@ -104,6 +118,13 @@ Backlog. Real, but not scheduled.
   checks.
 - **#454** — group handler-specific `Outcome` fields into sub-structs.
 - **#455** — repo hygiene sweep.
+
+### Transports
+- **#473** — Slack transport (`cmd/trackerbot`): drive Tracker from Slack via
+  Socket Mode — `@trackerbot` starts runs, threads receive notifications and
+  clarifying gate questions, artifacts land back in the thread. The first
+  non-TUI consumer that proves the boundary. Promotes to Next once the Transport
+  boundary milestone (#472) closes. (Slack sub-issues: #480–#485.)
 
 ### Product & positioning
 - **#460** — naming & discoverability: "tracker" is ungoogleable.
