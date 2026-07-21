@@ -129,13 +129,27 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	}
 
 	iv := NewThreadInterviewer(ui, r.deps.NewID)
-	nf := newNotifier(ui)
 	cfg := r.deps.ConfigBase
 	cfg.WorkingDir = workDir
 	cfg.CheckpointDir = checkpoint
 	cfg.Params = rec.Params
 	cfg.Interviewer = iv
-	cfg.EventHandler = pipeline.PipelineEventHandlerFunc(nf.HandlePipelineEvent)
+
+	// The notifier posts discrete gate/failure/terminal messages. When the
+	// transport supports a live status card (StatusRenderer), also drive that
+	// card from the stream and quiet the notifier's per-stage/cost chatter (the
+	// card shows it) — the thread gets one updating dashboard instead of spam.
+	nf := newNotifier(ui)
+	handler := nf.HandlePipelineEvent
+	if sr, ok := ui.(StatusRenderer); ok {
+		st := newStatusTracker(sr, rec.Workflow, float64(cfg.Budget.MaxCostCents)/100)
+		nf.quiet = true
+		handler = func(evt pipeline.PipelineEvent) {
+			st.HandlePipelineEvent(evt)
+			nf.HandlePipelineEvent(evt)
+		}
+	}
+	cfg.EventHandler = pipeline.PipelineEventHandlerFunc(handler)
 
 	// Register AFTER a successful Start: registering earlier would let a duplicate
 	// mention that Start rejects (ErrRunKeyActive) clobber the live run's

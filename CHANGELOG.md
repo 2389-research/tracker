@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`transport/chatops` — the transport-neutral core of a chat front-end.**
+  Lifted the transport-agnostic logic out of `cmd/trackerbot` (Runner, the
+  `ThreadInterviewer` over a `ThreadUI` seam, the notifier, delivery, durable
+  `Store`, intent) into a reusable package, so a new chat transport
+  (Discord/Teams/Email) is a `ThreadUI` + auth, not a rewrite. `cmd/trackerbot`
+  keeps only the Slack-specific transport. No behavior change.
+
+- **`trackerbot` live status card.** Instead of a wall of per-event messages, a
+  run now posts **one** message that updates in place (`chat.update`) into a live
+  dashboard: workflow, state, a progress bar with the current node, step count,
+  elapsed, and spend vs budget — driven entirely by the pipeline event stream
+  (built transport-neutrally in `transport/chatops`, so future transports inherit
+  it). When the card is active the notifier quiets its per-stage/cost chatter.
+
 - **Transport conformance suite (Ship 4) — an executable definition of a correct
   transport.** New `transport/conformance` package: `RunInterviewerSuite(t,
   newSubject)` drives any `handlers.Interviewer` through every gate mode (choice /

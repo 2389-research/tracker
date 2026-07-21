@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -214,6 +215,9 @@ type slackThreadUI struct {
 	bot      *SlackBot
 	channel  string
 	threadTS string
+
+	statusMu sync.Mutex
+	statusTS string // the live status card's message ts (empty until first post)
 }
 
 // clearPending implements the pendingClearer capability: drop this thread's
@@ -262,4 +266,88 @@ func (u *slackThreadUI) postButtons(g Gate) error {
 		slack.MsgOptionBlocks(prompt, actions),
 		slack.MsgOptionTS(u.threadTS))
 	return err
+}
+
+// UpsertStatus implements chatops.StatusRenderer: post the live status card the
+// first time, then edit that same message in place (chat.update) on every
+// update — so the thread shows one dashboard that morphs as the run happens.
+// The lock spans the API call so a concurrent update can't double-post the card.
+func (u *slackThreadUI) UpsertStatus(card StatusCard) error {
+	blocks := slack.MsgOptionBlocks(statusBlocks(card)...)
+	u.statusMu.Lock()
+	defer u.statusMu.Unlock()
+	if u.statusTS == "" {
+		_, ts, err := u.bot.api.PostMessage(u.channel, blocks, slack.MsgOptionTS(u.threadTS))
+		if err != nil {
+			return err
+		}
+		u.statusTS = ts
+		return nil
+	}
+	_, _, _, err := u.bot.api.UpdateMessage(u.channel, u.statusTS, blocks)
+	return err
+}
+
+// statusBlocks renders a StatusCard as Block Kit: a header line, a progress bar
+// with the current node, and a context line with elapsed time and spend.
+func statusBlocks(card StatusCard) []slack.Block {
+	md := func(s string) *slack.TextBlockObject {
+		return slack.NewTextBlockObject(slack.MarkdownType, s, false, false)
+	}
+	header := fmt.Sprintf("%s  *%s* · %s", stateEmoji(card.State), card.Workflow, card.State)
+
+	progress := fmt.Sprintf("%s  %d/%d steps", progressBar(card.DoneCount, card.TotalCount), card.DoneCount, card.TotalCount)
+	if card.CurrentNode != "" {
+		progress += "\n└ " + card.CurrentNode
+	}
+
+	meta := "⏱ " + fmtDuration(card.Elapsed)
+	switch {
+	case card.BudgetUSD > 0:
+		meta += fmt.Sprintf("   💸 $%.2f / $%.2f", card.CostUSD, card.BudgetUSD)
+	case card.CostUSD > 0:
+		meta += fmt.Sprintf("   💸 $%.2f", card.CostUSD)
+	}
+
+	return []slack.Block{
+		slack.NewSectionBlock(md(header), nil, nil),
+		slack.NewSectionBlock(md(progress), nil, nil),
+		slack.NewContextBlock("", md(meta)),
+	}
+}
+
+func stateEmoji(state string) string {
+	switch state {
+	case "success":
+		return "✅"
+	case "fail":
+		return "❌"
+	case "budget_exceeded":
+		return "🛑"
+	case "validation_overridden":
+		return "☑️"
+	default:
+		return "🟢"
+	}
+}
+
+// progressBar draws a fixed-width unicode meter.
+func progressBar(done, total int) string {
+	const width = 12
+	if total <= 0 {
+		return strings.Repeat("░", width)
+	}
+	filled := done * width / total
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("▓", filled) + strings.Repeat("░", width-filled)
+}
+
+func fmtDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	if m := int(d / time.Minute); m > 0 {
+		return fmt.Sprintf("%dm %02ds", m, int((d%time.Minute)/time.Second))
+	}
+	return fmt.Sprintf("%ds", int(d/time.Second))
 }

@@ -9,6 +9,8 @@ type (
 	GateAnswer     = chatops.GateAnswer
 	GateKind       = chatops.GateKind
 	ThreadUI       = chatops.ThreadUI
+	StatusCard     = chatops.StatusCard
+	StatusNode     = chatops.StatusNode
 	Runner         = chatops.Runner
 	RunnerDeps     = chatops.RunnerDeps
 	RunRecord      = chatops.RunRecord

@@ -19,6 +19,10 @@ const costThrottle = 30 * time.Second
 type notifier struct {
 	ui ThreadUI
 
+	// quiet suppresses the per-stage-completed and cost posts — set when a live
+	// status card is showing that progress, so the thread isn't doubly noisy.
+	quiet bool
+
 	mu       sync.Mutex
 	lastCost time.Time
 	now      func() time.Time // injectable for tests
@@ -31,8 +35,13 @@ func newNotifier(ui ThreadUI) *notifier {
 // HandlePipelineEvent implements pipeline.PipelineEventHandler.
 func (n *notifier) HandlePipelineEvent(evt pipeline.PipelineEvent) {
 	if evt.Type == pipeline.EventCostUpdated {
-		n.maybePostCost(evt)
+		if !n.quiet {
+			n.maybePostCost(evt) // the live card shows spend when quiet
+		}
 		return
+	}
+	if n.quiet && evt.Type == pipeline.EventStageCompleted {
+		return // the live card shows node progress
 	}
 	if msg := describeEvent(evt); msg != "" {
 		_ = n.ui.Post(msg)
