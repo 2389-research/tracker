@@ -93,6 +93,29 @@ jsonld:
         <div class="slack-av">🤖</div>
         <div class="slack-body">
           <div class="slack-who">trackerbot <span class="bot-tag">app</span></div>
+          <div class="slack-txt">🔎 Estimate: ~$0.36&ndash;$2.90 &middot; 21 steps &middot; 9 agent nodes <span class="muted">(rough &mdash; actual depends on turns/loops)</span></div>
+        </div>
+      </div>
+
+      <div class="slack-msg">
+        <div class="slack-av">🤖</div>
+        <div class="slack-body" style="width:100%;">
+          <div class="slack-who">trackerbot <span class="bot-tag">app</span> <span class="muted" style="font-weight:400; font-size:0.72rem;">&nbsp;&#8635; updates live</span></div>
+          <div class="slack-txt">
+            <div style="border:1px solid var(--border-subtle); border-radius:10px; padding:0.7rem 0.9rem; background:var(--bg-surface); margin-top:0.2rem;">
+              <div>🟢 <strong>Ask &amp; Execute</strong> &middot; running</div>
+              <div style="font-family:monospace; letter-spacing:1px; margin-top:0.4rem;">▓▓▓▓▓░░░░ 5/9 steps</div>
+              <div style="color:var(--text-secondary); margin-top:0.15rem;">&#9492; ImplementParallel</div>
+              <div style="color:var(--text-secondary); font-size:0.85rem; margin-top:0.45rem;">&#9201; 2m 40s &nbsp;&nbsp; &#128184; $1.12 / $5.00</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slack-msg">
+        <div class="slack-av">🤖</div>
+        <div class="slack-body">
+          <div class="slack-who">trackerbot <span class="bot-tag">app</span></div>
           <div class="slack-txt">I explored the request and drafted a plan. <strong>Approve the spec?</strong>
             <div class="slack-btns">
               <span class="slack-btn primary">Approve</span>
@@ -115,11 +138,7 @@ jsonld:
         <div class="slack-av">🤖</div>
         <div class="slack-body">
           <div class="slack-who">trackerbot <span class="bot-tag">app</span></div>
-          <div class="slack-txt">
-            ✅ <code>ImplementParallel</code> complete<br>
-            ✅ <code>FinalBuild</code> complete &nbsp;<span class="muted">~$1.87</span><br>
-            🏁 run finished: <strong>success</strong>
-          </div>
+          <div class="slack-txt"><em>&#8230; the status card above keeps ticking &mdash; lamps fill in, cost climbs &mdash; then flips to</em> ✅ <strong>Ask &amp; Execute · success</strong></div>
         </div>
       </div>
 
@@ -133,8 +152,9 @@ jsonld:
     </div>
 
     <p style="font-size: 0.9rem; color: var(--text-secondary);">
-      A freeform gate instead asks you to reply in the thread (<code>✍️ &lt;question&gt;</code>); an interview
-      asks one question at a time. Cost notifications are throttled so a long run doesn&rsquo;t spam the channel.
+      The <strong>live status card</strong> is one message that updates in place as the run happens, so the thread
+      stays a single dashboard instead of a wall of per-step posts. A freeform gate instead asks you to reply in
+      the thread (<code>✍️ &lt;question&gt;</code>); an interview asks one question at a time.
     </p>
   </section>
 

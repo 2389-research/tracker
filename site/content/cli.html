@@ -114,6 +114,11 @@ tracker update</code></pre>
       <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes, and graph-level attrs (sorted, deterministic). No LLM calls. Supports bare names. Accepts <code>.dip</code>, <code>.dot</code>, and <code>.dipx</code> bundles. <span class="badge">.dipx v0.26.0</span></div>
     </div>
 
+    <div class="cli-cmd">
+      <code>tracker estimate &lt;pipeline&gt;</code>
+      <div class="desc">Rough pre-run cost &amp; scale ballpark <span class="badge">v0.46.0</span> &mdash; prices each agent node's model against a turn heuristic and reports steps, agent-node count, distinct models, and a Low&ndash;High cost range with an expected value (e.g. <code>build_product</code> &rarr; <code>$0.65&ndash;$10.02, expected ~$3.56</code>). No LLM calls; supports bare names. A deliberately wide range &mdash; actual cost depends on how many turns each agent uses and how many times loops run.</div>
+    </div>
+
     <h3 style="margin-top: 2rem;">Headless &amp; Integration</h3>
 
     <div class="cli-cmd">
