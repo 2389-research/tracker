@@ -228,6 +228,33 @@ func TestScopeToNodeBasic(t *testing.T) {
 	}
 }
 
+// TestScopeToNodeSkipsEpisodeSummaries: the running-aggregate episode keys must
+// NOT be aliased per-node (that copied a bounded-but-large blob under every node,
+// bloating the checkpoint — #491). Normal keys written alongside still scope.
+func TestScopeToNodeSkipsEpisodeSummaries(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set(ContextKeyEpisodeSummaries, `["s1","s2"]`)
+	ctx.Set(ContextKeyEpisodeSummary, "most recent")
+	ctx.Set("last_response", "normal output")
+	ctx.ScopeToNode("Implement")
+
+	// Live keys retained.
+	if v, ok := ctx.Get(ContextKeyEpisodeSummaries); !ok || v != `["s1","s2"]` {
+		t.Errorf("live episode_summaries lost: %q", v)
+	}
+	// Per-node copies of the episode keys must NOT exist.
+	if _, ok := ctx.Get("node.Implement." + ContextKeyEpisodeSummaries); ok {
+		t.Error("episode_summaries should not be scoped per-node (checkpoint bloat, #491)")
+	}
+	if _, ok := ctx.Get("node.Implement." + ContextKeyEpisodeSummary); ok {
+		t.Error("episode_summary should not be scoped per-node")
+	}
+	// A normal key alongside still scopes.
+	if _, ok := ctx.Get("node.Implement.last_response"); !ok {
+		t.Error("normal keys must still scope per-node")
+	}
+}
+
 func TestScopeToNodeLastWriterWins(t *testing.T) {
 	ctx := NewPipelineContext()
 

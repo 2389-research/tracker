@@ -54,6 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hard-fail" contract for billing specifically (auth / model-not-found still
   hard-fail; rate limits still retry then fail).
 
+### Fixed
+
+- **Checkpoint no longer bloats with per-node episode-summary copies (#491).**
+  Per-node context scoping aliased the running `episode_summaries` / `episode_summary`
+  aggregate under `node.<id>.…` for *every* node, so a long build accumulated one
+  bounded-but-large (~4 KB) copy per node — a 184 KB checkpoint dominated by them.
+  These running-aggregate keys are now excluded from per-node scoping (they're
+  global by nature, already bounded on their live key, and nothing reads the
+  scoped copies). Checkpoint size stays flat instead of climbing with milestone
+  count; the live summary the model sees is unchanged.
+
 ### Changed
 
 - **Empathetic message when in-flight work can't be preserved (#488, partial).**

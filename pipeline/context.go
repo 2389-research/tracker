@@ -236,12 +236,23 @@ func (c *PipelineContext) ScopeToNode(nodeID string) {
 	defer c.mu.Unlock()
 	prefix := fmt.Sprintf("%s%s.", ContextKeyNodePrefix, nodeID)
 	for k := range c.dirty {
-		if strings.HasPrefix(k, ContextKeyNodePrefix) {
+		if strings.HasPrefix(k, ContextKeyNodePrefix) || unscopedContextKeys[k] {
 			continue
 		}
 		c.values[prefix+k] = c.values[k]
 	}
 	c.dirty = make(map[string]struct{})
+}
+
+// unscopedContextKeys are running-aggregate keys that must NOT be aliased into
+// the per-node namespace. They are global by nature and already bounded on their
+// live key, so a per-node copy is meaningless AND (over many milestones)
+// accumulates one bounded-but-large blob per node — the checkpoint bloat in #491
+// (a 184 KB checkpoint dominated by per-node episode-summary copies). Nothing
+// reads the scoped copies; the live key is the only consumer.
+var unscopedContextKeys = map[string]bool{
+	ContextKeyEpisodeSummaries: true,
+	ContextKeyEpisodeSummary:   true,
 }
 
 // ClearDirty resets the dirty set without scoping any keys. Call this after
