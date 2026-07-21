@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Provider/model failover on billing exhaustion (#486, core).** A new
+  `llm.Client.CompleteFailover(req, fallbacks, onFailover)` tries an ordered list
+  of provider/model lanes: on a billing/quota exhaustion it switches to the next
+  lane (a dead account no longer ends a run when another lane has budget), while
+  transient errors (already retried) and code/auth errors — which would fail
+  identically on any lane — are returned as-is. The agent session uses it when
+  `SessionConfig.Fallbacks` is set, emitting a `provider_failover` event per
+  switch for the audit trail. Composes with the billing pause (#487): failover if
+  a lane is available, else pause. (Exposing `fallbacks` in `.dip` workflow config
+  is the remaining wiring.)
+
 - **Billing/quota exhaustion is now a resumable PAUSE, not a fatal abort (#487
   phase 2).** When a run hits a provider credit/quota exhaustion, it stops in a
   new `OutcomePausedBilling` terminal (`billing_paused` event) instead of

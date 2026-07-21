@@ -22,6 +22,7 @@ const (
 	EventError                EventType = "error"
 	EventContextWindowWarning EventType = "context_window_warning"
 	EventSteeringInjected     EventType = "steering_injected"
+	EventProviderFailover     EventType = "provider_failover"
 	EventLLMRequestStart      EventType = "llm_request_start"
 	EventLLMReasoning         EventType = "llm_reasoning"
 	EventLLMText              EventType = "llm_text"

@@ -168,7 +168,42 @@ func (s *Session) doLLMCall(ctx context.Context, turn int) (*llm.Response, error
 		Model:     s.config.Model,
 	})
 
-	return s.client.Complete(ctx, req)
+	return s.complete(ctx, req, turn)
+}
+
+// failoverCompleter is the optional failover capability of the concrete LLM
+// client (*llm.Client). Type-asserted so the base Completer interface stays
+// minimal and test stubs need not implement it.
+type failoverCompleter interface {
+	CompleteFailover(ctx context.Context, req *llm.Request, fallbacks []llm.Target, onFailover func(llm.FailoverEvent)) (*llm.Response, error)
+}
+
+// The concrete client must provide the failover capability, so the type
+// assertion in complete() is guaranteed to hit for real runs (not just stubs).
+var _ failoverCompleter = (*llm.Client)(nil)
+
+// complete sends the request, failing over to a configured fallback lane on a
+// billing/quota exhaustion (#486). With no fallbacks it's a plain Complete. Each
+// lane switch is surfaced as an EventProviderFailover so the audit trail shows
+// which target served the turn.
+func (s *Session) complete(ctx context.Context, req *llm.Request, turn int) (*llm.Response, error) {
+	// Failover is an optional capability of the concrete client; a Completer
+	// without it (e.g. a test stub) simply doesn't fail over.
+	fc, ok := s.client.(failoverCompleter)
+	if !ok || len(s.config.Fallbacks) == 0 {
+		return s.client.Complete(ctx, req)
+	}
+	return fc.CompleteFailover(ctx, req, s.config.Fallbacks, func(e llm.FailoverEvent) {
+		s.emit(Event{
+			Type:      EventProviderFailover,
+			SessionID: s.id,
+			Turn:      turn,
+			Provider:  e.To.Provider,
+			Model:     e.To.Model,
+			Text: fmt.Sprintf("provider failover: %s/%s exhausted (%v) — trying %s/%s",
+				e.From.Provider, e.From.Model, e.Err, e.To.Provider, e.To.Model),
+		})
+	})
 }
 
 // doPlanningCall sends one planning-only request without tool definitions.
@@ -193,7 +228,7 @@ func (s *Session) doPlanningCall(ctx context.Context) (*llm.Response, error) {
 		Model:     s.config.Model,
 	})
 
-	return s.client.Complete(ctx, req)
+	return s.complete(ctx, req, 0)
 }
 
 // buildResponseFormat creates an llm.ResponseFormat from session config.

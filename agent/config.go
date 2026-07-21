@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/2389-research/tracker/llm"
 )
 
 type CompactionMode string
@@ -28,12 +30,16 @@ type SessionConfig struct {
 	SystemPrompt                  string
 	Model                         string
 	Provider                      string
-	CacheToolResults              bool
-	ContextCompaction             CompactionMode
-	CompactionThreshold           float64
-	ReasoningEffort               string // OpenAI reasoning effort: "low", "medium", "high"
-	ResponseFormat                string // "json_object" or "json_schema" — forces structured output
-	ResponseSchema                string // JSON schema string when ResponseFormat is "json_schema"
+	// Fallbacks is an ordered list of provider/model lanes to fail over to when
+	// the primary lane hits a billing/quota exhaustion (#486). Empty = no
+	// failover (the run pauses/fails on the primary lane's exhaustion).
+	Fallbacks           []llm.Target
+	CacheToolResults    bool
+	ContextCompaction   CompactionMode
+	CompactionThreshold float64
+	ReasoningEffort     string // OpenAI reasoning effort: "low", "medium", "high"
+	ResponseFormat      string // "json_object" or "json_schema" — forces structured output
+	ResponseSchema      string // JSON schema string when ResponseFormat is "json_schema"
 	// ReflectOnError injects a structured reflection prompt after tool call
 	// errors to help the LLM reason about what went wrong before retrying.
 	// Default: true.
