@@ -957,49 +957,6 @@ func buildOpenAICompatConstructor() func(string) (llm.ProviderAdapter, error) {
 	}
 }
 
-// chooseInterviewer selects the interviewer implementation based on config.
-// Priority: --auto-approve > --webhook-url > --autopilot > terminal detection.
-// When backend is claude-code and autopilot is active, routes gate decisions
-// through the claude CLI subprocess instead of the native LLM client.
-func chooseInterviewer(isTerminal bool, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.FreeformInterviewer {
-	if cfg.autoApprove {
-		return &handlers.AutoApproveFreeformInterviewer{}
-	}
-	if activeWebhookGate != nil {
-		return newWebhookInterviewerFromCfg(activeWebhookGate)
-	}
-	if cfg.persona != "" {
-		return chooseAutopilotInterviewer(cfg.persona, llmClient, backend)
-	}
-	if isTerminal {
-		return tui.NewMode1Interviewer()
-	}
-	return handlers.NewConsoleInterviewer()
-}
-
-// chooseAutopilotInterviewer resolves the best FreeformInterviewer for autopilot mode.
-// Prefers claude-code subprocess when backend matches, falls back to native LLM client.
-func chooseAutopilotInterviewer(persona string, llmClient *llm.Client, backend string) handlers.FreeformInterviewer {
-	p, err := handlers.ParsePersona(persona)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: %v, falling back to auto-approve\n", err)
-		return &handlers.AutoApproveFreeformInterviewer{}
-	}
-	if backend == "claude-code" {
-		ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(p)
-		if ccErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
-		} else {
-			return ccAutopilot
-		}
-	}
-	if llmClient == nil {
-		fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to auto-approve\n")
-		return &handlers.AutoApproveFreeformInterviewer{}
-	}
-	return handlers.NewAutopilotInterviewer(llmClient, p)
-}
-
 // configureTUIHeader sets backend and autopilot tags on the TUI header bar.
 func configureTUIHeader(app *tui.AppModel, backend string, cfg autopilotCfg) {
 	if backend != "" && backend != "native" {

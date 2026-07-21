@@ -192,19 +192,21 @@ func (b *SlackBot) clearPendingFreeform(threadTS, gateID string) {
 }
 
 // gateActionPrefix namespaces our button action ids so unrelated interactions
-// are ignored. Encoding is "gate|<gateID>|<index>".
+// are ignored. Encoding is "gate|<index>|<gateID>" — the gateID is the trailing
+// field so it round-trips even if it ever contains the "|" separator (the index
+// only makes each button's action id unique and is not parsed back).
 const gateActionPrefix = "gate"
 
 func gateActionID(gateID string, i int) string {
-	return fmt.Sprintf("%s|%s|%d", gateActionPrefix, gateID, i)
+	return fmt.Sprintf("%s|%d|%s", gateActionPrefix, i, gateID)
 }
 
 func parseGateAction(actionID string) (string, bool) {
 	parts := strings.SplitN(actionID, "|", 3)
-	if len(parts) < 2 || parts[0] != gateActionPrefix {
+	if len(parts) < 3 || parts[0] != gateActionPrefix {
 		return "", false
 	}
-	return parts[1], true
+	return parts[2], true
 }
 
 // slackThreadUI posts to one thread and renders gates as Block Kit.

@@ -147,6 +147,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Transport hardening (Ship 3): kill the false green + a gate-button codec
+  bug.** Deleted the dead `chooseInterviewer` (and `chooseAutopilotInterviewer`),
+  which had no caller yet still carried five passing tests — so the CLI's live
+  interviewer selection (`applyInterviewerToConfig`, `chooseTUIInterviewer`, the
+  core of the #478 refactor) now has real coverage instead of misleading green.
+  Fixed the Slack button action-id codec to put the gate id in the trailing field
+  (`gate|<index>|<id>`) so a click never misroutes if the id contains the `|`
+  separator. Added tests for gateway resolution via the `Config` *argument* path
+  (previously only the env path was covered) including the fail-closed
+  `ErrGatewayRouteRefused`.
+
 - **Transport hardening (Ship 2): `trackerbot` safety, cost governance, and the
   token double-count guard.**
   - **`trackerbot` authorization** — `TRACKERBOT_ALLOWED_USERS` restricts who may

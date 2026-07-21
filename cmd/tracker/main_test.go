@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 	"github.com/2389-research/tracker/tui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func floatNear(a, b, epsilon float64) bool {
@@ -21,41 +23,83 @@ func floatNear(a, b, epsilon float64) bool {
 	return diff < epsilon
 }
 
-func TestChooseInterviewerReturnsBubbleteaWhenTerminal(t *testing.T) {
-	iv := chooseInterviewer(true, autopilotCfg{}, nil, "")
+// TestApplyInterviewerToConfig covers the LIVE plain-run interviewer selection
+// (#478): the CLI translates its flags into tracker.Config fields and the library
+// owns the interviewer. Priority: auto-approve > webhook > autopilot > interactive
+// (TTY → inline modal, else console). Replaces the tests of the deleted
+// chooseInterviewer, which no longer had a caller.
+func TestApplyInterviewerToConfig(t *testing.T) {
+	// These read package globals; save and restore around the table.
+	savedAuto, savedWebhook := activeAutopilotCfg, activeWebhookGate
+	t.Cleanup(func() { activeAutopilotCfg, activeWebhookGate = savedAuto, savedWebhook })
+
+	t.Run("auto-approve wins", func(t *testing.T) {
+		activeAutopilotCfg, activeWebhookGate = autopilotCfg{autoApprove: true}, nil
+		var cfg tracker.Config
+		applyInterviewerToConfig(&cfg, true)
+		if !cfg.AutoApprove {
+			t.Fatalf("expected AutoApprove set; cfg = %+v", cfg)
+		}
+	})
+
+	t.Run("webhook over autopilot", func(t *testing.T) {
+		activeAutopilotCfg = autopilotCfg{persona: "hard"}
+		activeWebhookGate = &webhookGateCfg{webhookURL: "https://example/gate"}
+		var cfg tracker.Config
+		applyInterviewerToConfig(&cfg, false)
+		if cfg.WebhookGate == nil {
+			t.Fatal("expected WebhookGate set when configured (over autopilot)")
+		}
+		if cfg.Autopilot != "" {
+			t.Fatalf("autopilot must not win over webhook, got %q", cfg.Autopilot)
+		}
+	})
+
+	t.Run("autopilot persona", func(t *testing.T) {
+		activeAutopilotCfg, activeWebhookGate = autopilotCfg{persona: "hard"}, nil
+		var cfg tracker.Config
+		applyInterviewerToConfig(&cfg, true)
+		if cfg.Autopilot != "hard" {
+			t.Fatalf("Autopilot = %q, want hard", cfg.Autopilot)
+		}
+	})
+
+	t.Run("interactive TTY → bubbletea modal", func(t *testing.T) {
+		activeAutopilotCfg, activeWebhookGate = autopilotCfg{}, nil
+		var cfg tracker.Config
+		applyInterviewerToConfig(&cfg, true)
+		if _, ok := cfg.Interviewer.(*tui.BubbleteaInterviewer); !ok {
+			t.Fatalf("TTY interactive should be a bubbletea interviewer, got %T", cfg.Interviewer)
+		}
+	})
+
+	t.Run("interactive non-TTY → console", func(t *testing.T) {
+		activeAutopilotCfg, activeWebhookGate = autopilotCfg{}, nil
+		var cfg tracker.Config
+		applyInterviewerToConfig(&cfg, false)
+		if _, ok := cfg.Interviewer.(*handlers.ConsoleInterviewer); !ok {
+			t.Fatalf("non-TTY interactive should be a console interviewer, got %T", cfg.Interviewer)
+		}
+	})
+}
+
+// TestChooseTUIInterviewer covers the LIVE Mode-2 (persistent TUI) selection,
+// including the autopilot-with-nil-client fallback to the interactive Bubbletea
+// interviewer that the deleted chooseInterviewer tests used to guard.
+func TestChooseTUIInterviewer(t *testing.T) {
+	saved := activeWebhookGate
+	t.Cleanup(func() { activeWebhookGate = saved })
+	activeWebhookGate = nil
+	send := tui.SendFunc(func(tea.Msg) {})
+
+	if iv := chooseTUIInterviewer(send, autopilotCfg{autoApprove: true}, nil, ""); iv == nil {
+		t.Fatal("auto-approve should yield a non-nil interviewer")
+	}
+	// Autopilot persona with no LLM client and native backend falls back to the
+	// interactive bubbletea interviewer (not a panic, not nil).
+	iv := chooseTUIInterviewer(send, autopilotCfg{persona: "lax"}, nil, "")
 	if _, ok := iv.(*tui.BubbleteaInterviewer); !ok {
-		t.Errorf("expected *tui.BubbleteaInterviewer when terminal, got %T", iv)
-	}
-}
-
-func TestChooseInterviewerReturnsConsoleWhenNotTerminal(t *testing.T) {
-	iv := chooseInterviewer(false, autopilotCfg{}, nil, "")
-	if _, ok := iv.(*handlers.ConsoleInterviewer); !ok {
-		t.Errorf("expected *handlers.ConsoleInterviewer when not terminal, got %T", iv)
-	}
-}
-
-func TestChooseInterviewerAutoApprove(t *testing.T) {
-	iv := chooseInterviewer(true, autopilotCfg{autoApprove: true}, nil, "")
-	if _, ok := iv.(*handlers.AutoApproveFreeformInterviewer); !ok {
-		t.Errorf("expected *handlers.AutoApproveFreeformInterviewer, got %T", iv)
-	}
-}
-
-func TestChooseInterviewerAutopilotNoClientFallsBack(t *testing.T) {
-	// When backend is not claude-code and llmClient is nil, should fall back to auto-approve.
-	iv := chooseInterviewer(true, autopilotCfg{persona: "lax"}, nil, "")
-	if _, ok := iv.(*handlers.AutoApproveFreeformInterviewer); !ok {
-		t.Errorf("expected auto-approve fallback with nil client, got %T", iv)
-	}
-}
-
-func TestChooseInterviewerClaudeCodeBackend(t *testing.T) {
-	// When backend is claude-code and autopilot is active, should try claude-code autopilot.
-	// Will fall back since claude binary may not be in test PATH, but shouldn't panic.
-	iv := chooseInterviewer(true, autopilotCfg{persona: "lax"}, nil, "claude-code")
-	if iv == nil {
-		t.Error("expected non-nil interviewer")
+		t.Fatalf("autopilot with nil client should fall back to bubbletea, got %T", iv)
 	}
 }
 
