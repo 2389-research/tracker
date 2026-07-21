@@ -102,7 +102,7 @@ go run ./cmd/trackerbot          # or: go build -o trackerbot ./cmd/trackerbot &
 - `@trackerbot run <workflow> [k=v …]` — start a named built-in/local workflow.
 - `@trackerbot retry` — re-run this thread's last workflow (also `again` / `rerun`).
 - `@trackerbot bump <dollars>` — re-run the last workflow with a raised cost ceiling (offered after a `budget_exceeded` run).
-- `@trackerbot steer <guidance>` — inject a note into the running workflow (surfaces at the next node; the workflow must reference `steer.guidance` to act on it).
+- `@trackerbot steer <guidance>` — inject a note into the running workflow (surfaces at the next node; the workflow must reference `steer.guidance` to act on it — e.g. `${ctx.steer.guidance}` in an agent prompt).
 - `@trackerbot workflows` — list workflows you can run.
 - `@trackerbot status` — this thread's run state, with a live `5/9 steps · $1.12 · <node>` progress digest.
 - `@trackerbot cancel` — stop this thread's run.

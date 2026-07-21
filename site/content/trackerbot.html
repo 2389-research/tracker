@@ -300,6 +300,17 @@ export TRACKERBOT_RUNS=/var/tmp/trackerbot-runs
         <p>A structured form asked <strong>one question at a time</strong> (buttons or reply), accumulated into a single result.</p>
       </div>
     </div>
+    <div class="glass" style="margin-top: 1.25rem;">
+      <h4>Make a workflow steerable</h4>
+      <p><code>steer</code> injects a note under the context key <code>steer.guidance</code>, which lands
+      in the pipeline context at the next step boundary. A workflow acts on it by referencing that key
+      in an agent prompt &mdash; otherwise the note is a harmless unused value. For example:</p>
+      <pre><code>Implement the requested change.
+Extra guidance from the operator (may be empty): ${ctx.steer.guidance}</code></pre>
+      <p>Now <code>@trackerbot steer prefer the smaller change</code> mid-run reaches that agent on its
+      next turn. The <code>steer.*</code> namespace is never interpolated into shell/tool commands, so a
+      note can&rsquo;t become code.</p>
+    </div>
   </section>
 
   <!-- ═══ How it works ═══ -->
