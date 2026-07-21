@@ -158,6 +158,22 @@ Quiet by default: @mention the requester only on gate-needed / done / failed; �
 original message when finished; a "Tracker is working…" presence; optional DM for the moments
 that need eyes. Less spam = more trust. Implemented in `notify.go`'s notable-event predicate.
 
+## Documentation & website
+
+The dedicated [Slack Bot page](../../site/content/trackerbot.html) and
+[`cmd/trackerbot/README.md`](../../cmd/trackerbot/README.md) are the **single home** for Slack
+docs — the Transports page only summarizes and links (kept DRY). As each tier lands:
+- **Update `trackerbot.html`** in the same PR — the visual walkthrough gains the new surface
+  (a mockup of the live status card; new slash commands / App Home / shortcuts in the commands
+  section; new env vars in the config table; steer/budget-bump in a "controls" subsection).
+- **Update the README** env table + feature list; **`CHANGELOG.md`** "Added" entry;
+  **`ROADMAP.md`** tier promotion.
+- New env vars (`TRACKERBOT_CONFIRM`, schedule/preset stores, RBAC config) land in *both* the
+  README table and the site config table — keep them in sync (they're the one place that
+  legitimately mirrors, since the site table is the friendly copy of the README reference).
+- The live-status-card mockup on the site should be re-verified against the real Block Kit
+  output once built (same discipline as the `build_product` diagram audit).
+
 ## Rollout sequence
 
 | Order | Slice | Effort | Why |

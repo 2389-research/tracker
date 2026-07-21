@@ -226,6 +226,38 @@ Slack — the cost is the Microsoft setup.
 - **Budget + authz** are per-transport policy but reuse the same `Config.Budget` and an
   `Authorizer` seam (already in trackerbot) — lift that into chatops too.
 
+## Documentation & website (per transport)
+
+**DRY principle — one home per transport.** Each transport's setup, config, commands, and
+env belong on **its own dedicated page**; overview surfaces only *summarize and link*. The
+[Transports page](../../site/content/transport.html) and
+[`transport-boundary.md`](../architecture/transport-boundary.md) are the map — a transport
+gets a short paragraph + a link there, never a duplicated setup section. (The Slack section on
+the Transports page was trimmed to exactly this once `trackerbot.html` existed.)
+
+**Docs deliverable checklist — every transport ships with:**
+1. **A dedicated site page** — `site/content/<transport>.html` on the `trackerbot.html`
+   template: what it is, a visual/example, setup, commands/usage, config/env table, security,
+   troubleshooting, further-reading. Add it to `site/data/nav.yaml`.
+2. **An in-repo README** — `cmd/<transport>/README.md` (or `transport/<name>/README.md`): the
+   reference — source layout, internals, the setup checklist. The site page is the friendly
+   guide; the README is the technical reference (and links to the site page, as trackerbot's does).
+3. **Overview updates (summarize + link, don't duplicate):**
+   - Transports page: one row in the "instances" table + a one-line pointer to the dedicated page.
+   - `transport-boundary.md`: one row in "The transports as instances" + one line in "Building a
+     new transport" if the transport pattern teaches something new (e.g. GitHub's PR-review-as-gate).
+   - Top-level `README.md`: a line in the transports list, linking the dedicated page.
+4. **`CHANGELOG.md`** — an "Added" entry in the same PR as the code.
+5. **`ROADMAP.md`** — promote the transport up a tier when it ships (Maintenance contract).
+6. **Diagrams** — each transport page owns its own flow diagram; the boundary page keeps only
+   the one shared shape. Verify any diagram against reality (see the `build_product` diagram
+   audit — models and stages must match the code).
+
+**Website mechanics:** pages are hand-written HTML with front matter (title/description/og/
+`mermaid`/`jsonld`); wide tables auto-stack on mobile and the on-page TOC auto-builds — no extra
+work. Push to `main` touching `site/**` → the `docs.yml` workflow deploys to `gh-pages`. Preview
+locally with `cd site && hugo server`.
+
 ## Rollout sequence & dependencies
 
 ```

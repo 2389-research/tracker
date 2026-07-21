@@ -199,66 +199,20 @@ flowchart TB
 
   <!-- ═══ trackerbot ═══ -->
   <section class="glass" id="trackerbot">
-    <h2>Slack: <span class="accent">trackerbot</span></h2>
+    <h2>The reference transport: <span class="accent">Slack</span></h2>
     <p class="lead">
-      <code>cmd/trackerbot</code> is the reference non-terminal transport: mention <code>@trackerbot make me an app
-      that &hellip;</code> (or <code>run &lt;workflow&gt;</code>) and it starts a pipeline in a Slack thread, streams
-      notifications and gate questions to that thread, and delivers the result &mdash; arbitrarily many runs at
-      once, one per thread, each isolated. It runs over Socket Mode, so no public endpoint is needed.
+      <code>cmd/trackerbot</code> is the proof the boundary works for a non-terminal front-end &mdash; a
+      <em>pure consumer</em>, no engine changes. It supplies a <code>SlackInterviewer</code> for gates, filters
+      the event stream into thread notifications, and keys a <code>RunManager</code> on <code>thread_ts</code>
+      for one isolated run per thread. Mention it, watch the run happen in the thread, get the result back.
+      Everything on this page &mdash; the interviewer seam, the streams, per-run isolation, durable resume &mdash;
+      it exercises for real.
     </p>
-    <p style="font-size: 0.95rem;">
-      &rarr; <strong><a href="/tracker/trackerbot.html">Getting started with the Slack bot</a></strong> &mdash; a
-      full setup walkthrough with examples, Slack app configuration, commands, security, and troubleshooting.
+    <p style="font-size: 1rem; margin-top: 1rem;">
+      &rarr; <strong><a href="/tracker/trackerbot.html">Get started with the Slack bot</a></strong> &mdash; the
+      full guide: Slack app setup, install, commands, gates, security &amp; cost, configuration, and
+      troubleshooting.
     </p>
-
-    <div class="diagram">
-      <div class="mermaid">
-flowchart LR
-    M["@trackerbot &lt;request&gt;"] --> I["intent<br/>LLM classify + grammar"]
-    I --> R["Runner<br/>thread_ts &rarr; run"]
-    R --> RM["RunManager<br/>one run / thread"]
-    RM --> E["tracker.Run<br/>SlackInterviewer + notifier"]
-    E -->|gate| T["thread: buttons / reply"]
-    E -->|events| N["thread: notifications"]
-    E -->|done| D["deliver result / diagnosis"]
-      </div>
-    </div>
-
-    <div class="grid-2" style="margin-top: 1.25rem;">
-      <div class="glass glass-sm">
-        <h4>Run flow</h4>
-        <p>A mention resolves to a workflow (LLM classifier with a <code>run &lt;workflow&gt;</code> grammar fast-path). All four gate modes render in-thread (buttons for choice/yes-no, a reply for freeform, one-question-at-a-time for interviews). On success the deliverable is posted; on failure a real <code>Diagnose</code> summary.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Durability</h4>
-        <p>Each thread gets a deterministic workdir&nbsp;+&nbsp;checkpoint. A restart resumes any interrupted run from its checkpoint &mdash; no run-id bookkeeping. State and checkpoints are written atomically; a corrupt state file is preserved aside and logged, never silently dropped.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Security &amp; cost</h4>
-        <p><code>TRACKERBOT_ALLOWED_USERS</code> restricts who can trigger paid runs (empty = open, logged as a warning). Every run carries a fail-closed budget (<code>TRACKERBOT_MAX_COST_CENTS</code>, default $5), and workflow names are validated so a mention can never load an arbitrary <code>.dip</code> off the host.</p>
-      </div>
-      <div class="glass glass-sm">
-        <h4>Lifecycle</h4>
-        <p>Finished-run workdirs are reaped by default to bound disk (<code>TRACKERBOT_KEEP_WORKDIRS=1</code> retains them), plus a startup sweep of orphans. A pure consumer of the boundary &mdash; no engine changes.</p>
-      </div>
-    </div>
-
-    <h3 style="margin-top: 1.75rem;">Environment</h3>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>Variable</th><th>Purpose</th><th>Default</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>SLACK_BOT_TOKEN</code> / <code>SLACK_APP_TOKEN</code></td><td>bot (<code>xoxb-</code>) and app-level (<code>xapp-</code>) tokens</td><td>required</td></tr>
-          <tr><td><code>TRACKERBOT_ALLOWED_USERS</code></td><td>comma-separated Slack user ids allowed to drive the bot</td><td>&mdash; (open)</td></tr>
-          <tr><td><code>TRACKERBOT_MAX_COST_CENTS</code></td><td>fail-closed per-run cost ceiling; <code>0</code> disables</td><td><code>500</code></td></tr>
-          <tr><td><code>TRACKERBOT_MAX_CONCURRENT</code></td><td>concurrent run cap</td><td><code>8</code></td></tr>
-          <tr><td><code>TRACKERBOT_KEEP_WORKDIRS</code></td><td><code>1</code> retains finished-run workdirs</td><td>&mdash; (reap)</td></tr>
-          <tr><td><code>TRACKERBOT_BACKEND</code></td><td>agent backend (<code>native</code>/<code>claude-code</code>/<code>acp</code>)</td><td><code>native</code></td></tr>
-        </tbody>
-      </table>
-    </div>
   </section>
 
   <!-- ═══ Building a new transport ═══ -->
