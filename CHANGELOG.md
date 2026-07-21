@@ -216,6 +216,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (temp-file + rename), so a crash *during* a write can't corrupt the one file
     whose job is crash recovery; a corrupt `trackerbot` state file is preserved
     aside and logged loudly rather than silently dropping every resumable run.
+    A new test also pins that a crash while a **human gate** is waiting resumes
+    at the gate without re-running the completed upstream node (its output was
+    checkpointed before the gate blocked) — node-granularity durability, verified.
   - **`trackerbot` rejects path-shaped workflow names** before `ResolveSource`,
     closing a traversal where the grammar intent fallback could load an
     arbitrary `.dip` off the host (e.g. `run ../../../etc/hosts`).
