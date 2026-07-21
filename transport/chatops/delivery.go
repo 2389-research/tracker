@@ -18,6 +18,12 @@ import (
 func deliver(ctx context.Context, ui ThreadUI, run *tracker.ManagedRun) {
 	res, runErr := run.Result()
 	if res == nil {
+		// No run dir to diagnose — lead with the classified cause of the
+		// start-time failure (config, auth, billing…) instead of a raw wrapper.
+		if fc := tracker.ClassifyFailure(runErr); fc.Title != "" {
+			_ = ui.Post("❌ the run couldn't start — " + formatCause(fc))
+			return
+		}
 		_ = ui.Post("❌ the run could not start: " + errText(runErr))
 		return
 	}
@@ -25,7 +31,21 @@ func deliver(ctx context.Context, ui ThreadUI, run *tracker.ManagedRun) {
 		deliverSuccess(ui, res)
 		return
 	}
-	deliverFailure(ctx, ui, run.WorkDir, res)
+	deliverFailure(ctx, ui, run.WorkDir, res, runErr)
+}
+
+// formatCause renders a FailureCause as a compact thread message: the title, the
+// cause, and the next step.
+func formatCause(fc tracker.FailureCause) string {
+	var b strings.Builder
+	b.WriteString("*" + strings.TrimSpace(fc.Icon+" "+fc.Title) + "*")
+	if fc.Detail != "" {
+		b.WriteString("\n" + fc.Detail)
+	}
+	if fc.NextSteps != "" {
+		b.WriteString("\n" + fc.NextSteps)
+	}
+	return b.String()
 }
 
 // deliverSuccess posts the results card: outcome, cost, duration, and the
@@ -113,10 +133,16 @@ func shortDur(d time.Duration) string {
 // a one-word recovery nudge. A budget breach gets a `bump` nudge (raise the
 // ceiling and re-run) instead of a plain `retry` — re-running at the same cap
 // would just breach again.
-func deliverFailure(ctx context.Context, ui ThreadUI, workDir string, res *tracker.Result) {
+func deliverFailure(ctx context.Context, ui ThreadUI, workDir string, res *tracker.Result, runErr error) {
 	hint := recoveryHint(res)
 	if msg, ok := diagnose(ctx, workDir, res.RunID); ok {
 		_ = ui.Post(msg + hint)
+		return
+	}
+	// No diagnosis available — lead with the classified cause when we have one,
+	// instead of a bare "couldn't pull a diagnosis" (#492).
+	if fc := tracker.ClassifyFailure(runErr); fc.Kind != "" && fc.Kind != "generic" {
+		_ = ui.Post("❌ " + formatCause(fc) + hint)
 		return
 	}
 	_ = ui.Post(fmt.Sprintf("❌ the run finished *%s* — I couldn't pull a diagnosis.%s", res.Status, hint))

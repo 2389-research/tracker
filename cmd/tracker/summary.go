@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -164,13 +165,28 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineF
 	if result != nil && result.Status == pipeline.OutcomeBudgetExceeded {
 		printBudgetHaltBanner(result)
 	} else if pipelineErr != nil {
-		fmt.Println()
-		fmt.Printf("  ERROR: %v\n", pipelineErr)
+		printFailureCause(pipelineErr)
 	}
 
 	printResumeHint(result, pipelineFile)
 
 	fmt.Println("═══════════════════════════════════════════════════════════")
+}
+
+// printFailureCause renders the classified, human-first failure banner (#492):
+// lead with the cause + remediation, keep the raw wrapper out of the headline.
+func printFailureCause(err error) {
+	fc := tracker.ClassifyFailure(err)
+	fmt.Println()
+	fmt.Printf("  %s\n", lipgloss.NewStyle().Foreground(colorHot).Render(strings.TrimSpace(fc.Icon+" "+fc.Title)))
+	if fc.Detail != "" {
+		fmt.Printf("    %s\n", fc.Detail)
+	}
+	for _, line := range strings.Split(strings.TrimRight(fc.NextSteps, "\n"), "\n") {
+		if line != "" {
+			fmt.Printf("    %s\n", line)
+		}
+	}
 }
 
 func printParamOverrideSummary() {

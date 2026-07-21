@@ -9,8 +9,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	tracker "github.com/2389-research/tracker"
 	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -171,6 +173,18 @@ func exitWithError(err error) {
 	// preferred label), so we don't re-print the bare sentinel here.
 	if errors.Is(err, pipeline.ErrValidationOverridden) {
 		os.Exit(2)
+	}
+	// A run-execution failure already had its classified cause + remediation
+	// rendered in the run summary (printFailureCause). Re-printing the full
+	// wrapped error here would make the raw "pipeline execution: handler error at
+	// node …" wrapper the last, most-prominent thing on screen (#492). Keep stderr
+	// to a terse classified one-liner instead. interpretRunResult is the sole
+	// producer of these prefixes.
+	msg := err.Error()
+	if strings.HasPrefix(msg, "pipeline execution:") || strings.HasPrefix(msg, "pipeline finished with status:") {
+		fc := tracker.ClassifyFailure(err)
+		fmt.Fprintf(os.Stderr, "error: %s\n", strings.TrimSpace(fc.Icon+" "+fc.Title))
+		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	os.Exit(1)

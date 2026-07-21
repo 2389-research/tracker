@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Failures lead with the cause, not the plumbing (#492).** When a run fails,
+  the `tracker run` summary now leads with a classified, human-first banner —
+  e.g. `💳 Billing / quota exhausted` with the account/remediation, or
+  `🔑 Authentication failed`, `⏳ Rate limited`, `📏 Context too long`,
+  `🌐 Network error`, `⚙️ Configuration problem` — instead of a bare
+  `ERROR: pipeline execution: handler error at node "X": …` wrapper. The final
+  stderr line is a terse classified one-liner rather than the raw wrapped blob.
+  The chatops (Slack) failure fallback uses the same classification. New shared
+  `tracker.ClassifyFailure` / `FailureCause`, reused across surfaces (the
+  mechanism behind the error-UX epic #493).
+
 ### Added
 
 - **`tracker diagnose` flags cost asymmetry (#353).** When one backend with no
