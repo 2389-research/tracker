@@ -19,8 +19,8 @@ func TestPrintEstimate(t *testing.T) {
 	var buf bytes.Buffer
 	printEstimate(&buf, "myflow", &tracker.RunEstimate{
 		Steps: 10, AgentNodes: 3,
-		Models:  []string{"claude-opus-4-6", "gpt-5.2"},
-		LowUSD:  0.5, HighUSD: 5.0, ExpectedUSD: 2.0,
+		Models: []string{"claude-opus-4-6", "gpt-5.2"},
+		LowUSD: 0.5, HighUSD: 5.0, ExpectedUSD: 2.0,
 	})
 	out := buf.String()
 	for _, want := range []string{"myflow", "Steps:", "10", "claude-opus-4-6", "gpt-5.2", "$0.50", "$5.00", "$2.00"} {

@@ -15,8 +15,8 @@ import (
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
-	chatops "github.com/2389-research/tracker/transport/chatops"
 	"github.com/2389-research/tracker/pipeline"
+	chatops "github.com/2389-research/tracker/transport/chatops"
 )
 
 func main() {
@@ -51,12 +51,12 @@ func main() {
 	}
 	st := chatops.OpenStore(filepath.Join(runsBase, "trackerbot-state.json"))
 	runner := chatops.NewRunner(rm, RunnerDeps{
-		NewThreadUI:  bot.NewThreadUI,
-		WorkDir:      workDir,
-		RunsBase:     runsBase,
-		NewID:        newGateID,
-		ConfigBase:   configBase,
-		Intent:       buildIntentResolver(configBase),
+		NewThreadUI:    bot.NewThreadUI,
+		WorkDir:        workDir,
+		RunsBase:       runsBase,
+		NewID:          newGateID,
+		ConfigBase:     configBase,
+		Intent:         buildIntentResolver(configBase),
 		Store:          st,
 		KeepWorkdirs:   os.Getenv("TRACKERBOT_KEEP_WORKDIRS") == "1",
 		ConfirmOverUSD: float64(envInt("TRACKERBOT_CONFIRM_OVER_CENTS", 200)) / 100,

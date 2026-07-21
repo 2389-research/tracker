@@ -259,7 +259,6 @@ func executeSimulate(cfg runConfig) error {
 	return runSimulateCmd(cfg.pipelineFile, cfg.format, os.Stdout)
 }
 
-
 func executeAudit(cfg runConfig) error {
 	if cfg.resumeID == "" {
 		return listRuns(cfg.workdir)
