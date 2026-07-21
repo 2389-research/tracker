@@ -77,3 +77,10 @@ go run ./cmd/trackerchat          # or: go build -o trackerchat ./cmd/trackercha
   (that thread is busy). Control commands (`status`, `cancel`, `steer`) still
   work mid-run.
 - Output interleaves with your typing, as any REPL bot's does.
+- Human gates are answered from a single input slot, so gates must be
+  **sequential** (the norm). A workflow whose *parallel* branches each open a
+  human gate at the same time can only answer one from the terminal — fine for
+  the built-in workflows, which gate sequentially.
+- Type answers only after a gate is shown: a line typed before its gate prompt
+  appears is treated as a fresh request (and rejected while a run is active), not
+  as the answer.

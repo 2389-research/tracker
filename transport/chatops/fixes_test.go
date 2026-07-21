@@ -41,3 +41,22 @@ func TestThreadInterviewer_ClearsPendingOnCancel(t *testing.T) {
 		t.Fatalf("expected ClearPending(%s), got %v", g.ID, got)
 	}
 }
+
+// TestThreadInterviewer_ClearsPendingOnCancel_ChoiceGate: a cancelled CHOICE gate
+// must also clear the transport's pending slot. A single-slot transport (the CLI
+// REPL) arms its pending slot for every gate kind, so without this an abandoned
+// choice gate leaves a stale slot that swallows the user's next request.
+func TestThreadInterviewer_ClearsPendingOnCancel_ChoiceGate(t *testing.T) {
+	ui := &clearingUI{fakeUI: newFakeUI()}
+	iv := NewThreadInterviewer(ui, seqIDs())
+
+	done := make(chan struct{})
+	go func() { _, _ = iv.Ask("pick", []string{"A", "B"}, "A"); close(done) }()
+	g := awaitGate(t, ui.fakeUI)
+	iv.Cancel()
+	<-done
+
+	if got := ui.clears(); len(got) != 1 || got[0] != g.ID {
+		t.Fatalf("choice gate must clear pending too: expected ClearPending(%s), got %v", g.ID, got)
+	}
+}

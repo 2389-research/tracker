@@ -88,6 +88,17 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 		return
 	}
 
+	// One run per thread. Reject a fresh request when this thread already has a
+	// live run BEFORE doing any estimate/confirm/registration — otherwise the
+	// doomed second mention would clobber the live run's per-thread state
+	// (interviewer, steering channel, status card) on its way to being rejected
+	// by rm.Start. Commands (status/cancel/steer/bump) went through handleCommand
+	// above, so they are unaffected. (rm.Start remains the authoritative guard.)
+	if _, active := r.rm.Get(threadTS); active {
+		r.handleAdmission(ui, tracker.ErrRunKeyActive) // same message as the authoritative Start guard
+		return
+	}
+
 	intent, err := r.resolveIntent(ctx, text)
 	if err != nil {
 		_ = ui.Post("I couldn't work out what to run: " + err.Error())
@@ -200,7 +211,13 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	cfg.CheckpointDir = checkpoint
 	cfg.Params = rec.Params
 	cfg.Interviewer = iv
-	cfg.SteeringChan = r.openSteering(rec.ThreadTS) // enable `steer` in this thread
+	// The steering channel must be on the config before Start (the engine reads
+	// it at construction), but it is only recorded in the per-thread map AFTER a
+	// successful Start (see the register note below) — so a rejected duplicate
+	// mention can't clobber the live run's channel. An unregistered channel is
+	// just GC'd.
+	steer := make(chan map[string]string, steerBufSize)
+	cfg.SteeringChan = steer
 	if budgetOverrideCents > 0 {
 		cfg.Budget.MaxCostCents = budgetOverrideCents // `bump` raised the ceiling
 	}
@@ -211,9 +228,9 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	// card shows it) — the thread gets one updating dashboard instead of spam.
 	nf := newNotifier(ui)
 	handler := nf.HandlePipelineEvent
+	var st *statusTracker
 	if sr, ok := ui.(StatusRenderer); ok {
-		st := newStatusTracker(sr, rec.Workflow, float64(cfg.Budget.MaxCostCents)/100)
-		r.trackStatus(rec.ThreadTS, st) // so `status` can report live progress
+		st = newStatusTracker(sr, rec.Workflow, float64(cfg.Budget.MaxCostCents)/100)
 		nf.quiet = true
 		handler = func(evt pipeline.PipelineEvent) {
 			st.HandlePipelineEvent(evt)
@@ -222,16 +239,21 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	}
 	cfg.EventHandler = pipeline.PipelineEventHandlerFunc(handler)
 
-	// Register AFTER a successful Start: registering earlier would let a duplicate
-	// mention that Start rejects (ErrRunKeyActive) clobber the live run's
-	// interviewer. The window before register is far shorter than the run
-	// reaching its first gate, so no inbound answer is lost in practice.
+	// Register per-thread state AFTER a successful Start: registering earlier
+	// would let a duplicate mention that Start rejects (ErrRunKeyActive) clobber
+	// the live run's interviewer, steering channel, or status card. The window
+	// before register is far shorter than the run reaching its first gate, so no
+	// inbound answer is lost in practice.
 	run, err := r.rm.Start(ctx, rec.ThreadTS, source, cfg)
 	if err != nil {
 		r.handleAdmission(ui, err)
 		return
 	}
 	r.register(rec.ThreadTS, iv)
+	r.registerSteering(rec.ThreadTS, steer)
+	if st != nil {
+		r.trackStatus(rec.ThreadTS, st) // so `status` can report live progress
+	}
 	r.deps.Store.put(rec)
 	r.remember(rec.ThreadTS, rec) // enable `retry` in this thread
 	if cents := cfg.Budget.MaxCostCents; cents > 0 {
@@ -340,9 +362,15 @@ func (r *Runner) watch(threadTS string, run *tracker.ManagedRun, ui ThreadUI) {
 	r.untrackStatus(threadTS)
 	r.unregisterSteering(threadTS)
 	r.deps.Store.remove(threadTS) // finished — no longer resumable
-	r.rm.Forget(threadTS)         // free the thread for a future run
 	deliver(context.Background(), ui, run)
-	r.reap(threadTS)
+	r.reap(threadTS) // reclaim the workdir BEFORE freeing the key...
+	// ...then free the thread. Forget must come last: it re-admits the thread,
+	// and a `bump`/`retry` reacting to the terminal message would otherwise
+	// rm.Start into this same deterministic workdir while reap is still deleting
+	// it — the new run's checkpoint/artifacts would vanish mid-flight. Holding
+	// the key through deliver+reap serializes reap against any re-launch. deliver
+	// runs before reap because it reads the run dir (diagnosis).
+	r.rm.Forget(threadTS)
 }
 
 // reap reclaims a finished run's workdir (bounding disk), or, when retention is

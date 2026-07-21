@@ -61,9 +61,16 @@ func (b *SlackBot) onAppHomeOpened(ev *slackevents.AppHomeOpenedEvent) {
 	if ev.Tab != "home" {
 		return
 	}
+	// Only show the active-run list to allowlisted users — the same identity gate
+	// that guards driving the bot. A non-allowlisted viewer gets the how-to only,
+	// never the list of active run keys/states.
+	var runs []RunView
+	if b.authorized(ev.User) {
+		runs = b.runner.ActiveRuns()
+	}
 	view := slack.HomeTabViewRequest{
 		Type:   slack.VTHomeTab,
-		Blocks: slack.Blocks{BlockSet: homeBlocks(b.runner.ActiveRuns())},
+		Blocks: slack.Blocks{BlockSet: homeBlocks(runs)},
 	}
 	_, _ = b.api.PublishView(ev.User, view, "")
 }

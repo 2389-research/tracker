@@ -180,21 +180,26 @@ func (r *Runner) steerRun(ui ThreadUI, threadTS, text string) {
 	// tell the user to retry rather than block the transport goroutine.
 	select {
 	case ch <- map[string]string{steerGuidanceKey: text}:
-		_ = ui.Post("🧭 steering the run: " + text)
+		// Honest wording: the note is queued and applied at the next inter-node
+		// boundary — a non-blocking send only guarantees it's buffered, not that
+		// the engine (which may be mid-node, or finishing) will consume it.
+		_ = ui.Post("🧭 steering queued (applies at the next step): " + text)
 	default:
 		_ = ui.Post("Couldn't steer right now (the run is mid-step) — try again in a moment.")
 	}
 }
 
-// openSteering creates and registers a buffered steering channel for a thread's
-// run, returning it for cfg.SteeringChan. The buffer absorbs bursts between the
-// engine's inter-node drains.
-func (r *Runner) openSteering(threadTS string) chan map[string]string {
-	ch := make(chan map[string]string, 8)
+// steerBufSize is the steering channel's buffer — it absorbs bursts between the
+// engine's inter-node drains without the sender ever blocking.
+const steerBufSize = 8
+
+// registerSteering records a run's steering channel for the thread so `steer`
+// can reach it. Called only after a successful rm.Start, so a rejected duplicate
+// mention can't overwrite a live run's channel.
+func (r *Runner) registerSteering(threadTS string, ch chan map[string]string) {
 	r.steerMu.Lock()
 	r.steerCh[threadTS] = ch
 	r.steerMu.Unlock()
-	return ch
 }
 
 // unregisterSteering drops the thread's steering channel on run completion. It

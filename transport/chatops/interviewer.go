@@ -208,16 +208,20 @@ func (s *ThreadInterviewer) await(g Gate) (GateAnswer, error) {
 	}
 }
 
-// cleanup removes the gate's pending channel and, for a freeform gate, asks the
-// transport to clear its per-thread pending entry.
+// cleanup removes the gate's pending channel and asks the transport to clear any
+// per-thread pending entry it armed for this gate. ClearPending is match-guarded
+// (it clears only if the transport's pending slot still points at g.ID), so this
+// is called for EVERY gate kind: a transport that arms its slot only for freeform
+// (Slack) treats a choice-gate clear as a harmless no-op, while a transport that
+// arms its single slot for all kinds (the CLI REPL) needs the clear on an
+// abandoned choice/labeled gate — otherwise the stale slot swallows the user's
+// next request.
 func (s *ThreadInterviewer) cleanup(g Gate) {
 	s.mu.Lock()
 	delete(s.pending, g.ID)
 	s.mu.Unlock()
-	if g.Kind == GateFreeform {
-		if pc, ok := s.ui.(PendingClearer); ok {
-			pc.ClearPending(g.ID)
-		}
+	if pc, ok := s.ui.(PendingClearer); ok {
+		pc.ClearPending(g.ID)
 	}
 }
 

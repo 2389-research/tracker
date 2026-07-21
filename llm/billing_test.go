@@ -27,6 +27,15 @@ func TestIsBillingError(t *testing.T) {
 		{"insufficient_quota text", fmt.Errorf("openai: insufficient_quota: You exceeded your current quota"), true},
 		{"wrapped credit error", fmt.Errorf("node \"Implement\": %w", anthropicCreditErr()), true},
 		{"auth error is not billing", &AuthenticationError{ProviderError: ProviderError{SDKError: SDKError{Msg: "invalid api key"}}}, false},
+		// A retryable 429 rate limit whose message says "Quota exceeded" (Gemini's
+		// per-minute throttle) must NOT be treated as billing — it should retry.
+		{"retryable rate limit with quota text", &RateLimitError{ProviderError: ProviderError{
+			SDKError: SDKError{Msg: "gemini: Quota exceeded for quota metric 'Generate Content API requests per minute'"},
+			Provider: "gemini", StatusCode: 429,
+		}}, false},
+		{"wrapped retryable rate limit with quota text", fmt.Errorf("node \"Implement\": %w", &RateLimitError{ProviderError: ProviderError{
+			SDKError: SDKError{Msg: "gemini: Quota exceeded ... per minute"}, Provider: "gemini", StatusCode: 429,
+		}}), false},
 		{"unrelated error", fmt.Errorf("connection reset"), false},
 		{"nil", nil, false},
 	}

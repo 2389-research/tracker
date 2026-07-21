@@ -32,9 +32,19 @@ func IsBillingError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// The typed insufficient-quota error (OpenAI / openai-compat) is always billing.
 	var qe *QuotaExceededError
 	if errors.As(err, &qe) {
 		return true
+	}
+	// A *retryable* provider error is transient throttling (e.g. a 429 rate limit),
+	// NOT credit exhaustion — even when its message says "Quota exceeded" (Gemini
+	// reuses that text for per-minute limits). The type system already drew this
+	// line (RateLimitError.Retryable()==true vs QuotaExceededError==false); don't
+	// second-guess it with a substring and turn a retry into a fatal "add credit".
+	var pe ProviderErrorInterface
+	if errors.As(err, &pe) && pe.Retryable() {
+		return false
 	}
 	msg := strings.ToLower(err.Error())
 	for _, s := range billingSignals {
