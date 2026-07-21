@@ -4,7 +4,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -485,41 +484,6 @@ func (h *CodergenHandler) resolveArtifactRoot(pctx *pipeline.PipelineContext) st
 		return dir
 	}
 	return h.workingDir
-}
-
-// handleRunError processes session run errors, distinguishing fatal from retryable.
-func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string) (pipeline.Outcome, error) {
-	var cfgErr *llm.ConfigurationError
-	if errors.As(runErr, &cfgErr) {
-		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
-	}
-
-	if pe, ok := runErr.(llm.ProviderErrorInterface); ok && !pe.Retryable() {
-		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
-	}
-
-	outcome := pipeline.Outcome{
-		Status: pipeline.OutcomeRetry,
-		ContextUpdates: map[string]string{
-			pipeline.ContextKeyLastResponse:             runErr.Error(),
-			pipeline.ContextKeyResponsePrefix + node.ID: runErr.Error(),
-			// #304: clear guard flags so a prior retry's state doesn't
-			// persist into downstream conditional routing.
-			pipeline.ContextKeyNodeCostExceeded: "",
-			pipeline.ContextKeyNodeNoProgress:   "",
-		},
-		Stats: buildSessionStats(sessResult),
-	}
-	h.applyEpisodeContextUpdates(outcome.ContextUpdates, sessResult, priorEpisodes)
-	responseArtifact := collector.transcript()
-	if responseArtifact == "" {
-		responseArtifact = runErr.Error()
-	}
-	responseArtifact += "\n\n" + sessResult.String()
-	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
-		return pipeline.Outcome{}, err
-	}
-	return outcome, nil
 }
 
 // buildOutcome constructs the pipeline outcome from a completed session run.

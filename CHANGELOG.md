@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Actionable provider billing/quota errors (#487, phase 1).** When a run stops
+  because a provider reports insufficient credit ("credit balance is too low",
+  `insufficient_quota`), the failure message now identifies *which account* to
+  top up: the provider, the env var that supplied the key (e.g.
+  `$ANTHROPIC_API_KEY`), a **masked** key fingerprint (never the raw key), and
+  the provider's billing URL — so a user with multiple accounts isn't left
+  guessing. A billing error is now also classified as non-retryable regardless of
+  how it's wrapped, so it can never be mistaken for a transient failure and
+  retried into the same empty balance. New exported `llm.IsBillingError` /
+  `llm.BillingHelp`. (An explicit resumable `PAUSED_BILLING` state is the planned
+  phase 2.)
+
 ### Changed
 
 - **`tracker init build_product` scaffolds a starter `SPEC.md` (#456).** The

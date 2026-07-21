@@ -19,11 +19,14 @@ The three active milestones. These are what we're building next.
 ### Engine correctness — *milestone: Engine correctness*
 The engine must route and terminate exactly as authored. No silent
 mis-routes, no phantom "Done" on an unresolved gate.
-- **#348** — goal-gate retry re-runs the escalation tail, never the gate, so
-  the pipeline reaches `Done` with the gate still at `outcome=fail`.
+- **#348** — ✅ resolved: goal-gate retry now re-enters the gate node (via a
+  persisted `GateRecheckPending` flag) so a remediated tree is re-judged, and a
+  human "accept" marks the gate `validation_overridden` (#271) rather than
+  ending in a silent success with an unsatisfied gate. Regression-tested in
+  `pipeline/engine_goal_gate_recheck_test.go` + `_override_test.go`.
 
-*(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — and
-#430 shipped and are closed; #348 is the remaining known routing defect.)*
+*(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
+#348 shipped and are closed. No known routing defects remain open.)*
 
 ### Epic #308 closeout — *milestone: Epic #308 closeout*
 Harden `build_product` against the structural and process gaps surfaced by
