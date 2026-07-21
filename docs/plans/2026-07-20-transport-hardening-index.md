@@ -2,10 +2,31 @@
 
 **Date:** 2026-07-20
 **Branch of origin:** `feat/transport-boundary-474`
-**Status:** proposed
+**Status:** ✅ shipped (Ships 1–4 + durability proof + coverage follow-ups) — merged to `main`
 **Scope:** make the transport boundary (core `tracker.Config` → `Engine`, `RunManager`,
 the `Interviewer` seam, the event streams) and its consumers (TUI, `cmd/trackerbot`,
 future web/mobile) **robust, safe, and scalable to new features across every surface.**
+
+## Outcome (delivered)
+
+All phases landed on `main` (see `CHANGELOG.md` for the itemized entries):
+
+- **Ship 1 — failure containment:** engine + RunManager panic recovery; terminal-status
+  backstop for nil-result exits; `retry_target` validation; atomic checkpoint/state
+  writes; path-traversal guard; typed-nil client guard.
+- **Ship 2 — safe & governed:** authz allowlist; fail-closed budget; workdir reaper +
+  orphan sweep; `TokenTracker` double-count guard; terminal-status doc scoping.
+- **Ship 3 — kill the false green:** deleted dead `chooseInterviewer`, repointed at the
+  live selection; fixed the Slack button codec misroute; gateway-via-`Config` test.
+- **Ship 4 — conformance:** `transport/conformance` suite (reference impl + `SlackInterviewer`
+  both pass); boundary doc lists inherited invariants.
+- **Durability:** proved resume-at-a-gate skips the completed upstream node — **TD.3 needed
+  no code** (node-granularity + advance-time checkpointing already satisfy it).
+- **Coverage follow-ups:** `Config.Subgraphs` wiring test; NDJSON `StreamEvent` wire-envelope
+  stability guard.
+
+The per-phase docs below are kept as the design record; where a phase's assumption turned
+out to already hold (TD.3), the outcome above is authoritative.
 
 ## Why this exists
 
