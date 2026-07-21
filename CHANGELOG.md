@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`cost_exceeded_action: fail` — safe per-node cost caps (#353).** A per-node
+  cost ceiling (`max_cost_usd`) previously always routed `retry` on breach, which
+  re-runs (and multiplies the cost of) an expensive, uncached node — so capping a
+  runaway review lane could make it *worse*. The new `cost_exceeded_action: fail`
+  attr routes the node's fail edges immediately on breach (no retry), so a cap is
+  safe to place on a lane that should escalate rather than re-run. Default stays
+  `retry` (unchanged). This is the primitive #353's reviewer-cap fix needs;
+  choosing the cap value + wiring it into `build_product`'s reviewers is left to a
+  real run to calibrate.
+
 - **Test-fidelity check: `tracker verify-tests [dir]` (#489, core).** Flags Go
   test functions that share a body — byte-for-byte duplicates and near-duplicates
   that differ only in literal values — the exact "a required test is a copy of

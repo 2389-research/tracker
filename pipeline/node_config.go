@@ -33,8 +33,14 @@ type AgentNodeConfig struct {
 	MaxBudgetUSD    float64
 	MaxCostUSD      float64 // #304: per-node cost ceiling in USD; 0 = unlimited
 	NoProgressTurns int     // #304: halt after K consecutive tool-call-free turns; 0 = disabled
-	PermissionMode  string
-	ACPAgent        string
+	// CostExceededAction controls what happens when MaxCostUSD is breached:
+	// "retry" (default — re-run within retry budget) or "fail" (route fail edges
+	// immediately, no retry). "fail" makes a cap safe on an expensive, uncached
+	// node whose retries would multiply the cost (#353) — e.g. a review lane that
+	// should escalate rather than re-run.
+	CostExceededAction string
+	PermissionMode     string
+	ACPAgent           string
 
 	// ToolAccess restricts the agent's tool surface. When non-empty (any
 	// value), the runtime registers zero tools, sets ToolChoice=none on
@@ -138,6 +144,7 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	cfg.PermissionMode = n.Attrs["permission_mode"]
 	cfg.ToolAccess = n.Attrs["tool_access"]
 	cfg.ACPAgent = n.Attrs["acp_agent"]
+	cfg.CostExceededAction = n.Attrs["cost_exceeded_action"]
 	cfg.SystemPrompt = n.Attrs["system_prompt"]
 	cfg.ResponseFormat = n.Attrs["response_format"]
 	cfg.ResponseSchema = n.Attrs["response_schema"]

@@ -50,6 +50,35 @@ func TestCodergenNodeCostExceededRoutesToRetry(t *testing.T) {
 	}
 }
 
+func TestCodergenCostExceededActionFailRoutesToFail(t *testing.T) {
+	// cost_exceeded_action: fail → the cap routes fail edges immediately (no
+	// retry), so an expensive node can't be re-run and multiply the cost (#353).
+	client := &scriptedCompleter{responses: []*llm.Response{
+		truncatedCostResponse(0.006),
+		truncatedCostResponse(0.006),
+	}}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{
+		ID: "review", Shape: "box", Handler: "codergen",
+		Attrs: map[string]string{
+			"prompt":               "review something expensive",
+			"max_cost_usd":         "0.01",
+			"cost_exceeded_action": "fail",
+		},
+	}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("want %q with cost_exceeded_action=fail, got %q", pipeline.OutcomeFail, outcome.Status)
+	}
+	// The guard flag is still set so fail-edge routing can condition on it.
+	if outcome.ContextUpdates[pipeline.ContextKeyNodeCostExceeded] != "true" {
+		t.Errorf("node_cost_exceeded should still be set, got %q", outcome.ContextUpdates[pipeline.ContextKeyNodeCostExceeded])
+	}
+}
+
 func TestCodergenNoProgressDetectedRoutesToRetry(t *testing.T) {
 	// no_progress_turns=2: two consecutive truncated turns without tool calls → no-progress fires.
 	client := &scriptedCompleter{responses: []*llm.Response{

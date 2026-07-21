@@ -527,8 +527,14 @@ func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prom
 			Timestamp: time.Now(),
 		})
 	}
+	// Default retries within budget; cost_exceeded_action: fail routes fail edges
+	// immediately so a cap doesn't re-run (and multiply) an expensive node (#353).
+	status := pipeline.OutcomeRetry
+	if node.AgentConfig(h.graphAttrs).CostExceededAction == "fail" {
+		status = pipeline.OutcomeFail
+	}
 	outcome := pipeline.Outcome{
-		Status: pipeline.OutcomeRetry,
+		Status: status,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
