@@ -5,6 +5,11 @@ request and it starts a run in a thread, keeps that thread updated with
 notifications and clarifying questions, and delivers the result — with an
 arbitrary number of runs going at once, each isolated in its own thread.
 
+> **New here?** The [**Slack Bot getting-started guide**](https://2389-research.github.io/tracker/trackerbot.html)
+> is the friendly walkthrough — with a visual of a full conversation, the Slack
+> app setup, commands, security, and troubleshooting. This README is the in-repo
+> reference (source layout, demux internals, the setup checklist).
+
 ```
 @trackerbot make me a CLI that greets people
 @trackerbot run build_product
