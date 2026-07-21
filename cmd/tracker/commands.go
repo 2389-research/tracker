@@ -91,6 +91,8 @@ func dispatchPipelineCommands(cfg runConfig) (error, bool) {
 		return executeWorkflows(), true
 	case modeInit:
 		return executeInit(cfg), true
+	case modeVerifyTests:
+		return executeVerifyTests(cfg), true
 	}
 	return nil, false
 }

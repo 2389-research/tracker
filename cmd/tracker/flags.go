@@ -28,19 +28,20 @@ func parseFlags(args []string) (runConfig, error) {
 
 // subcommandMap maps CLI arg strings to command modes. "list" is an alias for audit.
 var subcommandMap = map[string]commandMode{
-	"version":             modeVersion,
-	"--version":           modeVersion,
-	"list":                modeAudit,
-	string(modeDiagnose):  modeDiagnose,
-	string(modeDoctor):    modeDoctor,
-	string(modeSetup):     modeSetup,
-	string(modeValidate):  modeValidate,
-	string(modeSimulate):  modeSimulate,
-	string(modeEstimate):  modeEstimate,
-	string(modeAudit):     modeAudit,
-	string(modeWorkflows): modeWorkflows,
-	string(modeInit):      modeInit,
-	string(modeUpdate):    modeUpdate,
+	"version":               modeVersion,
+	"--version":             modeVersion,
+	"list":                  modeAudit,
+	string(modeDiagnose):    modeDiagnose,
+	string(modeDoctor):      modeDoctor,
+	string(modeSetup):       modeSetup,
+	string(modeValidate):    modeValidate,
+	string(modeSimulate):    modeSimulate,
+	string(modeEstimate):    modeEstimate,
+	string(modeAudit):       modeAudit,
+	string(modeWorkflows):   modeWorkflows,
+	string(modeInit):        modeInit,
+	string(modeUpdate):      modeUpdate,
+	string(modeVerifyTests): modeVerifyTests,
 }
 
 // parseSubcommand checks if the second argument is a known subcommand and
@@ -63,7 +64,7 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 		return *cfg, nil
 	case modeDoctor:
 		return parseDoctorFlags(args, cfg)
-	case modeInit, modeValidate, modeSimulate, modeEstimate:
+	case modeInit, modeValidate, modeSimulate, modeEstimate, modeVerifyTests:
 		if len(args) > 2 {
 			cfg.pipelineFile = args[2]
 		}
@@ -395,6 +396,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker estimate <pipeline.dip>   Rough pre-run cost & scale estimate\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
+	fmt.Fprintf(w, "  tracker verify-tests [dir]     Flag duplicate/near-duplicate Go test bodies (exit 1 if any)\n")
 	fmt.Fprintf(w, "  tracker doctor [--probe=false] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
 	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
 	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")

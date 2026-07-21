@@ -70,18 +70,19 @@ type runConfig struct {
 type commandMode string
 
 const (
-	modeRun       commandMode = "run"
-	modeSetup     commandMode = "setup"
-	modeAudit     commandMode = "audit"
-	modeSimulate  commandMode = "simulate"
-	modeEstimate  commandMode = "estimate"
-	modeValidate  commandMode = "validate"
-	modeDiagnose  commandMode = "diagnose"
-	modeDoctor    commandMode = "doctor"
-	modeVersion   commandMode = "version"
-	modeWorkflows commandMode = "workflows"
-	modeInit      commandMode = "init"
-	modeUpdate    commandMode = "update"
+	modeRun         commandMode = "run"
+	modeSetup       commandMode = "setup"
+	modeAudit       commandMode = "audit"
+	modeSimulate    commandMode = "simulate"
+	modeEstimate    commandMode = "estimate"
+	modeValidate    commandMode = "validate"
+	modeDiagnose    commandMode = "diagnose"
+	modeDoctor      commandMode = "doctor"
+	modeVersion     commandMode = "version"
+	modeWorkflows   commandMode = "workflows"
+	modeInit        commandMode = "init"
+	modeUpdate      commandMode = "update"
+	modeVerifyTests commandMode = "verify-tests"
 )
 
 var errUsage = errors.New("usage")

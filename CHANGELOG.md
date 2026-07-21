@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Test-fidelity check: `tracker verify-tests [dir]` (#489, core).** Flags Go
+  test functions that share a body — byte-for-byte duplicates and near-duplicates
+  that differ only in literal values — the exact "a required test is a copy of
+  the row above it, asserting the same path" gap the structural VerifyMilestone
+  checks are blind to. Exits non-zero when any are found, so a workflow's verify
+  gate can run it (`tracker verify-tests .`) and fail on hollow/copied tests.
+  Library: `tracker.AnalyzeTestFidelity`. AST-based, conservative (ignores trivial
+  stub bodies; zero findings on tracker's own suite), so no false-positive noise.
+
 - **Provider/model failover on billing exhaustion (#486, core).** A new
   `llm.Client.CompleteFailover(req, fallbacks, onFailover)` tries an ordered list
   of provider/model lanes: on a billing/quota exhaustion it switches to the next
