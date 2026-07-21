@@ -77,6 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Per-node cost in the run summary (#490 visibility).** The `tracker run`
+  node-execution table now shows a **Cost** column per node, so the
+  verification-vs-implementation spend is visible at a glance (e.g.
+  `VerifyMilestone $1.56` next to `Implement $1.64`) instead of reverse-engineering
+  the activity log — making the verify-cadence tuning a data-driven decision.
+
 - **In-flight milestone work is preserved on node failure, by default (#488).**
   When a node fails terminally, the engine now snapshots the project working
   tree's uncommitted code — **tracked changes AND untracked new files** — to a

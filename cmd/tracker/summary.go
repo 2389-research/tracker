@@ -320,8 +320,8 @@ func printNodeTable(result *pipeline.EngineResult) {
 	}
 	fmt.Println()
 	fmt.Println("─── Node Execution ────────────────────────────────────────")
-	fmt.Printf("  %-22s  %-10s  %-10s  %5s  %5s  %s\n", "Node", "Status", "Time", "Turns", "Tools", "Handler")
-	fmt.Printf("  %-22s  %-10s  %-10s  %5s  %5s  %s\n", "────", "──────", "────", "─────", "─────", "───────")
+	fmt.Printf("  %-22s  %-10s  %-10s  %5s  %5s  %8s  %s\n", "Node", "Status", "Time", "Turns", "Tools", "Cost", "Handler")
+	fmt.Printf("  %-22s  %-10s  %-10s  %5s  %5s  %8s  %s\n", "────", "──────", "────", "─────", "─────", "────", "───────")
 	for _, entry := range result.Trace.Entries {
 		printNodeTableRow(entry)
 	}
@@ -343,13 +343,17 @@ func printNodeTableRow(entry pipeline.TraceEntry) {
 
 	turns := "-"
 	tools := "-"
+	cost := "-"
 	if entry.Stats != nil {
 		turns = fmt.Sprintf("%d", entry.Stats.Turns)
 		tools = fmt.Sprintf("%d", entry.Stats.TotalToolCalls)
+		if entry.Stats.CostUSD > 0 {
+			cost = fmt.Sprintf("$%.2f", entry.Stats.CostUSD)
+		}
 	}
 
-	fmt.Printf("  %-22s  %s %-8s  %-10s  %5s  %5s  %s\n",
-		nodeID, icon, entry.Status, formatElapsed(entry.Duration), turns, tools, entry.HandlerName)
+	fmt.Printf("  %-22s  %s %-8s  %-10s  %5s  %5s  %8s  %s\n",
+		nodeID, icon, entry.Status, formatElapsed(entry.Duration), turns, tools, cost, entry.HandlerName)
 }
 
 // printTokensByProvider prints per-provider token usage breakdown.
