@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transport runs it the same way to prove conformance before shipping. The
   transport-boundary doc now lists the enforced invariants (one terminal event,
   panic containment, per-run isolation, durable resume) a transport inherits and
-  must not re-implement.
+  must not re-implement. Follow-ups: a test pins `Config.Subgraphs` resolves
+  through `NewEngineFromGraph`, and a wire-stability guard pins the NDJSON
+  `StreamEvent` envelope's field set so an accidental add/rename is a reviewed
+  change, not a silent break for subscribers.
 
 - **`trackerbot` — drive Tracker pipelines from Slack (#473).** A new
   `cmd/trackerbot` binary: mention `@trackerbot make me an app that …` (or
