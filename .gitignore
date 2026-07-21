@@ -11,6 +11,7 @@ bin/
 /tracker
 /tracker-conformance
 /tracker-swebench
+/trackerbot
 /agent-runner
 /predictions.jsonl
 /generate
