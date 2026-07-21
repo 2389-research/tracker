@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Transport conformance suite (Ship 4) — an executable definition of a correct
+  transport.** New `transport/conformance` package: `RunInterviewerSuite(t,
+  newSubject)` drives any `handlers.Interviewer` through every gate mode (choice /
+  yes-no / freeform / interview) and asserts cancellation unblocks a waiting gate.
+  Both a minimal in-package reference interviewer and the real `SlackInterviewer`
+  pass the same suite, proving it is transport-neutral — a future web/mobile
+  transport runs it the same way to prove conformance before shipping. The
+  transport-boundary doc now lists the enforced invariants (one terminal event,
+  panic containment, per-run isolation, durable resume) a transport inherits and
+  must not re-implement.
+
 - **`trackerbot` — drive Tracker pipelines from Slack (#473).** A new
   `cmd/trackerbot` binary: mention `@trackerbot make me an app that …` (or
   `run <workflow>`) and it starts a pipeline in a Slack thread, streams

@@ -170,5 +170,28 @@ once from one process:
    `WithWorkDirBase` for isolation.
 4. Resolve requests to a workflow with `ResolveSource` / `Workflows`; deliver
    with `Result` + `Diagnose` / `ExportBundle`.
+5. **Prove it with the conformance suite.** Run
+   [`transport/conformance`](../../transport/conformance) `RunInterviewerSuite`
+   from a test to verify your interviewer honours every gate mode (choice /
+   yes-no / freeform / interview) and unblocks on cancellation — the executable
+   definition of a correct interviewer, the same suite `SlackInterviewer` passes.
 
 Nothing above touches the engine — the boundary is the whole contract.
+
+## The invariants a transport inherits (enforced, not by convention)
+
+These hold in the **core** regardless of transport — a front-end cannot violate
+them, and gets them for free:
+
+- **Exactly one top-level terminal event** carries `TerminalStatus` — including
+  panic and invariant-error exits (the engine's backstop). Your run-finished
+  signal never goes missing.
+- **A handler panic is contained** — it becomes a `fail` terminal event, never a
+  crashed host, so a `RunManager` driving many runs survives one bad run.
+- **Per-run isolation** — distinct `WorkingDir`, no shared mutable state, per-run
+  webhook port; N concurrent runs never collide.
+- **Durable resume** — checkpoints are written atomically and keyed
+  deterministically, so a process crash resumes from the last completed node.
+
+Your transport's job is presentation and identity (who may run, how gates look);
+these safety and durability properties are not yours to re-implement.
