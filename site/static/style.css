@@ -752,6 +752,75 @@ tbody tr:hover td {
   background: rgba(249, 115, 22, 0.03);
 }
 
+/* Responsive tables: below the mobile breakpoint, stack each row into a
+   labeled card so wide tables are scannable vertically instead of forcing a
+   horizontal scroll. The per-cell label comes from `data-label`, which the
+   script in baseof.html auto-stamps from each column's <th> — so every table
+   (current and future) gets this with no per-cell markup. No JS → the table
+   keeps today's horizontal-scroll behavior (progressive enhancement). */
+@media (max-width: 768px) {
+  .table-wrap { overflow-x: visible; }
+
+  /* Visually hide the header row but keep it in the DOM for the auto-label
+     script and for assistive tech. */
+  .table-wrap thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .table-wrap tr {
+    display: block;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--bg-card);
+    margin-bottom: 0.85rem;
+    padding: 0.2rem 0.95rem;
+  }
+
+  .table-wrap tbody tr:hover td { background: transparent; }
+
+  .table-wrap td {
+    display: block;
+    position: relative;
+    padding: 0.6rem 0 0.6rem 38%;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    min-height: 1.4rem;
+    /* Wrap long, unbreakable tokens (code, tokens, paths, URLs) so they never
+       overflow the narrow value column on a phone. */
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+  .table-wrap td code { overflow-wrap: anywhere; word-break: break-word; }
+  .table-wrap tr td:last-child { border-bottom: none; }
+
+  .table-wrap td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 0.6rem;
+    width: 34%;
+    padding-right: 0.6rem;
+    font-weight: 600;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--orange-700);
+    white-space: normal;
+  }
+
+  /* A cell with no header label (a table without <thead>) spans full width. */
+  .table-wrap td:not([data-label]),
+  .table-wrap td[data-label=""] { padding-left: 0; }
+  .table-wrap td:not([data-label])::before,
+  .table-wrap td[data-label=""]::before { content: none; }
+}
+
 /* ─── Diagram / Mermaid ─────────────────────────────────── */
 .diagram {
   text-align: center;

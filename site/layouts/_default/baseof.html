@@ -13,5 +13,24 @@
 
 <script src="{{ "highlight.js" | relURL }}"></script>
 
+<!-- Responsive tables: stamp each cell with its column header so the mobile
+     card layout (style.css) can label stacked rows. One pass, all tables. -->
+<script>
+(function () {
+  document.querySelectorAll('.table-wrap table').forEach(function (table) {
+    var headers = table.querySelectorAll('thead th');
+    if (!headers.length) return;
+    var labels = Array.prototype.map.call(headers, function (th) {
+      return th.textContent.trim();
+    });
+    table.querySelectorAll('tbody tr').forEach(function (row) {
+      Array.prototype.forEach.call(row.children, function (cell, i) {
+        if (labels[i]) cell.setAttribute('data-label', labels[i]);
+      });
+    });
+  });
+})();
+</script>
+
 </body>
 </html>
