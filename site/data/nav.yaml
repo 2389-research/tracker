@@ -5,6 +5,8 @@ items:
     url: workflows.html
   - label: Architecture
     url: architecture.html
+  - label: Transports
+    url: transport.html
   - label: CLI
     url: cli.html
   - label: Changelog

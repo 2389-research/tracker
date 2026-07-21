@@ -1,0 +1,290 @@
+---
+title: "Transports"
+description: "How front-ends drive Tracker — the transport boundary. TUI, Slack (trackerbot), and future web/mobile apps plug into one tracker.Config → Engine path as first-class peers, inheriting panic containment, one-terminal-event, per-run isolation, and durable resume for free."
+og_title: "Transports — Tracker"
+og_description: "The transport boundary: TUI, Slack, and web/mobile front-ends drive Tracker as first-class peers on one library path, with a conformance suite that proves a new transport is correct."
+mermaid: true
+jsonld:
+  "@context": "https://schema.org"
+  "@type": "TechArticle"
+  headline: "Transports — Tracker"
+  description: "The transport boundary: how the TUI, the Slack bot, and future web/mobile apps drive Tracker as first-class peers on one library path."
+  url: "https://2389-research.github.io/tracker/transport.html"
+  author:
+    "@type": "Organization"
+    name: "2389.ai"
+    url: "https://2389.ai"
+  publisher:
+    "@type": "Organization"
+    name: "2389.ai"
+  isPartOf:
+    "@type": "WebSite"
+    name: "Tracker"
+    url: "https://2389-research.github.io/tracker/"
+---
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>Transports</h1>
+    <p class="subtitle">A transport is a front-end that drives runs and relays them to a human. The terminal TUI, the Slack bot, a future web or mobile app &mdash; every one is a first-class peer on the same small library boundary. None is privileged.</p>
+  </section>
+
+  <nav class="page-toc" aria-label="On this page">
+    <strong>On this page:</strong>
+    <a href="#boundary">The boundary</a>
+    <a href="#categories">Six interactions</a>
+    <a href="#interviewer">The interviewer seam</a>
+    <a href="#invariants">Inherited invariants</a>
+    <a href="#runmanager">Concurrency</a>
+    <a href="#instances">The transports</a>
+    <a href="#trackerbot">Slack: trackerbot</a>
+    <a href="#building">Build a transport</a>
+  </nav>
+
+  <!-- ═══ The boundary ═══ -->
+  <section class="glass" id="boundary">
+    <h2>The <span class="accent">boundary</span></h2>
+    <p class="lead">
+      The core engine knows nothing about LLMs, subprocesses, terminals, or Slack. A front-end plugs
+      in through a small, deliberate library surface &mdash; <code>tracker.Config</code>&nbsp;&rarr;&nbsp;<code>Engine</code>,
+      an <code>Interviewer</code> seam for human gates, the event streams, and <code>RunManager</code>
+      for concurrency. What the library can do and what the product can do are the same set.
+    </p>
+    <p style="color: var(--text-secondary);">
+      The <code>tracker</code> CLI proves it: since the CLI&nbsp;&rarr;&nbsp;library unification, the TUI runs on
+      nothing but this boundary &mdash; it is just another <code>Config</code> consumer.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+flowchart TB
+    subgraph transports["Transports (peers)"]
+        tui["TUI<br/>BubbleteaInterviewer"]
+        slack["Slack<br/>SlackInterviewer"]
+        web["web / mobile<br/>(future)"]
+    end
+    subgraph boundary["The boundary"]
+        cfg["tracker.Config<br/>NewEngineFromGraph / Run"]
+        rm["RunManager<br/>N concurrent runs"]
+        iv["handlers.Interviewer<br/>gate answering"]
+        ev["PipelineEvent + agent.Event<br/>progress stream"]
+    end
+    subgraph core["Core (UI-agnostic)"]
+        eng["pipeline.Engine"]
+        reg["HandlerRegistry"]
+    end
+    transports --> cfg
+    transports --> rm
+    transports -->|implement| iv
+    transports -->|subscribe| ev
+    cfg --> eng
+    rm --> cfg
+    iv --> reg
+    eng --> ev
+      </div>
+    </div>
+    <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+      Full contract: <a href="https://github.com/2389-research/tracker/blob/main/docs/architecture/transport-boundary.md"><code>docs/architecture/transport-boundary.md</code></a>.
+    </p>
+  </section>
+
+  <!-- ═══ Six interaction categories ═══ -->
+  <section class="glass" id="categories">
+    <h2>Six <span class="accent">interactions</span></h2>
+    <p class="lead">A transport is fully described by six interaction categories, all composed from existing public types.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Category</th><th>Entry points</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td><strong>Start a run</strong></td><td><code>tracker.Run(ctx, source, cfg)</code>, or <code>NewEngineWithContext</code> / <code>NewEngineFromGraph</code> &rarr; <code>Engine.Run</code> for a pre-parsed graph.</td></tr>
+          <tr><td>2</td><td><strong>Answer human gates</strong></td><td><code>Config.Interviewer</code> &mdash; anything implementing the interviewer family. The key seam.</td></tr>
+          <tr><td>3</td><td><strong>Observe progress</strong></td><td><code>Config.EventHandler</code> (pipeline lifecycle), <code>AgentEvents</code> (per-tool-call), <code>LLMTrace</code> (raw tokens).</td></tr>
+          <tr><td>4</td><td><strong>Control a run</strong></td><td>Cancel the run <code>ctx</code> (or <code>RunManager.Cancel(key)</code>); resume via <code>Config.CheckpointDir</code> / <code>ResumeRunID</code>.</td></tr>
+          <tr><td>5</td><td><strong>Deliver &amp; inspect</strong></td><td><code>tracker.Result</code>, plus read-only <code>ListRuns</code> / <code>Audit</code> / <code>Diagnose</code> / <code>Simulate</code> / <code>ExportBundle</code>.</td></tr>
+          <tr><td>6</td><td><strong>Resolve what to run</strong></td><td><code>ResolveSource</code> (path &rarr; local <code>.dip</code> &rarr; built-in catalog), the <code>Workflows()</code> catalog, <code>NewLLMClient</code> for free-text classification.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ The interviewer seam ═══ -->
+  <section class="glass" id="interviewer">
+    <h2>The interviewer <span class="accent">seam</span></h2>
+    <p class="lead">
+      <code>Config.Interviewer</code> accepts anything implementing the interviewer family in
+      <code>pipeline/handlers/human.go</code>. The human handler upgrades to the richest supported mode
+      via a type assertion &mdash; so an <em>interactive</em> transport uses the convenience API rather than
+      dropping to the handlers layer.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Interface</th><th>Adds</th><th>Gate modes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>Interviewer</code></td><td><code>Ask(prompt, choices, def)</code></td><td>choice, yes/no</td></tr>
+          <tr><td><code>FreeformInterviewer</code></td><td><code>AskFreeform(prompt)</code></td><td>open-ended reply</td></tr>
+          <tr><td><code>LabeledFreeformInterviewer</code></td><td><code>AskFreeformWithLabels(&hellip;)</code></td><td>labels + freeform escape</td></tr>
+          <tr><td><code>InterviewInterviewer</code></td><td><code>AskInterview(questions, prev)</code></td><td>structured multi-field form</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+      Optional side-interfaces, checked by assertion: <code>Actor()</code> (override auditing), <code>Cancel()</code>
+      (torn down on <code>Engine.Close</code>), <code>SetPipelineContext(ctx)</code> (a run cancellation unblocks a
+      waiting gate). Reference implementations prove the seam is transport-neutral: <code>ConsoleInterviewer</code>,
+      <code>BubbleteaInterviewer</code>, <code>WebhookInterviewer</code>, the autopilot interviewers, and
+      <code>SlackInterviewer</code>.
+    </p>
+  </section>
+
+  <!-- ═══ Inherited invariants ═══ -->
+  <section class="glass" id="invariants">
+    <h2>Invariants a transport <span class="accent">inherits</span></h2>
+    <p class="lead">
+      These hold in the <strong>core</strong>, regardless of transport. A front-end cannot violate them, and
+      gets them for free. Your job is presentation and identity &mdash; not re-implementing safety and durability.
+    </p>
+    <div class="grid-2" style="margin-top: 1.25rem;">
+      <div class="glass glass-sm">
+        <h4>Exactly one terminal event</h4>
+        <p>The top-level engine emits exactly one event carrying <code>TerminalStatus</code> &mdash; including panic and invariant-error exits, which a backstop covers. Your run-finished signal never goes missing, so a Slack thread never hangs waiting for &ldquo;done&rdquo;.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Panic containment</h4>
+        <p>A handler panic on the run goroutine becomes a <code>fail</code> terminal event, never a crashed host. A <code>RunManager</code> driving many runs survives one bad run &mdash; a single panicking pipeline can&rsquo;t take down every other thread.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Per-run isolation</h4>
+        <p>Distinct <code>WorkingDir</code> per run, no shared mutable state, per-run webhook callback port. N concurrent runs never collide on the filesystem or on ports.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Durable resume</h4>
+        <p>Checkpoints are written atomically (temp&nbsp;+&nbsp;rename) and keyed deterministically. A process crash &mdash; even one mid-write &mdash; resumes from the last completed node; a crash at a human gate resumes at the gate <em>without</em> re-running the completed upstream node.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Concurrency ═══ -->
+  <section class="glass" id="runmanager">
+    <h2><span class="accent">RunManager</span> &mdash; N concurrent runs</h2>
+    <p class="lead">
+      A service (Slack, web) drives many runs at once from one process. <code>RunManager</code> owns them,
+      keyed by a caller-chosen external id.
+    </p>
+    <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 0.65rem;">
+      <li><strong><code>Start(ctx, key, source, cfg)</code></strong> &mdash; launches a run in its own goroutine, keyed by <code>key</code> (e.g. a Slack <code>thread_ts</code>). An atomic claim guards the active-key and an optional concurrency cap (<code>WithMaxConcurrent</code> &rarr; <code>ErrAtCapacity</code> / <code>ErrRunKeyActive</code>).</li>
+      <li><strong><code>ManagedRun</code></strong> &mdash; exposes <code>State</code> / <code>Done</code> / <code>Result</code> / <code>RunID</code>; the manager exposes <code>Get</code> / <code>List</code> / <code>Cancel</code> / <code>Forget</code>.</li>
+      <li><strong>Isolation</strong> &mdash; a distinct <code>WorkingDir</code> per run (<code>WithWorkDirBase</code>), no shared state, and a <code>:0</code> webhook port by default so two webhook-gated runs never collide.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ The transports as instances ═══ -->
+  <section class="glass" id="instances">
+    <h2>The transports as <span class="accent">instances</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Transport</th><th>Interviewer</th><th>Progress</th><th>Concurrency</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>TUI</strong></td><td><code>BubbleteaInterviewer</code> via <code>Config.Interviewer</code></td><td><code>EventHandler</code>/<code>AgentEvents</code> &rarr; <code>prog.Send</code>; shares <code>Config.TokenTracker</code></td><td>one run per process</td></tr>
+          <tr><td><strong>Slack</strong> (<code>trackerbot</code>)</td><td><code>SlackInterviewer</code> (thread gates)</td><td><code>notifier</code> filters events &rarr; thread</td><td><code>RunManager</code>, one run per thread</td></tr>
+          <tr><td><strong>web / mobile</strong></td><td>implement <code>handlers.Interviewer</code></td><td>subscribe to the streams</td><td><code>RunManager</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ trackerbot ═══ -->
+  <section class="glass" id="trackerbot">
+    <h2>Slack: <span class="accent">trackerbot</span></h2>
+    <p class="lead">
+      <code>cmd/trackerbot</code> is the reference non-terminal transport: mention <code>@trackerbot make me an app
+      that &hellip;</code> (or <code>run &lt;workflow&gt;</code>) and it starts a pipeline in a Slack thread, streams
+      notifications and gate questions to that thread, and delivers the result &mdash; arbitrarily many runs at
+      once, one per thread, each isolated. It runs over Socket Mode, so no public endpoint is needed.
+    </p>
+
+    <div class="diagram">
+      <div class="mermaid">
+flowchart LR
+    M["@trackerbot &lt;request&gt;"] --> I["intent<br/>LLM classify + grammar"]
+    I --> R["Runner<br/>thread_ts &rarr; run"]
+    R --> RM["RunManager<br/>one run / thread"]
+    RM --> E["tracker.Run<br/>SlackInterviewer + notifier"]
+    E -->|gate| T["thread: buttons / reply"]
+    E -->|events| N["thread: notifications"]
+    E -->|done| D["deliver result / diagnosis"]
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top: 1.25rem;">
+      <div class="glass glass-sm">
+        <h4>Run flow</h4>
+        <p>A mention resolves to a workflow (LLM classifier with a <code>run &lt;workflow&gt;</code> grammar fast-path). All four gate modes render in-thread (buttons for choice/yes-no, a reply for freeform, one-question-at-a-time for interviews). On success the deliverable is posted; on failure a real <code>Diagnose</code> summary.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Durability</h4>
+        <p>Each thread gets a deterministic workdir&nbsp;+&nbsp;checkpoint. A restart resumes any interrupted run from its checkpoint &mdash; no run-id bookkeeping. State and checkpoints are written atomically; a corrupt state file is preserved aside and logged, never silently dropped.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Security &amp; cost</h4>
+        <p><code>TRACKERBOT_ALLOWED_USERS</code> restricts who can trigger paid runs (empty = open, logged as a warning). Every run carries a fail-closed budget (<code>TRACKERBOT_MAX_COST_CENTS</code>, default $5), and workflow names are validated so a mention can never load an arbitrary <code>.dip</code> off the host.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Lifecycle</h4>
+        <p>Finished-run workdirs are reaped by default to bound disk (<code>TRACKERBOT_KEEP_WORKDIRS=1</code> retains them), plus a startup sweep of orphans. A pure consumer of the boundary &mdash; no engine changes.</p>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 1.75rem;">Environment</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Variable</th><th>Purpose</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>SLACK_BOT_TOKEN</code> / <code>SLACK_APP_TOKEN</code></td><td>bot (<code>xoxb-</code>) and app-level (<code>xapp-</code>) tokens</td><td>required</td></tr>
+          <tr><td><code>TRACKERBOT_ALLOWED_USERS</code></td><td>comma-separated Slack user ids allowed to drive the bot</td><td>&mdash; (open)</td></tr>
+          <tr><td><code>TRACKERBOT_MAX_COST_CENTS</code></td><td>fail-closed per-run cost ceiling; <code>0</code> disables</td><td><code>500</code></td></tr>
+          <tr><td><code>TRACKERBOT_MAX_CONCURRENT</code></td><td>concurrent run cap</td><td><code>8</code></td></tr>
+          <tr><td><code>TRACKERBOT_KEEP_WORKDIRS</code></td><td><code>1</code> retains finished-run workdirs</td><td>&mdash; (reap)</td></tr>
+          <tr><td><code>TRACKERBOT_BACKEND</code></td><td>agent backend (<code>native</code>/<code>claude-code</code>/<code>acp</code>)</td><td><code>native</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ Building a new transport ═══ -->
+  <section class="glass" id="building">
+    <h2>Build a new <span class="accent">transport</span></h2>
+    <p class="lead">Five steps take a web app, a mobile app, or a second bot from nothing to a proven front-end.</p>
+    <ol class="steps">
+      <li>
+        <h4>Implement the interviewer</h4>
+        <p>Implement <code>handlers.Interviewer</code> (plus the richer extensions you support) to present gates in your medium; pass it as <code>Config.Interviewer</code>.</p>
+      </li>
+      <li>
+        <h4>Render progress</h4>
+        <p>Provide a <code>PipelineEventHandler</code> (and optionally <code>AgentEvents</code> / <code>LLMTrace</code>) that renders progress; pass them via <code>Config</code>.</p>
+      </li>
+      <li>
+        <h4>Scale concurrency</h4>
+        <p>For many concurrent runs, hold a <code>RunManager</code> keyed by your session id, with <code>WithWorkDirBase</code> for isolation.</p>
+      </li>
+      <li>
+        <h4>Resolve &amp; deliver</h4>
+        <p>Map requests to a workflow with <code>ResolveSource</code> / <code>Workflows</code>; deliver with <code>Result</code> + <code>Diagnose</code> / <code>ExportBundle</code>.</p>
+      </li>
+      <li>
+        <h4>Prove it with the conformance suite</h4>
+        <p>Run <a href="https://github.com/2389-research/tracker/tree/main/transport/conformance"><code>transport/conformance</code></a> <code>RunInterviewerSuite</code> from a test. It drives your interviewer through every gate mode and asserts cancellation unblocks a waiting gate &mdash; the executable definition of a correct interviewer, the same suite <code>SlackInterviewer</code> passes.</p>
+      </li>
+    </ol>
+    <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
+      Nothing above touches the engine &mdash; the boundary is the whole contract. The safety and durability
+      invariants are enforced in the core, so a new transport inherits them and must not re-implement them.
+    </p>
+  </section>

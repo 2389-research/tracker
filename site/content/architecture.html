@@ -342,7 +342,9 @@ graph LR
   <section class="glass" id="library-api">
     <h2>Library <span class="accent">API</span></h2>
     <p class="lead">
-      Tracker is also a Go library. The CLI is a thin printer over the same APIs.
+      Tracker is also a Go library. The CLI is a thin printer over the same APIs &mdash; and one
+      <a href="/tracker/transport.html">transport</a> among peers. The TUI, the Slack bot, and any future
+      web or mobile app plug into the same <code>tracker.Config</code>&nbsp;&rarr;&nbsp;<code>Engine</code> boundary.
     </p>
     <div class="grid-2" style="margin-top: 1rem;">
       <div class="glass glass-sm">
