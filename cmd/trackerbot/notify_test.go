@@ -38,7 +38,7 @@ func TestNotifier_FiltersToNotable(t *testing.T) {
 
 	n.HandlePipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventStageCompleted, NodeID: "Build"})
 	n.HandlePipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventStageStarted, NodeID: "Build"}) // not notable
-	n.HandlePipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventDecisionEdge, NodeID: "Build"})  // not notable
+	n.HandlePipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventDecisionEdge, NodeID: "Build"}) // not notable
 	n.HandlePipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted, TerminalStatus: "success"})
 
 	if got := len(ui.posts); got != 2 {

@@ -13,8 +13,8 @@ import (
 // events (start/text/finish) that a client-level observer should see.
 type traceMockAdapter struct{ name string }
 
-func (m *traceMockAdapter) Name() string  { return m.name }
-func (m *traceMockAdapter) Close() error  { return nil }
+func (m *traceMockAdapter) Name() string { return m.name }
+func (m *traceMockAdapter) Close() error { return nil }
 func (m *traceMockAdapter) Complete(context.Context, *llm.Request) (*llm.Response, error) {
 	return &llm.Response{Message: llm.AssistantMessage("hello"), FinishReason: llm.FinishReason{Reason: "stop"}}, nil
 }

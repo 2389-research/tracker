@@ -46,21 +46,17 @@ Get a real, published benchmark number.
 
 Directional. Expected to promote to Now as the milestones above close.
 
-### Transport boundary — *milestone: Transport boundary*
-Make the core fully UI-agnostic so TUI, Slack, web, and mobile are first-class
-transport peers on one `tracker.Config` → `Engine` path. The core is already
-mostly transport-neutral (correct dependency direction, a proven `Interviewer`
-seam, a near-sufficient event stream) — this finishes the boundary. Precedes the
-Slack transport (below).
-- **#472** — the epic: UI-agnostic core.
-- **#474** — `Config.Interviewer` injection seam.
-- **#475** — event-stream completeness (terminal-status + snapshot + cost-as-events).
-- **#476** — make N concurrent runs safe (per-run port/gateway/client).
-- **#477** — relocate the `tui/render` path leak.
-- **#478** — full unification: TUI becomes just another `Config` consumer.
-- **#479** — thin `RunManager` (transport-neutral concurrency owner).
-- Absorbs **#396** (globals → `runOptions`), **#450** / **#451** (public API vs
-  assembly; `suggested_next_nodes` off the context string).
+### Transport boundary — ✅ shipped (v0.46.0)
+The core is now fully UI-agnostic: TUI, Slack, web, and mobile are first-class
+transport peers on one `tracker.Config` → `Engine` path. Shipped #472/#474/#475/
+#476/#477/#478/#479 (absorbing #396/#450/#451): the `Config.Interviewer` seam,
+event-stream completeness (authoritative terminal-status, start snapshot,
+cost-as-events), N-concurrent-run safety, the `tui/render` relocation, full
+CLI→library unification, and the transport-neutral `RunManager`. Followed by a
+hardening pass — engine/RunManager panic containment, atomic checkpoint/state
+writes, `trackerbot` authz/budget/lifecycle, and a `transport/conformance` suite
+that a new transport runs to prove correctness. Boundary contract:
+[`docs/architecture/transport-boundary.md`](docs/architecture/transport-boundary.md).
 
 ### Parallel-first resilience
 First-class parallel milestone execution, so branches retry and resume
@@ -120,13 +116,14 @@ Backlog. Real, but not scheduled.
 - **#455** — repo hygiene sweep.
 
 ### Transports
-- **#473** — Slack transport (`cmd/trackerbot`): drive Tracker from Slack via
-  Socket Mode — `@trackerbot` starts runs, threads receive notifications and
-  clarifying gate questions, results land back in the thread. The first non-TUI
-  consumer that proves the boundary. **A v1 is implemented** (all four gate
-  modes, natural-language intent, control commands, per-thread concurrency,
-  failure diagnosis; sub-issues #480–#485). Remaining: durable resume across
-  process restarts, and live-Slack verification. See
+- **#473** — ✅ shipped (v0.46.0): Slack transport (`cmd/trackerbot`) — drive
+  Tracker from Slack via Socket Mode; `@trackerbot` starts runs, threads receive
+  notifications and gate questions, results land back in the thread. All four
+  gate modes, natural-language intent, control commands, per-thread concurrency,
+  failure diagnosis (#480–#485), **durable resume across restarts**, authz +
+  fail-closed budget + workdir lifecycle, and conformance-suite coverage. The
+  first non-TUI consumer that proves the boundary. Remaining: live-Slack
+  verification against a staging workspace. See
   [`cmd/trackerbot/README.md`](cmd/trackerbot/README.md).
 
 ### Product & positioning

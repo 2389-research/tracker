@@ -109,7 +109,7 @@ func TestSlackInterviewer_Interview(t *testing.T) {
 	iv := NewSlackInterviewer(ui, seqIDs())
 
 	questions := []handlers.Question{
-		{Index: 1, Text: "name?"},                                  // open-ended → freeform
+		{Index: 1, Text: "name?"},                                    // open-ended → freeform
 		{Index: 2, Text: "color?", Options: []string{"red", "blue"}}, // options → choice
 	}
 	got := make(chan *handlers.InterviewResult, 1)

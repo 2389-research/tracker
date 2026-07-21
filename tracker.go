@@ -52,18 +52,18 @@ type Config struct {
 	// engine attaches it idempotently — re-adding the same tracker to a supplied
 	// *llm.Client is skipped, so usage is never double-counted.
 	TokenTracker *llm.TokenTracker
-	Context       map[string]string             // optional: initial pipeline context
-	Params        map[string]string             // optional: override declared workflow params (keys without "params." prefix)
+	Context      map[string]string // optional: initial pipeline context
+	Params       map[string]string // optional: override declared workflow params (keys without "params." prefix)
 	// Subgraphs are pre-loaded child graphs keyed by subgraph_ref, for a graph
 	// with subgraph nodes; nil/empty for flat pipelines. See NewEngineFromGraph.
 	Subgraphs map[string]*pipeline.Graph
-	Backend       string                        // "native" (default), "claude-code", "acp"; selects agent backend
+	Backend   string // "native" (default), "claude-code", "acp"; selects agent backend
 	// ToolSafety overrides the tool-handler security config (denylist/allowlist,
 	// output limits, env passthrough); nil uses the registry defaults.
-	ToolSafety *handlers.ToolHandlerConfig
-	Autopilot     string                        // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
-	AutoApprove   bool                          // auto-approve all human gates with default/first option
-	Budget        pipeline.BudgetLimits         // configures pipeline-level token, cost, and wall-time ceilings
+	ToolSafety  *handlers.ToolHandlerConfig
+	Autopilot   string                // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
+	AutoApprove bool                  // auto-approve all human gates with default/first option
+	Budget      pipeline.BudgetLimits // configures pipeline-level token, cost, and wall-time ceilings
 	// GatewayURL is the root URL of a Cloudflare AI Gateway (or any compatible
 	// proxy). When non-empty it is used as the base for all provider URLs, with
 	// the per-provider suffix appended (e.g. "<gateway>/anthropic"). A

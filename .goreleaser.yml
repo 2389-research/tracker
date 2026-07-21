@@ -62,6 +62,10 @@ archives:
 brews:
   - ids:
       - tracker
+    # Don't push prereleases (rc/beta/alpha) or snapshots to the Homebrew tap —
+    # stable `brew upgrade` users must not receive a release candidate. The
+    # final (non-prerelease) tag publishes the formula.
+    skip_upload: "auto"
     repository:
       owner: 2389-research
       name: homebrew-tap
@@ -77,6 +81,11 @@ brews:
       bin.install "tracker"
     test: |
       system "#{bin}/tracker", "version"
+
+release:
+  # Mark a tag carrying a prerelease segment (e.g. v0.46.0-rc1) as a GitHub
+  # prerelease so it does not become "Latest". A plain vX.Y.Z tag is a full release.
+  prerelease: auto
 
 checksum:
   name_template: checksums.txt
