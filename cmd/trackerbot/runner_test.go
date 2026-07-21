@@ -164,3 +164,39 @@ func TestRunner_DuplicateThreadRejected(t *testing.T) {
 	run, _ := rm.Get("T1")
 	waitDone(t, run)
 }
+
+// TestValidWorkflowName pins the security guard that keeps path-shaped names out
+// of ResolveSource (which would otherwise load an arbitrary .dip off the host).
+func TestValidWorkflowName(t *testing.T) {
+	for _, n := range []string{"quick", "build_product", "ask-and-execute", "a1"} {
+		if !validWorkflowName(n) {
+			t.Errorf("%q should be a valid workflow name", n)
+		}
+	}
+	for _, n := range []string{"", "../etc", "/abs/path", "x.dip", "a/b", "a b", "a|b", "..", `a\b`} {
+		if validWorkflowName(n) {
+			t.Errorf("%q should be rejected", n)
+		}
+	}
+}
+
+// TestOnMention_RejectsPathShapedWorkflow asserts the grammar path (no LLM
+// resolver) cannot start a run for a path-shaped workflow — the traversal fix.
+func TestOnMention_RejectsPathShapedWorkflow(t *testing.T) {
+	rm := tracker.NewRunManager()
+	uis := newUIRegistry()
+	r := NewRunner(rm, RunnerDeps{
+		NewThreadUI: uis.newUI,
+		WorkDir:     t.TempDir(),
+		RunsBase:    t.TempDir(),
+		NewID:       seqIDs(),
+		ConfigBase:  tracker.Config{Format: "dip", LLMClient: stubCompleter{}},
+	})
+
+	r.OnMention(context.Background(), "C", "T1", "run ../../../etc/hosts")
+
+	if _, ok := rm.Get("T1"); ok {
+		t.Fatal("a path-shaped workflow name must not start a run")
+	}
+	waitForPost(t, uis.ui("T1"), "isn't a valid workflow name", time.Second)
+}

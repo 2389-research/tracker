@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -190,6 +191,27 @@ func (rm *RunManager) release() {
 // execute runs the pipeline and records the terminal state.
 func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string, cfg Config) {
 	m.setState(RunRunning)
+
+	// Always release the slot, close done, and cancel — even if Run panics or
+	// Goexits — so one bad run can neither crash the service nor leak capacity
+	// nor hang callers blocked on Done()/Result() (Phase 0). This is
+	// belt-and-suspenders over Engine.Run's own panic recovery: it also catches
+	// a panic raised outside the engine (e.g. during source parsing).
+	defer func() {
+		if r := recover(); r != nil {
+			m.mu.Lock()
+			m.err = fmt.Errorf("panic in run %q: %v\n%s", m.Key, r, debug.Stack())
+			m.state = RunFailed
+			m.mu.Unlock()
+		}
+		m.mu.Lock()
+		cancel := m.cancel
+		m.mu.Unlock()
+		cancel() // release the context's resources
+		rm.release()
+		close(m.done)
+	}()
+
 	res, err := Run(ctx, source, cfg)
 
 	m.mu.Lock()
@@ -205,12 +227,7 @@ func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string,
 	default:
 		m.state = RunFailed
 	}
-	cancel := m.cancel
 	m.mu.Unlock()
-
-	cancel() // release the context's resources
-	rm.release()
-	close(m.done)
 }
 
 func (m *ManagedRun) setState(s RunState) {

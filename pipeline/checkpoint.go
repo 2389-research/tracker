@@ -266,8 +266,33 @@ func SaveCheckpoint(cp *Checkpoint, path string) error {
 		return fmt.Errorf("marshal checkpoint: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Write atomically: a crash *during* a plain WriteFile could truncate the
+	// one file whose job is crash recovery, leaving LoadCheckpoint unable to
+	// resume. Write a temp file, fsync it, then rename over the target — the
+	// rename is atomic on POSIX same-directory, so a reader always sees either
+	// the old-complete or new-complete checkpoint, never a partial one.
+	if err := writeFileAtomic(path, data, 0o600); err != nil {
 		return fmt.Errorf("write checkpoint: %w", err)
+	}
+	return nil
+}
+
+// writeFileAtomic writes data to a sibling temp file, then renames it over path.
+// The rename is atomic on POSIX same-directory, so a reader (and a resume after a
+// crash) always sees either the old-complete or new-complete file, never a
+// partial one. This targets the stated threat — a *process* crash (OOM, SIGKILL,
+// deploy) during a write — for which the surviving kernel page cache makes the
+// rename sufficient; it deliberately does not fsync (power-loss durability is a
+// non-goal here and the added latency is not worth it). Cleans up on error.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
 	}
 	return nil
 }

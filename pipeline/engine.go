@@ -222,7 +222,7 @@ type loopResult struct {
 }
 
 // Run executes the pipeline to completion or failure.
-func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
+func (e *Engine) Run(ctx context.Context) (result *EngineResult, runErr error) {
 	s, err := e.initRunState(ctx)
 	if err != nil {
 		return nil, err
@@ -243,14 +243,24 @@ func (e *Engine) Run(ctx context.Context) (*EngineResult, error) {
 	// the sleep-aware path and safe on a nil guard.
 	e.budgetGuard.AnchorRunStart()
 
+	// Contain a handler panic on the main run goroutine: convert it to a terminal
+	// fail result + event instead of crashing the host process (Phase 0). Without
+	// this, a single panicking run takes down every other concurrent run a
+	// RunManager owns.
+	defer func() {
+		if r := recover(); r != nil {
+			result, runErr = e.recoverPanic(s, r)
+		}
+	}()
+
 	currentNodeID := e.graph.StartNode
 	if s.cp.CurrentNode != "" {
 		currentNodeID = s.cp.CurrentNode
 	}
 
-	if result, err, done := e.runLoop(ctx, s, currentNodeID); !done {
-		e.emitTerminalBackstop(s, result)
-		return result, err
+	if res, rerr, done := e.runLoop(ctx, s, currentNodeID); !done {
+		e.emitTerminalBackstop(s, res)
+		return res, rerr
 	}
 
 	return e.buildSuccessResult(s), nil
@@ -430,19 +440,12 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 	// and sets EngineResult.WorkPreserveFailed) and machine-detectable.
 	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 	e.emitFailed(s, fmt.Sprintf("handler error at node %q: %v", currentNodeID, err), err)
+	result := e.newFailResult(s)
+	result.WorkPreserveFailed = workPreserveFailed
 	return loopResult{
 		action: loopReturn,
-		result: &EngineResult{
-			RunID:               s.runID,
-			Status:              OutcomeFail,
-			CompletedNodes:      s.cp.CompletedNodes,
-			Context:             s.pctx.Snapshot(),
-			Trace:               s.trace,
-			Usage:               s.trace.AggregateUsage(),
-			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-			WorkPreserveFailed:  workPreserveFailed,
-		},
-		err: fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
+		result: result,
+		err:    fmt.Errorf("handler error at node %q: %w", currentNodeID, err),
 	}
 }
 

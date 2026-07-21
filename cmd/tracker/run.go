@@ -614,9 +614,16 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		EventHandler:   buildTUIPipelineHandler(prog, activityLog),
 		AgentEvents:    buildTUIAgentHandler(prog, activityLog),
 		LLMTrace:       buildTUITraceObserver(prog, activityLog, verbose),
-		LLMClient:      llmClient,
 		TokenTracker:   tokenTracker,
 		Interviewer:    interviewer, // cancelled by eng.Close() if it is a canceller
+	}
+	// Guard the typed-nil trap: llmClient is a *llm.Client; assigning a nil
+	// pointer to the agent.Completer interface field would make it non-nil
+	// (interface-wrapping-nil), defeating resolveCompleter's env-build fallback
+	// and risking a nil-deref on a native-backend override. Only set it when a
+	// real client exists.
+	if llmClient != nil {
+		cfg.LLMClient = llmClient
 	}
 
 	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)

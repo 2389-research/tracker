@@ -823,6 +823,21 @@ func (e *Engine) handleRetry(ctx context.Context, s *runState, currentNodeID str
 	return e.handleRetryExhausted(s, currentNodeID, execNode, traceEntry)
 }
 
+// resolveRetryTarget returns the node a retry routes to: the node's retry_target
+// attr if set, else the node itself. A retry_target naming a nonexistent node is
+// an authoring error surfaced loudly here (mirroring restart_target's existence
+// check) rather than routing into an opaque "node not found" nil-result exit.
+func (e *Engine) resolveRetryTarget(execNode *Node, currentNodeID string) (string, error) {
+	rt, ok := execNode.Attrs["retry_target"]
+	if !ok {
+		return currentNodeID, nil
+	}
+	if _, exists := e.graph.Nodes[rt]; !exists {
+		return "", fmt.Errorf("retry_target %q on node %q does not exist in graph", rt, currentNodeID)
+	}
+	return rt, nil
+}
+
 // handleRetryWithinBudget runs a retry when budget remains: waits backoff, emits event, routes to target.
 func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry, policy *RetryPolicy) (string, bool, *EngineResult, error) {
 	s.cp.IncrementRetry(currentNodeID)
@@ -855,9 +870,11 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 		Message:   fmt.Sprintf("retrying node %q (attempt %d/%d, policy=%s)", currentNodeID, s.cp.RetryCount(currentNodeID), policy.MaxRetries, policy.Name),
 	})
 
-	target := currentNodeID
-	if rt, ok := execNode.Attrs["retry_target"]; ok {
-		target = rt
+	target, terr := e.resolveRetryTarget(execNode, currentNodeID)
+	if terr != nil {
+		s.trace.EndTime = time.Now()
+		e.emitFailed(s, terr.Error(), terr)
+		return "", false, e.newFailResult(s), terr
 	}
 	traceEntry.EdgeTo = target
 	s.trace.AddEntry(*traceEntry)

@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sort"
 	"sync"
@@ -27,17 +28,26 @@ type store struct {
 	recs map[string]RunRecord
 }
 
-// openStore loads (or starts) the store at path. A read error (e.g. missing
-// file) yields an empty store, not an error.
+// openStore loads (or starts) the store at path. A missing file yields an empty
+// store (fresh start). A *corrupt* file is not silently dropped — that would
+// lose every resumable run without a trace; it is preserved aside and logged
+// loudly, then the bot starts with no resumable runs (an operator can recover
+// the file and restart).
 func openStore(path string) *store {
 	s := &store{path: path, recs: make(map[string]RunRecord)}
-	if data, err := os.ReadFile(path); err == nil {
-		var recs []RunRecord
-		if json.Unmarshal(data, &recs) == nil {
-			for _, r := range recs {
-				s.recs[r.ThreadTS] = r
-			}
-		}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return s // missing/unreadable file — normal on first run
+	}
+	var recs []RunRecord
+	if err := json.Unmarshal(data, &recs); err != nil {
+		aside := path + ".corrupt"
+		_ = os.Rename(path, aside)
+		log.Printf("trackerbot: state file %s is corrupt (%v); moved it to %s and starting with no resumable runs", path, err, aside)
+		return s
+	}
+	for _, r := range recs {
+		s.recs[r.ThreadTS] = r
 	}
 	return s
 }
@@ -89,7 +99,18 @@ func (s *store) flush() {
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ThreadTS < out[j].ThreadTS })
-	if data, err := json.MarshalIndent(out, "", "  "); err == nil {
-		_ = os.WriteFile(s.path, data, 0o600)
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return
+	}
+	// Atomic write: a crash mid-write must not corrupt the state file (which
+	// would drop every resumable run — see openStore). Temp + rename so a
+	// reader always sees a complete file.
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
 	}
 }

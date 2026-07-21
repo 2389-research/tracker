@@ -50,6 +50,36 @@ func TestCheckpointSaveAndLoad(t *testing.T) {
 	}
 }
 
+// TestCheckpointSaveAtomic asserts the atomic write leaves no sibling .tmp file
+// behind and overwrites an existing checkpoint in place — the temp+rename that
+// prevents a crash mid-write from corrupting the recovery file.
+func TestCheckpointSaveAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cp.json")
+
+	for i, node := range []string{"n1", "n2", "n3"} {
+		cp := &Checkpoint{RunID: "r", CurrentNode: node, Timestamp: time.Now().Truncate(time.Second)}
+		if err := SaveCheckpoint(cp, path); err != nil {
+			t.Fatalf("save %d: %v", i, err)
+		}
+		if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+			t.Fatalf("temp file %s.tmp must not remain after save %d", path, i)
+		}
+		loaded, err := LoadCheckpoint(path)
+		if err != nil {
+			t.Fatalf("load %d: %v", i, err)
+		}
+		if loaded.CurrentNode != node {
+			t.Fatalf("overwrite %d: CurrentNode = %q, want %q", i, loaded.CurrentNode, node)
+		}
+	}
+
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly one file in dir, got %d", len(entries))
+	}
+}
+
 func TestCheckpointLoadMissing(t *testing.T) {
 	_, err := LoadCheckpoint("/nonexistent/path/checkpoint.json")
 	if err == nil {

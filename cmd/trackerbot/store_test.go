@@ -35,6 +35,25 @@ func TestStore_NilSafe(t *testing.T) {
 	}
 }
 
+// TestStore_CorruptFilePreserved asserts a corrupt state file is not silently
+// dropped (which would lose every resumable run without a trace) — it is moved
+// aside for recovery and the bot starts empty.
+func TestStore_CorruptFilePreserved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, []byte("{ not valid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := openStore(path)
+	if recs := s.list(); len(recs) != 0 {
+		t.Fatalf("corrupt file should yield an empty store, got %+v", recs)
+	}
+	if _, err := os.Stat(path + ".corrupt"); err != nil {
+		t.Fatalf("corrupt file must be preserved at %s.corrupt for recovery: %v", path, err)
+	}
+}
+
 // TestRunner_Resume drives a resume from a real checkpoint. The runner pins a
 // deterministic per-thread workdir + checkpoint; we seed a run there first, then
 // Resume — the launch recomputes the same checkpoint path and the engine replays
@@ -81,4 +100,24 @@ func TestRunner_Resume(t *testing.T) {
 	waitDone(t, run)
 	waitForPost(t, uis.ui("T1"), "🔄", 3*time.Second) // resume acknowledgement
 	waitForPost(t, uis.ui("T1"), "🏁", 3*time.Second) // completed
+
+	// The 🏁 post is emitted by the notifier on the terminal event, which fires
+	// before the runner's watch goroutine finishes reaping the run (store.remove,
+	// then Forget). Wait for the reap so the test body doesn't return — and let
+	// t.TempDir cleanup run — while store.remove is still writing the state file.
+	waitForForget(t, rm, "T1", 3*time.Second)
+}
+
+// waitForForget blocks until the RunManager no longer tracks key (the watch
+// goroutine has reaped the run), or fails after timeout.
+func waitForForget(t *testing.T, rm *tracker.RunManager, key string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, ok := rm.Get(key); !ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("run %q was not reaped within %s", key, timeout)
 }

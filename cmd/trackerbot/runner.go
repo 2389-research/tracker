@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -69,6 +70,16 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 		_ = ui.Post("I couldn't work out what to run: " + err.Error())
 		return
 	}
+	if !validWorkflowName(intent.Workflow) {
+		// SECURITY: reject path-shaped names before ResolveSource. ResolveSource
+		// treats a name with a separator or .dip suffix as a filesystem path
+		// (and absolute paths as-is), so an unvalidated name like
+		// "../../../etc/hosts" or "/abs/evil.dip" would load an arbitrary file
+		// off the host. The LLM resolver validates against the catalog; the
+		// grammar fallback does not — this guard covers both uniformly.
+		_ = ui.Post(fmt.Sprintf("`%s` isn't a valid workflow name — try a built-in, or `runs` to see what's available.", intent.Workflow))
+		return
+	}
 	source, info, err := tracker.ResolveSource(intent.Workflow, r.deps.WorkDir)
 	if err != nil {
 		_ = ui.Post("Unknown workflow: " + err.Error())
@@ -86,6 +97,13 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 // configured path automatically). No run-id bookkeeping required.
 func (r *Runner) Resume(ctx context.Context, rec RunRecord) {
 	ui := r.deps.NewThreadUI(rec.Channel, rec.ThreadTS)
+	if !validWorkflowName(rec.Workflow) {
+		// A persisted record with a path-shaped workflow (tampered state file)
+		// must not reach ResolveSource — same containment as OnMention.
+		_ = ui.Post("Couldn't resume (invalid workflow name in saved state).")
+		r.deps.Store.remove(rec.ThreadTS)
+		return
+	}
 	source, _, err := tracker.ResolveSource(rec.Workflow, r.deps.WorkDir)
 	if err != nil {
 		_ = ui.Post("Couldn't resume (workflow gone): " + err.Error())
@@ -134,6 +152,17 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 func (r *Runner) runPaths(threadTS string) (workDir, checkpoint string) {
 	workDir = filepath.Join(r.deps.RunsBase, sanitizeThread(threadTS))
 	return workDir, filepath.Join(workDir, "checkpoint.json")
+}
+
+// workflowNamePattern matches a safe bare workflow identifier — no path
+// separators, no dots — so it can never be interpreted as a filesystem path by
+// ResolveSource. Built-in names and local <name>.dip files resolve by this bare
+// name; a user types "quick", not "quick.dip" or a path.
+var workflowNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validWorkflowName reports whether name is a safe bare workflow identifier.
+func validWorkflowName(name string) bool {
+	return workflowNamePattern.MatchString(name)
 }
 
 // sanitizeThread turns a thread_ts into a safe single path segment.

@@ -147,6 +147,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Transport hardening: contain failures at the shared seams (multi-dimension
+  review follow-up).** A four-dimension review of the transport-boundary +
+  `trackerbot` work surfaced a cluster of missing invariants; each is now
+  enforced once in the core so every transport (TUI, Slack, future web/mobile)
+  inherits it:
+  - **A handler panic no longer crashes the host.** `Engine.Run` now recovers a
+    panic on the main run goroutine, emits a terminal fail event, and returns
+    `(nil, err)` — so one panicking run can't take down every other concurrent
+    run a `RunManager` owns. `RunManager.execute` additionally reaps
+    (cancel/release/close) in a `defer` with its own recover, so a panic can
+    never leak a capacity slot or hang `Done()`/`Result()`.
+  - **Nil-result invariant errors now emit a `TerminalStatus`.** The terminal
+    backstop previously early-returned on a `nil` result, so exits like
+    node-not-found, no-outgoing-edges, and unresolved edge conditions (raised
+    after `pipeline_started`) emitted no terminal event — a stream-only
+    subscriber (Slack thread) hung forever. The backstop now emits a `fail`
+    terminal event for these too, completing the #475 guarantee.
+  - **`retry_target` is validated against the graph** (mirroring
+    `restart_target`), so a typo fails loudly instead of routing into an opaque
+    "node not found".
+  - **Checkpoint and `trackerbot` state files are written atomically**
+    (temp-file + rename), so a crash *during* a write can't corrupt the one file
+    whose job is crash recovery; a corrupt `trackerbot` state file is preserved
+    aside and logged loudly rather than silently dropping every resumable run.
+  - **`trackerbot` rejects path-shaped workflow names** before `ResolveSource`,
+    closing a traversal where the grammar intent fallback could load an
+    arbitrary `.dip` off the host (e.g. `run ../../../etc/hosts`).
+  - **The CLI/TUI no longer stores a typed-nil `*llm.Client`** into the
+    `Config.LLMClient` interface, which had defeated the env-build fallback and
+    risked a nil-deref on a native-backend override.
+
 - **Every terminal exit now emits a `TerminalStatus` (#475 follow-up).** A
   fresh-eyes review found the strict-failure halt (a node returns `outcome=fail`
   with only unconditional edges — the common "tool step failed, no fail edge"
