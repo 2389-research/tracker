@@ -59,7 +59,8 @@ jsonld:
 flowchart TB
     subgraph transports["Transports (peers)"]
         tui["TUI<br/>BubbleteaInterviewer"]
-        slack["Slack<br/>SlackInterviewer"]
+        slack["Slack · trackerbot<br/>ThreadInterviewer"]
+        repl["CLI REPL · trackerchat<br/>ThreadInterviewer"]
         web["web / mobile<br/>(future)"]
     end
     subgraph boundary["The boundary"]
@@ -190,7 +191,8 @@ flowchart TB
         </thead>
         <tbody>
           <tr><td><strong>TUI</strong></td><td><code>BubbleteaInterviewer</code> via <code>Config.Interviewer</code></td><td><code>EventHandler</code>/<code>AgentEvents</code> &rarr; <code>prog.Send</code>; shares <code>Config.TokenTracker</code></td><td>one run per process</td></tr>
-          <tr><td><strong>Slack</strong> (<code>trackerbot</code>)</td><td><code>SlackInterviewer</code> (thread gates)</td><td><code>notifier</code> filters events &rarr; thread</td><td><code>RunManager</code>, one run per thread</td></tr>
+          <tr><td><strong>Slack</strong> (<code>trackerbot</code>)</td><td><code>ThreadInterviewer</code> (thread gates)</td><td><code>notifier</code> filters events &rarr; thread</td><td><code>RunManager</code>, one run per thread</td></tr>
+          <tr><td><strong>CLI REPL</strong> (<code>trackerchat</code>)</td><td><code>ThreadInterviewer</code> (inline text gates)</td><td>messages printed to the terminal</td><td>one conversation per process</td></tr>
           <tr><td><strong>web / mobile</strong></td><td>implement <code>handlers.Interviewer</code></td><td>subscribe to the streams</td><td><code>RunManager</code></td></tr>
         </tbody>
       </table>
@@ -244,5 +246,13 @@ flowchart TB
     <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
       Nothing above touches the engine &mdash; the boundary is the whole contract. The safety and durability
       invariants are enforced in the core, so a new transport inherits them and must not re-implement them.
+    </p>
+    <p style="margin-top: 0.75rem; font-size: 0.95rem;">
+      <strong>Living proof:</strong> <code>cmd/trackerchat</code> &mdash; a terminal REPL &mdash; is a second
+      consumer built from the same <code>transport/chatops</code> core the Slack bot uses. It adds only a
+      terminal <code>ThreadUI</code> (print messages, render gates as a numbered list) and a stdin loop that
+      routes each line to the shared <code>Runner</code>. Because that core carries the commands, gating,
+      estimate/confirm, budget-bump, and steer, the REPL inherits them all &mdash; the transport-specific code
+      is I/O only, and it&rsquo;s exercised end-to-end in tests with no external service.
     </p>
   </section>

@@ -163,8 +163,15 @@ once from one process:
 | Transport | Interviewer | Progress | Concurrency |
 |---|---|---|---|
 | **TUI** ([`tui.md`](./tui.md)) | `BubbleteaInterviewer` via `Config.Interviewer` | `EventHandler`/`AgentEvents` → `prog.Send`; shares `Config.TokenTracker` | one run per process |
-| **Slack** ([`cmd/trackerbot`](../../cmd/trackerbot/README.md)) | `SlackInterviewer` (thread gates) | `notifier` filters events → thread | `RunManager`, one run per thread |
+| **Slack** ([`cmd/trackerbot`](../../cmd/trackerbot/README.md)) | `ThreadInterviewer` (thread gates) | `notifier` filters events → thread | `RunManager`, one run per thread |
+| **CLI REPL** ([`cmd/trackerchat`](../../cmd/trackerchat/README.md)) | `ThreadInterviewer` (inline text gates) | messages printed to the terminal | one conversation per process |
 | **web / mobile** | implement `handlers.Interviewer` | subscribe to the streams | `RunManager` |
+
+Both the Slack bot and the CLI REPL share `transport/chatops` (the `Runner`,
+interviewer, notifier, delivery, commands); each supplies only a `ThreadUI` +
+its inbound loop. `cmd/trackerchat` (a ~200-line terminal front-end + the
+`transport/cli` package) is the concrete demonstration that a second transport
+is I/O-only.
 
 ## Building a new transport
 

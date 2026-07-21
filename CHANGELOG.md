@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerchat` — a terminal REPL transport (second boundary consumer).** A
+  new `cmd/trackerchat` binary drives pipelines from stdin/stdout: type a
+  request, answer gates inline (a number/label picks a choice, anything else is
+  free text), watch the run. It's built from the same `transport/chatops` core
+  as the Slack bot — the transport-specific code is a terminal `ThreadUI` + a
+  stdin loop, so every shared feature (commands, gating, estimate/confirm,
+  budget-bump, steer, resume) is inherited. The transport-neutral logic lives in
+  the new `transport/cli` package and is unit-tested end-to-end via a fake
+  dispatcher (no LLM/Slack). This is the "prove the boundary with a second
+  transport" milestone from the transport-boundary plan.
+
 - **`trackerbot` Slack Tier-3 surfaces: `/tracker` slash command + App Home tab.**
   `/tracker <what you want>` runs from anywhere (no `@mention`) by opening a
   thread and routing exactly like a mention, so all in-thread commands and gates
