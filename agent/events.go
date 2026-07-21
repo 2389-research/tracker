@@ -23,16 +23,20 @@ const (
 	EventContextWindowWarning EventType = "context_window_warning"
 	EventSteeringInjected     EventType = "steering_injected"
 	EventProviderFailover     EventType = "provider_failover"
-	EventLLMRequestStart      EventType = "llm_request_start"
-	EventLLMReasoning         EventType = "llm_reasoning"
-	EventLLMText              EventType = "llm_text"
-	EventLLMToolPrepare       EventType = "llm_tool_prepare"
-	EventLLMFinish            EventType = "llm_finish"
-	EventLLMProviderRaw       EventType = "llm_provider_raw"
-	EventToolCacheHit         EventType = "tool_cache_hit"
-	EventContextCompaction    EventType = "context_compaction"
-	EventTurnMetrics          EventType = "turn_metrics"
-	EventLLMRequestPreparing  EventType = "llm_request_preparing"
+	// EventStatusUpdate is an agent-authored, plain-language status the model
+	// emits via the report_status tool — a high-level "what I'm doing / what I
+	// just finished" narration, distinct from the low-level turn/tool plumbing (#494).
+	EventStatusUpdate        EventType = "status_update"
+	EventLLMRequestStart     EventType = "llm_request_start"
+	EventLLMReasoning        EventType = "llm_reasoning"
+	EventLLMText             EventType = "llm_text"
+	EventLLMToolPrepare      EventType = "llm_tool_prepare"
+	EventLLMFinish           EventType = "llm_finish"
+	EventLLMProviderRaw      EventType = "llm_provider_raw"
+	EventToolCacheHit        EventType = "tool_cache_hit"
+	EventContextCompaction   EventType = "context_compaction"
+	EventTurnMetrics         EventType = "turn_metrics"
+	EventLLMRequestPreparing EventType = "llm_request_preparing"
 	// EventVerify is emitted for verify-after-edit status updates (pass/fail/retry).
 	// Use EventError only for infrastructure failures (binary not found, etc.).
 	EventVerify EventType = "verify"

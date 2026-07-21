@@ -99,6 +99,7 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 	s.registerBuiltinTools()
 	s.initToolCache()
 	s.registerSpawnTool()
+	s.registerStatusTool()
 
 	// tool_access enforcement (issue #258): after every registration path
 	// (built-ins, WithTools, spawn_agent), clear the registry if access is
@@ -131,17 +132,6 @@ func (s *Session) registerBuiltinTools() {
 func (s *Session) initToolCache() {
 	if s.config.CacheToolResults {
 		s.cache = newToolCache()
-	}
-}
-
-// registerSpawnTool registers the spawn_agent tool when a session runner is set.
-func (s *Session) registerSpawnTool() {
-	if s.sessionRunner == nil {
-		return
-	}
-	spawnTool := tools.NewSpawnAgentTool(s.sessionRunner)
-	if s.registry.Get(spawnTool.Name()) == nil {
-		s.registry.Register(spawnTool)
 	}
 }
 

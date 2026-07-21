@@ -35,7 +35,11 @@ func (s *Session) initConversation(ctx context.Context, userInput string) {
 	// the scrub is defense-in-depth, not the load-bearing check.
 	basePrompt := "File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative to the working directory. " +
 		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\". " +
-		"Bash commands may use absolute paths when needed."
+		"Bash commands may use absolute paths when needed. " +
+		"Use the report_status tool to narrate your progress in plain language at meaningful moments — " +
+		"starting or finishing a milestone/phase, or a notable result — a short, honest \"what I'm doing / just " +
+		"finished, and where I am in the job\". Do this as part of work you're already doing, not every turn, and " +
+		"describe the actual work rather than restating the step name."
 	if s.config.IsToolAccessRestricted() {
 		basePrompt = "Respond to the user with plain text only; do not attempt to invoke any tool. " +
 			"No tools are available for this session."

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent-authored status narration: the `report_status` tool (#494, core).** The
+  agent can now emit a plain-language, high-level status — "what I'm doing / what
+  I just finished, and where I am in the job" — as a first-class `status_update`
+  event, distinct from the turn/tool firehose. It's cheap by design: a tool the
+  agent calls as part of work it's already doing (no dedicated LLM call), nudged
+  by the base system prompt to fire at meaningful moments (not every turn). The
+  event surfaces live in the CLI/TUI stream (`📣 …`) and persists to the activity
+  log for a queryable timeline. (A dedicated compact `tracker status` view over
+  those events is a follow-up.)
+
 - **`cost_exceeded_action: fail` — safe per-node cost caps (#353).** A per-node
   cost ceiling (`max_cost_usd`) previously always routed `retry` on breach, which
   re-runs (and multiplies the cost of) an expensive, uncached node — so capping a

@@ -182,8 +182,11 @@ func TestSessionToolAccess_EmptyMeansUnrestricted(t *testing.T) {
 		&recordingTool{name: "read"},
 	))
 
-	if got := len(sess.registry.Definitions()); got != 1 {
-		t.Errorf("ToolAccess=\"\": registry holds %d tools; expected 1 (unrestricted)", got)
+	// Unrestricted: the WithTools tool survives (isn't cleared). The always-on
+	// report_status tool (#494) is also present, so assert the tool's presence
+	// rather than an exact count.
+	if sess.registry.Get("read") == nil {
+		t.Error("ToolAccess=\"\": the WithTools \"read\" tool should survive (unrestricted)")
 	}
 }
 

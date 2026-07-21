@@ -19,22 +19,48 @@ func FormatEventLine(evt Event) string {
 	case EventToolCallEnd:
 		return formatToolEnd(evt)
 	case EventError:
-		if evt.Err != nil {
-			return "✖ " + evt.Err.Error()
-		}
+		return formatErrorLine(evt)
 	case EventVerify:
-		if evt.Text != "" {
-			if strings.Contains(evt.Text, "passed") {
-				return "✔ " + evt.Text
-			}
-			return "⚠ " + evt.Text
-		}
+		return formatVerifyLine(evt)
 	case EventCheckpoint:
-		if evt.Text != "" {
-			return "⏱ checkpoint: " + previewEventText(evt.Text)
-		}
+		return formatCheckpointLine(evt)
+	case EventStatusUpdate:
+		return formatStatusLine(evt)
+	default:
+		return ""
+	}
+}
+
+func formatErrorLine(evt Event) string {
+	if evt.Err != nil {
+		return "✖ " + evt.Err.Error()
 	}
 	return ""
+}
+
+func formatVerifyLine(evt Event) string {
+	if evt.Text == "" {
+		return ""
+	}
+	if strings.Contains(evt.Text, "passed") {
+		return "✔ " + evt.Text
+	}
+	return "⚠ " + evt.Text
+}
+
+func formatCheckpointLine(evt Event) string {
+	if evt.Text == "" {
+		return ""
+	}
+	return "⏱ checkpoint: " + previewEventText(evt.Text)
+}
+
+// formatStatusLine renders an agent-authored high-level status update (#494).
+func formatStatusLine(evt Event) string {
+	if evt.Text == "" {
+		return ""
+	}
+	return "📣 " + evt.Text
 }
 
 // formatToolStart renders tool invocations in a clean, human-readable way.

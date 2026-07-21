@@ -2234,3 +2234,28 @@ func TestSession_LoopDetected_SkipsBreachVerify(t *testing.T) {
 		t.Error("verify ran on a detected loop (sentinel exists) — must be skipped")
 	}
 }
+
+// TestSession_ReportStatusToolRegisteredAndEmits: the report_status tool is
+// available to the agent and, when invoked, emits a first-class EventStatusUpdate
+// on the session's event stream (#494).
+func TestSession_ReportStatusToolRegisteredAndEmits(t *testing.T) {
+	var statuses []string
+	client := &mockCompleter{responses: []*llm.Response{{Message: llm.AssistantMessage("done"), FinishReason: llm.FinishReason{Reason: "stop"}}}}
+	sess := mustNewSession(t, client, DefaultConfig(), WithEventHandler(EventHandlerFunc(func(e Event) {
+		if e.Type == EventStatusUpdate {
+			statuses = append(statuses, e.Text)
+		}
+	})))
+
+	tool := sess.registry.Get("report_status")
+	if tool == nil {
+		t.Fatal("report_status tool should be registered on every session")
+	}
+	if _, err := tool.Execute(context.Background(), []byte(`{"status":"milestone 3 of 7 — OpenAI adapter done"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(statuses) != 1 || statuses[0] != "milestone 3 of 7 — OpenAI adapter done" {
+		t.Errorf("expected the status to be emitted as EventStatusUpdate, got %v", statuses)
+	}
+}
