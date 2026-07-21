@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` `status` reports live progress.** For transports with a live
+  status card, `@trackerbot status` now appends a `5/9 steps · $1.12 · Implement`
+  digest (steps done, spend so far, current node) instead of just the run state.
+
 - **`trackerbot` suggests workflows when a request can't be resolved.** An
   unrecognized mention or unknown workflow now gets a compact "Try one of: …"
   hint (plus a pointer to `@trackerbot workflows`) instead of a dead-end error.

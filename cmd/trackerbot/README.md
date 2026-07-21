@@ -102,7 +102,7 @@ go run ./cmd/trackerbot          # or: go build -o trackerbot ./cmd/trackerbot &
 - `@trackerbot run <workflow> [k=v …]` — start a named built-in/local workflow.
 - `@trackerbot retry` — re-run this thread's last workflow (also `again` / `rerun`).
 - `@trackerbot workflows` — list workflows you can run.
-- `@trackerbot status` — this thread's run state.
+- `@trackerbot status` — this thread's run state, with a live `5/9 steps · $1.12 · <node>` progress digest.
 - `@trackerbot cancel` — stop this thread's run.
 - `@trackerbot runs` — list active runs.
 - `@trackerbot help` — usage.

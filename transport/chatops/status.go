@@ -3,6 +3,8 @@
 package chatops
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -172,4 +174,29 @@ func (s *statusTracker) snapshot() StatusCard {
 	c := s.card
 	c.Nodes = append([]StatusNode(nil), s.card.Nodes...)
 	return c
+}
+
+// Card returns a race-free snapshot of the current card, so a caller outside the
+// event stream (e.g. the `status` command) can report live progress.
+func (s *statusTracker) Card() StatusCard {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snapshot()
+}
+
+// statusLine renders the one-line progress digest appended to a `status` reply:
+// "5/9 steps · $1.12 · Implement". Empty parts are dropped; an all-empty card
+// yields "".
+func statusLine(c StatusCard) string {
+	parts := make([]string, 0, 3)
+	if c.TotalCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d/%d steps", c.DoneCount, c.TotalCount))
+	}
+	if c.CostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", c.CostUSD))
+	}
+	if c.CurrentNode != "" {
+		parts = append(parts, c.CurrentNode)
+	}
+	return strings.Join(parts, " · ")
 }
